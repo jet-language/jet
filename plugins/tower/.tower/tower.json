@@ -2,8 +2,8 @@
   "meta": {
     "version": 4,
     "project": "Jet",
-    "nextNum": 2102,
-    "rev": 39499,
+    "nextNum": 2104,
+    "rev": 39518,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -14193,6 +14193,16 @@
       "assignee": null,
       "log": [
         {
+          "at": "2026-08-20",
+          "by": "agent",
+          "text": "STALE LAW on criterion 7, found 2026-08-19. It requires supervisor restart and endpoint/mailbox diagnostics to read TaskOutcome/TaskStatus and never trace()/exception(). But TaskOutcome and TaskStatus are RETIRED: docs/spec/syntax-decisions.md:2196-2204 records D-CONC-OUTCOME1=A as retired by D-CONC-FAIL1=A, and :2265-2271 makes the later ruling operative - join() returns T ? TaskFailure, TaskFailure is a normal enum with .Cancelled/.DeadlineBlown/.Panicked(reason), and the spec states plainly that TaskOutcome, TaskStatus, trace() and exception() do not ship. Card #1565, which existed to build that surface, is frozen as superseded for the same reason. The implemented slice reads the ratified JetTaskFailure rail, which is what criterion 7 should have asked for, so the criterion's INTENT is met and its wording names a surface that must never be built. Treat the criterion as satisfied by the failure rail; do not build TaskOutcome to satisfy its letter."
+        },
+        {
+          "at": "2026-08-20",
+          "by": "fable-e3-burndown",
+          "text": "Scoping and owner gate, 2026-08-19. Delivered this slice: two parallel supervision mechanisms deleted rather than wrapped (a slice-local five-variant outcome enum shadowing the retired TaskOutcome surface, and a global restart ceiling read at one site), replaced by the ratified JetTaskFailure rail plus a typed restart budget carried as data on the group, with ONE policy lookup feeding both restart strategy and escalation budget. A supervisor task owns a child group per declared group. The example and golden now prove bounded backpressure, drain, restart and budget escalation as observable output. BLOCKED on one owner-gated surface question, raised as a ballot rather than invented: D-SERVICE1=D describes service.tree((root) => { root.worker(NAME, fn) }) - promoting an ordinary fn into a worker, with sema diagnostics for topology names and cycles - while the shipped Core surface is procedural and string-keyed (services.worker(&tree, NAME, n) takes no function, per crates/jet-sema/src/Sema/CheckerCoreLib/fixed_sigs.rs:1258-1279 and module_items.rs:485-539). Because no worker body ever runs, criterion 1 and the 'under concurrency' half of criterion 2 cannot be met at all without changing the spelling, and changing it is I7 owner-gated. Also recorded: this lane caused a tree-wide E0255 in every generated program by re-exporting jet_std::JetTaskFailure into the flat scope that already declares it (about 30 stems red across ui, web, lowlevel, streams, reflection), found and fixed it, and established that the two JetTaskFailure declarations pre-date this session and live in different scopes legally - the import was the whole bug."
+        },
+        {
           "at": "2026-08-19",
           "by": "fable",
           "text": "Criterion scoping (2026-08-19 alignment): the shared row \"Topology, supervision, delivery, state, histories, identity, discovery, rollout, observability, and receipts preserve the card's declared meaning\" is met FOR THIS CARD by proving its own slice (topology, supervision, endpoints, mailboxes, backpressure, cancellation/drain) under concurrency and restart — sibling slices are proven on their own cards (\"This card owns only\" clause governs). Do not re-prove the whole family here."
@@ -14358,7 +14368,7 @@
         }
       ],
       "created": "2026-07-09T23:22:09.769Z",
-      "updated": "2026-08-19T13:32:02.318Z",
+      "updated": "2026-08-20T07:09:51.964Z",
       "criteria": [
         {
           "n": 1,
@@ -14450,7 +14460,7 @@
         "tests/jetpack_services.rs",
         "tests/fuzz/sema/valid/ex_concurrency_taskgroup.jet"
       ],
-      "updatedBy": "fable",
+      "updatedBy": "agent",
       "tags": [
         "service-runtime"
       ],
@@ -131574,7 +131584,13 @@
       "plan": "Identify the stems whose `build` or `run` function fails tir_covers at emit time. Note the shape of the bug: sema admitted the function and codegen then found the typed IR does not cover it, so the two disagree about coverage -- that disagreement is the defect, not the uncovered construct itself. Per I3 all checking belongs in sema, so if a construct cannot be lowered, sema must reject it with a registered diagnostic rather than letting codegen ICE.\n\nDetermine whether this is the same over-admission polarity found repeatedly this session (a gate saying yes where lowering cannot follow) and fix it on the admitting side. blockedBy: none",
       "blockedBy": [],
       "assignee": null,
-      "log": [],
+      "log": [
+        {
+          "at": "2026-08-20",
+          "by": "fable-e3-burndown",
+          "text": "Criterion 4 is BLOCKED on #2103, measured 2026-08-19: example_corpus_strict_jit_aot_differential_gate cannot reach its own assertion because the in-process guard aborts the suite at 900s (923s wall, exit 101). The ICE that used to kill this gate is fixed - the error-conversion bodies are now checked, so the gate no longer dies on a panic - but it still cannot finish, so criterion 4's wording (reaches its own assertion rather than dying on a panic) is half proven: the panic is gone, the completion is not."
+        }
+      ],
       "criteria": [
         {
           "n": 1,
@@ -131623,8 +131639,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-16T03:48:38.509Z",
-      "updated": "2026-08-19T16:21:10.219Z",
-      "updatedBy": "fable"
+      "updated": "2026-08-20T07:25:38.174Z",
+      "updatedBy": "fable-e3-burndown"
     },
     {
       "id": "c0sv6ejg",
@@ -136867,15 +136883,58 @@
       "plan": null,
       "blockedBy": [],
       "assignee": null,
-      "log": [],
-      "criteria": [],
+      "log": [
+        {
+          "at": "2026-08-20",
+          "by": "agent",
+          "text": "Criterion 3 stays OPEN and is the remaining work, with the measured state recorded so the next lane starts from facts. Two of the three named causes are fixed (files family, vault). The eight stems now stand as: crypto/vault_keys RUNS on the interpreter tier; io/watcher gets PAST create_dir_all and remove_all and now stops at an honest registered refusal, E2201 'jet dev can't interpret this program yet - it uses a process launch or an early exit' at watcher.jet:76, which is a genuine host-effect boundary rather than a missing arm; net/http_web_defaults gets past its first failure and moves to the HTTP mux/serve gap; the remaining net stems (http_rest_service, http_routes, http_server_limits, ws_echo, http_readiness) still need the HTTP ambient handles, which is the third cause and was deliberately NOT half-armed. Also measured tonight and worth folding in: text/time_calendar fails under --interpret on core.time.parse_rfc3339, so the ambient gap list is wider than the card's original eight."
+        }
+      ],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "files.create_dir_all, remove_all, remove_dir and copy run on the interpreter tier by calling the Prelude symbol, not a hand-rolled std::fs copy",
+          "status": "met",
+          "metBy": "fable-e3-burndown",
+          "verifiedBy": null,
+          "evidence": "Fixed at root. The comptime evaluator hand-rolled NINE of the thirty-three core.files rows with raw std::fs instead of calling the Prelude symbol, and create_dir_all, remove_all, remove_dir and copy had NO arm at all, so they hit the refusal and rendered E0956. Nothing was unreachable: the comptime tier already includes Prelude/CoreLib/Top/Text.rs with its jet_std shim and all 33 rows already carried full coverage - the evaluator simply never called it. The hand-rolling had drifted twice on its own: create_dir ran create_dir_all recursively and remove ran remove_dir_all on directories, neither of which is what the Prelude symbol does, and none of the arms consulted the fault-injection hook, so core.testing fault injection was silently inert on that tier. One arm now covers the whole Text.rs-owned family, marshalling only.",
+          "at": "2026-08-20T07:10:14.967Z"
+        },
+        {
+          "n": 2,
+          "text": "core.crypto.vault.current runs under jet run --interpret, while build-time evaluation still refuses with E1265",
+          "status": "met",
+          "metBy": "fable-e3-burndown",
+          "verifiedBy": null,
+          "evidence": "PROOF jet run --interpret examples/features/crypto/vault_keys.jet prints 'no release key configured' (2026-08-19), where it previously died with E0956 core.crypto.vault.current() isn't supported. The ambient host had arms for core.crypto, core.crypto.random and core.crypto.uuid but none for the sibling core.crypto.vault, and the pure-parity fallthrough list did not name it either. The kernel was already linked and the Cranelift host already called it, so only the marshalling arm was missing. The correct refusal is untouched: build-time evaluation still raises E1265 vault_comptime_denied; only the runtime-execution path changed.",
+          "at": "2026-08-20T07:10:15.446Z"
+        },
+        {
+          "n": 3,
+          "text": "Each of the eight named stems either runs on the interpreter tier or fails with an honest, registered diagnostic naming a genuine host-effect boundary",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-20T07:09:49.843Z"
+        },
+        {
+          "n": 4,
+          "text": "No arm re-encodes policy: every added interpreter arm marshals to the same Prelude function AOT calls",
+          "status": "met",
+          "metBy": "fable-e3-burndown",
+          "verifiedBy": null,
+          "evidence": "Both added arms marshal only: the files family calls jet_std_fs_* in Prelude/CoreLib/Top/Text.rs, the same symbols AOT calls, and the vault arm calls jet_vault_current_impl in jet-pkg-model/src/Prelude/SecretsCrypto.rs, which the Cranelift host already reached through the same include. No policy, default or error text is re-encoded on the interpreter tier.",
+          "at": "2026-08-20T07:10:15.932Z"
+        }
+      ],
       "refs": [],
       "tags": [],
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-20T00:10:07.160Z",
-      "updated": "2026-08-20T00:10:07.161Z",
-      "updatedBy": "fable-e3-burndown"
+      "updated": "2026-08-20T07:10:16.581Z",
+      "updatedBy": "agent"
     },
     {
       "id": "c0hr2wez",
@@ -137142,6 +137201,110 @@
       "needsAcceptance": false,
       "created": "2026-08-20T04:54:20.093Z",
       "updated": "2026-08-20T04:54:22.351Z",
+      "updatedBy": "fable-e3-burndown"
+    },
+    {
+      "id": "c094m07d",
+      "num": 2102,
+      "title": "Native cancellation publishes task completion before draining owned groups",
+      "body": "Open I9 drift, precisely diagnosed on 2026-08-19 and NOT yet fixed. cargo test --test taskgroup_params is 21 passed / 1 failed on native_cancellation_closes_group_before_caller_continues: interpreter prints 'settled\\ncancelled\\ncaller' while both native tiers print 'cancelled\\ncaller'. The missing line is the CHILD BODY's own output at tests/taskgroup_params.rs:474, not a close hook. The interpreter is RIGHT: spec.md:2563-2566 and :2609-2610 require task.group to join its children before the cancelled task completes, with D-CANCELMODEL1=C at :2410-2419 governing the cancel. The evaluator closes and drains the group before publishing completion (Codegen/TIR/eval/stmts.rs:791-797, eval/mod.rs:2721-2772); native cancellation exits the task frame and publishes completion first, and the fallback close_active_task_groups runs only after the caller returns (crates/jet-jit/src/jit/resident.rs:395-400). The cancelled task is 'outer' waiting in time.sleep at tests/taskgroup_params.rs:476; the nested child waits at :473. TWO ATTEMPTS SO FAR. Attempt 1 (07050d92e, reverted, saved at .claude/cancel_drain_attempt.patch) drained at the JIT scheduler boundary and cost six tests: it paired a RefCell borrow with a borrow_mut in one if-let, so the resident tier RAN and then aborted with BorrowMutError surfacing as a branded exit-101, which the tier-plan assertions reported as 'tier1 native' - worth remembering, because a tier assertion reading native can mean an abort rather than a refusal. Attempt 2 (30b4545e0, KEPT) fixes the borrow, adds task-local group ownership and gives the structured drain blocking-wait compensation so a waiting drain cannot starve the worker pool; it regresses nothing (task_control_tiers stays 19/19) but does NOT close the drift either.",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P1",
+      "plan": "The ordering rule must live in the Prelude group close that both native tiers already reach, so that completion publication cannot precede the drain. Attempt 2 established that the borrow hazard and the pool-starvation hazard are both handled; what remains is that the native completion publication still does not wait on the drain. Establish next whether the publication site can consult the existing structured join rather than a new drain call, and prove it with the three-way comparison in the named test plus task_control_tiers as the regression guard. Do not relax the assertion and do not add a jit_gaps row: the interpreter's behaviour is the ratified one, so this is native's bug.",
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "native_cancellation_closes_group_before_caller_continues passes with all three tiers printing the child's settled line before the cancel is observed",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-20T07:07:56.040Z"
+        },
+        {
+          "n": 2,
+          "text": "task_control_tiers and the panicked-wait sibling stay green, proving the fix costs no tier parity and no promptness",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-20T07:07:56.584Z"
+        },
+        {
+          "n": 3,
+          "text": "The ordering lives in one Prelude place that both native tiers call, with no second ordering in a JIT host",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-20T07:07:57.119Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-08-20T07:07:55.494Z",
+      "updated": "2026-08-20T07:07:57.119Z",
+      "updatedBy": "fable-e3-burndown"
+    },
+    {
+      "id": "c0bskept",
+      "num": 2103,
+      "title": "dev_corpus_gate cannot finish inside the 900s guard, so the ledger cannot be regenerated",
+      "body": "Measured twice on 2026-08-19: JET_DUMP_CORPUS_GATE=1 JET_WRITE_CORPUS_GATE=1 cargo test --test dev_corpus_gate example_corpus_strict_jit_aot_differential_gate runs 923s wall and is aborted by the in-process guard at its 900s default, exit 101, both before and after the E0956 error-conversion ICE was fixed. So the gate never reaches its write phase and tests/jit_corpus_gate.txt CANNOT be regenerated from an observed run today. That blocks real work: the ledger still carries stale rows (a previous audit found 40 frontend_rejected rows of which 36 were dead, and those rows SKIP working examples from the interpreter batteries), and #2101 needs the classification changed, which needs a run to re-derive. It also leaves #2008 criterion 4 and the ledger-facing criteria on #2018 unprovable. Deliberately NOT fixed by adding a second row to tests/suite_budgets.txt: OVER_DEFAULT_BUDGET_CEILING in tests/suite_membership.rs is 1, one row already exists for cli_compile_latency, and raising the ceiling needs a reviewed diff plus a justification - while the guard's own text says the right answer for a suite that outruns the default is normally to split it or speed it up. At roughly 1.8s per stem for 500 stems across three tiers, this suite is not defective, it is simply large, which is exactly the shard case.",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P1",
+      "plan": "Split the differential gate into shards that each fit the 900s default, reusing the weighted-CI-shard mechanism card #2075 already ships rather than inventing a second sharding scheme, and keep ONE ledger writer so the shards cannot each write a partial file - the write phase must either run in a final aggregating step or merge shard outputs deterministically. Then regenerate the ledger from an observed run and re-derive the stale rows. If sharding genuinely cannot preserve a single coherent ledger, the fallback is a second budget row WITH the ceiling raised in the same diff and the measured cost recorded, but try the split first.",
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "The differential gate runs to completion inside the 900s default, as shards or as a faster suite, with no second budget row",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-20T07:25:36.314Z"
+        },
+        {
+          "n": 2,
+          "text": "tests/jit_corpus_gate.txt is regenerated from an observed run and its stale rows are gone, with the row count before and after recorded",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-20T07:25:36.861Z"
+        },
+        {
+          "n": 3,
+          "text": "One writer owns the ledger: no shard writes a partial file",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-20T07:25:37.420Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-08-20T07:25:35.748Z",
+      "updated": "2026-08-20T07:25:37.420Z",
       "updatedBy": "fable-e3-burndown"
     }
   ],
@@ -183451,6 +183614,139 @@
   ],
   "events": [
     {
+      "at": "2026-08-20T07:25:38.175Z",
+      "by": "fable-e3-burndown",
+      "action": "card.update",
+      "ref": "c0ubjby5",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-08-20T07:25:37.420Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-add",
+      "ref": "c0bskept",
+      "note": "#3 One writer owns the ledger: no shard writes a partial file"
+    },
+    {
+      "at": "2026-08-20T07:25:36.862Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-add",
+      "ref": "c0bskept",
+      "note": "#2 tests/jit_corpus_gate.txt is regenerated from an observed ru"
+    },
+    {
+      "at": "2026-08-20T07:25:36.314Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-add",
+      "ref": "c0bskept",
+      "note": "#1 The differential gate runs to completion inside the 900s def"
+    },
+    {
+      "at": "2026-08-20T07:25:35.748Z",
+      "by": "fable-e3-burndown",
+      "action": "card.add",
+      "ref": "c0bskept",
+      "note": "dev_corpus_gate cannot finish inside the 900s guard, so the ledger cannot be regenerated"
+    },
+    {
+      "at": "2026-08-20T07:10:16.581Z",
+      "by": "agent",
+      "action": "card.update",
+      "ref": "c00q0c08",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-08-20T07:10:15.933Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c00q0c08",
+      "note": "#4"
+    },
+    {
+      "at": "2026-08-20T07:10:15.446Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c00q0c08",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-20T07:10:14.968Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c00q0c08",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-20T07:09:51.964Z",
+      "by": "agent",
+      "action": "card.update",
+      "ref": "c0todzv8",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-08-20T07:09:50.269Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-add",
+      "ref": "c00q0c08",
+      "note": "#4 No arm re-encodes policy: every added interpreter arm marsha"
+    },
+    {
+      "at": "2026-08-20T07:09:49.843Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-add",
+      "ref": "c00q0c08",
+      "note": "#3 Each of the eight named stems either runs on the interpreter"
+    },
+    {
+      "at": "2026-08-20T07:09:49.413Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-add",
+      "ref": "c00q0c08",
+      "note": "#2 core.crypto.vault.current runs under jet run --interpret, wh"
+    },
+    {
+      "at": "2026-08-20T07:09:48.987Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-add",
+      "ref": "c00q0c08",
+      "note": "#1 files.create_dir_all, remove_all, remove_dir and copy run on"
+    },
+    {
+      "at": "2026-08-20T07:07:57.119Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-add",
+      "ref": "c094m07d",
+      "note": "#3 The ordering lives in one Prelude place that both native tie"
+    },
+    {
+      "at": "2026-08-20T07:07:56.584Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-add",
+      "ref": "c094m07d",
+      "note": "#2 task_control_tiers and the panicked-wait sibling stay green,"
+    },
+    {
+      "at": "2026-08-20T07:07:56.040Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-add",
+      "ref": "c094m07d",
+      "note": "#1 native_cancellation_closes_group_before_caller_continues pas"
+    },
+    {
+      "at": "2026-08-20T07:07:55.494Z",
+      "by": "fable-e3-burndown",
+      "action": "card.add",
+      "ref": "c094m07d",
+      "note": "Native cancellation publishes task completion before draining owned groups"
+    },
+    {
+      "at": "2026-08-20T05:14:44.550Z",
+      "by": "fable-e3-burndown",
+      "action": "card.update",
+      "ref": "c0todzv8",
+      "note": "logEntry"
+    },
+    {
       "at": "2026-08-20T05:04:21.303Z",
       "by": "fable-e3-burndown",
       "action": "card.update",
@@ -186816,139 +187112,6 @@
       "action": "card.criteria-add",
       "ref": "c0jb1b32",
       "note": "#1 core.testing ships a deterministic, seed-stable, locale-awar"
-    },
-    {
-      "at": "2026-08-19T13:50:37.885Z",
-      "by": "fable",
-      "action": "card.criteria-add",
-      "ref": "c0zzylwh",
-      "note": "#1 A committed proposal doc records the checked transaction-reg"
-    },
-    {
-      "at": "2026-08-19T13:50:37.462Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c0hipgvn",
-      "note": "track,epoch,milestoneId"
-    },
-    {
-      "at": "2026-08-19T13:50:36.879Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c08jqcnk",
-      "note": "track,epoch,milestoneId"
-    },
-    {
-      "at": "2026-08-19T13:50:36.283Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c0y3llif",
-      "note": "track,epoch,milestoneId"
-    },
-    {
-      "at": "2026-08-19T13:50:35.687Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c0p48658",
-      "note": "track,epoch,milestoneId"
-    },
-    {
-      "at": "2026-08-19T13:50:35.084Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c0615ffl",
-      "note": "track,epoch,milestoneId"
-    },
-    {
-      "at": "2026-08-19T13:49:24.238Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c054x1px",
-      "note": "track,epoch,milestoneId"
-    },
-    {
-      "at": "2026-08-19T13:49:23.631Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c0wwqqt2",
-      "note": "track,epoch,milestoneId"
-    },
-    {
-      "at": "2026-08-19T13:49:23.005Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c0cl0ccy",
-      "note": "track,epoch,milestoneId"
-    },
-    {
-      "at": "2026-08-19T13:49:22.392Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c0460ur1",
-      "note": "track,epoch,milestoneId,logEntry"
-    },
-    {
-      "at": "2026-08-19T13:49:21.771Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c0m0lmh4",
-      "note": "track,epoch,milestoneId,logEntry"
-    },
-    {
-      "at": "2026-08-19T13:49:21.158Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c09otnjg",
-      "note": "track,epoch,milestoneId,logEntry"
-    },
-    {
-      "at": "2026-08-19T13:49:20.529Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c0twdzxi",
-      "note": "track,epoch,milestoneId"
-    },
-    {
-      "at": "2026-08-19T13:49:19.920Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c0ku9me4",
-      "note": "track,epoch,milestoneId"
-    },
-    {
-      "at": "2026-08-19T13:49:19.310Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c0c369sk",
-      "note": "track,epoch,milestoneId"
-    },
-    {
-      "at": "2026-08-19T13:49:18.717Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c030t7mo",
-      "note": "track,epoch,milestoneId"
-    },
-    {
-      "at": "2026-08-19T13:49:18.117Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c0twqtzl",
-      "note": "track,epoch,milestoneId"
-    },
-    {
-      "at": "2026-08-19T13:49:17.528Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c0khd7fh",
-      "note": "track,epoch,milestoneId"
-    },
-    {
-      "at": "2026-08-19T13:49:16.941Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c0boklxe",
-      "note": "track,epoch,milestoneId"
     }
   ],
   "nextNum": 368,
