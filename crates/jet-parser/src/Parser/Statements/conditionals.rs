@@ -920,18 +920,36 @@ impl<'a> Parser<'a> {
     pub(super) fn if_stmt(&mut self) -> Result<IfStmt, Diagnostic> {
         let span = self.bump().span; // `if`
         let cond = self.expr_no_struct_lit()?;
+        // D-ONELINE-BODY1=B: every arm of a chain takes the same body shapes as
+        // the leading `if` — one `->` statement, a braced block, or the
+        // braces-teaching recovery. `fmt` prints `->` for each arm that fits, so
+        // each arm must read it back; a chain that only the first arm could
+        // spell made the formatter write source the parser rejected.
+        if matches!(self.peek().kind, TokKind::Arrow) {
+            self.bump();
+            let then_body = self.adjacent_effect_body()?;
+            let else_branch = self.adjacent_effect_else()?;
+            return Ok(IfStmt {
+                cond,
+                then_body,
+                else_branch,
+                span,
+            });
+        }
+        if !matches!(self.peek().kind, TokKind::LBrace | TokKind::Semi) {
+            self.teach_control_braces("if", self.peek().span);
+            let then_body = self.adjacent_effect_body()?;
+            let else_branch = self.adjacent_effect_else()?;
+            return Ok(IfStmt {
+                cond,
+                then_body,
+                else_branch,
+                span,
+            });
+        }
         self.expect(TokKind::LBrace, "to open the `if` body")?;
         let then_body = self.block_stmts();
-        let mut else_branch = None;
-        if matches!(self.peek().kind, TokKind::KwElse) {
-            self.bump();
-            if matches!(self.peek().kind, TokKind::KwIf) {
-                else_branch = Some(ElseBranch::ElseIf(Box::new(self.if_stmt()?)));
-            } else {
-                self.expect(TokKind::LBrace, "to open the `else` body")?;
-                else_branch = Some(ElseBranch::Else(self.block_stmts()));
-            }
-        }
+        let else_branch = self.adjacent_effect_else()?;
         Ok(IfStmt {
             cond,
             then_body,

@@ -1149,6 +1149,24 @@ fn fmt_simplify_rewrites_a_classic_else_if_chain_to_an_arm_table() {
 }
 
 #[test]
+fn fmt_output_for_a_classic_else_if_chain_parses_again() {
+    // D-ONELINE-BODY1=B: plain fmt collapses a short chain to one `->` body per
+    // arm. Every arm of a chain must read that shape back, or `jet fmt` writes
+    // a file the compiler then rejects.
+    let source = "fn grade(score: Int) => String {\n    if score >= 90 {\n        return \"a\"\n    } else if score >= 80 {\n        return \"b\"\n    } else {\n        return \"c\"\n    }\n}\n";
+    let once = jet::format_source(source).expect("the chain formats");
+    let (tokens, lex_diags) = jet::Lexer::lex(&once);
+    assert!(lex_diags.is_empty(), "{lex_diags:?}");
+    jet::Parser::parse_for_fmt(&tokens)
+        .unwrap_or_else(|diags| panic!("fmt wrote source it cannot read:\n{once}\n{diags:?}"));
+    assert_eq!(
+        once,
+        jet::format_source(&once).expect("second pass formats"),
+        "fmt must be idempotent on the chain"
+    );
+}
+
+#[test]
 fn fmt_map_type_spacing_is_canonical_and_value_spacing_stays() {
     let source = "fn read(values: [String: Int]) => [String: Int] {\n    return [\"key\": 1]\n}\n";
     let once = jet::format_source(source).expect("map type should format");
