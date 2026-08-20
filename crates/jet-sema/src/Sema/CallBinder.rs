@@ -15,8 +15,9 @@
 use crate::AST::{CallArg, ParamZone};
 use crate::Diagnostics::{Diagnostic, Span};
 use crate::Sema::Diagnostics::{
-    binder_ambiguous_positional, binder_label_forbidden, binder_label_required,
-    binder_missing_argument, binder_repeated_label, binder_unknown_label,
+    binder_ambiguous_call, binder_ambiguous_positional, binder_label_forbidden,
+    binder_label_required, binder_missing_argument, binder_repeated_label,
+    binder_unknown_label,
 };
 
 /// One parameter's public call contract, as the binder needs to see it.
@@ -68,9 +69,22 @@ pub(crate) enum ArgSource {
 }
 
 /// The binding for one call.
+#[derive(Debug, Clone)]
 pub(crate) struct Binding {
     /// Parallel to the rewritten `args`: where each slot came from.
     pub sources: Vec<ArgSource>,
+}
+
+/// A callable body supplied by an interop resolver. Jet user definitions stay
+/// unique (D-CAP10); this seam is for imported overload sets such as C++.
+// Dead outside tests until the C++ overload consumer lands (card #2042). Jet's
+// own callables are unique by D-CAP10, so nothing in-tree calls this yet; the
+// seam exists for imported overload sets and is exercised by the unit tests
+// below. Delete it, not this attribute, if that card is dropped.
+#[cfg_attr(not(test), allow(dead_code))]
+pub(crate) struct CallableCandidate<'a> {
+    pub params: &'a [BindParam<'a>],
+    pub signature: &'a str,
 }
 
 impl Binding {
@@ -267,6 +281,104 @@ pub(crate) fn bind_call_args(
     Some(rewrite(params, args, &slots, call_span))
 }
 
+/// Bind a call against every candidate body, then keep exactly one successful
+/// binding. The resolver supplies the type check after binding; the binder
+/// never changes a positional slot to make a type fit.
+#[cfg_attr(not(test), allow(dead_code))]
+pub(crate) fn bind_call_candidate_set<F>(
+    callee: &str,
+    candidates: &[CallableCandidate<'_>],
+    args: &mut Vec<CallArg>,
+    call_span: Span,
+    diags: &mut Vec<Diagnostic>,
+    mut candidate_types_match: F,
+) -> Option<Binding>
+where
+    F: FnMut(usize, &[CallArg]) -> bool,
+{
+    let mut successes = Vec::new();
+    for (index, candidate) in candidates.iter().enumerate() {
+        let mut trial_args = args.clone();
+        let mut trial_diags = Vec::new();
+        let Some(binding) = bind_call_args(
+            callee,
+            candidate.params,
+            &mut trial_args,
+            call_span,
+            &mut trial_diags,
+        ) else {
+            continue;
+        };
+        if !candidate_arity_matches(candidate.params, &binding)
+            || !candidate_types_match(index, &trial_args)
+        {
+            continue;
+        }
+        successes.push((index, binding, trial_args));
+    }
+
+    match successes.len() {
+        0 => {
+            // Preserve today's binder diagnostics when no candidate binds.
+            if let Some(candidate) = candidates.first() {
+                let _ = bind_call_args(
+                    callee,
+                    candidate.params,
+                    args,
+                    call_span,
+                    diags,
+                );
+            }
+            None
+        }
+        1 => {
+            let (_, binding, trial_args) = successes.pop().expect("one candidate succeeded");
+            *args = trial_args;
+            Some(binding)
+        }
+        _ => {
+            let signatures: Vec<&str> = successes
+                .iter()
+                .map(|(index, _, _)| candidates[*index].signature)
+                .collect();
+            let (_, first_binding, first_args) = &successes[0];
+            let rewrite = labeled_rewrite(first_args, first_binding);
+            diags.push(binder_ambiguous_call(
+                callee,
+                &signatures,
+                &rewrite,
+                call_span,
+            ));
+            None
+        }
+    }
+}
+
+#[cfg_attr(not(test), allow(dead_code))]
+fn candidate_arity_matches(params: &[BindParam<'_>], binding: &Binding) -> bool {
+    if params.last().is_some_and(|param| param.variadic) {
+        binding.sources.len() >= params.len().saturating_sub(1)
+    } else {
+        binding.sources.len() == params.len()
+    }
+}
+
+#[cfg_attr(not(test), allow(dead_code))]
+fn labeled_rewrite(args: &[CallArg], binding: &Binding) -> String {
+    args.iter()
+        .zip(&binding.sources)
+        .filter_map(|(arg, source)| match source {
+            ArgSource::Written(_) => arg
+                .flags
+                .binder_label
+                .as_deref()
+                .map(|label| format!("{label}: …")),
+            ArgSource::Default => None,
+        })
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
 /// Reorder `args` into declaration order and fill every unbound parameter with
 /// its default. Defaults run after the supplied arguments, in declaration
 /// order. A default reference names a private declaration-slot temp, so a
@@ -294,6 +406,7 @@ fn rewrite(
                 arg.flags.source_index = Some(*index);
                 arg.flags.binder_slot = Some(position);
                 arg.flags.binder_site = Some(call_span.start as u32);
+                arg.flags.binder_label = Some(params[position].label.to_string());
                 args.push(arg);
                 sources.push(ArgSource::Written(*index));
             }
@@ -370,4 +483,99 @@ fn rewrite(
         }
     }
     binding
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::AST::{AccessConvention, Expr};
+
+    fn param(label: &'static str) -> BindParam<'static> {
+        BindParam {
+            label,
+            name: label,
+            zone: ParamZone::Either,
+            default: None,
+            convention: AccessConvention::Read,
+            ty: None,
+            variadic: false,
+            core_default: None,
+        }
+    }
+
+    fn arg(start: usize) -> CallArg {
+        let span = Span::new(start, start + 1);
+        CallArg {
+            convention: AccessConvention::Read,
+            expr: Expr::Ident(format!("value_{start}"), span),
+            span,
+            flags: Default::default(),
+            label: None,
+            spread: false,
+        }
+    }
+
+    #[test]
+    fn candidate_set_reports_ambiguous_bare_call_with_labeled_fix() {
+        let first = vec![param("name"), param("text")];
+        let second = vec![param("key"), param("id")];
+        let candidates = [
+            CallableCandidate {
+                params: &first,
+                signature: "put(name: String, text: String)",
+            },
+            CallableCandidate {
+                params: &second,
+                signature: "put(key: String, id: String)",
+            },
+        ];
+        let mut args = vec![arg(4), arg(12)];
+        let mut diags = Vec::new();
+
+        assert!(bind_call_candidate_set(
+            "put",
+            &candidates,
+            &mut args,
+            Span::new(0, 16),
+            &mut diags,
+            |_, _| true,
+        )
+        .is_none());
+        assert_eq!(diags.len(), 1);
+        assert_eq!(diags[0].code, "E0772");
+        assert!(diags[0].why.contains("put(name: String, text: String)"));
+        assert!(diags[0].why.contains("put(key: String, id: String)"));
+        assert!(diags[0].fix.contains("put(name: …, text: …)"));
+    }
+
+    #[test]
+    fn candidate_type_check_runs_after_binding_and_selects_one_body() {
+        let first = vec![param("name"), param("text")];
+        let second = vec![param("key"), param("id")];
+        let candidates = [
+            CallableCandidate {
+                params: &first,
+                signature: "put(name: String, text: String)",
+            },
+            CallableCandidate {
+                params: &second,
+                signature: "put(key: String, id: Int)",
+            },
+        ];
+        let mut args = vec![arg(4), arg(12)];
+        let mut diags = Vec::new();
+
+        assert!(bind_call_candidate_set(
+            "put",
+            &candidates,
+            &mut args,
+            Span::new(0, 16),
+            &mut diags,
+            |index, bound_args| index == 1 && bound_args.len() == 2,
+        )
+        .is_some());
+        assert!(diags.is_empty());
+        assert_eq!(args[0].flags.binder_label.as_deref(), Some("key"));
+        assert_eq!(args[1].flags.binder_label.as_deref(), Some("id"));
+    }
 }

@@ -1,5 +1,5 @@
 use super::*;
-use crate::Diagnostics::{Diagnostic, Span};
+use crate::Diagnostics::{Diagnostic, Span, TextEdit};
 use crate::Generics::{self, is_type_var_name};
 use crate::Syntax;
 pub(crate) use crate::Syntax::edit_distance;
@@ -160,13 +160,20 @@ pub(crate) fn undeclared_value_tag(
         },
         |candidate| format!("did you mean `{candidate}`?"),
     );
-    Diagnostic::error(
+    let mut diagnostic = Diagnostic::error(
         "E0733",
         format!("there's no tag called `{marker}`"),
         "a value tag must name a declared `tag`".to_string(),
         fix,
         Some(span),
-    )
+    );
+    if let Some(candidate) = suggestion {
+        diagnostic = diagnostic.with_edit(TextEdit {
+            span,
+            new_text: candidate.to_string(),
+        });
+    }
+    diagnostic
 }
 
 pub(crate) fn compound_why(op: BinOp) -> String {
@@ -367,6 +374,30 @@ pub(crate) fn binder_label_required(callee: &str, label: &str, span: Span) -> Di
         "the `*` in the declaration requires the label, so the call says what the value means"
             .to_string(),
         format!("write `{label}: …` for this argument"),
+        Some(span),
+    )
+}
+
+// Reached only from the CallBinder overload seam, which waits on card #2042.
+#[cfg_attr(not(test), allow(dead_code))]
+pub(crate) fn binder_ambiguous_call(
+    callee: &str,
+    candidates: &[&str],
+    rewrite: &str,
+    span: Span,
+) -> Diagnostic {
+    Diagnostic::error(
+        "E0772",
+        format!("this call to `{callee}` matches more than one callable body"),
+        format!(
+            "the call binds to multiple candidate signatures:\n{}",
+            candidates
+                .iter()
+                .map(|candidate| format!("  {candidate}"))
+                .collect::<Vec<_>>()
+                .join("\n")
+        ),
+        format!("name the arguments to choose one candidate: `{callee}({rewrite})`"),
         Some(span),
     )
 }
@@ -611,11 +642,11 @@ fn builtin_resource_type(name: &str) -> bool {
     )
 }
 
-/// D-MEM1/S7 (D-NOALLOC-SEM1=A): true when `ty` owns heap data — directly
+/// D-MEM1: true when `ty` owns heap data — directly
 /// (`String`/`[T]`/`[K,V]`/`Shared<T>`/a boxed trait object/a `[T#N]`, which
 /// erases to `Vec<T>` at codegen) or transitively (a struct/enum/tuple/distinct/
-/// alias with a heap-owning part). Backs `#Policy(no_alloc)` struct/enum-
-/// literal and `copy` checks (E0921) — deliberately narrower than
+/// alias with a heap-owning part). Backs heap-ownership and `copy` checks —
+/// deliberately narrower than
 /// `is_cloneable`, which asks a different question ("can Rust `.clone()` this",
 /// true for nearly everything including heap types).
 pub(crate) fn type_owns_heap(ty: &Type, registry: &TypeRegistry) -> bool {
@@ -680,8 +711,8 @@ fn type_owns_heap_rec(ty: &Type, registry: &TypeRegistry, visiting: &mut HashSet
         // recurse into its type args (approximates a generic field storing
         // one), OR'd with a direct field-registry lookup by name (no generic
         // substitution — a known gap for a user generic struct whose fields
-        // are typed by a type PARAMETER rather than a concrete arg; see S7
-        // report). Errs toward flagging (a false positive under `no_alloc` is
+        // are typed by a type PARAMETER rather than a concrete arg; see the
+        // generic-type report). Errs toward flagging (a false positive is
         // cheaper than a silent miss of an actual allocation).
         Type::Apply { name, .. } if name == Syntax::TYPE_CHECKED_TEXT => true,
         Type::Apply { name, args } if name == "Pool" => {
