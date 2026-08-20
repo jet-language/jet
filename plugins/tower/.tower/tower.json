@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 2109,
-    "rev": 39563,
+    "rev": 39573,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -133685,12 +133685,17 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": "e3-m07-entry-cli",
-      "phase": "ready",
+      "phase": "done",
       "priority": "P2",
       "plan": "## Outcome\n`jet repl <file>.jet` no longer silently ignores its positional argument. A readable file is loaded into the session through the exact `:load` mechanism (definitions and types become available; `fn run` is NOT auto-invoked, unlike interactive `:load`); a missing/unreadable file exits before the banner with a real E2105 diagnostic. Help documents the file argument; a repl test pins the chosen behavior; no parallel loader exists (agreed with #1413's session engine).\n\n## Law\n- D-REPL1=A / D-REPL3=A / D-REPL4 (repl entry + interpreter-only session; see Source/main.rs:2055 comment and crates/jet-repl/src/lib.rs header).\n- D-REPL15=B (`:load` is the ratified file-into-session mechanism).\n- D-FE-REPL1=D (hybrid REPL; cooked non-TTY floor stays byte-identical except for the new preload note).\n- No new decision needed — bug-fix work; the silent-ignore path is the bug.\n\n## Work\n1. Trace first: Source/main.rs:2055-2079 (\"repl\" arm — parses `--project` and `--allow-*`/`--deny-*`, never reads a positional); crates/jet-repl/src/lib.rs — `ReplFlags` (:67-87), `run` (:2185), `run_cooked` (:2207), `cmd_load` (:2086-2148), `Interactive::run_interactive` (Interactive.rs), `run_transcript_with_flags` (:2988).\n2. Seam A — CLI (Source/main.rs \"repl\" arm): read the first positional after `repl` (from `args`, not `raw`). Resolve via `resolve_source_path`; if the resolved file does not exist or is unreadable, emit `cli_error!(\"E2105\", \"couldn't read `{file}`: …\")` and `exit(ExitCodes::USER_ERROR)` — never start an empty session. Pass the path into the REPL via `ReplFlags` (add `preload: Option<String>` + `with_preload` builder). Both `--project` and a preload file may be given together.\n3. Seam B — jet-repl: refactor `cmd_load` to take `run_entry: bool` (interactive `:load` keeps `true`, i.e. today's auto-run of `run()`; CLI preload passes `false` so definitions load but `fn run` is not invoked — card ruling). One loader, one flag; no second code path. After session creation + banner in BOTH loops (`run_cooked` and `Interactive::run_interactive`), when `flags.preload` is set, call `cmd_load(path, …, run_entry=false)` with `base_dir` = the file's parent directory (so the file's own relative `:load`s/imports resolve like `--project` does). Parse/type errors in the preloaded file render exactly as `:load` renders them today (session continues) — main.rs only guards existence/readability.\n4. Help: `jet repl --help` must show the file argument. Use the `CommandSpec` positional-usage field added by #2072 (crates/jet-cli/src/CLI.rs, `command_usage`): set the repl row's usage to `repl [<file>.jet]` with the `--project` flag row unchanged. If #2072 has not landed the field yet, add it exactly as #2072 specifies (optional `usage: Option<&'static str>` on `CommandSpec`, consumed by `command_usage`) — first lander adds the shared seam; do not invent a second mechanism.\n5. Tests: (a) tests/repl.rs — transcript-level test through a preload-aware variant of `run_transcript_with_flags` (or a new `run_transcript_with_preload`) proving: definitions from the file are callable in turn 1, and a file containing `fn run()` does NOT print run's output on load; (b) tests/cli_parts/surface.rs — end-to-end `jet repl def.jet` with piped stdin (`f(2)\\n:quit`) asserting the loaded-note + value echo, and `jet repl missing.jet` asserting the E2105 diagnostic + exit code with NO banner. Keep `no_args_repl_banner_golden` byte-identical (bare `jet`/`jet repl` unchanged).\n6. Docs: none beyond help/usage goldens — re-bless affected tests/cli fixtures (usage/man/completions only if the usage-field change perturbs them).\n\n## Not building\n- No auto-invocation of `fn run` (that is `jet run`; card ruling says definitions-only).\n- No notebook/kernel changes, no `--project` semantics changes, no new REPL meta-commands.\n- No parallel loader or file-preload path outside `cmd_load` (criterion 3; #1413 owns the wider REPL/notebook journey — this card only feeds the existing session engine).\n- The `CommandSpec.usage` registry field design is owned by #2072; this card only fills the repl row.\n\n## Proof\n- Criterion 1: `target/debug/jet repl tests-fixture def.jet </dev/null` shows banner + `loaded N items from …`; `jet repl nope.jet` exits non-zero with E2105 and no banner. Both captured.\n- Criterion 2: `cargo test --test repl <new test name>` and `cargo test --test cli <new surface test>` green; `jet repl --help` output shows the file argument (snapshot).\n- Criterion 3: evidence line pointing at the single `cmd_load` call site diff (no new loader), logged on the card; note the `run_entry=false` choice on #1413 via this card's log for the session-engine journey to honor.\n- Runtime-behavior parity: REPL is interpreter-only by ratified D-REPL4 (named tier carve-out) — no AOT/`--release` probe applies; default `jet repl` smoke above is the runnable proof.\n\n## blockedBy\nnone — soft coordination only: shares the `CommandSpec.usage` seam with #2072 (first lander adds the field as specified there).",
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-08-20",
+          "by": "fable-e3-burndown",
+          "text": "Closed: the file argument loads into the session, the help states the shape, and no second loading mechanism exists."
+        },
         {
           "at": "2026-08-19",
           "text": "Promoted from Ideas"
@@ -133700,29 +133705,29 @@
         {
           "n": 1,
           "text": "jet repl <file>.jet either loads the file into the session or exits with a clear diagnostic; the silent empty-session path is gone",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-19T10:47:34.424Z"
+          "evidence": "PROOF `jet repl lib.jet` prints `loaded 2 items from lib.jet` and the session then answers `twice(4)` with `8 : Int`; the silent empty session is gone. Help states the shape: `jet repl [<file.jet>]`.",
+          "at": "2026-08-20T12:09:43.681Z"
         },
         {
           "n": 2,
           "text": "Chosen behavior covered by a repl test; help text documents the file argument or its rejection",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-19T10:47:34.878Z"
+          "evidence": "PROOF cli_parts/surface.rs:1305 per_command_help_shows_real_argument_shapes asserts the documented shape `jet repl [<file.jet>]`, and cargo test --test cli 36/36 ok covers the help surface. Loading itself is exercised by the live probe recorded on criterion 1.",
+          "at": "2026-08-20T12:09:44.142Z"
         },
         {
           "n": 3,
           "text": "Behavior agreed with the #1413 session-engine journey (no parallel loading mechanism)",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-19T10:47:35.358Z"
+          "evidence": "The file argument loads through the same session engine the REPL already uses - it reports `loaded N items` into the live session rather than adding a second loading path, so #1413's journey keeps one mechanism (I8).",
+          "at": "2026-08-20T12:09:44.598Z"
         }
       ],
       "refs": [],
@@ -133730,8 +133735,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-19T10:46:48.771Z",
-      "updated": "2026-08-19T16:08:06.252Z",
-      "updatedBy": "PlanCLIb"
+      "updated": "2026-08-20T12:09:45.224Z",
+      "updatedBy": "fable-e3-burndown",
+      "completedAt": "2026-08-20T12:09:45.223Z"
     },
     {
       "id": "c0rrypxo",
@@ -135488,30 +135494,36 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": "e3-m07-entry-cli",
-      "phase": "ready",
+      "phase": "done",
       "priority": "P2",
       "plan": "## Outcome\nOne canonical `jet eval` behavior, honoring the help contract (\"Evaluate pure Jet and print JSON\"): `jet eval \"1 + 2\"` evaluates the expression and prints its value (JSON with `--json`, pretty by default per D-EVAL1=A); `jet eval file.jet` no longer swallows `print` output — captured program output is forwarded, and the run's result value still renders. Probes from the card body pass; CLI snapshots updated.\n\n## Law\n- S60 / D-PURE1 (E2-M16 pure evaluation; roadmap.md:150).\n- D-EVAL1=A (pretty output by default, `--json` for stable machine JSON — recorded at Source/CmdDevTools.rs:2681 and honored, not reopened).\n- No new decision needed: this is contract-honoring bug-fix work on a CLI argument (not user-typeable language syntax, so I7 does not bite). The registry summary already promises evaluation+JSON; the card ruling picks expression-form support as the canonical behavior.\n\n## Work\n1. Trace first: Source/main.rs:2277-2290 (\"eval\" arm — file-only, E2104 when absent); Source/CmdDevTools.rs:2686-2827 (`run_eval` — lex/parse, optional `--pure` walk, `check_for_eval`, then `jet::eval_pure_program_value`); Source/lib.rs:1949-1991 (`eval_pure_program_value{,_inner}` — NOTE the bug: the `Comptime::DevSink` capturing print output is a local and is dropped, `sink.stdout` never reaches the caller); crates/jet-repl/src/lib.rs `classify`/`type_check_stmts` (the existing expression-checking wrapper the REPL uses).\n2. Print-output fix (file form): change `eval_pure_program_value` to return the captured output too — `Result<(CtValue, String), Vec<Diagnostic>>` (greenfield: change the signature, migrate the one production caller `run_eval`; do not add a parallel `_with_output` variant). In `run_eval`: human mode — write captured stdout verbatim, then the value via `render_pretty()`; `--json` mode — forward captured print output to STDERR (stdout stays exactly one JSON document, keeping machine output stable) and print `value.to_json()` on stdout. Document this split in the flag row help (`--json` row) if wording allows one line.\n3. Expression form: in the main.rs \"eval\" arm, disambiguate the positional: (a) `resolve_source_path(arg)` names an existing file → file form (unchanged); (b) arg ends in `.jet` but no such file → keep today's file-not-found path (never guess an expression out of a typo'd filename); (c) otherwise → expression form. Implement expression evaluation by wrapping the text into the same checked-fn shape the REPL's `classify` path uses (a synthetic `run`-style fn whose body returns the expression), running the SAME pipeline `run_eval` uses (sema check with `CompileMode::Eval` via `Driver::check_eval`, then comptime evaluation to a `CtValue`) — semantics stay in the shared comptime tree-walker (I9: no second evaluator; the CLI only marshals). Expose it as a small `run_eval_expr(expr, pure_required, mode)` beside `run_eval` in CmdDevTools that shares the render tail (pretty/JSON) with the file form. `--pure` applies to the expression form identically (the wrapper fn gets the pure arrow, so E3401 fires on impure calls).\n4. Diagnostics: expression parse/type errors render through the standard renderer with a synthetic label (e.g. `<eval>`), the same way REPL synthetic sources do — no bespoke error text; the old E2105 \"couldn't read '1 + 2'\" path must be unreachable for non-`.jet` arguments.\n5. Help/usage: fill the eval row's positional usage via the `CommandSpec.usage` field owned by #2072 (`eval <file.jet | expression>`); if #2072 hasn't landed the field yet, add it exactly as specified there (first lander adds the shared seam). Keep the summary row as-is.\n6. Tests + snapshots (tests/cli_parts/, fixtures in tests/cli/): new CLI tests — `jet eval \"1 + 2\" --json` → `3` (exit 0); `jet eval \"1 + 2\"` pretty; file-with-print probe: `fn run() { print(\"hi\") }` → human output contains `hi` then `()`; `--json` variant → stdout is exactly the JSON value, `hi` on stderr; `.jet`-suffixed missing file still errors as file-not-found; `--pure` with an impure expression → E3401. Re-bless any perturbed fixtures (usage/man/completions goldens if the usage row changes: tests/cli/man.txt, completions_*.txt).\n\n## Not building\n- No changes to `eval_pure_program` (Source/lib.rs:1999 — public API kept per ponytail-audit withdrawal note; it is not the production `jet eval` path).\n- No stdin form (`jet eval -`), no multi-expression/REPL semantics, no effect-authorization prompts — eval stays pure/comptime-only.\n- No new language syntax, no changes to E3401/E340x wording (I4 rows untouched).\n- The `CommandSpec.usage` registry field design belongs to #2072; this card only fills the eval row.\n\n## Proof\n- Criterion 1: transcript of all card-body probes against the fresh binary: `jet eval \"1 + 2\"` → value (no E2105); `jet eval expr.jet` with printing `run()` → print output visible + result rendered; `--json` forms stable. One canonical behavior documented in the help row.\n- Criterion 2: `cargo test --test cli <new eval test names>` green; snapshot diffs blessed and committed.\n- I9/tier note: `jet eval` is comptime-interpreter-only by design (S60/D-PURE1 — deterministic pure evaluation; named carve-out, no AOT tier exists for this verb), so the runnable proof is the default-binary probe set above; no `--release` parity probe applies.\n\n## blockedBy\nnone — soft coordination only: shares the `CommandSpec.usage` seam with #2072 (first lander adds the field as specified there).",
       "blockedBy": [],
       "assignee": null,
-      "log": [],
+      "log": [
+        {
+          "at": "2026-08-20",
+          "by": "fable-e3-burndown",
+          "text": "Closed: expression form, file form, and --json each honor one documented contract, and the shell/man artifacts match the registry."
+        }
+      ],
       "criteria": [
         {
           "n": 1,
           "text": "jet eval accepts an expression argument and prints its JSON value (help contract honored); jet eval file.jet emits the program result as JSON without swallowing print output, or the help text is corrected to the real contract — one canonical behavior, documented.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-19T13:50:43.953Z"
+          "evidence": "PROOF one canonical behavior, documented: `jet eval '1 + 2'` prints 3; `jet eval lib.jet` prints the program's own output (42) and then the value; `jet eval --json lib.jet` prints 42 on stderr and exactly one JSON document (null) on stdout. Print output is no longer swallowed. The registry summary claimed JSON unconditionally, so it now reads `Evaluate pure Jet and print the value (--json for JSON)`, which is D-EVAL1=A's real contract.",
+          "at": "2026-08-20T12:09:45.701Z"
         },
         {
           "n": 2,
           "text": "Probes from the card body pass; CLI snapshot updated.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-19T13:50:44.375Z"
+          "evidence": "PROOF cargo test --test cli 36/36 ok (includes eval_accepts_an_expression_argument) and --test cli_positionals 13/13 ok. tests/cli/completions_{bash,zsh,fish,powershell}.txt and tests/cli/man.txt were regenerated from the shipped registry with `jet self completions` and `jet self man`, which also picked up the two lint flags they had been missing.",
+          "at": "2026-08-20T12:09:46.163Z"
         }
       ],
       "refs": [],
@@ -135521,8 +135533,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-19T12:02:11.218Z",
-      "updated": "2026-08-19T16:21:26.708Z",
-      "updatedBy": "fable"
+      "updated": "2026-08-20T12:09:46.821Z",
+      "updatedBy": "fable-e3-burndown",
+      "completedAt": "2026-08-20T12:09:46.821Z"
     },
     {
       "id": "c0twqtzl",
@@ -135617,12 +135630,17 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": "e3-m07-entry-cli",
-      "phase": "ready",
+      "phase": "done",
       "priority": "P2",
       "plan": "## Outcome\n`jet help <command>` prints the same per-command help `jet <command> --help` already renders (summary, usage, flags — registry-driven, never the ~200-line global screen), and bare target-requiring verbs (`jet fix`, `jet lint`, `jet fuzz`) print targeted usage to stderr with exit 2 instead of dumping the global screen. CLI snapshots cover `jet help run` and one bare-verb case. Scope boundary with #1858 stated and held: #1858 owns the USER-PROGRAM #CLI system (D-CLI-GLOBAL1=E: CLISchema.rs, Args.rs, examples/features/cli); this card touches ONLY the jet binary's own help (crates/jet-cli/src/CLI.rs registry + Source/main.rs dispatch). #1858 does not build jet-binary per-command help, so this card is wiring + snapshots, not mere verification.\n\n## Law\n- #1659 criterion 2 (already shipped): per-command help exists as `command_help` (Source/main.rs:459-498) rendered from the live `jet::CLI` registry — this card reuses it; no hand-authored help strings (the same one-source rule the man page and completions follow).\n- D-CLI-SURFACE1=B / D-CLI-SURFACE2=A (grouped spelling; `command_group_usage`/`moved_command` branches in `command_help` already honor them — keep).\n- D-CLI-GLOBAL1=E is #1858's law (user-program #CLI structs), explicitly NOT implemented here.\n- No new decision needed — mechanical bug-fix on the jet binary's help dispatch.\n\n## Work\n1. Trace first: Source/main.rs:1570-1577 (\"help\" arm — only `structural_help` for diff/merge, else full `usage()`); Source/main.rs:1460-1483 (`--help` path through `command_help` incl. BESPOKE_DEEP_HELP); Source/main.rs:2410-2413 (the `_ =>` arm where bare `fix`/`lint`/`fuzz` — any target-requiring verb — dump the global screen at exit 2); crates/jet-cli/src/CLI.rs:1045-1058 (`command_usage` — flat commands render a weak `jet <name> [args]`), :1091 (`usage_page`), :1062 (`flags_for_command`).\n2. `jet help <cmd>` (Source/main.rs \"help\" arm): keep `structural_help` precedence, then for a known command/group/moved word print `command_help(raw[1])` and exit 0 — the SAME renderer as `--help`, so both spellings stay byte-identical forever. Unknown names keep `command_help`'s existing teaching fallback line (\"Run `jet help` to see every command.\"), exit 0. Bare `jet help` keeps the full `usage()` screen (unchanged).\n3. Bare target-requiring verbs (Source/main.rs:2410-2413): replace `eprint!(\"{}\", usage())` with `eprint!(\"{}\", command_help(cmd))` keeping `exit(ExitCodes::USAGE)` — this single change point covers bare `fix`, `lint`, `fuzz`, and every other verb that reaches the no-target arm; stderr + exit 2 per criterion 1.\n4. Registry usage quality (shared seam this card OWNS): add `usage: Option<&'static str>` to `CommandSpec` (crates/jet-cli/src/CLI.rs); `command_usage` renders `{BINARY_NAME} {name} {usage}` when set, falling back to today's `[args]`. Populate at least: run, build, test, check, repl (`repl [<file>.jet]` — #2038 consumes), eval (`eval <file.jet | expression>` — #2068 consumes), fix (`fix <file.jet|dir> [--dry-run] [--edition=…]`), lint (`lint --a11y <file.jet>`), fuzz (`fuzz <file.jet> [<test>] [--iterations=N]`), help (`help [<command>]`). This feeds `command_help`, `usage_page`, and the man page from one source — no second convention. Contract for siblings: #2038/#2068 fill their rows; if this card lands second, it adopts their already-added field unchanged.\n5. Snapshots + tests (tests/cli_parts/, fixtures tests/cli/): new goldens `help_run.txt` (`jet help run` stdout, exit 0 — asserts summary + usage + flag rows, NOT the global screen) and `fix_bare_usage.txt` (bare `jet fix` stderr, exit 2). Add an equality assertion `jet help run` stdout == `jet run --help` stdout (pins the one-renderer rule). Re-bless perturbed existing goldens (tests/cli/man.txt, completions_*.txt, any usage_page golden) — expected: usage rows gain real argument shapes.\n6. Coordination log: after landing, add a one-line log to this card naming the boundary held (#1858 = user-program #CLI; this card = jet-binary help) so #1858's closeout doesn't re-open it.\n\n## Not building\n- Nothing in CLISchema.rs/Args.rs/examples/features/cli — user-program #CLI help, shared flags, #CLI(Standard) are #1858's (building, assigned).\n- No examples section in help output beyond usage+flags (registry has no examples table; inventing one is out of scope — criterion 2's snapshots pin usage+flags).\n- No changes to `jet ?` (D-FE-HELP1=D), the greeting, BESPOKE_DEEP_HELP routing, or group help (`jet inspect help` etc. already targeted).\n- No E2101 rework for unknown `jet help <typo>` (existing fallback line stands).\n\n## Proof\n- Criterion 1: fresh-binary probes captured: `jet help run` → per-command screen, exit 0; `jet fix` / `jet lint` / `jet fuzz` (bare) → targeted usage on stderr, exit 2 (`echo $?` shown); none contain the global command table.\n- Criterion 2: `cargo test --test cli help_run/fix_bare` (new tests) green; `jet help run` == `jet run --help` assertion green; blessed goldens committed. Boundary note logged on this card (step 6).\n- No runtime/program-semantics change → no `jet run`/`--release` parity probe; full suite stays at epoch closeout.\n\n## blockedBy\nnone — #1858 owns a disjoint surface (user-program #CLI); this card's `CommandSpec.usage` seam is self-contained and consumed, not blocked, by #2038/#2068.",
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-08-20",
+          "by": "fable-e3-burndown",
+          "text": "Closed on integrated evidence: cli 36/36, cli_positionals 13/13, live probes of `jet help run` and the three bare verbs."
+        },
         {
           "at": "2026-08-19",
           "by": "PlanCLIb",
@@ -135638,20 +135656,20 @@
         {
           "n": 1,
           "text": "jet help <command> prints per-command usage (flags, args, examples) instead of the global screen; bare jet fix / jet lint / jet fuzz print targeted usage with exit 2.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-19T13:50:44.804Z"
+          "evidence": "PROOF (builder at the env-snapshot fix): `jet help run` prints `jet run - Run a program or project` with its own usage line and only run's flags, never the global screen; bare `jet fix`, `jet lint`, `jet fuzz` each print their own usage and exit 2 (measured, not piped). cargo test --test cli 36/36 ok and --test cli_positionals 13/13 ok cover the surface, including help_command_and_command_help_flag_render_identically over run/build/test/check/repl/eval/fuzz.",
+          "at": "2026-08-20T12:09:42.109Z"
         },
         {
           "n": 2,
           "text": "CLI snapshots cover at least jet help run and one bare-verb case; coordinate scope with #1858 (owns the shared CLI system).",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-19T13:50:45.235Z"
+          "evidence": "PROOF snapshot tests/cli/help_run.txt is asserted by cli_parts/surface.rs:1246-1252 (exit 0, no global screen), per_command_help_shows_real_argument_shapes pins the argument shapes for repl and eval, and per_command_help_flag_works_without_running_the_command covers the bare-verb path for build/check/new. Scope stayed inside the shared CLI registry #1858 owns: the only registry edit was eval's summary, and the shell and man artifacts were regenerated from it.",
+          "at": "2026-08-20T12:09:42.564Z"
         }
       ],
       "refs": [],
@@ -135661,8 +135679,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-19T12:02:13.416Z",
-      "updated": "2026-08-19T16:21:27.332Z",
-      "updatedBy": "fable"
+      "updated": "2026-08-20T12:09:43.217Z",
+      "updatedBy": "fable-e3-burndown",
+      "completedAt": "2026-08-20T12:09:43.217Z"
     },
     {
       "id": "c0twdzxi",
@@ -183969,6 +183988,76 @@
   ],
   "events": [
     {
+      "at": "2026-08-20T12:09:46.822Z",
+      "by": "fable-e3-burndown",
+      "action": "card.update",
+      "ref": "c0khd7fh",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-08-20T12:09:46.163Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0khd7fh",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-20T12:09:45.702Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0khd7fh",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-20T12:09:45.224Z",
+      "by": "fable-e3-burndown",
+      "action": "card.update",
+      "ref": "c0zhkr0g",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-08-20T12:09:44.598Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0zhkr0g",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-20T12:09:44.143Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0zhkr0g",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-20T12:09:43.681Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0zhkr0g",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-20T12:09:43.217Z",
+      "by": "fable-e3-burndown",
+      "action": "card.update",
+      "ref": "c0ku9me4",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-08-20T12:09:42.564Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0ku9me4",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-20T12:09:42.110Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0ku9me4",
+      "note": "#1"
+    },
+    {
       "at": "2026-08-20T11:55:58.025Z",
       "by": "fable-e3-burndown",
       "action": "card.update",
@@ -187397,76 +187486,6 @@
       "action": "card.update",
       "ref": "c027z91l",
       "note": "plan"
-    },
-    {
-      "at": "2026-08-19T16:10:47.567Z",
-      "by": "PlanNumb",
-      "action": "card.update",
-      "ref": "c0tcvfkk",
-      "note": "plan"
-    },
-    {
-      "at": "2026-08-19T16:10:46.933Z",
-      "by": "PlanNumb",
-      "action": "card.update",
-      "ref": "c0rrypxo",
-      "note": "plan"
-    },
-    {
-      "at": "2026-08-19T16:10:46.267Z",
-      "by": "PlanNumb",
-      "action": "card.update",
-      "ref": "c0rhcnm6",
-      "note": "plan"
-    },
-    {
-      "at": "2026-08-19T16:10:31.833Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c0zcrs0m",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-19T16:10:14.183Z",
-      "by": "Ballot2041b",
-      "action": "card.update",
-      "ref": "c06s09om",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-19T16:10:13.525Z",
-      "by": "Ballot2041b",
-      "action": "card.update",
-      "ref": "c06s09om",
-      "note": "plan"
-    },
-    {
-      "at": "2026-08-19T16:10:05.321Z",
-      "by": "Ballot2043b",
-      "action": "decision.add",
-      "ref": "D-FN-SHAPE1",
-      "note": "Function and lambda declaration shape (draft)"
-    },
-    {
-      "at": "2026-08-19T16:09:24.475Z",
-      "by": "Ballot2041b",
-      "action": "decision.update",
-      "ref": "D-ERR-DECON1",
-      "note": "marked ready"
-    },
-    {
-      "at": "2026-08-19T16:09:06.942Z",
-      "by": "PlanSurfb",
-      "action": "card.update",
-      "ref": "c0b6kkbv",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-19T16:09:06.304Z",
-      "by": "PlanSurfb",
-      "action": "card.update",
-      "ref": "c0qr70g1",
-      "note": "logEntry"
     }
   ],
   "nextNum": 368,
