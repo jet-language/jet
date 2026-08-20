@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 2109,
-    "rev": 39646,
+    "rev": 39651,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -133442,7 +133442,13 @@
       "plan": "## Outcome\n`env.decode<Settings>()` — one call that composes the process environment plus the project `.env` into a typed record through the existing `__jet_Decode`/`FieldError` codec, with prefix stripping (`APP_`), `DOUBLE__UNDERSCORE` → nested-record mapping, scalar coercion identical to csv/toml decode (I8: no second validation plane), decode errors naming both the offending env var and the field path, and `Secret` fields redacted by law. A flagship executable example with golden proves the whole pydantic-settings demo loop (declare once → one call → typed value) on default `jet run` and `--release` AOT, and its doc header carries the side-by-side table naming Jet's compile-time wins.\n\n## Law\n- D-ENV-LIFECYCLE2 / E1333 — `Dotenv.{file, allow, secrets}` is the ratified dotenv vocabulary; dotenv paths stay project-relative; expert allowlists make secret handling explicit. The runtime surface reuses these names, it does not invent a second dotenv vocabulary.\n- D-CONF-KEY1=A — build-plane `settings:` is a separate ratified plane; this card is the runtime plane and must not collide with or duplicate it.\n- D-EMAIL-SMTP-CONFIG1=A — the existing move-only, redacted `Secret` is the secret carrier precedent; config secrets use it.\n- D-SERDE5 (E2410 missing field), D-SERDE8 (E2412 unknown field with `#DenyUnknownFields`), D-MIGRATE3/4 — the one decode law; env decode is one more wire source over it.\n- I8 (one mechanism — reuse the codec, no parallel validator), I9 (semantics in Prelude only), I4 (any new diagnostic registered with what/why/fix + UI snapshot), I5 (executable example + golden).\n\n## Work\n1. Trace the seams first: `crates/jet-codegen/src/Prelude/CoreLib/Top/FSIoEnvOsTesting.rs` (env snapshot lock + `jet_env_value_raw`/`jet_std_env_get`, lines ~858–901), `Top/DataFmt.rs` `jet_enc_csv_decode_traced` (lines 98–142 — the proof that `DataTree::Text` leaves coerce to typed scalars through the one codec), `JetStd/EncodingTraits.rs` (`__jet_Decode`), `JetStd/DataTree.rs` (`FieldError::{at, under_errors}` path framing).\n2. Implement `jet_env_decode<T: __jet_Decode>` in `FSIoEnvOsTesting.rs` (Prelude — every tier marshals to it): snapshot env under the one env lock; parse the project-relative `.env` (default `./.env`, overridable via the `Dotenv.file` name) with a small std-only KEY=VALUE parser (comments, quotes, blank lines); source order matches pydantic-settings: process env wins over `.env`; filter to the prefix (expert arg, default none), strip it, split remaining keys on `__` into nested `DataTree::Object` paths, case-insensitively matched to field names (document the fold rule in the fn doc); leaves stay `DataTree::Text`; call `T::jet_decode_traced` — scalar coercion, defaults, optionals, unknown-field law all come from the existing codec.\n3. Error mapping: on decode failure, invert the key mapping to translate each `FieldError.path` back to the originating env var name and frame the reason as `env var APP_DB__PORT → db.port: <reason>`. Register the runtime config-decode diagnostic in `Prelude/Diagnostics.jet` (I4: what/why/fix) next to the E2410/E2412 family.\n4. `Secret` fields: ensure `Secret` implements `__jet_Decode` (Text → `Secret.from_text`, the TIR helper `__secret_from_text` already exists per `Codegen/TIR/lower/method_calls.rs:1643`); confirm show/render stays redacted (never the plaintext) and that a decoded config record prints the redaction marker.\n5. Surface wiring: expose `env.decode<T>()` beginner form and expert args (`prefix:`, `file:`, `allow:` — mirroring the ratified `Dotenv` names) through the same registration/arity tables `csv.decode<T>` uses; AOT, the Cranelift hosts, and the interpreter ambient marshal to the one Prelude fn — zero policy in engines (I9).\n6. Flagship example `examples/features/io/app_config.jet` + `examples/features/expected/io/app_config.out`: writes a temp `.env`, sets process env vars, decodes `Settings { host, port: Int, debug: Bool, db: Db { url, password: Secret } }` with `APP_` prefix and `APP_DB__URL` nesting, prints typed values and the redacted secret, then shows one failing decode whose error names the env var and field path. Header comment carries the side-by-side vs pydantic-settings table: prefix / .env / nested / validation each matched, plus the compile-time wins (closed typed record, field types checked at compile time, `Secret` redaction by law, one codec shared with json/toml/csv).\n7. UI snapshots (criterion 2): `tests/ui/` pair for the failure shape (env var + field path in the rendered error) and one asserting the `Secret` field renders redacted.\n\n## Not building\n- Build-plane settings (D-CONF-KEY1) — untouched; no bridge between the planes.\n- The jetpack environment-plane Dotenv lifecycle (E1333 checks) — already ratified and owned elsewhere; this card only reuses its vocabulary at runtime.\n- No new validation plane, constraint DSL, or field-validator callbacks — the codec is the validator (I8).\n- No TOML/YAML/JSON config-file loading (existing decoders already cover files) and no secrets-manager/vault integration.\n\n## Proof\n- Criterion 1: `jet run examples/features/io/app_config.jet` matches the golden; identical output under `jet run --release` (AOT).\n- Criterion 2: `tests/ui` snapshots show (a) decode error naming env var + field path, (b) `Secret` never printing; diagnostic registered in Diagnostics.jet.\n- Criterion 3: side-by-side table in the example doc covers every capability in the video demo (prefix, .env, nested, validation) with the compile-time wins named; verified against the card body's capability list.\n- Focused checks only: the one example, the ui snapshot pair, any new Prelude unit tests. Full suite stays at epoch closeout.\n\n## blockedBy\nnone — env lock, dotenv law, codec machinery, and `Secret` all exist and are ratified; this is composition plus one new Prelude fn.",
       "blockedBy": [],
       "assignee": null,
-      "log": [],
+      "log": [
+        {
+          "at": "2026-08-20",
+          "by": "fable-e3-burndown",
+          "text": "Finding (2026-08-20, live probe at HEAD): core.sys.decode is AOT-only. Default jet run reports E0956 (canonical TIR evaluator does not cover it) and jet run --interpret reports E2201, so criterion 1 cannot be met as written and the example was withheld rather than shipped broken. Second finding: crypto.Secret implements neither Encode nor Decode (E0905), so a Secret field inside a #Codable config record does not compile today - criterion 2 needs that first. Source added by the wave-1 lane: crates/jet-codegen/src/Prelude/CoreLib/Top/FSIoEnvOsTesting.rs:903-1057, sema core_call.rs:1593, AOT emit/core_calls.rs:1386. Remaining work: marshal the same Prelude symbol from the TIR evaluator and the interpreter ambient (I9), then land the example plus golden."
+        }
+      ],
       "criteria": [
         {
           "n": 1,
@@ -133477,8 +133483,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-17T13:19:00.348Z",
-      "updated": "2026-08-19T16:21:15.097Z",
-      "updatedBy": "fable"
+      "updated": "2026-08-20T14:16:49.164Z",
+      "updatedBy": "fable-e3-burndown"
     },
     {
       "id": "c00pxltq",
@@ -133649,20 +133655,20 @@
         {
           "n": 1,
           "text": "[Fighter.{...}, .{...}, .{...}] compiles and runs when one element names the type; same result on AOT, default jet run, and interpreter",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-19T10:47:31.973Z"
+          "evidence": "examples/features/types/list_element_inference.jet: [Fighter.{...}, .{...}, .{...}] compiles and runs, printing Ada:3 on jet run, jet run --interpret and jet run --release (identical bytes at HEAD).",
+          "at": "2026-08-20T14:16:59.400Z"
         },
         {
           "n": 2,
           "text": "Annotation-driven form units: [Fighter] :: [.{...}, .{...}] also infers every slot",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-19T10:47:32.417Z"
+          "evidence": "The typed list literal form [Fighter].{.{...}, .{...}} infers every slot; the same example prints Eli:2 on all three tiers. (Note: a binding-level annotation does not exist in Jet - 'types ride the value', E0003 - so the annotation form is the typed literal head.)",
+          "at": "2026-08-20T14:17:00.070Z"
         },
         {
           "n": 3,
@@ -133676,11 +133682,11 @@
         {
           "n": 4,
           "text": "Example with golden output added to the corpus proving the inference on every applicable tier",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-19T10:47:33.324Z"
+          "evidence": "examples/features/expected/types/list_element_inference.out holds the golden and matches all three tiers; jet fmt --check examples is clean.",
+          "at": "2026-08-20T14:17:00.851Z"
         }
       ],
       "refs": [
@@ -133691,8 +133697,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-19T10:46:48.287Z",
-      "updated": "2026-08-19T16:10:46.266Z",
-      "updatedBy": "PlanNumb"
+      "updated": "2026-08-20T14:17:00.852Z",
+      "updatedBy": "fable-e3-burndown"
     },
     {
       "id": "c0zhkr0g",
@@ -134936,11 +134942,11 @@
         {
           "n": 4,
           "text": "A parallel fs.walk/scan path implements the shared-queue-of-directories architecture; a grep-style flagship example with golden output matches the sequential walk result set; measured throughput on the 200k-file fixture is recorded on the card.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-19T13:30:22.383Z"
+          "evidence": "examples/features/io/grep_scan.jet walks a temp tree in parallel, greps it, and compares the parallel and sequential walks. Identical output on all three tiers at HEAD (jet run, --interpret, --release): 'matches: 2 / notes.txt: needle / src/alpha.txt: needle / walks agree: true', matching examples/features/expected/io/grep_scan.out. One kernel serves every tier: crates/jet-codegen/src/Prelude/Core/FSWalk.rs, embedded once for AOT (Codegen/mod.rs:207) and include!-ed by the resident host (jet-jit/src/CoreHost.rs:19), the interpreter ambient (ambient_interp.rs:21) and the comptime evaluator (TextLite.rs:142).",
+          "at": "2026-08-20T14:14:07.732Z"
         }
       ],
       "refs": [],
@@ -134951,8 +134957,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-19T11:45:08.410Z",
-      "updated": "2026-08-19T16:21:22.424Z",
-      "updatedBy": "fable"
+      "updated": "2026-08-20T14:14:07.732Z",
+      "updatedBy": "fable-e3-burndown"
     },
     {
       "id": "c0y3llif",
@@ -184472,6 +184478,41 @@
   ],
   "events": [
     {
+      "at": "2026-08-20T14:17:00.852Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0rhcnm6",
+      "note": "#4"
+    },
+    {
+      "at": "2026-08-20T14:17:00.070Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0rhcnm6",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-20T14:16:59.400Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0rhcnm6",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-20T14:16:49.164Z",
+      "by": "fable-e3-burndown",
+      "action": "card.update",
+      "ref": "c0r02txw",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-08-20T14:14:07.732Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0p48658",
+      "note": "#4"
+    },
+    {
       "at": "2026-08-20T14:02:28.128Z",
       "by": "fable-e3-burndown",
       "action": "card.update",
@@ -187934,41 +187975,6 @@
       "by": "fable",
       "action": "card.update",
       "ref": "c0n4n1pz",
-      "note": "phase"
-    },
-    {
-      "at": "2026-08-19T16:21:12.080Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c06zs6dw",
-      "note": "phase"
-    },
-    {
-      "at": "2026-08-19T16:21:11.467Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c0p6kqj5",
-      "note": "phase"
-    },
-    {
-      "at": "2026-08-19T16:21:10.842Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c0xwtrld",
-      "note": "phase"
-    },
-    {
-      "at": "2026-08-19T16:21:10.219Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c0ubjby5",
-      "note": "phase"
-    },
-    {
-      "at": "2026-08-19T16:21:09.602Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c0aps31f",
       "note": "phase"
     }
   ],
