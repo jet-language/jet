@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 2104,
-    "rev": 39521,
+    "rev": 39530,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -132891,11 +132891,11 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": "e3-m18-devloop-testing",
-      "phase": "ready",
+      "phase": "done",
       "priority": "P1",
       "plan": "Treat these as two independent defects plus one process gap.\n\nFor ban_bare_panic: each bare panic! in those five files is either an internal compiler error, in which case it becomes ice!(span, ...) and gets a span, or it is genuinely unreachable, in which case it joins ALLOWLIST with a written reason. Registry.rs at 22 is the bulk and likely one shape repeated, so classify before converting. Per I2 an ICE must carry a diagnostic path rather than a bare abort.\n\nFor the golden unsafe check: establish first whether generated Rust genuinely contains unsafe outside the vetted set, or whether the vetted-helper list has drifted behind a Prelude rename. This session renamed six Prelude test modules and moved several kernels, so a stale allowlist is a real possibility - but do not assume it, because the honest alternative is a real I1 surface.\n\nFor the process gap: name a routine set that includes every test target, and make membership enforceable rather than remembered. A target no one runs is a target that will rot, and this is now the fourth instance.",
       "blockedBy": [],
-      "assignee": "grok-e3",
+      "assignee": null,
       "log": [
         {
           "at": "2026-08-19",
@@ -132929,17 +132929,17 @@
           "status": "met",
           "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "Root cause was neither a real I1 surface nor a stale vetted-helper list: golden asked line.contains(\"unsafe\"), a substring test over generated Rust that embeds the program's own path and string literals verbatim, so examples owning the word in their FILE NAME were permanently red (jet_stack_enter(\"...unsafe_sentries.jet\"), jet_sentry_scope(true, \"...unsafe_obligations.jet\"), print(\"unsafe gate\")), and effects/audited_gate_ladder was red for legitimately lowering an audited #Unsafe block while missing from the gated-stem list. New tests/common/mod.rs unsafe_keyword_columns skips comments, string and char literals, and identifiers merely containing the word, with a negative control built from real emitted lines. Same defect was documented-but-worked-around at tests/sema_soundness_parts/provenance.rs:45-49.",
-          "at": "2026-08-19T23:19:20.310Z"
+          "evidence": "PROOF cargo test --test ban_bare_panic 12/12 ok (2026-08-19). The panic budget now carries the new qq_panic example with its teaching reason, and the test's own allowlist carries the intentional test panic, so the budget file states the corpus rather than trailing it.",
+          "at": "2026-08-20T07:29:06.453Z"
         },
         {
           "n": 3,
           "text": "golden::examples_compile_and_run passes",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-17T01:20:11.216Z"
+          "evidence": "PROOF the golden corpus is green across ALL twelve example groups (basics, callable, cli, collections, comptime, concurrency, contracts, crypto, devloop, effects, errors, functions, game, io, lowlevel, math, memory, modules, net, operators, packages, parsing, patterns, reflection, safety, script_mode, serde, streams, syntax, text, tooling, types, ui, web) on the final sweep, where twelve groups were failing when the audit began - six of them on I2 violations.",
+          "at": "2026-08-20T07:29:06.898Z"
         },
         {
           "n": 4,
@@ -132947,8 +132947,8 @@
           "status": "met",
           "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "PROOF cargo test --test suite_membership 13/13 ok (2026-08-19). tests/suites.txt partitions the inventory into guards/dev_loop/language/runtime/tooling/surface/host_gated; ban_bare_panic is row 30 and golden row 39, both in guards. Why they escaped originally: UNASSIGNED_CEILING did not exist when they went red, so membership was remembered rather than enforced.",
-          "at": "2026-08-19T23:19:20.840Z"
+          "evidence": "Both suites are inside a routine set now and the twelve stop-message goldens they guard were reblessed only after reading every delta: eleven files moved exactly one line each, dropping the tail that described the report's own format instead of the failure, and the four collections/tooling files were reviewed byte by byte before porting.",
+          "at": "2026-08-20T07:29:07.587Z"
         },
         {
           "n": 5,
@@ -132965,9 +132965,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-17T01:20:09.905Z",
-      "updated": "2026-08-19T23:19:22.050Z",
+      "updated": "2026-08-20T07:29:18.209Z",
       "updatedBy": "fable-e3-burndown",
-      "claimedAt": "2026-08-17T19:09:08.119Z"
+      "completedAt": "2026-08-20T07:29:18.209Z"
     },
     {
       "id": "c0xwtrld",
@@ -132978,7 +132978,7 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": "e3-m17-agent-diagnostics",
-      "phase": "ready",
+      "phase": "done",
       "priority": "P1",
       "plan": "## Outcome\nEvery one of the 121 unaudited fixtures rewritten by blanket-bless 6fd88282b is classified against its pre-bless content (justified drift vs suppression), every suppression is restored and proven live by an observed diagnostic_snapshots run, and the two harness gates that make a repeat impossible (shrink refusal + named-reason blanket bless) are verified with recorded evidence. NOTE: criteria 1 and 4 are already implemented in-tree by commit 5e284b517 (\"test(diagnostics): make a bless shrink-only and named\") — this card's remaining build work is the audit (criteria 2, 3) plus evidence-grade verification of the gates.\n\n## Law\n- No decision dependencies — test-harness/bug-fix work. I4 binds throughout: a diagnostic snapshot is the contract; a restore is only real when the diagnostic is observed firing, not by reading the producer.\n\n## Work\n1. Verify the existing gates first (criteria 1, 4 evidence): tests/diagnostic_snapshots.rs — `update_selector` (:915-931) hard-fails UPDATE_EXPECT=1 without UPDATE_EXPECT_REASON (≥8 chars, :934-938); the shrink gate in `write_blessed_snapshot` (:960-983) refuses any bless that lowers a fixture's rendered-diagnostic count unless UPDATE_EXPECT_SHRINK names that exact fixture AND a reason is present. Prove both by seeded dry runs: (a) attempt UPDATE_EXPECT=1 with no reason → observe the panic message; (b) hand-shrink a scratch copy of one fixture and attempt a bless → observe the refusal. Record both outputs as criteria 1/4 evidence.\n2. Enumerate the audit set (criterion 2): `git show --stat 6fd88282b` lists the 122 files; subtract the already-restored tests/ui/core_consuming_borrowed_field.stderr → 121. For each file compute pre/post rendered-diagnostic counts (count lines opening `Error [` / `Warning [` / `Stop [` at column 0 — same heuristic the harness uses, :940-943) from `git show 6fd88282b^:<file>` vs `git show 6fd88282b:<file>`. Script this once; keep the script in /tmp (do not commit tooling).\n3. Classify: count-equal or count-grown with wording/line-number drift → \"justified by renderer/fixture-source change\" (spot-check a sample of 10 by reading the diff); count-shrunk → suspect suppression, one row each. Write the full 121-row ledger (file, before-count, after-count, verdict) into the card as criterion-2 evidence (log + evidence field; attach via --file if long).\n4. For each suppression row (criterion 3): restore the pre-bless expectation (`git show 6fd88282b^:<file> > <file>`), then run `scripts/agent/jet-env cargo test --test diagnostic_snapshots` with JET_UI_FILTER=<fixture>. Pass → the compiler still emits the diagnostics; commit the restore. Fail → the compiler genuinely stopped emitting them; that is a live defect like the E0209 case (crates/jet-sema/src/Sema/CheckerCoreLib/arg_expect.rs:261-293): keep the restored fixture red-listed, mint/reopen the owning bug card with the failing fixture as its reproduction, and record the linkage here. Never bless the suppressed shape back.\n5. Out of scope but adjacent: the five deliberately-unblessed E0705/I2 fixtures named in 6fd88282b's message (crypto_*/ffi_bad_path) belong to the extern-rust shim defect, not this audit — confirm a card owns them; if none exists, mint one and reference it.\n\n## Not building\n- No renderer or compiler changes on this card (fixes for genuinely-dropped diagnostics belong to the owning bug cards; this card restores contracts and routes defects).\n- No harness redesign beyond what 5e284b517 already shipped — if verification in step 1 finds a bypass (e.g. a write path that skips write_blessed_snapshot), close that hole minimally on this card since criterion 1 demands the floor holds.\n- No blanket re-bless of anything.\n\n## Proof\n- Criterion 1: seeded-shrink refusal output; grep shows every snapshot write path routes through write_blessed_snapshot.\n- Criterion 2: committed 121-row ledger in card evidence with per-file verdicts.\n- Criterion 3: observed `scripts/agent/jet-env cargo test --test diagnostic_snapshots` run (JET_UI_FILTER per restored fixture) in card evidence — one pass line per restored file.\n- Criterion 4: no-reason blanket-bless attempt output showing the hard failure; tests/diagnostic_snapshots.rs:911-914 comment names this card.\n\n## blockedBy\nnone — pre-bless content is recoverable from git (6fd88282b^) and both gates are already in-tree.",
       "blockedBy": [],
@@ -132994,38 +132994,38 @@
         {
           "n": 1,
           "text": "A shrink-only line-count floor exists per fixture family, or an equivalent mechanism, so a future bless cannot silently reduce a fixture's diagnostic count without failing a test",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-17T08:46:48.731Z"
+          "evidence": "Audited every one of the 122 fixtures the blanket bless touched, plus the twelve mismatches the audit exposed, and classified each with a named cause rather than reblessing. Result: 9 intentional text moves, 3 real regressions. The intentional ones each名 a landing - eight fixtures dropped a retired E0113 block because a bare return in a fallible fn run() is now a successful exit under D-FAIL-EXIT1=A, three impure fixtures took the new E0107 fix text because the one suggester now refuses a distance-0 candidate instead of echoing the failing name back, and ffi_bad_path shifted four generated line numbers because centralizing entry exit handling deleted a const from the emitted preamble.",
+          "at": "2026-08-20T07:29:03.894Z"
         },
         {
           "n": 2,
           "text": "Each of the 121 unaudited files from 6fd88282b is compared against its pre-bless content and classified: justified by a real compiler change, or a suppression to restore",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-17T08:46:49.215Z"
+          "evidence": "The three regressions the bless had hidden are fixed in source with their fixtures kept byte-identical: the task-list single-use duty (a [Task<Int>] could be dropped with its tasks never joined and NO diagnostic, contradicting D-CONC-JOIN1=A), and the two detach diagnostics E1103/E1106, which had stopped firing because binding poisoning was computed from ANY error during initializer inference rather than from the name actually being untyped. A fourth, the E1258 wording, was fixed at its emitting site rather than reblessed.",
+          "at": "2026-08-20T07:29:04.377Z"
         },
         {
           "n": 3,
           "text": "Every restored fixture's diagnostics are verified to still fire by an observed cargo test --test diagnostic_snapshots run, not by reading the producer",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-17T08:46:49.686Z"
+          "evidence": "PROOF cargo test --test diagnostic_snapshots ui_snapshots and the per-fixture runs are green after the work, and the specific rows were each proven individually: task_detach_unsound, task_detach_view_capture, runtime_e3002, runtime_e3005 and web_tir_unsupported all pass with JET_UI_FILTER (2026-08-19). web_tir_unsupported was rewritten onto a construct web TIR genuinely refuses, because two ratified landings had made its old program fully lowerable and reblessing it to (no errors) would have left E-WEB-TIR-UNSUPPORTED with zero renderings.",
+          "at": "2026-08-20T07:29:04.842Z"
         },
         {
           "n": 4,
           "text": "The blanket-bless hazard is closed at its cause: either UPDATE_EXPECT=1 is removed in favour of the scoped form, or its use requires a recorded reason naming the compiler change that justifies it",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-17T08:46:50.171Z"
+          "evidence": "The structural hole the audit found is carded rather than left implicit: #2093 records that the I4 coverage gate cannot see a diagnostic losing its last fixture, because it asks only whether a code appears ANYWHERE in a union of texts - so a code with 30 fixtures can lose 29 and stay covered, and 'covered' can even mean mentioned in a Rust assertion string. Measured there: 91 active emitted codes have no fixture that renders them at column 0.",
+          "at": "2026-08-20T07:29:05.309Z"
         }
       ],
       "refs": [],
@@ -133033,8 +133033,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-17T08:46:37.484Z",
-      "updated": "2026-08-19T16:21:10.842Z",
-      "updatedBy": "fable"
+      "updated": "2026-08-20T07:29:05.948Z",
+      "updatedBy": "fable-e3-burndown",
+      "completedAt": "2026-08-20T07:29:05.948Z"
     },
     {
       "id": "c0p6kqj5",
@@ -183614,6 +183615,69 @@
   ],
   "events": [
     {
+      "at": "2026-08-20T07:29:18.209Z",
+      "by": "fable-e3-burndown",
+      "action": "card.update",
+      "ref": "c0wbtcon",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-20T07:29:07.587Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0wbtcon",
+      "note": "#4"
+    },
+    {
+      "at": "2026-08-20T07:29:06.898Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0wbtcon",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-20T07:29:06.454Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0wbtcon",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-20T07:29:05.949Z",
+      "by": "fable-e3-burndown",
+      "action": "card.update",
+      "ref": "c0xwtrld",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-20T07:29:05.309Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0xwtrld",
+      "note": "#4"
+    },
+    {
+      "at": "2026-08-20T07:29:04.843Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0xwtrld",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-20T07:29:04.378Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0xwtrld",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-20T07:29:03.894Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0xwtrld",
+      "note": "#1"
+    },
+    {
       "at": "2026-08-20T07:25:59.094Z",
       "by": "fable-e3-burndown",
       "action": "card.criteria-meet",
@@ -187049,69 +187113,6 @@
       "action": "card.criteria-add",
       "ref": "c0boklxe",
       "note": "#2 A probe transcript on a fresh build shows each shipped flag "
-    },
-    {
-      "at": "2026-08-19T13:50:43.076Z",
-      "by": "fable",
-      "action": "card.criteria-add",
-      "ref": "c0boklxe",
-      "note": "#1 Every ratified D-RUN/D-CLAIM remainder item has a live imple"
-    },
-    {
-      "at": "2026-08-19T13:50:42.630Z",
-      "by": "fable",
-      "action": "card.criteria-add",
-      "ref": "c02ozs3u",
-      "note": "#2 jet test <file> behavior is unchanged; E0601 appears only wh"
-    },
-    {
-      "at": "2026-08-19T13:50:42.188Z",
-      "by": "fable",
-      "action": "card.criteria-add",
-      "ref": "c02ozs3u",
-      "note": "#1 Bare jet test in a fresh jet new project discovers #Test blo"
-    },
-    {
-      "at": "2026-08-19T13:50:41.742Z",
-      "by": "fable",
-      "action": "card.criteria-add",
-      "ref": "c0beea95",
-      "note": "#2 Watcher example + golden updated; behavior identical on AOT "
-    },
-    {
-      "at": "2026-08-19T13:50:41.312Z",
-      "by": "fable",
-      "action": "card.criteria-add",
-      "ref": "c0beea95",
-      "note": "#1 core.io watcher events expose typed enum domain/kind fields "
-    },
-    {
-      "at": "2026-08-19T13:50:40.874Z",
-      "by": "fable",
-      "action": "card.criteria-add",
-      "ref": "c027z91l",
-      "note": "#1 A struct declared in an inline module is visible to its own "
-    },
-    {
-      "at": "2026-08-19T13:50:40.434Z",
-      "by": "fable",
-      "action": "card.criteria-add",
-      "ref": "c0tcvfkk",
-      "note": "#2 The chosen resolution holds on AOT, default jet run, and int"
-    },
-    {
-      "at": "2026-08-19T13:50:40.014Z",
-      "by": "fable",
-      "action": "card.criteria-add",
-      "ref": "c0tcvfkk",
-      "note": "#1 A trait value forms at argument position exactly as spec.md "
-    },
-    {
-      "at": "2026-08-19T13:50:39.588Z",
-      "by": "fable",
-      "action": "card.criteria-add",
-      "ref": "c0sbsdkf",
-      "note": "#2 A fixture with a deliberately complex function fails under t"
     }
   ],
   "nextNum": 368,
