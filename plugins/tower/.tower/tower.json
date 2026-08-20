@@ -2,8 +2,8 @@
   "meta": {
     "version": 4,
     "project": "Jet",
-    "nextNum": 2100,
-    "rev": 39490,
+    "nextNum": 2102,
+    "rev": 39498,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -107838,20 +107838,20 @@
         {
           "n": 1,
           "text": "All nine D-BOUND-* ballots pass the validator and reach the owner queue",
-          "status": "verified",
-          "metBy": "fable",
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": "sol-verifier",
-          "evidence": "Independent check of live tower.json: nine D-BOUND-* decisions open, ballotMode full, all five reviewPasses non-empty, every option carries code, whyNot covers every losing key; tower lint reports zero BOUND findings",
-          "at": "2026-08-07T19:36:52.938Z"
+          "evidence": "Pre-existing and verified rather than re-done: all nine D-BOUND ballots reached the owner queue and were ratified with outcome A on 2026-08-07, confirmed by decision show for LAW1 HEAD1 RAW1 SINK1 TAINT1 EVOLVE1 BIND1 UNDO1 PROV1. The validator gate is evidenced by their ratification, since an unvalidated ballot cannot reach the queue.",
+          "at": "2026-08-20T04:52:25.546Z"
         },
         {
           "n": 2,
           "text": "Every ratified decision the proposal touches is respected or named as an amendment inside the relevant ballot text",
-          "status": "verified",
-          "metBy": "fable",
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": "sol-verifier",
-          "evidence": "Independent check: amendment disclosures present in live ballot JSON for RAW1 (D-REGEX-LIT1), SINK1 (F9 note), PROV1 (D-AUTHORITY-MANIFEST1), UNDO1 (D-TXN2-era set); proposal table markings match at decisions section",
-          "at": "2026-08-07T19:36:53.293Z"
+          "evidence": "Verified in the ballot and slate text: four amendments are each named inside the bullet that carries them - SINK1 amends the types-not-markers rule, RAW1 leaves the regex-literal decision untouched, PROV1 amends the manifest trust block, TAINT1's off-switch spelling stays owner-gated and is marked proposed-and-unbuilt rather than assumed. Two near-misses were checked and cleared during the audit: UNDO1 does not depend on the still-flat effect-root table because E0746 keys on is_extern plus a missing #Undo, and RAW1's spec date is an implementation log date rather than a second ratification.",
+          "at": "2026-08-20T04:52:26.131Z"
         },
         {
           "n": 3,
@@ -107953,7 +107953,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-07T19:09:55.438Z",
-      "updated": "2026-08-20T04:51:42.476Z",
+      "updated": "2026-08-20T04:52:26.132Z",
       "updatedBy": "fable-e3-burndown",
       "completedAt": "2026-08-20T04:51:42.475Z"
     },
@@ -137055,6 +137055,88 @@
       "needsAcceptance": false,
       "created": "2026-08-20T04:50:05.312Z",
       "updated": "2026-08-20T04:50:06.683Z",
+      "updatedBy": "fable-e3-burndown"
+    },
+    {
+      "id": "c05uuzek",
+      "num": 2100,
+      "title": "Binary patterns: AOT runs a second matcher and the tiers disagree on a value",
+      "body": "CORRECTNESS DIVERGENCE found 2026-08-19 while verifying D-BINPAT1's four-tier claim. Three engines, not one, and two of them give DIFFERENT ANSWERS for the same program. (1) AOT lowers binary patterns to an inline bit scanner at crates/jet-codegen/src/Codegen/TIR/lower/control_flow.rs:1513-1622, whose bit loop at 1569-1581 handles ANY width in 1..=64 plus little-endian byte-swap. (2) The shared kernel crates/jet-foundation/src/MatchScan.rs:115-232, which the Cranelift host calls, enters its byte-fast path only when width%8==0 and returns None from its fallback for nbytes 3/5/6/7 - so U24, U40, U48 and U56 MISS. The parser accepts those widths (crates/jet-parser/src/Parser/Statements/patterns.rs:567-593 allows 1..=64), so a program is accepted and then answered differently per tier: matching \\\"{x:U24be}\\\" against [1,2,3] binds 66051 under AOT and does not match at all on the JIT tier; U24le binds 197121 under AOT and misses likewise. Silent wrong answer, no diagnostic. (3) The canonical TIR evaluator has no arm at all: crates/jet-codegen/src/Codegen/TIR/eval/exprs.rs:8199-8223 rejects THostCall::BinMatchScan as unsupported, so binary patterns are absent from the interpreter and comptime tiers, and eval/exprs.rs:1124-1131 excludes it from children. Ratified law is docs/spec/syntax-decisions.md:598-608 and claims one engine across tiers. Note tests/jit_corpus_gate.txt lists parsing/binary-reader and parsing/binary_pattern under resident_jit, which is supposed to mean observed three-tier parity - that row is therefore also suspect, and that ledger has already been wrong twice today.",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P0",
+      "plan": "Delete the AOT inline scanner and marshal AOT to Prelude/MatchScan like the JIT host does (I8/I9), fix MatchScan to handle every width the parser accepts - 3, 5, 6 and 7 byte widths in both endiannesses - and add the interpreter arm so the construct exists on every tier. Then add one differential test per width class that fails when any two tiers disagree, and re-derive the corpus ledger rows from an observed run rather than trusting them.",
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-08-20",
+          "by": "fable-e3-burndown",
+          "text": "Extra evidence from the same audit, 2026-08-19: the string-match twin has the identical shape. Foundation keeps str_match_scan and bin_match_scan as separate scanners (crates/jet-foundation/src/MatchScan.rs:115-232) and AOT keeps separate inline closure builders for both (crates/jet-codegen/src/Codegen/TIR/lower/control_flow.rs:1481-1623), so the 'one engine' claim is false on the string side too, not only the binary side. The interpreter is worse than first reported: it is absent at TWO layers, not one - bind_match_pattern returns Ok(false) for both StrMatch and BinMatch patterns (crates/jet-codegen/src/Codegen/TIR/eval/stmts.rs:2502-2605) in addition to the host call being refused as unsupported (eval/exprs.rs:8199-8224). Sema already validates the widths the kernel cannot honour: CheckerItems.rs:2774-2831 and 3409-3435 accept U1..U64 and only require width%8==0 for little-endian, raising E1008/E1011 otherwise - so U24be passes every check and then answers differently per tier. Finally, the comments at control_flow.rs:1481-1488 assert tier-0 parity for this construct, which is false; those comments should be corrected in the same change so the next reader is not misled the way this audit initially was."
+        }
+      ],
+      "criteria": [],
+      "refs": [],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-08-20T04:52:27.191Z",
+      "updated": "2026-08-20T05:00:10.929Z",
+      "updatedBy": "fable-e3-burndown"
+    },
+    {
+      "id": "c011y14n",
+      "num": 2101,
+      "title": "resident_jit does not mean three-tier parity, and closed cards claim it does",
+      "body": "FALSE-GREEN EVIDENCE DEFECT found 2026-08-19. The tests/jit_corpus_gate.txt classification resident_jit is widely read - including in this burndown's own closure evidence - as 'observed AOT == JIT == interpreter parity for this stem'. It does not mean that. Verified at tests/dev_parts/support.rs:4080-4120: the interpreter leg IS invoked, but only the RAN branch asserts equality with AOT (:4089-4092). The Problems branch asserts merely that the reported code is E2201 or E0956 (:4095-4098) - no comparison and no failure - and the classification at :4102-4120 then ignores the interpreter outcome entirely, so the stem still lands in resident_jit. The licence resident_jit actually gives is: AOT green, default tiered run green, normalized JIT output equal to AOT, Cranelift actually executed, no deopt. The interpreter claim holds ONLY when the interpreter did not refuse, and a refusal is invisible in the ledger. Why this is dangerous rather than merely imprecise: closure evidence written during this burndown asserts the stronger reading verbatim - .claude/bdlog/close10.mjs:10, close11.mjs:8 and close12.mjs:6,8 each say 'the interpreter is separately asserted equal to AOT', which is FALSE for any stem whose interpreter refused. tests/dev_parts/corpus_gate.rs also carries prose claiming the byte-for-byte interpreter comparison always happens. Concrete instance: parsing/binary_pattern and parsing/binary-reader are both resident_jit while the TIR evaluator refuses BinMatchScan outright (crates/jet-codegen/src/Codegen/TIR/eval/exprs.rs:8199-8223), so D-BINPAT1 has no interpreter coverage behind a row that reads as if it does (see #2100).",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P0",
+      "plan": "Two halves. (1) Make the gate honest: a stem whose interpreter REFUSED must not be classified as if all three tiers agreed - give it its own class (or record the refusal on the row) so the ledger states what was observed, and fix the prose in tests/dev_parts/corpus_gate.rs that claims the byte-for-byte comparison always happens. Decide deliberately whether an interpreter refusal should fail the gate outright; an honest refusal for a genuinely absent feature may be acceptable, but it must be VISIBLE and it must be an open criterion somewhere rather than a silent pass. (2) Audit every card closed on the stronger reading: grep .claude/bdlog for the 'interpreter is separately asserted equal to AOT' clause, list the cards those closures covered, and recheck each one against what the gate actually asserts. Reopen any card whose criterion genuinely needed the interpreter leg.",
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "The resident_jit classification states what was observed, and an interpreter refusal is visible on the row rather than silently ignored",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-20T04:54:20.855Z"
+        },
+        {
+          "n": 2,
+          "text": "The prose in tests/dev_parts/corpus_gate.rs and any closure template no longer claims an interpreter comparison that does not always happen",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-20T04:54:21.507Z"
+        },
+        {
+          "n": 3,
+          "text": "Every card closed on the phrase 'the interpreter is separately asserted equal to AOT' is listed and rechecked, and any card whose criterion needed the interpreter leg is reopened",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-20T04:54:22.351Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-08-20T04:54:20.093Z",
+      "updated": "2026-08-20T04:54:22.351Z",
       "updatedBy": "fable-e3-burndown"
     }
   ],
@@ -183364,6 +183446,62 @@
   ],
   "events": [
     {
+      "at": "2026-08-20T05:00:10.929Z",
+      "by": "fable-e3-burndown",
+      "action": "card.update",
+      "ref": "c05uuzek",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-08-20T04:54:22.351Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-add",
+      "ref": "c011y14n",
+      "note": "#3 Every card closed on the phrase 'the interpreter is separate"
+    },
+    {
+      "at": "2026-08-20T04:54:21.507Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-add",
+      "ref": "c011y14n",
+      "note": "#2 The prose in tests/dev_parts/corpus_gate.rs and any closure "
+    },
+    {
+      "at": "2026-08-20T04:54:20.856Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-add",
+      "ref": "c011y14n",
+      "note": "#1 The resident_jit classification states what was observed, an"
+    },
+    {
+      "at": "2026-08-20T04:54:20.094Z",
+      "by": "fable-e3-burndown",
+      "action": "card.add",
+      "ref": "c011y14n",
+      "note": "resident_jit does not mean three-tier parity, and closed cards claim it does"
+    },
+    {
+      "at": "2026-08-20T04:52:27.191Z",
+      "by": "fable-e3-burndown",
+      "action": "card.add",
+      "ref": "c05uuzek",
+      "note": "Binary patterns: AOT runs a second matcher and the tiers disagree on a value"
+    },
+    {
+      "at": "2026-08-20T04:52:26.132Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0psk4rw",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-20T04:52:25.546Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0psk4rw",
+      "note": "#1"
+    },
+    {
       "at": "2026-08-20T04:51:42.476Z",
       "by": "fable-e3-burndown",
       "action": "card.update",
@@ -186805,62 +186943,6 @@
       "by": "fable",
       "action": "card.update",
       "ref": "c02ozs3u",
-      "note": "track,epoch,milestoneId"
-    },
-    {
-      "at": "2026-08-19T13:49:15.750Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c0tilidq",
-      "note": "track,epoch,milestoneId"
-    },
-    {
-      "at": "2026-08-19T13:49:15.156Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c0awen6y",
-      "note": "track,epoch,milestoneId"
-    },
-    {
-      "at": "2026-08-19T13:49:14.557Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c0xffwib",
-      "note": "track,epoch,milestoneId"
-    },
-    {
-      "at": "2026-08-19T13:49:13.946Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c0zkd2j5",
-      "note": "track,epoch,milestoneId"
-    },
-    {
-      "at": "2026-08-19T13:49:13.340Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c0beea95",
-      "note": "track,epoch,milestoneId"
-    },
-    {
-      "at": "2026-08-19T13:49:12.719Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c027z91l",
-      "note": "track,epoch,milestoneId"
-    },
-    {
-      "at": "2026-08-19T13:49:12.117Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c0tcvfkk",
-      "note": "track,epoch,milestoneId"
-    },
-    {
-      "at": "2026-08-19T13:49:11.521Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c0b6kkbv",
       "note": "track,epoch,milestoneId"
     }
   ],
