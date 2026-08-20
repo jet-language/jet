@@ -1127,6 +1127,28 @@ fn fmt_simplify_rewrites_listed_fence_integers_to_a_range() {
 }
 
 #[test]
+fn fmt_simplify_rewrites_a_classic_else_if_chain_to_an_arm_table() {
+    // D-IFGUARD1=A / R2: a chained classic `if` is one ordered arm table
+    // (L0507 says so in the lint). The rewrite must emit source that parses
+    // back, which is what the simplify identity check re-reads.
+    let options = jet::Formatter::FormatOptions { simplify: true };
+    let source = "fn grade(score: Int) => String {\n    if score >= 90 {\n        return \"a\"\n    } else if score >= 80 {\n        return \"b\"\n    } else {\n        return \"c\"\n    }\n}\n";
+
+    let once = jet::format_source_with_options(source, options)
+        .expect("R2 must emit source the parser reads back");
+    assert!(
+        once.contains("if {") && !once.contains("else if"),
+        "R2 did not collapse the chain into one arm table:\n{once}"
+    );
+    assert_eq!(
+        once,
+        jet::format_source_with_options(&once, options)
+            .expect("second simplify pass should work"),
+        "simplify output must be stable"
+    );
+}
+
+#[test]
 fn fmt_map_type_spacing_is_canonical_and_value_spacing_stays() {
     let source = "fn read(values: [String: Int]) => [String: Int] {\n    return [\"key\": 1]\n}\n";
     let once = jet::format_source(source).expect("map type should format");
