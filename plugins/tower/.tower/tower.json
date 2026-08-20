@@ -2,8 +2,8 @@
   "meta": {
     "version": 4,
     "project": "Jet",
-    "nextNum": 2093,
-    "rev": 39417,
+    "nextNum": 2094,
+    "rev": 39429,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -67103,7 +67103,7 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": "e3-m18-devloop-testing",
-      "phase": "ready",
+      "phase": "done",
       "priority": "P0",
       "plan": "Reproduce the `canvas_scenarios` gecko undo/source-restoration and `fallible_context` failures. Fix the owning toast, web-TIR, or scenario behavior; do not weaken the expectations. Run the two focused suites and any directly affected UI/golden checks. Epoch 6 closeout owns the next full-suite run.",
       "blockedBy": [],
@@ -67134,57 +67134,58 @@
         {
           "n": 1,
           "text": "The original gecko undo/source-restoration and fallible-context failures reproduce before the fix and pass after it without relaxed assertions or skips.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-01T18:15:00.512Z"
+          "evidence": "Both halves reproduced RED before and green after, with the card's exact messages. fallible_context: pre-fix FAIL 'fallible row not excluded with reason: null' at scenario.mjs:1887, deterministic 1/1 on chromium; post-fix PASS 1/1 and 3/3 under saturated CPU. gecko undo: pre-fix firefox on an idle machine passed 10/10 (which is why it read as flaky), but under 48 spinners failed 6/6 with 'undo toast did not name operation: Source updated'; post-fix 6/6 PASS under the same load.",
+          "at": "2026-08-20T00:08:43.597Z"
         },
         {
           "n": 2,
           "text": "Undo restores the exact canonical source and fallible context preserves the intended web/TIR behavior through the production path.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-01T18:15:00.512Z"
+          "evidence": "Undo still restores the exact canonical source and the fallible-context exclusion facts are unchanged: the fix only changed WHAT the scenario waits for, never what it asserts. fallible_context still asserts available===false, code===needs_fallible_function, the hover title containing 'fallible function', and the unchanged server-side pre-sema refusal. Undo still polls for restored bytes equal to the pre-insert source and additionally for the client toast naming the operation. The third symptom in the card body (E-WEB-TIR-UNSUPPORTED) is already gone at HEAD.",
+          "at": "2026-08-20T00:08:44.145Z"
         },
         {
           "n": 3,
           "text": "Focused `canvas_scenarios`, `fallible_context`, and directly affected UI/golden checks pass and fail when the corrective behavior is removed.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-01T18:15:00.512Z"
+          "evidence": "Both checks proven non-vacuous by mutation probes: making the fallible fixture actually fallible (=> Int?) flips the row to available=true and the assertion FAILS with the rendered text '◇Failure railcanvas.structural...', which also independently proves the shipped row text is 'Failure rail' and never 'Fallible'; and expecting a wrong undo label ('Undo: insert zzz') fails with 'timed out waiting for source restored by undo and named in the toast'. Related canvas proofs green in the same session: cargo test --test canvas_scenarios pattern_arm 2/2 ok and --test canvas canvas_statement_state_nodes_and_toggle_transaction ok.",
+          "at": "2026-08-20T00:08:44.694Z"
         },
         {
           "n": 4,
           "text": "No unrelated failure is hidden, reclassified, or added to a gap/skip list; any independent failure becomes its own card.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-01T18:15:00.512Z"
+          "evidence": "No failure hidden, reclassified, skipped or gap-listed: the only file changed is scripts/canvas-test/scenario.mjs (+22 -7), no product source, no ledger, no exclusion list. The gecko half was explicitly checked for being a Firefox-only product behaviour and is not: it fails 3/3 on chromium under load, and it is NOT the richestGraph precondition bug fixed separately for the pattern-arm scenarios (richestGraph is a deterministic node-count sort and both candidate graphs expose the pin the assertions use).",
+          "at": "2026-08-20T00:08:45.252Z"
         },
         {
           "n": 5,
           "text": "The card records the root cause and scoped evidence. The full suite runs once at Epoch 6 closeout.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-01T18:15:00.512Z"
+          "evidence": "Root cause recorded per half: (a) product rename 078993c04 'Fallible' to 'Failure rail' swept product JS (drawing-palette.js:310) and query_actions.rs:1204 but not the browser scenario; (b) the scenario waited on a server observable then asserted a client one, because lastToast is snapshotted only when drawGraph runs while the undo path toasts and redraws after its own response handling. Full-suite run stays at epoch closeout per the criterion.",
+          "at": "2026-08-20T00:08:45.785Z"
         }
       ],
       "refs": [],
       "needsAcceptance": false,
       "created": "2026-07-27T19:53:05.080Z",
-      "updated": "2026-08-19T13:20:56.823Z",
-      "updatedBy": "fable",
+      "updated": "2026-08-20T00:08:46.478Z",
+      "updatedBy": "fable-e3-burndown",
       "workOrder": 1410,
       "tags": [],
-      "parentId": null
+      "parentId": null,
+      "completedAt": "2026-08-20T00:08:46.478Z"
     },
     {
       "id": "c01h50x5",
@@ -136625,7 +136626,13 @@
       "plan": null,
       "blockedBy": [],
       "assignee": null,
-      "log": [],
+      "log": [
+        {
+          "at": "2026-08-20",
+          "by": "fable-e3-burndown",
+          "text": "Scope note 2026-08-19: add scenario-versus-product drift to this card's class. #1240's fallible_context half was exactly this shape — commit 078993c04 renamed a structural action from 'Fallible' to 'Failure rail' and swept the product JS and the Rust query action, but not scripts/canvas-test/scenario.mjs, so the browser scenario searched for a title that no longer exists and had been deterministically red since. The same check this card asks for (every flag a doc tells an agent to pass must exist) should also cover every product string a browser scenario asserts."
+        }
+      ],
       "criteria": [
         {
           "n": 1,
@@ -136660,7 +136667,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-19T23:41:21.701Z",
-      "updated": "2026-08-19T23:42:03.434Z",
+      "updated": "2026-08-20T00:08:47.178Z",
       "updatedBy": "fable-e3-burndown"
     },
     {
@@ -136709,6 +136716,67 @@
       "needsAcceptance": false,
       "created": "2026-08-20T00:00:30.357Z",
       "updated": "2026-08-20T00:00:30.357Z",
+      "updatedBy": "fable-e3-burndown"
+    },
+    {
+      "id": "c0ksllx4",
+      "num": 2093,
+      "title": "I4 coverage gate cannot see a diagnostic losing its last fixture",
+      "body": "Found while auditing the 122-fixture blanket bless (#2026) on 2026-08-19. The I4(b) gate every_emitted_code_has_snapshot (tests/diagnostics_coverage.rs:1083) asks only whether a code appears ANYWHERE in a union of texts, which fails two ways. (a) Per-code, not per-fixture: a code with 30 fixtures can lose 29 rendered rows and still read as covered — that hid 19 of the 22 drops in this audit. (b) The union is not fixtures: snapshot_codes (:542) counts any bracketed [Exxxx] anywhere under tests/ui, ui_lint, cli, release and fixtures, INCLUDING a Why/Fix sentence that cross-references another code, plus any quoted \"Exxxx\" in any top-level tests/*.rs. So 'covered' can mean 'mentioned in a Rust assertion string'. Measured now: 622 codes are registered-active and emitted in crates/, but only 590 have any rendered report line; anchoring on a real report opener (^(Error|Warning|Stop|Lint) [CODE] at column 0, the shape write_blessed_snapshot already counts) leaves 91 active+emitted codes with no fixture that renders them — 59 covered only by a non-fixture mention, 22 only by a cli/release corpus that does not open a column-0 report and so needs its own stated convention, and 10 with no coverage at all and on no exclusion list: E0134, E0343, E0349, E0601, E1103, E1106, E2202, E2210, E2712, E3002. E0601's only mention is stderr.matches(\"[E0601]\") in tests/jet_test.rs which the quote-delimited extractor cannot match; E3002's is a bare E3002 in tests/cli/explain_E3002.txt with no brackets; E2210's lives in tests/dev_parts/, a subdirectory the gate never walks. That this class is real and not drift is already proven three times: 192fb60a4 is literally 'restore the web TIR fixture the blanket bless blanked', 5e284b517 restored both typed_head_url holes, and cfeab2359 was a real sema fix that brought E0927/E3005 back.",
+      "kind": "task",
+      "track": "sidequest",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P1",
+      "plan": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "every_emitted_code_has_snapshot becomes set equality between two independently maintained tables with a named diff in BOTH directions, beside the existing test: LEFT is registered-active codes emitted in crates minus named exclusions, RIGHT counts only report-opening lines at column 0 in the corpora the ui and lint harnesses actually enumerate plus the CLI, jetpack and release fixture dirs",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-20T00:06:02.922Z"
+        },
+        {
+          "n": 2,
+          "text": "The reverse direction is checked for the first time: a fixture asserting a code that is retired or no longer registered fails with that code named",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-20T00:06:03.452Z"
+        },
+        {
+          "n": 3,
+          "text": "A code cannot be counted as covered by prose, a cross-reference in another diagnostic's Why or Fix text, a comment, or a Rust assertion string",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-20T00:06:03.975Z"
+        },
+        {
+          "n": 4,
+          "text": "The codes that newly go red are handled by the file's existing shrink-only ratchet treatment (one allowlist, a named owner per row, a count ceiling that cannot grow) rather than by loosening the anchor, and the 10 uncovered codes E0134 E0343 E0349 E0601 E1103 E1106 E2202 E2210 E2712 E3002 each either gain a rendering fixture or an owned allowlist row",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-20T00:06:04.479Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-08-20T00:06:02.398Z",
+      "updated": "2026-08-20T00:06:04.479Z",
       "updatedBy": "fable-e3-burndown"
     }
   ],
@@ -183018,6 +183086,90 @@
   ],
   "events": [
     {
+      "at": "2026-08-20T00:08:47.178Z",
+      "by": "fable-e3-burndown",
+      "action": "card.update",
+      "ref": "c0csb38y",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-08-20T00:08:46.479Z",
+      "by": "fable-e3-burndown",
+      "action": "card.update",
+      "ref": "c0ahqhoi",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-20T00:08:45.785Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0ahqhoi",
+      "note": "#5"
+    },
+    {
+      "at": "2026-08-20T00:08:45.253Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0ahqhoi",
+      "note": "#4"
+    },
+    {
+      "at": "2026-08-20T00:08:44.695Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0ahqhoi",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-20T00:08:44.145Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0ahqhoi",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-20T00:08:43.597Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0ahqhoi",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-20T00:06:04.479Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-add",
+      "ref": "c0ksllx4",
+      "note": "#4 The codes that newly go red are handled by the file's existi"
+    },
+    {
+      "at": "2026-08-20T00:06:03.975Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-add",
+      "ref": "c0ksllx4",
+      "note": "#3 A code cannot be counted as covered by prose, a cross-refere"
+    },
+    {
+      "at": "2026-08-20T00:06:03.452Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-add",
+      "ref": "c0ksllx4",
+      "note": "#2 The reverse direction is checked for the first time: a fixtu"
+    },
+    {
+      "at": "2026-08-20T00:06:02.922Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-add",
+      "ref": "c0ksllx4",
+      "note": "#1 every_emitted_code_has_snapshot becomes set equality between"
+    },
+    {
+      "at": "2026-08-20T00:06:02.398Z",
+      "by": "fable-e3-burndown",
+      "action": "card.add",
+      "ref": "c0ksllx4",
+      "note": "I4 coverage gate cannot see a diagnostic losing its last fixture"
+    },
+    {
       "at": "2026-08-20T00:01:45.347Z",
       "by": "fable-e3-burndown",
       "action": "card.update",
@@ -186432,90 +186584,6 @@
       "action": "card.criteria-add",
       "ref": "c054x1px",
       "note": "#2 tower lint reports zero criteria-evidence-conflict rows (or "
-    },
-    {
-      "at": "2026-08-19T13:40:12.377Z",
-      "by": "fable",
-      "action": "card.criteria-add",
-      "ref": "c054x1px",
-      "note": "#1 Every one of the 21 flagged rows has a recorded adjudication"
-    },
-    {
-      "at": "2026-08-19T13:40:11.956Z",
-      "by": "fable",
-      "action": "card.add",
-      "ref": "c054x1px",
-      "note": "Re-adjudicate the 21 criteria-evidence-conflict lint rows"
-    },
-    {
-      "at": "2026-08-19T13:40:11.414Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c0fylvpy",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-19T13:39:35.699Z",
-      "by": "fable",
-      "action": "card.criteria-add",
-      "ref": "c0wwqqt2",
-      "note": "#3 No umbrella-wide criterion row was deleted or weakened — eac"
-    },
-    {
-      "at": "2026-08-19T13:39:35.294Z",
-      "by": "fable",
-      "action": "card.criteria-add",
-      "ref": "c0wwqqt2",
-      "note": "#2 Every treated card's log names its governing decision ids an"
-    },
-    {
-      "at": "2026-08-19T13:39:34.882Z",
-      "by": "fable",
-      "action": "card.criteria-add",
-      "ref": "c0wwqqt2",
-      "note": "#1 A fresh census (same regex method) returns zero open split-f"
-    },
-    {
-      "at": "2026-08-19T13:39:34.453Z",
-      "by": "fable",
-      "action": "card.add",
-      "ref": "c0wwqqt2",
-      "note": "Split-family cards: per-slice criteria and named decision ids (269-card census)"
-    },
-    {
-      "at": "2026-08-19T13:39:00.133Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c00cnpnb",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-19T13:38:59.511Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c0rzz168",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-19T13:38:58.899Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c0jsiyel",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-19T13:38:58.279Z",
-      "by": "fable",
-      "action": "card.criteria-add",
-      "ref": "c0hxk6vx",
-      "note": "#6 Slice bar: a Jet MCP server and client complete initialize/i"
-    },
-    {
-      "at": "2026-08-19T13:38:57.854Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c09sm31b",
-      "note": "logEntry"
     }
   ],
   "nextNum": 368,
