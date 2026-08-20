@@ -572,6 +572,30 @@ impl JitRuntime {
         self.trapped = Some("__jet_rich_panic__".to_string());
     }
 
+    /// An explicit `process.exit(code)`: the resident twin of AOT's
+    /// `JetExplicitExit`. Both fields are written here, in this order, for the
+    /// same reason `set_rendered_runtime_stop` above does: `exit_code` alone is
+    /// invisible to generated code, which leaves a run only when
+    /// `jet_jit_is_trapped` answers 1 at an `emit_trap_check`. Setting
+    /// `exit_code` and then calling `set_trap` cannot work — that path returns
+    /// early once `exit_code` is set, so `trapped` stayed empty, every check
+    /// passed, and the program ran ON past its own exit (`print` after
+    /// `process.exit(0)` still printed, and a signal handler's exit never ended
+    /// the process while the program sat in a `loop`).
+    ///
+    /// This is also the resident half of the rule
+    /// `Prelude/CoreLib/Top/Interrupt.rs::jet_interrupt_dispatch` states: a tier
+    /// MUST END whatever control transfer its handler raises. The handler runs on
+    /// the interrupt dispatcher thread, which shares this runtime, so recording
+    /// the trap here is what ends the program that is still running.
+    pub(crate) fn set_explicit_exit(&mut self, code: i32) {
+        if self.trapped.is_some() || self.exit_code.is_some() {
+            return;
+        }
+        self.exit_code = Some(code);
+        self.trapped = Some("__jet_process_exit__".to_string());
+    }
+
     pub(crate) fn stack_enter(&mut self, file: &str, line: u32, fn_name: &str, src_line: &str) {
         const LIMIT: usize = jet_foundation::Outcome::JET_RUNTIME_STACK_LIMIT;
         self.source_frames.push(JitSourceFrame {

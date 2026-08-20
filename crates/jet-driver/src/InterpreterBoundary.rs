@@ -194,9 +194,9 @@ fn native_module_feature(name: &str, debug_impure: bool) -> Option<&'static str>
 /// phrase naming why it cannot.
 ///
 /// Keyed by LEAF, never by module. `core.sys` registers ~55 members
-/// (`jet-sema` `module_items`) and the interpreter ambient marshals three of
-/// them, so a module-level "yes" would admit `sys.fork()` along with
-/// `env.get`. The default arms therefore REFUSE: a newly registered
+/// (`jet-sema` `module_items`) and the interpreter ambient marshals only the
+/// handful listed below, so a module-level "yes" would admit `sys.fork()` along
+/// with `env.get`. The default arms therefore REFUSE: a newly registered
 /// `core.sys` / `core.process` member stays native-only until an ambient arm
 /// exists for it, rather than silently inheriting a neighbour's coverage.
 fn process_leaf_feature(module: &str, item: &str) -> Option<&'static str> {
@@ -221,7 +221,18 @@ fn process_leaf_feature(module: &str, item: &str) -> Option<&'static str> {
         ("core.sys", "current_dir" | "set_current_dir") => {
             Some("a working-directory read or change")
         }
-        ("core.sys", "on_interrupt") => Some("an OS signal handler"),
+        // #2027: the evaluator has the interrupt ambient this refusal predated.
+        // It arms through the ONE shared count
+        // (`Codegen/TIR/eval/mod.rs::register_interrupt_callback`, which calls
+        // `interrupt_runtime::jet_interrupt_arm`), keeps the handler as a
+        // callable-arena index, and drains through the one Prelude rule
+        // (`jet_interrupt_dispatch`) at every statement and loop boundary —
+        // including a bare `loop { }` (`eval/stmts.rs::exec_infinite`), which is
+        // the shape a signalled program actually waits in. A handler's terminal
+        // transfer is ended the way `Prelude/CoreLib/Top/Interrupt.rs` names for
+        // this tier: the drain returns the diagnostic, so `process.exit` ends the
+        // run with its code and a handler panic reports and stops with 70.
+        ("core.sys", "on_interrupt") => None,
         ("core.sys", _) => Some("an OS fact or process control call"),
         ("core.process", _) => Some("a process launch or an early exit"),
         _ => None,

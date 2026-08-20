@@ -220,14 +220,24 @@ fn jet_scheduler_panic_message(payload: &(dyn std::any::Any + Send)) -> String {
 /// Report a payload this program caught and will not re-raise: a blown deadline
 /// prints its rendered report, loose panic text republishes as a caught stop.
 ///
-/// One consumer, and it is not in this part: the AOT interrupt adapter
-/// (`Prelude/CoreLib/Top/FSIoEnvOsTesting.rs`, `mod jet_os_interrupt`) passes
+/// One consumer, and it is not in this part: the AOT interrupt adapter — the
+/// signal-dispatcher module in `Prelude/CoreLib/Top/FSIoEnvOsTesting.rs` — passes
 /// this as the tail of `Prelude/Core.rs`'s `jet_interrupt_handler_unwind`,
 /// which owns the payloads Core declares and names none of this part's. Do not
 /// move this into Core: `JetDeadlineUnwind` is the scheduler's payload, and
 /// `jet_codegen::scheduler` (the Cranelift/interpreter host, `lib.rs`) compiles
 /// this file WITHOUT `Prelude/Core.rs`, so a Core home for either would need a
 /// second declaration in `SchedulerHost.rs` (I8).
+///
+/// That adapter is described, never SPELLED, here on purpose. This file ships
+/// with every program that reaches the runtime, while the adapter ships only
+/// when a program calls `core.sys.on_interrupt`, and the pay-for-what-you-call
+/// guard for that gating is a plain text search of the emitted Rust
+/// (`tests/corelib_parts/compile.rs`,
+/// `core_os_interrupt_prelude_is_emitted_only_when_used`). Writing its `mod`
+/// header in prose here put the searched-for text into every runtime-carrying
+/// program and failed the guard with no FFI emitted at all — so name the file,
+/// not the item, in any always-emitted part.
 fn jet_report_caught_unwind(payload: Box<dyn std::any::Any + Send>) {
     if let Some(deadline) = payload.downcast_ref::<JetDeadlineUnwind>() {
         eprintln!("{}", deadline.rendered);

@@ -1836,12 +1836,14 @@ fn jet_jit_io_input(has_prompt: i8, prompt: i64) -> i64 {
 }
 
 fn jet_jit_process_exit(code: i64) {
-    // Soft exit: set the code + trap so `resident_invoke` returns `Ran` with
+    // Soft exit: record the code + trap so `resident_invoke` returns `Ran` with
     // that exit status. Never terminate the resident host — that would kill
-    // the resident/test process (three-way battery, `jet serve`, …).
+    // the resident/test process (three-way battery, `jet serve`, …). The
+    // recorder writes BOTH fields (`set_explicit_exit`); writing `exit_code`
+    // here and then calling `set_trap` left `trapped` empty, so generated code
+    // sailed past every `emit_trap_check` and the program outlived its exit.
     Concurrency::with_runtime_mut(|rt| {
-        rt.exit_code = Some(contract_kernel::jet_runtime_exit_code(code));
-        rt.set_trap("__jet_process_exit__");
+        rt.set_explicit_exit(contract_kernel::jet_runtime_exit_code(code));
     });
 }
 
