@@ -492,16 +492,32 @@ fn run_resident_restart(
     ok
 }
 
-/// `jet repl` — interactive REPL session (E2-M18, D-REPL3=A).
+/// `jet repl [<file>.jet]` — interactive REPL session (E2-M18, D-REPL3=A).
 /// `project_dir` sets the base for `:load` paths and (eventually) import
 /// context (D-REPL10=A sandbox; `--project <dir>` enables project mode).
+///
+/// #2038: a positional `<file>.jet` is a session preload — its definitions
+/// become available in turn 1 through the one ratified file-into-session
+/// mechanism, `:load` (D-REPL15=B); `fn run` is NOT invoked, because running a
+/// program is `jet run`. A path that isn't there is refused here, before the
+/// banner, exactly the way `run_dev` above refuses one (E2105). Silently
+/// starting an empty session was the bug.
 pub(crate) fn run_repl(
     project_dir: Option<&str>,
+    preload: Option<&str>,
     allow: &[String],
     deny: &[String],
     color: ColorChoice,
 ) {
-    let flags = jet::REPL::ReplFlags::new(allow, deny).with_color(color);
+    let mut flags = jet::REPL::ReplFlags::new(allow, deny).with_color(color);
+    if let Some(file) = preload {
+        let resolved = crate::resolve_source_path(file);
+        if !Path::new(&resolved).exists() {
+            crate::cli_error!(@fix "E2105", format!("can't find the file `{}`", file), format!("check the spelling, or run {} from the folder that contains it", jet::Syntax::BINARY_NAME));
+            exit(ExitCodes::USER_ERROR);
+        }
+        flags = flags.with_preload(resolved);
+    }
     let code = jet::REPL::run(project_dir, flags);
     exit(code);
 }
@@ -2809,10 +2825,16 @@ pub(crate) fn run_eval(file: &str, pure_required: bool, mode: OutputMode) {
 
     // Evaluate via comptime and render. D-EVAL1=A: pretty by default, JSON with --json.
     match jet::eval_pure_program_value(&src, file) {
-        Ok(value) => {
+        Ok((value, printed)) => {
+            // #2068: what the program printed is program output, not noise.
+            // In `--json` mode it goes to stderr so stdout stays exactly one
+            // JSON document for a machine consumer; otherwise it precedes the
+            // value, in the order the program produced it.
             if mode.json {
+                eprint!("{printed}");
                 println!("{}", value.to_json());
             } else {
+                print!("{printed}");
                 println!("{}", value.render_pretty());
             }
         }
@@ -2820,6 +2842,57 @@ pub(crate) fn run_eval(file: &str, pure_required: bool, mode: OutputMode) {
             eprint!(
                 "{}",
                 jet::render_all_colored(file, &src, &diags, mode.color_stderr())
+            );
+            exit(ExitCodes::USER_ERROR);
+        }
+    }
+}
+
+/// Label diagnostics carry when the evaluated source came from the command
+/// line rather than a file, so a caret can point into the argument text.
+const EVAL_EXPRESSION_LABEL: &str = "<eval>";
+
+/// S60 / D-PURE1: `jet eval "<expression>"` — the expression form of the same
+/// verb (#2068). Before this, an expression fell through to the file reader
+/// and died as `E2105 couldn't read '1 + 2'`, contradicting the registry
+/// summary ("Evaluate pure Jet and print JSON").
+///
+/// Evaluation runs through `jet::REPL::eval_once`, the shipped one-turn
+/// expression pipeline, so a command-line expression and the same text typed
+/// into `jet repl` cannot disagree — there is no second expression evaluator
+/// (I8) and no second set of semantics (I9). This function only marshals the
+/// result into D-EVAL1=A's rendering: pretty by default, `--json` for stable
+/// machine JSON with program output kept off stdout.
+///
+/// Effects are refused unconditionally (E1803 — `eval_once` attaches no
+/// prompt), which is strictly stronger than `--pure`, so the expression form
+/// needs no purity walk of its own.
+pub(crate) fn run_eval_expression(source: &str, mode: OutputMode) {
+    let base_dir = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+    match jet::REPL::eval_once(source, &base_dir, jet::REPL::ReplFlags::default()) {
+        Ok(evaluated) => {
+            // An input that only binds or declares has no value of its own;
+            // render it as Unit, the same way a `run()` that hands nothing
+            // back renders in the file form. One canonical rendering.
+            let value = evaluated.value.unwrap_or(jet::CtValue::Unit);
+            if mode.json {
+                eprint!("{}{}", evaluated.stdout, evaluated.stderr);
+                println!("{}", value.to_json());
+            } else {
+                print!("{}", evaluated.stdout);
+                eprint!("{}", evaluated.stderr);
+                println!("{}", value.render_pretty());
+            }
+        }
+        Err(diags) => {
+            eprint!(
+                "{}",
+                jet::render_all_colored(
+                    EVAL_EXPRESSION_LABEL,
+                    source,
+                    &diags,
+                    mode.color_stderr()
+                )
             );
             exit(ExitCodes::USER_ERROR);
         }

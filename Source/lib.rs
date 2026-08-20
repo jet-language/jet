@@ -2002,16 +2002,20 @@ pub fn check_document(path: &str, text: &str) -> Vec<Diagnostic> {
 }
 
 /// S60 / D-PURE1 (E2-M16): evaluate a pure Jet program via the comptime
-/// interpreter and return the value `main()` returns as a `CtValue`.
-/// Stdout is captured but not returned; callers render with `render_pretty()`
-/// (human) or `to_json()` (machine/`--json`).
+/// interpreter and return the value `run()` returns, together with everything
+/// the program printed.
+///
+/// The captured output is part of the result, not a local the evaluator drops
+/// (#2068): swallowing it made `jet eval` on a printing program show only its
+/// `()` return value. Callers render the value with `render_pretty()` (human)
+/// or `to_json()` (machine/`--json`).
 ///
 /// Returns `Err` diagnostics (E3401/E0952/E0953) on failure.
-pub fn eval_pure_program_value(src: &str, file: &str) -> Result<CtValue, Vec<Diagnostic>> {
+pub fn eval_pure_program_value(src: &str, file: &str) -> Result<(CtValue, String), Vec<Diagnostic>> {
     with_compiler_stack(|| eval_pure_program_value_inner(src, file))
 }
 
-fn eval_pure_program_value_inner(src: &str, file: &str) -> Result<CtValue, Vec<Diagnostic>> {
+fn eval_pure_program_value_inner(src: &str, file: &str) -> Result<(CtValue, String), Vec<Diagnostic>> {
     use std::collections::HashMap;
 
     let (toks, lex_diags) = Lexer::lex(src);
@@ -2048,7 +2052,7 @@ fn eval_pure_program_value_inner(src: &str, file: &str) -> Result<CtValue, Vec<D
     let mut sink = Comptime::DevSink::new();
     let value =
         Comptime::run_main_value(main_fn, &func_map, base_dir, &mut sink).map_err(|d| vec![d])?;
-    Ok(value)
+    Ok((value, sink.stdout))
 }
 
 /// S60 / D-PURE1 (E2-M16): evaluate a pure Jet program via the comptime

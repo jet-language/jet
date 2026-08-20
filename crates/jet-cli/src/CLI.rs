@@ -140,6 +140,12 @@ pub struct CommandSpec {
     /// `config`) are modeled and everything else — including bare `jet os` and
     /// `jet os help` — falls through to the real `jet os` dispatcher unchanged.
     pub exhaustive: bool,
+    /// Positional argument shape for a flat command, e.g. `repl [<file.jet>]`
+    /// — the same role `NestedCommandSpec::usage` plays for a nested action,
+    /// so `command_usage` has one field to read instead of a second table
+    /// (#2072). `None` keeps the generic `[args]` shape. Flags are NOT
+    /// repeated here: `flags_for_command` already renders them from `FLAGS`.
+    pub usage: Option<&'static str>,
 }
 
 impl CommandSpec {
@@ -388,17 +394,18 @@ pub fn moved_command_group(name: &str) -> Option<&'static str> {
 /// Every built-in subcommand. Order here is the order shown in the man page and
 /// completions; the greeting picks the `headline` ones.
 pub const COMMANDS: &[CommandSpec] = &[
-    CommandSpec { name: "registry", summary: "Publish and manage packages", headline: false, actions: REGISTRY_ACTIONS, exhaustive: true },
-    CommandSpec { name: "inspect", summary: "Explore code, builds, packages, and bindings", headline: false, actions: INSPECT_ACTIONS, exhaustive: true },
-    CommandSpec { name: "hangar", summary: "Inspect and maintain the package store", headline: false, actions: HANGAR_ACTIONS, exhaustive: true },
-    CommandSpec { name: "project", summary: "Inspect project files and modules", headline: false, actions: PROJECT_ACTIONS, exhaustive: true },
-    CommandSpec { name: "self", summary: "Manage the Jet installation and editor tools", headline: false, actions: SELF_ACTIONS, exhaustive: true },
+    CommandSpec { name: "registry", summary: "Publish and manage packages", headline: false, actions: REGISTRY_ACTIONS, exhaustive: true, usage: None },
+    CommandSpec { name: "inspect", summary: "Explore code, builds, packages, and bindings", headline: false, actions: INSPECT_ACTIONS, exhaustive: true, usage: None },
+    CommandSpec { name: "hangar", summary: "Inspect and maintain the package store", headline: false, actions: HANGAR_ACTIONS, exhaustive: true, usage: None },
+    CommandSpec { name: "project", summary: "Inspect project files and modules", headline: false, actions: PROJECT_ACTIONS, exhaustive: true, usage: None },
+    CommandSpec { name: "self", summary: "Manage the Jet installation and editor tools", headline: false, actions: SELF_ACTIONS, exhaustive: true, usage: None },
     CommandSpec {
         name: "diff",
         summary: "Compare two Jet programs by meaning",
         headline: false,
         actions: &[],
         exhaustive: false,
+        usage: None,
     },
     CommandSpec {
         name: "merge",
@@ -406,6 +413,7 @@ pub const COMMANDS: &[CommandSpec] = &[
         headline: false,
         actions: &[],
         exhaustive: false,
+        usage: None,
     },
     CommandSpec {
         name: "run",
@@ -413,6 +421,7 @@ pub const COMMANDS: &[CommandSpec] = &[
         headline: true,
         actions: &[],
         exhaustive: false,
+        usage: Some("run <file.jet|dir> [-- <args>]"),
     },
     CommandSpec {
         name: "jobs",
@@ -420,6 +429,7 @@ pub const COMMANDS: &[CommandSpec] = &[
         headline: false,
         actions: &[],
         exhaustive: false,
+        usage: None,
     },
     CommandSpec {
         name: "check",
@@ -427,6 +437,7 @@ pub const COMMANDS: &[CommandSpec] = &[
         headline: true,
         actions: &[],
         exhaustive: false,
+        usage: Some("check [<file.jet|dir>]"),
     },
     CommandSpec {
         name: "test",
@@ -434,6 +445,7 @@ pub const COMMANDS: &[CommandSpec] = &[
         headline: true,
         actions: &[],
         exhaustive: false,
+        usage: Some("test [<file.jet|dir>] [<filter>]"),
     },
     CommandSpec {
         name: "prove",
@@ -441,6 +453,7 @@ pub const COMMANDS: &[CommandSpec] = &[
         headline: false,
         actions: &[],
         exhaustive: false,
+        usage: None,
     },
     CommandSpec {
         name: "build",
@@ -448,6 +461,7 @@ pub const COMMANDS: &[CommandSpec] = &[
         headline: false,
         actions: &[],
         exhaustive: false,
+        usage: Some("build [<file.jet|dir>]"),
     },
     CommandSpec {
         name: "dev",
@@ -455,6 +469,7 @@ pub const COMMANDS: &[CommandSpec] = &[
         headline: false,
         actions: &[],
         exhaustive: false,
+        usage: None,
     },
     CommandSpec {
         name: "debug",
@@ -462,6 +477,7 @@ pub const COMMANDS: &[CommandSpec] = &[
         headline: false,
         actions: &[],
         exhaustive: false,
+        usage: None,
     },
     CommandSpec {
         name: "repl",
@@ -469,6 +485,7 @@ pub const COMMANDS: &[CommandSpec] = &[
         headline: false,
         actions: &[],
         exhaustive: false,
+        usage: Some("repl [<file.jet>]"),
     },
     CommandSpec {
         name: "notebook",
@@ -476,6 +493,7 @@ pub const COMMANDS: &[CommandSpec] = &[
         headline: false,
         actions: &[],
         exhaustive: false,
+        usage: None,
     },
     CommandSpec {
         name: "import",
@@ -483,6 +501,7 @@ pub const COMMANDS: &[CommandSpec] = &[
         headline: false,
         actions: &[],
         exhaustive: false,
+        usage: None,
     },
     CommandSpec {
         name: "new",
@@ -490,6 +509,7 @@ pub const COMMANDS: &[CommandSpec] = &[
         headline: false,
         actions: &[],
         exhaustive: false,
+        usage: None,
     },
     CommandSpec {
         name: "fmt",
@@ -497,6 +517,7 @@ pub const COMMANDS: &[CommandSpec] = &[
         headline: false,
         actions: &[],
         exhaustive: false,
+        usage: None,
     },
     CommandSpec {
         name: "fix",
@@ -504,6 +525,7 @@ pub const COMMANDS: &[CommandSpec] = &[
         headline: false,
         actions: &[],
         exhaustive: false,
+        usage: Some("fix <file.jet|dir>"),
     },
     CommandSpec {
         name: "audit",
@@ -511,6 +533,7 @@ pub const COMMANDS: &[CommandSpec] = &[
         headline: false,
         actions: &[],
         exhaustive: false,
+        usage: None,
     },
     CommandSpec {
         name: "lint",
@@ -518,6 +541,7 @@ pub const COMMANDS: &[CommandSpec] = &[
         headline: false,
         actions: &[],
         exhaustive: false,
+        usage: Some("lint --a11y <file.jet>"),
     },
     CommandSpec {
         name: "explain",
@@ -525,6 +549,7 @@ pub const COMMANDS: &[CommandSpec] = &[
         headline: false,
         actions: &[],
         exhaustive: false,
+        usage: None,
     },
     CommandSpec {
         name: "env",
@@ -532,6 +557,7 @@ pub const COMMANDS: &[CommandSpec] = &[
         headline: false,
         actions: ENV_ACTIONS,
         exhaustive: false,
+        usage: None,
     },
     CommandSpec {
         name: "shared-store",
@@ -539,6 +565,7 @@ pub const COMMANDS: &[CommandSpec] = &[
         headline: false,
         actions: SHARED_STORE_ACTIONS,
         exhaustive: true,
+        usage: None,
     },
     CommandSpec {
         name: "cache",
@@ -546,6 +573,7 @@ pub const COMMANDS: &[CommandSpec] = &[
         headline: false,
         actions: &[],
         exhaustive: false,
+        usage: None,
     },
     CommandSpec {
         name: "remote",
@@ -553,6 +581,7 @@ pub const COMMANDS: &[CommandSpec] = &[
         headline: false,
         actions: &[],
         exhaustive: false,
+        usage: None,
     },
     // #1659 criterion 1: `push`/`bridge`/`services` are `jet os` nested
     // actions (see OS_ACTIONS below) — declared once there, not here too.
@@ -562,6 +591,7 @@ pub const COMMANDS: &[CommandSpec] = &[
         headline: false,
         actions: &[],
         exhaustive: false,
+        usage: None,
     },
     CommandSpec {
         name: "image",
@@ -569,6 +599,7 @@ pub const COMMANDS: &[CommandSpec] = &[
         headline: false,
         actions: &[],
         exhaustive: false,
+        usage: None,
     },
     CommandSpec {
         name: "os",
@@ -576,6 +607,7 @@ pub const COMMANDS: &[CommandSpec] = &[
         headline: false,
         actions: OS_ACTIONS,
         exhaustive: false,
+        usage: None,
     },
     CommandSpec {
         name: "add",
@@ -583,6 +615,7 @@ pub const COMMANDS: &[CommandSpec] = &[
         headline: false,
         actions: &[],
         exhaustive: false,
+        usage: None,
     },
     CommandSpec {
         name: "remove",
@@ -590,6 +623,7 @@ pub const COMMANDS: &[CommandSpec] = &[
         headline: false,
         actions: &[],
         exhaustive: false,
+        usage: None,
     },
     CommandSpec {
         name: "fetch",
@@ -597,6 +631,7 @@ pub const COMMANDS: &[CommandSpec] = &[
         headline: false,
         actions: &[],
         exhaustive: false,
+        usage: None,
     },
     CommandSpec {
         name: "update",
@@ -604,6 +639,7 @@ pub const COMMANDS: &[CommandSpec] = &[
         headline: false,
         actions: &[],
         exhaustive: false,
+        usage: None,
     },
     CommandSpec {
         name: "init",
@@ -611,6 +647,7 @@ pub const COMMANDS: &[CommandSpec] = &[
         headline: false,
         actions: &[],
         exhaustive: false,
+        usage: None,
     },
     CommandSpec {
         name: "split",
@@ -618,6 +655,7 @@ pub const COMMANDS: &[CommandSpec] = &[
         headline: false,
         actions: &[],
         exhaustive: false,
+        usage: None,
     },
     CommandSpec {
         name: "fold",
@@ -625,6 +663,7 @@ pub const COMMANDS: &[CommandSpec] = &[
         headline: false,
         actions: &[],
         exhaustive: false,
+        usage: None,
     },
     // #1659 criterion 1: `config` is a `jet os` nested action (OS_ACTIONS).
     CommandSpec {
@@ -633,6 +672,7 @@ pub const COMMANDS: &[CommandSpec] = &[
         headline: false,
         actions: GC_ACTIONS,
         exhaustive: false,
+        usage: None,
     },
     CommandSpec {
         name: "clean",
@@ -640,6 +680,7 @@ pub const COMMANDS: &[CommandSpec] = &[
         headline: false,
         actions: &[],
         exhaustive: false,
+        usage: None,
     },
     // #1659 criterion 1: `publish`/`yank`/`keygen`/`key`/`vendor` are `jet
     // registry` nested actions (REGISTRY_ACTIONS); `audit`/`sbom` are `jet
@@ -650,6 +691,7 @@ pub const COMMANDS: &[CommandSpec] = &[
         headline: false,
         actions: &[],
         exhaustive: false,
+        usage: None,
     },
     CommandSpec {
         name: "eval",
@@ -657,6 +699,7 @@ pub const COMMANDS: &[CommandSpec] = &[
         headline: false,
         actions: &[],
         exhaustive: false,
+        usage: Some("eval <file.jet|expression>"),
     },
     CommandSpec {
         name: "budget",
@@ -664,6 +707,7 @@ pub const COMMANDS: &[CommandSpec] = &[
         headline: false,
         actions: &[],
         exhaustive: false,
+        usage: None,
     },
     CommandSpec {
         name: "perf",
@@ -671,6 +715,7 @@ pub const COMMANDS: &[CommandSpec] = &[
         headline: false,
         actions: PERF_ACTIONS,
         exhaustive: true,
+        usage: None,
     },
     CommandSpec {
         name: "report",
@@ -678,6 +723,7 @@ pub const COMMANDS: &[CommandSpec] = &[
         headline: false,
         actions: &[],
         exhaustive: false,
+        usage: None,
     },
     CommandSpec {
         name: "bench",
@@ -685,6 +731,7 @@ pub const COMMANDS: &[CommandSpec] = &[
         headline: false,
         actions: &[],
         exhaustive: false,
+        usage: Some("bench [<file.jet|dir>]"),
     },
     CommandSpec {
         name: "fuzz",
@@ -692,6 +739,7 @@ pub const COMMANDS: &[CommandSpec] = &[
         headline: false,
         actions: &[],
         exhaustive: false,
+        usage: Some("fuzz <file.jet> [<test>]"),
     },
     CommandSpec {
         name: "version",
@@ -699,6 +747,7 @@ pub const COMMANDS: &[CommandSpec] = &[
         headline: false,
         actions: &[],
         exhaustive: false,
+        usage: None,
     },
     CommandSpec {
         name: "help",
@@ -706,6 +755,7 @@ pub const COMMANDS: &[CommandSpec] = &[
         headline: false,
         actions: &[],
         exhaustive: false,
+        usage: Some("help [<command>]"),
     },
 ];
 
@@ -1039,9 +1089,11 @@ pub static FLAGS: LazyLock<Vec<FlagSpec>> = LazyLock::new(|| {
     flags
 });
 
-/// Render the generic usage shape for a live command. Argument-rich nested
-/// rows use their `NestedCommandSpec::usage`; flat commands keep one compact
-/// registry-owned shape for `jet <cmd> --help` and the help index.
+/// Render the usage shape for a live command from the one registry: a group
+/// renders `<group> <command>`, a nested action its `NestedCommandSpec::usage`,
+/// and a flat command its own `CommandSpec::usage` (falling back to `[args]`
+/// when it takes no positional). `jet <cmd> --help`, `jet help <cmd>`, the
+/// help index, and the man page all read this one function.
 pub fn command_usage(name: &str) -> String {
     if let Some(group) = command_group(name) {
         return format!("{} {} <command>", BINARY_NAME, group.name);
@@ -1053,6 +1105,15 @@ pub fn command_usage(name: &str) -> String {
             .map(|usage| format!("{} {} {}", BINARY_NAME, group.name, usage))
             .collect::<Vec<_>>()
             .join("\n");
+    }
+    // A flat command's own declared shape, when the registry carries one
+    // (#2072). Falling back to `[args]` keeps rows that have no positional.
+    if let Some(usage) = COMMANDS
+        .iter()
+        .find(|command| command.name == name)
+        .and_then(|command| command.usage)
+    {
+        return format!("{} {}", BINARY_NAME, usage);
     }
     format!("{} {} [args]", BINARY_NAME, name)
 }

@@ -69,6 +69,11 @@ pub struct ReplFlags {
     pub allow: HashSet<String>,
     pub deny: HashSet<String>,
     pub color: ColorChoice,
+    /// #2038: a file named on the command line (`jet repl <file>.jet`), loaded
+    /// into the session once it exists. The CLI has already proven the path is
+    /// there; loading itself goes through `cmd_load`, the one `:load`
+    /// mechanism (D-REPL15=B), with `run_entry: false`.
+    pub preload: Option<String>,
 }
 
 impl ReplFlags {
@@ -77,11 +82,17 @@ impl ReplFlags {
             allow: allow.iter().map(|s| s.to_ascii_lowercase()).collect(),
             deny: deny.iter().map(|s| s.to_ascii_lowercase()).collect(),
             color: ColorChoice::Auto,
+            preload: None,
         }
     }
 
     pub fn with_color(mut self, color: ColorChoice) -> Self {
         self.color = color;
+        self
+    }
+
+    pub fn with_preload(mut self, file: String) -> Self {
+        self.preload = Some(file);
         self
     }
 }
@@ -2093,12 +2104,20 @@ pub(crate) fn type_name(v: &CtValue) -> &str {
 
 // ── :load ─────────────────────────────────────────────────────────────────
 
-/// `:load <file>` — load a Jet source file into the session.
+/// `:load <file>` — load a Jet source file into the session. The one
+/// file-into-session mechanism (D-REPL15=B).
+///
+/// `run_entry` says whether a `fn run` in the file is invoked on load.
+/// Interactive `:load` passes `true` (its shipped behavior). The `jet repl
+/// <file>.jet` preload passes `false` (#2038): naming a file on the command
+/// line makes its definitions available, it does not run the program — that
+/// is `jet run`.
 fn cmd_load(
     path_str: &str,
     session: &mut Session,
     base_dir: &Path,
     _color: bool,
+    run_entry: bool,
     out_sink: &mut impl Write,
 ) {
     let src = match std::fs::read_to_string(path_str) {
@@ -2134,8 +2153,8 @@ fn cmd_load(
 
     let _ = writeln!(out_sink, "loaded {} items from `{}`", item_count, path_str);
 
-    // Run run() if present.
-    if has_run {
+    // Run run() if present and the caller asked for it.
+    if has_run && run_entry {
         if let Some(main) = session.func_defs.get("run") {
             let main_clone = main.clone();
             let funcs: HashMap<String, &Func> = session
@@ -2225,6 +2244,7 @@ fn run_cooked(project_dir: Option<&str>, color: bool, flags: ReplFlags) -> i32 {
 
     let mut session = Session::new();
     session.enable_persistent_history();
+    let preload = flags.preload.clone();
     let mut policy = ReplPolicy::new(flags, &base_dir);
 
     // D-REPL10=A: --project loads the project's source items into the session
@@ -2233,6 +2253,14 @@ fn run_cooked(project_dir: Option<&str>, color: bool, flags: ReplFlags) -> i32 {
         let mut stdout = io::stdout();
         load_project_items(Path::new(dir), &mut session, &mut stdout);
         session.preserve_project_baseline();
+    }
+
+    // #2038: `jet repl <file>.jet`. Same loader as `:load`, `fn run` not
+    // invoked. Both may be given: `--project` seeds the package, the file
+    // then loads on top.
+    if let Some(file) = &preload {
+        let mut stdout = io::stdout();
+        cmd_load(file, &mut session, &base_dir, color, false, &mut stdout);
     }
 
     let stdin = io::stdin();
@@ -2694,7 +2722,7 @@ fn handle_meta(
                 }
             };
             let mut stdout = io::stdout();
-            cmd_load(path, session, base_dir, color, &mut stdout);
+            cmd_load(path, session, base_dir, color, true, &mut stdout);
         }
         "type" => {
             let name = match arg {
@@ -2988,6 +3016,78 @@ fn handle_history(arg: Option<&str>, history: &mut History::History) {
     eprintln!("usage: :history search <text> | :history clear");
 }
 
+// ── one-shot command-line expression (#2068) ──────────────────────────────
+
+/// What one command-line expression produced.
+pub struct EvalOnce {
+    /// The value the input evaluated to. `None` when the input only bound or
+    /// declared something and so has no value to show.
+    pub value: Option<CtValue>,
+    /// Anything the input printed, in program order.
+    pub stdout: String,
+    pub stderr: String,
+}
+
+/// `jet eval "<expression>"` (#2068).
+///
+/// One REPL turn against a fresh session: the same `classify` →
+/// `type_check_stmts` → `Comptime::run_repl_step` pipeline every interactive
+/// turn already uses. A command-line expression and a typed REPL line
+/// therefore cannot disagree — there is no second expression evaluator (I8),
+/// and the semantics stay in the shared comptime tree-walker while this only
+/// marshals (I9).
+///
+/// No `EffectPrompt` is attached, so an effect that no `--allow-*` covers is
+/// refused with E1803 rather than blocking a non-interactive command on
+/// stdin — `jet eval` is the pure/deterministic verb (S60 / D-PURE1).
+pub fn eval_once(
+    src: &str,
+    base_dir: &Path,
+    flags: ReplFlags,
+) -> Result<EvalOnce, Vec<Diagnostic>> {
+    jet_driver::boot_tir_eval();
+    let mut policy = ReplPolicy::new(flags, base_dir);
+    let session = Session::new();
+
+    let (stmts, suppress, check_src) = match classify(src.trim(), 1)? {
+        InputKind::Stmts(stmts, suppress, check_src) => (stmts, suppress, check_src),
+        // The one registered E1802 renderer, same as an interactive turn.
+        InputKind::Reject(feature) => return Err(vec![e1802(&feature)]),
+        // A declaration or import on its own is checked and accepted; it
+        // simply has no value to show, exactly like a `run()` that returns
+        // nothing. A `:meta` command never reaches here — the CLI rejects it
+        // as a malformed argument before calling in.
+        InputKind::Meta(..) | InputKind::Item(_) | InputKind::Import(_) | InputKind::Empty => {
+            return Ok(EvalOnce { value: None, stdout: String::new(), stderr: String::new() });
+        }
+    };
+
+    let (checked_stmts, core_imports) = type_check_stmts(&session, &stmts, 1, &check_src)?;
+    let executable = repl_executable_stmts(checked_stmts);
+
+    let funcs: HashMap<String, &Func> = HashMap::new();
+    let structs: HashMap<String, &StructDef> = HashMap::new();
+    let mut sink = DevSink::new();
+    let mut scope: HashMap<String, CtValue> = HashMap::new();
+    let mut authorizer = policy.authorizer(None);
+    match crate::Comptime::run_repl_step(
+        &executable,
+        &funcs,
+        base_dir,
+        &mut sink,
+        &mut scope,
+        REPL_FUEL_BUDGET,
+        suppress,
+        &core_imports,
+        &structs,
+        &session.binding_types,
+        &mut authorizer,
+    ) {
+        Ok(value) => Ok(EvalOnce { value, stdout: sink.stdout, stderr: sink.stderr }),
+        Err(diagnostic) => Err(vec![diagnostic]),
+    }
+}
+
 // ── transcript test harness (D-REPL20=A) ──────────────────────────────────
 
 /// Run a REPL transcript test: feed `inputs` through the session, collect
@@ -3007,17 +3107,48 @@ pub fn run_transcript_with_flags(
     allow: &[&str],
     deny: &[&str],
 ) -> String {
+    run_transcript_with(
+        inputs,
+        project_dir,
+        ReplFlags {
+            allow: allow.iter().map(|s| s.to_ascii_lowercase()).collect(),
+            deny: deny.iter().map(|s| s.to_ascii_lowercase()).collect(),
+            color: ColorChoice::Never,
+            preload: None,
+        },
+    )
+}
+
+/// #2038: the `jet repl <file>.jet` floor. Same session engine, same loader —
+/// the transcript just starts with the named file already loaded.
+pub fn run_transcript_with_preload(
+    inputs: &[&str],
+    project_dir: Option<&str>,
+    preload: &str,
+) -> String {
+    run_transcript_with(
+        inputs,
+        project_dir,
+        ReplFlags {
+            color: ColorChoice::Never,
+            preload: Some(preload.to_string()),
+            ..Default::default()
+        },
+    )
+}
+
+fn run_transcript_with(
+    inputs: &[&str],
+    project_dir: Option<&str>,
+    flags: ReplFlags,
+) -> String {
     jet_driver::boot_tir_eval();
     let base_dir: std::path::PathBuf = project_dir
         .map(std::path::PathBuf::from)
         .unwrap_or_else(|| std::path::PathBuf::from("."));
 
     let mut session = Session::new();
-    let flags = ReplFlags {
-        allow: allow.iter().map(|s| s.to_ascii_lowercase()).collect(),
-        deny: deny.iter().map(|s| s.to_ascii_lowercase()).collect(),
-        color: ColorChoice::Never,
-    };
+    let preload = flags.preload.clone();
     let mut policy = ReplPolicy::new(flags, &base_dir);
     let mut out = String::new();
 
@@ -3025,6 +3156,14 @@ pub fn run_transcript_with_flags(
     if let Some(dir) = project_dir {
         let mut buf = Vec::new();
         load_project_items(Path::new(dir), &mut session, &mut buf);
+        out.push_str(&String::from_utf8_lossy(&buf));
+    }
+
+    // #2038: the command-line file, through the same `cmd_load` the real
+    // loops use — `fn run` is not invoked.
+    if let Some(file) = &preload {
+        let mut buf = Vec::new();
+        cmd_load(file, &mut session, &base_dir, false, false, &mut buf);
         out.push_str(&String::from_utf8_lossy(&buf));
     }
 
@@ -3078,7 +3217,7 @@ pub fn run_transcript_with_flags(
                             }
                         };
                         let mut buf = Vec::new();
-                        cmd_load(&path, &mut session, &base_dir, false, &mut buf);
+                        cmd_load(&path, &mut session, &base_dir, false, true, &mut buf);
                         out.push_str(&String::from_utf8_lossy(&buf));
                     }
                     "type" => {

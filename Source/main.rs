@@ -60,7 +60,7 @@ use CmdCompile::{
 };
 use CmdDevTools::{
     run_bench, run_bind, run_completions, run_dev, run_devtools, run_doctor, run_emit_rust,
-    run_eval, run_explain, run_explain_marker, run_explain_web_graph, run_lint_a11y, run_repl, watch_policy_from, WatchPolicy,
+    run_eval, run_eval_expression, run_explain, run_explain_marker, run_explain_web_graph, run_lint_a11y, run_repl, watch_policy_from, WatchPolicy,
     BenchRunOpts,
 };
 use CmdDossier::{run_dossier, run_module_explain};
@@ -1126,7 +1126,7 @@ fn main() {
 
     // c6vz465: bare `jet` starts the REPL (D-REPL4); `jet ?` is help sugar.
     if raw.is_empty() {
-        run_repl(None, &[], &[], ColorChoice::Auto);
+        run_repl(None, None, &[], &[], ColorChoice::Auto);
         return;
     }
     if raw[0] == "?" {
@@ -1301,7 +1301,9 @@ fn main() {
                 skip_next = false;
                 continue;
             }
-            if a == "-p" || a == "--output" || a == "--gate" || a == "--scope" || a == "--kind" || a == "--set" || a == "--target" {
+            // `--project <dir>` swallows its value too (#2038): a project
+            // directory is never the positional file/program arg.
+            if a == "-p" || a == "--output" || a == "--gate" || a == "--scope" || a == "--kind" || a == "--set" || a == "--target" || a == "--project" {
                 skip_next = true;
                 continue;
             }
@@ -1568,8 +1570,18 @@ fn main() {
         "report" => exit(run_report(&raw[1..])),
         "remote" => run_remote(&raw, mode),
         "help" => {
-            if let Some(help) = raw.get(1).and_then(|command| structural_help(command)) {
-                print!("{help}");
+            // `jet help <cmd>` renders the SAME per-command screen as
+            // `jet <cmd> --help` (#2072): one renderer, so the two spellings
+            // can never drift. `diff`/`merge` keep their bespoke deep help,
+            // exactly as the `--help` path above does. Bare `jet help` is the
+            // full inventory. An unknown word falls through `command_help`'s
+            // teaching line rather than dumping the ~200-line global screen.
+            if let Some(command) = raw.get(1) {
+                if let Some(help) = structural_help(command) {
+                    print!("{help}");
+                    exit(ExitCodes::OK);
+                }
+                print!("{}", command_help(command));
                 exit(ExitCodes::OK);
             }
             print!("{}", usage());
@@ -2074,7 +2086,11 @@ fn main() {
                 })
                 .map(|effect| effect.flag().to_string())
                 .collect();
-            run_repl(project.as_deref(), &allow, &deny, mode.color);
+            // #2038: the first positional is a session preload file. `args`
+            // (not `raw`) is the positional-only view, so `--project <dir>`
+            // and the `--allow-*`/`--deny-*` flags never land here.
+            let preload = args.get(1).map(|file| file.as_str());
+            run_repl(project.as_deref(), preload, &allow, &deny, mode.color);
             return;
         }
         "notebook" => {
@@ -2275,17 +2291,33 @@ fn main() {
             ));
         }
         "eval" => {
-            // S60 / D-PURE1 (E2-M16): deterministic evaluation of a pure program.
+            // S60 / D-PURE1 (E2-M16): deterministic evaluation of pure Jet.
             let pure_flag = raw.iter().any(|a| a == "--pure");
-            let file = match args.get(1) {
+            let argument = match args.get(1) {
                 Some(f) => f.as_str(),
                 None => {
-                    crate::cli_error!("E2104", "`jet eval` needs a file: {} eval --pure <file.{}>", jet::Syntax::BINARY_NAME, jet::Syntax::FILE_EXT);
+                    crate::cli_error!("E2104", "`jet eval` needs a file or an expression: {} eval <file.{} | expression>", jet::Syntax::BINARY_NAME, jet::Syntax::FILE_EXT);
                     exit(ExitCodes::USAGE);
                 }
             };
-            let resolved = resolve_source_path(file);
-            run_eval(&resolved, pure_flag, mode);
+            // #2068: one argument, two shapes. `looks_like_jet_source` is the
+            // same predicate the bare-entry sugar uses, so a file, a project
+            // directory, or a bare stem all keep the file form — including a
+            // `.jet` name that is NOT there, which stays a file-not-found
+            // error rather than being re-read as an expression. Anything else
+            // is an expression, which the registry summary has always
+            // promised ("Evaluate pure Jet and print JSON").
+            if looks_like_jet_source(argument) {
+                run_eval(&resolve_source_path(argument), pure_flag, mode);
+                return;
+            }
+            // A `:meta` word is REPL vocabulary, not an expression: say so
+            // instead of handing it to the parser as broken source.
+            if argument.starts_with(':') {
+                crate::cli_error!(@fix "E2104", format!("`{}` is a {} command, not an expression", argument, jet::Syntax::BINARY_NAME), format!("run `{} repl` for an interactive session, or pass an expression such as `1 + 2`", jet::Syntax::BINARY_NAME));
+                exit(ExitCodes::USAGE);
+            }
+            run_eval_expression(argument, mode);
             return;
         }
         _ => {}
@@ -2419,7 +2451,12 @@ fn main() {
                     }
                 }
                 _ => {
-                    eprint!("{}", usage());
+                    // #2072: a target-requiring verb invoked bare (`jet fix`,
+                    // `jet lint`, `jet fuzz`, …) wants its OWN usage, not the
+                    // whole command inventory. Same registry renderer as
+                    // `jet <cmd> --help`; stderr + exit 2 because this is a
+                    // usage error, not a help request.
+                    eprint!("{}", command_help(cmd));
                     exit(ExitCodes::USAGE);
                 }
             }

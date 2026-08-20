@@ -1153,10 +1153,10 @@ pub fn run_main_debug(
     Ok(())
 }
 
-/// `jet eval --pure` variant: runs `main()` and returns its return value as a
-/// `CtValue` instead of buffering stdout. Used when the caller wants to render
-/// the value (pretty or JSON) rather than capture print output. Any print
-/// calls are still captured but discarded; the return value is authoritative.
+/// `jet eval` variant: runs `main()` and returns its return value as a
+/// `CtValue` instead of buffering stdout into the result. Print calls are
+/// captured into the caller's `sink`, which the caller owns and reads (#2068
+/// — it used to be a local that was dropped, so the output vanished).
 pub fn run_main_value(
     main: &Func,
     funcs: &HashMap<String, &Func>,
