@@ -3252,7 +3252,8 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                     });
                 }
                 // c109 Phase 26: the rich-runtime-report builtins (S36) — render the whole
-                // emit string at lowering, byte-for-byte the AST helper. `require`/`panic`
+                // emit string at lowering, byte-for-byte the AST helper. `assert`/
+                // `assert_eq`/`panic`
                 // are statement-position calls (a `()` result); the string is the `{ … }`
                 // block emit emits as an expr-statement. Disjoint from a user fn of the same
                 // name (`cx.sigs.contains_key` would be true then).

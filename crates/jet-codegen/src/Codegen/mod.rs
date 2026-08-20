@@ -4194,7 +4194,7 @@ fn command_override_entry(items: &[Item]) -> Option<String> {
 /// stock harness as the suite runner, hands control to the user's command entry
 /// (`entry`: the Rust name of the `fn run` this same harness emitted, never a
 /// literal), then reports the suite's status as the process status. `jet test`
-/// and `jet bench` share this emitter so that call exists once.
+/// owns this adapter.
 fn emit_command_override_main(
     entry: &str,
     install: &str,
@@ -4980,7 +4980,7 @@ fn emit_bundle_tests_cov_inner(
 /// (`jet fuzz <file> [<name>]`).
 ///   - named: must exist and must be a property test (have params) — else a
 ///     plain-English `Err` naming the problem (CLI-level selection error, not
-///     a compiler diagnostic, same tier as `run_bench`'s missing-file message).
+///     a compiler diagnostic, same tier as a CLI missing-file message).
 ///   - unnamed: exactly one property test in the file is picked automatically;
 ///     zero or more-than-one is an `Err` (the latter lists the candidates).
 fn select_fuzz_target(

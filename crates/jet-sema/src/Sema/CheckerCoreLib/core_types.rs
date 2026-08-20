@@ -223,7 +223,7 @@ pub(crate) fn core_type_known(name: &str) -> bool {
         // D-AUTHORITY-NAME1=A: one ordinary, nameable rights carrier.
         | Syntax::TYPE_AUTHORITY
         | "Clock" | "Rng" | "Fake" | "Duration" | "DurationUnit" | "RangeError" | "Condition" | "Path"
-        | "TestSuite" | "BenchSuite"
+        | "TestSuite"
         | "GameScene" | "GameAssets" | "GameInputMap"
         | "GameBackend" | "GameReplay" | "GameImage" | "GameSound" | "GameFrame"
         | "GameInputSnapshot" | "GameSceneType" | "GameReplayType" | "GameBackendType"
@@ -532,7 +532,7 @@ pub(crate) fn core_struct_field(type_name: &str, field: &str) -> Option<Type> {
             _ => None,
         };
     }
-    if matches!(type_name, "TestSuite" | "BenchSuite") {
+    if type_name == "TestSuite" {
         return matches!(field, "iteration" | "result").then_some(Type::Int);
     }
     if type_name == "TLSPeerIdentity" {

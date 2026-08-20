@@ -3608,7 +3608,13 @@ mod tests {
 
         let manifest = jet_driver::Package::PackageFacts {
             effects_enabled: true,
-            effects_allow: Some(vec![external_spelling.to_string()]),
+            authority: jet_driver::Package::PackageAuthority {
+                holds: jet_driver::Package::Blocks::AuthorityHolds {
+                    allow: Some(vec![external_spelling.to_string()]),
+                    deny: None,
+                },
+                ..Default::default()
+            },
             ..Default::default()
         };
         let entries = [jet_driver::EffectBudget::PackageEffects {

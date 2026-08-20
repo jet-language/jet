@@ -1136,8 +1136,21 @@ fn jit_map_composite_key_type(ty: &Type) -> bool {
 }
 
 fn jit_map_composite_key_expr(expr: &TExpr) -> bool {
-    matches!(&expr.ty, Type::Tuple(_))
-        || matches!((&expr.ty, &expr.kind), (Type::Named(_), TExprKind::StructLit { .. }))
+    let scalar_field = |field: &TExpr| {
+        matches!(
+            &field.ty,
+            Type::Int | Type::IntN { .. } | Type::String | Type::Bool | Type::Char
+        )
+    };
+    match (&expr.ty, &expr.kind) {
+        (Type::Tuple(_), TExprKind::TupleLit { fields, .. }) => {
+            fields.iter().all(|(_, field)| scalar_field(field))
+        }
+        (Type::Named(_), TExprKind::StructLit { fields, .. }) => {
+            fields.iter().all(|(_, field, _)| scalar_field(field))
+        }
+        _ => false,
+    }
 }
 
 fn jit_map_int_key_type(ty: &Type) -> bool {
@@ -6520,7 +6533,6 @@ fn resident_safe_handle_op(op: &THandleOp, recv: &TExpr, args: &[TExpr]) -> bool
         | THandleOp::ClockNow
         | THandleOp::StopwatchElapsedMillis
         | THandleOp::TestSuiteRun
-        | THandleOp::BenchSuiteRun
         | THandleOp::RngBool
         | THandleOp::RngFloat
         | THandleOp::RngSplit => args.is_empty(),

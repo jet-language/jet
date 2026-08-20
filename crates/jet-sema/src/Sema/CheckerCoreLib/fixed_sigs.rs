@@ -1330,7 +1330,7 @@ fn core_fixed_sig_impl(
                 (read, Type::String),
             ],
             Some(result_ty(
-                Type::Named("Unit".into()),
+                Type::Named("ServiceReceipt".into()),
                 Type::Named("ServiceError".to_string()),
             )),
         )),
@@ -3242,6 +3242,8 @@ pub struct CoreParam {
 #[derive(Clone, Copy)]
 pub enum CoreDefault {
     Bool(bool),
+    String(&'static str),
+    EmptyList,
     /// An omitted optional Core handle. The binder inserts the slot; the
     /// Core emitter turns this declaration-side absence into `None`.
     Absent,
@@ -3254,6 +3256,11 @@ impl CoreDefault {
     pub fn build(self, span: crate::Diagnostics::Span) -> crate::AST::Expr {
         match self {
             CoreDefault::Bool(value) => crate::AST::Expr::Bool(value, span),
+            CoreDefault::String(value) => crate::AST::Expr::Str(
+                vec![crate::AST::StrPart::Lit(value.to_string())],
+                span,
+            ),
+            CoreDefault::EmptyList => crate::AST::Expr::ListLit(Vec::new(), span),
             CoreDefault::Absent => crate::AST::Expr::Absent(span),
             CoreDefault::StaticCall { type_name, method } => crate::AST::Expr::MethodCall {
                 receiver: Box::new(crate::AST::Expr::Ident(type_name.to_string(), span)),
@@ -3286,6 +3293,13 @@ const ENCODING_LIMITS_DEFAULT: CoreDefault =
 
 pub fn core_param_contract(module: &str, name: &str) -> Option<Vec<CoreParam>> {
     match (module, name) {
+        // D-CONFIG-ENV1: labels are part of the runtime config surface, while
+        // the defaults keep `env.decode<T>()` as the beginner one-call form.
+        ("core.sys", "decode") => Some(vec![
+            optional("prefix", CoreDefault::String("")),
+            optional("file", CoreDefault::String(".env")),
+            optional("allow", CoreDefault::EmptyList),
+        ]),
         ("core.game", "run") => Some(vec![
             required("scene"),
             CoreParam {

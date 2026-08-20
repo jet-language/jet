@@ -150,8 +150,8 @@
 // D-ENTRY-VALUE1=B (card #1446) adds no token: `fn run` is the one entry, and
 // its return value is the program. A returned App is served at the runtime
 // edge; there is no hidden app-name convention or synthesized run overlay.
-// D-CMD-OVERRIDE1=C (card #1451) adds no token: `fn test(suite: TestSuite)` and
-// `fn bench(suite: BenchSuite)` extend the existing command-entry convention.
+// D-CMD-OVERRIDE1=C (card #1451) adds no token: `fn test(suite: TestSuite)`
+// extends the existing command-entry convention.
 // `--show-default` selects the stock harness; no keyword or sigil enters the grammar.
 // D-JOB-NAME1=A (ratified 2026-08-05, card #1448) adds no token: the marker
 // and every command use `job`. Canonical CLI is `jet run <entry> -- <name>`

@@ -2118,7 +2118,61 @@
         }
 
         pub fn to_string_rep(&self) -> String {
+            if let Some(decimal) = finite_fraction_decimal(self.numerator, self.denominator) {
+                return decimal;
+            }
             format!("{}/{}", self.numerator, self.denominator)
+        }
+    }
+
+    /// Render a finite reduced ratio without passing through binary floating
+    /// point. A denominator with any factor beyond 2 and 5 stays a fraction.
+    fn finite_fraction_decimal(numerator: i64, denominator: i64) -> Option<String> {
+        if denominator <= 0 {
+            return None;
+        }
+        if numerator == 0 {
+            return Some("0".to_string());
+        }
+
+        let mut factors = denominator as u64;
+        let mut twos = 0u32;
+        while factors % 2 == 0 {
+            factors /= 2;
+            twos += 1;
+        }
+        let mut fives = 0u32;
+        while factors % 5 == 0 {
+            factors /= 5;
+            fives += 1;
+        }
+        if factors != 1 {
+            return None;
+        }
+
+        let scale = twos.max(fives);
+        let denominator = denominator as u128;
+        let magnitude = numerator.unsigned_abs() as u128;
+        let mut remainder = magnitude % denominator;
+        let whole = magnitude / denominator;
+        let sign = if numerator < 0 { "-" } else { "" };
+        if scale == 0 {
+            return Some(format!("{sign}{whole}"));
+        }
+
+        let mut fraction = String::with_capacity(scale as usize);
+        for _ in 0..scale {
+            remainder *= 10;
+            fraction.push(char::from(b'0' + (remainder / denominator) as u8));
+            remainder %= denominator;
+        }
+        while fraction.ends_with('0') {
+            fraction.pop();
+        }
+        if fraction.is_empty() {
+            Some(format!("{sign}{whole}"))
+        } else {
+            Some(format!("{sign}{whole}.{fraction}"))
         }
     }
 

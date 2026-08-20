@@ -48,7 +48,7 @@ fn emit_sentry_gate(tir: &TFunc, cx: &Cx, out: &mut String, indent: usize) {
     ));
 }
 
-/// D-CMD-OVERRIDE1=C: `TestSuite`/`BenchSuite` are `Copy` snapshots, and the
+/// D-CMD-OVERRIDE1=C: `TestSuite` is a `Copy` snapshot, and the
 /// ratified override signature binds one by value — `fn test(suite: TestSuite)`.
 /// Their one method, `run`, mutates the receiver, which the shared-reference
 /// form of a non-scalar `Read` parameter cannot express: `rust_param_type`
@@ -61,7 +61,7 @@ fn emit_sentry_gate(tir: &TFunc, cx: &Cx, out: &mut String, indent: usize) {
 fn is_owned_snapshot_param(cx: &Cx, convention: AccessConvention, ty: &Type) -> bool {
     let Type::Named(name) = ty else { return false };
     matches!(convention, AccessConvention::Read)
-        && matches!(name.as_str(), "TestSuite" | "BenchSuite")
+        && name == "TestSuite"
         && !cx.type_names.contains(name.as_str())
 }
 

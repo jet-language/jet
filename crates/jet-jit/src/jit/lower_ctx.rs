@@ -7761,9 +7761,6 @@ impl LowerCtx<'_, '_> {
             "test_suite" if args.is_empty() => {
                 Ok(self.call_host(self.host.testing_test_suite_new, &[]))
             }
-            "bench_suite" if args.is_empty() => {
-                Ok(self.call_host(self.host.testing_bench_suite_new, &[]))
-            }
             other => Err(format!("jit core call unsupported: core.testing.{other}")),
         }
     }
@@ -24618,11 +24615,6 @@ impl LowerCtx<'_, '_> {
             THandleOp::TestSuiteRun => {
                 in_own_frame(|| -> Result<Value, String> {
                     Ok(self.call_host(self.host.testing_test_suite_run, &[recv_val]))
-                })
-            }
-            THandleOp::BenchSuiteRun => {
-                in_own_frame(|| -> Result<Value, String> {
-                    Ok(self.call_host(self.host.testing_bench_suite_run, &[recv_val]))
                 })
             }
             THandleOp::ClockNow => {

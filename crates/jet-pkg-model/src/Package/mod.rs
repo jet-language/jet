@@ -1733,8 +1733,13 @@ fn parse_common(
             "effects" => {
                 facts.effects_enabled = true;
                 let (allow, deny) = Blocks::parse_effects(record_body(&value, "effects")?)?;
-                facts.effects_allow = allow;
-                facts.effects_deny = deny;
+                // Keep the legacy spelling on the same authority fact while
+                // its parser remains during the one-pass manifest migration.
+                // Consumers therefore have one semantic source even before
+                // the retired key is removed by the retirement slice.
+                facts.effects_allow = allow.clone();
+                facts.effects_deny = deny.clone();
+                facts.authority.holds = Blocks::AuthorityHolds { allow, deny };
             }
             "grants" if config => return Err(PackageParseError::UnknownField(field.clone())),
             "grants" => {

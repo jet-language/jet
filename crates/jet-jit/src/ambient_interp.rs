@@ -3412,16 +3412,6 @@ pub fn ambient_core_call(
                 ],
             }))
         }
-        ("core.testing", "bench_suite") => {
-            let suite = jet_codegen::command_suite::jet_bench_suite_new();
-            Some(Ok(CtValue::Struct {
-                type_name: "BenchSuite".to_string(),
-                fields: vec![
-                    ("iteration".to_string(), CtValue::Int(suite.iteration)),
-                    ("result".to_string(), CtValue::Int(suite.result)),
-                ],
-            }))
-        }
         // D-SERVICE1=D / I9: ambient is only the adapter; typed topology
         // construction and rendering execute the same ServicesLite Prelude
         // used by AOT and TIR.
@@ -4286,12 +4276,8 @@ pub fn ambient_handle(
     if let Some(result) = ambient_http_handle(op, recv, args, span) {
         return Some(result);
     }
-    if matches!(op, "TestSuiteRun" | "BenchSuiteRun") {
-        let expected = if op == "TestSuiteRun" {
-            "TestSuite"
-        } else {
-            "BenchSuite"
-        };
+    if op == "TestSuiteRun" {
+        let expected = "TestSuite";
         let CtValue::Struct { type_name, fields } = recv else {
             return Some(Err(unsupported("command suite receiver", span)));
         };
@@ -4310,21 +4296,13 @@ pub fn ambient_handle(
                 _ => 0,
             })
         }).unwrap_or(0);
-        let (status, iteration, result) = if op == "TestSuiteRun" {
+        let (status, iteration, result) = {
             let mut suite = jet_codegen::command_suite::JetTestSuite {
                 iteration,
                 result,
                 runner: None,
             };
             let status = jet_codegen::command_suite::jet_test_suite_run(&mut suite);
-            (status, suite.iteration, suite.result)
-        } else {
-            let mut suite = jet_codegen::command_suite::JetBenchSuite {
-                iteration,
-                result,
-                runner: None,
-            };
-            let status = jet_codegen::command_suite::jet_bench_suite_run(&mut suite);
             (status, suite.iteration, suite.result)
         };
         if let CtValue::Struct { fields, .. } = recv {

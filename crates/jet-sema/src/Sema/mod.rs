@@ -1263,11 +1263,6 @@ pub enum CompileMode {
     Test,
     /// `jet test` with a user-owned `fn test` command adapter.
     TestOverride,
-    /// `jet bench` (D-BENCH1) — type-check `#Bench` block bodies and emit the
-    /// timing harness; `run` is optional, like `Test`.
-    Bench,
-    /// `jet bench` with a user-owned `fn bench` command adapter.
-    BenchOverride,
     /// `jet check` / LSP — type-check only; imported modules and library files
     /// need not define `run`.
     Check,

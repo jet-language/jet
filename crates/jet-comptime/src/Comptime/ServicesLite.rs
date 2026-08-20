@@ -1395,7 +1395,7 @@ pub fn apply(method: &str, args: &[CtValue], span: Span) -> Result<CtValue, Diag
                 _ => return Err(unsupported("idempotency key", span)),
             };
             Ok(match jet_services_send_durable(&mut tree, &endpoint, message, key) {
-                Ok(()) => CtValue::Present(Box::new(mutate_ok(tree, CtValue::Unit))),
+                Ok(receipt) => CtValue::Present(Box::new(mutate_ok(tree, receipt_to_ct(receipt)))),
                 Err(e) => mutate_err(tree, map_err(e)),
             })
         }

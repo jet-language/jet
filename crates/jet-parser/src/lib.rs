@@ -76,6 +76,14 @@ mod generic_module_tests {
     }
 
     #[test]
+    fn shared_prefix_accepts_inferred_brace_values() {
+        let source = "fn run() { value :: shared { count: 1 } }\n";
+        let (tokens, lexer_diagnostics) = Lexer::lex(source);
+        assert!(lexer_diagnostics.is_empty(), "{lexer_diagnostics:?}");
+        Parser::parse(&tokens).expect("shared must accept an inferred brace value");
+    }
+
+    #[test]
     fn script_statements_survive_items_and_formatter() {
         let source = "print(\"first\")\nfn helper() {}\nprint(\"last\")\n";
         let (tokens, lexer_diagnostics) = Lexer::lex(source);

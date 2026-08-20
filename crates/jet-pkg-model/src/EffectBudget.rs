@@ -2,12 +2,12 @@
 //!
 //! Zero-config: every `jet build` prints a one-line summary of the effects the
 //! dependency graph uses, and per-dependency effect provenance is recorded in
-//! the lockfile. An `effects: { allow: […], deny: […] }` block in `package.jet`
-//! turns on whole-graph enforcement — the build fails naming the exact
-//! dependency and offending function when a transitive dependency needs an
-//! effect outside the budget. `grants: { "dep": [Effect] }` is the audited
-//! per-dependency escape, also recorded in the lockfile. Manifest keys only —
-//! no language grammar (§0.4 DO-NOT).
+//! the lockfile. An `authority: .{ holds: { allow: […], deny: […] } }` block in
+//! `package.jet` turns on whole-graph enforcement — the build fails naming the
+//! exact dependency and offending function when a transitive dependency needs
+//! an effect outside the budget. `authority.grants: { "dep": [Effect] }` is the
+//! audited per-dependency escape, also recorded in the lockfile. Manifest keys
+//! only — no language grammar (§0.4 DO-NOT).
 //!
 //! Attribution: sema already computes a whole-program per-function effect fixpoint
 //! (`Sema::Effects::solve`, keyed by `Sema::effect_key`). This module attributes
@@ -265,11 +265,11 @@ pub fn provenance_for(entries: &[PackageEffects], name: &str) -> Vec<String> {
         .unwrap_or_default()
 }
 
-/// D-EFFBUDGET1 whole-graph enforcement: when `package.jet` declares an `effects:`
-/// block, fail the build for any *dependency* (not root — the budget names the
-/// supply chain) whose effect set has something outside `allow` or inside
-/// `deny`, unless `grants:` covers it for that dependency. Returns E1220 per
-/// offending (dependency, effect) pair.
+/// D-EFFBUDGET1 whole-graph enforcement: when `package.jet` declares an
+/// `authority.holds` block, fail the build for any *dependency* (not root — the
+/// budget names the supply chain) whose effect set has something outside
+/// `allow` or inside `deny`, unless `authority.grants` covers it for that
+/// dependency. Returns E1220 per offending (dependency, effect) pair.
 pub fn enforce(entries: &[PackageEffects], manifest: &PackageFacts) -> Vec<Diagnostic> {
     if !manifest.effects_enabled {
         return Vec::new();
@@ -277,7 +277,9 @@ pub fn enforce(entries: &[PackageEffects], manifest: &PackageFacts) -> Vec<Diagn
     // D-EFFTREE1: allow/deny/grants entries may be ancestor roots (or leaves);
     // the substrate verdict, not exact membership, decides budget authority.
     let allow: Option<EffectSet> = manifest
-        .effects_allow
+        .authority
+        .holds
+        .allow
         .as_ref()
         .map(|names| {
             names
@@ -287,7 +289,9 @@ pub fn enforce(entries: &[PackageEffects], manifest: &PackageFacts) -> Vec<Diagn
                 .collect()
         });
     let deny: EffectSet = manifest
-        .effects_deny
+        .authority
+        .holds
+        .deny
         .as_ref()
         .map(|names| {
             names
@@ -298,6 +302,7 @@ pub fn enforce(entries: &[PackageEffects], manifest: &PackageFacts) -> Vec<Diagn
         })
         .unwrap_or_default();
     let grants: HashMap<&str, EffectSet> = manifest
+        .authority
         .grants
         .iter()
         .map(|(dep, effects)| {
@@ -345,9 +350,9 @@ pub fn enforce(entries: &[PackageEffects], manifest: &PackageFacts) -> Vec<Diagn
 }
 
 /// D-EFFBUDGET1: write computed per-package effect provenance (and configured
-/// `grants:`) into an existing lockfile's package entries in place. No-op for
-/// a package name the lockfile doesn't (yet) list — `jet store fetch` owns adding
-/// package entries; this only annotates ones already there.
+/// `authority.grants`) into an existing lockfile's package entries in place.
+/// No-op for a package name the lockfile doesn't (yet) list — `jet store fetch`
+/// owns adding package entries; this only annotates ones already there.
 pub fn update_lock_provenance(
     lock: &mut crate::Lock::LockFile,
     entries: &[PackageEffects],
@@ -361,6 +366,7 @@ pub fn update_lock_provenance(
         };
         pkg.effects = provenance_for(entries, key);
         pkg.effect_grants = manifest
+            .authority
             .grants
             .iter()
             .find(|(dep, _)| dep == &pkg.name)
@@ -376,9 +382,9 @@ pub fn e1220(dep: &str, effect: &str) -> Diagnostic {
         format!(
             "`{dep}` uses the `{effect}` effect, which this package's budget doesn't allow"
         ),
-        "an `effects:` budget fails the build when any dependency reaches an effect you didn't list — supply-chain review as a compile error".to_string(),
+        "an `authority.holds` budget fails the build when any dependency reaches an effect you didn't list — supply-chain review as a compile error".to_string(),
         format!(
-            "add `{effect}` to `allow`, or grant it to `{dep}` in `grants:`, or drop the dependency"
+            "add `{effect}` to `authority.holds.allow`, grant it to `{dep}` in `authority.grants`, or drop the dependency"
         ),
         None::<Span>,
     )
@@ -398,4 +404,32 @@ pub fn e1220_panic(dep: &str, panic_site: &str, span: Option<Span>) -> Diagnosti
         "return a fallible result for expected failure, add facts or a `#Pre`/refinement proof for a programmer-error stop, or allow/grant Panic to this dependency".to_string(),
         span,
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn authority_block_is_the_e1220_source() {
+        let mut manifest = PackageFacts::default();
+        manifest.effects_enabled = true;
+        // Deliberately disagree with the retired mirror fields. The authority
+        // block must decide the result.
+        manifest.effects_allow = Some(vec!["Net".to_string()]);
+        manifest.authority.holds.allow = Some(vec!["FS".to_string()]);
+        let entries = [PackageEffects {
+            name: "dep".to_string(),
+            effects: EffectSet::from(["Net".to_string()]),
+            panic_sites: Vec::new(),
+            boundary_span: None,
+        }];
+
+        let diagnostics = enforce(&entries, &manifest);
+        assert_eq!(diagnostics.len(), 1);
+        assert!(diagnostics[0].fix.contains("authority.holds.allow"));
+
+        manifest.authority.grants = vec![("dep".to_string(), vec!["Net".to_string()])];
+        assert!(enforce(&entries, &manifest).is_empty());
+    }
 }

@@ -840,8 +840,8 @@ impl<'a> Interp<'a> {
             };
             return Err(comptime_panic(&msg, span));
         }
-        if name == "require" || name == "require_eq" {
-            return self.eval_require(name, args, span, scope);
+        if name == "assert" || name == "assert_eq" {
+            return self.eval_assertion(name, args, span, scope);
         }
         // D-CONC-FREEZE1=A: comptime values are already owned snapshots. The
         // evaluator returns the value by value, preserving freeze's identity
@@ -1440,14 +1440,14 @@ impl<'a> Interp<'a> {
         }
     }
 
-    fn eval_require(
+    fn eval_assertion(
         &mut self,
         name: &str,
         args: &[crate::AST::CallArg],
         span: Span,
         scope: &mut HashMap<String, CtValue>,
     ) -> Result<CtValue, Diagnostic> {
-        if name == "require_eq" {
+        if name == "assert_eq" {
             let a = self.eval(&args[0].expr, scope)?;
             let b = self.eval(&args[1].expr, scope)?;
             if a != b {

@@ -548,15 +548,6 @@ fn jet_jit_env_config(prefix: i64, file: i64, allow: i64) -> i64 {
     result_ok(carrier as u64)
 }
 
-fn env_config_secret_path(path: &str) -> bool {
-    path.split(['.', '[', ']']).any(|segment| {
-        matches!(
-            segment.to_ascii_lowercase().as_str(),
-            "secret" | "password" | "token" | "key"
-        )
-    })
-}
-
 fn clone_env_config_origins(handle: i64) -> Vec<(String, String)> {
     Concurrency::with_runtime_mut(|rt| {
         let len = rt.heap.list_len(handle).unwrap_or(0);
@@ -583,19 +574,8 @@ fn jet_jit_env_config_map(result: i64, origins: i64) -> i64 {
         .into_iter()
         .map(|mut error| {
             let path = error.path.clone();
-            let origin = origins
-                .iter()
-                .find(|(_, mapped)| mapped.eq_ignore_ascii_case(&path))
-                .map(|(name, _)| name.as_str());
-            let reason = if env_config_secret_path(&path) {
-                "secret value rejected".to_string()
-            } else {
-                error.reason
-            };
-            error.reason = match origin {
-                Some(name) => format!("E2416: env var {name} -> {path}: {reason}"),
-                None => format!("E2416: config field {path}: {reason}"),
-            };
+            let reason = std::mem::take(&mut error.reason);
+            error.reason = env_config_rt::jet_env_config_error_reason(&path, &reason, &origins);
             error
         })
         .collect();

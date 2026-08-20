@@ -1423,8 +1423,8 @@ impl<'a> Checker<'a> {
                             self.diags.push(Diagnostic::lint(
                                 "L0508",
                                 "this arrow loop body computes a value and drops it".to_string(),
-                                "a statement-position loop arrow discards its body's value; use a value loop to collect results or a write handle to update the source".to_string(),
-                                "bind the loop with `::` to collect its values, or write `loop v, &values -> v *= 2` to update in place".to_string(),
+                                "a statement-position loop arrow discards its body's value; the loop takes write access (&) for items when it updates the source".to_string(),
+                                "bind the loop with `::` to collect its values, or write `loop v, &values -> v *= 2` so it takes write access (&) for items".to_string(),
                                 Some(expr.span()),
                             ));
                         }

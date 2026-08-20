@@ -1,7 +1,7 @@
-// D-CONFIG-ENV1 / I9: the source-order, prefix, allowlist, and dotenv rules
-// are shared by generated AOT programs and the resident interpreter. Each
-// engine supplies its own logical environment snapshot and marshals these
-// entries into its existing DataTree carrier.
+// D-CONFIG-ENV1 / I9: the source-order, prefix, allowlist, dotenv, and error
+// framing rules are shared by every execution tier. Each engine supplies its
+// logical environment snapshot and marshals these entries into its existing
+// DataTree carrier.
 
 #[derive(Clone, Debug)]
 pub(crate) struct JetEnvConfigEntry {
@@ -23,8 +23,8 @@ pub(crate) fn jet_env_config_file_is_project_relative(file: &str) -> bool {
 /// Environment field segments are folded to lowercase before they enter the
 /// existing decoder. This is the case-insensitive env-to-field rule: ordinary
 /// Jet record fields use their canonical lowercase spelling, while the source
-/// key may use any ASCII case. Process values replace dotenv values by the
-/// case-folded environment name.
+/// key may use any ASCII case. The prefix is folded the same way. Process
+/// values replace dotenv values by the case-folded environment name.
 pub(crate) fn jet_env_config_entries(
     prefix: &str,
     dotenv: Option<&str>,
@@ -66,7 +66,10 @@ pub(crate) fn jet_env_config_entries(
 
     let mut entries = Vec::new();
     for (_, (name, value)) in values {
-        let Some(rest) = name.strip_prefix(prefix) else {
+        let Some(rest) = name
+            .get(prefix.len()..)
+            .filter(|_| name[..prefix.len()].eq_ignore_ascii_case(prefix))
+        else {
             continue;
         };
         if rest.is_empty() {
@@ -87,6 +90,40 @@ pub(crate) fn jet_env_config_entries(
         });
     }
     Ok(entries)
+}
+
+/// Frame one existing codec error with its source environment variable.
+///
+/// The decoder remains the sole validator. This helper only adds provenance
+/// and applies the shared secret-path redaction rule before an engine renders
+/// the error in its own result carrier.
+pub(crate) fn jet_env_config_error_reason(
+    path: &str,
+    reason: &str,
+    origins: &[(String, String)],
+) -> String {
+    let reason = if jet_env_config_secret_path(path) {
+        "secret value rejected"
+    } else {
+        reason
+    };
+    let origin = origins
+        .iter()
+        .find(|(_, mapped)| mapped.eq_ignore_ascii_case(path))
+        .map(|(name, _)| name.as_str());
+    match origin {
+        Some(name) => format!("E2416: env var {name} -> {path}: {reason}"),
+        None => format!("E2416: config field {path}: {reason}"),
+    }
+}
+
+fn jet_env_config_secret_path(path: &str) -> bool {
+    path.split(['.', '[', ']']).any(|segment| {
+        matches!(
+            segment.to_ascii_lowercase().as_str(),
+            "secret" | "password" | "token" | "key"
+        )
+    })
 }
 
 fn jet_env_config_name_is_valid(name: &str) -> bool {

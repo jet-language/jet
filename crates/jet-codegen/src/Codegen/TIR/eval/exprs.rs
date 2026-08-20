@@ -97,6 +97,11 @@ impl crate::option_lift2::JetOptionValue for EvalOptionValue {
     }
 }
 
+#[allow(dead_code)]
+mod env_config_prelude {
+    include!("../../../Prelude/Core/EnvConfig.rs");
+}
+
 mod codec_rt {
     pub(crate) mod jet_std {
         pub(crate) type JetDecimal = jet_foundation::Numeric::CtDecimal;
@@ -865,15 +870,6 @@ fn decode_error(path: impl Into<String>, reason: impl Into<String>) -> CtValue {
     }])
 }
 
-fn env_config_secret_path(path: &str) -> bool {
-    path.split(['.', '[', ']']).any(|segment| {
-        matches!(
-            segment.to_ascii_lowercase().as_str(),
-            "secret" | "password" | "token" | "key"
-        )
-    })
-}
-
 fn env_config_map_error(error: CtValue, origins: &[(String, String)]) -> CtValue {
     let CtValue::List(errors) = error else {
         return error;
@@ -905,19 +901,9 @@ fn env_config_map_error(error: CtValue, origins: &[(String, String)]) -> CtValue
                     return CtValue::Struct { type_name, fields };
                 };
                 let reason = reason.unwrap_or_default();
-                let reason = if env_config_secret_path(&path) {
-                    "secret value rejected".to_string()
-                } else {
-                    reason
-                };
-                let origin = origins
-                    .iter()
-                    .find(|(_, mapped)| mapped.eq_ignore_ascii_case(&path))
-                    .map(|(name, _)| name.as_str());
-                let reason = match origin {
-                    Some(name) => format!("E2416: env var {name} -> {path}: {reason}"),
-                    None => format!("E2416: config field {path}: {reason}"),
-                };
+                let reason = env_config_prelude::jet_env_config_error_reason(
+                    &path, &reason, origins,
+                );
                 if let Some((_, value)) = fields.iter_mut().find(|(name, _)| name == "reason") {
                     *value = CtValue::Str(reason);
                 }

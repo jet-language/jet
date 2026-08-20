@@ -8,7 +8,7 @@
 //! registry. This pass is the single owner of both shapes:
 //!
 //! - E0614 — unknown member (lists the vocabulary), or a member used inside a
-//!   marker that declares none (e.g. `#Bench`).
+//!   marker that declares none.
 //! - E0615 — a member statement outside any member-declaring marker block.
 //! - E0616 — `.setup` is not the first statement.
 //! - E0617 — wrong argument shape (`.timeout` needs one duration value; `.setup` /
@@ -19,7 +19,7 @@
 //!
 //! Everything here is compile-time only (I3): the checker recurses into member
 //! bodies for ordinary type-checking, and codegen lowers the members into the
-//! `jet test` harness. `#Test`/`#Bench` bodies are validated only under their
+//! `jet test` harness. `#Test` bodies are validated only under their
 //! own modes (they are not compiled otherwise, mirroring the rest of sema).
 
 use crate::Diagnostics::{Diagnostic, Span};

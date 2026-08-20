@@ -974,29 +974,12 @@ fn jet_std_env_decode<T: __jet_Decode>(
                 .into_iter()
                 .map(|mut error| {
                     let path = error.path.clone();
-                    let origin = origins
-                        .iter()
-                        .find(|(_, mapped)| mapped.eq_ignore_ascii_case(&path))
-                        .map(|(name, _)| name.as_str());
-                    let reason = if jet_env_secret_path(&path) {
-                        "secret value rejected".to_string()
-                    } else {
-                        error.reason
-                    };
-                    error.reason = match origin {
-                        Some(name) => format!("E2416: env var {name} -> {path}: {reason}"),
-                        None => format!("E2416: config field {path}: {reason}"),
-                    };
+                    let reason = std::mem::take(&mut error.reason);
+                    error.reason = jet_env_config_error_reason(&path, &reason, &origins);
                     error
                 })
                 .collect()
         })
-}
-
-fn jet_env_secret_path(path: &str) -> bool {
-    path.split(['.', '[', ']']).any(|segment| {
-        matches!(segment.to_ascii_lowercase().as_str(), "secret" | "password" | "token" | "key")
-    })
 }
 
 fn jet_env_insert_tree(tree: &mut jet_std::DataTree, segments: &[String], value: String) {

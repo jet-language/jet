@@ -38,6 +38,19 @@ fn is_bare_member_chain(expr: &Expr) -> bool {
     }
 }
 
+fn bare_member_chain_text(expr: &Expr) -> String {
+    match expr {
+        Expr::Ident(name, _) if name.is_empty() => String::new(),
+        Expr::Field(inner, member, _) => {
+            format!("{}.{member}", bare_member_chain_text(inner))
+        }
+        Expr::MethodCall {
+            receiver, method, ..
+        } => format!("{}.{}(…)", bare_member_chain_text(receiver), method),
+        _ => ".member".to_string(),
+    }
+}
+
 fn replace_bare_member_subject(expr: &mut Expr) {
     match expr {
         Expr::Ident(name, _) if name.is_empty() => *name = BARE_MEMBER_SUBJECT.to_string(),
@@ -1745,6 +1758,26 @@ impl<'a> Checker<'a> {
                     meta: LambdaMeta::default(),
                 });
                 return self.infer(e);
+            }
+        }
+
+        // D-SUBJECT-CALL1=A: a lower-case bare member chain has meaning only
+        // as the shorthand for a unary callable. Keep ordinary value contexts
+        // distinct from `.new(...)` and uppercase variant inference.
+        if is_bare_member_chain(e) {
+            // The workspace is not on Rust 2024, so a `let` chain does not
+            // compile here. Nest the guard instead; the meaning is unchanged.
+            if let Some(expected) = self.expected_type.clone() {
+                if !matches!(expected, Type::Fn { .. }) {
+                    let expected_name = expected.name();
+                    let chain = bare_member_chain_text(e);
+                    self.diags.push(Diagnostic::from_row(
+                        "E-SUBJECT-CALL",
+                        &[("expected", expected_name.as_str()), ("chain", chain.as_str())],
+                        Some(e.span()),
+                    ));
+                    return None;
+                }
             }
         }
 

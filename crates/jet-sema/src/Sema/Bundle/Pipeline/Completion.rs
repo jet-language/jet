@@ -205,13 +205,8 @@ pub(super) fn complete_bundle_check(
                 None,
             ));
         }
-        // `jet bench` checks the AST for `#Bench` blocks before entering Bench
-        // mode and falls back to whole-program timing otherwise, so an empty
-        // bench set is never an error here.
-        CompileMode::Bench
-        | CompileMode::Test
+        CompileMode::Test
         | CompileMode::TestOverride
-        | CompileMode::BenchOverride
         | CompileMode::Run
         | CompileMode::Check
         | CompileMode::Eval => {}

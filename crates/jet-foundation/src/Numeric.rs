@@ -23,12 +23,19 @@ pub fn is_money_like_name(name: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::is_money_like_name;
+    use super::{is_money_like_name, CtFraction};
 
     #[test]
     fn total_is_not_assumed_to_mean_money() {
         assert!(!is_money_like_name("total"));
         assert!(is_money_like_name("total_price"));
+    }
+
+    #[test]
+    fn fractions_use_decimal_display_only_when_finite() {
+        assert_eq!(CtFraction::new(7, 2).unwrap().to_string_rep(), "3.5");
+        assert_eq!(CtFraction::new(-1, 8).unwrap().to_string_rep(), "-0.125");
+        assert_eq!(CtFraction::new(1, 3).unwrap().to_string_rep(), "1/3");
     }
 }
 
@@ -124,6 +131,9 @@ impl CtFraction {
     }
 
     pub fn to_string_rep(&self) -> String {
+        if let Some(decimal) = finite_decimal(self.numerator, self.denominator) {
+            return decimal;
+        }
         format!("{}/{}", self.numerator, self.denominator)
     }
 
@@ -156,6 +166,57 @@ impl CtFraction {
             }
         }
         Ok(Self { numerator, denominator })
+    }
+}
+
+/// Render a word-sized ratio as a finite decimal when its reduced denominator
+/// has no prime factors other than 2 and 5. Long division keeps the formatter
+/// exact without multiplying into a wider-than-word temporary.
+fn finite_decimal(numerator: i64, denominator: i64) -> Option<String> {
+    if denominator <= 0 {
+        return None;
+    }
+    if numerator == 0 {
+        return Some("0".to_string());
+    }
+
+    let mut factors = denominator as u64;
+    let mut twos = 0u32;
+    while factors % 2 == 0 {
+        factors /= 2;
+        twos += 1;
+    }
+    let mut fives = 0u32;
+    while factors % 5 == 0 {
+        factors /= 5;
+        fives += 1;
+    }
+    if factors != 1 {
+        return None;
+    }
+
+    let scale = twos.max(fives);
+    let denominator = denominator as u128;
+    let mut remainder = numerator.unsigned_abs() as u128 % denominator;
+    let whole = numerator.unsigned_abs() as u128 / denominator;
+    let sign = if numerator < 0 { "-" } else { "" };
+    if scale == 0 {
+        return Some(format!("{sign}{whole}"));
+    }
+
+    let mut fraction = String::with_capacity(scale as usize);
+    for _ in 0..scale {
+        remainder *= 10;
+        fraction.push(char::from(b'0' + (remainder / denominator) as u8));
+        remainder %= denominator;
+    }
+    while fraction.ends_with('0') {
+        fraction.pop();
+    }
+    if fraction.is_empty() {
+        Some(format!("{sign}{whole}"))
+    } else {
+        Some(format!("{sign}{whole}.{fraction}"))
     }
 }
 

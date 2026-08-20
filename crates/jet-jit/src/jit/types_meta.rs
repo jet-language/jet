@@ -258,7 +258,7 @@ pub(crate) fn clif_ty_with_distinct(
     if matches!(&ty, Type::Named(n)
         if matches!(
             n.as_str(),
-            "Arena" | "Bump" | "Pool" | "Fixed" | "Solver" | jet_foundation::Syntax::TYPE_BITS | jet_foundation::Syntax::TYPE_BYTES | "Mod" | "ModGrant" | "Hasher" | "TestSuite" | "BenchSuite"
+            "Arena" | "Bump" | "Pool" | "Fixed" | "Solver" | jet_foundation::Syntax::TYPE_BITS | jet_foundation::Syntax::TYPE_BYTES | "Mod" | "ModGrant" | "Hasher" | "TestSuite"
         ))
     {
         return Some(types::I64);
@@ -1384,7 +1384,7 @@ static CORE_STRUCT_FIELDS: &[(&[&str], &[&str])] = &[
     (&["LogSpan"], &["id", "name"]),
     (&["Rng"], &["state"]),
     (&["Fake"], &["state", "locale"]),
-    (&["TestSuite", "BenchSuite"], &["iteration", "result"]),
+    (&["TestSuite"], &["iteration", "result"]),
     (
         &["TLSCertificate"],
         &[

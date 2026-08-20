@@ -37,7 +37,6 @@ impl<'a> Checker<'a> {
                 return true;
             }
             match ty {
-                Type::InlineRange { base, .. } => visit(checker, base, active),
                 Type::Tagged { inner, .. } => visit(checker, inner, active),
                 Type::Tuple(fields) => fields
                     .iter()

@@ -571,7 +571,7 @@ pub(crate) fn handle_method_return_ty(
     if let Some(ret) = resolved_ret {
         return ret.clone();
     }
-    if matches!(handle, "TestSuite" | "BenchSuite") && method == "run" && nargs == 0 {
+    if handle == "TestSuite" && method == "run" && nargs == 0 {
         return Type::Int;
     }
     let span = crate::Diagnostics::Span { start: 0, end: 0 };

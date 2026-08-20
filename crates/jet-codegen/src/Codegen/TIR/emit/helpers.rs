@@ -530,7 +530,7 @@ pub(crate) fn emit_require_stop(
             let msg_s = emit_panic_message_expr(msg, cx);
             // D-PROOF / proof-replay-decisions: `panic(...)` is an uncaught
             // runtime stop (E3001 / exit 70) even inside `#Test`. Only
-            // `require` / `require_eq` are caught harness assertions.
+            // `assert` / `assert_eq` are caught harness assertions.
             format!(
                 "{{ {cleanup} jet_panic_rich({file}, {line}, {fn_name_esc}, {src_line_esc}, {col}, {caret}, &{msg_s}, &if cfg!(debug_assertions) {{ {locals} }} else {{ String::new() }}); }}",
                 cleanup = RESOURCE_CLEANUP_MARKER,

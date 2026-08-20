@@ -68,7 +68,6 @@ pub fn is_map_key_type(ty: &Type) -> bool {
     match ty {
         Type::Int | Type::Bool | Type::String | Type::Char | Type::IntN { .. } => true,
         Type::Tuple(fields) => fields.iter().all(|(_, field)| is_map_key_type(field)),
-        Type::InlineRange { base, .. } => is_map_key_type(base),
         _ => false,
     }
 }
@@ -300,7 +299,7 @@ pub fn builtin_method_return(
             _ => None,
         },
         Type::Named(n) if n == "Stopwatch" => stopwatch_method_return(method, arg_count),
-        Type::Named(n) if matches!(n.as_str(), "TestSuite" | "BenchSuite") => {
+        Type::Named(n) if n == "TestSuite" => {
             (method == "run" && arg_count == 0).then_some(Some(Type::Int))
         }
         Type::Named(n) if n == Syntax::TYPE_RANGE => match (method, arg_count) {

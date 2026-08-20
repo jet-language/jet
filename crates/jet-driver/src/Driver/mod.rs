@@ -5714,8 +5714,8 @@ pub fn compile_test_override(
 
 /// D-TESTKIT1=A (c308 pass 2, gap #1): a CLI-level error selecting the `jet
 /// fuzz` target — no property test, an ambiguous set, or a named test that
-/// doesn't exist / isn't a property test. Same tier as `run_bench`'s "can't
-/// find the file" message: argument validation, not a compiler diagnostic.
+/// doesn't exist / isn't a property test. Same tier as a CLI argument error's
+/// "can't find the file" message: argument validation, not a compiler diagnostic.
 pub enum FuzzCompileError {
     Diagnostics(Vec<Diagnostic>),
     Target(String),
@@ -5980,44 +5980,6 @@ pub fn swap_entry_point(bundle: &mut crate::AST::ProgramBundle, entry_fn: &str) 
     }));
 }
 
-/// Bench pipeline.
-pub fn compile_benches(
-    file: &str,
-) -> Result<(String, Option<crate::FFI::FfiLink>), Vec<Diagnostic>> {
-    crate::run_compiler_work(|| compile_benches_on_compiler_stack(file))
-}
-
-fn compile_benches_on_compiler_stack(
-    file: &str,
-) -> Result<(String, Option<crate::FFI::FfiLink>), Vec<Diagnostic>> {
-    let mut bundle = crate::Loader::load_entry_with_overlay(file, None, false)?;
-    let diags = crate::Sema::check_bundle(&mut bundle, crate::Sema::CompileMode::Bench);
-    let parse_teaching = std::mem::take(&mut bundle.parse_teaching);
-    let _lints = classify_diagnostics(
-        &bundle,
-        parse_teaching
-            .into_iter()
-            .chain(diags)
-            .collect(),
-        false,
-    )?;
-    let ffi = match crate::FFI::prepare(&bundle) {
-        Ok(link) => link,
-        Err(ffi_diags) => return Err(ffi_diags),
-    };
-    Ok((
-        crate::Codegen::emit_bundle_benches(&bundle, ffi.as_ref()),
-        ffi,
-    ))
-}
-
-/// D-CMD-OVERRIDE1=C: compile an expert `fn bench(...)` command override.
-pub fn compile_bench_override(
-    file: &str,
-) -> Result<(String, Option<crate::FFI::FfiLink>), Vec<Diagnostic>> {
-    compile_command_override(file, crate::Codegen::CommandOverrideKind::Bench, false)
-}
-
 fn compile_command_override(
     file: &str,
     kind: crate::Codegen::CommandOverrideKind,
@@ -6037,7 +5999,6 @@ fn compile_command_override_on_compiler_stack(
     swap_command_entry_point(&mut bundle, kind);
     let mode = match kind {
         crate::Codegen::CommandOverrideKind::Test => crate::Sema::CompileMode::TestOverride,
-        crate::Codegen::CommandOverrideKind::Bench => crate::Sema::CompileMode::BenchOverride,
     };
     let diags = crate::Sema::check_bundle(&mut bundle, mode);
     let parse_teaching = std::mem::take(&mut bundle.parse_teaching);
@@ -6064,8 +6025,8 @@ fn compile_command_override_on_compiler_stack(
 
 /// D-CMD-OVERRIDE1=C: install the command override as the program entry.
 ///
-/// `fn test(suite: TestSuite)` / `fn bench(suite: BenchSuite)` own command
-/// policy, but Jet's only entry is `fn run` (S12), so park any existing one as
+/// `fn test(suite: TestSuite)` owns command policy, but Jet's only entry is
+/// `fn run` (S12), so park any existing one as
 /// `__jet___unused_run` (still callable under that name) and inject
 /// `fn run() { test(core.testing.test_suite()) }` — zero params, built from the
 /// target's own first-parameter convention so the suite is passed exactly as
@@ -6087,7 +6048,6 @@ fn swap_command_entry_point(
     let run_fn = crate::Codegen::ENTRY_FN;
     let (entry_name, suite_name, suite_method) = match kind {
         crate::Codegen::CommandOverrideKind::Test => ("test", "TestSuite", "test_suite"),
-        crate::Codegen::CommandOverrideKind::Bench => ("bench", "BenchSuite", "bench_suite"),
     };
     let entry_module = &mut bundle.modules[bundle.entry];
     let Some(target) = entry_module.items.iter().find_map(|item| match item {

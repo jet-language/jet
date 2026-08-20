@@ -48,7 +48,7 @@ fn write_window_at_maximal_place(expr: Expr, start: usize) -> Expr {
 /// D-CONC-SHARE1=A: decide whether `shared` opens a shared-cell construction
 /// (`shared expr`) or is an ordinary identifier. The keyword is contextual, so
 /// this is a closed allow-list of tokens that begin the constructed value —
-/// a name, a literal, a list/typed literal, or a parenthesised value. Anything
+/// a name, a literal, a list/typed literal, or an inferred brace literal. Anything
 /// else (a binding sigil, an operator, a `.`, a separator, a call `(`) leaves
 /// `shared` as a plain name, which keeps existing bindings and arguments
 /// spelled `shared` legal.
@@ -65,6 +65,7 @@ pub(super) fn starts_shared_operand(kind: &TokKind) -> bool {
             | TokKind::KwFalse
             | TokKind::KwSelf
             | TokKind::LBracket
+            | TokKind::LBrace
     )
 }
 

@@ -696,7 +696,7 @@ pub const JOB_SCOPE_VARIANTS: &[&str] = &["Dev", "Ship", "Internal"];
 
 /// D-JPK-TASKRUN1=A / D-CMD-OVERRIDE1=C: lifecycle verbs a `#Job fn` must not
 /// reuse — they already name Jet's built-in entry points (`fn run`/`fn dev`/
-/// `fn build`/`fn test`/`fn bench`).
+/// `fn build`/`fn test`).
 /// Sema rejects a collision as E0928.
 pub const JOB_RESERVED_LIFECYCLE: &[&str] = &["run", "dev", "build", "test", "bench"];
 
@@ -741,9 +741,9 @@ pub const MARKER_EVERY: &str = "Every";
 /// D-DOTSCOPE1: the scope-member vocabulary an applied-rule block declares, or
 /// `None` if the marker declares no members. Each marker that grows a member
 /// vocabulary is added here (an API decision, not a syntax one — the `.name { }`
-/// grammar is fixed). `#Test` is the only marker with members today; `#Bench`
-/// (and every other block marker) declares none, so a member statement inside
-/// it is rejected against this empty vocabulary.
+/// grammar is fixed). `#Test` is the only marker with members today; every
+/// other block marker declares none, so a member statement inside it is
+/// rejected against this empty vocabulary.
 pub fn scope_members(marker: &str) -> Option<&'static [&'static str]> {
     match marker {
         KW_TEST => Some(&[

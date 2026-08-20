@@ -1740,7 +1740,6 @@ impl TraitRegistry {
             "Stat",
             "Stopwatch",
             "TestSuite",
-            "BenchSuite",
             "TcpListener",
             "TcpStream",
             "TDigest",

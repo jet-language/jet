@@ -197,7 +197,7 @@ pub(crate) struct Cx {
     /// ABI calls distinct from calls into the package's public surface.
     pub(crate) module_alias: String,
     pub(crate) core_archive_source: bool,
-    /// When true, `require`/`require_eq` unwind instead of exiting (test bodies).
+    /// When true, `assert`/`assert_eq` unwind instead of exiting (test bodies).
     pub(crate) test_mode: bool,
     /// D-COV1: `jet test --coverage`. When true, emitted user function heads and
     /// control-flow decisions get probes and the harness carries the recorder +
@@ -473,7 +473,6 @@ pub(crate) fn core_rust_type_name(name: &str) -> Option<&'static str> {
         "EventConfigError" => Some("JetEventConfigError"),
         "Stopwatch" => Some("Stopwatch"),
         "TestSuite" => Some("JetTestSuite"),
-        "BenchSuite" => Some("JetBenchSuite"),
         // D-DET1: deterministic injected capability handles.
         "Clock" => Some("Clock"),
         "Rng" => Some("Rng"),

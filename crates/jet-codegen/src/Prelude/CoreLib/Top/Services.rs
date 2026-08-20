@@ -2150,7 +2150,7 @@ fn jet_services_send_durable(
     endpoint: &JetServiceEndpoint,
     message: String,
     idempotency_key: String,
-) -> Result<(), JetServiceError> {
+) -> Result<JetServiceReceipt, JetServiceError> {
     if tree.delivery != JetServiceDelivery::DurableAtLeastOnce {
         return Err(JetServiceError::Policy(
             "send_durable requires DurableAtLeastOnce delivery".to_string(),
@@ -2193,7 +2193,7 @@ fn jet_services_send_durable(
         .iter()
         .any(|id| id == &local_id)
     {
-        return Ok(());
+        return Ok(JetServiceReceipt::Executed(local_id));
     }
     match jet_services_runtime_send(&runtime, endpoint, &message, &idempotency_key)? {
         JetServiceReceipt::Enqueued(id) => {
@@ -2247,20 +2247,18 @@ fn jet_services_send_durable(
                 tree.idempotency_seen
                     .push((idempotency_key, endpoint.clone(), message));
             }
-            Ok(())
+            Ok(JetServiceReceipt::Enqueued(id))
         }
-        JetServiceReceipt::Executed(_) => Ok(()),
-        JetServiceReceipt::Retained { .. } => Ok(()),
+        receipt @ JetServiceReceipt::Executed(_) => Ok(receipt),
+        receipt @ JetServiceReceipt::Retained { .. } => Ok(receipt),
         JetServiceReceipt::DeadLettered(id) => {
             if tree.dead_letters.len() < MAX_SERVICE_DEAD_LETTERS {
                 tree.dead_letters.push(id.clone());
             }
-            Err(JetServiceError::Unavailable(format!(
-                "durable service delivery dead-lettered: {id}"
-            )))
+            Ok(JetServiceReceipt::DeadLettered(id))
         }
-        JetServiceReceipt::Rejected(reason) => Err(JetServiceError::Policy(reason)),
-        JetServiceReceipt::Unavailable(reason) => Err(JetServiceError::Unavailable(reason)),
+        receipt @ JetServiceReceipt::Rejected(_) => Ok(receipt),
+        receipt @ JetServiceReceipt::Unavailable(_) => Ok(receipt),
     }
 }
 

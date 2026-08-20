@@ -2270,13 +2270,14 @@ impl Type {
         }
     }
 
-    /// Bounds projected from the interval plane for a fixed-width integer
-    /// carrier. Exact `Int` has no finite static bounds.
+    /// Bounds projected from the interval plane for an integer carrier.
+    /// Exact `Int` has no finite static bounds.
     pub fn integer_range(&self) -> Option<(i128, i128)> {
         match self {
             Type::Int => None,
-            Type::IntN { .. } => self.knowledge_vector().interval_i128(),
-            Type::InlineRange { lo, hi, .. } => Some((i128::from(*lo), i128::from(*hi))),
+            Type::IntN { .. } | Type::InlineRange { .. } => {
+                self.knowledge_vector().interval_i128()
+            }
             Type::Tagged { inner, .. } => inner.integer_range(),
             _ => None,
         }
@@ -2676,6 +2677,28 @@ mod tests {
                 KnowledgeFact::Measure(Measure::Literal { kind, value })
                     if kind == "lane" && *value == 4
             )));
+    }
+
+    #[test]
+    fn integer_range_reads_the_interval_plane_for_widths_and_ranges() {
+        // D-TYPE2-REFINE1: sized widths and user ranges share one interval fact.
+        let width = Type::IntN {
+            signed: false,
+            bits: 8,
+        };
+        let range = Type::InlineRange {
+            base: Box::new(Type::Int),
+            lo: 1,
+            hi: 6,
+        };
+
+        for (ty, expected) in [
+            (&width, (0_i128, 255_i128)),
+            (&range, (1_i128, 6_i128)),
+        ] {
+            assert_eq!(ty.knowledge_vector().interval_i128(), Some(expected));
+            assert_eq!(ty.integer_range(), Some(expected));
+        }
     }
 
     #[test]

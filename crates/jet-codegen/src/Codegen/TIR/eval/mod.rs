@@ -3987,7 +3987,6 @@ fn insert_core_struct_field_types(
             &["operation", "resource", "os_code", "cause"],
         ),
         ("TestSuite", &["iteration", "result"]),
-        ("BenchSuite", &["iteration", "result"]),
         (
             "TLSCertificate",
             &[

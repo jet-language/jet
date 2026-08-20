@@ -1171,6 +1171,15 @@ impl<'a> Parser<'a> {
                 self.bump();
             }
             let (name, span) = self.expect_effect_path_name("for an effect name")?;
+            if !prohibited && name.contains('(') {
+                return Err(Diagnostic::error(
+                    "E0119",
+                    format!("`{name}` is only valid as a memory denial"),
+                    "the `above: Bytes` argument parameterizes a prohibition, not a positive effect bound".to_string(),
+                    format!("write `:[!{name}]>`"),
+                    Some(span),
+                ));
+            }
             effects.push((if prohibited { format!("!{name}") } else { name }, span));
             if matches!(self.peek().kind, TokKind::RBracket) {
                 break;

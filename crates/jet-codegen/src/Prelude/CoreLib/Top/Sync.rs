@@ -1105,6 +1105,20 @@ fn jet_sync_decode_error(message: impl Into<String>) -> Vec<jet_std::FieldError>
     jet_std::FieldError::one(message)
 }
 
+/// Invalid CRDT carriers are an absorbing denial state.  Their codec marker
+/// must round-trip that state instead of turning it into an ordinary shape
+/// error, otherwise a denied value could become an apparent decode failure at
+/// a tier boundary and lose the carrier's algebraic identity.
+fn jet_sync_is_invalid_marker(tree: &jet_std::DataTree) -> bool {
+    matches!(
+        tree,
+        jet_std::DataTree::Object(fields)
+            if fields.len() == 1
+                && fields[0].0 == "invalid"
+                && matches!(&fields[0].1, jet_std::DataTree::Bool(true))
+    )
+}
+
 fn jet_sync_object<'a>(
     tree: &'a jet_std::DataTree,
     expected: &[&str],
@@ -1256,6 +1270,12 @@ impl __jet_Encode for JetSyncText {
 
 impl __jet_Decode for JetSyncText {
     fn jet_decode(tree: &jet_std::DataTree) -> Result<Self, Vec<jet_std::FieldError>> {
+        if jet_sync_is_invalid_marker(tree) {
+            return Ok(JetSyncText {
+                atoms: Vec::new(),
+                valid: false,
+            });
+        }
         let fields = jet_sync_object(tree, &["atoms"], "SyncText")?;
         let values = jet_sync_decode_array(
             jet_sync_object_field(fields, "atoms", "SyncText")?,
@@ -1428,6 +1448,12 @@ impl __jet_Encode for JetSyncCounter {
 
 impl __jet_Decode for JetSyncCounter {
     fn jet_decode(tree: &jet_std::DataTree) -> Result<Self, Vec<jet_std::FieldError>> {
+        if jet_sync_is_invalid_marker(tree) {
+            return Ok(JetSyncCounter {
+                counts: Vec::new(),
+                valid: false,
+            });
+        }
         let fields = jet_sync_object(tree, &["counts"], "SyncCounter")?;
         let values = jet_sync_decode_array(
             jet_sync_object_field(fields, "counts", "SyncCounter")?,
@@ -1535,6 +1561,12 @@ impl __jet_Encode for JetSyncMap {
 
 impl __jet_Decode for JetSyncMap {
     fn jet_decode(tree: &jet_std::DataTree) -> Result<Self, Vec<jet_std::FieldError>> {
+        if jet_sync_is_invalid_marker(tree) {
+            return Ok(JetSyncMap {
+                entries: Vec::new(),
+                valid: false,
+            });
+        }
         let fields = jet_sync_object(tree, &["entries"], "SyncMap")?;
         let values = jet_sync_decode_array(
             jet_sync_object_field(fields, "entries", "SyncMap")?,
@@ -1647,6 +1679,12 @@ impl __jet_Encode for JetSyncList {
 
 impl __jet_Decode for JetSyncList {
     fn jet_decode(tree: &jet_std::DataTree) -> Result<Self, Vec<jet_std::FieldError>> {
+        if jet_sync_is_invalid_marker(tree) {
+            return Ok(JetSyncList {
+                items: Vec::new(),
+                valid: false,
+            });
+        }
         let fields = jet_sync_object(tree, &["items"], "SyncList")?;
         let values = jet_sync_decode_array(
             jet_sync_object_field(fields, "items", "SyncList")?,
@@ -1745,6 +1783,12 @@ where
     V: __jet_Decode + __jet_Encode,
 {
     fn jet_decode(tree: &jet_std::DataTree) -> Result<Self, Vec<jet_std::FieldError>> {
+        if jet_sync_is_invalid_marker(tree) {
+            return Ok(JetSyncMapGeneric {
+                entries: Vec::new(),
+                valid: false,
+            });
+        }
         let fields = jet_sync_object(tree, &["entries"], "SyncMap")?;
         let values = jet_sync_decode_array(
             jet_sync_object_field(fields, "entries", "SyncMap")?,
@@ -1867,6 +1911,12 @@ where
     T: __jet_Decode + __jet_Encode,
 {
     fn jet_decode(tree: &jet_std::DataTree) -> Result<Self, Vec<jet_std::FieldError>> {
+        if jet_sync_is_invalid_marker(tree) {
+            return Ok(JetSyncListGeneric {
+                items: Vec::new(),
+                valid: false,
+            });
+        }
         let fields = jet_sync_object(tree, &["items"], "SyncList")?;
         let values = jet_sync_decode_array(
             jet_sync_object_field(fields, "items", "SyncList")?,
