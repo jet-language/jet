@@ -306,6 +306,14 @@ impl<'a> EvalCtx<'a> {
             let argv = views.into_iter().map(|(_, view)| view).collect();
             let callable = self.eval_expr(&args[1], scope)?;
             let _ = self.call_callable_in_scope(&callable, argv, scope)?;
+            // D-MEMDISJOINT1=A / I9: `jet_edit_disjoint` lends the owner's own
+            // storage (`&mut xs`) to the callback, so a write through either
+            // lent view IS a write to the owner. The callable runs over a clone
+            // of this scope and only its *lexical* captures are synced back;
+            // the owner is reached through the view handle by name, never
+            // captured, so publish it explicitly or every edit is discarded
+            // while AOT and the resident JIT keep it.
+            self.sync_callable_lent_owner(&callable, &base_name, scope);
             return Ok(CtValue::Present(Box::new(CtValue::Unit)));
         }
         let mut recv_v = self.eval_expr_child(recv, scope)?;
