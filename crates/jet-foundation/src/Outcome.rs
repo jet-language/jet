@@ -108,6 +108,15 @@ struct JourneyFrame {
     line: u32,
 }
 
+impl JourneyFrame {
+    /// The one site-equality rule behind hop collapse: same function, same
+    /// file, same line. A fresh `?` and a hop carried in from another thread
+    /// both ask this, so `×N` cannot mean two things.
+    fn same_site(&self, file: &str, line: u32, fn_name: &str) -> bool {
+        self.line == line && self.fn_name == fn_name && self.file == file
+    }
+}
+
 /// One trail line: a `?` site, the note that hop carried, and how many
 /// consecutive hops it stands for. A site that re-propagates keeps one line
 /// and counts the repeats (`×N`) instead of printing the same line again — the
@@ -140,8 +149,147 @@ pub fn jet_journey_reset() {
 
 /// Drain the accumulated hops as E3002's rendered trail block, or an empty
 /// string when the failure never crossed a `?`.
+///
+/// Plain on purpose. The generated wasm store puts this string into JSON, where
+/// ANSI and a column budget are both wrong. The terminal form of the same block
+/// is [`jet_journey_report`].
 pub fn jet_journey_take() -> String {
-    JET_JOURNEY_HOPS.with(|hops| jet_journey_trail(&std::mem::take(&mut *hops.borrow_mut())))
+    jet_journey_take_styled(JetReportStyle::PLAIN)
+}
+
+fn jet_journey_take_styled(style: JetReportStyle) -> String {
+    JET_JOURNEY_HOPS
+        .with(|hops| jet_journey_trail(&std::mem::take(&mut *hops.borrow_mut()), style))
+}
+
+/// The hops a run has accumulated so far, moved off this thread.
+///
+/// The journey belongs to the running program, but it lives in a thread-local
+/// because each `task` owns its own. An engine that moves one program across
+/// threads for its own reasons therefore has to move the journey with it: the
+/// TIR evaluator runs every program on a 64 MiB worker thread and joins before
+/// its report edge, so `?` pushed hops the worker owned and
+/// `jet_journey_report` drained the caller's empty list — `jet run --interpret`
+/// printed the failure with no trail while AOT and the resident tier printed
+/// the hops (I9).
+///
+/// The hop list never leaves this module. An engine can only move the opaque
+/// carrier and hand it back to [`jet_journey_adopt`], so collapse, order, and
+/// rendering stay owned here.
+pub struct JetJourneyHops(Vec<JourneyHop>);
+
+/// Move this thread's accumulated hops out, for a caller that is about to
+/// carry them across a thread boundary it created.
+pub fn jet_journey_take_hops() -> JetJourneyHops {
+    JET_JOURNEY_HOPS.with(|hops| JetJourneyHops(std::mem::take(&mut *hops.borrow_mut())))
+}
+
+/// Adopt hops carried in from another thread, oldest first, applying the same
+/// consecutive-site collapse a fresh `?` applies — a site that re-propagates
+/// across the seam adds its count to one line instead of opening a second.
+pub fn jet_journey_adopt(carried: JetJourneyHops) {
+    JET_JOURNEY_HOPS.with(|hops| {
+        let mut hops = hops.borrow_mut();
+        for hop in carried.0 {
+            let collapsed = hops.last_mut().is_some_and(|last| {
+                if last.site.same_site(&hop.site.file, hop.site.line, &hop.site.fn_name) {
+                    last.hops += hop.hops;
+                    return true;
+                }
+                false
+            });
+            if !collapsed {
+                hops.push(hop);
+            }
+        }
+    });
+}
+
+/// The terminal facts the trail is laid out against.
+///
+/// Facts in, policy here. [`jet_journey_report`] resolves this ONCE at the
+/// report edge, and every tier reaches that edge through that one call — AOT's
+/// `jet_entry_report`, the resident Cranelift boundary, the interpreter
+/// boundary, the deopt boundary — so no engine owns a terminal decision (I9).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct JetReportStyle {
+    /// Dim the trail, so the root failure is the one undimmed line.
+    pub color: bool,
+    /// Column budget, or `None` for a stream that has no columns. No budget
+    /// means no elision: a pipe, a log and a JSON wire keep whole paths.
+    pub width: Option<usize>,
+}
+
+impl JetReportStyle {
+    /// Every consumer that is not a terminal: full bytes, no ANSI.
+    pub const PLAIN: Self = Self {
+        color: false,
+        width: None,
+    };
+
+    /// The one detection.
+    ///
+    /// Colour and width are separate capabilities: `FORCE_COLOR` paints a pipe
+    /// but never gives it columns. A terminal's width is `COLUMNS` when that is
+    /// a positive integer, else the ratified 80-column default. This edge does
+    /// not shell out to `stty` the way `io.terminal_width()` may — the program
+    /// is already failing, and spawning a child to lay out its last line is the
+    /// worse trade.
+    pub fn for_stderr() -> Self {
+        let is_tty = {
+            use std::io::IsTerminal;
+            std::io::stderr().is_terminal()
+        };
+        Self {
+            color: jet_terminal_auto_color(is_tty),
+            width: if is_tty {
+                Some(jet_report_env_columns().unwrap_or(JET_REPORT_DEFAULT_COLUMNS))
+            } else {
+                None
+            },
+        }
+    }
+}
+
+/// Card #1751 named the 80x24 terminal default once, in
+/// `jet-codegen/src/Prelude/TerminalDefault.rs`. This file is emitted verbatim
+/// into every generated program (`Codegen/mod.rs`'s `PRELUDE_PARTS`) while that
+/// one is a `jet-codegen` module, so the column half is spelled here too.
+const JET_REPORT_DEFAULT_COLUMNS: usize = 80;
+
+/// Dim — the same SGR pair as `Terminal.rs`'s `Theme::DIM_SGR`, spelled here
+/// for the same reason as the default above.
+const JET_REPORT_DIM_SGR: &str = "\x1b[2;37m";
+const JET_REPORT_SGR_RESET: &str = "\x1b[0m";
+
+/// `NO_COLOR` presence > `FORCE_COLOR` presence > the stream — THE `auto`
+/// colour ladder. `Terminal.rs`'s `ColorChoice::Auto` calls this, so a compile
+/// diagnostic and a running program's breach report cannot answer differently.
+/// It lives in this file because this is the file a generated program gets.
+pub fn jet_terminal_auto_color(is_tty: bool) -> bool {
+    if std::env::var_os("NO_COLOR").is_some() {
+        return false;
+    }
+    if std::env::var_os("FORCE_COLOR").is_some() {
+        return true;
+    }
+    is_tty
+}
+
+/// `COLUMNS`, under the same positive-integer rule `Prelude/Term.rs` applies to
+/// that variable for `io.terminal_width()`.
+fn jet_report_env_columns() -> Option<usize> {
+    std::env::var("COLUMNS")
+        .ok()?
+        .trim()
+        .parse::<usize>()
+        .ok()
+        .filter(|columns| *columns > 0)
+}
+
+/// Columns, not bytes: `—` and `×` are one column and several bytes each.
+fn jet_report_columns(text: &str) -> usize {
+    text.chars().count()
 }
 
 /// E3002's trail block. The root failure has already been stated by the time
@@ -150,33 +298,128 @@ pub fn jet_journey_take() -> String {
 /// the hop's note after an em dash. The header carries the code and the
 /// mechanism once instead of repeating `error propagated from … via ?` on every
 /// line, which is what buried the root cause under its own trail.
-fn jet_journey_trail(hops: &[JourneyHop]) -> String {
+///
+/// `style` is the whole terminal-state matrix. Colour dims this block and only
+/// this block, so the root failure above stays the one undimmed line and stays
+/// what the eye lands on. A column budget sheds this block's disposable parts
+/// and never reaches the root failure, which is not this function's line.
+fn jet_journey_trail(hops: &[JourneyHop], style: JetReportStyle) -> String {
     if hops.is_empty() {
         return String::new();
     }
     let total: u32 = hops.iter().map(|hop| hop.hops).sum();
-    let mut trail = format!(
-        " Trail [{code}] ({total} hop{} via ?, origin first):\n",
-        if total == 1 { "" } else { "s" },
-        code = JET_JOURNEY_DIAGNOSTIC_CODE,
-    );
+    // One path budget for the whole block, decided by its widest hop line, so
+    // one file never renders two different ways under one header.
+    let layout = style
+        .width
+        .map(|width| (width, jet_journey_path_budget(hops, width)));
+    let mut lines = Vec::with_capacity(hops.len() + 1);
+    lines.push(jet_journey_header(total, style.width));
     for (index, hop) in hops.iter().enumerate() {
-        trail.push_str(&format!(
-            "  {}. {} ({}:{})",
-            index + 1,
-            hop.site.fn_name,
-            hop.site.file,
-            hop.site.line
-        ));
-        if hop.hops > 1 {
-            trail.push_str(&format!(" ×{}", hop.hops));
+        lines.push(jet_journey_hop_line(index + 1, hop, layout));
+    }
+    let mut trail = String::new();
+    for line in &lines {
+        // One SGR pair per line, not one around the block: a pager or a
+        // line-oriented filter that keeps one line still gets its reset.
+        if style.color {
+            trail.push_str(JET_REPORT_DIM_SGR);
         }
-        if !hop.note.is_empty() {
-            trail.push_str(&format!(" — {}", hop.note));
+        trail.push_str(line);
+        if style.color {
+            trail.push_str(JET_REPORT_SGR_RESET);
         }
         trail.push('\n');
     }
     trail
+}
+
+/// The header separates the root failure from its trail, so it must not wrap.
+/// When the full form does not fit, the reminder of the mechanism goes and the
+/// facts stay: the code and the hop count. That short form is the floor.
+fn jet_journey_header(total: u32, width: Option<usize>) -> String {
+    let plural = if total == 1 { "" } else { "s" };
+    let code = JET_JOURNEY_DIAGNOSTIC_CODE;
+    let full = format!(" Trail [{code}] ({total} hop{plural} via ?, origin first):");
+    match width {
+        Some(width) if jet_report_columns(&full) > width => {
+            format!(" Trail [{code}] ({total} hop{plural}):")
+        }
+        _ => full,
+    }
+}
+
+/// The columns left for a hop's file path once the widest hop line's fixed
+/// parts are paid for.
+fn jet_journey_path_budget(hops: &[JourneyHop], width: usize) -> usize {
+    let widest = hops
+        .iter()
+        .enumerate()
+        .map(|(index, hop)| {
+            jet_report_columns(&jet_journey_hop_text(index + 1, hop, "", &hop.note))
+        })
+        .max()
+        .unwrap_or(0);
+    width.saturating_sub(widest)
+}
+
+/// One hop line, laid out to the block's width.
+///
+/// A hop's identity is its number, its `fn` and `file:line` — that is the
+/// address of the code to open, and nothing sheds it. What sheds, in order:
+/// leading path segments, then the note's tail. So a narrow terminal loses
+/// commentary, never a location, and never the root failure above.
+fn jet_journey_hop_line(
+    number: usize,
+    hop: &JourneyHop,
+    layout: Option<(usize, usize)>,
+) -> String {
+    let Some((width, path_budget)) = layout else {
+        return jet_journey_hop_text(number, hop, &hop.site.file, &hop.note);
+    };
+    let file = jet_report_elide_path(&hop.site.file, path_budget);
+    let full = jet_journey_hop_text(number, hop, &file, &hop.note);
+    if jet_report_columns(&full) <= width {
+        return full;
+    }
+    let identity = jet_journey_hop_text(number, hop, &file, "");
+    // ` — ` plus the ellipsis costs four columns; a note that cannot show one
+    // character on top of that goes entirely rather than leaving ` — …`.
+    let room = width.saturating_sub(jet_report_columns(&identity) + 4);
+    if room == 0 {
+        return identity;
+    }
+    let note: String = hop.note.chars().take(room).collect();
+    jet_journey_hop_text(number, hop, &file, &format!("{note}…"))
+}
+
+fn jet_journey_hop_text(number: usize, hop: &JourneyHop, file: &str, note: &str) -> String {
+    let mut line = format!("  {number}. {} ({file}:{})", hop.site.fn_name, hop.site.line);
+    if hop.hops > 1 {
+        line.push_str(&format!(" ×{}", hop.hops));
+    }
+    if !note.is_empty() {
+        line.push_str(&format!(" — {note}"));
+    }
+    line
+}
+
+/// Shed whole leading segments, never characters inside a name, so the file you
+/// have to open is still spelled correctly. `…/` marks what went. The basename
+/// is the floor: a half-spelled file name is worse than a line that wraps.
+fn jet_report_elide_path(file: &str, budget: usize) -> String {
+    if jet_report_columns(file) <= budget {
+        return file.to_string();
+    }
+    let mut start = 0;
+    while let Some(slash) = file[start..].find('/') {
+        start += slash + 1;
+        let candidate = format!("…/{}", &file[start..]);
+        if jet_report_columns(&candidate) <= budget {
+            return candidate;
+        }
+    }
+    file[start..].to_string()
 }
 
 /// D-FAIL-BREACH1=A / D-FAIL-CTX1: the one order for a failure report — the
@@ -204,7 +447,13 @@ pub fn jet_journey_compose(error: &str, trail: &str) -> String {
 /// which made a handled error print a report on stderr under those tiers and
 /// nothing under AOT (I9).
 pub fn jet_journey_report(error: &str) -> String {
-    jet_journey_compose(error, &jet_journey_take())
+    jet_journey_report_styled(error, JetReportStyle::for_stderr())
+}
+
+/// The same report against explicit terminal facts, which is how the terminal
+/// state matrix is proven. Nothing else may render a second trail.
+pub fn jet_journey_report_styled(error: &str, style: JetReportStyle) -> String {
+    jet_journey_compose(error, &jet_journey_take_styled(style))
 }
 
 /// Claim one `?` site for the failure now on its way out. Nothing prints here:
@@ -214,7 +463,7 @@ pub fn jet_journey_frame<F: FnOnce() -> String>(file: &str, line: u32, fn_name: 
     JET_JOURNEY_HOPS.with(|hops| {
         let mut hops = hops.borrow_mut();
         if let Some(last) = hops.last_mut() {
-            if last.site.line == line && last.site.fn_name == fn_name && last.site.file == file {
+            if last.site.same_site(file, line, fn_name) {
                 last.hops += 1;
                 return;
             }
@@ -294,6 +543,19 @@ mod journey_tests {
 
     // Each `#[test]` runs on its own thread, so the thread-local hop buffer is
     // this test's alone.
+    /// The example the card's before/after uses, so these cells and the real
+    /// runs in `tests/terminal.rs` are the same program.
+    const EXAMPLE: &str = "examples/features/errors/error_context.jet";
+
+    fn three_real_hops() {
+        jet_journey_reset();
+        jet_journey_frame(EXAMPLE, 7, "parse_config", || "reading raw config".to_string());
+        jet_journey_frame(EXAMPLE, 12, "load_config", || {
+            "loading config app.toml".to_string()
+        });
+        jet_journey_frame(EXAMPLE, 16, "run", String::new);
+    }
+
     #[test]
     fn report_leads_with_the_failure_and_puts_the_trail_under_it() {
         jet_journey_reset();
@@ -302,7 +564,7 @@ mod journey_tests {
         jet_journey_frame("app.jet", 16, "run", String::new);
 
         assert_eq!(
-            jet_journey_report("Error: file not found"),
+            jet_journey_report_styled("Error: file not found", JetReportStyle::PLAIN),
             "Error: file not found\n\
              \x20Trail [E3002] (3 hops via ?, origin first):\n\
              \x20 1. parse_config (app.jet:7) — reading raw config\n\
@@ -323,7 +585,7 @@ mod journey_tests {
         jet_journey_frame("app.jet", 9, "run", String::new);
 
         assert_eq!(
-            jet_journey_report("Error: bottom"),
+            jet_journey_report_styled("Error: bottom", JetReportStyle::PLAIN),
             "Error: bottom\n\
              \x20Trail [E3002] (5 hops via ?, origin first):\n\
              \x20 1. dive (app.jet:6) ×4\n\
@@ -334,7 +596,123 @@ mod journey_tests {
     #[test]
     fn a_failure_that_crossed_no_hop_reports_only_itself() {
         jet_journey_reset();
-        assert_eq!(jet_journey_report("Error: no trail"), "Error: no trail\n");
+        assert_eq!(
+            jet_journey_report_styled("Error: no trail", JetReportStyle::PLAIN),
+            "Error: no trail\n"
+        );
+    }
+
+    // The terminal state matrix (card #2044 criterion 2). Four cells, one
+    // renderer, explicit facts — `jet_journey_report` resolves the same facts
+    // from the process, and `tests/terminal.rs` proves that resolution against
+    // a real PTY. Both read this same program.
+
+    #[test]
+    fn a_pipe_gets_no_ansi_and_whole_paths() {
+        three_real_hops();
+        assert_eq!(
+            jet_journey_report_styled("Error: file not found", JetReportStyle::PLAIN),
+            "Error: file not found\n\
+             \x20Trail [E3002] (3 hops via ?, origin first):\n\
+             \x20 1. parse_config (examples/features/errors/error_context.jet:7) — reading raw config\n\
+             \x20 2. load_config (examples/features/errors/error_context.jet:12) — loading config app.toml\n\
+             \x20 3. run (examples/features/errors/error_context.jet:16)\n"
+        );
+    }
+
+    #[test]
+    fn a_colour_terminal_dims_the_trail_and_leaves_the_failure_bright() {
+        three_real_hops();
+        let report = jet_journey_report_styled(
+            "Error: file not found",
+            JetReportStyle {
+                color: true,
+                width: Some(80),
+            },
+        );
+        assert_eq!(
+            report,
+            "Error: file not found\n\
+             \x1b[2;37m Trail [E3002] (3 hops via ?, origin first):\x1b[0m\n\
+             \x1b[2;37m  1. parse_config (…/errors/error_context.jet:7) — reading raw config\x1b[0m\n\
+             \x1b[2;37m  2. load_config (…/errors/error_context.jet:12) — loading config app.toml\x1b[0m\n\
+             \x1b[2;37m  3. run (…/errors/error_context.jet:16)\x1b[0m\n"
+        );
+        // The root failure carries no SGR at all, which is the whole point: it
+        // is the one line the eye lands on.
+        assert!(!report.lines().next().expect("root line").contains('\x1b'));
+    }
+
+    #[test]
+    fn no_color_on_a_terminal_keeps_the_layout_and_drops_the_ansi() {
+        three_real_hops();
+        // Same 80-column layout as the colour cell above, byte for byte, minus
+        // the SGR pairs: colour and width are separate capabilities. Every hop
+        // also elides its one file to one spelling — the block's budget is
+        // decided once, not per line.
+        assert_eq!(
+            jet_journey_report_styled(
+                "Error: file not found",
+                JetReportStyle {
+                    color: false,
+                    width: Some(80),
+                },
+            ),
+            "Error: file not found\n\
+             \x20Trail [E3002] (3 hops via ?, origin first):\n\
+             \x20 1. parse_config (…/errors/error_context.jet:7) — reading raw config\n\
+             \x20 2. load_config (…/errors/error_context.jet:12) — loading config app.toml\n\
+             \x20 3. run (…/errors/error_context.jet:16)\n"
+        );
+    }
+
+    #[test]
+    fn a_narrow_terminal_keeps_every_location_and_sheds_the_prose() {
+        three_real_hops();
+        // 40 columns. The header drops its mechanism reminder, the paths fall
+        // back to the file name that is never truncated, and the notes go —
+        // three addressable sites under the root failure, nothing wrapped.
+        let report = jet_journey_report_styled(
+            "Error: file not found",
+            JetReportStyle {
+                color: false,
+                width: Some(40),
+            },
+        );
+        assert_eq!(
+            report,
+            "Error: file not found\n\
+             \x20Trail [E3002] (3 hops):\n\
+             \x20 1. parse_config (error_context.jet:7)\n\
+             \x20 2. load_config (error_context.jet:12)\n\
+             \x20 3. run (error_context.jet:16)\n"
+        );
+        for line in report.lines().skip(1) {
+            assert!(
+                jet_report_columns(line) <= 40,
+                "the trail must fit the terminal it was laid out for: {line:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_note_too_long_for_the_line_keeps_its_head_and_an_ellipsis() {
+        jet_journey_reset();
+        jet_journey_frame("a.jet", 1, "f", || {
+            "a very long note that will not fit at all".to_string()
+        });
+        assert_eq!(
+            jet_journey_report_styled(
+                "Error: nope",
+                JetReportStyle {
+                    color: false,
+                    width: Some(30),
+                },
+            ),
+            "Error: nope\n\
+             \x20Trail [E3002] (1 hop):\n\
+             \x20 1. f (a.jet:1) — a very lon…\n"
+        );
     }
 }
 

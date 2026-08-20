@@ -2789,11 +2789,29 @@ impl<'a> EvalCtx<'a> {
         )
     }
 
-    pub(super) fn route_runtime_arithmetic(
+    /// The Jet line a span falls on. A runtime report names Jet source facts,
+    /// never generated-Rust ones (I2).
+    pub(super) fn span_line(&self, span: Span) -> u32 {
+        self.source_text
+            .get(..span.start.min(self.source_text.len()))
+            .map(|prefix| prefix.bytes().filter(|byte| *byte == b'\n').count() as u32 + 1)
+            .unwrap_or(1)
+    }
+
+    /// D-FAIL-TIER1 / I9: the shared evaluator mints the comptime `E0953`
+    /// panic for a failed check because the same code also runs at compile
+    /// time. While it is *running* a program that stop is program-side, so
+    /// re-enter the one `jet_runtime_stop_report` with this tier's source
+    /// facts — the same report AOT gets from `jet_panic` and the resident JIT
+    /// gets from `JitRuntime::set_runtime_stop`. Without this the stop escapes
+    /// to `Interpreter::runtime_trap_from_e0953`, which has no file, line, or
+    /// function left to name and prints a locationless report.
+    pub(super) fn route_runtime_panic<T>(
         &mut self,
-        result: Result<CtValue, Diagnostic>,
-        span: Span,
-    ) -> Result<CtValue, Diagnostic> {
+        result: Result<T, Diagnostic>,
+        code: &'static str,
+        line: u32,
+    ) -> Result<T, Diagnostic> {
         match result {
             Err(diagnostic) if self.runtime_execution && diagnostic.code == "E0953" => {
                 let message = diagnostic
@@ -2803,15 +2821,19 @@ impl<'a> EvalCtx<'a> {
                     )
                     .unwrap_or(diagnostic.what.as_str())
                     .to_string();
-                let line = self
-                    .source_text
-                    .get(..span.start.min(self.source_text.len()))
-                    .map(|prefix| prefix.bytes().filter(|byte| *byte == b'\n').count() as u32 + 1)
-                    .unwrap_or(1);
-                Err(self.runtime_stop("E3010", line, &message))
+                Err(self.runtime_stop(code, line, &message))
             }
             result => result,
         }
+    }
+
+    pub(super) fn route_runtime_arithmetic(
+        &mut self,
+        result: Result<CtValue, Diagnostic>,
+        span: Span,
+    ) -> Result<CtValue, Diagnostic> {
+        let line = self.span_line(span);
+        self.route_runtime_panic(result, "E3010", line)
     }
 
     pub(super) fn eval_fixed_width_division(
@@ -2831,11 +2853,7 @@ impl<'a> EvalCtx<'a> {
                 value, signed, bits,
             ))),
             Err(message) => {
-                let line = self
-                    .source_text
-                    .get(..span.start.min(self.source_text.len()))
-                    .map(|prefix| prefix.bytes().filter(|byte| *byte == b'\n').count() as u32 + 1)
-                    .unwrap_or(1);
+                let line = self.span_line(span);
                 Err(self.runtime_stop("E3010", line, message))
             }
         }
@@ -3432,6 +3450,38 @@ impl<'a> EvalCtx<'a> {
         for (source, updated) in updates {
             if scope.contains_key(&source) {
                 scope.insert(source, updated);
+            }
+        }
+    }
+
+    /// Publish one *lent* local back out of a callable frame.
+    ///
+    /// A lending callback (`edit_disjoint`) never captures the owner it writes
+    /// through: it holds a `__JetViewMut` that names the owner local, and the
+    /// callable frame is a clone of the caller's scope, so the body's writes
+    /// land on the frame's copy. `sync_callable_captures` walks the *lexical*
+    /// capture list and cannot see that name, so the loan has to be published
+    /// by name — otherwise the interpreter silently drops writes that AOT's
+    /// `jet_edit_disjoint(&mut xs, …)` makes directly on the owner (I9).
+    pub(super) fn sync_callable_lent_owner(
+        &self,
+        value: &CtValue,
+        owner: &str,
+        scope: &mut HashMap<String, CtValue>,
+    ) {
+        let Some(index) = Self::callable_index(value) else {
+            return;
+        };
+        let updated = {
+            let runtime = self.runtime.lock().expect("evaluator runtime poisoned");
+            let Some(EvalCallable::Lambda { captured, .. }) = runtime.callables.get(index) else {
+                return;
+            };
+            captured.get(owner).cloned()
+        };
+        if let Some(updated) = updated {
+            if scope.contains_key(owner) {
+                scope.insert(owner.to_string(), updated);
             }
         }
     }
@@ -4148,12 +4198,23 @@ fn run_program_with_structs_at_stage_and_cli(
     // of caller-established state the run reads, so they are carried explicitly.
     let (ambient_core, ambient_handle) = crate::Comptime::ambient_hooks();
     let edition = program.edition.clone();
-    std::thread::scope(|scope| {
+    // D-FAIL-CTX1 / I9: the E3002 journey belongs to the program, not to
+    // whichever thread the evaluator needed for stack room. `?` pushes its hop
+    // inside this worker (`eval/exprs.rs`, `TExprKind::Try`), while every
+    // report edge — `Interpreter::run_checked`, `Interpreter::run_named_job`,
+    // the JIT deopt boundary — calls `jet_journey_report` on the caller after
+    // this join. Leaving the hops on the worker is why `jet run --interpret`
+    // printed `Error: file not found` with no trail while AOT and the resident
+    // tier printed the three hops: the report edge drained the caller's empty
+    // list. Foundation still owns the hops, their collapse and their
+    // rendering; this only carries them across a boundary the evaluator
+    // created for itself.
+    let (outcome, journey) = std::thread::scope(|scope| {
         let worker = std::thread::Builder::new()
             .name("jet-tir-eval".to_string())
             .stack_size(64 * 1024 * 1024)
             .spawn_scoped(scope, move || {
-                jet_foundation::PackageEdition::with_package_edition(&edition, || {
+                let outcome = jet_foundation::PackageEdition::with_package_edition(&edition, || {
                 crate::Comptime::with_ambient(ambient_core, ambient_handle, || {
                     run_program_with_structs_on_stack(
                         program,
@@ -4169,11 +4230,14 @@ fn run_program_with_structs_at_stage_and_cli(
                         package_hardened,
                     )
                 })
-                })
+                });
+                (outcome, jet_foundation::Outcome::jet_journey_take_hops())
             })
             .expect("evaluator worker");
         worker.join().expect("evaluator worker panicked")
-    })
+    });
+    jet_foundation::Outcome::jet_journey_adopt(journey);
+    outcome
 }
 
 fn run_program_with_structs_on_stack(

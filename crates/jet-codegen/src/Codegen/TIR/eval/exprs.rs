@@ -1160,6 +1160,21 @@ fn eval_place_children(place: &TPlace) -> Vec<&TExpr> {
     }
 }
 
+/// The Jet line a view-construction op reports its bounds failure on.
+///
+/// I9: this is the very `line` the AOT emitter hands `jet_view_new` /
+/// `jet_view_mut_new` and the resident JIT hands `jet_jit_view_bounds`, so
+/// every tier names the same place when the window misses.
+fn view_op_line(op: &crate::Codegen::TIR::TBuiltinOp) -> Option<u32> {
+    match op {
+        crate::Codegen::TIR::TBuiltinOp::ViewNew { line }
+        | crate::Codegen::TIR::TBuiltinOp::ViewMutNew { line }
+        | crate::Codegen::TIR::TBuiltinOp::ComputeViewNew { line }
+        | crate::Codegen::TIR::TBuiltinOp::ComputeViewMutNew { line } => Some(*line as u32),
+        _ => None,
+    }
+}
+
 /// Every strict child is scheduled in source order. Lazy bodies and
 /// short-circuit/control-flow edges are resumed by explicit work items instead
 /// of being placed in this list.
@@ -5915,14 +5930,24 @@ impl<'a> EvalCtx<'a> {
                     let CtValue::List(xs) = base_value else {
                         return Err(unsupported("view-mut list base", self.span()));
                     };
-                    let (start, end_exclusive) = if args.len() == 1 {
+                    // I9: the window bounds come from the shared Prelude
+                    // kernel, so a failure here is the same program-side stop
+                    // AOT gets from `jet_view_mut_new` and the resident JIT
+                    // gets from `jet_jit_view_bounds`. Marshal it into the one
+                    // runtime report with the `line` the TIR op already
+                    // carries, instead of leaving a comptime `E0953` to escape
+                    // the run with no source facts.
+                    let window = if args.len() == 1 {
                         let range = self.eval_expr_child(&args[0], scope)?;
-                        super::range_window(&range, xs.len(), self.span())?
+                        super::range_window(&range, xs.len(), self.span())
                     } else {
                         let start = as_int(&self.eval_expr_child(&args[0], scope)?, self.span())?;
                         let end = as_int(&self.eval_expr_child(&args[1], scope)?, self.span())?;
-                        super::checked_view_window(start, end, false, xs.len(), self.span())?
+                        super::checked_view_window(start, end, false, xs.len(), self.span())
                     };
+                    let line = view_op_line(op).unwrap_or_else(|| self.span_line(self.span()));
+                    let (start, end_exclusive) =
+                        self.route_runtime_panic(window, "E3001", line)?;
                     let end = i64::try_from(end_exclusive)
                         .map_err(|_| unsupported("view-mut end is too large", self.span()))?
                         - 1;
@@ -6075,7 +6100,14 @@ impl<'a> EvalCtx<'a> {
                         );
                     }
                 }
-                let mut result = eval_builtin(op, &mut r, argv, self.span())?;
+                // I9: same shared bounds kernel, same one runtime report — a
+                // read window that misses is a program-side stop, not a
+                // comptime build error, exactly as for the mutable form above.
+                let raw = eval_builtin(op, &mut r, argv, self.span());
+                let mut result = match view_op_line(op) {
+                    Some(line) => self.route_runtime_panic(raw, "E3001", line)?,
+                    None => raw?,
+                };
                 if let Some((source_items, description, format, started_at, source_pulls, source_tail, total, known_total)) = progress {
                     if progress_lazy_builtin(op) {
                         // A lazy adapter may hand back either a plain List or
@@ -7275,29 +7307,43 @@ impl<'a> EvalCtx<'a> {
                         Ok(*inner)
                     }
                     CtValue::Failed(CtReport::Told(e)) => {
-                        // D-FAIL-CTX1: evaluate the hop note only on a failed
-                        // propagation path, then use the shared journey renderer.
+                        // D-FAIL-CTX1: claim this `?` site through the shared
+                        // journey state on a failed propagation path.
                         let file = file.trim_matches('"');
                         let fn_name = fn_name.trim_matches('"');
-                        let note = if let Some(note) = note {
-                            match self.eval_expr_child(note, scope)? {
-                                CtValue::Str(note) => note,
-                                other => other.jet_show(),
-                            }
-                        } else {
-                            String::new()
-                        };
                         // Accumulate only. The frame reaches stderr at the one
                         // report edge (`jet_journey_report`), so a failure the
                         // program recovers reports nothing — the AOT Prelude's
                         // `jet_trace_err` has done exactly this since the report
                         // edge landed, and printing here was the second policy.
+                        //
+                        // The note stays a closure, exactly as the AOT Prelude's
+                        // `jet_trace_err_note` and the JIT host pass it, so
+                        // Foundation decides whether this site opens a new hop or
+                        // collapses into the previous one BEFORE the note runs.
+                        // Evaluating it up front ran the note of every `×N` repeat
+                        // the trail never prints — one tier paying for text no
+                        // tier shows.
+                        let mut note_failure = None;
                         jet_foundation::Outcome::jet_journey_frame(
                             file,
                             *line as u32,
                             fn_name,
-                            || note,
+                            || match note {
+                                Some(note) => match self.eval_expr_child(note, scope) {
+                                    Ok(CtValue::Str(note)) => note,
+                                    Ok(other) => other.jet_show(),
+                                    Err(diagnostic) => {
+                                        note_failure = Some(diagnostic);
+                                        String::new()
+                                    }
+                                },
+                                None => String::new(),
+                            },
                         );
+                        if let Some(diagnostic) = note_failure {
+                            return Err(diagnostic);
+                        }
                         // D-FAIL-ERROR1=A: the evaluator marshals the same
                         // String-to-Err conversion selected by sema. Declared
                         // conversions run their lowered body, so the evaluator

@@ -212,6 +212,22 @@ fn default_entry_error_golden_matches_all_execution_tiers() {
     );
 }
 
+/// D-FAIL-CTX1=A / I9: the `?`-propagation trail is one byte oracle across
+/// debug AOT, `--release`, default `jet run`, and the forced interpreter. The
+/// interpreter printed `Error: file not found` with NO trail while the other
+/// three printed three hops, because the evaluator records each hop on its own
+/// worker thread and the report edge drained the caller's empty journey. No
+/// per-stem battery named this example, so the divergence sat in the shipped
+/// binary: the trail's own example now names every lens.
+#[test]
+fn propagation_trail_golden_matches_all_execution_tiers() {
+    tir_support::assert_example_cli_error_tiers_agree(
+        "errors/error_context",
+        1,
+        include_str!("../examples/features/expected/errors/error_context.err.out"),
+    );
+}
+
 /// D-FAIL-BREACH1 / I9: the checked-in runtime-stop reports are one byte oracle
 /// across AOT, default `jet run`, and the forced interpreter. Keep one example
 /// for each shipped stop kind so exit 101 or a second renderer cannot hide in a
