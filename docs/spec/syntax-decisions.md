@@ -63,6 +63,15 @@ ordinary syntax errors; stale teaching fixtures were deleted. **D-CAP10**: one
 definition per name (E0105); no overloading — capability disambiguation is
 call-site sigils on a single definition.
 
+**S14 implementation note — declaration and binding reflexes** *(diagnostic-
+only; no new Jet syntax)*: the shared foreign-word table also recognizes common
+declaration words (`fun`, `func`, `def`, `function`) and binding words (`let`,
+`let mut`, `var`, `const`, `val`) only when their surrounding shape proves a
+declaration or binding. The diagnostic names the one Jet form — `fn`, `::`, or
+`:=` — and supplies a source edit when the rewrite is mechanical. A function
+return colon gets the existing `=>` edit. These words never enter the grammar;
+ordinary dead-value cases keep E0003's existing wording.
+
 **D-CASING1 — Casing law + "Core"** *(with D-MARKER-CANON1, D-CONTRACTCASE1)*:
 every `#` applied rule is PascalCase (`#Test`, `#Unsafe`, `#Grant`, `#Pre`);
 lowercase `#[allow(...)]` is the registered lint-policy exception. Traits are
@@ -7401,3 +7410,37 @@ rides the existing interpolation selector rail beside `:Debug`, expands canonica
 Debug text with two-space indentation and one field or element per line, and keeps
 output deterministic and width-independent. The selector and `core.text.fmt.pretty`
 call share one Prelude formatter.
+
+**2026-08-20 — D-LIT-DOT1=B** *(card #2080; ratified 2026-08-20)*: a literal
+constructor drops the dot before its braces. A named head writes `Point{x: 1}`
+and `[Int]{1, 2, 3, 4}`. An enum payload writes `.Password{username: u}`. An
+anonymous record writes `{port: 8080, on: true}`. This amends every
+`Type.{ body }` row — D-DOTCTOR3=A's universal head, D-UNIFYLIT1=A's domain-text
+and byte-pattern heads, D-REGEX-LIT1=D, D-BOUND-HEAD1=A, D-BINPAT1=A,
+D-UNINIT-SENTINEL2=A, and the `[T].{}` / `[K:V].{}` empty forms — to the
+dotless spelling. The dotted form is retired: E0320's class teaches the dotless
+direction, and the reflex that E0320 punished is now the correct spelling.
+
+**2026-08-20 — D-ARROW-UNIFY1=B** *(card #2081; ratified 2026-08-20)*: one arrow,
+`:>`, in every arrow position — a callable result, a dispatch arm, a loop body,
+and a lambda. The effect ceiling becomes `:[IO]>`. This retires the split that
+D-ARROW-CONTROL1=A introduced (`=>` for a result, `->` for control) along with
+D-LOOP-STMT-ARROW1 and D-BODY-ARROW1, and it amends D-SHAPE8=A's `=[Effects]=>`
+row to `:[Effects]>`. Map types, generic argument lists, and dispatch arms must
+still parse unambiguously against `:>`; the owning card carries that fixture.
+
+**2026-08-20 — D-TEST-XFAIL1=A** *(card #2107; ratified 2026-08-20)*: a test
+records a known failure through a typed `#Test` argument —
+`#Test("…", expected_fail: true)`. A marked test runs its body: while it fails,
+the command stays green and the run counts it as an expected failure; when it
+passes, the run fails and names the marker to remove. This is not the existing
+`.expect_fail { … }` region, which catches one failing region inside an
+otherwise passing test, and it is not a skip — the body must execute.
+
+**2026-08-20 — D-TEACH-FOREIGN1=A** *(card #2105; ratified 2026-08-20)*: one
+shared teaching code covers every recognized foreign keyword. E0003 keeps its
+single registry row, and its what/why/fix name the foreign word and its Jet
+replacement — `fun`/`func`/`def`/`function` teach `fn`, and
+`var`/`let`/`const`/`val` teach `::` or `:=`. One table owns those
+facts, shared with the loop keywords `for`/`while`/`continue`/`do` that
+card #1887 already fixed; a second table is a defect.
