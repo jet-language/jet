@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 2102,
-    "rev": 39498,
+    "rev": 39499,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -137075,6 +137075,11 @@
         {
           "at": "2026-08-20",
           "by": "fable-e3-burndown",
+          "text": "Final evidence appended 2026-08-19: the I9 one-home violation is explicit in the kernel's own header. crates/jet-foundation/src/MatchScan.rs:1-8 states that AOT specializes its own closure builders while the AST tiers walk Foundation's MatchScan - so the split is documented rather than accidental, and NEITHER binary rule lives under crates/jet-codegen/src/Prelude/**, which is where I9 says the semantics must live. AOT emits the policy inline (Codegen/TIR/emit/expressions.rs:432-442 and lower/control_flow.rs:1513-1622) while the JIT and the TIR consume path call Foundation (jet-jit/src/Parse.rs:248-264, eval/stream.rs:115-129). Two further mismatches in the kernel itself: its aligned branch covers only 1, 2, 4 and 8 bytes and falls to None otherwise, and it reports IntN carrying the literal declared width while codegen maps U24 to 32 bits (control_flow.rs:1625-1637) - the packers currently ignore that metadata, so the disagreement is latent rather than observable today. One consume-mode nuance for whoever takes this: Reader.take_pattern DOES reach Foundation from the comptime and ambient tiers (eval/stream.rs:115-129), so the interpreter gap is specific to ARM matching (eval/stmts.rs:2604 returns false for both StrMatch and BinMatch, and eval/exprs.rs:8199-8224 refuses the host call), not to binary patterns wholesale."
+        },
+        {
+          "at": "2026-08-20",
+          "by": "fable-e3-burndown",
           "text": "Extra evidence from the same audit, 2026-08-19: the string-match twin has the identical shape. Foundation keeps str_match_scan and bin_match_scan as separate scanners (crates/jet-foundation/src/MatchScan.rs:115-232) and AOT keeps separate inline closure builders for both (crates/jet-codegen/src/Codegen/TIR/lower/control_flow.rs:1481-1623), so the 'one engine' claim is false on the string side too, not only the binary side. The interpreter is worse than first reported: it is absent at TWO layers, not one - bind_match_pattern returns Ok(false) for both StrMatch and BinMatch patterns (crates/jet-codegen/src/Codegen/TIR/eval/stmts.rs:2502-2605) in addition to the host call being refused as unsupported (eval/exprs.rs:8199-8224). Sema already validates the widths the kernel cannot honour: CheckerItems.rs:2774-2831 and 3409-3435 accept U1..U64 and only require width%8==0 for little-endian, raising E1008/E1011 otherwise - so U24be passes every check and then answers differently per tier. Finally, the comments at control_flow.rs:1481-1488 assert tier-0 parity for this construct, which is false; those comments should be corrected in the same change so the next reader is not misled the way this audit initially was."
         }
       ],
@@ -137084,7 +137089,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-20T04:52:27.191Z",
-      "updated": "2026-08-20T05:00:10.929Z",
+      "updated": "2026-08-20T05:04:21.303Z",
       "updatedBy": "fable-e3-burndown"
     },
     {
@@ -183446,6 +183451,13 @@
   ],
   "events": [
     {
+      "at": "2026-08-20T05:04:21.303Z",
+      "by": "fable-e3-burndown",
+      "action": "card.update",
+      "ref": "c05uuzek",
+      "note": "logEntry"
+    },
+    {
       "at": "2026-08-20T05:00:10.929Z",
       "by": "fable-e3-burndown",
       "action": "card.update",
@@ -186936,13 +186948,6 @@
       "by": "fable",
       "action": "card.update",
       "ref": "c0boklxe",
-      "note": "track,epoch,milestoneId"
-    },
-    {
-      "at": "2026-08-19T13:49:16.343Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c02ozs3u",
       "note": "track,epoch,milestoneId"
     }
   ],
