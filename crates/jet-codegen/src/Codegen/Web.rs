@@ -5060,8 +5060,11 @@ fn wasm_emit_expr(
             let less = wasm_enum_head(Syntax::TYPE_ORDERING, "Less");
             let equal = wasm_enum_head(Syntax::TYPE_ORDERING, "Equal");
             let greater = wasm_enum_head(Syntax::TYPE_ORDERING, "Greater");
-            format!(
-                "{{ let __jet_compare_left = {l}; let __jet_compare_right = {r}; if (__jet_compare_left) < (__jet_compare_right) {{ {less} }} else if (__jet_compare_left) > (__jet_compare_right) {{ {greater} }} else {{ {equal} }} }}"
+            // Generated locals take their prefix from the one allocator
+            // (`{name_prefix}` = `Codegen::canonical_prefix`), never a
+            // hard-coded `__jet_` in a template.
+            jet_name_format!(
+                "{{ let {name_prefix}compare_left = {l}; let {name_prefix}compare_right = {r}; if ({name_prefix}compare_left) < ({name_prefix}compare_right) {{ {less} }} else if ({name_prefix}compare_left) > ({name_prefix}compare_right) {{ {greater} }} else {{ {equal} }} }}"
             )
         }
         TIR::TExprKind::Binary { op, lhs, rhs, .. }
@@ -5375,8 +5378,8 @@ fn wasm_emit_expr(
                 return Err(())
             };
             let msg = wasm_emit_expr(msg, funcs, file_prefix, reconstructions)?;
-            format!(
-                "match ({value}) {{ Ok(__jet_ok) => __jet_ok, Err(_) => jet_panic_rich({:?}, {}, {:?}, {:?}, {}, {}, &({msg})) }}",
+            jet_name_format!(
+                "match ({value}) {{ Ok({name_prefix}ok) => {name_prefix}ok, Err(_) => jet_panic_rich({:?}, {}, {:?}, {:?}, {}, {}, &({msg})) }}",
                 loc.file,
                 loc.line,
                 loc.fn_name,
@@ -5497,8 +5500,8 @@ fn wasm_emit_expr(
         } => {
             let base = wasm_emit_expr(base, funcs, file_prefix, reconstructions)?;
             let index = wasm_emit_expr(index, funcs, file_prefix, reconstructions)?;
-            format!(
-                "{{ let __jet_map = &({base}); let __jet_key = &({index}); __jet_map.get(__jet_key).cloned().unwrap_or_else(|| jet_panic({}, {}, {source_fn}, {source_line}, &jet_missing_map_key_value(__jet_key))) }}",
+            jet_name_format!(
+                "{{ let {name_prefix}map = &({base}); let {name_prefix}key = &({index}); {name_prefix}map.get({name_prefix}key).cloned().unwrap_or_else(|| jet_panic({}, {}, {source_fn}, {source_line}, &jet_missing_map_key_value({name_prefix}key))) }}",
                 mangle_generated("source_file"),
                 line,
             )
@@ -5518,8 +5521,8 @@ fn wasm_emit_expr(
             };
             let index = wasm_emit_expr(index, funcs, file_prefix, reconstructions)?;
             let file = mangle_generated("source_file");
-            format!(
-                "{{ let __jet_list = ({base}); jet_fixed_list_index(__jet_list.len(), ({index}), |__jet_i| __jet_list[__jet_i].clone()).unwrap_or_else(|__jet_error| jet_arithmetic_stop({file}, {line}, &__jet_error.message())) }}",
+            jet_name_format!(
+                "{{ let {name_prefix}list = ({base}); jet_fixed_list_index({name_prefix}list.len(), ({index}), |{name_prefix}i| {name_prefix}list[{name_prefix}i].clone()).unwrap_or_else(|{name_prefix}error| jet_arithmetic_stop({file}, {line}, &{name_prefix}error.message())) }}"
             )
         }
         TIR::TExprKind::Call { name, args, .. } => {
@@ -5845,7 +5848,9 @@ fn emit_js_app(
             ));
             let fallible_main = matches!(main_fn.return_type.as_ref(), Some(Type::Result { .. }));
             if fallible_main {
-                out.push_str("    const __jet_edge_result = await (async () => {\n");
+                out.push_str(&jet_name_format!(
+                    "    const {name_prefix}edge_result = await (async () => {{\n"
+                ));
             }
             let body_indent = if fallible_main { 3 } else { 2 };
             let body_pad = "  ".repeat(body_indent);
@@ -5865,7 +5870,9 @@ fn emit_js_app(
             out.push_str(&bind_inline_handler_symbols(&body, main_fn, &mut handlers));
             if fallible_main {
                 out.push_str("    })();\n");
-                out.push_str("    return jet_web_edge_result(__jet_edge_result);\n");
+                out.push_str(&jet_name_format!(
+                    "    return jet_web_edge_result({name_prefix}edge_result);\n"
+                ));
             }
             if fallible_main {
                 out.push_str("  } catch (error) {\n");

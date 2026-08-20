@@ -106,7 +106,7 @@ fn emit_struct_command_entry(
             .collect::<Option<Vec<_>>>()
             .expect("canonical CLI command input is missing");
         let variables: Vec<String> = (0..params.len())
-            .map(|index| format!("__jet_cli_arg_{index}"))
+            .map(|index| jet_name_format!("{name_prefix}cli_arg_{index}"))
             .collect();
         let mut decode_lines = String::new();
         for ((param, input), variable) in params
@@ -136,7 +136,11 @@ fn emit_struct_command_entry(
             }
             if let Some(shared_param) = shared_param {
                 if param.name == shared_param.name {
-                    call_args.push(cli_call_argument(cx, param, "__jet_cli_receiver"));
+                    call_args.push(cli_call_argument(
+                        cx,
+                        param,
+                        &jet_name_format!("{name_prefix}cli_receiver"),
+                    ));
                     continue;
                 }
             }
@@ -145,7 +149,7 @@ fn emit_struct_command_entry(
         }
         let call_args = call_args.join(", ");
         let callable = if self_method {
-            format!("__jet_cli_receiver.{}", mangle(&function.name))
+            jet_name_format!("{name_prefix}cli_receiver.{}", mangle(&function.name))
         } else if target.is_binding {
             format!("{helper_prefix}{}", mangle(&function.name))
         } else {
@@ -164,8 +168,8 @@ fn emit_struct_command_entry(
         );
         let tuple = cli_tuple_expr(&variables);
         let receiver = if self_method || shared_param.is_some() {
-            format!(
-                "                let __jet_cli_receiver = match {helper_prefix}{decode_name}(&__spec, &__parsed) {{\n                    Ok(__value) => __value,\n                    Err(__e) => {{ eprint!(\"{{}}\", jet_cli_banner(&__e)); std::process::exit(2); }}\n                }};\n",
+            jet_name_format!(
+                "                let {name_prefix}cli_receiver = match {helper_prefix}{decode_name}(&__spec, &__parsed) {{\n                    Ok(__value) => __value,\n                    Err(__e) => {{ eprint!(\"{{}}\", jet_cli_banner(&__e)); std::process::exit(2); }}\n                }};\n"
             )
         } else {
             String::new()
@@ -594,7 +598,7 @@ pub(crate) fn columnar_cell_type(name: &str) -> String {
 /// D-SOA-TIER1=A: the accessor that unwraps one column's cell to the field's own
 /// type, used by the fused `xs[i].field` read.
 pub(crate) fn columnar_cell_accessor(field: &str) -> String {
-    format!("__jet_col_{field}")
+    jet_name_format!("{name_prefix}col_{field}")
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -1052,7 +1056,7 @@ fn emit_direct_cli_entry(
     spec_body.push_str("        __s\n");
 
     let variables: Vec<String> = (0..params.len())
-        .map(|index| format!("__jet_cli_arg_{index}"))
+        .map(|index| jet_name_format!("{name_prefix}cli_arg_{index}"))
         .collect();
     let mut decode_lines = String::new();
     for ((param, input), variable) in params
@@ -2425,32 +2429,7 @@ pub(crate) fn emit_trait_impl(
     if let Some(s) = migration_struct {
         emit_migration_step_fns(cx, s, migration_style.as_deref(), out);
     }
-    // I2: the bridge impls stand beside the user impl emitted above, so they
-    // carry the SAME generic header. Emitting `impl JetDisplay for __jet_Box`
-    // for a `Box<T>` is rustc E0107 (missing generics) — a generated-code
-    // defect, never a user diagnostic. `tp_impl`/`tp_use` are empty for a
-    // non-generic type, so this is byte-identical there.
-    if block.trait_name == crate::Syntax::TRAIT_DISPLAY {
-        out.push_str(&format!(
-            "impl{} JetDisplay for {}{} {{\n    fn jet_display(&self) -> String {{ <{}{} as {}>::display(self) }}\n}}\n\n",
-            tp_impl,
-            mangle_path(type_name),
-            tp_use,
-            mangle_path(type_name),
-            tp_use,
-            crate::Codegen::mangle(crate::Syntax::TRAIT_DISPLAY),
-        ));
-    }
-    if block.trait_name == crate::Syntax::TRAIT_DEBUG {
-        out.push_str(&format!(
-            "impl{} JetDebug for {}{} {{\n    fn jet_debug(&self) -> String {{ <{}{} as __jet_Debug>::debug(self) }}\n}}\n\n",
-            tp_impl,
-            mangle_path(type_name),
-            tp_use,
-            mangle_path(type_name),
-            tp_use,
-        ));
-    }
+    emit_representation_bridges(cx, &block.trait_name, type_name, &tp_impl, &tp_use, out);
 }
 
 /// I2: render an enum value with Jet-source names. Rust's derived `Debug` would
@@ -2631,16 +2610,29 @@ pub(crate) fn emit_external_trait_impl(
     if let Some(s) = migration_struct {
         emit_migration_step_fns(cx, s, migration_style.as_deref(), out);
     }
-    // I2: same rule as `emit_trait_impl` — the bridge impl repeats the user
-    // impl's generic header, or rustc rejects `impl JetDisplay for __jet_Box`
-    // with E0107.
+    emit_representation_bridges(cx, trait_name, &i.type_name, &tp_impl, &tp_use, out);
+}
+
+/// I2: the Rust representation bridges that stand beside a Jet capability impl.
+/// Each one repeats the generic header of the impl it follows — emitting
+/// `impl JetDisplay for __jet_Box` for a `Box<T>` is rustc E0107, a
+/// generated-code defect and never a user diagnostic. `tp_impl`/`tp_use` are
+/// empty for a non-generic type, so the emit is byte-identical there.
+fn emit_representation_bridges(
+    cx: &Cx,
+    trait_name: &str,
+    type_name: &str,
+    tp_impl: &str,
+    tp_use: &str,
+    out: &mut String,
+) {
     if trait_name == crate::Syntax::TRAIT_DISPLAY {
         out.push_str(&format!(
             "impl{} JetDisplay for {}{} {{\n    fn jet_display(&self) -> String {{ <{}{} as {}>::display(self) }}\n}}\n\n",
             tp_impl,
-            mangle_path(&i.type_name),
+            mangle_path(type_name),
             tp_use,
-            mangle_path(&i.type_name),
+            mangle_path(type_name),
             tp_use,
             crate::Codegen::mangle(crate::Syntax::TRAIT_DISPLAY),
         ));
@@ -2649,12 +2641,49 @@ pub(crate) fn emit_external_trait_impl(
         out.push_str(&format!(
             "impl{} JetDebug for {}{} {{\n    fn jet_debug(&self) -> String {{ <{}{} as __jet_Debug>::debug(self) }}\n}}\n\n",
             tp_impl,
-            mangle_path(&i.type_name),
+            mangle_path(type_name),
             tp_use,
-            mangle_path(&i.type_name),
+            mangle_path(type_name),
             tp_use,
         ));
     }
+    // I2: Jet equality on a nominal value is the `Equatable` hook, but the SAME
+    // value nested in a container (`T?`, `[T]`, `[K:T]`, a tuple, another
+    // record) is compared by Rust's own structural `==` on that container,
+    // which requires `PartialEq` on the element. Without this bridge the
+    // derived `equal` of `struct Tree { child: Tree? }` emits
+    // `(*(self).__jet_child) == (*(rhs).__jet_child)` on a
+    // `JetOutcome<__jet_Tree, JetAbsent>` and rustc answers E0369. Forwarding
+    // to the hook keeps ONE definition of equality — the derived or
+    // user-written `equal` — at every nesting depth.
+    if trait_name == crate::Syntax::TRAIT_EQUATABLE && !rust_partial_eq_derived(cx, type_name) {
+        out.push_str(&format!(
+            "impl{} PartialEq for {}{} {{\n    fn eq(&self, rhs: &Self) -> bool {{ <{}{} as {}>::equal(self, rhs) }}\n}}\n\n",
+            tp_impl,
+            mangle_path(type_name),
+            tp_use,
+            mangle_path(type_name),
+            tp_use,
+            crate::Codegen::mangle(crate::Syntax::TRAIT_EQUATABLE),
+        ));
+    }
+}
+
+/// The one predicate for "this nominal's Rust representation already spells a
+/// structural `PartialEq`". `emit_struct`/`emit_enum` derive it for a hash-key
+/// type, because `Eq`/`Hash` require it; the Equatable bridge above must not
+/// then add a second impl of the same trait (rustc E0119).
+fn rust_partial_eq_derived(cx: &Cx, type_name: &str) -> bool {
+    if cx.distinct_types.contains_key(type_name) {
+        // A distinct type is a transparent newtype and `emit_distinct` owns its
+        // representation derives (`#Numeric` takes `PartialEq`/`PartialOrd` so
+        // its native ordering rule compiles). Its Jet `equal` is a `.raw()`
+        // comparison, so the bridge would only restate the base type's own
+        // `==`.
+        return true;
+    }
+    cx.hashable.contains(type_name)
+        && !cx.type_contains_shared_guard(&Type::Named(type_name.to_string()))
 }
 
 fn emit_trait_method(

@@ -25,8 +25,8 @@ fn emit_stack_guard(tir: &TFunc, cx: &Cx, out: &mut String, indent: usize) {
             .trim_end()
     };
     let pad = "    ".repeat(indent);
-    out.push_str(&format!(
-        "{pad}let __jet_stack_frame = crate::jet_stack_enter({}, {}, {}, {});\n",
+    out.push_str(&jet_name_format!(
+        "{pad}let {name_prefix}stack_frame = crate::jet_stack_enter({}, {}, {}, {});\n",
         crate::Codegen::escape_rust_str(&cx.file),
         tir.line,
         crate::Codegen::escape_rust_str(&tir.name),
@@ -258,9 +258,9 @@ fn emit_tir_memoized_toplevel(
     bound: Option<usize>,
 ) {
     let name = cx.mangle_name(&tir.name);
-    let store_name = format!("__jet_memo_store_{name}");
-    let body_name = format!("__jet_memo_body_{name}");
-    let stats_name = format!("__jet_memo_stats_{name}");
+    let store_name = jet_name_format!("{name_prefix}memo_store_{name}");
+    let body_name = jet_name_format!("{name_prefix}memo_body_{name}");
+    let stats_name = jet_name_format!("{name_prefix}memo_stats_{name}");
     let key_type = memo_key_type(tir, cx);
     let value_type = ret_clause
         .strip_prefix(" -> ")
@@ -298,8 +298,8 @@ fn emit_tir_memoized_toplevel(
     out.push_str(&format!(
         "{kernel_proof}{inline_attr}{vis}{unsafe_kw}{abi}fn {name}{generics}({params}){ret_clause} {{\n"
     ));
-    out.push_str(&format!(
-        "    let __jet_memo_store = {store_init};\n    let __jet_memo_key: {key_type} = {key_expr};\n    {root}jet_memo_call(__jet_memo_store, __jet_memo_key, || {body_call})\n"
+    out.push_str(&jet_name_format!(
+        "    let {name_prefix}memo_store = {store_init};\n    let {name_prefix}memo_key: {key_type} = {key_expr};\n    {root}jet_memo_call({name_prefix}memo_store, {name_prefix}memo_key, || {body_call})\n"
     ));
     out.push_str("}\n\n");
     out.push_str(&format!(

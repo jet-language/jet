@@ -690,8 +690,8 @@ fn run() {
 
 /// c109: a field read off a comptime-const STRUCT value (`@pair_value :: Pair{…}`;
 /// `pair_value.left`) and an `==` against a comptime-const ENUM value (`@light_value ::
-/// Light.Green`; `light_value == Light.Green`). Each const inlines to its pre-rendered
-/// Rust value; the field read / comparison uses the canonical Equatable hook.
+/// Light.Green`; `light_value == Light.Green`). The struct field read folds to the
+/// projected comptime value; the comparison uses the canonical ordering hook.
 /// `main` routes through the TIR; runs to the round-trip output.
 #[test]
 fn field_read_and_eq_on_inlined_comptime_values() {
@@ -724,18 +724,33 @@ fn run() {
 }
 ";
     let out = jet::compile(src).expect("should compile");
-    // Byte-exact: `pair_value.left` reads a field off the inlined struct literal.
+    // A comptime const is compile-time DATA: sema folds `@pair_value.left`
+    // to the projected value (`CheckerInfer/expr.rs::fold_comptime_struct_field`),
+    // so no field read of it survives into the emitted Rust.
     assert!(
-        out.rust.contains(
-            "(__jet_Pair { __jet_left: 7i64, __jet_right: \"seven\".to_string() }).__jet_left"
-        ),
-        "comptime struct field read not byte-exact:\n{}",
+        out.rust.contains("jet_std::jet_int_to_string(7i64)")
+            && out.rust.contains("(\"seven\".to_string()).jet_display()"),
+        "comptime struct field read was not folded to its value:\n{}",
         out.rust
     );
-    // Byte-exact: user-enum equality routes through the canonical Equatable hook.
+    // Byte-exact: the RUNTIME twin of each read is still the ordinary TIR
+    // field read, so the fold above is the only difference between them.
     assert!(
         out.rust
-            .contains("(__jet_Light::__jet_Green).equal(&(__jet_Light::__jet_Green))"),
+            .contains("jet_std::jet_int_to_string((__jet_p).__jet_left)")
+            && out.rust.contains("((__jet_p).__jet_right).jet_display()"),
+        "runtime struct field read not byte-exact:\n{}",
+        out.rust
+    );
+    // Byte-exact: user-enum equality routes through a canonical Jet hook, never
+    // a native Rust `==` on the mangled enum. `Light` derives BOTH Comparable
+    // and Equatable, and a type with both defines `==` by its ONE ordering law
+    // (`compare(…) == Ordering.Equal`, D-CMP spaceship), so `==`, `<` and `>`
+    // can never disagree.
+    assert!(
+        out.rust.contains(
+            "((__jet_Light::__jet_Green).compare(&(__jet_Light::__jet_Green))) == (__jet_Ordering::__jet_Equal)"
+        ),
         "comptime enum equality hook not byte-exact:\n{}",
         out.rust
     );
@@ -780,8 +795,8 @@ fn run() {
 /// c97/D-STRPARSE1: `String.lines()` (→ `[String]`) and `Int.parse(text)` (→
 /// `Int ? ParseError`). Both are compiler built-ins, so `main` routes
 /// through the TIR — proven by the emitted `jet_string_lines` helper call and
-/// the static parse form. `Int.parse` composes with `??`: a good parse yields the
-/// value, a bad one (`"abc"`) takes the fallback.
+/// the Prelude parse-kernel call. `Int.parse` composes with `??`: a good parse
+/// yields the value, a bad one (`"abc"`) takes the fallback.
 #[test]
 fn string_lines_and_int_parse() {
     if !have_rustc() {
@@ -807,15 +822,18 @@ fn run() {
 ";
     let out = jet::compile(src).expect("should compile");
     // TIR routing: `lines()` lowers to the `jet_string_lines` helper, `Int.parse`
-    // to the trim+parse form. (The AST emit path is gone — these prove the TIR.)
+    // to `TBuiltinOp::ParseInt`. (The AST emit path is gone — these prove the TIR.)
     assert!(
         out.rust.contains("jet_string_lines(&("),
         "lines() did not lower through the TIR (no jet_string_lines):\n{}",
         out.rust
     );
+    // I9: `ParseInt` calls the ONE parse kernel every tier runs
+    // (`jet_int_parse` = trim + arbitrary-precision parse + the same failure
+    // text, `Prelude/CoreLib/JetStd/CommonTypes.rs`), not an inlined
+    // `.trim().parse::<i64>()` that would reject an `Int` too big for `i64`.
     assert!(
-        out.rust
-            .contains(".trim().parse::<i64>().map_err(|_| format!"),
+        out.rust.contains("jet_std::jet_int_parse("),
         "Int.parse did not lower through the TIR (no parse form):\n{}",
         out.rust
     );
@@ -848,11 +866,16 @@ fn run() {
         "plain indexed field assignment did not mutate the list element:\n{}",
         out.rust
     );
+    // The compound form still goes through a CHECKED add, never Rust's `+`:
+    // `Int` addition is the one Prelude spine `jet_std::jet_int_add`, which
+    // `checked_add`s the packed small case and promotes to the arbitrary-
+    // precision value instead of wrapping (`Prelude/CoreLib/JetStd/
+    // CommonTypes.rs`). The element it reads comes from the bounds-checked
+    // `jet_index_vec`, and the write is the same element place as above.
     assert!(
-        out.rust.contains(").__jet_x).jet_add((1i64)")
-            && out
-                .rust
-                .contains("(__jet_points)[0i64 as usize].__jet_x = __jet___v;"),
+        out.rust.contains(
+            "{ let __jet___v = jet_std::jet_int_add((jet_index_vec(&(__jet_points), 0i64, \"input.jet\", 7)).__jet_x, 1i64); (__jet_points)[0i64 as usize].__jet_x = __jet___v; }"
+        ),
         "compound indexed field assignment did not use the checked add spine:\n{}",
         out.rust
     );

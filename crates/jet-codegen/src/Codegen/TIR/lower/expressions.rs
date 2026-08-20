@@ -5727,7 +5727,7 @@ pub(crate) fn wrap_foreign_undo(
                 )
             }
         };
-        let temp = format!("__jet_undo_arg_{site}_{index}");
+        let temp = jet_name_format!("{name_prefix}undo_arg_{site}_{index}");
         let ty = value.ty.clone();
         env.note_clone(&ty);
         captures.push((

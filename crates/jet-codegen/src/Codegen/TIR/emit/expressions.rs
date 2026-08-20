@@ -1185,8 +1185,8 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
             args,
         } => {
             if let Some(function) = name.strip_prefix(crate::Syntax::MEMO_STATS_CALL_PREFIX) {
-                return format!(
-                    "__jet_memo_stats_{}()",
+                return jet_name_format!(
+                    "{name_prefix}memo_stats_{}()",
                     cx.mangle_name(function)
                 );
             }

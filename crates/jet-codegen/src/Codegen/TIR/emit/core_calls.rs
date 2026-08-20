@@ -735,8 +735,8 @@ pub(crate) fn emit_tir_core_call(
                 } else {
                     "jet_int_div_rem_pair"
                 };
-                Some(format!(
-                    "{{ let __jet_pair = {}jet_std::{}({}, {}, \"core.math\", 0); {} {{ {}: __jet_pair.0, {}: __jet_pair.1 }} }}",
+                Some(jet_name_format!(
+                    "{{ let {name_prefix}pair = {}jet_std::{}({}, {}, \"core.math\", 0); {} {{ {}: {name_prefix}pair.0, {}: {name_prefix}pair.1 }} }}",
                     cx.root_prefix,
                     helper,
                     arg(0),
