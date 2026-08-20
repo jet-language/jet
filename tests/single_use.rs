@@ -373,3 +373,76 @@ fn tag_erases_in_codegen() {
         "Lock should lower to a plain struct"
     );
 }
+
+/// D-CONC-JOIN1: a bound `Task` handle owes discharge, and exactly four things
+/// discharge it — joining it, using its result, handing it to a combinator, or
+/// detaching it. Dropping a bound handle is a compile error (L1101), while an
+/// UNBOUND spawn is untouched: it joins at scope end under D-CONC-SPAWN1.
+///
+/// This rides the one D-LIN1 obligation pass rather than a second task-only
+/// checker, which is the whole point of the decision.
+#[test]
+fn task_handles_owe_join_or_detach() {
+    let dropped = codes_of(
+        r#"
+fn run() {
+    handle :: task 42
+    print("done")
+}
+"#,
+    );
+    assert!(
+        dropped.contains(&"L1101".to_string()),
+        "a bound handle that is never discharged must report L1101, got {dropped:?}"
+    );
+
+    let discarded = codes_of(
+        r#"
+fn run() {
+    _ :: task 42
+    print("done")
+}
+"#,
+    );
+    assert!(
+        discarded.contains(&"L1101".to_string()),
+        "discarding a handle into `_` is still dropping it, got {discarded:?}"
+    );
+
+    for (label, src) in [
+        (
+            "join",
+            r#"
+fn run() {
+    handle :: task 42
+    print(handle.join() ?? 0)
+}
+"#,
+        ),
+        (
+            "detach",
+            r#"
+fn run() {
+    handle :: task 42
+    handle.detach()
+}
+"#,
+        ),
+        (
+            "unbound spawn",
+            r#"
+fn work() => Int :: 7
+fn run() {
+    task work()
+    print("spawned")
+}
+"#,
+        ),
+    ] {
+        let codes = codes_of(src);
+        assert!(
+            !codes.contains(&"L1101".to_string()),
+            "{label} discharges the duty, so no L1101 belongs here; got {codes:?}"
+        );
+    }
+}
