@@ -1165,10 +1165,11 @@ fn push_corelib_prelude_body(
             fn jet_debug(&self) -> String { self.jet_show() }\n\
         }\n",
     );
-    // D-CONC-FAIL1=A: the one typed failure rail. Optional flat fragments
-    // outside `mod jet_std` (Services.rs) name it unqualified, so it is
-    // re-exported here rather than restated as a slice-local outcome enum.
-    out.push_str("\npub use crate::jet_std::{JetTaskFailure, JetTaskGroupRuntime};\n");
+    // NEVER add `JetTaskFailure` here. `jet-foundation/src/Outcome.rs` declares
+    // it and rides in `PRELUDE_PARTS`, so it is already a flat top-level item in
+    // every generated program; importing `jet_std::JetTaskFailure` into that same
+    // scope is E0255. Flat fragments outside `mod jet_std` name it unqualified.
+    out.push_str("\npub use crate::jet_std::JetTaskGroupRuntime;\n");
     // Card #1751: the one 80x24 terminal default, read by CommonTypes.rs's
     // TerminalPolicy::default (in the kernel closure above) and by
     // ProcessPty.rs's PtyConfig::default when process/PTY support is emitted.
