@@ -762,20 +762,20 @@ pub(crate) fn missing_arms_text(
         .map(|v| match subj_ty {
             // D-ENUMDOT1: leading-dot arm heads in `if subject == { … }`.
             Type::Named(_) | Type::Apply { .. } | Type::Union(_) => {
-                format!("    .{} {} {{}}", v, crate::Syntax::OP_ARM_ARROW)
+                format!("    .{} {} {{}}", v, crate::Syntax::OP_UNIFIED_ARROW)
             }
             Type::Option(_) => {
                 if v == crate::Syntax::LIT_VALUE {
                     format!(
                         "    .{}(inner) {} {{}}",
                         crate::Syntax::LIT_VALUE,
-                        crate::Syntax::OP_ARM_ARROW
+                        crate::Syntax::OP_UNIFIED_ARROW
                     )
                 } else {
                     format!(
                         "    .{} {} {{}}",
                         crate::Syntax::LIT_NULL,
-                        crate::Syntax::OP_ARM_ARROW
+                        crate::Syntax::OP_UNIFIED_ARROW
                     )
                 }
             }
@@ -784,17 +784,17 @@ pub(crate) fn missing_arms_text(
                     format!(
                         "    .{}(v) {} {{}}",
                         crate::Syntax::LIT_OK,
-                        crate::Syntax::OP_ARM_ARROW
+                        crate::Syntax::OP_UNIFIED_ARROW
                     )
                 } else {
                     format!(
                         "    .{}(e) {} {{}}",
                         crate::Syntax::LIT_ERR,
-                        crate::Syntax::OP_ARM_ARROW
+                        crate::Syntax::OP_UNIFIED_ARROW
                     )
                 }
             }
-            _ => format!("    .{} {} {{}}", v, crate::Syntax::OP_ARM_ARROW),
+            _ => format!("    .{} {} {{}}", v, crate::Syntax::OP_UNIFIED_ARROW),
         })
         .collect();
     format!("\n{}", arms.join("\n"))

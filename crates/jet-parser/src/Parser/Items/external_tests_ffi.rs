@@ -53,7 +53,9 @@ impl<'a> Parser<'a> {
             if matches!(self.peek().kind, TokKind::KwFn) {
                 let arguments = self.bound_registered_rule_arguments(&marker)?;
                 let faults_expr = arguments.parameter(1).cloned();
-                let test = self.test_def_after_kw(faults_expr)?;
+                let mut test = self.test_def_after_kw(faults_expr)?;
+                test.expected_fail_expr = arguments.parameter(2).cloned();
+                test.marker_name_span = marker.span;
                 self.bind_rule_fact(
                     marker.name_span,
                     Some(test.span),
@@ -76,6 +78,7 @@ impl<'a> Parser<'a> {
                 other => (None, other.span()),
             };
             let faults_expr = arguments.parameter(1).cloned();
+            let expected_fail_expr = arguments.parameter(2).cloned();
             let item_start = marker.span.start;
             self.expect(TokKind::LBrace, "to open the test body")?;
             let body = self.block_stmts();
@@ -85,6 +88,9 @@ impl<'a> Parser<'a> {
                 name_expr: Some(name_argument.clone()),
                 faults_expr,
                 faults: Vec::new(),
+                expected_fail_expr,
+                expected_fail: false,
+                marker_name_span: marker.span,
                 name_prefix: None,
                 name_span,
                 params: Vec::new(),
@@ -123,6 +129,9 @@ impl<'a> Parser<'a> {
                     name_expr: None,
                     faults_expr,
                     faults: Vec::new(),
+                    expected_fail_expr: None,
+                    expected_fail: false,
+                    marker_name_span: Span::new(0, 0),
                     name_prefix: None,
                     name_span,
                     params,
@@ -139,6 +148,9 @@ impl<'a> Parser<'a> {
                 name_expr: None,
                 faults_expr,
                 faults: Vec::new(),
+                expected_fail_expr: None,
+                expected_fail: false,
+                marker_name_span: Span::new(0, 0),
                 name_prefix: None,
                 name_span,
                 params: Vec::new(),
@@ -563,7 +575,7 @@ impl<'a> Parser<'a> {
                         Syntax::KW_RUST
                     ),
                     format!(
-                        "write: {} {} \"std\" {{ fn name() => Int = \"std::path\"; }}",
+                        "write: {} {} \"std\" {{ fn name() :> Int = \"std::path\"; }}",
                         Syntax::KW_EXTERN,
                         Syntax::KW_RUST
                     ),
@@ -665,12 +677,9 @@ impl<'a> Parser<'a> {
             let mut return_type = None;
             let mut return_type_span = None;
             let mut arrow_return = false;
-            if matches!(self.peek().kind, TokKind::LambdaArrow | TokKind::Arrow) {
+            if self.at_unified_arrow() {
                 arrow_return = true;
-                let arrow = self.bump();
-                if matches!(arrow.kind, TokKind::Arrow) {
-                    self.diags.push(Self::retired_callable_arrow(arrow.span));
-                }
+                self.expect_unified_arrow("before a callable result type")?;
                 let (ty, span) = self.return_type()?;
                 return_type = Some(ty);
                 return_type_span = Some(span);

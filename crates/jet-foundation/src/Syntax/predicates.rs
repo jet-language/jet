@@ -37,7 +37,7 @@ pub const UNIT_SUFFIX_EXPONENT_RESERVED: &str = "e"; // D-UNITLIT1
 pub const UNIT_SUFFIX_IMAGINARY: &str = "i";
 
 // D-TRAILBLOCK2=A (amends D-TRAILBLOCK1): no new token — code arguments are
-// ordinary `() => { … }` lambdas inside call parentheses. A bare `{` after a
+// ordinary `() :> { … }` lambdas inside call parentheses. A bare `{` after a
 // call is E0335 (retired trailing-block sugar), not a new lexical form.
 // D-DESTRUCT1: no new token — reuses the D-DOTCTOR1 `.{` sigil in pattern
 // position and `..` (OP_RANGE) as the now-mandatory partial-pattern rest
@@ -296,7 +296,7 @@ pub const EFFECTS_FIELD_DENY: &str = "deny"; // D-EFFBUDGET1
 /// per-dependency escape from the `effects:` budget, recorded in the lockfile.
 pub const MANIFEST_BLOCK_GRANTS: &str = "grants"; // D-EFFBUDGET1
 /// D-POLICY-WORD1=A: package floors and memory governance live under the
-/// `policy: .{ … }` block in `package.jet`. Manifest keys only, no language
+/// `policy: { … }` block in `package.jet`. Manifest keys only, no language
 /// grammar.
 pub const MANIFEST_BLOCK_POLICY: &str = "policy"; // D-POLICY-WORD1
 /// D-MEM-GUARANTEE1=A: package-only dependency containment policy. These
@@ -304,7 +304,7 @@ pub const MANIFEST_BLOCK_POLICY: &str = "policy"; // D-POLICY-WORD1
 pub const POLICY_FIELD_CONTAIN: &str = "contain";
 pub const POLICY_FIELD_HARDEN: &str = "harden";
 /// D-AUTHORITY-MANIFEST1=A / D-BOUND-PROV1=A: source-reviewed trust and
-/// provider authority live under the one `authority: .{ … }` block.
+/// provider authority live under the one `authority: { … }` block.
 pub const MANIFEST_BLOCK_AUTHORITY: &str = "authority"; // D-AUTHORITY-MANIFEST1
 pub const AUTHORITY_FIELD_TRUST: &str = "trust"; // D-BOUND-PROV1
 /// D-JPK-PROVIDERAUTH1=A: reviewed registry and fetch authority.

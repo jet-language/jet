@@ -26,8 +26,9 @@
 //! by default even with a matching declared bound absent — see
 //! `check_secret_grants`.
 //!
-//! D-EFFTREE1 (ratified 2026-07-03) amends D-EFF4/5: the 31 declared names below
-//! become tree **roots**. A user-written effect name may now be a dotted path
+//! D-EFFTREE1 (ratified 2026-07-03) amends D-EFF4/5: the canonical names in
+//! `jet-foundation::Authority` become tree **roots**. A user-written effect
+//! name may now be a dotted path
 //! rooted at one of them (`FS.Read`, `Net.HTTP.Get`) — the root is validated
 //! against the closed vocabulary (E0119 otherwise); further segments are an
 //! open, user-chosen leaf path with no fixed vocabulary of children (the same
@@ -37,9 +38,9 @@
 //! below it in the tree (`effect_covers`) — the same ancestor-subtree rule as
 //! D-TAG1's nested variant groups (CheckerCore.rs's switch-arm coverage:
 //! `variant.starts_with(&format!("{c}."))`). `Effect` itself stays the closed
-//! 31-root enum, used for root validation/
-//! classification and by the small set of call sites (D-TXN2, D-TAINT1,
-//! D-WASM1) that only ever care about a whole root regardless of leaf.
+//! root enum, used for classification by the small set of call sites
+//! (D-TXN2, D-TAINT1, D-WASM1) that only ever care about a whole root
+//! regardless of leaf.
 
 use crate::Diagnostics::{Diagnostic, Span};
 /// D-META-EFFECT1: the effect facts live in `jet-foundation` so both stages
@@ -64,13 +65,13 @@ pub fn effect_root(name: &str) -> &str {
 }
 
 /// D-EFFTREE1: validate a user-written effect path — bare (`FS`) or dotted
-/// (`FS.Read`, `Net.HTTP.Get`). The root must be one of the closed 31
-/// D-EFF4/5 names (the caller reports E0119 on `None`); further segments are
+/// (`FS.Read`, `Net.HTTP.Get`). The root must be one of the canonical closed
+/// names (the caller reports E0119 on `None`); further segments are
 /// an open, user-chosen leaf path with no fixed vocabulary — mirrors D-TAG1's
 /// tag-tree dotted paths. Returns the path unchanged (as the canonical form)
 /// when the root is known.
 pub fn parse_effect_name(name: &str) -> Option<String> {
-    Effect::parse(effect_root(name))?;
+    jet_foundation::Authority::parse_root(name)?;
     Some(name.to_string())
 }
 
@@ -836,6 +837,17 @@ mod inferred_purity_display_tests {
             inferred_purity_display_name("app", "dependency::leaky"),
             "dependency::leaky"
         );
+    }
+}
+
+#[cfg(test)]
+mod authority_root_tests {
+    use super::parse_effect_name;
+
+    #[test]
+    fn effect_name_validation_reads_foundation_roots() {
+        assert_eq!(parse_effect_name("FS.Read").as_deref(), Some("FS.Read"));
+        assert!(parse_effect_name("NotAnAuthority.Right").is_none());
     }
 }
 

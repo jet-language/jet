@@ -346,6 +346,10 @@ fn specialize_test(source: &crate::AST::TestDef, alias: &str,
     if let Some(expression) = &mut result.faults_expr {
         substitute_expr(expression, types, values);
     }
+    if let Some(expression) = &mut result.expected_fail_expr {
+        substitute_expr(expression, types, values);
+    }
+    result.expected_fail = false;
     result.faults.clear();
     for param in &mut result.params {
         param.ty = specialize_module_type(&param.ty, types, values);

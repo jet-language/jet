@@ -1,7 +1,7 @@
 use crate::AST::{AccessConvention, Expr, ParamZone, Type};
 use crate::Diagnostics::{CryptoMisuseReason, Diagnostic, Span};
 use crate::Sema::Checker;
-use crate::Sema::Diagnostics::{is_debuggable, is_displayable, is_printable, type_fix_hint, types_comparable};
+use crate::Sema::Diagnostics::{is_debuggable, is_displayable, is_printable, suggest_field, type_fix_hint, types_comparable};
 use crate::Sema::Effects::{core_effect, e0746, is_irreversible_effect};
 use crate::Sema::FFI::e3301;
 use crate::Sema::Purity::{e3401, is_impure_core};
@@ -24,6 +24,104 @@ fn core_effect_for_call(module: &str, name: &str) -> Option<crate::Sema::Effects
     match Syntax::core_call(module, name) {
         Some(row) => row.effect(),
         None => core_effect(module, name),
+    }
+}
+
+fn analytics_sql_literal(expr: &Expr) -> Option<String> {
+    let Expr::TypedLit {
+        head: Some(Type::Named(head)),
+        body: crate::AST::TypedLitBody::Value(value),
+        ..
+    } = expr
+    else {
+        return None;
+    };
+    if head != "SQL" {
+        return None;
+    }
+    let Expr::Str(parts, _) = value.as_ref() else {
+        return None;
+    };
+    Some(
+        parts
+            .iter()
+            .filter_map(|part| match part {
+                crate::AST::StrPart::Lit(text) => Some(text.as_str()),
+                crate::AST::StrPart::Interp(..) => None,
+            })
+            .collect(),
+    )
+}
+
+fn analytics_sql_columns(sql: &str) -> Vec<String> {
+    let tokens: Vec<String> = sql
+        .split_whitespace()
+        .map(|token| token.trim_matches(',').to_string())
+        .collect();
+    let mut columns = Vec::new();
+    if let (Some(select), Some(from)) = (
+        tokens.iter().position(|token| token.eq_ignore_ascii_case("select")),
+        tokens.iter().position(|token| token.eq_ignore_ascii_case("from")),
+    ) {
+        for token in tokens.iter().skip(select + 1).take(from.saturating_sub(select + 1)) {
+            let name = token
+                .trim_matches(|c: char| !c.is_ascii_alphanumeric() && c != '_')
+                .split('(')
+                .last()
+                .unwrap_or_default();
+            if !name.is_empty() && name != "*" && !name.eq_ignore_ascii_case("as") {
+                columns.push(name.rsplit('.').next().unwrap_or(name).to_string());
+            }
+        }
+    }
+    for keyword in ["where", "order", "group"] {
+        if let Some(at) = tokens.iter().position(|token| token.eq_ignore_ascii_case(keyword)) {
+            let offset = if keyword == "where" { 1 } else { 2 };
+            if let Some(token) = tokens.get(at + offset) {
+                let name = token
+                    .trim_matches(|c: char| !c.is_ascii_alphanumeric() && c != '_')
+                    .rsplit('.')
+                    .next()
+                    .unwrap_or_default();
+                if !name.is_empty() {
+                    columns.push(name.to_string());
+                }
+            }
+        }
+    }
+    columns.sort();
+    columns.dedup();
+    columns
+}
+
+impl<'a> Checker<'a> {
+    pub(crate) fn check_analytics_sql_schema(&mut self, row: &Type, query: &Expr) {
+        let Some(sql) = analytics_sql_literal(query) else {
+            return;
+        };
+        let type_name = match row {
+            Type::Named(name) | Type::Apply { name, .. } => name,
+            _ => return,
+        };
+        let Some(fields) = self.struct_fields_for_type_name(type_name) else {
+            return;
+        };
+        let known: Vec<String> = fields.iter().map(|(name, _, _)| name.clone()).collect();
+        for column in analytics_sql_columns(&sql) {
+            if known.iter().any(|known| known == &column) {
+                continue;
+            }
+            let suggestion = suggest_field(&column, &known)
+                .map(|name| format!(" Did you mean `{name}`?"))
+                .unwrap_or_default();
+            self.diags.push(Diagnostic::error(
+                "E2420",
+                format!("unknown analytics column `{column}`{suggestion}"),
+                format!("`{column}` is not a field on `{type_name}`; DuckDB would fail at runtime, but Jet checks this schema at compile time"),
+                format!("write one of: {}", known.join(", ")),
+                Some(query.span()),
+            ));
+        }
     }
 }
 
@@ -851,6 +949,57 @@ impl<'a> Checker<'a> {
                     self.expect_core_arg(name, 0, &input_type, arg);
                 }
                 return Some(core_compiler_return(name));
+            }
+            // D-SQL-SURFACE1=C: typed CSV query and in-memory query share one
+            // checked row shape and one Prelude result carrier.
+            if module == "core.encoding.csv" && name == "query" && !type_args.is_empty() {
+                if args.len() != 2 {
+                    self.diags.push(wrong_core_arity(name, 2, args.len(), span));
+                }
+                let Some(row) = exactly_one_type_arg(self, name, type_args, span) else {
+                    return None;
+                };
+                if let Some(path) = args.get_mut(0) {
+                    self.expect_core_arg(name, 0, &Type::String, path);
+                }
+                if let Some(query) = args.get_mut(1) {
+                    self.check_analytics_sql_schema(&row, &query.expr);
+                    self.expect_core_arg(name, 1, &Type::Named("SQL".to_string()), query);
+                }
+                self.check_decodable(&row, span);
+                self.check_encodable(&row, span);
+                return Some(result_ty(
+                    Type::List(Box::new(row)),
+                    Type::List(Box::new(Type::Named("FieldError".to_string()))),
+                ));
+            }
+            if module == "core.data" && name == "query" {
+                if args.len() != 2 {
+                    self.diags.push(wrong_core_arity(name, 2, args.len(), span));
+                }
+                let row = match args.get_mut(0).and_then(|arg| self.infer(&mut arg.expr)) {
+                    Some(Type::List(inner)) => *inner,
+                    Some(other) => {
+                        self.diags.push(Diagnostic::error(
+                            "E0112",
+                            format!("`data.query` needs a typed row list, not {}", other.show()),
+                            "the in-memory SQL door preserves one typed row shape".to_string(),
+                            "pass a `[Row]` value".to_string(),
+                            Some(span),
+                        ));
+                        Type::Int
+                    }
+                    None => Type::Int,
+                };
+                if let Some(query) = args.get_mut(1) {
+                    self.check_analytics_sql_schema(&row, &query.expr);
+                    self.expect_core_arg(name, 1, &Type::Named("SQL".to_string()), query);
+                }
+                self.check_encodable(&row, span);
+                return Some(result_ty(
+                    Type::List(Box::new(row)),
+                    Type::List(Box::new(Type::Named("FieldError".to_string()))),
+                ));
             }
             // D-EFF1: record the effect this Core call contributes to the enclosing
             // function's inferred set (erased in codegen; purely a sema fact).

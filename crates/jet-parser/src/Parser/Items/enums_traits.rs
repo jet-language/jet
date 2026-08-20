@@ -249,7 +249,7 @@ impl<'a> Parser<'a> {
                     parts.push(self.expect_ident("after `.` in `impl`")?);
                 }
                 let is_error_conversion =
-                    matches!(self.peek().kind, TokKind::LambdaArrow | TokKind::Arrow);
+                    self.at_unified_arrow();
                 let is_protocol_impl = parts.len() == 2
                     && matches!(parts[1].0.as_str(), "Client" | "Server")
                     && matches!(self.peek().kind, TokKind::LBrace);
@@ -279,12 +279,9 @@ impl<'a> Parser<'a> {
             };
             // Detect `impl Source => Target { body }` — D-ERR-CONV as respelled
             // by D-ARROW-CONTROL1. Accept `->` only to emit its migration error.
-            if matches!(self.peek().kind, TokKind::LambdaArrow | TokKind::Arrow) {
-                let arrow = self.bump();
-                if matches!(arrow.kind, TokKind::Arrow) {
-                    self.diags.push(Self::retired_callable_arrow(arrow.span));
-                }
-                let (to_ty, to_span) = self.parse_type_path("after `=>` in error conversion")?;
+            if self.at_unified_arrow() {
+                self.expect_unified_arrow("before a callable result type")?;
+                let (to_ty, to_span) = self.parse_type_path("after `:>` in error conversion")?;
                 // Peek the `{` span before consuming.
                 if !matches!(self.peek().kind, TokKind::LBrace) {
                     return Err(Diagnostic::error(

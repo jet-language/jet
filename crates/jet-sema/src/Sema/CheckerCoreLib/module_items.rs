@@ -309,6 +309,7 @@ pub fn core_module_items(module: &str) -> Vec<String> {
             "parse",
             "decode",
             "decode_traced",
+            "query",
             "to_string",
             "reader",
             "writer",
@@ -360,6 +361,7 @@ pub fn core_module_items(module: &str) -> Vec<String> {
         "core.game" => &["Scene", "Replay", "Backend", "run"],
         "core.data" => &[
             "csv",
+            "query",
             "json",
             "csv_reader",
             "json_reader",

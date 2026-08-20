@@ -42,7 +42,9 @@ impl<'a> Fmt<'a> {
         };
         self.write("if ");
         self.fmt_cond(cond);
-        self.write(" -> ");
+        self.write(" ");
+        self.write(Syntax::OP_UNIFIED_ARROW);
+        self.write(" ");
         if then_body.is_empty() && !self.value_was_braced(then_value) {
             self.fmt_expr(then_value, Prec::OrFallback);
         } else {
@@ -52,10 +54,14 @@ impl<'a> Fmt<'a> {
             self.write(" else ");
             self.fmt_if_expr(else_value, inline);
         } else if else_body.is_empty() && !self.value_was_braced(else_value) {
-            self.write(" else -> ");
+            self.write(" else ");
+            self.write(Syntax::OP_UNIFIED_ARROW);
+            self.write(" ");
             self.fmt_expr(else_value, Prec::OrFallback);
         } else {
-            self.write(" else -> ");
+            self.write(" else ");
+            self.write(Syntax::OP_UNIFIED_ARROW);
+            self.write(" ");
             self.fmt_value_block(else_body, else_value, inline);
         }
     }
@@ -204,7 +210,7 @@ impl<'a> Fmt<'a> {
                     };
                     f.fmt_dispatch_value_cond(subject, table_op, cond);
                     f.write(" ");
-                    f.write(Syntax::OP_ARM_ARROW);
+                    f.write(Syntax::OP_UNIFIED_ARROW);
                     f.write(" ");
                     if then_body.is_empty() {
                         f.fmt_expr(then_value, Prec::OrFallback);
@@ -225,7 +231,7 @@ impl<'a> Fmt<'a> {
                     }
                     f.write(Syntax::KW_ELSE);
                     f.write(" ");
-                    f.write(Syntax::OP_ARM_ARROW);
+                    f.write(Syntax::OP_UNIFIED_ARROW);
                     f.write(" ");
                     if else_body.is_empty() {
                         f.fmt_expr(else_value, Prec::OrFallback);
@@ -257,7 +263,7 @@ impl<'a> Fmt<'a> {
                 };
                 f.fmt_expr(cond, Prec::OrFallback);
                 f.write(" ");
-                f.write(Syntax::OP_ARM_ARROW);
+                f.write(Syntax::OP_UNIFIED_ARROW);
                 f.write(" ");
                 if then_body.is_empty() {
                     f.fmt_expr(then_value, Prec::OrFallback);
@@ -273,7 +279,7 @@ impl<'a> Fmt<'a> {
                 }
                 f.write(Syntax::KW_ELSE);
                 f.write(" ");
-                f.write(Syntax::OP_ARM_ARROW);
+                f.write(Syntax::OP_UNIFIED_ARROW);
                 f.write(" ");
                 if else_body.is_empty() {
                     f.fmt_expr(else_value, Prec::OrFallback);
@@ -494,19 +500,21 @@ impl<'a> Fmt<'a> {
                 }
                 self.write(")");
                 if let Some(bound) = effect_bound {
-                    self.write(" =[");
+                    self.write(" ");
+                    self.write(Syntax::EFFECT_ARROW_OPEN);
                     for (i, (name, _)) in bound.iter().enumerate() {
                         if i > 0 {
                             self.write(", ");
                         }
                         self.write(name);
                     }
-                    self.write("]=>");
+                    self.write(Syntax::EFFECT_ARROW_CLOSE);
                 }
                 if let Some(r) = ret {
                     let unit_fallible = Self::is_unit_fallible_type(r);
                     if effect_bound.is_none() && !unit_fallible {
-                        self.write(" =>");
+                        self.write(" ");
+                        self.write(Syntax::OP_UNIFIED_ARROW);
                     }
                     if unit_fallible {
                         self.fmt_unit_fallible_return(r);
@@ -1162,7 +1170,7 @@ impl<'a> Fmt<'a> {
                     self.write(")");
                     return;
                 }
-                // D-DOTCTOR1: emit `Type.{ … }` (named) or `.{ … }` (inferred).
+                // D-LIT-DOT1: emit `Type{ … }` (named) or `{ … }` (inferred).
                 // The formatter is also the auto-fixer for E0320: any old `Type { … }`
                 // (recovered with `inferred: false`) is re-emitted in the new form.
                 let inferred = *inferred
@@ -1173,7 +1181,7 @@ impl<'a> Fmt<'a> {
                             import_ns.as_deref(),
                         ));
                 if inferred {
-                    // `.{ field: val, … }` — type inferred from context.
+                    // `{ field: val, … }` — type inferred from context.
                 } else {
                     if let Some(ns) = import_ns {
                         self.write(ns.as_str());
@@ -1191,7 +1199,7 @@ impl<'a> Fmt<'a> {
                         self.write(">");
                     }
                 }
-                self.write(".{");
+                self.write("{");
                 let multiline = self.source_span_multiline(*span);
                 if multiline {
                     self.newline();
@@ -1235,7 +1243,7 @@ impl<'a> Fmt<'a> {
                 if let Some(head) = head {
                     self.fmt_type(head);
                 }
-                self.write(".{");
+                self.write("{");
                 let multiline = self.source_span_multiline(*span);
                 if multiline {
                     self.newline();
@@ -1364,11 +1372,11 @@ impl<'a> Fmt<'a> {
                 }
                 self.write(variant);
                 if !args.is_empty() {
-                    // D-UITREE1/D-DOTCTOR1: named-payload variants use the struct
-                    // dot-brace spelling (`.Variant.{ field: val }`); positional
+                    // D-UITREE1/D-LIT-DOT1: named-payload variants use the struct
+                    // brace spelling (`.Variant{ field: val }`); positional
                     // (single-payload, S30) variants keep the paren call form.
                     let named = matches!(args.first(), Some(EnumLitArg::Named { .. }));
-                    self.write(if named { ".{" } else { "(" });
+                    self.write(if named { "{" } else { "(" });
                     for (i, arg) in args.iter().enumerate() {
                         if i > 0 {
                             self.write(", ");
@@ -1734,14 +1742,20 @@ impl<'a> Fmt<'a> {
             body
         };
         let Some((tail, prefix)) = body.split_last() else {
-            self.write(" -> {}");
+            self.write(" ");
+            self.write(Syntax::OP_UNIFIED_ARROW);
+            self.write(" {}");
             return;
         };
         let Stmt::Yield(value, _) = tail else {
-            self.write(" -> {}");
+            self.write(" ");
+            self.write(Syntax::OP_UNIFIED_ARROW);
+            self.write(" {}");
             return;
         };
-        self.write(" -> ");
+        self.write(" ");
+        self.write(Syntax::OP_UNIFIED_ARROW);
+        self.write(" ");
         if prefix.is_empty() {
             self.fmt_expr(value, Prec::OrFallback);
             return;
@@ -1783,7 +1797,9 @@ impl<'a> Fmt<'a> {
         if !bare_param {
             self.write(")");
         }
-        self.write(" => ");
+        self.write(" ");
+        self.write(Syntax::OP_UNIFIED_ARROW);
+        self.write(" ");
         match &lam.body {
             crate::AST::LambdaBody::Expr(e) => self.fmt_expr(e, Prec::OrFallback.add_rhs()),
             crate::AST::LambdaBody::Block(stmts) => {
@@ -1947,7 +1963,7 @@ impl<'a> Fmt<'a> {
             }
             // D-DESTRUCT1: struct-shaped dispatch arm head.
             Pattern::Struct { fields, rest, .. } => {
-                self.write(".{");
+                self.write("{");
                 for (i, field) in fields.iter().enumerate() {
                     if i > 0 {
                         self.write(", ");
@@ -1983,17 +1999,17 @@ impl<'a> Fmt<'a> {
             Pattern::StrMatch { parts, span } => {
                 self.fmt_str_match_parts(parts, self.is_typed_head_body(*span));
             }
-            // D-BINPAT1 / D-UNIFYLIT1=A: `[U8].{"…"}` binary pattern.
+            // D-BINPAT1 / D-UNIFYLIT1=A: `[U8]{"…"}` binary pattern.
             Pattern::BinMatch { parts, .. } => {
                 self.fmt_bin_match_parts(parts);
             }
         }
     }
 
-    /// D-BINPAT1 / D-UNIFYLIT1=A: render a `BinMatchPart` list as `[U8].{"…"}`.
+    /// D-BINPAT1 / D-UNIFYLIT1=A: render a `BinMatchPart` list as `[U8]{"…"}`.
     pub(super) fn fmt_bin_match_parts(&mut self, parts: &[crate::AST::BinMatchPart]) {
         use crate::AST::{BinEndian, BinMatchPart, BinSpec};
-        self.write("[U8].{\"");
+        self.write("[U8]{\"");
         for part in parts {
             match part {
                 BinMatchPart::Lit(bytes) => {
@@ -2030,7 +2046,7 @@ impl<'a> Fmt<'a> {
         raw_head: bool,
     ) {
         if raw_head {
-            self.write("String.{");
+            self.write("String{");
         }
         self.write("\"");
         for part in parts {
@@ -2059,7 +2075,7 @@ impl<'a> Fmt<'a> {
         }
     }
 
-    /// D-BOUND-RAW1=A: only an explicit `String.{"…"}` pattern body owns
+    /// D-BOUND-RAW1=A: only an explicit `String{"…"}` pattern body owns
     /// backslashes. Bare text patterns keep the ordinary string escape table.
     fn is_typed_head_body(&self, span: crate::Diagnostics::Span) -> bool {
         self.src

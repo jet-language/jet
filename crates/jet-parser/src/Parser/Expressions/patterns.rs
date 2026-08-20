@@ -16,13 +16,13 @@ mod tests {
 fn run() {
     text :: "prefix-42-suffix"
     if text == {
-        "prefix-{value}-suffix" -> print(value)
-        else -> print("miss")
+        "prefix-{value}-suffix" :> print(value)
+        else :> print("miss")
     }
-    bytes :: [U8].{ 7 }
+    bytes :: [U8]{ 7 }
     if bytes == {
-        [U8].{"{value:U8}"} -> print(value)
-        else -> print("miss")
+        [U8]{"{value:U8}"} :> print(value)
+        else :> print("miss")
     }
 }
 "#;
@@ -214,6 +214,7 @@ impl<'a> Parser<'a> {
                 callable_tail_block_depth: None,
                 module_arg_expr_depth: None,
                 allow_lowercase_leading_dot: self.allow_lowercase_leading_dot,
+                migration_mode: self.migration_mode,
                 derive_template_depth: self.derive_template_depth,
                 policy_declarations: Vec::new(),
                 applied_rules: Vec::new(),
@@ -247,7 +248,7 @@ impl<'a> Parser<'a> {
         }
     
         /// D-SHIFT1 / D-UNIFYLIT1=A: parse the sole argument of `take_pattern(…)`.
-        /// Accepts a bare `"…"` text pattern, `String.{"…"}`, or `[U8].{"…"}`
+        /// Accepts a bare `"…"` text pattern, `String{"…"}`, or `[U8]{"…"}`
         /// (byte mode). The retired `b"…"` prefix is no longer lexed.
         pub(super) fn parse_take_pattern_literal(&mut self) -> Result<Expr, Diagnostic> {
             if let Some(expr) = self.try_typed_pattern_literal_expr()? {
@@ -263,8 +264,8 @@ impl<'a> Parser<'a> {
                     ),
                     "the pattern is matched at compile time, so it must be written directly as a string literal"
                         .to_string(),
-                    format!(
-                        "write `{}(\"literal-{{hole}}-pattern\")` or `{}([U8].{{\"…\"}})` for bytes",
+                        format!(
+                        "write `{}(\"literal-{{hole}}-pattern\")` or `{}([U8]{{\"…\"}})` for bytes",
                         Syntax::METHOD_TAKE_PATTERN,
                         Syntax::METHOD_TAKE_PATTERN
                     ),
@@ -277,7 +278,7 @@ impl<'a> Parser<'a> {
             Ok(Expr::StrMatchLit(match_parts, span))
         }
 
-        /// D-UNIFYLIT1=A: `[U8].{"…"}` / `String.{"…"}` as a take_pattern /
+        /// D-UNIFYLIT1=A: `[U8]{"…"}` / `String{"…"}` as a take_pattern /
         /// pattern-position literal expression.
         fn try_typed_pattern_literal_expr(&mut self) -> Result<Option<Expr>, Diagnostic> {
             let save = self.pos;
@@ -300,7 +301,7 @@ impl<'a> Parser<'a> {
             }
         }
 
-        /// Hard-error gate shared by bare `"…"` and `String.{"…"}` take_pattern args.
+        /// Hard-error gate shared by bare `"…"` and `String{"…"}` take_pattern args.
         fn reject_bad_take_pattern_holes(
             parts: &[StrTokPart],
             fallback_span: Span,
@@ -334,7 +335,7 @@ impl<'a> Parser<'a> {
             Ok(())
         }
 
-        /// D-BINPAT1 / D-UNIFYLIT1=A: `[U8].{"…"}` binary pattern — byte-mode
+        /// D-BINPAT1 / D-UNIFYLIT1=A: `[U8]{"…"}` binary pattern — byte-mode
         /// sibling of `try_str_match_pattern`. Malformed holes are hard errors
         /// (no byte-value literal fallback).
         pub(super) fn try_bin_match_pattern(&mut self) -> Result<Option<Pattern>, Diagnostic> {
@@ -357,7 +358,7 @@ impl<'a> Parser<'a> {
             }))
         }
 
-        /// Optional `String.{"…"}` text pattern head (symmetry with `[U8].{"…"}`).
+        /// Optional `String{"…"}` text pattern head (symmetry with `[U8]{"…"}`).
         pub(super) fn try_string_typed_str_match_pattern(
             &mut self,
         ) -> Result<Option<Pattern>, Diagnostic> {
@@ -414,7 +415,7 @@ impl<'a> Parser<'a> {
             }))
         }
 
-        /// Parse `Head.{"…"}` where Head is `[U8]` / `[U8#N]` or `String`.
+        /// Parse `Head{"…"}` where Head is `[U8]` / `[U8#N]` or `String`.
         /// Returns the raw string token parts without elaborating holes as exprs.
         fn try_typed_pattern_str_body(
             &mut self,
@@ -443,12 +444,28 @@ impl<'a> Parser<'a> {
                 return Ok(None);
             };
             let (kind, start) = kind;
-            if !matches!(self.peek().kind, TokKind::Dot) {
+            let dotted = matches!(self.peek().kind, TokKind::Dot);
+            if dotted {
+                self.bump();
+            } else if !matches!(self.peek().kind, TokKind::LBrace) {
                 self.pos = save;
                 self.diags.truncate(save_diags);
                 return Ok(None);
             }
-            self.bump();
+            if dotted {
+                let label = if matches!(&kind, TypedPatternKind::Bytes) {
+                    "[U8]"
+                } else {
+                    "String"
+                };
+                self.diags.push(Diagnostic::error(
+                    "E0320",
+                    format!("typed pattern construction uses `{label}{{…}}`, not `{label}.{{…}}`"),
+                    "D-LIT-DOT1 drops the constructor dot from every literal head".to_string(),
+                    format!("write `{label}{{…}}`"),
+                    Some(self.toks[self.pos.saturating_sub(1)].span),
+                ));
+            }
             if !matches!(self.peek().kind, TokKind::LBrace) {
                 self.pos = save;
                 self.diags.truncate(save_diags);
@@ -647,8 +664,19 @@ impl<'a> Parser<'a> {
         }
 
         pub(super) fn struct_pattern_rhs(&mut self) -> Result<Pattern, Diagnostic> {
-            let dot_span = self.bump().span;
-            self.expect(TokKind::LBrace, "after `.` in a struct pattern")?;
+            let dotted = matches!(self.peek().kind, TokKind::Dot);
+            let start = self.peek().span.start;
+            if dotted {
+                let dot = self.bump();
+                self.diags.push(Diagnostic::error(
+                    "E0320",
+                    "record patterns use `{…}`, not `.{…}`".to_string(),
+                    "D-LIT-DOT1 drops the constructor dot from every literal head".to_string(),
+                    "write `{…}`".to_string(),
+                    Some(dot.span),
+                ));
+            }
+            self.expect(TokKind::LBrace, "to open a struct pattern")?;
             let mut fields = Vec::new();
             let mut rest = None;
             if !matches!(self.peek().kind, TokKind::RBrace) {
@@ -710,7 +738,7 @@ impl<'a> Parser<'a> {
             Ok(Pattern::Struct {
                 fields,
                 rest,
-                span: Span::new(dot_span.start, end),
+                span: Span::new(start, end),
             })
         }
     

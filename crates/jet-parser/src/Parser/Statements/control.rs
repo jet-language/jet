@@ -555,9 +555,9 @@ impl<'a> Parser<'a> {
             && matches!(self.peek5().kind, TokKind::LBrace)
     }
 
-    /// D-LAYOUT-CTOR1: parse `name :: Layout.{ … }` into `Stmt::Layout`.
+    /// D-LAYOUT-CTOR1: parse `name :: Layout{ … }` into `Stmt::Layout`.
     /// Body is a D-DOTCTOR3 element list of `Constraint` exprs (comma/semi),
-    /// not a statement block — same separator convention as `[T].{ … }`.
+    /// not a statement block — same separator convention as `[T]{ … }`.
     fn layout_ctor_binding(&mut self) -> Result<Stmt, Diagnostic> {
         let (name, name_span) = self.expect_ident("for the layout binding name")?;
         let (mutable, _) = self.expect_bind_sigil()?;
@@ -663,7 +663,7 @@ impl<'a> Parser<'a> {
     }
 
     /// D-UNINIT-SENTINEL1/2: `#Uninit name: Type` is retired — teaching error
-    /// E0426 points at `name := Type.{ uninit }`.
+    /// E0426 points at `name := Type{ uninit }`.
     fn retired_uninit_marker(&mut self) -> Result<Stmt, Diagnostic> {
         let head = self.read_marker_head()?;
         let hash_span = head.span;
@@ -675,7 +675,7 @@ impl<'a> Parser<'a> {
         }
         let fix = if name_hint.is_empty() {
             format!(
-                "write `name {} Type.{{ {} }}`",
+                "write `name {} Type{{ {} }}`",
                 Syntax::SIGIL_BIND_MUT,
                 Syntax::KW_UNINIT
             )
@@ -690,7 +690,7 @@ impl<'a> Parser<'a> {
             "E0426",
             format!("`#{}` is retired", Syntax::MARKER_UNINIT),
             format!(
-                "uninitialized storage is a fact about the value — it now reads `name {} Type.{{ {} }}`",
+                "uninitialized storage is a fact about the value — it now reads `name {} Type{{ {} }}`",
                 Syntax::SIGIL_BIND_MUT,
                 Syntax::KW_UNINIT
             ),
@@ -1335,15 +1335,14 @@ impl<'a> Parser<'a> {
             TokKind::LBrace,
             &format!("after `#{}(…)`", Syntax::KW_GRANT),
         )?;
-        // Retired spelling: `{ caps -> … }`.
+        // Retired spelling: `{ caps :> … }` (old arrows remain a migration arm).
         let (binding, binding_span) = self.expect_ident("for the authority handle name")?;
-        self.expect(
-            TokKind::UnifiedArrow,
+        self.expect_unified_arrow(
             &format!(
                 "after the `#{}` handle name (`#{}(…) {{ caps {} … }}`)",
                 Syntax::KW_GRANT,
                 Syntax::KW_GRANT,
-                "->"
+                Syntax::OP_UNIFIED_ARROW
             ),
         )?;
         let body = self.block_stmts();
@@ -1730,7 +1729,7 @@ impl<'a> Parser<'a> {
         let mut parens = 0usize;
         let mut brackets = 0usize;
         for token in self.toks.iter().skip(self.pos + 1) {
-            match token.kind {
+            match &token.kind {
                 TokKind::LParen => parens += 1,
                 TokKind::RParen => parens = parens.saturating_sub(1),
                 TokKind::LBracket => brackets += 1,
@@ -2449,7 +2448,7 @@ impl<'a> Parser<'a> {
                 self.finish_stmt()?;
                 Ok(Stmt::Val(binding))
             }
-            // D-LAYOUT-CTOR1: `name :: Layout.{ … }` before general sigil bindings.
+            // D-LAYOUT-CTOR1: `name :: Layout{ … }` before general sigil bindings.
             _ if self.looks_like_layout_ctor() => {
                 let stmt = self.layout_ctor_binding()?;
                 self.finish_stmt()?;
@@ -2484,7 +2483,7 @@ impl<'a> Parser<'a> {
             }
             // D-DOTSCOPE1: a scope-member statement `.name { … }` /
             // `.name(args) { … }`. The ident after the dot separates it from
-            // `.{ }` construction (S74) and the required trailing block from a
+            // `{ }` construction (S74) and the required trailing block from a
             // leading-dot enum value (D-ENUMDOT1). Parsed context-free wherever
             // the shape appears; sema resolves it against the enclosing marker's
             // vocabulary (E0614) or rejects it outside a marker block (E0615).
@@ -2495,7 +2494,7 @@ impl<'a> Parser<'a> {
                 return self.scope_member_stmt();
             }
             // D-UNINIT-SENTINEL1/2: `#Uninit name: Type` is retired — teaching
-            // error E0426 points at `name := Type.{ uninit }`.
+            // error E0426 points at `name := Type{ uninit }`.
             TokKind::Hash
                 if matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::MARKER_UNINIT) =>
             {
@@ -2876,7 +2875,7 @@ impl<'a> Parser<'a> {
         let mut nested_loop_pending = false;
         let mut nested_loop_braces = Vec::new();
         for (index, token) in self.toks.iter().enumerate().skip(self.pos + 3) {
-            match token.kind {
+            match &token.kind {
                 TokKind::LBrace => {
                     braces += 1;
                     saw_body = true;

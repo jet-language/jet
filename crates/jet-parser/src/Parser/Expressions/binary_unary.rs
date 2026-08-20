@@ -103,7 +103,12 @@ impl<'a> Parser<'a> {
         }
     
         fn parse_or_fallback(&mut self, allow_struct_lit: bool) -> Result<OrFallback, Diagnostic> {
-            if matches!(self.peek().kind, TokKind::LBrace) {
+            // D-LIT-DOT1: a field-led bare brace is a record literal. Keep
+            // statement-shaped braces as fallback blocks.
+            if matches!(self.peek().kind, TokKind::LBrace)
+                && (!self.brace_starts_record()
+                    || matches!(self.peek2().kind, TokKind::RBrace))
+            {
                 return self.parse_or_fallback_block();
             }
             if matches!(self.peek().kind, TokKind::KwReturn) {
@@ -676,14 +681,24 @@ impl<'a> Parser<'a> {
                     let full = Span::new(span.start, inner.span().end);
                     Ok(Expr::Copy(Box::new(inner), full))
                 }
-                // D-DOTCTOR1: `.{ … }` inferred struct literal (type from context).
-                // A leading `.` immediately followed by `{` is unambiguous — it is not
-                // valid as a field access (no receiver) or any other production — so it
-                // is accepted even where `allow_struct_lit` is false: that restriction
-                // exists for the dotless `Type {` / block ambiguity, which has no
-                // leading-dot counterpart (card #1441).
+                // D-LIT-DOT1: field-led `{ … }` is the inferred record literal.
+                // It is accepted only in expression positions that permit
+                // literals, because a bare brace can otherwise open a block.
+                TokKind::LBrace if allow_struct_lit && self.brace_starts_record() => {
+                    let start = self.peek().span.start;
+                    self.struct_lit_inferred(start)
+                }
+                // D-LIT-DOT1 migration arm: accept the retired `.{ … }` form
+                // long enough for `jet fmt` to rewrite the corpus.
                 TokKind::Dot if matches!(self.peek2().kind, TokKind::LBrace) => {
                     let dot_start = self.bump().span.start; // consume `.`
+                    self.diags.push(Diagnostic::error(
+                        "E0320",
+                        "inferred record construction uses `{…}`, not `.{…}`".to_string(),
+                        "D-LIT-DOT1 drops the constructor dot from every literal head".to_string(),
+                        "write `{…}`".to_string(),
+                        Some(self.toks[self.pos.saturating_sub(1)].span),
+                    ));
                     self.struct_lit_inferred(dot_start)
                 }
                 // D-SHAPE3a=A: `.new(...)` leaves only the static receiver implicit.
@@ -741,15 +756,24 @@ impl<'a> Parser<'a> {
                         variant = format!("{variant}.{seg}");
                         variant_span = seg_span;
                     }
-                    // D-UITREE1/D-DOTCTOR1: `.Variant.{ field: val, … }` — named-payload
-                    // construction reuses the struct dot-brace spelling (one leading-dot
-                    // rule for every inferred construction, structs and enums alike).
-                    // Like bare `.{` above, `.{` after a variant path is unambiguous, so
-                    // it is accepted even where `allow_struct_lit` is false (card #1441).
-                    let (args, end) = if matches!(self.peek().kind, TokKind::Dot)
+                    // D-LIT-DOT1: enum payload fields touch the variant name.
+                    let (args, end) = if allow_struct_lit && matches!(self.peek().kind, TokKind::LBrace) {
+                        self.enum_lit_named_fields()?
+                    } else if matches!(self.peek().kind, TokKind::Dot)
                         && matches!(self.peek2().kind, TokKind::LBrace)
                     {
-                        self.bump(); // consume `.`
+                        // Migration arm for retired `.Variant.{ … }`.
+                        let dot = self.bump();
+                        self.diags.push(Diagnostic::error(
+                            "E0320",
+                            format!(
+                                "enum payload uses `.{}{{…}}`, not `.{}.{{…}}`",
+                                variant, variant
+                            ),
+                            "D-LIT-DOT1 drops the constructor dot before payload fields".to_string(),
+                            format!("write `.{}{{…}}`", variant),
+                            Some(dot.span),
+                        ));
                         self.enum_lit_named_fields()?
                     } else if matches!(self.peek().kind, TokKind::LParen) {
                         self.bump(); // consume `(`

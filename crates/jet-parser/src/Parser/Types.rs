@@ -123,7 +123,7 @@ impl<'a> Parser<'a> {
             self.peek().kind,
             TokKind::KwFn | TokKind::Ident(_) | TokKind::LParen | TokKind::LBracket
         )
-        // D-EFF2/D-VERDICT-732-1 (formerly D-MARKERMOVE2): `fn(…) =[]=>` — a pure-bounded function type
+        // D-EFF2/D-VERDICT-732-1 (formerly D-MARKERMOVE2): `fn(…) :[]>` — a pure-bounded function type
         // (G1: the one carve-out where a contract marker prefixes a TYPE, not a
         // declaration). Retired `fn(…) --[]->` remains recognized here so the
         // callback-bound parser can teach E0062. `fn(…) --[E]->` — the retired general
@@ -187,7 +187,7 @@ impl<'a> Parser<'a> {
     fn return_type_inner(&mut self) -> Result<(Type, Span), Diagnostic> {
         // D-RESULT-OPTION-CANON1: return types use the same `T?` / `T ?` / `T ? E`
         // rules as every other type position. Parentheses only group
-        // (including optional `=> (T?)` when the author wants them).
+        // (including optional `:> (T?)` when the author wants them).
         self.type_()
     }
 
@@ -913,7 +913,7 @@ impl<'a> Parser<'a> {
         Ok((member, start))
     }
 
-    /// Parse a function type `fn(T1, …) =[E]=> R`, the cursor at `fn`.
+    /// Parse a function type `fn(T1, …) :[E]> R`, the cursor at `fn`.
     /// `effect_bound` is non-None only while recovering retired prefix syntax.
     /// D-MEMPROVENANCE3=A: optional `name: Type` params and a trailing `from`
     /// after the return type populate `return_view_provenance` (names resolve
@@ -994,12 +994,12 @@ impl<'a> Parser<'a> {
                 ),
                 "a label-only parameter is reached by writing its label, so it has to have one"
                     .to_string(),
-                "name it, as in `fn(*, force: Bool) => Int`".to_string(),
+                "name it, as in `fn(*, force: Bool) :> Int`".to_string(),
                 Some(self.peek().span),
             ));
         }
         // Identity only exists when the type actually declares one; an
-        // unannotated `fn(Int) => Int` keeps its bare structural meaning.
+        // unannotated `fn(Int) :> Int` keeps its bare structural meaning.
         let param_contract: Option<Vec<(String, crate::AST::ParamZone)>> = (saw_slash
             || saw_star
             || param_names.iter().any(Option::is_some))
@@ -1010,17 +1010,19 @@ impl<'a> Parser<'a> {
                 .map(|(name, zone)| (name.clone().unwrap_or_default(), *zone))
                 .collect()
         });
-        let decorated = matches!(self.peek().kind, TokKind::Eq)
+        let decorated = matches!(self.peek().kind, TokKind::Colon)
+            && matches!(self.peek2().kind, TokKind::LBracket);
+        let retired_eq = matches!(self.peek().kind, TokKind::Eq)
             && matches!(self.peek2().kind, TokKind::LBracket);
         let retired_double = matches!(self.peek().kind, TokKind::MinusMinus);
         let retired_ballot = matches!(self.peek().kind, TokKind::Minus)
             && matches!(self.peek2().kind, TokKind::LBracket);
-        if decorated || retired_double || retired_ballot {
-            if retired_double || retired_ballot {
+        if decorated || retired_eq || retired_double || retired_ballot {
+            if retired_eq || retired_double || retired_ballot {
                 self.diags.push(Self::retired_effect_syntax(self.peek().span));
             }
             effect_bound =
-                Some(self.parse_effect_arrow_row(decorated, retired_ballot)?);
+                Some(self.parse_effect_arrow_row(decorated, retired_eq, retired_ballot)?);
         }
         let mut arrow_return = false;
         let mut return_type_span = None;
@@ -1038,14 +1040,11 @@ impl<'a> Parser<'a> {
             }
         } else if retired_double
             || retired_ballot
-            || matches!(self.peek().kind, TokKind::LambdaArrow | TokKind::Arrow)
+            || self.at_unified_arrow()
         {
             arrow_return = true;
             if !retired_double && !retired_ballot {
-                let arrow = self.bump();
-                if matches!(arrow.kind, TokKind::Arrow) {
-                    self.diags.push(Self::retired_callable_arrow(arrow.span));
-                }
+                self.expect_unified_arrow("before a callable result type")?;
             }
             if self.type_starts_here() {
                 let (r, span) = self.type_()?;
@@ -1110,10 +1109,13 @@ impl<'a> Parser<'a> {
     fn parse_effect_arrow_row(
         &mut self,
         canonical: bool,
+        retired_eq: bool,
         retired_ballot: bool,
     ) -> Result<Vec<(String, Span)>, Diagnostic> {
         self.expect(
             if canonical {
+                TokKind::Colon
+            } else if retired_eq {
                 TokKind::Eq
             } else if retired_ballot {
                 TokKind::Minus
@@ -1149,6 +1151,8 @@ impl<'a> Parser<'a> {
         self.expect(TokKind::RBracket, "to close the effect row")?;
         self.expect(
             if canonical {
+                TokKind::Gt
+            } else if retired_eq {
                 TokKind::LambdaArrow
             } else {
                 TokKind::Arrow
@@ -1162,7 +1166,7 @@ impl<'a> Parser<'a> {
     /// at `#`. `#Pure` yields the empty set (`Some([])`); `#(E1, E2, …)` yields the
     /// listed names (validated against the effect vocabulary in sema, not here).
     /// The caller has confirmed via lookahead that a `fn` follows.
-    /// D-EFF2/D-VERDICT-732-1 (formerly D-MARKERMOVE2, G1): parse a callback effect bound. `fn(…) =[]=>`
+    /// D-EFF2/D-VERDICT-732-1 (formerly D-MARKERMOVE2, G1): parse a callback effect bound. `fn(…) :[]>`
     /// is the one carve-out where a contract marker prefixes a function TYPE
     /// instead of a declaration — the retired `fn(…) --[]->` spelling still
     /// parses here so it can teach E0062. The general effect-list form,

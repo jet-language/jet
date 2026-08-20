@@ -52,15 +52,27 @@ impl<'a> Parser<'a> {
                             expr = self.parse_member_spread(expr, start)?;
                             continue;
                         }
-                        // D-DOTCTOR1: `alias.Type.{ … }` — named construction through
-                        // an import namespace, or `Protocol.Client.{ … }` for a dotted
-                        // local type when the base name is PascalCase (D-PROTO1/D-PROTO2).
+                        // D-LIT-DOT1 migration arm: `alias.Type.{ … }` is the
+                        // retired spelling of a qualified literal. The canonical
+                        // form is handled by the direct-brace branch below.
                         if allow_struct_lit && matches!(self.peek().kind, TokKind::LBrace) {
                             let start = expr.span().start;
                             if let Expr::Field(inner, type_name, _) = &expr {
                                 if let Expr::Ident(alias, _) = inner.as_ref() {
                                     let alias = alias.clone();
                                     let type_name = type_name.clone();
+                                    let brace_span = self.peek().span;
+                                    self.diags.push(Diagnostic::error(
+                                        "E0320",
+                                        format!(
+                                            "literal construction uses `{}.{}{{…}}`, not `{}.{}.{{…}}`",
+                                            alias, type_name, alias, type_name
+                                        ),
+                                        "literal heads place no dot before their brace (D-LIT-DOT1)"
+                                            .to_string(),
+                                        format!("write `{}.{}{{…}}`", alias, type_name),
+                                        Some(brace_span),
+                                    ));
                                     if alias.chars().next().is_some_and(|c| c.is_ascii_uppercase()) {
                                         let full = format!("{alias}.{type_name}");
                                         let span = expr.span();
@@ -260,15 +272,14 @@ impl<'a> Parser<'a> {
                             span,
                         };
                     }
-                    TokKind::LambdaArrow => {
+                    kind if Self::at_unified_arrow_token(&kind) => {
                         break;
                     }
                     TokKind::LBrace => {
                         // In a control-flow header (`for … in expr {`, `if cond {`, …)
                         // the `{` opens the body, never a struct literal — even after a
-                        // field chain like `recv.field`. Only treat `expr.Type { … }` as
-                        // an old-form import-namespace struct literal (E0320 recovery)
-                        // when struct literals are allowed in this position.
+                        // field chain like `recv.field`. A qualified literal is the one
+                        // exception when struct literals are allowed here.
                         let import_lit = if !allow_struct_lit {
                             None
                         } else if let Expr::Field(inner, type_name, _) = &expr {
@@ -281,21 +292,14 @@ impl<'a> Parser<'a> {
                             None
                         };
                         if let Some((alias, type_name)) = import_lit {
-                            // D-DOTCTOR2: old dotless `alias.Type { … }` — E0320 recovery.
-                            let brace_span = self.peek().span;
-                            self.diags.push(Diagnostic::error(
-                                "E0320",
-                                format!(
-                                    "struct construction uses `{}.{}.{{…}}`, not `{}.{} {{…}}`",
-                                    alias, type_name, alias, type_name
-                                ),
-                                "named construction has a dot before the brace (D-DOTCTOR1)"
-                                    .to_string(),
-                                format!("write `{}.{}.{{…}}` instead", alias, type_name),
-                                Some(brace_span),
-                            ));
                             let start = expr.span().start;
-                            expr = self.struct_lit_after_import(alias, type_name, start)?;
+                            if alias.chars().next().is_some_and(|c| c.is_ascii_uppercase()) {
+                                let full = format!("{alias}.{type_name}");
+                                let span = expr.span();
+                                expr = self.struct_lit_after_name(full, Vec::new(), span)?;
+                            } else {
+                                expr = self.struct_lit_after_import(alias, type_name, start)?;
+                            }
                         } else if allow_struct_lit
                             && matches!(
                                 expr,
@@ -306,25 +310,25 @@ impl<'a> Parser<'a> {
                             )
                         {
                             // D-TRAILBLOCK2=A: trailing `{ }` after a call is retired.
-                            // Pass code as an ordinary `() => { … }` argument inside the
+                            // Pass code as an ordinary `() :> { … }` argument inside the
                             // parentheses (multiline bodies and multiple code args allowed).
                             let bad_span = self.peek().span;
                             let fix = match &expr {
                                 Expr::Ident(name, _) => format!(
-                                    "write `{name}(() => {{ … }})` — a multiline code argument uses `() => {{ … }}` inside the call"
+                                    "write `{name}(() :> {{ … }})` — a multiline code argument uses `() :> {{ … }}` inside the call"
                                 ),
                                 Expr::Call(c) => format!(
-                                    "write `{}(…, () => {{ … }})` — put the block inside the parentheses as `() => {{ … }}`",
+                                    "write `{}(…, () :> {{ … }})` — put the block inside the parentheses as `() :> {{ … }}`",
                                     c.name
                                 ),
                                 Expr::MethodCall { method, .. } => format!(
-                                    "write `….{method}(…, () => {{ … }})` — put the block inside the parentheses as `() => {{ … }}`"
+                                    "write `….{method}(…, () :> {{ … }})` — put the block inside the parentheses as `() :> {{ … }}`"
                                 ),
-                                _ => "write `callee(…, () => { … })` — put the block inside the parentheses as `() => { … }`".to_string(),
+                                _ => "write `callee(…, () :> { … })` — put the block inside the parentheses as `() :> { … }`".to_string(),
                             };
                             return Err(Diagnostic::error(
                                 "E0335",
-                                "trailing blocks are gone — pass code with `() =>`".to_string(),
+                                "trailing blocks are gone — pass code with `() :>`".to_string(),
                                 "a bare `{ }` after a call used to fill one last zero-parameter function argument; that sugar is retired (D-TRAILBLOCK2)"
                                     .to_string(),
                                 fix,

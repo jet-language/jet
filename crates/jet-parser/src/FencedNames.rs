@@ -33,7 +33,10 @@ pub(crate) fn expand(
                 || index
                     .checked_sub(1)
                     .is_some_and(|previous| {
-                        matches!(toks[previous].kind, TokKind::LambdaArrow | TokKind::Dot)
+                        matches!(
+                            toks[previous].kind,
+                            TokKind::UnifiedArrow | TokKind::Arrow | TokKind::LambdaArrow | TokKind::Dot
+                        )
                     }));
         let boundary = matches!(token.kind, TokKind::Eof)
             || (matches!(token.kind, TokKind::Semi)
@@ -620,7 +623,7 @@ mod tests {
     fn formatter_keeps_fenced_lambda_body_after_an_inline_comment() {
         let source = "\
 fn run() {
-    @[ first, second ]@ :: work(() => { // keep this note
+    @[ first, second ]@ :: work(() :> { // keep this note
         print(\"body\")
         return 1
     })
@@ -726,7 +729,7 @@ fn run() {
 
     #[test]
     fn nested_lambda_and_struct_braces_stay_inside_fenced_statements() {
-        let source = "fn run() {\n    @[ first, second ]@ :: () => {\n        print(\"nested\")\n    }\n    show(Thing.{ value: @[ first, second ]@ })\n}\n";
+        let source = "fn run() {\n    @[ first, second ]@ :: () :> {\n        print(\"nested\")\n    }\n    show(Thing{ value: @[ first, second ]@ })\n}\n";
         let (tokens, diagnostics) = Lexer::lex(source);
         assert!(diagnostics.is_empty(), "{diagnostics:?}");
         let program = crate::Parser::parse(&tokens).expect("parse nested fenced statements");

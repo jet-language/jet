@@ -94,7 +94,7 @@ impl<'a> Parser<'a> {
         }
         // D-ONELINE-BODY1=B: an effect-only one-line `if` uses an arrow before
         // its one statement. Braces remain the multi-statement/scoped form.
-        if matches!(self.peek().kind, TokKind::Arrow) {
+        if self.at_unified_arrow() {
             self.bump();
             let then_body = self.adjacent_effect_body()?;
             let else_branch = self.adjacent_effect_else()?;
@@ -247,7 +247,7 @@ impl<'a> Parser<'a> {
             self.bump();
             return Ok(Some(ElseBranch::Else(self.block_stmts())));
         }
-        if matches!(self.peek().kind, TokKind::Arrow) {
+        if self.at_unified_arrow() {
             self.bump();
             return Ok(Some(ElseBranch::Else(self.adjacent_effect_body()?)));
         }
@@ -302,7 +302,7 @@ impl<'a> Parser<'a> {
                 }
                 TokKind::KwElse => {
                     self.bump();
-                    self.expect(TokKind::Arrow, "after `else` in a guard table")?;
+                    self.expect_unified_arrow("after `else` in a guard table")?;
                     else_body = Some(self.guard_arm_body()?);
                     while matches!(self.peek().kind, TokKind::Semi) {
                         self.bump();
@@ -313,7 +313,7 @@ impl<'a> Parser<'a> {
                 _ => {
                     let arm_start = self.peek().span;
                     let cond = self.expr_no_struct_lit()?;
-                    self.expect(TokKind::Arrow, "after a guard condition")?;
+                    self.expect_unified_arrow("after a guard condition")?;
                     let body = self.guard_arm_body()?;
                     let end = body.last().map(Stmt::span).map_or(cond.span().end, |s| s.end);
                     arms.push(SwitchArm {
@@ -355,7 +355,7 @@ impl<'a> Parser<'a> {
     pub(super) fn if_body_is_arms(&mut self) -> bool {
         // `else ->` catch-all as the first (only) arm.
         if matches!(self.peek().kind, TokKind::KwElse)
-            && matches!(self.peek2().kind, TokKind::Arrow)
+            && Self::at_unified_arrow_token(&self.peek2().kind)
         {
             return true;
         }
@@ -373,7 +373,7 @@ impl<'a> Parser<'a> {
             ) {
                 // `lo .. hi ->` (4 tokens: lo, .., hi, ->)
                 if let Some(tok_after_hi) = self.toks.get(self.pos + 3) {
-                    if matches!(tok_after_hi.kind, TokKind::Arrow) {
+                    if Self::at_unified_arrow_token(&tok_after_hi.kind) {
                         return true;
                     }
                 }
@@ -381,7 +381,7 @@ impl<'a> Parser<'a> {
                 if matches!(self.toks.get(self.pos + 3).map(|t| &t.kind), Some(TokKind::Ident(s)) if s == Syntax::RETIRED_LOOP_STEP)
                 {
                     if let Some(tok_after_step_n) = self.toks.get(self.pos + 5) {
-                        if matches!(tok_after_step_n.kind, TokKind::Arrow) {
+                        if Self::at_unified_arrow_token(&tok_after_step_n.kind) {
                             return true;
                         }
                     }
@@ -392,7 +392,7 @@ impl<'a> Parser<'a> {
                     Some(TokKind::Eq)
                 ) {
                     if let Some(tok_after_eq_hi) = self.toks.get(self.pos + 4) {
-                        if matches!(tok_after_eq_hi.kind, TokKind::Arrow) {
+                        if Self::at_unified_arrow_token(&tok_after_eq_hi.kind) {
                             return true;
                         }
                     }
@@ -403,7 +403,7 @@ impl<'a> Parser<'a> {
         let save = self.pos;
         let saved_diags = self.diags.len();
         let is_arm = matches!(self.expr_no_struct_lit(), Ok(_))
-            && matches!(self.peek().kind, TokKind::Arrow);
+            && self.at_unified_arrow();
         self.pos = save;
         self.diags.truncate(saved_diags);
         is_arm
@@ -454,7 +454,7 @@ impl<'a> Parser<'a> {
                 }
                 TokKind::KwElse => {
                     let arm_start = self.bump().span; // `else`
-                    self.expect(TokKind::Arrow, "after `else` in an `if`")?;
+                    self.expect_unified_arrow("after `else` in an `if`")?;
                     let body = self.arm_body()?;
                     let _ = arm_start;
                     else_body = Some(body);
@@ -464,7 +464,7 @@ impl<'a> Parser<'a> {
                     // D-PATR / C25: range heads live in `if_arm_head` (shared with
                     // expression-position value dispatch).
                     let raw_head = self.if_arm_head(&subject, &pat_subject, op)?;
-                    self.expect(TokKind::Arrow, "after an `if` arm value or condition")?;
+                    self.expect_unified_arrow("after an `if` arm value or condition")?;
                     let body = self.arm_body()?;
                     let end = self
                         .toks
@@ -620,7 +620,7 @@ impl<'a> Parser<'a> {
                     })
                     .expect("pattern guard has at least one condition")
             };
-            if matches!(self.peek().kind, TokKind::Arrow) {
+            if self.at_unified_arrow() {
                 let span = pat_span(&pattern);
                 if op != BinOp::Eq {
                     self.diags.push(Diagnostic::error(
@@ -925,7 +925,7 @@ impl<'a> Parser<'a> {
         // braces-teaching recovery. `fmt` prints `->` for each arm that fits, so
         // each arm must read it back; a chain that only the first arm could
         // spell made the formatter write source the parser rejected.
-        if matches!(self.peek().kind, TokKind::Arrow) {
+        if self.at_unified_arrow() {
             self.bump();
             let then_body = self.adjacent_effect_body()?;
             let else_branch = self.adjacent_effect_else()?;
@@ -989,7 +989,7 @@ impl<'a> Parser<'a> {
         self.diags.truncate(probe_diags);
 
         let cond = self.expr_no_struct_lit()?;
-        self.expect(TokKind::Arrow, "after the condition of a value-producing `if`")?;
+        self.expect_unified_arrow("after the condition of a value-producing `if`")?;
         let (then_body, then_value) = self.parse_selected_value()?;
         if !matches!(self.peek().kind, TokKind::KwElse) {
             return Err(Diagnostic::error(
@@ -1006,7 +1006,7 @@ impl<'a> Parser<'a> {
         let (else_body, else_value) = if chained {
             (Vec::new(), self.parse_if_expr_inner(false)?)
         } else {
-            self.expect(TokKind::Arrow, "after `else` in a value-producing `if`")?;
+            self.expect_unified_arrow("after `else` in a value-producing `if`")?;
             self.parse_selected_value()?
         };
         let span = Span::new(start.start, else_value.span().end);
@@ -1045,7 +1045,7 @@ impl<'a> Parser<'a> {
             match self.peek().kind {
                 TokKind::KwElse => {
                     self.bump();
-                    self.expect(TokKind::Arrow, "after `else` in a value dispatch")?;
+                    self.expect_unified_arrow("after `else` in a value dispatch")?;
                     let (body, value) = self.guard_value_body()?;
                     while matches!(self.peek().kind, TokKind::Semi) {
                         self.bump();
@@ -1085,7 +1085,7 @@ impl<'a> Parser<'a> {
                 }
                 _ => {
                     let cond = self.if_arm_head(&subject, &pat_subject, op)?;
-                    self.expect(TokKind::Arrow, "after a value dispatch arm head")?;
+                    self.expect_unified_arrow("after a value dispatch arm head")?;
                     let (body, value) = self.guard_value_body()?;
                     arms.push((cond, body, value));
                 }
@@ -1138,7 +1138,7 @@ impl<'a> Parser<'a> {
             match self.peek().kind {
                 TokKind::KwElse => {
                     self.bump();
-                    self.expect(TokKind::Arrow, "after `else` in a value guard")?;
+                    self.expect_unified_arrow("after `else` in a value guard")?;
                     let (body, value) = self.guard_value_body()?;
                     while matches!(self.peek().kind, TokKind::Semi) {
                         self.bump();
@@ -1168,7 +1168,7 @@ impl<'a> Parser<'a> {
                 }
                 _ => {
                     let cond = self.expr_no_struct_lit()?;
-                    self.expect(TokKind::Arrow, "after a value guard condition")?;
+                    self.expect_unified_arrow("after a value guard condition")?;
                     let (body, value) = self.guard_value_body()?;
                     arms.push((cond, body, value));
                 }
@@ -1332,19 +1332,19 @@ impl<'a> Parser<'a> {
                         format!(
                             "`{}` arms are written `value {} body`, not `{}`",
                             Syntax::KW_IF,
-                            Syntax::OP_ARM_ARROW,
+                            Syntax::OP_UNIFIED_ARROW,
                             foreign
                         ),
                         format!(
                             "choosing one branch from many uses `{}` with `{}` arms (D-IF1)",
                             Syntax::KW_IF,
-                            Syntax::OP_ARM_ARROW
+                            Syntax::OP_UNIFIED_ARROW
                         ),
                         format!(
                             "replace `{}` with a value or condition and `{}`, like `1 {} body`",
                             foreign,
-                            Syntax::OP_ARM_ARROW,
-                            Syntax::OP_ARM_ARROW
+                            Syntax::OP_UNIFIED_ARROW,
+                            Syntax::OP_UNIFIED_ARROW
                         ),
                         Some(t.span),
                     ));
@@ -1353,7 +1353,7 @@ impl<'a> Parser<'a> {
                 }
                 TokKind::KwElse => {
                     self.bump();
-                    self.expect(TokKind::Arrow, "after `else` in a `switch`")?;
+                    self.expect_unified_arrow("after `else` in a `switch`")?;
                     self.expect(TokKind::LBrace, "to open the `else` arm")?;
                     let body = self.block_stmts();
                     self.expect(TokKind::Semi, "after a `switch` arm's closing `}`")?;
@@ -1445,7 +1445,7 @@ impl<'a> Parser<'a> {
                     } else {
                         self.expr_no_struct_lit()?
                     };
-                    self.expect(TokKind::Arrow, "after a `switch` arm's condition")?;
+                    self.expect_unified_arrow("after a `switch` arm's condition")?;
                     self.expect(TokKind::LBrace, "to open the arm's body")?;
                     let body = self.block_stmts();
                     // Capture the `;` end so SwitchArm.span covers the full arm.

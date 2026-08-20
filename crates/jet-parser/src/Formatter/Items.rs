@@ -98,7 +98,7 @@ impl TraitBodyMember<'_> {
 
 /// D-FMT-SIMPLIFY1=A: may this rendered expression be a `::` one-line function
 /// body? The parser reads that body with `expr_no_struct_lit`, which refuses a
-/// `{` opening in the bare expression spine — a `Type.{ … }` construction or a
+/// `{` opening in the bare expression spine — a `Type{ … }` construction or a
 /// block lambda (`Parser/Items/functions_params.rs`,
 /// `Parser/Expressions/primary.rs`). Braces inside `(`/`[` reopen the ordinary
 /// expression grammar, and braces inside text are the lexer's business.
@@ -222,7 +222,7 @@ impl<'a> Fmt<'a> {
             Item::Struct(s) => self.fmt_struct(s, true),
             Item::Enum(e) => self.fmt_enum(e, true),
             Item::Impl(i) => {
-                // External-method sugar (`fn Type.method(…) =[]=>`) is
+                // External-method sugar (`fn Type.method(…) :[]>`) is
                 // normalized to an ImplDef by the parser. Its AST deliberately
                 // no longer carries enough ordering information to reconstruct
                 // markers before `fn`, so preserve that source form verbatim.
@@ -233,7 +233,21 @@ impl<'a> Fmt<'a> {
                 let text = &self.src[line_start..i.span.end];
                 let external_head = format!("fn {}.", i.type_name);
                 if text.contains(&external_head) {
-                    self.write(text);
+                    // The AST does not retain the marker ordering for this
+                    // sugar, but the formatter still owns the canonical arrow.
+                    // Restrict the rewrite to the declaration head; the path
+                    // string and any quoted text remain verbatim.
+                    let (head, tail) = text.split_once(" = \"").unwrap_or((text, ""));
+                    let head = head
+                        .replace("=[", ":[")
+                        .replace("]=>", "]>")
+                        .replace("=>", ":>")
+                        .replace("->", ":>");
+                    self.write(&head);
+                    if !tail.is_empty() {
+                        self.write(" = \"");
+                        self.write(tail);
+                    }
                     self.newline();
                     self.skip_verbatim_comments(i.span.end);
                 } else {
@@ -309,10 +323,12 @@ impl<'a> Fmt<'a> {
             // D-ERR-CONV: error conversion declarations are emitted verbatim.
             Item::ErrorConv(ec) => {
                 let text = self.src[ec.body_span.start..ec.body_span.end].to_string();
-                // Re-emit as `impl From => To { body }` verbatim for now.
+                // Re-emit as `impl From :> To { body }` verbatim for now.
                 self.write("impl ");
                 self.write(&ec.from_ty);
-                self.write(" => ");
+                self.write(" ");
+                self.write(Syntax::OP_UNIFIED_ARROW);
+                self.write(" ");
                 self.write(&ec.to_ty);
                 self.write(" ");
                 self.write(&text);
@@ -391,7 +407,7 @@ impl<'a> Fmt<'a> {
         let typed_budget_list = self
             .src
             .get(perf.list_span.start..perf.list_span.end)
-            .is_some_and(|source| source.contains("].{"));
+            .is_some_and(|source| source.contains("]{") || source.contains("].{"));
 
         self.write("module ");
         self.write(&module.name);
@@ -407,7 +423,7 @@ impl<'a> Fmt<'a> {
                         f.write(", ");
                     }
                     f.write(&workload.name);
-                    f.write(": CompilerWorkload.Edit.{target: ");
+                    f.write(": CompilerWorkload.Edit{target: ");
                     f.fmt_expr(&workload.target, Prec::OrFallback);
                     f.write(", patch: ");
                     f.fmt_expr(&workload.patch, Prec::OrFallback);
@@ -417,12 +433,12 @@ impl<'a> Fmt<'a> {
                 f.newline();
             }
             if typed_budget_list {
-                f.write("budgets: [Budget].{");
+                f.write("budgets: [Budget]{");
                 for (index, budget) in perf.budgets.iter().enumerate() {
                     if index > 0 {
                         f.write(", ");
                     }
-                    f.write(".{");
+                    f.write("{");
                     f.fmt_perf_budget_fields(&budget.fields);
                     f.write("}");
                 }
@@ -433,7 +449,7 @@ impl<'a> Fmt<'a> {
                     if index > 0 {
                         f.write(", ");
                     }
-                    f.write("Budget.{");
+                    f.write("Budget{");
                     f.fmt_perf_budget_fields(&budget.fields);
                     f.write("}");
                 }
@@ -496,16 +512,22 @@ impl<'a> Fmt<'a> {
                         .map(|(n, _)| n.as_str())
                         .collect::<Vec<_>>()
                         .join(", ");
-                    f.write(&format!(" =[{}]=>", list));
+                    f.write(" ");
+                    f.write(Syntax::EFFECT_ARROW_OPEN);
+                    f.write(&list);
+                    f.write(Syntax::EFFECT_ARROW_CLOSE);
                 } else if m.is_pure {
-                    f.write(" =[]=>");
+                    f.write(" ");
+                    f.write(Syntax::EFFECT_ARROW_OPEN);
+                    f.write(Syntax::EFFECT_ARROW_CLOSE);
                 } else if m.return_type.is_some()
                     && !m
                         .return_type
                         .as_ref()
                         .is_some_and(|ty| Self::is_unit_fallible_type(ty))
                 {
-                    f.write(" =>");
+                    f.write(" ");
+                    f.write(Syntax::OP_UNIFIED_ARROW);
                 }
                 if let Some(ret) = &m.return_type {
                     if Self::is_unit_fallible_type(ret) {
@@ -566,7 +588,9 @@ impl<'a> Fmt<'a> {
             if Self::is_unit_fallible_type(ret) {
                 self.fmt_unit_fallible_return(ret);
             } else {
-                self.write(" => ");
+                self.write(" ");
+                self.write(Syntax::OP_UNIFIED_ARROW);
+                self.write(" ");
                 self.fmt_return_type(ret);
             }
         }
@@ -602,13 +626,29 @@ impl<'a> Fmt<'a> {
                 self.write(": ");
                 self.fmt_expr(faults, Prec::OrFallback);
             }
+            if let Some(expected_fail) = &t.expected_fail_expr {
+                self.write(", ");
+                self.write(Syntax::TEST_EXPECTED_FAIL_PARAM);
+                self.write(": ");
+                self.fmt_expr(expected_fail, Prec::OrFallback);
+            }
             self.write(")");
         } else {
-            if let Some(faults) = &t.faults_expr {
+            if t.faults_expr.is_some() || t.expected_fail_expr.is_some() {
                 self.write("(");
-                self.write(Syntax::TEST_FAULTS_PARAM);
-                self.write(": ");
-                self.fmt_expr(faults, Prec::OrFallback);
+                if let Some(faults) = &t.faults_expr {
+                    self.write(Syntax::TEST_FAULTS_PARAM);
+                    self.write(": ");
+                    self.fmt_expr(faults, Prec::OrFallback);
+                }
+                if let Some(expected_fail) = &t.expected_fail_expr {
+                    if t.faults_expr.is_some() {
+                        self.write(", ");
+                    }
+                    self.write(Syntax::TEST_EXPECTED_FAIL_PARAM);
+                    self.write(": ");
+                    self.fmt_expr(expected_fail, Prec::OrFallback);
+                }
                 self.write(")");
             }
             self.write(" fn ");
@@ -860,24 +900,28 @@ impl<'a> Fmt<'a> {
         self.write(")");
         // D-ARROW-CONTROL1: effect row lives inside the callable arrow.
         if let Some(effects) = &f.declared_effects {
-            self.write(" =[");
+            self.write(" ");
+            self.write(Syntax::EFFECT_ARROW_OPEN);
             for (i, (name, _)) in effects.iter().enumerate() {
                 if i > 0 {
                     self.write(", ");
                 }
                 self.write(name);
             }
-            self.write("]=>");
+            self.write(Syntax::EFFECT_ARROW_CLOSE);
         } else if f.is_pure {
-            self.write(" =[]=>");
+            self.write(" ");
+            self.write(Syntax::EFFECT_ARROW_OPEN);
+            self.write(Syntax::EFFECT_ARROW_CLOSE);
         }
         // D-EFF2: pass-through occupies the same row.
         if let Some((param, _)) = &f.effect_via {
-            self.write(" =[");
+            self.write(" ");
+            self.write(Syntax::EFFECT_ARROW_OPEN);
             self.write(Syntax::KW_VIA);
             self.write(" ");
             self.write(param);
-            self.write("]=>");
+            self.write(Syntax::EFFECT_ARROW_CLOSE);
         }
         let unit_fallible = f
             .return_type
@@ -888,7 +932,8 @@ impl<'a> Fmt<'a> {
             && f.return_type.is_some()
             && !unit_fallible
         {
-            self.write(" =>");
+            self.write(" ");
+            self.write(Syntax::OP_UNIFIED_ARROW);
         }
         if let Some(ret) = &f.return_type {
             if unit_fallible {
@@ -1658,9 +1703,11 @@ impl<'a> Fmt<'a> {
         self.write(&field.name);
         self.write(": ");
         self.fmt_decode_type(&field.ty, field.ty_span, derives_decode);
-        // D-FIELDPOL1: `name: T => expr` — a computed field.
+        // D-FIELDPOL1: `name: T :> expr` — a computed field.
         if let Some(expr) = &field.computed {
-            self.write(" => ");
+            self.write(" ");
+            self.write(Syntax::OP_UNIFIED_ARROW);
+            self.write(" ");
             self.fmt_expr(expr, Prec::OrFallback.add_rhs());
         }
         // D-FIELDDEF1=C: `name: T = expr` — absence / construction default.

@@ -129,7 +129,7 @@ impl<'a> Parser<'a> {
                         "the compiler owns the closed policy registry and its scope rules".to_string()
                     };
                     let fix = if package_only {
-                        "write `policy: .{ contain: [\"dependency\"], harden: true }` in `package.jet`".to_string()
+                        "write `policy: { contain: [\"dependency\"], harden: true }` in `package.jet`".to_string()
                     } else if site_bound {
                         format!("use `#{name}` at its sound site")
                     } else {
@@ -577,7 +577,7 @@ impl<'a> Parser<'a> {
                             "foreign Rust functions live in whole `extern rust` blocks — callers never write `unsafe`"
                                 .to_string(),
                             format!(
-                                "write: {} {} \"crate@version\" {{ fn name(...) => T = \"rust::path\"; }}",
+                                "write: {} {} \"crate@version\" {{ fn name(...) :> T = \"rust::path\"; }}",
                                 Syntax::KW_EXTERN,
                                 Syntax::KW_RUST
                             ),
@@ -1290,6 +1290,10 @@ impl<'a> Parser<'a> {
                             self.sync_top();
                         }
                         continue;
+                    }
+                    TokKind::KwConst if self.at_foreign_binding() => {
+                        let span = self.bump().span;
+                        Err(self.foreign_keyword_diagnostic(Syntax::FOREIGN_CONST, span))
                     }
                     TokKind::KwConst => self.retired_const_def().map(Item::Const),
                     // D-PERSIST1: `#Persist name (:: | :=) expr` — module-level

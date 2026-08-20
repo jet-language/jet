@@ -133,13 +133,13 @@ pub const NS_PROFILE: &str = "profile";
 pub const NS_WORKSPACE: &str = "workspace";
 
 /// D-PERFBUDGET-GRAMMAR1=A: reserved performance-policy role namespace.
-/// `module perf.<role> { budgets: [Budget.{ ... }] }` is sole declaration
+/// `module perf.<role> { budgets: [Budget{ ... }] }` is sole declaration
 /// surface. Names are reserved before parser/runtime implementation. Full law:
 /// docs/spec/performance-budget-decisions.md.
 pub const NS_PERF: &str = "perf";
 pub const PERF_FIELD_BUDGETS: &str = "budgets";
 /// D-PERFBUDGET-COMPILE1=C (ratified 2026-07-16): typed compile workloads.
-/// `compile_workloads: { name: CompilerWorkload.Edit.{ target, patch } }`
+/// `compile_workloads: { name: CompilerWorkload.Edit{ target, patch } }`
 /// plus the `CompileTime` metric and `CompilerProbe(Clean|NoChange|Edit(name))`
 /// provider below are the sole compile-latency budget spellings.
 pub const PERF_FIELD_COMPILE_WORKLOADS: &str = "compile_workloads";
@@ -586,7 +586,7 @@ pub const ENV_FLAG_ENV_RETIRED: &str = "--env-profile";
 pub const ENV_FLAG_PRESET: &str = "--preset";
 /// D-CONF-WORD1=A: the retired spelling, kept only to teach `--preset`.
 pub const ENV_FLAG_PROFILE_RETIRED: &str = "--profile";
-/// D-FE-PROMPT-STRIP1: `Prompt.{ label: "...", path: .Short, strip: .On }`.
+/// D-FE-PROMPT-STRIP1: `Prompt{ label: "...", path: .Short, strip: .On }`.
 pub const PROMPT_FIELD_LABEL: &str = "label";
 pub const PROMPT_FIELD_PATH: &str = "path";
 pub const PROMPT_FIELD_STRIP: &str = "strip";

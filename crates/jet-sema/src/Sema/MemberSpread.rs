@@ -19,6 +19,9 @@ pub fn desugar_member_spreads(bundle: &mut ProgramBundle) {
                     if let Some(e) = &mut t.faults_expr {
                         desugar_expr(e);
                     }
+                    if let Some(e) = &mut t.expected_fail_expr {
+                        desugar_expr(e);
+                    }
                     desugar_stmts(&mut t.body);
                 }
                 Item::Bench(b) => {

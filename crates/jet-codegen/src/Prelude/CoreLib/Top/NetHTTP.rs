@@ -1,5 +1,7 @@
 // ── E2-M10: networking (core.net + core.http) ─────────────────────────────────
 // All networking uses std::net only — zero external crates in the prelude (I6).
+// wasm32-wasip2's std::net implementation is the shared wasi:sockets adapter;
+// Jet does not duplicate socket semantics in a target host.
 // TLS (D-NET1) uses the shared native callback bridge below; AOT and JIT hosts
 // marshal into these Prelude operations rather than implementing a second TLS policy.
 

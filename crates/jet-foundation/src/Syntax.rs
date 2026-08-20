@@ -75,16 +75,16 @@
 // this root; no second configuration spelling is allowed.
 //
 // D-TRAILBLOCK2=A adds no token: retires D-TRAILBLOCK1 trailing `{ }` sugar.
-// Code arguments are ordinary `() => { … }` lambdas inside call parentheses;
+// Code arguments are ordinary `() :> { … }` lambdas inside call parentheses;
 // a bare `{` after a call is E0335.
 // D-BIND-BARE1=A adds no token: bindings are always bare `name :: value` /
-// `name := value`; types ride values (`Type.{ … }`) or live on signatures
+// `name := value`; types ride values (`Type{ … }`) or live on signatures
 // and fields. Retires `name: Type ::` / `name: Type :=`.
 // D-ALIAS-OP1=B (ratified 2026-08-06, card #1513; amends D-TYPEALIAS1): alias
 // declarations bind with the existing `::` mark; no token or grammar category
 // is added. The retired `=` spelling is diagnostic-only.
 // D-UNINIT-SENTINEL2=A amends D-UNINIT-SENTINEL1: `uninit` is legal only as
-// the whole body of a `Type.{ uninit }` head (`name := Type.{ uninit }`).
+// the whole body of a `Type{ uninit }` head (`name := Type{ uninit }`).
 // Retires annotated `name: Type := uninit`. KW_UNINIT stays the same token.
 // D-SHAPE-CLI1 reuses the existing `fn run` / `#CLI` surface: a resolved
 // entry-parameter type owns typed shell inputs, while zero-parameter `fn run()`
@@ -98,7 +98,7 @@
 // marker list. D-SHAPE6 adds no Jet source token; grouped tool commands remain
 // owned by the single registry in crates/jet-cli/src/CLI.rs.
 // D-ECO-DECL1=A adds no spelling: ecosystem entries reuse ordinary named
-// fields and D-DOTCTOR1 `Type.{ ... }` construction. D-ECO-ROOTNAME1 still
+// fields and D-LIT-DOT1 `Type{ ... }` construction. D-ECO-ROOTNAME1 still
 // owns the root noun; #560 owns executable source and tooling behavior.
 // D-MEM-VIEWRET1=B adds no token, sigil, lifetime spelling, or grammar rule.
 // It reuses the existing named-type spellings `View`, `ViewMut`, and the
@@ -132,11 +132,11 @@
 // ordinary resolution and access rules.
 // D-SHAPE-CASE1=C owns the identifier category table and its two enforced
 // shapes. D-SHAPE-CASE2=A exempts foreign names inside FFI binding modules.
-// D-ARROW-CONTROL1=A (ratified 2026-07-26, card #1209) splits callable and
-// control syntax. OP_CALLABLE_ARROW (`=>`) defines callable results.
+// D-ARROW-UNIFY1=B (ratified 2026-08-19): OP_UNIFIED_ARROW (`:>`) defines
+// callable results and control arms/bodies in every position.
 // D-FAIL-UNIT1=A (ratified 2026-08-06, card #1534) adds no token: a
 // unit-fallible function writes `? E` or bare `?` directly after its parameters;
-// value-returning fallible functions keep OP_CALLABLE_ARROW.
+// value-returning fallible functions keep OP_UNIFIED_ARROW.
 // D-ENTRY-VALUE1=B (card #1446) adds no token: `fn run` is the one entry, and
 // its return value is the program. A returned App is served at the runtime
 // edge; there is no hidden app-name convention or synthesized run overlay.
@@ -148,20 +148,20 @@
 // and `jet jobs`. Retired spellings have no alias or fallback. Help,
 // completions, diagnostics, docs, examples, and tests use the same word.
 // KW_JOB / JOB_SCOPE_VARIANTS live in math_layout and are re-exported here.
-// EFFECT_ARROW_OPEN/CLOSE (`=[` / `]=>`) add effect ceilings. OP_ARM_ARROW
-// (`->`) selects dispatch/guard values, yields finite-loop items, and marks a
+// EFFECT_ARROW_OPEN/CLOSE (`:[` / `]>`) add effect ceilings. The unified
+// arrow selects dispatch/guard values, yields finite-loop items, and marks a
 // one-line effect `if`/`loop` body. D-LOOP-STMT-ARROW1=C (ratified
 // 2026-08-13, card #1453) gives every statement-position loop header this
 // body form. D-ONELINE-BODY1=B (ratified 2026-08-13,
 // cards #1453/#1454) makes `::` the one-line function-body marker; callable
-// heads keep `=>`; braces remain the multi-statement/scoped form. `=` remains
+// heads keep `:>`; braces remain the multi-statement/scoped form. `=` remains
 // for slot-filling declarations such as extern bindings.
 // D-LOOP-COMMA1=A (ratified 2026-07-30, card #1336) uses commas between loop
 // clauses and `(key, value)` for a two-name source binding.
 // D-LOOPSTATE1 owns break/next target arguments, and
 // D-COMPREHENSION1 fixes yielding-loop results to eager List.
 // D-IFGUARD1=A adds no spelling: subjectless statement/value guard tables
-// reuse KW_IF, KW_ELSE, OP_ARM_ARROW, braces, and ordinary Bool expressions.
+// reuse KW_IF, KW_ELSE, OP_UNIFIED_ARROW, braces, and ordinary Bool expressions.
 // D-IFDIST1=A (ratified 2026-07-28, card #1305) adds no token: any comparison
 // (`== != < > <= >=`) may mark `if subject OP { … }` dispatch. Bare arm atoms
 // desugar to `subject OP atom`; `|` unions those atoms; `&&`/`||` combine.
@@ -202,7 +202,7 @@
 // D-UNIONTYPE1=A reuses the existing `|` token (TokKind::Pipe / BitOr) in type
 // position as TYPE_UNION_SEP. `T ? E1 | E2` parses as `T ? (E1 | E2)`.
 // D-REGEX-LIT1=D adds no punctuation. Regex patterns use the universal
-// `Type.{ body }` / inferred `.{ body }` form from D-DOTCTOR3.
+// `Type{ body }` / inferred `{ body }` form from D-LIT-DOT1.
 // D-RANGE-VALUE1=A makes `a..b` and `a..<b` construct one nominal Range
 // value. Range carries end inclusivity; arm heads and distinct constraints
 // keep their literal-only grammar.

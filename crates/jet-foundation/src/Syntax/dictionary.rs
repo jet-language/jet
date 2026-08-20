@@ -136,7 +136,7 @@ fn meaning(token: &str, kind: SyntaxDictionaryKind) -> String {
         super::COMPTIME_MARK => "compile-time demand mark on a name or block".to_string(),
         super::SIGIL_BIND_IMMUT => "immutable binding or one-line function-body marker".to_string(),
         super::MARKER_LIVE => "terminal direct-input block marker".to_string(),
-        super::OP_CALLABLE_ARROW => "callable result arrow for functions and lambdas".to_string(),
+        super::OP_UNIFIED_ARROW => "callable, arm, and lambda arrow".to_string(),
         _ => match kind {
             SyntaxDictionaryKind::Keyword => format!("registered Jet keyword `{token}`"),
             SyntaxDictionaryKind::Marker => format!("registered marker `#{token}`"),
@@ -154,7 +154,7 @@ fn example(token: &str, kind: SyntaxDictionaryKind) -> String {
         super::COMPTIME_MARK => "@limit :: 1000".to_string(),
         super::SIGIL_BIND_IMMUT => "answer :: 42".to_string(),
         super::MARKER_LIVE => "#Live { input() }".to_string(),
-        super::OP_CALLABLE_ARROW => "fn twice(n: Int) => Int :: n * 2".to_string(),
+        super::OP_UNIFIED_ARROW => "fn twice(n: Int) :> Int :: n * 2".to_string(),
         _ => match kind {
             SyntaxDictionaryKind::Keyword => format!("{token} …"),
             SyntaxDictionaryKind::Marker => format!("#{token} …"),

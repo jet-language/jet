@@ -21,7 +21,7 @@ impl<'a> Parser<'a> {
                     TokKind::Ident(kw) if kw == Syntax::KW_RENAME => {
                         let (from, from_span) = self.expect_ident("as the field to rename")?;
                         self.expect(
-                            TokKind::LambdaArrow,
+                            TokKind::UnifiedArrow,
                             "between the old and new field names in `rename`",
                         )?;
                         let (to, to_span) = self.expect_ident("as the new field name")?;
@@ -62,7 +62,7 @@ impl<'a> Parser<'a> {
                         self.expect(TokKind::Colon, "after the changed field name")?;
                         let (from_ty, from_span) = self.type_()?;
                         self.expect(
-                            TokKind::LambdaArrow,
+                            TokKind::UnifiedArrow,
                             "between the old and new field types in `change`",
                         )?;
                         let (to_ty, to_span) = self.type_()?;
@@ -325,8 +325,8 @@ impl<'a> Parser<'a> {
                     ));
                 }
             };
-            if matches!(self.peek().kind, TokKind::Arrow) {
-                let arrow = self.bump();
+            if self.at_unified_arrow() {
+                let arrow = self.expect_unified_arrow("in the retired protocol spelling")?;
                 let expected = match direction {
                     crate::AST::ProtocolDirection::ClientToServer => Syntax::PROTO_SERVER,
                     crate::AST::ProtocolDirection::ServerToClient => Syntax::PROTO_CLIENT,

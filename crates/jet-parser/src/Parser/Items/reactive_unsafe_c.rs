@@ -35,7 +35,7 @@ impl<'a> Parser<'a> {
             self.expect_kw(TokKind::KwFn, "after `#FFI(<lang>)`")?;
 
             // Ordinary Jet signature: name, type params, parameter list, optional
-            // `=[effects]=> T` or plain `=> T`. Reuses the same sub-parsers as a
+            // `:[effects]> T` or plain `:> T`. Reuses the same sub-parsers as a
             // normal `fn` so the checked contract is identical.
             let (name, name_span) = self.expect_ident("after `fn`")?;
             let type_params = self.parse_opt_type_params()?;
@@ -58,12 +58,9 @@ impl<'a> Parser<'a> {
                     return_type = Some(ty);
                     return_type_span = Some(span);
                 }
-            } else if matches!(self.peek().kind, TokKind::LambdaArrow | TokKind::Arrow) {
+            } else if self.at_unified_arrow() {
                 arrow_return = true;
-                let arrow = self.bump();
-                if matches!(arrow.kind, TokKind::Arrow) {
-                    self.diags.push(Self::retired_callable_arrow(arrow.span));
-                }
+                self.expect_unified_arrow("before a callable result type")?;
                 if self.type_starts_here() {
                     let (ty, span) = self.return_type()?;
                     return_type = Some(ty);
@@ -224,7 +221,7 @@ impl<'a> Parser<'a> {
     
         /// S59 (E2-M14): parse `#Extern module c.<lib> { … }` (overlay) or
         /// `#Bindgen module c.<lib>.__bindgen__ { … }` (generated cache). Body
-        /// declarations share the `extern_fn` shape (`fn name(args) => T = "Sym";`).
+        /// declarations share the `extern_fn` shape (`fn name(args) :> T = "Sym";`).
         pub(super) fn c_module(&mut self) -> Result<crate::AST::CModule, Diagnostic> {
             use crate::AST::CModuleKind;
             if matches!(

@@ -513,6 +513,9 @@ impl<'a> ComptimeTypeResolver<'a> {
                 if let Some(expression) = &mut test.faults_expr {
                     self.resolve_expr_types(expression);
                 }
+                if let Some(expression) = &mut test.expected_fail_expr {
+                    self.resolve_expr_types(expression);
+                }
                 for parameter in &mut test.params {
                     self.resolve_type(&mut parameter.ty);
                 }

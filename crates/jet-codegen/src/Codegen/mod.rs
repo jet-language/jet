@@ -4002,7 +4002,7 @@ fn emit_test_main_cov_mode(
     package_hardened: bool,
 ) {
     out.push_str("#[derive(Clone, Copy)]\n");
-    out.push_str("struct JetTestSlot { name: &'static str, skip: bool, property: bool, run: fn() -> Result<(), String> }\n");
+    out.push_str("struct JetTestSlot { name: &'static str, skip: bool, property: bool, expected_fail: bool, run: fn() -> Result<(), String> }\n");
     if override_entry.is_some() {
         out.push_str("fn jet_test_command_run() -> (i64, i64) {\n");
         out.push_str("    let output = jet_test_take_output();\n");
@@ -4036,17 +4036,18 @@ fn emit_test_main_cov_mode(
         );
         let skip = whole_test_skip(def);
         out.push_str(&format!(
-            "        JetTestSlot {{ name: {}, skip: {}, property: {}, run: {} }},\n",
+            "        JetTestSlot {{ name: {}, skip: {}, property: {}, expected_fail: {}, run: {} }},\n",
             name,
             skip,
             !def.params.is_empty(),
+            def.expected_fail,
             test_fn_path(test),
         ));
     }
     for (i, check) in checks.iter().enumerate() {
         let name = escape_rust_str(&check.output_name);
         out.push_str(&format!(
-            "        JetTestSlot {{ name: {}, skip: false, property: false, run: jet_output_check_{} }},\n",
+            "        JetTestSlot {{ name: {}, skip: false, property: false, expected_fail: false, run: jet_output_check_{} }},\n",
             name, i
         ));
     }
@@ -4059,7 +4060,7 @@ fn emit_test_main_cov_mode(
     // always printed so a shuffled run's order is reproducible.
     out.push_str("    if let Ok(seed_str) = std::env::var(\"JET_TEST_SHUFFLE_SEED\") {\n");
     out.push_str("        if let Ok(seed) = seed_str.parse::<u64>() {\n");
-    out.push_str("            println!(\"shuffle: seed={}\", seed);\n");
+    out.push_str("            if std::env::var_os(\"JET_TEST_JSON\").is_none() { println!(\"shuffle: seed={}\", seed); }\n");
     out.push_str("            let order = jet_test_shuffle_order(slots.len(), seed);\n");
     out.push_str("            slots = order.into_iter().map(|i| slots[i]).collect();\n");
     out.push_str("        }\n");
@@ -4069,47 +4070,51 @@ fn emit_test_main_cov_mode(
     // most one test (no isolation benefit, and keeps single-test runs allocation-
     // free of the thread machinery).
     out.push_str("    let serial = std::env::var(\"JET_TEST_SERIAL\").is_ok();\n");
-    out.push_str("    let results: Vec<(String, bool, bool, Option<Result<(), String>>, String, Option<JetTestFailure>)> = if serial || slots.len() <= 1 {\n");
+    out.push_str("    let json = std::env::var_os(\"JET_TEST_JSON\").is_some();\n");
+    out.push_str("    let results: Vec<(String, bool, bool, bool, Option<Result<(), String>>, String, Option<JetTestFailure>)> = if serial || slots.len() <= 1 {\n");
     out.push_str("        slots.iter().map(|s| {\n");
     out.push_str("            let res = if s.skip { None } else { Some((s.run)()) };\n");
     out.push_str("            let output = jet_test_take_output();\n");
     out.push_str("            let failure = jet_test_take_failure();\n");
-    out.push_str("            (s.name.to_string(), s.skip, s.property, res, output, failure)\n");
+    out.push_str("            (s.name.to_string(), s.skip, s.property, s.expected_fail, res, output, failure)\n");
     out.push_str("        }).collect()\n");
     out.push_str("    } else {\n");
     out.push_str("        let handles: Vec<_> = slots.iter().map(|s| {\n");
     out.push_str("            let name = s.name.to_string();\n");
     out.push_str("            let skip = s.skip;\n");
     out.push_str("            let property = s.property;\n");
+    out.push_str("            let expected_fail = s.expected_fail;\n");
     out.push_str("            let run = s.run;\n");
     out.push_str("            std::thread::spawn(move || {\n");
     out.push_str("                let res = if skip { None } else { Some(run()) };\n");
     out.push_str("                let output = jet_test_take_output();\n");
     out.push_str("                let failure = jet_test_take_failure();\n");
-    out.push_str("                (name, skip, property, res, output, failure)\n");
+    out.push_str("                (name, skip, property, expected_fail, res, output, failure)\n");
     out.push_str("            })\n");
     out.push_str("        }).collect();\n");
-    out.push_str("        handles.into_iter().map(|h| h.join().unwrap_or_else(|_| (\"<thread panicked>\".to_string(), false, false, Some(Err(\"test thread panicked\".to_string())), String::new(), None))).collect()\n");
+    out.push_str("        handles.into_iter().map(|h| h.join().unwrap_or_else(|_| (\"<thread panicked>\".to_string(), false, false, false, Some(Err(\"test thread panicked\".to_string())), String::new(), None))).collect()\n");
     out.push_str("    };\n");
     out.push_str("    let mut report = JetTestReport::new(0, 0, 0);\n");
-    out.push_str("    for (name, skip, property, res, output, failure) in results {\n");
-    out.push_str("        if !output.is_empty() { print!(\"{}\", output); }\n");
+    out.push_str("    for (name, skip, property, expected_fail, res, output, failure) in results {\n");
+    out.push_str("        if !json && !output.is_empty() { print!(\"{}\", output); }\n");
     out.push_str("        match (skip, res) {\n");
-    out.push_str("            (true, _) => { println!(\"{}: skip\", name); jet_proof_record(0, 2, &name, \"\", \"\", 0); report.skipped += 1; }\n");
-    out.push_str("            (false, Some(Ok(()))) => { println!(\"{}: pass\", name); if !property { jet_proof_record(0, 0, &name, \"\", \"\", 0); } report.passed += 1; }\n");
-    out.push_str("            (false, Some(Err(msg))) => { let mut failure = failure.unwrap_or_else(|| JetTestFailure::fallback(&msg)); if property { failure.message = msg; } println!(\"{}: FAIL\", name); eprint!(\"{}\", failure.render_detail()); if !property { jet_proof_record(0, 1, &name, &failure.message, &failure.file, failure.line); } report.failed += 1; }\n");
+    out.push_str("            (true, _) => { if !json { println!(\"{}: skip\", name); } jet_proof_record(0, 2, &name, \"\", \"\", 0); report.skipped += 1; }\n");
+    out.push_str("            (false, Some(Ok(()))) if expected_fail => { if !json { println!(\"{}: UNEXPECTED-PASS (remove expected_fail: true)\", name); } report.unexpected_passes += 1; }\n");
+    out.push_str("            (false, Some(Err(_msg))) if expected_fail => { if !json { println!(\"{}: expected-fail\", name); } report.expected_failures += 1; }\n");
+    out.push_str("            (false, Some(Ok(()))) => { if !json { println!(\"{}: pass\", name); } if !property { jet_proof_record(0, 0, &name, \"\", \"\", 0); } report.passed += 1; }\n");
+    out.push_str("            (false, Some(Err(msg))) => { let mut failure = failure.unwrap_or_else(|| JetTestFailure::fallback(&msg)); if property { failure.message = msg; } if !json { println!(\"{}: FAIL\", name); eprint!(\"{}\", failure.render_detail()); } if !property { jet_proof_record(0, 1, &name, &failure.message, &failure.file, failure.line); } report.failed += 1; }\n");
     out.push_str("            (false, None) => unreachable!(),\n");
     out.push_str("        }\n");
     out.push_str("    }\n");
-    out.push_str("    println!(\"{}\", report.summary());\n");
+    out.push_str("    if json { println!(\"{}\", report.json()); } else { println!(\"{}\", report.summary()); }\n");
     if coverage {
         // D-COV1: write the hit set before any `exit` (which would skip Drop).
         out.push_str("    jet_cov_dump();\n");
     }
     if override_entry.is_some() {
-        out.push_str("    (slots.len() as i64, i64::from(report.failed > 0))\n");
+        out.push_str("    (slots.len() as i64, i64::from(report.failed > 0 || report.unexpected_passes > 0))\n");
     } else {
-        out.push_str("    if report.failed > 0 { std::process::exit(1); }\n");
+        out.push_str("    if report.failed > 0 || report.unexpected_passes > 0 { std::process::exit(1); }\n");
     }
     out.push_str("}\n");
     if let Some(entry) = override_entry {

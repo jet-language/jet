@@ -507,7 +507,7 @@ impl<'a> Checker<'a> {
                     format!(
                         "add `{} {} {{ … }}` to handle values not matched by any range",
                         Syntax::KW_ELSE,
-                        Syntax::OP_ARM_ARROW
+                        Syntax::OP_UNIFIED_ARROW
                     ),
                     Some(span),
                 ));
@@ -877,7 +877,7 @@ impl<'a> Checker<'a> {
                         format!(
                             "add `{} {} {{ ... }}` to handle bytes that don't match",
                             Syntax::KW_ELSE,
-                            Syntax::OP_ARM_ARROW
+                            Syntax::OP_UNIFIED_ARROW
                         ),
                         Some(span),
                     ));
@@ -893,7 +893,7 @@ impl<'a> Checker<'a> {
                         format!(
                             "add `{} {} {{ ... }}` to handle text that doesn't match",
                             Syntax::KW_ELSE,
-                            Syntax::OP_ARM_ARROW
+                            Syntax::OP_UNIFIED_ARROW
                         ),
                         Some(span),
                     ));
@@ -910,7 +910,7 @@ impl<'a> Checker<'a> {
                         format!(
                             "add `{} {} {{ ... }}` after the last arm",
                             Syntax::KW_ELSE,
-                            Syntax::OP_ARM_ARROW
+                            Syntax::OP_UNIFIED_ARROW
                         ),
                         Some(span),
                     ));

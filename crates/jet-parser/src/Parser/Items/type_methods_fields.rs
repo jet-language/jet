@@ -13,7 +13,7 @@ impl<'a> Parser<'a> {
             self.validate_variadic_params(&params);
             self.validate_param_labels(&params);
             self.reject_root_method_params(&params);
-            // D-EFF3 / D-SHAPE8 / D-ARROW-CONTROL1: optional `=[GPU]=>`
+            // D-EFF3 / D-SHAPE8 / D-ARROW-CONTROL1: optional `:[GPU]>`
             // effect bound.
             let declared_effects = self.parse_opt_effect_annotation()?;
             let decorated_arrow = declared_effects.is_some();
@@ -32,12 +32,9 @@ impl<'a> Parser<'a> {
                     return_type = Some(ty);
                     return_type_span = Some(span);
                 }
-            } else if matches!(self.peek().kind, TokKind::LambdaArrow | TokKind::Arrow) {
+            } else if self.at_unified_arrow() {
                 arrow_return = true;
-                let arrow = self.bump();
-                if matches!(arrow.kind, TokKind::Arrow) {
-                    self.diags.push(Self::retired_callable_arrow(arrow.span));
-                }
+                self.expect_unified_arrow("before a callable result type")?;
                 if self.type_starts_here() {
                     let (ty, span) = self.return_type()?;
                     return_type = Some(ty);
@@ -152,12 +149,12 @@ impl<'a> Parser<'a> {
             }
             self.expect(TokKind::Colon, "after a field name")?;
             let (ty, ty_span) = self.type_()?;
-            // D-FIELDPOL1: `name: T => expr` — a computed field. `expr` is a
+            // D-FIELDPOL1: `name: T :> expr` — a computed field. `expr` is a
             // single expression (no block); sibling field names inside it are
             // still bare `Ident`s here — `Sema::CheckerFieldPolicy` rewrites them
             // to `self.<field>` once every field of the struct is known.
             // D-FIELDDEF1=C: `name: T = expr` — absence / construction default.
-            let (computed, default) = if matches!(self.peek().kind, TokKind::LambdaArrow) {
+            let (computed, default) = if self.at_unified_arrow() {
                 self.bump();
                 (Some(Box::new(self.expr()?)), None)
             } else if matches!(self.peek().kind, TokKind::Eq) {
@@ -395,7 +392,7 @@ impl<'a> Parser<'a> {
         }
 
         /// D-ECO-OUTPUT-DEFAULT1=A: checked Output defaults keep the ratified
-        /// `defaults: .{ run: address, ... }` source spelling.
+        /// `defaults: { run: address, ... }` source spelling.
         pub(in crate::Parser) fn output_defaults_def(&mut self) -> Result<ConstDef, Diagnostic> {
             let start = self.peek().span.start;
             let (name, name_span) = self.expect_ident("for Output defaults")?;

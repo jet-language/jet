@@ -2634,6 +2634,30 @@ fn lower_method_call_impl(
         }
     }
 
+    // D-SQL-SURFACE1=C: `[T].query(SQL)` is the in-memory builder door. It
+    // lowers to the same Prelude symbol as the CSV file door; only the source
+    // value differs.
+    if method == "query"
+        && args.len() == 1
+        && resolved_ret.is_some_and(|ty| matches!(ty, Type::Result { .. }))
+    {
+        return in_own_frame(|| {
+            let rows = lower_expr(receiver, cx, env);
+            let query = lower_expr(&args[0].expr, cx, env);
+            let ty = resolved_ret.cloned().unwrap_or_else(unit_type);
+            TExpr {
+                ty,
+                kind: TExprKind::CoreCall {
+                    module: "core.data".to_string(),
+                    method: "query".to_string(),
+                    args: vec![rows, query],
+                    source_span: method_span,
+                    widen_to_vec: vec![false, false],
+                },
+            }
+        });
+    }
+
     // c109 Phase 10: a core/stdlib module call `alias.method(args)`.
     // Mirror TIR core-call emission: resolve the module here (total), lower args
     // PLAINLY (no clone/borrow wrappers —
@@ -6991,7 +7015,7 @@ fn demand_generic_serde_codec(
         .insert(fn_name.to_string());
     if matches!(
         method,
-        "to_string" | "to_string_pretty" | "to_bytes" | "to_bytes_canonical"
+        "to_string" | "to_string_pretty" | "to_bytes" | "to_bytes_canonical" | "query"
     ) {
         if let Some(arg) = args.first() {
             if matches!(&arg.ty, Type::Apply { .. }) {
@@ -7002,17 +7026,21 @@ fn demand_generic_serde_codec(
             }
         }
     }
-    if method == "decode" {
+    if method == "decode" || method == "query" {
         if let Type::Result { ok, .. } = ret_ty {
             if cx.migrations.contains_key(&ok.name()) {
                 cx.jit_canonical_deopt
                     .borrow_mut()
                     .insert(fn_name.to_string());
             }
-            if matches!(ok.as_ref(), Type::Apply { .. }) {
+            let decode_ty = match ok.as_ref() {
+                Type::List(inner) if method == "query" => inner.as_ref(),
+                other => other,
+            };
+            if matches!(decode_ty, Type::Apply { .. }) {
                 cx.jit_method_calls.borrow_mut().insert(
-                    crate::Codegen::TIR::generic_method_instance_key(ok, "decode", &[]),
-                    ((**ok).clone(), "decode".to_string(), Vec::new()),
+                    crate::Codegen::TIR::generic_method_instance_key(decode_ty, "decode", &[]),
+                    (decode_ty.clone(), "decode".to_string(), Vec::new()),
                 );
             }
         }

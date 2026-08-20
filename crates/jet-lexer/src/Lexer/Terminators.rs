@@ -167,7 +167,10 @@ fn dispatch_arm_starts_at(src: &str, toks: &[Token], i: usize) -> bool {
             }
             j += 1;
         }
-        return matches!(toks.get(j).map(|t| &t.kind), Some(TokKind::Arrow));
+        return matches!(
+            toks.get(j).map(|t| &t.kind),
+            Some(TokKind::UnifiedArrow | TokKind::Arrow | TokKind::LambdaArrow)
+        );
     }
     if !toks
         .get(j)
@@ -217,7 +220,8 @@ fn dispatch_arm_starts_at(src: &str, toks: &[Token], i: usize) -> bool {
                 TokKind::RParen | TokKind::RBracket | TokKind::RBrace => {
                     depth = depth.saturating_sub(1);
                 }
-                TokKind::Arrow if depth == 0 => {
+                kind if matches!(kind, TokKind::UnifiedArrow | TokKind::Arrow | TokKind::LambdaArrow)
+                    && depth == 0 => {
                     return src
                         .get(guard_start..token.span.start)
                         .is_some_and(|guard| !guard.contains('\n'));
@@ -228,7 +232,10 @@ fn dispatch_arm_starts_at(src: &str, toks: &[Token], i: usize) -> bool {
         }
         return false;
     }
-    matches!(toks.get(j).map(|t| &t.kind), Some(TokKind::Arrow))
+    matches!(
+        toks.get(j).map(|t| &t.kind),
+        Some(TokKind::UnifiedArrow | TokKind::Arrow | TokKind::LambdaArrow)
+    )
 }
 
 /// S6-R post-pass: walk the code tokens (comments are trivia, skipped but kept
@@ -286,7 +293,8 @@ fn insert_terminators(src: &str, toks: &mut Vec<Token>, diags: &mut Vec<Diagnost
                 // onto the next line from a `)`.
                 if matches!(
                     cur.kind,
-                    TokKind::Arrow
+                    TokKind::UnifiedArrow
+                        | TokKind::Arrow
                         | TokKind::LambdaArrow
                         | TokKind::Eq
                         | TokKind::MinusMinus
@@ -295,6 +303,7 @@ fn insert_terminators(src: &str, toks: &mut Vec<Token>, diags: &mut Vec<Diagnost
                     && matches!(prev.kind, TokKind::RParen)
                 {
                     let spelling = match &cur.kind {
+                        TokKind::UnifiedArrow => ":>",
                         TokKind::Arrow => "->",
                         TokKind::LambdaArrow => "=>",
                         TokKind::Eq => "=[…]=>",

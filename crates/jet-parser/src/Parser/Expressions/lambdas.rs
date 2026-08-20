@@ -3,7 +3,7 @@ use super::super::{
 };
 
 impl<'a> Parser<'a> {
-        /// S46: `(` … `) =>` without scanning nested `(` for the `=>` probe.
+        /// S46: `(` … `) :>` without scanning nested `(` for the `:>` probe.
         pub(super) fn after_lparen_is_lambda(&self) -> bool {
             let mut i = self.pos + 1;
             let mut depth = 1usize;
@@ -15,7 +15,7 @@ impl<'a> Parser<'a> {
                         if depth == 0 {
                             return matches!(
                                 self.toks.get(i + 1).map(|t| &t.kind),
-                                Some(TokKind::LambdaArrow)
+                                Some(kind) if Parser::at_unified_arrow_token(kind)
                             );
                         }
                     }
@@ -83,7 +83,7 @@ impl<'a> Parser<'a> {
             }
             let close_paren = self.peek().span;
             self.expect(TokKind::RParen, "after lambda parameters")?;
-            self.expect(TokKind::LambdaArrow, "after `)` in a lambda")?;
+            self.expect_unified_arrow("after `)` in a lambda")?;
             let (body, end) = self.lambda_arrow_body(close_paren.end)?;
             Ok(Lambda {
                 take_names,
@@ -95,13 +95,13 @@ impl<'a> Parser<'a> {
         }
     
         /// D-LAMBDA-INFER1 (ratified 2026-07-04): a bare single-param lambda with
-        /// no parens and no type — `m => m.hp > 0`. Legal wherever the expected
+        /// no parens and no type — `m :> m.hp > 0`. Legal wherever the expected
         /// closure/fn type fixes the param type (sema rejects it elsewhere, same
-        /// as the existing omitted-type `(m) => …` form under S46/D-LAMBDAINFER1).
+        /// as the existing omitted-type `(m) :> …` form under S46/D-LAMBDAINFER1).
         /// D-ARROW-CONTROL1: captures are always inferred.
         pub(super) fn parse_bare_lambda(&mut self) -> Result<Lambda, Diagnostic> {
             let (name, name_span) = self.expect_ident("as a lambda parameter")?;
-            self.expect(TokKind::LambdaArrow, "after a bare lambda parameter")?;
+            self.expect_unified_arrow("after a bare lambda parameter")?;
             let (body, end) = self.lambda_arrow_body(name_span.end)?;
             Ok(Lambda {
                 take_names: vec![],
@@ -117,13 +117,13 @@ impl<'a> Parser<'a> {
             })
         }
     
-        /// Shared by `parse_lambda`/`parse_bare_lambda`: the body after `=>` and
+        /// Shared by `parse_lambda`/`parse_bare_lambda`: the body after `:>` and
         /// the lambda's overall end offset. `fallback_end` is used only for an
         /// empty block body (no statements to read an end span from).
         ///
-        /// S46: `=> expr` or `=> { … }`. A single assignment after `=>` needs no
-        /// braces — `a => a.balance -= n` is the one-statement form of
-        /// `a => { a.balance -= n }` (braces stay for multi-statement bodies).
+        /// S46: `:> expr` or `:> { … }`. A single assignment after `:>` needs no
+        /// braces — `a :> a.balance -= n` is the one-statement form of
+        /// `a :> { a.balance -= n }` (braces stay for multi-statement bodies).
         fn lambda_arrow_body(
             &mut self,
             fallback_end: usize,

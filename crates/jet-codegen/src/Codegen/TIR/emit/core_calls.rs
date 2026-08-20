@@ -1447,6 +1447,15 @@ pub(crate) fn emit_tir_core_call(
                 arg(0)
             )
         }
+        ("core.encoding.csv", "query") => {
+            format!(
+                "{}::<{}>(&({}), &({}).0)",
+                helper("jet_enc_csv_query"),
+                enc_row_target_rust(ret_ty, cx),
+                arg(0),
+                arg(1)
+            )
+        }
         ("core.encoding.csv", "to_string") => {
             if enc_arg_is_string_rows(args) {
                 format!("{}(&({}))", helper("jet_ring_csv_render"), arg(0))
@@ -1460,6 +1469,27 @@ pub(crate) fn emit_tir_core_call(
                 helper("jet_enc_csv_decode"),
                 enc_row_target_rust(ret_ty, cx),
                 arg(0)
+            )
+        }
+        ("core.data", "query") => {
+            let row_ty = match ret_ty {
+                Type::Result { ok, .. } => match ok.as_ref() {
+                    Type::List(inner) => inner.as_ref().clone(),
+                    _ => Type::Int,
+                },
+                _ => Type::Int,
+            };
+            let rows = if cx.columnar_list_type(&row_ty).is_some() {
+                format!("({}).to_aos()", arg(0))
+            } else {
+                arg(0)
+            };
+            format!(
+                "{}::<{}>(&({}), &({}).0)",
+                helper("jet_data_query_rows"),
+                cx.rust_type(&row_ty),
+                rows,
+                arg(1)
             )
         }
         // Array-of-objects JSON → `[T]`, reusing encoding.json's Decode path (I8).

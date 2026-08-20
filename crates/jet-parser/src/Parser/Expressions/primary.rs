@@ -285,6 +285,10 @@ impl<'a> Parser<'a> {
                     Ok(Expr::Char(ch, span))
                 }
                 TokKind::LBracket => self.list_or_map_lit(),
+                TokKind::LBrace if allow_struct_lit && self.brace_starts_record() => {
+                    let start = self.peek().span.start;
+                    self.struct_lit_inferred(start)
+                }
                 TokKind::KwTrue => {
                     let span = self.bump().span;
                     Ok(Expr::Bool(true, span))
@@ -315,7 +319,7 @@ impl<'a> Parser<'a> {
                 // D-LAMBDA-INFER1 (ratified 2026-07-04): a bare single-param
                 // lambda with no parens — `m => m.hp > 0`. Sema accepts it only
                 // where the expected type fixes the param type (E0801 elsewhere).
-                TokKind::Ident(_) if matches!(self.peek2().kind, TokKind::LambdaArrow) => {
+                TokKind::Ident(_) if Self::at_unified_arrow_token(&self.peek2().kind) => {
                     Ok(Expr::Lambda(self.parse_bare_lambda()?))
                 }
                 TokKind::LParen => self.parse_paren_primary(allow_struct_lit),
@@ -330,8 +334,8 @@ impl<'a> Parser<'a> {
                             Syntax::LANG_NAME,
                             Syntax::FOREIGN_LAMBDA
                         ),
-                        "write a lambda with parentheses and `=>` instead".to_string(),
-                        "e.g. `(x) => x + 1` instead of `lambda x { ... }`".to_string(),
+                        "write a lambda with parentheses and `:>` instead".to_string(),
+                        "e.g. `(x) :> x + 1` instead of `lambda x { ... }`".to_string(),
                         Some(span),
                     ));
                     return self.expr_primary(allow_struct_lit);
@@ -415,26 +419,8 @@ impl<'a> Parser<'a> {
                         }
                         self.expect_type_args_close(&format!("after `{type_name}<…>`"))?;
                     }
-                    if allow_struct_lit
-                        && matches!(self.peek().kind, TokKind::LBrace)
-                        && type_name.chars().next().is_some_and(|c| c.is_uppercase())
-                    {
-                        // D-DOTCTOR2: old dotless `Type { … }` form — teaching error E0320.
-                        // Recover: parse the fields as if the user had written `Type.{ … }`.
-                        // A lowercase name falls through to a plain `Ident`. A following
-                        // `{` after a call is E0335 under D-TRAILBLOCK2 (retired trailing
-                        // sugar) — not a desugared lambda argument.
-                        let brace_span = self.peek().span;
-                        self.diags.push(Diagnostic::error(
-                            "E0320",
-                            format!(
-                                "struct construction uses `{}.{{…}}`, not `{} {{…}}`",
-                                type_name, type_name
-                            ),
-                            "named construction has a dot before the brace (D-DOTCTOR1)".to_string(),
-                            format!("write `{}.{{…}}` instead", type_name),
-                            Some(brace_span),
-                        ));
+                    if allow_struct_lit && matches!(self.peek().kind, TokKind::LBrace) {
+                        // D-LIT-DOT1: a named head touches its brace directly.
                         return self.struct_lit_after_name(type_name, type_args, span);
                     }
                     if matches!(self.peek().kind, TokKind::Dot) {
@@ -453,8 +439,20 @@ impl<'a> Parser<'a> {
                             let base = Expr::Ident(type_name, span);
                             return self.parse_member_spread(base, span.start);
                         }
-                        // D-DOTCTOR1: `Type.{ … }` named construction.
+                        // D-LIT-DOT1: recover retired `Type.{ … }` while fmt rewrites
+                        // it to `Type{ … }`.
                         if allow_struct_lit && matches!(self.peek().kind, TokKind::LBrace) {
+                            self.diags.push(Diagnostic::error(
+                                "E0320",
+                                format!(
+                                    "struct construction uses `{}{{…}}`, not `{}.{{…}}`",
+                                    type_name, type_name
+                                ),
+                                "literal heads place no dot before their brace (D-LIT-DOT1)"
+                                    .to_string(),
+                                format!("write `{}{{…}}`", type_name),
+                                Some(self.peek().span),
+                            ));
                             return self.struct_lit_after_name(type_name, type_args, span);
                         }
                         let (member, member_span) = self.expect_field_name()?;
@@ -466,12 +464,47 @@ impl<'a> Parser<'a> {
                         if member == Syntax::TYPE_PTR && matches!(self.peek().kind, TokKind::Lt) {
                             return self.ptr_from_addr(type_name, span);
                         }
-                        if type_name == Syntax::TYPE_COMPILER_WORKLOAD
-                            && member == "Edit"
+                        if allow_struct_lit && matches!(self.peek().kind, TokKind::LBrace) {
+                            // D-LIT-DOT1: a lower-case leading segment is an
+                            // import namespace (`alias.Type{…}`), not an enum
+                            // type/variant pair. Keep the same namespace split
+                            // used by the postfix migration path.
+                            if type_name
+                                .chars()
+                                .next()
+                                .is_some_and(|c| c.is_ascii_lowercase())
+                            {
+                                return self.struct_lit_after_import(
+                                    type_name,
+                                    member,
+                                    span.start,
+                                );
+                            }
+                            let (args, end) = self.enum_lit_named_fields()?;
+                            return Ok(Expr::EnumLit {
+                                type_name,
+                                variant: member,
+                                args,
+                                leading_dot: false,
+                                span: Span::new(span.start, end),
+                            });
+                        }
+                        if allow_struct_lit
                             && matches!(self.peek().kind, TokKind::Dot)
                             && matches!(self.peek2().kind, TokKind::LBrace)
                         {
                             self.bump();
+                            self.diags.push(Diagnostic::error(
+                                "E0320",
+                                format!(
+                                    "enum payload uses `{}.{}{{…}}`, not `{}.{}.{{…}}`",
+                                    type_name, member, type_name, member
+                                ),
+                                "literal heads place no dot before their brace (D-LIT-DOT1)"
+                                    .to_string(),
+                                format!("write `{}.{}{{…}}`", type_name, member),
+                                Some(self.peek().span),
+                            ));
                             let (args, end) = self.enum_lit_named_fields()?;
                             return Ok(Expr::EnumLit {
                                 type_name,
@@ -863,6 +896,7 @@ impl<'a> Parser<'a> {
                             callable_tail_block_depth: None,
                             module_arg_expr_depth: None,
                             allow_lowercase_leading_dot: self.allow_lowercase_leading_dot,
+                            migration_mode: self.migration_mode,
                             derive_template_depth: self.derive_template_depth,
                             policy_declarations: Vec::new(),
                             applied_rules: Vec::new(),

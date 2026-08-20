@@ -6,28 +6,52 @@ pub struct JetTestReport {
     pub passed: usize,
     pub failed: usize,
     pub skipped: usize,
+    pub expected_failures: usize,
+    pub unexpected_passes: usize,
 }
 
 impl JetTestReport {
     pub const fn new(passed: usize, failed: usize, skipped: usize) -> Self {
-        Self { passed, failed, skipped }
+        Self { passed, failed, skipped, expected_failures: 0, unexpected_passes: 0 }
     }
 
     pub fn summary(&self) -> String {
         format!(
-            "{} passed, {} failed, {} skipped",
-            self.passed, self.failed, self.skipped
+            "{} passed, {} failed, {} skipped, {} expected-fail, {} unexpected-pass",
+            self.passed,
+            self.failed,
+            self.skipped,
+            self.expected_failures,
+            self.unexpected_passes
         )
+    }
+
+    pub fn json(&self) -> String {
+        format!(
+            "{{\"failed\":{},\"passed\":{},\"skipped\":{},\"selected\":{},\"expectedFailures\":{},\"unexpectedPasses\":{}}}",
+            self.failed,
+            self.passed,
+            self.skipped,
+            self.selected(),
+            self.expected_failures,
+            self.unexpected_passes
+        )
+    }
+
+    fn selected(&self) -> usize {
+        self.passed + self.failed + self.skipped + self.expected_failures + self.unexpected_passes
     }
 
     /// Summary member used by `jet prove`'s canonical proof report.
     pub fn json_summary(&self) -> String {
         format!(
-            "{{\"failed\":{},\"passed\":{},\"selected\":{},\"skipped\":{}}}",
+            "{{\"failed\":{},\"passed\":{},\"selected\":{},\"skipped\":{},\"expectedFailures\":{},\"unexpectedPasses\":{}}}",
             self.failed,
             self.passed,
-            self.passed + self.failed + self.skipped,
-            self.skipped
+            self.selected(),
+            self.skipped,
+            self.expected_failures,
+            self.unexpected_passes
         )
     }
 }

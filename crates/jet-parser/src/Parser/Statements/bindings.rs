@@ -112,14 +112,14 @@ impl<'a> Parser<'a> {
                     Syntax::SIGIL_BIND_MUT
                 ),
                 format!(
-                    "write `name {} value` or put the type on the value (e.g. `Type.{{ … }}`)",
+                    "write `name {} value` or put the type on the value (e.g. `Type{{ … }}`)",
                     Syntax::SIGIL_BIND_IMMUT
                 ),
                 Some(self.peek().span),
             ));
         }
         let (mutable, sigil_span) = self.expect_bind_sigil()?;
-        // Bare `name := uninit` — type must ride a `Type.{ uninit }` head.
+        // Bare `name := uninit` — type must ride a `Type{ uninit }` head.
         if matches!(&self.peek().kind, TokKind::Ident(n) if n == Syntax::KW_UNINIT)
             && matches!(
                 self.peek2().kind,
@@ -132,7 +132,7 @@ impl<'a> Parser<'a> {
                 "`uninit` needs a typed-literal head".to_string(),
                 "an uninitialized binding has no value to infer its type from, so the type must head the literal".to_string(),
                 format!(
-                    "write `{name} {} <Type>.{{ {} }}`, e.g. `buffer := [U8#4096].{{ {} }}`",
+                    "write `{name} {} <Type>{{ {} }}`, e.g. `buffer := [U8#4096]{{ {} }}`",
                     Syntax::SIGIL_BIND_MUT,
                     Syntax::KW_UNINIT,
                     Syntax::KW_UNINIT
@@ -141,7 +141,7 @@ impl<'a> Parser<'a> {
             ));
         }
         let init = self.expr()?;
-        // D-UNINIT-SENTINEL2: `name := Type.{ uninit }` — uninit only as a
+        // D-UNINIT-SENTINEL2: `name := Type{ uninit }` — uninit only as a
         // whole typed-literal body. Mutable bindings only (`:=`).
         if mutable {
             if let Some((ty, ty_span, marker_span)) = typed_lit_uninit_head(&init) {
@@ -243,12 +243,12 @@ impl<'a> Parser<'a> {
             }
             // Destructuring targets: scan ahead to a `::`/`:=` after the matching
             // close. Cheap bounded lookahead. `[ … ] ::`, `( … ) ::`,
-            // `Type { … } ::` (E0320 recovery), and `Type.{ … } ::` (D-DOTCTOR1).
+            // and `Type{ … } ::` (plus the retired dotted migration form).
             TokKind::LBracket | TokKind::LParen => self.pattern_target_is_binding(),
             TokKind::Ident(_) if matches!(self.peek2().kind, TokKind::LBrace) => {
                 self.pattern_target_is_binding()
             }
-            // D-DOTCTOR1: `Type.{ … } ::` — new form.
+            // D-LIT-DOT1 migration arm: retired `Type.{ … } ::`.
             TokKind::Ident(_)
                 if matches!(self.peek2().kind, TokKind::Dot)
                     && matches!(self.peek3().kind, TokKind::LBrace) =>
@@ -293,8 +293,8 @@ impl<'a> Parser<'a> {
         false
     }
 
-    /// D-DOTCTOR1: like `pattern_target_is_binding` but skips `Ident Dot` before
-    /// the opening `{`, for the `Type.{ … } :: expr` destructuring form.
+    /// D-LIT-DOT1: like `pattern_target_is_binding` but skips `Ident Dot` before
+    /// the opening `{`, for the retired `Type.{ … } :: expr` migration form.
     pub(super) fn pattern_target_is_binding_dot(&self) -> bool {
         let mut i = self.pos;
         let n = self.toks.len();
@@ -360,13 +360,24 @@ impl<'a> Parser<'a> {
                     span: Span::new(start.start, end.end),
                 }))
             }
-            // D-DOTCTOR1: `Type.{ x, y }` new form (new) or `Type { x, y }` (E0320 recovery).
+            // D-LIT-DOT1 migration arm: retired `Type.{ x, y }`.
             TokKind::Ident(_)
                 if matches!(self.peek2().kind, TokKind::Dot)
                     && matches!(self.peek3().kind, TokKind::LBrace) =>
             {
                 let (type_name, type_span) = self.expect_ident("for a struct pattern")?;
+                let dot_span = self.peek().span;
                 self.expect(TokKind::Dot, "in a struct pattern")?;
+                self.diags.push(Diagnostic::error(
+                    "E0320",
+                    format!(
+                        "struct pattern uses `{}{{…}}`, not `{}.{{…}}`",
+                        type_name, type_name
+                    ),
+                    "literal heads place no dot before their brace (D-LIT-DOT1)".to_string(),
+                    format!("write `{}{{…}}`", type_name),
+                    Some(dot_span),
+                ));
                 self.expect(TokKind::LBrace, "to open the struct pattern")?;
                 let (fields, rest) = self.struct_pattern_fields()?;
                 let end = self.peek().span;
@@ -381,19 +392,8 @@ impl<'a> Parser<'a> {
                 }))
             }
             TokKind::Ident(_) if matches!(self.peek2().kind, TokKind::LBrace) => {
-                // D-DOTCTOR2: old dotless `Type { x, y }` — E0320 recovery.
+                // D-LIT-DOT1: canonical `Type{ x, y }` struct pattern.
                 let (type_name, type_span) = self.expect_ident("for a struct pattern")?;
-                let brace_span = self.peek().span;
-                self.diags.push(Diagnostic::error(
-                    "E0320",
-                    format!(
-                        "struct pattern uses `{}.{{…}}`, not `{} {{…}}`",
-                        type_name, type_name
-                    ),
-                    "the struct pattern needs a dot before the brace (D-DOTCTOR1)".to_string(),
-                    format!("write `{}.{{…}}` instead", type_name),
-                    Some(brace_span),
-                ));
                 self.expect(TokKind::LBrace, "to open the struct pattern")?;
                 let (fields, rest) = self.struct_pattern_fields()?;
                 let end = self.peek().span;
@@ -439,7 +439,7 @@ impl<'a> Parser<'a> {
     /// D-DESTRUCT1: the field list inside a struct destructure's `{ … }` —
     /// `field` (bind same name), `field: name` (rename), and an optional
     /// trailing `..` (rest marker, `OP_RANGE`). Shared by the binding-position
-    /// `Type.{ … }` pattern (both the D-DOTCTOR1 and E0320-recovery spellings).
+    /// `Type{ … }` pattern and its E0320-recovery dotted spelling.
     pub(super) fn struct_pattern_fields(&mut self) -> Result<(Vec<BindName>, Option<Span>), Diagnostic> {
         let mut fields = Vec::new();
         let mut rest = None;
@@ -686,7 +686,7 @@ impl<'a> Parser<'a> {
     // --- expressions -----------------------------------------------------
 }
 
-/// D-UNINIT-SENTINEL2: `Type.{ uninit }` as a whole typed-literal body.
+/// D-UNINIT-SENTINEL2: `Type{ uninit }` as a whole typed-literal body.
 /// Returns `(head_type, ty_span, uninit_span)`. Non-whole bodies are ordinary
 /// typed literals (not this trigger).
 fn typed_lit_uninit_head(init: &Expr) -> Option<(Type, Span, Span)> {

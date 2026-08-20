@@ -1,6 +1,7 @@
 // ── D-HTTPLIB1=A / D-HTTPLIB2=B: core.http.server — function-first mux ───────
-// Plain HTTP is pure std. D-TLSSERVE1=A routes server TLS through the hidden
-// rustls bridge only when the named `tls:` option is used.
+// Plain HTTP is pure std. On wasm32-wasip2, Rust std delegates socket calls to
+// the canonical wasi:sockets adapter. D-TLSSERVE1=A routes server TLS through
+// the hidden rustls bridge only when the named `tls:` option is used.
 
 const JET_HTTP_KEEPALIVE_IDLE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(60);
 const JET_HTTP_MAX_REQUESTS_PER_CONNECTION: usize = 1000;
@@ -789,7 +790,8 @@ fn jet_http_server_bind_with_tls(
         target_os = "freebsd",
         target_os = "openbsd",
         target_os = "netbsd",
-        target_os = "windows"
+        target_os = "windows",
+        all(target_os = "wasi", target_env = "p2", target_arch = "wasm32")
     )))]
     {
         let _ = (addr, mux, tls_conn);
@@ -803,7 +805,8 @@ fn jet_http_server_bind_with_tls(
         target_os = "freebsd",
         target_os = "openbsd",
         target_os = "netbsd",
-        target_os = "windows"
+        target_os = "windows",
+        all(target_os = "wasi", target_env = "p2", target_arch = "wasm32")
     ))]
     {
     jet_http_mux_validate(&mux)?;

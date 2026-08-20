@@ -4381,6 +4381,26 @@ impl<'a> Checker<'a> {
             // D-ZIPPAD1: list/iterator zip-family calls use one variadic typed
             // contract for free and method spellings. Option.zip remains the
             // separate nullable combinator below.
+            if method == "query" {
+                if let Type::List(inner) = &recv_ty {
+                    if args.len() != 1 {
+                        self.diags.push(wrong_core_arity(method, 1, args.len(), span));
+                    }
+                    if let Some(query) = args.get_mut(0) {
+                        self.check_analytics_sql_schema(inner, &query.expr);
+                        self.expect_core_arg(method, 0, &Type::Named("SQL".to_string()), query);
+                    }
+                    self.check_encodable(inner, span);
+                    let ret = Type::Result {
+                        ok: Box::new(Type::List(inner.clone())),
+                        err: Box::new(Type::List(Box::new(Type::Named(
+                            "FieldError".to_string(),
+                        )))),
+                    };
+                    *resolved_ret_out = Some(ret.clone());
+                    return Some(ret);
+                }
+            }
             if matches!(method, "zip" | "zip_short" | "zip_pad") {
                 if let Some(ret) = self.check_zip_family_method(
                     receiver,

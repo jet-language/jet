@@ -144,6 +144,7 @@ pub fn is_polymorphic_core_special(module: &str, name: &str) -> bool {
                 | "core.encoding.yaml",
                 "to_string" | "to_string_pretty" | "decode" | "decode_traced",
             )
+            | ("core.encoding.csv", "query")
             | ("core.sys", "decode")
             | ("core.encoding.cbor", "parse" | "decode" | "to_bytes" | "to_bytes_canonical")
             | ("core.encoding.xml", "decode" | "decode_bytes" | "expanded_name")
@@ -161,7 +162,7 @@ pub fn is_polymorphic_core_special(module: &str, name: &str) -> bool {
                     | "series" | "values" | "schema"
                     | "missing_count" | "lazy" | "lazy_filter" | "lazy_sort_by" | "collect"
                     | "plan" | "filter" | "sort_by" | "group_count" | "group_sum" | "group_mean"
-                    | "inner_join" | "left_join" | "pivot_sum",
+                    | "inner_join" | "left_join" | "pivot_sum" | "query",
             )
             | ("core.crypto.vault", "current" | "versions" | "load" | "status"
                 | "prepare_generate" | "prepare_store" | "prepare_rotate" | "prepare_retire" | "prepare_revoke"

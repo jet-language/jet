@@ -1427,8 +1427,9 @@ impl<'a> Fmt<'a> {
             if top_level
                 && matches!(
                     token.kind,
-                    TokKind::Comma
+                        TokKind::Comma
                         | TokKind::Semi
+                        | TokKind::UnifiedArrow
                         | TokKind::LambdaArrow
                         | TokKind::RParen
                         | TokKind::RBrace

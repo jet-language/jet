@@ -212,7 +212,7 @@ pub fn apply_impure_core_call_with_type(
                 if let Some(sink) = sink {
                     let tty = super::term_semantics::jet_term_stdout_is_terminal();
                     let frame = super::term_semantics::jet_term_progress_frame(tty, text);
-                    if tty {
+                    if super::term_semantics::jet_term_stdout_is_program_stream() {
                         super::term_semantics::jet_term_write_stdout(&frame, true).map_err(|error| {
                             unsupported(&format!("write stdout: {error}"), span)
                         })?;

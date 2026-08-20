@@ -68,6 +68,17 @@ impl ValidatedRuleArguments {
             .and_then(|index| self.constants.get(index))
             .and_then(Option::as_ref)
     }
+
+    pub(crate) fn constant_for_parameter(
+        &self,
+        parameter_index: usize,
+    ) -> Option<&crate::Comptime::CtValue> {
+        self.bindings
+            .iter()
+            .position(|binding| binding.parameter_index == Some(parameter_index))
+            .and_then(|index| self.constants.get(index))
+            .and_then(Option::as_ref)
+    }
 }
 
 fn rule_signature_bindings(
@@ -419,6 +430,13 @@ pub(crate) fn resolve_static_rule_products(
                         expression.span(),
                     )));
                 }
+                if let Some(expression) = &test.expected_fail_expr {
+                    args.push(expression.clone());
+                    arg_labels.push(Some((
+                        Syntax::TEST_EXPECTED_FAIL_PARAM.to_string(),
+                        expression.span(),
+                    )));
+                }
                 if args.is_empty() {
                     continue;
                 }
@@ -538,6 +556,7 @@ pub(crate) fn resolve_static_rule_products(
     }
     materialize_static_marker_values(&mut module.items, &validated, &invalid);
     materialize_test_faults(&mut module.items, diags);
+    materialize_test_expected_fail(&mut module.items, &validated);
     // D-FIELDDEF1=C: promote retired `#Default(expr)` into `field: T = expr`.
     // Then sweep whatever retired spellings are left on the field: the field
     // attachment point had no reader at all, so the registry's `@retired`
@@ -682,6 +701,25 @@ pub(crate) fn resolve_static_rule_products(
             ),
             None => text,
         });
+    }
+}
+
+/// D-TEST-XFAIL1=A: materialize the typed marker flag once in sema. The test
+/// harness receives only this checked boolean and never interprets marker text.
+fn materialize_test_expected_fail(
+    items: &mut [Item],
+    validated: &HashMap<usize, ValidatedRuleArguments>,
+) {
+    for item in items {
+        let Item::Test(test) = item else { continue };
+        test.expected_fail = validated
+            .get(&test.marker_name_span.start)
+            .and_then(|arguments| arguments.constant_for_parameter(2))
+            .and_then(|value| match value {
+                crate::Comptime::CtValue::Bool(value) => Some(*value),
+                _ => None,
+            })
+            .unwrap_or(false);
     }
 }
 

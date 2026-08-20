@@ -216,7 +216,7 @@ impl<'a> Parser<'a> {
                                     "E2903",
                                     format!("performance budget role `{path}` is not valid"),
                                     "`compile_workloads` uses one bare inferred record".to_string(),
-                                    "write `compile_workloads: { name: CompilerWorkload.Edit.{ target: \"cli\", patch: \"...\" } }`".to_string(),
+                                    "write `compile_workloads: { name: CompilerWorkload.Edit{ target: \"cli\", patch: \"...\" } }`".to_string(),
                                     Some(self.peek().span),
                                 ));
                             }
@@ -227,7 +227,7 @@ impl<'a> Parser<'a> {
                                 "E2903",
                                 format!("performance budget role `{path}` is not valid"),
                                 "a performance role contains one `budgets` list and at most one `compile_workloads` map".to_string(),
-                                "write `budgets: [Budget.{ ... }]` and, for edit probes, `compile_workloads: { ... }`".to_string(),
+                                "write `budgets: [Budget{ ... }]` and, for edit probes, `compile_workloads: { ... }`".to_string(),
                                 Some(field_span),
                             ));
                         }
@@ -278,13 +278,13 @@ impl<'a> Parser<'a> {
                         "E2903",
                         format!("performance budget role `{path}` is not valid"),
                         "a performance role requires one `budgets` list".to_string(),
-                        "add `budgets: [Budget.{ ... }]`".to_string(),
+                        "add `budgets: [Budget{ ... }]`".to_string(),
                         Some(path_span),
                     ));
                 };
                 let list_span = budgets.span();
-                // D-PERFBUDGET-SURFACE1: `budgets: [Budget.{ … }]`.
-                // D-DOTCTOR3: also `budgets: [Budget].{ .{ … }, … }` (typed-list head).
+                // D-PERFBUDGET-SURFACE1: `budgets: [Budget{ … }]`.
+                // D-DOTCTOR3: also `budgets: [Budget]{ { … }, … }` (typed-list head).
                 let typed_budgets = Self::perf_budget_decls(budgets, &path)?;
                 let (compile_workloads, compile_workloads_span) = match perf_compile_workloads {
                     Some((field_span, value)) => (
@@ -324,7 +324,7 @@ impl<'a> Parser<'a> {
     }
 
     /// Collect `Budget` decls from a `budgets:` value.
-    /// Accepts plain `[Budget.{ … }, …]` and D-DOTCTOR3 `[Budget].{ .{ … }, … }`.
+    /// Accepts plain `[Budget{ … }, …]` and D-DOTCTOR3 `[Budget]{ { … }, … }`.
     fn perf_budget_decls(
         budgets: Expr,
         path: &str,
@@ -346,7 +346,7 @@ impl<'a> Parser<'a> {
                             Syntax::TYPE_BUDGET,
                             Type::List(inner).name()
                         ),
-                        format!("write `budgets: [{0}].{{ … }}` or `budgets: [{0}.{{ … }}]`", Syntax::TYPE_BUDGET),
+                        format!("write `budgets: [{0}]{{ … }}` or `budgets: [{0}{{ … }}]`", Syntax::TYPE_BUDGET),
                         Some(span),
                     ));
                 }
@@ -359,7 +359,7 @@ impl<'a> Parser<'a> {
                             format!("performance budget role `{path}` is not valid"),
                             "`budgets` must be a list of typed `Budget` values".to_string(),
                             format!(
-                                "write `budgets: [{0}].{{ .{{ … }}, … }}` or `budgets: [{0}.{{ … }}]`",
+                                "write `budgets: [{0}]{{ {{ … }}, … }}` or `budgets: [{0}{{ … }}]`",
                                 Syntax::TYPE_BUDGET
                             ),
                             Some(span),
@@ -373,7 +373,7 @@ impl<'a> Parser<'a> {
                     format!("performance budget role `{path}` is not valid"),
                     "`budgets` must be a list of typed `Budget` values".to_string(),
                     format!(
-                        "write `budgets: [{0}].{{ … }}` or `budgets: [{0}.{{ … }}]`",
+                        "write `budgets: [{0}]{{ … }}` or `budgets: [{0}{{ … }}]`",
                         Syntax::TYPE_BUDGET
                     ),
                     Some(other.span()),
@@ -406,7 +406,7 @@ impl<'a> Parser<'a> {
                 "E2903",
                 format!("performance budget role `{path}` is not valid"),
                 "`compile_workloads` must be an inferred record of named edit workloads".to_string(),
-                "write `compile_workloads: { name: CompilerWorkload.Edit.{ target: \"cli\", patch: \"...\" } }`".to_string(),
+                "write `compile_workloads: { name: CompilerWorkload.Edit{ target: \"cli\", patch: \"...\" } }`".to_string(),
                 Some(value.span()),
             ));
         };
@@ -426,7 +426,7 @@ impl<'a> Parser<'a> {
                     "E2903",
                     format!("performance workload `{name}` is not valid"),
                     "a compile workload must be `CompilerWorkload.Edit`".to_string(),
-                    "write `CompilerWorkload.Edit.{ target: \"cli\", patch: \"path/to.patch\" }`".to_string(),
+                    "write `CompilerWorkload.Edit{ target: \"cli\", patch: \"path/to.patch\" }`".to_string(),
                     Some(value.span()),
                 ));
             };
@@ -435,7 +435,7 @@ impl<'a> Parser<'a> {
                     "E2903",
                     format!("performance workload `{name}` is not valid"),
                     format!("`{variant}` is not a compile edit workload"),
-                    "use `CompilerWorkload.Edit.{ target: \"cli\", patch: \"path/to.patch\" }`".to_string(),
+                    "use `CompilerWorkload.Edit{ target: \"cli\", patch: \"path/to.patch\" }`".to_string(),
                     Some(span),
                 ));
             }
@@ -447,7 +447,7 @@ impl<'a> Parser<'a> {
                         "E2903",
                         format!("performance workload `{name}` is not valid"),
                         "`CompilerWorkload.Edit` requires named `target` and `patch` fields".to_string(),
-                        "write `CompilerWorkload.Edit.{ target: \"cli\", patch: \"path/to.patch\" }`".to_string(),
+                        "write `CompilerWorkload.Edit{ target: \"cli\", patch: \"path/to.patch\" }`".to_string(),
                         Some(span),
                     ));
                 };
@@ -557,7 +557,7 @@ impl<'a> Parser<'a> {
                         "E2903",
                         "performance budget entry is not valid".to_string(),
                         why,
-                        "write `Budget.{ name: ..., metric: ..., limit: ... }`".to_string(),
+                        "write `Budget{ name: ..., metric: ..., limit: ... }`".to_string(),
                         Some(span),
                     ));
                 }
@@ -600,7 +600,7 @@ impl<'a> Parser<'a> {
                 "E2903",
                 "performance budget entry is not valid".to_string(),
                 "every `budgets` item must be one typed `Budget` literal".to_string(),
-                "write `Budget.{ name: ..., metric: ..., limit: ... }`".to_string(),
+                "write `Budget{ name: ..., metric: ..., limit: ... }`".to_string(),
                 Some(entry_span),
             )),
         }
@@ -1311,32 +1311,30 @@ impl<'a> Parser<'a> {
     }
 
     /// U18: an optional record type name before `{`. Returns its span when the
-    /// author wrote it (`System.{ … }` / `Image.{ … }` / `Service.{ … }`), `None`
-    /// for a bare `{ … }`. D-DOTCTOR1: also accepts the old dotless `System { … }`
-    /// form (E0320 recovery — `jet fmt` auto-fixes).
+    /// author wrote it (`System{ … }` / `Image{ … }` / `Service{ … }`), `None`
+    /// for a bare `{ … }`. The retired dotted form remains a migration arm.
     fn opt_record_type(&mut self, expected: &str) -> Result<Option<Span>, Diagnostic> {
-        // D-DOTCTOR1: new form `TypeName.{` — consume Ident and Dot.
+        // D-LIT-DOT1: canonical form `TypeName{` — consume the type name.
+        if self.peek_is_ident(expected) && matches!(self.peek2().kind, TokKind::LBrace) {
+            let span = self.bump().span;
+            return Ok(Some(span));
+        }
+        // Migration arm for retired `TypeName.{`.
         if self.peek_is_ident(expected)
             && matches!(self.peek2().kind, TokKind::Dot)
             && matches!(self.peek3().kind, TokKind::LBrace)
         {
-            let span = self.bump().span; // consume type name
-            self.bump(); // consume dot
-            return Ok(Some(span));
-        }
-        // D-DOTCTOR2 recovery: old dotless `TypeName {` — emit E0320, consume Ident.
-        if self.peek_is_ident(expected) && matches!(self.peek2().kind, TokKind::LBrace) {
             let span = self.bump().span;
-            let brace_span = self.peek().span;
+            let dot = self.bump();
             self.diags.push(Diagnostic::error(
                 "E0320",
                 format!(
-                    "struct construction uses `{}.{{…}}`, not `{} {{…}}`",
+                    "struct construction uses `{}{{…}}`, not `{}.{{…}}`",
                     expected, expected
                 ),
-                "named construction has a dot before the brace (D-DOTCTOR1)".to_string(),
-                format!("write `{}.{{…}}` instead", expected),
-                Some(brace_span),
+                "literal heads place no dot before their brace (D-LIT-DOT1)".to_string(),
+                format!("write `{}{{…}}`", expected),
+                Some(dot.span),
             ));
             return Ok(Some(span));
         }

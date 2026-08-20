@@ -16,12 +16,24 @@ fn brace_body_looks_like_fields(toks: &[Token], pos: usize) -> bool {
     }
 }
 
+fn brace_body_looks_like_record(toks: &[Token], pos: usize) -> bool {
+    brace_body_looks_like_fields(toks, pos)
+        || matches!(
+            (toks.get(pos).map(|t| &t.kind), toks.get(pos + 1).map(|t| &t.kind)),
+            (Some(TokKind::Str(_)), Some(TokKind::Colon))
+        )
+}
+
 impl<'a> Parser<'a> {
+        pub(super) fn brace_starts_record(&self) -> bool {
+            brace_body_looks_like_record(&self.toks, self.pos + 1)
+        }
+
         /// S37/S38: `[a, b]` or `["k": v]` or `[]`. D-EMPTYLIT1: `[]` is the one
         /// empty-collection spelling — type-directed, list or map decided by the
         /// expected-type context (sema). `[:]` is gone; `[` immediately followed
         /// by `:` falls through to an ordinary expression-expected parse error.
-        /// D-DOTCTOR3: `[T].{ … }` / `[T#N].{ … }` / `[K:V].{ … }` is a typed-
+        /// D-DOTCTOR3: `[T]{ … }` / `[T#N]{ … }` / `[K:V]{ … }` is a typed-
         /// literal head, not a list value whose first element is a type name.
         pub(super) fn list_or_map_lit(&mut self) -> Result<Expr, Diagnostic> {
             if let Some(lit) = self.try_typed_lit_from_bracket()? {
@@ -64,7 +76,7 @@ impl<'a> Parser<'a> {
             Ok(Expr::ListLit(elems, Span::new(open.start, close.end)))
         }
 
-        /// D-DOTCTOR3: probe `[Type].{` / `[Type#N].{` / `[K:V].{`.
+        /// D-DOTCTOR3: probe `[Type]{` / `[Type#N]{` / `[K:V]{`.
         fn try_typed_lit_from_bracket(&mut self) -> Result<Option<Expr>, Diagnostic> {
             let save = self.pos;
             let save_diags = self.diags.len();
@@ -87,12 +99,22 @@ impl<'a> Parser<'a> {
                 self.diags.truncate(save_diags);
                 return Ok(None);
             }
-            if !matches!(self.peek().kind, TokKind::Dot) {
+            let dotted = matches!(self.peek().kind, TokKind::Dot);
+            if dotted {
+                self.bump();
+                self.diags.push(Diagnostic::error(
+                    "E0320",
+                    "typed collection construction uses `[T]{…}`, not `[T].{…}`"
+                        .to_string(),
+                    "D-LIT-DOT1 drops the constructor dot from every literal head".to_string(),
+                    "write `[T]{…}`".to_string(),
+                    Some(self.toks[self.pos.saturating_sub(1)].span),
+                ));
+            } else if !matches!(self.peek().kind, TokKind::LBrace) {
                 self.pos = save;
                 self.diags.truncate(save_diags);
                 return Ok(None);
             }
-            self.bump();
             if !matches!(self.peek().kind, TokKind::LBrace) {
                 self.pos = save;
                 self.diags.truncate(save_diags);
@@ -194,7 +216,7 @@ impl<'a> Parser<'a> {
             Ok(fields)
         }
 
-        /// D-DOTCTOR3: `Head.{ body }` when `Head` is a type spelling (scalar,
+        /// D-DOTCTOR3: `Head{ body }` when `Head` is a type spelling (scalar,
         /// named non-field body, etc.).
         pub(super) fn typed_lit_after_type(
             &mut self,
@@ -301,10 +323,11 @@ impl<'a> Parser<'a> {
             })
         }
     
-        /// D-DOTCTOR1: inferred struct lit `.{ field: val, … }`.
-        /// D-DOTCTOR3: also `.{ elems }` / `.{ value }` when the body is not a
+        /// D-DOTCTOR1: inferred struct lit `{ field: val, … }`.
+        /// D-DOTCTOR3: also `{ elems }` / `{ value }` when the body is not a
         /// record field list — elaborates against the expected type in sema.
-        /// The leading `.` was already consumed. Parses `{ … }`.
+        /// The canonical branch starts on `{`; the migration arm consumes a
+        /// retired leading dot first. Both paths parse the same `{ … }` body.
         pub(super) fn struct_lit_inferred(&mut self, dot_start: usize) -> Result<Expr, Diagnostic> {
             self.expect(TokKind::LBrace, "to open an inferred struct literal")?;
             if matches!(self.peek().kind, TokKind::RBrace) {
@@ -337,7 +360,7 @@ impl<'a> Parser<'a> {
             // field-shaped above. Remaining forms are element lists / values.
             let first = self.list_elem()?;
             if matches!(self.peek().kind, TokKind::Colon) {
-                // Rare inferred map body `.{ key: val }` where key wasn't a bare
+                // Rare inferred map body `{ key: val }` where key wasn't a bare
                 // Ident (e.g. string key). Parse as entries.
                 self.bump();
                 let value = self.expr()?;
@@ -467,8 +490,12 @@ impl<'a> Parser<'a> {
                         span: Span::new(start.start, binding_span.end),
                     }));
                 }
-                // D-DESTRUCT1: struct-shaped dispatch arm head:
-                // `.{ kind: "page", title, .. } -> ...`.
+                // D-LIT-DOT1: struct-shaped dispatch arm head:
+                // `{ kind: "page", title, .. } -> ...`.
+                TokKind::LBrace if self.brace_starts_record() => {
+                    return self.struct_pattern_rhs().map(Some);
+                }
+                // Migration arm for the retired `.{ … }` pattern.
                 TokKind::Dot
                     if matches!(
                         self.toks.get(self.pos + 1).map(|t| &t.kind),

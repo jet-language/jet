@@ -533,7 +533,7 @@ impl<'a> Fmt<'a> {
                 self.fmt_effect_loop_body(body, header_end, *arrow_body);
             }
             // D-IF3 / D-IFDIST1: multi-arm dispatch renders as
-            // `if subject OP { head -> body }` (the `Stmt::Switch` IR is shared
+            // `if subject OP { head :> body }` (the `Stmt::Switch` IR is shared
             // with the retired `when`). The comparison marker enters dispatch;
             // arm heads carry no repeated `subject OP`.
             Stmt::Switch {
@@ -674,12 +674,12 @@ impl<'a> Fmt<'a> {
                 self.with_indent(|f| f.fmt_block_stmts(body));
                 self.end_block();
             }
-            // D-LAYOUT-CTOR1: `name :: Layout.{ … }` — typed-literal element
+            // D-LAYOUT-CTOR1: `name :: Layout{ … }` — typed-literal element
             // body (comma-separated Constraints). Re-sugar `h`/`v` calls back
             // to `box.anchor` / `self.anchor`.
             Stmt::Layout { name, body, .. } => {
                 self.write(&format!(
-                    "{} {} {}.{{",
+                    "{} {} {}{{",
                     name,
                     Syntax::SIGIL_BIND_IMMUT,
                     Syntax::LAYOUT_TYPE
@@ -850,7 +850,9 @@ impl<'a> Fmt<'a> {
             let saved_line_start = self.at_line_start;
             let saved_pending_blank = self.pending_blank;
             let saved_comment_i = self.comment_i;
-            self.write(" -> ");
+            self.write(" ");
+            self.write(Syntax::OP_UNIFIED_ARROW);
+            self.write(" ");
             self.fmt_stmt_inline(&body[0]);
             if self.col <= MAX_WIDTH && !self.out[saved_out..].contains('\n') {
                 return;
@@ -909,7 +911,7 @@ impl<'a> Fmt<'a> {
                 }
                 f.write(Syntax::KW_ELSE);
                 f.write(" ");
-                f.write(Syntax::OP_ARM_ARROW);
+                f.write(Syntax::OP_UNIFIED_ARROW);
                 f.fmt_arm_body(else_b, false);
             }
         });
@@ -929,7 +931,7 @@ impl<'a> Fmt<'a> {
                 }
                 f.fmt_expr(&arm.cond, Prec::OrFallback);
                 f.write(" ");
-                f.write(Syntax::OP_ARM_ARROW);
+                f.write(Syntax::OP_UNIFIED_ARROW);
                 f.fmt_arm_body(&arm.body, false);
                 f.emit_trailing(arm.span.end);
             }
@@ -946,7 +948,7 @@ impl<'a> Fmt<'a> {
                 }
                 f.write(Syntax::KW_ELSE);
                 f.write(" ");
-                f.write(Syntax::OP_ARM_ARROW);
+                f.write(Syntax::OP_UNIFIED_ARROW);
                 f.fmt_arm_body(body, false);
             }
         });
@@ -1051,7 +1053,7 @@ impl<'a> Fmt<'a> {
     ) {
         self.fmt_switch_cond(subject, table_op, &arm.cond, Prec::OrFallback);
         self.write(" ");
-        self.write(Syntax::OP_ARM_ARROW);
+        self.write(Syntax::OP_UNIFIED_ARROW);
         self.fmt_arm_body(&arm.body, force_braces);
     }
 
@@ -1140,7 +1142,9 @@ impl<'a> Fmt<'a> {
             let saved_line_start = self.at_line_start;
             let saved_pending_blank = self.pending_blank;
             let saved_comment_i = self.comment_i;
-            self.write(" -> ");
+            self.write(" ");
+            self.write(Syntax::OP_UNIFIED_ARROW);
+            self.write(" ");
             self.fmt_stmt_inline(&body[0]);
             if self.col <= MAX_WIDTH && !self.out[saved_out..].contains('\n') {
                 return;
@@ -1177,10 +1181,10 @@ impl<'a> Fmt<'a> {
         let Some(prefix) = self.src.get(..start) else {
             return false;
         };
-        let Some(arrow) = prefix.rfind(Syntax::OP_ARM_ARROW) else {
+        let Some(arrow) = prefix.rfind(Syntax::OP_UNIFIED_ARROW) else {
             return false;
         };
-        let between = &prefix[arrow + Syntax::OP_ARM_ARROW.len()..];
+        let between = &prefix[arrow + Syntax::OP_UNIFIED_ARROW.len()..];
         let source_end = self.statement_source_end(&body[0]);
         !between.contains('{')
             && !between.contains('\n')
@@ -1188,7 +1192,7 @@ impl<'a> Fmt<'a> {
                 .src
                 .get(start..source_end)
                 .is_some_and(|source| !source.contains('\n'))
-            && !self.span_has_comment(arrow + Syntax::OP_ARM_ARROW.len(), source_end)
+            && !self.span_has_comment(arrow + Syntax::OP_UNIFIED_ARROW.len(), source_end)
     }
 
     fn fmt_switch_cond(&mut self, subject: &Expr, table_op: BinOp, cond: &Expr, prec: Prec) {
@@ -1416,7 +1420,7 @@ impl<'a> Fmt<'a> {
             });
         } else {
             // D-BIND-BARE1: bindings are always bare (`name :: …` / `name := …`).
-            // Types ride the value (`Type.{ … }`), never the binding name.
+            // Types ride the value (`Type{ … }`), never the binding name.
             self.write(&b.name);
             self.write(" ");
             self.write(if b.mutable {
@@ -1426,11 +1430,11 @@ impl<'a> Fmt<'a> {
             });
         }
         self.write(" ");
-        // D-UNINIT-SENTINEL2: print `Type.{ uninit }` from the binding's type.
+        // D-UNINIT-SENTINEL2: print `Type{ uninit }` from the binding's type.
         if b.uninit {
             if let Some(ty) = &b.ty {
                 self.fmt_type(ty);
-                self.write(".{ ");
+                self.write("{ ");
                 self.write(Syntax::KW_UNINIT);
                 self.write(" }");
             } else {
@@ -1449,10 +1453,10 @@ impl<'a> Fmt<'a> {
                 rest,
                 ..
             } => {
-                // D-DOTCTOR1: emit `Type.{x, y}` (auto-fixes E0320 recovery).
+                // D-LIT-DOT1: emit `Type{x, y}` (auto-fixes retired dotted form).
                 // D-DESTRUCT1: preserve a `field: rename` and a trailing `..`.
                 self.write(type_name);
-                self.write(".{");
+                self.write("{");
                 for (i, f) in fields.iter().enumerate() {
                     if i > 0 {
                         self.write(", ");

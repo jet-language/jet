@@ -388,17 +388,25 @@ mod jet_std {
             if self.groups == 0 {
                 return vec![Some(self.span)];
             }
+            let base = self.span.0;
+            let window = &self.text[self.span.0..self.span.1];
             regex_run(
                 &self.program,
                 &self.flags,
                 self.groups,
-                &self.text,
-                self.span.0,
+                window,
+                0,
                 true,
                 true,
             )
             .and_then(|run| run.caps)
             .map(|caps| regex_slots_to_spans(&caps))
+            .map(|spans| {
+                spans
+                    .into_iter()
+                    .map(|span| span.map(|(start, end)| (start + base, end + base)))
+                    .collect()
+            })
             .unwrap_or_else(|| vec![Some(self.span)])
         }
     }
@@ -552,25 +560,11 @@ mod jet_std {
         ) -> Option<JetRegexMatch> {
             if let Some(literal) = self.program.literal.as_deref() {
                 if !self.flags.case_insensitive {
-                    let needle = std::str::from_utf8(literal).unwrap();
-                    let mut candidate = start;
-                    while candidate <= text.len() {
-                        let offset = text[candidate..].find(needle)?;
-                        candidate += offset;
-                        if let Some(run) = regex_run(
-                            &self.program,
-                            &self.flags,
-                            self.groups,
-                            text,
-                            candidate,
-                            true,
-                            false,
-                        ) {
-                            return Some(self.make_match(text, run.span));
-                        }
-                        candidate = regex_next_search_pos(text, candidate, candidate);
-                    }
-                    return None;
+                    let candidate = regex_find_literal(text.as_bytes(), literal, start)?;
+                    return Some(self.make_match(
+                        text,
+                        (candidate, candidate + literal.len()),
+                    ));
                 }
             }
             regex_run(
@@ -1217,18 +1211,30 @@ mod jet_std {
         }
     }
 
-    fn regex_matcher_matches(matcher: &RegexMatcher, ch: char, flags: &RegexFlags) -> bool {
-        match matcher {
-            RegexMatcher::Literal(expected) => {
-                if flags.case_insensitive {
-                    super::jet_text_simple_fold(*expected as u32) == super::jet_text_simple_fold(ch as u32)
-                } else {
-                    *expected == ch
-                }
+    fn regex_matcher_next(
+        matcher: &RegexMatcher,
+        text: &str,
+        pos: usize,
+        flags: &RegexFlags,
+    ) -> Option<usize> {
+        if let RegexMatcher::Literal(expected) = matcher {
+            if !flags.case_insensitive {
+                let mut encoded = [0; 4];
+                let bytes = expected.encode_utf8(&mut encoded).as_bytes();
+                return text.as_bytes()[pos..]
+                    .starts_with(bytes)
+                    .then_some(pos + bytes.len());
             }
+        }
+        let ch = text[pos..].chars().next()?;
+        let next = pos + ch.len_utf8();
+        let matches = match matcher {
+            RegexMatcher::Literal(expected) => super::jet_text_simple_fold(*expected as u32)
+                == super::jet_text_simple_fold(ch as u32),
             RegexMatcher::Any => flags.dotall || ch != '\n',
             RegexMatcher::Class(class) => regex_class_matches(class, ch, flags),
-        }
+        };
+        matches.then_some(next)
     }
 
     fn regex_class_matches(class: &RegexClass, ch: char, flags: &RegexFlags) -> bool {
@@ -1347,13 +1353,24 @@ mod jet_std {
             if pos == text.len() {
                 return last_match;
             }
-            let ch = text[pos..].chars().next().unwrap();
-            let next_pos = pos + ch.len_utf8();
             next.clear();
+            // Every thread at `pos` consumes the same input character, so the
+            // step is a property of the text, not of a thread's matcher —
+            // `regex_matcher_next` only ever returns this boundary. Computing
+            // it once keeps the Pike VM's one-clock invariant; binding it per
+            // thread left it out of scope for the advance below.
+            let Some(step) = text[pos..].chars().next() else {
+                return last_match;
+            };
+            let next_pos = pos + step.len_utf8();
             for thread in &current.threads {
                 let RegexInst::Consume(matcher, Some(target)) = &program.insts[thread.pc]
                 else { continue };
-                if regex_matcher_matches(matcher, ch, flags) {
+                if regex_matcher_next(matcher, text, pos, flags).is_none() {
+                    continue;
+                };
+                if capture {
+                    let caps = thread.caps.clone();
                     regex_add_thread(
                         &mut next,
                         program,
@@ -1361,7 +1378,20 @@ mod jet_std {
                         RegexThread {
                             pc: *target,
                             start: thread.start,
-                            caps: thread.caps.clone(),
+                            caps,
+                        },
+                        next_pos,
+                        text,
+                    );
+                } else {
+                    regex_add_thread(
+                        &mut next,
+                        program,
+                        flags,
+                        RegexThread {
+                            pc: *target,
+                            start: thread.start,
+                            caps: None,
                         },
                         next_pos,
                         text,
@@ -1443,6 +1473,154 @@ mod jet_std {
             literal.push(*ch);
         }
         (!literal.is_empty()).then(|| literal.into_bytes())
+    }
+
+    // Required-literal prefilter. It scans the haystack once, then the VM only
+    // sees candidates. The VM remains the authority for non-literal programs.
+    fn regex_find_literal(haystack: &[u8], needle: &[u8], start: usize) -> Option<usize> {
+        if needle.is_empty() {
+            return Some(start.min(haystack.len()));
+        }
+        let last = haystack.len().checked_sub(needle.len())?;
+        let first = needle[0];
+        let mut pos = start.min(haystack.len());
+        while pos <= last {
+            let candidate = regex_find_byte(haystack, first, pos)?;
+            if candidate > last {
+                return None;
+            }
+            pos = candidate;
+            if haystack[pos..].starts_with(needle) {
+                return Some(pos);
+            }
+            pos += 1;
+        }
+        None
+    }
+
+    fn regex_find_byte(haystack: &[u8], needle: u8, start: usize) -> Option<usize> {
+        #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+        {
+            if is_x86_feature_detected!("avx2") {
+                // JET_VETTED_UNSAFE_BEGIN: regex_literal_prefilter_cpu_simd
+                return unsafe { regex_find_byte_avx2(haystack, needle, start) };
+                // JET_VETTED_UNSAFE_END: regex_literal_prefilter_cpu_simd
+            }
+            if is_x86_feature_detected!("sse2") {
+                // JET_VETTED_UNSAFE_BEGIN: regex_literal_prefilter_cpu_simd
+                return unsafe { regex_find_byte_sse2(haystack, needle, start) };
+                // JET_VETTED_UNSAFE_END: regex_literal_prefilter_cpu_simd
+            }
+        }
+        haystack
+            .get(start..)?
+            .iter()
+            .position(|byte| *byte == needle)
+            .map(|offset| start + offset)
+    }
+
+    #[cfg(target_arch = "x86_64")]
+    #[target_feature(enable = "avx2")]
+    unsafe fn regex_find_byte_avx2(
+        haystack: &[u8],
+        needle: u8,
+        start: usize,
+    ) -> Option<usize> {
+        use std::arch::x86_64::{
+            _mm256_cmpeq_epi8, _mm256_loadu_si256, _mm256_movemask_epi8, _mm256_set1_epi8,
+        };
+        let mut pos = start;
+        let target = _mm256_set1_epi8(needle as i8);
+        while pos <= haystack.len().saturating_sub(32) {
+            let chunk = _mm256_loadu_si256(haystack.as_ptr().add(pos).cast());
+            let mask = _mm256_movemask_epi8(_mm256_cmpeq_epi8(chunk, target)) as u32;
+            if mask != 0 {
+                return Some(pos + mask.trailing_zeros() as usize);
+            }
+            pos += 32;
+        }
+        haystack
+            .get(pos..)?
+            .iter()
+            .position(|byte| *byte == needle)
+            .map(|offset| pos + offset)
+    }
+
+    #[cfg(target_arch = "x86")]
+    #[target_feature(enable = "avx2")]
+    unsafe fn regex_find_byte_avx2(
+        haystack: &[u8],
+        needle: u8,
+        start: usize,
+    ) -> Option<usize> {
+        use std::arch::x86::{
+            _mm256_cmpeq_epi8, _mm256_loadu_si256, _mm256_movemask_epi8, _mm256_set1_epi8,
+        };
+        let mut pos = start;
+        let target = _mm256_set1_epi8(needle as i8);
+        while pos <= haystack.len().saturating_sub(32) {
+            let chunk = _mm256_loadu_si256(haystack.as_ptr().add(pos).cast());
+            let mask = _mm256_movemask_epi8(_mm256_cmpeq_epi8(chunk, target)) as u32;
+            if mask != 0 {
+                return Some(pos + mask.trailing_zeros() as usize);
+            }
+            pos += 32;
+        }
+        haystack
+            .get(pos..)?
+            .iter()
+            .position(|byte| *byte == needle)
+            .map(|offset| pos + offset)
+    }
+
+    #[cfg(target_arch = "x86_64")]
+    #[target_feature(enable = "sse2")]
+    unsafe fn regex_find_byte_sse2(
+        haystack: &[u8],
+        needle: u8,
+        start: usize,
+    ) -> Option<usize> {
+        use std::arch::x86_64::{_mm_cmpeq_epi8, _mm_loadu_si128, _mm_movemask_epi8, _mm_set1_epi8};
+        let mut pos = start;
+        let target = _mm_set1_epi8(needle as i8);
+        while pos <= haystack.len().saturating_sub(16) {
+            let chunk = _mm_loadu_si128(haystack.as_ptr().add(pos).cast());
+            let mask = _mm_movemask_epi8(_mm_cmpeq_epi8(chunk, target)) as u32;
+            if mask != 0 {
+                return Some(pos + mask.trailing_zeros() as usize);
+            }
+            pos += 16;
+        }
+        haystack
+            .get(pos..)?
+            .iter()
+            .position(|byte| *byte == needle)
+            .map(|offset| pos + offset)
+    }
+
+    #[cfg(target_arch = "x86")]
+    #[target_feature(enable = "sse2")]
+    unsafe fn regex_find_byte_sse2(
+        haystack: &[u8],
+        needle: u8,
+        start: usize,
+    ) -> Option<usize> {
+        use std::arch::x86::{_mm_cmpeq_epi8, _mm_loadu_si128, _mm_movemask_epi8, _mm_set1_epi8};
+        let mut pos = start;
+        let target = _mm_set1_epi8(needle as i8);
+        while pos <= haystack.len().saturating_sub(16) {
+            let chunk = _mm_loadu_si128(haystack.as_ptr().add(pos).cast());
+            let mask = _mm_movemask_epi8(_mm_cmpeq_epi8(chunk, target)) as u32;
+            if mask != 0 {
+                return Some(pos + mask.trailing_zeros() as usize);
+            }
+            pos += 16;
+        }
+        haystack
+            .get(pos..)?
+            .iter()
+            .position(|byte| *byte == needle)
+            .map(|offset| pos + offset)
     }
 
     fn regex_next_search_pos(text: &str, start: usize, end: usize) -> usize {

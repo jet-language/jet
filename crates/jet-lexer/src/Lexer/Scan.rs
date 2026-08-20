@@ -262,6 +262,7 @@ impl<'a> Lexer<'a> {
                 ']' if next == '@' => toks.push(simple(self, TokKind::FenceClose, 2)),
                 ']' => toks.push(simple(self, TokKind::RBracket, 1)),
                 // D-BIND4: `:=` mutable binding sigil.
+                ':' if next == '>' => toks.push(simple(self, TokKind::UnifiedArrow, 2)),
                 ':' if next == ':' => toks.push(simple(self, TokKind::ColonColon, 2)),
                 ':' if next == '=' => toks.push(simple(self, TokKind::ColonEq, 2)),
                 ':' => toks.push(simple(self, TokKind::Colon, 1)),

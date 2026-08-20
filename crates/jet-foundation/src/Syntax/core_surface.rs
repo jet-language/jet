@@ -85,10 +85,10 @@ pub const PUB_PACKAGE_QUALIFIER: &str = "package";
 
 /// S2 / D-BIND1 / D-BIND4 / D-BIND-BARE1: immutable binding sigil `name :: expr`.
 /// D-BIND-BARE1 retires typed bindings (`name: Type :: expr`); types ride the
-/// value (`Type.{ … }`) or live on signatures and fields.
+/// value (`Type{ … }`) or live on signatures and fields.
 /// Amended by D-ONELINE-BODY1=B (ratified 2026-08-13, cards #1453/#1454): `::`
 /// also opens a one-line function body after the return type
-/// (`fn twice(n: Int) => Int :: n * 2`), `->` sends a head to a one-statement
+/// (`fn twice(n: Int) :> Int :: n * 2`), `:>` sends a head to a one-statement
 /// effect body, and `=` is retired from bodies (E0065 teaches the rewrite).
 pub const SIGIL_BIND_IMMUT: &str = "::";
 
@@ -297,7 +297,7 @@ pub const KW_MUTATE: &str = "mut";
 
 /// S10 (M2) → D-CAP7: the retired move keyword. Bare `take value` is recognized
 /// only for the paused capability teaching path. `.take(n)` stays a valid method
-/// name, while `take(names) () =>` is recognized only to report E0057.
+/// name, while `take(names) () :>` is recognized only to report E0057.
 pub const KW_MOVE: &str = "take";
 
 /// M2: struct definition keyword (construction spelling: S29).
@@ -595,11 +595,11 @@ pub const MARKER_UNINIT: &str = "Uninit";
 
 /// D-UNINIT-SENTINEL2=A (ratified 2026-07-24; amends D-UNINIT-SENTINEL1):
 /// contextual keyword `uninit`, legal only as the whole body of a typed-literal
-/// head — `name := Type.{ uninit }`. Bare `name := uninit` is E0421. Still gated
+/// head — `name := Type{ uninit }`. Bare `name := uninit` is E0421. Still gated
 /// by `use core.mem` (E0424) and restricted to plain-data types (E0423). Flow
 /// proof E0420 is unchanged. Contextual like `region`/`state`/`migration`: the
 /// word `uninit` stays usable as an ordinary identifier everywhere else; the
-/// lexer emits it as a plain `Ident`, and only a whole `Type.{ uninit }` body
+/// lexer emits it as a plain `Ident`, and only a whole `Type{ uninit }` body
 /// is the uninit trigger.
 pub const KW_UNINIT: &str = "uninit"; // D-UNINIT-SENTINEL2
 

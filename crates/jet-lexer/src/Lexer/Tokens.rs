@@ -91,7 +91,9 @@ pub enum TokKind {
     ColonEq,
     Comma,
     Arrow,
-    /// S46 (M8): lambda arrow `=>` — distinct from `->`.
+    /// D-ARROW-UNIFY1=B: one callable/control arrow, `:>`.
+    UnifiedArrow,
+    /// Retired D-ARROW-UNIFY1 spellings kept only for migration diagnostics.
     LambdaArrow,
     Semi,
     Eq,
@@ -258,6 +260,7 @@ pub fn describe(kind: &TokKind) -> String {
         TokKind::ColonEq => format!("`{}`", Syntax::SIGIL_BIND_MUT),
         TokKind::Comma => "`,`".to_string(),
         TokKind::Arrow => "`->`".to_string(),
+        TokKind::UnifiedArrow => "`:>`".to_string(),
         TokKind::LambdaArrow => "`=>`".to_string(),
         TokKind::Semi => "`;`".to_string(),
         TokKind::Eq => "`=`".to_string(),

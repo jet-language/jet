@@ -16,7 +16,7 @@ mod generic_module_tests {
 
     #[test]
     fn generic_module_slots_remain_unresolved_until_sema_without_casing_heuristics() {
-        let src="module Weird<lower>(UPPER: Int) { fn ready() => Bool { return true } }\nmodule Use :: Weird<String>(32)";
+        let src="module Weird<lower>(UPPER: Int) { fn ready() :> Bool { return true } }\nmodule Use :: Weird<String>(32)";
         let (tokens,lex)=Lexer::lex(src);assert!(lex.is_empty(),"{lex:?}");let program=Parser::parse(&tokens).unwrap();
         let Item::GenericModule(def)=&program.items[0]else{panic!("template")};
         assert!(matches!(&def.params[0],GenericModuleParam::Type{name,bound,..}if name=="lower"&&bound.is_none()));
@@ -27,7 +27,7 @@ mod generic_module_tests {
 
     #[test]
     fn generic_module_value_slots_parse_closed_identifier_led_expressions() {
-        let src = "module retry(count: Int) { fn ready() => Bool { return true } }\nmodule a :: retry(limit + 1)\nmodule b :: retry(compute())";
+        let src = "module retry(count: Int) { fn ready() :> Bool { return true } }\nmodule a :: retry(limit + 1)\nmodule b :: retry(compute())";
         let (tokens, lex) = Lexer::lex(src);
         assert!(lex.is_empty(), "{lex:?}");
         let program = Parser::parse(&tokens).unwrap();
@@ -39,7 +39,7 @@ mod generic_module_tests {
 
     #[test]
     fn generic_module_retired_mixed_angle_value_slot_teaches_parentheses() {
-        let src = "module cache<K, capacity: Int> { fn size() => Int :: capacity }";
+        let src = "module cache<K, capacity: Int> { fn size() :> Int :: capacity }";
         let (tokens, lex) = Lexer::lex(src);
         assert!(lex.is_empty(), "{lex:?}");
         let diagnostics = Parser::parse(&tokens).expect_err("retired mixed parameter spelling");
@@ -52,7 +52,7 @@ mod generic_module_tests {
 
     #[test]
     fn generic_module_retired_equals_alias_teaches_coloncolon() {
-        let src = "module cache<K>(capacity: Int) { fn size() => Int :: capacity }\nmodule old = cache<Int>(64)";
+        let src = "module cache<K>(capacity: Int) { fn size() :> Int :: capacity }\nmodule old = cache<Int>(64)";
         let (tokens, lex) = Lexer::lex(src);
         assert!(lex.is_empty(), "{lex:?}");
         let diagnostics = Parser::parse(&tokens).expect_err("retired equals alias spelling");
@@ -65,7 +65,7 @@ mod generic_module_tests {
 
     #[test]
     fn generic_module_retains_symbolic_fixed_length_and_nested_modules() {
-        let src = "module buffer<T>(capacity: Int) { struct Data { items: [T#capacity] } module stats { fn size() => Int { return capacity } } }";
+        let src = "module buffer<T>(capacity: Int) { struct Data { items: [T#capacity] } module stats { fn size() :> Int { return capacity } } }";
         let (tokens, lex) = Lexer::lex(src);
         assert!(lex.is_empty(), "{lex:?}");
         let program = Parser::parse(&tokens).unwrap();
@@ -98,7 +98,7 @@ mod generic_module_tests {
 
     #[test]
     fn callable_policy_marker_keeps_one_typed_wrapper_chain() {
-        let source = "#Policy(retry(3), trace(\"users.load\"))\nfn load_user(id: Int) => Int { return id }\n";
+        let source = "#Policy(retry(3), trace(\"users.load\"))\nfn load_user(id: Int) :> Int { return id }\n";
         let (tokens, lexer_diagnostics) = Lexer::lex(source);
         assert!(lexer_diagnostics.is_empty(), "{lexer_diagnostics:?}");
         let program = Parser::parse(&tokens).expect("callable policy marker should parse");
@@ -150,14 +150,14 @@ mod raw_head_fmt_tests {
     #[test]
     fn typed_head_bodies_keep_raw_backslashes() {
         let src = r#"fn run() {
-    digits :: Regex.{"\d+"}
+    digits :: Regex{"\d+"}
     text :: "a\nb"
     loc :: URL.{"https://x/{name}"}
 }
 "#;
         let once = Formatter::format_source(src).expect("typed head should format");
         assert!(
-            once.contains(r#"Regex.{"\d+"}"#),
+            once.contains(r#"Regex{"\d+"}"#),
             "formatter decoded a typed-head slash:\n{once}"
         );
         assert!(

@@ -882,6 +882,12 @@ pub struct TestDef {
     pub faults_expr: Option<Expr>,
     /// D-TESTFAULT1=A: canonical effect operation paths used by codegen.
     pub faults: Vec<String>,
+    /// D-TEST-XFAIL1=A: raw expected-failure flag from `expected_fail: true`.
+    pub expected_fail_expr: Option<Expr>,
+    /// D-TEST-XFAIL1=A: sema-resolved expected-failure flag used by codegen.
+    pub expected_fail: bool,
+    /// Marker-name span used to read validated static marker arguments.
+    pub marker_name_span: Span,
     /// Generic-module instance prefix applied to the resolved identity.
     pub name_prefix: Option<String>,
     pub name_span: Span,

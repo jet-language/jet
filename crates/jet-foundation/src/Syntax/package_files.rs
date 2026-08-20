@@ -49,21 +49,19 @@ pub const JTOML_KEY_NAME: &str = "name";
 /// D-JPK-FILES (ratified 2026-06-18): `version` key in `[repo]`.
 pub const JTOML_KEY_VERSION: &str = "version";
 
-/// D-DOTCTOR1 (ratified 2026-06-25): named struct construction `Type.{ field: val }`.
-/// The dot immediately before `{` is the canonical construction sigil.
-/// Inferred form (type from context): `.{ field: val }` — leading dot with no type name.
-/// Both are parser-level adjacency of `.` and `{`; the lexer emits no dedicated token.
-/// The old dotless `Type { … }` form is teaching error E0320, auto-fixed by `jet fmt`.
+/// D-LIT-DOT1=B (ratified 2026-08-20): named struct construction `Type{ field: val }`.
+/// Inferred form (type from context): `{ field: val }` — no type name.
+/// The retired dotted forms remain parser migration arms and emit E0320.
 /// D-UITREE1 (ratified 2026-06-30): the same sigil also constructs a named-payload
-/// enum variant — `.Variant.{ field: val }` / `Type.Variant.{ field: val }` (S30
+/// enum variant — `.Variant{ field: val }` / `Type.Variant{ field: val }` (S30
 /// multi-field variants). No new token; `enum_lit_named_fields` in
 /// `Parser/Expressions.rs` reuses this `.{` adjacency after a leading-dot variant name.
-/// D-DOTCTOR3=A (ratified 2026-07-24): the same `Type.{ body }` head is universal —
-/// scalars (`U8.{ 250 }`), lists (`[U8].{ 1, 2 }`), fixed arrays (`[U8#3].{ … }`),
-/// maps (`[String:Int].{}`), and one-expression assertions (`Int.{ fetch_rows() }`).
+/// D-LIT-DOT1=B amends D-DOTCTOR3: the same `Type{ body }` head is universal —
+/// scalars (`U8{ 250 }`), lists (`[U8]{ 1, 2 }`), fixed arrays (`[U8#3]{ … }`),
+/// maps (`[String:Int]{}`), and one-expression assertions (`Int{ fetch_rows() }`).
 /// Body elaborates against the head; it never converts. Amends D-EMPTYLIT1:
-/// `[T].{}` is the explicit empty; bare `[]` stays contextual. No new token.
-pub const OP_NAMED_CTOR: &str = ".{";
+/// `[T]{}` is the explicit empty; bare `[]` stays contextual. No new token.
+pub const OP_NAMED_CTOR: &str = "{";
 
 /// D-VARIADIC1 (ratified 2026-06-27): spread/rest sigil — `name: ...T` variadic
 /// parameters (last position only), `f(...xs)` call spread, `[...a, x, ...b]` list spread.
@@ -129,7 +127,7 @@ pub const METHOD_CALL: &str = "call";
 /// argument shape, no second call-argument grammar.
 pub const METHOD_TAKE_PATTERN: &str = "take_pattern";
 
-/// D-BINPAT1 / D-UNIFYLIT1=A: binary patterns use typed head `[U8].{"…"}`
+/// D-BINPAT1 / D-UNIFYLIT1=A: binary patterns use typed head `[U8]{"…"}`
 /// (byte-mode sibling of D-PARSESTR1 string patterns). Each `{name:U4}` hole
 /// reads a fixed-width bit field; an endian suffix (`be`/`le`) picks byte
 /// order on a multi-byte read; a final `{name:...}` captures remaining bytes.
@@ -542,17 +540,17 @@ pub const JET_TYPE_LIST: &[&str] = &[
 ];
 
 /// D-BUILDPROFILE1 (ratified 2026-06-25): the `build { }` block in `pkg.jet`
-/// where named build profiles are defined. A profile is a `Build.{ optimize: … }`
+/// where named build profiles are defined. A profile is a `Build{ optimize: … }`
 /// value; blessed names `release`/`debug` carry built-in defaults; all others
 /// must be declared here. Active profile is chosen by `--release` (sugar for
 /// `--profile=release`) or `--profile=<name>` — never by ambient environment.
 pub const MANIFEST_BLOCK_BUILD: &str = "build"; // D-BUILDPROFILE1
 
 /// D-BUILDPROFILE1: the constructor type for a build profile value inside
-/// `pkg.jet`'s `build { }` block — written as `Build.{ optimize: … }`.
+/// `pkg.jet`'s `build { }` block — written as `Build{ optimize: … }`.
 pub const BUILD_CTOR: &str = "Build"; // D-BUILDPROFILE1
 
-/// D-BUILDPROFILE1: the field inside a `Build.{ … }` profile value that sets
+/// D-BUILDPROFILE1: the field inside a `Build{ … }` profile value that sets
 /// the optimization level.
 pub const BUILD_FIELD_OPTIMIZE: &str = "optimize"; // D-BUILDPROFILE1
 
@@ -562,7 +560,7 @@ pub const BUILD_PROFILE_RELEASE: &str = "release"; // D-BUILDPROFILE1
 pub const BUILD_PROFILE_DEBUG: &str = "debug"; // D-BUILDPROFILE1
 pub const BUILD_PROFILE_CI: &str = "ci"; // D-BUILDPROFILE1
 
-/// D-BUILDPROFILE1: optional fields inside `Build.{ … }` profile values.
+/// D-BUILDPROFILE1: optional fields inside `Build{ … }` profile values.
 pub const BUILD_FIELD_DEBUG_INFO: &str = "debug_info"; // D-BUILDPROFILE1
 pub const BUILD_FIELD_SMALL: &str = "small"; // D-BUILDPROFILE1
 pub const BUILD_FIELD_PANIC: &str = "panic"; // D-BUILDPROFILE1
@@ -619,11 +617,11 @@ pub const ADAPTER_RECIPE_NAMES: &[&str] = &[
     RECIPE_MAKE,
 ];
 
-/// D-BUILDPROFILE1: `panic:` values for `Build.{ panic: … }`.
+/// D-BUILDPROFILE1: `panic:` values for `Build{ panic: … }`.
 pub const BUILD_PANIC_ABORT: &str = "abort"; // D-BUILDPROFILE1
 pub const BUILD_PANIC_UNWIND: &str = "unwind"; // D-BUILDPROFILE1
 
-/// D-BUILDPROFILE1: `optimize:` levels for `Build.{ optimize: … }`:
+/// D-BUILDPROFILE1: `optimize:` levels for `Build{ optimize: … }`:
 /// `none` (no optimization, fastest compile), `basic` (opt-level=2, the
 /// driver default), `full` (opt-level=3, maximum throughput).
 pub const BUILD_OPTIMIZE_NONE: &str = "none"; // D-BUILDPROFILE1
