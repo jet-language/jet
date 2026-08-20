@@ -6002,7 +6002,7 @@ fn emit_js_fn(
     out.push_str(&bind_inline_handler_symbols(&body, f, handlers));
     if matches!(f.return_type.as_ref(), Some(Type::Result { .. })) {
         out.push_str("  } catch (error) {\n");
-        out.push_str("    if (error instanceof JetWebPropagation) return { tag: \"Err\", values: [{ wire: error.wire, journey: error.journey, frame: error.frame }] };\n");
+        out.push_str("    if (error instanceof JetWebPropagation) return { tag: \"Err\", values: [{ wire: error.wire, journey: error.journey, frame: error.frame, hops: error.hops }] };\n");
         out.push_str("    throw error;\n");
     }
     out.push_str(&format!("  }} finally {{\n    jetDom.exitRenderScope();\n    jet_stack_leave({stack_frame});\n  }}\n"));
@@ -8101,14 +8101,14 @@ const WASM_ARITH_PRELUDE: &str = concat!(
     "}\n\n",
     "fn jet_wasm_store_error(error: &JetErr) {\n",
     "    let journey = jet_journey_take();\n",
-    "    let frame = format!(\"{journey}{}\", jet_render_err(error));\n",
+    "    let frame = jet_journey_compose(&jet_render_err(error), &journey);\n",
     "    let journey = journey.trim_end().to_string();\n",
     "    let json = format!(\"{{\\\"tag\\\":\\\"Err\\\",\\\"error\\\":{}}}\", jet_wasm_err_wire(error));\n",
     "    jet_wasm_store(json, journey, frame, 1);\n",
     "}\n\n",
     "fn jet_wasm_store_runtime_error(error: &JetErr, rendered: &str, status: i32) {\n",
     "    let journey = jet_journey_take();\n",
-    "    let frame = format!(\"{journey}{rendered}\");\n",
+    "    let frame = jet_journey_compose(rendered, &journey);\n",
     "    let journey = journey.trim_end().to_string();\n",
     "    let json = if status == 101 {\n",
     "        format!(\"{{\\\"tag\\\":\\\"Host\\\",\\\"status\\\":101,\\\"error\\\":{},\\\"report\\\":{}}}\", jet_wasm_err_wire(error), jet_wasm_json(rendered))\n",
@@ -8118,12 +8118,12 @@ const WASM_ARITH_PRELUDE: &str = concat!(
     "    jet_wasm_store(json, journey, frame, status);\n",
     "}\n\n",
     "fn jet_trace_err<T, E>(r: Result<T, E>, file: &str, line: u32, fn_name: &str) -> Result<T, E> {\n",
-    "    if r.is_err() { let _ = jet_journey_frame(file, line, fn_name, || String::new()); }\n",
+    "    if r.is_err() { jet_journey_frame(file, line, fn_name, || String::new()); }\n",
     "    else { jet_journey_reset(); }\n",
     "    r\n",
     "}\n\n",
     "fn jet_trace_err_note<T, E, F: FnOnce() -> String>(r: Result<T, E>, file: &str, line: u32, fn_name: &str, note: F) -> Result<T, E> {\n",
-    "    if r.is_err() { let _ = jet_journey_frame(file, line, fn_name, note); }\n",
+    "    if r.is_err() { jet_journey_frame(file, line, fn_name, note); }\n",
     "    else { jet_journey_reset(); }\n",
     "    r\n",
     "}\n\n",

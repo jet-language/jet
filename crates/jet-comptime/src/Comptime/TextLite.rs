@@ -283,6 +283,54 @@ mod text_kernel {
     pub(super) fn unicode_scalars(s: &str) -> Vec<String> {
         jet_text_unicode_scalars(&s.to_string())
     }
+
+    // ── D-I9: the ONE `core.files` kernel ────────────────────────────────
+    // `Prelude/CoreLib/Top/Text.rs` (included above) owns fault injection,
+    // the recursive/non-recursive split and every `IOError` this family
+    // reports — the same `jet_std_fs_*` symbols AOT emits and the resident
+    // Cranelift host calls. The shared evaluator marshals a path in and a
+    // `CtValue` out; it never spells a second `std::fs` call. Hand-written
+    // per-member arms are exactly what left `create_dir_all` and `remove_all`
+    // with no arm at all while `create_dir` silently ran the recursive one.
+    pub(super) fn fs_read(path: &str) -> Result<String, jet_std::IOError> {
+        jet_std_fs_read(&path.to_string())
+    }
+    pub(super) fn fs_read_bytes(path: &str) -> Result<Vec<u8>, jet_std::IOError> {
+        jet_std_fs_read_bytes(&path.to_string())
+    }
+    pub(super) fn fs_write(path: &str, text: &str) -> Result<(), jet_std::IOError> {
+        jet_std_fs_write(&path.to_string(), &text.to_string())
+    }
+    pub(super) fn fs_append(path: &str, text: &str) -> Result<(), jet_std::IOError> {
+        jet_std_fs_append(&path.to_string(), &text.to_string())
+    }
+    pub(super) fn fs_exists(path: &str) -> bool {
+        jet_std_fs_exists(&path.to_string())
+    }
+    pub(super) fn fs_is_dir(path: &str) -> bool {
+        jet_std_fs_is_dir(&path.to_string())
+    }
+    pub(super) fn fs_create_dir(path: &str) -> Result<(), jet_std::IOError> {
+        jet_std_fs_create_dir(&path.to_string())
+    }
+    pub(super) fn fs_create_dir_all(path: &str) -> Result<(), jet_std::IOError> {
+        jet_std_fs_create_dir_all(&path.to_string())
+    }
+    pub(super) fn fs_remove(path: &str) -> Result<(), jet_std::IOError> {
+        jet_std_fs_remove(&path.to_string())
+    }
+    pub(super) fn fs_remove_dir(path: &str) -> Result<(), jet_std::IOError> {
+        jet_std_fs_remove_dir(&path.to_string())
+    }
+    pub(super) fn fs_remove_all(path: &str) -> Result<(), jet_std::IOError> {
+        jet_std_fs_remove_all(&path.to_string())
+    }
+    pub(super) fn fs_copy(from: &str, to: &str) -> Result<(), jet_std::IOError> {
+        jet_std_fs_copy(&from.to_string(), &to.to_string())
+    }
+    pub(super) fn fs_list_dir(path: &str) -> Result<Vec<jet_std::DirEntry>, jet_std::IOError> {
+        jet_std_fs_list_dir(&path.to_string())
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -302,7 +350,13 @@ pub(super) fn io_error_value(
         IoErrorOperation::Write => text_kernel::jet_std::IOOperation::Write,
         IoErrorOperation::Resolve => text_kernel::jet_std::IOOperation::Resolve,
     };
-    let error = text_kernel::jet_std::io_error_at(operation, path, error);
+    io_error_ct(text_kernel::jet_std::io_error_at(operation, path, error))
+}
+
+/// Project the ONE Prelude `IOError` carrier into the evaluator's value
+/// carrier. The kernel decides operation, resource, OS code and cause; this
+/// only renames the Rust shape into a `CtValue` (I9).
+fn io_error_ct(error: text_kernel::jet_std::IOError) -> crate::AST::CtValue {
     let operation_value = |operation| {
         let variant = match operation {
             text_kernel::jet_std::IOOperation::Read => "Read",
@@ -358,6 +412,61 @@ pub(super) fn io_error_value(
         variant: variant.to_string(),
         args: vec![(None, context_value(context))],
     }
+}
+
+// ── D-I9 `core.files`: one arm per Prelude symbol, no second spelling ──────
+// Every helper below is pure marshalling: it hands the resolved path to the
+// `jet_std_fs_*` symbol AOT emits and projects that symbol's `IOError` with
+// the shared `io_error_ct`. `Ok`/`Err` stay Rust-shaped here so the caller
+// decides the outcome carrier for its own row.
+pub(super) type FsResult<T> = Result<T, crate::AST::CtValue>;
+
+pub(super) fn fs_read(path: &str) -> FsResult<String> {
+    text_kernel::fs_read(path).map_err(io_error_ct)
+}
+pub(super) fn fs_read_bytes(path: &str) -> FsResult<Vec<u8>> {
+    text_kernel::fs_read_bytes(path).map_err(io_error_ct)
+}
+pub(super) fn fs_write(path: &str, text: &str) -> FsResult<()> {
+    text_kernel::fs_write(path, text).map_err(io_error_ct)
+}
+pub(super) fn fs_append(path: &str, text: &str) -> FsResult<()> {
+    text_kernel::fs_append(path, text).map_err(io_error_ct)
+}
+pub(super) fn fs_exists(path: &str) -> bool {
+    text_kernel::fs_exists(path)
+}
+pub(super) fn fs_is_dir(path: &str) -> bool {
+    text_kernel::fs_is_dir(path)
+}
+pub(super) fn fs_create_dir(path: &str) -> FsResult<()> {
+    text_kernel::fs_create_dir(path).map_err(io_error_ct)
+}
+pub(super) fn fs_create_dir_all(path: &str) -> FsResult<()> {
+    text_kernel::fs_create_dir_all(path).map_err(io_error_ct)
+}
+pub(super) fn fs_remove(path: &str) -> FsResult<()> {
+    text_kernel::fs_remove(path).map_err(io_error_ct)
+}
+pub(super) fn fs_remove_dir(path: &str) -> FsResult<()> {
+    text_kernel::fs_remove_dir(path).map_err(io_error_ct)
+}
+pub(super) fn fs_remove_all(path: &str) -> FsResult<()> {
+    text_kernel::fs_remove_all(path).map_err(io_error_ct)
+}
+pub(super) fn fs_copy(from: &str, to: &str) -> FsResult<()> {
+    text_kernel::fs_copy(from, to).map_err(io_error_ct)
+}
+/// `(name, full path, is_dir)` rows in the kernel's own sorted order (D-LSDIR1).
+pub(super) fn fs_list_dir(path: &str) -> FsResult<Vec<(String, String, bool)>> {
+    text_kernel::fs_list_dir(path)
+        .map(|entries| {
+            entries
+                .into_iter()
+                .map(|entry| (entry.name, entry.path, entry.is_dir))
+                .collect()
+        })
+        .map_err(io_error_ct)
 }
 
 pub(super) fn nfd(s: &str) -> String { text_kernel::nfd(s) }

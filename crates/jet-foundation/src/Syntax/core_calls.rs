@@ -9,6 +9,7 @@
 
 use crate::Effects::Effect;
 use crate::Syntax::sinks::SinkClass;
+use crate::Syntax::VAULT_KEY_REF_TYPE;
 
 const fn same_text(left: &str, right: &str) -> bool {
     let left = left.as_bytes();
@@ -1632,6 +1633,9 @@ pub const CORE_CALLS: &[CoreCallRecord] = &[
             "Solver",
             "ServiceUpgradeReceipt",
             "DataError",
+            // D-CRYPTO-VAULT1=A: the vault handle renders through the Prelude's
+            // own `impl Display for JetVaultKeyRef`, carried on the value.
+            VAULT_KEY_REF_TYPE,
         ],
         "__display",
         &[],

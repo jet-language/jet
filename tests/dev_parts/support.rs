@@ -1381,7 +1381,13 @@ fn normalize_for_parity(stem: &str, mut out: ProgramOutput) -> ProgramOutput {
         out.stderr = out
             .stderr
             .lines()
-            .filter(|line| !line.starts_with("error propagated from:"))
+            .filter(|line| {
+                let hop = line.strip_prefix("  ").is_some_and(|rest| {
+                    rest.split_once(". ")
+                        .is_some_and(|(index, _)| index.parse::<u32>().is_ok())
+                });
+                !line.starts_with(" Trail [E3002] (") && !hop
+            })
             .collect::<Vec<_>>()
             .join("\n");
         if !out.stderr.is_empty() && !out.stderr.ends_with('\n') {

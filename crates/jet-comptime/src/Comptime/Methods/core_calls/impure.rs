@@ -78,151 +78,70 @@ pub fn apply_impure_core_call_with_type(
         })
     };
     match (module, method) {
-        ("core.files", "read") => {
-            let path_str = as_string(one(0)?, span)?;
-            let path = base_dir.join(&path_str);
-            match std::fs::read_to_string(&path) {
-                Ok(s) => Ok(CtValue::Present(Box::new(CtValue::Str(s)))),
-                Err(e) => Ok(CtValue::failed(Box::new(io_error_value(
-                    IoErrorOperation::Read,
-                    &path_str,
-                    e,
-                )))),
-            }
-        }
-        ("core.files", "read_bytes") => {
-            let path_str = as_string(one(0)?, span)?;
-            let path = base_dir.join(&path_str);
-            match std::fs::read(&path) {
-                Ok(bs) => Ok(CtValue::Present(Box::new(CtValue::Bytes(bs)))),
-                Err(e) => Ok(CtValue::failed(Box::new(io_error_value(
-                    IoErrorOperation::Read,
-                    &path_str,
-                    e,
-                )))),
-            }
-        }
-        // D-FILES-APPEND1=A: whole-file one-shot is `append_all` (not `append`,
-        // which names the streaming handle's method).
-        ("core.files", "write" | "append_all") => {
-            let path_str = as_string(one(0)?, span)?;
-            let content = as_string(one(1)?, span)?;
-            let path = base_dir.join(&path_str);
-            let result = if method == "append_all" {
-                use std::io::Write;
-                std::fs::OpenOptions::new()
-                    .create(true)
-                    .append(true)
-                    .open(&path)
-                    .and_then(|mut f| f.write_all(content.as_bytes()).map(|_| ()))
-            } else {
-                std::fs::write(&path, content)
+        // ── D-I9 `core.files`: marshal to the ONE Prelude kernel ───────────
+        // `Prelude/CoreLib/Top/Text.rs` owns every operation below — fault
+        // injection, the recursive/non-recursive split, and the `IOError`
+        // shape — through the same `jet_std_fs_*` symbols AOT emits and the
+        // resident Cranelift host calls. This arm resolves the path against
+        // `base_dir` and projects the kernel's result; it spells no `std::fs`
+        // call of its own. The hand-written per-member arms it replaces are
+        // why `create_dir_all` and `remove_all` had no arm at all: a shipped
+        // example (`io/watcher`) passed sema and then died at run time on
+        // E0956 while AOT ran the same source.
+        (
+            "core.files",
+            "read" | "read_bytes" | "write" | "append_all" | "exists" | "is_dir"
+            | "create_dir" | "create_dir_all" | "remove" | "remove_dir" | "remove_all"
+            | "list_dir" | "copy",
+        ) => {
+            let resolve = |value: &CtValue| -> Result<String, Diagnostic> {
+                Ok(base_dir
+                    .join(as_string(value, span)?)
+                    .to_string_lossy()
+                    .into_owned())
             };
-            match result {
-                Ok(()) => Ok(CtValue::Present(Box::new(CtValue::Unit))),
-                Err(e) => Ok(CtValue::failed(Box::new(io_error_value(
-                    IoErrorOperation::Write,
-                    &path_str,
-                    e,
-                )))),
-            }
-        }
-        ("core.files", "exists" | "is_dir") => {
-            let path_str = as_string(one(0)?, span)?;
-            let path = base_dir.join(&path_str);
-            let meta = std::fs::metadata(&path);
-            Ok(CtValue::Bool(match (method, meta) {
-                ("exists", Ok(_)) => true,
-                ("exists", Err(_)) => false,
-                ("is_dir", Ok(m)) => m.is_dir(),
-                ("is_dir", Err(_)) => false,
-                _ => false,
-            }))
-        }
-        ("core.files", "create_dir") => {
-            let path_str = as_string(one(0)?, span)?;
-            let path = base_dir.join(&path_str);
-            match std::fs::create_dir_all(&path) {
-                Ok(()) => Ok(CtValue::Present(Box::new(CtValue::Unit))),
-                Err(e) => Ok(CtValue::failed(Box::new(io_error_value(
-                    IoErrorOperation::Write,
-                    &path_str,
-                    e,
-                )))),
-            }
-        }
-        // D-LSDIR1: mirror AOT jet_std_fs_list_dir (sorted by name).
-        ("core.files", "list_dir") => {
-            let path_str = as_string(one(0)?, span)?;
-            let path = base_dir.join(&path_str);
-            match std::fs::read_dir(&path) {
-                Ok(rd) => {
-                    let mut entries = Vec::new();
-                    let mut err: Option<std::io::Error> = None;
-                    for entry in rd {
-                        match entry {
-                            Ok(entry) => {
-                                let name = entry.file_name().to_string_lossy().to_string();
-                                let full_path = path
-                                    .join(&name)
-                                    .to_string_lossy()
-                                    .to_string();
-                                let is_dir =
-                                    entry.file_type().map(|ft| ft.is_dir()).unwrap_or(false);
-                                entries.push((name, full_path, is_dir));
-                            }
-                            Err(e) => {
-                                err = Some(e);
-                                break;
-                            }
-                        }
-                    }
-                    if let Some(e) = err {
-                        Ok(CtValue::failed(Box::new(io_error_value(
-                            IoErrorOperation::Read,
-                            &path_str,
-                            e,
-                        ))))
-                    } else {
-                        entries.sort_by(|a, b| a.0.cmp(&b.0));
-                        Ok(CtValue::Present(Box::new(CtValue::List(
-                            entries
-                                .into_iter()
-                                .map(|(name, full_path, is_dir)| CtValue::Struct {
-                                    type_name: "DirEntry".to_string(),
-                                    fields: vec![
-                                        ("name".to_string(), CtValue::Str(name)),
-                                        ("path".to_string(), CtValue::Str(full_path)),
-                                        ("is_dir".to_string(), CtValue::Bool(is_dir)),
-                                    ],
-                                })
-                                .collect(),
-                        ))))
-                    }
-                }
-                Err(e) => Ok(CtValue::failed(Box::new(io_error_value(
-                    IoErrorOperation::Read,
-                    &path_str,
-                    e,
-                )))),
-            }
-        }
-        ("core.files", "remove") => {
-            let path_str = as_string(one(0)?, span)?;
-            let path = base_dir.join(&path_str);
-            let result = if path.is_dir() {
-                std::fs::remove_dir_all(&path)
-            } else {
-                std::fs::remove_file(&path)
+            let path = resolve(one(0)?)?;
+            let unit = |result: Result<(), CtValue>| match result {
+                Ok(()) => CtValue::Present(Box::new(CtValue::Unit)),
+                Err(error) => CtValue::failed(Box::new(error)),
             };
-            match result {
-                Ok(()) => Ok(CtValue::Present(Box::new(CtValue::Unit))),
-                Err(e) => Ok(CtValue::failed(Box::new(io_error_value(
-                    IoErrorOperation::Write,
-                    &path_str,
-                    e,
-                )))),
-            }
+            let present = |result: Result<CtValue, CtValue>| match result {
+                Ok(value) => CtValue::Present(Box::new(value)),
+                Err(error) => CtValue::failed(Box::new(error)),
+            };
+            use crate::Comptime::TextLite as files_kernel;
+            Ok(match method {
+                "read" => present(files_kernel::fs_read(&path).map(CtValue::Str)),
+                "read_bytes" => present(files_kernel::fs_read_bytes(&path).map(CtValue::Bytes)),
+                // D-FILES-APPEND1=A: whole-file one-shot is `append_all` (not
+                // `append`, which names the streaming handle's method).
+                "write" => unit(files_kernel::fs_write(&path, as_string(one(1)?, span)?)),
+                "append_all" => unit(files_kernel::fs_append(&path, as_string(one(1)?, span)?)),
+                "exists" => CtValue::Bool(files_kernel::fs_exists(&path)),
+                "is_dir" => CtValue::Bool(files_kernel::fs_is_dir(&path)),
+                "create_dir" => unit(files_kernel::fs_create_dir(&path)),
+                "create_dir_all" => unit(files_kernel::fs_create_dir_all(&path)),
+                "remove" => unit(files_kernel::fs_remove(&path)),
+                "remove_dir" => unit(files_kernel::fs_remove_dir(&path)),
+                "remove_all" => unit(files_kernel::fs_remove_all(&path)),
+                "copy" => unit(files_kernel::fs_copy(&path, &resolve(one(1)?)?)),
+                // D-LSDIR1: the kernel returns rows already sorted by name.
+                _ => present(files_kernel::fs_list_dir(&path).map(|entries| {
+                    CtValue::List(
+                        entries
+                            .into_iter()
+                            .map(|(name, path, is_dir)| CtValue::Struct {
+                                type_name: "DirEntry".to_string(),
+                                fields: vec![
+                                    ("name".to_string(), CtValue::Str(name)),
+                                    ("path".to_string(), CtValue::Str(path)),
+                                    ("is_dir".to_string(), CtValue::Bool(is_dir)),
+                                ],
+                            })
+                            .collect(),
+                    )
+                })),
+            })
         }
         ("core.sys", "get") => {
             let key = as_string(one(0)?, span)?;

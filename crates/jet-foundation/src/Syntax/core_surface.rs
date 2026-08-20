@@ -604,6 +604,20 @@ pub const CORE_SOLVE_MODULE: &str = "core.compute.solve";
 /// D-SOLVER-LIB1=A: deterministic solver state handle.
 pub const SOLVER_TYPE: &str = "Solver";
 
+/// D-CRYPTO-VAULT1=A: the opaque persistent-key handle `core.crypto.vault`
+/// hands back. It has no Jet-visible fields; the two carrier names below are
+/// how an in-process engine holds one.
+pub const VAULT_KEY_REF_TYPE: &str = "KeyRef";
+
+/// Carrier field holding the host-side vault handle identity, so a marshalled
+/// `KeyRef` still names one key rather than a copy of its rendering.
+pub const VAULT_KEY_REF_HANDLE: &str = "__jet_vault_handle";
+
+/// Carrier field holding the ONE `impl Display for JetVaultKeyRef` rendering
+/// (`Prelude/SecretsCrypto.rs`). The ambient host calls that impl while it
+/// marshals the handle; no engine re-derives `repo:{name}@v{generation}`.
+pub const VAULT_KEY_REF_SHOWN: &str = "__jet_vault_shown";
+
 /// S58 / D-CAP9 / D-TYPE-ALIAS-CANON1 (ratified): raw-pointer type is `*T`.
 /// `Ptr<T>` is not live syntax; this string remains only as the internal Rust
 /// dispatch key for legacy TIR/codegen paths until they are renamed to `RawPtr`.

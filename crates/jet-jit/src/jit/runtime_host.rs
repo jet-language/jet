@@ -1560,7 +1560,7 @@ fn jet_jit_trace_err(file: i64, line: i64, fn_name: i64) {
     Concurrency::with_runtime_mut(|rt| {
         let file = rt.heap.clone_string(file).unwrap_or_default();
         let fn_name = rt.heap.clone_string(fn_name).unwrap_or_default();
-        let _ = jet_foundation::Outcome::jet_journey_frame(
+        jet_foundation::Outcome::jet_journey_frame(
             &file,
             line as u32,
             &fn_name,
@@ -1574,7 +1574,7 @@ fn jet_jit_trace_err_note(file: i64, line: i64, fn_name: i64, note: i64) {
         let file = rt.heap.clone_string(file).unwrap_or_default();
         let fn_name = rt.heap.clone_string(fn_name).unwrap_or_default();
         let note = rt.heap.clone_string(note).unwrap_or_default();
-        let _ = jet_foundation::Outcome::jet_journey_frame(
+        jet_foundation::Outcome::jet_journey_frame(
             &file,
             line as u32,
             &fn_name,

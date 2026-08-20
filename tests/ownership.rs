@@ -703,7 +703,7 @@ fn show(n: Int) {
 }
 
 fn run() {
-    show(limit)
+    show(@limit)
 }
 "#;
     let out = jet::compile(src).expect("should compile");

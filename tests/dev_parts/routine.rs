@@ -2902,8 +2902,9 @@ fn run() ? {
 "#, "physical_quantity_inexact");
     // D-FAIL-CTX1=A (ratified 2026-08-06, card #1532): "Each `?` hop joins the
     // failure journey on every tier, whether it has a note or not." The `?` on
-    // line 7 is that hop, spelled exactly as E3002 registers it:
-    // `error propagated from: {fn} ({file}:{line}) via ?`. D-FAIL-ERROR1=A
+    // line 7 is that hop, printed as one trail line under the root failure the
+    // way E3002 now registers it: `  {n}. {fn} ({file}:{line})`, origin first,
+    // under the root failure line. D-FAIL-ERROR1=A
     // (card #1528) + D-FAIL-EXIT1=A (card #1533): bare `fn run() ?` means
     // `run() ? Err`, so the conversion's plain `String` error arrives as the
     // default error and `jet_render_err` prints `Error: {message}` -- no code,
@@ -2914,8 +2915,9 @@ fn run() ? {
         ProgramOutput::ran(
             String::new(),
             format!(
-                "error propagated from: run ({inexact_shown}:7) via ?\n\
-                 Error: unit conversion would round\n"
+                "Error: unit conversion would round\n\
+                 \x20Trail [E3002] (1 hop via ?, origin first):\n\
+                 \x20 1. run ({inexact_shown}:7)\n"
             ),
             1
         )
@@ -2938,8 +2940,9 @@ fn run() ? {
         ProgramOutput::ran(
             String::new(),
             format!(
-                "error propagated from: run ({rational_edge_shown}:7) via ?\n\
-                 Error: unit conversion would round\n"
+                "Error: unit conversion would round\n\
+                 \x20Trail [E3002] (1 hop via ?, origin first):\n\
+                 \x20 1. run ({rational_edge_shown}:7)\n"
             ),
             1
         )
@@ -2986,15 +2989,16 @@ fn run() ? {
 }
 "#;
     // Same ratified envelope (D-FAIL-CTX1=A / D-FAIL-ERROR1=A); this fixture's
-    // `?` is on line 5, so its single journey frame names that line.
+    // `?` is on line 5, so its single trail hop names that line.
     let overflow_shown = fixture_shown("physical_quantity_rounded_overflow");
     assert_eq!(
         run_cranelift_without_fallback(overflow, "physical_quantity_rounded_overflow"),
         ProgramOutput::ran(
             String::new(),
             format!(
-                "error propagated from: run ({overflow_shown}:5) via ?\n\
-                 Error: unit conversion overflows its runtime representation\n"
+                "Error: unit conversion overflows its runtime representation\n\
+                 \x20Trail [E3002] (1 hop via ?, origin first):\n\
+                 \x20 1. run ({overflow_shown}:5)\n"
             ),
             1
         )
@@ -3459,9 +3463,9 @@ fn run() ? {
         .into_owned();
     // D-FAIL-CTX1=A (ratified 2026-08-06, card #1532): "Each `?` hop joins the
     // failure journey on every tier, whether it has a note or not." That
-    // authorises the two E3002 frames — `forward`'s `?` on line 11 and `run`'s on
-    // line 16 — in innermost-to-outermost order, spelled exactly as E3002
-    // registers it: `error propagated from: {fn} ({file}:{line}) via ?`.
+    // authorises the two E3002 hops — `forward`'s `?` on line 11 and `run`'s on
+    // line 16 — origin first under the root failure, spelled the way E3002 now
+    // registers it: `  {n}. {fn} ({file}:{line})`.
     // D-FAIL-ERROR1=A (card #1528) + D-FAIL-EXIT1=A (card #1533): bare `fn run() ?`
     // means `run() ? Err`, so the `String` error arrives as the default error and
     // the process edge prints one full report and exits 1. `jet_render_err`
@@ -3473,9 +3477,10 @@ fn run() ? {
         ProgramOutput::ran(
             String::new(),
             format!(
-                "error propagated from: forward ({failure_shown}:11) via ?\n\
-                 error propagated from: run ({failure_shown}:16) via ?\n\
-                 Error: typed boom\n"
+                "Error: typed boom\n\
+                 \x20Trail [E3002] (2 hops via ?, origin first):\n\
+                 \x20 1. forward ({failure_shown}:11)\n\
+                 \x20 2. run ({failure_shown}:16)\n"
             ),
             1
         )

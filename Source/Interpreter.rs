@@ -154,7 +154,7 @@ pub fn run_checked(bundle: &ProgramBundle, try_anyway: bool) -> RunOutcome {
                             .unwrap_or_else(|| error.jet_show())
                     });
                 // Same report edge as AOT's `jet_entry_report` and the resident
-                // tier: the accumulated E3002 journey prefixes this error.
+                // tier: this error leads and the accumulated E3002 trail follows.
                 sink.stderr
                     .push_str(&jet_foundation::Outcome::jet_journey_report(&rendered));
                 RunOutcome::Ran {

@@ -1151,6 +1151,40 @@ fn jet_jit_vault_key_ref_show(handle: i64) -> i64 {
     Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(text))
 }
 
+/// D-CRYPTO-VAULT1=A / I9: the ambient (interpreter) tier reads the vault
+/// through the same `jet_vault_current_impl` this file's Cranelift host calls
+/// and AOT emits. Name validation, the store read and every `JetVaultError`
+/// row stay in `Prelude/SecretsCrypto.rs`; the engines differ only in how they
+/// carry the resulting handle. `None` here means the key tag is not one this
+/// vault knows, which is the caller's refusal to render, not a store outcome.
+pub(crate) fn vault_current_handle(
+    name: &str,
+    tag: i64,
+) -> Option<Result<Option<i64>, runtime::JetVaultError>> {
+    let name = name.to_string();
+    match tag {
+        1 => Some(
+            runtime::jet_vault_current_impl::<runtime::JetSigningKey>(&name)
+                .map(|key| key.map(|key| push(CryptoValue::KeyRefSigning(key)))),
+        ),
+        2 => Some(
+            runtime::jet_vault_current_impl::<runtime::JetX25519SecretKey>(&name)
+                .map(|key| key.map(|key| push(CryptoValue::KeyRefX25519(key)))),
+        ),
+        _ => None,
+    }
+}
+
+/// The ONE `impl Display for JetVaultKeyRef` rendering, read through the same
+/// handle registry `jet_jit_vault_key_ref_show` uses.
+pub(crate) fn vault_key_ref_text(handle: i64) -> Option<String> {
+    with_crypto(handle, |value| match value {
+        CryptoValue::KeyRefSigning(key) => Some(key.to_string()),
+        CryptoValue::KeyRefX25519(key) => Some(key.to_string()),
+        _ => None,
+    })
+}
+
 fn jet_jit_vault_current(name: i64, tag: i64) -> i64 {
     let name = clone_string(name);
     match tag {

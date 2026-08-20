@@ -25,9 +25,28 @@ function jet_web_base_frame(error) {
   return frame;
 }
 
+// D-FAIL-CTX1 / E3002: the JS projection of Foundation's trail block
+// (`jet_journey_trail` in crates/jet-foundation/src/Outcome.rs). The JS tier
+// runs no Rust, so this grammar is duplicated by construction; the cross-tier
+// parity assertion in tests/web_build.rs is what keeps the two identical.
+function jet_web_journey_trail(hops) {
+  if (!hops.length) return "";
+  const total = hops.reduce((sum, hop) => sum + hop.hops, 0);
+  let trail = ` Trail [E3002] (${total} hop${total === 1 ? "" : "s"} via ?, origin first):\n`;
+  hops.forEach((hop, index) => {
+    trail += `  ${index + 1}. ${hop.fnName} (${hop.file}:${hop.line})`;
+    if (hop.hops > 1) trail += ` ×${hop.hops}`;
+    if (hop.note) trail += ` — ${hop.note}`;
+    trail += "\n";
+  });
+  return trail;
+}
+
+// The one order, mirroring Foundation's `jet_journey_compose`: the root failure
+// leads, its trail follows.
 function jet_web_error_frame(error, journey) {
   const base = jet_web_base_frame(error);
-  return journey ? `${journey}\n${base}` : base;
+  return journey ? `${base}\n${journey}` : base;
 }
 
 export class JetError extends Error {
@@ -49,12 +68,13 @@ export class JetError extends Error {
 }
 
 class JetWebPropagation extends Error {
-  constructor(wire, journey, frame) {
+  constructor(wire, journey, frame, hops) {
     super(wire.message);
     this.name = "JetWebPropagation";
     this.wire = wire;
     this.journey = journey;
     this.frame = frame;
+    this.hops = hops;
   }
 }
 
@@ -93,11 +113,22 @@ function jet_web_try(value, file, line, fnName, note = null) {
   if (value && value.tag === "Err") {
     const carrier = jet_web_result_value(value);
     const wire = jet_web_error_wire(carrier?.wire ?? carrier);
-    const noteText = typeof note === "function" ? String(note() ?? "") : "";
-    const current = `error propagated from: ${fnName} (${file}:${line}) via ?${noteText ? `: ${noteText}` : ""}`;
-    const priorJourney = carrier?.wire ? String(carrier.journey ?? "") : "";
-    const journey = priorJourney ? `${priorJourney}\n${current}` : current;
-    throw new JetWebPropagation(wire, journey, jet_web_error_frame(wire, journey));
+    const hops = carrier?.wire && Array.isArray(carrier.hops) ? carrier.hops.slice() : [];
+    const last = hops[hops.length - 1];
+    if (last && last.fnName === fnName && last.file === file && last.line === line) {
+      // Same site again: count the repeat instead of printing the line twice.
+      hops[hops.length - 1] = { ...last, hops: last.hops + 1 };
+    } else {
+      hops.push({
+        fnName,
+        file,
+        line,
+        note: typeof note === "function" ? String(note() ?? "") : "",
+        hops: 1,
+      });
+    }
+    const journey = jet_web_journey_trail(hops);
+    throw new JetWebPropagation(wire, journey, jet_web_error_frame(wire, journey), hops);
   }
   return value;
 }

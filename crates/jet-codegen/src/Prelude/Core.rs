@@ -1026,7 +1026,7 @@ fn jet_panic_rich(
 /// lesson — while each distinct site keeps its identity (Elixir lesson).
 fn jet_trace_err<T, E>(r: Result<T, E>, file: &str, line: u32, fn_name: &str) -> Result<T, E> {
     if r.is_err() {
-        let _ = jet_journey_frame(file, line, fn_name, || String::new());
+        jet_journey_frame(file, line, fn_name, || String::new());
     } else {
         jet_journey_reset();
     }
@@ -1041,7 +1041,7 @@ fn jet_trace_err_note<T, E, F: FnOnce() -> String>(
     note: F,
 ) -> Result<T, E> {
     if r.is_err() {
-        let _ = jet_journey_frame(file, line, fn_name, note);
+        jet_journey_frame(file, line, fn_name, note);
     } else {
         jet_journey_reset();
     }

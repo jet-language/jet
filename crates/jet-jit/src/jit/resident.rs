@@ -482,8 +482,8 @@ pub(crate) fn resident_invoke() -> Result<RunOutcome, String> {
                             .ok_or_else(|| "jit fallible entry returned non-string error".to_string())?
                     };
                     // One report edge, shared with `jet_entry_report` in the
-                    // AOT Prelude: the accumulated E3002 journey prefixes the
-                    // rendered error, and only an escaping failure reports.
+                    // AOT Prelude: the rendered error leads and the accumulated
+                    // E3002 trail follows it, and only an escaping failure reports.
                     runtime
                         .stderr
                         .push_str(&jet_foundation::Outcome::jet_journey_report(&message));

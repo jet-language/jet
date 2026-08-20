@@ -101,19 +101,26 @@ pub fn jet_err_cause(error: &JetErr) -> JetOutcome<JetErr, JetAbsent> {
 // journey vocabulary and collapse only consecutive duplicate hops.
 const JET_JOURNEY_DIAGNOSTIC_CODE: &str = "E3002";
 
-#[derive(PartialEq, Eq)]
+/// One `?` site on the failure's way out.
 struct JourneyFrame {
-    diagnostic_code: &'static str,
     fn_name: String,
     file: String,
     line: u32,
 }
 
+/// One trail line: a `?` site, the note that hop carried, and how many
+/// consecutive hops it stands for. A site that re-propagates keeps one line
+/// and counts the repeats (`×N`) instead of printing the same line again — the
+/// Go wrap-noise lesson — while each distinct site keeps its identity.
+struct JourneyHop {
+    site: JourneyFrame,
+    note: String,
+    hops: u32,
+}
+
 thread_local! {
-    static JET_JOURNEY_LAST: std::cell::RefCell<Option<JourneyFrame>> =
-        const { std::cell::RefCell::new(None) };
-    static JET_JOURNEY_FRAMES: std::cell::RefCell<String> = const {
-        std::cell::RefCell::new(String::new())
+    static JET_JOURNEY_HOPS: std::cell::RefCell<Vec<JourneyHop>> = const {
+        std::cell::RefCell::new(Vec::new())
     };
     static JET_STREAM_FAILURE_REPORT: std::cell::RefCell<Option<String>> =
         const { std::cell::RefCell::new(None) };
@@ -128,18 +135,68 @@ pub fn jet_stream_take_failure_report() -> Option<String> {
 }
 
 pub fn jet_journey_reset() {
-    JET_JOURNEY_LAST.with(|last| *last.borrow_mut() = None);
-    JET_JOURNEY_FRAMES.with(|frames| frames.borrow_mut().clear());
+    JET_JOURNEY_HOPS.with(|hops| hops.borrow_mut().clear());
 }
 
+/// Drain the accumulated hops as E3002's rendered trail block, or an empty
+/// string when the failure never crossed a `?`.
 pub fn jet_journey_take() -> String {
-    JET_JOURNEY_LAST.with(|last| *last.borrow_mut() = None);
-    JET_JOURNEY_FRAMES.with(|frames| std::mem::take(&mut *frames.borrow_mut()))
+    JET_JOURNEY_HOPS.with(|hops| jet_journey_trail(&std::mem::take(&mut *hops.borrow_mut())))
+}
+
+/// E3002's trail block. The root failure has already been stated by the time
+/// this prints, so a hop only has to say where the failure passed: the numbered
+/// list reads origin first, one line per site, `×N` when a site repeated, and
+/// the hop's note after an em dash. The header carries the code and the
+/// mechanism once instead of repeating `error propagated from … via ?` on every
+/// line, which is what buried the root cause under its own trail.
+fn jet_journey_trail(hops: &[JourneyHop]) -> String {
+    if hops.is_empty() {
+        return String::new();
+    }
+    let total: u32 = hops.iter().map(|hop| hop.hops).sum();
+    let mut trail = format!(
+        " Trail [{code}] ({total} hop{} via ?, origin first):\n",
+        if total == 1 { "" } else { "s" },
+        code = JET_JOURNEY_DIAGNOSTIC_CODE,
+    );
+    for (index, hop) in hops.iter().enumerate() {
+        trail.push_str(&format!(
+            "  {}. {} ({}:{})",
+            index + 1,
+            hop.site.fn_name,
+            hop.site.file,
+            hop.site.line
+        ));
+        if hop.hops > 1 {
+            trail.push_str(&format!(" ×{}", hop.hops));
+        }
+        if !hop.note.is_empty() {
+            trail.push_str(&format!(" — {}", hop.note));
+        }
+        trail.push('\n');
+    }
+    trail
+}
+
+/// D-FAIL-BREACH1=A / D-FAIL-CTX1: the one order for a failure report — the
+/// root failure leads, its trail follows.
+///
+/// Every adapter that holds both halves calls this instead of concatenating its
+/// own way. The wasm store built `journey + report` itself, so one tier could
+/// print the trail first while the natives printed it last (I9).
+pub fn jet_journey_compose(error: &str, trail: &str) -> String {
+    let error = error.trim_end_matches('\n');
+    let mut report = String::with_capacity(error.len() + trail.len() + 1);
+    report.push_str(error);
+    report.push('\n');
+    report.push_str(trail);
+    report
 }
 
 /// The one report-edge policy for a failure that escapes the entry (D-FAIL-EDGE1).
 ///
-/// A journey frame is ACCUMULATED at each `?` and printed only here, so a
+/// A journey hop is ACCUMULATED at each `?` and printed only here, so a
 /// failure recovered by `??` or a `.Err(e)` arm reports nothing. Every engine
 /// marshals to this symbol: `jet_entry_report` in the AOT Prelude, the resident
 /// Cranelift entry boundary, the interpreter boundary, and the deopt boundary.
@@ -147,56 +204,31 @@ pub fn jet_journey_take() -> String {
 /// which made a handled error print a report on stderr under those tiers and
 /// nothing under AOT (I9).
 pub fn jet_journey_report(error: &str) -> String {
-    let journey = jet_journey_take();
-    let mut report = format!("{journey}{error}");
-    if !report.ends_with('\n') {
-        report.push('\n');
-    }
-    report
+    jet_journey_compose(error, &jet_journey_take())
 }
 
-pub fn jet_journey_frame<F: FnOnce() -> String>(
-    file: &str,
-    line: u32,
-    fn_name: &str,
-    note: F,
-) -> Option<String> {
-    let site = JourneyFrame {
-        diagnostic_code: JET_JOURNEY_DIAGNOSTIC_CODE,
-        fn_name: fn_name.to_string(),
-        file: file.to_string(),
-        line,
-    };
-    let fresh = JET_JOURNEY_LAST.with(|last| {
-        let mut slot = last.borrow_mut();
-        if slot.as_ref() == Some(&site) {
-            false
-        } else {
-            *slot = Some(site);
-            true
+/// Claim one `?` site for the failure now on its way out. Nothing prints here:
+/// the hop reaches stderr only at the report edge, and only if the failure
+/// escapes the entry.
+pub fn jet_journey_frame<F: FnOnce() -> String>(file: &str, line: u32, fn_name: &str, note: F) {
+    JET_JOURNEY_HOPS.with(|hops| {
+        let mut hops = hops.borrow_mut();
+        if let Some(last) = hops.last_mut() {
+            if last.site.line == line && last.site.fn_name == fn_name && last.site.file == file {
+                last.hops += 1;
+                return;
+            }
         }
+        hops.push(JourneyHop {
+            site: JourneyFrame {
+                fn_name: fn_name.to_string(),
+                file: file.to_string(),
+                line,
+            },
+            note: note(),
+            hops: 1,
+        });
     });
-    if !fresh {
-        return None;
-    }
-    let note = note();
-    let suffix = if note.is_empty() {
-        String::new()
-    } else {
-        format!(": {note}")
-    };
-    let frame = JET_JOURNEY_LAST.with(|last| {
-        let state = last.borrow();
-        let site = state
-            .as_ref()
-            .expect("fresh journey frame must remain stored");
-        format!(
-            "error propagated from: {} ({}:{}) via ?{suffix}\n",
-            site.fn_name, site.file, site.line
-        )
-    });
-    JET_JOURNEY_FRAMES.with(|frames| frames.borrow_mut().push_str(&frame));
-    Some(frame)
 }
 
 pub fn jet_render_err(error: &JetErr) -> String {
@@ -254,6 +286,56 @@ mod err_tests {
 
     }
 
+}
+
+#[cfg(test)]
+mod journey_tests {
+    use super::*;
+
+    // Each `#[test]` runs on its own thread, so the thread-local hop buffer is
+    // this test's alone.
+    #[test]
+    fn report_leads_with_the_failure_and_puts_the_trail_under_it() {
+        jet_journey_reset();
+        jet_journey_frame("app.jet", 7, "parse_config", || "reading raw config".to_string());
+        jet_journey_frame("app.jet", 12, "load_config", || "loading config".to_string());
+        jet_journey_frame("app.jet", 16, "run", String::new);
+
+        assert_eq!(
+            jet_journey_report("Error: file not found"),
+            "Error: file not found\n\
+             \x20Trail [E3002] (3 hops via ?, origin first):\n\
+             \x20 1. parse_config (app.jet:7) — reading raw config\n\
+             \x20 2. load_config (app.jet:12) — loading config\n\
+             \x20 3. run (app.jet:16)\n"
+        );
+    }
+
+    #[test]
+    fn a_repeating_site_collapses_to_one_line_with_a_count() {
+        jet_journey_reset();
+        jet_journey_frame("app.jet", 6, "dive", String::new);
+        for _ in 0..3 {
+            jet_journey_frame("app.jet", 6, "dive", || {
+                panic!("a collapsed repeat must not evaluate its note")
+            });
+        }
+        jet_journey_frame("app.jet", 9, "run", String::new);
+
+        assert_eq!(
+            jet_journey_report("Error: bottom"),
+            "Error: bottom\n\
+             \x20Trail [E3002] (5 hops via ?, origin first):\n\
+             \x20 1. dive (app.jet:6) ×4\n\
+             \x20 2. run (app.jet:9)\n"
+        );
+    }
+
+    #[test]
+    fn a_failure_that_crossed_no_hop_reports_only_itself() {
+        jet_journey_reset();
+        assert_eq!(jet_journey_report("Error: no trail"), "Error: no trail\n");
+    }
 }
 
 /// The clean report: no payload, nothing to say. This is what `T?` puts on the

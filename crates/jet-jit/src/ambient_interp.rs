@@ -2089,6 +2089,128 @@ fn auth_struct_field<'a>(value: &'a CtValue, wanted: &str) -> Option<&'a CtValue
         .flatten()
 }
 
+/// D-CRYPTO-VAULT1=A: an opaque `KeyRef` carrier. `handle` keeps the host-side
+/// identity so a later vault row reads the same key; `shown` holds the ONE
+/// `impl Display for JetVaultKeyRef` rendering the Prelude just produced, so no
+/// engine re-derives `repo:{name}@v{generation}` (I9).
+fn vault_key_ref_value(handle: i64) -> CtValue {
+    CtValue::Struct {
+        type_name: jet_foundation::Syntax::VAULT_KEY_REF_TYPE.to_string(),
+        fields: vec![
+            (
+                jet_foundation::Syntax::VAULT_KEY_REF_HANDLE.to_string(),
+                CtValue::Int(handle),
+            ),
+            (
+                jet_foundation::Syntax::VAULT_KEY_REF_SHOWN.to_string(),
+                CtValue::Str(
+                    Crypto::vault_key_ref_text(handle)
+                        .unwrap_or_else(|| "<invalid KeyRef>".to_string()),
+                ),
+            ),
+        ],
+    }
+}
+
+/// Project the Prelude's `JetVaultError` into the evaluator's carrier, the same
+/// shape `auth_error_value` uses for `JetAuthError`. The variant set and its
+/// payloads are the Prelude's; this only renames them.
+fn vault_error_value(error: Crypto::runtime::JetVaultError) -> CtValue {
+    let variant = |name: &str, args: Vec<(Option<String>, CtValue)>| CtValue::Enum {
+        type_name: "VaultError".to_string(),
+        variant: name.to_string(),
+        args,
+    };
+    match error {
+        Crypto::runtime::JetVaultError::InvalidName => variant("InvalidName", Vec::new()),
+        Crypto::runtime::JetVaultError::NotFound => variant("NotFound", Vec::new()),
+        Crypto::runtime::JetVaultError::WrongType => variant("WrongType", Vec::new()),
+        Crypto::runtime::JetVaultError::Revoked => variant("Revoked", Vec::new()),
+        Crypto::runtime::JetVaultError::Locked => variant("Locked", Vec::new()),
+        Crypto::runtime::JetVaultError::AuthorityDenied => {
+            variant("AuthorityDenied", Vec::new())
+        }
+        Crypto::runtime::JetVaultError::Conflict => variant("Conflict", Vec::new()),
+        Crypto::runtime::JetVaultError::UnsupportedProvider => {
+            variant("UnsupportedProvider", Vec::new())
+        }
+        Crypto::runtime::JetVaultError::InvalidEncoding => {
+            variant("InvalidEncoding", Vec::new())
+        }
+        Crypto::runtime::JetVaultError::DurabilityUnknown => {
+            variant("DurabilityUnknown", Vec::new())
+        }
+        Crypto::runtime::JetVaultError::Crypto(inner) => variant(
+            "Crypto",
+            vec![(None, CtValue::Str(inner.to_string()))],
+        ),
+        Crypto::runtime::JetVaultError::IO {
+            operation,
+            redacted_path,
+        } => variant(
+            "IO",
+            vec![
+                (
+                    Some("operation".to_string()),
+                    CtValue::Str(operation.to_string()),
+                ),
+                (
+                    Some("redacted_path".to_string()),
+                    CtValue::Str(redacted_path.to_string()),
+                ),
+            ],
+        ),
+        Crypto::runtime::JetVaultError::Internal { incident_id } => variant(
+            "Internal",
+            vec![(
+                Some("incident_id".to_string()),
+                CtValue::Str(incident_id.to_string()),
+            )],
+        ),
+    }
+}
+
+/// D-CRYPTO-VAULT1=A / I9: `core.crypto.vault` at the ambient tier.
+///
+/// The key type is a Jet type argument, so the engine reads it from the call's
+/// resolved return type exactly as the Cranelift lowering does
+/// (`Crypto::vault_key_tag`) and hands the tag to the shared bridge. Only the
+/// read row `current` has an interpreter projection; a mutation row still has
+/// none and keeps the shared evaluator's registered refusal rather than a
+/// second, engine-local write path into the store.
+fn ambient_vault_call(
+    method: &str,
+    args: &[CtValue],
+    resolved_ret: Option<&Type>,
+    span: Span,
+) -> Result<CtValue, Diagnostic> {
+    if method != "current" {
+        return Err(unsupported(
+            &format!("core.crypto.vault.{method} ambient"),
+            span,
+        ));
+    }
+    let Some(CtValue::Str(name)) = args.first() else {
+        return Err(unsupported("core.crypto.vault.current name", span));
+    };
+    // The same ladder the Cranelift lowering runs (`jit/lower_ctx.rs`): read the
+    // tag from the call's resolved type, then fall back to the signing key. A
+    // tier that refused here where another defaults would be the divergence.
+    let tag = resolved_ret.and_then(Crypto::vault_key_tag).unwrap_or(1);
+    let Some(read) = Crypto::vault_current_handle(name, tag) else {
+        return Err(unsupported("core.crypto.vault.current key type", span));
+    };
+    Ok(match read {
+        Ok(Some(handle)) => CtValue::Present(Box::new(CtValue::Present(Box::new(
+            vault_key_ref_value(handle),
+        )))),
+        Ok(None) => CtValue::Present(Box::new(CtValue::absent(Type::Named(
+            jet_foundation::Syntax::VAULT_KEY_REF_TYPE.to_string(),
+        )))),
+        Err(error) => CtValue::failed(Box::new(vault_error_value(error))),
+    })
+}
+
 fn auth_text_arg(args: &[CtValue], index: usize, what: &str, span: Span) -> Result<String, Diagnostic> {
     match args.get(index) {
         Some(CtValue::Str(value)) => Ok(value.clone()),
@@ -2591,6 +2713,20 @@ pub fn ambient_core_call(
                 .map(CtValue::Bytes)
                 .map_err(|error| unsupported(&error.to_string(), span)),
         );
+    }
+    // D-CRYPTO-VAULT1=A / I9: the vault read rows marshal to the same
+    // `jet_vault_*_impl` symbols AOT emits and the Cranelift host calls
+    // (`Crypto.rs`). Without this arm `core.crypto.vault` fell past every
+    // ambient guard into the shared evaluator's `_` refusal, so
+    // `crypto/vault_keys` passed sema and died at run time on E0956 while the
+    // same source ran under AOT and the resident JIT.
+    if module == "core.crypto.vault" {
+        return Some(ambient_vault_call(
+            method,
+            &args,
+            resolved_ret.as_ref(),
+            span,
+        ));
     }
     if let Some(result) = ambient_time_call(module, method, &args, span, resolved_ret.as_ref()) {
         return Some(result);

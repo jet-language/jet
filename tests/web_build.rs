@@ -1595,7 +1595,7 @@ fn run() {
     assert!(!node.status.success(), "a reached stop must fail the JS process");
     let stderr = String::from_utf8_lossy(&node.stderr);
     assert!(
-        stderr.contains("Stop [E3010]: `the list has 1 items, so position 9 doesn't exist` — with Jet file and line."),
+        stderr.contains("Stop [E3010]: `the list has 1 items, so position 9 doesn't exist`"),
         "missing shared stop text:\n{stderr}"
     );
     assert!(
@@ -2425,7 +2425,7 @@ fn normalize_journey_paths(journey: &str, shown: &str, target_line_offset: i64) 
             let Some(open) = line.find(" (") else {
                 return line.to_string();
             };
-            let Some(close) = line.find(") via ?") else {
+            let Some(close) = line[open..].find(')').map(|offset| open + offset) else {
                 return line.to_string();
             };
             let Some(colon) = line[..close].rfind(':') else {
@@ -2489,10 +2489,11 @@ fn run() ? {
 "#;
     let shown = "tests/fixtures/web_two_hop_journey.jet";
     let expected_journey = format!(
-        "error propagated from: read ({shown}:6) via ?: reading source\n\
-error propagated from: run ({shown}:11) via ?: running source"
+        " Trail [E3002] (2 hops via ?, origin first):\n\
+  1. read ({shown}:6) — reading source\n\
+  2. run ({shown}:11) — running source"
     );
-    let expected_report = format!("{expected_journey}\nError [TWOHOP]: two-hop");
+    let expected_report = format!("Error [TWOHOP]: two-hop\n{expected_journey}");
 
     let native_runs = [
         (
@@ -2539,12 +2540,12 @@ try {
     );
     let js_stdout = run_node_harness(&js_dir, "two_hop_journey_harness.mjs", harness);
     assert_eq!(
-        normalize_journey_paths(&harness_journey(&js_stdout), shown, 1),
+        normalize_journey_paths(harness_journey(&js_stdout).trim_end(), shown, 1),
         expected_journey,
         "JS journey changed"
     );
     assert_eq!(
-        normalize_journey_paths(&harness_frame(&js_stdout), shown, 1),
+        normalize_journey_paths(harness_frame(&js_stdout).trim_end(), shown, 1),
         expected_report,
         "JS report changed"
     );
@@ -2552,12 +2553,12 @@ try {
     let wasm_dir = build_web_fixture("two_hop_journey_wasm", source, shown);
     let wasm_stdout = run_node_harness(&wasm_dir, "two_hop_journey_harness.mjs", harness);
     assert_eq!(
-        normalize_journey_paths(&harness_journey(&wasm_stdout), shown, 0),
+        normalize_journey_paths(harness_journey(&wasm_stdout).trim_end(), shown, 0),
         expected_journey,
         "Wasm journey changed"
     );
     assert_eq!(
-        normalize_journey_paths(&harness_frame(&wasm_stdout), shown, 0),
+        normalize_journey_paths(harness_frame(&wasm_stdout).trim_end(), shown, 0),
         expected_report,
         "Wasm report changed"
     );

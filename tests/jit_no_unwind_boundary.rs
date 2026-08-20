@@ -718,9 +718,9 @@ fn the_abort_markers_name_every_abort_and_no_report() {
     // over correct output, which is the more expensive direction to get wrong.
     for stderr in [
         "",
-        "Stop [E3001]: `panic: expected the answer, got none` — with Jet file, \
-         line, function name, source-line context box, and (debug builds only) \
-         safe local variable values.\n",
+        "Stop [E3001]: `panic: expected the answer, got none`\n",
+        "Error: file not found\n Trail [E3002] (2 hops via ?, origin first):\n  \
+         1. load (app.jet:7) — reading config\n  2. run (app.jet:12)\n",
         "Error [E3003]: deadline exceeded while waiting in task join\n",
         "Runtime fault [E3010]: the list has 2 items\n",
         "panic: can't view 1 items from 2 to 2 (inclusive)\n",

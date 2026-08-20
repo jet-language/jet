@@ -209,7 +209,7 @@ fn run() {
     let (code, _stdout, stderr) = build_and_run_debug("rich_panic", src);
     assert_eq!(code, 70, "expected exit 70");
     assert!(
-        stderr.contains("Stop [E3001]: `panic: must be positive` — with Jet file, line, function name, source-line context box, and (debug builds only) safe local variable values."),
+        stderr.contains("Stop [E3001]: `panic: must be positive`\n"),
         "wrong panic header: {}",
         stderr
     );
@@ -366,7 +366,7 @@ fn run() {{
             "{name}: expected Jet panic, not a rustc ICE: {stderr}"
         );
         assert!(
-            stderr.contains("Stop [E3001]: `panic: missing value` — with Jet file, line, function name, source-line context box, and (debug builds only) safe local variable values."),
+            stderr.contains("Stop [E3001]: `panic: missing value`\n"),
             "{name}: missing exact Jet panic report: {stderr}"
         );
         assert!(
@@ -479,25 +479,32 @@ fn run() ? ParseError {
     let (code, stdout, stderr) = build_and_run_debug("error_trace", src);
     assert_eq!(code, 1, "escaping failure must exit 1: {stderr}");
     assert!(stdout.is_empty(), "nothing printed before the failure: {stdout}");
-    // Innermost frame first, one per `?` site, each carrying its own note.
-    let frames: Vec<&str> = stderr
-        .lines()
-        .filter(|line| line.starts_with("error propagated from: "))
-        .collect();
-    assert_eq!(frames.len(), 3, "one frame per `?` site: {stderr}");
+    // Root failure first, then the trail: one numbered hop per `?` site,
+    // origin first, each carrying its own note.
+    let (root, trail) = stderr
+        .split_once(" Trail [E3002] (")
+        .unwrap_or_else(|| panic!("report must carry a trail block: {stderr}"));
     assert!(
-        frames[0].starts_with("error propagated from: load (")
-            && frames[0].ends_with(") via ?: loading age"),
-        "innermost frame must be load with its note: {stderr}"
+        !root.trim().is_empty(),
+        "the root failure must lead the report: {stderr}"
     );
     assert!(
-        frames[1].starts_with("error propagated from: double (")
-            && frames[1].ends_with(") via ?: doubling age"),
-        "second frame must be double with its note: {stderr}"
+        trail.starts_with("3 hops via ?, origin first):\n"),
+        "three `?` sites, none repeated: {stderr}"
+    );
+    let hops: Vec<&str> = trail.lines().skip(1).collect();
+    assert_eq!(hops.len(), 3, "one hop per `?` site: {stderr}");
+    assert!(
+        hops[0].starts_with("  1. load (") && hops[0].ends_with(") — loading age"),
+        "innermost hop must be load with its note: {stderr}"
     );
     assert!(
-        frames[2].starts_with("error propagated from: run (") && frames[2].ends_with(") via ?"),
-        "outermost frame must be run with no note: {stderr}"
+        hops[1].starts_with("  2. double (") && hops[1].ends_with(") — doubling age"),
+        "second hop must be double with its note: {stderr}"
+    );
+    assert!(
+        hops[2].starts_with("  3. run (") && hops[2].ends_with(")"),
+        "outermost hop must be run with no note: {stderr}"
     );
 }
 
@@ -560,28 +567,24 @@ fn run() ? {
     let (code, _stdout, stderr) = build_and_run_debug("error_trace_uncaught", src);
     assert_eq!(code, 1, "uncaught Err must exit 1: {stderr}");
     assert!(
-        stderr.contains("error propagated from: parse_config"),
-        "missing parse_config frame: {stderr}"
+        stderr.starts_with("Error: file not found\n"),
+        "the root failure must be the first line: {stderr}"
     );
     assert!(
-        stderr.contains("error propagated from: load_config"),
-        "missing load_config frame: {stderr}"
+        stderr.contains(" Trail [E3002] (3 hops via ?, origin first):\n"),
+        "missing the trail header: {stderr}"
     );
     assert!(
-        stderr.contains("via ?"),
-        "missing `via ?` suffix: {stderr}"
+        stderr.contains("  1. parse_config (") && stderr.contains(") — reading raw config\n"),
+        "missing parse_config hop with its note: {stderr}"
     );
     assert!(
-        stderr.contains("via ?: reading raw config"),
-        "missing first ? note in uncaught Err text: {stderr}"
+        stderr.contains("  2. load_config (") && stderr.contains(") — loading config\n"),
+        "missing load_config hop with its note: {stderr}"
     );
     assert!(
-        stderr.contains("via ?: loading config"),
-        "missing second ? note in uncaught Err text: {stderr}"
-    );
-    assert!(
-        stderr.contains("Error: file not found"),
-        "missing original error text in uncaught Err text: {stderr}"
+        stderr.contains("  3. run ("),
+        "missing the entry hop: {stderr}"
     );
 }
 
@@ -611,12 +614,21 @@ fn run() ? {
     let (code, stdout, stderr) = build_and_run_debug("error_trace_collapse", src);
     assert_eq!(code, 1, "an escaping failure must exit 1: {stderr}");
     assert!(stdout.is_empty(), "the failure precedes the print: {stdout}");
-    let dive_frames = stderr
+    let dive_hops = stderr
         .lines()
-        .filter(|l| l.contains("error propagated from: dive"))
-        .count();
+        .filter(|line| line.contains(". dive ("))
+        .collect::<Vec<_>>();
     assert_eq!(
-        dive_frames, 1,
-        "repeated dive frames must collapse to 1, got {dive_frames}:\n{stderr}"
+        dive_hops.len(),
+        1,
+        "repeated dive hops must collapse to one line:\n{stderr}"
+    );
+    assert!(
+        dive_hops[0].ends_with(" ×4"),
+        "the collapsed hop must count its repeats:\n{stderr}"
+    );
+    assert!(
+        stderr.contains(" Trail [E3002] (5 hops via ?, origin first):\n"),
+        "the header counts every hop, collapsed or not:\n{stderr}"
     );
 }

@@ -682,6 +682,23 @@ pub(super) fn display(value: &CtValue) -> Option<String> {
         }
     }
     match value {
+        // D-CRYPTO-VAULT1=A / I9: a vault `KeyRef` has exactly one rendering,
+        // `impl Display for JetVaultKeyRef` in `Prelude/SecretsCrypto.rs`. The
+        // ambient host calls that impl while it marshals the handle and carries
+        // the text on the value, so the evaluator reads what the Prelude wrote
+        // instead of re-deriving `repo:{name}@v{generation}` here.
+        CtValue::Struct { type_name, fields }
+            if core_display.is_some()
+                && type_name == jet_foundation::Syntax::VAULT_KEY_REF_TYPE =>
+        {
+            fields
+                .iter()
+                .find(|(name, _)| name == jet_foundation::Syntax::VAULT_KEY_REF_SHOWN)
+                .and_then(|(_, shown)| match shown {
+                    CtValue::Str(shown) => Some(shown.clone()),
+                    _ => None,
+                })
+        }
         CtValue::Struct { type_name, .. }
             if core_display.is_some() && type_name == "HyperLogLog" =>
         {

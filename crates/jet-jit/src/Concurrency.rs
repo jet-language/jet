@@ -830,9 +830,9 @@ pub(crate) fn active_runtime_ptr() -> Option<*mut super::JitRuntime> {
 /// terms (I2/I4). Widening the quiet set instead would silence genuinely
 /// unconvertible host panics, and rendering the report into the payload instead
 /// would corrupt the value: `jet_scheduler_panic_message` splits a transported
-/// report on `]: `, and E3001's row text is `` `panic: {msg}` — with Jet file,
-/// … ``, so `.Panicked(reason)` would carry that whole sentence instead of the
-/// program's own message. `resume_unwind` is also what
+/// report on `]: `, and an E3001 report carries its source frame, context box
+/// and Why/Fix under that header, so `.Panicked(reason)` would carry the whole
+/// report instead of the program's own message. `resume_unwind` is also what
 /// `jit/runtime_host.rs`'s `runtime_stop_unwind` already uses.
 ///
 /// #1997: cranelift-jit registers no unwind info, so this must never run with a

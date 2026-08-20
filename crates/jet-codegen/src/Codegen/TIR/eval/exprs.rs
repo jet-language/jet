@@ -7292,7 +7292,7 @@ impl<'a> EvalCtx<'a> {
                         // program recovers reports nothing — the AOT Prelude's
                         // `jet_trace_err` has done exactly this since the report
                         // edge landed, and printing here was the second policy.
-                        let _ = jet_foundation::Outcome::jet_journey_frame(
+                        jet_foundation::Outcome::jet_journey_frame(
                             file,
                             *line as u32,
                             fn_name,
