@@ -227,7 +227,7 @@ fn answer_file(dir: &std::path::Path, tag: &str, i: usize, answers: &str) -> std
     path
 }
 
-// ── #2076: the run-scoped oracle-binary cache ────────────────────────────────
+// ── #2076: the persistent oracle-binary cache ───────────────────────────────
 //
 // Every dev battery pays an optimized (`-O`) rustc build per example, and the
 // six battery targets walk overlapping slices of the same corpus, so one full
@@ -236,19 +236,16 @@ fn answer_file(dir: &std::path::Path, tag: &str, i: usize, answers: &str) -> std
 // link inputs — so the second caller of one key can reuse the first caller's
 // artifact instead of paying for it again.
 //
-// Where the run scope comes from: `scripts/agent/verify-full.sh` already points
-// TMPDIR at a fresh `jet-verify.XXXXXX` per run and removes it on exit, so a
-// temp-rooted cache is exactly run-scoped for every full verification run, and
-// all six battery processes of that run share it. A second run-scoping
-// mechanism here would be the I8 fork of one; `JET_DEV_ORACLE_CACHE_DIR` only
-// moves the root, for a measurement run that wants its own ledger.
+// The default root is the repository's gitignored `.tmp/jet-test-scratch`, so
+// optimized oracle binaries survive `verify-full.sh` and later runs can reuse
+// them. `JET_DEV_ORACLE_CACHE_DIR` moves the root for a measurement run that
+// wants its own ledger, but the shared test guard still rejects `/tmp`.
 //
-// An ad-hoc `cargo test` against the system temp dir MAY therefore meet a
-// previous run's entry, and that is reuse rather than a leak: the key covers
-// everything that decides the bytes rustc emits, and the artifact is
-// digest-verified on every hit, so a hit is the same binary the build would
-// have produced. Everything else — a changed key input, a truncated artifact,
-// an unwritable root — is a MISS, and a miss is the old build path unchanged.
+// An ad-hoc `cargo test` therefore meets previous entries too: that is reuse,
+// not a leak. The key covers everything that decides the bytes rustc emits, and
+// every hit is digest-verified. Everything else — a changed key input, a
+// truncated artifact, an unwritable root — is a MISS, and a miss is the old
+// build path unchanged.
 // Nothing here can turn a failing battery green: the cache sits strictly
 // between "generated Rust ready" and "binary on disk", and a failed build is
 // never published.
@@ -300,16 +297,21 @@ impl OracleBuildFailure {
     }
 }
 
-/// The directory this run's oracle artifacts live in, or `None` when it cannot
-/// be created — then every caller builds exactly as it did before #2076.
+/// The persistent oracle artifact directory, or `None` when it cannot be
+/// created — then every caller builds exactly as it did before #2076.
 ///
 /// The path is NOT salted with the toolchain: the key below already carries
 /// `rustc -vV`, so two toolchains get different keys inside one root instead of
 /// two roots that could disagree about which is current.
 static ORACLE_CACHE_ROOT: LazyLock<Option<PathBuf>> = LazyLock::new(|| {
+    common::assert_test_environment_is_safe();
     let root = match std::env::var_os("JET_DEV_ORACLE_CACHE_DIR") {
-        Some(dir) => PathBuf::from(dir),
-        None => std::env::temp_dir().join("jet_dev_oracle_cache"),
+        Some(dir) => {
+            let root = PathBuf::from(dir);
+            common::assert_test_path_on_disk(&root, "JET_DEV_ORACLE_CACHE_DIR");
+            root
+        }
+        None => common::test_scratch_root("dev-oracle-cache"),
     };
     fs::create_dir_all(&root).ok().map(|()| root)
 });
@@ -419,8 +421,8 @@ fn reuse_cached_oracle(entry: &std::path::Path, bin: &std::path::Path) -> bool {
 /// published this key first: same key, same inputs, nothing to do.
 ///
 /// A hard link, not a copy: the run then holds exactly ONE copy of the bytes per
-/// distinct oracle, whoever built it and however many batteries reuse it, which
-/// matters because the verification temp root is RAM-backed tmpfs. It also means
+/// distinct oracle, whoever built it and however many batteries reuse it. The
+/// persistent disk root keeps that copy available to later runs. It also means
 /// a later build that writes over that same scratch path in place can change the
 /// published bytes — and that is caught rather than served, because a hit
 /// re-hashes the artifact against its recorded digest and a mismatch is a miss.
@@ -450,11 +452,12 @@ fn publish_cached_oracle(entry: &std::path::Path, bin: &std::path::Path) {
     }
 }
 
-/// One line per oracle event in the run's own cache root — the #2076 ledger.
+/// One line per oracle event in the shared cache root — the #2076 ledger.
 ///
 /// Six battery processes share the root, so a per-process counter cannot state
-/// a per-RUN number and an appended line can. Total builds against the number
-/// of DISTINCT keys built is the duplicate-compile count the card gates on:
+/// a combined count and an appended line can. The persistent file is
+/// cumulative; total builds against the number of DISTINCT keys built is the
+/// duplicate-compile count the card gates on:
 ///
 /// ```text
 /// events="$JET_DEV_ORACLE_CACHE_DIR/events"
@@ -464,10 +467,9 @@ fn publish_cached_oracle(entry: &std::path::Path, bin: &std::path::Path) {
 /// echo "duplicate optimized oracle compiles: $((builds - distinct)) (was $((hits + builds - distinct)))"
 /// ```
 ///
-/// One run states BOTH sides of the card's gate, so no second run with the
-/// cache off is needed: every `hit` is a compile this run did not pay and the
-/// old harness did, so `hits + (builds - distinct)` is the duplicate count
-/// before the cache and `builds - distinct` the count after it.
+/// Every `hit` is a compile the current or an earlier run did not pay and the
+/// old harness did, so the cumulative ledger still exposes reuse without a
+/// cache-off run.
 ///
 /// `hit` is a reuse, `build` a paid compile, `fail` a compile rustc rejected —
 /// a rejection is deliberately NOT published, so the few examples whose oracle
@@ -495,8 +497,19 @@ fn record_oracle_event(event: &str, entry: &std::path::Path) {
     }
 }
 
-/// Build the optimized AOT oracle for one example, or reuse the run's artifact
-/// for the same inputs (#2076).
+/// Per-stem AOT scratch on the persistent, gitignored disk root. The process id
+/// keeps two simultaneous batteries from writing the same generated source;
+/// the oracle cache above still supplies cross-run reuse.
+fn aot_scratch_dir(tag: &str, stem: &str) -> PathBuf {
+    let stem = stem.replace('/', "_");
+    common::test_scratch_root("aot").join(format!(
+        "{tag}_{stem}_{}",
+        std::process::id()
+    ))
+}
+
+/// Build the optimized AOT oracle for one example, or reuse the persistent
+/// artifact for the same inputs (#2076).
 ///
 /// The ONE place a dev battery turns generated Rust into an oracle binary. Both
 /// callers below route through it, so the cache cannot be half-applied and the
@@ -508,6 +521,8 @@ fn build_oracle_binary(
     stem: &str,
     file: &str,
 ) -> Result<std::path::PathBuf, OracleBuildFailure> {
+    common::assert_test_environment_is_safe();
+    common::assert_test_path_on_disk(dir, "AOT scratch");
     let src = fs::read_to_string(file).map_err(OracleBuildFailure::Io)?;
     let compiled = jet::compile_with_path(&src, file).map_err(OracleBuildFailure::FrontEnd)?;
     let clinks = jet::resolve_c_links(file).map_err(OracleBuildFailure::CLinks)?;
@@ -571,6 +586,8 @@ fn build_oracle_binary(
     Ok(bin)
 }
 
+/// `dir` is the caller's fixture directory; AOT output is always redirected to
+/// `aot_scratch_dir` so one shared helper owns the storage policy.
 fn compiled_binary_output(
     dir: &std::path::Path,
     tag: &str,
@@ -589,18 +606,19 @@ fn compiled_binary_output(
 /// function's private business, because `command_output_with_timeout` owns the
 /// spawn and never services a pipe, so a child needs a real fd 0.
 fn compiled_binary_output_with_stdin(
-    dir: &std::path::Path,
+    _dir: &std::path::Path,
     tag: &str,
     i: usize,
     stem: &str,
     file: &str,
     answers: Option<&str>,
 ) -> ProgramOutput {
-    let bin = build_oracle_binary(dir, tag, i, stem, file)
+    let dir = aot_scratch_dir(tag, stem);
+    let bin = build_oracle_binary(&dir, tag, i, stem, file)
         .unwrap_or_else(|failure| panic!("{}", failure.describe(stem, file)));
     let mut run_cmd = Command::new(&bin);
     if let Some(answers) = answers {
-        run_cmd.stdin(fs::File::open(answer_file(dir, tag, i, answers)).unwrap());
+        run_cmd.stdin(fs::File::open(answer_file(&dir, tag, i, answers)).unwrap());
     }
     // Match golden / ui_and_web three-way: GTK `present` opens a real window
     // unless headless — AOT would hang the 30s timeout otherwise.
@@ -631,13 +649,14 @@ fn compiled_binary_output_with_stdin(
 /// that the stem is real. Splitting build from run is what lets the gate keep
 /// that proof while leaving the stem out of the run universe.
 fn try_compiled_binary_build(
-    dir: &std::path::Path,
+    _dir: &std::path::Path,
     tag: &str,
     i: usize,
     stem: &str,
     file: &str,
 ) -> Option<std::path::PathBuf> {
-    build_oracle_binary(dir, tag, i, stem, file).ok()
+    let dir = aot_scratch_dir(tag, stem);
+    build_oracle_binary(&dir, tag, i, stem, file).ok()
 }
 
 fn try_compiled_binary_output(
@@ -2402,7 +2421,7 @@ fn assert_cranelift_three_way(file: &str, stem: &str) {
         );
     }
 
-    let dir = std::env::temp_dir().join(format!("jet_jit_3way_{}", std::process::id()));
+    let dir = aot_scratch_dir("jit_3way", stem);
     let aot = normalize_for_parity(
         stem,
         compiled_binary_output(&dir, "jit_3way", next_oracle_index(), stem, file),
@@ -2474,7 +2493,7 @@ fn assert_ui_and_web_three_way(file: &str, stem: &str) {
         "`{stem}` used deopt or fallback"
     );
 
-    let dir = std::env::temp_dir().join(format!("jet_jit_1225_{}", std::process::id()));
+    let dir = aot_scratch_dir("jit_1225", stem);
     let aot = compiled_binary_output(&dir, "jit_1225", 0, stem, file);
 
     if let Some(interpreted) = interpreted {
@@ -2565,7 +2584,7 @@ fn assert_concurrency_and_game_three_way(file: &str, stem: &str) {
         "`{stem}` used deopt or fallback"
     );
 
-    let dir = std::env::temp_dir().join(format!("jet_jit_1218_{}", std::process::id()));
+    let dir = aot_scratch_dir("jit_1218", stem);
     let aot = compiled_binary_output(&dir, "jit_1218", 0, stem, file);
 
     if let Some(interpreted) = interpreted {
@@ -2642,7 +2661,7 @@ fn assert_crypto_auth_vault_three_way(file: &str, stem: &str) {
         "`{stem}` used deopt or fallback"
     );
 
-    let dir = std::env::temp_dir().join(format!("jet_jit_1222_{}", std::process::id()));
+    let dir = aot_scratch_dir("jit_1222", stem);
     let aot = compiled_binary_output(&dir, "jit_1222", 0, stem, file);
 
     if let Some(interpreted) = interpreted {
@@ -2724,7 +2743,7 @@ fn assert_network_http_browser_three_way(file: &str, stem: &str) {
         "`{stem}` used deopt or fallback"
     );
 
-    let dir = std::env::temp_dir().join(format!("jet_jit_1221_{}", std::process::id()));
+    let dir = aot_scratch_dir("jit_1221", stem);
     let aot = compiled_binary_output(&dir, "jit_1221", 0, stem, file);
 
     if let Some(interpreted) = interpreted {
@@ -2828,7 +2847,7 @@ fn assert_data_pipelines_parsing_three_way(file: &str, stem: &str) {
         "`{stem}` used deopt or fallback"
     );
 
-    let dir = std::env::temp_dir().join(format!("jet_jit_1223_{}", std::process::id()));
+    let dir = aot_scratch_dir("jit_1223", stem);
     let aot = compiled_binary_output(&dir, "jit_1223", 0, stem, file);
 
     // Golden + resident JIT + AOT own ProgramOutput. Interpreter is compared when
@@ -2920,14 +2939,19 @@ fn assert_interactive_example_three_way(file: &str, stem: &str, answers: &str) {
         );
         return;
     }
-    let dir = common::unique_tmp(&format!("jet_stdin_three_way_{}", stem.replace('/', "_")));
-    fs::create_dir_all(&dir).unwrap();
-    let aot = compiled_binary_output_with_stdin(&dir, "stdin_three_way", 0, stem, file, Some(answers));
+    let dir = aot_scratch_dir("stdin_three_way", stem);
+    let aot = compiled_binary_output_with_stdin(
+        &dir,
+        "stdin_three_way",
+        0,
+        stem,
+        file,
+        Some(answers),
+    );
     assert_eq!(
         aot, golden,
         "AOT drifted from the golden for `{stem}` with the answers it was recorded with"
     );
-    let _ = fs::remove_dir_all(&dir);
 }
 
 fn assert_io_cli_terminal_time_three_way(file: &str, stem: &str) {
@@ -2988,15 +3012,14 @@ fn assert_io_cli_terminal_time_three_way(file: &str, stem: &str) {
         }
     };
 
-    let dir = std::env::temp_dir().join(format!(
-        "jet_jit_1219_{}_{}",
-        stem.replace('/', "_"),
-        std::process::id()
-    ));
-    let _ = fs::remove_dir_all(&dir);
-    fs::create_dir_all(&dir).unwrap();
+    let dir = aot_scratch_dir("jit_1219", stem);
     let aot = compiled_binary_output(&dir, "jit_1219", 0, stem, file);
-    let aot_bin = compiled_binary_path(&dir, "jit_1219", 0, file);
+    let aot_bin = compiled_binary_path(
+        &aot_scratch_dir("jit_1219", stem),
+        "jit_1219",
+        0,
+        file,
+    );
 
     // Watcher re-execs `os.executable() --watch-child`. Under resident JIT,
     // point argv[0] at the AOT binary so the child is the same program identity
@@ -3059,7 +3082,6 @@ fn assert_io_cli_terminal_time_three_way(file: &str, stem: &str) {
         aot.stderr, expected_stderr,
         "AOT stderr divergence for `{stem}`"
     );
-    let _ = fs::remove_dir_all(&dir);
 }
 
 fn assert_lowlevel_and_safety_three_way(file: &str, stem: &str) {
@@ -3132,13 +3154,7 @@ fn assert_lowlevel_and_safety_three_way(file: &str, stem: &str) {
         "`{stem}` used deopt or fallback"
     );
 
-    let dir = std::env::temp_dir().join(format!(
-        "jet_jit_1220_{}_{}",
-        stem.replace('/', "_"),
-        std::process::id()
-    ));
-    let _ = fs::remove_dir_all(&dir);
-    fs::create_dir_all(&dir).unwrap();
+    let dir = aot_scratch_dir("jit_1220", stem);
     let aot = compiled_binary_output(&dir, "jit_1220", 0, stem, file);
 
     if let Some(interpreted) = interpreted {
@@ -3168,7 +3184,6 @@ fn assert_lowlevel_and_safety_three_way(file: &str, stem: &str) {
         jit.exit_code, aot.exit_code,
         "JIT vs AOT exit divergence for `{stem}`"
     );
-    let _ = fs::remove_dir_all(&dir);
 }
 
 /// Pin the CLIF Jet emits at a site that once produced verifier-invalid code
@@ -3886,12 +3901,7 @@ struct CorpusGateRecord {
     detail: String,
 }
 
-fn classify_corpus_stem(
-    stem: &str,
-    dir: &std::path::Path,
-    worker: usize,
-    have_rustc: bool,
-) -> CorpusGateRecord {
+fn classify_corpus_stem(stem: &str, have_rustc: bool) -> CorpusGateRecord {
     let file = example_path(stem);
     if let Some(reason) = corpus_gate_exclusion(stem) {
         return CorpusGateRecord {
@@ -3946,9 +3956,9 @@ fn classify_corpus_stem(
         // Run-path frontend rejection of an AOT/golden-green example is a
         // run-tier parity hole, not a true frontend reject (D-VERDICT-1254-1).
         if have_rustc && example_has_out_golden(stem) && !example_has_err_golden(stem) {
-            let worker_dir = dir.join(format!("w{worker}"));
+            let aot_dir = aot_scratch_dir("corpus_gate", stem);
             if let Some(aot) =
-                try_compiled_binary_output(&worker_dir, "corpus_gate_aot", 0, stem, &file)
+                try_compiled_binary_output(&aot_dir, "corpus_gate_aot", 0, stem, &file)
             {
                 if aot.exit_code == 0 {
                     return CorpusGateRecord {
@@ -3988,9 +3998,9 @@ fn classify_corpus_stem(
     // predicate, which is why nothing forced the gate to notice when three
     // examples became services.
     if jet::AST::bundle_serves_until_stopped(&bundle) {
-        let worker_dir = dir.join(format!("w{worker}"));
+        let aot_dir = aot_scratch_dir("corpus_gate_service", stem);
         assert!(
-            try_compiled_binary_build(&worker_dir, "corpus_gate_service", 0, stem, &file).is_some(),
+            try_compiled_binary_build(&aot_dir, "corpus_gate_service", 0, stem, &file).is_some(),
             "`{stem}` is a service entry outside the gate's run universe, so its AOT compile is \
              the only proof left: that compile failed"
         );
@@ -4009,8 +4019,8 @@ fn classify_corpus_stem(
         };
     }
 
-    let worker_dir = dir.join(format!("w{worker}"));
-    let aot = try_compiled_binary_output(&worker_dir, "corpus_gate_aot", 0, stem, &file);
+    let aot_dir = aot_scratch_dir("corpus_gate", stem);
+    let aot = try_compiled_binary_output(&aot_dir, "corpus_gate_aot", 0, stem, &file);
     let aot = match aot {
         Some(out) => out,
         None => {
@@ -4123,15 +4133,13 @@ fn classify_corpus_stem(
 }
 
 fn collect_corpus_gate_records() -> Vec<CorpusGateRecord> {
-    let dir = std::env::temp_dir().join(format!("jet_corpus_gate_{}", std::process::id()));
-    let _ = fs::remove_dir_all(&dir);
-    fs::create_dir_all(&dir).unwrap();
+    common::assert_test_environment_is_safe();
+    let _ = common::test_scratch_root("aot");
     let have_rustc = have_rustc();
     let mut stems = all_example_stems();
     if let Ok(filter) = std::env::var("JET_CORPUS_GATE_FILTER") {
         stems.retain(|stem| stem.contains(&filter));
     }
-    let dir = Arc::new(dir);
     let jobs = Arc::new(Mutex::new(std::collections::VecDeque::from(stems)));
     let records = Arc::new(Mutex::new(Vec::<CorpusGateRecord>::new()));
     let failures = Arc::new(Mutex::new(Vec::<String>::new()));
@@ -4140,7 +4148,6 @@ fn collect_corpus_gate_records() -> Vec<CorpusGateRecord> {
         let jobs = Arc::clone(&jobs);
         let records = Arc::clone(&records);
         let failures = Arc::clone(&failures);
-        let dir = Arc::clone(&dir);
         handles.push(
             std::thread::Builder::new()
                 .name(format!("corpus-gate-{worker}"))
@@ -4150,7 +4157,7 @@ fn collect_corpus_gate_records() -> Vec<CorpusGateRecord> {
                         break;
                     };
                     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                        classify_corpus_stem(&stem, &dir, worker, have_rustc)
+                        classify_corpus_stem(&stem, have_rustc)
                     }));
                     match result {
                         Ok(record) => lock_recovered(&records, "corpus gate record set")

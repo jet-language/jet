@@ -1592,7 +1592,7 @@ files like `Source/Codegen/Items.rs` are fine — only emitted text matters. Rel
 The content-addressed build cache (`~/.cache/jet/build`, plus repo-local `build/`) keys on the AST hash and a `COMPILER_VERSION` salt, NOT on generated-Rust bytes. After any codegen or prelude edit, smoke tests silently run stale binaries.
 **Why:** an agent verified "green" smoke output that was actually the pre-edit binary (found during #308 fuzz work, 2026-07-10).
 
-**How to apply:** `rm -rf ~/.cache/jet build` before any smoke test that follows a codegen/prelude change — `jet run` also caches per-file under `~/.cache/jet/run`, so clearing only `build` still serves a stale quick-run result. Related: [[prelude-embedded-rebuild]].
+**How to apply:** `rm -rf ~/.cache/jet/build ~/.cache/jet/run build` before any smoke test that follows a codegen/prelude change — `jet run` also caches per-file under `~/.cache/jet/run`, so clearing only `build` still serves a stale quick-run result. Related: [[prelude-embedded-rebuild]].
 
 ### jetos-owner-parity-import
 

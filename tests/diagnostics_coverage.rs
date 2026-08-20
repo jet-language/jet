@@ -2,8 +2,8 @@
 //!
 //! Enforces invariant I4: every emitted code must have
 //!   (a) an entry in the typed diagnostic-row registry,
-//!   (b) at least one tests/ui (or tests/ui_lint, tests/cli, tests/release)
-//!       snapshot that mentions it, and
+//!   (b) at least one harness-enumerated fixture with a column-0 report opener,
+//!       and
 //!   (c) a `jet explain` page (resolves through Explain::lookup).
 //!
 //! Also checks I2 regression: the FFI bridge must not surface raw rustc error
@@ -537,138 +537,134 @@ fn coverage_baseline_rejects_removal_addition_and_substitution() {
     );
 }
 
-/// All [EL]NNNN codes that appear in snapshot files or legacy test assertions.
-/// Required rendered-snapshot codes are excluded from the legacy fallback.
-fn snapshot_codes() -> BTreeSet<String> {
-    let root = root();
-    let mut out: BTreeSet<String> = BTreeSet::new();
+/// Direct fixture directories that carry rendered CLI/tool reports. UI and
+/// lint paths are collected separately because their harnesses derive the
+/// expected snapshot path from each source fixture.
+const REPORT_FIXTURE_DIRS: &[(&str, &str)] = &[
+    ("tests/cli", "txt"),
+    ("tests/release", "txt"),
+    ("tests/fixtures/cli-diagnostics", "stderr"),
+    ("tests/fixtures/jetpack-diagnostics", "stderr"),
+    ("tests/fixtures/module-eval-diagnostics", "stderr"),
+];
 
-    // tests/ui/*.stderr (flat) and tests/ui/**/stderr (subdirs)
+/// Exact snapshot paths consumed by the UI/lint harnesses plus direct report
+/// fixture directories. Keeping this path table independent from code
+/// extraction prevents prose, comments, and Rust assertions from becoming
+/// coverage.
+fn report_snapshot_paths() -> Vec<PathBuf> {
+    let root = root();
+    let mut out = Vec::new();
+
     let ui = root.join("tests/ui");
     if let Ok(entries) = fs::read_dir(&ui) {
-        for e in entries.flatten() {
-            let p = e.path();
-            if p.is_dir() {
-                // subdirectory fixture: tests/ui/foo/stderr
-                let sub = p.join("stderr");
-                if sub.is_file() {
-                    for code in extract_snapshot_codes(&read(&sub)) {
-                        out.insert(code);
-                    }
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_file()
+                && path.extension().and_then(|ext| ext.to_str()) == Some(jet::Syntax::FILE_EXT)
+                && !path
+                    .file_name()
+                    .and_then(|name| name.to_str())
+                    .is_some_and(|name| name.contains(".fixed."))
+            {
+                let snapshot = path.with_extension("stderr");
+                if snapshot.is_file() {
+                    out.push(snapshot);
                 }
-            } else if p.extension().and_then(|x| x.to_str()) == Some("stderr") {
-                for code in extract_snapshot_codes(&read(&p)) {
-                    out.insert(code);
+                continue;
+            }
+            if !path.is_dir() {
+                continue;
+            }
+            let entry = ["run", "main"]
+                .into_iter()
+                .map(|name| path.join(format!("{name}.{}", jet::Syntax::FILE_EXT)))
+                .find(|candidate| candidate.is_file());
+            if entry.is_some() {
+                let snapshot = path.join("stderr");
+                if snapshot.is_file() {
+                    out.push(snapshot);
+                }
+            } else {
+                let workspace = path.join(jet::Syntax::WORKSPACE_FILE);
+                if workspace.is_file() {
+                    let name = path
+                        .file_name()
+                        .expect("workspace fixture directory name")
+                        .to_string_lossy();
+                    let snapshot = path
+                        .parent()
+                        .expect("workspace fixture parent")
+                        .join(format!("{name}.stderr"));
+                    if snapshot.is_file() {
+                        out.push(snapshot);
+                    }
                 }
             }
         }
     }
 
-    // tests/ui_lint/*.warn
     let lint = root.join("tests/ui_lint");
     if let Ok(entries) = fs::read_dir(&lint) {
-        for e in entries.flatten() {
-            let p = e.path();
-            if p.extension().and_then(|x| x.to_str()) == Some("warn") {
-                for code in extract_snapshot_codes(&read(&p)) {
-                    out.insert(code);
-                }
-            }
-        }
-    }
-
-    // tests/cli/*.txt
-    let cli = root.join("tests/cli");
-    if let Ok(entries) = fs::read_dir(&cli) {
-        for e in entries.flatten() {
-            let p = e.path();
-            if p.extension().and_then(|x| x.to_str()) == Some("txt") {
-                let text = read(&p);
-                for code in extract_snapshot_codes(&text) {
-                    out.insert(code);
-                }
-            }
-        }
-    }
-
-    // Runtime journey reports intentionally omit a bracketed diagnostic code.
-    // Count only the exact runtime fixture convention, with a paired snapshot
-    // and the live interpreter marker; explain pages are not UI snapshots.
-    if let Ok(entries) = fs::read_dir(&ui) {
-        for e in entries.flatten() {
-            let path = e.path();
-            if path.extension().and_then(|x| x.to_str()) == Some("jet") {
-                if let Some(code) = runtime_ui_code(&path) {
-                    out.insert(code);
-                }
-            }
-        }
-    }
-
-    // tests/release/*.txt
-    let rel = root.join("tests/release");
-    if let Ok(entries) = fs::read_dir(&rel) {
-        for e in entries.flatten() {
-            let p = e.path();
-            if p.extension().and_then(|x| x.to_str()) == Some("txt") {
-                for code in extract_snapshot_codes(&read(&p)) {
-                    out.insert(code);
-                }
-            }
-        }
-    }
-
-    // Exact CLI stderr fixtures for command diagnostics that do not originate
-    // from .jet UI source files.
-    for fixture_dir in ["jetpack-diagnostics", "cli-diagnostics"] {
-        let fixtures = root.join("tests/fixtures").join(fixture_dir);
-        if let Ok(entries) = fs::read_dir(&fixtures) {
-            for e in entries.flatten() {
-                let p = e.path();
-                if p.extension().and_then(|x| x.to_str()) == Some("stderr") {
-                    for code in extract_snapshot_codes(&read(&p)) {
-                        out.insert(code);
-                    }
-                }
-            }
-        }
-    }
-
-    // Legacy runtime assertions outside this card remain accepted until their
-    // owning cards migrate them. #343 coverage below uses committed artifacts;
-    // none of E0966-E0978/E1203/E1207/E1801/E3302/E3402/L2101 depends
-    // on this compatibility scan.
-    let tests_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests");
-    if let Ok(entries) = fs::read_dir(&tests_dir) {
         for entry in entries.flatten() {
             let path = entry.path();
-            if path.extension().and_then(|x| x.to_str()) == Some("rs")
-                && path.file_name().and_then(|x| x.to_str()) != Some("diagnostics_coverage.rs")
+            if path.is_file()
+                && path.extension().and_then(|ext| ext.to_str()) == Some(jet::Syntax::FILE_EXT)
             {
-                if let Ok(content) = fs::read_to_string(path) {
-                    for code in extract_assert_codes(&content) {
-                        if !RENDERED_SNAPSHOT_REQUIRED.contains(&code.as_str()) {
-                            out.insert(code);
-                        }
-                    }
+                let snapshot = path.with_extension("warn");
+                if snapshot.is_file() {
+                    out.push(snapshot);
                 }
             }
         }
     }
 
-    let module_eval = root.join("tests/fixtures/module-eval-diagnostics");
-    if let Ok(entries) = fs::read_dir(&module_eval) {
-        for entry in entries.flatten() {
-            let path = entry.path();
-            if path.extension().and_then(|x| x.to_str()) == Some("stderr") {
-                for code in extract_snapshot_codes(&read(&path)) {
-                    out.insert(code);
+    for &(dir, extension) in REPORT_FIXTURE_DIRS {
+        let dir = root.join(dir);
+        if let Ok(entries) = fs::read_dir(dir) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.is_file()
+                    && path.extension().and_then(|ext| ext.to_str()) == Some(extension)
+                {
+                    out.push(path);
                 }
             }
         }
     }
 
+    out.sort();
+    out.dedup();
     out
+}
+
+fn is_report_code(code: &str) -> bool {
+    let mut bytes = code.bytes();
+    matches!(bytes.next(), Some(byte) if byte.is_ascii_uppercase())
+        && bytes.all(|byte| byte.is_ascii_uppercase() || byte.is_ascii_digit() || byte == b'-')
+}
+
+/// Extract only report-opening lines. Column 0 is intentional: indented
+/// backend text, Why/Fix cross-references, comments, and quoted assertions do
+/// not assert a rendered report.
+fn extract_report_opening_codes(text: &str) -> Vec<String> {
+    text.lines()
+        .filter_map(|line| {
+            let rest = ["Error [", "Warning [", "Stop [", "Lint ["]
+                .into_iter()
+                .find_map(|prefix| line.strip_prefix(prefix))?;
+            let end = rest.find(']')?;
+            let code = &rest[..end];
+            is_report_code(code).then(|| code.to_string())
+        })
+        .collect()
+}
+
+fn rendered_report_codes() -> BTreeSet<String> {
+    report_snapshot_paths()
+        .into_iter()
+        .flat_map(|path| extract_report_opening_codes(&read(&path)))
+        .collect()
 }
 
 fn rendered_snapshot_texts() -> Vec<(PathBuf, String)> {
@@ -732,41 +728,6 @@ fn diagnostic_voice_scope_includes_owned_runtime_artifacts() {
     ] {
         assert!(paths.contains(expected), "voice ratchet omitted {expected}");
     }
-}
-
-/// Extract codes from Rust test assertions like `.contains("E1234")` or
-/// `d.code == "E1234"` or `assert_eq!(diag.code, "E1234")`.
-fn extract_assert_codes(text: &str) -> Vec<String> {
-    extract_delimited_codes(text, b'"', b'"')
-}
-
-/// Workspace diagnostics must have rendered snapshots. Code assertions in
-/// `tests/workspace.rs` do not satisfy I4(b).
-const RENDERED_SNAPSHOT_REQUIRED: &[&str] = &["E0995", "E0996", "E0997"];
-
-/// Extract numeric or word-shaped bracket codes from snapshot text.
-fn extract_snapshot_codes(text: &str) -> Vec<String> {
-    extract_delimited_codes(text, b'[', b']')
-}
-
-fn runtime_ui_code(path: &PathBuf) -> Option<String> {
-    let name = path.file_name()?.to_str()?;
-    let digits = name.strip_prefix("runtime_e")?.strip_suffix(".jet")?;
-    if digits.len() != 4 || !digits.bytes().all(|byte| byte.is_ascii_digit()) {
-        return None;
-    }
-    if !path.with_extension("stderr").is_file() {
-        return None;
-    }
-    let source = fs::read_to_string(path).ok()?;
-    if !source
-        .lines()
-        .any(|line| line.trim() == "// @dev_interpreter")
-    {
-        return None;
-    }
-    let code = format!("E{digits}");
-    jet::Explain::is_code(&code).then_some(code)
 }
 
 #[test]
@@ -846,24 +807,170 @@ const UNTESTABLE_VIA_SNAPSHOT: &[&str] = &[
     "E0909", // generic instantiation: parser stack overflow before depth guard fires
 ];
 
-/// Codes that are emitted in Source/ but have no test coverage yet.
-/// These are ACKNOWLEDGED GAPS — not exclusions. Each entry must name WHY it has no coverage
-/// and what work is needed. This list should shrink over time.
-///
-/// The test still PASSES with these codes listed here, but a separate test
-/// (`acknowledged_coverage_gaps_are_expected`) verifies the list doesn't GROW silently.
-const ACKNOWLEDGED_COVERAGE_GAPS: &[&str] = &[
-    // E0916 is reserved for Debug auto-derive limits and documented as
-    // "defined, not yet emitted"; the helper lives in Generics.rs before the
-    // feature path is wired. Remove this once auto-derived Debug can actually
-    // reject a non-debuggable field through sema.
-    "E0916",
-    // E2202 (dev interpreter step budget) is covered by tests/dev.rs
-    // (`infinite_loop_hits_e2202_fuel_stop` + the c77 battery boundary set).
-    // E0153: protocol expansion parse failure — internal compiler error path only
-    // (D-PROTO1); no user-writable fixture triggers a failed fragment re-parse.
-    "E0153",
+/// Current fixture/registry mismatches that are intentional and owned. The
+/// side names which independently maintained table is missing the code:
+/// `left-only` is a registered-active emitted code without a report opener;
+/// `right-only` is a report opener without a registered-active emitted code.
+/// Every row has an owner, and the count ratchet below makes this list shrink-only.
+const DIAGNOSTIC_COVERAGE_ALLOWLIST: &[(&str, &str, &str)] = &[
+    // LEFT-only: registered-active and emitted, but no column-0 report opener.
+    ("E0037", "left-only", "Tower #2093"),
+    ("E0153", "left-only", "Tower #2093"),
+    ("E0343", "left-only", "Tower #2093"),
+    ("E0345", "left-only", "Tower #2093"),
+    ("E0347", "left-only", "Tower #2093"),
+    ("E0349", "left-only", "Tower #2093"),
+    ("E0403", "left-only", "Tower #2093"),
+    ("E0502", "left-only", "Tower #2093"),
+    ("E0601", "left-only", "Tower #2093"),
+    ("E0613", "left-only", "Tower #2093"),
+    ("E0916", "left-only", "Tower #2093"),
+    ("E0953", "left-only", "Tower #2093"),
+    ("E0959", "left-only", "Tower #2093"),
+    ("E0979", "left-only", "Tower #2093"),
+    ("E0980", "left-only", "Tower #2093"),
+    ("E0981", "left-only", "Tower #2093"),
+    ("E0982", "left-only", "Tower #2093"),
+    ("E1204", "left-only", "Tower #2093"),
+    ("E1214", "left-only", "Tower #2093"),
+    ("E1215", "left-only", "Tower #2093"),
+    ("E1217", "left-only", "Tower #2093"),
+    ("E1218", "left-only", "Tower #2093"),
+    ("E1221", "left-only", "Tower #2093"),
+    ("E1227", "left-only", "Tower #2093"),
+    ("E1228", "left-only", "Tower #2093"),
+    ("E1230", "left-only", "Tower #2093"),
+    ("E1232", "left-only", "Tower #2093"),
+    ("E1233", "left-only", "Tower #2093"),
+    ("E1234", "left-only", "Tower #2093"),
+    ("E1235", "left-only", "Tower #2093"),
+    ("E1236", "left-only", "Tower #2093"),
+    ("E1237", "left-only", "Tower #2093"),
+    ("E1238", "left-only", "Tower #2093"),
+    ("E1240", "left-only", "Tower #2093"),
+    ("E1241", "left-only", "Tower #2093"),
+    ("E1242", "left-only", "Tower #2093"),
+    ("E1243", "left-only", "Tower #2093"),
+    ("E1244", "left-only", "Tower #2093"),
+    ("E1245", "left-only", "Tower #2093"),
+    ("E1246", "left-only", "Tower #2093"),
+    ("E1247", "left-only", "Tower #2093"),
+    ("E1248", "left-only", "Tower #2093"),
+    ("E1249", "left-only", "Tower #2093"),
+    ("E1250", "left-only", "Tower #2093"),
+    ("E1251", "left-only", "Tower #2093"),
+    ("E1252", "left-only", "Tower #2093"),
+    ("E1254", "left-only", "Tower #2093"),
+    ("E1255", "left-only", "Tower #2093"),
+    ("E1256", "left-only", "Tower #2093"),
+    ("E1261", "left-only", "Tower #2093"),
+    ("E1262", "left-only", "Tower #2093"),
+    ("E1263", "left-only", "Tower #2093"),
+    ("E1266", "left-only", "Tower #2093"),
+    ("E1267", "left-only", "Tower #2093"),
+    ("E1268", "left-only", "Tower #2093"),
+    ("E1269", "left-only", "Tower #2093"),
+    ("E1271", "left-only", "Tower #2093"),
+    ("E1272", "left-only", "Tower #2093"),
+    ("E1275", "left-only", "Tower #2093"),
+    ("E1276", "left-only", "Tower #2093"),
+    ("E1278", "left-only", "Tower #2093"),
+    ("E1279", "left-only", "Tower #2093"),
+    ("E1280", "left-only", "Tower #2093"),
+    ("E1281", "left-only", "Tower #2093"),
+    ("E1282", "left-only", "Tower #2093"),
+    ("E1283", "left-only", "Tower #2093"),
+    ("E1284", "left-only", "Tower #2093"),
+    ("E1285", "left-only", "Tower #2093"),
+    ("E1286", "left-only", "Tower #2093"),
+    ("E1287", "left-only", "Tower #2093"),
+    ("E1288", "left-only", "Tower #2093"),
+    ("E1289", "left-only", "Tower #2093"),
+    ("E1290", "left-only", "Tower #2093"),
+    ("E1291", "left-only", "Tower #2093"),
+    ("E1294", "left-only", "Tower #2093"),
+    ("E1316", "left-only", "Tower #2093"),
+    ("E1320", "left-only", "Tower #2093"),
+    ("E1329", "left-only", "Tower #2093"),
+    ("E1330", "left-only", "Tower #2093"),
+    ("E1332", "left-only", "Tower #2093"),
+    ("E1335", "left-only", "Tower #2093"),
+    ("E1336", "left-only", "Tower #2093"),
+    ("E1802", "left-only", "Tower #2093"),
+    ("E1803", "left-only", "Tower #2093"),
+    ("E2106", "left-only", "Tower #2093"),
+    ("E2201", "left-only", "Tower #2093"),
+    ("E2202", "left-only", "Tower #2093"),
+    ("E2203", "left-only", "Tower #2093"),
+    ("E2204", "left-only", "Tower #2093"),
+    ("E2210", "left-only", "Tower #2093"),
+    ("E2601", "left-only", "Tower #2093"),
+    ("E2602", "left-only", "Tower #2093"),
+    ("E2603", "left-only", "Tower #2093"),
+    ("E2604", "left-only", "Tower #2093"),
+    ("E2605", "left-only", "Tower #2093"),
+    ("E2606", "left-only", "Tower #2093"),
+    ("E2712", "left-only", "Tower #2093"),
+    ("E2901", "left-only", "Tower #2093"),
+    ("E2906", "left-only", "Tower #2093"),
+    ("E2907", "left-only", "Tower #2093"),
+    ("E2908", "left-only", "Tower #2093"),
+    ("E3002", "left-only", "Tower #2093"),
+    ("E3201", "left-only", "Tower #2093"),
+    ("E3209", "left-only", "Tower #2093"),
+    ("E3210", "left-only", "Tower #2093"),
+    ("E3504", "left-only", "Tower #2093"),
+    ("L0204", "left-only", "Tower #2093"),
+    ("L0205", "left-only", "Tower #2093"),
+    ("L2902", "left-only", "Tower #2093"),
+    ("L3102", "left-only", "Tower #2093"),
+    ("R0801", "left-only", "Tower #2093"),
+    ("R0802", "left-only", "Tower #2093"),
+    ("R0803", "left-only", "Tower #2093"),
+    // RIGHT-only: existing report openers for retired/reserved rows.
+    ("E0060", "right-only", "Tower #2093"),
+    ("E0065", "right-only", "Tower #2093"),
+    ("E0066", "right-only", "Tower #2093"),
+    ("E0067", "right-only", "Tower #2093"),
+    ("E0128", "right-only", "Tower #2093"),
+    ("E0146", "right-only", "Tower #2093"),
+    ("E0214", "right-only", "Tower #2093"),
+    ("E0341", "right-only", "Tower #2093"),
+    ("E0351", "right-only", "Tower #2093"),
+    ("E0358", "right-only", "Tower #2093"),
+    ("E0374", "right-only", "Tower #2093"),
+    ("E0375", "right-only", "Tower #2093"),
+    ("E0376", "right-only", "Tower #2093"),
+    ("E0377", "right-only", "Tower #2093"),
+    ("E0426", "right-only", "Tower #2093"),
+    ("E0431", "right-only", "Tower #2093"),
+    ("E0432", "right-only", "Tower #2093"),
+    ("E0922", "right-only", "Tower #2093"),
+    ("E0928", "right-only", "Tower #2093"),
+    ("E0929", "right-only", "Tower #2093"),
+    ("E0960", "right-only", "Tower #2093"),
+    ("E0988", "right-only", "Tower #2093"),
+    ("E1002", "right-only", "Tower #2093"),
+    ("E1105", "right-only", "Tower #2093"),
+    ("E1107", "right-only", "Tower #2093"),
+    ("E1115", "right-only", "Tower #2093"),
+    ("E1116", "right-only", "Tower #2093"),
+    ("E1209", "right-only", "Tower #2093"),
+    ("E1210", "right-only", "Tower #2093"),
+    ("E1306", "right-only", "Tower #2093"),
+    ("E1342", "right-only", "Tower #2093"),
+    ("E1343", "right-only", "Tower #2093"),
+    ("E2101", "right-only", "Tower #2093"),
+    ("E2510", "right-only", "Tower #2093"),
+    ("E2714", "right-only", "Tower #2093"),
+    ("E2805", "right-only", "Tower #2093"),
+    ("E2935", "right-only", "Tower #2093"),
+    ("E2936", "right-only", "Tower #2093"),
+    ("E3206", "right-only", "Tower #2093"),
+    ("E3530", "right-only", "Tower #2093"),
 ];
+
+const DIAGNOSTIC_COVERAGE_ALLOWLIST_CEILING: usize = 153;
 
 /// All exclusions combined.
 fn all_exclusions() -> BTreeSet<String> {
@@ -934,9 +1041,8 @@ fn i2_rustc_codes_do_not_leak_as_jet_diagnostics() {
             code
         );
 
-        // Verify no snapshot file mentions the rustc code in [ENNNNN] format
-        let bracketed = format!("[{}]", code);
-        let snaps = snapshot_codes();
+        // Verify no rendered report opens with the rustc code.
+        let snaps = rendered_report_codes();
         assert!(
             !snaps.contains(code),
             "I2 violation: rustc code {} appears in a user-facing snapshot as [{}]. \
@@ -944,7 +1050,7 @@ fn i2_rustc_codes_do_not_leak_as_jet_diagnostics() {
             code,
             code
         );
-        let _ = (&allowed_fn_context, &bracketed);
+        let _ = &allowed_fn_context;
     }
 }
 

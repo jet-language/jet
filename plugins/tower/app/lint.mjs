@@ -4,7 +4,7 @@
 // mutates the store.
 import { readdirSync, existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { ballotGaps } from './store.mjs';
+import { ballotGaps, findCard } from './store.mjs';
 import { isOpenCard, referenceLabel, referenceTokens } from './card-matching.mjs';
 
 // `updated`/`ratifiedAt` are 'YYYY-MM-DD' (today()); `created` on decisions
@@ -98,12 +98,11 @@ export function ruleStaleDraft(s) {
 // non-blocking; this rule is how that silence gets surfaced.
 export function ruleOrphanBlockers(s, history) {
   const findings = [];
-  const liveCardIds = new Set(s.cards.map(c => c.id));
-  const historyCardIds = new Set((history?.cards || []).map(c => c.id));
   const decisionIds = new Set(s.decisions.map(d => d.id));
+  const archived = { cards: history?.cards || [] };
   for (const c of s.cards) {
     for (const id of c.blockedBy || []) {
-      if (liveCardIds.has(id) || historyCardIds.has(id) || decisionIds.has(id)) continue;
+      if (findCard(s, id) || findCard(archived, id) || decisionIds.has(id)) continue;
       findings.push({ rule: 'orphan-blockers', ref: `#${c.num}`,
         msg: `#${c.num} "${c.title}" blockedBy dangling ref ${id}` });
     }

@@ -10,7 +10,7 @@ import { fileURLToPath } from 'node:url';
 import * as db from './store.mjs';
 import { openStore, TowerError, PHASE_IDS } from './store.mjs';
 import { findDataDir, readJSON, writeJSON, historyFile } from './paths.mjs';
-import { ConfigError, DEFAULTS } from './config.mjs';
+import { ConfigError } from './config.mjs';
 import { migrate } from './migrate.mjs';
 import { lint } from './lint.mjs';
 import { findDuplicateCandidates } from './card-matching.mjs';
@@ -40,48 +40,169 @@ function parseArgs(argv) {
 // "…"` created a card with an empty body, and a typo'd `--phase` on `card
 // update` no-oped. Every flag is declared here (camelCase, as parseArgs
 // normalizes it) and anything else is a usage error.
-const GLOBAL_FLAGS = ['json', 'by', 'file', 'stdin', 'color', 'help', 'data'];
+const GLOBAL_FLAGS = ['json', 'help', 'data'];
+const by = (...flags) => [...new Set(['by', ...flags])];
+const payload = (...flags) => by('file', 'stdin', ...flags);
+
+// Flags belong to verbs, not nouns. A noun-wide allow-list makes a valid flag
+// on one verb silently disappear on its sibling (for example --meet on card
+// add). This table is the CLI contract; help below is rendered from it.
 const COMMAND_FLAGS = {
-  init: ['name', 'dir'],
-  import: ['dir', 'name', 'force'],
-  serve: ['port', 'open', 'noWatch'],
-  status: ['days', 'window'],
-  state: [],
-  card: ['title', 'body', 'kind', 'track', 'epoch', 'milestone', 'phase', 'priority', 'plan',
-    'workOrder', 'log', 'needsAcceptance', 'blockedBy', 'refs', 'tags', 'addTag', 'removeTag',
-    'tag', 'untagged', 'parent', 'lane', 'add', 'meet', 'verify', 'reopen', 'reason', 'evidence', 'handoff', 'expectRev', 'force', 'list'],
-  decision: ['id', 'cardId', 'card', 'title', 'gist', 'lesson', 'story', 'explainer', 'inWild',
-    'detail', 'rec', 'group', 'ballotMode', 'shortAuthorizedBy', 'draft', 'ready', 'outcome',
-    'comment', 'quote', 'open', 'expectRev'],
-  question: ['card', 'decision', 'text', 'kind', 'open'],
-  message: ['card', 'text', 'status', 'all'],
-  papercut: ['card', 'text', 'open'],
-  idea: ['title', 'body', 'text', 'kind', 'track', 'priority', 'tags', 'note', 'all'],
-  epoch: ['name', 'goal', 'status'],
-  milestone: ['id', 'epoch', 'title', 'goal', 'criteria', 'status', 'add', 'meet', 'verify', 'reopen', 'reason', 'evidence', 'expectRev', 'list', 'archive', 'unarchive', 'archived'],
-  next: ['agent', 'epoch', 'track', 'limit', 'burndown', 'parallel', 'readyAcrossEpochs'],
-  brief: ['agent', 'noClaim'],
-  lint: ['docs', 'docsRoot'],
-  docs: ['section', 'title', 'path', 'id', 'body', 'scratch'],
-  verdict: ['outcome', 'title'],
-  archive: [],
-  repair: ['manifest', 'dryRun', 'expectRev'],
-  events: ['limit'],
-  undo: ['expectRev'],
-  githook: [],
+  init: { flags: ['name', 'dir'] },
+  import: { flags: ['dir', 'name', 'force'] },
+  serve: { flags: ['port', 'open', 'noWatch'] },
+  status: { flags: ['days', 'window', 'color'] },
+  state: { flags: [] },
+  card: { verbs: {
+    list: ['lane', 'phase', 'epoch', 'track', 'kind', 'milestone', 'tag', 'untagged', 'parent'],
+    show: [],
+    add: payload('title', 'body', 'kind', 'track', 'epoch', 'milestone', 'phase', 'priority', 'plan',
+      'workOrder', 'needsAcceptance', 'blockedBy', 'refs', 'tags', 'addTag', 'parent', 'force'),
+    update: payload('title', 'body', 'kind', 'track', 'epoch', 'milestone', 'phase', 'priority', 'plan',
+      'workOrder', 'log', 'needsAcceptance', 'blockedBy', 'refs', 'tags', 'addTag', 'removeTag', 'parent', 'expectRev'),
+    claim: by(),
+    release: by('handoff'),
+    delete: by(),
+    criteria: by('add', 'meet', 'verify', 'reopen', 'reason', 'evidence', 'list'),
+    log: by('text'),
+  }},
+  decision: { verbs: {
+    list: ['open', 'card'],
+    show: [],
+    add: payload('id', 'card', 'title', 'gist', 'lesson', 'story', 'explainer', 'inWild', 'detail', 'rec',
+      'group', 'ballotMode', 'shortAuthorizedBy', 'draft'),
+    update: payload('title', 'gist', 'lesson', 'story', 'explainer', 'inWild', 'detail', 'rec', 'group',
+      'ballotMode', 'shortAuthorizedBy', 'ready'),
+    ratify: by('outcome', 'comment', 'quote', 'expectRev'),
+    reopen: by(),
+    delete: by(),
+  }},
+  question: { verbs: {
+    list: ['open', 'card'],
+    ask: by('text', 'kind', 'decision'),
+    answer: by('text'),
+    delete: by(),
+  }},
+  message: { verbs: {
+    list: ['card', 'status', 'all'],
+    add: by('text'),
+    done: by(),
+  }},
+  papercut: { verbs: {
+    list: ['open'],
+    add: by('card', 'text'),
+    resolve: by(),
+  }},
+  idea: { verbs: {
+    list: ['all'],
+    add: by('title', 'body', 'text', 'kind', 'track', 'priority', 'tags', 'note'),
+    promote: by('title', 'body', 'kind', 'track', 'priority'),
+    delete: by(),
+  }},
+  epoch: { verbs: {
+    list: [],
+    add: by('name', 'goal', 'status'),
+    update: by('name', 'goal', 'status'),
+    current: by(),
+  }},
+  milestone: { verbs: {
+    list: ['epoch', 'archived'],
+    add: payload('id', 'epoch', 'title', 'goal', 'criteria'),
+    update: payload('title', 'goal', 'criteria', 'status', 'epoch', 'archive', 'unarchive'),
+    criteria: by('add', 'meet', 'verify', 'reopen', 'reason', 'evidence', 'list'),
+    verify: by('evidence', 'expectRev'),
+    delete: by(),
+  }},
+  next: { flags: ['agent', 'epoch', 'track', 'limit', 'burndown', 'parallel', 'readyAcrossEpochs'] },
+  brief: { flags: ['agent', 'noClaim', 'color'] },
+  lint: { flags: ['docs', 'docsRoot'] },
+  docs: { verbs: {
+    list: [],
+    show: ['path', 'scratch'],
+    add: payload('section', 'title', 'path', 'id', 'body'),
+    update: payload('title', 'path', 'body', 'scratch'),
+    archive: ['path'],
+    delete: ['path'],
+  }},
+  verdict: { flags: by('outcome', 'title') },
+  archive: { verbs: {
+    status: [],
+    show: [],
+    restore: by(),
+  }},
+  repair: { verbs: {
+    apply: by('manifest', 'dryRun', 'expectRev'),
+  }},
+  events: { flags: ['limit'] },
+  undo: { flags: ['expectRev'] },
+  githook: { verbs: { install: [], 'post-commit': [] } },
 };
 
 const spellFlag = (key) => `--${key.replace(/[A-Z]/g, (c) => `-${c.toLowerCase()}`)}`;
+const commandFlags = (cmd, verb) => {
+  const spec = COMMAND_FLAGS[cmd];
+  if (!spec) return null;
+  if (!spec.verbs) return spec.flags;
+  return spec.verbs[verb || (cmd === 'githook' ? 'install' : verb)];
+};
 
-function checkFlags(cmd, flags) {
-  const known = COMMAND_FLAGS[cmd];
-  if (!known) return; // unknown command — the dispatcher reports that instead
-  const unknown = Object.keys(flags).filter(f => !known.includes(f) && !GLOBAL_FLAGS.includes(f));
+function checkFlags(cmd, verb, flags) {
+  const spec = COMMAND_FLAGS[cmd];
+  if (!spec) return; // unknown command — the dispatcher reports that instead
+  const knownFlags = commandFlags(cmd, verb) || (spec.verbs && !verb
+    ? [...new Set(Object.values(spec.verbs).flat())] : null);
+  if (spec.verbs && !knownFlags)
+    throw new TowerError('E_USAGE', `unknown ${cmd} verb "${verb}" — run \`tower help\``);
+  const known = [...GLOBAL_FLAGS, ...(knownFlags || [])];
+  const unknown = Object.keys(flags).filter(f => !known.includes(f));
   if (!unknown.length) return;
   throw new TowerError('E_USAGE',
     `unknown flag${unknown.length > 1 ? 's' : ''} for \`tower ${cmd}\`: `
     + `${unknown.map(spellFlag).join(', ')} — run \`tower help\``);
 }
+
+const FLAG_VALUE = {
+  add: '"text"', meet: 'n', verify: 'n', reopen: 'n', reason: '"…"', evidence: '"…"',
+  by: 'X', file: 'FILE', stdin: null, color: '=auto|always|never',
+  title: '"…"', body: '"…"', text: '"…"', path: 'PATH', section: 'SECTION',
+  id: 'ID', card: 'REF', decision: 'ID', epoch: 'E', milestone: 'M',
+  phase: 'P', track: 'T', kind: 'K', priority: 'P', plan: '"…"', lane: 'L',
+  tag: 'T', tags: 'a,b', addTag: 'T', removeTag: 'T', parent: 'REF', blockedBy: 'REF',
+  refs: 'a,b', workOrder: 'N', needsAcceptance: 'true|false', log: '"…"', handoff: '"…"',
+  expectRev: 'N', name: 'X', dir: 'PATH', port: 'N', days: 'N', window: 'N', goal: '"…"',
+  status: 'S', open: null, all: null, untagged: null, force: null, archive: null,
+  unarchive: null, archived: null, draft: null, ready: null, comment: '"…"', quote: '"…"',
+  outcome: 'K', agent: 'A', noClaim: null, limit: 'N', burndown: null, parallel: null,
+  readyAcrossEpochs: null, docs: null, docsRoot: 'DIR', scratch: null, note: '"…"',
+  manifest: 'FILE', dryRun: null,
+};
+
+const flagToken = (key) => {
+  const value = FLAG_VALUE[key];
+  return `${spellFlag(key)}${value == null ? '' : String(value).startsWith('=') ? value : ` ${value}`}`;
+};
+const flagSynopsis = (flags) => flags
+  .filter((key) => key !== 'by')
+  .concat(flags.includes('by') ? ['by'] : [])
+  .map(flagToken)
+  .join(' ');
+const helpLine = (path, flags) => {
+  if (path === 'brief' && flags.includes('color')) {
+    return `  tower brief [${flagSynopsis(flags.filter((key) => key !== 'color'))}]\n              [${flagToken('color')}]`;
+  }
+  return `  tower ${path}${flags.length ? ` [${flagSynopsis(flags)}]` : ''}`;
+};
+
+// Generated from COMMAND_FLAGS. Keep this as the only user-facing command
+// surface list; `tower help --check` verifies its flags against the parser.
+const HELP_ENTRIES = Object.entries(COMMAND_FLAGS).flatMap(([cmd, spec]) => {
+  if (!spec.verbs) return [helpLine(cmd, spec.flags)];
+  return [
+    `  tower ${cmd}     ${Object.keys(spec.verbs).join('|')}`,
+    ...Object.entries(spec.verbs).map(([verb, flags]) => helpLine(`${cmd} ${verb}`, flags)),
+  ];
+});
+const HELP_SURFACE = HELP_ENTRIES.join('\n');
 
 const readPayload = (flags) => {
   if (flags.file === '-' || flags.stdin) return JSON.parse(readFileSync(0, 'utf8'));
@@ -229,7 +350,8 @@ function cmdCard(store, { pos, flags }) {
   switch (verb) {
     case 'list': {
       const s = store.project();
-      let cs = s.cards;
+      const allCards = Array.isArray(s.cards) ? s.cards : [];
+      let cs = allCards;
       if (flags.lane) cs = cs.filter(c => c.lane.lane === flags.lane);
       if (flags.epoch) cs = cs.filter(c => c.epoch === flags.epoch);
       if (flags.track) cs = cs.filter(c => c.track === flags.track);
@@ -242,7 +364,7 @@ function cmdCard(store, { pos, flags }) {
       }
       if (flags.untagged) cs = cs.filter(c => !(c.tags || []).length);
       if (flags.parent) {
-        const parent = db.findCard({ cards: s.cards }, flags.parent);
+        const parent = db.findCard({ cards: allCards }, flags.parent);
         if (!parent) throw new TowerError('E_NOT_FOUND', `no card ${flags.parent}`);
         cs = cs.filter(c => c.parentId === parent.id);
       }
@@ -356,7 +478,15 @@ function cmdCard(store, { pos, flags }) {
       const { result } = store.mutate((s) => db.deleteCard(s, ref, { by }));
       return out(flags, `deleted card #${result.num}`, result);
     }
-    default: throw new TowerError('E_USAGE', `unknown card verb "${verb}" — list/show/add/update/claim/release/delete/criteria`);
+    case 'log': {
+      if (typeof flags.text !== 'string' || !flags.text.trim())
+        throw new TowerError('E_USAGE', 'card log needs --text <text>');
+      const { result } = store.mutate((s, cfg) => db.updateCard(s, ref, {
+        logEntry: flags.text.trim(), by,
+      }, cfg));
+      return out(flags, `logged card #${result.num}`, result);
+    }
+    default: throw new TowerError('E_USAGE', `unknown card verb "${verb}" — list/show/add/update/claim/release/delete/criteria/log`);
   }
 }
 
@@ -972,110 +1102,62 @@ async function githookPostCommit(store) {
 
 const HELP = `tower — file-backed project board for an owner + AI agents
 
-  tower init [--name X] [--dir PATH]        set up plugins/tower/.tower (or PATH/.tower)
-  tower serve [--port ${DEFAULTS.port}] [--open] [--no-watch]
-                                            board UI + HTTP API; self-restarts
-                                            when Tower's own source changes
-                                            (--no-watch disables that)
-  tower status [--days N|--window N] [--json] [--color=auto|always|never]
-                                            terminal snapshot + open-card trend
-  tower state                               full projected state (JSON)
-  tower next [--epoch E] [--track T] [--agent A] [--limit N]
-             [--burndown | --ready-across-epochs | --parallel]
-                                            what an agent should pick up next;
-                                            --burndown narrows to the active
-                                            epoch + all sidequests; --ready-
-                                            across-epochs (alias --parallel)
-                                            lists every unblocked card board-
-                                            wide — the parallel-safe set
-                                            (D-TWR-OPS2)
-  tower lint [--json] [--docs] [--docs-root DIR]
-                                            durability sweeper over the live
-                                            board (done-without-evidence,
-                                            claimed-idle, missing-attribution,
-                                            ballot-gaps, stale-draft, orphan-
-                                            blockers, blocker-unpopulated,
-                                            duplicate-suspect,
-                                            criteria-evidence-conflict);
-                                            --docs also flags a ratified
-                                            decision id still listed in
-                                            docs/ballots/*.md; exit 1 on any
-                                            finding, 0 clean
-  tower docs     list|show|add|update|archive|delete
-                                            durable markdown under docs/ + pinned
-                                            scratchpad (.tower/scratch/owner-scratch.md)
-                                            — add: --section spec|audits|research|plans|
-                                            proposals|references [--title] [--file -]
-                                            — archive moves to docs/archive/ (hidden
-                                            from Docs UI); delete removes the file
-                                            — update/show scratchpad: --scratch
-  tower brief [ref] [--agent me] [--json] [--no-claim]
-              [--color=auto|always|never]
-                                            one-shot work packet: card, blockers,
-                                            criteria, decisions VERBATIM, questions,
-                                            refs, recent log, rules — zero other reads
-                                            needed to start. No ref → picks the top
-                                            card via next's picker. --agent claims it
-                                            unless --no-claim; no --agent → read-only.
+${HELP_SURFACE}
+  tower help --check                         verify help/parser flag agreement
 
-  tower card     list|show|add|update|claim|release|delete
-  tower card list [--lane L] [--phase P] [--epoch E] [--track T] [--kind K]
-                  [--tag T] [--untagged] [--parent '#N'] [--milestone M] [--json]
-  tower card add|update … [--add-tag T] [--remove-tag T] [--tags a,b] [--parent '#N'] [--force]
-  tower card update <ref> --needs-acceptance true|false   flag for owner accept ballot on close
-  tower card update <ref> --refs "docs/a.md,examples/b.jet"   explicit doc-path pointers
-  tower card criteria <ref> --add "text" --by X           add an exit criterion
-                            --meet n --evidence "…" --by X    builder: mark met
-                            --verify n --evidence "…" --by Y  milestone-review signoff
-                            --reopen n --reason "…" --by X     reopen a criterion
-                            --list                            show the checklist
-  tower card release <ref> --by X [--handoff "…"]         --handoff required if the card is building
-  tower decision list|show|add|update|ratify|reopen|delete
-  tower decision add --draft                              save a work-in-progress ballot, skip validation
-  tower decision update <id> --ready                       validate + clear draft
-  tower decision ratify <id> --outcome K [--quote "…"]     generic ballots only; acceptance requires owner UI
-  tower verdict '#N' --outcome "..." [--title "…"] --by owner
-                                            record an owner ruling as a ratified decision (not a log note)
-  tower archive  status|show <id>|restore <id> --by owner
-                                            done cards + ratified decisions retire here on their own
-                                            after config.retireAfterDays (default 3); restore brings one back
-  tower repair apply --manifest FILE --expect-rev N --by X [--dry-run]
-                                            exact, rev-guarded two-store leaf repair
-  tower question list|ask|answer|delete
-  tower message  list|add|done
-  tower papercut list|add|resolve
-  tower papercut add --by <agent> --text "…" [--card '#N']   log one-line tooling
-                                            friction; never blocked by card lanes
-  tower papercut resolve <id> --by owner    owner clears a handled papercut
-  tower idea     list|add|promote|delete
-  tower epoch    list|add|update|current
-  tower milestone list|add|update|criteria|verify|delete
-  tower milestone criteria <id> --add "text" --by X
-                                  --meet n|--verify n --evidence "…" --by X
-                                  --reopen n --reason "…" --by X
-  tower milestone verify <id> --evidence "…" --by X
-                                            review only when every linked
-                                            card is done and every milestone
-                                            criterion is verified
-  tower events   [--limit 30]
-  tower import <old-tower.json> [--name X] [--force]
-
-  tower undo                                revert the last write (rev-guarded)
-  tower githook [install]                   commits mentioning #N → card log
-
-  Cards accept #num or id. --json everywhere for machine output.
-  Complex payloads: --file payload.json or --file - (stdin).
-  Writers should pass --by <agent-name>; owner ops use --by owner.
-  Optimistic concurrency: --expect-rev N (exit 2 on conflict).
+  Shared flags: --json, --help, --data DIR.
+  Complex payloads: --file FILE or --stdin (writes only where shown above).
+  Cards accept #num or id. Writers pass --by X; --expect-rev N is rev-guarded.
   Phases: ${PHASE_IDS.map(id => id === 'verify' ? 'review (phase id verify)' : id).join(' ')}
 
   Guards (agent-hard, owner-soft — --by owner bypasses card closure; see plugin AGENTS.md):
     ballot validation (full/short profile, simple prose, ordered reviews; E_BALLOT), owner-only ratify (E_OWNER_ONLY),
-    frozen write guard (E_OWNER_LANE), ratified-decision delete guard
-    (E_HAS_RATIFIED), building-release handoff (E_HANDOFF), nonempty card
-    exit criteria with every row met or verified (E_CRITERIA), and explicit
-    milestone review (E_MILESTONE).
+    frozen write guard (E_OWNER_LANE), ratified-decision delete guard (E_HAS_RATIFIED),
+    building-release handoff (E_HANDOFF), nonempty card exit criteria (E_CRITERIA),
+    and explicit milestone review (E_MILESTONE).
 `;
+
+function helpContract() {
+  const mismatches = [];
+  if (!HELP.includes(HELP_SURFACE)) mismatches.push('generated command surface is missing from help');
+  const documentedGlobals = new Set((HELP.match(/--[a-z0-9-]+/g) || []));
+  for (const key of GLOBAL_FLAGS) {
+    if (!documentedGlobals.has(spellFlag(key))) mismatches.push(`global ${spellFlag(key)} is not documented`);
+  }
+  for (const entry of HELP_ENTRIES) {
+    const firstLine = entry.split('\n')[0];
+    if (/^  tower \S+\s{2,}\S/.test(firstLine)) continue;
+    const path = firstLine.trim().split(' [')[0].replace(/^tower /, '');
+    const parts = path.split(/\s+/);
+    const flags = parts.length > 1
+      ? commandFlags(parts[0], parts[1])
+      : commandFlags(parts[0]);
+    const expected = (flags || []).map(spellFlag);
+    if (!HELP.includes(entry)) {
+      mismatches.push(`${path}: command line is missing from help`);
+      for (const flag of expected) mismatches.push(`${path}: ${flag} is accepted but not documented`);
+      continue;
+    }
+    const declared = [...entry.matchAll(/--[a-z0-9-]+/g)].map((m) => m[0]);
+    for (const flag of expected) {
+      if (!declared.includes(flag)) mismatches.push(`${path}: ${flag} is accepted but not documented`);
+    }
+    for (const flag of declared) {
+      if (!expected.includes(flag)) mismatches.push(`${path}: ${flag} is documented but not accepted`);
+    }
+  }
+  return mismatches;
+}
+
+function cmdHelpCheck() {
+  const mismatches = helpContract();
+  if (mismatches.length) {
+    console.error(`tower: help/parser mismatch: ${mismatches.join('; ')}`);
+    process.exitCode = 1;
+    return;
+  }
+  console.log(JSON.stringify({ ok: true, mismatches: [], checked: Object.keys(COMMAND_FLAGS).length }));
+}
 
 // ---- dispatch ----------------------------------------------------------------
 
@@ -1084,8 +1166,14 @@ export async function run(argv) {
   const [cmd, ...rest] = pos;
   const sub = { pos: rest, flags };
   try {
-    if (!cmd || cmd === 'help' || flags.help) return console.log(HELP);
-    checkFlags(cmd, flags);
+    if (!cmd) return console.log(HELP);
+    if (cmd === 'help') {
+      const unknown = Object.keys(flags).filter((key) => !['check', ...GLOBAL_FLAGS].includes(key));
+      if (unknown.length) throw new TowerError('E_USAGE', `unknown flag${unknown.length > 1 ? 's' : ''} for \`tower help\`: ${unknown.map(spellFlag).join(', ')}`);
+      return flags.check ? cmdHelpCheck() : console.log(HELP);
+    }
+    checkFlags(cmd, rest[0], flags);
+    if (flags.help) return console.log(HELP);
     if (cmd === 'init') return cmdInit(sub);
     if (cmd === 'import') return cmdImport(sub);
 

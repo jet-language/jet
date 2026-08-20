@@ -735,6 +735,21 @@ export function findCard(s, ref) {
 }
 const mustCard = (s, ref) => findCard(s, ref) || fail('E_NOT_FOUND', `no card ${ref}`);
 
+// Store blocker refs canonically. Card lanes accept #N for convenience, but
+// lint and persisted state must see the same card id.
+function normalizeBlockedBy(s, raw) {
+  const refs = raw == null ? [] : Array.isArray(raw) ? raw : [raw];
+  return refs.map((value) => {
+    const ref = String(value ?? '').trim();
+    if (!ref) fail('E_INVALID', 'blockedBy needs a card or decision ref');
+    const card = findCard(s, ref);
+    if (card) return card.id;
+    const decision = s.decisions.find(d => d.id === ref);
+    if (decision) return decision.id;
+    fail('E_NOT_FOUND', `blockedBy: no card or decision ${ref}`);
+  });
+}
+
 const checkEnum = (val, list, what) => {
   if (val != null && !list.includes(val)) fail('E_INVALID', `${what} must be one of: ${list.join(', ')} (got ${JSON.stringify(val)})`);
 };
@@ -772,15 +787,27 @@ export function logEvent(s, { by = 'agent', action, ref = null, note = '' }) {
 // One exit-criteria item: 1-based stable n, open -> met (builder) -> verified
 // (a different reviewer). Card-embedded, no own id — addressed by (card, n).
 function normalizeCriterion(it, i) {
+  const source = typeof it === 'string' ? { text: it } : (it || {});
   return {
-    n: it.n ?? (i + 1),
-    text: String(it.text || '').trim(),
-    status: ['open', 'met', 'verified'].includes(it.status) ? it.status : 'open',
-    metBy: it.metBy ?? null,
-    verifiedBy: it.verifiedBy ?? null,
-    evidence: it.evidence || '',
-    at: it.at || now(),
+    n: source.n ?? (i + 1),
+    text: String(source.text || '').trim(),
+    status: ['open', 'met', 'verified'].includes(source.status) ? source.status : 'open',
+    metBy: source.metBy ?? null,
+    verifiedBy: source.verifiedBy ?? null,
+    evidence: source.evidence || '',
+    at: source.at || now(),
   };
+}
+
+function assertCriterionText(raw) {
+  if (raw == null) return;
+  if (typeof raw === 'string' && !raw.trim()) fail('E_INVALID', 'criterion needs text');
+  const items = Array.isArray(raw) ? raw : raw && typeof raw === 'object' && Array.isArray(raw.items)
+    ? raw.items : [raw];
+  for (const item of items) {
+    const text = typeof item === 'string' ? item : item?.text;
+    if (!text || !String(text).trim()) fail('E_INVALID', 'criterion needs text');
+  }
 }
 
 function normalizeMilestoneCriterion(it, i) {
@@ -842,6 +869,8 @@ export function addCard(s, p, config) {
   checkCardHome({ track, epoch, phase: p.phase || 'planning' });
   checkCardMilestone(s, { epoch, track, milestoneId: p.milestoneId });
   checkRefs(p.refs);
+  if (p.criteria !== undefined) assertCriterionText(p.criteria);
+  const blockedBy = normalizeBlockedBy(s, p.blockedBy);
   const parentId = 'parentId' in p || 'parent' in p
     ? resolveParentId(s, p.parentId ?? p.parent)
     : null;
@@ -859,7 +888,7 @@ export function addCard(s, p, config) {
     phase: p.phase || 'planning',
     priority: p.priority || config.priorities[2] || config.priorities.at(-1),
     plan: p.plan || null,
-    blockedBy: p.blockedBy || [],
+    blockedBy,
     workOrder: p.workOrder != null ? Number(p.workOrder) : undefined,
     assignee: p.assignee || null,
     log: p.log || [],
@@ -1003,10 +1032,7 @@ export function updateCard(s, ref, patch, config) {
     milestoneId: 'milestoneId' in patch ? patch.milestoneId : c.milestoneId,
   });
   // blockedBy accepts a card ref OR a decision id (D-TWRGUARD1=C #458).
-  if ('blockedBy' in patch) for (const id of patch.blockedBy || []) {
-    if (!findCard(s, id) && !s.decisions.find(d => d.id === id))
-      fail('E_NOT_FOUND', `blockedBy: no card or decision ${id}`);
-  }
+  if ('blockedBy' in patch) patch.blockedBy = normalizeBlockedBy(s, patch.blockedBy);
   if ('refs' in patch) checkRefs(patch.refs);
   if ('tags' in patch) patch.tags = normalizeTags(patch.tags);
   if ('parentId' in patch || 'parent' in patch) {
@@ -1025,7 +1051,10 @@ export function updateCard(s, ref, patch, config) {
   if (openAcceptance && 'needsAcceptance' in patch && !(patch.needsAcceptance === true || patch.needsAcceptance === 'true'))
     fail('E_ACCEPTANCE_OWNER_UI', `${openAcceptance.id} is open — needsAcceptance cannot be cleared to bypass owner verification`);
   assertOwnerLane(c, patch, patch.by);
-  if ('criteria' in patch) invalidateCardMilestone(s, c);
+  if ('criteria' in patch) {
+    assertCriterionText(patch.criteria);
+    invalidateCardMilestone(s, c);
+  }
   const candidateCriteria = 'criteria' in patch && Array.isArray(patch.criteria)
     ? patch.criteria.map((it, i) => normalizeCriterion(it, i))
     : c.criteria;
@@ -1698,6 +1727,7 @@ export function setCurrentEpoch(s, id) {
 export function addMilestone(s, p) {
   checkEpoch(s, p.epochId || fail('E_INVALID', 'milestone needs --epoch <id>'));
   if (!p.title || !String(p.title).trim()) fail('E_INVALID', 'milestone needs a title');
+  assertCriterionText(p.criteria);
   const m = { id: p.id || newId('m'), epochId: p.epochId, title: String(p.title).trim(),
     goal: p.goal || '', criteria: normalizeMilestoneCriteria(p.criteria), status: 'open', created: now() };
   s.milestones.push(m);
@@ -1722,6 +1752,7 @@ export function updateMilestone(s, id, patch, by) {
   if ('status' in patch)
     fail('E_MILESTONE_VERIFY', 'milestone ' + m.id + ' status is derived — use `tower milestone verify ' + m.id + ' --evidence "..." --by <reviewer>`');
   if ('criteria' in patch) {
+    assertCriterionText(patch.criteria);
     m.criteria = normalizeMilestoneCriteria(patch.criteria);
     clearMilestoneVerification(m);
   }

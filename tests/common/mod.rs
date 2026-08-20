@@ -285,7 +285,52 @@ static JET_TEST_GUARD: GuardedAlloc = GuardedAlloc;
 
 static SEQ: AtomicU64 = AtomicU64::new(0);
 
-/// Collision-safe scratch dir under `std::env::temp_dir()`: prefix + pid +
+/// Reject a test path on the system temp filesystem. On this machine `/tmp` is
+/// RAM-backed, so crate scratch and Cargo artifacts there can OOM the agent.
+pub fn assert_test_path_on_disk(path: &Path, label: &str) {
+    let absolute = |path: &Path| {
+        if path.is_absolute() {
+            path.to_path_buf()
+        } else {
+            std::env::current_dir().unwrap().join(path)
+        }
+    };
+    let path = absolute(path);
+    let temp = absolute(&std::env::temp_dir());
+    let path = fs::canonicalize(&path).unwrap_or(path);
+    let temp = fs::canonicalize(&temp).unwrap_or(temp);
+    assert!(
+        !path.starts_with(&temp),
+        "jet test harness refuses {label}={} on RAM-backed temp storage; use a disk path",
+        path.display()
+    );
+}
+
+/// Guard the two process-wide artifact locations before a battery writes.
+pub fn assert_test_environment_is_safe() {
+    if let Some(target) = std::env::var_os("CARGO_TARGET_DIR") {
+        assert_test_path_on_disk(&PathBuf::from(target), "CARGO_TARGET_DIR");
+    }
+}
+
+/// Persistent, gitignored test scratch root. `JET_TEST_SCRATCH_DIR` is an
+/// explicit override for CI or a local measurement, but it must stay off `/tmp`.
+pub fn test_scratch_root(scope: &str) -> PathBuf {
+    assert_test_environment_is_safe();
+    let root = std::env::var_os("JET_TEST_SCRATCH_DIR")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| {
+            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(".tmp/jet-test-scratch")
+        });
+    assert_test_path_on_disk(&root, "JET_TEST_SCRATCH_DIR");
+    let path = root.join(scope);
+    fs::create_dir_all(&path).unwrap_or_else(|error| {
+        panic!("create test scratch root `{}`: {error}", path.display())
+    });
+    path
+}
+
+/// Collision-safe throwaway dir under `std::env::temp_dir()`: prefix + pid +
 /// per-process counter, so concurrent tests in one binary never share a dir.
 pub fn unique_tmp(prefix: &str) -> PathBuf {
     let n = SEQ.fetch_add(1, Ordering::Relaxed);

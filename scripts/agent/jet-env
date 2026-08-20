@@ -14,30 +14,55 @@ if [ "$#" -eq 0 ]; then
   exit 64
 fi
 
-# /tmp is RAM-backed tmpfs on this machine; a cargo target dir there fills
-# swap and triggers kernel OOM kills. Use a disk path instead.
-case "${CARGO_TARGET_DIR:-}" in
-  /tmp/*)
-    echo "jet-env: CARGO_TARGET_DIR=$CARGO_TARGET_DIR is on tmpfs /tmp (RAM-backed)." >&2
-    echo "jet-env: build artifacts there cause OOM crashes; use a disk path (e.g. \$repo/target-<name>)." >&2
-    exit 64
-    ;;
-esac
+# Check after every environment boundary. direnv and nix can add a shared
+# target dir after the outer process starts, so checking only the caller's
+# environment leaves the same cross-worktree corruption door open.
+check_target_dir() {
+  local checkout="$1"
 
-# A target dir outside this checkout can be shared by another same-name
-# checkout; cargo then reports "Finished" while target/debug/<bin> still holds
-# the other checkout's binary with its embedded assets. Per-checkout caches
-# only (card 1640).
-if [ -n "${CARGO_TARGET_DIR:-}" ]; then
-  case "$(realpath -m -- "$CARGO_TARGET_DIR")" in
-    "$repo"/*) ;;
-    *)
-      echo "jet-env: CARGO_TARGET_DIR=$CARGO_TARGET_DIR lies outside this checkout." >&2
-      echo "jet-env: shared caches serve stale cross-checkout binaries; use $repo/target-<name>." >&2
-      exit 64
-      ;;
-  esac
-fi
+  # /tmp is RAM-backed tmpfs on this machine; cargo artifacts or test scratch
+  # there fill swap and trigger kernel OOM kills. Use a disk path instead.
+  reject_tmpfs_path() {
+    local name="$1"
+    local value="$2"
+    local resolved
+    resolved="$(realpath -m -- "$value")"
+    case "$resolved" in
+      /tmp|/tmp/*)
+        echo "jet-env: $name=$value is on tmpfs /tmp (RAM-backed)." >&2
+        echo "jet-env: artifacts there cause OOM crashes; use a disk path under the checkout." >&2
+        exit 64
+        ;;
+    esac
+  }
+
+  if [ -n "${CARGO_TARGET_DIR:-}" ]; then
+    reject_tmpfs_path CARGO_TARGET_DIR "$CARGO_TARGET_DIR"
+  fi
+  for scratch_var in JET_TEST_SCRATCH_DIR JET_DEV_ORACLE_CACHE_DIR; do
+    scratch_value="${!scratch_var:-}"
+    if [ -n "$scratch_value" ]; then
+      reject_tmpfs_path "$scratch_var" "$scratch_value"
+    fi
+  done
+
+  # A target dir outside this checkout can be shared by another same-name
+  # checkout; cargo then reports "Finished" while target/debug/<bin> still holds
+  # the other checkout's binary with its embedded assets. Per-checkout caches
+  # only (card 1640).
+  if [ -n "${CARGO_TARGET_DIR:-}" ]; then
+    case "$(realpath -m -- "$CARGO_TARGET_DIR")" in
+      "$checkout"/*) ;;
+      *)
+        echo "jet-env: CARGO_TARGET_DIR=$CARGO_TARGET_DIR lies outside this checkout." >&2
+        echo "jet-env: shared caches serve stale cross-checkout binaries; use $checkout/target-<name>." >&2
+        exit 64
+        ;;
+    esac
+  fi
+}
+
+check_target_dir "$repo"
 
 # Cache-mode selection (card #1785): a COLD tree (no target/debug yet — fresh
 # worktree) compiles fastest through sccache's input-keyed shared cache, which
@@ -64,6 +89,7 @@ cache_mode_env() {
 if command -v direnv >/dev/null 2>&1; then
   if env_dump="$(cd "$repo" && JET_DEV_SHELL="$profile" direnv export bash 2>/dev/null)"; then
     eval "$env_dump"
+    check_target_dir "$repo"
     cache_mode_env "$repo"
     exec "$@"
   fi
@@ -73,6 +99,6 @@ fi
 # the check sees the shell's PATH.
 joined="$(printf '%q ' "$@")"
 if [ "$profile" = "full" ]; then
-  exec nix develop "$repo#full" -c bash -c "$(declare -f cache_mode_env); cache_mode_env $(printf %q "$repo"); exec $joined"
+  exec nix develop "$repo#full" -c bash -c "$(declare -f check_target_dir cache_mode_env); check_target_dir $(printf %q "$repo"); cache_mode_env $(printf %q "$repo"); exec $joined"
 fi
-exec nix develop "$repo" -c bash -c "$(declare -f cache_mode_env); cache_mode_env $(printf %q "$repo"); exec $joined"
+exec nix develop "$repo" -c bash -c "$(declare -f check_target_dir cache_mode_env); check_target_dir $(printf %q "$repo"); cache_mode_env $(printf %q "$repo"); exec $joined"

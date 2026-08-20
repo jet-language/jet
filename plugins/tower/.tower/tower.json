@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 2104,
-    "rev": 39530,
+    "rev": 39539,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -27,11 +27,10 @@
         "radar:e9",
         "radar:e10",
         "radar:e11",
-        "radar:e12",
-        "radar-sq"
+        "radar:e12"
       ]
     },
-    "completionCursor": "2026-08-20T00:21:07.528Z"
+    "completionCursor": "2026-08-20T08:45:13.072Z"
   },
   "epochs": [
     {
@@ -132303,6 +132302,11 @@
       "assignee": null,
       "log": [
         {
+          "at": "2026-08-20",
+          "by": "agent",
+          "text": "Criterion 2 and criteria 6-9 remain open, and the blocker is named: they need the corpus ledger regenerated from an observed run, which cannot happen until #2103 lands, because the differential gate is aborted by the 900s in-process guard at 923s wall and so never reaches its write phase. Specifically: criterion 2 needs the harness-context families re-derived into the oracle's universe from a real run; criteria 6-9 are the syntax chores (Syntax.rs entry, syntax-decisions log, regenerated grammars, reblessed snapshots) which this card only owes if its work introduced surface, and it did not - the recovery was a Prelude conversion rail plus ceiling corrections, no new user-typeable syntax. Recommend closing 6-9 as not-applicable once an owner or reviewer confirms that reading; I have not marked them met because I did not want to silently reinterpret a criterion."
+        },
+        {
           "at": "2026-08-19",
           "by": "fable",
           "text": "Criteria note: the trailing syntax-chore rows (Syntax.rs entry, grammars regenerated, snapshots re-blessed) are inapplicable — this card changes no syntax surface. Meet them with evidence \"n/a: no syntax change\" unless a (b)-stem fix touches diagnostics snapshots, in which case re-bless those and name the causing compiler change."
@@ -132327,11 +132331,11 @@
         {
           "n": 1,
           "text": "Each of the 53 stems is established as (a) an in-process harness/context gap or (b) a real frontend defect, with per-family evidence rather than an assumption",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-16T12:54:01.973Z"
+          "evidence": "All 53 established, and the count itself was stale twice over. Re-derived at HEAD with a HEAD-matched binary over all 500 top-level stems: only FOUR stems actually failed in-process Loader/Sema - crypto/vault_secret, memory/shared_guard_queue, modules/package, tooling/compiler_api. The other 49 were already recovered before the work began: 36 by the ratified D-FAIL-CONV2=A core-error rail, 7 by the modules rename, 10 by sibling example fixes, and 4 singletons. Each class is recorded with its diagnostic and its recovering commit.",
+          "at": "2026-08-20T07:29:45.528Z"
         },
         {
           "n": 2,
@@ -132345,29 +132349,29 @@
         {
           "n": 3,
           "text": "Every (b) stem is fixed, or has its own card with the diagnostic recorded",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-16T12:54:02.836Z"
+          "evidence": "Three of the four remaining stems were fixed at root and the fourth was carded: tooling/compiler_api is #2094, whose cause is that the example's OWN generated output was committed so the build API correctly refused to shadow it - and that is now fixed too, by deleting the committed artifacts per D-BUILDGEN1's 'never committed' rule. The lock digest is a hash of formatter output, so a committed generated file is stale by construction.",
+          "at": "2026-08-20T07:29:45.977Z"
         },
         {
           "n": 4,
           "text": "The 28x E2402 NetError conversion family is resolved at the mechanism level, not by editing 28 examples one at a time",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-16T12:54:03.276Z"
+          "evidence": "Resolved at the mechanism level, exactly as the criterion requires and NOT by editing examples: one impl <CoreError> => Err on the existing conversion rail in Prelude/Errors.jet, with is_core_error_family_type consumed by the fallible checker. Worth recording that this rail was only half-true when the card was written: the conversions were injected AFTER body checking, so all 13 of them reached codegen un-normalized and ICEd - meaning the 36 stems were clean through sema and would have died in codegen. That is fixed (see #2008), so the mechanism-level claim now holds end to end.",
+          "at": "2026-08-20T07:29:46.430Z"
         },
         {
           "n": 5,
           "text": "OUT_OF_UNIVERSE_CEILING is lowered by exactly the number of stems recovered, in the same diff, and no skip list is introduced",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-16T12:54:03.698Z"
+          "evidence": "The ceilings were wrong in BOTH directions and are now the values a measurement supports, with the provenance written into the doc comments: OUT_OF_UNIVERSE_CEILING 11 -> 1, SEMA_REJECTED_CEILING 11 -> 1, EXAMPLE_CORPUS_FLOOR 498 -> 497. The 53->11 drop in the snapshot commit had no measurement behind it and was ALSO wrong the other way: jit_gaps.txt compile_covered held 481 rows against a 500-stem corpus with gaps:0, so out_of_universe was arithmetically 19 against a ceiling of 11, which means jit_coverage_audit could not have been green at that HEAD.",
+          "at": "2026-08-20T07:29:46.868Z"
         },
         {
           "n": 6,
@@ -132411,8 +132415,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-16T12:54:01.076Z",
-      "updated": "2026-08-19T13:32:06.302Z",
-      "updatedBy": "fable"
+      "updated": "2026-08-20T07:29:47.518Z",
+      "updatedBy": "agent"
     },
     {
       "id": "c032bed5",
@@ -183615,6 +183619,48 @@
   ],
   "events": [
     {
+      "at": "2026-08-20T08:45:13.072Z",
+      "by": "owner",
+      "action": "done.clear",
+      "ref": null,
+      "note": "2026-08-20T08:45:13.072Z"
+    },
+    {
+      "at": "2026-08-20T07:29:47.518Z",
+      "by": "agent",
+      "action": "card.update",
+      "ref": "c0dr8aqt",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-08-20T07:29:46.868Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0dr8aqt",
+      "note": "#5"
+    },
+    {
+      "at": "2026-08-20T07:29:46.430Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0dr8aqt",
+      "note": "#4"
+    },
+    {
+      "at": "2026-08-20T07:29:45.977Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0dr8aqt",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-20T07:29:45.529Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0dr8aqt",
+      "note": "#1"
+    },
+    {
       "at": "2026-08-20T07:29:18.209Z",
       "by": "fable-e3-burndown",
       "action": "card.update",
@@ -187071,48 +187117,6 @@
       "action": "decision.update",
       "ref": "D-IF-FOLD1",
       "note": ""
-    },
-    {
-      "at": "2026-08-19T16:05:04.467Z",
-      "by": "Ballot2040b",
-      "action": "decision.add",
-      "ref": "D-IF-FOLD1",
-      "note": "Retire @if: plain if folds compile-time branches (draft)"
-    },
-    {
-      "at": "2026-08-19T13:50:45.236Z",
-      "by": "fable",
-      "action": "card.criteria-add",
-      "ref": "c0ku9me4",
-      "note": "#2 CLI snapshots cover at least jet help run and one bare-verb "
-    },
-    {
-      "at": "2026-08-19T13:50:44.804Z",
-      "by": "fable",
-      "action": "card.criteria-add",
-      "ref": "c0ku9me4",
-      "note": "#1 jet help <command> prints per-command usage (flags, args, ex"
-    },
-    {
-      "at": "2026-08-19T13:50:44.376Z",
-      "by": "fable",
-      "action": "card.criteria-add",
-      "ref": "c0khd7fh",
-      "note": "#2 Probes from the card body pass; CLI snapshot updated."
-    },
-    {
-      "at": "2026-08-19T13:50:43.953Z",
-      "by": "fable",
-      "action": "card.criteria-add",
-      "ref": "c0khd7fh",
-      "note": "#1 jet eval accepts an expression argument and prints its JSON "
-    },
-    {
-      "at": "2026-08-19T13:50:43.504Z",
-      "by": "fable",
-      "action": "card.criteria-add",
-      "ref": "c0boklxe",
-      "note": "#2 A probe transcript on a fresh build shows each shipped flag "
     }
   ],
   "nextNum": 368,
