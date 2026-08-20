@@ -11,9 +11,8 @@ mod time_deadline_kernel;
 #[path = "Methods/pool.rs"]
 mod pool;
 
-pub(super) use core_calls::{
-    apply_core_pure_method, apply_regex_method, as_float, as_string, solver_require,
-};
+pub(super) use core_calls::{apply_core_pure_method, apply_regex_method, as_float, solver_require};
+pub(crate) use core_calls::as_string;
 // I9: the TIR evaluator in jet-codegen calls this fake-data kernel too, so it
 // leaves this crate rather than stopping at `pub(super)`.
 pub use core_calls::apply_fake_method;

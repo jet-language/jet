@@ -7,7 +7,7 @@ pub(super) fn named_tuple(fields: &[(&str, CtValue)]) -> CtValue {
     }
 }
 
-pub(super) fn as_string(v: &CtValue, span: Span) -> Result<&str, Diagnostic> {
+pub(crate) fn as_string(v: &CtValue, span: Span) -> Result<&str, Diagnostic> {
     match v {
         CtValue::Str(s) => Ok(s.as_str()),
         _ => Err(unsupported("non-string argument to a Core string call", span)),
@@ -48,7 +48,7 @@ pub(super) fn csv_rows_from_records(v: &CtValue) -> Option<Vec<Vec<String>>> {
     Some(rows)
 }
 
-pub(super) const URL_INTERNAL_PREFIX: &str = "__jet_url_";
+pub(crate) const URL_INTERNAL_PREFIX: &str = "__jet_url_";
 const URL_RAW_HOST: &str = "__jet_url_raw_host";
 const URL_USERNAME: &str = "__jet_url_username";
 const URL_PASSWORD: &str = "__jet_url_password";
@@ -109,7 +109,7 @@ pub(crate) fn url_parts_to_ct(u: &super::super::super::UrlLite::UrlParts) -> CtV
     CtValue::Struct { type_name: "Url".to_string(), fields }
 }
 
-pub(super) fn url_parts_from_ct(value: &CtValue, span: Span) -> Result<super::super::super::UrlLite::UrlParts, Diagnostic> {
+pub(crate) fn url_parts_from_ct(value: &CtValue, span: Span) -> Result<super::super::super::UrlLite::UrlParts, Diagnostic> {
     let CtValue::Struct { type_name, fields } = value else { return Err(unsupported("malformed URL value", span)); };
     let type_name = type_name.strip_prefix(jet_foundation::Syntax::GENERATED_NAME_PREFIX).unwrap_or(type_name);
     if type_name != "Url" { return Err(unsupported("malformed URL value", span)); }

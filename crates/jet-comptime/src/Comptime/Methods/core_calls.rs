@@ -425,7 +425,8 @@ use data::{
     as_data_groups, as_float_list, data_error_value, data_float_value, data_result_value,
 };
 pub use impure::{apply_impure_core_call, apply_impure_core_call_with_type};
-use values::{as_string, as_string_rows, csv_rows_from_records, named_tuple};
+use values::{as_string_rows, csv_rows_from_records, named_tuple};
+pub(crate) use values::as_string;
 pub(super) use values::{url_parts_from_ct, URL_INTERNAL_PREFIX};
 pub(crate) use values::url_parts_to_ct;
 
