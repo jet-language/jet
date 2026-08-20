@@ -1990,4 +1990,35 @@ mod tests {
             format_source(&formatted).expect("formatted source should re-format")
         );
     }
+
+    #[test]
+    fn inferred_braces_and_blocks_round_trip() {
+        let source = r#"struct Point {
+    x: Int
+    y: Int
+}
+
+fn make() :> Point :: {x: 1, y: 2}
+
+fn accepts(values: [String]) {}
+
+fn block() {
+    print("block")
+}
+
+fn run() {
+    accepts({"needle"})
+    p :: make()
+    block()
+}
+"#;
+        let once = format_source(source).expect("inferred braces should format");
+        assert!(once.contains(":: {x: 1, y: 2}"), "{once}");
+        assert!(once.contains("accepts({\"needle\"})"), "{once}");
+        assert!(once.contains("fn block() {"), "{once}");
+        assert_eq!(
+            once,
+            format_source(&once).expect("formatted source should re-format")
+        );
+    }
 }

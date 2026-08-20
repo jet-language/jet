@@ -197,7 +197,10 @@ impl<'a> Parser<'a> {
             };
             if let Some(marker) = body_marker {
                 let start = marker.span.start;
-                let expr = self.expr_no_struct_lit()?;
+                // `::` requires one value, so a non-empty brace is an
+                // inferred literal. Block-capable headers use
+                // `expr_no_struct_lit`.
+                let expr = self.expr()?;
                 let expr_end = expr.span().end;
                 self.expect(TokKind::Semi, "after the single-expression function body")?;
                 let end = if self.pos > 0 {

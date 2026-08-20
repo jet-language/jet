@@ -681,10 +681,10 @@ impl<'a> Parser<'a> {
                     let full = Span::new(span.start, inner.span().end);
                     Ok(Expr::Copy(Box::new(inner), full))
                 }
-                // D-LIT-DOT1: field-led `{ … }` is the inferred record literal.
-                // It is accepted only in expression positions that permit
-                // literals, because a bare brace can otherwise open a block.
-                TokKind::LBrace if allow_struct_lit && self.brace_starts_record() => {
+                // D-LIT-DOT1: a non-empty `{ … }` in value position is an
+                // inferred literal. `allow_struct_lit` is the existing
+                // value-vs-block seam.
+                TokKind::LBrace if allow_struct_lit && self.brace_starts_inferred_literal() => {
                     let start = self.peek().span.start;
                     self.struct_lit_inferred(start)
                 }

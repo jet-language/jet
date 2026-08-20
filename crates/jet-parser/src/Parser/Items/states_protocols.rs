@@ -20,8 +20,7 @@ impl<'a> Parser<'a> {
                     // D-MIGRATE1: `rename old => new`.
                     TokKind::Ident(kw) if kw == Syntax::KW_RENAME => {
                         let (from, from_span) = self.expect_ident("as the field to rename")?;
-                        self.expect(
-                            TokKind::UnifiedArrow,
+                        self.expect_unified_arrow(
                             "between the old and new field names in `rename`",
                         )?;
                         let (to, to_span) = self.expect_ident("as the new field name")?;
@@ -61,8 +60,7 @@ impl<'a> Parser<'a> {
                             self.expect_ident("as the field whose type changes")?;
                         self.expect(TokKind::Colon, "after the changed field name")?;
                         let (from_ty, from_span) = self.type_()?;
-                        self.expect(
-                            TokKind::UnifiedArrow,
+                        self.expect_unified_arrow(
                             "between the old and new field types in `change`",
                         )?;
                         let (to_ty, to_span) = self.type_()?;

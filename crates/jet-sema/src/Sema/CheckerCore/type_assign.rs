@@ -347,8 +347,7 @@ impl<'a> Checker<'a> {
                             | "Pool" | "Id"
                             // D-LOCALCELL1=A: one-thread cell and projected guard types.
                             | "Cell" | "CellReadGuard" | "CellEditGuard"
-                            // D-TTLVAL1=A / D-TTL-ZEROIZE1=A: one closed
-                            // secret-lifetime wrapper.
+                            // The one closed secret-lifetime wrapper.
                             | "ExpiringSecret" | Syntax::TYPE_SHARED_GUARD
                             | Syntax::TYPE_SHARED_WEAK
                             | "KeyRef" | "MutationPlan" | "VaultWrite" | "Rotation" | "WrappedImportPlan"

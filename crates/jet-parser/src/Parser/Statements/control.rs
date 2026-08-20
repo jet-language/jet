@@ -542,7 +542,8 @@ impl<'a> Parser<'a> {
             )
     }
 
-    /// D-LAYOUT-CTOR1: `name (::|:=) Layout .{` — typed-literal constraint body.
+    /// D-LAYOUT-CTOR1: `name (::|:=) Layout{` — typed-literal constraint body.
+    /// The retired `Layout.{` spelling remains readable during migration.
     /// `:=` is recognized so we can teach immutable `::` (not silent TypedLit fallthrough).
     fn looks_like_layout_ctor(&self) -> bool {
         matches!(self.peek().kind, TokKind::Ident(_))
@@ -551,8 +552,9 @@ impl<'a> Parser<'a> {
                 TokKind::ColonColon | TokKind::ColonEq
             )
             && matches!(&self.peek3().kind, TokKind::Ident(n) if n == Syntax::LAYOUT_TYPE)
-            && matches!(self.peek4().kind, TokKind::Dot)
-            && matches!(self.peek5().kind, TokKind::LBrace)
+            && (matches!(self.peek4().kind, TokKind::LBrace)
+                || (matches!(self.peek4().kind, TokKind::Dot)
+                    && matches!(self.peek5().kind, TokKind::LBrace)))
     }
 
     /// D-LAYOUT-CTOR1: parse `name :: Layout{ … }` into `Stmt::Layout`.
@@ -581,7 +583,9 @@ impl<'a> Parser<'a> {
             ));
         }
         let type_tok = self.bump(); // `Layout`
-        self.expect(TokKind::Dot, "before the layout constraint body")?;
+        if matches!(self.peek().kind, TokKind::Dot) {
+            self.bump();
+        }
         self.in_layout_body += 1;
         let lit_body =
             self.typed_lit_body_for_head(&Type::Named(Syntax::LAYOUT_TYPE.to_string()))?;

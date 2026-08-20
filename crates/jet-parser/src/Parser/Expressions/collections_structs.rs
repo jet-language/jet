@@ -25,6 +25,14 @@ fn brace_body_looks_like_record(toks: &[Token], pos: usize) -> bool {
 }
 
 impl<'a> Parser<'a> {
+    /// D-LIT-DOT1: a non-empty brace in value position is an inferred literal.
+    /// Empty braces remain block syntax; `allow_struct_lit` supplies the
+    /// value-position distinction at the caller.
+    pub(super) fn brace_starts_inferred_literal(&self) -> bool {
+        matches!(self.peek().kind, TokKind::LBrace)
+            && !matches!(self.peek2().kind, TokKind::RBrace)
+    }
+
         pub(super) fn brace_starts_record(&self) -> bool {
             brace_body_looks_like_record(&self.toks, self.pos + 1)
         }
@@ -288,7 +296,29 @@ impl<'a> Parser<'a> {
                 span: Span::new(start_span.start, end),
             })
         }
-    
+
+        pub(super) fn struct_lit_after_path(
+            &mut self,
+            type_name: String,
+            type_args: Vec<Type>,
+            start_span: Span,
+        ) -> Result<Expr, Diagnostic> {
+            if let Some((import_ns, local_name)) = type_name.split_once('.') {
+                if import_ns
+                    .chars()
+                    .next()
+                    .is_some_and(|c| c.is_ascii_lowercase())
+                {
+                    return self.struct_lit_after_import(
+                        import_ns.to_string(),
+                        local_name.to_string(),
+                        start_span.start,
+                    );
+                }
+            }
+            self.struct_lit_after_name(type_name, type_args, start_span)
+        }
+
         pub(super) fn struct_lit_after_import(
             &mut self,
             alias: String,

@@ -1038,12 +1038,13 @@ impl<'a> Parser<'a> {
             } else {
                 None
             }
-        } else if retired_double
+        } else if retired_eq
+            || retired_double
             || retired_ballot
             || self.at_unified_arrow()
         {
             arrow_return = true;
-            if !retired_double && !retired_ballot {
+            if !retired_eq && !retired_double && !retired_ballot {
                 self.expect_unified_arrow("before a callable result type")?;
             }
             if self.type_starts_here() {

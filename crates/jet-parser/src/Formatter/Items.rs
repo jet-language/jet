@@ -168,6 +168,70 @@ fn has_ambiguous_decode_union(items: &[Item], ty: &Type) -> bool {
 }
 
 impl<'a> Fmt<'a> {
+    /// Rewrite retired surface tokens inside a migration while preserving its
+    /// source layout. Migration AST nodes keep operation spans for sema, not
+    /// the authored punctuation, so token edits are the narrow formatter seam.
+    fn canonical_migration_source(&self, span: Span) -> String {
+        let tokens: Vec<&Token> = self
+            .source_toks
+            .iter()
+            .filter(|token| token.span.start >= span.start && token.span.end <= span.end)
+            .collect();
+        let mut edits: Vec<(usize, usize, &str)> = Vec::new();
+        let mut effect_arrows = Vec::new();
+
+        for index in 0..tokens.len() {
+            if !matches!(tokens[index].kind, TokKind::Eq)
+                || !matches!(tokens.get(index + 1).map(|token| &token.kind), Some(TokKind::LBracket))
+            {
+                continue;
+            }
+            let Some(close) = (index + 2..tokens.len())
+                .find(|&candidate| matches!(tokens[candidate].kind, TokKind::RBracket))
+            else {
+                continue;
+            };
+            if matches!(
+                tokens.get(close + 1).map(|token| &token.kind),
+                Some(TokKind::LambdaArrow)
+            ) {
+                edits.push((tokens[index].span.start, tokens[index].span.end, ":"));
+                effect_arrows.push(close + 1);
+            }
+        }
+
+        for (index, token) in tokens.iter().enumerate() {
+            let replacement = match token.kind {
+                TokKind::Arrow => Some(Syntax::OP_UNIFIED_ARROW),
+                TokKind::LambdaArrow if effect_arrows.contains(&index) => Some(">"),
+                TokKind::LambdaArrow => Some(Syntax::OP_UNIFIED_ARROW),
+                TokKind::Dot
+                    if matches!(tokens.get(index + 1).map(|next| &next.kind), Some(TokKind::LBrace)) =>
+                {
+                    Some("")
+                }
+                _ => None,
+            };
+            if let Some(replacement) = replacement {
+                edits.push((token.span.start, token.span.end, replacement));
+            }
+        }
+
+        edits.sort_unstable_by_key(|(start, _, _)| *start);
+        let mut out = String::with_capacity(span.end - span.start);
+        let mut cursor = span.start;
+        for (start, end, replacement) in edits {
+            if start < cursor {
+                continue;
+            }
+            out.push_str(&self.src[cursor..start]);
+            out.push_str(replacement);
+            cursor = end;
+        }
+        out.push_str(&self.src[cursor..span.end]);
+        out
+    }
+
     fn fmt_decode_type(&mut self, ty: &Type, span: Span, derives_decode: bool) {
         let source_ty = (derives_decode && has_ambiguous_decode_union(self.items, ty))
             .then(|| self.source_type_spelling(span.start))
@@ -335,9 +399,10 @@ impl<'a> Fmt<'a> {
                 self.newline();
                 self.skip_verbatim_comments(ec.body_span.end);
             }
-            // D-MIGRATE1: migration blocks are emitted verbatim (non-destructive).
+            // D-MIGRATE1: preserve migration layout while emitting the
+            // canonical arrow and literal spellings inside the block.
             Item::Migration(m) => {
-                let text = self.src[m.span.start..m.span.end].to_string();
+                let text = self.canonical_migration_source(m.span);
                 self.write(&text);
                 self.newline();
                 self.skip_verbatim_comments(m.span.end);

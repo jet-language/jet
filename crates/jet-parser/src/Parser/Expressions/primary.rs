@@ -285,7 +285,7 @@ impl<'a> Parser<'a> {
                     Ok(Expr::Char(ch, span))
                 }
                 TokKind::LBracket => self.list_or_map_lit(),
-                TokKind::LBrace if allow_struct_lit && self.brace_starts_record() => {
+                TokKind::LBrace if allow_struct_lit && self.brace_starts_inferred_literal() => {
                     let start = self.peek().span.start;
                     self.struct_lit_inferred(start)
                 }
@@ -429,9 +429,31 @@ impl<'a> Parser<'a> {
                         }
                         self.expect_type_args_close(&format!("after `{type_name}<…>`"))?;
                     }
-                    if allow_struct_lit && matches!(self.peek().kind, TokKind::LBrace) {
-                        // D-LIT-DOT1: a named head touches its brace directly.
-                        return self.struct_lit_after_name(type_name, type_args, span);
+                    if allow_struct_lit && self.at_literal_head_path() {
+                        let (type_name, retired_dot) =
+                            self.consume_literal_head_path(type_name)?;
+                        if retired_dot {
+                            let message = if type_name.contains('.') {
+                                format!(
+                                    "literal construction uses `{}{{…}}`, not `{}.{{…}}`",
+                                    type_name, type_name
+                                )
+                            } else {
+                                format!(
+                                    "struct construction uses `{}{{…}}`, not `{}.{{…}}`",
+                                    type_name, type_name
+                                )
+                            };
+                            self.diags.push(Diagnostic::error(
+                                "E0320",
+                                message,
+                                "literal heads place no dot before their brace (D-LIT-DOT1)"
+                                    .to_string(),
+                                format!("write `{}{{…}}`", type_name),
+                                Some(self.peek().span),
+                            ));
+                        }
+                        return self.struct_lit_after_path(type_name, type_args, span);
                     }
                     if matches!(self.peek().kind, TokKind::Dot) {
                         self.bump();
@@ -449,22 +471,6 @@ impl<'a> Parser<'a> {
                             let base = Expr::Ident(type_name, span);
                             return self.parse_member_spread(base, span.start);
                         }
-                        // D-LIT-DOT1: recover retired `Type.{ … }` while fmt rewrites
-                        // it to `Type{ … }`.
-                        if allow_struct_lit && matches!(self.peek().kind, TokKind::LBrace) {
-                            self.diags.push(Diagnostic::error(
-                                "E0320",
-                                format!(
-                                    "struct construction uses `{}{{…}}`, not `{}.{{…}}`",
-                                    type_name, type_name
-                                ),
-                                "literal heads place no dot before their brace (D-LIT-DOT1)"
-                                    .to_string(),
-                                format!("write `{}{{…}}`", type_name),
-                                Some(self.peek().span),
-                            ));
-                            return self.struct_lit_after_name(type_name, type_args, span);
-                        }
                         let (member, member_span) = self.expect_field_name()?;
                         // S58 (E2-M13): `alias.Ptr<T>.from_addr(addr)` — a typed
                         // pointer constructor through a `core.mem` alias. Recognise
@@ -473,56 +479,6 @@ impl<'a> Parser<'a> {
                         // comparison. Mirrors the postfix-position trigger.
                         if member == Syntax::TYPE_PTR && matches!(self.peek().kind, TokKind::Lt) {
                             return self.ptr_from_addr(type_name, span);
-                        }
-                        if allow_struct_lit && matches!(self.peek().kind, TokKind::LBrace) {
-                            // D-LIT-DOT1: a lower-case leading segment is an
-                            // import namespace (`alias.Type{…}`), not an enum
-                            // type/variant pair. Keep the same namespace split
-                            // used by the postfix migration path.
-                            if type_name
-                                .chars()
-                                .next()
-                                .is_some_and(|c| c.is_ascii_lowercase())
-                            {
-                                return self.struct_lit_after_import(
-                                    type_name,
-                                    member,
-                                    span.start,
-                                );
-                            }
-                            let (args, end) = self.enum_lit_named_fields()?;
-                            return Ok(Expr::EnumLit {
-                                type_name,
-                                variant: member,
-                                args,
-                                leading_dot: false,
-                                span: Span::new(span.start, end),
-                            });
-                        }
-                        if allow_struct_lit
-                            && matches!(self.peek().kind, TokKind::Dot)
-                            && matches!(self.peek2().kind, TokKind::LBrace)
-                        {
-                            self.bump();
-                            self.diags.push(Diagnostic::error(
-                                "E0320",
-                                format!(
-                                    "enum payload uses `{}.{}{{…}}`, not `{}.{}.{{…}}`",
-                                    type_name, member, type_name, member
-                                ),
-                                "literal heads place no dot before their brace (D-LIT-DOT1)"
-                                    .to_string(),
-                                format!("write `{}.{}{{…}}`", type_name, member),
-                                Some(self.peek().span),
-                            ));
-                            let (args, end) = self.enum_lit_named_fields()?;
-                            return Ok(Expr::EnumLit {
-                                type_name,
-                                variant: member,
-                                args,
-                                leading_dot: false,
-                                span: Span::new(span.start, end),
-                            });
                         }
                         // D-GENERIC-CALL1=A: optional call-site type arguments on
                         // every qualified call, such as `csv.decode<Order>(raw)`.
@@ -662,6 +618,46 @@ impl<'a> Parser<'a> {
                     Some(self.peek().span),
                 )),
             }
+        }
+
+        fn at_literal_head_path(&self) -> bool {
+            let mut index = self.pos;
+            while matches!(self.toks.get(index).map(|token| &token.kind), Some(TokKind::Dot))
+                && matches!(
+                    self.toks.get(index + 1).map(|token| &token.kind),
+                    Some(TokKind::Ident(_))
+                )
+            {
+                index += 2;
+            }
+            matches!(self.toks.get(index).map(|token| &token.kind), Some(TokKind::LBrace))
+                || (matches!(
+                    self.toks.get(index).map(|token| &token.kind),
+                    Some(TokKind::Dot)
+                ) && matches!(
+                    self.toks.get(index + 1).map(|token| &token.kind),
+                    Some(TokKind::LBrace)
+                ))
+        }
+
+        fn consume_literal_head_path(
+            &mut self,
+            mut type_name: String,
+        ) -> Result<(String, bool), Diagnostic> {
+            while matches!(self.peek().kind, TokKind::Dot)
+                && matches!(self.peek2().kind, TokKind::Ident(_))
+            {
+                self.bump();
+                let (segment, _) = self.expect_ident("after `.` in a literal head")?;
+                type_name.push('.');
+                type_name.push_str(&segment);
+            }
+            let retired_dot = matches!(self.peek().kind, TokKind::Dot)
+                && matches!(self.peek2().kind, TokKind::LBrace);
+            if retired_dot {
+                self.bump();
+            }
+            Ok((type_name, retired_dot))
         }
 
         /// D-CONC-SPAWN1=D: one `task` word owns single-task spawn and the
