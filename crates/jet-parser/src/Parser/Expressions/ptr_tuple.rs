@@ -370,6 +370,20 @@ impl<'a> Parser<'a> {
         }
 
         fn can_start_primary_expr(&self) -> bool {
+            // D-CONC-SHARE1=A (card #1561): `shared <value>` is a prefix
+            // construction, and its arm lives in the unary layer. The fast
+            // path below would take the bare `shared` as a whole primary
+            // (nothing after it is an infix token), leave the operand
+            // unconsumed, and report E0003 at the statement terminator. So a
+            // contextual `shared` never starts a primary; send it down the
+            // precedence chain. A `shared` that is an ordinary name still
+            // does, because `starts_shared_operand` rejects the tokens that
+            // follow a name (`::`, `:=`, `.`, `,`, `)`, an operator).
+            if matches!(&self.peek().kind, TokKind::Ident(word) if word == Syntax::KW_SHARED)
+                && super::binary_unary::starts_shared_operand(&self.peek2().kind)
+            {
+                return false;
+            }
             matches!(
                 self.peek().kind,
                 TokKind::KwLoop

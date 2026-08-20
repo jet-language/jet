@@ -40,7 +40,7 @@ fn write_window_at_maximal_place(expr: Expr, start: usize) -> Expr {
 /// else (a binding sigil, an operator, a `.`, a separator, a call `(`) leaves
 /// `shared` as a plain name, which keeps existing bindings and arguments
 /// spelled `shared` legal.
-fn starts_shared_operand(kind: &TokKind) -> bool {
+pub(super) fn starts_shared_operand(kind: &TokKind) -> bool {
     matches!(
         kind,
         TokKind::Ident(_)

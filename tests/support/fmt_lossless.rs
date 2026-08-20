@@ -165,6 +165,7 @@ const UI_PARSE_INVALID: &[&str] = &[
     "tests/ui/root_param_shape.jet",
     "tests/ui/schedule_every_without_task.jet",
     "tests/ui/schedule_task_on_method.jet",
+    "tests/ui/shared_retired_constructor.jet",
     "tests/ui/shield_arguments.jet",
     "tests/ui/single_bracket_marker.jet",
     "tests/ui/stacked_type_markers.jet",
