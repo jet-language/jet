@@ -1,0 +1,16 @@
+// D-CONSTMARK1: `#Static` gives a compile-time constant a stable address.
+// Without the marker the constant folds into its use sites and no symbol is
+// emitted; with it, the constant becomes one `static` a pointer can name.
+#Static @limit :: 10
+
+@window :: 4
+
+fn show(label: String, n: Int) { print("{label}: {n}") }
+
+fn run() {
+    // Both constants read the same way at the use site. The difference is
+    // storage: `@limit` has an address, `@window` is folded.
+    show("limit", @limit)
+    show("window", @window)
+    show("sum", @limit + @window)
+}
