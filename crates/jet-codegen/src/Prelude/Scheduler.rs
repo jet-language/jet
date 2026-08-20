@@ -2754,7 +2754,9 @@ impl<T> JetSchedulerJoin<T> {
     }
 
     pub fn drain(self) {
+        jet_scheduler_blocking_wait_enter();
         let _ = self.rx.recv();
+        jet_scheduler_blocking_wait_leave();
     }
 }
 
