@@ -280,37 +280,68 @@ fn golden_uses_release_run(stem: &str) -> bool {
 /// their generated Rust must carry `unsafe` — in gated `unsafe { … }` /
 /// `unsafe fn` / `unsafe extern` form only. Every other stem must generate none.
 ///
-/// Both directions are asserted below, which is why this list cannot rot the way
-/// suite membership did (#2025): a stem here that stops lowering `unsafe` fails
-/// the positive assertion, and a stem missing from here that starts lowering it
-/// fails the negative one.
+/// DERIVED, never hand-typed: the repository already keeps exactly one registry
+/// of approved user-written unsafe regions — the `unsafe-ratchet` baseline in
+/// `docs/spec/safety.md`, scanned and enforced by
+/// `scripts/agent/check-unsafe-ratchet.mjs` (`tests/unsafe_ratchet.rs`,
+/// `scripts/agent/verify-full.sh`). A new `#Unsafe` gate cannot land without
+/// refreshing that baseline in the same change, so reading it here makes the two
+/// facts one fact.
 ///
-/// The last four rows were red since 2026-08-13 (`bfc7dbba1`, dev memory
-/// sentries; `08e594d26`, the gate ladder) with nothing watching `golden` — they
-/// lower a real audited block, and three of them ALSO carry the word in their
-/// file name, which the old substring scan could not tell from code. See
-/// `common::unsafe_keyword_columns`.
-const GATED_UNSAFE_STEMS: &[&str] = &[
-    "crypto/crypto_migration",
-    "crypto/vault_keys",
-    "effects/audited_gate_ladder",
-    "effects/single_use_discard",
-    "io/os_process_control",
-    "io/os_stop_cleanup",
-    "io/process_exit_cleanup",
-    "lowlevel/inline_asm",
-    "lowlevel/inline_c",
-    "lowlevel/lowlevel",
-    "lowlevel/mmio_board_write",
-    "lowlevel/pointer_cast_deref",
-    "lowlevel/unsafe_obligations",
-    "memory/pin",
-    "memory/rawptr",
-    "memory/uninit",
-    "memory/unsafe_sentries",
-    "memory/unsafe_sentries_provenance",
-    "memory/unsafe_sentries_source_off",
-];
+/// A hand copy was a second registry of the same fact, and it rotted twice: the
+/// dev-sentry/gate-ladder rows were red from 2026-08-13 with nothing watching
+/// `golden`, and `a5bea5f25` added an approved gate at
+/// `examples/features/crypto/random_api_split.jet:28` ("compare the typed and
+/// raw HKDF rungs"), refreshed the baseline as the ratchet demands, and left the
+/// list behind — so `golden` reported an APPROVED region as an I1 violation.
+///
+/// Deriving cannot widen I1: a region only enters the baseline through the
+/// ratchet, a stem with no approved region that emits `unsafe` still fails the
+/// negative assertion below, and a stem with one that stops emitting still fails
+/// the positive one.
+///
+/// Both directions are still asserted below, and the gated form is scanned with
+/// `common::unsafe_keyword_columns` — three audited stems carry the word in
+/// their own file name, which a plain substring scan could not tell from code.
+static GATED_UNSAFE_STEMS: std::sync::LazyLock<std::collections::HashSet<String>> =
+    std::sync::LazyLock::new(|| {
+        let baseline_path =
+            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("docs/spec/safety.md");
+        let baseline = fs::read_to_string(&baseline_path).unwrap_or_else(|err| {
+            panic!(
+                "cannot read the approved unsafe-region baseline {}: {err}",
+                baseline_path.display()
+            )
+        });
+        let data = baseline
+            .split_once("<!-- unsafe-ratchet:data")
+            .and_then(|(_, rest)| rest.split_once("\n-->"))
+            .map(|(data, _)| data)
+            .unwrap_or_else(|| {
+                panic!(
+                    "{} has no `unsafe-ratchet:data` baseline block",
+                    baseline_path.display()
+                )
+            });
+        let example_prefix = "examples/features/";
+        let jet_suffix = format!(".{}", jet::Syntax::FILE_EXT);
+        let stems: std::collections::HashSet<String> = data
+            .lines()
+            .filter_map(|line| {
+                let quoted = line.trim().strip_prefix("\"file\":")?.trim_start();
+                let file = quoted.strip_prefix('"')?.split('"').next()?;
+                let stem = file.strip_prefix(example_prefix)?.strip_suffix(&jet_suffix)?;
+                Some(stem.to_owned())
+            })
+            .collect();
+        assert!(
+            !stems.is_empty(),
+            "{} records no approved `examples/features` unsafe region; the audited-tier \
+             examples (lowlevel/memory/effects/crypto) must appear there",
+            baseline_path.display()
+        );
+        stems
+    });
 
 fn check_golden_entry(entry: &GoldenEntry, env: &GoldenEnv) {
     // D-JPK-TASKRUN1 / I5 (card #476): job_runner proves both `#Job` entry
@@ -400,7 +431,7 @@ fn check_golden_entry(entry: &GoldenEntry, env: &GoldenEnv) {
     let ffi_link = compiled.ffi;
     let user_code = strip_vetted_prelude_modules(&rust_code);
 
-    if GATED_UNSAFE_STEMS.contains(&stem) {
+    if GATED_UNSAFE_STEMS.contains(stem) {
         assert!(
             user_code.lines().any(|line| !unsafe_keyword_columns(line).is_empty()),
             "the audited example {} should exercise the gated `unsafe` tier",
