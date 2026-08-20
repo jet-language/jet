@@ -207,7 +207,7 @@ pub(super) fn build_generation(
             theme.error_coded(
                 "E1288",
                 "jetos GNOME desktop package is missing",
-                "D-JOS-DESKTOP1=A: the default jetos desktop profile needs first-party GNOME session packages in the system closure.",
+                "the default jetos desktop profile needs first-party GNOME session packages in the system closure.",
                 "declare first-party packages for gdm, gnome-session, and gnome-shell, or select a ratified non-GNOME desktop profile.",
             );
             return None;
@@ -234,7 +234,7 @@ pub(super) fn build_generation(
                 theme.error_coded(
                     "E1288",
                     "jetos GNOME desktop package is missing",
-                    "D-JOS-DESKTOP1=A: the default jetos desktop profile needs first-party GNOME session packages in the system closure.",
+                    "the default jetos desktop profile needs first-party GNOME session packages in the system closure.",
                     "declare first-party packages for gdm, gnome-session, and gnome-shell, or select a ratified non-GNOME desktop profile.",
                 );
                 return None;

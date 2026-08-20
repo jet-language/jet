@@ -33,7 +33,7 @@ impl<'a> Parser<'a> {
             && !matches!(self.peek2().kind, TokKind::RBrace)
     }
 
-        pub(super) fn brace_starts_record(&self) -> bool {
+        pub(in crate::Parser) fn brace_starts_record(&self) -> bool {
             brace_body_looks_like_record(&self.toks, self.pos + 1)
         }
 

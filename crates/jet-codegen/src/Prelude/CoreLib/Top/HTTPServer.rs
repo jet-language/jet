@@ -884,6 +884,19 @@ fn jet_http_server_run_listener(
     drain_deadline_ms: Option<std::sync::Arc<std::sync::atomic::AtomicU64>>,
     tls_conn: Option<JetHTTPTlsConn>,
 ) -> Result<JetHTTPShutdownReport, String> {
+    #[cfg(all(target_os = "wasi", target_env = "p2", target_arch = "wasm32"))]
+    {
+        return jet_http_server_run_listener_wasip2(
+            listener,
+            mux,
+            options,
+            shutdown,
+            dynamic_grace_ms,
+            drain_deadline_ms,
+            tls_conn,
+        );
+    }
+
     use std::io::{Read, Write};
     use std::sync::atomic::Ordering;
     use std::sync::mpsc::{Receiver, SyncSender, TrySendError};
@@ -1044,6 +1057,89 @@ fn jet_http_server_run_listener(
         if worker.is_finished() { let _ = worker.join(); }
     }
     Ok(report)
+}
+
+#[cfg(all(target_os = "wasi", target_env = "p2", target_arch = "wasm32"))]
+fn jet_http_server_run_listener_wasip2(
+    listener: std::net::TcpListener,
+    mux: JetHTTPMux,
+    options: JetHTTPServerOptions,
+    shutdown: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    dynamic_grace_ms: Option<std::sync::Arc<std::sync::atomic::AtomicU64>>,
+    drain_deadline_ms: Option<std::sync::Arc<std::sync::atomic::AtomicU64>>,
+    tls_conn: Option<JetHTTPTlsConn>,
+) -> Result<JetHTTPShutdownReport, String> {
+    use std::sync::atomic::Ordering;
+
+    listener
+        .set_nonblocking(true)
+        .map_err(|error| format!("http listener setup failed: {error}"))?;
+    let drain_deadline_ms = drain_deadline_ms
+        .unwrap_or_else(|| std::sync::Arc::new(std::sync::atomic::AtomicU64::new(0)));
+    let mut report = JetHTTPShutdownReport::default();
+
+    // WASI Preview 2 runtimes do not provide `std::thread::spawn`. Keep the
+    // same Prelude protocol, limits, and request handler, but serve one
+    // connection at a time on the component's main thread.
+    while !shutdown.load(Ordering::Acquire) {
+        match listener.accept() {
+            Ok((mut stream, _peer)) => {
+                report.user_accepted += 1;
+                stream
+                    .set_nonblocking(false)
+                    .map_err(|error| format!("http connection setup failed: {error}"))?;
+                if let Some(tls) = tls_conn.as_ref() {
+                    if let Err(error) = tls(
+                        stream,
+                        shutdown.clone(),
+                        options.clone(),
+                        dynamic_grace_ms.clone(),
+                        drain_deadline_ms.clone(),
+                    ) {
+                        eprintln!("E2801: connection failed: {error}");
+                    }
+                } else {
+                    jet_http_server_handle_stream_wasip2(&mut stream, &mux, &options);
+                }
+                report.user_completed += 1;
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                std::thread::sleep(std::time::Duration::from_millis(2));
+            }
+            Err(error) => return Err(format!("http accept failed: {error}")),
+        }
+    }
+
+    report.user_cancelled = report
+        .user_accepted
+        .saturating_sub(report.user_completed);
+    Ok(report)
+}
+
+#[cfg(all(target_os = "wasi", target_env = "p2", target_arch = "wasm32"))]
+fn jet_http_server_handle_stream_wasip2(
+    stream: &mut std::net::TcpStream,
+    mux: &JetHTTPMux,
+    options: &JetHTTPServerOptions,
+) {
+    use std::io::Write;
+
+    let raw = match jet_http_srv_read_with_limits(stream, options) {
+        Ok(raw) => raw,
+        Err(error) => {
+            let _ = stream.write_all(jet_http_srv_read_error_response(&error).as_bytes());
+            return;
+        }
+    };
+    let request = match jet_http_srv_parse(&raw) {
+        Ok(request) => request,
+        Err(error) => {
+            let _ = stream.write_all(jet_http_srv_read_error_response(&error).as_bytes());
+            return;
+        }
+    };
+    let response = jet_http_mux_dispatch(mux, request).unwrap_or_else(jet_http_srv_error_response);
+    let _ = jet_http_srv_write_response(stream, &response, "HTTP/1.1", true);
 }
 
 fn jet_http_unix_now_ms() -> u64 {

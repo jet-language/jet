@@ -861,7 +861,9 @@ pub(crate) fn collect_core_expr(
                 OrFallback::Value(e) => collect_core_expr(e, imports, used, spans, ffi_cb),
                 OrFallback::Block { body, value, .. } => {
                     collect_core_stmts(body, imports, used, spans, ffi_cb);
-                    collect_core_expr(value, imports, used, spans, ffi_cb);
+                    if let Some(value) = value {
+                        collect_core_expr(value, imports, used, spans, ffi_cb);
+                    }
                 }
                 OrFallback::Return(Some(e), _) => collect_core_expr(e, imports, used, spans, ffi_cb),
                 OrFallback::Return(None, _) => {}
@@ -895,7 +897,7 @@ pub(crate) fn collect_core_expr(
             collect_core_expr(else_value, imports, used, spans, ffi_cb);
         }
         Expr::Int(_, _, _, _)
-        | Expr::Float(_, _, _)
+        | Expr::Float(_, _, _, _)
         | Expr::Bool(_, _)
         | Expr::Char(_, _)
         | Expr::Ident(_, _)

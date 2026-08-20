@@ -1764,6 +1764,7 @@ impl<'a> EvalCtx<'a> {
         if self.task_sender.is_some() {
             return run(self);
         }
+        let (ambient_core, ambient_handle) = crate::Comptime::ambient_hooks();
         std::thread::scope(|threads| {
             let (sender, receiver) = mpsc::channel();
             self.task_sender = Some(sender);
@@ -1780,7 +1781,11 @@ impl<'a> EvalCtx<'a> {
                                 .name("jet-tir-task".to_string())
                                 .stack_size(8 * 1024 * 1024)
                                 .spawn_scoped(threads, move || {
-                                    Self::run_eval_job(job_config, job)
+                                    crate::Comptime::with_ambient(
+                                        ambient_core,
+                                        ambient_handle,
+                                        || Self::run_eval_job(job_config, job),
+                                    )
                                 })
                                 .expect("evaluator task worker");
                         }

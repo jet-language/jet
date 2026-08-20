@@ -637,7 +637,7 @@ impl<'a> Interp<'a> {
                         Err(error) => Ok(CtValue::failed(Box::new(error))),
                     };
                 }
-                // D-MIGRATE3=A / D-SERDE6: `decode<T>`/`decode_traced<T>` — typed
+                // D-SERDE6: typed
                 // Decode dispatch. Untyped `.decode()` (no turbofish, D-JSON3
                 // lenient form) keeps its existing `apply_core_call` arm below.
                 if matches!(
@@ -647,7 +647,7 @@ impl<'a> Interp<'a> {
                             | "core.encoding.csv"
                             | "core.encoding.toml"
                             | "core.encoding.yaml",
-                        "decode" | "decode_traced",
+                            "decode",
                     )
                 ) && !type_args.is_empty()
                 {
@@ -660,7 +660,7 @@ impl<'a> Interp<'a> {
                             span,
                         ));
                     };
-                    return self.eval_typed_decode(&module, method, &text, &type_args[0], span);
+                    return self.eval_typed_decode(&module, &text, &type_args[0], span);
                 }
                 // D-SERDE-ENGINE1: a user or generated `Encode` method is the
                 // same engine used by the native codec. The interpreter only

@@ -19,12 +19,14 @@
 
 use crate::Diagnostics::{Diagnostic, Span};
 use crate::Package::PackageFacts;
-use crate::Sema::{
-    effect_set_has_root, parse_effect_name, Effect, EffectSet, EffectSummary,
-};
+use crate::Sema::{effect_set_has_root, Effect, EffectSet, EffectSummary};
 use crate::AST::{ImportKind, Item, ProgramBundle};
-use jet_foundation::Authority::{covers as effect_covers, root as effect_root};
+use jet_foundation::Authority::{answer, parse_right, root as effect_root, Holds, Verdict};
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
+
+fn is_memory_right(name: &str) -> bool {
+    name == "Mem.Rc" || crate::Sema::memory_allocation_bound(name).is_some()
+}
 
 /// One package's (root, or a dependency) aggregated effect set.
 #[derive(Debug, Clone)]
@@ -273,16 +275,27 @@ pub fn enforce(entries: &[PackageEffects], manifest: &PackageFacts) -> Vec<Diagn
         return Vec::new();
     }
     // D-EFFTREE1: allow/deny/grants entries may be ancestor roots (or leaves);
-    // coverage (`effect_covers`), not exact membership, decides whether a
-    // dependency's solved effect is inside the budget.
+    // the substrate verdict, not exact membership, decides budget authority.
     let allow: Option<EffectSet> = manifest
         .effects_allow
         .as_ref()
-        .map(|names| names.iter().filter_map(|n| parse_effect_name(n)).collect());
+        .map(|names| {
+            names
+                .iter()
+                .filter(|name| !is_memory_right(name))
+                .filter_map(|n| parse_right(n))
+                .collect()
+        });
     let deny: EffectSet = manifest
         .effects_deny
         .as_ref()
-        .map(|names| names.iter().filter_map(|n| parse_effect_name(n)).collect())
+        .map(|names| {
+            names
+                .iter()
+                .filter(|name| !is_memory_right(name))
+                .filter_map(|n| parse_right(n))
+                .collect()
+        })
         .unwrap_or_default();
     let grants: HashMap<&str, EffectSet> = manifest
         .grants
@@ -292,28 +305,28 @@ pub fn enforce(entries: &[PackageEffects], manifest: &PackageFacts) -> Vec<Diagn
                 dep.as_str(),
                 effects
                     .iter()
-                    .filter_map(|n| parse_effect_name(n))
+                    .filter(|name| !is_memory_right(name))
+                    .filter_map(|n| parse_right(n))
                     .collect::<EffectSet>(),
             )
         })
         .collect();
 
+    let empty = Holds::new();
     let mut diags = Vec::new();
     for pkg in entries {
         if pkg.name == "root" {
             continue;
         }
         let granted = grants.get(pkg.name.as_str());
-        for effect in &pkg.effects {
-            if let Some(g) = granted {
-                if g.iter().any(|b| effect_covers(b, effect)) {
-                    continue;
-                }
+        for effect in pkg.effects.iter().filter(|effect| effect_root(effect) != "Mem") {
+            if granted.is_some_and(|g| answer(g, &empty, effect) == Verdict::Allowed) {
+                continue;
             }
             let outside_allow = allow
                 .as_ref()
-                .is_some_and(|a| !a.iter().any(|b| effect_covers(b, effect)));
-            let inside_deny = deny.iter().any(|b| effect_covers(b, effect));
+                .is_some_and(|a| answer(a, &empty, effect) != Verdict::Allowed);
+            let inside_deny = answer(&empty, &deny, effect) == Verdict::Denied;
             if outside_allow || inside_deny {
                 if effect_root(effect) == Effect::Panic.name() {
                     let site = pkg

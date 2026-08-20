@@ -150,6 +150,7 @@ enum JetComputeTapeRule {
     Maximum,
     Minimum,
     Matmul,
+    MatmulF32Tile,
     MseLoss,
     SgdStep {
         learning_rate: f64,
@@ -2765,6 +2766,10 @@ fn jet_compute_rule_gradients(
             let (a, b) = jet_compute_vjp_matmul(&values[0], &values[1], &cot)?;
             Ok(vec![a, b])
         }
+        JetComputeTapeRule::MatmulF32Tile => {
+            let (a, b) = jet_compute_vjp_matmul_f32_tile(&values[0], &values[1], &cot)?;
+            Ok(vec![a, b])
+        }
         JetComputeTapeRule::MseLoss => Ok(vec![
             jet_compute_mse_vjp(&values[0], &values[1], &cot, true)?,
             jet_compute_mse_vjp(&values[0], &values[1], &cot, false)?,
@@ -3098,6 +3103,12 @@ fn jet_compute_jvp_rule(
             let right = jet_compute_matmul(&values[0], &tangents[1])?;
             jet_compute_binary("add", &left, &right)
         }
+        JetComputeTapeRule::MatmulF32Tile => jet_compute_jvp_matmul_f32_tile(
+            &values[0],
+            &values[1],
+            &tangents[0],
+            &tangents[1],
+        ),
         JetComputeTapeRule::MseLoss => jet_compute_mse_jvp(
             &values[0],
             &values[1],
@@ -3225,6 +3236,97 @@ fn jet_compute_vjp_matmul(
         jet_compute_inherit_placement(jet_compute_matmul(cot, &b_t)?, a),
         jet_compute_inherit_placement(jet_compute_matmul(&a_t, cot)?, b),
     ))
+}
+
+fn jet_compute_f32_projection(tensor: &JetTensor) -> Result<JetTensor, JetComputeError> {
+    jet_compute_validate_tensor(tensor)?;
+    let values = jet_compute_tensor_values(tensor)
+        .into_iter()
+        .map(|value| jet_compute_f32_value(value, "f32 autodiff input"))
+        .collect::<Result<Vec<_>, _>>()?;
+    let mut projected = jet_compute_tensor_from_shape(
+        tensor.shape.clone(),
+        0.0,
+        JetComputeDevice::Cpu,
+    )?;
+    projected.data = std::sync::Arc::new(values.into_iter().map(f64::from).collect());
+    projected.last_placement.profile = CPU_ORACLE_F32_PROFILE.to_string();
+    projected.last_placement.capabilities = CPU_ORACLE_F32_CAPABILITIES
+        .iter()
+        .map(|capability| (*capability).to_string())
+        .collect();
+    projected.last_placement.reason = "autodiff f32 projection".to_string();
+    jet_compute_validate_tensor(&projected)?;
+    Ok(projected)
+}
+
+fn jet_compute_vjp_matmul_f32_tile(
+    a: &JetTensor,
+    b: &JetTensor,
+    cot: &JetTensor,
+) -> Result<(JetTensor, JetTensor), JetComputeError> {
+    jet_compute_validate_tensor(a)?;
+    jet_compute_validate_tensor(b)?;
+    jet_compute_validate_tensor(cot)?;
+    if a.shape.len() != 2
+        || b.shape.len() != 2
+        || cot.shape.len() != 2
+        || a.shape[1] != b.shape[0]
+        || cot.shape[0] != a.shape[0]
+        || cot.shape[1] != b.shape[1]
+    {
+        return Err(JetComputeError::RankMismatch(
+            "matmul_f32_tile cotangent shape must equal the matmul output".to_string(),
+        ));
+    }
+    if a.device != b.device || a.device != cot.device {
+        return Err(JetComputeError::Device(
+            "matmul_f32_tile cotangent devices must match the inputs".to_string(),
+        ));
+    }
+    let a32 = jet_compute_f32_projection(a)?;
+    let b32 = jet_compute_f32_projection(b)?;
+    let cot32 = jet_compute_f32_projection(cot)?;
+    let b_transposed = jet_compute_transpose(&b32)?;
+    let a_transposed = jet_compute_transpose(&a32)?;
+    let a_gradient = jet_compute_matmul_f32_tile(&cot32, &b_transposed)?;
+    let b_gradient = jet_compute_matmul_f32_tile(&a_transposed, &cot32)?;
+    Ok((
+        jet_compute_tensor_from_values_like(a, &jet_compute_tensor_values(&a_gradient))?,
+        jet_compute_tensor_from_values_like(b, &jet_compute_tensor_values(&b_gradient))?,
+    ))
+}
+
+fn jet_compute_jvp_matmul_f32_tile(
+    a: &JetTensor,
+    b: &JetTensor,
+    a_tangent: &JetTensor,
+    b_tangent: &JetTensor,
+) -> Result<JetTensor, JetComputeError> {
+    jet_compute_validate_tensor(a)?;
+    jet_compute_validate_tensor(b)?;
+    jet_compute_validate_tensor(a_tangent)?;
+    jet_compute_validate_tensor(b_tangent)?;
+    if a.shape != a_tangent.shape || b.shape != b_tangent.shape {
+        return Err(JetComputeError::RankMismatch(
+            "matmul_f32_tile tangent shapes must match the inputs".to_string(),
+        ));
+    }
+    if a.device != b.device
+        || a.device != a_tangent.device
+        || b.device != b_tangent.device
+    {
+        return Err(JetComputeError::Device(
+            "matmul_f32_tile tangent devices must match the inputs".to_string(),
+        ));
+    }
+    let a32 = jet_compute_f32_projection(a)?;
+    let b32 = jet_compute_f32_projection(b)?;
+    let a_tangent32 = jet_compute_f32_projection(a_tangent)?;
+    let b_tangent32 = jet_compute_f32_projection(b_tangent)?;
+    let left = jet_compute_matmul_f32_tile(&a_tangent32, &b32)?;
+    let right = jet_compute_matmul_f32_tile(&a32, &b_tangent32)?;
+    jet_compute_binary("add", &left, &right)
 }
 
 fn jet_compute_f32_value(value: f64, context: &str) -> Result<f32, JetComputeError> {
@@ -4011,14 +4113,47 @@ impl JetComputeSimdBackend {
 fn jet_compute_simd_backend() -> JetComputeSimdBackend {
     #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
     {
-        if is_x86_feature_detected!("avx2") {
-            return JetComputeSimdBackend::Avx2;
-        }
-        if is_x86_feature_detected!("sse2") {
-            return JetComputeSimdBackend::Sse2;
-        }
+        return jet_compute_simd_backend_for_features(
+            is_x86_feature_detected!("avx2"),
+            is_x86_feature_detected!("sse2"),
+        );
+    }
+    #[cfg(not(any(target_arch = "x86", target_arch = "x86_64")))]
+    {
+        jet_compute_simd_backend_for_features(false, false)
+    }
+}
+
+fn jet_compute_simd_backend_for_features(avx2: bool, sse2: bool) -> JetComputeSimdBackend {
+    if avx2 {
+        return JetComputeSimdBackend::Avx2;
+    }
+    if sse2 {
+        return JetComputeSimdBackend::Sse2;
     }
     JetComputeSimdBackend::Scalar
+}
+
+#[inline(never)]
+fn jet_compute_f32_dot_scalar(a: &[f32], b: &[f32]) -> f32 {
+    a.iter()
+        .zip(b.iter())
+        .fold(0.0_f32, |sum, (left, right)| sum + left * right)
+}
+
+fn jet_compute_simd_backend_available(backend: JetComputeSimdBackend) -> bool {
+    #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+    {
+        match backend {
+            JetComputeSimdBackend::Avx2 => is_x86_feature_detected!("avx2"),
+            JetComputeSimdBackend::Sse2 => is_x86_feature_detected!("sse2"),
+            JetComputeSimdBackend::Scalar => true,
+        }
+    }
+    #[cfg(not(any(target_arch = "x86", target_arch = "x86_64")))]
+    {
+        matches!(backend, JetComputeSimdBackend::Scalar)
+    }
 }
 
 // JET_VETTED_UNSAFE_BEGIN: jet_compute_cpu_simd
@@ -4140,15 +4275,9 @@ fn jet_compute_f32_dot(
         JetComputeSimdBackend::Avx2 => unsafe { jet_compute_f32_dot_avx2(a, b) },
         #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
         JetComputeSimdBackend::Sse2 => unsafe { jet_compute_f32_dot_sse2(a, b) },
-        JetComputeSimdBackend::Scalar => a
-            .iter()
-            .zip(b.iter())
-            .fold(0.0_f32, |sum, (left, right)| sum + left * right),
+        JetComputeSimdBackend::Scalar => jet_compute_f32_dot_scalar(a, b),
         #[cfg(not(any(target_arch = "x86", target_arch = "x86_64")))]
-        _ => a
-            .iter()
-            .zip(b.iter())
-            .fold(0.0_f32, |sum, (left, right)| sum + left * right),
+        _ => jet_compute_f32_dot_scalar(a, b),
     };
     if value.is_finite() {
         Ok(value)
@@ -4165,11 +4294,6 @@ fn jet_compute_f32_dot(
 /// ordered scalar tail. Lane products are reduced in lane order so the SIMD
 /// backend preserves the reproducible CPU-oracle reduction contract.
 fn jet_compute_matmul_f32_tile(a: &JetTensor, b: &JetTensor) -> Result<JetTensor, JetComputeError> {
-    if a.trace.is_some() || b.trace.is_some() {
-        return Err(JetComputeError::Unsupported(
-            "matmul_f32_tile has no registered autodiff rule".to_string(),
-        ));
-    }
     if a.shape.len() != 2 || b.shape.len() != 2 {
         return Err(JetComputeError::RankMismatch(
             "matmul_f32_tile requires rank-2 tensors".to_string(),
@@ -4250,8 +4374,12 @@ fn jet_compute_matmul_f32_tile(a: &JetTensor, b: &JetTensor) -> Result<JetTensor
         backend.name(),
         backend.width(),
     );
-    jet_compute_validate_tensor(&out)?;
-    Ok(out)
+    jet_compute_record(
+        out,
+        &[a, b],
+        vec![a.clone(), b.clone()],
+        JetComputeTapeRule::MatmulF32Tile,
+    )
 }
 
 fn jet_compute_profile_f32_strict() -> String {

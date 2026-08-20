@@ -607,9 +607,15 @@ impl<'a> Checker<'a> {
                                                 .to_string()
                                         },
                                         |call| {
-                                            format!(
-                                                "materialize it first: add `{call}` before printing"
-                                            )
+                                            if crate::Collections::is_iter_type(&t) {
+                                                format!(
+                                                    "materialize it first: add `{call}` before printing; `.lazy()` or another Iter source enters the one-pass plane"
+                                                )
+                                            } else {
+                                                format!(
+                                                    "materialize it first: add `{call}` before printing"
+                                                )
+                                            }
                                         },
                                     );
                                 self.diags.push(Diagnostic::error(
@@ -694,16 +700,16 @@ impl<'a> Checker<'a> {
                 return Some(None);
             }
     
-            if call.name == Syntax::BUILTIN_REQUIRE
-                && self.funcs.get(Syntax::BUILTIN_REQUIRE).is_none()
-                && self.lookup(Syntax::BUILTIN_REQUIRE).is_none()
+            if call.name == Syntax::BUILTIN_ASSERT
+                && self.funcs.get(Syntax::BUILTIN_ASSERT).is_none()
+                && self.lookup(Syntax::BUILTIN_ASSERT).is_none()
             {
-                self.check_require_call(call);
+                self.check_assert_call(call);
                 return Some(None);
             }
     
-            if call.name == Syntax::BUILTIN_REQUIRE_EQ {
-                self.check_require_eq_call(call);
+            if call.name == Syntax::BUILTIN_ASSERT_EQ {
+                self.check_assert_eq_call(call);
                 return Some(None);
             }
     
@@ -1015,6 +1021,30 @@ impl<'a> Checker<'a> {
             // `check_zip_family_free`.
             if let Some(result) = self.check_zip_family_free(call) {
                 return Some(result);
+            }
+
+            // D-CLAIM-WORD1=B: keep the retired spelling teachable without
+            // preserving it as a second assertion mechanism.
+            if matches!(call.name.as_str(), "require" | "require_eq")
+                && self.funcs.get(&call.name).is_none()
+                && self.lookup(&call.name).is_none()
+            {
+                let replacement = if call.name == "require" {
+                    "assert"
+                } else {
+                    "assert_eq"
+                };
+                self.diags.push(Diagnostic::error(
+                    "E0102",
+                    format!("`{}` is a retired assertion spelling", call.name),
+                    "Jet has one assertion family: `assert` and `assert_eq`".to_string(),
+                    format!("write `{replacement}` instead"),
+                    Some(call.name_span),
+                ));
+                for arg in call.args.iter_mut() {
+                    self.infer(&mut arg.expr);
+                }
+                return Some(None);
             }
     
             let Some(mut sig) = self.text_head_function_sig(&call.name) else {

@@ -156,7 +156,7 @@ impl<'a> Parser<'a> {
                 kind,
                 TokKind::Ident(_)
                     | TokKind::Int(_, _)
-                    | TokKind::Float(_)
+                    | TokKind::Float(..)
                     | TokKind::Str(_)
                     | TokKind::KwTrue
                     | TokKind::KwFalse

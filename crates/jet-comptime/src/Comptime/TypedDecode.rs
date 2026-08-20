@@ -1,11 +1,11 @@
 //! Card #392 pass 5: typed `Decode` dispatch at comptime — the machinery
-//! behind `json.decode<T>` / `json.decode_traced<T>` (and the csv/toml/yaml
+//! behind `json.decode<T>` (and the csv/toml/yaml
 //! siblings, plus `core.data.csv<T>`'s row decode). Mirrors AOT's derived
-//! `__jet_Decode::jet_decode` / `jet_decode_traced` field-by-field walk from
+//! `__jet_Decode::jet_decode` / `jet_decode_with_status` field-by-field walk from
 //! the shared typed codec item bodies and migration-chain walker
 //! and `Sema::SchemaMigration`'s `#PublishedSchema` migration chain
 //! byte-for-byte (R12 parity) — including error message text (E2410/E2412)
-//! and the `[FieldError]` / `MigrationStatus{migrated,from,steps}` shapes
+//! and the `[FieldError]` / internal migration-report shape
 //! `jet_std` defines.
 //! parity: guard tests/corelib.rs::typed_codec_decode_matches_between_full_build_and_quick_run
 //!
@@ -33,7 +33,7 @@ mod inline_range_semantics {
     include!("../../../jet-codegen/src/Prelude/Core/InlineRange.rs");
 }
 
-// ── [FieldError] / MigrationStatus / DecodeResult CtValue shapes ───────────
+// ── [FieldError] / internal migration-report CtValue shape ────────────────
 
 pub(super) fn decode_error(reason: impl Into<String>) -> CtValue {
     decode_error_at("", reason)
@@ -95,7 +95,7 @@ pub(super) fn decode_error_under(seg: &str, e: CtValue) -> CtValue {
 
 fn migration_status(migrated: bool, from: String, steps: Vec<String>) -> CtValue {
     CtValue::Struct {
-        type_name: "MigrationStatus".to_string(),
+        type_name: "JetMigrationStatus".to_string(),
         fields: vec![
             ("migrated".to_string(), CtValue::Bool(migrated)),
             ("from".to_string(), CtValue::Str(from)),
@@ -119,13 +119,6 @@ fn migration_migrated(status: &CtValue) -> bool {
             .map(|(_, v)| matches!(v, CtValue::Bool(true)))
             .unwrap_or(false),
         _ => false,
-    }
-}
-
-pub(super) fn decode_result(value: CtValue, migration: CtValue) -> CtValue {
-    CtValue::Struct {
-        type_name: "DecodeResult".to_string(),
-        fields: vec![("value".to_string(), value), ("migration".to_string(), migration)],
     }
 }
 
@@ -753,7 +746,7 @@ impl<'a> Interp<'a> {
 
     /// The non-migrating decode: mirrors a type's plain `jet_decode` walk.
     /// Recurses through Option/List and nested user structs; the top-level
-    /// `decode_traced<T>`/`decode<T>` entry point (`typed_decode_top`) is what
+    /// The typed `decode<T>` entry point (`typed_decode_top`) is what
     /// additionally tries the `#PublishedSchema` migration chain on failure.
     pub(super) fn typed_decode_value(&mut self, ty: &Type, tree: &CtValue, span: Span) -> Result<CtValue, CtValue> {
         if let Some(decoded) = typed_decode_builtin_value(ty, tree) {
@@ -1107,7 +1100,8 @@ impl<'a> Interp<'a> {
         Ok(())
     }
 
-    /// `decode_traced<T>`'s full entry point — mirrors `jet_decode_traced`'s
+    /// The typed decoder's full entry point — mirrors the generated
+    /// `jet_decode_with_status` path's
     /// default (try `jet_decode`, report fresh) plus, for a
     /// `#PublishedSchema` type with `migration { }` blocks, the runtime
     /// chain-walker (`emit_migration_chain_walker`): on failure, detect which
@@ -1156,21 +1150,18 @@ impl<'a> Interp<'a> {
         }
     }
 
-    /// The `json.decode<T>` / `json.decode_traced<T>` / csv/toml/yaml sibling
-    /// entry point — parses `text` with the codec's own parser, then runs
-    /// `typed_decode_top`. `method` is `"decode"` (drop the migration status,
-    /// same chain applied silently — matches `jet_enc_*_decode`) or
-    /// `"decode_traced"` (wrap in `DecodeResult`).
+    /// The `json.decode<T>` / csv/toml/yaml sibling entry point — parses
+    /// `text` with the codec's own parser, then runs `typed_decode_top` and
+    /// returns only the canonical value or `[FieldError]` result.
     pub(super) fn eval_typed_decode(
         &mut self,
         module: &str,
-        method: &str,
         text: &str,
         ty: &Type,
         span: Span,
     ) -> Result<CtValue, Diagnostic> {
         if module == "core.encoding.csv" {
-            return self.eval_typed_csv_decode(method, text, ty, span);
+            return self.eval_typed_csv_decode(text, ty, span);
         }
         let parsed: Result<CtValue, CtValue> = match module {
             "core.encoding.json" => super::JSONInterp::parse_json_typed_ordered(text)
@@ -1185,30 +1176,25 @@ impl<'a> Interp<'a> {
             }
             // I4: named construct, not a phase — the typed decoder is the
             // runtime evaluator's decoder too.
-            _ => return Err(unsupported(&format!("`{}.{}()`", module, method), span)),
+            // This function serves the typed `decode` verb, so name it rather
+            // than a variable that does not exist in this scope.
+            _ => return Err(unsupported(&format!("`{module}.decode()`"), span)),
         };
         let tree = match parsed {
             Ok(t) => t,
             Err(e) => return Ok(CtValue::failed(Box::new(e))),
         };
         match self.typed_decode_top(ty, &tree, span) {
-            Ok((value, migration)) => {
-                if method == "decode_traced" {
-                    Ok(CtValue::Present(Box::new(decode_result(value, migration))))
-                } else {
-                    Ok(CtValue::Present(Box::new(value)))
-                }
-            }
+            Ok((value, _)) => Ok(CtValue::Present(Box::new(value))),
             Err(e) => Ok(CtValue::failed(Box::new(e))),
         }
     }
 
-    /// `core.data.csv<T>` / `core.encoding.csv.decode(_traced)<T>` — header row
+    /// `core.data.csv<T>` / `core.encoding.csv.decode<T>` — header row
     /// maps columns to fields by name; each data row becomes an Object of Text
-    /// cells, then decodes to `T`. Mirrors `jet_enc_csv_decode(_traced)`.
+    /// cells, then decodes to `T`.
     pub(super) fn eval_typed_csv_decode(
         &mut self,
-        method: &str,
         text: &str,
         ty: &Type,
         span: Span,
@@ -1220,14 +1206,9 @@ impl<'a> Interp<'a> {
         let mut it = rows.into_iter();
         let Some(header) = it.next() else {
             let value = CtValue::List(Vec::new());
-            return Ok(CtValue::Present(Box::new(if method == "decode_traced" {
-                decode_result(value, migration_status_fresh())
-            } else {
-                value
-            })));
+            return Ok(CtValue::Present(Box::new(value)));
         };
         let mut values = Vec::new();
-        let mut migration = migration_status_fresh();
         let mut errors = Vec::new();
         for (i, row) in it.enumerate() {
             let entries: Vec<(CtKey, CtValue)> = header
@@ -1240,12 +1221,7 @@ impl<'a> Interp<'a> {
                 .collect();
             let tree = json_variant("Object", Some(CtValue::Map(entries.into_iter().collect())));
             match self.typed_decode_top(ty, &tree, span) {
-                Ok((v, m)) => {
-                    if migration_migrated(&m) && !migration_migrated(&migration) {
-                        migration = m;
-                    }
-                    values.push(v);
-                }
+                Ok((v, _)) => values.push(v),
                 Err(e) => {
                     extend_decode_errors(
                         &mut errors,
@@ -1258,11 +1234,7 @@ impl<'a> Interp<'a> {
             return Ok(CtValue::failed(Box::new(CtValue::List(errors))));
         }
         let value = CtValue::List(values);
-        Ok(CtValue::Present(Box::new(if method == "decode_traced" {
-            decode_result(value, migration)
-        } else {
-            value
-        })))
+        Ok(CtValue::Present(Box::new(value)))
     }
 }
 

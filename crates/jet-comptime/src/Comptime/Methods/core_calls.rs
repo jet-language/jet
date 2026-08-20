@@ -672,6 +672,18 @@ pub fn apply_core_call_with_type(
         jet_foundation::Syntax::CoreCallCoverage::COMPTIME,
         span,
     )?;
+    // Runtime ambient carriers must reach their host marshaller before the
+    // pure projection. Pure comptime has no ambient hook, so it still uses
+    // CorePureParity below.
+    if let Some(result) = crate::Comptime::try_ambient_core_call_typed(
+        module,
+        method,
+        args.clone(),
+        span,
+        resolved_ret.cloned(),
+    ) {
+        return result;
+    }
     // The foundation row owns the effect classification for every plain
     // symbol call. Only effect-free rows may enter the pure parity evaluator;
     // this prevents a new effectful row from accidentally gaining a second
@@ -682,15 +694,6 @@ pub fn apply_core_call_with_type(
         if let Some(result) = core_pure_parity::evaluate(row, &args, span) {
             return result;
         }
-    }
-    if let Some(result) = crate::Comptime::try_ambient_core_call_typed(
-        module,
-        method,
-        args.clone(),
-        span,
-        resolved_ret.cloned(),
-    ) {
-        return result;
     }
 
     if repl_mode {
@@ -2216,7 +2219,9 @@ pub fn apply_core_call_with_type(
         // D-COMPUTE1=D / I9: same Prelude as AOT (`ComputeLite` includes Compute.rs).
         ("core.compute", method) => super::super::ComputeLite::apply(method, &args, span),
         // D-SERVICE1=D / I9: same Prelude as AOT (`ServicesLite` includes Services.rs).
-        ("core.services", method) => super::super::ServicesLite::apply(method, &args, span),
+        ("core.service" | "core.services", method) => {
+            super::super::ServicesLite::apply(method, &args, span)
+        }
         // D-AUTH1=A / I9: session batteries (JWT/PASETO stay on AOT/subset path).
         // Stateful store ops are Tier-2 (`is_tier2_core_call`) so pure
         // `evaluate_constant` cannot fold them into Ok(literals) while leaving

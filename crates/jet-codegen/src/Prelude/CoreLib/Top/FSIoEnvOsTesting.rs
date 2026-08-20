@@ -932,77 +932,43 @@ fn jet_std_env_decode<T: __jet_Decode>(
     allow: &Vec<String>,
 ) -> Result<T, Vec<jet_std::FieldError>> {
     let path = std::path::Path::new(file);
-    if path.is_absolute() || path.components().any(|part| matches!(part, std::path::Component::ParentDir)) {
+    if !jet_env_config_file_is_project_relative(file) {
         return Err(jet_std::FieldError::one(
-            "Dotenv.file must be project-relative",
+            "E2416: Dotenv.file must be project-relative",
         ));
     }
 
-    let allowed = |name: &str| {
-        allow.is_empty()
-            || allow
-                .iter()
-                .any(|candidate| candidate.eq_ignore_ascii_case(name))
-    };
-    let mut values = std::collections::BTreeMap::<String, (String, String)>::new();
-    if !file.is_empty() {
-        let text = std::fs::read_to_string(path).map_err(|error| {
-            jet_std::FieldError::one(format!("cannot read Dotenv.file `{file}`: {error}"))
-        })?;
-        for (line_index, line) in text.lines().enumerate() {
-            let line = line.trim();
-            if line.is_empty() || line.starts_with('#') {
-                continue;
-            }
-            let line = line.strip_prefix("export ").unwrap_or(line);
-            let Some((raw_name, raw_value)) = line.split_once('=') else {
+    let dotenv = if file.is_empty() {
+        None
+    } else {
+        match std::fs::read_to_string(path) {
+            Ok(text) => Some(text),
+            // A missing default `.env` is normal. Other read failures remain
+            // visible as config errors with the file name attached.
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
+            Err(error) => {
                 return Err(jet_std::FieldError::one(format!(
-                    "invalid .env line {}",
-                    line_index + 1
-                )));
-            };
-            let name = raw_name.trim();
-            if !jet_env_name_is_valid(name) || !allowed(name) {
-                continue;
+                    "E2416: cannot read Dotenv.file `{file}`: {error}"
+                )))
             }
-            let value = jet_env_dotenv_value(raw_value.trim());
-            values.insert(name.to_ascii_uppercase(), (name.to_string(), value));
         }
-    }
+    };
     // Process values win over `.env`, matching pydantic-settings source order.
-    // One snapshot, the one every tier defines: `jet_std_env_snapshot_raw`
-    // (native reads the process table, the JIT host marshals to it). A second
-    // spelling here compiled nowhere.
-    for (raw_name, raw_value) in jet_std_env_snapshot_raw() {
-        let (Some(name), Some(value)) = (raw_name.to_str(), raw_value.to_str()) else {
-            continue;
-        };
-        if jet_env_name_is_valid(name) && allowed(name) {
-            values.insert(name.to_ascii_uppercase(), (name.to_string(), value.to_string()));
-        }
-    }
+    // The parser and overlay rules are the shared Prelude fragment above;
+    // this call only marshals the logical environment snapshot to Strings.
+    let process = jet_std_env_snapshot_raw()
+        .into_iter()
+        .filter_map(|(name, value)| Some((name.to_str()?.to_string(), value.to_str()?.to_string())));
+    let entries = jet_env_config_entries(prefix, dotenv.as_deref(), allow, process)
+        .map_err(|reason| jet_std::FieldError::one(format!("E2416: {reason}")))?;
 
     let mut tree = jet_std::DataTree::Object(Vec::new());
     let mut origins = Vec::<(String, String)>::new();
-    for (_, (name, value)) in values {
-        let Some(rest) = name.strip_prefix(prefix) else {
-            continue;
-        };
-        if rest.is_empty() {
-            continue;
-        }
-        let segments: Vec<String> = rest
-            .split("__")
-            .map(|segment| segment.to_lowercase())
-            .filter(|segment| !segment.is_empty())
-            .collect();
-        if segments.is_empty() {
-            continue;
-        }
-        origins.push((name.clone(), segments.join(".")));
-        jet_env_insert_tree(&mut tree, &segments, value);
+    for entry in entries {
+        origins.push((entry.name, entry.segments.join(".")));
+        jet_env_insert_tree(&mut tree, &entry.segments, entry.value);
     }
-    T::jet_decode_traced(&tree)
+    T::jet_decode_with_status(&tree)
         .map(|(value, _)| value)
         .map_err(|errors| {
             errors
@@ -1019,30 +985,13 @@ fn jet_std_env_decode<T: __jet_Decode>(
                         error.reason
                     };
                     error.reason = match origin {
-                        Some(name) => format!("env var {name} -> {path}: {reason}"),
-                        None => format!("config field {path}: {reason}"),
+                        Some(name) => format!("E2416: env var {name} -> {path}: {reason}"),
+                        None => format!("E2416: config field {path}: {reason}"),
                     };
                     error
                 })
                 .collect()
         })
-}
-
-fn jet_env_name_is_valid(name: &str) -> bool {
-    !name.is_empty() && !name.contains('=') && !name.contains('\0')
-}
-
-fn jet_env_dotenv_value(value: &str) -> String {
-    let value = value.trim();
-    if value.len() >= 2
-        && ((value.starts_with('"') && value.ends_with('"'))
-            || (value.starts_with('\'') && value.ends_with('\'')))
-    {
-        return value[1..value.len() - 1].to_string();
-    }
-    value
-        .split_once(" #")
-        .map_or_else(|| value.to_string(), |(value, _)| value.trim_end().to_string())
 }
 
 fn jet_env_secret_path(path: &str) -> bool {

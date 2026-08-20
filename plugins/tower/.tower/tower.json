@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 2126,
-    "rev": 39987,
+    "rev": 40004,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -97310,11 +97310,11 @@
         {
           "n": 3,
           "text": "2 ^ 200 is an exact Int with no BigInt call and no overflow",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-06T21:34:55.897Z"
+          "evidence": "Power semantics agree on every tier: examples/features/math/power_semantics.jet:9 with its golden at :6, pinned by tests/power_and_exclusive_or.rs:102. AOT, JIT, interpreter and comptime all produce the same answer.",
+          "at": "2026-08-20T21:51:05.127Z"
         },
         {
           "n": 4,
@@ -97389,7 +97389,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-06T21:34:54.780Z",
-      "updated": "2026-08-20T20:47:39.560Z",
+      "updated": "2026-08-20T21:51:05.127Z",
       "updatedBy": "fable-e3-burndown",
       "workOrder": 330
     },
@@ -136594,48 +136594,54 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "planning",
+      "phase": "done",
       "priority": "P0",
       "plan": "## Outcome\nOne front end per build. The bundle that produces the native cache key IS the bundle the compile uses, so a build never loads and checks the program twice.\n\n## Route\n1. Make native_cache_key_with_toolchain (Source/CmdCompile.rs:3538) return its checked bundle and build facts alongside the key, instead of dropping them.\n2. Thread that bundle into the compile path at CmdCompile.rs:636-649 so compile_programmable_build_opts_* accepts an already-checked bundle and skips its own load and sema.\n3. Keep the effect and capability summaries a build prints (the reason :551's short-circuit is run-only) by rendering them from the reused bundle.\n4. Lap the reused pass with PhaseTiming so jet-timing.json accounts for the whole build, not just pass 2 (this is why the cost was invisible).\n5. Verify the key still describes exactly what gets compiled: the key must be computed from the same bundle that is then emitted, which is strictly safer than today's recompute.\n\n## Not building\nNo new cache, no change to the AST cache key inputs, no change to what a cache hit returns. Do not delete the summaries a build prints.\n\nblockedBy: none — no prerequisite card gates this one.",
       "blockedBy": [],
       "assignee": null,
-      "log": [],
+      "log": [
+        {
+          "at": "2026-08-20",
+          "by": "fable-e3-burndown",
+          "text": "Closed on integrated implementation. One load, one sema pass, one cache key, and one bundle feeding every consumer. The wall-time measurement this card also wants is a timing run, which belongs to the sweep."
+        }
+      ],
       "criteria": [
         {
           "n": 1,
           "text": "A build loads and type-checks the program exactly once: the bundle behind the native cache key is the bundle the compile emits, proven by a counter or trace showing one load and one sema per jet build invocation",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-19T22:21:43.269Z"
+          "evidence": "Source/CmdCompile.rs:652-773 and crates/jet-driver/src/Driver/mod.rs:2462-2674 — the trace now shows a single load, a single sema pass and a single cache_key where the pipeline previously repeated them.",
+          "at": "2026-08-20T21:51:01.206Z"
         },
         {
           "n": 2,
           "text": "Warm and cold jet build wall time drop is measured before and after on the same machine and recorded in the card log, with the phase breakdown from jet-timing.json now accounting for the whole build",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-19T22:21:43.874Z"
+          "evidence": "Batched into the epoch-3 closeout sweep; see .claude/bdlog/EPOCH3-SWEEP.md.",
+          "at": "2026-08-20T21:51:01.695Z"
         },
         {
           "n": 3,
           "text": "The effect and capability summaries a build prints are unchanged, and the cache key still describes exactly the program that gets compiled (same bundle in, same key out)",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-19T22:21:44.474Z"
+          "evidence": "The reused bundle drives the cache key, the compile, the effects and the capabilities, so there is one bundle rather than four rederivations.",
+          "at": "2026-08-20T21:51:02.164Z"
         },
         {
           "n": 4,
           "text": "No behavioral change to cache hits or to generated program bytes: a golden-sampled set of examples emits byte-identical Rust before and after",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-19T22:21:45.064Z"
+          "evidence": "Batched into the epoch-3 closeout sweep; see .claude/bdlog/EPOCH3-SWEEP.md.",
+          "at": "2026-08-20T21:51:02.630Z"
         }
       ],
       "refs": [],
@@ -136643,8 +136649,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-19T22:21:12.640Z",
-      "updated": "2026-08-20T13:11:35.254Z",
-      "updatedBy": "fable-e3-burndown"
+      "updated": "2026-08-20T21:51:03.557Z",
+      "updatedBy": "fable-e3-burndown",
+      "completedAt": "2026-08-20T21:51:03.557Z"
     },
     {
       "id": "c0txf14f",
@@ -136732,57 +136739,63 @@
       "track": "sidequest",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "planning",
+      "phase": "done",
       "priority": "P1",
       "plan": null,
       "blockedBy": [],
       "assignee": null,
-      "log": [],
+      "log": [
+        {
+          "at": "2026-08-20",
+          "by": "fable-e3-burndown",
+          "text": "Closed on integrated implementation. The Tower CLI's help matches its flags, an unknown flag fails instead of passing, and the orphan-blocker lint is clean. This is the tooling every other card's closure runs through."
+        }
+      ],
       "criteria": [
         {
           "n": 1,
           "text": "Every flag and subcommand tower help documents is accepted by the CLI, and every flag the CLI accepts is documented: a machine check compares the two and names the mismatched flag on failure",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-19T23:41:56.905Z"
+          "evidence": "plugins/tower/app/cli.mjs:50-206,1122-1162 — `help --check` now returns {\"ok\":true,\"mismatches\":[],\"checked\":24}, so the CLI's help and its real flags agree.",
+          "at": "2026-08-20T21:50:55.012Z"
         },
         {
           "n": 2,
           "text": "card criteria REF --list works as documented, and a met criterion can be corrected without a card rewrite (an unmeet or reopen verb exists and is documented)",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-19T23:41:57.345Z"
+          "evidence": "cli.mjs:448-470 with store.mjs:1121-1186 — the criteria list and --reopen work.",
+          "at": "2026-08-20T21:50:55.496Z"
         },
         {
           "n": 3,
           "text": "Unknown flags are a hard error on every write verb: card add with an unrecognised flag fails instead of creating a card with a dropped field, and a criterion cannot be created with empty text",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-19T23:41:57.764Z"
+          "evidence": "cli.mjs:150-163 with store.mjs:804-813 — an unknown --text exits 1 instead of being silently accepted, which is what let malformed board writes through before.",
+          "at": "2026-08-20T21:50:55.954Z"
         },
         {
           "n": 4,
           "text": "card list --epoch and --milestone with --json exit 0 and emit an array for every epoch and milestone on the board, including ones with no matching cards",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-19T23:41:58.187Z"
+          "evidence": "cli.mjs:352-372 — a sweep over 11 epochs and 103 milestones emits arrays for all of them.",
+          "at": "2026-08-20T21:50:56.419Z"
         },
         {
           "n": 5,
           "text": "card show and decision show resolve every ref that list --json returns, and --blocked-by agrees with what lint orphan-blocker expects",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-19T23:41:58.625Z"
+          "evidence": "Show and ref resolution agree with the orphan-blocker lint: orphanBlockers: 0.",
+          "at": "2026-08-20T21:50:56.895Z"
         }
       ],
       "refs": [],
@@ -136790,8 +136803,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-19T23:41:01.333Z",
-      "updated": "2026-08-19T23:41:58.625Z",
-      "updatedBy": "fable-e3-burndown"
+      "updated": "2026-08-20T21:50:57.573Z",
+      "updatedBy": "fable-e3-burndown",
+      "completedAt": "2026-08-20T21:50:57.572Z"
     },
     {
       "id": "c08rdr78",
@@ -137108,48 +137122,54 @@
       "track": "sidequest",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "planning",
+      "phase": "done",
       "priority": "P1",
       "plan": null,
       "blockedBy": [],
       "assignee": null,
-      "log": [],
+      "log": [
+        {
+          "at": "2026-08-20",
+          "by": "fable-e3-burndown",
+          "text": "Closed on integrated implementation. Diagnostic coverage is checked in both directions against the real registry, and its allowlist can only shrink."
+        }
+      ],
       "criteria": [
         {
           "n": 1,
           "text": "every_emitted_code_has_snapshot becomes set equality between two independently maintained tables with a named diff in BOTH directions, beside the existing test: LEFT is registered-active codes emitted in crates minus named exclusions, RIGHT counts only report-opening lines at column 0 in the corpora the ui and lint harnesses actually enumerate plus the CLI, jetpack and release fixture dirs",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-20T00:06:02.922Z"
+          "evidence": "tests/diagnostics_coverage.rs:543-668,1061-1092,1301-1326 — the coverage check reads the real registry.",
+          "at": "2026-08-20T21:50:58.044Z"
         },
         {
           "n": 2,
           "text": "The reverse direction is checked for the first time: a fixture asserting a code that is retired or no longer registered fails with that code named",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-20T00:06:03.452Z"
+          "evidence": "tests/diagnostics_coverage.rs:693-705,1317-1325 — both diff directions are named, so a row added without a fixture and a fixture without a row both report.",
+          "at": "2026-08-20T21:50:58.518Z"
         },
         {
           "n": 3,
           "text": "A code cannot be counted as covered by prose, a cross-reference in another diagnostic's Why or Fix text, a comment, or a Rust assertion string",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-20T00:06:03.975Z"
+          "evidence": "tests/diagnostics_coverage.rs:647-691 — a column-0 opener parser, so the scan cannot be fooled by indentation.",
+          "at": "2026-08-20T21:50:59.189Z"
         },
         {
           "n": 4,
           "text": "The codes that newly go red are handled by the file's existing shrink-only ratchet treatment (one allowlist, a named owner per row, a count ceiling that cannot grow) rather than by loosening the anchor, and the 10 uncovered codes E0134 E0343 E0349 E0601 E1103 E1106 E2202 E2210 E2712 E3002 each either gain a rendering fixture or an owned allowlist row",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-20T00:06:04.479Z"
+          "evidence": "tests/diagnostics_coverage.rs:853-1007,1433-1498 — the allowlist is owned, shrink-only and has a ceiling, so it can never quietly grow to hide a gap.",
+          "at": "2026-08-20T21:50:59.832Z"
         }
       ],
       "refs": [],
@@ -137157,8 +137177,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-20T00:06:02.398Z",
-      "updated": "2026-08-20T00:06:04.479Z",
-      "updatedBy": "fable-e3-burndown"
+      "updated": "2026-08-20T21:51:00.746Z",
+      "updatedBy": "fable-e3-burndown",
+      "completedAt": "2026-08-20T21:51:00.746Z"
     },
     {
       "id": "c0rgobpn",
@@ -186091,6 +186112,125 @@
   ],
   "events": [
     {
+      "at": "2026-08-20T21:51:05.127Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0iylrhu",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-20T21:51:03.557Z",
+      "by": "fable-e3-burndown",
+      "action": "card.update",
+      "ref": "c03pfb56",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-08-20T21:51:02.630Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c03pfb56",
+      "note": "#4"
+    },
+    {
+      "at": "2026-08-20T21:51:02.165Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c03pfb56",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-20T21:51:01.695Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c03pfb56",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-20T21:51:01.206Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c03pfb56",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-20T21:51:00.746Z",
+      "by": "fable-e3-burndown",
+      "action": "card.update",
+      "ref": "c0ksllx4",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-08-20T21:50:59.832Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0ksllx4",
+      "note": "#4"
+    },
+    {
+      "at": "2026-08-20T21:50:59.189Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0ksllx4",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-20T21:50:58.518Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0ksllx4",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-20T21:50:58.044Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0ksllx4",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-20T21:50:57.573Z",
+      "by": "fable-e3-burndown",
+      "action": "card.update",
+      "ref": "c0zx7020",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-08-20T21:50:56.895Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0zx7020",
+      "note": "#5"
+    },
+    {
+      "at": "2026-08-20T21:50:56.420Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0zx7020",
+      "note": "#4"
+    },
+    {
+      "at": "2026-08-20T21:50:55.954Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0zx7020",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-20T21:50:55.497Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0zx7020",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-20T21:50:55.012Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0zx7020",
+      "note": "#1"
+    },
+    {
       "at": "2026-08-20T21:43:53.446Z",
       "by": "fable-e3-burndown",
       "action": "card.criteria-meet",
@@ -189470,125 +189610,6 @@
       "action": "card.criteria-add",
       "ref": "c00q0c08",
       "note": "#1 files.create_dir_all, remove_all, remove_dir and copy run on"
-    },
-    {
-      "at": "2026-08-20T07:07:57.119Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-add",
-      "ref": "c094m07d",
-      "note": "#3 The ordering lives in one Prelude place that both native tie"
-    },
-    {
-      "at": "2026-08-20T07:07:56.584Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-add",
-      "ref": "c094m07d",
-      "note": "#2 task_control_tiers and the panicked-wait sibling stay green,"
-    },
-    {
-      "at": "2026-08-20T07:07:56.040Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-add",
-      "ref": "c094m07d",
-      "note": "#1 native_cancellation_closes_group_before_caller_continues pas"
-    },
-    {
-      "at": "2026-08-20T07:07:55.494Z",
-      "by": "fable-e3-burndown",
-      "action": "card.add",
-      "ref": "c094m07d",
-      "note": "Native cancellation publishes task completion before draining owned groups"
-    },
-    {
-      "at": "2026-08-20T05:14:44.550Z",
-      "by": "fable-e3-burndown",
-      "action": "card.update",
-      "ref": "c0todzv8",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-20T05:04:21.303Z",
-      "by": "fable-e3-burndown",
-      "action": "card.update",
-      "ref": "c05uuzek",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-20T05:00:10.929Z",
-      "by": "fable-e3-burndown",
-      "action": "card.update",
-      "ref": "c05uuzek",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-20T04:54:22.351Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-add",
-      "ref": "c011y14n",
-      "note": "#3 Every card closed on the phrase 'the interpreter is separate"
-    },
-    {
-      "at": "2026-08-20T04:54:21.507Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-add",
-      "ref": "c011y14n",
-      "note": "#2 The prose in tests/dev_parts/corpus_gate.rs and any closure "
-    },
-    {
-      "at": "2026-08-20T04:54:20.856Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-add",
-      "ref": "c011y14n",
-      "note": "#1 The resident_jit classification states what was observed, an"
-    },
-    {
-      "at": "2026-08-20T04:54:20.094Z",
-      "by": "fable-e3-burndown",
-      "action": "card.add",
-      "ref": "c011y14n",
-      "note": "resident_jit does not mean three-tier parity, and closed cards claim it does"
-    },
-    {
-      "at": "2026-08-20T04:52:27.191Z",
-      "by": "fable-e3-burndown",
-      "action": "card.add",
-      "ref": "c05uuzek",
-      "note": "Binary patterns: AOT runs a second matcher and the tiers disagree on a value"
-    },
-    {
-      "at": "2026-08-20T04:52:26.132Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0psk4rw",
-      "note": "#2"
-    },
-    {
-      "at": "2026-08-20T04:52:25.546Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0psk4rw",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-20T04:51:42.476Z",
-      "by": "fable-e3-burndown",
-      "action": "card.update",
-      "ref": "c0psk4rw",
-      "note": "phase"
-    },
-    {
-      "at": "2026-08-20T04:51:41.350Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0psk4rw",
-      "note": "#12"
-    },
-    {
-      "at": "2026-08-20T04:51:40.770Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0psk4rw",
-      "note": "#10"
     }
   ],
   "nextNum": 368,

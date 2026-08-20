@@ -515,7 +515,7 @@ fn load_entry_with_overlays_mode_on_stack(
                             "E0355",
                             "invalid package memory policy".to_string(),
                             detail,
-                            "use `policy: .{ no_alloc: true, zero_rc: true, arena_bounded: 65536, gc: true, copies: .Explicit, unsafe: .Forbid, sentries: .Off }` in `package.jet`".to_string(),
+                            "write memory floors as `effects: .{ deny: [Mem.Alloc, Mem.Rc, Mem.Alloc(above: 65536)] }` in `package.jet`; keep `policy:` for non-memory settings".to_string(),
                             None,
                         )],
                     ),
@@ -779,11 +779,21 @@ fn load_entry_with_overlays_mode_on_stack(
                 })?;
                 let mut policy = organization_policy.clone();
                 let package_lints_deny = package_manifest.policy.lints_deny.unwrap_or_default();
+                let package_memory_denials = package_manifest
+                    .effects_deny
+                    .clone()
+                    .unwrap_or_default()
+                    .into_iter()
+                    .filter(|name| {
+                        name == "Mem.Rc" || crate::Sema::memory_allocation_bound(name).is_some()
+                    })
+                    .collect();
                 let package_guarantees = PackageGuarantees {
                     contain: package_manifest.policy.contain.clone(),
                     harden: package_manifest.policy.harden,
+                    memory_denials: package_memory_denials,
                 };
-                policy.extend(package_manifest.policy.memory);
+                policy.extend(package_manifest.policy.declarations);
                 let source = pack_path.display().to_string();
                 for declaration in policy.iter_mut().filter(|declaration| declaration.scope == crate::Policy::PolicyScope::Package) { declaration.source = source.clone(); }
                 resolver.revalidate_file(&checked.file).map_err(|error| {
@@ -1195,7 +1205,6 @@ fn load_entry_with_overlays_mode_on_stack(
             no_prelude: program.no_prelude,
             default_target: program.default_target,
             html_path: program.html_path,
-            no_alloc_policy: program.no_alloc_policy,
             policy_declarations: program.policy_declarations,
             rule_facts: program.rule_facts,
         });
@@ -1812,7 +1821,6 @@ fn load_file(
         no_prelude: prog.no_prelude,
         default_target: prog.default_target,
         html_path: prog.html_path.clone(),
-        no_alloc_policy: prog.no_alloc_policy,
         policy_declarations: effective_declarations,
         rule_facts: std::mem::take(&mut prog.rule_facts),
     });

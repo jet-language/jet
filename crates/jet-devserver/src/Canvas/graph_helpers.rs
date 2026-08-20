@@ -156,7 +156,7 @@ pub(super) fn binding_type(g: &GraphBuilder, name: &str, b: &AST::Binding) -> St
 pub(super) fn expr_type(g: &GraphBuilder, index: &SemIndex, expr: &Expr) -> String {
     match expr {
         Expr::Int(_, _, _, _) => "Int".to_string(),
-        Expr::Float(_, _, is_f32) => if *is_f32 { "F32" } else { "Float" }.to_string(),
+        Expr::Float(_, _, is_f32, _) => if *is_f32 { "F32" } else { "Float" }.to_string(),
         Expr::Bool(_, _) => "Bool".to_string(),
         Expr::Str(_, _) => "String".to_string(),
         Expr::Char(_, _) => "Char".to_string(),
@@ -227,7 +227,7 @@ pub(super) fn pure_leaf(expr: &Expr) -> bool {
     match expr {
         Expr::Str(_, _)
         | Expr::Int(_, _, _, _)
-        | Expr::Float(_, _, _)
+        | Expr::Float(_, _, _, _)
         | Expr::Bool(_, _)
         | Expr::Char(_, _)
         | Expr::Ident(_, _)

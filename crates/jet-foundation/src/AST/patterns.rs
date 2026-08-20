@@ -263,12 +263,12 @@ impl BindPattern {
 #[derive(Debug, Clone)]
 pub enum OrFallback {
     Value(Box<Expr>),
-    /// D-FAIL-BIND1=A: `expr ?? { statements; value }`. The final `return
-    /// value` spelling is normalized to this same value-bearing block by the
-    /// parser; sema provides the fallback-only ambient `err` binding.
+    /// D-FAIL-BIND1=A: `expr ?? { statements; value-or-exit }`. `None` marks
+    /// a body whose final statement diverges; sema provides the fallback-only
+    /// ambient `err` binding.
     Block {
         body: Vec<Stmt>,
-        value: Box<Expr>,
+        value: Option<Box<Expr>>,
         span: Span,
     },
     Return(Option<Box<Expr>>, Span),

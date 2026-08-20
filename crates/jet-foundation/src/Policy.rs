@@ -1,17 +1,17 @@
 //! Compiler-owned scoped policy registry and resolution ladder (D-MARK-SCOPE1).
 
-use crate::Diagnostics::Span;
+use crate::Diagnostics::{Span, TextEdit};
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::LazyLock;
 
 pub use crate::Authority::Scope as PolicyScope;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Ord, PartialOrd)]
-pub enum PolicyKey { NoAlloc, ZeroRc, ArenaBounded, Unsafe, Impure, Nondeterministic, ScopedGc, ExplicitUnits, Copies, Sentries }
+pub enum PolicyKey { Unsafe, Impure, Nondeterministic, ScopedGc, ExplicitUnits, Copies, Sentries }
 
 impl PolicyKey {
-    pub const fn name(self) -> &'static str { match self { Self::NoAlloc => "no_alloc", Self::ZeroRc => "zero_rc", Self::ArenaBounded => "arena_bounded", Self::Unsafe => "unsafe", Self::Impure => "impure", Self::Nondeterministic => "nondeterministic", Self::ScopedGc => "gc", Self::ExplicitUnits => "explicit_units", Self::Copies => "copies", Self::Sentries => "sentries" } }
-    pub fn parse(name: &str) -> Option<Self> { match name { "no_alloc" => Some(Self::NoAlloc), "zero_rc" => Some(Self::ZeroRc), "arena_bounded" => Some(Self::ArenaBounded), "unsafe" => Some(Self::Unsafe), "impure" => Some(Self::Impure), "nondeterministic" => Some(Self::Nondeterministic), "gc" => Some(Self::ScopedGc), "explicit_units" => Some(Self::ExplicitUnits), "copies" => Some(Self::Copies), "sentries" => Some(Self::Sentries), _ => None } }
+    pub const fn name(self) -> &'static str { match self { Self::Unsafe => "unsafe", Self::Impure => "impure", Self::Nondeterministic => "nondeterministic", Self::ScopedGc => "gc", Self::ExplicitUnits => "explicit_units", Self::Copies => "copies", Self::Sentries => "sentries" } }
+    pub fn parse(name: &str) -> Option<Self> { match name { "unsafe" => Some(Self::Unsafe), "impure" => Some(Self::Impure), "nondeterministic" => Some(Self::Nondeterministic), "gc" => Some(Self::ScopedGc), "explicit_units" => Some(Self::ExplicitUnits), "copies" => Some(Self::Copies), "sentries" => Some(Self::Sentries), _ => None } }
     pub const fn is_audited_gate(self) -> bool { matches!(self, Self::Unsafe | Self::Impure | Self::Nondeterministic) }
 }
 
@@ -338,9 +338,6 @@ pub struct PolicyRule {
 const PACKAGE_SCOPES: &[PolicyScope] = &[PolicyScope::Package, PolicyScope::Module, PolicyScope::Function, PolicyScope::Block];
 const ALL_SCOPES: &[PolicyScope] = &[PolicyScope::Organization, PolicyScope::Package, PolicyScope::Module, PolicyScope::Function, PolicyScope::Block];
 pub const POLICY_RULES: &[PolicyRule] = &[
-    PolicyRule { key: PolicyKey::NoAlloc, scopes: PACKAGE_SCOPES, combine: PolicyCombine::Tighten },
-    PolicyRule { key: PolicyKey::ZeroRc, scopes: PACKAGE_SCOPES, combine: PolicyCombine::Tighten },
-    PolicyRule { key: PolicyKey::ArenaBounded, scopes: PACKAGE_SCOPES, combine: PolicyCombine::Tighten },
     PolicyRule { key: PolicyKey::Unsafe, scopes: ALL_SCOPES, combine: PolicyCombine::Tighten },
     PolicyRule { key: PolicyKey::Impure, scopes: ALL_SCOPES, combine: PolicyCombine::Tighten },
     PolicyRule { key: PolicyKey::Nondeterministic, scopes: ALL_SCOPES, combine: PolicyCombine::Tighten },
@@ -398,8 +395,7 @@ fn resolve_policy(key: PolicyKey, declarations: impl IntoIterator<Item = PolicyD
         let mut next = declaration.value;
         if let Some(outer) = effective {
             let widens = match (key, outer, declaration.value) {
-                (PolicyKey::ArenaBounded, PolicyValue::Limit(a), PolicyValue::Limit(b)) => b > a,
-                (PolicyKey::NoAlloc | PolicyKey::ZeroRc | PolicyKey::ScopedGc | PolicyKey::ExplicitUnits, PolicyValue::Enabled, PolicyValue::Enabled) => false,
+                (PolicyKey::ScopedGc | PolicyKey::ExplicitUnits, PolicyValue::Enabled, PolicyValue::Enabled) => false,
                 (PolicyKey::Copies, PolicyValue::Explicit, PolicyValue::Explicit) => false,
                 (PolicyKey::Sentries, PolicyValue::On, PolicyValue::On | PolicyValue::Off) => false,
                 (PolicyKey::Sentries, PolicyValue::Off, PolicyValue::On) => true,
@@ -642,7 +638,7 @@ pub fn default_gate_value(key: PolicyKey) -> PolicyValue {
 pub fn parse_value(key: PolicyKey, raw: &str) -> Result<PolicyValue, String> {
     let raw = raw.trim();
     match key {
-        PolicyKey::NoAlloc | PolicyKey::ZeroRc | PolicyKey::ScopedGc | PolicyKey::ExplicitUnits if raw == "true" => Ok(PolicyValue::Enabled),
+        PolicyKey::ScopedGc | PolicyKey::ExplicitUnits if raw == "true" => Ok(PolicyValue::Enabled),
         PolicyKey::Copies => match raw {
             ".Explicit" => Ok(PolicyValue::Explicit),
             _ => Err("`copies` must be `.Explicit`".to_string()),
@@ -652,7 +648,6 @@ pub fn parse_value(key: PolicyKey, raw: &str) -> Result<PolicyValue, String> {
             ".Off" => Ok(PolicyValue::Off),
             _ => Err("`sentries` must be `.On` or `.Off`".to_string()),
         },
-        PolicyKey::ArenaBounded => raw.parse::<u64>().ok().filter(|n| *n > 0).map(PolicyValue::Limit).ok_or_else(|| format!("`{}` needs a positive byte limit", key.name())),
         key if key.is_audited_gate() => match raw {
             ".Forbid" => Ok(PolicyValue::Forbid),
             ".Default" => Ok(PolicyValue::Default),
@@ -968,9 +963,6 @@ fn canonical_rule_arg_variants(name: &str) -> Option<&'static [&'static str]> {
         "ObligationMode" => &["None", "GateOnly", "Obligations", "PerSite", "Track", "Skip"],
         "Site" => SITE_VARIANTS,
         "PolicySetting" => &[
-            "no_alloc",
-            "zero_rc",
-            "arena_bounded",
             "unsafe",
             "gc",
             "explicit_units",
@@ -1448,22 +1440,30 @@ pub fn marker_unknown_error(
         .filter(|(_, distance)| *distance <= 2)
         .min_by_key(|(_, distance)| *distance)
         .map(|(candidate, _)| candidate.clone());
-    crate::Diagnostics::Diagnostic::error(
+    let fix = nearest.as_ref().map_or_else(
+        || {
+            "check the spelling, or see docs/spec/syntax-decisions.md for the full applied-rule list."
+                .to_string()
+        },
+        |nearest| format!("did you mean `#{nearest}`?"),
+    );
+    let mut diagnostic = crate::Diagnostics::Diagnostic::error(
         "E0927",
         format!("`#{name}` isn't a known applied rule"),
         format!(
             "`{name}` isn't registered as an applied rule — Jet rules are a closed, \
              registered vocabulary (I7), not any PascalCase word."
         ),
-        nearest.map_or_else(
-            || {
-                "check the spelling, or see docs/spec/syntax-decisions.md for the full applied-rule list."
-                    .to_string()
-            },
-            |nearest| format!("did you mean `#{nearest}`?"),
-        ),
+        fix,
         Some(span),
-    )
+    );
+    if let Some(nearest) = nearest {
+        diagnostic = diagnostic.with_edit(TextEdit {
+            span,
+            new_text: nearest,
+        });
+    }
+    diagnostic
 }
 
 /// D-MARK-REPEAT1=A: the one repeated-rule diagnostic. Every site calls this,
@@ -1859,29 +1859,10 @@ mod tests {
     }
 
     #[test]
-    fn package_module_function_block_chain_keeps_provenance_and_rejects_widening() {
-        let declaration = |scope, value, start, source: &str| super::PolicyDeclaration {
-            key: super::PolicyKey::ArenaBounded,
-            value: super::PolicyValue::Limit(value),
-            scope,
-            span: crate::Diagnostics::Span::new(start, start + 1),
-            target: None,
-            source: source.to_string(),
-        };
-        let chain = vec![
-            declaration(super::PolicyScope::Package, 65536, 1, "package.jet"),
-            declaration(super::PolicyScope::Module, 32768, 2, "Source/main.jet"),
-            declaration(super::PolicyScope::Function, 16384, 3, "Source/main.jet"),
-            declaration(super::PolicyScope::Block, 8192, 4, "Source/main.jet"),
-        ];
-        let effective = super::resolve(super::PolicyKey::ArenaBounded, chain).unwrap().unwrap();
-        assert_eq!(effective.value, super::PolicyValue::Limit(8192));
-        assert_eq!(effective.provenance.len(), 4);
-        let widening = vec![
-            declaration(super::PolicyScope::Package, 1024, 1, "package.jet"),
-            declaration(super::PolicyScope::Module, 2048, 2, "Source/main.jet"),
-        ];
-        assert!(matches!(super::resolve(super::PolicyKey::ArenaBounded, widening), Err(super::PolicyError::Widening { .. })));
+    fn memory_floor_words_are_not_policy_keys() {
+        assert!(super::PolicyKey::parse("no_alloc").is_none());
+        assert!(super::PolicyKey::parse("zero_rc").is_none());
+        assert!(super::PolicyKey::parse("arena_bounded").is_none());
     }
 
     #[test]

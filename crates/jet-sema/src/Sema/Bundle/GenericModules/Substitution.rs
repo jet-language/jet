@@ -273,7 +273,9 @@ pub(super) fn substitute_expr(
                 }
                 OrFallback::Block { body, value, .. } => {
                     substitute_stmts(body, types, values);
-                    substitute_expr(value, types, values);
+                    if let Some(value) = value {
+                        substitute_expr(value, types, values);
+                    }
                 }
                 OrFallback::Panic { args, .. } => args
                     .iter_mut()

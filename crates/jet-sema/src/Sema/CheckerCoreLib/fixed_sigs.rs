@@ -137,12 +137,10 @@ pub fn is_polymorphic_core_special(module: &str, name: &str) -> bool {
             // D-ENC1 / D-GENERIC-CALL1 / D-SERDE6: typed encode/decode return
             // types depend on the value type / call-site `<T>`, so codegen reads
             // them from resolved_ret (I3).
-            // D-MIGRATE3=A: `decode_traced` is the same call-site-typed shape, one
-            // layer deeper (`DecodeResult<T>`).
             | (
                 "core.encoding.json" | "core.encoding.csv" | "core.encoding.toml"
                 | "core.encoding.yaml",
-                "to_string" | "to_string_pretty" | "decode" | "decode_traced",
+                "to_string" | "to_string_pretty" | "decode",
             )
             | ("core.encoding.csv", "query")
             | ("core.sys", "decode")
@@ -1226,23 +1224,42 @@ fn core_fixed_sig_impl(
         ("core.compute", "profile_f32_strict" | "profile_show") => {
             Some((vec![], Some(Type::String)))
         },
-        // D-SERVICE1=D (#444): service tree topology + mailboxes.
-        ("core.services", "runtime") => Some((
+        // D-SERVICE1=D (#444): the typed tree declaration is the public
+        // topology surface. Its callback is a declaration block over the
+        // compiler-owned builder, not an arbitrary runtime closure.
+        ("core.service", "tree") => Some((
+            vec![(
+                read,
+                Type::Fn {
+                    params: vec![Type::Named("ServiceTreeBuilder".to_string())],
+                    ret: Some(Box::new(unit.clone())),
+                    effect_bound: None,
+                    param_contract: None,
+                    call_metadata: None,
+                    return_view_provenance: None,
+                },
+            )],
+            Some(Type::Named("ServiceTree".to_string())),
+        )),
+        ("core.service", "tree_show") => Some((
+            vec![(read, Type::Named("ServiceTree".to_string()))],
+            Some(Type::String),
+        )),
+        // The rows below are retained as private Prelude contracts while the
+        // typed builder migrates the rest of the service tree. They are not in
+        // `core_module_items`, so no old string-keyed surface is user-visible.
+        ("core.service", "runtime") => Some((
             vec![(read, Type::String), (read, Type::Named("Duration".to_string()))],
             Some(Type::Named("ServiceRuntime".to_string())),
         )),
-        ("core.services", "state_store") => Some((
+        ("core.service", "state_store") => Some((
             vec![(read, Type::String)],
             Some(result_ty(
                 Type::Named("ServiceStateStore".to_string()),
                 Type::Named("ServiceError".to_string()),
             )),
         )),
-        ("core.services", "tree") => Some((
-            vec![(read, Type::String)],
-            Some(Type::Named("ServiceTree".to_string())),
-        )),
-        ("core.services", "restart_one_for_one" | "restart_one_for_all" | "restart_rest_for_one") => {
+        ("core.service", "restart_one_for_one" | "restart_one_for_all" | "restart_rest_for_one") => {
             Some((vec![], Some(Type::Named("ServiceRestart".to_string()))))
         }
         ("core.services", "delivery_at_most_once" | "delivery_durable") => {

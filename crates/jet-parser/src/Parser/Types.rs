@@ -67,7 +67,7 @@ impl<'a> Parser<'a> {
                     Some(Span::new(start, end)),
                 ));
             }
-            TokKind::Float(_) if kind == "length" => {
+            TokKind::Float(..) if kind == "length" => {
                 let span = self.bump().span;
                 return Err(Diagnostic::error(
                     "E0963",
@@ -187,7 +187,7 @@ impl<'a> Parser<'a> {
     fn return_type_inner(&mut self) -> Result<(Type, Span), Diagnostic> {
         // D-RESULT-OPTION-CANON1: return types use the same `T?` / `T ?` / `T ? E`
         // rules as every other type position. Parentheses only group
-        // (including optional `:> (T?)` when the author wants them).
+        // (including optional `(T?)` when the author wants them).
         self.type_()
     }
 
@@ -913,7 +913,7 @@ impl<'a> Parser<'a> {
         Ok((member, start))
     }
 
-    /// Parse a function type `fn(T1, …) :[E]> R`, the cursor at `fn`.
+    /// Parse a function type `fn(T1, …) R :[E]>`, the cursor at `fn`.
     /// `effect_bound` is non-None only while recovering retired prefix syntax.
     /// D-MEMPROVENANCE3=A: optional `name: Type` params and a trailing `from`
     /// after the return type populate `return_view_provenance` (names resolve
@@ -994,12 +994,12 @@ impl<'a> Parser<'a> {
                 ),
                 "a label-only parameter is reached by writing its label, so it has to have one"
                     .to_string(),
-                "name it, as in `fn(*, force: Bool) :> Int`".to_string(),
+                "name it, as in `fn(*, force: Bool) Int`".to_string(),
                 Some(self.peek().span),
             ));
         }
         // Identity only exists when the type actually declares one; an
-        // unannotated `fn(Int) :> Int` keeps its bare structural meaning.
+        // unannotated `fn(Int) Int` keeps its bare structural meaning.
         let param_contract: Option<Vec<(String, crate::AST::ParamZone)>> = (saw_slash
             || saw_star
             || param_names.iter().any(Option::is_some))
@@ -1054,6 +1054,10 @@ impl<'a> Parser<'a> {
             } else {
                 None
             }
+        } else if self.type_starts_here() {
+            let (r, span) = self.type_()?;
+            return_type_span = Some(span);
+            Some(Box::new(r))
         } else if let Some((ty, span)) = self.parse_unit_fallible_return()? {
             return_type_span = Some(span);
             Some(Box::new(ty))
@@ -1087,6 +1091,12 @@ impl<'a> Parser<'a> {
             })
             .collect();
         let return_view_provenance = self.parse_opt_declared_view_from(&from_params);
+        if effect_bound.is_none()
+            && matches!(self.peek().kind, TokKind::Colon)
+            && matches!(self.peek2().kind, TokKind::LBracket)
+        {
+            effect_bound = Some(self.parse_effect_arrow_row(true, false, false)?);
+        }
         let call_metadata = Some(crate::AST::FunctionCallMetadata {
             names: from_params.iter().map(|param| param.name.clone()).collect(),
             defaults: from_params

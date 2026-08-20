@@ -1,6 +1,6 @@
 //! Declared fact-tag dataflow (D-FACTMODEL1=A, D-TAG-SURFACE1=A).
 
-use crate::Diagnostics::{Diagnostic, Span};
+use crate::Diagnostics::{Diagnostic, Span, TextEdit};
 use crate::Sema::Effects::core_effect;
 use crate::Sema::FlowFacts::{Facts, Plane};
 use crate::Sema::{KnowledgeGate, KnowledgePlane};
@@ -178,7 +178,7 @@ impl<'a> TaintCtx<'a> {
     }
 
     fn is_typed_decode(&self, receiver: &Expr, method: &str) -> bool {
-        if !matches!(method, "decode" | "decode_traced") {
+        if method != "decode" {
             return false;
         }
         matches!(
@@ -558,7 +558,9 @@ impl<'a> TaintCtx<'a> {
                     OrFallback::Value(e) => self.check_expr(e),
                     OrFallback::Block { body, value, .. } => {
                         self.check_block(body);
-                        self.check_expr(value);
+                        if let Some(value) = value {
+                            self.check_expr(value);
+                        }
                     }
                     OrFallback::Return(Some(e), _) => self.check_expr(e),
                     _ => {}
@@ -1210,18 +1212,27 @@ pub fn collect_tag_facts(
                             .map(String::as_str)
                             .chain(["Html"].into_iter()),
                     );
-                    diags.push(Diagnostic::error(
+                    let fix = suggestion.map_or_else(
+                        || {
+                            "use a known effect such as `DB`, `Net`, `Exec`, `Log`, or `Html`"
+                                .to_string()
+                        },
+                        |candidate| format!("did you mean `{candidate}`?"),
+                    );
+                    let mut diagnostic = Diagnostic::error(
                         "E0735",
                         format!("`{destination}` is not a known tag destination"),
                         "a `deny` entry names an effect or a registered sink".to_string(),
-                        suggestion
-                            .map(|candidate| format!("did you mean `{candidate}`?"))
-                            .unwrap_or_else(|| {
-                                "use a known effect such as `DB`, `Net`, `Exec`, `Log`, or `Html`"
-                                    .to_string()
-                            }),
+                        fix,
                         Some(*span),
-                    ));
+                    );
+                    if let Some(candidate) = suggestion {
+                        diagnostic = diagnostic.with_edit(TextEdit {
+                            span: *span,
+                            new_text: candidate.to_string(),
+                        });
+                    }
+                    diags.push(diagnostic);
                 }
             }
             for (source, span) in &tag.from {
@@ -1232,17 +1243,24 @@ pub fn collect_tag_facts(
                         source,
                         known_sources.iter().map(String::as_str),
                     );
-                    diags.push(Diagnostic::error(
+                    let fix = suggestion.map_or_else(
+                        || "use a known effect or a declared function path".to_string(),
+                        |candidate| format!("did you mean `{candidate}`?"),
+                    );
+                    let mut diagnostic = Diagnostic::error(
                         "E0735",
                         format!("`{source}` is not a known tag source"),
                         "a `from` entry names an effect or a function path".to_string(),
-                        suggestion
-                            .map(|candidate| format!("did you mean `{candidate}`?"))
-                            .unwrap_or_else(|| {
-                                "use a known effect or a declared function path".to_string()
-                            }),
+                        fix,
                         Some(*span),
-                    ));
+                    );
+                    if let Some(candidate) = suggestion {
+                        diagnostic = diagnostic.with_edit(TextEdit {
+                            span: *span,
+                            new_text: candidate.to_string(),
+                        });
+                    }
+                    diags.push(diagnostic);
                 }
             }
         }

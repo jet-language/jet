@@ -421,14 +421,9 @@ pub const FOREIGN_NOT: &str = "not";
 pub const KW_USE: &str = "use";
 pub const KW_AS: &str = "as";
 
-/// D-MEM1/S7 / D-POLICY-WORD1: `#Policy(no_alloc)` — a
-/// module-level allocation floor, file-scoped like `web_target_ceiling`/
-/// `#PubFile`. Sema flags allocation-shaped expressions written directly in
-/// this file's own function bodies (E0921) — local only, never follows calls
-/// into other modules. `no_alloc` and `copies: .Explicit` are ratified policy
-/// names; unknown names after `policy` are E0003.
+/// D-AUTHORITY-MEM1: memory floors are effect-row denials. `#Policy` keeps
+/// non-memory settings such as `copies: .Explicit`.
 pub const MARKER_POLICY: &str = "Policy"; // D-POLICY-WORD1
-pub const POLICY_NO_ALLOC: &str = "no_alloc";
 pub const POLICY_COPIES: &str = "copies"; // D-MEM-COPYSEM1
 
 /// S51 / D-CORENS-CANON1: compiler-known `core.*` library root.
@@ -611,9 +606,11 @@ pub const TYPE_RESULT: &str = "Result";
 pub const LIT_OK: &str = "Ok";
 pub const LIT_ERR: &str = "Err";
 
-/// S35 (ratified M4; spelling updated by S71/D-SG6): the fallback operator,
-/// supplying a value, `return`, or `panic` when a `T?` is absent or a `T ? E`
-/// failed. Spelled `??` since the 2026-06-15 rename (was the word `or`).
+/// S35 (ratified M4; spelling updated by S71/D-SG6; D-ERR-DECON1=A): the
+/// fallback operator supplies a value or route (`return`, `next`, `break`, or
+/// `panic`) when a `T?` is absent or a `T ? E` failed. A block route may run
+/// ordinary statements before its final value or diverging tail. Spelled `??`
+/// since the 2026-06-15 rename (was the word `or`).
 pub const OP_FALLBACK: &str = "??";
 
 /// S71 (ratified 2026-06-15, D-SG6): optional chaining — `a?.b` yields a `T?`
@@ -637,13 +634,10 @@ pub const BUILTIN_CHECKED: &str = "checked";
 /// integer-to-float crossing at one use site.
 pub const BUILTIN_APPROX: &str = "approx";
 /// D-CLAIM-WORD1=B (ratified 2026-08-07, card #1641): the one assertion
-/// family for code, tests, and scripts. `require`/`require_eq` migrate to
-/// these spellings; the rich diff and one stop family remain.
+/// family for code, tests, and scripts. The rich diff and one stop family
+/// remain.
 pub const BUILTIN_ASSERT: &str = "assert";
 pub const BUILTIN_ASSERT_EQ: &str = "assert_eq";
-pub const BUILTIN_REQUIRE: &str = "require";
-/// S43 (ratified M6): equality assertion in test blocks.
-pub const BUILTIN_REQUIRE_EQ: &str = "require_eq";
 
 /// D-CTIO1 (ratified 2026-06-22): the sanctioned build-time I/O builtins.
 /// `embed_file("path") :> String` bakes a file's UTF-8 text into the binary;
@@ -669,13 +663,8 @@ pub const KW_TEST: &str = "Test";
 pub const TEST_FAULTS_PARAM: &str = "faults";
 pub const TEST_EXPECTED_FAIL_PARAM: &str = "expected_fail";
 
-/// D-BENCH1 + D-BENCH-MARKER1=A: top-level region-benchmark block, written as
-/// the marker `#Bench("name") { … }` — the exact sibling of `#Test("name") { … }`.
-/// The existing `jet bench` verb (D-TOOL5) discovers and runs these, reporting
-/// per-region ops/sec + ns/iter (today it times a whole program). PascalCase
-/// marker per D-CASING1, joining the `#Test`/`#Pure`/`#Todo`/`#Caps` family.
-/// The `benchmark` manifest target (TARGET_BENCHMARK, c80) points `jet bench`
-/// at a package entry; it is not a new engine — it reuses this exact machinery.
+/// D-CLAIM-BENCH1=A: retained only so the parser can teach the retired marker;
+/// measured claims use `#Test("name") { .measure { … } }`.
 pub const KW_BENCH: &str = "Bench";
 
 /// D-DOTSCOPE1 (ratified 2026-07-02): scope-member vocabulary for `#Test`.

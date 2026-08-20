@@ -300,7 +300,7 @@ impl<'a> InlineAlwaysScan<'a> {
                 }
             }
             Expr::StrMatchLit(_, _) | Expr::BinMatchLit(_, _) => {}
-            Expr::Int(_, _, _, _) | Expr::Float(_, _, _) | Expr::Bool(_, _) | Expr::Char(_, _) => {}
+            Expr::Int(_, _, _, _) | Expr::Float(_, _, _, _) | Expr::Bool(_, _) | Expr::Char(_, _) => {}
             Expr::ListLit(items, _) => {
                 for i in items {
                     self.scan_expr(i);
@@ -386,7 +386,9 @@ impl<'a> InlineAlwaysScan<'a> {
                     crate::AST::OrFallback::Value(e) => self.scan_expr(e),
                     crate::AST::OrFallback::Block { body, value, .. } => {
                         self.scan_stmts(body);
-                        self.scan_expr(value);
+                        if let Some(value) = value {
+                            self.scan_expr(value);
+                        }
                     }
                     crate::AST::OrFallback::Return(e, _) => {
                         if let Some(e) = e {

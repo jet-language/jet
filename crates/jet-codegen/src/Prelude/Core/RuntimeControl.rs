@@ -142,14 +142,14 @@ trait __jet_Serialize {
 // in-process `jet_codegen::terminal_runtime` instance; AOT embeds this source
 // in its generated program (I9).
 //
-// `JetShow` is an AOT-only rendering trait, so this projection stays here with
-// the rest of the generated program's show surface.
+// The user-facing rendering projections stay here with the generated program's
+// show surface; resident tiers marshal the value through their own carriers.
 // ──────────────────────────────────────────────────────────────────────────────
 
 impl JetShow for JetKey {
     fn jet_show(&self) -> String {
         match self {
-            JetKey::Char(c) => format!("Char({})", c),
+            JetKey::Char(c) => format!("Char({:?})", c),
             JetKey::Enter => "Enter".to_string(),
             JetKey::Escape => "Escape".to_string(),
             JetKey::Backspace => "Backspace".to_string(),
@@ -160,8 +160,20 @@ impl JetShow for JetKey {
             JetKey::Left => "Left".to_string(),
             JetKey::Right => "Right".to_string(),
             JetKey::F(n) => format!("F({})", n),
-            JetKey::Ctrl(c) => format!("Ctrl({})", c),
+            JetKey::Ctrl(c) => format!("Ctrl({:?})", c),
             JetKey::Unknown => "Unknown".to_string(),
         }
+    }
+}
+
+impl JetDisplay for JetKey {
+    fn jet_display(&self) -> String {
+        self.jet_show()
+    }
+}
+
+impl JetDebug for JetKey {
+    fn jet_debug(&self) -> String {
+        self.jet_show()
     }
 }

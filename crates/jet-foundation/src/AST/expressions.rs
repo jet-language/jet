@@ -61,6 +61,10 @@ pub struct CallArgFlags {
     /// and inserted slots so source-order lowering can materialize one value
     /// for defaults that refer to it.
     pub binder_slot: Option<usize>,
+    /// Public call label for a supplied argument. The semantic index uses this
+    /// to render the same ghost text for free calls, methods, core calls, and
+    /// function values without resolving the callee a second time.
+    pub binder_label: Option<String>,
     /// Default-expression references rewritten to compiler-private slot names.
     /// The supplied AST is never copied into a default; lowering resolves these
     /// names to the slot temporary instead.
@@ -426,7 +430,7 @@ pub enum Expr {
     Int(i64, Span, Option<(bool, u8)>, Option<String>),
     /// D-FLOATW1: the bool is `true` when the literal is resolved as F32 in a
     /// typed context (e.g. `x: F32 = 1.5`). `false` = default F64/Float.
-    Float(f64, Span, bool),
+    Float(f64, Span, bool, Option<String>),
     Bool(bool, Span),
     /// S41: single-quoted `'a'`.
     Char(char, Span),
@@ -736,7 +740,7 @@ impl Expr {
             | Expr::StrMatchLit(_, s)
             | Expr::BinMatchLit(_, s)
             | Expr::Int(_, s, _, _)
-            | Expr::Float(_, s, _)
+            | Expr::Float(_, s, _, _)
             | Expr::Bool(_, s)
             | Expr::Char(_, s)
             | Expr::ListLit(_, s)
@@ -793,7 +797,7 @@ impl Expr {
             | Expr::StrMatchLit(_, current)
             | Expr::BinMatchLit(_, current)
             | Expr::Int(_, current, _, _)
-            | Expr::Float(_, current, _)
+            | Expr::Float(_, current, _, _)
             | Expr::Bool(_, current)
             | Expr::Char(_, current)
             | Expr::ListLit(_, current)
@@ -1212,7 +1216,9 @@ impl Expr {
                 OrFallback::Value(value) => walk(value, f),
                 OrFallback::Block { body, value, .. } => {
                     walk_stmts(body, f);
-                    walk(value, f);
+                    if let Some(value) = value {
+                        walk(value, f);
+                    }
                 }
                 OrFallback::Return(Some(value), _) => walk(value, f),
                 OrFallback::Panic { args, .. } => walk_args(args, f),

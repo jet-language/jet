@@ -32,7 +32,7 @@ pub(super) fn cmd_browser(theme: &Theme, parsed: &Parsed) -> i32 {
             theme.error(
                 "`jetpack browser` needs a verb",
                 &format!(
-                    "verbs are: {} — lock or provision a project-pinned browser binary (D-BROWSER-AUTO1).",
+                    "verbs are: {} — lock or provision a project-pinned browser binary.",
                     Syntax::BROWSER_VERBS.join(", ")
                 ),
                 "try `jetpack browser list` or `jetpack browser lock chromium --binary ./chromium`.",

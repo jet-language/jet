@@ -467,9 +467,8 @@ pub const JET_KEYWORD_LIST: &[&str] = &[
     // stays out of this list, matching MARKER_TARGET/MARKER_META (paren-arg
     // config markers aren't bare completion words).
     KW_JOB,
-    // Test / tooling (S43, S60, D-TOOL2, D-BENCH1)
+    // Test / tooling (S43, S60, D-TOOL2)
     KW_TEST,
-    KW_BENCH,
     KW_TODO,
     // D-TAG-SURFACE1=A retired `Tainted`/`Sanitizer`; direct declared tags and
     // `#Scrub(Tag)` come from the applied-rule registry.
@@ -651,7 +650,7 @@ pub const IMPURE_BUILTINS: &[&str] = &[BUILTIN_PRINT, "eprint", "print", BUILTIN
 // old comments or docs; check docs/spec/syntax-decisions.md for the live law
 // before trusting any comment that predates 2026-07-23.
 use super::{
-    BUILTIN_INPUT, BUILTIN_PRINT, CTX_BLOCK, KW_ALIAS, KW_AS, KW_BENCH,
+    BUILTIN_INPUT, BUILTIN_PRINT, CTX_BLOCK, KW_ALIAS, KW_AS,
     KW_BREAK, KW_DEFER, KW_DERIVE, KW_EFFECT_DECL, KW_ELSE, KW_ENUM,
     KW_CONC_TASK, KW_FREEZE, KW_EXTERN, KW_FN, KW_IF, KW_IMPL, KW_IMPURE, KW_IT, KW_JOB, KW_LOOP, KW_MARKER, KW_MODULE,
     KW_PRIV, KW_PROTOCOL, KW_PUB, KW_RETURN,

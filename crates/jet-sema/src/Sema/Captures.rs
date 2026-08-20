@@ -219,7 +219,9 @@ pub(crate) fn walk_expr_for_const_refs(
                 OrFallback::Value(e) => walk_expr_for_const_refs(e, const_names, taken),
                 OrFallback::Block { body, value, .. } => {
                     walk_stmts_for_const_refs(body, const_names, taken);
-                    walk_expr_for_const_refs(value, const_names, taken);
+                    if let Some(value) = value {
+                        walk_expr_for_const_refs(value, const_names, taken);
+                    }
                 }
                 OrFallback::Return(Some(e), _) => walk_expr_for_const_refs(e, const_names, taken),
                 OrFallback::Return(None, _)
@@ -252,7 +254,7 @@ pub(crate) fn walk_expr_for_const_refs(
         }
         Expr::Char(_, _)
         | Expr::Int(_, _, _, _)
-        | Expr::Float(_, _, _)
+        | Expr::Float(_, _, _, _)
         | Expr::Bool(_, _)
         | Expr::UnitLit { .. } => {}
         Expr::ListLit(elems, _) => {
@@ -328,7 +330,8 @@ pub(crate) fn fallback_refs_name(fallback: &OrFallback, name: &str) -> bool {
     match fallback {
         OrFallback::Value(e) => expr_refs_name(e, name),
         OrFallback::Block { body, value, .. } => {
-            body.iter().any(|stmt| stmt_refs_name(stmt, name)) || expr_refs_name(value, name)
+            body.iter().any(|stmt| stmt_refs_name(stmt, name))
+                || value.as_ref().is_some_and(|value| expr_refs_name(value, name))
         }
         OrFallback::Return(Some(e), _) => expr_refs_name(e, name),
         OrFallback::Return(None, _)
@@ -441,7 +444,7 @@ pub(crate) fn expr_refs_name(e: &Expr, name: &str) -> bool {
                 || else_body.iter().any(|s| stmt_refs_name(s, name))
         }
         Expr::Int(_, _, _, _)
-        | Expr::Float(_, _, _)
+        | Expr::Float(_, _, _, _)
         | Expr::Bool(_, _)
         | Expr::Char(_, _)
         | Expr::Absent(_)
@@ -792,7 +795,9 @@ pub(crate) fn expr_collect_captures(
                     for stmt in body {
                         stmt_collect_captures(stmt, &mut block_bound, read, mut_cap, called);
                     }
-                    expr_collect_captures(value, &block_bound, read, mut_cap, called);
+                    if let Some(value) = value {
+                        expr_collect_captures(value, &block_bound, read, mut_cap, called);
+                    }
                 }
                 OrFallback::Return(Some(ex), _) => {
                     expr_collect_captures(ex, bound, read, mut_cap, called);

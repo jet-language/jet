@@ -20,7 +20,7 @@
 //! defaults into synthetic top-level functions (type-checked and lowered
 //! through the normal pipeline), and codegen
 //! (`Codegen/Items.rs::emit_struct_migration`) emits per-block step functions
-//! plus a `jet_decode_traced` chain-walker for each decodable
+//! plus a silent migration chain-walker for each decodable
 //! `#PublishedSchema` type with migration blocks.
 //!
 //! I3: all checking here; codegen only performs the mechanical lowering.

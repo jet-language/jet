@@ -188,6 +188,8 @@ const PRELUDE_PARTS: &[&str] = &[
     include_str!("../Prelude/Core/Time.rs"),
     include_str!("../Prelude/Core/Sketch.rs"),
     include_str!("../Prelude/Core/Contracts.rs"),
+    include_str!("../Prelude/Core/RuntimeStack.rs"),
+    include_str!("../Prelude/Core/Authority.rs"),
     include_str!("../Prelude/Core.rs"),
     include_str!("../Prelude/Core/ViewAccess.rs"),
     // D-EXPOP1=A / D-EXPSEM1=A: `^`. Shared verbatim with the wasm module
@@ -1320,7 +1322,7 @@ fn push_corelib_prelude_body(
     let needs_auth_tokens = core_usage_matches(used_core, &["core.auth"]) || needs_crypto;
     let needs_auth_session = core_usage_matches(used_core, &["core.auth", "app"]);
     let needs_sync = core_usage_matches(used_core, &["core.sync", "app", "core.db"]);
-    let needs_services = core_usage_matches(used_core, &["core.services"]);
+    let needs_services = core_usage_matches(used_core, &["core.service", "core.services"]);
     let needs_mod = core_usage_matches(used_core, &["core.mod"]);
     if needs_mod {
         // The generated loader must compare against the compiler that emitted
@@ -1414,6 +1416,9 @@ fn push_corelib_prelude_body(
         if needs_interrupt {
             out.push_str(include_str!("../Prelude/CoreLib/Top/Interrupt.rs"));
         }
+        // D-CONFIG-ENV1 / I9: source overlay and dotenv parsing are one
+        // Prelude fragment for AOT and the interpreter ambient adapter.
+        out.push_str(include_str!("../Prelude/Core/EnvConfig.rs"));
         out.push_str(include_str!("../Prelude/CoreLib/Top/FSIoEnvOsTesting.rs"));
         // #1465: identity / release / POSIX control — after FSIoEnvOsTesting so
         // jet_std_os_pid / env helpers and jet_std_process_exit stay in scope.
@@ -3666,7 +3671,6 @@ mod tests {
                 web_target_ceiling: program.web_target_ceiling, pub_file: program.pub_file,
                 no_prelude: program.no_prelude,
                 default_target: program.default_target, html_path: program.html_path,
-                no_alloc_policy: program.no_alloc_policy,
                 policy_declarations: program.policy_declarations.clone(),
                 rule_facts: std::mem::take(&mut program.rule_facts),
             }],
@@ -3745,7 +3749,6 @@ mod tests {
                 no_prelude: prog.no_prelude,
                 default_target: prog.default_target,
                 html_path: prog.html_path.clone(),
-                no_alloc_policy: prog.no_alloc_policy,
                 policy_declarations: prog.policy_declarations.clone(),
                 rule_facts: std::mem::take(&mut prog.rule_facts),
             }],
@@ -3803,6 +3806,8 @@ struct TestCase<'a> {
     /// Rust module path that owns the test. `None` means the generated root.
     module: Option<String>,
     index: usize,
+    /// D-CLAIM-BENCH1=A: this test contains a top-level `.measure` claim.
+    measure: bool,
 }
 
 fn test_fn_path(test: &TestCase<'_>) -> String {
@@ -3827,6 +3832,11 @@ pub fn emit_tests(prog: &Program, src: &str, file: &str) -> String {
             test,
             module: None,
             index,
+            measure: test.body.iter().any(|statement| matches!(
+                statement,
+                crate::AST::Stmt::ScopeMember { name, .. }
+                    if name == Syntax::SCOPE_TEST_MEASURE
+            )),
         })
         .collect();
     assert!(!tests.is_empty(), "emit_tests called with no test blocks");
@@ -4002,7 +4012,7 @@ fn emit_test_main_cov_mode(
     package_hardened: bool,
 ) {
     out.push_str("#[derive(Clone, Copy)]\n");
-    out.push_str("struct JetTestSlot { name: &'static str, skip: bool, property: bool, expected_fail: bool, run: fn() -> Result<(), String> }\n");
+    out.push_str("struct JetTestSlot { name: &'static str, skip: bool, property: bool, expected_fail: bool, measure: bool, run: fn() -> Result<(), String> }\n");
     if override_entry.is_some() {
         out.push_str("fn jet_test_command_run() -> (i64, i64) {\n");
         out.push_str("    let output = jet_test_take_output();\n");
@@ -4036,18 +4046,19 @@ fn emit_test_main_cov_mode(
         );
         let skip = whole_test_skip(def);
         out.push_str(&format!(
-            "        JetTestSlot {{ name: {}, skip: {}, property: {}, expected_fail: {}, run: {} }},\n",
+            "        JetTestSlot {{ name: {}, skip: {}, property: {}, expected_fail: {}, measure: {}, run: {} }},\n",
             name,
             skip,
             !def.params.is_empty(),
             def.expected_fail,
+            test.measure,
             test_fn_path(test),
         ));
     }
     for (i, check) in checks.iter().enumerate() {
         let name = escape_rust_str(&check.output_name);
         out.push_str(&format!(
-            "        JetTestSlot {{ name: {}, skip: false, property: false, expected_fail: false, run: jet_output_check_{} }},\n",
+            "        JetTestSlot {{ name: {}, skip: false, property: false, expected_fail: false, measure: false, run: jet_output_check_{} }},\n",
             name, i
         ));
     }
@@ -4055,6 +4066,39 @@ fn emit_test_main_cov_mode(
     // Filter (D-TESTKIT1 gap #4): `--filter=<substr>` keeps names containing it.
     out.push_str("    if let Ok(filter) = std::env::var(\"JET_TEST_FILTER\") {\n");
     out.push_str("        slots.retain(|s| s.name.contains(filter.as_str()));\n");
+    out.push_str("    }\n");
+    out.push_str("    let json = std::env::var_os(\"JET_TEST_JSON\").is_some();\n");
+    // D-CLAIM-BENCH1=A: measurement is an explicit test mode. A plain test
+    // keeps every claim, while `--measure` selects only `.measure` claims.
+    out.push_str("    let measure_mode = std::env::var_os(\"JET_TEST_MEASURE\").is_some();\n");
+    out.push_str("    if measure_mode { slots.retain(|s| s.measure && !s.skip); }\n");
+    out.push_str("    if measure_mode {\n");
+    out.push_str("        let mut measured = 0usize;\n");
+    out.push_str("        for slot in &slots {\n");
+    out.push_str("            let mut samples = Vec::with_capacity(20);\n");
+    out.push_str("            for _ in 0..20 {\n");
+    out.push_str("                let started = std::time::Instant::now();\n");
+    out.push_str("                match (slot.run)() {\n");
+    out.push_str("                    Ok(()) => samples.push(started.elapsed().as_nanos() as f64),\n");
+    out.push_str("                    Err(message) => { eprintln!(\"{}: FAIL during measurement: {}\", slot.name, message);\n");
+    if override_entry.is_some() {
+        out.push_str("                        return (measured as i64, 1); }\n");
+    } else {
+        out.push_str("                        std::process::exit(1); }\n");
+    }
+    out.push_str("                }\n");
+    out.push_str("            }\n");
+    out.push_str("            let mean = samples.iter().sum::<f64>() / samples.len() as f64;\n");
+    out.push_str("            let variance = samples.iter().map(|sample| (sample - mean) * (sample - mean)).sum::<f64>() / samples.len() as f64;\n");
+    out.push_str("            let deviation = variance.sqrt();\n");
+    out.push_str("            if json { println!(\"{{\\\"name\\\":\\\"{}\\\",\\\"mean_ns\\\":{:.3},\\\"stddev_ns\\\":{:.3},\\\"samples\\\":{}}}\", slot.name, mean, deviation, samples.len()); } else { println!(\"{}: {:.3} ns ±{:.3} ({} samples)\", slot.name, mean, deviation, samples.len()); }\n");
+    out.push_str("            measured += 1;\n");
+    out.push_str("        }\n");
+    if override_entry.is_some() {
+        out.push_str("        return (measured as i64, 0);\n");
+    } else {
+        out.push_str("        return;\n");
+    }
     out.push_str("    }\n");
     // Shuffle (gap #4): `--shuffle[=seed]` reorders before running; the seed is
     // always printed so a shuffled run's order is reproducible.
@@ -4070,7 +4114,6 @@ fn emit_test_main_cov_mode(
     // most one test (no isolation benefit, and keeps single-test runs allocation-
     // free of the thread machinery).
     out.push_str("    let serial = std::env::var(\"JET_TEST_SERIAL\").is_ok();\n");
-    out.push_str("    let json = std::env::var_os(\"JET_TEST_JSON\").is_some();\n");
     out.push_str("    let results: Vec<(String, bool, bool, bool, Option<Result<(), String>>, String, Option<JetTestFailure>)> = if serial || slots.len() <= 1 {\n");
     out.push_str("        slots.iter().map(|s| {\n");
     out.push_str("            let res = if s.skip { None } else { Some((s.run)()) };\n");
@@ -4739,6 +4782,11 @@ fn emit_bundle_tests_cov_inner(
             test,
             module,
             index,
+            measure: test.body.iter().any(|statement| matches!(
+                statement,
+                crate::AST::Stmt::ScopeMember { name, .. }
+                    if name == Syntax::SCOPE_TEST_MEASURE
+            )),
         })
         .collect();
     let checks = bundle.modules.iter().flat_map(|module| module.items.iter()).filter_map(|item| {
@@ -5028,6 +5076,11 @@ pub fn emit_bundle_fuzz(
             test,
             module: None,
             index,
+            measure: test.body.iter().any(|statement| matches!(
+                statement,
+                crate::AST::Stmt::ScopeMember { name, .. }
+                    if name == Syntax::SCOPE_TEST_MEASURE
+            )),
         })
         .collect();
     if tests.is_empty() {

@@ -417,7 +417,7 @@ fn normalize_core_module(module: &str, member: &str) -> String {
     if module == "core.encoding"
         && matches!(
             member,
-            "parse" | "decode" | "decode_traced" | "to_string" | "to_string_pretty"
+            "parse" | "decode" | "to_string" | "to_string_pretty"
                 | "canonical" | "events"
         )
     {
@@ -544,7 +544,7 @@ fn core_call_is_fallible(module: &str, member: &str) -> bool {
                 | "core.encoding.hex"
                 | "core.encoding.base64"
                 | "core.encoding.base32",
-            "parse" | "decode" | "decode_traced" | "decode_url"
+            "parse" | "decode" | "decode_url"
         )
     )
 }

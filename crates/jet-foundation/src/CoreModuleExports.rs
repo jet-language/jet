@@ -76,6 +76,7 @@ const CORE_ROOT_TYPES: &[&str] = &[
     crate::Syntax::TYPE_DECIMAL,
     crate::Syntax::DURATION_TYPE,
     crate::Syntax::TYPE_INSTANT,
+    crate::Syntax::TYPE_AUTHORITY,
     "Date",
     "LocalDate",
     "LocalTime",

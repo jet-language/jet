@@ -55,7 +55,10 @@ pub enum TokKind {
     /// Parsed value plus exact source spelling, including radix prefix,
     /// leading zeroes, separator placement, and digit case.
     Int(i64, String),
-    Float(f64),
+    /// Decimal source spelling stays beside the parsed value so sema can
+    /// adopt an untyped decimal as exact `Decimal` without a binary-float
+    /// round trip. Explicit Float contexts still use the parsed value.
+    Float(f64, String),
     /// D-UNITLIT1: a numeric literal immediately followed by an identifier
     /// suffix that isn't a float exponent — `500ms`, `12.50usd`. A NEW,
     /// SEPARATE token kind (not a field added to `Int`/`Float`) so every
@@ -244,7 +247,7 @@ pub fn describe(kind: &TokKind) -> String {
         TokKind::Ident(name) => format!("the name `{}`", name),
         TokKind::Str(_) => "a piece of quoted text".to_string(),
         TokKind::Int(..) => "a number".to_string(),
-        TokKind::Float(_) => "a decimal number".to_string(),
+        TokKind::Float(..) => "a decimal number".to_string(),
         TokKind::UnitNumber { .. } => "a number with a unit suffix".to_string(),
         TokKind::Char(_) => "a character".to_string(),
         TokKind::LParen => "`(`".to_string(),

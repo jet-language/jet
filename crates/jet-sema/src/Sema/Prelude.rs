@@ -19,10 +19,10 @@ const INTERNAL_PREFIX: &str = "__jet_prelude_";
 /// checking). Unused members stay out of the module, so blast radius scales
 /// with use instead of being total.
 ///
-/// A `#NoPrelude` file and a `policy no_alloc` file receive nothing. A module
-/// that already declared the pair keeps its own conversion.
+/// A `#NoPrelude` file receives nothing. A memory denial is an effect contract
+/// and does not disable the readable Core prelude.
 pub(crate) fn inject_exercised_error_conversions(module: &mut LoadedModule) -> Vec<Diagnostic> {
-    if module.no_prelude || module.no_alloc_policy.is_some() {
+    if module.no_prelude {
         return Vec::new();
     }
     let (shipped, diagnostics) = shipped_error_conversions();

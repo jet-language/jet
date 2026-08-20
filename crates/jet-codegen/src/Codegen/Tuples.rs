@@ -132,7 +132,7 @@ fn collect_tuple_shapes_from_expr(expr: &Expr, out: &mut CollectedTypeShapes) {
         }
         Expr::Ident(_, _)
         | Expr::Int(_, _, _, _)
-        | Expr::Float(_, _, _)
+        | Expr::Float(_, _, _, _)
         | Expr::Bool(_, _)
         | Expr::Char(_, _)
         | Expr::Absent(_)
@@ -257,7 +257,9 @@ fn collect_tuple_shapes_from_expr(expr: &Expr, out: &mut CollectedTypeShapes) {
                     for stmt in body {
                         collect_tuple_shapes_from_stmt(stmt, out);
                     }
-                    collect_tuple_shapes_from_expr(value, out);
+                    if let Some(value) = value {
+                        collect_tuple_shapes_from_expr(value, out);
+                    }
                 }
                 OrFallback::Return(Some(v), _) => collect_tuple_shapes_from_expr(v, out),
                 OrFallback::Return(None, _) => {}
@@ -581,6 +583,20 @@ fn emit_tuple_struct(cx: &Cx, name: &str, fields: &[(String, Type)], out: &mut S
         })
     {
         derives.push("PartialEq");
+    }
+    if fields
+        .iter()
+        .all(|(_, t)| {
+            !cx.type_contains_shared_guard(t)
+                && !is_move_only_cell_guard(t)
+                && field_type_hashable(t, &cx.hashable, &no_params)
+        })
+    {
+        // D-MAP-KEY1: the map is a BTreeMap, so the generated tuple carrier
+        // needs the same structural ordering traits as a nominal key.
+        derives.push("Eq");
+        derives.push("PartialOrd");
+        derives.push("Ord");
     }
     let view_lifetime = fields
         .iter()

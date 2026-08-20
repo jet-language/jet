@@ -59,6 +59,8 @@ const JS_EXECUTION_PRELUDE: &str = concat!(
     "\n",
     include_str!("../Prelude/Core/Values.js"),
     "\n",
+    include_str!("../Prelude/Core/Shared.js"),
+    "\n",
     include_str!("../Prelude/Core/FloatProvenance.js"),
     "\n",
     include_str!("../Prelude/Core/InlineRange.js"),
@@ -805,6 +807,7 @@ fn web_wasm_inline_block_supported(
                 web_wasm_expr_supported(expr, bundle, file_prefix, reconstructions)
             }
             TIR::TStmt::Return(None) => true,
+            TIR::TStmt::Break(_) | TIR::TStmt::Continue(_) => true,
             _ => false,
         }
 }
@@ -1251,6 +1254,10 @@ fn web_stmts_supported(stmts: &[TIR::TStmt]) -> bool {
                     .is_none_or(|s| web_stmts_supported(std::slice::from_ref(s.as_ref())))
                 && web_stmts_supported(body)
         }
+        TIR::TStmt::Transact {
+            snapshots, body, ..
+        } => snapshots.iter().all(|(_, rollback)| rollback.is_none())
+            && web_stmts_supported(body),
         TIR::TStmt::Break(_) | TIR::TStmt::Continue(_) => true,
         TIR::TStmt::IndexAssign {
             base,
@@ -1334,6 +1341,7 @@ fn web_stmts_safe_in_js_iife(stmts: &[TIR::TStmt]) -> bool {
         | TIR::TStmt::Impure(body) => {
             web_stmts_safe_in_js_iife(body)
         }
+        TIR::TStmt::Transact { body, .. } => web_stmts_safe_in_js_iife(body),
         _ => true,
     })
 }
@@ -1437,6 +1445,23 @@ fn web_overflow_opt_supported(prefix: &str, op: &str) -> bool {
     prefix == "wrapping" && op == "add"
 }
 
+fn web_shared_host_call_supported(host: &TIR::THostCall) -> bool {
+    match host {
+        TIR::THostCall::FixedListIndex { base, index, .. } => {
+            web_expr_supported(base) && web_expr_supported(index)
+        }
+        TIR::THostCall::YieldSend { value } => web_expr_supported(value),
+        TIR::THostCall::Method { recv, method, args }
+            if matches!(&recv.ty, Type::Shared(_))
+                && matches!(method.as_str(), "read" | "edit" | "edit_txn")
+                && args.len() == 1 =>
+        {
+            web_expr_supported(recv) && args.iter().all(web_expr_supported)
+        }
+        _ => false,
+    }
+}
+
 fn web_expr_supported(expr: &TIR::TExpr) -> bool {
     use TIR::TExprKind as E;
     match &expr.kind {
@@ -1482,13 +1507,15 @@ fn web_expr_supported(expr: &TIR::TExpr) -> bool {
             .iter()
             .all(|(key, value)| web_expr_supported(key) && web_expr_supported(value)),
         E::Index { base, index, .. } => web_expr_supported(base) && web_expr_supported(index),
-        E::HostCall(host) => match host.as_ref() {
-            TIR::THostCall::FixedListIndex { base, index, .. } => {
-                web_expr_supported(base) && web_expr_supported(index)
-            }
-            TIR::THostCall::YieldSend { value } => web_expr_supported(value),
-            _ => false,
-        },
+        E::HostCall(host) => web_shared_host_call_supported(host),
+        E::StaticCall {
+            owner: TIR::TStaticOwner::Prelude { path, .. },
+            method,
+            args,
+            ..
+        } if path == "jet_std::JetShared" && method.name == "new" && args.len() == 1 => {
+            web_expr_supported(&args[0].value)
+        }
         E::Present(inner) | E::Ok(inner) | E::Err(inner) => web_expr_supported(inner),
         E::Try { inner, note, .. } => {
             web_expr_supported(inner)
@@ -1601,6 +1628,11 @@ fn web_expr_supported(expr: &TIR::TExpr) -> bool {
                 executable,
                 ..
             },
+        } => web_lambda_supported(executable),
+        E::CoreClosureCall {
+            kind:
+                TIR::TCoreClosureKind::OnCommit { executable, .. }
+                | TIR::TCoreClosureKind::OnRollback { executable, .. },
         } => web_lambda_supported(executable),
         E::CoreClosureCall {
             kind: TIR::TCoreClosureKind::UiButtonOnClick {
@@ -4893,12 +4925,26 @@ fn wasm_emit_inline_block(
             wasm_emit_expr(expr, funcs, file_prefix, reconstructions)?
         )),
         TIR::TStmt::Return(Some(expr)) => rendered.push_str(&format!(
-            "{pad}return {};\n",
-            wasm_emit_expr(expr, funcs, file_prefix, reconstructions)?
-        )),
+                "{pad}return {};\n",
+                wasm_emit_expr(expr, funcs, file_prefix, reconstructions)?
+            )),
         TIR::TStmt::Return(None) => rendered.push_str(&format!("{pad}return;\n")),
-        _ => return Err(()),
-    }
+        TIR::TStmt::Break(label) => match label {
+            Some(name) => rendered.push_str(&format!(
+                "{pad}break '{};\n",
+                mangle(name)
+            )),
+            None => rendered.push_str(&format!("{pad}break;\n")),
+        },
+        TIR::TStmt::Continue(label) => match label {
+            Some(name) => rendered.push_str(&format!(
+                "{pad}continue '{};\n",
+                mangle(name)
+            )),
+            None => rendered.push_str(&format!("{pad}continue;\n")),
+        },
+            _ => return Err(()),
+        }
     rendered.push('}');
     Ok(rendered)
 }
@@ -5986,7 +6032,7 @@ fn emit_js_fn(
     ));
     emit_tir_js_body(&f.tir.body, &mut body, all, f.file_prefix.as_deref(), 2)
         .map_err(|()| web_emit_error(f))?;
-    let async_kw = if !f.is_generator && body.contains("await bridge_") {
+    let async_kw = if !f.is_generator && body.contains("await ") {
         "async "
     } else {
         ""
@@ -6559,7 +6605,7 @@ fn emit_js_contract_scope(
     emit_tir_js_body(body, &mut nested, funcs, file_prefix, indent + 1)?;
     let pad = "  ".repeat(indent);
     let result = mangle_generated("result");
-    if nested.contains("await bridge_") {
+    if nested.contains("await ") {
         out.push_str(&format!(
             "{pad}const {result} = await (async () => {{\n"
         ));
@@ -6730,6 +6776,89 @@ fn emit_tir_js_body_inner(
                 }
                 emit_tir_js_body(body, out, funcs, file_prefix, indent + 1)?;
                 out.push_str(&format!("{pad}}}\n"));
+            }
+            TIR::TStmt::Transact {
+                handle,
+                snapshots,
+                stm,
+                body,
+            } => {
+                if snapshots.iter().any(|(_, rollback)| rollback.is_some()) {
+                    return Err(());
+                }
+                let effective_handle = handle
+                    .as_ref()
+                    .map(web_local)
+                    .or_else(|| {
+                        (!snapshots.is_empty())
+                            .then(|| web_name(&mangle_generated("txn")).to_string())
+                    });
+                let committed = web_name(&mangle_generated("txn_committed")).to_string();
+                out.push_str(&format!("{pad}{{\n"));
+                if let Some(stm) = stm {
+                    out.push_str(&format!(
+                        "{pad}  const {} = jet_stm_begin();\n",
+                        web_local(stm)
+                    ));
+                }
+                if let Some(handle) = effective_handle.as_deref() {
+                    out.push_str(&format!(
+                        "{pad}  const {handle} = jet_transaction();\n"
+                    ));
+                }
+                for (index, (slot, _)) in snapshots.iter().enumerate() {
+                    let snapshot =
+                        web_name(&mangle_generated(&format!("txn_snapshot_{index}"))).to_string();
+                    out.push_str(&format!(
+                        "{pad}  const {snapshot} = jet_web_clone({});\n",
+                        web_local(slot)
+                    ));
+                }
+                out.push_str(&format!("{pad}  let {committed} = false;\n"));
+                out.push_str(&format!("{pad}  try {{\n"));
+                emit_tir_js_body(body, out, funcs, file_prefix, indent + 2)?;
+                if let Some(stm) = stm {
+                    out.push_str(&format!(
+                        "{pad}    jet_stm_commit({});\n",
+                        web_local(stm)
+                    ));
+                }
+                if let Some(handle) = effective_handle.as_deref() {
+                    out.push_str(&format!("{pad}    await {handle}.commit();\n"));
+                }
+                out.push_str(&format!("{pad}    {committed} = true;\n"));
+                out.push_str(&format!("{pad}  }} catch (error) {{\n"));
+                if let Some(stm) = stm {
+                    out.push_str(&format!(
+                        "{pad}    jet_stm_abort({});\n",
+                        web_local(stm)
+                    ));
+                }
+                if let Some(handle) = effective_handle.as_deref() {
+                    out.push_str(&format!("{pad}    await {handle}.rollback();\n"));
+                }
+                out.push_str(&format!("{pad}    throw error;\n"));
+                out.push_str(&format!("{pad}  }} finally {{\n"));
+                if let Some(stm) = stm {
+                    out.push_str(&format!(
+                        "{pad}    jet_stm_abort_if_active({});\n",
+                        web_local(stm)
+                    ));
+                }
+                if let Some(handle) = effective_handle.as_deref() {
+                    out.push_str(&format!(
+                        "{pad}    if (!{committed}) await {handle}.rollback();\n"
+                    ));
+                }
+                for (index, (slot, _)) in snapshots.iter().enumerate() {
+                    let snapshot =
+                        web_name(&mangle_generated(&format!("txn_snapshot_{index}"))).to_string();
+                    out.push_str(&format!(
+                        "{pad}    if (!{committed}) {} = {snapshot};\n",
+                        web_local(slot)
+                    ));
+                }
+                out.push_str(&format!("{pad}  }}\n{pad}}}\n"));
             }
             TIR::TStmt::Loop { label, body } => {
                 out.push_str(&format!(
@@ -7242,8 +7371,33 @@ fn tir_js_expr(expr: &TIR::TExpr, funcs: &[FuncWeb], file_prefix: Option<&str>) 
             TIR::THostCall::YieldSend { value } => {
                 format!("yield {}", tir_js_expr(value, funcs, file_prefix)?)
             }
+            TIR::THostCall::Method { recv, method, args }
+                if matches!(&recv.ty, Type::Shared(_))
+                    && args.len() == 1
+                    && matches!(method.as_str(), "read" | "edit" | "edit_txn") =>
+            {
+                let recv = tir_js_expr(recv, funcs, file_prefix)?;
+                let callback = tir_js_expr(&args[0], funcs, file_prefix)?;
+                match method.as_str() {
+                    "read" => format!("jet_shared_read({recv}, {callback})"),
+                    "edit" => format!("jet_shared_edit({recv}, {callback})"),
+                    "edit_txn" => format!("jet_shared_edit_txn({recv}, {callback})"),
+                    _ => return Err(()),
+                }
+            }
             _ => return Err(()),
         },
+        E::StaticCall {
+            owner: TIR::TStaticOwner::Prelude { path, .. },
+            method,
+            args,
+            ..
+        } if path == "jet_std::JetShared" && method.name == "new" && args.len() == 1 => {
+            format!(
+                "jet_shared_new({})",
+                tir_js_expr(&args[0].value, funcs, file_prefix)?
+            )
+        }
         // D-EXPSEM1=A / D-FLOORDIV1=A: `^` and `/%` call the JS preamble, which
         // carries the same rules the Prelude helpers do.
         E::Binary {
@@ -7737,7 +7891,7 @@ fn tir_js_expr(expr: &TIR::TExpr, funcs: &[FuncWeb], file_prefix: Option<&str>) 
                 file_prefix,
                 1,
             )?;
-            if rendered.contains("await bridge_") {
+            if rendered.contains("await ") {
                 format!("await (async () => {{\n{rendered}}})()")
             } else {
                 format!("(() => {{\n{rendered}}})()")
@@ -7752,6 +7906,28 @@ fn tir_js_expr(expr: &TIR::TExpr, funcs: &[FuncWeb], file_prefix: Option<&str>) 
             },
         } => format!(
             "jet_task_spawn({})",
+            tir_js_lambda(executable, funcs, file_prefix)?
+        ),
+        E::CoreClosureCall {
+            kind: TIR::TCoreClosureKind::OnCommit {
+                handle,
+                executable,
+                ..
+            },
+        } => format!(
+            "jet_transaction_on_commit({}, {})",
+            web_place(handle),
+            tir_js_lambda(executable, funcs, file_prefix)?
+        ),
+        E::CoreClosureCall {
+            kind: TIR::TCoreClosureKind::OnRollback {
+                handle,
+                executable,
+                ..
+            },
+        } => format!(
+            "jet_transaction_on_rollback({}, {})",
+            web_place(handle),
             tir_js_lambda(executable, funcs, file_prefix)?
         ),
         E::CoreClosureCall { kind: TIR::TCoreClosureKind::UiReactiveRender { executable, .. } } => format!("jetDom.reactiveRender({})", tir_js_lambda(executable, funcs, file_prefix)?),
@@ -7791,7 +7967,7 @@ fn tir_js_inline_block(
         TIR::TStmt::Return(None) => rendered.push_str("  return;\n"),
         _ => return Err(()),
     }
-    let is_async = rendered.contains("await bridge_");
+    let is_async = rendered.contains("await ");
     let prefix = if is_async { "await (async " } else { "(" };
     Ok(format!("{prefix}() => {{\n{rendered}}})()"))
 }
@@ -7803,7 +7979,7 @@ fn tir_js_lambda(
 ) -> Result<String, ()> {
     let params = lam.source_params.join(", ");
     let async_kw = |body: &str| {
-        if body.contains("await bridge_") {
+        if body.contains("await ") {
             "async "
         } else {
             ""

@@ -221,10 +221,10 @@ impl<'a> Checker<'a> {
             if matches!(return_type, Type::Named(name) if name == Syntax::TYPE_TASKGROUP) {
                 self.diags.push(Diagnostic::error(
                     "E1110",
-                    "`TaskGroup` cannot be returned".to_string(),
+                    "`Group` cannot be returned".to_string(),
                     "a task group is a scoped spawn authority; the block that owns it joins its children when it closes, so a returned handle would already be dead"
                         .to_string(),
-                    "take `group: TaskGroup` as a parameter of a function or method and do the work there"
+                    "take `group: Group` as a parameter of a function or method and do the work there"
                         .to_string(),
                     Some(f.return_type_span.unwrap_or(f.name_span)),
                 ));
@@ -254,7 +254,7 @@ impl<'a> Checker<'a> {
                 && matches!(&p.ty, Type::Named(n) if n.is_empty());
             // D-CONC-GROUP1=A: a group is a borrow of its scope, so it may be
             // named in EVERY direct parameter position — a method's parameter
-            // list exactly like a free function's. `TaskGroup` is a
+            // list exactly like a free function's. `Group` is a
             // compiler-private handle type, not a registered one, so the
             // declared-type check is skipped for it here; every other position
             // (struct field, return type, local annotation, lambda parameter)
@@ -927,7 +927,14 @@ pub(crate) fn check_effect_boundaries(
             match parse_effect_name(base_name) {
                 Some(e) => {
                     if is_prohibited {
-                        prohibited.insert(e);
+                        // D-AUTHORITY-MEM1: memory denials are checked by the
+                        // shared memory-event proof. They still parse and
+                        // publish through the ordinary effect row, but the
+                        // generic ambient-effect diagnostic must not duplicate
+                        // the bounded/unbounded memory diagnostic.
+                        if super::effect_root(&e) != "Mem" {
+                            prohibited.insert(e);
+                        }
                     } else {
                         declared.insert(e);
                     }

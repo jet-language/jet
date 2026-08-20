@@ -607,6 +607,12 @@ impl JetTaskControl {
 thread_local! {
     static TASK_CONTROL: std::cell::RefCell<Option<Arc<JetTaskControl>>> =
         const { std::cell::RefCell::new(None) };
+    // A task's lexical groups must drain before this scheduler publishes its
+    // completion. Engines register only their representation-specific close
+    // callback; this Prelude owns the completion ordering.
+    static TASK_COMPLETION_CLEANUPS: std::cell::RefCell<Vec<Box<dyn FnOnce()>>> =
+        const { std::cell::RefCell::new(Vec::new()) };
+    static TASK_COMPLETION_ACTIVE: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
 }
 
 pub fn jet_scheduler_set_task_control(c: Option<Arc<JetTaskControl>>) {
@@ -615,6 +621,56 @@ pub fn jet_scheduler_set_task_control(c: Option<Arc<JetTaskControl>>) {
 
 fn current_task_control() -> Option<Arc<JetTaskControl>> {
     TASK_CONTROL.with(|t| t.borrow().clone())
+}
+
+pub fn jet_scheduler_task_completion_begin() {
+    TASK_COMPLETION_ACTIVE.with(|active| {
+        debug_assert!(!active.replace(true), "task completion scope nested");
+    });
+    TASK_COMPLETION_CLEANUPS.with(|cleanups| {
+        debug_assert!(
+            cleanups.borrow().is_empty(),
+            "task completion cleanup leaked"
+        );
+    });
+}
+
+pub fn jet_scheduler_task_completion_register<F>(cleanup: F)
+where
+    F: FnOnce() + 'static,
+{
+    TASK_COMPLETION_ACTIVE.with(|active| {
+        if active.get() {
+            TASK_COMPLETION_CLEANUPS.with(|cleanups| {
+                cleanups.borrow_mut().push(Box::new(cleanup));
+            });
+        }
+    });
+}
+
+pub fn jet_scheduler_task_completion_drain() {
+    loop {
+        let cleanups = TASK_COMPLETION_CLEANUPS.with(|pending| {
+            std::mem::take(&mut *pending.borrow_mut())
+        });
+        if cleanups.is_empty() {
+            return;
+        }
+        for cleanup in cleanups.into_iter().rev() {
+            cleanup();
+        }
+    }
+}
+
+pub fn jet_scheduler_task_completion_end() {
+    TASK_COMPLETION_ACTIVE.with(|active| active.set(false));
+    TASK_COMPLETION_CLEANUPS.with(|cleanups| {
+        debug_assert!(
+            cleanups.borrow().is_empty(),
+            "task completion cleanup leaked"
+        );
+        cleanups.borrow_mut().clear();
+    });
 }
 
 /// Apply the shared pause wait to the current task. The evaluator uses this
@@ -2952,7 +3008,13 @@ where F:FnOnce()->T+Send+'static,T:Send+'static,
             task_completion_wait.wake();
             return;
         }
+        jet_scheduler_task_completion_begin();
         let out = jet_scheduler_catch_task_unwind(f);
+        // D-CANCELMODEL1=C: a cancellation unwind skips the generated task
+        // frame's fall-through epilogue. Drain owned groups before publishing
+        // this task's completion, so its caller cannot observe it first.
+        jet_scheduler_task_completion_drain();
+        jet_scheduler_task_completion_end();
         jet_scheduler_task_panic_leave();
         jet_scheduler_set_task_control(None);
         let result = match out {

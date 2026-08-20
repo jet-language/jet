@@ -429,7 +429,7 @@ pub(crate) fn register_extern_fn(
     is_c_abi: bool,
     prelude_enabled: bool,
 ) {
-    if ef.name == Syntax::BUILTIN_REQUIRE_EQ || ef.name == Syntax::BUILTIN_EXPECT {
+    if ef.name == Syntax::BUILTIN_ASSERT_EQ || ef.name == Syntax::BUILTIN_EXPECT {
         diags.push(Diagnostic::error(
             "E0106",
             format!("the name `{}` is built in and can't be redefined", ef.name),

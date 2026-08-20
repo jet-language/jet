@@ -391,7 +391,7 @@ fn walk_expr_nodes(e: &Expr, opts: WalkOpts, f: &mut impl FnMut(&Expr)) {
         Expr::StrMatchLit(_, _)
         | Expr::BinMatchLit(_, _)
         | Expr::Int(_, _, _, _)
-        | Expr::Float(_, _, _)
+        | Expr::Float(_, _, _, _)
         | Expr::Bool(_, _)
         | Expr::Char(_, _)
         | Expr::Ident(_, _)
@@ -508,7 +508,9 @@ fn walk_expr_nodes(e: &Expr, opts: WalkOpts, f: &mut impl FnMut(&Expr)) {
                     for stmt in body {
                         walk_stmt_expr_nodes(stmt, opts, f);
                     }
-                    walk_expr_nodes(value, opts, f);
+                    if let Some(value) = value {
+                        walk_expr_nodes(value, opts, f);
+                    }
                 }
                 OrFallback::Panic { args, .. } => {
                     for arg in args {

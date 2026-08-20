@@ -380,7 +380,9 @@ fn desugar_expr(expr: &mut Expr) {
                 }
                 crate::AST::OrFallback::Block { body, value, .. } => {
                     desugar_stmts(body);
-                    desugar_expr(value);
+                    if let Some(value) = value {
+                        desugar_expr(value);
+                    }
                 }
                 crate::AST::OrFallback::Panic { args, .. } => {
                     for arg in args {

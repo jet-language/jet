@@ -2083,7 +2083,6 @@ mod structure_tests {
                 no_prelude: program.no_prelude,
                 default_target: program.default_target,
                 html_path: program.html_path,
-                no_alloc_policy: program.no_alloc_policy,
                 policy_declarations: program.policy_declarations,
                 rule_facts: program.rule_facts,
             }],

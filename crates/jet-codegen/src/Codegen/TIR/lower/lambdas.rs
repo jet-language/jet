@@ -647,7 +647,7 @@ pub(crate) fn render_spawn_lambda(lam: &Lambda, cx: &Cx, env: &LowerEnv) -> Stri
     // rewritten to the active lexical group. The AOT body is rendered after
     // that rewrite, so a nested `task.*` call would otherwise move the parent
     // `JetTaskGroup` into the child closure and rustc would reject the second
-    // nested use. Clone only this injected group handle; user TaskGroup
+    // nested use. Clone only this injected group handle; user Group
     // captures remain rejected by sema (E1110).
     let reads = match &lam.body {
         LambdaBody::Block(stmts) => crate::Sema::block_free_var_reads(stmts),

@@ -34,50 +34,25 @@ impl<'a> Parser<'a> {
             let (is_pub, is_package_pub) = self.parse_item_visibility();
             self.expect_kw(TokKind::KwFn, "after `#FFI(<lang>)`")?;
 
-            // Ordinary Jet signature: name, type params, parameter list, optional
-            // `:[effects]> T` or plain `:> T`. Reuses the same sub-parsers as a
-            // normal `fn` so the checked contract is identical.
+            // Ordinary Jet signature. Reuse the normal callable result parser
+            // so the retired arrow form and the bare result form agree.
             let (name, name_span) = self.expect_ident("after `fn`")?;
             let type_params = self.parse_opt_type_params()?;
             self.expect(TokKind::LParen, "after the function name")?;
             let params = self.parse_param_list()?;
             self.validate_variadic_params(&params);
             self.validate_param_labels(&params);
-            let (declared_effects, effect_via) = self.parse_opt_func_effects()?;
-            let decorated_arrow = declared_effects.is_some() || effect_via.is_some();
-            let mut return_type = None;
-            let mut return_type_span = None;
-            let mut arrow_return = false;
-            if decorated_arrow {
-                if self.type_starts_here() {
-                    arrow_return = true;
-                    let (ty, span) = self.return_type()?;
-                    return_type = Some(ty);
-                    return_type_span = Some(span);
-                } else if let Some((ty, span)) = self.parse_unit_fallible_return()? {
-                    return_type = Some(ty);
-                    return_type_span = Some(span);
-                }
-            } else if self.at_unified_arrow() {
-                arrow_return = true;
-                self.expect_unified_arrow("before a callable result type")?;
-                if self.type_starts_here() {
-                    let (ty, span) = self.return_type()?;
-                    return_type = Some(ty);
-                    return_type_span = Some(span);
-                }
-            } else if let Some((ty, span)) = self.parse_unit_fallible_return()? {
-                return_type = Some(ty);
-                return_type_span = Some(span);
-            }
-            if arrow_return
-                && return_type
-                    .as_ref()
-                    .is_some_and(|ty| Self::is_unit_fallible_type(ty))
-            {
-                self.diags.push(Self::retired_unit_fallible_signature(
-                    return_type_span.unwrap_or(self.peek().span),
-                ));
+            let (
+                return_type,
+                return_type_span,
+                mut declared_effects,
+                mut effect_via,
+                _prefix_effect_span,
+            ) = self.parse_callable_result_and_prefix_effects()?;
+            if declared_effects.is_none() {
+                let (effects, via) = self.parse_opt_func_effects()?;
+                declared_effects = effects;
+                effect_via = via;
             }
 
             // The body is a single foreign-source string literal, not a Jet block.

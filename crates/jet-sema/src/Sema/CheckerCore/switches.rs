@@ -486,12 +486,12 @@ impl<'a> Checker<'a> {
             if matches!(st, Type::Int | Type::InlineRange { .. } | Type::Char) {
                 let domain_note = if matches!(st, Type::InlineRange { .. }) {
                     format!(
-                        "`{}` is an inline range; range arms are not proven to cover its full interval (D-PATR)",
+                        "`{}` is an inline range; range arms are not proven to cover its full interval",
                         st.show()
                     )
                 } else {
                     format!(
-                        "`{}` has infinitely many values; range arms only cover a subset (D-PATR)",
+                        "`{}` has infinitely many values; range arms only cover a subset",
                         st.show()
                     )
                 };

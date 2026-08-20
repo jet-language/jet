@@ -17,6 +17,13 @@ pub(crate) mod jet_encoding_json {
 }
 pub mod Codegen;
 mod BrowserHost;
+/// D-FAIL-BREACH1=A: the same task-local runtime stack kernel used by emitted
+/// AOT code. Resident engines marshal source locations into their own report
+/// carrier, but depth policy stays in this Prelude part.
+pub mod runtime_stack {
+    use jet_foundation::Outcome::JET_RUNTIME_STACK_LIMIT;
+    include!("Prelude/Core/RuntimeStack.rs");
+}
 /// D-TESTFAULT1=A: the same fault schedule source used by emitted Prelude
 /// code, the TIR evaluator, and the resident JIT adapters.
 #[allow(dead_code)]

@@ -1123,7 +1123,7 @@ pub(super) fn core_member_params(module_path: &str, member_name: &str, signature
             ("min".to_string(), "Int".to_string()),
             ("max".to_string(), "Int".to_string()),
         ],
-        ("core.encoding.json" | "core.encoding.csv" | "core.encoding.toml" | "core.encoding.yaml", "parse" | "decode" | "decode_traced") => {
+        ("core.encoding.json" | "core.encoding.csv" | "core.encoding.toml" | "core.encoding.yaml", "parse" | "decode") => {
             vec![("text".to_string(), "String".to_string())]
         }
         ("core.encoding.hex" | "core.encoding.base64" | "core.encoding.base32", "decode" | "decode_url") => {

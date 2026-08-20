@@ -101,11 +101,7 @@ pub fn collect_policy_facts_from_program(program: &Program) -> PolicyFactGraph {
     for declaration in &program.policy_declarations {
         if matches!(
             declaration.key,
-            crate::Policy::PolicyKey::NoAlloc
-                | crate::Policy::PolicyKey::ZeroRc
-                | crate::Policy::PolicyKey::ArenaBounded
-                | crate::Policy::PolicyKey::Copies
-                | crate::Policy::PolicyKey::Sentries
+            crate::Policy::PolicyKey::Copies | crate::Policy::PolicyKey::Sentries
         ) {
             graph.record(
                 PolicyDomain::Memory,
@@ -120,8 +116,55 @@ pub fn collect_policy_facts_from_program(program: &Program) -> PolicyFactGraph {
             );
         }
     }
+    for item in &program.items {
+        collect_memory_denials(&mut graph, item);
+    }
     collect_items(&mut graph, &program.items);
     graph
+}
+
+fn collect_memory_denials(graph: &mut PolicyFactGraph, item: &Item) {
+    let mut record = |function: &Func| {
+        for (name, span) in function
+            .declared_effects
+            .as_deref()
+            .unwrap_or_default()
+            .iter()
+            .filter(|(name, _)| name.starts_with("!Mem."))
+        {
+            graph.record(
+                PolicyDomain::Memory,
+                name.clone(),
+                format!("function denial at {}..{}", span.start, span.end),
+            );
+        }
+    };
+    match item {
+        Item::Func(function) => record(function),
+        Item::Impl(definition) => definition.methods.iter().for_each(&mut record),
+        Item::Struct(definition) => {
+            definition.methods.iter().for_each(&mut record);
+            definition
+                .trait_impls
+                .iter()
+                .flat_map(|block| &block.methods)
+                .for_each(&mut record);
+        }
+        Item::Enum(definition) => {
+            definition.methods.iter().for_each(&mut record);
+            definition
+                .trait_impls
+                .iter()
+                .flat_map(|block| &block.methods)
+                .for_each(&mut record);
+        }
+        Item::CodeModule(module) => {
+            if let Some(body) = &module.body {
+                body.iter().for_each(|item| collect_memory_denials(graph, item));
+            }
+        }
+        _ => {}
+    }
 }
 
 fn collect_items(graph: &mut PolicyFactGraph, items: &[Item]) {

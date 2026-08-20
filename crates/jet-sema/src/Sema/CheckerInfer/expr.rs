@@ -4,8 +4,7 @@
 
 use super::*;
 use super::fallible::value_loop_requires_route;
-use crate::Collections::is_map_key_type;
-use crate::Diagnostics::{Diagnostic, Span};
+use crate::Diagnostics::{Diagnostic, Span, TextEdit};
 use crate::Syntax;
 use crate::Sema::CheckerCore::{contextual_literal, ContextualLiteral};
 use crate::Sema::Diagnostics::{owned_type_for_read_view, soft_public_use};
@@ -1556,12 +1555,12 @@ impl<'a> Checker<'a> {
             // interpreter. These readable names only select that kernel.
             Target::Builtin if name == "assert" => {
                 if let Expr::Call(call) = e {
-                    call.name = Syntax::BUILTIN_REQUIRE.to_string();
+                    call.name = Syntax::BUILTIN_ASSERT.to_string();
                 }
             }
             Target::Builtin if name == "assert_eq" => {
                 if let Expr::Call(call) = e {
-                    call.name = Syntax::BUILTIN_REQUIRE_EQ.to_string();
+                    call.name = Syntax::BUILTIN_ASSERT_EQ.to_string();
                 }
             }
             _ => {}
@@ -1936,8 +1935,17 @@ impl<'a> Checker<'a> {
             // D-SG9/D-FLOATW1: a float literal is `Float` (f64) by default, but
             // adopts `F32` when that width is expected here. Write the resolution
             // back onto the AST so TIR lowering can read the width from the node.
-            Expr::Float(_, _, is_f32) => {
-                if matches!(self.expected_type, Some(Type::Float32)) {
+            Expr::Float(value, span, is_f32, raw) => {
+                // D-TYPE2-DEFAULT1: an untyped decimal literal is exact. Keep
+                // an explicit Float/F32 context on the machine-float path;
+                // everything else adopts the existing Decimal Prelude carrier.
+                let expected = self.expected_type.clone();
+                if raw.is_some() && !matches!(expected, Some(Type::Float | Type::Float32)) {
+                    let text = raw.take().expect("decimal literal spelling");
+                    *e = super::exact_decimal_literal(text, *span);
+                    return self.infer(e);
+                }
+                if matches!(expected, Some(Type::Float32)) {
                     *is_f32 = true;
                     Some(Type::Float32)
                 } else {
@@ -1960,7 +1968,7 @@ impl<'a> Checker<'a> {
                     let is_float = float.is_some();
                     let mut value = match (int, float) {
                         (Some(value), _) => Expr::Int(*value, *span, None, None),
-                        (_, Some(value)) => Expr::Float(*value, *span, false),
+                        (_, Some(value)) => Expr::Float(*value, *span, false, None),
                         _ => Expr::Int(0, *span, None, None),
                     };
                     let scale = unit
@@ -1971,7 +1979,7 @@ impl<'a> Checker<'a> {
                         .expect("canonical Time scales fit the Int carrier");
                     if scale != 1 {
                         let multiplier = if is_float {
-                            Expr::Float(scale as f64, *span, false)
+                            Expr::Float(scale as f64, *span, false, None)
                         } else {
                             Expr::Int(scale, *span, None, None)
                         };
@@ -2046,7 +2054,7 @@ impl<'a> Checker<'a> {
                             args: vec![
                                 CallArg {
                                     convention: AccessConvention::Read,
-                                    expr: Expr::Float(0.0, call_span, false),
+                                    expr: Expr::Float(0.0, call_span, false, None),
                                     span: call_span,
                                     flags: CallArgFlags::default(),
                                     label: None,
@@ -2054,7 +2062,7 @@ impl<'a> Checker<'a> {
                                 },
                                 CallArg {
                                     convention: AccessConvention::Read,
-                                    expr: Expr::Float(value, call_span, false),
+                                    expr: Expr::Float(value, call_span, false, None),
                                     span: call_span,
                                     flags: CallArgFlags::default(),
                                     label: None,
@@ -2088,7 +2096,7 @@ impl<'a> Checker<'a> {
                     type_args: Vec::new(),
                     args: vec![CallArg {
                         convention: AccessConvention::Read,
-                        expr: Expr::Float(value, call_span, false),
+                        expr: Expr::Float(value, call_span, false, None),
                         span: call_span,
                         flags: crate::AST::CallArgFlags::default(),
                         label: None,
@@ -3008,19 +3016,26 @@ impl<'a> Checker<'a> {
                             .iter()
                             .map(|fact| (*fact).to_string())
                             .collect::<Vec<_>>();
-                        let fix = suggest_field(member, &candidates)
-                            .map(|fact| format!("did you mean `TerminalFact.{fact}`?"))
-                            .unwrap_or_else(|| {
-                                "use a documented TerminalFact key or a preview string".to_string()
-                            });
-                        self.diags.push(Diagnostic::error(
+                        let suggestion = suggest_field(member, &candidates);
+                        let fix = suggestion.as_ref().map_or_else(
+                            || "use a documented TerminalFact key or a preview string".to_string(),
+                            |fact| format!("did you mean `TerminalFact.{fact}`?"),
+                        );
+                        let mut diagnostic = Diagnostic::error(
                             "E0302",
                             format!("`TerminalFact` has no key `{member}`"),
                             "stable terminal fact keys use the checked TerminalFact namespace"
                                 .to_string(),
                             fix,
                             Some(span),
-                        ));
+                        );
+                        if let Some(fact) = suggestion {
+                            diagnostic = diagnostic.with_edit(TextEdit {
+                                span,
+                                new_text: fact,
+                            });
+                        }
+                        self.diags.push(diagnostic);
                         return None;
                     }
                 }
@@ -4187,15 +4202,15 @@ impl<'a> Checker<'a> {
             else {
                 continue;
             };
-            if !is_map_key_type(&kt) {
-                self.diags.push(Diagnostic::error(
-                    "E0502",
-                    format!("`{}` can't be a map key", kt.name()),
-                    "map keys must be Int, String, Bool, Char, or a payload-free enum".to_string(),
-                    "use a simpler key type".to_string(),
-                    Some(k.span()),
-                ));
-            }
+        if !self.map_key_type_eligible(&kt) {
+            self.diags.push(Diagnostic::error(
+                "E0502",
+                format!("`{}` can't be a map key (D-MAP-KEY1)", kt.name()),
+                "map keys must be Int, String, Bool, Char, U8/IntN, a payload-free enum, or a tuple/struct whose fields recursively follow D-MAP-KEY1; Float, views, Shared, functions, lists, maps, sets, and payload-carrying enums are not key-eligible".to_string(),
+                "use an eligible scalar, enum, tuple, or struct key; remove non-key fields or store the value separately".to_string(),
+                Some(k.span()),
+            ));
+        }
             if let Some(ref fk) = key_ty {
                 if kt != *fk {
                     self.diags.push(Diagnostic::error(
@@ -5008,17 +5023,25 @@ impl<'a> Checker<'a> {
                         }
                     }
                     let field_names: Vec<String> = fields.iter().map(|(n, ..)| n.clone()).collect();
-                    let mut fix = format!("check the field names on `{}`", display_type_name);
-                    if let Some(suggest) = suggest_field(member, &field_names) {
-                        fix = format!("did you mean `{}`?", suggest);
-                    }
-                    self.diags.push(Diagnostic::error(
+                    let suggestion = suggest_field(member, &field_names);
+                    let fix = suggestion.as_ref().map_or_else(
+                        || format!("check the field names on `{}`", display_type_name),
+                        |suggest| format!("did you mean `{}`?", suggest),
+                    );
+                    let mut diagnostic = Diagnostic::error(
                         "E0302",
                         format!("`{}` has no field `{}`", display_type_name, member),
                         "field access only works on names declared in the struct".to_string(),
                         fix,
                         Some(span),
-                    ));
+                    );
+                    if let Some(suggest) = suggestion {
+                        diagnostic = diagnostic.with_edit(TextEdit {
+                            span,
+                            new_text: suggest,
+                        });
+                    }
+                    self.diags.push(diagnostic);
                     return None;
                 }
             }
@@ -5056,25 +5079,31 @@ impl<'a> Checker<'a> {
                         }
                     }
                     let field_names: Vec<String> = fields.iter().map(|(n, ..)| n.clone()).collect();
-                    let mut fix = format!("check the field names on `{}`", name);
-                    if let Some(suggest) = suggest_field(member, &field_names) {
-                        fix = format!("did you mean `{}`?", suggest);
-                    }
-                    self.diags.push(Diagnostic::error(
+                    let suggestion = suggest_field(member, &field_names);
+                    let fix = suggestion.as_ref().map_or_else(
+                        || format!("check the field names on `{}`", name),
+                        |suggest| format!("did you mean `{}`?", suggest),
+                    );
+                    let mut diagnostic = Diagnostic::error(
                         "E0302",
                         format!("`{}` has no field `{}`", name, member),
                         "field access only works on names declared in the struct".to_string(),
                         fix,
                         Some(span),
-                    ));
+                    );
+                    if let Some(suggest) = suggestion {
+                        diagnostic = diagnostic.with_edit(TextEdit {
+                            span,
+                            new_text: suggest,
+                        });
+                    }
+                    self.diags.push(diagnostic);
                     return None;
                 }
             } else if owner_import_ns.is_none() {
                 if let Some(fty) = core_generic_struct_field(leaf, member, args) {
-                    // D-MIGRATE3=A: `DecodeResult<T>` is a reserved core generic with
-                    // no `struct_owner_module` — but the user-type-wins guard (D-SHIFT1
-                    // precedent: `Reader`/`Cursor`) means this fallback only runs when
-                    // no user struct claimed the name above.
+                    // Reserved core generic field lookup runs only after the
+                    // user-type-wins guard above.
                     return Some(fty);
                 }
             }
@@ -5086,17 +5115,25 @@ impl<'a> Checker<'a> {
                 }
             }
             let field_names: Vec<String> = fields.iter().map(|(n, _)| n.clone()).collect();
-            let mut fix = "check the member names in this tuple".to_string();
-            if let Some(suggest) = suggest_field(member, &field_names) {
-                fix = format!("did you mean `{}`?", suggest);
-            }
-            self.diags.push(Diagnostic::error(
+            let suggestion = suggest_field(member, &field_names);
+            let fix = suggestion.as_ref().map_or_else(
+                || "check the member names in this tuple".to_string(),
+                |suggest| format!("did you mean `{}`?", suggest),
+            );
+            let mut diagnostic = Diagnostic::error(
                 "E0302",
                 format!("this tuple has no member `{}`", member),
                 "field access only works on names declared in the tuple".to_string(),
                 fix,
                 Some(span),
-            ));
+            );
+            if let Some(suggest) = suggestion {
+                diagnostic = diagnostic.with_edit(TextEdit {
+                    span,
+                    new_text: suggest,
+                });
+            }
+            self.diags.push(diagnostic);
             return None;
         }
         self.diags.push(Diagnostic::error(

@@ -1135,7 +1135,7 @@ impl<'a> Parser<'a> {
             return Err(Diagnostic::error(
                 "E0760",
                 "context fields are set with `:`, not `=`".to_string(),
-                "`=` is reassignment (S17); the `name: value` form sets a context field (D-CTX1)"
+                "`=` is reassignment (S17); the `name: value` form sets a context field"
                     .to_string(),
                 format!("write `#{}({field}: …) {{ … }}`", Syntax::CTX_BLOCK),
                 Some(self.peek5().span),
@@ -2082,10 +2082,6 @@ impl<'a> Parser<'a> {
                 self.finish_stmt()?;
                 Ok(Stmt::Val(binding))
             }
-            TokKind::KwConst if self.at_foreign_binding() => {
-                let span = self.bump().span;
-                Err(self.foreign_keyword_diagnostic(Syntax::FOREIGN_CONST, span))
-            }
             TokKind::Hash if self.at_known_lead() => {
                 if matches!(self.peek3().kind, TokKind::KwIf) {
                     return self.comptime_if_stmt();
@@ -2225,6 +2221,24 @@ impl<'a> Parser<'a> {
                 let expr = self.expr()?;
                 self.finish_stmt()?;
                 Ok(Stmt::Yield(expr, span))
+            }
+            TokKind::KwIf if self.callable_tail_block_depth == Some(self.block_depth) => {
+                // D-BODY-LAST1=B: a trailing dispatch is a value expression
+                // when the surrounding callable has a declared result. Keep
+                // ordinary statement `if` parsing as the fallback.
+                let save = self.pos;
+                let saved_diags = self.diags.len();
+                if let Ok(expr) = self.expr() {
+                    if matches!(self.peek().kind, TokKind::RBrace)
+                        || matches!(self.peek().kind, TokKind::Semi)
+                            && matches!(self.peek2().kind, TokKind::RBrace)
+                    {
+                        return Ok(Stmt::Expr(expr));
+                    }
+                }
+                self.pos = save;
+                self.diags.truncate(saved_diags);
+                self.if_or_dispatch()
             }
             TokKind::KwIf => self.if_or_dispatch(),
             // D-S14-PAUSE: `when` teaching is paused.
@@ -2847,6 +2861,14 @@ impl<'a> Parser<'a> {
                             op_span: op_tok.span,
                             value,
                         });
+                    }
+                    if self.callable_tail_block_depth == Some(self.block_depth)
+                        && (matches!(self.peek().kind, TokKind::RBrace)
+                            || matches!(self.peek().kind, TokKind::Semi)
+                                && matches!(self.peek2().kind, TokKind::RBrace))
+                    {
+                        self.finish_stmt()?;
+                        return Ok(Stmt::Expr(expression));
                     }
                 }
                 Err(Diagnostic::error(

@@ -288,6 +288,7 @@ fn worker_to_ct(w: &JetServiceWorker) -> CtValue {
         type_name: "ServiceWorker".to_string(),
         fields: vec![
             ("name".to_string(), CtValue::Str(w.name.clone())),
+            ("handler".to_string(), CtValue::Str(w.handler.clone())),
             ("endpoint".to_string(), endpoint_to_ct(&w.endpoint)),
             ("mailbox".to_string(), mailbox_to_ct(&w.mailbox)),
             (
@@ -317,8 +318,17 @@ fn ct_to_worker(v: &CtValue, span: Span) -> Result<JetServiceWorker, Diagnostic>
         CtValue::Bool(b) => *b,
         _ => return Err(unsupported("worker running state", span)),
     };
+    let name = ct_to_service_string(field("name")?, MAX_SERVICE_NAME, "worker name", span)?;
+    let handler = match field("handler") {
+        Ok(value) => ct_to_service_string(value, MAX_SERVICE_NAME, "worker handler", span)?,
+        // Existing internal Core values predate handler metadata. Preserve
+        // their real worker identity while the typed surface migrates; this is
+        // not a second user-facing declaration form.
+        Err(_) => name.clone(),
+    };
     Ok(JetServiceWorker {
-        name: ct_to_service_string(field("name")?, MAX_SERVICE_NAME, "worker name", span)?,
+        name,
+        handler,
         endpoint: ct_to_endpoint(field("endpoint")?, span)?,
         mailbox: ct_to_mailbox(field("mailbox")?, span)?,
         restarts: match field("restarts")? {
@@ -1207,6 +1217,9 @@ pub fn apply(method: &str, args: &[CtValue], span: Span) -> Result<CtValue, Diag
     };
     match method {
         "tree" => match one(0)? {
+            CtValue::Str(payload) if payload.starts_with(SERVICE_TREE_PAYLOAD_PREFIX) => {
+                Ok(tree_to_ct(&jet_services_tree_declared(payload.clone())))
+            }
             value => {
                 let name = ct_to_service_string(value, MAX_SERVICE_NAME, "tree name", span)?;
                 Ok(tree_to_ct(&jet_services_tree(name)))

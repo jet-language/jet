@@ -546,7 +546,7 @@ pub(crate) fn tir_recv_jet_ty(e: &Expr, env: &LowerEnv) -> Option<Type> {
     fn literal_ty(expr: &Expr) -> Option<Type> {
         match expr {
             Expr::Int(..) => Some(Type::Int),
-            Expr::Float(_, _, _) => Some(Type::Float),
+            Expr::Float(_, _, _, _) => Some(Type::Float),
             Expr::Bool(_, _) => Some(Type::Bool),
             Expr::Char(_, _) => Some(Type::Char),
             Expr::Str(_, _) => Some(Type::String),

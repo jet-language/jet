@@ -206,6 +206,7 @@ fn tape_rule_to_ct(rule: Option<&JetComputeTapeRule>) -> CtValue {
         JetComputeTapeRule::Maximum => ("maximum", None, None),
         JetComputeTapeRule::Minimum => ("minimum", None, None),
         JetComputeTapeRule::Matmul => ("matmul", None, None),
+        JetComputeTapeRule::MatmulF32Tile => ("matmul_f32_tile", None, None),
         JetComputeTapeRule::MseLoss => ("mse_loss", None, None),
         JetComputeTapeRule::SgdStep { .. } => ("sgd_step", None, None),
         JetComputeTapeRule::Unary(op) => (op.as_str(), None, None),
@@ -657,6 +658,7 @@ fn tape_rule_from_ct(value: &CtValue, span: Span) -> Result<Option<JetComputeTap
         "maximum" => JetComputeTapeRule::Maximum,
         "minimum" => JetComputeTapeRule::Minimum,
         "matmul" => JetComputeTapeRule::Matmul,
+        "matmul_f32_tile" => JetComputeTapeRule::MatmulF32Tile,
         "mse_loss" => JetComputeTapeRule::MseLoss,
         "sgd_step" => JetComputeTapeRule::SgdStep {
             learning_rate: learning_rate()?,

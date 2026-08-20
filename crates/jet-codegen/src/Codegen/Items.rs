@@ -315,6 +315,8 @@ pub(crate) fn emit_struct(cx: &Cx, s: &StructDef, out: &mut String) {
         // Equatable implementation.
         rust_derives.push("PartialEq");
         rust_derives.push("Eq");
+        rust_derives.push("PartialOrd");
+        rust_derives.push("Ord");
         rust_derives.push("Hash");
     }
     // Visibility is enforced by sema (E0605); Rust-level `pub` everywhere
@@ -1850,6 +1852,8 @@ pub(crate) fn emit_enum(cx: &Cx, e: &EnumDef, out: &mut String) {
     if !has_shared_guard && cx.hashable.contains(&e.name) {
         rust_derives.push("PartialEq");
         rust_derives.push("Eq");
+        rust_derives.push("PartialOrd");
+        rust_derives.push("Ord");
         rust_derives.push("Hash");
     }
     if let Some(tag) = e.c_layout_tag() {
@@ -2108,7 +2112,7 @@ pub(super) fn migration_shapes(
     shapes
 }
 
-/// D-MIGRATE4: the `jet_decode_traced` override emitted inside the type's
+/// D-MIGRATE4: the `jet_decode_with_status` override emitted inside the type's
 /// `__jet_Decode` impl. Tries the current shape first (plain `jet_decode` — the
 /// cheap happy path, and the documented "prefer newest" ambiguity rule); on
 /// failure detects which historical shape the data's key set matches, newest
@@ -2122,9 +2126,9 @@ fn emit_migration_chain_walker(cx: &Cx, s: &StructDef, style: Option<&str>, out:
         "    // D-MIGRATE4: #PublishedSchema migration chain — v1..v{} are historical shapes.\n",
         k
     ));
-    out.push_str("    fn jet_decode_traced(__t: &jet_std::DataTree) -> Result<(Self, jet_std::MigrationStatus), Vec<jet_std::FieldError>> {\n");
+    out.push_str("    fn jet_decode_with_status(__t: &jet_std::DataTree) -> Result<(Self, jet_std::JetMigrationStatus), Vec<jet_std::FieldError>> {\n");
     out.push_str("        let __err = match Self::jet_decode(__t) {\n");
-    out.push_str("            Ok(__v) => return Ok((__v, jet_std::MigrationStatus::fresh())),\n");
+    out.push_str("            Ok(__v) => return Ok((__v, jet_std::JetMigrationStatus::fresh())),\n");
     out.push_str("            Err(__e) => __e,\n");
     out.push_str("        };\n");
     out.push_str("        let __keys = jet_std::jet_datatree_key_set(__t);\n");
@@ -2158,7 +2162,7 @@ fn emit_migration_chain_walker(cx: &Cx, s: &StructDef, style: Option<&str>, out:
         out.push_str("            let __tree = jet_std::DataTree::Object(__pairs);\n");
         out.push_str("            let __v = Self::jet_decode(&__tree)?;\n");
         out.push_str(&format!(
-            "            return Ok((__v, jet_std::MigrationStatus {{ migrated: true, from: {:?}.to_string(), steps: __steps }}));\n",
+            "            return Ok((__v, jet_std::JetMigrationStatus {{ migrated: true, from: {:?}.to_string(), steps: __steps }}));\n",
             crate::Codegen::TIR::migration_shape_name(j)
         ));
         out.push_str("        }\n");
@@ -2888,7 +2892,7 @@ pub(crate) fn emit_const(c: &crate::AST::ConstDef, out: &mut String) {
             (format!("{n}{rust}"), rust)
         }
         Expr::Int(n, _, None, _) => (format!("{}i64", n), "i64".to_string()),
-        Expr::Float(v, _, is_f32) => {
+        Expr::Float(v, _, is_f32, _) => {
             if *is_f32 {
                 (format!("{:?}f32", v), "f32".to_string())
             } else {

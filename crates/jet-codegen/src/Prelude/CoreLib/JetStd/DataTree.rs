@@ -77,38 +77,28 @@
     }
 
     // D-MIGRATE3=A / D-MIGRATE4=A: decode-time migration transparency plus the
-    // runtime engine. `decode_traced<T>` sits beside `decode<T>` on every codec
-    // that shares this decode machinery. Decoding a `#PublishedSchema` type
-    // with `migration { }` blocks tries the current shape first; on mismatch
-    // the type's generated `jet_decode_traced` override detects which
-    // historical shape the data's key set matches and walks the step functions
-    // forward (oldest matching version → current). Plain `decode` walks the
-    // same chain silently; `decode_traced` reports it here — `migrated`,
-    // `from` (the source shape's version label), and `steps` (one entry per
-    // step applied, "v1->v2" style). Types without migrations keep the trait's
-    // default identity path: `migrated` false, `from`/`steps` empty, no
-    // per-type code emitted.
+    // runtime engine. Decoding a `#PublishedSchema` type with `migration { }`
+    // blocks tries the current shape first; on mismatch the type's generated
+    // `jet_decode_with_status` override detects which historical shape the
+    // data's key set matches and walks the step functions forward (oldest
+    // matching version → current). The public `decode` call drops this
+    // internal report. Types without migrations keep the trait's default
+    // identity path, with no per-type chain code emitted.
     #[derive(Clone, Debug, PartialEq)]
-    pub struct MigrationStatus {
+    pub struct JetMigrationStatus {
         pub migrated: bool,
         pub from: String,
         pub steps: Vec<String>,
     }
 
-    impl MigrationStatus {
-        pub fn fresh() -> MigrationStatus {
-            MigrationStatus {
+    impl JetMigrationStatus {
+        pub fn fresh() -> JetMigrationStatus {
+            JetMigrationStatus {
                 migrated: false,
                 from: String::new(),
                 steps: Vec::new(),
             }
         }
-    }
-
-    #[derive(Clone, Debug, PartialEq)]
-    pub struct DecodeResult<T> {
-        pub value: T,
-        pub migration: MigrationStatus,
     }
 
     /// D-MIGRATE4: the sorted set of top-level object keys of a `DataTree`, used

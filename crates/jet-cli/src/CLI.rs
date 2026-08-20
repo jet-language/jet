@@ -315,13 +315,14 @@ const OS_ACTIONS: &[NestedCommandSpec] = &[
     NestedCommandSpec { name: "config", usage: "config", summary: "Manage Jet settings and trust", handler: HandlerKey::Config, also_canonical_top_level: false },
 ];
 
-// D-PERFSESSION1=D: `jet perf` owns collection/view/compare/export. `run`/
-// `test`/`bench` stay canonical top-level intents and also live here so the
-// group help lists the full family; their rows declare that overlap.
+// D-PERFSESSION1=D: `jet perf` owns collection/view/compare/export. `run` and
+// `test` stay canonical top-level intents and also live here so the group help
+// lists the full family. `bench` remains a trace-producing projection of the
+// measured test intent.
 const PERF_ACTIONS: &[NestedCommandSpec] = &[
     NestedCommandSpec { name: "run", usage: "run", summary: "Run a program and write a .jettrace", handler: HandlerKey::Perf, also_canonical_top_level: true },
     NestedCommandSpec { name: "test", usage: "test", summary: "Run tests and write a .jettrace", handler: HandlerKey::Perf, also_canonical_top_level: true },
-    NestedCommandSpec { name: "bench", usage: "bench", summary: "Measure performance and write a .jettrace", handler: HandlerKey::Perf, also_canonical_top_level: true },
+    NestedCommandSpec { name: "bench", usage: "bench", summary: "Measure test claims and write a .jettrace", handler: HandlerKey::Perf, also_canonical_top_level: false },
     NestedCommandSpec { name: "attach", usage: "attach", summary: "Attach to a running process and write a .jettrace", handler: HandlerKey::Perf, also_canonical_top_level: false },
     NestedCommandSpec { name: "view", usage: "view", summary: "Show a .jettrace summary", handler: HandlerKey::Perf, also_canonical_top_level: false },
     NestedCommandSpec { name: "compare", usage: "compare", summary: "Compare two .jettrace artifacts", handler: HandlerKey::Perf, also_canonical_top_level: false },
@@ -726,14 +727,6 @@ pub const COMMANDS: &[CommandSpec] = &[
         usage: None,
     },
     CommandSpec {
-        name: "bench",
-        summary: "Measure program performance",
-        headline: false,
-        actions: &[],
-        exhaustive: false,
-        usage: Some("bench [<file.jet|dir>]"),
-    },
-    CommandSpec {
         name: "fuzz",
         summary: "Find failing inputs for property tests",
         headline: false,
@@ -792,6 +785,10 @@ fn retired_lock_fix(argv: &[String]) -> String {
     }
 }
 
+fn retired_bench_fix(_: &[String]) -> String {
+    "jet test --measure".to_string()
+}
+
 fn retired_store_fix(_: &[String]) -> String {
     "jet hangar / jet clean / jet fetch".to_string()
 }
@@ -827,6 +824,14 @@ fn retired_store_lock_fix(argv: &[String]) -> String {
 }
 
 pub const RETIRED_COMMANDS: &[RetiredCommandSpec] = &[
+    RetiredCommandSpec {
+        spelling: "bench",
+        category: RetirementCategory::Semantic,
+        error_code: "E2101",
+        why: "measurement is a mode of the test harness now (D-CLAIM-BENCH1=A)",
+        fix: retired_bench_fix,
+        rewrite: None,
+    },
     RetiredCommandSpec {
         spelling: "serve",
         category: RetirementCategory::Semantic,
@@ -991,7 +996,7 @@ const BASE_FLAGS: &[FlagSpec] = &[
     FlagSpec { long: "--read-only", help: "with shared-store enroll: grant read-only broker access" },
     FlagSpec { long: "--fd", help: "with shared-store broker: inherited broker socket descriptor" },
     // D-CLI-BARE1=A / D-TASKS-LIST1=A: select one workspace member.
-    FlagSpec { long: "-p", help: "with run/dev/debug/bench/check/build/jobs: pick a workspace member by name" },
+    FlagSpec { long: "-p", help: "with run/dev/debug/check/build/jobs: pick a workspace member by name" },
     FlagSpec { long: "--annotated", help: "with new: include commented example deps" },
     FlagSpec { long: "--force", help: "with publish: bypass pre-publish gate (with warning)" },
     // #1659 criterion 1 (round 2): these 8 flags previously lived only in
@@ -1064,11 +1069,14 @@ const BASE_FLAGS: &[FlagSpec] = &[
     FlagSpec { long: "--complexity", help: "with lint: report per-function cognitive complexity" },
     FlagSpec { long: "--max", help: "with lint --complexity: fail when a function exceeds this score" },
     FlagSpec { long: "--scope", help: "with inspect gates/authority or trust grant: choose a ledger or trust scope" },
-    // D-TESTKIT1=A / D-BENCH-PARITY1=B: the shared name-selection flag.
-    FlagSpec { long: "--filter", help: "with test/bench: only run regions whose name contains --filter=<substr>" },
+    // D-TESTKIT1=A: the shared test name-selection flag.
+    FlagSpec { long: "--filter", help: "with test: only run claims whose name contains --filter=<substr>" },
     FlagSpec { long: "--shuffle", help: "with test: run tests in random (or --shuffle=<seed>) order" },
     FlagSpec { long: "--serial", help: "with test: run tests one at a time instead of the parallel default" },
-    FlagSpec { long: "--show-default", help: "with test/bench: ignore fn test/fn bench and use the stock harness" },
+    FlagSpec { long: "--show-default", help: "with test: ignore fn test and use the stock harness" },
+    FlagSpec { long: "--measure", help: "with test: measure `.measure` claims" },
+    FlagSpec { long: "--record", help: "with run/dev/test: record a named replay as --record=<name>" },
+    FlagSpec { long: "--replay", help: "with debug: consume a named replay as --replay=<name>" },
     // D-TESTKIT1=A: `jet fuzz` (its own bespoke flags below are validated by
     // `owns_flag_vocabulary`; these two are listed for completions/the man page).
     FlagSpec { long: "--iterations", help: "with fuzz: case budget --iterations=<n> (default 1000)" },

@@ -248,10 +248,6 @@ pub const JET_HIGHLIGHT_TOKENS: &[HighlightToken] = &[
         class: HighlightClass::KeywordDeclaration,
     },
     HighlightToken {
-        text: KW_BENCH,
-        class: HighlightClass::KeywordDeclaration,
-    },
-    HighlightToken {
         text: KW_TODO,
         class: HighlightClass::KeywordDeclaration,
     },
@@ -1160,7 +1156,7 @@ use super::{
     KW_CONC_TASK, KW_FREEZE, KW_SHARED, READINESS_AFTER, TASK_ALL, TASK_ANY, TASK_GROUP, TASK_JOIN, TASK_RACE,
     TASK_FAILURE_CANCELLED, TASK_FAILURE_DEADLINE_BLOWN, TASK_FAILURE_PANICKED,
     TYPE_RECEIVER, TYPE_SENDER, TYPE_TASK, TYPE_TASK_FAILURE,
-    KW_ADD, KW_ALIAS, KW_AS, KW_BENCH, KW_BREAK, KW_CHANGE,
+    KW_ADD, KW_ALIAS, KW_AS, KW_BREAK, KW_CHANGE,
     KW_DERIVE, KW_DISTINCT, KW_EFFECT_DECL, KW_ELSE, KW_ENUM,
     KW_EXTERN, KW_FN, KW_IF, KW_IMPL, KW_IMPURE, KW_IT, KW_LOOP,
     KW_MARKER, KW_MIGRATION, KW_MODULE, KW_PRIV, KW_PROTOCOL, KW_PUB,

@@ -85,7 +85,7 @@ fn resolve_every_arg(
             if nanos < 0 {
                 return Err(EveryScheduleError::NonPositiveDuration);
             }
-            Ok(EverySchedule::Interval { nanos })
+            Ok(EverySchedule::Duration { nanos })
         }
         EveryArg::WallClock { text, .. } => {
             let bytes = text.as_bytes();
@@ -106,7 +106,7 @@ fn resolve_every_arg(
             if minute > 59 {
                 return Err(EveryScheduleError::MinuteOutOfRange);
             }
-            Ok(EverySchedule::DailyAt {
+            Ok(EverySchedule::WallClockTime {
                 hour: hour as u8,
                 minute: minute as u8,
             })

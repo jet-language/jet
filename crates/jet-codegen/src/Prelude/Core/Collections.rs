@@ -214,6 +214,24 @@ fn jet_list_copy<T: Clone>(xs: &[T]) -> Vec<T> {
     xs.to_vec()
 }
 
+fn jet_list_sort_by<T, K: Ord, F>(xs: &mut Vec<T>, f: F)
+where
+    F: FnMut(&T) -> K,
+{
+    xs.sort_by_key(f);
+}
+
+fn jet_list_sort_desc<T: Ord>(xs: &mut Vec<T>) {
+    xs.sort_by(|left, right| right.cmp(left));
+}
+
+fn jet_list_sort_by_desc<T, K: Ord, F>(xs: &mut Vec<T>, mut f: F)
+where
+    F: FnMut(&T) -> K,
+{
+    xs.sort_by_key(|item| std::cmp::Reverse(f(item)));
+}
+
 // D-ALLOCFAIL1=A: collection fallibility is one Prelude path. Native
 // reservations stay here; map storage insertion is a representation hook.
 // AOT, JIT, and TIR-eval marshal these functions.
@@ -949,8 +967,8 @@ where
     xs.iter().map(|x| map(x)).filter(|value| keep(value)).collect()
 }
 
-// List-shaped helpers kept for non-Iter call sites / terminals that still
-// materialize; non-map/filter adapters above remain the lazy path.
+// List-shaped helpers serve eager concrete-List adapters and materializing
+// terminals; `.lazy()` and Iter receivers stay on the JetIter helpers above.
 fn jet_list_take<T: Clone>(xs: Vec<T>, n: i64) -> Vec<T> {
     xs.into_iter().take(n.max(0) as usize).collect()
 }

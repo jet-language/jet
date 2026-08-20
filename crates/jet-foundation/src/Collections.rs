@@ -32,6 +32,7 @@ pub const RESERVED_TYPES: &[&str] = &[
     Syntax::DURATION_UNIT_TYPE,
     Syntax::DURATION_RANGE_ERROR_TYPE,
     Syntax::EXPIRING_VALUE_TYPE,
+    Syntax::TYPE_AUTHORITY,
     // D-SOLVER-LIB1=A: `Solver` is the Core finite-solver handle. Reserving it
     // prevents a user type from being mistaken for the runtime solver handle.
     Syntax::SOLVER_TYPE,
@@ -64,15 +65,12 @@ pub fn is_reserved_type(name: &str) -> bool {
 
 /// Whether `ty` may be used as a `Map` key (E0502).
 pub fn is_map_key_type(ty: &Type) -> bool {
-    matches!(
-        ty,
-        Type::Int
-            | Type::Bool
-            | Type::String
-            | Type::Char
-            | Type::Named(_)
-            | Type::InlineRange { .. }
-    )
+    match ty {
+        Type::Int | Type::Bool | Type::String | Type::Char | Type::IntN { .. } => true,
+        Type::Tuple(fields) => fields.iter().all(|(_, field)| is_map_key_type(field)),
+        Type::InlineRange { base, .. } => is_map_key_type(base),
+        _ => false,
+    }
 }
 
 /// Whether `ty` may be used as a `Set` element — requires `Hash + Eq` (E0506).
@@ -126,8 +124,9 @@ pub fn sort_by_callback_type(inner: &Type, comparator: bool) -> Type {
 }
 
 /// D-ITERTOOLS1=A: adapter spellings that are lazy when the receiver is an
-/// `Iter<T>`. D-CORE-EAGER1=A makes `map` and `filter` eager on concrete
-/// collections; receiver-sensitive lowering keeps the same vocabulary.
+/// `Iter<T>`. D-CORE-EAGER1=A and D-CORE-EAGER2=A make `map`, `filter`,
+/// `flatten`, and `flat_map` eager on their concrete collection receivers;
+/// receiver-sensitive lowering keeps the same vocabulary.
 pub fn is_lazy_adapter(method: &str) -> bool {
     matches!(
         method,
@@ -1120,8 +1119,10 @@ fn list_method_return(inner: &Type, method: &str, nargs: usize) -> Option<Option
         // #1477: ledger `replace` — substitute every equal element.
         ("replace", 2) => Some(Some(Type::List(Box::new(inner.clone())))),
         ("flatten", 0) => match inner {
-            Type::List(elem) => Some(Some(iter_ty(*elem.clone()))),
-            _ => Some(Some(iter_ty(Type::Int))),
+            // D-CORE-EAGER2=A: concrete List adapters materialize eagerly;
+            // `.lazy().flatten()` uses the Iter table below.
+            Type::List(elem) => Some(Some(Type::List(elem.clone()))),
+            _ => Some(Some(Type::List(Box::new(Type::Int)))),
         },
         ("intersperse", 1) => Some(Some(iter_ty(inner.clone()))),
         // D-ITER1 / D-RANGE-EXCL1=C: indexed → Iter<(idx: Int, item: T)>.
@@ -1159,8 +1160,9 @@ fn list_method_return(inner: &Type, method: &str, nargs: usize) -> Option<Option
         ("partition", 1) => Some(Some(partition_ret_ty(inner))),
         // D-ITERTOOLS1=A: closure adapters returning `Iter<T>`.
         ("take_while" | "skip_while", 1) => Some(Some(iter_ty(inner.clone()))),
-        // D-ITER1: flat_map(f: T->[U]) → Iter<U>; placeholder; sema refines.
-        ("flat_map", 1) => Some(Some(iter_ty(Type::Int))),
+        // D-CORE-EAGER2=A: flat_map on a concrete List returns [U]; sema
+        // refines U from the callback. Iter receivers stay on the table below.
+        ("flat_map", 1) => Some(Some(Type::List(Box::new(Type::Int)))),
         // D-FAILCOMP1: filter_map(f: T -> V?E) → Iter<V>; keeps ok, drops err; sema refines V.
         ("filter_map", 1) => Some(Some(iter_ty(Type::Int))),
         // D-FAILCOMP1: try_collect on [Result<T,E>] → Result<[T],E>.

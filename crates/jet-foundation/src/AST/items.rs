@@ -1115,7 +1115,7 @@ pub struct Func {
     pub job_metadata: Option<JobMetadata>,
     /// D-SCHEDULE1 (ratified 2026-07-11, card #505): `#Every(...)` — a
     /// declarative schedule on a `#Job fn`. `None` means unscheduled (a
-    /// plain task, invoked manually only). Legal only alongside `is_job`
+    /// plain job, invoked manually only). Legal only alongside `is_job`
     /// (E0925 otherwise). Compile-checked (E0926 on a bad argument), then
     /// carried as metadata for `jet dev`/service-runtime/jetos consumers —
     /// erased in codegen (I3), never a runtime value the generated fn sees.
@@ -1428,16 +1428,17 @@ pub struct EveryMarker {
     pub resolved: Option<EverySchedule>,
 }
 
-/// D-SCHEDULE1: a resolved, checked `#Every(…)` schedule. Sema writes this
-/// projection once from the registered Time-family facts; every runtime
-/// consumer reads the same value instead of re-parsing source text.
+/// D-CONC-SCHED1 / D-SCHEDULE1: a resolved, checked `#Every(…)` value. Sema
+/// writes this projection once from the registered Time-family facts; every
+/// consumer reads the same `Duration` or wall-clock value instead of
+/// re-parsing source text.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum EverySchedule {
-    /// Re-run every `nanos` nanoseconds since the job last ran. The interval
-    /// is the canonical Time delta carrier: a checked i64 nanosecond count.
-    Interval { nanos: i64 },
+    /// Re-run every `nanos` nanoseconds since the job last ran. This is the
+    /// canonical Time-family `Duration` carrier.
+    Duration { nanos: i64 },
     /// Re-run once daily at this local 24h wall-clock time.
-    DailyAt { hour: u8, minute: u8 },
+    WallClockTime { hour: u8, minute: u8 },
 }
 
 /// D-SCHEDULE1: why sema rejected an `EveryArg` — sema turns each into the

@@ -38,12 +38,6 @@ pub struct Program {
     /// the silent `<stem>.html` sibling-filename convention. Relative to the
     /// `.jet` source file's own directory.
     pub html_path: Option<String>,
-    /// D-MEM1/S7 / D-POLICY-WORD1: `#Policy(no_alloc)` —
-    /// this file's allocation floor. `Some(span)` = the policy line's span
-    /// (for a "declared twice" check); `None` = no policy. Local-only: sema
-    /// checks only expressions written directly in this file's own function
-    /// bodies, never calls into other modules (E0921).
-    pub no_alloc_policy: Option<Span>,
     /// D-MARK-SCOPE1: source policy declarations with compiler-owned scope/target metadata.
     pub policy_declarations: Vec<crate::Policy::PolicyDeclaration>,
     /// D-MARK-STACK1: source-order applied rules for attachment sites whose
@@ -636,6 +630,10 @@ pub struct ProgramBundle {
 pub struct PackageGuarantees {
     pub contain: std::collections::BTreeSet<String>,
     pub harden: bool,
+    /// D-AUTHORITY-MEM1/D-AUTHORITY-MEM2: package-wide memory denials from
+    /// `effects.deny`. The loader carries the raw canonical rights here so
+    /// sema applies the same memory proof as a signature denial.
+    pub memory_denials: Vec<String>,
 }
 
 impl ProgramBundle {
@@ -697,8 +695,6 @@ pub struct LoadedModule {
     /// D-HTMLPAIR1 (ratified 2026-07-01, c134): `#HTML("path.html")` — this file's explicit
     /// companion host page for `--target=web` builds.
     pub html_path: Option<String>,
-    /// D-MEM1/S7 (D-NOALLOC-SEM1=A): mirrors `Program::no_alloc_policy`.
-    pub no_alloc_policy: Option<Span>,
     /// Mirrors `Program::policy_declarations` for sema/index/explain consumers.
     pub policy_declarations: Vec<crate::Policy::PolicyDeclaration>,
     /// Mirrors `Program::rule_facts` for sema signature conformance.

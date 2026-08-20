@@ -351,8 +351,8 @@ fn expr_has_assertion(expr: &Expr) -> bool {
 }
 
 fn is_assertion_name(name: &str) -> bool {
-    name == Syntax::BUILTIN_REQUIRE
-        || name == Syntax::BUILTIN_REQUIRE_EQ
+    name == Syntax::BUILTIN_ASSERT
+        || name == Syntax::BUILTIN_ASSERT_EQ
         || name == "assert"
         || name == "assert_eq"
 }
@@ -379,7 +379,8 @@ fn fallback_has_assertion(fallback: &OrFallback) -> bool {
             expr_has_assertion(value)
         }
         OrFallback::Block { body, value, .. } => {
-            statements_have_assertion(body) || expr_has_assertion(value)
+            statements_have_assertion(body)
+            || value.as_ref().is_some_and(|value| expr_has_assertion(value))
         }
         OrFallback::Panic { args, .. } => args.iter().any(|arg| expr_has_assertion(&arg.expr)),
         OrFallback::Return(None, _)
@@ -793,6 +794,17 @@ fn validate_args(
                     "`.skip` takes at most one reason string".to_string(),
                     "`.skip` optionally records why the region is skipped".to_string(),
                     "write `.skip { … }` or `.skip(\"reason\") { … }`".to_string(),
+                    Some(at),
+                ));
+            }
+        }
+        n if n == Syntax::SCOPE_TEST_MEASURE => {
+            if !args.is_empty() {
+                diags.push(Diagnostic::error(
+                    "E0617",
+                    "`.measure` takes no arguments".to_string(),
+                    "`.measure` is a selection marker for the test measurement mode".to_string(),
+                    "write `.measure { … }`".to_string(),
                     Some(at),
                 ));
             }

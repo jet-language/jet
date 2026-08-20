@@ -35,7 +35,6 @@ fn err_codes(src: &str) -> Vec<String> {
             no_prelude: prog.no_prelude,
             default_target: prog.default_target,
             html_path: prog.html_path.clone(),
-            no_alloc_policy: prog.no_alloc_policy,
             policy_declarations: prog.policy_declarations.clone(),
             rule_facts: std::mem::take(&mut prog.rule_facts),
         }],

@@ -1,5 +1,5 @@
 use crate::AST::{Expr, Type};
-use crate::Diagnostics::{Diagnostic, Span};
+use crate::Diagnostics::{Diagnostic, Span, TextEdit};
 use crate::Sema::Diagnostics::suggest_field;
 use crate::Syntax;
 use crate::Traits::TraitRegistry;
@@ -109,21 +109,29 @@ pub(crate) fn unknown_core_item(module: &str, name: &str, span: Span) -> Diagnos
     if let Some(diagnostic) = submodule_path_hint(module, name, span) {
         return diagnostic;
     }
-    let mut fix = if items.is_empty() {
+    let suggestion = suggest_field(name, &items);
+    let fix = if items.is_empty() {
         "import a specific core module, like `import core.files as fs;`".to_string()
     } else {
         format!("use one of: {}", items.join(", "))
     };
-    if let Some(s) = suggest_field(name, &items) {
-        fix = format!("did you mean `{}`?", s);
-    }
-    Diagnostic::error(
+    let fix = suggestion
+        .as_ref()
+        .map_or(fix, |s| format!("did you mean `{s}`?"));
+    let mut diagnostic = Diagnostic::error(
         "E1004",
         format!("`{}` has no item `{}`", module, name),
         "standard library modules expose a fixed set of public items".to_string(),
         fix,
         Some(span),
-    )
+    );
+    if let Some(suggestion) = suggestion {
+        diagnostic = diagnostic.with_edit(TextEdit {
+            span,
+            new_text: suggestion,
+        });
+    }
+    diagnostic
 }
 
 /// E1004 for a name that lives one level down the Core tree: either

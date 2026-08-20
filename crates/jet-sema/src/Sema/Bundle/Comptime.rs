@@ -263,7 +263,7 @@ fn expr_has_comptime_evaluation(expr: &Expr) -> bool {
                     }
                     OrFallback::Block { body, value, .. } => {
                         stmts_have_comptime_evaluation(body)
-                            || expr_has_comptime_evaluation(value)
+                            || value.as_ref().is_some_and(|value| expr_has_comptime_evaluation(value))
                     }
                     _ => false,
                 }

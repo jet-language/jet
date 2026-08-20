@@ -638,7 +638,7 @@ impl<'a> Parser<'a> {
             let token = self.bump();
             let value = match token.kind {
                 TokKind::Int(_, raw) => raw,
-                TokKind::Float(value) if value.is_finite() => value.to_string(),
+                TokKind::Float(value, _) if value.is_finite() => value.to_string(),
                 _ => {
                     return Err(unit_scale_error(
                         format!("expected a finite decimal {expected}"),

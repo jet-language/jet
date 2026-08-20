@@ -13,52 +13,29 @@ impl<'a> Parser<'a> {
             self.validate_variadic_params(&params);
             self.validate_param_labels(&params);
             self.reject_root_method_params(&params);
-            // D-EFF3 / D-SHAPE8 / D-ARROW-CONTROL1: optional `:[GPU]>`
-            // effect bound.
-            let declared_effects = self.parse_opt_effect_annotation()?;
-            let decorated_arrow = declared_effects.is_some();
-            let is_pure = is_pure
-                || declared_effects.as_ref().is_some_and(|effects| effects.is_empty());
-            let mut return_type = None;
-            let mut return_type_span = None;
-            let mut arrow_return = false;
-            if decorated_arrow {
-                if self.type_starts_here() {
-                    arrow_return = true;
-                    let (ty, span) = self.return_type()?;
-                    return_type = Some(ty);
-                    return_type_span = Some(span);
-                } else if let Some((ty, span)) = self.parse_unit_fallible_return()? {
-                    return_type = Some(ty);
-                    return_type_span = Some(span);
-                }
-            } else if self.at_unified_arrow() {
-                arrow_return = true;
-                self.expect_unified_arrow("before a callable result type")?;
-                if self.type_starts_here() {
-                    let (ty, span) = self.return_type()?;
-                    return_type = Some(ty);
-                    return_type_span = Some(span);
-                }
-            } else if let Some((ty, span)) = self.parse_unit_fallible_return()? {
-                return_type = Some(ty);
-                return_type_span = Some(span);
-            }
-            if arrow_return
-                && return_type
-                    .as_ref()
-                    .is_some_and(|ty| Self::is_unit_fallible_type(ty))
-            {
-                self.diags.push(Self::retired_unit_fallible_signature(
-                    return_type_span.unwrap_or(self.peek().span),
-                ));
-            }
+            let (
+                return_type,
+                _return_type_span,
+                mut declared_effects,
+                _effect_via,
+                _prefix_effect_span,
+            ) = self.parse_callable_result_and_prefix_effects()?;
             let declared_return_view_provenance =
                 self.parse_opt_declared_view_from(&params);
+            if declared_effects.is_none() {
+                declared_effects = self.parse_opt_effect_annotation()?;
+            }
+            let is_pure = is_pure
+                || declared_effects.as_ref().is_some_and(|effects| effects.is_empty());
             // D-LIB2: optional default body `{ … }` instead of `;`.
             let default_body = if matches!(self.peek().kind, TokKind::LBrace) {
                 self.bump();
+                let previous_tail_depth = self.callable_tail_block_depth;
+                if return_type.is_some() {
+                    self.callable_tail_block_depth = Some(self.block_depth + 1);
+                }
                 let stmts = self.block_stmts();
+                self.callable_tail_block_depth = previous_tail_depth;
                 Some(stmts)
             } else {
                 let end = self.peek().span.end;

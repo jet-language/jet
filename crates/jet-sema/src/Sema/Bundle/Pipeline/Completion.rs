@@ -19,6 +19,24 @@ pub(super) fn complete_bundle_check(
     // owning module instead of a registry-order-dependent leaf name.
     check_strong_shared_cycles(&states, &name_ledger, &mut diags);
 
+    // D-CLAIM-BENCH1=A: `#Bench` is no longer a source-level claim. Keep the
+    // private benchmark compiler path available to the budget adapter while
+    // every user-facing compile teaches the one canonical measured-test form.
+    if !matches!(mode, CompileMode::Bench | CompileMode::BenchOverride) {
+        for module in &bundle.modules {
+            for item in &module.items {
+                let Item::Bench(bench) = item else { continue };
+                diags.push(Diagnostic::error(
+                    "E0927",
+                    "`#Bench` is a retired claim spelling".to_string(),
+                    "measurement is a mode of `#Test`, so Jet has one claim family".to_string(),
+                    "write `#Test(\"name\") { .measure { ... } }` and run `jet test --measure`".to_string(),
+                    Some(bench.name_span),
+                ));
+            }
+        }
+    }
+
     for idx in 0..bundle.modules.len() {
         for item in &bundle.modules[idx].items {
             let Item::Impl(i) = item else { continue };
@@ -197,13 +215,13 @@ pub(super) fn complete_bundle_check(
                 "E0601",
                 format!("no `#{}` blocks found to run", Syntax::KW_TEST),
                 format!(
-                    "add at least one top-level block: #{} \"describes what this checks\" {{ ... }}",
+                    "add at least one top-level block: #{}(\"describes what this checks\") {{ ... }}",
                     Syntax::KW_TEST
                 ),
                 format!(
                     "use `{}` and `{}` inside the block to check results",
-                    Syntax::BUILTIN_REQUIRE,
-                    Syntax::BUILTIN_REQUIRE_EQ
+                    Syntax::BUILTIN_ASSERT,
+                    Syntax::BUILTIN_ASSERT_EQ
                 ),
                 None,
             ));
@@ -498,8 +516,8 @@ pub(super) fn complete_bundle_check(
     }
 
     // JS/WASM partition inference and boundary checks.
-    // D-MEM-FACTS1: module `#Policy(no_alloc)` declarations are checked only
-    // after the same qualified, dependency-complete graph is projected.
+    // D-MEM-FACTS1: function effect-row denials and package manifest denials
+    // are checked only after the same qualified, dependency-complete graph is projected.
     // #657 feeds the other scope levels and the two remaining fact values into
     // this declaration surface; reachability itself stays single-mechanism.
     let (memory_summaries, memory_declarations) =
@@ -529,7 +547,7 @@ pub(super) fn complete_bundle_check(
         &public_solved,
     ));
 
-    // D-WEBAPP1=D / D-WEBAUTHOR1=D (Tower #438): one sema-known application graph.
+    // D-WEBAPP1=D / D-WEBAUTHOR1=D (Tower #1274, #1703): one sema-known application graph.
     let (app_graph, app_diags) = super::super::super::App::extract_app_graph(bundle);
     diags.extend(app_diags);
 

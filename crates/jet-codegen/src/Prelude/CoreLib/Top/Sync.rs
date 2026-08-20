@@ -192,7 +192,7 @@ pub(crate) fn jet_sync_text_new(replica: String, text: String) -> JetSyncText {
         atoms: Vec::new(),
         valid: true,
     };
-    if !jet_sync_token_is_valid(&replica) || text.chars().count() > MAX_SYNC_TEXT {
+    if !jet_sync_token_is_valid(&replica) || text.len() > MAX_SYNC_TEXT {
         doc.valid = false;
         return doc;
     }
@@ -207,7 +207,7 @@ pub(crate) fn jet_sync_text_set(mut doc: JetSyncText, replica: String, text: Str
     let inserted = text.chars().count();
     if !doc.valid
         || !jet_sync_token_is_valid(&replica)
-        || inserted > MAX_SYNC_TEXT
+        || text.len() > MAX_SYNC_TEXT
         || doc.atoms.len().saturating_add(inserted) > MAX_SYNC_ATOMS
         || jet_sync_text_clock_exhausted(&doc, inserted)
     {
@@ -235,7 +235,7 @@ pub(crate) fn jet_sync_text_edit(
         || !jet_sync_token_is_valid(&replica)
         || index < 0
         || delete_count < 0
-        || inserted > MAX_SYNC_TEXT
+        || insert.len() > MAX_SYNC_TEXT
         || doc.atoms.len().saturating_add(inserted) > MAX_SYNC_ATOMS
         || jet_sync_text_clock_exhausted(&doc, inserted)
     {
@@ -287,18 +287,17 @@ pub(crate) fn jet_sync_text_merge(a: &JetSyncText, b: &JetSyncText) -> JetSyncTe
         let key = (atom.replica.clone(), atom.counter);
         match merged.get_mut(&key) {
             Some(existing) => {
-                let deleted = existing.deleted || atom.deleted;
                 // One identity carrying two readings means a replica name was
                 // used by two writers, or one document was forked and both
-                // halves edited under the same name.  An anchor must resolve
-                // to one parent, so only one reading can survive; keep the
-                // smaller so the merge answers the same either way round.
-                // A replica name has to own a single line of edits.
-                if (atom.ch, &atom.after) < (existing.ch, &existing.after) {
-                    existing.ch = atom.ch;
-                    existing.after = atom.after.clone();
+                // halves edited under the same name.  Refuse the malformed
+                // merge instead of silently choosing one character or anchor.
+                if existing.ch != atom.ch || existing.after != atom.after {
+                    return JetSyncText {
+                        atoms: Vec::new(),
+                        valid: false,
+                    };
                 }
-                existing.deleted = deleted;
+                existing.deleted |= atom.deleted;
             }
             None => {
                 merged.insert(key, atom.clone());
@@ -501,10 +500,11 @@ fn jet_sync_map_set_replica(
     {
         return map;
     }
+    // Advance past every observed entry. A write after a remote observation
+    // must not reuse a lower clock and lose to that value on merge.
     let Some(next_clock) = map
         .entries
         .iter()
-        .filter(|(_, _, _, writer)| writer == &replica)
         .map(|(_, _, clock, _)| *clock)
         .max()
         .unwrap_or(0)
@@ -671,7 +671,6 @@ where
     let Some(next_clock) = map
         .entries
         .iter()
-        .filter(|(_, _, _, writer)| writer == &replica)
         .map(|(_, _, clock, _)| *clock)
         .max()
         .unwrap_or(0)

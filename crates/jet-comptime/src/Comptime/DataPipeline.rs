@@ -330,7 +330,7 @@ impl<'a> Interp<'a> {
                     Some(CtValue::Str(s)) => s.clone(),
                     _ => return Err(unsupported("`data.csv()`: expected a string argument", span)),
                 };
-                self.eval_typed_csv_decode("decode", &text, ty, span)
+                self.eval_typed_csv_decode(&text, ty, span)
             }
             "json" => {
                 let Some(ty) = type_args.first() else {
@@ -343,7 +343,6 @@ impl<'a> Interp<'a> {
                 // Array-of-objects → `[T]`, same Decode model as `encoding.json.decode<[T]>`.
                 self.eval_typed_decode(
                     "core.encoding.json",
-                    "decode",
                     &text,
                     &Type::List(Box::new(ty.clone())),
                     span,

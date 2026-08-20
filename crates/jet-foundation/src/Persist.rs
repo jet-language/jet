@@ -151,6 +151,32 @@ pub fn shared_clear() {
     SHARED.with(|s| *s.borrow_mut() = PersistStore::new());
 }
 
+/// Read a live value by the store's canonical `module::binding` identity.
+/// Execution tiers use this as a marshalling seam; shape checking and reload
+/// policy remain in `prepare_bundle`.
+pub fn shared_read_key(key: &str) -> Option<CtValue> {
+    SHARED.with(|cell| {
+        cell.borrow()
+            .entries
+            .get(key)
+            .and_then(|entry| decode_payload(&entry.payload))
+    })
+}
+
+/// Update a live value by the store's canonical `module::binding` identity.
+/// The next `prepare_bundle` observes this payload and carries it across a
+/// compatible hot reload.
+pub fn shared_write_key(key: &str, value: &CtValue) -> bool {
+    SHARED.with(|cell| {
+        let mut store = cell.borrow_mut();
+        let Some(entry) = store.entries.get_mut(key) else {
+            return false;
+        };
+        entry.payload = encode_payload(value);
+        true
+    })
+}
+
 /// Sync every `#Persist` binding in `bundle` into the shared store and return
 /// the values that should seed this generation's globals / JIT constants.
 pub fn prepare_bundle(bundle: &ProgramBundle) -> PersistPrep {
@@ -208,7 +234,7 @@ fn const_runtime_value(c: &crate::AST::ConstDef) -> Option<CtValue> {
             [StrPart::Lit(s)] => Some(CtValue::Str(s.clone())),
             _ => None,
         },
-        Expr::Float(v, _, is_f32) => Some(CtValue::Float(if *is_f32 {
+        Expr::Float(v, _, is_f32, _) => Some(CtValue::Float(if *is_f32 {
             CtFloat::f32(*v as f32)
         } else {
             CtFloat::f64(*v)

@@ -2185,7 +2185,7 @@ fn jet_jit_object_entries_to_map(list: i64) -> i64 {
     })
 }
 
-// ── D-MIGRATE3/4: decode_traced + silent migrate for plain decode ────────────
+// ── D-MIGRATE4: silent migration for plain decode ────────────────────────────
 // Mirrors codegen `emit_migration_chain_walker` / step fns using registered
 // MigrationDecl metadata (no per-type Rust emit). Literal `add` defaults only.
 
@@ -2212,7 +2212,7 @@ fn literal_datatree(expr: &Expr) -> Option<json_rt::DataTree> {
     match expr {
         Expr::Bool(b, _) => Some(json_rt::DataTree::Bool(*b)),
         Expr::Int(n, _, _, _) => Some(json_rt::DataTree::Int(*n)),
-        Expr::Float(f, _, _) => Some(json_rt::DataTree::Float(*f)),
+        Expr::Float(f, _, _, _) => Some(json_rt::DataTree::Float(*f)),
         Expr::Char(c, _) => Some(json_rt::DataTree::Text(c.to_string())),
         Expr::Str(parts, _) => {
             let mut s = String::new();

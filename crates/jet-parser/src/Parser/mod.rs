@@ -67,7 +67,6 @@ pub fn parse_for_check(toks: &[Token]) -> Result<(Program, Vec<Diagnostic>), Vec
     };
     let mut prog = p.program();
     prog.fenced_statements = fenced_statements;
-    drop_pending_retirements(&mut p.diags);
     if p.diags.is_empty() {
         Ok((prog, Vec::new()))
     } else if p
@@ -110,7 +109,6 @@ fn parse_inner(toks: &[Token], for_fmt: bool) -> Result<Program, Vec<Diagnostic>
     };
     let mut prog = p.program();
     prog.fenced_statements = fenced_statements;
-    drop_pending_retirements(&mut p.diags);
     if p.diags.is_empty() {
         return Ok(prog);
     }
@@ -153,19 +151,6 @@ fn string_literal_value(parts: &[StrTokPart]) -> Result<String, Diagnostic> {
     }
 }
 
-/// D-LIT-DOT1=B and D-ARROW-UNIFY1=B retire the dotted literal head and the
-/// `=>`/`->` arrows, but a retirement cannot be enforced before the corpus is
-/// respelled: roughly a thousand shipped `.jet` files still carry the old
-/// spellings, and raising on them made every example, fixture and doc fail to
-/// parse. The parser therefore READS both spellings and stays silent about the
-/// retired one until `jet fmt` has rewritten the corpus.
-///
-/// The change that closes #2080 and #2081 deletes this function and its two
-/// call sites in the same commit that lands the reformatted corpus; after that
-/// the retirement diagnostics are the only spelling advice a user sees.
-fn drop_pending_retirements(diags: &mut Vec<Diagnostic>) {
-    diags.retain(|d| !matches!(d.code.as_str(), "E0320" | "E0070" | "E0066"));
-}
 
 /// Live teaching diagnostics that recover in the AST; fmt may rewrite to canon.
 fn is_teaching_parse_diag(code: &str) -> bool {
@@ -593,7 +578,7 @@ impl<'a> Parser<'a> {
         Ok((name, Span::new(start, end)))
     }
 
-    /// D-EFFTREE1: an *effect path* — `ident (.ident)*` — for effect-list
+    /// D-EFFTREE1/D-AUTHORITY-MEM2: an effect path — `ident (.ident)*` — for effect-list
     /// entries (`FS`, `FS.Read`, `Net.HTTP.Get`). The root is validated in
     /// sema against the closed ten-name D-EFF4/5 vocabulary; further segments
     /// are an open, user-chosen leaf path (mirrors D-TAG1's tag-tree dotted
@@ -607,6 +592,46 @@ impl<'a> Parser<'a> {
             name.push('.');
             name.push_str(&seg);
             end = seg_span.end;
+        }
+        // Memory's bounded denial is the only parameterized rights-tree
+        // entry. Keep its closed argument in the canonical AST string so the
+        // formatter, sema, and every execution tier consume one spelling.
+        if name == "Mem.Alloc" && matches!(self.peek().kind, TokKind::LParen) {
+            self.bump();
+            let (label, label_span) = self.expect_ident("for the memory denial argument name")?;
+            if label != "above" {
+                return Err(Diagnostic::error(
+                    "E0119",
+                    format!("`Mem.Alloc` does not accept the argument `{label}`"),
+                    "the bounded memory denial has one closed argument: `above: Bytes`".to_string(),
+                    "write `Mem.Alloc(above: 65536)`".to_string(),
+                    Some(label_span),
+                ));
+            }
+            self.expect(TokKind::Colon, "after `above`")?;
+            let token = self.bump();
+            let TokKind::Int(value, _) = token.kind else {
+                return Err(Diagnostic::error(
+                    "E0119",
+                    "`Mem.Alloc(above: …)` needs an integer byte ceiling".to_string(),
+                    "the bounded denial is checked at compile time and accepts a positive byte count".to_string(),
+                    "write `Mem.Alloc(above: 65536)`".to_string(),
+                    Some(token.span),
+                ));
+            };
+            if value <= 0 {
+                return Err(Diagnostic::error(
+                    "E0119",
+                    "`Mem.Alloc(above: …)` needs a positive byte ceiling".to_string(),
+                    "zero cannot bound a usable memory region".to_string(),
+                    "write a positive byte count, such as `Mem.Alloc(above: 65536)`".to_string(),
+                    Some(token.span),
+                ));
+            }
+            let close_span = self.peek().span;
+            self.expect(TokKind::RParen, "after the memory denial argument")?;
+            name.push_str(&format!("(above: {value})"));
+            end = close_span.end;
         }
         Ok((name, Span::new(first_span.start, end)))
     }
@@ -976,7 +1001,7 @@ fn build(b: BuildContext) {
 
     #[test]
     fn grouped_function_rules_keep_meta_and_policy_semantics() {
-        let src = "#[Policy(no_alloc), Meta(category: \"api\", maturity: .Tested), Job]\nfn sync() {}\n";
+        let src = "#[Policy(copies: .Explicit), Meta(category: \"api\", maturity: .Tested), Job]\nfn sync() {}\n";
         let p = program(src);
         let func = p.items.iter().find_map(|item| match item {
             crate::AST::Item::Func(func) if func.name == "sync" => Some(func),
@@ -986,7 +1011,7 @@ fn build(b: BuildContext) {
         assert!(func.meta.is_some());
         assert_eq!(func.maturity, Some(crate::AST::MaturityTag::Tested));
         assert!(p.policy_declarations.iter().any(|declaration| {
-            declaration.key == crate::Policy::PolicyKey::NoAlloc
+            declaration.key == crate::Policy::PolicyKey::Copies
                 && declaration.scope == crate::Policy::PolicyScope::Function
                 && declaration.target == Some(func.span)
         }));
@@ -1139,8 +1164,8 @@ fn build(b: BuildContext) {
         use crate::Formatter::format_source;
         for (src, expected_group) in [
             (
-                "use core.mem\n#[Policy(no_alloc), Meta(category: \"ffi\"), Job, Unsafe(\"register ABI\", obligations: .None), FFI(c)]\nfn add() {\n    \"\"\"void add(void) {}\"\"\"\n}\n",
-                "#[Policy(no_alloc), Meta(category: \"ffi\"), Job, Unsafe(\"register ABI\", obligations: .None), FFI(c)]",
+                "use core.mem\n#[Policy(copies: .Explicit), Meta(category: \"ffi\"), Job, Unsafe(\"register ABI\", obligations: .None), FFI(c)]\nfn add() {\n    \"\"\"void add(void) {}\"\"\"\n}\n",
+                "#[Policy(copies: .Explicit), Meta(category: \"ffi\"), Job, Unsafe(\"register ABI\", obligations: .None), FFI(c)]",
             ),
             (
                 "#[HTML(\"index.html\"), PubFile, Target(Web), NoPrelude]\nfn main() {}\n",
@@ -1340,13 +1365,13 @@ fn run() {
     server: Ready()
 }
 
-fn classify(score: Int) :> Grade :: if {
+fn classify(score: Int) Grade :> if {
     score >= 90 :> .A
     score >= 80 :> .B
     else :> .C
 }
 
-fn notify(ready: Bool) :[Net]> () {
+fn notify(ready: Bool) :[Net]> {
     if ready :> send() else :> skip()
     loop item, items :> audit(item)
     outer :: loop {
@@ -1362,9 +1387,9 @@ fn notify(ready: Bool) :[Net]> () {
 "#;
 
         let once = format_source(src).expect("canonical arrow/control syntax formats");
-        assert!(once.contains("fn classify(score: Int) :> Grade :: if {"), "{once}");
+        assert!(once.contains("fn classify(score: Int) Grade :> if {"), "{once}");
         assert!(once.contains("score >= 90 :> .A"), "{once}");
-        assert!(once.contains("fn notify(ready: Bool) :[Net]> ()"), "{once}");
+        assert!(once.contains("fn notify(ready: Bool) :[Net]> {"), "{once}");
         assert!(once.contains("if ready :> send() else :> skip()"), "{once}");
         assert!(once.contains("loop item, items :> audit(item)"), "{once}");
         assert!(once.contains("next(outer)"), "{once}");
@@ -1392,7 +1417,7 @@ fn notify(ready: Bool) :[Net]> () {
     #[test]
     fn multiline_callable_tail_preserves_its_source_expression() {
         let p = program(
-            "fn double(value: Int) :> Int {\n    adjusted :: value + 1\n    adjusted * 2\n}\n",
+            "fn double(value: Int) Int {\n    adjusted :: value + 1\n    adjusted * 2\n}\n",
         );
         let func = p.items.iter().find_map(|item| match item {
             crate::AST::Item::Func(func) if func.name == "double" => Some(func),

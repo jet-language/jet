@@ -442,7 +442,7 @@
                 message: "policy-scoped SQL cannot contain comments".to_string(),
             });
         }
-        if user.is_empty() || user.len() > 1024 * 1024 || user.chars().any(char::is_control) {
+        if user.trim().is_empty() || user.len() > 1024 * 1024 || user.chars().any(char::is_control) {
             return Err(DBError {
                 message: "policy user identity is empty, too long, or contains control characters"
                     .to_string(),

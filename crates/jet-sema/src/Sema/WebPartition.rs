@@ -316,7 +316,7 @@ pub fn format_partition_report(
     solved: &HashMap<String, EffectSet>,
 ) -> String {
     let mut lines = vec![
-        "Web partition report (D-WASM1)".to_string(),
+        "Web partition report".to_string(),
         "================================".to_string(),
     ];
     let mut rows: Vec<_> = metas.iter().collect();

@@ -525,6 +525,7 @@ pub(crate) fn resolve_builtin_op(
         ("max", 0) => TBuiltinOp::Max {
             float: is_float_sequence,
         },
+        // D-CORE-EAGER2=A: emit/eval split this op by List vs Iter receiver.
         ("flatten", 0) => TBuiltinOp::Flatten,
         ("intersperse", 1) => TBuiltinOp::Intersperse,
         ("clear", 0) => TBuiltinOp::Clear,
@@ -865,6 +866,7 @@ pub(crate) fn resolve_builtin_op(
             TBuiltinOp::RemoveList { .. } => {
                 crate::Collections::BuiltinReceiverBorrow::EagerWrite
             }
+            TBuiltinOp::SortDesc => crate::Collections::BuiltinReceiverBorrow::EagerWrite,
             // Native method syntax receives Rust's two-phase `&mut self`.
             TBuiltinOp::Push
             | TBuiltinOp::TryPush
@@ -880,7 +882,6 @@ pub(crate) fn resolve_builtin_op(
             | TBuiltinOp::ExtendList
             | TBuiltinOp::Reverse
             | TBuiltinOp::Sort
-            | TBuiltinOp::SortDesc
             | TBuiltinOp::Clear
             | TBuiltinOp::SetInsert
             | TBuiltinOp::SetRemove
@@ -1005,6 +1006,8 @@ pub(crate) fn resolve_closure_op(
         "take_while" => TClosureOp::TakeWhile,
         "skip_while" => TClosureOp::SkipWhile,
         "flat_map" if matches!(recv_ty, Type::Map { .. }) => TClosureOp::MapFlatMap,
+        // D-CORE-EAGER2=A: one op; emit/eval choose eager List or lazy Iter
+        // behavior from the receiver, as map/filter already do.
         "flat_map" => TClosureOp::FlatMap,
         "binary_search_by" => TClosureOp::ListBinarySearchBy,
         "min_max_by" => {

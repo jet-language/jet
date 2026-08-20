@@ -1,5 +1,5 @@
 use crate::AST::{AccessConvention, BindPattern, Binding, CallArg, Expr, MetaAttr, MetaField, StrPart, Type};
-use crate::Diagnostics::{Diagnostic, Severity};
+use crate::Diagnostics::{Diagnostic, Severity, TextEdit};
 use crate::Sema::Diagnostics::{edit_distance, field_read_to_clone, is_task_type, type_fix_hint};
 use crate::Sema::{Checker, LocalInfo};
 use crate::Syntax;
@@ -43,7 +43,7 @@ fn contains_taskgroup(ty: &Type) -> bool {
         Type::Map { key, value, .. } | Type::Result { ok: key, err: value } => {
             contains_taskgroup(key) || contains_taskgroup(value)
         }
-        // Function signatures have their own direct TaskGroup parameter/return
+        // Function signatures have their own direct Group parameter/return
         // checks; do not duplicate those diagnostics at the binding site.
         Type::Fn { .. } => false,
         Type::Apply { args, .. } | Type::Union(args) => args.iter().any(contains_taskgroup),
@@ -147,27 +147,40 @@ pub(crate) fn check_meta_attr_fields(meta: &MetaAttr) -> Vec<Diagnostic> {
                 }
             }
             MetaField::Unknown { name, span, .. } => {
-                let fix = if edit_distance(name, Syntax::META_FIELD_CATEGORY) <= 2 {
-                    format!("did you mean `{}`?", Syntax::META_FIELD_CATEGORY)
+                let suggestion = if edit_distance(name, Syntax::META_FIELD_CATEGORY) <= 2 {
+                    Some(Syntax::META_FIELD_CATEGORY)
                 } else if edit_distance(name, Syntax::META_FIELD_TUNABLE) <= 2 {
-                    format!("did you mean `{}`?", Syntax::META_FIELD_TUNABLE)
+                    Some(Syntax::META_FIELD_TUNABLE)
                 } else if edit_distance(name, Syntax::META_FIELD_MATURITY) <= 2 {
-                    format!("did you mean `{}`?", Syntax::META_FIELD_MATURITY)
+                    Some(Syntax::META_FIELD_MATURITY)
                 } else {
-                    format!(
-                        "use `{}`, `{}`, or `{}`",
-                        Syntax::META_FIELD_CATEGORY,
-                        Syntax::META_FIELD_TUNABLE,
-                        Syntax::META_FIELD_MATURITY
-                    )
+                    None
                 };
-                diags.push(Diagnostic::error(
+                let fix = suggestion.map_or_else(
+                    || {
+                        format!(
+                            "use `{}`, `{}`, or `{}`",
+                            Syntax::META_FIELD_CATEGORY,
+                            Syntax::META_FIELD_TUNABLE,
+                            Syntax::META_FIELD_MATURITY
+                        )
+                    },
+                    |suggestion| format!("did you mean `{suggestion}`?"),
+                );
+                let mut diagnostic = Diagnostic::error(
                     "E0345",
                     format!("`#Meta` does not have a `{}` field", name),
                     "`#Meta` fields are owner-ratified tooling metadata".to_string(),
                     fix,
                     Some(*span),
-                ));
+                );
+                if let Some(suggestion) = suggestion {
+                    diagnostic = diagnostic.with_edit(TextEdit {
+                        span: *span,
+                        new_text: suggestion.to_string(),
+                    });
+                }
+                diags.push(diagnostic);
             }
         }
     }
@@ -947,10 +960,10 @@ impl<'a> Checker<'a> {
             {
                 self.diags.push(Diagnostic::error(
                     "E1110",
-                    "`TaskGroup` cannot be stored inside another value".to_string(),
+                    "`Group` cannot be stored inside another value".to_string(),
                     "a task group is call-stack-only spawn authority; aliases and aggregates could outlive its owner"
                         .to_string(),
-                    "pass `group: TaskGroup` directly to a helper function or method and use it there"
+                    "pass `group: Group` directly to a helper function or method and use it there"
                         .to_string(),
                     Some(b.name_span),
                 ));

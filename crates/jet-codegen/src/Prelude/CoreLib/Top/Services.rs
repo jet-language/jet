@@ -24,6 +24,12 @@ const MAX_SERVICE_STATE_BYTES: usize = 128 * 1024 * 1024;
 const MAX_SERVICE_WORKFLOW_STEPS: usize = 100_000;
 const MAX_SERVICE_ACTIVITY_ATTEMPTS: i64 = 1_000;
 const MAX_SERVICE_MESSAGES: usize = 100_000;
+/// Private compiler payload for the first typed `service.tree` slice. It is
+/// not a user-facing string-keyed API: TIR emits it only after sema has typed
+/// each `worker(name, handler)` declaration.
+const SERVICE_TREE_PAYLOAD_PREFIX: &str = "\0jet.service.tree.v1\0";
+const SERVICE_TREE_DEFAULT_NAME: &str = "root";
+const SERVICE_TREE_DEFAULT_CAPACITY: i64 = 1;
 /// D-SERVICE1=D's ratified default restart policy: `OneForOne` with a bounded
 /// budget of five restarts per minute, escalating to the parent group when the
 /// budget is spent. These are the *default* values of a policy row a group
@@ -369,6 +375,10 @@ fn jet_services_new_mailbox(
 #[derive(Clone, Debug)]
 struct JetServiceWorker {
     name: String,
+    /// The ordinary Jet function promoted by the typed declaration. The
+    /// current slice records identity in the topology; invocation and
+    /// supervision remain unstarted.
+    handler: String,
     endpoint: JetServiceEndpoint,
     mailbox: JetServiceMailbox,
     /// The restart instants this worker has spent, oldest first. This list is
@@ -639,6 +649,64 @@ fn jet_services_tree(name: String) -> JetServiceTree {
     }
 }
 
+fn service_tree_payload_field<'a>(cursor: &mut &'a str) -> Option<&'a str> {
+    let separator = cursor.find(':')?;
+    let length = cursor[..separator].parse::<usize>().ok()?;
+    *cursor = &cursor[separator + 1..];
+    if length > cursor.len() || !cursor.is_char_boundary(length) {
+        return None;
+    }
+    let (field, rest) = cursor.split_at(length);
+    *cursor = rest;
+    Some(field)
+}
+
+fn service_tree_payload_entries(payload: &str) -> Option<Vec<(String, String)>> {
+    let mut cursor = payload.strip_prefix(SERVICE_TREE_PAYLOAD_PREFIX)?;
+    let separator = cursor.find('|')?;
+    let count = cursor[..separator].parse::<usize>().ok()?;
+    if count > MAX_SERVICE_WORKERS {
+        return None;
+    }
+    cursor = &cursor[separator + 1..];
+    let mut entries = Vec::with_capacity(count);
+    for _ in 0..count {
+        let name = service_tree_payload_field(&mut cursor)?;
+        let handler = service_tree_payload_field(&mut cursor)?;
+        if name.trim().is_empty()
+            || name.chars().any(char::is_control)
+            || name.len() > MAX_SERVICE_NAME
+            || handler.trim().is_empty()
+            || handler.chars().any(char::is_control)
+            || handler.len() > MAX_SERVICE_NAME
+            || entries.iter().any(|(known, _)| known == name)
+        {
+            return None;
+        }
+        entries.push((name.to_string(), handler.to_string()));
+    }
+    cursor.is_empty().then_some(entries)
+}
+
+/// Build the real Prelude service tree represented by the typed declaration.
+/// Invalid input is a compiler bug, not a user runtime case: the only caller
+/// is the compiler-emitted payload, so fail closed instead of returning an
+/// empty or otherwise fake tree.
+fn jet_services_tree_declared(payload: String) -> JetServiceTree {
+    let entries = service_tree_payload_entries(&payload)
+        .unwrap_or_else(|| panic!("invalid compiler service.tree payload"));
+    let mut tree = jet_services_tree(SERVICE_TREE_DEFAULT_NAME.to_string());
+    for (name, handler) in entries {
+        jet_services_worker(&mut tree, name, SERVICE_TREE_DEFAULT_CAPACITY)
+            .unwrap_or_else(|error| panic!("compiler service.tree worker rejected: {error:?}"));
+        tree.workers
+            .last_mut()
+            .expect("service.tree worker was just inserted")
+            .handler = handler;
+    }
+    tree
+}
+
 pub fn jet_services_state_store(path: String) -> Result<JetServiceStateStore, JetServiceError> {
     service_authority_validate_text(
         &path,
@@ -825,6 +893,7 @@ fn jet_services_worker(
     // channel allocation must not leave a ghost authority in the registry.
     service_authority_register(&endpoint, false)?;
     tree.workers.push(JetServiceWorker {
+        handler: name.clone(),
         name,
         endpoint: endpoint.clone(),
         mailbox,

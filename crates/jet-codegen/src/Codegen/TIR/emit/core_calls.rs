@@ -12,7 +12,6 @@ use crate::Codegen::TIR::enc_ok_is_json;
 use crate::Codegen::TIR::enc_row_target_rust;
 use crate::Codegen::TIR::enc_row_target_rust_traced;
 use crate::Codegen::TIR::enc_target_rust;
-use crate::Codegen::TIR::enc_target_rust_traced;
 use crate::Codegen::TIR::struct_field_type;
 use crate::Codegen::TIR::emit::emit_symbol_call;
 use crate::Codegen::TIR::TExpr;
@@ -1390,16 +1389,6 @@ pub(crate) fn emit_tir_core_call(
             let allow = args.get(2).map(|_| format!("&({})", arg(2))).unwrap_or_else(|| "&Vec::new()".to_string());
             format!("{}::<{}>({}, {}, {})", helper("jet_std_env_decode"), target, prefix, file, allow)
         }
-        // D-MIGRATE3=A: `decode_traced<T>` — the traced sibling of `decode<T>`,
-        // one wrapper deeper (`DecodeResult<T>`), same target-type plumbing.
-        ("core.encoding.json", "decode_traced") => {
-            format!(
-                "{}::<{}>(&({}))",
-                helper("jet_enc_json_decode_traced"),
-                enc_target_rust_traced(ret_ty, cx),
-                arg(0)
-            )
-        }
         ("core.encoding.json", "to_string") => {
             if enc_arg_is_json(args) {
                 format!("{}(&({}))", helper("jet_std_json_render"), arg(0))
@@ -1436,14 +1425,6 @@ pub(crate) fn emit_tir_core_call(
                 "{}::<{}>(&({}))",
                 helper("jet_enc_csv_decode"),
                 enc_row_target_rust(ret_ty, cx),
-                arg(0)
-            )
-        }
-        ("core.encoding.csv", "decode_traced") => {
-            format!(
-                "{}::<{}>(&({}))",
-                helper("jet_enc_csv_decode_traced"),
-                enc_row_target_rust_traced(ret_ty, cx),
                 arg(0)
             )
         }
@@ -1544,6 +1525,13 @@ pub(crate) fn emit_tir_core_call(
         
         
         
+        // D-SERVICE1=D: the typed builder has already become a validated
+        // Prelude payload in TIR; this is the one AOT boundary for it.
+        ("core.service", "tree") => format!(
+            "{}(({}).clone())",
+            helper("jet_services_tree_declared"),
+            arg(0)
+        ),
         ("core.services", "runtime") => format!(
             "{}(({}).clone(), ({}).as_millis())",
             helper("jet_services_runtime"),
@@ -2023,14 +2011,6 @@ pub(crate) fn emit_tir_core_call(
                 arg(0)
             )
         }
-        ("core.encoding.toml", "decode_traced") => {
-            format!(
-                "{}::<{}>(&({}))",
-                helper("jet_enc_toml_decode_traced"),
-                enc_target_rust_traced(ret_ty, cx),
-                arg(0)
-            )
-        }
         ("core.encoding.toml", "to_string") => {
             if enc_arg_is_json(args) {
                 format!("{}(&({}))", helper("jet_std_toml_render"), arg(0))
@@ -2043,14 +2023,6 @@ pub(crate) fn emit_tir_core_call(
                 "{}::<{}>(&({}))",
                 helper("jet_enc_yaml_decode"),
                 enc_target_rust(ret_ty, cx),
-                arg(0)
-            )
-        }
-        ("core.encoding.yaml", "decode_traced") => {
-            format!(
-                "{}::<{}>(&({}))",
-                helper("jet_enc_yaml_decode_traced"),
-                enc_target_rust_traced(ret_ty, cx),
                 arg(0)
             )
         }

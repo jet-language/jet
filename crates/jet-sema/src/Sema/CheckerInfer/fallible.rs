@@ -204,9 +204,7 @@ impl<'a> Checker<'a> {
                         if is_default_error(ret_err) {
                             let err_name = err.name();
                             // D-FAIL-CONV2=A: demand-driven family conversion onto Err.
-                            if !self.no_prelude
-                                && !self.no_alloc
-                                && is_core_error_family_type(&err_name)
+                            if !self.no_prelude && is_core_error_family_type(&err_name)
                             {
                                 let fn_name =
                                     error_conv_fn_name(&err_name, Syntax::TYPE_ERR);
@@ -643,29 +641,32 @@ impl<'a> Checker<'a> {
                 Some(payload)
             }
             OrFallback::Block { body, value, .. } => {
-                // A `??` fallback block runs only on the failure path, so a
-                // `return` inside it does not end the enclosing block (#2006).
+                // A `??` fallback block runs only on the failure path. A
+                // diverging tail leaves the enclosing function/loop for real;
+                // ordinary body statements remain conditional (#2006).
                 self.check_conditional_block(body, false);
-                let saved = self.expected_type.clone();
-                self.expected_type = Some(payload.clone());
-                let value_ty = self.infer(value);
-                self.expected_type = saved;
-                if let Some(value_ty) = value_ty {
-                    if value_ty != payload {
-                        self.diags.push(Diagnostic::error(
-                            "E0405",
-                            format!(
-                                "the fallback is {}, but the success value is {}",
-                                value_ty.show(),
-                                payload.show()
-                            ),
-                            format!(
-                                "both sides of `{}` must be the same type",
-                                Syntax::OP_FALLBACK
-                            ),
-                            type_fix_hint(&payload, &value_ty),
-                            Some(value.span()),
-                        ));
+                if let Some(value) = value {
+                    let saved = self.expected_type.clone();
+                    self.expected_type = Some(payload.clone());
+                    let value_ty = self.infer(value);
+                    self.expected_type = saved;
+                    if let Some(value_ty) = value_ty {
+                        if value_ty != payload {
+                            self.diags.push(Diagnostic::error(
+                                "E0405",
+                                format!(
+                                    "the fallback is {}, but the success value is {}",
+                                    value_ty.show(),
+                                    payload.show()
+                                ),
+                                format!(
+                                    "both sides of `{}` must be the same type",
+                                    Syntax::OP_FALLBACK
+                                ),
+                                type_fix_hint(&payload, &value_ty),
+                                Some(value.span()),
+                            ));
+                        }
                     }
                 }
                 Some(payload)
@@ -845,15 +846,20 @@ impl<'a> Checker<'a> {
                 value,
                 span: fallback_span,
             } => {
+                let diverges = value.is_none() && fallback_block_diverges(body);
                 self.check_conditional_block(body, false);
-                self.infer(value);
-                self.diags.push(Diagnostic::error(
-                    "E0405",
-                    format!("`{}` fallback blocks cannot continue after a refutable binding", Syntax::OP_FALLBACK),
-                    "a refutable binding needs one direct diverging miss route".to_string(),
-                    "replace the block with `return`, `panic(...)`, `break`, or `next`".to_string(),
-                    Some(*fallback_span),
-                ));
+                if let Some(value) = value {
+                    self.infer(value);
+                }
+                if !diverges {
+                    self.diags.push(Diagnostic::error(
+                        "E0405",
+                        format!("`{}` fallback blocks cannot continue after a refutable binding", Syntax::OP_FALLBACK),
+                        "a refutable binding needs one direct diverging miss route".to_string(),
+                        "end the block with `return`, `panic(...)`, `break`, or `next`".to_string(),
+                        Some(*fallback_span),
+                    ));
+                }
             }
             OrFallback::Return(ret_expr, ret_span) => {
                 let ret = self.ret.clone();
@@ -966,6 +972,20 @@ pub(crate) fn value_loop_requires_route(expr: &Expr) -> bool {
                             && !lam.meta.exhaustion_route_attached
                 )
     )
+}
+
+fn fallback_block_diverges(body: &[Stmt]) -> bool {
+    match body.last() {
+        Some(
+            Stmt::Return(..)
+            | Stmt::Break(..)
+            | Stmt::Continue(..)
+            | Stmt::BreakLabel(..)
+            | Stmt::ContinueLabel(..),
+        ) => true,
+        Some(Stmt::Expr(Expr::Call(call))) => call.name == Syntax::BUILTIN_PANIC,
+        _ => false,
+    }
 }
 
 fn mark_value_loop_route_attached(expr: &mut Expr) {

@@ -683,6 +683,10 @@ impl<'a> Parser<'a> {
                 let (ty, span) = self.return_type()?;
                 return_type = Some(ty);
                 return_type_span = Some(span);
+            } else if self.type_starts_here() {
+                let (ty, span) = self.return_type()?;
+                return_type = Some(ty);
+                return_type_span = Some(span);
             } else if let Some((ty, span)) = self.parse_unit_fallible_return()? {
                 return_type = Some(ty);
                 return_type_span = Some(span);

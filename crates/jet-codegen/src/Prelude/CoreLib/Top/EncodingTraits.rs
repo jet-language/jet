@@ -18,10 +18,10 @@ pub trait __jet_Decode: Sized {
     /// runtime decode path — every other type keeps this default, so no
     /// per-type code is emitted and the decode path is byte-for-byte unchanged.
     /// parity: guard tests/corelib.rs::typed_codec_decode_matches_between_full_build_and_quick_run
-    fn jet_decode_traced(
+    fn jet_decode_with_status(
         tree: &jet_std::DataTree,
-    ) -> Result<(Self, jet_std::MigrationStatus), Vec<jet_std::FieldError>> {
-        Ok((Self::jet_decode(tree)?, jet_std::MigrationStatus::fresh()))
+    ) -> Result<(Self, jet_std::JetMigrationStatus), Vec<jet_std::FieldError>> {
+        Ok((Self::jet_decode(tree)?, jet_std::JetMigrationStatus::fresh()))
     }
 }
 
@@ -518,19 +518,7 @@ fn jet_enc_json_decode<T: __jet_Decode>(text: &String) -> Result<T, Vec<jet_std:
     // D-MIGRATE4: plain decode walks the same migration chain, silently — the
     // status is dropped. Types without migrations hit the trait default, which
     // is exactly `jet_decode` (zero cost).
-    Ok(T::jet_decode_traced(&tree)?.0)
-}
-
-// D-MIGRATE3=A: `decode_traced<T>` — same decode, wrapped in `DecodeResult` so the
-// caller can ask whether/how it migrated, without `decode` itself paying for it.
-fn jet_enc_json_decode_traced<T: __jet_Decode>(
-    text: &String,
-) -> Result<jet_std::DecodeResult<T>, Vec<jet_std::FieldError>> {
-    let tree = jet_std::parse_json_typed_datatree(text).map_err(|e| {
-        jet_std::FieldError::one(format!("invalid JSON (line {}): {}", e.line, e.message))
-    })?;
-    let (value, migration) = T::jet_decode_traced(&tree)?;
-    Ok(jet_std::DecodeResult { value, migration })
+    Ok(T::jet_decode_with_status(&tree)?.0)
 }
 
 // CSV typed decode: header row maps columns to fields by name; each data row
@@ -555,7 +543,7 @@ fn jet_enc_csv_decode<T: __jet_Decode>(text: &String) -> Result<Vec<T>, Vec<jet_
             .collect();
         let tree = jet_std::DataTree::Object(obj);
         // D-MIGRATE4: plain decode walks the migration chain silently (see json's).
-        match T::jet_decode_traced(&tree) {
+        match T::jet_decode_with_status(&tree) {
             Ok((value, _)) => out.push(value),
             Err(error) => errors.extend(jet_std::FieldError::under_errors(
                 &format!("row {}", i + 1),

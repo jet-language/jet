@@ -5,7 +5,7 @@ use jet_foundation::Diagnostics::Span;
 use jet_foundation::Syntax;
 use jet_foundation::AST::{self, Item, LoadedModule, ProgramBundle};
 use jet_sema::{effect_key, SemIndexEffectFacts};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use crate::JSON::{convert_defs, convert_effects, convert_refs};
 use crate::Types::{BypassFact, BypassKind, CallEdge, DefinitionAnchor, DefinitionFact, InstanceApplicationFact, InstanceFact, MemberFact, MemberKind, MemberOrigin, OutputEntryFact, OutputFact, SemIndex, StructuralNode, StructuralSlotBoundary, StructuralSlotKind, SymbolDef, SymbolKind};
@@ -91,7 +91,7 @@ pub struct HoverEntry {
     pub text: String,
 }
 
-/// Inlay hint: position (just past the binding name) + type text to show.
+/// Inlay hint: a source anchor plus ghost text to show at that anchor.
 #[derive(Debug, Clone)]
 pub struct InlayHint {
     pub span: Span,
@@ -2386,6 +2386,37 @@ fn collect_binding(b: &AST::Binding, mp: &str, ctx: &mut WalkCtx<'_>) {
     structural_slot(ctx, "initializer", StructuralSlotKind::Scalar, |ctx| collect_expr(&b.init, mp, ctx));
 }
 
+/// D-CALLPOS1=A / D-REF3: the binder records the public label on each supplied
+/// argument. Show it before the expression, including for function values and
+/// Core calls where the index cannot resolve a source declaration. A repeated
+/// binder slot is the variadic tail; only its first member gets a hint.
+fn collect_call_inlay_hints(args: &[AST::CallArg], mp: &str, ctx: &mut WalkCtx<'_>) {
+    let mut seen_slots = HashSet::new();
+    for arg in args {
+        if arg.label.is_some() {
+            continue;
+        }
+        let Some(label) = arg.flags.binder_label.as_deref() else {
+            continue;
+        };
+        if label.is_empty() {
+            continue;
+        }
+        let Some(slot) = arg.flags.binder_slot else {
+            continue;
+        };
+        if !seen_slots.insert(slot) {
+            continue;
+        }
+        let start = arg.expr.span().start;
+        ctx.db.inlay.push(InlayHint {
+            span: Span::new(start, start),
+            module_path: mp.to_string(),
+            label: format!("{label}: "),
+        });
+    }
+}
+
 fn collect_expr(e: &AST::Expr, mp: &str, ctx: &mut WalkCtx<'_>) {
     // D-MEM-COPYSEM1=A: sema-inserted owning copies remain visible as a ghost
     // hint. An authored `~` has a span beginning at its sigil; an implicit
@@ -2414,6 +2445,7 @@ fn collect_expr(e: &AST::Expr, mp: &str, ctx: &mut WalkCtx<'_>) {
             ctx.db
                 .refs
                 .push(scoped_ref(call.name.clone(), call.name_span, mp, ctx));
+            collect_call_inlay_hints(&call.args, mp, ctx);
             structural_slot(ctx, "args", StructuralSlotKind::List, |ctx| {
                 for arg in &call.args { collect_expr(&arg.expr, mp, ctx); }
             });
@@ -2449,6 +2481,7 @@ fn collect_expr(e: &AST::Expr, mp: &str, ctx: &mut WalkCtx<'_>) {
                     span: (*method_span).into(),
                 });
             }
+            collect_call_inlay_hints(args, mp, ctx);
             structural_slot(ctx, "args", StructuralSlotKind::List, |ctx| {
                 for arg in args { collect_expr(&arg.expr, mp, ctx); }
             });
@@ -2606,7 +2639,11 @@ fn collect_expr(e: &AST::Expr, mp: &str, ctx: &mut WalkCtx<'_>) {
                         let module = ctx.module;
                         collect_stmts(body, mp, module, ctx);
                     });
-                    structural_slot(ctx, "fallback", StructuralSlotKind::Scalar, |ctx| collect_expr(value, mp, ctx));
+                    if let Some(value) = value {
+                        structural_slot(ctx, "fallback", StructuralSlotKind::Scalar, |ctx| {
+                            collect_expr(value, mp, ctx)
+                        });
+                    }
                 }
                 AST::OrFallback::Panic { args, .. } => {
                     structural_slot(ctx, "fallback_args", StructuralSlotKind::List, |ctx| {
@@ -2652,6 +2689,7 @@ fn collect_expr(e: &AST::Expr, mp: &str, ctx: &mut WalkCtx<'_>) {
         }
         AST::Expr::CallValue { callee, args, .. } => {
             structural_slot(ctx, "callee", StructuralSlotKind::Scalar, |ctx| collect_expr(callee, mp, ctx));
+            collect_call_inlay_hints(args, mp, ctx);
             structural_slot(ctx, "args", StructuralSlotKind::List, |ctx| {
                 for a in args { collect_expr(&a.expr, mp, ctx); }
             });
@@ -2681,7 +2719,7 @@ fn collect_expr(e: &AST::Expr, mp: &str, ctx: &mut WalkCtx<'_>) {
             structural_slot(ctx, "else_value", StructuralSlotKind::Scalar, |ctx| collect_expr(else_value, mp, ctx));
         }
         AST::Expr::Int(_, _, _, _)
-        | AST::Expr::Float(_, _, _)
+        | AST::Expr::Float(_, _, _, _)
         | AST::Expr::Bool(_, _)
         | AST::Expr::Char(_, _)
         | AST::Expr::Absent(_)

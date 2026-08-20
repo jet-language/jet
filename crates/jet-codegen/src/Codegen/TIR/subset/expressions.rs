@@ -166,8 +166,8 @@ fn expr_in_subset_inner(e: &Expr, cx: &Cx, locals: &HashSet<String>) -> bool {
             let is_close = c.name == Syntax::RESOURCE_CLOSE
                 && !locals.contains(&c.name)
                 && c.args.len() == 1;
-            // c109 Phase 26: the rich-runtime-report builtins `require(cond[, msg])`,
-            // `require_eq(left, right)`, and `panic(msg)` (S36). Each is a bare
+            // c109 Phase 26: the rich-runtime-report builtins `assert(cond[, msg])`,
+            // `assert_eq(left, right)`, and `panic(msg)` (S36). Each is a bare
             // `Expr::Call` whose name is the builtin (not in `cx.sigs`, not shadowed by a
             // local) and whose argument count matches the AST `emit_require`/
             // `emit_require_eq`/`emit_panic_stop` shape. The whole statement string is
@@ -175,11 +175,11 @@ fn expr_in_subset_inner(e: &Expr, cx: &Cx, locals: &HashSet<String>) -> bool {
             // operands) must be in-subset (they are lowered + emitted via the TIR). Sema
             // validated the shape (arg count, `panic`'s 1 message arg). Excluded if a
             // user fn / local shadows the name (then the plain-call branch claims it).
-            let is_require = c.name == Syntax::BUILTIN_REQUIRE
+            let is_assert = c.name == Syntax::BUILTIN_ASSERT
                 && !cx.sigs.contains_key(&c.name)
                 && !locals.contains(&c.name)
                 && (c.args.len() == 1 || c.args.len() == 2);
-            let is_require_eq = c.name == Syntax::BUILTIN_REQUIRE_EQ
+            let is_assert_eq = c.name == Syntax::BUILTIN_ASSERT_EQ
                 && !cx.sigs.contains_key(&c.name)
                 && !locals.contains(&c.name)
                 && c.args.len() == 2;
@@ -323,8 +323,8 @@ fn expr_in_subset_inner(e: &Expr, cx: &Cx, locals: &HashSet<String>) -> bool {
                 || is_expect
                 || is_close
                 || is_ambient_input
-                || is_require
-                || is_require_eq
+                || is_assert
+                || is_assert_eq
                 || is_panic
                 || is_plain_fn
                 || is_distinct_ctor
@@ -1000,7 +1000,9 @@ pub(crate) fn orfallback_rhs_in_subset(
         OrFallback::Block { body, value, .. } => {
             body.iter().all(|stmt| {
                 stmt_in_subset(stmt, cx, &mut fallback_locals)
-            }) && expr_in_subset(value, cx, &fallback_locals)
+            }) && value
+                .as_ref()
+                .is_none_or(|value| expr_in_subset(value, cx, &fallback_locals))
         }
         OrFallback::Return(None, _) => true,
         OrFallback::Return(Some(e), _) => expr_in_subset(e, cx, &fallback_locals),

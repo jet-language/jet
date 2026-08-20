@@ -44,7 +44,7 @@ pub mod SemanticSymbols;
 pub mod Term;
 
 use jet_foundation::Terminal::{ColorChoice, Theme};
-use jet_foundation::Authority::covers;
+use jet_foundation::Authority::{answer, parse_right, Holds, Verdict};
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::io::{self, BufRead, Write};
 use std::path::Path;
@@ -80,8 +80,8 @@ pub struct ReplFlags {
 impl ReplFlags {
     pub fn new(allow: &[String], deny: &[String]) -> Self {
         Self {
-            allow: allow.iter().map(|s| s.to_ascii_lowercase()).collect(),
-            deny: deny.iter().map(|s| s.to_ascii_lowercase()).collect(),
+            allow: allow.iter().map(|s| canonical_flag(s)).collect(),
+            deny: deny.iter().map(|s| canonical_flag(s)).collect(),
             color: ColorChoice::Auto,
             preload: None,
         }
@@ -96,6 +96,11 @@ impl ReplFlags {
         self.preload = Some(file);
         self
     }
+}
+
+fn canonical_flag(value: &str) -> String {
+    parse_right(value)
+        .unwrap_or_else(|| value.to_ascii_lowercase())
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -216,11 +221,14 @@ impl crate::Comptime::ReplAuthorizer for ReplAuthorization<'_> {
 
     fn authorize(&mut self, request: &crate::Comptime::ReplEffectRequest, span: crate::Diagnostics::Span) -> Result<(), Diagnostic> {
         self.validate_file_target(request, span)?;
-        let root = request.root.to_ascii_lowercase();
-        if self.policy.flags.deny.iter().any(|bound| covers(bound, &root)) {
+        let root = parse_right(&request.root).unwrap_or_else(|| request.root.clone());
+        let allow: Holds = self.policy.flags.allow.iter().cloned().collect();
+        let deny: Holds = self.policy.flags.deny.iter().cloned().collect();
+        let verdict = answer(&allow, &deny, &root);
+        if verdict == Verdict::Denied {
             return Err(self.e1803(request, "an explicit `--deny` policy overrides every prompt and allowance", span));
         }
-        if self.policy.flags.allow.iter().any(|bound| covers(bound, &root))
+        if verdict == Verdict::Allowed
             && (request.operation != "Exit" || self.prompt.is_none())
         {
             return Ok(());
@@ -2016,7 +2024,6 @@ fn program_bundle(src: &str, mut prog: crate::AST::Program) -> crate::AST::Progr
             no_prelude: prog.no_prelude,
             default_target: prog.default_target,
             html_path: prog.html_path,
-            no_alloc_policy: prog.no_alloc_policy,
             policy_declarations: prog.policy_declarations.clone(),
             block_spans: prog.block_spans.clone(),
             rule_facts: std::mem::take(&mut prog.rule_facts),
@@ -3585,6 +3592,65 @@ mod tests {
         assert_eq!(prompt.0, 0, "platform denial must not ask for authority");
         assert!(!target.exists(), "platform denial executed filesystem operation");
         std::fs::remove_dir_all(root).ok();
+    }
+
+    #[test]
+    fn authority_answer_matches_compile_build_session_and_repl() {
+        let written = "IO";
+        let external_spelling = "io";
+        let expected = jet_foundation::Authority::parse_right(written).expect("known right");
+        assert_eq!(expected, "IO");
+
+        let compile = crate::Sema::Effects::parse_effect_name(external_spelling)
+            .expect("compile right");
+        assert_eq!(compile, expected);
+        assert!(crate::Sema::Effects::effect_covers(written, &expected));
+
+        let manifest = jet_driver::Package::PackageFacts {
+            effects_enabled: true,
+            effects_allow: Some(vec![external_spelling.to_string()]),
+            ..Default::default()
+        };
+        let entries = [jet_driver::EffectBudget::PackageEffects {
+            name: "dependency".to_string(),
+            effects: Holds::from([expected.clone()]),
+            panic_sites: Vec::new(),
+            boundary_span: None,
+        }];
+        assert!(jet_driver::EffectBudget::enforce(&entries, &manifest).is_empty());
+        assert_eq!(
+            jet_driver::EffectBudget::provenance_for(&entries, "dependency"),
+            vec![expected.clone()]
+        );
+
+        let session = answer(
+            &Holds::from([external_spelling.to_string()]),
+            &Holds::new(),
+            written,
+        );
+        assert_eq!(session, Verdict::Allowed);
+
+        let flags = ReplFlags::new(&[external_spelling.to_string()], &[]);
+        assert!(flags.allow.contains(&expected));
+        let mut policy = ReplPolicy::new(flags, Path::new("."));
+        let request = crate::Comptime::ReplEffectRequest {
+            root: expected,
+            operation: "Read".to_string(),
+            resource: "authority-substrate".to_string(),
+        };
+        let mut authorization = policy.authorizer(None);
+        crate::Comptime::ReplAuthorizer::preflight(
+            &mut authorization,
+            &request,
+            crate::Diagnostics::Span::new(0, 1),
+        )
+        .expect("repl preflight");
+        crate::Comptime::ReplAuthorizer::authorize(
+            &mut authorization,
+            &request,
+            crate::Diagnostics::Span::new(0, 1),
+        )
+        .expect("repl authority");
     }
 
     #[test]

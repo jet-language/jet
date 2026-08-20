@@ -113,12 +113,15 @@ mod generic_module_tests {
     }
 
     #[test]
-    fn retired_scoped_policy_shape_is_not_a_callable_policy_alias() {
+    fn retired_memory_policy_names_point_to_effect_denials() {
         let source = "#Policy(no_alloc)\nfn run() {}\n";
         let (tokens, lexer_diagnostics) = Lexer::lex(source);
         assert!(lexer_diagnostics.is_empty(), "{lexer_diagnostics:?}");
-        let program = Parser::parse(&tokens).expect("legacy scoped policy is separate during migration");
-        assert_eq!(program.policy_declarations.len(), 1);
+        let diagnostics = Parser::parse(&tokens).expect_err("memory floor words are retired");
+        assert!(diagnostics.iter().any(|diagnostic| {
+            diagnostic.code == "E0355"
+                && diagnostic.fix.contains("!Mem.Alloc")
+        }));
     }
 
     #[test]

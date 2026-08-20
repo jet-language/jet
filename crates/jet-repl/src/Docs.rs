@@ -220,4 +220,13 @@ mod tests {
         assert!(doc.contains("core.math.sqrt"), "got: {doc:?}");
         assert!(doc.contains("Source: core.math"), "got: {doc:?}");
     }
+
+    #[test]
+    fn syntax_docs_use_the_registry_dictionary() {
+        let doc = lookup(&Session::new(), "#Live").expect("#Live docs");
+        assert!(doc.contains("MARKER_LIVE"), "got: {doc:?}");
+        assert!(doc.contains("Decision: D-BLOCKPLANE1"), "got: {doc:?}");
+        assert!(doc.contains("Example: #Live { input() }"), "got: {doc:?}");
+        assert!(doc.contains("Source: Syntax.rs"), "got: {doc:?}");
+    }
 }

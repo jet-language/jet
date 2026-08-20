@@ -132,7 +132,7 @@ pub const KNOWN_CORE_MODULES: &[&str] = &[
     "core.event",
     "core.reactive",
     "core.reactive.loadable",
-    "core.services",
+    "core.service",
     "core.watcher",
     "core.game",
     "core.game.raylib",
@@ -306,6 +306,10 @@ pub const POLICY_FIELD_HARDEN: &str = "harden";
 /// D-AUTHORITY-MANIFEST1=A / D-BOUND-PROV1=A: source-reviewed trust and
 /// provider authority live under the one `authority: { … }` block.
 pub const MANIFEST_BLOCK_AUTHORITY: &str = "authority"; // D-AUTHORITY-MANIFEST1
+pub const AUTHORITY_FIELD_HOLDS: &str = "holds"; // D-AUTHORITY-MANIFEST1
+pub const AUTHORITY_HOLDS_FIELD_ALLOW: &str = "allow"; // D-AUTHORITY-MANIFEST1
+pub const AUTHORITY_HOLDS_FIELD_DENY: &str = "deny"; // D-AUTHORITY-MANIFEST1
+pub const AUTHORITY_FIELD_GRANTS: &str = "grants"; // D-AUTHORITY-MANIFEST1
 pub const AUTHORITY_FIELD_TRUST: &str = "trust"; // D-BOUND-PROV1
 /// D-JPK-PROVIDERAUTH1=A: reviewed registry and fetch authority.
 pub const AUTHORITY_FIELD_PROVIDERS: &str = "providers";

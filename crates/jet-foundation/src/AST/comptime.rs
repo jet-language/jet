@@ -747,6 +747,17 @@ pub enum CtKey {
     Str(String),
     Bool(bool),
     Char(char),
+    /// D-MAP-KEY1: tuple keys retain their named, canonical fields so the
+    /// interpreter compares the same deep value that AOT stores in `JetMap`.
+    Tuple(Vec<(String, CtKey)>),
+    /// D-MAP-KEY1: a struct key is ordered by nominal type, field name, then
+    /// recursively by field value.
+    Struct {
+        type_name: String,
+        fields: Vec<(String, CtKey)>,
+    },
+    /// D-MAP-KEY1: payload-free enum variants are already complete values.
+    Enum { type_name: String, variant: String },
 }
 
 impl CtKey {
@@ -756,6 +767,28 @@ impl CtKey {
             CtValue::Str(s) => Some(CtKey::Str(s)),
             CtValue::Bool(b) => Some(CtKey::Bool(b)),
             CtValue::Char(c) => Some(CtKey::Char(c)),
+            CtValue::Struct { type_name, fields } => {
+                let fields = fields
+                    .into_iter()
+                    .filter(|(name, _)| !crate::Syntax::is_memo_storage_name(name))
+                    .map(|(name, value)| Some((name, CtKey::from_value(value)?)))
+                    .collect::<Option<Vec<_>>>()?;
+                if type_name == "tuple"
+                    || type_name.starts_with("JetTup_")
+                    || type_name.starts_with('(')
+                {
+                    Some(CtKey::Tuple(fields))
+                } else {
+                    Some(CtKey::Struct { type_name, fields })
+                }
+            }
+            CtValue::Enum {
+                type_name,
+                variant,
+                args,
+            } if !type_name.is_empty() && args.is_empty() => {
+                Some(CtKey::Enum { type_name, variant })
+            }
             _ => None,
         }
     }
@@ -765,6 +798,25 @@ impl CtKey {
             CtKey::Str(s) => CtValue::Str(s.clone()),
             CtKey::Bool(b) => CtValue::Bool(*b),
             CtKey::Char(c) => CtValue::Char(*c),
+            CtKey::Tuple(fields) => CtValue::Struct {
+                type_name: "tuple".to_string(),
+                fields: fields
+                    .iter()
+                    .map(|(name, value)| (name.clone(), value.to_value()))
+                    .collect(),
+            },
+            CtKey::Struct { type_name, fields } => CtValue::Struct {
+                type_name: type_name.clone(),
+                fields: fields
+                    .iter()
+                    .map(|(name, value)| (name.clone(), value.to_value()))
+                    .collect(),
+            },
+            CtKey::Enum { type_name, variant } => CtValue::Enum {
+                type_name: type_name.clone(),
+                variant: variant.clone(),
+                args: Vec::new(),
+            },
         }
     }
     pub(crate) fn jet_type(&self) -> Type {
@@ -773,6 +825,15 @@ impl CtKey {
             CtKey::Str(_) => Type::String,
             CtKey::Bool(_) => Type::Bool,
             CtKey::Char(_) => Type::Char,
+            CtKey::Tuple(fields) => Type::Tuple(
+                fields
+                    .iter()
+                    .map(|(name, value)| (name.clone(), Box::new(value.jet_type())))
+                    .collect(),
+            ),
+            CtKey::Struct { type_name, .. } | CtKey::Enum { type_name, .. } => {
+                Type::Named(type_name.clone())
+            }
         }
     }
     pub(crate) fn jet_show(&self) -> String {

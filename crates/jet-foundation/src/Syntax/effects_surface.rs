@@ -138,10 +138,14 @@ pub const GRANT_BIND_SEPARATOR: &str = ":";
 /// in codegen (I3). Mirrors `TXN_HANDLE_TYPE`.
 pub const CAP_HANDLE_TYPE: &str = "Capability";
 
+/// D-AUTHORITY-NAME1=A (ratified 2026-08-06, card #1569): the one named
+/// rights value crossing process, plugin, and session boundaries.
+pub const TYPE_AUTHORITY: &str = "Authority";
+
 /// D-CONC-SPAWN1=D: parser-only receiver used while lowering `task` sugar.
 pub const INTERNAL_TASK_RECEIVER: &str = "\0jet.task";
 /// Compiler-only dispatch type for a `task` combinator that is not attached to
-/// a lexical `TaskGroup` handle.
+/// a lexical `Group` handle.
 pub const INTERNAL_TASK_SURFACE_TYPE: &str = "\0jet.task.surface";
 /// Compiler-only dispatch type for a canonical combinator inside `task.group`.
 pub const INTERNAL_TASK_GROUP_SURFACE_TYPE: &str = "\0jet.task.group.surface";
@@ -153,7 +157,7 @@ pub const INTERNAL_TASK_GROUP_SURFACE_TYPE: &str = "\0jet.task.group.surface";
 /// lowering; it is not a public first-class value, so it is refused in a struct
 /// field, a return type, a local annotation, a lambda parameter, and every
 /// aggregate.
-pub const TYPE_TASKGROUP: &str = "TaskGroup";
+pub const TYPE_TASKGROUP: &str = "Group";
 
 /// Compiler-private dispatch method for canonical `task` spawn syntax.
 pub const INTERNAL_TASK_SPAWN_METHOD: &str = "\0jet.task.spawn";

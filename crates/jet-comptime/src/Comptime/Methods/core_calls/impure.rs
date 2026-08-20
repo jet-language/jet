@@ -49,15 +49,9 @@ pub fn apply_impure_core_call_with_type(
         jet_foundation::Syntax::CoreCallCoverage::COMPTIME,
         span,
     )?;
-    // Pure CorePureParity surfaces (crypto.expert, net.socket_*, datetime, …)
-    // must still resolve under ambient impure depth — same as apply_core_call.
-    if let Some(row) = jet_foundation::Syntax::core_call(module, method)
-        .filter(|row| core_call_allows_pure_parity(row))
-    {
-        if let Some(result) = core_pure_parity::evaluate(row, &args, span) {
-            return result;
-        }
-    }
+    // Runtime ambient carriers must reach their host marshaller before the
+    // pure projection. Pure comptime has no ambient hook, so it still uses
+    // CorePureParity below.
     let mut sink = sink;
     if let Some(result) = crate::Comptime::try_core_call_typed_with_sink(
         module,
@@ -68,6 +62,15 @@ pub fn apply_impure_core_call_with_type(
         sink.as_deref_mut(),
     ) {
         return result;
+    }
+    // Pure CorePureParity surfaces (crypto.expert, net.socket_*, datetime, …)
+    // must still resolve under ambient impure depth — same as apply_core_call.
+    if let Some(row) = jet_foundation::Syntax::core_call(module, method)
+        .filter(|row| core_call_allows_pure_parity(row))
+    {
+        if let Some(result) = core_pure_parity::evaluate(row, &args, span) {
+            return result;
+        }
     }
     let one = |i: usize| {
         args.get(i).ok_or_else(|| {
@@ -422,6 +425,7 @@ pub fn apply_impure_core_call_with_type(
         | ("core.testing", _)
         | ("core.data", _)
         | ("core.compute", _)
+        | ("core.service", _)
         | ("core.services", _)
         | ("core.auth", _)
         | ("core.sync", _)

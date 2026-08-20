@@ -1,5 +1,4 @@
 use crate::AST::Type;
-use crate::Collections::is_map_key_type;
 use crate::Diagnostics::{Diagnostic, Span};
 use crate::Generics::{e0905, e0909, generic_depth_exceeded, substitute_type, COMPARABLE};
 use crate::Sema::CheckerCoreLib::{
@@ -326,7 +325,14 @@ impl<'a> Checker<'a> {
                     let is_core_generic = unqualified_core
                         && matches!(
                             lookup_name,
-                            "Task" | "Channel" | "Sender" | "Ptr" | "Tensor" | "Vec" | "Matrix"
+                            "Task"
+                                | "Channel"
+                                | Syntax::TYPE_RECEIVER
+                                | "Sender"
+                                | "Ptr"
+                                | "Tensor"
+                                | "Vec"
+                                | "Matrix"
                             // D-COLLBREADTH1=A: Set<T> and Queue<T>.
                             | "Set" | Syntax::TYPE_TALLY | Syntax::TYPE_QUEUE
                             // D-ITERTOOLS1=A: expanded generic collection handles.
@@ -339,8 +345,6 @@ impl<'a> Checker<'a> {
                             | "DispatchReport"
                             // D-STREAMYIELD1: generator return type.
                             | "Stream"
-                            // D-MIGRATE3=A: `decode_traced<T>`'s return-shape wrapper.
-                            | "DecodeResult"
                             // D-DATAFRAME1=A: reserved core.data generic value types.
                             | "Table" | "Series" | "LazyFrame" | "DataJoin"
                             // D-MEM1 S6 (D-POOLID-API1=A): generational-arena handle pair.
@@ -544,16 +548,15 @@ impl<'a> Checker<'a> {
                 } => {
                     self.check_declared_type_rules(key, span);
                     self.check_declared_type_rules(value, span);
-                    if !is_map_key_type(key) {
-                        self.diags.push(Diagnostic::error(
-                            "E0502",
-                            format!("`{}` can't be a map key type yet", key.name()),
-                            "map keys must be Int, String, Bool, Char, or a payload-free enum"
-                                .to_string(),
-                            "pick a simpler key type, or store a struct as the value".to_string(),
-                            Some(key_span.unwrap_or(span)),
-                        ));
-                    }
+                if !self.map_key_type_eligible(key) {
+                    self.diags.push(Diagnostic::error(
+                        "E0502",
+                        format!("`{}` can't be a map key type (D-MAP-KEY1)", key.name()),
+                        "map keys must be Int, String, Bool, Char, U8/IntN, a payload-free enum, or a tuple/struct whose fields recursively follow D-MAP-KEY1; Float, views, Shared, functions, lists, maps, sets, and payload-carrying enums are not key-eligible".to_string(),
+                        "use an eligible scalar, enum, tuple, or struct key; remove non-key fields or store the value separately".to_string(),
+                        Some(key_span.unwrap_or(span)),
+                    ));
+                }
                 }
                 Type::Char => {}
                 Type::Result { ok, err } => {

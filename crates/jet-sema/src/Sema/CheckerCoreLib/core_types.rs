@@ -171,7 +171,7 @@ fn phantom_fact_menu_fix(name: &str) -> Option<&'static str> {
         "Maturity" => "write it only inside `#Meta(maturity: .Tested)`",
         "NamingCase" => "write it only inside `#RenameAll(case: snake)`",
         "ObligationMode" => "write it only inside `#Unsafe(\"reason\", obligations: .Track)`",
-        "PolicySetting" => "write it only inside `#Policy(no_alloc)` or `#Policy(copies: .Explicit)`",
+        "PolicySetting" => "write it only inside `#Policy(gc)`, `#Policy(copies: .Explicit)`, or another registered non-memory policy",
         "Site" => "write it only as `@sites: [...]` on a `marker` declaration",
         "State" => "write it only inside `#State(state: .Draft)` or `#Transition(from:, to:)`",
         "TaintKind" => "it has no live marker: its only user was the retired `#Tainted`, now `#Input`",
@@ -220,6 +220,8 @@ pub(crate) fn core_type_known(name: &str) -> bool {
         | "TextWidth" | "TextWidthAmbiguous" | "TextWidthControls" | "TextError" | "EnvError"
         // D-DET1: deterministic injected capability handles.
         // D-DET-CAPAPI: `Duration` value type for the widened clock surface.
+        // D-AUTHORITY-NAME1=A: one ordinary, nameable rights carrier.
+        | Syntax::TYPE_AUTHORITY
         | "Clock" | "Rng" | "Fake" | "Duration" | "DurationUnit" | "RangeError" | "Condition" | "Path"
         | "TestSuite" | "BenchSuite"
         | "GameScene" | "GameAssets" | "GameInputMap"
@@ -259,7 +261,9 @@ pub(crate) fn core_type_known(name: &str) -> bool {
         // D-COMPUTE1=D / D-COMPUTE-TYPE1=D: ranked tensor owner + compute errors.
         | "Tensor" | "ComputeError" | "ComputeDevice" | "ComputeStream" | "VjpRun"
         | "SparseTensor"
-        // D-SERVICE1=D: structured service tree handles.
+        // D-SERVICE1=D: structured service tree handles and its declaration
+        // builder. The builder is compiler-supplied and has no constructor.
+        | "ServiceTreeBuilder"
         | "ServiceTree" | "ServiceEndpoint" | "ServiceError" | "ServiceRestart"
         | "ServiceDelivery" | "ServiceRuntime" | "ServiceStateStore" | "ServiceReceipt"
         | "ServiceUpgradeReceipt"
@@ -355,10 +359,6 @@ pub(crate) fn core_type_known(name: &str) -> bool {
         // D-SHIFT1 (c7shift): `binary.Reader` / `text.Cursor` — consuming,
         // fallible, `?`-composed cursors over `[U8]`/`String`.
         | "Reader" | "Cursor"
-        // D-MIGRATE3=A: decode-time migration transparency. `DecodeResult<T>`
-        // (generic, see `is_core_generic` in CheckerCore.rs) and its plain
-        // `MigrationStatus` field both need the bare-name gate here too.
-        | "DecodeResult" | "MigrationStatus"
         // D-BUILD*: selected-root build-program handles. No runtime values.
         | "BuildContext" | "BuildPlan" | "BuildAction" | "BuildTarget"
         | "BuildToolchain" | "BuildProbe" | "BuildSigningIdentity" | "ProgramInfo" | "MemoStats" | "TypeInfo" | "LayoutInfo" | "LayoutField" | "SourceSpan"
@@ -482,6 +482,28 @@ pub fn core_fact_kind_variants(
 }
 
 pub(crate) fn core_struct_field(type_name: &str, field: &str) -> Option<Type> {
+    if type_name == "ServiceTreeBuilder" && field == "worker" {
+        return Some(Type::Fn {
+            params: vec![
+                Type::String,
+                Type::Fn {
+                    params: Vec::new(),
+                    ret: None,
+                    effect_bound: None,
+                    param_contract: None,
+                    call_metadata: None,
+                    return_view_provenance: None,
+                },
+            ],
+            // A declaration statement does not expose an endpoint handle;
+            // endpoint values belong to the later delivery surface.
+            ret: None,
+            effect_bound: None,
+            param_contract: None,
+            call_metadata: None,
+            return_view_provenance: None,
+        });
+    }
     if type_name == Syntax::TYPE_MEMO_STATS {
         return match field {
             "hits" | "misses" | "size" => Some(Type::Int),
@@ -1166,16 +1188,6 @@ pub(crate) fn core_struct_field(type_name: &str, field: &str) -> Option<Type> {
             _ => None,
         };
     }
-    // D-MIGRATE3=A: `MigrationStatus` — `.migrated` false + `.from`/`.steps`
-    // empty for fresh data and for non-`#PublishedSchema` types.
-    if type_name == "MigrationStatus" {
-        return match field {
-            "migrated" => Some(Type::Bool),
-            "from" => Some(Type::String),
-            "steps" => Some(Type::List(Box::new(Type::String))),
-            _ => None,
-        };
-    }
     if type_name == "DataGroup" {
         return match field {
             "key" => Some(Type::String),
@@ -1308,7 +1320,7 @@ pub(crate) fn core_struct_field(type_name: &str, field: &str) -> Option<Type> {
 /// marshalling adapters that must not re-declare a Core record's shape (I9).
 ///
 /// `Type::Named` receivers go through [`core_struct_field`]; a reserved core
-/// GENERIC (`DecodeResult<T>`, `DataJoin<L, R>`, `VjpRun<T>`, `Rotation<T>`)
+/// GENERIC (`DataJoin<L, R>`, `VjpRun<T>`, `Rotation<T>`)
 /// goes through [`core_generic_struct_field`], which needs the type arguments.
 /// Neither answers for a USER struct: every caller resolves its own struct
 /// table first (D-SHIFT1 user-type-wins), exactly as `Checker::field_type`
@@ -1351,23 +1363,14 @@ impl<'a> Checker<'a> {
     }
 }
 
-/// D-MIGRATE3=A: field access on the reserved generic `DecodeResult<T>` —
-/// `.value: T` and `.migration: MigrationStatus`. Mirrors [`core_struct_field`]
-/// for the one reserved core type that carries a generic type argument
-/// (`Type::Apply`, not `Type::Named`); see the `Type::Apply` arm in
-/// `CheckerInfer/expr.rs`'s member-access resolver.
+/// Field access on reserved generic core values. Mirrors [`core_struct_field`]
+/// for core types that carry generic type arguments (`Type::Apply`, not
+/// `Type::Named`); see the `Type::Apply` arm in `CheckerInfer/expr.rs`.
 pub(crate) fn core_generic_struct_field(
     type_name: &str,
     field: &str,
     args: &[Type],
 ) -> Option<Type> {
-    if type_name == "DecodeResult" {
-        return match field {
-            "value" => args.first().cloned(),
-            "migration" => Some(Type::Named("MigrationStatus".to_string())),
-            _ => None,
-        };
-    }
     if type_name == "DataJoin" && args.len() == 2 {
         return match field {
             "left" => Some(args[0].clone()),

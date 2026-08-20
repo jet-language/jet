@@ -526,7 +526,6 @@ fn materialize_namespace(
                 no_prelude: program.no_prelude,
                 default_target: program.default_target,
                 html_path: program.html_path.clone(),
-                no_alloc_policy: program.no_alloc_policy,
                 policy_declarations: program.policy_declarations.clone(),
                 rule_facts: std::mem::take(&mut program.rule_facts),
             });
@@ -548,7 +547,6 @@ fn materialize_namespace(
         no_prelude: false,
         default_target: None,
         html_path: None,
-        no_alloc_policy: None,
         policy_declarations: Vec::new(),
         rule_facts: Vec::new(),
     });

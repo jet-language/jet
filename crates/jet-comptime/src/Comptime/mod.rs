@@ -812,7 +812,7 @@ fn build_fact_expr(
     Some(match value {
         CtValue::Bool(value) => crate::AST::Expr::Bool(*value, span),
         CtValue::Int(value) => crate::AST::Expr::Int(*value, span, None, None),
-        CtValue::Float(value) => crate::AST::Expr::Float(value.as_f64(), span, false),
+        CtValue::Float(value) => crate::AST::Expr::Float(value.as_f64(), span, false, None),
         CtValue::Char(value) => crate::AST::Expr::Char(*value, span),
         CtValue::Str(value) => {
             crate::AST::Expr::Str(vec![crate::AST::StrPart::Lit(value.clone())], span)
@@ -1035,7 +1035,7 @@ pub struct ProgramInfo<'a> {
     /// facts. The dev/build interpreter never probes the host for it.
     pub build_facts: jet_foundation::Facts::BuildFactSnapshot,
     /// Card #392 pass 5: `TypeName -> migration { }` blocks (source order) for
-    /// `decode_traced<T>`'s runtime chain-walker (see `Interp::migrations`).
+    /// Typed decode's runtime chain-walker (see `Interp::migrations`).
     pub migrations: HashMap<String, Vec<&'a crate::AST::MigrationDecl>>,
 }
 
@@ -1688,7 +1688,6 @@ pub fn format_template_items(items: Vec<crate::AST::Item>) -> String {
         no_prelude: false,
         default_target: None,
         html_path: None,
-        no_alloc_policy: None,
         policy_declarations: Vec::new(),
         applied_rules: Vec::new(),
         rule_facts: Vec::new(),

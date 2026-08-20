@@ -87,49 +87,6 @@ pub(super) fn unquote(s: &str) -> String {
     }
 }
 
-/// The body inside the `open`/`close` delimiters following `key:` at the top
-/// level, with balanced nesting and an optional leading `.` before `open`
-/// (dot-construction, D-DOT-CONSTRUCTION1). `None` if `key:` is absent.
-pub(super) fn block_body(text: &str, key: &str, open: char, close: char) -> Option<String> {
-    let mut search_from = 0;
-    while let Some(rel) = text[search_from..].find(key) {
-        let at = search_from + rel;
-        let preceded_ok = at == 0
-            || !text[..at]
-                .chars()
-                .next_back()
-                .is_some_and(|c| c.is_alphanumeric() || c == '_');
-        let after = &text[at + key.len()..];
-        let after_trim = after.trim_start();
-        if preceded_ok && after_trim.starts_with(':') {
-            let rest = after_trim[1..].trim_start();
-            let rest = rest.strip_prefix('.').unwrap_or(rest).trim_start();
-            if let Some(stripped) = rest.strip_prefix(open) {
-                return Some(balanced(stripped, open, close));
-            }
-        }
-        search_from = at + key.len();
-    }
-    None
-}
-
-fn balanced(s: &str, open: char, close: char) -> String {
-    let mut depth = 1;
-    let mut out = String::new();
-    for c in s.chars() {
-        if c == open {
-            depth += 1;
-        } else if c == close {
-            depth -= 1;
-            if depth == 0 {
-                break;
-            }
-        }
-        out.push(c);
-    }
-    out
-}
-
 fn err(detail: impl Into<String>) -> PackageParseError {
     PackageParseError::Composition(detail.into())
 }
@@ -786,6 +743,11 @@ fn parse_effect_list(field: &str, value: &str) -> Result<Vec<String>, PackagePar
                 "`{name}` isn't a known effect (see the closed vocabulary in Prelude/Effects.jet)"
             )));
         }
+        if name.contains('(') && crate::Sema::memory_allocation_bound(name).is_none() {
+            return Err(PackageParseError::BadEffectsBlock(format!(
+                "`{name}` has an invalid parameterized rights entry — use `Mem.Alloc(above: 65536)`"
+            )));
+        }
     }
     Ok(names)
 }
@@ -799,6 +761,13 @@ pub enum TrustDecision {
     Allow,
     Prompt,
     Deny,
+}
+
+/// D-AUTHORITY-MANIFEST1=A: the package's own authority bound.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct AuthorityHolds {
+    pub allow: Option<Vec<String>>,
+    pub deny: Option<Vec<String>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
@@ -835,26 +804,127 @@ pub struct ProviderAuthority {
     pub deny: Vec<String>,
 }
 
-pub(super) fn parse_authority_trust(body: &str) -> Result<Option<TrustPolicy>, PackageParseError> {
-    let Some(trust_body) = block_body(body, Syntax::AUTHORITY_FIELD_TRUST, '{', '}') else {
-        return Ok(None);
+/// D-AUTHORITY-MANIFEST1=A: one parsed authority block. The package model
+/// copies this into its public authority fact and mirrors holds/grants into
+/// the existing effect-budget inputs until the retired top-level keys leave.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct AuthorityBlock {
+    pub holds: AuthorityHolds,
+    pub grants: Vec<(String, Vec<String>)>,
+    pub trust: Option<TrustPolicy>,
+    pub providers: Vec<ProviderAuthority>,
+}
+
+fn authority_bad(detail: impl Into<String>) -> PackageParseError {
+    PackageParseError::BadEffectsBlock(format!("malformed `authority:` block: {}", detail.into()))
+}
+
+fn authority_object_body<'a>(value: &'a str, field: &str) -> Result<&'a str, PackageParseError> {
+    let value = value.trim();
+    let Some(open) = value.find('{') else {
+        return Err(authority_bad(format!("`authority.{field}` must be a record")));
     };
+    let Some(close) = value.rfind('}') else {
+        return Err(authority_bad(format!("`authority.{field}` is missing `}}`")));
+    };
+    Ok(&value[open + 1..close])
+}
+
+fn parse_authority_holds(body: &str) -> Result<AuthorityHolds, PackageParseError> {
+    let mut holds = AuthorityHolds::default();
+    let mut seen = HashSet::new();
+    for (key, value) in key_value_entries(body).map_err(authority_error)? {
+        if !seen.insert(key.clone()) {
+            return Err(authority_bad(format!("authority.holds.{key} is declared more than once")));
+        }
+        match key.as_str() {
+            Syntax::AUTHORITY_HOLDS_FIELD_ALLOW => {
+                holds.allow = Some(
+                    parse_effect_list("authority.holds.allow", value.trim())
+                        .map_err(authority_error)?,
+                );
+            }
+            Syntax::AUTHORITY_HOLDS_FIELD_DENY => {
+                holds.deny = Some(
+                    parse_effect_list("authority.holds.deny", value.trim())
+                        .map_err(authority_error)?,
+                );
+            }
+            _ => {
+                return Err(authority_bad(format!(
+                    "unknown `authority.holds` field `{key}` — allowed: `{}`, `{}`",
+                    Syntax::AUTHORITY_HOLDS_FIELD_ALLOW,
+                    Syntax::AUTHORITY_HOLDS_FIELD_DENY,
+                )))
+            }
+        }
+    }
+    Ok(holds)
+}
+
+pub(super) fn parse_authority(body: &str) -> Result<AuthorityBlock, PackageParseError> {
+    let mut authority = AuthorityBlock::default();
+    let mut seen = HashSet::new();
+    for (key, value) in key_value_entries(body).map_err(authority_error)? {
+        if !seen.insert(key.clone()) {
+            return Err(authority_bad(format!("authority.{key} is declared more than once")));
+        }
+        match key.as_str() {
+            Syntax::AUTHORITY_FIELD_HOLDS => {
+                authority.holds = parse_authority_holds(authority_object_body(&value, "holds")?)?;
+            }
+            Syntax::AUTHORITY_FIELD_GRANTS => {
+                authority.grants = parse_grants(authority_object_body(&value, "grants")?)
+                    .map_err(authority_error)?;
+            }
+            Syntax::AUTHORITY_FIELD_TRUST => {
+                authority.trust = Some(parse_authority_trust_body(
+                    authority_object_body(&value, "trust")?,
+                )?);
+            }
+            Syntax::AUTHORITY_FIELD_PROVIDERS => {
+                authority.providers = parse_provider_authority_body(
+                    authority_object_body(&value, "providers")?,
+                )?;
+            }
+            _ => {
+                return Err(authority_bad(format!(
+                    "unknown `authority` field `{key}` — allowed: `{}`, `{}`, `{}`, `{}`",
+                    Syntax::AUTHORITY_FIELD_HOLDS,
+                    Syntax::AUTHORITY_FIELD_GRANTS,
+                    Syntax::AUTHORITY_FIELD_TRUST,
+                    Syntax::AUTHORITY_FIELD_PROVIDERS,
+                )))
+            }
+        }
+    }
+    Ok(authority)
+}
+
+fn authority_error(error: PackageParseError) -> PackageParseError {
+    match error {
+        PackageParseError::Composition(detail) => authority_bad(detail),
+        other => other,
+    }
+}
+
+fn parse_authority_trust_body(body: &str) -> Result<TrustPolicy, PackageParseError> {
     let mut policy = TrustPolicy::default();
     let mut seen = HashSet::new();
-    for (key, value) in key_value_entries(&trust_body)? {
+    for (key, value) in key_value_entries(body).map_err(authority_error)? {
         if !seen.insert(key.clone()) {
-            return Err(err(format!("authority.trust.{key} is declared more than once")));
+            return Err(authority_bad(format!("authority.trust.{key} is declared more than once")));
         }
         if key == Syntax::AUTHORITY_TRUST_FIELD_DEFAULT {
-            policy.default = Some(parse_trust_decision(&value)?);
+            policy.default = Some(parse_trust_decision(&value).map_err(authority_error)?);
         } else if key == Syntax::AUTHORITY_TRUST_FIELD_CI {
-            policy.ci_prompt = Some(parse_ci_trust_prompt(&value)?);
+            policy.ci_prompt = Some(parse_ci_trust_prompt(&value).map_err(authority_error)?);
         } else if key == Syntax::AUTHORITY_TRUST_FIELD_SERVICES {
-            policy.services = parse_service_trust(&value)?;
+            policy.services = parse_service_trust(&value).map_err(authority_error)?;
         } else if key == Syntax::AUTHORITY_TRUST_FIELD_REQUIRE {
-            policy.require = Some(parse_provenance_requirement(&value)?);
+            policy.require = Some(parse_provenance_requirement(&value).map_err(authority_error)?);
         } else {
-            return Err(err(format!(
+            return Err(authority_bad(format!(
                 "unknown `authority.trust` field `{key}` — allowed: `{}`, `{}`, `{}`, `{}`",
                 Syntax::AUTHORITY_TRUST_FIELD_DEFAULT,
                 Syntax::AUTHORITY_TRUST_FIELD_CI,
@@ -863,49 +933,54 @@ pub(super) fn parse_authority_trust(body: &str) -> Result<Option<TrustPolicy>, P
             )));
         }
     }
-    Ok(Some(policy))
+    Ok(policy)
 }
 
-pub(super) fn parse_provider_authority(body: &str) -> Result<Vec<ProviderAuthority>, PackageParseError> {
-    let Some(providers) = block_body(body, Syntax::AUTHORITY_FIELD_PROVIDERS, '{', '}') else {
-        return Ok(Vec::new());
-    };
+fn parse_provider_authority_body(providers: &str) -> Result<Vec<ProviderAuthority>, PackageParseError> {
     let mut out = Vec::new();
     let mut seen_providers = HashSet::new();
-    for (provider, value) in key_value_entries(&providers)? {
+    for (provider, value) in key_value_entries(providers).map_err(authority_error)? {
         if !seen_providers.insert(provider.clone()) {
-            return Err(err(format!("authority.providers.{provider} is declared more than once")));
+            return Err(authority_bad(format!("authority.providers.{provider} is declared more than once")));
         }
-        let authority = value
-            .trim()
-            .strip_prefix('{')
-            .and_then(|value| value.strip_suffix('}'))
-            .ok_or_else(|| err(format!("authority.providers.{provider} must be an authority object")))?;
+        let authority = authority_object_body(&value, &format!("providers.{provider}"))?;
         let mut registry = None;
         let mut allow = Vec::new();
         let mut deny = Vec::new();
         let mut seen_fields = HashSet::new();
-        for (field, value) in key_value_entries(authority)? {
+        for (field, value) in key_value_entries(authority).map_err(authority_error)? {
             if !seen_fields.insert(field.clone()) {
-                return Err(err(format!("authority.providers.{provider}.{field} is declared more than once")));
+                return Err(authority_bad(format!(
+                    "authority.providers.{provider}.{field} is declared more than once"
+                )));
             }
             if field == Syntax::PROVIDER_FIELD_REGISTRY {
                 let value = value.trim();
                 if !value.starts_with('"') || !value.ends_with('"') || value.len() < 2 {
-                    return Err(err(format!("authority.providers.{provider}.registry must be a string")));
+                    return Err(authority_bad(format!(
+                        "authority.providers.{provider}.registry must be a string"
+                    )));
                 }
                 registry = Some(unquote(value));
             } else if field == Syntax::PROVIDER_FIELD_ALLOW {
                 allow = parse_string_list(&value)
-                    .map_err(|_| err(format!("authority.providers.{provider}.allow must be a list")))?;
+                    .map_err(|_| authority_bad(format!(
+                        "authority.providers.{provider}.allow must be a list"
+                    )))?;
             } else if field == Syntax::PROVIDER_FIELD_DENY {
                 deny = parse_string_list(&value)
-                    .map_err(|_| err(format!("authority.providers.{provider}.deny must be a list")))?;
+                    .map_err(|_| authority_bad(format!(
+                        "authority.providers.{provider}.deny must be a list"
+                    )))?;
             } else {
-                return Err(err(format!("unknown authority.providers.{provider} field `{field}`")));
+                return Err(authority_bad(format!(
+                    "unknown authority.providers.{provider} field `{field}`"
+                )));
             }
         }
-        let registry = registry.ok_or_else(|| err(format!("authority.providers.{provider} needs registry")))?;
+        let registry = registry.ok_or_else(|| {
+            authority_bad(format!("authority.providers.{provider} needs registry"))
+        })?;
         out.push(ProviderAuthority { provider, registry, allow, deny });
     }
     Ok(out)
@@ -983,7 +1058,7 @@ pub(super) fn parse_lints_policy(body: &str) -> Result<Option<Vec<String>>, Pack
     })
 }
 
-pub(super) fn parse_memory_policy(
+pub(super) fn parse_policy(
     body: &str,
     package_only_fields: bool,
 ) -> Result<Vec<crate::Policy::PolicyDeclaration>, PackageParseError> {
@@ -991,6 +1066,21 @@ pub(super) fn parse_memory_policy(
     let mut seen = HashSet::new();
     for (name, raw) in key_value_entries(body)? {
         let Some(key) = crate::Policy::PolicyKey::parse(&name) else {
+            let replacement = match name.as_str() {
+                "no_alloc" => Some("`effects: .{ deny: [Mem.Alloc] }`".to_string()),
+                "zero_rc" => Some("`effects: .{ deny: [Mem.Rc] }`".to_string()),
+                "arena_bounded" => raw
+                    .parse::<u64>()
+                    .ok()
+                    .filter(|bytes| *bytes > 0)
+                    .map(|bytes| format!("`effects: .{{ deny: [Mem.Alloc(above: {bytes})] }}`")),
+                _ => None,
+            };
+            if let Some(replacement) = replacement {
+                return Err(bad_mem(format!(
+                    "`{name}` is a retired memory floor; write the denial {replacement}"
+                )));
+            }
             if name == "lints"
                 || (package_only_fields
                     && (name == Syntax::POLICY_FIELD_CONTAIN
@@ -1012,7 +1102,7 @@ pub(super) fn parse_memory_policy(
                     ),
                 });
             }
-            return Err(bad_mem(format!("`{name}` is not a registered package policy")));
+            return Err(bad_mem(format!("`{name}` is not a registered package policy; memory floors belong in `effects.deny`")));
         };
         if !seen.insert(key) {
             return Err(bad_mem(format!("package policy `{name}` is declared more than once")));
@@ -1106,7 +1196,7 @@ pub fn parse_policy_document(text: &str) -> Result<Vec<crate::Policy::PolicyDecl
     if !rest[close + 1..].trim().is_empty() {
         return Err(bad_mem("organization policy file may contain only the `policy` block"));
     }
-    parse_memory_policy(&rest[..close], false)
+    parse_policy(&rest[..close], false)
 }
 
 // ── `fn build` co-location (D-BUILDSCOPE1) ──────────────────────────────────

@@ -17,7 +17,7 @@ mod Edit;
 
 pub use Blocks::{
     build_entry_source, dep_display, parse_policy_document, BuildOptimize, BuildPanic,
-    BuildProfileDef, DepSource, PackageEntry, PackageKind, ProviderAuthority,
+    AuthorityHolds, BuildProfileDef, DepSource, PackageEntry, PackageKind, ProviderAuthority,
     ProvenanceRequirement, Target, TrustDecision, TrustPolicy,
 };
 pub use Convert::{new_template, to_manifest};
@@ -200,8 +200,7 @@ pub struct PackageFacts {
     /// D-AUTHORITY-MANIFEST1=A: the one source authority namespace
     /// (`authority: .{ … }`).
     pub authority: PackageAuthority,
-    /// D-POLICY-WORD1=A: package floors and memory governance
-    /// (`policy: .{ … }`).
+    /// D-POLICY-WORD1=A: package governance settings (`policy: .{ … }`).
     pub policy: PackagePolicy,
     /// D-CONF-MODULE1=A: typed settings declared in `settings: .{ … }`.
     /// The driver resolves their effective profile values into the shared
@@ -223,15 +222,15 @@ pub struct PackageFacts {
     pub origin: String,
 }
 
-/// D-POLICY-WORD1=A: the package's governance namespace — package-scope
-/// only (never a Config contribution), same as the ratified D-MARK-SCOPE1
-/// package rung.
+/// D-POLICY-WORD1=A: the package's non-memory governance namespace —
+/// package-scope only (never a Config contribution), same as the ratified
+/// D-MARK-SCOPE1 package rung. Memory denials live in `effects.deny` and are
+/// carried separately through `PackageGuarantees`.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct PackagePolicy {
-    /// D-PACKAGE-POLICY-SCOPE1: typed, tighten-only memory-policy facts
-    /// (`no_alloc`, `zero_rc`, `arena_bounded`, `gc`, `unsafe`, `copies`,
-    /// `sentries`).
-    pub memory: Vec<crate::Policy::PolicyDeclaration>,
+    /// D-AUTHORITY-MEM1: source policy keeps only non-memory settings. Memory
+    /// floors are rights-tree denials in `effects.deny`.
+    pub declarations: Vec<crate::Policy::PolicyDeclaration>,
     /// D-LINTPOLICY1=A: `policy.lints.deny`. `None` means no `lints:` block
     /// at all (warn-never-block stays the default).
     pub lints_deny: Option<Vec<String>>,
@@ -247,6 +246,8 @@ pub struct PackagePolicy {
 /// scope and do not compose from Config files.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct PackageAuthority {
+    pub holds: Blocks::AuthorityHolds,
+    pub grants: Vec<(String, Vec<String>)>,
     pub trust: Option<Blocks::TrustPolicy>,
     pub providers: Vec<Blocks::ProviderAuthority>,
 }
@@ -1732,9 +1733,20 @@ fn parse_common(
             "authority" if config => return Err(PackageParseError::UnknownField(field.clone())),
             "authority" => {
                 let body = record_body(&value, "authority")?;
+                let authority = Blocks::parse_authority(body)?;
+                if authority.holds.allow.is_some() || authority.holds.deny.is_some() {
+                    facts.effects_enabled = true;
+                    facts.effects_allow = authority.holds.allow.clone();
+                    facts.effects_deny = authority.holds.deny.clone();
+                }
+                if !authority.grants.is_empty() {
+                    facts.grants = authority.grants.clone();
+                }
                 facts.authority = PackageAuthority {
-                    trust: Blocks::parse_authority_trust(body)?,
-                    providers: Blocks::parse_provider_authority(body)?,
+                    holds: authority.holds,
+                    grants: authority.grants,
+                    trust: authority.trust,
+                    providers: authority.providers,
                 };
             }
             "policy" if config => return Err(PackageParseError::UnknownField(field.clone())),
@@ -1742,7 +1754,7 @@ fn parse_common(
                 let body = record_body(&value, "policy")?;
                 let (contain, harden) = Blocks::parse_guarantee_policy(body)?;
                 facts.policy = PackagePolicy {
-                    memory: Blocks::parse_memory_policy(body, true)?,
+                    declarations: Blocks::parse_policy(body, true)?,
                     lints_deny: Blocks::parse_lints_policy(body)?,
                     contain,
                     harden,

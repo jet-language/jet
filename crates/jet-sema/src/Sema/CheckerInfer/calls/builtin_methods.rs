@@ -875,7 +875,22 @@ impl<'a> Checker<'a> {
                                 if let Type::List(inner) | Type::FixedList { elem: inner, .. } =
                                     r.as_ref()
                                 {
-                                    refined_ret = Some(Collections::iter_ty((**inner).clone()));
+                                    let mapped_inner = (**inner).clone();
+                                    match recv_ty {
+                                        Type::List(_) | Type::FixedList { .. } => {
+                                            // D-CORE-EAGER2=A: concrete List.flat_map
+                                            // returns [U]; `.lazy()` stays Iter.
+                                            refined_ret =
+                                                Some(Type::List(Box::new(mapped_inner)));
+                                        }
+                                        Type::Apply { name, .. }
+                                            if name == Syntax::TYPE_ITER =>
+                                        {
+                                            refined_ret =
+                                                Some(Collections::iter_ty(mapped_inner));
+                                        }
+                                        _ => {}
+                                    }
                                 }
                             }
                         }

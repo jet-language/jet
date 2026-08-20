@@ -212,7 +212,7 @@ pub(crate) fn register_func_item(
     diags: &mut Vec<Diagnostic>,
     prelude_enabled: bool,
 ) {
-    if f.name == Syntax::BUILTIN_REQUIRE_EQ {
+    if f.name == Syntax::BUILTIN_ASSERT_EQ {
         diags.push(Diagnostic::error(
             "E0106",
             format!("the name `{}` is built in and can't be redefined", f.name),
@@ -406,7 +406,6 @@ fn check_func_body_incremental(
     summaries: &mut HashMap<String, EffectSummary>,
     embed_inputs_out: &mut Vec<crate::AST::ComptimeInput>,
     global_addr_taken: &mut HashSet<String>,
-    no_alloc: bool,
     no_prelude: bool,
     name_ledger: &mut jet_foundation::Names::NameLedger,
     pending_diagnostics_out: &mut Vec<PendingFunctionDiagnostic>,
@@ -430,7 +429,6 @@ fn check_func_body_incremental(
             summaries,
             embed_inputs_out,
             global_addr_taken,
-            no_alloc,
             no_prelude,
             name_ledger,
             pending_diagnostics_out,
@@ -476,7 +474,6 @@ fn check_func_body_incremental(
         &mut local_summaries,
         &mut local_inputs,
         &mut local_address_taken,
-        no_alloc,
         no_prelude,
         &mut local_ledger,
         &mut local_pending_diagnostics,
@@ -548,9 +545,6 @@ pub(crate) fn check_module_bodies(
 ) -> Vec<Diagnostic> {
     let st = &states[module_idx];
     let mut diags = Vec::new();
-    // D-MEM1/S7 (D-NOALLOC-SEM1=A): captured once — every function body check
-    // below for this module gets the same file-scoped `policy no_alloc` state.
-    let no_alloc = module.no_alloc_policy.is_some();
     let no_prelude = module.no_prelude;
     let (ct_funcs, ct_externs, ct_globals) = comptime_context_from_items(&module.items);
     let invalid_serde_impls = invalid_serde_derive_impls(&module.items, &st.trait_reg);
@@ -738,7 +732,6 @@ pub(crate) fn check_module_bodies(
                 &mut scratch_summaries,
                 &mut scratch_inputs,
                 &mut scratch_addr_taken,
-                no_alloc,
                 no_prelude,
                 &mut scratch_ledger,
                 &mut scratch_pending_diagnostics,
@@ -822,7 +815,6 @@ pub(crate) fn check_module_bodies(
                     summaries,
                     embed_inputs_out,
                     global_addr_taken,
-                    no_alloc,
                     no_prelude,
                     name_ledger,
                     pending_diagnostics_out,
@@ -852,7 +844,6 @@ pub(crate) fn check_module_bodies(
                         summaries,
                         embed_inputs_out,
                         global_addr_taken,
-                        no_alloc,
                         no_prelude,
                         name_ledger,
                         pending_diagnostics_out,
@@ -895,7 +886,6 @@ pub(crate) fn check_module_bodies(
                                 summaries,
                                 embed_inputs_out,
                                 global_addr_taken,
-                                no_alloc,
                                 no_prelude,
                                 name_ledger,
                                 pending_diagnostics_out,
@@ -936,7 +926,6 @@ pub(crate) fn check_module_bodies(
                         summaries,
                         embed_inputs_out,
                         global_addr_taken,
-                        no_alloc,
                         no_prelude,
                         name_ledger,
                         pending_diagnostics_out,
@@ -974,7 +963,6 @@ pub(crate) fn check_module_bodies(
                                 summaries,
                                 embed_inputs_out,
                                 global_addr_taken,
-                                no_alloc,
                                 no_prelude,
                                 name_ledger,
                                 pending_diagnostics_out,
@@ -1039,7 +1027,6 @@ pub(crate) fn check_module_bodies(
                         summaries,
                         embed_inputs_out,
                         global_addr_taken,
-                        no_alloc,
                         no_prelude,
                         name_ledger,
                         pending_diagnostics_out,
@@ -1129,7 +1116,6 @@ pub(crate) fn check_module_bodies(
                     summaries,
                     embed_inputs_out,
                     global_addr_taken,
-                    no_alloc,
                     no_prelude,
                     name_ledger,
                     pending_diagnostics_out,
@@ -1210,7 +1196,6 @@ pub(crate) fn check_module_bodies(
                     summaries,
                     embed_inputs_out,
                     global_addr_taken,
-                    no_alloc,
                     no_prelude,
                     name_ledger,
                     pending_diagnostics_out,
@@ -1245,7 +1230,6 @@ pub(crate) fn check_module_bodies(
                                 summaries,
                                 embed_inputs_out,
                                 global_addr_taken,
-                                no_alloc,
                                 no_prelude,
                                 name_ledger,
                                 pending_diagnostics_out,
@@ -1357,7 +1341,6 @@ pub(crate) fn check_module_bodies(
                     &mut conversion_summaries,
                     &mut conversion_inputs,
                     &mut conversion_addr_taken,
-                    no_alloc,
                     no_prelude,
                     &mut conversion_ledger,
                     &mut conversion_pending_diagnostics,
@@ -1498,8 +1481,6 @@ fn check_func_body_bundle_with_usage(
     summaries: &mut HashMap<String, EffectSummary>,
     embed_inputs_out: &mut Vec<crate::AST::ComptimeInput>,
     global_addr_taken: &mut HashSet<String>,
-    // D-MEM1/S7 (D-NOALLOC-SEM1=A): this module's `policy no_alloc` state.
-    _no_alloc: bool,
     // D-PRELUDEX1=A: this file's `#NoPrelude` state.
     no_prelude: bool,
     name_ledger: &mut jet_foundation::Names::NameLedger,
@@ -1520,7 +1501,6 @@ fn check_func_body_bundle_with_usage(
         summaries,
         embed_inputs_out,
         global_addr_taken,
-        _no_alloc,
         no_prelude,
         name_ledger,
         pending_diagnostics_out,
@@ -1544,7 +1524,6 @@ pub(crate) fn check_func_body_bundle(
     summaries: &mut HashMap<String, EffectSummary>,
     embed_inputs_out: &mut Vec<crate::AST::ComptimeInput>,
     global_addr_taken: &mut HashSet<String>,
-    _no_alloc: bool,
     no_prelude: bool,
     name_ledger: &mut jet_foundation::Names::NameLedger,
     pending_diagnostics_out: &mut Vec<PendingFunctionDiagnostic>,
@@ -1564,7 +1543,6 @@ pub(crate) fn check_func_body_bundle(
         summaries,
         embed_inputs_out,
         global_addr_taken,
-        _no_alloc,
         no_prelude,
         name_ledger,
         pending_diagnostics_out,
@@ -1588,7 +1566,6 @@ fn check_func_body_bundle_scoped(
     summaries: &mut HashMap<String, EffectSummary>,
     embed_inputs_out: &mut Vec<crate::AST::ComptimeInput>,
     global_addr_taken: &mut HashSet<String>,
-    no_alloc: bool,
     no_prelude: bool,
     name_ledger: &mut jet_foundation::Names::NameLedger,
     pending_diagnostics_out: &mut Vec<PendingFunctionDiagnostic>,
@@ -1703,7 +1680,6 @@ fn check_func_body_bundle_scoped(
         suppress_must_use: false,
         in_pure: f.is_pure,
         no_prelude,
-        no_alloc,
         in_pre_clause: false,
         fallback_has_err: None,
         fallback_is_shape_miss: false,
@@ -1924,8 +1900,23 @@ fn check_func_body_bundle_scoped(
     // D-EFFECT-OMIT1/D-EFF3: an explicit row is an upper bound, not an effect
     // declaration. Static calls propagate the implementation's inferred body
     // row; dynamic trait calls use the trait method bound separately.
-    let direct = std::mem::take(&mut ck.fx_direct);
-    for event in &mut ck.fx_memory_events {
+    let mut direct = std::mem::take(&mut ck.fx_direct);
+    let mut direct_spans = std::mem::take(&mut ck.fx_direct_spans);
+    let memory_events = std::mem::take(&mut ck.fx_memory_events);
+    // D-AUTHORITY-MEM1: memory operations publish the same rights-tree names
+    // as manifest `effects.deny`. The detailed event stream remains the
+    // source for bounded proofs and diagnostics.
+    for event in &memory_events {
+        let right = match event.kind {
+            super::super::MemoryEventKind::Allocation
+            | super::super::MemoryEventKind::ArenaBytes(_) => "Mem.Alloc",
+            super::super::MemoryEventKind::RetainRelease => "Mem.Rc",
+        };
+        direct.insert(right.to_string());
+        direct_spans.entry(right.to_string()).or_insert(event.span);
+    }
+    let mut memory_events = memory_events;
+    for event in &mut memory_events {
         event.source = st.module_path.clone();
         event.provenance = format!("{} in {}", effect_key(owner_type, &f.name), st.module_path);
     }
@@ -1958,7 +1949,7 @@ fn check_func_body_bundle_scoped(
         effect_key(owner_type, &f.name),
         EffectSummary {
             direct,
-            direct_spans: std::mem::take(&mut ck.fx_direct_spans),
+            direct_spans,
             edges: std::mem::take(&mut ck.fx_edges),
             maximal: ck.fx_maximal,
             maximal_span: ck.fx_maximal_span,
@@ -1970,7 +1961,7 @@ fn check_func_body_bundle_scoped(
             autodiff_safe_panic: ck.fx_autodiff_safe_panic,
             autodiff_unsafe_panic: ck.fx_autodiff_unsafe_panic,
             memory: super::MemoryFacts::MemorySummary {
-                events: std::mem::take(&mut ck.fx_memory_events),
+                events: memory_events,
                 open_dispatches: std::mem::take(&mut ck.fx_memory_open),
                 regions: std::mem::take(&mut ck.fx_memory_regions),
                 unbounded_control: std::mem::take(&mut ck.fx_memory_unbounded_control),

@@ -3,7 +3,7 @@
 use crate::Diagnostics::{Diagnostic, Span};
 use super::super::Diagnostics::unsupported;
 use crate::AST::{CtValue, Type};
-use jet_foundation::Authority::covers;
+use jet_foundation::Authority::{answer, parse_right, Holds, Verdict};
 use jet_foundation::Effects::{core_effect, is_nondeterministic_core, Effect};
 use super::core_calls::{
     apply_core_call_with_type, apply_impure_core_call_with_type, as_string, io_error_value,
@@ -189,7 +189,9 @@ pub fn apply_repl_authorized_core_call_with_type(
         ));
     };
     authorizer.preflight(&request, span)?;
-    let granted = grants.iter().any(|cap| covers(&request.root, cap));
+    let held: Holds = grants.iter().filter_map(|grant| parse_right(grant)).collect();
+    let denied = Holds::new();
+    let granted = answer(&held, &denied, &request.root) == Verdict::Allowed;
     if !granted {
         return Err(Diagnostic::error(
             "E1803",

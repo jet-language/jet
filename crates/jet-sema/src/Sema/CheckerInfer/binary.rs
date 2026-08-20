@@ -86,7 +86,7 @@ impl<'a> Checker<'a> {
                 },
                 crate::AST::CallArg {
                     convention: crate::AST::AccessConvention::Read,
-                    expr: Expr::Float(0.0, span, false),
+                    expr: Expr::Float(0.0, span, false, None),
                     span,
                     flags: crate::AST::CallArgFlags::default(),
                     label: None,
@@ -109,6 +109,27 @@ impl<'a> Checker<'a> {
             Expr::Int(_, _, None, _) => true,
             _ => false,
         }
+    }
+
+    fn decimalize_integer_literal(
+        &mut self,
+        expr: &mut Box<Expr>,
+        span: Span,
+    ) -> Option<Type> {
+        let value = match expr.as_ref() {
+            Expr::Int(value, _, None, raw) => {
+                super::exact_integer_literal(*value, raw.as_deref()).to_string_rep()
+            }
+            Expr::Paren(inner, _) if Self::is_bare_integer_literal(inner) => {
+                let Expr::Int(value, _, None, raw) = inner.as_ref() else {
+                    return None;
+                };
+                super::exact_integer_literal(*value, raw.as_deref()).to_string_rep()
+            }
+            _ => return None,
+        };
+        *expr = Box::new(super::exact_decimal_literal(value, span));
+        self.infer(expr.as_mut())
     }
 
     /// D-NUMLIT-PEER1=A / D-INTLIT-WIDTH1=F: the width a bare numeral takes
@@ -297,12 +318,12 @@ impl<'a> Checker<'a> {
                             Some(*span),
                         ));
                     }
-                    *expr = Expr::Float(*value as f64, *span, *target == Type::Float32);
+                    *expr = Expr::Float(*value as f64, *span, *target == Type::Float32, None);
                     Some(target.clone())
                 }
                 _ => None,
             },
-            Expr::Float(_, _, is_f32) => match target {
+            Expr::Float(_, _, is_f32, _) => match target {
                 Type::Float => {
                     *is_f32 = false;
                     Some(Type::Float)
@@ -361,7 +382,7 @@ impl<'a> Checker<'a> {
         );
 
         if checked {
-            if let Expr::Float(_, _, is_f32) = expr {
+            if let Expr::Float(_, _, is_f32, _) = expr {
                 if *target == Type::Float32 {
                     *is_f32 = true;
                     return;
@@ -626,7 +647,7 @@ impl<'a> Checker<'a> {
                 },
                 crate::AST::CallArg {
                     convention: crate::AST::AccessConvention::Read,
-                    expr: Expr::Float(0.0, span, false),
+                    expr: Expr::Float(0.0, span, false, None),
                     span,
                     flags: crate::AST::CallArgFlags::default(),
                     label: Some(("uncertainty".to_string(), span)),
@@ -1600,6 +1621,24 @@ impl<'a> Checker<'a> {
             if crate::Numeric::is_decimal_type_name(&lname)
                 || crate::Numeric::is_decimal_type_name(&rname)
             {
+                // D-TYPE2-DEFAULT1: an exact decimal may absorb an untyped
+                // integer literal. Keep the promotion at sema so TIR and all
+                // engines consume the same Decimal Prelude operation.
+                if crate::Numeric::type_is_decimal(&lt)
+                    && rt == Type::Int
+                    && Self::is_bare_integer_literal(rhs)
+                {
+                    if let Some(promoted) = self.decimalize_integer_literal(rhs, span) {
+                        rt = promoted;
+                    }
+                } else if crate::Numeric::type_is_decimal(&rt)
+                    && lt == Type::Int
+                    && Self::is_bare_integer_literal(lhs)
+                {
+                    if let Some(promoted) = self.decimalize_integer_literal(lhs, span) {
+                        lt = promoted;
+                    }
+                }
                 if let Some((code, what, fix)) = precise_mix_error(&lt, &rt) {
                     self.diags.push(Diagnostic::error(
                         code,

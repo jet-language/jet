@@ -490,7 +490,7 @@ fn jet_data_stream_decode_csv_row<T: __jet_Decode>(
             (name.clone(), jet_std::DataTree::Text(cell))
         })
         .collect();
-    T::jet_decode_traced(&jet_std::DataTree::Object(obj))
+    T::jet_decode_with_status(&jet_std::DataTree::Object(obj))
         .map(|(v, _)| v)
         .map_err(|errors| {
             let mut error = jet_data_error(
@@ -741,7 +741,7 @@ fn jet_data_stream_scan<T: __jet_Decode>(
             match jet_data_json_fold_from_event(reader, first) {
                 Ok(tree) => {
                     stream.row_index += 1;
-                    match T::jet_decode_traced(&tree) {
+                    match T::jet_decode_with_status(&tree) {
                         Ok((value, _)) => Ok(Some(value)),
                         Err(errors) => {
                             let mut error = jet_data_error(

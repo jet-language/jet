@@ -163,7 +163,8 @@ impl<'a> Checker<'a> {
             self.items.iter().any(|item| {
                 matches!(
                     item,
-                    crate::AST::Item::Const(c) if c.name == name && c.is_persist
+                    crate::AST::Item::Const(c)
+                        if c.name == name && c.is_persist && c.mutable
                 )
             })
         }

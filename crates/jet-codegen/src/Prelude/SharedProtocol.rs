@@ -763,6 +763,42 @@ mod shared_protocol_tests {
     }
 
     #[test]
+    fn contended_transaction_waits_and_applies_its_body_once() {
+        let protocol = JetSharedProtocol::new();
+        let held = protocol.acquire(true, || false).unwrap();
+        let log_lines = std::sync::Arc::new(std::sync::Mutex::new(Vec::<&'static str>::new()));
+        let (ready_tx, ready_rx) = std::sync::mpsc::channel();
+        let worker_protocol = protocol.clone();
+        let worker_log_lines = log_lines.clone();
+        let worker = std::thread::spawn(move || {
+            let mut transaction = jet_shared_transaction_begin();
+            transaction.record_edit(
+                worker_protocol,
+                Box::new(move || {
+                    worker_log_lines.lock().unwrap().push("transaction-body");
+                }),
+            );
+            ready_tx.send(()).unwrap();
+            transaction.commit();
+        });
+
+        ready_rx
+            .recv_timeout(std::time::Duration::from_secs(1))
+            .expect("transaction worker reached the lock wait");
+        assert!(
+            log_lines.lock().unwrap().is_empty(),
+            "a blocked commit must not log"
+        );
+        drop(held);
+        worker.join().unwrap();
+        assert_eq!(
+            *log_lines.lock().unwrap(),
+            vec!["transaction-body"],
+            "the committed transaction emits its body log exactly once"
+        );
+    }
+
+    #[test]
     fn notify_one_claims_each_waiter_once() {
         let condition = JetConditionProtocol::new();
         let first = std::sync::Arc::new(CountingWaiter::new());

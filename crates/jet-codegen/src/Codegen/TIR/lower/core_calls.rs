@@ -1,4 +1,4 @@
-use crate::AST::{Expr, Lambda, Type};
+use crate::AST::{Expr, Lambda, LambdaBody, Stmt, StrPart, Type};
 use crate::Codegen::Cx;
 use crate::Codegen::TIR::core_closure_call_return_ty;
 use crate::Codegen::TIR::lower_lambda_expecting_value;
@@ -15,6 +15,7 @@ use crate::Codegen::TIR::TCoreClosureKind;
 use crate::Codegen::TIR::TJitSpawnLambda;
 use crate::Codegen::TIR::TExpr;
 use crate::Codegen::TIR::TExprKind;
+use crate::Codegen::TIR::TStrPart;
 use crate::Codegen::TIR::unit_type;
 use crate::Diagnostics::Span;
 
@@ -160,6 +161,82 @@ pub(super) fn core_module_path_from_receiver(
     }
 }
 
+/// D-SERVICE1=D: lower the first typed service-tree builder slice to a
+/// compiler-owned declaration payload. The callback is sema-checked as a
+/// `ServiceTreeBuilder` function, but it is not an executable closure: only
+/// the static topology declarations are carried across the tier boundary.
+///
+/// The length-prefixed payload is private compiler data. It keeps worker names
+/// and handler identities intact without making a second runtime registry or
+/// pretending that arbitrary callback code is a service declaration.
+const SERVICE_TREE_PAYLOAD_PREFIX: &str = "\0jet.service.tree.v1\0";
+
+fn service_tree_literal_string(expr: &Expr) -> Option<String> {
+    let Expr::Str(parts, _) = expr else {
+        return None;
+    };
+    let mut value = String::new();
+    for part in parts {
+        match part {
+            StrPart::Lit(text) => value.push_str(text),
+            StrPart::Interp(_, _) => return None,
+        }
+    }
+    Some(value)
+}
+
+fn service_tree_payload(lambda: &Lambda) -> Option<String> {
+    let LambdaBody::Block(statements) = &lambda.body else {
+        return None;
+    };
+    let root = lambda.params.first()?.name.as_str();
+    let mut workers: Vec<(String, String)> = Vec::with_capacity(statements.len());
+    for statement in statements {
+        let Stmt::Expr(Expr::MethodCall {
+            receiver,
+            method,
+            args,
+            ..
+        }) = statement
+        else {
+            return None;
+        };
+        if method != "worker"
+            || args.len() != 2
+            || args.iter().any(|arg| arg.label.is_some())
+        {
+            return None;
+        }
+        let Expr::Ident(receiver_name, _) = receiver.as_ref() else {
+            return None;
+        };
+        if receiver_name != root {
+            return None;
+        }
+        let worker_name = service_tree_literal_string(&args[0].expr)?;
+        let handler = match &args[1].expr {
+            Expr::Ident(name, _) => name.clone(),
+            _ => return None,
+        };
+        if worker_name.trim().is_empty()
+            || worker_name.chars().any(char::is_control)
+            || worker_name.len() > 256
+            || handler.is_empty()
+            || handler.chars().any(char::is_control)
+            || handler.len() > 256
+            || workers.iter().any(|(name, _)| name == &worker_name)
+        {
+            return None;
+        }
+        workers.push((worker_name, handler));
+    }
+    let mut payload = format!("{SERVICE_TREE_PAYLOAD_PREFIX}{}|", workers.len());
+    for (name, handler) in workers {
+        payload.push_str(&format!("{}:{}{}:{}", name.len(), name, handler.len(), handler));
+    }
+    Some(payload)
+}
+
 pub(crate) fn lower_core_closure_call(
     module: &str,
     method: &str,
@@ -172,6 +249,23 @@ pub(crate) fn lower_core_closure_call(
         Some(Expr::Lambda(lam)) => Some(lam),
         _ => None,
     };
+    if module == "core.service" && method == "tree" {
+        let lambda = lam_at(0)?;
+        let payload = service_tree_payload(lambda)?;
+        return Some(TExpr {
+            ty: Type::Named("ServiceTree".to_string()),
+            kind: TExprKind::CoreCall {
+                module: module.to_string(),
+                method: method.to_string(),
+                args: vec![TExpr {
+                    ty: Type::String,
+                    kind: TExprKind::StrLit(vec![TStrPart::Lit(payload)]),
+                }],
+                source_span,
+                widen_to_vec: vec![false],
+            },
+        });
+    }
     if module == "core.tasks" && method == "spawn" {
         let lam = lam_at(0)?;
         let body_ty = spawn_body_result_ty(lam, cx, env);

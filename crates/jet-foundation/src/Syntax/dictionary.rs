@@ -6,7 +6,7 @@
 
 use std::sync::LazyLock;
 
-use super::{highlighted_tokens_sorted, HighlightClass, HighlightToken};
+use super::{highlighted_tokens_sorted, HighlightClass, HighlightToken, JET_KEYWORD_LIST};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum SyntaxDictionaryKind {
@@ -57,18 +57,38 @@ pub fn nearest(query: &str) -> Option<&'static SyntaxDictionaryRow> {
 
 pub fn looks_like_query(query: &str) -> bool {
     let query = query.trim();
+    if query.starts_with("package-overlay:") {
+        return false;
+    }
+    if is_package_ref(query) {
+        return false;
+    }
     query.starts_with('@')
         || query.starts_with('#')
         || query.starts_with("::")
         || query.starts_with(":=")
-        || (!query.is_empty()
-            && query
-                .chars()
-                .all(|ch| !ch.is_ascii_alphanumeric() && ch != '_' && ch != '.'))
+        || query.chars().any(|ch| {
+            !ch.is_ascii_alphanumeric() && !matches!(ch, '_' | '.' | '-' | '/' | '@')
+        })
+}
+
+fn is_package_ref(query: &str) -> bool {
+    if query.contains('@') && !query.starts_with('@') {
+        return true;
+    }
+    query.split_once(':').is_some_and(|(prefix, suffix)| {
+        !prefix.is_empty()
+            && !suffix.is_empty()
+            && prefix.chars().all(|ch| {
+                ch.is_ascii_alphanumeric() || matches!(ch, '_' | '-' | '.' | '/')
+            })
+            && suffix.chars().any(|ch| ch.is_ascii_alphanumeric())
+    })
 }
 
 fn build_rows() -> Vec<SyntaxDictionaryRow> {
     let decisions = source_decisions();
+    let acronym_decision = source_header_decision(include_str!("acronyms.rs"));
     let mut rows = Vec::new();
     let mut tokens = highlighted_tokens_sorted();
     for text in [super::MARKER_REGION, super::MARKER_LIVE, super::MARKER_NONDETERMINISTIC] {
@@ -76,6 +96,14 @@ fn build_rows() -> Vec<SyntaxDictionaryRow> {
             tokens.push(HighlightToken {
                 text,
                 class: HighlightClass::MarkerRule,
+            });
+        }
+    }
+    for &text in JET_KEYWORD_LIST {
+        if !tokens.iter().any(|token| token.text == text) {
+            tokens.push(HighlightToken {
+                text,
+                class: HighlightClass::KeywordOther,
             });
         }
     }
@@ -94,16 +122,13 @@ fn build_rows() -> Vec<SyntaxDictionaryRow> {
         if rows.iter().any(|row: &SyntaxDictionaryRow| row.token == token.text) {
             continue;
         }
-        let (name, decision) = decisions
-            .iter()
-            .find(|(value, _)| value.as_str() == token.text)
-            .map(|(_, metadata)| metadata.clone())
-            .or_else(|| {
-                crate::Registry::row(token.text)
-                    .map(|row| (token.text.to_string(), row.decision.to_string()))
-            })
-            .unwrap_or_else(|| (token.text.to_string(), "Syntax.rs".to_string()));
         let kind = kind(token.class);
+        let (name, decision) = metadata(
+            &decisions,
+            token.text,
+            kind,
+            acronym_decision.as_deref(),
+        );
         rows.push(SyntaxDictionaryRow {
             token: token.text.to_string(),
             name,
@@ -114,6 +139,66 @@ fn build_rows() -> Vec<SyntaxDictionaryRow> {
         });
     }
     rows
+}
+
+fn metadata(
+    decisions: &[(String, (String, String))],
+    token: &str,
+    kind: SyntaxDictionaryKind,
+    acronym_decision: Option<&str>,
+) -> (String, String) {
+    let mut candidates = decisions
+        .iter()
+        .filter(|(value, (_, decision))| value.as_str() == token && decision != "Syntax.rs");
+    let candidate = candidates
+        .find(|(_, (name, _))| constant_matches_kind(name, kind))
+        .or_else(|| {
+            decisions
+                .iter()
+                .find(|(value, (_, decision))| {
+                    value.as_str() == token && decision != "Syntax.rs"
+                })
+        });
+    if let Some((_, metadata)) = candidate {
+        return metadata.clone();
+    }
+    if let Some(row) = crate::Registry::row(token) {
+        return (token.to_string(), row.decision.to_string());
+    }
+    if is_acronym(token) {
+        if let Some(decision) = acronym_decision {
+            return (token.to_string(), decision.to_string());
+        }
+    }
+    (token.to_string(), "Syntax.rs".to_string())
+}
+
+fn constant_matches_kind(name: &str, kind: SyntaxDictionaryKind) -> bool {
+    match kind {
+        SyntaxDictionaryKind::Keyword => {
+            name.starts_with("KW_") || name.starts_with("LIT_") || name.starts_with("BUILTIN_")
+        }
+        SyntaxDictionaryKind::Marker => name.starts_with("MARKER_") || name.starts_with("RULE_"),
+        SyntaxDictionaryKind::Operator => name.starts_with("OP_"),
+        SyntaxDictionaryKind::Sigil => {
+            name.starts_with("SIGIL_")
+                || name.ends_with("_PREFIX")
+                || name.ends_with("_MARK")
+                || name == "TYPE_FIXED_SIZE_SEP"
+        }
+        SyntaxDictionaryKind::Literal => name.starts_with("LIT_"),
+        SyntaxDictionaryKind::Type => name.starts_with("TYPE_") || name.ends_with("_TYPE"),
+        SyntaxDictionaryKind::Builtin => name.starts_with("BUILTIN_"),
+    }
+}
+
+fn source_header_decision(source: &str) -> Option<String> {
+    source.lines().take(24).find_map(decision_id).map(str::to_string)
+}
+
+fn is_acronym(token: &str) -> bool {
+    token.chars().filter(|ch| ch.is_ascii_uppercase()).count() >= 2
+        && token.chars().any(|ch| ch.is_ascii_lowercase())
 }
 
 fn kind(class: HighlightClass) -> SyntaxDictionaryKind {
@@ -257,4 +342,31 @@ fn levenshtein(left: &str, right: &str) -> usize {
         row = next;
     }
     row[right.chars().count()]
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn dictionary_covers_highlights_and_keywords_without_foreign_words() {
+        for token in crate::Syntax::JET_HIGHLIGHT_TOKENS {
+            assert!(lookup(token.text).is_some(), "missing highlight token `{}`", token.text);
+        }
+        for token in JET_KEYWORD_LIST {
+            assert!(lookup(token).is_some(), "missing keyword `{token}`");
+        }
+
+        let constants = source_decisions();
+        for row in rows() {
+            assert!(
+                constants.iter().any(|(token, _)| token == &row.token)
+                    || crate::Registry::row(&row.token).is_some(),
+                "dictionary token `{}` is not a Syntax constant or registry marker",
+                row.token
+            );
+            assert_ne!(row.decision, "Syntax.rs", "missing decision ID for `{}`", row.token);
+            assert!(!row.example.is_empty(), "missing example for `{}`", row.token);
+        }
+    }
 }

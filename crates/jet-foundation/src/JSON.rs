@@ -467,6 +467,9 @@ fn is_known_provider_noise(line: &str) -> bool {
 }
 
 pub fn parse_lenient(input: &str) -> Result<FilteredJson, String> {
+    if input.len() > MAX_PROTOCOL_MESSAGE_BYTES {
+        return Err("JSON input exceeds the 1 MiB limit".into());
+    }
     let mut filtered = String::with_capacity(input.len());
     let mut noise = Vec::new();
     for line in input.split_inclusive('\n') {
@@ -514,6 +517,15 @@ mod tests {
         ] {
             assert!(parse_json(raw).is_err(), "accepted hostile JSON: {raw:?}");
         }
+    }
+
+    #[test]
+    fn lenient_json_rejects_oversized_provider_noise_before_filtering() {
+        let input = format!("warning: {}", "x".repeat(MAX_PROTOCOL_MESSAGE_BYTES));
+        assert_eq!(
+            parse_lenient(&input).unwrap_err(),
+            "JSON input exceeds the 1 MiB limit"
+        );
     }
 
     #[test]

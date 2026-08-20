@@ -20,7 +20,7 @@ use crate::Sema::CheckerCoreLib::{
     process_child_method_return, process_spec_method_return, process_stdin_method_return,
     terminal_session_method_return,
     process_stream_method_return, reflect_method_return, regex_method_return, result_ty,
-    core_generic_struct_field,
+    core_generic_struct_field, core_struct_field_type,
     simd_reduce_markers, sketch_method_return, sketch_type_name,
     text_cursor_method_return, u8_ty, ui_backend_method_return, unit_ty, url_mime_method_return,
     wrong_core_arity,
@@ -1540,7 +1540,7 @@ impl<'a> Checker<'a> {
                                     };
                                     fits_base.then_some((*n, *literal_span))
                                 }
-                                (Expr::Float(n, literal_span, _), source, base)
+                                (Expr::Float(n, literal_span, _, _), source, base)
                                     if source.is_float() && base.is_integer() && n.is_finite() => {
                                     let truncated = n.trunc();
                                     let (lo, upper_exclusive) = match base {
@@ -3925,7 +3925,7 @@ impl<'a> Checker<'a> {
                         self.diags.push(Diagnostic::error(
                             "E0511",
                             "`ExpiringValue.force` bypasses expiry checking".to_string(),
-                            "TTL-wrapped values must use fallible `get(clock)` so expired access is handled explicitly (D-TTLVAL1)".to_string(),
+                            "TTL-wrapped values must use fallible `get(clock)` so expired access is handled explicitly".to_string(),
                             "use `match item.get(clock) { .Ok(v) -> …; .Err(Expired) -> … }` instead".to_string(),
                             Some(span),
                         ));
@@ -4677,6 +4677,20 @@ impl<'a> Checker<'a> {
                         let call_span = Span::new(span.start, end);
                         return self.infer_call_value(&mut callee, args, call_span);
                     }
+                }
+            }
+            // D-SERVICE1=D: `ServiceTreeBuilder.worker` is a compiler-owned
+            // function field. It is not a constructable user record, so its
+            // shape lives in the Core field oracle beside the other reserved
+            // records instead of in the user struct registry.
+            if let Some(field_ty) = core_struct_field_type(&type_name, method, &[]) {
+                if matches!(field_ty, Type::Fn { .. }) {
+                    *recv_type_out = Some(dispatch_type_name.to_string());
+                    let mut callee =
+                        Box::new(Expr::Field(receiver.clone(), method.to_string(), span));
+                    let end = args.last().map(|a| a.expr.span().end).unwrap_or(span.end);
+                    let call_span = Span::new(span.start, end);
+                    return self.infer_call_value(&mut callee, args, call_span);
                 }
             }
             let Some((owner_mod, mut msig)) = self.resolve_method_sig(&type_name, method) else {

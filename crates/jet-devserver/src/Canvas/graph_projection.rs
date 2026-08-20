@@ -1331,7 +1331,7 @@ fn project_value_node(
     }
     let (title, badges) = match expr {
         Expr::Int(_, _, _, _)
-        | Expr::Float(_, _, _)
+        | Expr::Float(_, _, _, _)
         | Expr::Bool(_, _)
         | Expr::Str(_, _)
         | Expr::Char(_, _)

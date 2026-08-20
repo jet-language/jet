@@ -36,8 +36,13 @@
 // D-FAIL-ERROR1=A: core_surface::TYPE_ERR owns the shared default-error type
 // and constructor name. core_surface::RETIRED_TYPE_ERROR exists only for the
 // E0432 teaching diagnostic; it never resolves as a type.
-// D-FAIL-BIND1=A: core_surface::AMBIENT_ERR owns the contextual lowercase
-// `err` binder inside a fallible `??` fallback. It is not a lexer keyword.
+// D-FAIL-BIND1=A (amended by D-ERR-DECON1=A): core_surface::AMBIENT_ERR owns
+// the contextual lowercase `err` binder inside a fallible `??` fallback. It
+// is not a lexer keyword.
+// D-ERR-DECON1=A (ratified 2026-08-19, card #2041): the existing `??` block
+// accepts ordinary statements followed by either one bare value or one real
+// diverging tail (`return`, `next`, `break`, or `panic(...)`). No new token or
+// binder is added; the old `return value` block-value reading is retired.
 // Card #1641, ratified 2026-08-07: D-RUN-LAW1=A names one run/one claim;
 // D-CLAIM-WORD1=B names `assert`/`assert_eq`; D-CLAIM-BENCH1=A and
 // D-CLAIM-CASES1=B add `.measure`/`.cases` to the D-DOTSCOPE1 member menu;
@@ -60,6 +65,9 @@
 // a parameter list rather than as operators. It also gives a parameter an
 // optional public label ahead of its local name (`timeout seconds: Int`),
 // which needs no new token. Retires the S61 fixed-position label rule.
+// D-CALLPOS1=A adds no spelling: bare arguments fill one unambiguous callable
+// left to right; labels deconflict candidate bodies and the editor supplies
+// their names as inlay hints.
 //
 // D-CONF-WORD1=A gives the word `profile` one meaning, the optimize bundle
 // behind `--profile` and its `--release` sugar. The machine axis is
@@ -166,6 +174,8 @@
 // (`== != < > <= >=`) may mark `if subject OP { … }` dispatch. Bare arm atoms
 // desugar to `subject OP atom`; `|` unions those atoms; `&&`/`||` combine.
 // The same table is a ()-or-value expression in expression position.
+// D-LOOP-SUBJECT1=A adds no token: bindingless source loops reuse Syntax::KW_IT
+// as their implicit subject; scalar and `(key, value)` sources retain named bindings.
 // D-BRANCH-PREF1=A / D-BRANCH-ONELINE1=A / D-BRANCH-ELSEIF1=A /
 // D-BRANCH-LINT1=A / D-BRANCH-VALUE1=A / D-BRANCH-FMT1=C /
 // D-BRANCH-TEACH1=A (ratified 2026-07-28, card #1259) add no token:

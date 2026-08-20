@@ -73,13 +73,7 @@ pub(crate) fn is_impure_builtin(name: &str) -> bool {
 /// D-STDIN1=A: std module calls that are impure (read from environment/stdin).
 /// Unlike `is_nondeterministic_core` (E3403), these fire E3401 in pure context.
 pub(crate) fn is_impure_core(module: &str, method: &str) -> bool {
-    matches!(
-        (module, method),
-        (
-            "core.term",
-            "stdin" | "input" | "confirm" | "choose" | "input_secret" | "read_all_input"
-        )
-    )
+    jet_foundation::Authority::is_impure_core(module, method)
 }
 
 /// D-META-EFFECT1 c3: the call-graph walk itself lives in

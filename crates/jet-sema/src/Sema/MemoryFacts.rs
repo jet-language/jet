@@ -1,4 +1,4 @@
-//! D-MEM-FACTS1: transitive memory-policy facts over the Effects call graph.
+//! D-MEM-FACTS1: transitive memory-denial facts over the Effects call graph.
 
 use crate::Diagnostics::{Diagnostic, Span};
 use std::collections::{HashMap, HashSet, VecDeque};
@@ -9,17 +9,17 @@ use crate::Policy::{self, PolicyDeclaration, PolicyError, PolicyKey, PolicyScope
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub enum MemoryFact {
-    NoAlloc,
-    ZeroRc,
-    ArenaBounded(u64),
+    MemAllocDenied,
+    MemRcDenied,
+    MemAllocBounded(u64),
 }
 
 impl MemoryFact {
     pub fn display(self) -> String {
         match self {
-            Self::NoAlloc => "no_alloc".to_string(),
-            Self::ZeroRc => "zero_rc".to_string(),
-            Self::ArenaBounded(bytes) => format!("arena_bounded({bytes})"),
+            Self::MemAllocDenied => "!Mem.Alloc".to_string(),
+            Self::MemRcDenied => "!Mem.Rc".to_string(),
+            Self::MemAllocBounded(bytes) => format!("!Mem.Alloc(above: {bytes})"),
         }
     }
 }
@@ -85,52 +85,36 @@ pub(crate) fn bundle_memory_inputs(
     qualified: &HashMap<String, EffectSummary>,
 ) -> (HashMap<String, EffectSummary>, Vec<MemoryFactDeclaration>) {
     let mut summaries = qualified.clone();
-    let package = bundle.modules.first().into_iter()
-        .flat_map(|module| module.policy_declarations.iter())
-        .filter(|declaration| declaration.scope == PolicyScope::Package)
-        .cloned()
-        .collect::<Vec<_>>();
     let mut declarations = Vec::new();
+    let package_roots = qualified.keys().cloned().collect::<Vec<_>>();
+    for denial in &bundle.package_guarantees.memory_denials {
+        let Some(fact) = memory_fact_from_denial(denial) else {
+            continue;
+        };
+        declarations.push(MemoryFactDeclaration {
+            fact,
+            roots: package_roots.clone(),
+            span: Span::new(0, 0),
+            source: "package.jet".to_string(),
+            provenance: format!("manifest denial `effects: {{ deny: [{denial}] }}`"),
+        });
+    }
     for module in &bundle.modules {
-        let mut outer = package.clone();
-        outer.extend(
-            module
-                .policy_declarations
-                .iter()
-                .filter(|declaration| declaration.scope == PolicyScope::Module)
-                .cloned(),
-        );
-        if let Some(span) = module.no_alloc_policy {
-            if !outer.iter().any(|declaration| declaration.key == PolicyKey::NoAlloc) {
-                outer.push(PolicyDeclaration {
-                    key: PolicyKey::NoAlloc,
-                    value: PolicyValue::Enabled,
-                    scope: PolicyScope::Module,
-                    span,
-                    target: None,
-                    source: module.display.clone(),
-                });
-            }
-        }
         let mut functions = Vec::new();
         collect_function_keys(&module.items, &module.alias, &mut functions);
-        for (function_span, function_key) in functions {
-            let Some(summary) = qualified.get(&function_key) else { continue };
-            let mut chain = outer.clone();
-            chain.extend(
-                module
-                    .policy_declarations
-                    .iter()
-                    .filter(|declaration| {
-                        declaration.scope == PolicyScope::Function
-                            && declaration.target == Some(function_span)
-                    })
-                    .cloned(),
+        let mut denials = Vec::new();
+        collect_function_denials(&module.items, &module.alias, &mut denials);
+        for (function_key, row) in denials {
+            append_signature_denials(
+                &row,
+                vec![function_key],
+                &module.display,
+                &mut declarations,
             );
-            append_effective(&chain, vec![function_key.clone()], &module.display, &mut declarations);
+        }
+        for (_function_span, function_key) in functions {
+            let Some(summary) = qualified.get(&function_key) else { continue };
             for region in &summary.memory.regions {
-                let mut region_chain = chain.clone();
-                region_chain.extend(region.declarations.clone());
                 let synthetic = format!(
                     "{}#policy@{}..{}",
                     function_key, region.span.start, region.span.end
@@ -149,7 +133,6 @@ pub(crate) fn bundle_memory_inputs(
                         ..Default::default()
                     },
                 );
-                append_effective(&region_chain, vec![synthetic], &module.display, &mut declarations);
             }
         }
     }
@@ -674,41 +657,42 @@ fn type_may_own_heap(ty: &Type) -> bool {
     }
 }
 
-fn append_effective(
-    chain: &[PolicyDeclaration],
+fn append_signature_denials(
+    row: &[(String, Span)],
     roots: Vec<String>,
     source: &str,
     out: &mut Vec<MemoryFactDeclaration>,
 ) {
-    for key in [PolicyKey::NoAlloc, PolicyKey::ZeroRc, PolicyKey::ArenaBounded] {
-        let Ok(Some(effective)) = Policy::resolve(key, chain.iter().cloned()) else { continue };
-        let fact = match (key, effective.value) {
-            (PolicyKey::NoAlloc, PolicyValue::Enabled) => MemoryFact::NoAlloc,
-            (PolicyKey::ZeroRc, PolicyValue::Enabled) => MemoryFact::ZeroRc,
-            (PolicyKey::ArenaBounded, PolicyValue::Limit(limit)) => MemoryFact::ArenaBounded(limit),
-            _ => continue,
-        };
-        let Some(last) = effective.provenance.last() else { continue };
+    for (name, span) in row {
+        let Some(denial) = name.strip_prefix('!') else { continue };
+        let Some(fact) = memory_fact_from_denial(denial) else { continue };
         out.push(MemoryFactDeclaration {
             fact,
             roots: roots.clone(),
-            span: last.span,
+            span: *span,
             source: source.to_string(),
-            provenance: Policy::explain(&effective),
+            provenance: format!("signature denial `:[!{denial}]>` in {source}"),
         });
     }
 }
 
+fn memory_fact_from_denial(denial: &str) -> Option<MemoryFact> {
+    if let Some(bound) = super::Effects::memory_allocation_bound(denial) {
+        return Some(bound.map_or(MemoryFact::MemAllocDenied, MemoryFact::MemAllocBounded));
+    }
+    (denial == "Mem.Rc").then_some(MemoryFact::MemRcDenied)
+}
+
 /// Enumerate the functions a scoped memory fact is declared *about*.
 ///
-/// A `#Policy(no_alloc)` / `zero_rc` / `arena_bounded(N)` declaration is a
-/// promise about the code the module wrote. Compiler-synthesized members are
+/// A memory denial on a function signature is a promise about the code the
+/// module wrote. Compiler-synthesized members are
 /// not that code: the auto-derived `encode`/`decode` codecs
 /// (`ImplDef::is_generated_serde`) and the structural `equal`/`compare`
 /// blocks (`TraitImplBlock::compiler_generated`) are attached by the package
 /// auto-derive default, and an auto-derived `encode` returns a `DataTree`
 /// object built from a map literal — it allocates by construction. Rooting
-/// one would make a module-scope `no_alloc` incompatible with declaring any
+/// one would make a module-scope memory denial incompatible with declaring any
 /// struct at all.
 ///
 /// The skip is on root enumeration only. Their memory events stay recorded
@@ -746,6 +730,64 @@ fn collect_function_keys(items: &[Item], alias: &str, out: &mut Vec<(Span, Strin
             }
             Item::CodeModule(module) => {
                 if let Some(body) = &module.body { collect_function_keys(body, alias, out); }
+            }
+            _ => {}
+        }
+    }
+}
+
+fn collect_function_denials(
+    items: &[Item],
+    alias: &str,
+    out: &mut Vec<(String, Vec<(String, Span)>)>,
+) {
+    fn one(
+        function: &crate::AST::Func,
+        owner: Option<&str>,
+        alias: &str,
+        out: &mut Vec<(String, Vec<(String, Span)>)>,
+    ) {
+        let Some(row) = function.declared_effects.as_ref() else { return };
+        if row.iter().any(|(name, _)| name.starts_with("!Mem.")) {
+            out.push((
+                format!("{alias}::{}", super::effect_key(owner, &function.name)),
+                row.clone(),
+            ));
+        }
+    }
+    for item in items {
+        match item {
+            Item::Func(function) => one(function, None, alias, out),
+            Item::Impl(implementation) if implementation.is_generated_serde => {}
+            Item::Impl(implementation) => {
+                for method in &implementation.methods {
+                    one(method, Some(&implementation.type_name), alias, out);
+                }
+            }
+            Item::Struct(definition) => {
+                for method in &definition.methods {
+                    one(method, Some(&definition.name), alias, out);
+                }
+                for block in definition.trait_impls.iter().filter(|block| !block.compiler_generated) {
+                    for method in &block.methods {
+                        one(method, Some(&definition.name), alias, out);
+                    }
+                }
+            }
+            Item::Enum(definition) => {
+                for method in &definition.methods {
+                    one(method, Some(&definition.name), alias, out);
+                }
+                for block in definition.trait_impls.iter().filter(|block| !block.compiler_generated) {
+                    for method in &block.methods {
+                        one(method, Some(&definition.name), alias, out);
+                    }
+                }
+            }
+            Item::CodeModule(module) => {
+                if let Some(body) = &module.body {
+                    collect_function_denials(body, alias, out);
+                }
             }
             _ => {}
         }
@@ -846,7 +888,7 @@ fn shortest_violation(
     root: &str,
     summaries: &HashMap<String, EffectSummary>,
 ) -> Option<Finding> {
-    if let MemoryFact::ArenaBounded(limit) = fact {
+    if let MemoryFact::MemAllocBounded(limit) = fact {
         return match arena_bound(
             root,
             summaries,
@@ -898,13 +940,13 @@ fn shortest_violation(
         let mut next_arena = arena_used;
         for event in events {
             let violates = match (fact, event.kind) {
-                (MemoryFact::NoAlloc, MemoryEventKind::Allocation) => true,
-                (MemoryFact::ZeroRc, MemoryEventKind::RetainRelease) => true,
-                (MemoryFact::ArenaBounded(limit), MemoryEventKind::ArenaBytes(Some(bytes))) => {
+                (MemoryFact::MemAllocDenied, MemoryEventKind::Allocation) => true,
+                (MemoryFact::MemRcDenied, MemoryEventKind::RetainRelease) => true,
+                (MemoryFact::MemAllocBounded(limit), MemoryEventKind::ArenaBytes(Some(bytes))) => {
                     next_arena = next_arena.saturating_add(bytes);
                     next_arena > limit
                 }
-                (MemoryFact::ArenaBounded(_), MemoryEventKind::ArenaBytes(None)) => true,
+                (MemoryFact::MemAllocBounded(_), MemoryEventKind::ArenaBytes(None)) => true,
                 _ => false,
             };
             if violates {
@@ -1138,7 +1180,7 @@ fn memory_violation(declaration: &MemoryFactDeclaration, finding: Finding) -> Di
     let path = finding.path.join(" -> ");
     if let Some(event) = finding.event {
         let arena = match declaration.fact {
-            MemoryFact::ArenaBounded(_) => format!("; the proven path total is {} bytes", finding.arena_used),
+            MemoryFact::MemAllocBounded(_) => format!("; the proven path total is {} bytes", finding.arena_used),
             _ => String::new(),
         };
         return Diagnostic::error(
@@ -1151,7 +1193,7 @@ fn memory_violation(declaration: &MemoryFactDeclaration, finding: Finding) -> Di
                 "{} is reachable through {} from code governed by `{}`{}; declaration provenance: {}; operation provenance: {}",
                 event.source, path, fact, arena, declaration.provenance, event.provenance
             ),
-            "remove or replace the incompatible operation, call an implementation whose transitive memory facts satisfy the contract, or move the call outside this policy scope".to_string(),
+            "remove or replace the incompatible operation, seal the target set, or move the call outside this denial".to_string(),
             Some(event.span),
         );
     }
@@ -1163,7 +1205,7 @@ fn memory_violation(declaration: &MemoryFactDeclaration, finding: Finding) -> Di
             "{} is reachable through {}; a strict transitive fact cannot assume an unknown future target is compatible; declaration provenance: {}",
             open.reason, path, declaration.provenance
         ),
-        "seal the target set, consume a verified signed dependency summary that proves the fact, or move the dispatch outside this policy scope".to_string(),
+        "seal the target set, consume a verified signed dependency summary that proves the denial, or move the dispatch outside it".to_string(),
         Some(if open.span.start == open.span.end { declaration.span } else { open.span }),
     )
 }
@@ -1211,11 +1253,11 @@ mod tests {
             },
         );
         assert_eq!(
-            project_memory_fact(MemoryFact::ArenaBounded(8), "root", &summaries),
+            project_memory_fact(MemoryFact::MemAllocBounded(8), "root", &summaries),
             MemoryProjection::Proven
         );
         assert!(matches!(
-            project_memory_fact(MemoryFact::ArenaBounded(7), "root", &summaries),
+            project_memory_fact(MemoryFact::MemAllocBounded(7), "root", &summaries),
             MemoryProjection::Violated { .. }
         ));
     }
@@ -1223,7 +1265,7 @@ mod tests {
     #[test]
     fn missing_or_recursive_body_never_proves_a_strict_fact() {
         assert!(matches!(
-            project_memory_fact(MemoryFact::NoAlloc, "missing", &HashMap::new()),
+            project_memory_fact(MemoryFact::MemAllocDenied, "missing", &HashMap::new()),
             MemoryProjection::OpenWorld { .. }
         ));
         let mut summaries = HashMap::new();
@@ -1245,7 +1287,7 @@ mod tests {
         );
         assert!(matches!(
             project_memory_fact(
-                MemoryFact::ArenaBounded(8),
+                MemoryFact::MemAllocBounded(8),
                 "recursive",
                 &summaries
             ),

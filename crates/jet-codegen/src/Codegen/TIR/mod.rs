@@ -380,7 +380,7 @@ pub struct TCodecMigrationPlan {
 
 /// D-MIGRATE4 version vocabulary. Shapes count from one, and a step names the
 /// shapes it moves between. Codegen bakes these names into the generated
-/// chain-walker and the evaluator reports them back out of a `decode_traced`,
+/// chain-walker and the evaluator keeps them internal to the decode adapter,
 /// so both read them from here. `index` is zero-based.
 pub fn migration_shape_name(index: usize) -> String {
     format!("v{}", index + 1)
@@ -786,6 +786,8 @@ impl TLocal {
     pub fn rust_name(&self) -> String {
         if self.generated {
             self.name.clone()
+        } else if self.is_persistent() {
+            local_place(&self.name).to_uppercase()
         } else {
             local_place(&self.name)
         }
@@ -2813,6 +2815,9 @@ pub enum ScopeMemberKind {
     /// then its elapsed time is compared against the canonical Duration value;
     /// over budget fails the test. (v1: post-hoc — does not interrupt a hang.)
     Timeout(TExpr),
+    /// `.measure { … }` — a claim selected by `jet test --measure`. Plain
+    /// `jet test` still executes the body once as an ordinary correctness claim.
+    Measure,
     /// `.skip { … }` — a region that is not executed. Emitted as `if false { … }`
     /// so the body still type-checks but never runs.
     Skip,
@@ -4735,12 +4740,12 @@ pub enum TClosureOp {
     SortByCompare,
     /// `reduce` — `jet_list_reduce((recv).clone(), seed, f)`.
     Reduce,
-    // D-ITER1: lazy adapter closure methods.
+    // D-ITER1 / D-CORE-EAGER2=A: receiver-sensitive adapter closure methods.
     /// `take_while(f)` — `jet_list_take_while((recv).clone(), f)`.
     TakeWhile,
     /// `skip_while(f)` — `jet_list_skip_while((recv).clone(), f)`.
     SkipWhile,
-    /// `flat_map(f)` — `jet_list_flat_map((recv).clone(), f)`.
+    /// `flat_map(f)` — eager for List, lazy for Iter; emitter selects the kernel.
     FlatMap,
     /// `scan(seed, f)` — `jet_list_scan((recv).clone(), seed, f)`.
     Scan,

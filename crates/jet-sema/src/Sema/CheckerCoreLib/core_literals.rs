@@ -25,6 +25,9 @@ impl<'a> Checker<'a> {
                     value: Box::new(json.clone()),
                 }],
                 _ => {
+                    // No typed edit here: this dynamic enum literal exposes
+                    // only the whole literal span, so replacement would erase
+                    // its type and payload.
                     let candidates = ["Null", "Bool", "Int", "Float", "Text", "Array", "Object"]
                         .iter()
                         .map(|s| s.to_string())
@@ -91,6 +94,9 @@ impl<'a> Checker<'a> {
                 "Text" => vec![Type::String],
                 "Bool" => vec![Type::Bool],
                 _ => {
+                    // No typed edit here: this dynamic enum literal exposes
+                    // only the whole literal span, so replacement would erase
+                    // its type and payload.
                     let candidates = ["Null", "Int", "Float", "Text", "Bool"]
                         .iter()
                         .map(|s| s.to_string())

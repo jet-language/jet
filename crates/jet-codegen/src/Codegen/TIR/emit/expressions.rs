@@ -1772,7 +1772,15 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                 }
                 TBuiltinOp::Min { float: false } => format!("jet_list_min({vec_src})"),
                 TBuiltinOp::Max { float: false } => format!("jet_list_max({vec_src})"),
-                TBuiltinOp::Flatten => format!("jet_iter_flatten({as_iter})"),
+                TBuiltinOp::Flatten => {
+                    if recv_is_iter {
+                        format!("jet_iter_flatten({as_iter})")
+                    } else {
+                        // D-CORE-EAGER2=A: concrete List.flatten is eager;
+                        // `.lazy().flatten()` remains on the Iter plane.
+                        format!("jet_list_flatten({vec_src})")
+                    }
+                }
                 TBuiltinOp::Intersperse => {
                     format!("jet_iter_intersperse({as_iter}, {})", a(0))
                 }
@@ -3865,7 +3873,16 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                     format!("jet_iter_skip_while({as_iter}, {})", a(0))
                 }
                 TClosureOp::FlatMap => {
-                    format!("jet_iter_flat_map({as_iter}, {})", a(0))
+                    if recv_is_iter {
+                        format!("jet_iter_flat_map({as_iter}, {})", a(0))
+                    } else {
+                        // D-CORE-EAGER2=A: concrete List.flat_map is eager.
+                        let mut f = a(0);
+                        if let Some(rest) = f.strip_prefix("move ") {
+                            f = rest.to_string();
+                        }
+                        format!("jet_list_flat_map({vec_src}, {f})")
+                    }
                 }
                 TClosureOp::FilterMap => {
                     format!("jet_iter_filter_map({as_iter}, {})", a(0))

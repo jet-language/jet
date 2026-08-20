@@ -20,6 +20,210 @@ pub static EFFECT_ROOTS: LazyLock<Vec<&'static str>> = LazyLock::new(|| {
         .collect()
 });
 
+/// Typed view of the canonical effect-root table.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum Effect {
+    Net,
+    FS,
+    IO,
+    DB,
+    Time,
+    Rand,
+    Env,
+    Exec,
+    Log,
+    GPU,
+    Panic,
+    FFI,
+    Go,
+    Java,
+    DotNet,
+    Fortran,
+    Cobol,
+    Tcl,
+    Lua,
+    Ada,
+    Pascal,
+    Dart,
+    PowerShell,
+    Perl,
+    Ruby,
+    Php,
+    R,
+    Com,
+    Py,
+    Browser,
+    Secret,
+    Mem,
+}
+
+impl Effect {
+    pub fn requires_comptime_gate(self) -> bool {
+        matches!(
+            self,
+            Self::Net
+                | Self::FS
+                | Self::IO
+                | Self::DB
+                | Self::Env
+                | Self::Exec
+                | Self::Browser
+                | Self::Secret
+        )
+    }
+
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::Net => "Net",
+            Self::FS => "FS",
+            Self::IO => "IO",
+            Self::DB => "DB",
+            Self::Time => "Time",
+            Self::Rand => "Rand",
+            Self::Env => "Env",
+            Self::Exec => "Exec",
+            Self::Log => "Log",
+            Self::GPU => "GPU",
+            Self::Panic => "Panic",
+            Self::FFI => "FFI",
+            Self::Go => "Go",
+            Self::Java => "Java",
+            Self::DotNet => "DotNet",
+            Self::Fortran => "Fortran",
+            Self::Cobol => "Cobol",
+            Self::Tcl => "Tcl",
+            Self::Lua => "Lua",
+            Self::Ada => "Ada",
+            Self::Pascal => "Pascal",
+            Self::Dart => "Dart",
+            Self::PowerShell => "PowerShell",
+            Self::Perl => "Perl",
+            Self::Ruby => "Ruby",
+            Self::Php => "Php",
+            Self::R => "R",
+            Self::Com => "Com",
+            Self::Py => "Py",
+            Self::Browser => "Browser",
+            Self::Secret => "Secret",
+            Self::Mem => "Mem",
+        }
+    }
+
+    pub fn parse(root: &str) -> Option<Self> {
+        let canonical = parse_root(root)?;
+        if canonical != root {
+            return None;
+        }
+        Some(match canonical {
+            "Net" => Self::Net,
+            "FS" => Self::FS,
+            "IO" => Self::IO,
+            "DB" => Self::DB,
+            "Time" => Self::Time,
+            "Rand" => Self::Rand,
+            "Env" => Self::Env,
+            "Exec" => Self::Exec,
+            "Log" => Self::Log,
+            "GPU" => Self::GPU,
+            "Panic" => Self::Panic,
+            "FFI" => Self::FFI,
+            "Go" => Self::Go,
+            "Java" => Self::Java,
+            "DotNet" => Self::DotNet,
+            "Fortran" => Self::Fortran,
+            "Cobol" => Self::Cobol,
+            "Tcl" => Self::Tcl,
+            "Lua" => Self::Lua,
+            "Ada" => Self::Ada,
+            "Pascal" => Self::Pascal,
+            "Dart" => Self::Dart,
+            "PowerShell" => Self::PowerShell,
+            "Perl" => Self::Perl,
+            "Ruby" => Self::Ruby,
+            "Php" => Self::Php,
+            "R" => Self::R,
+            "Com" => Self::Com,
+            "Py" => Self::Py,
+            "Browser" => Self::Browser,
+            "Secret" => Self::Secret,
+            "Mem" => Self::Mem,
+            _ => return None,
+        })
+    }
+
+    pub fn all() -> Holds {
+        EFFECT_ROOTS.iter().map(|root| (*root).to_string()).collect()
+    }
+}
+
+/// Build authority is a typed view over the same canonical root table.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum BuildEffect {
+    Net,
+    FS,
+    IO,
+    DB,
+    Time,
+    Rand,
+    Env,
+    Exec,
+    Log,
+    GPU,
+}
+
+impl BuildEffect {
+    pub const ALL: [Self; 10] = [
+        Self::Net,
+        Self::FS,
+        Self::IO,
+        Self::DB,
+        Self::Time,
+        Self::Rand,
+        Self::Env,
+        Self::Exec,
+        Self::Log,
+        Self::GPU,
+    ];
+
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::Net => "Net",
+            Self::FS => "FS",
+            Self::IO => "IO",
+            Self::DB => "DB",
+            Self::Time => "Time",
+            Self::Rand => "Rand",
+            Self::Env => "Env",
+            Self::Exec => "Exec",
+            Self::Log => "Log",
+            Self::GPU => "GPU",
+        }
+    }
+
+    pub const fn flag(self) -> &'static str {
+        match self {
+            Self::Net => "net",
+            Self::FS => "fs",
+            Self::IO => "io",
+            Self::DB => "db",
+            Self::Time => "time",
+            Self::Rand => "rand",
+            Self::Env => "env",
+            Self::Exec => "exec",
+            Self::Log => "log",
+            Self::GPU => "gpu",
+        }
+    }
+
+    pub fn parse(value: &str) -> Option<Self> {
+        if value.contains('.') {
+            return None;
+        }
+        let canonical = parse_root(value)?;
+        Self::ALL.into_iter().find(|effect| canonical == effect.name())
+    }
+}
+
 /// Root segment of a dotted right (`FS.Read` → `FS`).
 pub fn root(right: &str) -> &str {
     right.split('.').next().unwrap_or(right)
@@ -35,16 +239,49 @@ pub fn parse_root(right: &str) -> Option<&'static str> {
         .find(|known| known.eq_ignore_ascii_case(root))
 }
 
+/// Preserve a right's leaf spelling while normalizing its canonical root.
+pub fn parse_right(right: &str) -> Option<String> {
+    let right = right.trim();
+    let root = parse_root(right)?;
+    Some(match right.split_once('.') {
+        Some((_, leaf)) => format!("{root}.{leaf}"),
+        None => root.to_string(),
+    })
+}
+
 /// D-EFFTREE1: a bound covers itself and every descendant in the rights tree.
 pub fn covers(bound: &str, right: &str) -> bool {
+    let bound = parse_right(bound).unwrap_or_else(|| bound.trim().to_string());
+    let right = parse_right(right).unwrap_or_else(|| right.trim().to_string());
     right == bound
         || right
-            .strip_prefix(bound)
+            .strip_prefix(&bound)
             .is_some_and(|suffix| suffix.starts_with('.'))
 }
 
 /// One rights carrier for every authority checkpoint.
 pub type Holds = BTreeSet<String>;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Verdict {
+    Allowed,
+    Denied,
+    Missing,
+}
+
+pub fn covers_any(bounds: &Holds, right: &str) -> bool {
+    bounds.iter().any(|bound| covers(bound, right))
+}
+
+pub fn answer(held: &Holds, denied: &Holds, right: &str) -> Verdict {
+    if covers_any(denied, right) {
+        Verdict::Denied
+    } else if covers_any(held, right) {
+        Verdict::Allowed
+    } else {
+        Verdict::Missing
+    }
+}
 
 /// D-AUTHORITY-MODEL1: inner scope may only tighten its parent's holds set.
 pub fn tighten(outer: &Holds, inner: &Holds) -> bool {
@@ -56,7 +293,7 @@ pub fn tighten(outer: &Holds, inner: &Holds) -> bool {
 /// Rights in `used` not covered by any held right.
 pub fn uncovered(used: &Holds, held: &Holds) -> Holds {
     used.iter()
-        .filter(|right| !held.iter().any(|bound| covers(bound, right)))
+        .filter(|right| !covers_any(held, right))
         .cloned()
         .collect()
 }
@@ -64,7 +301,7 @@ pub fn uncovered(used: &Holds, held: &Holds) -> Holds {
 /// Rights in `used` covered by a prohibition or other matching set.
 pub fn covered(used: &Holds, matching: &Holds) -> Holds {
     used.iter()
-        .filter(|right| matching.iter().any(|bound| covers(bound, right)))
+        .filter(|right| covers_any(matching, right))
         .cloned()
         .collect()
 }
@@ -323,10 +560,21 @@ fn same_fact(left: &GateEntry, right: &GateEntry) -> bool {
 }
 
 /// Shared purity classification consumed by both purity walkers.
-pub fn builtin_effect(name: &str) -> Option<crate::Effects::Effect> {
+pub fn builtin_effect(name: &str) -> Option<Effect> {
     crate::Syntax::IMPURE_BUILTINS
         .contains(&name)
-        .then_some(crate::Effects::Effect::IO)
+        .then_some(Effect::IO)
+}
+
+/// Core calls that consume ambient input rather than only transforming values.
+pub fn is_impure_core(module: &str, method: &str) -> bool {
+    matches!(
+        (module, method),
+        (
+            "core.term",
+            "stdin" | "input" | "confirm" | "choose" | "input_secret" | "read_all_input"
+        )
+    )
 }
 
 #[cfg(test)]
@@ -345,6 +593,35 @@ mod tests {
         assert!(!tighten(&outer, &inner));
         assert!(!tighten(&inner, &outer));
         assert_eq!(uncovered(&inner, &outer), Holds::from(["DB".to_string()]));
+    }
+
+    #[test]
+    fn every_checkpoint_uses_one_canonical_answer() {
+        let held = Holds::from(["FS".to_string()]);
+        let denied = Holds::from(["Secret".to_string()]);
+        let missing = Holds::new();
+        let right = parse_right("fs.Read").expect("known right");
+        assert_eq!(right, "FS.Read");
+        assert_eq!(parse_right("fs.read").as_deref(), Some("FS.read"));
+        let checkpoints = [
+            ("compile", answer(&held, &denied, &right)),
+            ("build", answer(&held, &denied, &right)),
+            ("session", answer(&held, &denied, &right)),
+            ("repl", answer(&held, &denied, &right)),
+        ];
+        assert!(checkpoints
+            .iter()
+            .all(|(_, verdict)| *verdict == Verdict::Allowed));
+        assert_eq!(
+            answer(&held, &Holds::from(["FS".to_string()]), &right),
+            Verdict::Denied
+        );
+        assert_eq!(answer(&held, &denied, "Secret"), Verdict::Denied);
+        assert_eq!(answer(&held, &denied, "Net"), Verdict::Missing);
+        assert_eq!(
+            answer(&held, &missing, "FS.Read"),
+            answer(&held, &missing, "fs.Read")
+        );
     }
 
     #[test]

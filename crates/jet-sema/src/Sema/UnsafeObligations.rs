@@ -376,7 +376,9 @@ fn collect_expr_operations(expression: &Expr, out: &mut Vec<(&'static str, Span,
                     for statement in body {
                         collect_shallow_operations(statement, out);
                     }
-                    collect_expr_operations(value, out);
+                    if let Some(value) = value {
+                        collect_expr_operations(value, out);
+                    }
                 }
                 OrFallback::Panic { args, .. } => for argument in args { collect_expr_operations(&argument.expr, out); },
                 OrFallback::Return(None, _)

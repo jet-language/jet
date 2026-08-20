@@ -45,7 +45,7 @@ pub(super) fn layout_constraint_fingerprint(e: &Expr) -> String {
             [crate::AST::StrPart::Lit(s)] => format!("{:?}", s),
             _ => "<str>".to_string(),
         },
-        Expr::Float(f, _, _) => f.to_string(),
+        Expr::Float(f, _, _, _) => f.to_string(),
         Expr::Int(i, _, _, _) => i.to_string(),
         _ => "<?>".to_string(),
     }

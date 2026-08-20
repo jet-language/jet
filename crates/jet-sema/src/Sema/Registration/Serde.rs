@@ -802,6 +802,59 @@ fn ordered_encode_fields(
     }
 }
 
+fn serde_decode_error_body(
+    error_name: &str,
+    missing: Option<&str>,
+    key: Option<&str>,
+    span: Span,
+) -> Vec<Stmt> {
+    let mut body = Vec::new();
+    if let (Some(missing), Some(key)) = (missing, key) {
+        body.push(if_stmt(
+            ident(missing, span),
+            vec![expr_stmt(method(
+                ident("jet_serde_errors", span),
+                "push",
+                vec![field_error(
+                    key,
+                    &format!("E2410: missing required field `{key}`"),
+                    span,
+                )],
+                span,
+            ))],
+            span,
+        ));
+        body.push(if_stmt(
+            unary_not(ident(missing, span), span),
+            vec![for_each(
+                "jet_serde_field_error",
+                ident(error_name, span),
+                vec![expr_stmt(method(
+                    ident("jet_serde_errors", span),
+                    "push",
+                    vec![ident("jet_serde_field_error", span)],
+                    span,
+                ))],
+                span,
+            )],
+            span,
+        ));
+    } else {
+        body.push(for_each(
+            "jet_serde_field_error",
+            ident(error_name, span),
+            vec![expr_stmt(method(
+                ident("jet_serde_errors", span),
+                "push",
+                vec![ident("jet_serde_field_error", span)],
+                span,
+            ))],
+            span,
+        ));
+    }
+    body
+}
+
 fn struct_decode_body(s: &crate::AST::StructDef, span: Span) -> Vec<Stmt> {
     let mut body = vec![binding(
         "jet_serde_errors",
@@ -881,7 +934,17 @@ fn struct_decode_body(s: &crate::AST::StructDef, span: Span) -> Vec<Stmt> {
             serde_default_expr(field).unwrap_or_else(|| serde_zero_expr(&field.ty, span))
         } else if has_marker(&field.serde_markers, crate::Syntax::MARKER_FLATTEN) {
             let result = format!("jet_serde_decode_{}", field.name);
-            let value = format!("jet_serde_decoded_value_{}", decoded.len());
+            let index = decoded.len();
+            let slot = format!("jet_serde_field_value_{index}");
+            let value = format!("jet_serde_decoded_value_{index}");
+            let ok_value = format!("jet_serde_ok_value_{index}");
+            body.push(binding(
+                &slot,
+                Some(Type::Option(Box::new(field.ty.clone()))),
+                Expr::Absent(span),
+                true,
+                span,
+            ));
             body.push(binding(
                 &result,
                 None,
@@ -889,7 +952,20 @@ fn struct_decode_body(s: &crate::AST::StructDef, span: Span) -> Vec<Stmt> {
                 false,
                 span,
             ));
-            decoded.push((result, value.clone(), None, None));
+            let error_name = format!("jet_serde_field_errors_{index}");
+            body.push(pattern_switch(
+                ident(&result, span),
+                "Ok",
+                vec![ok_value.clone()],
+                vec![assign_local(
+                    &slot,
+                    Expr::Present(Box::new(ident(&ok_value, span)), span),
+                    span,
+                )],
+                Some(serde_decode_error_body(&error_name, None, None, span)),
+                span,
+            ));
+            decoded.push((slot, value.clone(), None, None));
             ident(&value, span)
         } else {
             let key = serde_field_key(&s.serde_markers, field);
@@ -913,8 +989,18 @@ fn struct_decode_body(s: &crate::AST::StructDef, span: Span) -> Vec<Stmt> {
             } else {
                 or_fallback(method(ident("tree", span), "field", vec![string_expr(&key, span)], span), data_tree_null(span), span)
             };
+            let index = decoded.len();
             let result = format!("jet_serde_decode_{}", field.name);
-            let value = format!("jet_serde_decoded_value_{}", decoded.len());
+            let slot = format!("jet_serde_field_value_{index}");
+            let value = format!("jet_serde_decoded_value_{index}");
+            let ok_value = format!("jet_serde_ok_value_{index}");
+            body.push(binding(
+                &slot,
+                Some(Type::Option(Box::new(field.ty.clone()))),
+                Expr::Absent(span),
+                true,
+                span,
+            ));
             body.push(binding(
                 &result,
                 None,
@@ -926,7 +1012,25 @@ fn struct_decode_body(s: &crate::AST::StructDef, span: Span) -> Vec<Stmt> {
                 false,
                 span,
             ));
-            decoded.push((result, value.clone(), missing, Some(key)));
+            let error_name = format!("jet_serde_field_errors_{index}");
+            body.push(pattern_switch(
+                ident(&result, span),
+                "Ok",
+                vec![ok_value.clone()],
+                vec![assign_local(
+                    &slot,
+                    Expr::Present(Box::new(ident(&ok_value, span)), span),
+                    span,
+                )],
+                Some(serde_decode_error_body(
+                    &error_name,
+                    missing.as_deref(),
+                    Some(&key),
+                    span,
+                )),
+                span,
+            ));
+            decoded.push((slot, value.clone(), missing, Some(key)));
             ident(&value, span)
         };
         field_values.push((field.name.clone(), value));
@@ -964,58 +1068,6 @@ fn struct_decode_body(s: &crate::AST::StructDef, span: Span) -> Vec<Stmt> {
         ));
     }
 
-    for (index, (result, _, missing, key)) in decoded.iter().enumerate() {
-        let error_name = format!("jet_serde_field_errors_{index}");
-        let mut on_error = Vec::new();
-        if let (Some(missing), Some(key)) = (missing, key) {
-            on_error.push(if_stmt(
-                ident(missing, span),
-                vec![expr_stmt(method(
-                    ident("jet_serde_errors", span),
-                    "push",
-                    vec![field_error(key, &format!("E2410: missing required field `{key}`"), span)],
-                    span,
-                ))],
-                span,
-            ));
-            on_error.push(if_stmt(
-                unary_not(ident(missing, span), span),
-                vec![for_each(
-                    "jet_serde_field_error",
-                    ident(&error_name, span),
-                    vec![expr_stmt(method(
-                        ident("jet_serde_errors", span),
-                        "push",
-                        vec![ident("jet_serde_field_error", span)],
-                        span,
-                    ))],
-                    span,
-                )],
-                span,
-            ));
-        } else {
-            on_error.push(for_each(
-                "jet_serde_field_error",
-                ident(&error_name, span),
-                vec![expr_stmt(method(
-                    ident("jet_serde_errors", span),
-                    "push",
-                    vec![ident("jet_serde_field_error", span)],
-                    span,
-                ))],
-                span,
-            ));
-        }
-        body.push(pattern_switch(
-            copy(ident(result, span), span),
-            "Err",
-            vec![error_name],
-            on_error,
-            Some(Vec::new()),
-            span,
-        ));
-    }
-
     let mut success = Vec::new();
     let decoded_lit = struct_literal(
         target_type_name(&s.name),
@@ -1039,10 +1091,10 @@ fn struct_decode_body(s: &crate::AST::StructDef, span: Span) -> Vec<Stmt> {
             span,
         ));
     }
-    for (result, value, _, _) in decoded.iter().rev() {
+    for (slot, value, _, _) in decoded.iter().rev() {
         success = vec![pattern_switch(
-            copy(ident(result, span), span),
-            "Ok",
+            ident(slot, span),
+            "Val",
             vec![value.clone()],
             success,
             Some(Vec::new()),
@@ -1781,7 +1833,7 @@ fn serde_zero_expr(ty: &Type, span: Span) -> Expr {
     match ty {
         Type::Int | Type::IntN { .. } => Expr::Int(0, span, None, None),
         Type::InlineRange { lo, .. } => Expr::Int(*lo, span, None, None),
-        Type::Float | Type::Float32 => Expr::Float(0.0, span, matches!(ty, Type::Float32)),
+        Type::Float | Type::Float32 => Expr::Float(0.0, span, matches!(ty, Type::Float32), None),
         Type::Bool => Expr::Bool(false, span),
         Type::String => string_expr("", span),
         Type::Option(_) => Expr::Absent(span),
@@ -1812,7 +1864,7 @@ fn serde_default_expr(field: &crate::AST::Field) -> Option<Expr> {
 fn serde_ct_expr(value: &CtValue, span: Span) -> Option<Expr> {
     Some(match value {
         CtValue::Int(value) => Expr::Int(*value, span, None, None),
-        CtValue::Float(value) => Expr::Float(value.as_f64(), span, false),
+        CtValue::Float(value) => Expr::Float(value.as_f64(), span, false, None),
         CtValue::Bool(value) => Expr::Bool(*value, span),
         CtValue::Char(value) => Expr::Char(*value, span),
         CtValue::Str(value) => string_expr(value, span),

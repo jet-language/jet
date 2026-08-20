@@ -2011,6 +2011,12 @@ fn emit_tir_stmt(
                     out.push_str(&format!("{}}}\n", ip));
                     out.push_str(&format!("{}}}\n", pad));
                 }
+                // `.measure` is a selection marker. The generated test body
+                // remains ordinary code; the harness decides whether to run it
+                // once or collect timing samples.
+                ScopeMemberKind::Measure => {
+                    emit_tir_stmts_nested(body, cx, out, indent, active_deferred_closes);
+                }
                 // `.skip` (region form) — not executed. `if false` keeps the body
                 // type-checked but dead; whole-test skip is the harness's job.
                 ScopeMemberKind::Skip => {

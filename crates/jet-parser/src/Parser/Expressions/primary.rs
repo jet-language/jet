@@ -255,9 +255,9 @@ impl<'a> Parser<'a> {
                     let span = self.bump().span;
                     Ok(Expr::Int(n, span, None, Some(raw)))
                 }
-                TokKind::Float(v) => {
+                TokKind::Float(v, raw) => {
                     let span = self.bump().span;
-                    Ok(Expr::Float(v, span, false))
+                    Ok(Expr::Float(v, span, false, Some(raw)))
                 }
                 // D-UNITLIT1: `500ms`, `12.50usd` — a numeric literal with a unit
                 // suffix. The lexer already separated the exponent form; anything
@@ -935,7 +935,7 @@ impl<'a> Parser<'a> {
                                 match &tok.kind {
                                     TokKind::Ident(name) => label.push_str(name),
                                     TokKind::Int(n, _) => label.push_str(&n.to_string()),
-                                    TokKind::Float(n) => label.push_str(&n.to_string()),
+                                    TokKind::Float(n, _) => label.push_str(&n.to_string()),
                                     TokKind::Dot => label.push('.'),
                                     TokKind::LParen => label.push('('),
                                     TokKind::RParen => label.push(')'),

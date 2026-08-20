@@ -865,13 +865,83 @@ fn decode_error(path: impl Into<String>, reason: impl Into<String>) -> CtValue {
     }])
 }
 
-/// D-MIGRATE3=A: `MigrationStatus` for a record that arrived in the current
-/// shape — `jet_std::MigrationStatus::fresh()`.
+fn env_config_secret_path(path: &str) -> bool {
+    path.split(['.', '[', ']']).any(|segment| {
+        matches!(
+            segment.to_ascii_lowercase().as_str(),
+            "secret" | "password" | "token" | "key"
+        )
+    })
+}
+
+fn env_config_map_error(error: CtValue, origins: &[(String, String)]) -> CtValue {
+    let CtValue::List(errors) = error else {
+        return error;
+    };
+    CtValue::List(
+        errors
+            .into_iter()
+            .map(|entry| {
+                let CtValue::Struct {
+                    type_name,
+                    mut fields,
+                } = entry
+                else {
+                    return entry;
+                };
+                let path = fields.iter().find_map(|(name, value)| {
+                    (name == "path").then_some(value).and_then(|value| match value {
+                        CtValue::Str(path) => Some(path.clone()),
+                        _ => None,
+                    })
+                });
+                let reason = fields.iter().find_map(|(name, value)| {
+                    (name == "reason").then_some(value).and_then(|value| match value {
+                        CtValue::Str(reason) => Some(reason.clone()),
+                        _ => None,
+                    })
+                });
+                let Some(path) = path else {
+                    return CtValue::Struct { type_name, fields };
+                };
+                let reason = reason.unwrap_or_default();
+                let reason = if env_config_secret_path(&path) {
+                    "secret value rejected".to_string()
+                } else {
+                    reason
+                };
+                let origin = origins
+                    .iter()
+                    .find(|(_, mapped)| mapped.eq_ignore_ascii_case(&path))
+                    .map(|(name, _)| name.as_str());
+                let reason = match origin {
+                    Some(name) => format!("E2416: env var {name} -> {path}: {reason}"),
+                    None => format!("E2416: config field {path}: {reason}"),
+                };
+                if let Some((_, value)) = fields.iter_mut().find(|(name, _)| name == "reason") {
+                    *value = CtValue::Str(reason);
+                }
+                CtValue::Struct { type_name, fields }
+            })
+            .collect(),
+    )
+}
+
+fn env_config_map_result(value: CtValue, origins: &[(String, String)]) -> CtValue {
+    match value {
+        CtValue::Failed(CtReport::Told(error)) => {
+            CtValue::failed(Box::new(env_config_map_error(*error, origins)))
+        }
+        value => value,
+    }
+}
+
+/// Internal migration report for a record that arrived in the current shape.
 fn migration_status_fresh() -> CtValue {
     migration_status_value(false, String::new(), Vec::new())
 }
 
-/// D-MIGRATE4: `MigrationStatus` for a record that entered the chain at
+/// D-MIGRATE4: internal migration report for a record that entered the chain at
 /// historical shape `start` and was walked forward through `total` steps. The
 /// names come from the same vocabulary codegen bakes into the chain-walker.
 fn migration_status(start: usize, total: usize) -> CtValue {
@@ -886,7 +956,7 @@ fn migration_status(start: usize, total: usize) -> CtValue {
 
 fn migration_status_value(migrated: bool, from: String, steps: Vec<CtValue>) -> CtValue {
     CtValue::Struct {
-        type_name: "MigrationStatus".to_string(),
+        type_name: "JetMigrationStatus".to_string(),
         fields: vec![
             ("migrated".to_string(), CtValue::Bool(migrated)),
             ("from".to_string(), CtValue::Str(from)),
@@ -1514,6 +1584,9 @@ fn builtin_codec_name(ty: &Type) -> Option<&'static str> {
         "DateTime" => Some("DateTime"),
         "Duration" => Some("Duration"),
         "Decimal" => Some("Decimal"),
+        // D-CONFIG-ENV1: Secret has the same text wire form as the generated
+        // AOT Prelude impl; the carrier itself remains opaque/redacted.
+        "Secret" => Some("Secret"),
         _ => None,
     }
 }
@@ -1693,6 +1766,18 @@ fn builtin_codec_decode(tree: CtValue, name: &str) -> CtValue {
             _ => CtValue::failed(Box::new(decode_error(
                 "",
                 format!("expected Decimal, found {}", datatree_kind_for(&tree)),
+            ))),
+        },
+        "Secret" => match datatree_variant(&tree) {
+            Some(("Text", Some(CtValue::Str(text)))) => {
+                CtValue::Present(Box::new(CtValue::Struct {
+                    type_name: "Secret".to_string(),
+                    fields: vec![("bytes".to_string(), CtValue::Bytes(text.as_bytes().to_vec()))],
+                }))
+            }
+            _ => CtValue::failed(Box::new(decode_error(
+                "",
+                format!("expected Secret, found {}", datatree_kind_for(&tree)),
             ))),
         },
         _ => CtValue::failed(Box::new(decode_error(
@@ -2673,7 +2758,7 @@ impl<'a> EvalCtx<'a> {
             Type::Float | Type::Float32 => vec!["Float"],
             Type::Bool => vec!["Bool"],
             Type::String | Type::Char => vec!["Text"],
-            Type::Named(name) if name == "Decimal" => vec!["Text"],
+            Type::Named(name) if matches!(name.as_str(), "Decimal" | "Secret") => vec!["Text"],
             Type::List(_) | Type::FixedList { .. } => vec!["Array"],
             Type::Map { .. } | Type::Tuple(_) => vec!["Object"],
             Type::Shared(inner) | Type::Quantity { base: inner, .. } | Type::Tagged { inner, .. } => {
@@ -2821,7 +2906,7 @@ impl<'a> EvalCtx<'a> {
     }
 
     /// Replay the D-MIGRATE4 chain over a tree the current shape rejected.
-    /// `Ok` carries the migrated tree and the `MigrationStatus` describing the
+    /// `Ok` carries the migrated tree and an internal report describing the
     /// walk, the same `from`/`steps` the generated chain-walker reports.
     fn apply_codec_migration(
         &mut self,
@@ -2919,13 +3004,13 @@ impl<'a> EvalCtx<'a> {
         self.eval_datatree_decode_status(tree, ty, &mut None)
     }
 
-    /// D-MIGRATE3=A: `json|toml|yaml|csv . decode<T>` and `. decode_traced<T>`.
+    /// `json|toml|yaml|csv . decode<T>`.
     ///
     /// Marshalling only (I9). The tree comes from the codec's own parser, the
     /// one `apply_core_call` already hosts for `parse`; the value comes out of
-    /// the type's generated Decode TIR, the body AOT compiles. `decode` is
-    /// `decode_traced(…)?.value`, exactly as `jet_enc_*_decode` defines it, so
-    /// both spellings walk the same migration chain.
+    /// the type's generated Decode TIR, the body AOT compiles. The call applies
+    /// any published-schema migration chain silently, exactly as the Prelude
+    /// codec adapters define it.
     fn eval_typed_codec_decode(
         &mut self,
         module: &str,
@@ -2938,17 +3023,7 @@ impl<'a> EvalCtx<'a> {
         let Type::Result { ok, .. } = ret_ty else {
             return Err(shape());
         };
-        let traced = method == "decode_traced";
-        let target = if traced {
-            match &**ok {
-                Type::Apply { name, args } if name == "DecodeResult" => {
-                    args.first().cloned().ok_or_else(shape)?
-                }
-                _ => return Err(shape()),
-            }
-        } else {
-            (**ok).clone()
-        };
+        let target = (**ok).clone();
         let Some(CtValue::Str(text)) = argv.first() else {
             return Err(unsupported(
                 &format!("`{module}.{method}()` text argument"),
@@ -2961,21 +3036,11 @@ impl<'a> EvalCtx<'a> {
         } else {
             self.decode_codec_value(module, &target, text, span)?
         };
-        let (value, migration) = match decoded {
+        let (value, _) = match decoded {
             Ok(pair) => pair,
             Err(error) => return Ok(CtValue::failed(Box::new(error))),
         };
-        Ok(CtValue::Present(Box::new(if traced {
-            CtValue::Struct {
-                type_name: "DecodeResult".to_string(),
-                fields: vec![
-                    ("value".to_string(), value),
-                    ("migration".to_string(), migration),
-                ],
-            }
-        } else {
-            value
-        })))
+        Ok(CtValue::Present(Box::new(value)))
     }
 
     /// One whole record: parse, then decode. `Err` is the `[FieldError]` value.
@@ -3097,10 +3162,9 @@ impl<'a> EvalCtx<'a> {
         Ok(Ok((CtValue::List(values), migration)))
     }
 
-    /// `status` reports the D-MIGRATE3 `MigrationStatus` of the top-level
-    /// record. Only `decode_traced` asks for it; `eval_datatree_decode` passes
-    /// `None`, so a nested field that migrates cannot leak into its parent's
-    /// status — matching AOT, where nested fields call plain `jet_decode`.
+    /// `status` carries an internal top-level migration report. Nested fields
+    /// pass `None`, so a nested migration cannot leak into its parent's report;
+    /// this matches AOT, where nested fields call plain `jet_decode`.
     fn eval_datatree_decode_status(
         &mut self,
         tree: CtValue,
@@ -4764,6 +4828,83 @@ impl<'a> EvalCtx<'a> {
         ))
     }
 
+    fn eval_env_decode(
+        &mut self,
+        return_type: &Type,
+        args: &[CtValue],
+        source_span: Span,
+    ) -> Result<CtValue, Diagnostic> {
+        let Type::Result { ok, .. } = return_type else {
+            return Err(unsupported("core.sys.decode resolved return type", source_span));
+        };
+        let prefix = args
+            .first()
+            .cloned()
+            .unwrap_or_else(|| CtValue::Str(String::new()));
+        let file = args
+            .get(1)
+            .cloned()
+            .unwrap_or_else(|| CtValue::Str(".env".to_string()));
+        let allow = args
+            .get(2)
+            .cloned()
+            .unwrap_or_else(|| CtValue::List(Vec::new()));
+        let config = crate::Comptime::try_ambient_core_call_typed(
+            "core.sys",
+            "__env_config",
+            vec![prefix, file, allow],
+            source_span,
+            None,
+        )
+        .ok_or_else(|| unsupported("core.sys.decode runtime environment", source_span))??;
+        let config = match config {
+            CtValue::Present(value) => *value,
+            CtValue::Failed(CtReport::Told(error)) => {
+                return Ok(CtValue::Failed(CtReport::Told(error)));
+            }
+            _ => return Err(unsupported("core.sys.decode environment carrier", source_span)),
+        };
+        let CtValue::Struct { fields, .. } = config else {
+            return Err(unsupported("core.sys.decode environment record", source_span));
+        };
+        let field = |name: &str| {
+            fields
+                .iter()
+                .find_map(|(field, value)| (field == name).then_some(value))
+        };
+        let tree = field("tree")
+            .cloned()
+            .ok_or_else(|| unsupported("core.sys.decode environment tree", source_span))?;
+        let origins = match field("origins") {
+            Some(CtValue::List(entries)) => entries
+                .iter()
+                .filter_map(|entry| {
+                    let CtValue::Struct { fields, .. } = entry else {
+                        return None;
+                    };
+                    let name = fields.iter().find_map(|(field, value)| {
+                        (field == "name").then_some(value).and_then(|value| match value {
+                            CtValue::Str(name) => Some(name.clone()),
+                            _ => None,
+                        })
+                    })?;
+                    let path = fields.iter().find_map(|(field, value)| {
+                        (field == "path").then_some(value).and_then(|value| match value {
+                            CtValue::Str(path) => Some(path.clone()),
+                            _ => None,
+                        })
+                    })?;
+                    Some((name, path))
+                })
+                .collect::<Vec<_>>(),
+            _ => Vec::new(),
+        };
+        Ok(env_config_map_result(
+            self.eval_datatree_decode(tree, ok)?,
+            &origins,
+        ))
+    }
+
     fn eval_core_call_expr(
         &mut self,
         expr: &'a TExpr,
@@ -4826,8 +4967,8 @@ impl<'a> EvalCtx<'a> {
         if module == "core.compute" {
             return self.eval_core_compute_call(method, args, &expr.ty, source_span, scope);
         }
-        if module == "core.services" {
-            return self.eval_core_services_call(method, args, source_span, scope);
+        if module == "core.services" || module == "core.service" {
+            return self.eval_core_services_call(module, method, args, source_span, scope);
         }
         // I9: process-edge calls marshal into the evaluator's one runtime
         // boundary. Lexical cleanup remains owned by `run_func`; the boundary
@@ -4976,6 +5117,11 @@ impl<'a> EvalCtx<'a> {
         for a in args {
             argv.push(self.eval_expr_child(a, scope)?);
         }
+        // D-CONFIG-ENV1 / I9: source collection is an ambient marshalling
+        // step; the result enters the same DataTree decoder as JSON/TOML/CSV.
+        if self.runtime_execution && module == "core.sys" && method == "decode" {
+            return self.eval_env_decode(&expr.ty, &argv, source_span);
+        }
         // Hasher.update is lowered as a CoreCall so AOT and JIT share the
         // same Prelude symbol. The interpreter carrier is a structural value;
         // write its updated state back through the mutable receiver place.
@@ -5109,7 +5255,7 @@ impl<'a> EvalCtx<'a> {
                 | "core.encoding.toml"
                 | "core.encoding.yaml"
                 | "core.encoding.csv"
-        ) && matches!(method, "decode" | "decode_traced")
+        ) && method == "decode"
             && !(module == "core.encoding.json"
                 && method == "decode"
                 && crate::Codegen::TIR::emit::enc_ok_is_json(&expr.ty))
@@ -5557,10 +5703,14 @@ impl<'a> EvalCtx<'a> {
                 Ok(CtValue::Str(out))
             }
             TExprKind::Local(local) => {
-                let value = scope
-                .get(&local.name)
-                .cloned()
-                .or_else(|| self.globals.get(&local.name).cloned())
+                let value = local
+                    .persist_key
+                    .as_ref()
+                    .and_then(|persist_key| {
+                        jet_foundation::Persist::shared_read_key(persist_key)
+                    })
+                    .or_else(|| scope.get(&local.name).cloned())
+                    .or_else(|| self.globals.get(&local.name).cloned())
                     .ok_or_else(|| {
                         unsupported(&format!("unbound `{}`", local.name), self.span())
                     })?;
@@ -5648,7 +5798,8 @@ impl<'a> EvalCtx<'a> {
                         }
                     }
                 };
-                match self.exec_stmts(prefix, scope)? {
+                let result = (|| {
+                    match self.exec_stmts(prefix, scope)? {
                     Flow::Normal => {}
                     Flow::Return(value) => {
                         self.pending_return = Some(value);
@@ -5658,36 +5809,37 @@ impl<'a> EvalCtx<'a> {
                         self.pending_flow = Some(other);
                         return Err(unsupported("pending loop control", self.span()));
                     }
-                }
-                if let crate::Codegen::TIR::TStmt::Loop { label, body } = tail {
-                    let value = self.exec_loop_value(label.as_deref(), body, scope);
-                    restore(scope);
-                    return value;
-                }
-                let value = match tail {
-                    crate::Codegen::TIR::TStmt::ExprStmt(value) => self.eval_expr_child(value, scope),
-                    crate::Codegen::TIR::TStmt::Return(value) => {
-                        let value = match value {
-                            Some(value) => self.eval_expr_child(value, scope)?,
-                            None => CtValue::Unit,
-                        };
-                        self.pending_return = Some(value);
-                        Ok(CtValue::Unit)
                     }
-                    _ => match self.exec_stmt(tail, scope)? {
-                        Flow::Normal => Ok(CtValue::Unit),
-                        Flow::Return(value) => {
+                    if let crate::Codegen::TIR::TStmt::Loop { label, body } = tail {
+                        return self.exec_loop_value(label.as_deref(), body, scope);
+                    }
+                    match tail {
+                        crate::Codegen::TIR::TStmt::ExprStmt(value) => {
+                            self.eval_expr_child(value, scope)
+                        }
+                        crate::Codegen::TIR::TStmt::Return(value) => {
+                            let value = match value {
+                                Some(value) => self.eval_expr_child(value, scope)?,
+                                None => CtValue::Unit,
+                            };
                             self.pending_return = Some(value);
                             Ok(CtValue::Unit)
                         }
-                        other => {
-                            self.pending_flow = Some(other);
-                            Err(unsupported("pending loop control", self.span()))
-                        }
-                    },
-                };
+                        _ => match self.exec_stmt(tail, scope)? {
+                            Flow::Normal => Ok(CtValue::Unit),
+                            Flow::Return(value) => {
+                                self.pending_return = Some(value);
+                                Ok(CtValue::Unit)
+                            }
+                            other => {
+                                self.pending_flow = Some(other);
+                                Err(unsupported("pending loop control", self.span()))
+                            }
+                        },
+                    }
+                })();
                 restore(scope);
-                value
+                result
             }
             TExprKind::Uninit => match &expr.ty {
                 Type::FixedList { len, .. } => Ok(super::uninit_fixed_carrier(len.require_literal() as usize)),
@@ -8519,9 +8671,13 @@ impl<'a> EvalCtx<'a> {
                     return Err(unsupported("inc/dec place", self.span()));
                 };
                 let key = local.name.clone();
-                let cur = scope
-                    .get(&key)
-                    .cloned()
+                let cur = local
+                    .persist_key
+                    .as_ref()
+                    .and_then(|persist_key| {
+                        jet_foundation::Persist::shared_read_key(persist_key)
+                    })
+                    .or_else(|| scope.get(&key).cloned())
                     .or_else(|| self.globals.get(&key).cloned())
                     .unwrap_or(CtValue::Unit);
                 let n = as_int(&cur, self.span())?;

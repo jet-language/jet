@@ -933,6 +933,11 @@ pub const CORE_CALLS: &[CoreCallRecord] = &[
     CoreCallRecord::new("core.compute", "matmul_f32_tile", "jet_compute_matmul_f32_tile", true, &[true, true]),
     CoreCallRecord::new("core.compute", "profile_f32_strict", "jet_compute_profile_f32_strict", true, &[]),
     CoreCallRecord::new("core.compute", "profile_show", "jet_compute_profile_show", true, &[]),
+    // D-SERVICE1=D (#444): the typed declaration is a plain erased string
+    // payload at the engine boundary; the payload itself is produced only by
+    // the typed TIR lowering, and the Prelude owns its decoding.
+    CoreCallRecord::new("core.service", "tree", "jet_services_tree_declared", true, &[true]),
+    CoreCallRecord::new("core.service", "tree_show", "jet_services_tree_show", true, &[true]),
     CoreCallRecord::new("core.services", "restart_one_for_one", "jet_services_restart_one_for_one", true, &[]),
     CoreCallRecord::new("core.services", "restart_one_for_all", "jet_services_restart_one_for_all", true, &[]),
     CoreCallRecord::new("core.services", "restart_rest_for_one", "jet_services_restart_rest_for_one", true, &[]),

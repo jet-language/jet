@@ -384,7 +384,9 @@ fn expr_names(expr: &Expr, out: &mut Vec<Diagnostic>) {
                 OrFallback::Value(value) | OrFallback::Return(Some(value), _) => expr_names(value, out),
                 OrFallback::Block { body, value, .. } => {
                     stmt_names(body, out);
-                    expr_names(value, out);
+                    if let Some(value) = value {
+                        expr_names(value, out);
+                    }
                 }
                 OrFallback::Panic { args, .. } => for arg in args { expr_names(&arg.expr, out); },
                 OrFallback::Return(None, _)

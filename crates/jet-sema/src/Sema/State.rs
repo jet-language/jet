@@ -26,7 +26,7 @@
 //! field, a non-local receiver, a loop-carried position), the checker is **silent**
 //! rather than guessing (P1 — beginners never see a spurious error).
 
-use crate::Diagnostics::{Diagnostic, Span};
+use crate::Diagnostics::{Diagnostic, Span, TextEdit};
 use crate::Sema::FlowFacts::{FlowFacts, Plane};
 use crate::Sema::{KnowledgeGate, KnowledgePlane};
 use crate::Syntax::edit_distance;
@@ -840,7 +840,9 @@ impl<'a> StateCtx<'a> {
                     crate::AST::OrFallback::Value(e) => self.check_expr(e),
                     crate::AST::OrFallback::Block { body, value, .. } => {
                         self.check_block(body);
-                        self.check_expr(value);
+                        if let Some(value) = value {
+                            self.check_expr(value);
+                        }
                     }
                     crate::AST::OrFallback::Return(Some(e), _) => self.check_expr(e),
                     _ => {}
@@ -1027,14 +1029,15 @@ mod tests {
 /// state name that is not in the `state TypeName { … }` declaration for that type.
 /// Includes a typo suggestion when the edit distance is ≤ 2.
 pub fn e0151(state: &str, type_name: &str, candidates: &[&str], span: Span) -> Diagnostic {
-    let fix = if let Some(c) = candidates.first() {
+    let suggestion = candidates.first().copied();
+    let fix = if let Some(c) = suggestion {
         format!("did you mean `{c}`?  Check the `state {type_name} {{ … }}` block for valid names")
     } else {
         format!(
             "add `{state}` to the `state {type_name} {{ … }}` declaration, or correct the spelling"
         )
     };
-    Diagnostic::error(
+    let mut diagnostic = Diagnostic::error(
         "E0151",
         format!("`{state}` is not a declared state of `{type_name}`"),
         format!(
@@ -1044,7 +1047,14 @@ pub fn e0151(state: &str, type_name: &str, candidates: &[&str], span: Span) -> D
         ),
         fix,
         Some(span),
-    )
+    );
+    if let Some(candidate) = suggestion {
+        diagnostic = diagnostic.with_edit(TextEdit {
+            span,
+            new_text: candidate.to_string(),
+        });
+    }
+    diagnostic
 }
 
 /// L0151 (D-STATE-DECL): a declared state has no outgoing `#Transition(S, …)`,

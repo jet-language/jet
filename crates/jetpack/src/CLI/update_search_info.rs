@@ -254,6 +254,22 @@ pub(super) fn cmd_explain(theme: &Theme, parsed: &Parsed) -> i32 {
     if query.starts_with("package-overlay:") {
         return cmd_explain_overlay(theme, query);
     }
+    if Syntax::lookup(query).is_some() {
+        let explanation = jet_cli::Explain::lookup(query)
+            .expect("Syntax::lookup and Explain::lookup must share the dictionary");
+        print!("{}", jet_cli::Explain::render(&explanation, theme.color));
+        return 0;
+    }
+    if Syntax::looks_like_query(query) {
+        let closest = Syntax::nearest(query)
+            .map(Syntax::display)
+            .unwrap_or_else(|| "a registered syntax token".to_string());
+        let diagnostic = jet_foundation::Registry::diagnostic("E2106")
+            .expect("E2106 is registered for unknown syntax-token explanations");
+        let rendered = diagnostic.render(&[("token", query), ("closest", closest.as_str())]);
+        theme.error_coded(diagnostic.code, &rendered.what, &rendered.why, &rendered.fix);
+        return 2;
+    }
     let roots = Store::resolve();
     let package = query
         .split_once(':')

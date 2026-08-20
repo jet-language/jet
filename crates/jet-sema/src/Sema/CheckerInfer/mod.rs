@@ -94,6 +94,31 @@ pub(crate) fn exact_integer_fits(value: &crate::Numeric::CtBigInt, lo: i128, hi:
         && value.compare(&upper) != std::cmp::Ordering::Greater
 }
 
+/// D-TYPE2-DEFAULT1: build the one exact Decimal literal path. The parser and
+/// sema use this node for untyped decimal source, while the existing direct
+/// Decimal call lowers through the shared Prelude on every execution tier.
+pub(crate) fn exact_decimal_literal(text: String, span: crate::Diagnostics::Span) -> crate::AST::Expr {
+    crate::AST::Expr::Call(crate::AST::Call {
+        name: crate::Syntax::TYPE_DECIMAL.to_string(),
+        name_span: span,
+        type_args: Vec::new(),
+        args: vec![crate::AST::CallArg {
+            convention: crate::AST::AccessConvention::Read,
+            expr: crate::AST::Expr::Str(
+                vec![crate::AST::StrPart::Lit(text)],
+                span,
+            ),
+            span,
+            flags: crate::AST::CallArgFlags::default(),
+            label: None,
+            spread: false,
+        }],
+        resolved_ret: None,
+        range_checked: false,
+        widen_approx: false,
+    })
+}
+
 /// D-ITER1: returns true when `ty` or an immediate inner layer is `Type::Tuple`.
 /// Used to decide whether to store `resolved_ret` on a `MethodCall` node so that
 /// `Tuples.rs` can collect the JetTup_ shape for `indexed`/`zip`/`partition`.

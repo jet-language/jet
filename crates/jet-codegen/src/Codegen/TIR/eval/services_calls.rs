@@ -12,6 +12,7 @@ use super::EvalCtx;
 impl<'a> EvalCtx<'a> {
     pub(super) fn eval_core_services_call(
         &mut self,
+        module: &str,
         method: &str,
         args: &'a [TExpr],
         source_span: Span,
@@ -21,9 +22,9 @@ impl<'a> EvalCtx<'a> {
         for a in args {
             argv.push(self.eval_expr(a, scope)?);
         }
-        if method == "runtime" {
+        if module == "core.services" && method == "runtime" {
             if let Some(result) = crate::Comptime::try_ambient_core_call(
-                "core.services",
+                module,
                 method,
                 argv.clone(),
                 source_span,
@@ -72,7 +73,7 @@ impl<'a> EvalCtx<'a> {
                 ],
             });
         }
-        let result = apply_core_call("core.services", method, argv, source_span, self.repl_mode)?;
+        let result = apply_core_call(module, method, argv, source_span, self.repl_mode)?;
         // Any `mutate_ok` carrier must write the updated tree back (I9). The
         // early allowlist only covered the #444 tree slice and missed
         // delivery/workflow/handoff mutators (#1148–#1153).

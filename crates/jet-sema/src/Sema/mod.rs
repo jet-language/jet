@@ -1532,10 +1532,6 @@ pub(crate) struct Checker<'a> {
     /// D-PRELUDEX1=A: true when the enclosing file declared `#NoPrelude`.
     /// Disables readable Core prelude resolution for this body.
     no_prelude: bool,
-    /// D-NOALLOC-SEM1=A / D-FAIL-CONV2=A: a `policy no_alloc` file cannot use
-    /// the default `Err` (it carries an owned message), so the shipped family
-    /// conversion is not opened onto it.
-    no_alloc: bool,
     /// D-PREPOST1: true while type-checking a `#Pre` clause's condition —
     /// `result` isn't bound yet at function entry, so a reference to it here
     /// is E0144 instead of the normal "undefined name" error.
@@ -1796,9 +1792,9 @@ impl<'a> Checker<'a> {
                     && args.len() == 1 =>
             {
                 match &args[0].expr {
-                    Expr::Float(value, _, _) => Some(*value),
+                    Expr::Float(value, _, _, _) => Some(*value),
                     Expr::Unary(crate::AST::UnOp::Neg, inner, _) => match &**inner {
-                        Expr::Float(value, _, _) => Some(-*value),
+                        Expr::Float(value, _, _, _) => Some(-*value),
                         _ => None,
                     },
                     _ => None,
@@ -2279,6 +2275,7 @@ mod CheckerReferences;
 mod State;
 mod Taint;
 mod KnowledgeLoss;
+mod TargetSurface;
 mod App;
 mod WebPartition;
 
@@ -2316,6 +2313,7 @@ pub use CognitiveComplexity::{cognitive_complexity_reports, CognitiveComplexityR
 pub use Diagnostics::type_requires_owned_iteration;
 pub(crate) use Effects::*;
 pub(crate) use Purity::*;
+pub use TargetSurface::check_target_surface;
 pub use Registration::*;
 pub(crate) use Taint::check_func_taint;
 pub(crate) use FFI::*;
@@ -2358,7 +2356,8 @@ pub(crate) use CheckerMarkers::{check_declared_rule_facts, check_marker_vocabula
 pub(crate) use CheckerSchedule::{check_every_marker, check_job_collisions};
 pub use Effects::{
     builtin_effect, core_effect, effect_covers, effect_root, effect_row_var, effect_set_has_root,
-    parse_effect_name, resolve_effect_name, show_set, undeclared_effect, Effect, EffectSet,
+    memory_allocation_bound, parse_effect_name, resolve_effect_name, show_set, undeclared_effect,
+    Effect, EffectSet,
 };
 pub use Purity::{check_pure_fn, check_pure_program_root, e3401, e3402, e3403};
 pub use Registration::effect_key;

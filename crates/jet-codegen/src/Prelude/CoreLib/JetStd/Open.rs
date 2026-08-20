@@ -272,7 +272,6 @@ mod jet_std {
                 self.epoch = 1;
             }
         }
-
     }
 
     impl Default for RegexFlags {
@@ -473,15 +472,19 @@ mod jet_std {
         pub fn matches(&self, text: &str) -> Vec<JetRegexMatch> {
             let shared = std::sync::Arc::<str>::from(text);
             let mut out = Vec::new();
-            let mut pos = 0;
-            while pos <= text.len() {
-                let Some(m) = self.find_from_shared(&shared, pos) else {
-                    break;
-                };
-                let (start, end) = m.span;
-                out.push(m);
-                pos = regex_next_search_pos(text, start, end);
-            }
+            regex_scan(
+                &self.program,
+                &self.flags,
+                self.groups,
+                text,
+                0,
+                false,
+                false,
+                |run| {
+                    out.push(self.make_match(&shared, run.span));
+                    true
+                },
+            );
             out
         }
 
@@ -505,21 +508,29 @@ mod jet_std {
         }
 
         pub fn split_limit(&self, text: &str, limit: i64) -> Vec<String> {
-            let shared = std::sync::Arc::<str>::from(text);
             let mut out = Vec::new();
             let mut pos = 0;
             let mut splits = 0i64;
-            while pos <= text.len() {
-                if limit > 0 && splits >= limit - 1 {
-                    break;
-                }
-                let Some(m) = self.find_from_shared(&shared, pos) else {
-                    break;
-                };
-                let (start, end) = m.span;
-                out.push(text[pos..start].to_string());
-                pos = regex_next_search_pos(text, start, end);
-                splits += 1;
+            if limit != 1 {
+                regex_scan(
+                    &self.program,
+                    &self.flags,
+                    self.groups,
+                    text,
+                    0,
+                    false,
+                    false,
+                    |run| {
+                        if limit > 0 && splits >= limit - 1 {
+                            return false;
+                        }
+                        let (start, end) = run.span;
+                        out.push(text[pos..start].to_string());
+                        pos = regex_next_search_pos(text, start, end);
+                        splits += 1;
+                        true
+                    },
+                );
             }
             out.push(text[pos.min(text.len())..].to_string());
             out
@@ -532,18 +543,23 @@ mod jet_std {
             let shared = std::sync::Arc::<str>::from(text);
             let mut out = String::new();
             let mut pos = 0;
-            while pos <= text.len() {
-                let Some(m) = self.find_from_shared(&shared, pos) else {
-                    break;
-                };
-                let (start, end) = m.span;
-                out.push_str(&text[pos..start]);
-                out.push_str(&repl(&m));
-                pos = regex_next_search_pos(text, start, end);
-                if !all {
-                    break;
-                }
-            }
+            regex_scan(
+                &self.program,
+                &self.flags,
+                self.groups,
+                text,
+                0,
+                false,
+                false,
+                |run| {
+                    let (start, end) = run.span;
+                    out.push_str(&text[pos..start]);
+                    let mat = self.make_match(&shared, run.span);
+                    out.push_str(&repl(&mat));
+                    pos = regex_next_search_pos(text, start, end);
+                    all
+                },
+            );
             out.push_str(&text[pos.min(text.len())..]);
             out
         }
@@ -558,15 +574,6 @@ mod jet_std {
             text: &std::sync::Arc<str>,
             start: usize,
         ) -> Option<JetRegexMatch> {
-            if let Some(literal) = self.program.literal.as_deref() {
-                if !self.flags.case_insensitive {
-                    let candidate = regex_find_literal(text.as_bytes(), literal, start)?;
-                    return Some(self.make_match(
-                        text,
-                        (candidate, candidate + literal.len()),
-                    ));
-                }
-            }
             regex_run(
                 &self.program,
                 &self.flags,
@@ -1211,30 +1218,13 @@ mod jet_std {
         }
     }
 
-    fn regex_matcher_next(
-        matcher: &RegexMatcher,
-        text: &str,
-        pos: usize,
-        flags: &RegexFlags,
-    ) -> Option<usize> {
-        if let RegexMatcher::Literal(expected) = matcher {
-            if !flags.case_insensitive {
-                let mut encoded = [0; 4];
-                let bytes = expected.encode_utf8(&mut encoded).as_bytes();
-                return text.as_bytes()[pos..]
-                    .starts_with(bytes)
-                    .then_some(pos + bytes.len());
-            }
-        }
-        let ch = text[pos..].chars().next()?;
-        let next = pos + ch.len_utf8();
-        let matches = match matcher {
+    fn regex_matcher_matches(matcher: &RegexMatcher, ch: char, flags: &RegexFlags) -> bool {
+        match matcher {
             RegexMatcher::Literal(expected) => super::jet_text_simple_fold(*expected as u32)
                 == super::jet_text_simple_fold(ch as u32),
             RegexMatcher::Any => flags.dotall || ch != '\n',
             RegexMatcher::Class(class) => regex_class_matches(class, ch, flags),
-        };
-        matches.then_some(next)
+        }
     }
 
     fn regex_class_matches(class: &RegexClass, ch: char, flags: &RegexFlags) -> bool {
@@ -1304,6 +1294,50 @@ mod jet_std {
         anchored: bool,
         capture: bool,
     ) -> Option<RegexRun> {
+        let mut result = None;
+        regex_scan(
+            program,
+            flags,
+            groups,
+            text,
+            start,
+            anchored,
+            capture,
+            |run| {
+                result = Some(run);
+                false
+            },
+        );
+        result
+    }
+
+    // Unanchored Thompson/Pike scan. Start threads enter one shared VM at each
+    // UTF-8 boundary until the leftmost match begins; then no overlapping start
+    // can win, so the state resets at the non-overlap boundary. The VM never
+    // restarts from every candidate position. Thread lists and epsilon stacks
+    // stay instruction-sized and reusable.
+    fn regex_scan<F>(
+        program: &RegexProgram,
+        flags: &RegexFlags,
+        groups: usize,
+        text: &str,
+        start: usize,
+        anchored: bool,
+        capture: bool,
+        mut on_match: F,
+    ) where
+        F: FnMut(RegexRun) -> bool,
+    {
+        if start > text.len() {
+            return;
+        }
+        if !anchored && !capture && !flags.case_insensitive {
+            if let Some(literal) = program.literal.as_deref() {
+                regex_scan_literal(text, literal, start, &mut on_match);
+                return;
+            }
+        }
+
         let mut current = RegexState::new(program.insts.len());
         let mut next = RegexState::new(program.insts.len());
         current.clear();
@@ -1312,7 +1346,7 @@ mod jet_std {
         let mut last_match = None;
 
         loop {
-            if !anchored || pos == start {
+            if winner_start.is_none() && (!anchored || pos == start) {
                 let caps = capture.then(|| vec![None; (groups + 1) * 2]);
                 regex_add_thread(
                     &mut current,
@@ -1328,21 +1362,30 @@ mod jet_std {
                 );
             }
 
-            if let Some(found) = current
+            let found_start = current
                 .threads
                 .iter()
-                .find(|thread| matches!(program.insts[thread.pc], RegexInst::Match))
-            {
-                if winner_start.is_none() {
-                    winner_start = Some(found.start);
-                }
-                if winner_start == Some(found.start) {
-                    let caps = found.caps.as_ref().map(|source| {
-                        let mut caps = source.clone();
-                        caps[0] = Some(found.start);
-                        caps[1] = Some(pos);
-                        caps
-                    });
+                .filter(|thread| matches!(program.insts[thread.pc], RegexInst::Match))
+                .map(|thread| thread.start)
+                .min();
+            if winner_start.is_none() {
+                winner_start = found_start;
+            }
+            if let Some(winner) = winner_start {
+                if let Some(found) = current.threads.iter().find(|thread| {
+                    thread.start == winner
+                        && matches!(program.insts[thread.pc], RegexInst::Match)
+                }) {
+                    let caps = if capture {
+                        found.caps.as_ref().map(|source| {
+                            let mut caps = source.clone();
+                            caps[0] = Some(found.start);
+                            caps[1] = Some(pos);
+                            caps
+                        })
+                    } else {
+                        None
+                    };
                     last_match = Some(RegexRun {
                         span: (found.start, pos),
                         caps,
@@ -1351,22 +1394,31 @@ mod jet_std {
             }
 
             if pos == text.len() {
-                return last_match;
+                let Some(run) = last_match.take() else {
+                    return;
+                };
+                let resume = regex_next_search_pos(text, run.span.0, run.span.1);
+                if !on_match(run) {
+                    return;
+                }
+                if resume > text.len() {
+                    return;
+                }
+                current.clear();
+                winner_start = None;
+                last_match = None;
+                pos = resume;
+                continue;
             }
             next.clear();
-            // Every thread at `pos` consumes the same input character, so the
-            // step is a property of the text, not of a thread's matcher —
-            // `regex_matcher_next` only ever returns this boundary. Computing
-            // it once keeps the Pike VM's one-clock invariant; binding it per
-            // thread left it out of scope for the advance below.
-            let Some(step) = text[pos..].chars().next() else {
-                return last_match;
+            let Some(ch) = text[pos..].chars().next() else {
+                return;
             };
-            let next_pos = pos + step.len_utf8();
+            let next_pos = pos + ch.len_utf8();
             for thread in &current.threads {
                 let RegexInst::Consume(matcher, Some(target)) = &program.insts[thread.pc]
                 else { continue };
-                if regex_matcher_next(matcher, text, pos, flags).is_none() {
+                if !regex_matcher_matches(matcher, ch, flags) {
                     continue;
                 };
                 if capture {
@@ -1401,7 +1453,19 @@ mod jet_std {
             std::mem::swap(&mut current, &mut next);
             if let Some(winner) = winner_start {
                 if !current.threads.iter().any(|thread| thread.start == winner) {
-                    return last_match;
+                    let Some(run) = last_match.take() else { return };
+                    let resume = regex_next_search_pos(text, run.span.0, run.span.1);
+                    if !on_match(run) {
+                        return;
+                    }
+                    if resume > text.len() {
+                        return;
+                    }
+                    current.clear();
+                    winner_start = None;
+                    last_match = None;
+                    pos = resume;
+                    continue;
                 }
             }
             pos = next_pos;
@@ -1498,21 +1562,187 @@ mod jet_std {
         None
     }
 
-    // I1: a byte scan does not earn `unsafe`. The win here is algorithmic —
-    // the literal prefilter means the VM only ever sees candidates — and this
-    // scan is a straight `position` over a byte slice, which LLVM vectorizes.
-    // Four hand-written `std::arch` variants (x86/x86_64 by avx2/sse2) once
-    // lived here; they widened the generated-`unsafe` surface that
-    // tests/golden.rs guards, for a constant factor nobody had measured. If a
-    // benchmark ever shows the intrinsics are needed, that is an owner-gated
-    // I1 carve-out with numbers attached, not a quiet helper.
+    fn regex_scan_literal<F>(
+        text: &str,
+        needle: &[u8],
+        start: usize,
+        mut on_match: F,
+    ) where
+        F: FnMut(RegexRun) -> bool,
+    {
+        let mut pos = start;
+        while let Some(candidate) = regex_find_literal(text.as_bytes(), needle, pos) {
+            let end = candidate + needle.len();
+            if !on_match(RegexRun {
+                span: (candidate, end),
+                caps: None,
+            }) {
+                return;
+            }
+            pos = regex_next_search_pos(text, candidate, end);
+            if pos > text.len() {
+                return;
+            }
+        }
+    }
+
+    // I1: SIMD helpers are the same vetted std::arch carve-out used by
+    // core.compute. Runtime dispatch keeps unsupported CPUs on scalar code.
     fn regex_find_byte(haystack: &[u8], needle: u8, start: usize) -> Option<usize> {
+        // JET_VETTED_UNSAFE_BEGIN: jet_regex_cpu_simd_dispatch
+        #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+        {
+            if is_x86_feature_detected!("avx2") {
+                return unsafe { regex_find_byte_avx2(haystack, needle, start) };
+            }
+            if is_x86_feature_detected!("sse2") {
+                return unsafe { regex_find_byte_sse2(haystack, needle, start) };
+            }
+        }
+        // JET_VETTED_UNSAFE_END: jet_regex_cpu_simd_dispatch
+        regex_find_byte_scalar(haystack, needle, start)
+    }
+
+    fn regex_find_byte_scalar(haystack: &[u8], needle: u8, start: usize) -> Option<usize> {
+        let mut pos = start.min(haystack.len());
+        while pos < haystack.len() && pos % 8 != 0 {
+            if haystack[pos] == needle {
+                return Some(pos);
+            }
+            pos += 1;
+        }
+        let repeated = u64::from_ne_bytes([needle; 8]);
+        const LOW_BITS: u64 = 0x0101_0101_0101_0101;
+        const HIGH_BITS: u64 = 0x8080_8080_8080_8080;
+        while haystack.len().saturating_sub(pos) >= 8 {
+            let mut bytes = [0u8; 8];
+            bytes.copy_from_slice(&haystack[pos..pos + 8]);
+            let different = u64::from_ne_bytes(bytes) ^ repeated;
+            if different.wrapping_sub(LOW_BITS) & !different & HIGH_BITS != 0 {
+                for offset in 0..8 {
+                    if haystack[pos + offset] == needle {
+                        return Some(pos + offset);
+                    }
+                }
+            }
+            pos += 8;
+        }
         haystack
-            .get(start..)?
+            .get(pos..)?
             .iter()
             .position(|byte| *byte == needle)
-            .map(|offset| start + offset)
+            .map(|offset| pos + offset)
     }
+
+    // JET_VETTED_UNSAFE_BEGIN: jet_regex_cpu_simd
+    #[cfg(target_arch = "x86_64")]
+    #[target_feature(enable = "avx2")]
+    unsafe fn regex_find_byte_avx2(
+        haystack: &[u8],
+        needle: u8,
+        start: usize,
+    ) -> Option<usize> {
+        use std::arch::x86_64::{
+            _mm256_cmpeq_epi8, _mm256_loadu_si256, _mm256_movemask_epi8, _mm256_set1_epi8,
+        };
+        let mut pos = start;
+        let target = _mm256_set1_epi8(needle as i8);
+        while pos <= haystack.len().saturating_sub(32) {
+            let chunk = _mm256_loadu_si256(haystack.as_ptr().add(pos).cast());
+            let mask = _mm256_movemask_epi8(_mm256_cmpeq_epi8(chunk, target)) as u32;
+            if mask != 0 {
+                return Some(pos + mask.trailing_zeros() as usize);
+            }
+            pos += 32;
+        }
+        haystack
+            .get(pos..)?
+            .iter()
+            .position(|byte| *byte == needle)
+            .map(|offset| pos + offset)
+    }
+
+    #[cfg(target_arch = "x86")]
+    #[target_feature(enable = "avx2")]
+    unsafe fn regex_find_byte_avx2(
+        haystack: &[u8],
+        needle: u8,
+        start: usize,
+    ) -> Option<usize> {
+        use std::arch::x86::{
+            _mm256_cmpeq_epi8, _mm256_loadu_si256, _mm256_movemask_epi8, _mm256_set1_epi8,
+        };
+        let mut pos = start;
+        let target = _mm256_set1_epi8(needle as i8);
+        while pos <= haystack.len().saturating_sub(32) {
+            let chunk = _mm256_loadu_si256(haystack.as_ptr().add(pos).cast());
+            let mask = _mm256_movemask_epi8(_mm256_cmpeq_epi8(chunk, target)) as u32;
+            if mask != 0 {
+                return Some(pos + mask.trailing_zeros() as usize);
+            }
+            pos += 32;
+        }
+        haystack
+            .get(pos..)?
+            .iter()
+            .position(|byte| *byte == needle)
+            .map(|offset| pos + offset)
+    }
+
+    #[cfg(target_arch = "x86_64")]
+    #[target_feature(enable = "sse2")]
+    unsafe fn regex_find_byte_sse2(
+        haystack: &[u8],
+        needle: u8,
+        start: usize,
+    ) -> Option<usize> {
+        use std::arch::x86_64::{
+            _mm_cmpeq_epi8, _mm_loadu_si128, _mm_movemask_epi8, _mm_set1_epi8,
+        };
+        let mut pos = start;
+        let target = _mm_set1_epi8(needle as i8);
+        while pos <= haystack.len().saturating_sub(16) {
+            let chunk = _mm_loadu_si128(haystack.as_ptr().add(pos).cast());
+            let mask = _mm_movemask_epi8(_mm_cmpeq_epi8(chunk, target)) as u32;
+            if mask != 0 {
+                return Some(pos + mask.trailing_zeros() as usize);
+            }
+            pos += 16;
+        }
+        haystack
+            .get(pos..)?
+            .iter()
+            .position(|byte| *byte == needle)
+            .map(|offset| pos + offset)
+    }
+
+    #[cfg(target_arch = "x86")]
+    #[target_feature(enable = "sse2")]
+    unsafe fn regex_find_byte_sse2(
+        haystack: &[u8],
+        needle: u8,
+        start: usize,
+    ) -> Option<usize> {
+        use std::arch::x86::{
+            _mm_cmpeq_epi8, _mm_loadu_si128, _mm_movemask_epi8, _mm_set1_epi8,
+        };
+        let mut pos = start;
+        let target = _mm_set1_epi8(needle as i8);
+        while pos <= haystack.len().saturating_sub(16) {
+            let chunk = _mm_loadu_si128(haystack.as_ptr().add(pos).cast());
+            let mask = _mm_movemask_epi8(_mm_cmpeq_epi8(chunk, target)) as u32;
+            if mask != 0 {
+                return Some(pos + mask.trailing_zeros() as usize);
+            }
+            pos += 16;
+        }
+        haystack
+            .get(pos..)?
+            .iter()
+            .position(|byte| *byte == needle)
+            .map(|offset| pos + offset)
+    }
+    // JET_VETTED_UNSAFE_END: jet_regex_cpu_simd
 
     fn regex_next_search_pos(text: &str, start: usize, end: usize) -> usize {
         if end > start {

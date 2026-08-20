@@ -108,7 +108,7 @@ pub fn e0995_no_workspace_module() -> Diagnostic {
             crate::Syntax::NS_WORKSPACE
         ),
         format!(
-            "`{}` is the monorepo workspace index (D-WORKSPACE2=A); it must contain exactly one `module {} {{ members: … }}` body",
+            "`{}` is the monorepo workspace index; it must contain exactly one `module {} {{ members: … }}` body",
             crate::Syntax::WORKSPACE_FILE,
             crate::Syntax::NS_WORKSPACE
         ),

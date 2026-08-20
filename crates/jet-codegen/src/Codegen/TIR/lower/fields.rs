@@ -386,20 +386,10 @@ pub(crate) fn ast_operand_is_integer(e: &Expr, env: &LowerEnv) -> Option<bool> {
 /// Returns `Some(plain_name)` for a known core-struct field (so it is emitted
 /// unprefixed, B2), `None` otherwise (the caller falls back to `mangle(member)`).
 pub(crate) fn core_struct_field_rust_name(cx: &Cx, recv_ty: &Type, member: &str) -> Option<String> {
-    // D-MIGRATE3=A: `DecodeResult<T>` is the one reserved core struct with a
-    // generic type argument (`Type::Apply`, not `Type::Named`) — handle it
-    // before the `Type::Named`-only path below. User-type-wins (D-SHIFT1
-    // precedent): a user struct named `DecodeResult` shadows the core one.
     if let Type::Apply { name, .. } = recv_ty {
         if name == "DataJoin"
             && !cx.type_names.contains(name)
             && matches!(member, "left" | "right")
-        {
-            return Some(member.to_string());
-        }
-        if name == "DecodeResult"
-            && !cx.type_names.contains(name)
-            && matches!(member, "value" | "migration")
         {
             return Some(member.to_string());
         }
@@ -426,8 +416,7 @@ pub(crate) fn core_struct_field_rust_name(cx: &Cx, recv_ty: &Type, member: &str)
     {
         return Some(member.to_string());
     }
-    // User structs named Point/Rect/Size/MigrationStatus keep `__jet_<field>`
-    // lowering (c133 M1 precedent; D-MIGRATE3=A extends it to `MigrationStatus`).
+    // User structs named Point/Rect/Size keep `__jet_<field>` lowering.
     let ui_name_collision = matches!(
         type_name.as_str(),
         "Point"
@@ -435,7 +424,6 @@ pub(crate) fn core_struct_field_rust_name(cx: &Cx, recv_ty: &Type, member: &str)
             | "Rect"
             | "SizeConstraint"
             | "UiNode"
-            | "MigrationStatus"
             | "DataGroup"
             | "DataLineOptions"
             | "DataPivotCell"
@@ -562,8 +550,6 @@ pub(crate) fn core_struct_field_rust_name(cx: &Cx, recv_ty: &Type, member: &str)
         ),
         "GameScene" => matches!(member, "assets" | "input"),
         "GameFrame" | "JetGameFrame" => matches!(member, "index" | "input"),
-        // D-MIGRATE3=A: `MigrationStatus` — `.migrated`/`.from`/`.steps`.
-        "MigrationStatus" => matches!(member, "migrated" | "from" | "steps"),
         n if n == Syntax::TYPE_MEMO_STATS => {
             matches!(member, "hits" | "misses" | "size" | "bound")
         }
@@ -657,8 +643,8 @@ pub(crate) fn struct_field_type(cx: &Cx, recv_ty: &Type, field: &str) -> Option<
                 .collect();
             return Some(crate::Generics::substitute_type(&field_ty, &subst));
         }
-        // D-MIGRATE3=A: a reserved core GENERIC (`DecodeResult<T>`,
-        // `DataJoin<L, R>`, `VjpRun<T>`, `Rotation<T>`) resolves its field
+        // A reserved core GENERIC (`DataJoin<L, R>`, `VjpRun<T>`, `Rotation<T>`)
+        // resolves its field
         // against its type arguments, so a chained access (`r.migration
         // .migrated`) types the intermediate instead of mis-mangling the next
         // field.

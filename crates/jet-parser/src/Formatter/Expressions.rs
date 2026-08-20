@@ -499,23 +499,8 @@ impl<'a> Fmt<'a> {
                     }
                 }
                 self.write(")");
-                if let Some(bound) = effect_bound {
-                    self.write(" ");
-                    self.write(Syntax::EFFECT_ARROW_OPEN);
-                    for (i, (name, _)) in bound.iter().enumerate() {
-                        if i > 0 {
-                            self.write(", ");
-                        }
-                        self.write(name);
-                    }
-                    self.write(Syntax::EFFECT_ARROW_CLOSE);
-                }
                 if let Some(r) = ret {
                     let unit_fallible = Self::is_unit_fallible_type(r);
-                    if effect_bound.is_none() && !unit_fallible {
-                        self.write(" ");
-                        self.write(Syntax::OP_UNIFIED_ARROW);
-                    }
                     if unit_fallible {
                         self.fmt_unit_fallible_return(r);
                     } else {
@@ -579,6 +564,17 @@ impl<'a> Fmt<'a> {
                         }
                     }
                     let _ = synthetic;
+                }
+                if let Some(bound) = effect_bound {
+                    self.write(" ");
+                    self.write(Syntax::EFFECT_ARROW_OPEN);
+                    for (i, (name, _)) in bound.iter().enumerate() {
+                        if i > 0 {
+                            self.write(", ");
+                        }
+                        self.write(name);
+                    }
+                    self.write(Syntax::EFFECT_ARROW_CLOSE);
                 }
             }
             Type::Named(n) if n == Syntax::INTERNAL_UNIT_TYPE => self.write(Syntax::TYPE_UNIT),
@@ -763,7 +759,7 @@ impl<'a> Fmt<'a> {
                 let text = int_literal_spelling(self.src, *span, *n, raw.as_deref());
                 self.write(&text);
             }
-            Expr::Float(v, _, _) => self.write(&fmt_float(*v)),
+            Expr::Float(v, _, _, _) => self.write(&fmt_float(*v)),
             // D-UNITLIT1: `500ms` — no space between the number and the suffix.
             Expr::UnitLit {
                 raw, suffix, ..
@@ -1823,13 +1819,15 @@ impl<'a> Fmt<'a> {
     pub(super) fn fmt_or_fallback(&mut self, fb: &OrFallback) {
         match fb {
             OrFallback::Value(e) => self.fmt_expr(e, Prec::OrFallback),
-            OrFallback::Block { body, value, .. } => {
-                if self.fallback_value_was_return(value) {
-                    self.fmt_fallback_return_block(body, value);
-                } else {
-                    self.fmt_value_block(body, value, false);
+            OrFallback::Block { body, value, .. } => match value {
+                Some(value) => self.fmt_value_block(body, value, false),
+                None => {
+                    self.write("{");
+                    self.newline();
+                    self.with_indent(|f| f.fmt_block_stmts(body));
+                    self.end_block();
                 }
-            }
+            },
             OrFallback::Return(expr, _) => {
                 self.write("return");
                 if let Some(e) = expr {
@@ -1853,44 +1851,6 @@ impl<'a> Fmt<'a> {
             }
             OrFallback::ContinueLabel(name, _) => self.write(&format!("next({name})")),
         }
-    }
-
-    /// True when the author wrote `?? { … return value }` rather than
-    /// `?? { … value }`. Both spellings fold to one `OrFallback::Block`, so the
-    /// source before the value's left edge is the only surviving evidence of the
-    /// authored `return` — and that edge is `expr_start`, never `span().start`:
-    /// for `?? { return frozen.value }` the anchor is the member name, so the
-    /// prefix ended in `return frozen.` and the keyword was silently dropped.
-    fn fallback_value_was_return(&self, value: &Expr) -> bool {
-        let Some(prefix) = self.src.get(..Self::expr_start(value)) else {
-            return false;
-        };
-        let Some(return_start) = prefix.rfind("return") else {
-            return false;
-        };
-        let before_is_boundary = return_start == 0
-            || !prefix[..return_start]
-                .chars()
-                .next_back()
-                .is_some_and(|ch| ch.is_ascii_alphanumeric() || ch == '_');
-        before_is_boundary
-            && prefix[return_start + "return".len()..]
-                .chars()
-                .all(char::is_whitespace)
-    }
-
-    fn fmt_fallback_return_block(&mut self, body: &[Stmt], value: &Expr) {
-        self.write("{");
-        self.newline();
-        self.with_indent(|f| {
-            f.fmt_block_stmts(body);
-            if !body.is_empty() {
-                f.newline();
-            }
-            f.write("return ");
-            f.fmt_expr(value, Prec::OrFallback);
-        });
-        self.end_block();
     }
 
     pub(super) fn fmt_pattern(&mut self, pat: &Pattern) {

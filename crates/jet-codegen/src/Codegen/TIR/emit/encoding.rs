@@ -86,29 +86,6 @@ pub(crate) fn enc_row_target_rust(ret_ty: &Type, cx: &Cx) -> String {
     }
     enc_target_rust(ret_ty, cx)
 }
-/// D-MIGRATE3=A: the Rust type a typed `decode_traced<T>` constructs — same
-/// target as [`enc_target_rust`], one layer deeper through the resolved
-/// `Result<DecodeResult<T | [T]>, [FieldError]>` return type.
-pub(crate) fn enc_target_rust_traced(ret_ty: &Type, cx: &Cx) -> String {
-    if let Type::Result { ok, .. } = ret_ty {
-        if let Type::Apply { args, .. } = &**ok {
-            if let Some(inner) = args.first() {
-                return cx.rust_type(inner);
-            }
-        }
-    }
-    cx.rust_type(ret_ty)
-}
-pub(crate) fn enc_row_target_rust_traced(ret_ty: &Type, cx: &Cx) -> String {
-    if let Type::Result { ok, .. } = ret_ty {
-        if let Type::Apply { args, .. } = &**ok {
-            if let Some(Type::List(elem)) = args.first() {
-                return cx.rust_type(elem);
-            }
-        }
-    }
-    enc_target_rust_traced(ret_ty, cx)
-}
 pub(crate) fn enc_arg_is_json(args: &[TExpr]) -> bool {
     matches!(args.first().map(|a| &a.ty), Some(Type::Named(n)) if enc_is_json_name(n))
 }

@@ -144,7 +144,10 @@ pub fn lookup(code: &str) -> Option<Explanation> {
             meaning: row.meaning.clone(),
             what: Some(format!("{}: {}", row.name, row.meaning)),
             why: Some(format!("owner decision {}", row.decision)),
-            fix: Some(format!("use `{}` at its registered syntax site", row.token)),
+            fix: Some(format!(
+                "use `{}` at its registered syntax site",
+                jet_foundation::Syntax::display(row)
+            )),
             example: Some(row.example.clone()),
             retired: false,
         });

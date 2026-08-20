@@ -1,8 +1,9 @@
 use super::*;
 use crate::AST::{
-    AccessConvention, ConstAttr, ConstDef, EnumDef, EnumGroup, ExternFn, ExternRustBlock, Field,
-    Func, ImplDef, ImportDecl, ImportKind, Item, Marker, MetaAttr, MetaField, Param, Pattern,
-    StructDef, TraitImplBlock, Type, TypeParam, Variant, VariantPayload,
+    AccessConvention, CModuleKind, CodeModule, ConstAttr, ConstDef, EnumDef, EnumGroup, ExternFn,
+    ExternRustBlock, Field, Func, GenericModuleDef, GenericModuleParam, ImplDef, ImportDecl,
+    ImportKind, Item, Marker, MetaAttr, MetaField, Param, Pattern, StructDef, TraitImplBlock, Type,
+    TypeParam, Variant, VariantPayload,
 };
 
 enum EnumFmtEntry<'b> {
@@ -96,9 +97,32 @@ impl TraitBodyMember<'_> {
     }
 }
 
-/// D-FMT-SIMPLIFY1=A: may this rendered expression be a `::` one-line function
-/// body? The parser reads that body with `expr_no_struct_lit`, which refuses a
-/// `{` opening in the bare expression spine — a `Type{ … }` construction or a
+/// One member of an inline or generic module body. Module imports and items
+/// live in separate AST vectors, so retain authored order while formatting.
+enum ModuleBodyEntry<'b> {
+    Import(&'b ImportDecl),
+    Item(&'b Item),
+}
+
+impl ModuleBodyEntry<'_> {
+    fn start(&self, src: &str) -> usize {
+        match self {
+            Self::Import(import) => import.span.start,
+            Self::Item(item) => item_span_start(item, src),
+        }
+    }
+
+    fn end(&self) -> usize {
+        match self {
+            Self::Import(import) => import.span.end,
+            Self::Item(item) => item_span_end(item),
+        }
+    }
+}
+
+/// D-FMT-SIMPLIFY1=A: may this rendered expression be a `:>` one-line function
+/// body? The parser reads that body with `expr`, which accepts a headless
+/// record literal after `:>` — a `Type{ … }` construction or a
 /// block lambda (`Parser/Items/functions_params.rs`,
 /// `Parser/Expressions/primary.rs`). Braces inside `(`/`[` reopen the ordinary
 /// expression grammar, and braces inside text are the lexer's business.
@@ -352,8 +376,9 @@ impl<'a> Fmt<'a> {
                 self.newline();
                 self.skip_verbatim_comments(declaration.span.end);
             }
-            // Stage 1a: modules are emitted verbatim (non-destructive). A
-            // canonical module formatter lands with the eval pipeline.
+            // Stage 1a: JetOS contribution modules retain their source-level
+            // contribution shape; inline code modules use the typed formatter
+            // below. Their bodies are not interchangeable ASTs.
             Item::Module(m) => {
                 if !self.fmt_perf_module(m) {
                     let text = self.src[m.span.start..m.span.end].to_string();
@@ -361,19 +386,13 @@ impl<'a> Fmt<'a> {
                     self.skip_verbatim_comments(m.span.end);
                 }
             }
-            // S59: C FFI modules are emitted verbatim (non-destructive). A
-            // canonical formatter can land alongside the bind backend.
-            Item::CModule(cm) => {
-                let text = self.src[cm.span.start..cm.span.end].to_string();
-                self.write(&text);
-                self.skip_verbatim_comments(cm.span.end);
-            }
-            // Code modules are emitted verbatim pending a dedicated formatter.
-            Item::CodeModule(cm) => {
-                let text = self.src[cm.span.start..cm.span.end].to_string();
-                self.write(&text);
-                self.skip_verbatim_comments(cm.span.end);
-            }
+            // S59: C FFI modules contain typed foreign declarations. Format
+            // their Jet signatures while leaving the foreign symbol strings
+            // untouched.
+            Item::CModule(cm) => self.fmt_c_module(cm),
+            // D-MOD2: inline code-module bodies are ordinary typed items and
+            // must receive the same expression rewrites as file-level items.
+            Item::CodeModule(cm) => self.fmt_code_module(cm),
             Item::Distinct(d) => self.fmt_distinct(d),
             // D-TYPEALIAS1 / D-ALIAS-OP1=B: aliases use the binding sigil.
             Item::TypeAlias(a) => self.fmt_type_alias(a),
@@ -428,16 +447,9 @@ impl<'a> Fmt<'a> {
                 self.newline();
                 self.skip_verbatim_comments(d.span.end);
             }
-            // D-CONF-GENSPELL1=A: generic module templates emitted verbatim (non-destructive)
-            // apart from the `pub`/`pub(package)` qualifier, which the span excludes
-            // (it starts at the `module` keyword) and must be re-added explicitly.
-            Item::GenericModule(gm) => {
-                self.fmt_pub_qualifier(gm.is_pub, gm.is_package_pub);
-                let text = self.src[gm.span.start..gm.span.end].to_string();
-                self.write(&text);
-                self.newline();
-                self.skip_verbatim_comments(gm.span.end);
-            }
+            // D-CONF-GENSPELL1=A: generic module templates are typed item
+            // templates, not opaque source strings.
+            Item::GenericModule(gm) => self.fmt_generic_module(gm),
             // D-CONF-GENSPELL1=A: module alias declarations emitted verbatim (non-destructive)
             // apart from the `pub`/`pub(package)` qualifier — see Item::GenericModule.
             Item::ModuleAlias(ma) => {
@@ -448,6 +460,141 @@ impl<'a> Fmt<'a> {
                 self.skip_verbatim_comments(ma.span.end);
             }
         }
+    }
+
+    fn fmt_module_body(&mut self, imports: &[ImportDecl], items: &[Item], span_end: usize) {
+        let mut entries = Vec::with_capacity(imports.len() + items.len());
+        entries.extend(imports.iter().map(ModuleBodyEntry::Import));
+        entries.extend(items.iter().map(ModuleBodyEntry::Item));
+        entries.sort_by_key(|entry| entry.start(self.src));
+
+        for (index, entry) in entries.iter().enumerate() {
+            if index > 0 {
+                self.blank_separator_before_item();
+            }
+            self.emit_leading(entry.start(self.src));
+            match entry {
+                ModuleBodyEntry::Import(import) => self.fmt_import(import),
+                ModuleBodyEntry::Item(item) => self.fmt_item(item),
+            }
+            self.emit_trailing(entry.end());
+        }
+        // Comments between the last body member and the closing brace have no
+        // following item to claim them. Consume only comments inside this
+        // module, leaving outer comments for the enclosing formatter.
+        self.emit_leading(span_end);
+    }
+
+    fn end_module_block(&mut self) {
+        if !self.at_line_start {
+            self.newline();
+        }
+        self.write("}");
+    }
+
+    fn fmt_code_module(&mut self, module: &CodeModule) {
+        self.fmt_pub_qualifier(module.is_pub, module.is_package_pub);
+        self.write("module ");
+        self.write(&module.name);
+        if let Some(target) = module.web_target {
+            self.write(" ");
+            self.write(target.name());
+        }
+        match &module.body {
+            None => self.write(";"),
+            Some(items) => {
+                self.write(" {");
+                self.newline();
+                self.with_indent(|f| f.fmt_module_body(&module.imports, items, module.span.end));
+                self.end_module_block();
+            }
+        }
+    }
+
+    fn fmt_generic_module(&mut self, module: &GenericModuleDef) {
+        self.fmt_pub_qualifier(module.is_pub, module.is_package_pub);
+        self.write("module ");
+        self.write(&module.name);
+
+        let type_params = module
+            .params
+            .iter()
+            .filter_map(|param| match param {
+                GenericModuleParam::Type { .. } => Some(param),
+                GenericModuleParam::Value { .. } => None,
+            })
+            .collect::<Vec<_>>();
+        if !type_params.is_empty() {
+            self.write("<");
+            for (index, param) in type_params.iter().enumerate() {
+                if index > 0 {
+                    self.write(", ");
+                }
+                let GenericModuleParam::Type { name, bound, .. } = param else {
+                    unreachable!("type parameter filter returned a value parameter");
+                };
+                self.write(name);
+                if let Some(bound) = bound {
+                    self.write(": ");
+                    self.fmt_type(bound);
+                }
+            }
+            self.write(">");
+        }
+
+        let value_params = module
+            .params
+            .iter()
+            .filter_map(|param| match param {
+                GenericModuleParam::Value { .. } => Some(param),
+                GenericModuleParam::Type { .. } => None,
+            })
+            .collect::<Vec<_>>();
+        if !value_params.is_empty() {
+            self.write("(");
+            for (index, param) in value_params.iter().enumerate() {
+                if index > 0 {
+                    self.write(", ");
+                }
+                let GenericModuleParam::Value { name, ty, .. } = param else {
+                    unreachable!("value parameter filter returned a type parameter");
+                };
+                self.write(name);
+                self.write(": ");
+                self.fmt_type(ty);
+            }
+            self.write(")");
+        }
+
+        self.write(" {");
+        self.newline();
+        self.with_indent(|f| f.fmt_module_body(&module.imports, &module.body, module.span.end));
+        self.end_module_block();
+    }
+
+    fn fmt_c_module(&mut self, module: &crate::AST::CModule) {
+        self.write(match module.kind {
+            CModuleKind::Extern => "#Extern module c.",
+            CModuleKind::Bindgen => "#Bindgen module c.",
+        });
+        self.write(&module.lib);
+        if matches!(module.kind, CModuleKind::Bindgen) {
+            self.write(".__bindgen__");
+        }
+        self.write(" {");
+        self.newline();
+        self.with_indent(|f| {
+            for (index, function) in module.functions.iter().enumerate() {
+                if index > 0 && !f.at_line_start {
+                    f.newline();
+                }
+                f.emit_leading(function.span.start);
+                f.fmt_extern_fn(function);
+                f.emit_trailing(function.span.end);
+            }
+            f.emit_leading(module.span.end);
+        });
+        self.end_module_block();
     }
 
     fn fmt_perf_module(&mut self, module: &crate::AST::ModuleDecl) -> bool {
@@ -570,7 +717,18 @@ impl<'a> Fmt<'a> {
                 f.write("(");
                 f.fmt_param_list(&m.params);
                 f.write(")");
-                // D-EFF3 / D-ARROW-CONTROL1: effect bound inside the callable arrow.
+                if let Some(ret) = &m.return_type {
+                    if Self::is_unit_fallible_type(ret) {
+                        f.fmt_unit_fallible_return(ret);
+                    } else {
+                        f.write(" ");
+                        f.fmt_return_type(ret);
+                    }
+                }
+                if let Some(map) = &m.declared_return_view_provenance {
+                    f.fmt_declared_return_view_from(map, &m.params);
+                }
+                // D-SIG-SHAPE1=B / D-EFF3: result first, effect ceiling second.
                 if let Some(effects) = &m.declared_effects {
                     let list = effects
                         .iter()
@@ -585,25 +743,6 @@ impl<'a> Fmt<'a> {
                     f.write(" ");
                     f.write(Syntax::EFFECT_ARROW_OPEN);
                     f.write(Syntax::EFFECT_ARROW_CLOSE);
-                } else if m.return_type.is_some()
-                    && !m
-                        .return_type
-                        .as_ref()
-                        .is_some_and(|ty| Self::is_unit_fallible_type(ty))
-                {
-                    f.write(" ");
-                    f.write(Syntax::OP_UNIFIED_ARROW);
-                }
-                if let Some(ret) = &m.return_type {
-                    if Self::is_unit_fallible_type(ret) {
-                        f.fmt_unit_fallible_return(ret);
-                    } else {
-                        f.write(" ");
-                        f.fmt_return_type(ret);
-                    }
-                }
-                if let Some(map) = &m.declared_return_view_provenance {
-                    f.fmt_declared_return_view_from(map, &m.params);
                 }
                 // D-LIB2: a trait method may carry a default body.
                 if let Some(body) = &m.default_body {
@@ -653,8 +792,6 @@ impl<'a> Fmt<'a> {
             if Self::is_unit_fallible_type(ret) {
                 self.fmt_unit_fallible_return(ret);
             } else {
-                self.write(" ");
-                self.write(Syntax::OP_UNIFIED_ARROW);
                 self.write(" ");
                 self.fmt_return_type(ret);
             }
@@ -963,7 +1100,23 @@ impl<'a> Fmt<'a> {
             self.fmt_param_list(&f.params);
         }
         self.write(")");
-        // D-ARROW-CONTROL1: effect row lives inside the callable arrow.
+        let unit_fallible = f
+            .return_type
+            .as_ref()
+            .is_some_and(|ty| Self::is_unit_fallible_type(ty));
+        if let Some(ret) = &f.return_type {
+            if unit_fallible {
+                self.fmt_unit_fallible_return(ret);
+            } else {
+                self.write(" ");
+                self.fmt_return_type(ret);
+            }
+        }
+        if let Some(map) = &f.declared_return_view_provenance {
+            self.fmt_declared_return_view_from(map, &f.params);
+        }
+        // D-SIG-SHAPE1=B / D-ARROW-CONTROL1: the result is bare, then the
+        // effect ceiling owns the body-arrow position.
         if let Some(effects) = &f.declared_effects {
             self.write(" ");
             self.write(Syntax::EFFECT_ARROW_OPEN);
@@ -979,7 +1132,6 @@ impl<'a> Fmt<'a> {
             self.write(Syntax::EFFECT_ARROW_OPEN);
             self.write(Syntax::EFFECT_ARROW_CLOSE);
         }
-        // D-EFF2: pass-through occupies the same row.
         if let Some((param, _)) = &f.effect_via {
             self.write(" ");
             self.write(Syntax::EFFECT_ARROW_OPEN);
@@ -987,29 +1139,6 @@ impl<'a> Fmt<'a> {
             self.write(" ");
             self.write(param);
             self.write(Syntax::EFFECT_ARROW_CLOSE);
-        }
-        let unit_fallible = f
-            .return_type
-            .as_ref()
-            .is_some_and(|ty| Self::is_unit_fallible_type(ty));
-        if f.declared_effects.is_none()
-            && f.effect_via.is_none()
-            && f.return_type.is_some()
-            && !unit_fallible
-        {
-            self.write(" ");
-            self.write(Syntax::OP_UNIFIED_ARROW);
-        }
-        if let Some(ret) = &f.return_type {
-            if unit_fallible {
-                self.fmt_unit_fallible_return(ret);
-            } else {
-                self.write(" ");
-                self.fmt_return_type(ret);
-            }
-        }
-        if let Some(map) = &f.declared_return_view_provenance {
-            self.fmt_declared_return_view_from(map, &f.params);
         }
         let saved_return_type =
             std::mem::replace(&mut self.expected_return_type, f.return_type.clone());
@@ -1023,15 +1152,31 @@ impl<'a> Fmt<'a> {
                 .src
                 .get(span.start..span.start.saturating_add(1))
                 .is_some_and(|source| source == "=");
-            if marker == Some("::") || retired_marker {
-                self.write(" :: ");
+            let effect_body = f.declared_effects.is_some()
+                || f.effect_via.is_some()
+                || f.is_pure;
+            let effect_marker = effect_body
+                && self
+                    .src
+                    .get(span.start..span.start.saturating_add(2))
+                    .is_some_and(|source| source == ":[");
+            if marker == Some("::")
+                || marker == Some(":>")
+                || retired_marker
+                || effect_marker
+            {
+                if effect_body {
+                    self.write(" ");
+                } else {
+                    self.write(" :> ");
+                }
                 self.fmt_expr(expr, Prec::OrFallback);
                 self.expected_return_type = saved_return_type;
                 return;
             }
         }
         // D-FMT-SIMPLIFY1=A / card #1514 criterion 3: a braced body with one
-        // return uses the canonical `::` one-line body when it fits. Keep
+        // return uses the canonical `:>` one-line body when it fits. Keep
         // comments and wide output in the explicit block form.
         if self.simplify {
             if let [crate::AST::Stmt::Return(Some(expr), span)] = f.body.as_slice() {
@@ -1056,7 +1201,11 @@ impl<'a> Fmt<'a> {
                     let saved_line_start = self.at_line_start;
                     let saved_pending_blank = self.pending_blank;
                     let saved_comment_i = self.comment_i;
-                    self.write(" :: ");
+                    if f.declared_effects.is_some() || f.effect_via.is_some() || f.is_pure {
+                        self.write(" ");
+                    } else {
+                        self.write(" :> ");
+                    }
                     self.fmt_expr(expr, Prec::OrFallback);
                     if self.col <= MAX_WIDTH
                         && !self.out[saved_out..].contains('\n')

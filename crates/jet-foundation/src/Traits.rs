@@ -1067,6 +1067,12 @@ impl TraitRegistry {
                 .fields
                 .iter()
                 .filter(|field| field.computed.is_none())
+                // D-DEBUG-REDACT: a redacted field is replaced by the shared
+                // marker in the generated Debug body, so its carrier does not
+                // need a Debug implementation. This keeps secret-bearing
+                // values non-printable while allowing a config record to be
+                // inspected safely as a whole.
+                .filter(|field| !(trait_name == DEBUG && field.redact))
                 .all(|field| supports(&field.ty)),
             Item::Enum(e) => e.variants.iter().all(|variant| match &variant.payload {
                 crate::AST::VariantPayload::Unit => true,

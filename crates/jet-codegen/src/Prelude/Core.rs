@@ -488,7 +488,6 @@ impl JetShow for JetReservoirSampler {
 thread_local! {
     pub static JET_IN_SCHEDULER_TASK: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
     static JET_INTERRUPT_HANDLER_DEPTH: std::cell::Cell<u32> = const { std::cell::Cell::new(0) };
-    static JET_STACK_DEPTH: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
     static JET_TEST_EXPECT_FAIL: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
     static JET_TEST_STOP_CODE: std::cell::RefCell<Option<String>> = const { std::cell::RefCell::new(None) };
 }
@@ -523,7 +522,7 @@ struct JetStackFrame;
 
 impl Drop for JetStackFrame {
     fn drop(&mut self) {
-        JET_STACK_DEPTH.with(|depth| depth.set(depth.get().saturating_sub(1)));
+        jet_runtime_stack_leave();
     }
 }
 
@@ -533,11 +532,7 @@ fn jet_stack_enter(
     fn_name: &str,
     src_line: &str,
 ) -> JetStackFrame {
-    let overflow = JET_STACK_DEPTH.with(|depth| {
-        let next = depth.get().saturating_add(1);
-        depth.set(next);
-        next > JET_RUNTIME_STACK_LIMIT
-    });
+    let overflow = jet_runtime_stack_enter();
     if overflow {
         jet_runtime_stop_with_context(
             "E3012",
@@ -1783,20 +1778,12 @@ where
 {
     xs.into_iter().all(|x| f(&x))
 }
-fn jet_list_sort_by<T, K: Ord, F>(xs: &mut Vec<T>, f: F)
+fn jet_list_reduce<T, U, F, I>(xs: I, init: U, mut f: F) -> U
 where
-    F: FnMut(&T) -> K,
+    I: IntoIterator<Item = T>,
+    F: FnMut(&U, &T) -> U,
 {
-    xs.sort_by_key(f);
-}
-fn jet_list_sort_desc<T: Ord>(xs: &mut Vec<T>) {
-    xs.sort_by(|left, right| right.cmp(left));
-}
-fn jet_list_sort_by_desc<T, K: Ord, F>(xs: &mut Vec<T>, mut f: F)
-where
-    F: FnMut(&T) -> K,
-{
-    xs.sort_by_key(|item| std::cmp::Reverse(f(item)));
+    xs.into_iter().fold(init, |acc, x| f(&acc, &x))
 }
 fn jet_list_sort_by_compare<T, F>(xs: &mut Vec<T>, mut f: F)
 where
@@ -1807,13 +1794,6 @@ where
         __jet_Ordering::__jet_Equal => std::cmp::Ordering::Equal,
         __jet_Ordering::__jet_Greater => std::cmp::Ordering::Greater,
     });
-}
-fn jet_list_reduce<T, U, F, I>(xs: I, init: U, mut f: F) -> U
-where
-    I: IntoIterator<Item = T>,
-    F: FnMut(&U, &T) -> U,
-{
-    xs.into_iter().fold(init, |acc, x| f(&acc, &x))
 }
 fn jet_map_each<K: Ord, V, F>(m: JetMap<K, V>, mut f: F)
 where

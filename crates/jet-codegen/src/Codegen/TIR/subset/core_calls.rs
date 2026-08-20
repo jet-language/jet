@@ -339,7 +339,7 @@ pub(super) fn core_call_args_in_subset(
     }
     // D-SERVICE-AUTHORITY1=A: `services.runtime(store, retention: duration)`
     // publishes `retention`. Sema binds it; keep that resolved shape in TIR.
-    if module == "core.services" && method == "runtime" {
+    if module == "core.service" && method == "runtime" {
         return args.len() == 2
             && args.iter().enumerate().all(|(idx, arg)| {
                 let label_ok = if idx == 1 {
@@ -391,6 +391,12 @@ pub(crate) fn core_closure_call_in_subset(
     let lambda_arg = |i: usize| matches!(args.get(i).map(|a| &a.expr), Some(Expr::Lambda(lam)) if lambda_in_subset(lam, cx, locals));
     let no_labels = args.iter().all(|a| a.label.is_none());
     match (module, method) {
+        // D-SERVICE1=D: this is a declarative callback. Lowering accepts only
+        // its static worker statements and carries them as a typed payload;
+        // arbitrary callback execution is not a service-tree operation.
+        ("core.service", "tree") => {
+            args.len() == 1 && no_labels && matches!(args[0].expr, Expr::Lambda(_))
+        }
         ("core.tasks", "spawn") => args.len() == 1 && no_labels && lambda_arg(0),
         ("core.http", "serve") => {
             args.len() == 2

@@ -320,7 +320,9 @@ pub(crate) fn rewrite_field_refs(expr: &mut Expr, names: &HashSet<String>, recei
                             rewrite_field_refs(expr, names, receiver);
                         });
                     }
-                    rewrite_field_refs(value, names, receiver);
+                    if let Some(value) = value {
+                        rewrite_field_refs(value, names, receiver);
+                    }
                 }
                 OrFallback::Return(Some(e), _) => rewrite_field_refs(e, names, receiver),
                 _ => {}

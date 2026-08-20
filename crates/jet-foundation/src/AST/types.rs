@@ -63,6 +63,17 @@ impl Dimension {
         self.0.iter().map(|(axis, exponent)| (axis.as_str(), *exponent))
     }
 
+    /// D-TYPE2-MEASURE1=A: expose dimension exponents through the same measure
+    /// projection used by lengths, shapes, and lanes.
+    pub fn measure_exponents(&self) -> impl Iterator<Item = (&str, Measure)> {
+        self.0.iter().map(|(axis, exponent)| {
+            (
+                axis.as_str(),
+                Measure::signed_literal("exponent", i64::from(*exponent)),
+            )
+        })
+    }
+
     /// Stable identity used by API/type serialization.
     pub fn identity(&self) -> String {
         self.0
@@ -420,7 +431,7 @@ fn policy_argument_text(expr: &Expr) -> String {
             _ => "<string>".to_string(),
         },
         Expr::Int(value, _, _, source) => source.clone().unwrap_or_else(|| value.to_string()),
-        Expr::Float(value, _, _) => value.to_string(),
+        Expr::Float(value, _, _, _) => value.to_string(),
         Expr::Bool(value, _) => value.to_string(),
         Expr::Char(value, _) => format!("'{value}'"),
         Expr::Ident(name, _) => name.clone(),
@@ -1399,11 +1410,11 @@ impl Type {
                     crate::Registry::type_plane("Dimension"),
                     KnowledgeFact::Dimension(dimension.clone()),
                 );
-                for (axis, exponent) in dimension.axes() {
+                for (axis, measure) in dimension.measure_exponents() {
                     vector.push_at(
                         &["exponent".to_string(), axis.to_string()],
                         crate::Registry::type_plane("Measure"),
-                        KnowledgeFact::Measure(Measure::signed_literal("exponent", i64::from(exponent))),
+                        KnowledgeFact::Measure(measure),
                     );
                 }
             }

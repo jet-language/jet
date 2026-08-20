@@ -116,28 +116,39 @@ impl<'a> Parser<'a> {
                 self.reject_root_method_params(&params);
             }
     
-            // D-ARROW-UNIFY1=B: an optional `:[Net, DB]>` callable effect
-            // arrow. Effect names are validated in sema. D-EFF2 keeps `via f`
-            // in the same row.
-            let (declared_effects, effect_via) = self.parse_opt_func_effects()?;
-            let decorated_arrow = declared_effects.is_some() || effect_via.is_some();
+            let (
+                mut return_type,
+                mut return_type_span,
+                mut declared_effects,
+                mut effect_via,
+                prefix_effect_span,
+            ) = self.parse_callable_result_and_prefix_effects()?;
+            let declared_return_view_provenance =
+                self.parse_opt_declared_view_from(&params);
+            let post_effect_span = (!declared_effects.is_some()
+                && !effect_via.is_some()
+                && self.func_effect_starts_here())
+                .then(|| self.peek().span);
+            if post_effect_span.is_some() {
+                let (effects, via) = self.parse_opt_func_effects()?;
+                declared_effects = effects;
+                effect_via = via;
+            }
+            let effect_body_span = post_effect_span.or_else(|| {
+                (return_type.is_none()
+                    && (declared_effects.is_some() || effect_via.is_some()))
+                    .then(|| prefix_effect_span)
+                    .flatten()
+            });
             let is_pure = is_pure
                 || declared_effects.as_ref().is_some_and(|effects| effects.is_empty());
-    
-            let mut return_type = None;
-            let mut return_type_span = None;
-            let mut arrow_return = false;
-            if decorated_arrow {
-                if self.type_starts_here() {
-                    arrow_return = true;
-                    let (ty, span) = self.return_type()?;
-                    return_type = Some(ty);
-                    return_type_span = Some(span);
-                } else if let Some((ty, span)) = self.parse_unit_fallible_return()? {
-                    return_type = Some(ty);
-                    return_type_span = Some(span);
-                }
-            } else if matches!(self.peek().kind, TokKind::Colon) {
+
+            /*
+             * D-SIG-SHAPE1=B: the colon before a bare result is not a valid
+             * signature form. Keep the old branch below as ordinary recovery
+             * while the corpus still contains it.
+             */
+            if matches!(self.peek().kind, TokKind::Colon) {
                 let colon = self.bump();
                 self.diags.push(
                     Diagnostic::error(
@@ -153,64 +164,44 @@ impl<'a> Parser<'a> {
                         new_text: Syntax::OP_UNIFIED_ARROW.to_string(),
                     }),
                 );
-                arrow_return = true;
                 if self.type_starts_here() {
                     let (ty, span) = self.return_type()?;
                     return_type = Some(ty);
                     return_type_span = Some(span);
                 }
-            } else if self.at_unified_arrow() {
-                arrow_return = true;
-                self.expect_unified_arrow("before a callable result type")?;
-                if self.type_starts_here() {
-                    let (ty, span) = self.return_type()?;
-                    return_type = Some(ty);
-                    return_type_span = Some(span);
-                }
-            } else if let Some((ty, span)) = self.parse_unit_fallible_return()? {
-                return_type = Some(ty);
-                return_type_span = Some(span);
             }
-            if arrow_return
-                && return_type
-                    .as_ref()
-                    .is_some_and(|ty| Self::is_unit_fallible_type(ty))
-            {
-                self.diags.push(Self::retired_unit_fallible_signature(
-                    return_type_span.unwrap_or(self.peek().span),
-                ));
-            }
-            let declared_return_view_provenance =
-                self.parse_opt_declared_view_from(&params);
-    
-            // D-ONELINE-BODY1=B: one-line function bodies use `::`. Keep the
-            // retired `=` spelling recoverable long enough to emit its teaching
-            // diagnostic and let `jet fmt` apply the replacement.
-            let body_marker = match self.peek().kind {
-                TokKind::ColonColon => Some(self.bump()),
-                TokKind::Eq => {
-                    let marker = self.bump();
-                    self.diags.push(Self::retired_function_body(marker.span));
-                    Some(marker)
-                }
-                _ => None,
+
+            // D-SIG-SHAPE1=B: `:>` (or the effect ceiling) starts a one-line
+            // body. Keep retired `::`/`=` input readable for the migration.
+            let effect_body_marker = effect_body_span.is_some();
+            let body_marker_span = match effect_body_span {
+                Some(span)
+                    if !matches!(
+                        self.peek().kind,
+                        TokKind::UnifiedArrow | TokKind::ColonColon | TokKind::Eq
+                    ) => Some(span),
+                _ => self.parse_optional_function_body_marker(),
             };
-            if let Some(marker) = body_marker {
-                let start = marker.span.start;
-                // `::` requires one value, so a non-empty brace is an
-                // inferred literal. Block-capable headers use
-                // `expr_no_struct_lit`.
-                let expr = self.expr()?;
-                let expr_end = expr.span().end;
-                self.expect(TokKind::Semi, "after the single-expression function body")?;
-                let end = if self.pos > 0 {
-                    self.toks[self.pos - 1].span.end
-                } else {
-                    expr_end
-                };
-                let ret_span = Span::new(start, end);
-                let body = vec![crate::AST::Stmt::Return(Some(expr), ret_span)];
-                return Ok(Func {
+            if let Some(marker_span) = body_marker_span {
+                let value_body = !matches!(self.peek().kind, TokKind::LBrace)
+                    || self.brace_starts_record()
+                    || !effect_body_marker;
+                if value_body {
+                    let start = marker_span.start;
+                    // A one-expression marker accepts a non-empty brace as an
+                    // inferred literal. An effect ceiling followed by a brace
+                    // is the block form.
+                    let expr = self.expr()?;
+                    let expr_end = expr.span().end;
+                    self.finish_stmt()?;
+                    let end = if self.pos > 0 {
+                        self.toks[self.pos - 1].span.end
+                    } else {
+                        expr_end
+                    };
+                    let ret_span = Span::new(start, end);
+                    let body = vec![crate::AST::Stmt::Return(Some(expr), ret_span)];
+                    return Ok(Func {
                     span: Span::new(declaration_start, end),
                     is_pub,
                     is_package_pub,
@@ -261,7 +252,8 @@ impl<'a> Parser<'a> {
                     markers: Vec::new(),
                     compiler_generated: false,
                     body,
-                });
+                    });
+                }
             }
             self.expect(TokKind::LBrace, "to open the function body")?;
             let previous_tail_depth = self.callable_tail_block_depth;
@@ -394,6 +386,98 @@ impl<'a> Parser<'a> {
             )
         }
     
+        /// D-SIG-SHAPE1=B: read the result and any legacy prefix effect row.
+        /// The current result form is bare after `)`. The old `:> T` and
+        /// `:[E]> T` forms stay readable until the corpus migration.
+        pub(super) fn parse_callable_result_and_prefix_effects(
+            &mut self,
+        ) -> Result<(
+            Option<Type>,
+            Option<Span>,
+            Option<Vec<(String, Span)>>,
+            Option<(String, Span)>,
+            Option<Span>,
+        ), Diagnostic> {
+            let prefix_effect_span = self
+                .func_effect_starts_here()
+                .then(|| self.peek().span);
+            let (declared_effects, effect_via) = self.parse_opt_func_effects()?;
+            let has_prefix_effect = declared_effects.is_some() || effect_via.is_some();
+            let mut arrow_return = false;
+            let (return_type, return_type_span) = if has_prefix_effect {
+                arrow_return = true;
+                if self.type_starts_here() {
+                    let (ty, span) = self.return_type()?;
+                    (Some(ty), Some(span))
+                } else if let Some((ty, span)) = self.parse_unit_fallible_return()? {
+                    (Some(ty), Some(span))
+                } else {
+                    (None, None)
+                }
+            } else if self.at_unified_arrow() {
+                arrow_return = true;
+                self.expect_unified_arrow("before a callable result type")?;
+                if self.type_starts_here() {
+                    let (ty, span) = self.return_type()?;
+                    (Some(ty), Some(span))
+                } else if let Some((ty, span)) = self.parse_unit_fallible_return()? {
+                    (Some(ty), Some(span))
+                } else {
+                    (None, None)
+                }
+            } else if self.type_starts_here() {
+                let (ty, span) = self.return_type()?;
+                (Some(ty), Some(span))
+            } else if let Some((ty, span)) = self.parse_unit_fallible_return()? {
+                (Some(ty), Some(span))
+            } else {
+                (None, None)
+            };
+            if arrow_return
+                && return_type
+                    .as_ref()
+                    .is_some_and(|ty| Self::is_unit_fallible_type(ty))
+            {
+                self.diags.push(Self::retired_unit_fallible_signature(
+                    return_type_span.unwrap_or(self.peek().span),
+                ));
+            }
+            Ok((
+                return_type,
+                return_type_span,
+                declared_effects,
+                effect_via,
+                prefix_effect_span,
+            ))
+        }
+
+        /// Lookahead shared by signature parsing. `parse_opt_func_effects`
+        /// accepts these old spellings too, so the migration stays readable.
+        pub(super) fn func_effect_starts_here(&self) -> bool {
+            (matches!(self.peek().kind, TokKind::Colon)
+                && matches!(self.peek2().kind, TokKind::LBracket))
+                || (matches!(self.peek().kind, TokKind::Eq)
+                    && matches!(self.peek2().kind, TokKind::LBracket))
+                || (matches!(self.peek().kind, TokKind::Hash)
+                    && matches!(self.peek2().kind, TokKind::LParen))
+                || (matches!(self.peek().kind, TokKind::Minus)
+                    && matches!(self.peek2().kind, TokKind::LBracket))
+                || matches!(self.peek().kind, TokKind::MinusMinus)
+        }
+
+        fn parse_optional_function_body_marker(&mut self) -> Option<Span> {
+            match self.peek().kind {
+                TokKind::UnifiedArrow => Some(self.bump().span),
+                TokKind::ColonColon => Some(self.bump().span),
+                TokKind::Eq => {
+                    let span = self.bump().span;
+                    self.diags.push(Self::retired_function_body(span));
+                    Some(span)
+                }
+                _ => None,
+            }
+        }
+
         /// D-EFF1 / D-SHAPE8 / D-ARROW-CONTROL1: parse an optional
         /// `:[Net, DB]>` effect bound.
         /// Returns `None` when the cursor is not at the decorated arrow. D-EFFTREE1: an entry may be a
@@ -538,9 +622,9 @@ impl<'a> Parser<'a> {
             Diagnostic::error(
                 "E0065",
                 "This function uses the retired `=` body marker.".to_string(),
-                "`::` separates a one-line function body; `=` fills a slot inside a definition."
+                "`:>` introduces a one-expression function body; `=` fills a slot inside a definition."
                     .to_string(),
-                "Replace `=` with `::`; `jet fmt` applies this fix.".to_string(),
+                "Replace `=` with `:>`; `jet fmt` applies this fix.".to_string(),
                 Some(span),
             )
         }

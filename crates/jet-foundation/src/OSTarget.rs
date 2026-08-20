@@ -88,7 +88,7 @@ pub fn os_target_mixed_axis(
             Syntax::MARKER_TARGET,
             web,
         ),
-        "the OS axis (OS.Linux/OS.MacOS/OS.Windows, native platform gating) and the web axis (Wasm/JS/Web, D-WASM1's browser partition) are mutually exclusive — one item can't compile for both a specific native OS and a web bucket"
+        "the OS axis (OS.Linux/OS.MacOS/OS.Windows, native platform gating) and the web axis (Wasm/JS/Web, the browser partition) are mutually exclusive — one item can't compile for both a specific native OS and a web bucket"
             .to_string(),
         format!("pick one axis: remove the `#{}(OS.{})` marker or the web-axis marker", Syntax::MARKER_TARGET, os.name()),
         span,

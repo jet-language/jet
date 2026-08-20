@@ -117,6 +117,23 @@ impl<'a> Parser<'a> {
                     };
                     (name, name_span, limit, None, None)
                 };
+                if matches!(name.as_str(), "no_alloc" | "zero_rc" | "arena_bounded") {
+                    let replacement = match (name.as_str(), limit) {
+                        ("no_alloc", _) => "`:[!Mem.Alloc]>`".to_string(),
+                        ("zero_rc", _) => "`:[!Mem.Rc]>`".to_string(),
+                        ("arena_bounded", Some(bytes)) => {
+                            format!("`:[!Mem.Alloc(above: {bytes})]>`")
+                        }
+                        _ => "`:[!Mem.Alloc(above: N)]>`".to_string(),
+                    };
+                    return Err(Diagnostic::error(
+                        "E0355",
+                        format!("`{name}` is a retired memory policy"),
+                        "memory floors are rights-tree prohibitions, not policy-marker arguments".to_string(),
+                        format!("write {replacement} on the function signature"),
+                        Some(name_span),
+                    ));
+                }
                 let Some(key) = crate::Policy::PolicyKey::parse(&name) else {
                     let site_bound = crate::Policy::applied_rule(&name).is_some_and(|row| !row.inherits);
                     let package_only = name == Syntax::POLICY_FIELD_CONTAIN
@@ -133,7 +150,7 @@ impl<'a> Parser<'a> {
                     } else if site_bound {
                         format!("use `#{name}` at its sound site")
                     } else {
-                        "use `no_alloc`, `zero_rc`, `arena_bounded(bytes)`, `copies: .Explicit`, or `sentries: .Off`".to_string()
+                        "use `gc`, `explicit_units`, `copies: .Explicit`, or `sentries: .Off`; write memory floors as `!Mem.*` effect denials".to_string()
                     };
                     return Err(Diagnostic::error(
                         "E0355",
@@ -148,15 +165,8 @@ impl<'a> Parser<'a> {
                     (crate::Policy::PolicyKey::Copies, _, _) => return Err(Diagnostic::error("E0355", "`copies` needs an explicit mode".to_string(), "read-only views copy at owning destinations by default; the policy only restores explicit-copy syntax".to_string(), "write `copies: .Explicit`".to_string(), Some(name_span))),
                     (crate::Policy::PolicyKey::Sentries, _, Some(value)) => value,
                     (crate::Policy::PolicyKey::Sentries, _, None) => return Err(Diagnostic::error("E0355", "`sentries` needs an explicit mode".to_string(), "sentry instrumentation is either on or off; it is not a boolean memory fact".to_string(), "write `sentries: .Off` or `sentries: .On`".to_string(), Some(name_span))),
-                    (crate::Policy::PolicyKey::NoAlloc | crate::Policy::PolicyKey::ZeroRc | crate::Policy::PolicyKey::ScopedGc | crate::Policy::PolicyKey::ExplicitUnits, None, None) => crate::Policy::PolicyValue::Enabled,
-                    (crate::Policy::PolicyKey::NoAlloc | crate::Policy::PolicyKey::ZeroRc | crate::Policy::PolicyKey::ScopedGc | crate::Policy::PolicyKey::ExplicitUnits, _, _) => return Err(crate::Policy::marker_argument_shape_error(Syntax::MARKER_POLICY, marker_span)),
-                    (crate::Policy::PolicyKey::ArenaBounded, _, _) if limit.is_some() => {
-                        let Some(n) = limit else { unreachable!() };
-                        let value = n as u64;
-                        if value == 0 { return Err(Diagnostic::error("E0355", format!("`{name}` needs a positive byte ceiling"), "zero cannot bound a usable memory region".to_string(), format!("write `{name}(65536)`"), Some(self.peek().span))); }
-                        crate::Policy::PolicyValue::Limit(value)
-                    }
-                    (crate::Policy::PolicyKey::ArenaBounded, _, _) => return Err(Diagnostic::error("E0355", format!("`{name}` needs a byte ceiling"), "a memory threshold must have a positive compile-time limit".to_string(), format!("write `{name}(65536)`"), Some(name_span))),
+                    (crate::Policy::PolicyKey::ScopedGc | crate::Policy::PolicyKey::ExplicitUnits, None, None) => crate::Policy::PolicyValue::Enabled,
+                    (crate::Policy::PolicyKey::ScopedGc | crate::Policy::PolicyKey::ExplicitUnits, _, _) => return Err(crate::Policy::marker_argument_shape_error(Syntax::MARKER_POLICY, marker_span)),
                     (crate::Policy::PolicyKey::Unsafe | crate::Policy::PolicyKey::Impure | crate::Policy::PolicyKey::Nondeterministic, _, _) => return Err(Diagnostic::error("E0355", format!("`{name}` is not a source policy"), "organization and package policy own the audited-escape floor; source code can only write the corresponding marker".to_string(), format!("use the audited marker, or `policy: .{{ {name}: .Forbid }}` in `package.jet`"), Some(name_span))),
                 };
                 out.push(crate::Policy::PolicyDeclaration { key, value, scope, span: marker_span, target: None, source: "<source>".to_string() });
@@ -481,7 +491,7 @@ impl<'a> Parser<'a> {
                     text.push_str(&n.to_string());
                     end = self.bump().span.end;
                 }
-                TokKind::Float(f) => {
+                TokKind::Float(f, _) => {
                     text.push_str(&format_version_segment(f));
                     end = self.bump().span.end;
                 }
@@ -524,7 +534,6 @@ impl<'a> Parser<'a> {
             let mut html_seen = false;
             let mut pub_file = false;
             let mut no_prelude = false;
-            let mut no_alloc_policy: Option<Span> = None;
             loop {
                 let r = match &self.peek().kind {
                     TokKind::Eof => break,
@@ -547,13 +556,11 @@ impl<'a> Parser<'a> {
                         }
                     },
                     TokKind::KwEffect => self.effect_decl().map(Item::EffectDecl),
-                    // D-MEM1/S7 (D-NOALLOC-SEM1=A): `policy no_alloc;` — file-scoped
-                    // allocation floor, parsed like `use`/`#PubFile` (not inside any
-                    // `module { … }` body — only the top-level file item list).
+                    // D-MARK-SCOPE1: file-scoped non-memory policy, parsed like
+                    // `use`/`#PubFile` (not inside a module body).
                     TokKind::Hash if matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::MARKER_POLICY) && self.policy_is_file_decl() && !self.marker_sequence_leads_to_function() => match self.policy_decl(crate::Policy::PolicyScope::Module) {
                         Ok(declarations) => {
                             for declaration in declarations {
-                                if declaration.key == crate::Policy::PolicyKey::NoAlloc { no_alloc_policy = Some(declaration.span); }
                                 self.policy_declarations.push(declaration);
                             }
                             continue;
@@ -1291,10 +1298,13 @@ impl<'a> Parser<'a> {
                         }
                         continue;
                     }
-                    TokKind::KwConst if self.at_foreign_binding() => {
-                        let span = self.bump().span;
-                        Err(self.foreign_keyword_diagnostic(Syntax::FOREIGN_CONST, span))
-                    }
+                    // `const` never routes through the foreign-binding family.
+                    // D-VERDICT-1231-1 retired it with a named replacement, and
+                    // `retired_const_def` both teaches E0146 and recovers by
+                    // parsing the rest as a comptime binding, so the name still
+                    // exists and nothing downstream cascades. A generic
+                    // "write a complete Jet statement" would replace a known
+                    // fact with a guess (tests/ui/const_retired.stderr).
                     TokKind::KwConst => self.retired_const_def().map(Item::Const),
                     // D-PERSIST1: `#Persist name (:: | :=) expr` — module-level
                     // bare binding that survives a `jet dev` hot reload.
@@ -1493,7 +1503,6 @@ impl<'a> Parser<'a> {
                 no_prelude,
                 default_target,
                 html_path,
-                no_alloc_policy,
                 policy_declarations: std::mem::take(&mut self.policy_declarations),
                 applied_rules: std::mem::take(&mut self.applied_rules),
                 rule_facts: std::mem::take(&mut self.rule_facts),

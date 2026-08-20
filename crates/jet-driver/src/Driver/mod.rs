@@ -3276,6 +3276,10 @@ fn compile_build_from_front_end(
         )?;
         lints.extend(planned_lints);
     }
+    if let Some(target) = options.cross_target.as_deref() {
+        let target_diags = crate::Sema::check_target_surface(&bundle, target);
+        lints.extend(classify_diagnostics(&bundle, target_diags, false)?);
+    }
     if timing {
         // Build-entry plan evaluation, generated sources, and the re-check of
         // the planned program. Near zero when no build entry was selected.
@@ -4922,10 +4926,13 @@ fn compile_bundle_path_opts_on_compiler_stack(
     if timing {
         timer.lap("sema");
     }
-    let diags = match effect_facts.as_ref() {
+    let mut diags = match effect_facts.as_ref() {
         Some(facts) => apply_package_effect_budget(&bundle, facts, diags)?,
         None => diags,
     };
+    if let Some(target) = cross_target {
+        diags.extend(crate::Sema::check_target_surface(&bundle, target));
+    }
     let extension_diags = crate::CompilerExtensionHook::post_sema_diagnostics(
         &bundle,
         effect_facts.as_ref(),
@@ -5164,7 +5171,6 @@ fn compile_src_on_compiler_stack(
             no_prelude: prog.no_prelude,
             default_target: prog.default_target,
             html_path: prog.html_path.clone(),
-            no_alloc_policy: prog.no_alloc_policy,
             policy_declarations: prog.policy_declarations.clone(),
             rule_facts: std::mem::take(&mut prog.rule_facts),
         }],
@@ -5608,7 +5614,6 @@ fn check_eval_on_compiler_stack(
             no_prelude: prog.no_prelude,
             default_target: prog.default_target,
             html_path: prog.html_path.clone(),
-            no_alloc_policy: prog.no_alloc_policy,
             policy_declarations: prog.policy_declarations.clone(),
             rule_facts: std::mem::take(&mut prog.rule_facts),
         }],

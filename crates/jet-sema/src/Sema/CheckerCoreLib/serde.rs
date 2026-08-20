@@ -105,6 +105,12 @@ impl<'a> Checker<'a> {
                 Type::List(e) | Type::Option(e) | Type::Shared(e) => self.is_decodable(e),
                 Type::FixedList { elem, .. } => self.is_decodable(elem),
                 Type::Map { key, value, .. } => matches!(**key, Type::String) && self.is_decodable(value),
+                // D-CONFIG-ENV1: Core crypto marks `Secret` with an internal
+                // nominal tag before it reaches sema. Its text decoder is a
+                // vetted Prelude bridge, so admit that tagged carrier on the
+                // same typed Decode rail as an ordinary named type.
+                Type::Tagged { inner, .. }
+                    if matches!(inner.as_ref(), Type::Named(name) if name == "Secret") => true,
                 Type::Named(n) => n == "Decimal"
                     || n == "DataTree"
                     || n == "Secret"

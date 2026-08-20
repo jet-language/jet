@@ -2474,18 +2474,29 @@ pub(crate) fn hoist_inline_module_member_types(bundle: &mut ProgramBundle) {
         // qualified `module.Type` spelling, and only when it is `pub` — the
         // same consumer rewrite generic-module instances get.
         if !exported.is_empty() {
-            for item in &mut module.items {
-                let Item::Func(func) = item else { continue };
-                for param in &mut func.params {
-                    param.ty = crate::Generics::substitute_type(&param.ty, &exported);
-                }
-                if let Some(ret) = &mut func.return_type {
-                    *ret = crate::Generics::substitute_type(ret, &exported);
-                }
-                substitute_stmts(&mut func.body, &exported, &HashMap::new());
-            }
+            rewrite_exported_inline_types(&mut module.items, &exported);
         }
         module.items.extend(declarations);
+    }
+}
+
+/// Rewrite public inline-module type projections in every function scope in
+/// one file. A sibling inline module is outside the declaring module's body,
+/// but it still uses the enclosing file's public module surface. Private
+/// members never enter `exported`, so this cannot widen their reach.
+fn rewrite_exported_inline_types(items: &mut [Item], exported: &HashMap<String, Type>) {
+    for item in items {
+        match item {
+            Item::Func(func) => {
+                *func = specialize_function_types(func.clone(), exported);
+            }
+            Item::CodeModule(module) => {
+                if let Some(body) = &mut module.body {
+                    rewrite_exported_inline_types(body, exported);
+                }
+            }
+            _ => {}
+        }
     }
 }
 

@@ -163,7 +163,7 @@ pub(crate) struct Cx {
     pub(crate) cloneable: HashSet<String>,
     /// D-MIGRATE4: `migration TypeName { … }` blocks per type, in source order
     /// (the chain, oldest step first). Read by `emit_struct_migration` to lower
-    /// the runtime step functions + `jet_decode_traced` chain-walker.
+    /// the runtime step functions + silent decode migration chain-walker.
     pub(crate) migrations: HashMap<String, Vec<crate::AST::MigrationDecl>>,
     /// D-SOA1 / D-SOA-TIER1=A: struct names declared `#layout(columnar)`. A `[S]`
     /// of such a struct lowers to the Prelude-owned `JetColumnList<S>` over THE
@@ -433,6 +433,7 @@ pub(crate) fn is_db_value_type_name(name: &str) -> bool {
 pub(crate) fn root_prelude_rust_type_name(name: &str) -> Option<&'static str> {
     match name {
         n if n == Syntax::TYPE_MEMO_STATS => Some("JetMemoStats"),
+        n if n == Syntax::TYPE_AUTHORITY => Some("JetAuthority"),
         _ => None,
     }
 }
@@ -563,10 +564,6 @@ pub(crate) fn core_rust_type_name(name: &str) -> Option<&'static str> {
         "XMLWriter" => Some("XMLWriter"),
         "CBORReader" => Some("CBORReader"),
         "CBORWriter" => Some("CBORWriter"),
-        // D-MIGRATE3=A: decode-time migration transparency's plain status struct
-        // (the generic `DecodeResult<T>` has its own `rust_type` arm below, since
-        // this table only covers non-generic names).
-        "MigrationStatus" => Some("MigrationStatus"),
         // D-DBDRIVER1: the tagged SQL parameter/column value + its error type.
         "DBValue" => Some("DBValue"),
         "DBError" => Some("DBError"),
@@ -2489,23 +2486,6 @@ impl Cx {
                     self.rust_type(&args[1])
                 )
             }
-            // D-MIGRATE3=A: `DecodeResult<T>` — `decode_traced<T>`'s return-shape
-            // wrapper (`T` is already `[T]`/`Vec<T>` for CSV by the time sema
-            // builds this `Type::Apply`, so this arm needs no per-codec case).
-            // User-type-wins (D-SHIFT1 precedent): a user struct named
-            // `DecodeResult` shadows the core one — falls through to the plain
-            // user-generic arm below instead.
-            Type::Apply { name, args }
-                if name == "DecodeResult"
-                    && !args.is_empty()
-                    && !self.type_names.contains(name) =>
-            {
-                format!(
-                    "{}jet_std::DecodeResult<{}>",
-                    self.root_prefix,
-                    self.rust_type(&args[0])
-                )
-            }
             // D-DATAFRAME1=A: core.data typed containers, backed by std-only
             // prelude values. User types with the same names still win.
             Type::Apply { name, args }
@@ -4418,7 +4398,19 @@ pub(crate) fn build_cx_items(
             }
             Item::Const(c) => {
                 if c.is_persist {
-                    if let Some(ty) = c.ty.clone() {
+                    let ty = c.ty.clone().or_else(|| {
+                        c.ct.as_ref().map(CtValue::jet_type).or_else(|| match &c.value {
+                            Expr::Int(..) => Some(Type::Int),
+                            Expr::Bool(..) => Some(Type::Bool),
+                            Expr::Char(..) => Some(Type::Char),
+                            Expr::Float(_, _, is_f32, _) => {
+                                Some(if *is_f32 { Type::Float32 } else { Type::Float })
+                            }
+                            Expr::Str(..) => Some(Type::String),
+                            _ => None,
+                        })
+                    });
+                    if let Some(ty) = ty {
                         cx.persist_types.insert(c.name.clone(), ty);
                     }
                 }

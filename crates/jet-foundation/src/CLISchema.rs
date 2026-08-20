@@ -1192,7 +1192,7 @@ fn function_inputs(function: &Func) -> Option<Vec<CLIInputSchema>> {
 fn expr_default(expr: &Expr) -> Option<CLIDefault> {
     match expr.without_parens() {
         Expr::Int(value, _, _, _) => Some(CLIDefault::Value(CtValue::Int(*value))),
-        Expr::Float(value, _, is_f32) => Some(CLIDefault::Value(CtValue::Float(if *is_f32 {
+        Expr::Float(value, _, is_f32, _) => Some(CLIDefault::Value(CtValue::Float(if *is_f32 {
             CtFloat::f32(*value as f32)
         } else {
             CtFloat::f64(*value)

@@ -1,5 +1,5 @@
 use super::*;
-use crate::Diagnostics::{Diagnostic, Span};
+use crate::Diagnostics::{Diagnostic, Span, TextEdit};
 use crate::Syntax;
 use crate::Sema::Diagnostics::{owned_type_for_read_view, soft_public_use};
 use crate::AST::{
@@ -24,6 +24,49 @@ pub(crate) fn bin_bits_type(width: u8) -> Type {
 }
 
 impl<'a> Checker<'a> {
+    /// D-MAP-KEY1: map keys are ordered values. Nominal structs and enums need
+    /// the registry, so the foundation predicate handles only structural
+    /// shapes and scalar leaves; this checker owns the recursive nominal walk.
+    pub(crate) fn map_key_type_eligible(&self, ty: &Type) -> bool {
+        fn visit(
+            checker: &Checker<'_>,
+            ty: &Type,
+            active: &mut HashSet<String>,
+        ) -> bool {
+            if crate::Collections::is_map_key_type(ty) {
+                return true;
+            }
+            match ty {
+                Type::InlineRange { base, .. } => visit(checker, base, active),
+                Type::Tagged { inner, .. } => visit(checker, inner, active),
+                Type::Named(name) => {
+                    if let Some(numeric) = crate::AST::numeric_type_from_name(name) {
+                        return matches!(numeric, Type::Int | Type::IntN { .. });
+                    }
+                    if !active.insert(name.clone()) {
+                        return false;
+                    }
+                    let eligible = if let Some(fields) = checker.struct_fields_for_type_name(name) {
+                        fields
+                            .iter()
+                            .all(|(_, _, field)| visit(checker, field, active))
+                    } else if let Some(variants) = checker.resolve_enum_variants_cloned(name) {
+                        variants
+                            .values()
+                            .all(|(_, payload)| matches!(payload, VariantPayload::Unit))
+                    } else {
+                        false
+                    };
+                    active.remove(name);
+                    eligible
+                }
+                _ => false,
+            }
+        }
+
+        visit(self, ty, &mut HashSet::new())
+    }
+
     fn qualify_method_type(
         &self,
         owner_mod: usize,
@@ -2045,15 +2088,25 @@ impl<'a> Checker<'a> {
                     Some(*name_span),
                 ));
             } else {
-                self.diags.push(Diagnostic::error(
+                let suggestion = suggest_field(name, &field_names);
+                let fix = suggestion.as_ref().map_or_else(
+                    || "remove this field".to_string(),
+                    |suggest| format!("did you mean `{suggest}`?"),
+                );
+                let mut diagnostic = Diagnostic::error(
                     "E0303",
                     format!("struct literal for `{}` has no field `{}`", display_type_name, name),
                     "struct literals may only set fields that exist on the type".to_string(),
-                    suggest_field(name, &field_names)
-                        .map(|s| format!("did you mean `{}`?", s))
-                        .unwrap_or_else(|| "remove this field".to_string()),
+                    fix,
                     Some(*name_span),
-                ));
+                );
+                if let Some(suggest) = suggestion {
+                    diagnostic = diagnostic.with_edit(TextEdit {
+                        span: *name_span,
+                        new_text: suggest,
+                    });
+                }
+                self.diags.push(diagnostic);
             }
         }
         let missing: Vec<_> = def_fields
@@ -2311,6 +2364,8 @@ impl<'a> Checker<'a> {
                 }
                 return ty;
             }
+            // No typed edit here: `EnumLit` retains the whole literal span, not
+            // the variant token. Replacing it would erase the type or payload.
             let mut fix = "check the variant name".to_string();
             if let Some(s) = suggest_field(variant, &variants.keys().cloned().collect::<Vec<_>>()) {
                 fix = format!("did you mean `{}`?", s);
@@ -2434,6 +2489,8 @@ impl<'a> Checker<'a> {
                                     self.check_type_assignable(&f.ty, &et, expr.span());
                                 }
                             } else {
+                                // No typed edit here: the AST has the payload
+                                // expression span, not the unknown label span.
                                 self.diags.push(Diagnostic::error(
                                     "E0302",
                                     format!("variant `{}` has no field `{}`", variant, label),
@@ -3510,19 +3567,19 @@ impl<'a> Checker<'a> {
         self.autodiff_safe_panic_context = safe_panic_context;
     }
 
-    pub(crate) fn check_require_call(&mut self, call: &mut Call) {
+    pub(crate) fn check_assert_call(&mut self, call: &mut Call) {
         if call.args.is_empty() || call.args.len() > 2 {
             self.diags.push(Diagnostic::error(
                 "E0103",
                 format!(
                     "`{}` needs one condition, or a condition and a message",
-                    Syntax::BUILTIN_REQUIRE
+                    Syntax::BUILTIN_ASSERT
                 ),
-                "require checks a yes/no condition and stops when it's false".to_string(),
+                "assert checks a yes/no condition and stops when it's false".to_string(),
                 format!(
                     "e.g. {}(x > 0) or {}(x > 0, \"x must be positive\")",
-                    Syntax::BUILTIN_REQUIRE,
-                    Syntax::BUILTIN_REQUIRE
+                    Syntax::BUILTIN_ASSERT,
+                    Syntax::BUILTIN_ASSERT
                 ),
                 Some(call.name_span),
             ));
@@ -3535,7 +3592,7 @@ impl<'a> Checker<'a> {
                         "E0110",
                         format!(
                             "`{}` needs {}, but this is {}",
-                            Syntax::BUILTIN_REQUIRE,
+                            Syntax::BUILTIN_ASSERT,
                             Type::Bool.show(),
                             t.show()
                         ),
@@ -3554,7 +3611,7 @@ impl<'a> Checker<'a> {
                         "E0112",
                         format!(
                             "`{}` message must be text, but this is {}",
-                            Syntax::BUILTIN_REQUIRE,
+                            Syntax::BUILTIN_ASSERT,
                             t.show()
                         ),
                         "the optional message is shown when the condition is false".to_string(),
@@ -3566,16 +3623,16 @@ impl<'a> Checker<'a> {
         }
     }
 
-    pub(crate) fn check_require_eq_call(&mut self, call: &mut Call) {
+    pub(crate) fn check_assert_eq_call(&mut self, call: &mut Call) {
         if call.args.len() != 2 {
             self.diags.push(Diagnostic::error(
                 "E0104",
                 format!(
                     "`{}` needs exactly two values to compare",
-                    Syntax::BUILTIN_REQUIRE_EQ
+                    Syntax::BUILTIN_ASSERT_EQ
                 ),
-                "require_eq checks that two values are equal".to_string(),
-                format!("e.g. {}(got, expected)", Syntax::BUILTIN_REQUIRE_EQ),
+                "assert_eq checks that two values are equal".to_string(),
+                format!("e.g. {}(got, expected)", Syntax::BUILTIN_ASSERT_EQ),
                 Some(call.name_span),
             ));
             for arg in call.args.iter_mut() {
@@ -3583,7 +3640,7 @@ impl<'a> Checker<'a> {
             }
             return;
         }
-        // require_eq compares and shows by reference in the generated Rust.
+        // assert_eq compares and shows by reference in the generated Rust.
         self.borrow_ctx = true;
         let lt = self.infer(&mut call.args[0].expr);
         self.borrow_ctx = true;
@@ -3595,7 +3652,7 @@ impl<'a> Checker<'a> {
                         "E0108",
                         format!(
                             "`{}` compared {} and {}, which don't match",
-                            Syntax::BUILTIN_REQUIRE_EQ,
+                            Syntax::BUILTIN_ASSERT_EQ,
                             lt.show(),
                             rt.show()
                         ),
@@ -3613,7 +3670,7 @@ impl<'a> Checker<'a> {
                             "E0312",
                             format!(
                                 "`{}` can't compare values of type `{}` (field `{}` isn't comparable)",
-                                Syntax::BUILTIN_REQUIRE_EQ,
+                                Syntax::BUILTIN_ASSERT_EQ,
                                 lt.name(),
                                 field
                             ),
@@ -3626,7 +3683,7 @@ impl<'a> Checker<'a> {
                             "E0312",
                             format!(
                                 "`{}` can't compare values of type `{}`",
-                                Syntax::BUILTIN_REQUIRE_EQ,
+                                Syntax::BUILTIN_ASSERT_EQ,
                                 lt.show()
                             ),
                             "this type doesn't support `==`".to_string(),

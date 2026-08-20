@@ -557,7 +557,7 @@ impl<'a> Lexer<'a> {
             }
             let span = Span::new(start, self.pos(self.i));
             return Token {
-                kind: TokKind::Float(v),
+                kind: TokKind::Float(v, text),
                 span,
             };
         }

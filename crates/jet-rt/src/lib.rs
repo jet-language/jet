@@ -60,6 +60,18 @@ pub fn string_before(s: &str, sep: &str) -> String {
     }
 }
 
+/// Structural key carrier for the JIT map adapter. The key's shape is fixed
+/// by sema; this carrier preserves field order and value order while the
+/// Prelude-backed map owns lookup semantics.
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub enum JetMapKey {
+    Int(i64),
+    String(String),
+    Bool(bool),
+    Char(char),
+    Record(Vec<JetMapKey>),
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub enum JetVal {
     /// JIT value carrier for sema-proved uninitialized fixed-list storage.
@@ -88,8 +100,9 @@ pub enum JetVal {
         end: i64,
         exclusive: bool,
     },
-    /// String-keyed map; values are packed i64 (ints or heap handles).
-    Map(BTreeMap<String, i64>),
+    /// Ordered map; each entry keeps the raw key handle for `keys()` and the
+    /// packed value word used by the JIT ABI.
+    Map(BTreeMap<JetMapKey, (i64, i64)>),
     Record(Vec<JetVal>),
     // D-INTBIG1: exact Int spill carrier. Reuses `CtBigInt` (jet-foundation)
     // limb-for-limb so a JIT-computed spilled Int prints byte-identical to the
@@ -222,7 +235,7 @@ impl JetArena {
         let key = self.clone_string(key_id)?;
         match self.values.get_mut(map as usize) {
             Some(JetVal::Map(entries)) => {
-                entries.insert(key, value);
+                entries.insert(JetMapKey::String(key), (key_id, value));
                 Some(())
             }
             _ => None,
@@ -232,7 +245,9 @@ impl JetArena {
     pub fn map_get(&self, map: i64, key_id: i64) -> Option<i64> {
         let key = self.get_string(key_id)?;
         match self.values.get(map as usize) {
-            Some(JetVal::Map(entries)) => entries.get(key).copied(),
+            Some(JetVal::Map(entries)) => entries
+                .get(&JetMapKey::String(key.to_string()))
+                .map(|(_, value)| *value),
             _ => None,
         }
     }
@@ -240,7 +255,56 @@ impl JetArena {
     pub fn map_remove(&mut self, map: i64, key_id: i64) -> Option<i64> {
         let key = self.clone_string(key_id)?;
         match self.values.get_mut(map as usize) {
-            Some(JetVal::Map(entries)) => entries.remove(&key),
+            Some(JetVal::Map(entries)) => entries
+                .remove(&JetMapKey::String(key))
+                .map(|(_, value)| value),
+            _ => None,
+        }
+    }
+
+    /// Convert a generated tuple/struct record into the structural key used by
+    /// the JIT map adapter. Sema excludes floats and aggregate containers from
+    /// this resident path, so every field is a scalar value here.
+    fn composite_key(&self, key_id: i64) -> Option<JetMapKey> {
+        let JetVal::Record(fields) = self.values.get(key_id as usize)? else {
+            return None;
+        };
+        fields
+            .iter()
+            .map(|field| match field {
+                JetVal::Int(value) => Some(JetMapKey::Int(*value)),
+                JetVal::String(value) => Some(JetMapKey::String(value.clone())),
+                JetVal::Bool(value) => Some(JetMapKey::Bool(*value)),
+                JetVal::Char(value) => Some(JetMapKey::Char(*value)),
+                _ => None,
+            })
+            .collect::<Option<Vec<_>>>()
+            .map(JetMapKey::Record)
+    }
+
+    pub fn map_insert_composite(&mut self, map: i64, key_id: i64, value: i64) -> Option<()> {
+        let key = self.composite_key(key_id)?;
+        match self.values.get_mut(map as usize) {
+            Some(JetVal::Map(entries)) => {
+                entries.insert(key, (key_id, value));
+                Some(())
+            }
+            _ => None,
+        }
+    }
+
+    pub fn map_get_composite(&self, map: i64, key_id: i64) -> Option<i64> {
+        let key = self.composite_key(key_id)?;
+        match self.values.get(map as usize) {
+            Some(JetVal::Map(entries)) => entries.get(&key).map(|(_, value)| *value),
+            _ => None,
+        }
+    }
+
+    pub fn map_remove_composite(&mut self, map: i64, key_id: i64) -> Option<i64> {
+        let key = self.composite_key(key_id)?;
+        match self.values.get_mut(map as usize) {
+            Some(JetVal::Map(entries)) => entries.remove(&key).map(|(_, value)| value),
             _ => None,
         }
     }
@@ -257,10 +321,10 @@ impl JetArena {
             return None;
         }
         let key = match self.values.get(map as usize) {
-            Some(JetVal::Map(entries)) => entries.keys().nth(index as usize)?.clone(),
+            Some(JetVal::Map(entries)) => entries.values().nth(index as usize)?.0,
             _ => return None,
         };
-        Some(self.alloc_string(key))
+        Some(key)
     }
 
     pub fn map_value_at(&self, map: i64, index: i64) -> Option<i64> {
@@ -268,7 +332,7 @@ impl JetArena {
             return None;
         }
         match self.values.get(map as usize) {
-            Some(JetVal::Map(entries)) => entries.values().nth(index as usize).copied(),
+            Some(JetVal::Map(entries)) => entries.values().nth(index as usize).map(|(_, value)| *value),
             _ => None,
         }
     }

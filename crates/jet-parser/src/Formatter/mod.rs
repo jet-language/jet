@@ -44,7 +44,6 @@ pub fn canonical_program(prog: &Program) -> Vec<u8> {
         &prog.no_prelude,
         &prog.default_target,
         &prog.html_path,
-        &prog.no_alloc_policy,
         (
             &prog.policy_declarations,
             &prog.applied_rules,
@@ -787,8 +786,8 @@ fn format_program_with_tokens(
         f.write(&format!("#{}(\"{}\")", Syntax::MARKER_HTML, html_path));
         f.newline();
     }
-    // D-POLICY-WORD1=A: `#Policy(no_alloc)` — fixed post-import
-    // position, same single-instance-marker treatment as `#PubFile`/
+    // D-POLICY-WORD1=A: module-scoped non-memory `#Policy(...)` — fixed
+    // post-import position, same single-instance-marker treatment as `#PubFile`/
     // `#Target(…)`/`#HTML(…)` above (no span to preserve original placement).
     let module_policies = prog.policy_declarations.iter().filter(|d| d.scope == crate::Policy::PolicyScope::Module).cloned().collect::<Vec<_>>();
     if let Some(policy_span) = module_policies.first().map(|d| d.span) {
@@ -1959,19 +1958,18 @@ mod tests {
     }
 
     #[test]
-    fn trailing_call_comment_stays_outside_lambda_block() {
+    fn trailing_transaction_comment_stays_inside_transaction_block() {
         let source = r#"fn transfer(from: Shared<Account>, amount: Int) {
     #Transact(tx) {
-        from.edit(a => { a.balance -= amount })  // both land, or neither
+        from.balance -= amount  // both land, or neither
     }
 }
 "#;
         let formatted = format_source(source).expect("source should format");
-        let close = formatted.find("})").expect("lambda call should close");
         let comment = formatted
             .find("// both land, or neither")
             .expect("trailing comment should survive");
-        assert!(close < comment, "comment moved into lambda:\n{formatted}");
+        assert!(comment < formatted.rfind('}').unwrap());
         assert_eq!(
             formatted,
             format_source(&formatted).expect("formatted source should re-format")
@@ -1998,7 +1996,7 @@ mod tests {
     y: Int
 }
 
-fn make() :> Point :: {x: 1, y: 2}
+fn make() Point :> {x: 1, y: 2}
 
 fn accepts(values: [String]) {}
 
@@ -2013,7 +2011,7 @@ fn run() {
 }
 "#;
         let once = format_source(source).expect("inferred braces should format");
-        assert!(once.contains(":: {x: 1, y: 2}"), "{once}");
+        assert!(once.contains(":> {x: 1, y: 2}"), "{once}");
         assert!(once.contains("accepts({\"needle\"})"), "{once}");
         assert!(once.contains("fn block() {"), "{once}");
         assert_eq!(

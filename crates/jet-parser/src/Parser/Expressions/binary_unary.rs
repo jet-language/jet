@@ -1,7 +1,19 @@
 use super::super::{
-    BinOp, Diagnostic, EnumLitArg, Expr, OrFallback, Parser, Span, StrTokPart, Syntax, TokKind,
-    UnOp, leading_dot_variant, pat_span,
+    BinOp, Diagnostic, EnumLitArg, Expr, OrFallback, Parser, Span, Stmt, StrTokPart, Syntax,
+    TokKind, UnOp, leading_dot_variant, pat_span,
 };
+
+fn is_fallback_exit(stmt: &Stmt) -> bool {
+    match stmt {
+        Stmt::Return(..)
+        | Stmt::Break(..)
+        | Stmt::Continue(..)
+        | Stmt::BreakLabel(..)
+        | Stmt::ContinueLabel(..) => true,
+        Stmt::Expr(Expr::Call(call)) => call.name == Syntax::BUILTIN_PANIC,
+        _ => false,
+    }
+}
 
 fn write_window_at_maximal_place(expr: Expr, start: usize) -> Expr {
     match expr {
@@ -45,7 +57,7 @@ pub(super) fn starts_shared_operand(kind: &TokKind) -> bool {
         kind,
         TokKind::Ident(_)
             | TokKind::Int(..)
-            | TokKind::Float(_)
+            | TokKind::Float(..)
             | TokKind::UnitNumber { .. }
             | TokKind::Str(_)
             | TokKind::Char(_)
@@ -160,9 +172,8 @@ impl<'a> Parser<'a> {
         }
 
         /// D-FAIL-BIND1=A: a fallback block has ordinary statements followed
-        /// by one value. `return value` is the block's value spelling, not a
-        /// function return; it keeps the common early-return shape readable
-        /// while remaining one value-producing fallback.
+        /// by one bare value or one real exit. The old `return value` block
+        /// value reading is retired; `return value` now returns from the fn.
         fn parse_or_fallback_block(&mut self) -> Result<OrFallback, Diagnostic> {
             let start = self.peek().span.start;
             self.expect(TokKind::LBrace, "to open the `??` fallback block")?;
@@ -174,10 +185,11 @@ impl<'a> Parser<'a> {
                         self.bump();
                         return Err(Diagnostic::error(
                             "E0003",
-                            "a `??` fallback block needs a value".to_string(),
-                            "a fallback block runs its statements and then produces one value"
+                            "a `??` fallback block needs a final value or exit".to_string(),
+                            "a fallback block runs its statements and then produces one value or leaves control"
                                 .to_string(),
-                            "add a final value, such as `{ log(err); default_value }`".to_string(),
+                            "add a final value or exit, such as `{ log(err); default_value }` or `{ log(err); return }`"
+                                .to_string(),
                             Some(span),
                         ));
                     }
@@ -194,28 +206,24 @@ impl<'a> Parser<'a> {
                     _ => {}
                 }
 
-                // The final `return value` is the block-value spelling. A
-                // bare return remains an ordinary statement and will fail the
-                // value check below if it is the tail.
-                if matches!(self.peek().kind, TokKind::KwReturn) {
+                // A control statement is a real exit only when it is the tail.
+                // If more source follows, restore and parse it as an ordinary
+                // body statement so the normal block diagnostic remains local.
+                if matches!(self.peek().kind, TokKind::KwReturn | TokKind::KwBreak)
+                    || matches!(&self.peek().kind, TokKind::Ident(name) if name == Syntax::KW_NEXT)
+                {
                     let save = self.pos;
                     let saved_diags = self.diags.len();
-                    self.bump();
-                    if self.starts_expr(&self.peek().kind) {
-                        if let Ok(value) = self.expr() {
-                            if matches!(self.peek().kind, TokKind::Semi)
-                                && matches!(self.peek2().kind, TokKind::RBrace)
-                            {
-                                self.bump();
-                            }
-                            if matches!(self.peek().kind, TokKind::RBrace) {
-                                let end = self.bump().span.end;
-                                return Ok(OrFallback::Block {
-                                    body,
-                                    value: Box::new(value),
-                                    span: Span::new(start, end),
-                                });
-                            }
+                    if let Ok(stmt) = self.stmt() {
+                        if is_fallback_exit(&stmt) && matches!(self.peek().kind, TokKind::RBrace) {
+                            let end = self.bump().span.end;
+                            let mut body = body;
+                            body.push(stmt);
+                            return Ok(OrFallback::Block {
+                                body,
+                                value: None,
+                                span: Span::new(start, end),
+                            });
                         }
                     }
                     self.pos = save;
@@ -234,9 +242,19 @@ impl<'a> Parser<'a> {
                     }
                     if matches!(self.peek().kind, TokKind::RBrace) {
                         let end = self.bump().span.end;
+                        let is_exit = matches!(&value, Expr::Call(call) if call.name == Syntax::BUILTIN_PANIC);
+                        if is_exit {
+                            let mut body = body;
+                            body.push(Stmt::Expr(value));
+                            return Ok(OrFallback::Block {
+                                body,
+                                value: None,
+                                span: Span::new(start, end),
+                            });
+                        }
                         return Ok(OrFallback::Block {
                             body,
-                            value: Box::new(value),
+                            value: Some(Box::new(value)),
                             span: Span::new(start, end),
                         });
                     }

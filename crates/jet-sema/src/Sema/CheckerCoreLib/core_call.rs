@@ -111,6 +111,9 @@ impl<'a> Checker<'a> {
             if known.iter().any(|known| known == &column) {
                 continue;
             }
+            // The suggestion is embedded in `what`, while `query.span()` is
+            // the whole SQL expression; there is no safe column-token span
+            // for a typed edit here.
             let suggestion = suggest_field(&column, &known)
                 .map(|name| format!(" Did you mean `{name}`?"))
                 .unwrap_or_default();
@@ -1784,37 +1787,6 @@ impl<'a> Checker<'a> {
                         t
                     };
                     return Some(result_ty(inner, decode_error_ty()));
-                }
-                // D-MIGRATE3=A: `decode_traced<T>` — the one extra opt-in method beside
-                // `decode` on every codec that shares the decode machinery. Same target
-                // typing as `decode`, wrapped in `DecodeResult<T>` (`DecodeResult<[T]>`
-                // for CSV) so the caller can ask `.migration.migrated` without `decode`
-                // itself changing shape or cost (I8).
-                (
-                    "core.encoding.json" | "core.encoding.csv" | "core.encoding.toml"
-                    | "core.encoding.yaml",
-                    "decode_traced",
-                ) if !type_args.is_empty() => {
-                    if args.len() != 1 {
-                        self.diags.push(wrong_core_arity(name, 1, args.len(), span));
-                    }
-                    for a in args.iter_mut() {
-                        self.infer(&mut a.expr);
-                    }
-                    let Some(t) = exactly_one_type_arg(self, name, type_args, span) else {
-                        return None;
-                    };
-                    self.check_decodable(&t, span);
-                    let inner = if module == "core.encoding.csv" {
-                        Type::List(Box::new(t))
-                    } else {
-                        t
-                    };
-                    let decode_result = Type::Apply {
-                        name: "DecodeResult".to_string(),
-                        args: vec![inner],
-                    };
-                    return Some(result_ty(decode_result, decode_error_ty()));
                 }
                 // D-DATA-SURFACE1=A: the beginner facade reuses typed CSV/JSON decoding,
                 // then keeps table/stat selectors as ordinary typed Jet lambdas.

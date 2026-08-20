@@ -42,7 +42,7 @@
 //! (D-TXN2, D-TAINT1, D-WASM1) that only ever care about a whole root
 //! regardless of leaf.
 
-use crate::Diagnostics::{Diagnostic, Span};
+use crate::Diagnostics::{Diagnostic, Span, TextEdit};
 /// D-META-EFFECT1: the effect facts live in `jet-foundation` so both stages
 /// read one table. Sema keeps the solver, the diagnostics, and the checks.
 pub use jet_foundation::Effects::{
@@ -68,11 +68,39 @@ pub fn effect_root(name: &str) -> &str {
 /// (`FS.Read`, `Net.HTTP.Get`). The root must be one of the canonical closed
 /// names (the caller reports E0119 on `None`); further segments are
 /// an open, user-chosen leaf path with no fixed vocabulary — mirrors D-TAG1's
-/// tag-tree dotted paths. Returns the path unchanged (as the canonical form)
-/// when the root is known.
+/// tag-tree dotted paths. Returns the path with its root canonicalized when the
+/// root is known.
 pub fn parse_effect_name(name: &str) -> Option<String> {
-    jet_foundation::Authority::parse_root(name)?;
-    Some(name.to_string())
+    if let Some((base, args)) = name.split_once('(') {
+        let args = args.strip_suffix(')')?;
+        let base = jet_foundation::Authority::parse_right(base)?;
+        if base != "Mem.Alloc" || !args.trim().strip_prefix("above:")?.trim().parse::<u64>().ok().is_some_and(|n| n > 0) {
+            return None;
+        }
+        return Some(base);
+    }
+    jet_foundation::Authority::parse_right(name)
+}
+
+/// D-AUTHORITY-MEM2: decode the one parameterized memory right. `None` is the
+/// unbounded `Mem.Alloc` denial; `Some(bytes)` is its bounded form.
+pub fn memory_allocation_bound(name: &str) -> Option<Option<u64>> {
+    if name == "Mem.Alloc" {
+        return Some(None);
+    }
+    let (base, args) = name.split_once('(')?;
+    if base != "Mem.Alloc" {
+        return None;
+    }
+    let bytes = args
+        .strip_suffix(')')?
+        .trim()
+        .strip_prefix("above:")?
+        .trim()
+        .parse::<u64>()
+        .ok()
+        .filter(|bytes| *bytes > 0)?;
+    Some(Some(bytes))
 }
 
 /// D-EFF1: inline-module effect summaries use a semantic member key. The
@@ -89,7 +117,8 @@ pub fn resolve_effect_name(
     name: &str,
     facts: &jet_foundation::Facts::FactRegistry,
 ) -> Result<String, Option<String>> {
-    let root = effect_root(name);
+    let name = jet_foundation::Authority::parse_right(name).ok_or(None)?;
+    let root = effect_root(&name);
     Effect::parse(root).ok_or(None)?;
     let Some(member) = name.strip_prefix(root).and_then(|suffix| suffix.strip_prefix('.')) else {
         return Ok(name.to_string());
@@ -118,18 +147,26 @@ pub fn resolve_effect_name(
 }
 
 pub fn undeclared_effect(name: &str, suggestion: Option<&str>, span: Option<Span>) -> Diagnostic {
-    Diagnostic::error(
+    let fix = suggestion
+        .map(|candidate| format!("did you mean `{candidate}`?"))
+        .unwrap_or_else(|| format!("declare it with `effect {name}`, or use a declared leaf"));
+    let mut diagnostic = Diagnostic::error(
         "E0750",
         format!("`{name}` isn't a declared effect"),
         format!(
             "the `{}` root has declared leaves, so every leaf under it must resolve to one declared name",
             effect_root(name)
         ),
-        suggestion
-            .map(|candidate| format!("did you mean `{candidate}`?"))
-            .unwrap_or_else(|| format!("declare it with `effect {name}`, or use a declared leaf")),
+        fix,
         span,
-    )
+    );
+    if let (Some(candidate), Some(span)) = (suggestion, span) {
+        diagnostic = diagnostic.with_edit(TextEdit {
+            span,
+            new_text: candidate.to_string(),
+        });
+    }
+    diagnostic
 }
 
 pub fn effect_leaf_required(root: &str, span: Option<Span>) -> Diagnostic {
@@ -586,7 +623,6 @@ pub fn check_autodiff_purity(
                                 | "serialize"
                                 | "to_sparse"
                                 | "sparse_mv"
-                                | "matmul_f32_tile"
                         ) {
                             continue;
                         }
@@ -641,7 +677,7 @@ pub struct SemIndexEffectFacts {
     /// One name ledger produced by sema. Tooling reads it and never resolves
     /// names independently from spelling or proximity.
     pub name_ledger: jet_foundation::Names::NameLedger,
-    /// D-WEBAPP1=D: statically known App-returning `fn run` graph (Tower #438).
+    /// D-WEBAPP1=D: statically known App-returning `fn run` graph (Tower #1274, #1703).
     pub web_app: Option<jet_foundation::App::AppGraph>,
     /// D-FACTMODEL1=A: the one checked registry used by tag, effect, state,
     /// diagnostics, semantic tooling, and reflection consumers.
@@ -1635,7 +1671,7 @@ fn expr_handle_escape(e: &crate::AST::Expr, handle: &str) -> Option<Span> {
                 OrFallback::Block { body, value, .. } => body
                     .iter()
                     .find_map(|stmt| stmt_handle_escape(stmt, handle))
-                    .or_else(|| expr_handle_escape(value, handle)),
+                    .or_else(|| value.as_ref().and_then(|value| expr_handle_escape(value, handle))),
                 OrFallback::Return(Some(e), _) => expr_handle_escape(e, handle),
                 _ => None,
             }

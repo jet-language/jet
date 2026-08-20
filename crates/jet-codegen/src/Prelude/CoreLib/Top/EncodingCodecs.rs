@@ -462,7 +462,7 @@ fn jet_enc_cbor_decode<T: __jet_Decode>(
 ) -> Result<T, Vec<jet_std::FieldError>> {
     let tree = jet_enc_cbor_parse_with(bytes, options, true)
         .map_err(jet_cbor_decode_source_error)?;
-    T::jet_decode_traced(&tree).map(|(value, _)| value)
+    T::jet_decode_with_status(&tree).map(|(value, _)| value)
 }
 
 fn jet_uuid_format(b: &[u8; 16]) -> String {

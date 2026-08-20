@@ -410,8 +410,9 @@ pub(super) fn lower_or_fallback(
         }
         OrFallback::Block { body, value, .. } => {
             let mut stmts = lower_stmts(body, cx, &mut fallback_env);
-            let value = lower_expr(value, cx, &mut fallback_env);
-            stmts.push(TStmt::ExprStmt(value));
+            if let Some(value) = value {
+                stmts.push(TStmt::ExprStmt(lower_expr(value, cx, &mut fallback_env)));
+            }
             TOrFallback::Value(Box::new(TExpr {
                 ty: result_ty.clone(),
                 kind: TExprKind::InlineBlock(stmts),
@@ -2041,7 +2042,7 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                 }
             })
         }
-        Expr::Float(v, _, is_f32) => TExpr {
+        Expr::Float(v, _, is_f32, _) => TExpr {
             // D-FLOATW1: sema resolves F32 context and writes `is_f32=true` on the
             // node; carry that width through to TIR so emit produces the right suffix.
             ty: if *is_f32 { Type::Float32 } else { Type::Float },
@@ -3188,7 +3189,7 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                 // block emit emits as an expr-statement. Disjoint from a user fn of the same
                 // name (`cx.sigs.contains_key` would be true then).
                 if !cx.sigs.contains_key(&call.name) && !env.locals.contains_key(&call.name) {
-                    if call.name == Syntax::BUILTIN_REQUIRE {
+                    if call.name == Syntax::BUILTIN_ASSERT {
                         return in_own_frame(|| {
                             let (kind, loc) = lower_require_stop(call, cx, env);
                             return TExpr {
@@ -3201,7 +3202,7 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                             };
                         });
                     }
-                    if call.name == Syntax::BUILTIN_REQUIRE_EQ {
+                    if call.name == Syntax::BUILTIN_ASSERT_EQ {
                         return in_own_frame(|| {
                             let (kind, loc) = lower_require_eq_stop(call, cx, env);
                             return TExpr {
@@ -5502,7 +5503,7 @@ fn unit_lit_elaborated(e: &Expr, cx: &Cx) -> Option<Expr> {
             method_span: *suffix_span,
             owner_type_args: Vec::new(),
             type_args: Vec::new(),
-            args: vec![read_arg(Expr::Float(value, *span, false))],
+            args: vec![read_arg(Expr::Float(value, *span, false, None))],
             recv_type: None,
             resolved_ret: None,
             checked_widen: false,
@@ -5517,8 +5518,8 @@ fn unit_lit_elaborated(e: &Expr, cx: &Cx) -> Option<Expr> {
         name_span: *suffix_span,
         type_args: Vec::new(),
         args: vec![
-            read_arg(Expr::Float(0.0, *span, false)),
-            read_arg(Expr::Float(value, *span, false)),
+            read_arg(Expr::Float(0.0, *span, false, None)),
+            read_arg(Expr::Float(value, *span, false, None)),
         ],
         resolved_ret: None,
         range_checked: false,

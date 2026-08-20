@@ -232,7 +232,7 @@ pub(super) struct Interp<'a> {
     /// `#PublishedSchema` type, source order (the migration chain, oldest step
     /// first — mirrors `Codegen/Items.rs::migration_blocks`'s per-type list).
     /// Empty for a type with no migrations (the common case), which keeps
-    /// `decode_traced<T>`'s fast path — try the current shape, done — the same
+    /// Typed decode's fast path — try the current shape, done — the same
     /// zero-cost identity codegen's trait default gives every other type.
     pub(super) migrations: &'a HashMap<String, Vec<&'a crate::AST::MigrationDecl>>,
     pub(super) list_write_windows: HashMap<String, (String, i64)>,

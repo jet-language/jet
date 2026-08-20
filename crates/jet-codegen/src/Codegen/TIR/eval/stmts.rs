@@ -611,10 +611,14 @@ impl<'a> EvalCtx<'a> {
                         if local.is_persistent() {
                             let mut assigned = rhs;
                             if let Some(binop) = op {
-                                let current = self
-                                    .globals
-                                    .get(&key)
-                                    .cloned()
+                                let current = local
+                                    .persist_key
+                                    .as_ref()
+                                    .and_then(|persist_key| {
+                                        jet_foundation::Persist::shared_read_key(persist_key)
+                                    })
+                                    .or_else(|| scope.get(&key).cloned())
+                                    .or_else(|| self.globals.get(&key).cloned())
                                     .ok_or_else(|| unsupported("persisted global", self.span()))?;
                                 assigned = self.eval_runtime_binop(
                                     *binop,
@@ -2108,7 +2112,10 @@ impl<'a> EvalCtx<'a> {
                 }
                 result
             }
-            TStmt::ScopeMember { .. } => Err(unsupported("statement `ScopeMember`", self.span())),
+            TStmt::ScopeMember { kind, body } => match kind {
+                crate::Codegen::TIR::ScopeMemberKind::Measure => self.exec_stmts(body, scope),
+                _ => Err(unsupported("statement `ScopeMember`", self.span())),
+            },
             TStmt::Transact {
                 snapshots,
                 stm,

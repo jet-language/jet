@@ -1864,8 +1864,10 @@ fn lower_refutable_fallback(
         ],
         OrFallback::Block { body, value, .. } => {
             let mut out = lower_stmts(body, cx, &mut fallback_env);
-            out.push(TStmt::ExprStmt(lower_expr(value, cx, &mut fallback_env)));
-            out.push(unreachable());
+            if let Some(value) = value {
+                out.push(TStmt::ExprStmt(lower_expr(value, cx, &mut fallback_env)));
+                out.push(unreachable());
+            }
             out
         }
     }
@@ -3702,7 +3704,7 @@ fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmt
             });
         }
         // D-DOTSCOPE1 / D-META-DSL1: a `#Test` scope member
-        // (`.setup`/`.expect_fail`/`.timeout`/`.skip`) or a declared checked
+        // (`.setup`/`.expect_fail`/`.timeout`/`.skip`/`.measure`) or a declared checked
         // text block. Legality/args were checked in sema; here we pick the
         // lowering kind while retaining `.timeout`'s canonical Duration expression.
         // `.setup` emits inline, so its bindings are visible to the rest of the test;
@@ -3735,6 +3737,8 @@ fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmt
                         cx,
                         env,
                     ))
+                } else if name == Syntax::SCOPE_TEST_MEASURE {
+                    ScopeMemberKind::Measure
                 } else {
                     ScopeMemberKind::Skip
                 };
