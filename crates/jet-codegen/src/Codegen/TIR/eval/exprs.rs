@@ -8529,11 +8529,18 @@ impl<'a> EvalCtx<'a> {
                     crate::AST::IncDecOp::Inc => n.wrapping_add(1),
                     crate::AST::IncDecOp::Dec => n.wrapping_sub(1),
                 };
-                scope.insert(key, CtValue::Int(next));
+                let next = CtValue::Int(next);
+                if local.is_persistent() {
+                    self.globals.insert(key.clone(), next.clone());
+                    if let Some(persist_key) = &local.persist_key {
+                        let _ = jet_foundation::Persist::shared_write_key(persist_key, &next);
+                    }
+                }
+                scope.insert(key, next.clone());
                 Ok(if *postfix {
                     CtValue::Int(n)
                 } else {
-                    CtValue::Int(next)
+                    next
                 })
             }
             TExprKind::PtrFromAddr { addr, .. } => {
@@ -9416,6 +9423,14 @@ impl<'a> EvalCtx<'a> {
     ) -> Result<(), Diagnostic> {
         match &place.kind {
             TExprKind::Local(local) => {
+                if local.is_persistent() {
+                    self.globals.insert(local.name.clone(), value.clone());
+                    scope.insert(local.name.clone(), value.clone());
+                    if let Some(persist_key) = &local.persist_key {
+                        let _ = jet_foundation::Persist::shared_write_key(persist_key, &value);
+                    }
+                    return Ok(());
+                }
                 // D-MEM1 S9 / D-PIN1=A: writing a whole-place window writes the
                 // owner's storage, not the window binding.
                 let span = self.span();

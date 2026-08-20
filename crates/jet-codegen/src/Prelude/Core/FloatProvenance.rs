@@ -1,4 +1,4 @@
-/// D-FLOAT-ORIGIN / I9: the one rendering rule for tracked-float provenance.
+/// The one rendering rule for tracked-float provenance (I9).
 ///
 /// TIR supplies the provenance fact. Backends only marshal the optional note
 /// into this operation and carry the returned String to their own boundary.

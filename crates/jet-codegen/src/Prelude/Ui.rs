@@ -1,4 +1,4 @@
-// D-RENDERTGT1=A + D-RENDERTGT2=A (c133 M1): render-target backend trait seam.
+// Render-target backend trait seam.
 // Arc/Mutex (not Rc/RefCell): `jet_ui_reactive_render` requires Send+Sync
 // closures that capture backends — fully-qualified paths avoid clashing with
 // the AOT prelude's existing `use std::sync::{Arc, Mutex, …}`.
@@ -140,7 +140,7 @@ fn jet_ui_advance_focus(
 pub const DEFAULT_MOUNT_COLS: f64 = 80.0;
 pub const DEFAULT_MOUNT_ROWS: f64 = 24.0;
 
-/// D-RENDERTGT2=A: portable backend seam between Jet UI and platform renderers.
+/// Portable backend seam between Jet UI and platform renderers.
 pub trait JetBackend {
     fn measure(&mut self, node: &JetUiNode, constraint: JetSizeConstraint) -> JetSize;
     fn layout(&mut self, node: &JetUiNode, frame: JetRect);
@@ -380,7 +380,7 @@ impl JetBackend for JetNullBackendState {
     }
 }
 
-// ── D-RENDERTGT2=A (c133 M2): TUI backend — deterministic character-grid output ──
+// ── TUI backend — deterministic character-grid output ───────────────────────────
 
 struct JetTuiBackendState {
     measured: Option<JetSize>,
@@ -602,7 +602,7 @@ impl JetBackend for JetTuiBackendState {
     }
 }
 
-/// D-RENDERTGT2=A (c133 M2): reactive UI render loop — re-runs the body when signals change.
+/// Reactive UI render loop — re-runs the body when signals change.
 pub fn jet_ui_reactive_render<F: Fn() + Send + Sync + 'static>(body: F) {
     jet_std::jet_reactive_effect_rooted(body);
 }

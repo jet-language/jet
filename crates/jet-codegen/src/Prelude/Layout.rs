@@ -1,5 +1,5 @@
 mod jet_layout {
-    // D-LAYOUT1 / D-LAYOUT-GATES1 / D-LAYOUT-CTOR1: a Cassowary-style
+    // D-LAYOUT1 / D-LAYOUT-CTOR1: a Cassowary-style
     // linear constraint solver backing `name :: Layout.{ … }`. I6: zero external
     // crates — a hand-rolled two-phase primal simplex, plain std Rust only.
     //
@@ -767,17 +767,17 @@ mod jet_layout {
         Constraint { handle, idx }
     }
 
-    /// D-LAYOUT1 / D-LAYOUT-GATES1 (GATE 1): `lhs >= rhs` between layout values.
+    /// D-LAYOUT1 (GATE 1): `lhs >= rhs` between layout values.
     pub fn ge(lhs: impl Into<LinExpr>, rhs: impl Into<LinExpr>) -> Constraint {
         make_constraint(lhs.into(), rhs.into(), RelOp::Ge)
     }
 
-    /// D-LAYOUT1 / D-LAYOUT-GATES1 (GATE 1): `lhs <= rhs` between layout values.
+    /// D-LAYOUT1 (GATE 1): `lhs <= rhs` between layout values.
     pub fn le(lhs: impl Into<LinExpr>, rhs: impl Into<LinExpr>) -> Constraint {
         make_constraint(lhs.into(), rhs.into(), RelOp::Le)
     }
 
-    /// D-LAYOUT1 / D-LAYOUT-GATES1 (GATE 1): `lhs == rhs` between layout values.
+    /// D-LAYOUT1 (GATE 1): `lhs == rhs` between layout values.
     /// Named `eq_` (not `eq`) to stay clear of `PartialEq::eq`.
     pub fn eq_(lhs: impl Into<LinExpr>, rhs: impl Into<LinExpr>) -> Constraint {
         make_constraint(lhs.into(), rhs.into(), RelOp::Eq)

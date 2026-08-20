@@ -351,7 +351,10 @@ pub(super) fn lower_incdec_place(
 ) -> crate::Codegen::TIR::TPlace {
     use crate::Codegen::TIR::TPlace;
     match operand {
-        Expr::Ident(name, _) => TPlace::Local(env.local_of(name)),
+        Expr::Ident(name, _) => TPlace::Local(
+            cx.persistent_local(name)
+                .unwrap_or_else(|| env.local_of(name)),
+        ),
         other => TPlace::Expr(Box::new(lower_expr(other, cx, env))),
     }
 }

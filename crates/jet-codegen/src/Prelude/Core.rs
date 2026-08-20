@@ -1,3 +1,35 @@
+/// D-PERSIST-DEVSTATE1=A: AOT's persistent slot is an interior-mutable
+/// Prelude cell. The generated module binding stays safe Rust; the execution
+/// engine only reads and writes this one storage abstraction.
+pub struct JetPersistCell<T> {
+    value: std::sync::Mutex<T>,
+}
+
+impl<T> JetPersistCell<T> {
+    pub const fn new(value: T) -> Self {
+        Self {
+            value: std::sync::Mutex::new(value),
+        }
+    }
+
+    fn guard(&self) -> std::sync::MutexGuard<'_, T> {
+        self.value
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+
+    pub fn get(&self) -> T
+    where
+        T: Clone,
+    {
+        self.guard().clone()
+    }
+
+    pub fn set(&self, value: T) {
+        *self.guard() = value;
+    }
+}
+
 impl JetShow for JetDate {
     fn jet_show(&self) -> String {
         self.to_string_fmt()

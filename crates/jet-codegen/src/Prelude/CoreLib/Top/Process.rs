@@ -117,7 +117,7 @@ fn jet_process_command_base(
     }
     command.env_clear();
     command.envs(child_env);
-    // D-PROCESS1=A: no `.stdin(...)` call (default) closes the child's stdin —
+    // No `.stdin(...)` call (default) closes the child's stdin —
     // no accidental terminal/parent-stdin inheritance.
     command.stdin(match &spec.stdin {
         Some(mode) => jet_process_stdio(mode),
@@ -657,7 +657,7 @@ fn jet_process_child_signal(
     }
     Ok(())
 }
-// D-PROCESS1=A: `child.stdin` is a writer handle (`.write(text)`); `child.stdout`/
+// `child.stdin` is a writer handle (`.write(text)`); `child.stdout`/
 // `child.stderr` are streaming reader handles consumed only via
 // `loop line; child.stdout.lines() { ... }` (mirrors `FileReader`/`StdinHandle`
 // — sema restricts the field access + `.lines()` result to that position, E2502).

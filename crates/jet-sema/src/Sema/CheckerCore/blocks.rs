@@ -8,7 +8,7 @@ impl<'a> Checker<'a> {
             if new_scope {
                 self.push_scope();
             }
-            // E0209 liveness gate (was D-L0201): before checking each statement,
+            // E0209 liveness gate: before checking each statement,
             // record the tail of the current block (statements that follow it).
             // The helper `is_name_live_after` reads this to word the E0209 fix
             // menu (move vs. copy/reorder). We push the previous frame onto the
@@ -63,7 +63,7 @@ impl<'a> Checker<'a> {
             self.flow.reachable = reachable;
         }
     
-        /// E0209 liveness gate (was D-L0201): returns `true` when `name` is
+        /// E0209 liveness gate: returns `true` when `name` is
         /// referenced in any statement that follows the current statement in the
         /// innermost block. E0209 fires either way now (no clone is ever silent),
         /// but this decides its fix menu: live-after means `^` would break that

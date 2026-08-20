@@ -403,7 +403,7 @@ impl<'a> Checker<'a> {
     
         /// One pattern arm's contribution to the covered set — shared by the
         /// statement table and the else-less value-dispatch chain (card #1440),
-        /// so unreachable-arm policy (D-PATO or-patterns, D-TAG1 subtree
+        /// so unreachable-arm policy (or-patterns, D-TAG1 subtree
         /// ancestors, E0365 vs L0301) lives in exactly one place.
         pub(crate) fn note_pattern_coverage(
             &mut self,
@@ -413,7 +413,7 @@ impl<'a> Checker<'a> {
             multi_head: bool,
         ) {
             let pspan = pattern.span();
-            // D-PATO: or-patterns cover multiple variants; insert all of them.
+            // Or-patterns cover multiple variants; insert all of them.
             let covered_names: Vec<String> = if let Pattern::Or(alts, _) = pattern {
                 alts.iter().filter_map(pattern_variant_name).collect()
             } else if let Some(v) = pattern_variant_name(pattern) {
@@ -462,7 +462,7 @@ impl<'a> Checker<'a> {
         }
 
         /// The completion half of the shared policy: an else-less all-pattern
-        /// table must cover the subject's whole type (E0307); D-PATR open
+        /// table must cover the subject's whole type (E0307); open
         /// scalars and inline ranges without interval-aware coverage can
         /// never prove totality.
         pub(crate) fn check_pattern_coverage_complete(
@@ -478,7 +478,7 @@ impl<'a> Checker<'a> {
                 return;
             }
             let multi_head = subj_name == Some(Syntax::INTERNAL_MULTI_HEAD_SUBJECT);
-            // D-PATR: Int/Char are open scalar types, and an inline range is
+            // Int/Char are open scalar types, and an inline range is
             // finite but has no interval-aware coverage proof yet — range
             // arms can never prove totality here, so an `else` (or wildcard)
             // is always required. `missing_pattern_coverage` returns None for

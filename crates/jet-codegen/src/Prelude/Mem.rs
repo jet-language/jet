@@ -16,7 +16,7 @@
     //     never speaks — but the signatures are the backstop.
     //
     // I6: zero external crates — plain std Rust only.
-    // D-LL1: the one vetted lifetime-extension lives here, inside the core.mem
+    // The one vetted lifetime-extension lives here, inside the core.mem
     // helper module; it never leaks into user-visible generated code.
     use std::cell::{Cell, RefCell};
     use std::ptr::NonNull;
@@ -866,7 +866,7 @@
         }
     }
 
-    // ── D-CTX1 (ratified 2026-06-22, G2): Smart Context runtime ──────────────
+    // ── Smart Context runtime ───────────────────────────────────────────────
     //
     // `#Context(allocator: a) { … }` compiles to a `JetContextGuard` RAII value
     // that saves the old ambient allocator pointer and restores it on Drop.
@@ -877,7 +877,7 @@
     // Safety: Jet sema guarantees the allocator variable is declared before the
     // `#Context` block and lives for at least the block's duration, so the
     // pointer is always valid while the guard is live. This is the same
-    // lifetime-extension trust as the `alloc` helper above (D-LL1 vetted zone).
+    // lifetime-extension trust as the `alloc` helper above.
     //
     // I1: no `unsafe` leaks to user-visible generated Rust — this module is the
     // one audited exception (stripped from the I1 golden-test check in golden.rs).
@@ -911,7 +911,7 @@
     ///
     /// Safe to call: the `&T` borrow ensures the allocator lives at least as long
     /// as the borrow exists; Jet sema guarantees it lives for the whole block.
-    /// The unsafe pointer cast happens here (inside the vetted D-LL1 zone), never
+    /// The unsafe pointer cast happens here, never
     /// in emitted user code (I1).
     pub fn jet_ctx_push_alloc<T>(alloc: &T) -> JetContextGuard {
         let saved = JET_CTX_ALLOC.with(|c| c.get());

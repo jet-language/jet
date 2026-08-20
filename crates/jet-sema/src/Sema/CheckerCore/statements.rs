@@ -669,6 +669,13 @@ impl<'a> Checker<'a> {
                                 self.diags.push(aliasing_while_mut(name, name_span));
                             }
                             let Some(info) = self.lookup(name).cloned() else {
+                                if self.is_persist_binding(name) {
+                                    // D-PERSIST-DEVSTATE1=A: the marker makes
+                                    // this module binding the one legal global
+                                    // write target. Its type and assignment
+                                    // rules were already checked above.
+                                    return;
+                                }
                                 if self.consts.contains_key(name.as_str()) {
                                     self.diags.push(Diagnostic::error(
                                         "E0111",
@@ -2148,7 +2155,7 @@ impl<'a> Checker<'a> {
                                 Some(Type::Named(n)) if n == "StdinLines" => {
                                     self.declare_loop_var(var.clone(), *var_span, &Type::String);
                                 }
-                                // D-PROCESS1=A: `loop line; child.stdout.lines()` /
+                                // `loop line; child.stdout.lines()` /
                                 // `child.stderr.lines()` — streaming subprocess output.
                                 Some(Type::Named(n)) if n == "ProcessLines" => {
                                     self.declare_loop_var(var.clone(), *var_span, &Type::String);
@@ -2599,7 +2606,7 @@ impl<'a> Checker<'a> {
                     self.taskgroup_stack.pop();
                     self.pop_scope();
                 }
-                // D-LAYOUT1 / D-LAYOUT-GATES1: `layout NAME { … }` — a
+                // D-LAYOUT1: `layout NAME { … }` — a
                 // Cassowary-style constraint block. Unlike `region`/`task.group`,
                 // `name` is declared in the CURRENT scope (not pushed/popped
                 // around it) so the handle outlives the block — later code reads
@@ -2740,7 +2747,7 @@ impl<'a> Checker<'a> {
                     }
                     self.pop_scope();
                 }
-                // D-EFF1 / D-QUAL1: a `#Caps(Net, DB) { … }` effect-restriction
+                // D-EFF1: a `#Caps(Net, DB) { … }` effect-restriction
                 // region. Validate the cap names (E0119), open an accumulator so the
                 // effects reached inside are tallied, check the body, then seal the
                 // region for the post-pass E0741 subset check. A lexical scope.
@@ -2868,7 +2875,7 @@ impl<'a> Checker<'a> {
                         });
                     }
                 }
-                // D-CTX1 (ratified 2026-06-22, G2): `#Context(field: value) { … }`.
+                // `#Context(field: value) { … }`.
                 // Type-check each field value: `allocator` must be an allocator
                 // handle type; `deadline` must be an Int epoch-ms instant; `logger`
                 // is currently unconstrained. E0762 on mismatch.
@@ -2977,7 +2984,7 @@ impl<'a> Checker<'a> {
                         self.det_suppress -= 1;
                     }
                 }
-                // D-TXN1–D-TXN4 (ratified 2026-06-24): `#Transact(name) { … }`.
+                // `#Transact(name) { … }`.
                 // Bind the user-chosen handle `name` (typed `Transaction`) so
                 // `name.on_commit(() => { … })` resolves inside the block, then check
                 // the body with the transaction depth raised: an irreversible Core

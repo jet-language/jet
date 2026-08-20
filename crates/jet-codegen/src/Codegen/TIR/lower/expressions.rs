@@ -2151,6 +2151,15 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                         kind: TExprKind::Local(TLocal::user(&temp)),
                     };
                 }
+                if let Some(ty) = cx.persist_types.get(name) {
+                    return TExpr {
+                        ty: ty.clone(),
+                        kind: TExprKind::Local(
+                            cx.persistent_local(name)
+                                .expect("persist type and slot must agree"),
+                        ),
+                    };
+                }
                 // c109 Phase 24: a comptime CONST inlines its pre-rendered value FIRST (the
                 // AST `emit_expr` Ident arm returns `cx.consts[name]` before any env/fn-value
                 // check — so a const takes precedence even over a same-named local, matching

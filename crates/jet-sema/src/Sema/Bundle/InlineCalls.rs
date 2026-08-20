@@ -133,7 +133,7 @@ pub(crate) fn rewrite_inline_calls_stmts(
                     rewrite_inline_calls_stmts(eb, siblings, modname);
                 }
             }
-            // D-CTX1: rewrite inline calls in field values and body.
+            // Rewrite inline calls in field values and body.
             Stmt::ContextBlock { fields, body, .. } => {
                 for (_, e, _) in fields.iter_mut() {
                     rewrite_inline_calls_expr(e, siblings, modname);

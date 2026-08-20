@@ -1,4 +1,4 @@
-/// D-HOLE1 / I9: one option-lift operation for every execution tier.
+/// One option-lift operation for every execution tier (I9).
 ///
 /// The carrier is an adapter. It lets the TIR evaluator and the resident JIT
 /// pass their own representations through this same operation while the

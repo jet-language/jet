@@ -1,4 +1,4 @@
-// D-IO1: lexical path value rules shared by AOT, JIT, and comptime.
+// Lexical path value rules shared by AOT, JIT, and comptime.
 
 #[allow(dead_code)]
 pub(crate) fn jet_std_path_join(base: &String, part: &String) -> String {

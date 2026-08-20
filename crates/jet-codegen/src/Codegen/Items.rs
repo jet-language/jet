@@ -2898,6 +2898,15 @@ pub(crate) fn emit_const(c: &crate::AST::ConstDef, out: &mut String) {
         Expr::Bool(b, _) => (b.to_string(), "bool".to_string()),
         _ => ("0i64".to_string(), "i64".to_string()),
     };
+    if c.is_persist {
+        out.push_str(&format!(
+            "static {}: JetPersistCell<{}> = JetPersistCell::new({});\n\n",
+            mangle(&c.name).to_uppercase(),
+            ty,
+            val,
+        ));
+        return;
+    }
     let inline = if c.attrs.contains(&ConstAttr::ForceInline) {
         "#[inline]\n"
     } else {

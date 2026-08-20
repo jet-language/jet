@@ -54,7 +54,7 @@ pub(crate) fn jet_contract_report(
     jet_runtime_stop_report("E3005", file, line, "", "", 1, 1, &message, "")
 }
 
-// D-FAIL-ARITH1: engines marshal an operation fact to this one arithmetic
+// Engines marshal an operation fact to this one arithmetic
 // boundary. The code and wording do not live in a host adapter.
 pub(crate) const JET_ARITHMETIC_CODE: &str = "E3010";
 pub(crate) const JET_ARITHMETIC_ADD_OVERFLOW: &str =

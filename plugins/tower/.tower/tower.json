@@ -2,8 +2,8 @@
   "meta": {
     "version": 4,
     "project": "Jet",
-    "nextNum": 2109,
-    "rev": 39672,
+    "nextNum": 2110,
+    "rev": 39678,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -31,7 +31,7 @@
         "radar-sq"
       ]
     },
-    "completionCursor": "2026-08-20T15:53:58.429Z"
+    "completionCursor": "2026-08-20T18:28:55.997Z"
   },
   "epochs": [
     {
@@ -133646,12 +133646,17 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": "e3-m09-types-numbers",
-      "phase": "ready",
+      "phase": "done",
       "priority": "P2",
       "plan": "## Outcome\n`units :: [Fighter.{hp: 12}, .{hp: 0}, .{hp: 5}]` compiles and runs when any one element (or a binding annotation) determines the list's element type: bare `.{...}` slots elaborate against that determined type instead of failing E0119. The annotation-driven form `units: [Fighter] :: [.{...}, .{...}]` infers every slot. A list with no determinable element type still rejects with E0119, with a UI snapshot. An example with golden output proves the inference on AOT, default jet run, and interpreter.\n\n## Law\n- D-DOTCTOR2 (expected-type dot-construction elaboration; syntax-decisions.md S29 block, lines ~737-742) — this card extends its expected-type propagation into list-literal element slots; no new syntax (I7 satisfied by the existing decision).\n- D-DOTCTOR3, D-EMPTYLIT1 amendment (`[T].{}` explicit empty, card #780) — leave untouched.\n- I4 (snapshot for the ambiguous rejection), I5 (executable example + golden), I9 (tier parity).\n\n## Work\n1. Trace `crates/jet-sema/src/Sema/CheckerInfer/expr.rs::infer_list_lit` (~line 3789). Three branches: FixedList expected (3813), `Type::List` expected (3865 — sets `self.expected_type` per element, incl. the TraitObject `as_trait` path), and NO expected type (3955-4018) where each element is inferred independently — a bare `.{...}` there hits E0119 at expr.rs:3303/3626 (\"needs a known struct type here\").\n2. First verify criterion 2's annotated form `units: [Fighter] :: [.{...}]` through the 3865 branch on the live binary — it likely already passes; if so criterion 2 is proof-only.\n3. Fix the no-expected-type branch with two passes: pass 1 infers every element that is NOT a bare inferred construction (the `Expr` shapes that reach the expr.rs:3303/3626 E0119 when `expected_type` is None — defer those, do not infer them yet, so no duplicate diagnostics); join the inferred types with the existing `numeric_join` logic to one determined element type. Pass 2: set `self.expected_type = Some(determined)` and infer the deferred bare slots through the same elaboration the 3865 branch uses. Determination must work from ANY element position (type-naming element first, middle, or last), per the card body.\n4. If pass 1 yields no type (all slots bare) or irreconcilable struct types, fall through unchanged so E0119 (bare slots) / E0504 (mixed) behavior is preserved.\n5. Example: extend `examples/features/types/dot_construction.jet` (or `inferred_new.jet`) with the element-determined and annotation-determined forms; regenerate golden.\n6. Snapshot: add/refresh the E0119 UI snapshot for the ambiguous case (e.g. `[.{hp: 1}, .{hp: 2}]` with no determinant).\n\n## Not building\n- No new user-typeable syntax; no map-literal or tuple-literal inference changes.\n- The TraitObject element path (3866-3898) and FixedList path stay as-is.\n- No relaxation of E0504 same-type rule or E0501 empty-list rule.\n\n## Proof\n- Probe from the card body compiles and prints identically on `jet run`, `jet run --release`, and the interpreter tier (criterion 1).\n- Annotated form probe passes (criterion 2).\n- Snapshot test shows E0119 for the undeterminable list (criterion 3).\n- Updated example golden green on every applicable tier (criterion 4). Focused checks only; full suite at epoch closeout.\n\n## blockedBy\nnone — self-contained sema inference change under already-ratified D-DOTCTOR2.",
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-08-20",
+          "by": "fable-e3-burndown",
+          "text": "Closed on integrated evidence. A list literal infers its element type from a determinable slot, a mixed list takes the type from its named head, and an undeterminable one still reports E0119 with a fixture. The fix text now teaches the ratified spelling rather than the retired dotted one."
+        },
         {
           "at": "2026-08-19",
           "text": "Promoted from Ideas"
@@ -133679,11 +133684,11 @@
         {
           "n": 3,
           "text": "A list with no determinable element type still rejects with E0119; UI snapshot covers the mixed/ambiguous case",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-19T10:47:32.878Z"
+          "evidence": "PROOF at HEAD. A list with no determinable element type still rejects: tests/ui/list_literal_ambiguous_dot.jet holds [{name: 'Ada', hp: 10}, {name: 'Bo', hp: 8}] and reports E0119 twice, once per element, and cargo test --test diagnostic_snapshots ui_snapshots with JET_UI_FILTER on that fixture exits 0 (1 passed). The counterpart is proven too: [Fighter{name: 'Ada', hp: 10}, {name: 'Bo', hp: 8}] checks clean and jet run prints 2 then Bo, so one named head gives its inferred sibling the element type. The diagnostic's own fix text was teaching the retired Point.{ } spelling and now teaches Point{ }; the fixture and its expectation were respelled in the same change under D-LIT-DOT1=B.",
+          "at": "2026-08-20T19:16:57.145Z"
         },
         {
           "n": 4,
@@ -133703,8 +133708,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-19T10:46:48.287Z",
-      "updated": "2026-08-20T14:17:00.852Z",
-      "updatedBy": "fable-e3-burndown"
+      "updated": "2026-08-20T19:16:58.027Z",
+      "updatedBy": "fable-e3-burndown",
+      "completedAt": "2026-08-20T19:16:58.027Z"
     },
     {
       "id": "c0zhkr0g",
@@ -134472,12 +134478,17 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": "e3-m18-devloop-testing",
-      "phase": "verify",
+      "phase": "done",
       "priority": "P2",
       "plan": "## Outcome\nTwo-part deliverable per the owner ruling: (a) an owner-facing before/after demo of what `jet fmt --simplify` does today (R1 braced-single-return → `::` body, R4 integer fences → ranges) on real corpus files, presented for visual acceptance (card is needsAcceptance); (b) the parsed-AST forms behind R2 (else-if chain → one ordered arm table) and R3 (drop redundant `Type.{` head) are unified so both rewrites pass the span-free AST-identity check, and R2/R3 are enabled in the simplify catalog with fmt idempotence and corpus `--check` staying green.\n\n## Law\n- D-FMT-SIMPLIFY1=A (card #1514) — opt-in `--simplify`, only ratified simplest-spelling rewrites; identity check compares simplify output against plain-fmt output (crates/jet-parser/src/Formatter/mod.rs:1671-1695; implementation log docs/spec/syntax-decisions.md:7323).\n- D-IFGUARD1=A — subjectless guard tables reuse `if`/`else`/arm arrows; classic `if` and the guard table are intentionally ONE semantic node (`Stmt::Switch` with compiler-private `true` subject; crates/jet-foundation/src/AST/statements.rs:35-60).\n- D-IFDIST1=A — comparison-marked dispatch; D-DOTCTOR1/D-DOTCTOR3 — `Type.{ … }` named vs `.{ … }` inferred struct/typed literals (crates/jet-foundation/src/AST/expressions.rs:556-583).\n- No new user-typeable syntax (I7 untouched): both rewrites emit already-ratified spellings.\n\n## Work\n1. Demo first (criterion 1, independent of R2/R3): run `jet fmt --simplify` across `examples/**/*.jet` and `tests/ui/*.fixed.jet`, collect real diffs, and assemble a short owner demo (one before/after pair per rule R1/R4, same program both sides, real Jet syntax, dark-mode-friendly if rendered). Park it on the card log/refs for acceptance at close.\n2. Ground R2. Today a classic chain `if a {…} else if b {…} else {…}` parses as NESTED subjectless `Stmt::Switch` (each `else if` = a one-arm Switch in `else_body`; formatter prints it back via `switch_was_classic_if` + the else-if pattern at Formatter/Statements.rs:1007-1011), while the guard table `if { a -> …; b -> …; else -> … }` parses FLAT (one Switch, N arms). Unify at the parser: extend the existing one-node precedent (statements.rs:35-60) so a classic else-if chain parses into the FLAT arm-list Switch — the parser appends each `else if` arm instead of nesting, and classic spelling stays recoverable from source spans via `uses_classic_if_spelling` (spelling is already span-derived, not AST-derived, so plain fmt round-trip is preserved).\n3. Migrate every consumer of the nested shape found by grep `is_subjectless_guard` / nested-else-if patterns: TIR lowering `else_is_elseif` (jet-codegen/src/Codegen/TIR/mod.rs:3231, lower/control_flow.rs:826), subset statements.rs:660, sema CheckerCore/switches.rs (subjectless arms>1 paths already exist at 919), devserver edit_actions/graph_projection classic-if projections, formatter classic printer (fmt_classic_switch). Behavior must be provably unchanged: nested and flat lower identically (`} else if`), so this is shape migration, not semantics.\n4. Implement R2 in the simplify catalog (Formatter/Statements.rs beside R4 at 157): a subjectless classic chain of >=2 arms emits the guard-table arm form. With step 2 done, simplify output reparses to the identical flat Switch → identity assert (mod.rs:1692) passes.\n5. Ground R3. `Rect.{…}` vs `.{…}` differ in AST (`StructLit { type_name, inferred }` / `TypedLit { head: Option }`). Dropping a head can never canonicalize away blindly (it would equate `Rect.{…}` with `Point.{…}`). Unify via context elaboration in the identity check: teach `canonical_program` (Formatter/mod.rs:36) a normalization pass that, for struct/typed literals in syntactically-typed positions ONLY (binding with declared type `x: Rect = …`, field value whose field type is named in the same file's struct decl is NOT syntactic — exclude; typed-list element under a `[T].{` head; `return` of a function whose declared return type is in this AST), fills the inferred head from that context — mirroring exactly the elaboration sema performs (expressions.rs:574-577).\n6. Implement R3 gated to exactly the positions step 5's normalizer proves: drop the head only where (i) the context names the same type syntactically and (ii) the resulting bare `.{` still parses there — respect the `expr_no_struct_lit` refusal (a `::` one-line body cannot open `{`; see tests/fmt.rs:1070 `fmt_simplify_keeps_a_struct_literal_return_braced` — that constraint stays).\n7. Enable both rules only under `options.simplify`; plain `jet fmt` output must be byte-identical to today. Update the D-FMT-SIMPLIFY1 implementation log in docs/spec/syntax-decisions.md (7323-7329) to record R2/R3 enabling.\n8. If step 2's blast radius proves the parser unification unsafe (a consumer genuinely needs the nested shape), fall back to normalizing nested→flat inside `canonical_program` only (same place R3's normalizer lives) and record why in the card log — the identity check is the ratified arbiter either way.\n\n## Not building\n- New simplify rules beyond R2/R3; changes to plain (non-simplify) fmt output.\n- Sema-powered simplification (R3 stays syntactic-context only; no type inference in the formatter).\n- Changes to the guard-table or dispatch grammar itself.\n- Auto-applying --simplify anywhere (stays opt-in per D-FMT-SIMPLIFY1=A).\n\n## Proof\n- Criterion 1: demo artifact linked on the card; owner visual acceptance at close (needsAcceptance).\n- Criteria 2-3: new tests in tests/fmt.rs — an else-if chain simplifies to the arm table and round-trips the identity check; a typed-binding `Rect.{…}` drops to `.{…}`; a return-position struct literal stays braced; `.{` never emitted where `expr_no_struct_lit` refuses it; guard-table input is untouched (already simplest).\n- Criterion 4: R2/R3 active under --simplify; `fmt(fmt(x)) == fmt(x)` on every corpus file (existing tests/fmt.rs idempotence law, spec.md:1131); `jet fmt --check` over examples/ stays green; second `--simplify` pass is a no-op on a file exercising R1-R4.\n- Parser unification (step 2) is a compiler-shape change: run the focused switch/dispatch sema+TIR test set and one example golden through default `jet run` and `--release` AOT to prove lowering parity. Full suite at epoch closeout.\n\n## blockedBy\nnone — D-FMT-SIMPLIFY1=A is ratified with R2/R3 named in the original card #1514 scope; the owner ruling on this card (2026-08-19) authorizes the IR unification route.",
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-08-20",
+          "by": "owner",
+          "text": "Accepted — D-ACCEPT-2050 resolved through owner verification UI."
+        },
         {
           "at": "2026-08-20",
           "by": "fable-e3-burndown",
@@ -134552,9 +134563,10 @@
       "parentId": null,
       "needsAcceptance": true,
       "created": "2026-08-19T11:17:15.319Z",
-      "updated": "2026-08-20T11:53:29.680Z",
-      "updatedBy": "fable-e3-burndown",
-      "checkSteps": "Criterion 1 is the demo. Run, from the repo root:\n\n  scripts/agent/jet-env cargo build\n  scripts/agent/jet-env jet fmt --check --simplify --diff examples\n\nThat prints every rewrite --simplify would make across the example corpus.\nThree representative ones, from real corpus files:\n\nR1  examples/features/errors/qq_panic.jet\n    before: fn maybe() => Int? { return None }\n    after:  fn maybe() => Int? :: None\n\nR3  examples/features/basics/named_args.jet\n    before: fn new(width: Float, height: Float) => Rect { return Rect.{width: width, height: height} }\n    after:  fn new(width: Float, height: Float) => Rect { return .{width: width, height: height} }\n\nR2  a chained classic if becomes the ordered arm table L0507 already asks for\n    before:  if score >= 90 {\n                 return \"a\"\n             } else if score >= 80 {\n                 return \"b\"\n             } else {\n                 return \"c\"\n             }\n    after:   if {\n                 score >= 90 -> { return \"a\" }\n                 score >= 80 -> { return \"b\" }\n                 else -> { return \"c\" }\n             }\n\nGood looks like: each rewrite is the spelling you would have asked for, the\nmeaning is unchanged, and nothing gets harder to read.\n\nThe catalog is opt-in per rewrite, so bounce with the letter (R1, R2, or R3)\nyou reject and the rest can still ship."
+      "updated": "2026-08-20T18:28:52.954Z",
+      "updatedBy": "owner",
+      "checkSteps": "Criterion 1 is the demo. Run, from the repo root:\n\n  scripts/agent/jet-env cargo build\n  scripts/agent/jet-env jet fmt --check --simplify --diff examples\n\nThat prints every rewrite --simplify would make across the example corpus.\nThree representative ones, from real corpus files:\n\nR1  examples/features/errors/qq_panic.jet\n    before: fn maybe() => Int? { return None }\n    after:  fn maybe() => Int? :: None\n\nR3  examples/features/basics/named_args.jet\n    before: fn new(width: Float, height: Float) => Rect { return Rect.{width: width, height: height} }\n    after:  fn new(width: Float, height: Float) => Rect { return .{width: width, height: height} }\n\nR2  a chained classic if becomes the ordered arm table L0507 already asks for\n    before:  if score >= 90 {\n                 return \"a\"\n             } else if score >= 80 {\n                 return \"b\"\n             } else {\n                 return \"c\"\n             }\n    after:   if {\n                 score >= 90 -> { return \"a\" }\n                 score >= 80 -> { return \"b\" }\n                 else -> { return \"c\" }\n             }\n\nGood looks like: each rewrite is the spelling you would have asked for, the\nmeaning is unchanged, and nothing gets harder to read.\n\nThe catalog is opt-in per rewrite, so bounce with the letter (R1, R2, or R3)\nyou reject and the rest can still ship.",
+      "completedAt": "2026-08-20T18:28:52.954Z"
     },
     {
       "id": "c0ro98g4",
@@ -136913,14 +136925,20 @@
       "plan": null,
       "blockedBy": [],
       "assignee": null,
-      "log": [],
+      "log": [
+        {
+          "at": "2026-08-20",
+          "by": "fable-e3-burndown",
+          "text": "Evidence for the ballot, from the corpus rather than taste. Two axes were being conflated. Making a group is a verb and is already qualified: task.group g { … }, the same shape as files.create. Naming its type is a different axis, and Jet types are bare in parameter positions: fn write_catalog(path: Path), fn f() ? EncodingError, DataTree, TaskFailure. Among those bare type names, a domain prefix is the norm exactly where the bare word would be ambiguous: TaskFailure not Failure, EncodingError not Error, EncodingLimits not Limits, IOError not Error, CompilerWorkload not Workload. Group alone collides with layout groups, match groups and regex capture groups, so TaskGroup is the consistent name and it is not redundant with task.group any more than EncodingError is redundant with encoding.writer. Recommendation: keep TaskGroup, close this ballot, and unblock #1564 c8."
+        }
+      ],
       "criteria": [],
       "refs": [],
       "tags": [],
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-20T00:00:30.357Z",
-      "updated": "2026-08-20T00:00:30.357Z",
+      "updated": "2026-08-20T18:47:45.539Z",
       "updatedBy": "fable-e3-burndown"
     },
     {
@@ -137870,6 +137888,33 @@
       "needsAcceptance": false,
       "created": "2026-08-20T11:28:32.590Z",
       "updated": "2026-08-20T12:49:07.246Z",
+      "updatedBy": "fable-e3-burndown"
+    },
+    {
+      "id": "c089xrdz",
+      "num": 2109,
+      "title": "Diagnostics quote decision ids that resolve to nothing",
+      "body": "Owner ruling D-CITE-EMPTY1=A says a citation that resolves to nothing must go. The sharpest instance is not a comment, it is product copy.\n\n354 string literals across crates/ and Source/ contain a D-* id. 27 of those ids exist in neither Tower nor docs/spec/syntax-decisions.md, so a user reads the id in an error message and can look it up nowhere. That breaks I4: a diagnostic is a product, and this part of it means nothing to the person reading it.\n\nWorst offenders, because the id is the FIRST thing the message says:\n- crates/jet-env-model/src/ModuleEval/Diagnostics.rs:174,196,212,224,235,256 all open with \"D-JETOS-FREEZE1: ...\"\n- crates/jetpack/src/JetOS/generation.rs:210,237 open with \"D-JOS-DESKTOP1=A: ...\"\n\nTrailing parentheticals, where the sentence already teaches and the id adds nothing:\n- crates/jet-sema/src/Sema/CheckerCore/switches.rs:489,494 (D-PATR)\n- crates/jet-sema/src/Sema/CheckerInfer/calls/method_calls.rs:3928 (D-TTLVAL1)\n- crates/jet-sema/src/Sema/WebPartition.rs:319, Source/CmdCompile.rs:385, crates/jet-foundation/src/OSTarget.rs:91 (D-WASM1)\n- crates/jet-foundation/src/WebPartition.rs:156,158 (D-JSBIND1)\n- crates/jet-pkg-model/src/WorkspacePlan.rs:111 (D-WORKSPACE2)\n- crates/jetpack/src/CLI/browser.rs:35 (D-BROWSER-AUTO1)\n- Source/CmdReport.rs:229 (D-REPORT-SEND1)\n- crates/jet-driver/src/InterpreterBoundary.rs:82 (D-DBG3)\n- crates/jet-codegen/src/Prelude/Diagnostics.jet:396 (D-LL1)\n- crates/jet-parser/src/Parser/Statements/control.rs:1138 (D-CTX1)\n\nDelete the id and keep the teaching sentence. Do not swap in a different id unless it is ratified and actually says what the message claims. Every touched diagnostic needs its UI fixture reblessed in the same change.\n\nThe wider comment-level problem is separate and larger: 217 D-* ids cited in comments still resolve to nothing. A first pass re-pointed D-STATE-DECL to D-STATE1 and D-QUAL1 to D-EFF1 and deleted 28, and flagged these as likely real decisions that were never entered, which is worth the owner attention: D-MOD2, D-CTX1, D-CRYPTO-DIAG1, D-WASM1, D-RINGLAYER1, D-PROCESS1, D-TTLVAL1, D-JSON3, D-DATAFLOW1, D-TESTDATA1, D-RENDERTGT2, D-LAYOUT-GATES1, D-TXN4, D-PATR, D-PATO, D-FAIL-ARITH1.\n",
+      "kind": "bug",
+      "track": "epoch",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P1",
+      "plan": null,
+      "checkSteps": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [],
+      "refs": [],
+      "tags": [
+        "drift"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-08-20T19:00:51.392Z",
+      "updated": "2026-08-20T19:00:51.392Z",
       "updatedBy": "fable-e3-burndown"
     }
   ],
@@ -182489,8 +182534,28 @@
         "steps": "Criterion 1 is the demo. Run, from the repo root:\n\n  scripts/agent/jet-env cargo build\n  scripts/agent/jet-env jet fmt --check --simplify --diff examples\n\nThat prints every rewrite --simplify would make across the example corpus.\nThree representative ones, from real corpus files:\n\nR1  examples/features/errors/qq_panic.jet\n    before: fn maybe() => Int? { return None }\n    after:  fn maybe() => Int? :: None\n\nR3  examples/features/basics/named_args.jet\n    before: fn new(width: Float, height: Float) => Rect { return Rect.{width: width, height: height} }\n    after:  fn new(width: Float, height: Float) => Rect { return .{width: width, height: height} }\n\nR2  a chained classic if becomes the ordered arm table L0507 already asks for\n    before:  if score >= 90 {\n                 return \"a\"\n             } else if score >= 80 {\n                 return \"b\"\n             } else {\n                 return \"c\"\n             }\n    after:   if {\n                 score >= 90 -> { return \"a\" }\n                 score >= 80 -> { return \"b\" }\n                 else -> { return \"c\" }\n             }\n\nGood looks like: each rewrite is the spelling you would have asked for, the\nmeaning is unchanged, and nothing gets harder to read.\n\nThe catalog is opt-in per rewrite, so bounce with the letter (R1, R2, or R3)\nyou reject and the rest can still ship."
       },
       "draft": false,
-      "status": "open",
-      "created": "2026-08-20T11:53:29.680Z"
+      "status": "ratified",
+      "created": "2026-08-20T11:53:29.680Z",
+      "outcome": "accept",
+      "ratifiedAt": "2026-08-20",
+      "provenance": {
+        "kind": "owner-ui",
+        "session": "gJc5s8dftyE",
+        "challenge": "4zQh3zZv1MA",
+        "issuedFor": "D-ACCEPT-2050",
+        "outcome": "accept",
+        "resolvedAt": "2026-08-20T18:28:52.767Z"
+      },
+      "provenanceHistory": [
+        {
+          "kind": "owner-ui",
+          "session": "gJc5s8dftyE",
+          "challenge": "4zQh3zZv1MA",
+          "issuedFor": "D-ACCEPT-2050",
+          "outcome": "accept",
+          "resolvedAt": "2026-08-20T18:28:52.767Z"
+        }
+      ]
     },
     {
       "id": "D-ACCEPT-1413",
@@ -184529,6 +184594,48 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-08-20T19:16:58.027Z",
+      "by": "fable-e3-burndown",
+      "action": "card.update",
+      "ref": "c0rhcnm6",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-08-20T19:16:57.146Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0rhcnm6",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-20T19:00:51.393Z",
+      "by": "fable-e3-burndown",
+      "action": "card.add",
+      "ref": "c089xrdz",
+      "note": "Diagnostics quote decision ids that resolve to nothing"
+    },
+    {
+      "at": "2026-08-20T18:47:45.539Z",
+      "by": "fable-e3-burndown",
+      "action": "card.update",
+      "ref": "c01g2ptl",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-08-20T18:28:55.997Z",
+      "by": "owner",
+      "action": "done.clear",
+      "ref": null,
+      "note": "2026-08-20T18:28:55.997Z"
+    },
+    {
+      "at": "2026-08-20T18:28:52.954Z",
+      "by": "owner",
+      "action": "acceptance.resolve",
+      "ref": "D-ACCEPT-2050",
+      "note": "owner-ui session=gJc5s8dftyE challenge=4zQh3zZv1MA outcome=accept"
+    },
     {
       "at": "2026-08-20T18:20:58.333Z",
       "by": "fable-e3-burndown",
@@ -187986,48 +188093,6 @@
       "action": "card.criteria-add",
       "ref": "c0zcrs0m",
       "note": "#7 snapshots re-blessed"
-    },
-    {
-      "at": "2026-08-19T16:41:04.637Z",
-      "by": "owner",
-      "action": "card.criteria-add",
-      "ref": "c0zcrs0m",
-      "note": "#6 jet devtools grammars regenerated"
-    },
-    {
-      "at": "2026-08-19T16:41:04.636Z",
-      "by": "owner",
-      "action": "card.criteria-add",
-      "ref": "c0zcrs0m",
-      "note": "#5 syntax-decisions.md log entry"
-    },
-    {
-      "at": "2026-08-19T16:41:04.636Z",
-      "by": "owner",
-      "action": "card.criteria-add",
-      "ref": "c0zcrs0m",
-      "note": "#4 Syntax.rs entry updated"
-    },
-    {
-      "at": "2026-08-19T16:21:29.130Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c0460ur1",
-      "note": "phase"
-    },
-    {
-      "at": "2026-08-19T16:21:28.534Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c0m0lmh4",
-      "note": "phase"
-    },
-    {
-      "at": "2026-08-19T16:21:27.924Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c09otnjg",
-      "note": "phase"
     }
   ],
   "nextNum": 368,

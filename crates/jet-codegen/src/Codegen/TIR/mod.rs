@@ -677,6 +677,10 @@ pub struct TLocal {
     pub name: String,
     pub generated: bool,
     pub deref: bool,
+    /// D-PERSIST-DEVSTATE1=A: canonical module-store identity for a pinned
+    /// binding. Persistent slots do not enter the ordinary local variable map.
+    pub persist_key: Option<String>,
+    pub persist_ty: Option<Type>,
     /// D-PROVENANCE1=B: source identity for the exact `#Track` Float binding.
     /// The metadata travels with the slot until TIR lowers `.origin()`.
     pub origin: Option<TBindingOrigin>,
@@ -696,6 +700,8 @@ impl TLocal {
             name: name.into(),
             generated: false,
             deref: false,
+            persist_key: None,
+            persist_ty: None,
             origin: None,
             mutable: false,
             uninit_scalar: false,
@@ -715,6 +721,8 @@ impl TLocal {
             name,
             generated: true,
             deref: false,
+            persist_key: None,
+            persist_ty: None,
             origin: None,
             mutable: false,
             uninit_scalar: false,
@@ -731,6 +739,26 @@ impl TLocal {
     /// The compiler-owned STM handle used by `#Transact` Shared edits.
     pub fn stm() -> TLocal {
         TLocal::generated("stm").as_mutable()
+    }
+
+    /// A module binding whose value belongs to the shared development store.
+    pub fn persistent(name: impl Into<String>, module: &str, ty: Type) -> TLocal {
+        let name = name.into();
+        TLocal {
+            name: name.clone(),
+            generated: false,
+            deref: false,
+            persist_key: Some(format!("{module}::{name}")),
+            persist_ty: Some(ty),
+            origin: None,
+            mutable: true,
+            uninit_scalar: false,
+            uninit_fixed: false,
+        }
+    }
+
+    pub fn is_persistent(&self) -> bool {
+        self.persist_key.is_some()
     }
 
     pub fn as_mutable(mut self) -> TLocal {

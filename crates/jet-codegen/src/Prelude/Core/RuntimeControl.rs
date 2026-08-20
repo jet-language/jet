@@ -1,4 +1,4 @@
-// ── D-DEFER1 option B: core.mem.scope.guard ──────────────────────────────────────
+// ── core.mem.scope.guard ─────────────────────────────────────────────────────────
 // A ScopeGuard stores a zero-argument closure and runs it in Drop — on every
 // exit path (normal fall-through, early `return`, `?` propagation).
 // LIFO ordering is guaranteed by Rust's reverse-declaration drop order.
@@ -16,7 +16,7 @@ impl<F: FnOnce()> Drop for JetScopeGuard<F> {
         }
     }
 }
-// ── D-TXN1–D-TXN4 + D-TXN-ROLLBACK (2026-06-24/25): #Transact transaction blocks
+// ── #Transact transaction blocks ─────────────────────────────────────────────────
 // A `#Transact(tx) { … }` block lowers to:
 //   { let mut tx = jet_transaction(); <body>; tx.commit(); }
 //

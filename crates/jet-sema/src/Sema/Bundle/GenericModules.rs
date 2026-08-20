@@ -2353,7 +2353,7 @@ pub(crate) fn expand_generic_module_aliases(
     }
 }
 
-/// D-MOD2/D-MOD3: give an inline module's member TYPES the same lifted member
+/// Give an inline module's member TYPES the same lifted member
 /// identity its member functions already have.
 ///
 /// Registration and every engine only ever learn TOP-LEVEL type declarations:
@@ -2445,7 +2445,7 @@ pub(crate) fn hoist_inline_module_member_types(bundle: &mut ProgramBundle) {
                         &member_types,
                         &values,
                     ))),
-                    // Member callables keep their own name (D-MOD2 mangles it at
+                    // Member callables keep their own name (mangling happens at
                     // registration); only the member type spellings inside them move.
                     Item::Func(def) => kept.push(Item::Func(specialize_func(
                         def,

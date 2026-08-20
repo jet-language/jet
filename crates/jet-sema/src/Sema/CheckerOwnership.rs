@@ -2115,6 +2115,11 @@ impl<'a> Checker<'a> {
             ));
             return;
         }
+        if self.is_persist_binding(&root) {
+            // D-PERSIST-DEVSTATE1=A: a write place into the pinned module
+            // value is valid; the marker is the permission fact.
+            return;
+        }
         if self.consts.contains_key(&root) {
             self.diags.push(Diagnostic::error(
                 "E0111",

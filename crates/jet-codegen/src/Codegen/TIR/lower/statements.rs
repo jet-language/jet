@@ -2717,7 +2717,10 @@ fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmt
                         value_t = force_interrupt_callback_value(value_t, cx);
                     }
                     TStmt::Assign {
-                        place: TPlace::Local(env.local_of(name)),
+                        place: TPlace::Local(
+                            cx.persistent_local(name)
+                                .unwrap_or_else(|| env.local_of(name)),
+                        ),
                         op: *op,
                         value: value_t,
                         clone_value,

@@ -904,6 +904,24 @@ fn emit_tir_stmt(
                 })
             };
             if let TPlace::Local(local) = place {
+                if local.is_persistent() {
+                    let cell = local.rust_place();
+                    let read = format!("({cell}).get()");
+                    let next = match op {
+                        Some(_) if prelude_of(&read).is_some() => {
+                            prelude_of(&read).expect("checked just above")
+                        }
+                        Some(op) => format!(
+                            "({read}) {} {v}",
+                            op.rust_spell().expect(PRELUDE_CARRIED)
+                        ),
+                        None => v,
+                    };
+                    out.push_str(&format!("{}({cell}).set({next});\n", pad));
+                    return;
+                }
+            }
+            if let TPlace::Local(local) = place {
                 if local.uninit_scalar {
                     let place = local.rust_place();
                     let read = format!("({}).read().clone()", place);

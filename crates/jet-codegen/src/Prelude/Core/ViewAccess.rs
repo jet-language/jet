@@ -1,4 +1,4 @@
-// D-VIEWACCESS1=A / I9: one checked element-access policy for every borrowed
+// I9: one checked element-access policy for every borrowed
 // view. Tensor-specific window addressing remains in Compute.rs; this part
 // owns the final logical index and get/set operation for both AOT and ambient.
 

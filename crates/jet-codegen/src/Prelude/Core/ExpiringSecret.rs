@@ -1,4 +1,4 @@
-// D-TTLVAL1=A / D-TTL-CLOCK2=A / D-TTL-ZEROIZE1=A: the one secret-lifetime
+// The one secret-lifetime
 // wrapper. T is sema-restricted to existing move-only, zeroizing secret types.
 struct JetExpiringSecret<T> {
     value: Option<T>,

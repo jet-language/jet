@@ -15,15 +15,23 @@ impl JetTestReport {
         Self { passed, failed, skipped, expected_failures: 0, unexpected_passes: 0 }
     }
 
+    /// D-TEST-XFAIL1=A counts expected failures and unexpected passes apart
+    /// from ordinary pass/fail. Almost no run has either, so naming them
+    /// unconditionally would put two zeroes on the end of every summary a
+    /// person reads. They appear when they happened; the JSON always carries
+    /// them, because a machine reader wants a fixed shape.
     pub fn summary(&self) -> String {
-        format!(
-            "{} passed, {} failed, {} skipped, {} expected-fail, {} unexpected-pass",
-            self.passed,
-            self.failed,
-            self.skipped,
-            self.expected_failures,
-            self.unexpected_passes
-        )
+        let mut out = format!(
+            "{} passed, {} failed, {} skipped",
+            self.passed, self.failed, self.skipped
+        );
+        if self.expected_failures > 0 {
+            out.push_str(&format!(", {} expected-fail", self.expected_failures));
+        }
+        if self.unexpected_passes > 0 {
+            out.push_str(&format!(", {} unexpected-pass", self.unexpected_passes));
+        }
+        out
     }
 
     pub fn json(&self) -> String {

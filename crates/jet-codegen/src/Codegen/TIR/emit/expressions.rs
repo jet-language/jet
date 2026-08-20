@@ -10,6 +10,7 @@ use crate::Codegen::TIR::emit::collect_select_arms;
 use crate::Codegen::TIR::emit::emit_http_bridge_error;
 use crate::Codegen::TIR::emit::emit_http_response_from_bridge;
 use crate::Codegen::TIR::emit::emit_math_swizzle_read;
+use crate::Codegen::TIR::TPlace;
 use crate::Codegen::TIR::core_struct_field_rust_name;
 use crate::Codegen::TIR::emit::emit_field_rust;
 use crate::Codegen::TIR::emit::emit_require_stop;
@@ -1054,6 +1055,9 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
         }
         TExprKind::Local(slot) if slot.uninit_fixed => {
             format!("({}).read_array()", slot.rust_place())
+        }
+        TExprKind::Local(slot) if slot.is_persistent() => {
+            format!("({}).get()", slot.rust_place())
         }
         TExprKind::Local(slot) => slot.rust_place(),
         // D-TAG1: binding-free enum variant/group pattern test.
@@ -2788,6 +2792,20 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                 crate::AST::IncDecOp::Inc => "+",
                 crate::AST::IncDecOp::Dec => "-",
             };
+            if let TPlace::Local(local) = place {
+                if local.is_persistent() {
+                    let cell = local.rust_place();
+                    return if *postfix {
+                        jet_format!(
+                            "{{ let {jet_prefix}old = ({cell}).get(); ({cell}).set({jet_prefix}old {delta} 1); {jet_prefix}old }}"
+                        )
+                    } else {
+                        jet_format!(
+                            "{{ let {jet_prefix}next = ({cell}).get() {delta} 1; ({cell}).set({jet_prefix}next); {jet_prefix}next }}"
+                        )
+                    };
+                }
+            }
             let place = emit_tir_place(place, cx);
             if *postfix {
                 jet_format!("{{ let {jet_prefix}old = {place}; {place} {delta}= 1; {jet_prefix}old }}")

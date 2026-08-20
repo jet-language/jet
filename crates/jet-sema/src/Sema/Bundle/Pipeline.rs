@@ -426,13 +426,13 @@ fn check_bundle_opts_for_output_inner(
     // D-CHOOSE-HEADS1=A: fold ordered multi-head declarations into one
     // ordinary enum pattern table before registration and body checking.
     desugar_multi_head_functions(bundle, &mut diags);
-    // D-MOD2/D-MOD3: lift each inline module's member TYPES to their mangled
+    // Lift each inline module's member TYPES to their mangled
     // member identity beside the module, so registration, checking and every
     // engine see them the same way they see a generic module's members
     // (card #2054). Runs after generic expansion (instances are already
     // lifted) and before sibling-call mangling and registration.
     hoist_inline_module_member_types(bundle);
-    // D-MOD2: rewrite inline-module sibling calls to their mangled names before any
+    // Rewrite inline-module sibling calls to their mangled names before any
     // registration/checking/codegen sees the bodies.
     mangle_inline_sibling_calls(bundle);
     // D-UNSAFE-OBLIG1=A: run after compile-time branch selection and generic
@@ -934,7 +934,7 @@ fn check_bundle_opts_for_output_inner(
                 Item::Module(_) => {}
                 Item::CodeModule(cm) => {
                     if let Some(body) = &cm.body {
-                        // D-MOD2: register inline module functions under mangled names
+                        // Register inline module functions under mangled names
                         // (`__jet_math__double`) so call-site sema can check them.
                         st.code_modules.insert(cm.name.clone(), cm.name.clone());
                         st.code_module_identities.insert(
@@ -959,7 +959,7 @@ fn check_bundle_opts_for_output_inner(
                 Item::ErrorConv(_) => {}
                 // D-MIGRATE1: migration decls are handled by the schema diff pass; no registration needed.
                 Item::Migration(_) => {}
-                // D-STATE-DECL: state-set decls are sema-only (I3); no type to register.
+                // D-STATE1: state-set decls are sema-only (I3); no type to register.
                 Item::StateDecl(_) => {}
                 // D-PROTO1/D-PROTO2: expanded before registration; declaration erases.
                 Item::ProtocolDecl(_) => {}
@@ -1828,7 +1828,7 @@ fn check_bundle_opts_for_output_inner(
                     ));
                     continue;
                 }
-                // D-RINGLAYER1=A: infer minimum layer and enforce optional ceiling.
+                // Infer minimum layer and enforce optional ceiling.
                 if let Some(mod_layer) = crate::Syntax::core_module_layer(&module) {
                     if let Some(ceiling) = bundle.layer_ceiling {
                         if mod_layer > ceiling {
@@ -2033,7 +2033,7 @@ fn check_bundle_opts_for_output_inner(
                             Some(imp.alias_span),
                         ));
                     } else {
-                        // D-RINGLAYER1=A M2: unqualified `use core.X` obeys the same layer rules.
+                        // Unqualified `use core.X` obeys the same layer rules.
                         if let Some(mod_layer) = crate::Syntax::core_module_layer(&module) {
                             if let Some(ceiling) = bundle.layer_ceiling {
                                 if mod_layer > ceiling {

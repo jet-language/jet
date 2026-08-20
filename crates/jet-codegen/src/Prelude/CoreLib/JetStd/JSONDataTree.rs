@@ -191,7 +191,7 @@
         }
     }
 
-    // D-JSON3: ONE lenient-decode policy — the walk, the coercion message, and
+    // ONE lenient-decode policy — the walk, the coercion message, and
     // the audit-line shape. A tier supplies only the sink it can reach (AOT
     // `eprintln!`, the resident JIT's `JitRuntime.stderr`), which is real
     // marshalling. This lived as two byte-equivalent copies: AOT's
@@ -268,7 +268,7 @@
         }
     }
 
-    // D-JSON1-decode + D-JSON3. The coerced value collapses onto `Data`
+    // The lenient decode value collapses onto `Data`
     // (D-ENC-DYN1=A+).
     pub fn jet_std_json_decode_lenient(
         text: &str,

@@ -110,6 +110,10 @@ pub(crate) struct Cx {
     /// expression its total result `Type` without re-inferring in codegen.
     pub(crate) method_rets: HashMap<(String, String), Option<Type>>,
     pub(crate) consts: HashMap<String, String>,
+    /// D-PERSIST-DEVSTATE1=A: source-level types for the one writable module
+    /// storage class. TIR turns these names into persistent slots before any
+    /// engine-specific lowering runs.
+    pub(crate) persist_types: HashMap<String, Type>,
     /// The evaluated value behind each comptime const, so lowering can hand a
     /// structured literal to every engine instead of the rendered Rust text.
     pub(crate) const_values: HashMap<String, CtValue>,
@@ -804,6 +808,23 @@ pub(crate) fn nominal_leaf(name: &str) -> &str {
 }
 
 impl Cx {
+    pub(crate) fn persistent_local(&self, name: &str) -> Option<crate::Codegen::TIR::TLocal> {
+        self.persist_types.get(name).map(|_| {
+            crate::Codegen::TIR::TLocal::persistent(
+                name,
+                if self.module_alias.is_empty() {
+                    "main"
+                } else {
+                    self.module_alias.as_str()
+                },
+                self.persist_types
+                    .get(name)
+                    .cloned()
+                    .expect("persist type and slot must agree"),
+            )
+        })
+    }
+
     pub(crate) fn register_coverage_branch(&self) -> String {
         let function = {
             let current = self.current_fn.borrow();
@@ -3865,6 +3886,7 @@ pub(crate) fn build_cx_items(
         method_self_convs: HashMap::new(),
         method_rets: HashMap::new(),
         consts: HashMap::new(),
+        persist_types: HashMap::new(),
         const_values: HashMap::new(),
         type_names: HashSet::new(),
         local_type_names: HashSet::new(),
@@ -4395,6 +4417,11 @@ pub(crate) fn build_cx_items(
                 }
             }
             Item::Const(c) => {
+                if c.is_persist {
+                    if let Some(ty) = c.ty.clone() {
+                        cx.persist_types.insert(c.name.clone(), ty);
+                    }
+                }
                 if c.is_comptime && !matches!(c.rust_kind, crate::AST::RustConstKind::Static) {
                     // Inline the evaluated literal at every reference.
                     // `CtValue::serialize()` renders an empty `List([])` as a bare

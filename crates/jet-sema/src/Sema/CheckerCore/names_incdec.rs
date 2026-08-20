@@ -165,6 +165,28 @@ impl<'a> Checker<'a> {
                         ));
                     }
                     let Some(info) = self.lookup(name).cloned() else {
+                        if self.is_persist_binding(name) {
+                            let ty = self
+                                .consts
+                                .get(name.as_str())
+                                .cloned()
+                                .unwrap_or(Type::Int);
+                            if !ty.is_integer() {
+                                self.diags.push(Diagnostic::error(
+                                    "E0162",
+                                    format!("`++`/`--` is not defined for {}", ty.show()),
+                                    "increment and decrement work on integer types only"
+                                        .to_string(),
+                                    format!(
+                                        "use `{}` += 1 / `{}` -= 1 on an integer binding",
+                                        name, name
+                                    ),
+                                    Some(span),
+                                ));
+                                return None;
+                            }
+                            return Some(ty);
+                        }
                         if self.consts.contains_key(name.as_str()) {
                             self.diags.push(Diagnostic::error(
                                 "E0111",

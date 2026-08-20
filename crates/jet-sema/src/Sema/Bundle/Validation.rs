@@ -255,7 +255,7 @@ pub(crate) fn register_func_item(
             }
         }
     }
-    // D-NARG-D2 (E0126): check defaults don't ref later params.
+    // E0126: check defaults don't reference later params.
     check_default_forward_refs(&f.params, &f.name, diags);
     st.funcs.insert(f.name.clone(), func_to_sig(f));
 }
@@ -1218,7 +1218,7 @@ pub(crate) fn check_module_bodies(
                 b.body = synthetic.body;
             }
             Item::CodeModule(cm) => {
-                // D-MOD2: type-check inline-module function bodies. Sibling calls were
+                // Type-check inline-module function bodies. Sibling calls were
                 // already rewritten to mangled names by `mangle_inline_sibling_calls`,
                 // and the mangled signatures are registered in `st.funcs`.
                 if let Some(body) = &mut cm.body {

@@ -190,7 +190,7 @@ pub(crate) fn collect_used_core(
                 | Item::CModule(_)
                 | Item::ErrorConv(_)
                 | Item::Migration(_) // D-MIGRATE1
-                | Item::StateDecl(_) // D-STATE-DECL: uses no core imports
+                | Item::StateDecl(_) // D-STATE1: uses no core imports
                 | Item::ProtocolDecl(_) // D-PROTO1/D-PROTO2: erases
                 | Item::UserDerive(_) // D-METADERIVE1=A: already expanded
                 | Item::GenericModule(_) // D-CONF-GENSPELL1=A: template — erases
@@ -256,7 +256,7 @@ fn is_http_nominal_type(name: &str) -> bool {
     )
 }
 
-/// D-RINGLAYER1=A M2: bump inferred layer from emitted helper usage and enforce ceiling.
+/// Bump inferred layer from emitted helper usage and enforce ceiling.
 pub(crate) fn apply_helper_layer_inference(
     bundle: &mut ProgramBundle,
     states: &[ModuleState],
@@ -436,7 +436,7 @@ pub(crate) fn collect_core_stmts(
                     collect_core_stmts(eb, imports, used, spans, ffi_cb);
                 }
             }
-            // D-CTX1: collect Core usage from context block fields and body.
+            // Collect Core usage from context block fields and body.
             Stmt::ContextBlock { fields, body, .. } => {
                 for (_, e, _) in fields {
                     collect_core_expr(e, imports, used, spans, ffi_cb);

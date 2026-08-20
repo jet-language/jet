@@ -1,4 +1,4 @@
-    // D-PROCESS1=A: exactly the three ratified stream modes. `Stream` and
+    // Exactly the three stream modes. `Stream` and
     // `Capture` both pipe the child's stream (`Stdio::piped()`) — they differ
     // only in which Jet-level API is meant to drain them (`Child.stdout.lines()`
     // for `Stream`, the collected `ProcessResult.output`/`.errors` for `Capture`).
@@ -396,7 +396,7 @@
         pub env_set: Vec<(String, String)>,
         pub env_remove: Vec<String>,
         // `None` (default) closes the child's stdin (`Stdio::null()`) — matches
-        // the pre-D-PROCESS1 default of no accidental stdin inheritance.
+        // The default is no accidental stdin inheritance.
         pub stdin: Option<ProcessStreamMode>,
         pub stdout: ProcessStreamMode,
         pub stderr: ProcessStreamMode,
@@ -526,7 +526,7 @@
         pub legend: String,
     }
 
-    /// D-DATAFLOW1=A: typed streaming + invalid-data policy (edition 2027 surface).
+    /// Typed streaming + invalid-data policy (edition 2027 surface).
     #[derive(Clone, Debug, PartialEq, Eq)]
     pub enum DataErrorKind {
         Decode,
@@ -736,7 +736,7 @@
         pub start: std::time::Instant,
     }
 
-    // D-DET1 / D-TTL-CLOCK2=A: manual clocks are deterministic; system clocks
+    // D-DET1: manual clocks are deterministic; system clocks
     // use monotonic elapsed time. Normal clones fork the timeline, while the
     // private observer lets ExpiringSecret follow its injected clock.
     #[derive(Debug)]
@@ -843,7 +843,7 @@
         pub state: u64,
     }
 
-    // D-TESTDATA1: deterministic fake-data capability. `locale` is a closed
+    // Deterministic fake-data capability. `locale` is a closed
     // code: 0 = en, 1 = de. The Prelude owns all generation semantics.
     #[derive(Clone, Debug, PartialEq)]
     pub struct Fake {
@@ -1841,7 +1841,7 @@
     }
 
     fn jet_int_div_rem(value: i64, divisor: i64, file: &str, line: u32) -> (i64, i64) {
-        // D-FLOORDIV1 / D-FAIL-ARITH1: plain `Int` `/`, `%` and `/%` stop with THE
+        // D-FLOORDIV1: plain `Int` `/`, `%` and `/%` stop with THE
         // canonical arithmetic wording, never a second copy typed here. This site
         // carried the invented "division by zero" while `Core.rs`'s fixed-width
         // remainder, the TIR evaluator and the Cranelift host all raised

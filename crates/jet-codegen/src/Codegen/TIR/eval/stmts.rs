@@ -608,6 +608,31 @@ impl<'a> EvalCtx<'a> {
                 match place {
                     TPlace::Local(local) => {
                         let key = local.name.clone();
+                        if local.is_persistent() {
+                            let mut assigned = rhs;
+                            if let Some(binop) = op {
+                                let current = self
+                                    .globals
+                                    .get(&key)
+                                    .cloned()
+                                    .ok_or_else(|| unsupported("persisted global", self.span()))?;
+                                assigned = self.eval_runtime_binop(
+                                    *binop,
+                                    current,
+                                    assigned,
+                                    self.span(),
+                                )?;
+                            }
+                            self.globals.insert(key.clone(), assigned.clone());
+                            scope.insert(key, assigned.clone());
+                            if let Some(persist_key) = &local.persist_key {
+                                let _ = jet_foundation::Persist::shared_write_key(
+                                    persist_key,
+                                    &assigned,
+                                );
+                            }
+                            return Ok(Flow::Normal);
+                        }
                         if local.deref {
                             if let Some(view) = scope.get(&key).cloned() {
                                 if Self::allocator_view_parts(&view).is_some() {

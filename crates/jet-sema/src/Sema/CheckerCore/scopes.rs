@@ -156,6 +156,18 @@ impl<'a> Checker<'a> {
             }
         }
 
+        /// `#Persist` module bindings are the one module-level write target.
+        /// Keep the permission fact on the declaration; do not create a second
+        /// mutable-binding table beside `consts`.
+        pub(crate) fn is_persist_binding(&self, name: &str) -> bool {
+            self.items.iter().any(|item| {
+                matches!(
+                    item,
+                    crate::AST::Item::Const(c) if c.name == name && c.is_persist
+                )
+            })
+        }
+
         pub(crate) fn sendability_for(&self, name: &str) -> bool {
             let Some(depth) = self.binding_fact_depth(name) else {
                 return true;
