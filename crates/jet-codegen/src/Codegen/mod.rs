@@ -216,6 +216,9 @@ const PRELUDE_PARTS: &[&str] = &[
     // D-SHIFT1: `binary.Reader` / `text.Cursor`. Owned by jet-foundation so the
     // AOT prelude and the canonical TIR evaluator run one kernel (I9).
     include_str!("../../../jet-foundation/src/StreamCursor.rs"),
+    // D-BINPAT1 / I9: one binary-pattern scan kernel. AST-shaped engines only
+    // marshal pattern parts and project its values.
+    include_str!("../../../jet-foundation/src/Prelude/MatchScan.rs"),
 ];
 
 const OUTCOME_SOURCE: &str = include_str!("../../../jet-foundation/src/Outcome.rs");
@@ -3006,6 +3009,10 @@ mod tests {
             std::fs::read_to_string(root.join("../jet-foundation/src/StructuralDebug.rs")).unwrap();
         let stream_cursor =
             std::fs::read_to_string(root.join("../jet-foundation/src/StreamCursor.rs")).unwrap();
+        let match_scan = std::fs::read_to_string(
+            root.join("../jet-foundation/src/Prelude/MatchScan.rs"),
+        )
+        .unwrap();
         for (relative, source) in [
             ("../jet-foundation/src/Outcome.rs", outcome.as_str()),
             ("src/Prelude/FaultInjection.rs", fault_injection.as_str()),
@@ -3070,6 +3077,10 @@ mod tests {
             (
                 "../jet-foundation/src/StreamCursor.rs",
                 stream_cursor.as_str(),
+            ),
+            (
+                "../jet-foundation/src/Prelude/MatchScan.rs",
+                match_scan.as_str(),
             ),
         ] {
             assert!(
@@ -3195,6 +3206,9 @@ mod tests {
         let stream_cursor_pos = production_codegen
             .find("include_str!(\"../../../jet-foundation/src/StreamCursor.rs\")")
             .unwrap();
+        let match_scan_pos = production_codegen
+            .find("include_str!(\"../../../jet-foundation/src/Prelude/MatchScan.rs\")")
+            .unwrap();
         assert!(
             outcome_pos < unicode_pos
                 && outcome_pos < job_pos
@@ -3237,7 +3251,8 @@ mod tests {
                 && control_pos < observe_pos
                 && observe_pos < exact_units_pos
                 && exact_units_pos < structural_debug_pos
-                && structural_debug_pos < stream_cursor_pos,
+                && structural_debug_pos < stream_cursor_pos
+                && stream_cursor_pos < match_scan_pos,
             "prelude ownership order is generated-byte order"
         );
         assert!(production_codegen.contains("for (index, part) in PRELUDE_PARTS.iter().enumerate()"));
@@ -3307,6 +3322,7 @@ mod tests {
                 exact_units.as_str(),
                 structural_debug.as_str(),
                 stream_cursor.as_str(),
+                match_scan.as_str(),
             ],
             "PRELUDE_PARTS must list every owned module exactly once in generated-byte order"
         );
@@ -3360,6 +3376,7 @@ mod tests {
                     exact_units.as_str(),
                     structural_debug.as_str(),
                     stream_cursor.as_str(),
+                    match_scan.as_str(),
                 ]
                 .concat(),
             );
@@ -3426,6 +3443,7 @@ mod tests {
             "../jet-foundation/src/ExactUnitConversion.rs",
             "../jet-foundation/src/StructuralDebug.rs",
             "../jet-foundation/src/StreamCursor.rs",
+            "../jet-foundation/src/Prelude/MatchScan.rs",
         ] {
             fragments.push(root.join(relative));
         }

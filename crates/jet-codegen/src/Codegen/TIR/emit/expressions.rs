@@ -5792,10 +5792,8 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                     )
                 }
                 // D-BINPAT1 (card #506 follow-up): `reader.take_pattern(b"…")` —
-                // inline scan (I8: the D-BINPAT1 engine in consume mode,
-                // `bin_match_scan_closure_ex`), byte-mode sibling of
-                // `CursorTakePattern` immediately above — same shape, `&[u8]`
-                // tail instead of `&str`.
+                // marshal into the Foundation-owned Prelude scan kernel in
+                // consume mode, byte-mode sibling of `CursorTakePattern`.
                 THandleOp::ReaderTakePattern { parts, canonical } => {
                     let (closure, holes) =
                         bin_match_scan_closure_ex(

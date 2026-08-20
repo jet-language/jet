@@ -1,15 +1,19 @@
-//! Interpreted D-PARSESTR1 / D-BINPAT1 match scans.
+//! AST adapters for D-PARSESTR1 / D-BINPAT1 match scans.
 //!
-//! AOT specializes each pattern into inline Rust (`str_match_scan_closure_ex` /
-//! `bin_match_scan_closure_ex`). Every tier that still holds the pattern as AST
-//! at run time — the Cranelift JIT host and the canonical TIR evaluator — walks
-//! it here instead, so quick-run and full build agree on what matches, what
-//! binds, and how far the subject is consumed (I9, I8: one matcher).
+//! Binary matching semantics live in the Foundation-owned Prelude fragment
+//! `Prelude/MatchScan.rs`. AOT embeds that fragment; Foundation's AST adapter,
+//! the Cranelift JIT host, and the canonical TIR evaluator marshal into it.
+//! String matching remains separate: AST tiers use this text adapter, while AOT
+//! keeps its existing generated text path.
 
 use crate::AST::{BinEndian, BinMatchPart, BinSpec, StrMatchPart, Type};
 
 mod inline_range_semantics {
     include!("../../jet-codegen/src/Prelude/Core/InlineRange.rs");
+}
+
+mod bin_kernel {
+    include!("Prelude/MatchScan.rs");
 }
 
 /// One value bound by a binary pattern hole: a fixed-width integer, or the
@@ -119,116 +123,58 @@ pub fn bin_match_scan(
     parts: &[BinMatchPart],
     consume_prefix: bool,
 ) -> Option<(usize, Vec<(String, Type, BinBind)>)> {
-    let mut bit_pos = 0usize;
+    let kernel_parts = parts
+        .iter()
+        .map(|part| match part {
+            BinMatchPart::Lit(bytes) => bin_kernel::JetBinMatchPart::Lit(bytes.as_slice()),
+            BinMatchPart::Hole { spec, .. } => match spec {
+                BinSpec::Bits { width, endian } => bin_kernel::JetBinMatchPart::Bits {
+                    width: *width as usize,
+                    little: matches!(endian, BinEndian::Little),
+                },
+                BinSpec::Rest => bin_kernel::JetBinMatchPart::Rest,
+            },
+        })
+        .collect::<Vec<_>>();
+    let (bit_pos, values) =
+        bin_kernel::jet_bin_match_scan(subject, &kernel_parts, consume_prefix)?;
+    let mut values = values.into_iter();
     let mut binds = Vec::new();
     for part in parts {
-        match part {
-            BinMatchPart::Lit(bytes) => {
-                let need = bytes.len() * 8;
-                if bit_pos % 8 != 0 {
-                    return None;
-                }
-                let byte_pos = bit_pos / 8;
-                if byte_pos + bytes.len() > subject.len() {
-                    return None;
-                }
-                if &subject[byte_pos..byte_pos + bytes.len()] != bytes.as_slice() {
-                    return None;
-                }
-                bit_pos += need;
-            }
-            BinMatchPart::Hole { name, spec, .. } => {
-                let (width, be) = match spec {
-                    BinSpec::Bits { width, endian } => (
-                        *width as usize,
-                        matches!(endian, BinEndian::Big | BinEndian::None),
-                    ),
-                    BinSpec::Rest => {
-                        if bit_pos % 8 != 0 {
-                            return None;
-                        }
-                        let rest = subject[bit_pos / 8..].to_vec();
-                        binds.push((
-                            name.clone(),
-                            Type::List(Box::new(Type::IntN {
-                                signed: false,
-                                bits: 8,
-                            })),
-                            BinBind::Rest(rest),
-                        ));
-                        bit_pos = subject.len() * 8;
-                        continue;
-                    }
-                };
-                if width % 8 == 0 && bit_pos % 8 == 0 {
-                    let nbytes = width / 8;
-                    let byte_pos = bit_pos / 8;
-                    if byte_pos + nbytes > subject.len() {
-                        return None;
-                    }
-                    let slice = &subject[byte_pos..byte_pos + nbytes];
-                    let v = match (nbytes, be) {
-                        (1, _) => slice[0] as i64,
-                        (2, true) => u16::from_be_bytes([slice[0], slice[1]]) as i64,
-                        (2, false) => u16::from_le_bytes([slice[0], slice[1]]) as i64,
-                        (4, true) => {
-                            u32::from_be_bytes([slice[0], slice[1], slice[2], slice[3]]) as i64
-                        }
-                        (4, false) => {
-                            u32::from_le_bytes([slice[0], slice[1], slice[2], slice[3]]) as i64
-                        }
-                        (8, true) => u64::from_be_bytes([
-                            slice[0], slice[1], slice[2], slice[3], slice[4], slice[5], slice[6],
-                            slice[7],
-                        ]) as i64,
-                        (8, false) => u64::from_le_bytes([
-                            slice[0], slice[1], slice[2], slice[3], slice[4], slice[5], slice[6],
-                            slice[7],
-                        ]) as i64,
-                        _ => return None,
-                    };
-                    binds.push((
-                        name.clone(),
-                        Type::IntN {
-                            signed: false,
-                            bits: width as u8,
-                        },
-                        BinBind::Int(v),
-                    ));
-                    bit_pos += width;
-                } else {
-                    // Nibble-oriented (U4): read bit by bit MSB-first.
-                    if bit_pos + width > subject.len() * 8 {
-                        return None;
-                    }
-                    let mut v = 0u64;
-                    for _ in 0..width {
-                        let byte = subject[bit_pos / 8];
-                        let bit = 7 - (bit_pos % 8);
-                        v = (v << 1) | ((byte >> bit) as u64 & 1);
-                        bit_pos += 1;
-                    }
-                    binds.push((
-                        name.clone(),
-                        Type::IntN {
-                            signed: false,
-                            bits: width as u8,
-                        },
-                        BinBind::Int(v as i64),
-                    ));
-                }
-            }
-        }
-    }
-    if !consume_prefix && bit_pos != subject.len() * 8 {
-        let has_rest = parts
-            .iter()
-            .any(|p| matches!(p, BinMatchPart::Hole { spec: BinSpec::Rest, .. }));
-        if !has_rest {
-            return None;
-        }
+        let BinMatchPart::Hole { name, spec, .. } = part else {
+            continue;
+        };
+        let value = values.next()?;
+        let (ty, bind) = match (spec, value) {
+            (BinSpec::Bits { width, .. }, bin_kernel::JetBinMatchValue::Int(value)) => (
+                bin_bits_type(*width),
+                BinBind::Int(value as i64),
+            ),
+            (BinSpec::Rest, bin_kernel::JetBinMatchValue::Rest(bytes)) => (
+                Type::List(Box::new(Type::IntN {
+                    signed: false,
+                    bits: 8,
+                })),
+                BinBind::Rest(bytes),
+            ),
+            _ => return None,
+        };
+        binds.push((name.clone(), ty, bind));
     }
     Some((bit_pos, binds))
+}
+
+fn bin_bits_type(width: u8) -> Type {
+    let bits = if width <= 8 {
+        8
+    } else if width <= 16 {
+        16
+    } else if width <= 32 {
+        32
+    } else {
+        64
+    };
+    Type::IntN { signed: false, bits }
 }
 
 #[cfg(test)]
