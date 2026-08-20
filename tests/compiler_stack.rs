@@ -308,6 +308,9 @@ fn tir_func(
         clone_types: Vec::new(),
         is_main: name == "run",
         line: 1,
+        // Hand-written test fixture, not derive/serde output: the source span it
+        // carries is real, so no synthetic-frame suppression applies.
+        synthetic: false,
         is_unsafe: false,
         unsafe_gate: None,
         is_pure: true,
