@@ -3330,7 +3330,7 @@ impl<'a> Checker<'a> {
                                 "the inferred construction form requires an expected type \
                                  from the surrounding context (binding annotation, return type, etc.)"
                                     .to_string(),
-                                "add a type annotation, e.g. `x: Point :: .{ x: 1, y: 2 }`"
+                                "name the type at the value, e.g. `x :: Point.{ x: 1, y: 2 }`, or inside a list `[Point.{ … }, .{ … }]`"
                                     .to_string(),
                                 Some(*span),
                             ));
