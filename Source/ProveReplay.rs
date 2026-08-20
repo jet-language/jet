@@ -1196,7 +1196,7 @@ fn canonical_json_value(value: &JSONValue) -> Result<String, String> {
 }
 
 fn require_object_keys(
-    object: &std::collections::HashMap<String, JSONValue>,
+    object: &std::collections::BTreeMap<String, JSONValue>,
     object_name: &str,
     required: &[&str],
     allowed: &[&str],
@@ -1253,7 +1253,7 @@ fn flatten_identity_fields(
         ],
     )?;
     let mut out = std::collections::BTreeMap::new();
-    let string_field = |object: &std::collections::HashMap<String, JSONValue>, key: &str| {
+    let string_field = |object: &std::collections::BTreeMap<String, JSONValue>, key: &str| {
         match object.get(key) {
             Some(JSONValue::String(value)) => Ok(value.clone()),
             Some(_) => Err(format!("header field `{key}` must be a string")),

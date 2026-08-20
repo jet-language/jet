@@ -1822,7 +1822,7 @@ fn check_certificate(formula: &Formula, certificate: &str) -> Result<(), &'stati
     Ok(())
 }
 
-fn as_object(value: &JSONValue) -> Result<&std::collections::HashMap<String, JSONValue>, &'static str> {
+fn as_object(value: &JSONValue) -> Result<&std::collections::BTreeMap<String, JSONValue>, &'static str> {
     match value {
         JSONValue::Object(object) => Ok(object),
         _ => Err("certificate_invalid"),
@@ -1830,7 +1830,7 @@ fn as_object(value: &JSONValue) -> Result<&std::collections::HashMap<String, JSO
 }
 
 fn exact_certificate_keys(
-    object: &std::collections::HashMap<String, JSONValue>,
+    object: &std::collections::BTreeMap<String, JSONValue>,
     keys: &[&str],
 ) -> Result<(), &'static str> {
     if object.len() != keys.len()

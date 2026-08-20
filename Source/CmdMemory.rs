@@ -322,20 +322,20 @@ fn parse_row(value: &JSONValue, line: usize) -> Result<Row, String> {
     })
 }
 
-fn field<'a>(object: &'a HashMap<String, JSONValue>, name: &str, line: usize) -> Result<&'a JSONValue, String> {
+fn field<'a>(object: &'a std::collections::BTreeMap<String, JSONValue>, name: &str, line: usize) -> Result<&'a JSONValue, String> {
     object
         .get(name)
         .ok_or_else(|| format!("memory ledger row {line} is missing `{name}`"))
 }
 
-fn string<'a>(object: &'a HashMap<String, JSONValue>, name: &str, line: usize) -> Result<&'a str, String> {
+fn string<'a>(object: &'a std::collections::BTreeMap<String, JSONValue>, name: &str, line: usize) -> Result<&'a str, String> {
     match field(object, name, line)? {
         JSONValue::String(value) => Ok(value),
         _ => Err(format!("memory ledger row {line} `{name}` is not text")),
     }
 }
 
-fn safe_string(object: &HashMap<String, JSONValue>, name: &str, line: usize) -> Result<String, String> {
+fn safe_string(object: &std::collections::BTreeMap<String, JSONValue>, name: &str, line: usize) -> Result<String, String> {
     let value = string(object, name, line)?;
     if value.is_empty() || value.len() > MAX_FIELD_BYTES || value.chars().any(char::is_control) {
         return Err(format!("memory ledger row {line} `{name}` is empty, unsafe, or too long"));
@@ -343,14 +343,14 @@ fn safe_string(object: &HashMap<String, JSONValue>, name: &str, line: usize) -> 
     Ok(value.to_string())
 }
 
-fn uint(object: &HashMap<String, JSONValue>, name: &str, line: usize) -> Result<u64, String> {
+fn uint(object: &std::collections::BTreeMap<String, JSONValue>, name: &str, line: usize) -> Result<u64, String> {
     match field(object, name, line)? {
         JSONValue::Number(value) if *value >= 0 => Ok(*value as u64),
         _ => Err(format!("memory ledger row {line} `{name}` is not a non-negative integer")),
     }
 }
 
-fn boolean(object: &HashMap<String, JSONValue>, name: &str, line: usize) -> Result<bool, String> {
+fn boolean(object: &std::collections::BTreeMap<String, JSONValue>, name: &str, line: usize) -> Result<bool, String> {
     match field(object, name, line)? {
         JSONValue::Bool(value) => Ok(*value),
         _ => Err(format!("memory ledger row {line} `{name}` is not Bool")),

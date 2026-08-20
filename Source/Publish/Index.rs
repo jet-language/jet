@@ -342,7 +342,7 @@ fn json_str(s: &str) -> String {
 }
 
 fn required_string(
-    fields: &std::collections::HashMap<String, JSONValue>,
+    fields: &std::collections::BTreeMap<String, JSONValue>,
     key: &str,
 ) -> Option<String> {
     match fields.get(key)? {
@@ -352,7 +352,7 @@ fn required_string(
 }
 
 fn optional_string(
-    fields: &std::collections::HashMap<String, JSONValue>,
+    fields: &std::collections::BTreeMap<String, JSONValue>,
     key: &str,
 ) -> Option<String> {
     match fields.get(key) {
@@ -363,7 +363,7 @@ fn optional_string(
 }
 
 fn optional_bool(
-    fields: &std::collections::HashMap<String, JSONValue>,
+    fields: &std::collections::BTreeMap<String, JSONValue>,
     key: &str,
 ) -> Option<bool> {
     match fields.get(key) {
