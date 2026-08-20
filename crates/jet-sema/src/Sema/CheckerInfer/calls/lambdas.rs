@@ -393,7 +393,7 @@ use std::collections::HashSet;
                     // about a wait set. Genuine sendability is still checked
                     // below by `crossing_problem_for_name`.
                     let shared_capture = matches!(&cap_ty, Type::Shared(_))
-                        || matches!(&cap_ty, Type::Named(name) if name == Syntax::TYPE_CONDITION)
+                        || matches!(&cap_ty, Type::Named(ty_name) if ty_name == Syntax::TYPE_CONDITION)
                         || is_reactive_handle_ty(&cap_ty)
                         || self.type_contains_cell_guard(&cap_ty);
                     let mutable_capture = self.lookup(name).is_some_and(|info| info.mutable);
@@ -544,8 +544,10 @@ use std::collections::HashSet;
             // { fs.write(…) })` is the D-TXN2 fix-it: the irreversible work moves into
             // a lambda, off the block's direct path.
             let saved_txn_depth = self.txn_depth;
+            let saved_txn_wall_depth = self.txn_wall_depth;
             if !inline_loop {
                 self.txn_depth = 0;
+                self.txn_wall_depth = 0;
             }
             let saved_expected = self.expected_type.clone();
             self.expected_type = exp_ret.map(|ret| (**ret).clone());
@@ -719,6 +721,7 @@ use std::collections::HashSet;
             self.ret = saved_ret;
             self.expected_type = saved_expected;
             self.txn_depth = saved_txn_depth;
+            self.txn_wall_depth = saved_txn_wall_depth;
             for name in lending_params {
                 self.lending_view_loop_vars.remove(&name);
             }

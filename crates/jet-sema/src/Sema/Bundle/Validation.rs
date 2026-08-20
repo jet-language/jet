@@ -1668,6 +1668,7 @@ fn check_func_body_bundle_scoped(
         fx_memory_calls: Vec::new(),
         memory_control_multiplier: Some(1),
         txn_depth: 0,
+        txn_wall_depth: 0,
         det_suppress: 0,
         context_depth: 0,
         context_allocator_active: false,

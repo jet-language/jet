@@ -592,8 +592,26 @@ impl<'a> Checker<'a> {
             // comment) — a separate receiver match, same shape as the block above.
             if let Type::Shared(inner) = recv_ty {
                 match method {
-                    "read" => return self.finish_shared_read(inner, args, span),
-                    "edit" => return self.finish_shared_edit(inner, args, span),
+                    // D-CONC-SHARE1=A (card #1561): the closure forms are
+                    // retired at the source surface. The compiler's own
+                    // plain-access desugar carries the same shape into this
+                    // one seam, tagged, so only a user-typed closure is
+                    // rejected. Typing continues either way, so a rejected
+                    // file still reports the rest of its errors.
+                    "read" | "edit" => {
+                        if !crate::Sema::SharedAccess::is_shared_access_desugar(args) {
+                            self.diags.push(Diagnostic::from_row(
+                                "E1116",
+                                &[("method", method)],
+                                Some(span),
+                            ));
+                        }
+                        return if method == "read" {
+                            self.finish_shared_read(inner, args, span)
+                        } else {
+                            self.finish_shared_edit(inner, args, span)
+                        };
+                    }
                     "guard_read" | "guard_edit" if self.lexical_tail_len() >= 8 => {
                         self.diags.push(Diagnostic::lint(
                             "L0206",

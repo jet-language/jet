@@ -1053,7 +1053,18 @@ enum JitCompileVerdict {
 /// package.jet`, because that file is the `modules` topic's MANIFEST and never
 /// was an example. It stays on disk — `modules/fact_value_arguments.jet` reads
 /// the `cache_slots` setting it declares — so this is one fewer stem measured,
-/// not one fewer example shipped.
+/// not one fewer example shipped. `examples/features/expected/` corroborates it:
+/// 19 stems carry no golden, and every one of the other 18 is a deliberate
+/// panic/trap/abort example whose whole point is the failure path.
+/// `modules/package` is the only one that is not a program at all.
+///
+/// 497 is the last REVIEWED value minus that one deletion, deliberately not the
+/// count on disk. `topic_jet_files` saw 500 files while this card was open, so
+/// the honest observed floor was 499 — but the extra stems are examples other
+/// work added concurrently and this card does not own them. Leaving the floor at
+/// the reviewed-minus-one value keeps a real deletion loud without making this
+/// diff fail when a sibling change is integrated in a different order. Raise it
+/// to the observed count in the same diff as the next observed run.
 const EXAMPLE_CORPUS_FLOOR: usize = 497;
 
 /// How many stems the compile oracle is still allowed to be blind to (#1998).
@@ -1235,20 +1246,24 @@ fn classify_jit_compile(path: &std::path::Path) -> JitCompileVerdict {
     // locked stamp, so the two oracles could disagree about the same stem and
     // neither reader could tell which context produced the verdict (AGENTS.md
     // I8; I9: engines marshal one snapshot, they do not each invent one).
-    let errors: Vec<_> = match jet::Driver::seed_build_facts(
+    if let Err(diagnostics) = jet::Driver::seed_build_facts(
         &mut bundle,
         "dev",
         false,
         &std::collections::BTreeMap::new(),
     ) {
-        // Seeding answers with errors only, so they are already a front-end
-        // rejection and belong in the same bucket as a sema rejection below.
-        Err(diagnostics) => diagnostics,
-        Ok(()) => jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run)
-            .into_iter()
-            .filter(|d| matches!(d.severity, jet::Diagnostics::Severity::Error))
-            .collect(),
-    };
+        // Named for what it is. #1998's whole point is that the reason a stem
+        // left the universe is the compiler's own, so a seeding failure must not
+        // be reported as a sema rejection.
+        return JitCompileVerdict::OutOfUniverse(format!(
+            "build facts: {}",
+            first_diagnostic_summary(&diagnostics)
+        ));
+    }
+    let errors: Vec<_> = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run)
+        .into_iter()
+        .filter(|d| matches!(d.severity, jet::Diagnostics::Severity::Error))
+        .collect();
     // #1998: this arm was `if !errors.is_empty() { continue }`, same drop.
     if !errors.is_empty() {
         return JitCompileVerdict::OutOfUniverse(format!(

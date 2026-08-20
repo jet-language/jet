@@ -1821,26 +1821,29 @@ impl<'a> Checker<'a> {
                     *resolved_ret_out = Some(ret.clone());
                     return Some(ret);
                 }
-                // D-MEM1 S6 (D-SHARED-API1=A): `Shared.new(x)` — a lock-guarded shared
-                // handle (`Arc<RwLock<T>>` class). `T` is inferred from the constructor
-                // argument, no turbofish — a bare type-name call like `Path.from` above.
+                // D-CONC-SHARE1=A (amends D-MEM1 S6 / D-SHARED-API1=A):
+                // `shared x` — a lock-guarded shared value (`Arc<RwLock<T>>`
+                // class). `T` is inferred from the constructed value, no
+                // turbofish. The parser desugars the prefix form to this one
+                // constructor node and teaches E1115 on the retired
+                // `Shared.new(x)` call, so every tier keeps one shape.
                 if type_name == "Shared" && method == "new" {
                     self.record_memory_event(crate::Sema::MemoryEvent::new(
                         crate::Sema::MemoryEventKind::Allocation,
                         span,
-                        "`Shared.new` allocates shared storage",
+                        "`shared` allocates shared storage",
                     ));
                     self.record_memory_event(crate::Sema::MemoryEvent::new(
                         crate::Sema::MemoryEventKind::RetainRelease,
                         span,
-                        "`Shared.new` introduces reference-counted ownership",
+                        "`shared` introduces reference-counted ownership",
                     ));
                     if args.len() != 1 {
                         self.diags.push(Diagnostic::error(
                             "E0104",
-                            format!("`Shared.new` takes exactly one value, got {}", args.len()),
+                            format!("`shared` takes exactly one value, got {}", args.len()),
                             "a `Shared<T>` wraps exactly one starting value".to_string(),
-                            "write `Shared.new(value)`".to_string(),
+                            "write `shared value`".to_string(),
                             Some(span),
                         ));
                         for a in args.iter_mut() {

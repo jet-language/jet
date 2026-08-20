@@ -188,7 +188,10 @@ impl<'a> super::Checker<'a> {
         if sig.foreign_effect_root.is_none() {
             self.record_effect(Effect::FFI.name(), span);
         }
-        if self.txn_depth > 0 && sig.undo.is_none() {
+        // D-CONC-SHARE1=A: the D-TXN2 wall belongs to transactions the author
+        // opened. A synthesized one-statement commit is not a `#Transact` on
+        // the page, so it never rejects a call the author wrote outside one.
+        if self.txn_wall_depth > 0 && sig.undo.is_none() {
             self.diags.push(e0746(api, Effect::FFI, span));
         }
     }

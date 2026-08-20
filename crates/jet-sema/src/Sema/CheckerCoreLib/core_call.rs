@@ -898,7 +898,9 @@ impl<'a> Checker<'a> {
                 // occurs directly inside a `#Transact { … }` block (E0746). The fix
                 // is to move it after the block, or register it via
                 // `name.on_commit(() => { … })` so it runs only on a clean commit.
-                if self.txn_depth > 0 && is_irreversible_effect(e) {
+                // D-CONC-SHARE1=A: the wall counts only transactions the
+                // author opened, never a synthesized one-statement commit.
+                if self.txn_wall_depth > 0 && is_irreversible_effect(e) {
                     let api = format!("{}.{}", module_short_name(module), name);
                     self.diags.push(e0746(&api, e, span));
                 }
@@ -4062,6 +4064,20 @@ impl<'a> Checker<'a> {
                     }
                     // Continue into shared fixed-signature checking below.
                 }
+                // U13 (D-JPK-SECRETCRYPTO1): `core.crypto.vault.get` reads a
+                // decrypted repo secret and returns `String?`; it is not a raw
+                // key-material operation, so the expert arm below must not
+                // claim it. `docs/spec/spec.md` § Secrets states its whole gate:
+                // the `Secret` effect (E1264, and `Secret` is the one effect
+                // denied even with no declared row at all) plus unconditional
+                // denial at build/comptime time (E1265, no `#Impure` escape).
+                // The catch-all demanded a third gate it describes as "raw key
+                // import", which this call is not, and that rejected the shipped
+                // executable spec `examples/features/crypto/vault_secret.jet`
+                // — which declares `=[Secret, IO]=>` exactly as the spec says
+                // (I5, #2018). Empty body: fall through to the shared
+                // fixed-signature check like every other gated arm here.
+                ("core.crypto.vault", "get") => {}
                 // D-CRYPTOENV1=A: expert-only raw crypto — requires import + #Unsafe gate.
                 ("core.crypto.expert" | "core.crypto.vault", _) => {
                     let has_import = self

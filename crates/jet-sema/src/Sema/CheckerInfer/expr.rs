@@ -2969,6 +2969,13 @@ impl<'a> Checker<'a> {
             } => self.infer_ptr_from_addr(alias, *alias_span, elem, addr, *span),
             Expr::Field(_, _, span) => {
                 let span = *span;
+                // D-CONC-SHARE1=A (card #1561): a plain field read on a
+                // `Shared<T>` handle is one locked read. Rewrite to the
+                // Prelude's read seam and re-infer, so every execution tier
+                // keeps consuming exactly one shared-access shape (I9).
+                if self.desugar_shared_field_read(e) {
+                    return self.infer(e);
+                }
                 // D-PROCESS-SESSION2=D: known terminal facts are checked
                 // namespace members but lower to ordinary String keys. This
                 // keeps `Set<String>` open to preview keys without an extra

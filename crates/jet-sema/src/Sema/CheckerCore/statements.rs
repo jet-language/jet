@@ -286,7 +286,7 @@ impl<'a> Checker<'a> {
                 .map(|(_, _, ty)| substitute_type(ty, &subst))
         }
 
-        fn compound_expr_type(&self, expr: &Expr) -> Option<Type> {
+        pub(in crate::Sema) fn compound_expr_type(&self, expr: &Expr) -> Option<Type> {
             match expr {
                 Expr::Ident(name, _) => self.lookup(name).map(|info| info.ty.clone()),
                 Expr::Field(base, field, _) => self.compound_field_type(base, field),
@@ -374,6 +374,14 @@ impl<'a> Checker<'a> {
         }
 
         fn check_stmt_inner(&mut self, stmt: &mut Stmt) {
+            // D-CONC-SHARE1=A (card #1561): a plain field write on a
+            // `Shared<T>` handle is one atomic locked step. Rewrite before the
+            // compound-assignment expansion below, so a read-modify-write
+            // stays inside one lock and cannot lose an update.
+            if self.desugar_shared_field_write(stmt) {
+                self.check_stmt_inner(stmt);
+                return;
+            }
             if let Some(mut marker) = self.take_statement_rule_fact(stmt.span()) {
                 if let Some(arguments) = self.validate_rule_signature(&mut marker) {
                     let text = match arguments.constant_for_source(0) {
@@ -2977,8 +2985,10 @@ impl<'a> Checker<'a> {
                     name,
                     name_span,
                     body,
+                    implicit,
                     ..
                 } => {
+                    let implicit = *implicit;
                     self.push_scope();
                     if let (Some(name), Some(name_span)) = (name, name_span) {
                         self.declare_loop_var(
@@ -2988,7 +2998,16 @@ impl<'a> Checker<'a> {
                         );
                     }
                     self.txn_depth += 1;
+                    // D-CONC-SHARE1=A: only a transaction the author opened
+                    // raises the D-TXN2 effect wall. A synthesized
+                    // one-statement commit carries the commit plane alone.
+                    if !implicit {
+                        self.txn_wall_depth += 1;
+                    }
                     self.check_block(body, true);
+                    if !implicit {
+                        self.txn_wall_depth -= 1;
+                    }
                     self.txn_depth -= 1;
                     self.pop_scope();
                 }

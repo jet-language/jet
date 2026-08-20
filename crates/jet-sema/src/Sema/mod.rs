@@ -1501,6 +1501,13 @@ pub(crate) struct Checker<'a> {
     /// it via `name.on_commit(…)`. Zeroed and restored around every lambda body
     /// (effects inside an `on_commit`/other lambda are deferred, not rejected).
     txn_depth: usize,
+    /// D-CONC-SHARE1=A (card #1561): nesting depth of transaction blocks the
+    /// *user* opened. The D-TXN2 effect wall (E0746) keys off this, not
+    /// `txn_depth`, so a compiler-synthesized one-statement transaction — the
+    /// ordered-commit route for a plain statement touching several `Shared`
+    /// cells — carries the commit plane without rejecting effects the author
+    /// never put inside a transaction.
+    txn_wall_depth: usize,
     /// D-DET1: nesting depth of `assume_deterministic { … }` blocks currently
     /// being checked. While `> 0`, the determinism rejections inside a `#Pure fn`
     /// (E3403 non-deterministic Core call, E3401 impure Core call) are suspended —
@@ -2256,6 +2263,8 @@ mod Protocol;
 mod Purity;
 mod Registration;
 pub mod Schema;
+/// D-CONC-SHARE1=A: the one plain-access desugar for `Shared<T>`.
+mod SharedAccess;
 mod SchemaMigration;
 mod ScopeMembers;
 mod PolicyFacts;

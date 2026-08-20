@@ -5536,19 +5536,21 @@ fn serde_jit_parity_manifest_pins() {
                 record.detail
             );
         }
-        // `serde/encoding_breadth` is frontend-rejected today on the E2402
-        // `?`-conversion family. That is an open defect, not a licence: this
-        // pins the CAUSE, so repairing E2402 moves the stem out of the section
-        // and retires the branch, while a NEW and unrelated frontend rejection
-        // fails here instead of hiding behind an already-red row.
-        if record.class == CorpusGateClass::FrontendRejected {
-            assert!(
-                record.detail.contains("E2402"),
-                "{stem} is frontend-rejected for a NEW reason, not the known \
-                 E2402 `?`-conversion gap: {}",
-                record.detail
-            );
-        }
+        // #2018: E2402 is repaired — the core-error family ships one
+        // `impl <CoreError> => Err` on the D-FAIL-CONV2=A rail — so this branch
+        // retires exactly as its previous note said it would. It used to ALLOW a
+        // `frontend_rejected:` row for this stem as long as the reason was the
+        // known E2402 `?`-conversion gap. There is no longer a known reason to
+        // allow, so the allowance becomes the flat law: a shipped example that
+        // the front end rejects is a defect, and naming it here is stronger than
+        // the conditional it replaces.
+        assert!(
+            record.class != CorpusGateClass::FrontendRejected,
+            "{stem} is frontend-rejected: {}. The E2402 `?`-conversion gap that \
+             once excused this row is fixed (D-FAIL-CONV2=A), so a rejection here \
+             is a live defect, not the known one",
+            record.detail
+        );
         assert!(
             !gaps.iter().any(|row| {
                 row == stem || row.starts_with(&format!("{stem}:"))
