@@ -2,8 +2,8 @@
   "meta": {
     "version": 4,
     "project": "Jet",
-    "nextNum": 2097,
-    "rev": 39455,
+    "nextNum": 2100,
+    "rev": 39490,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -79828,6 +79828,11 @@
       "assignee": null,
       "log": [
         {
+          "at": "2026-08-20",
+          "by": "fable-e3-burndown",
+          "text": "Reconciled against the one-crossing slate (#1655) on 2026-08-19: this card plans post-law and needs no reshaping. Typed decode is the laundering act under D-BOUND-TAINT1=A, so the exact-number visitor must keep clearing origin facts on Ok. No other slate interaction."
+        },
+        {
           "at": "2026-08-19",
           "by": "fable",
           "text": "Retitled (BigInt is retired surface): #1436 (default Int arbitrary precision) is DONE and #1550 deletes BigInt from every surface with a tombstone. Decode targets are exact Int and Decimal; keep the \"no standalone JetBigInt decode path survives\" criterion. The plan's \"block on #1436\" amendment is satisfied — #1436 is done."
@@ -79960,8 +79965,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-03T20:21:49.596Z",
-      "updated": "2026-08-19T13:31:28.092Z",
-      "updatedBy": "fable",
+      "updated": "2026-08-20T04:50:46.351Z",
+      "updatedBy": "fable-e3-burndown",
       "workOrder": 340
     },
     {
@@ -99440,6 +99445,11 @@
       "assignee": null,
       "log": [
         {
+          "at": "2026-08-20",
+          "by": "fable-e3-burndown",
+          "text": "Reconciled against the one-crossing slate (#1655) on 2026-08-19: no pre-law conflict. D-BOUND-UNDO1 does NOT depend on this table - crates/jet-sema/src/Sema/Effects.rs:179-197 fires E0746 on is_extern plus a missing #Undo, not on the effect root - so UNDO1 was never blocked on this card. The 16 flat language effect roots (Prelude/Effects.jet:22-38) remain this card's scope."
+        },
+        {
           "at": "2026-08-16",
           "by": "fable-e3-burndown",
           "text": "D-PANICROOT1 IS RATIFIED, outcome A (deny-only), created and ratified 2026-08-15, ballotMode full, all five review passes recorded, whyNot covering B/C/D. It is NOT awaiting the owner -- I twice reported it as owner-gated and both claims were wrong. All 572 board decisions are ratified; there are no open ballots anywhere.\n\nThe live gap is IMPLEMENTATION, and outcome A is unimplemented at da0d189b1. Under A the CODE moves, not the corpus. Three sites still contradict the ratified outcome:\n- crates/jet-sema/src/Sema/CheckerItems.rs:3427 -- inside check_panic_call (declared :3423), `self.record_effect(Effect::Panic.name(), call.name_span)` still records Panic as an ORDINARY effect.\n- crates/jet-codegen/src/Prelude/Effects.jet:18 -- `effect Panic` is still declared a root alongside GPU and FFI.\n- E0751, the positive-mention diagnostic option A specifies, exists nowhere in crates/ (grep returns no matches).\n\nSingle seam for the fix: `effects_uncovered` at crates/jet-sema/src/Sema/Effects.rs:148. Its own doc comment states it is reached by every E0740/E0741/E0712/E0747/E0742 subset check, so dropping the Panic root there implements A everywhere at once rather than per call site.\n\nTwo shipped failures this must clear, both currently red:\n- examples/features/effects/effect_grant.jet -- `#Grant(caps: FS, IO)` at :16 omits Panic while the body panics at :17 and :18, so E0712.\n- examples/features/lowlevel/polyglot_fortran/main.jet:4 -- `fn run() =[Fortran, IO]=>` omits Panic and the reach is cross-file, so E0740.\n\nCare needed: deny-only is ASYMMETRIC. A deny surface must still refuse Panic (=[!Panic]=>, effects:{deny:[Panic]}, E0749, and the #Pre/refinement discharge from D-NOPANIC1=D all stay), while #Grant/#Caps must neither require nor accept it. Simply deleting Panic from the table would lose the deny side too. Under A the 21 gate sites across 12 example files plus 8 in tests that a grantable-Panic world would need become unnecessary; if any still needs a declaration afterwards, the gate is asymmetric the wrong way."
@@ -99634,7 +99644,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-06T21:35:44.281Z",
-      "updated": "2026-08-16T11:08:38.932Z",
+      "updated": "2026-08-20T04:50:45.737Z",
       "updatedBy": "fable-e3-burndown",
       "workOrder": 1120
     },
@@ -99865,7 +99875,13 @@
         "c0pp8jfr"
       ],
       "assignee": null,
-      "log": [],
+      "log": [
+        {
+          "at": "2026-08-20",
+          "by": "fable-e3-burndown",
+          "text": "Reconciled against the one-crossing slate (#1655) on 2026-08-19: criterion 1 still names the retired pkg.jet (the ratified name is package.jet, D-ECO-FILEROOT1) and its trust sub-block predates D-BOUND-PROV1=A. The trust block already ships require: none|logged|attested at crates/jet-pkg-model/src/Package/Blocks.rs:809-818 and Lock.rs:203-222 - do not rebuild it. The remaining work is holds/grants/providers plus deleting the old keys."
+        }
+      ],
       "criteria": [
         {
           "n": 1,
@@ -99950,8 +99966,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-06T21:35:53.310Z",
-      "updated": "2026-08-12T18:11:56.795Z",
-      "updatedBy": "fable-e3-audit",
+      "updated": "2026-08-20T04:50:45.111Z",
+      "updatedBy": "fable-e3-burndown",
       "workOrder": 1140
     },
     {
@@ -107786,7 +107802,7 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": "e3-m12-authority-boundary",
-      "phase": "ready",
+      "phase": "done",
       "priority": "P1",
       "plan": "All nine D-BOUND ballots are ratified as option A, so this card is now the recording, minting and reconciliation step; criteria 3 and 4 are the remaining work. Add `## The one-crossing slate (D-BOUND-*, ratified 2026-08-07, card #1655)` at the end of docs/spec/syntax-decisions.md, one bullet per outcome, in the shape of the say-it-once slate section already at line 5964, and name the amendments the card log already records: SINK1 discloses the F9 types-not-markers note, RAW1 is narrowed to backslash-only with D-REGEX-LIT1 left untouched, PROV1 amends D-AUTHORITY-MANIFEST1's trust block, and TAINT1 names its off-switch spelling. Then mint one implementation card per adopted ballot: LAW1 (every crossing names its schema and leaves a fact), HEAD1 (typed URL, Path and DateTime literal heads), RAW1, SINK1 (library-declared checked text types), TAINT1 (origin fact until a typed decode clears it), EVOLVE1 (unknown fields survive a round trip), BIND1 (jet bind reads data schemas), UNDO1 (a foreign call inside #Transact needs a declared undo), PROV1 (dependency provenance surface and default posture). HEAD1, RAW1 and TAINT1 add user-typeable syntax, so their cards carry the Syntax.rs entry, grammar regeneration, formatter round-trip and snapshot chores; this card's own criteria 5, 7 and 8 close by naming in a log note which card owns each. These are Core semantics, so every minted card must state the I9 requirement plainly: the Prelude owns the decode, taint and undo behaviour, and AOT emit, the Cranelift hosts and interpreter ambient all call the same jet_* symbol rather than re-encoding the rule. Finally do criterion 4's reconciliation: re-home or close #1567, #1570, #1577, #1628, #1618 and #1395 so none of them plans against the pre-law shape, and add the Phase-A defect cards the proposal names.",
       "blockedBy": [],
@@ -107840,92 +107856,92 @@
         {
           "n": 3,
           "text": "After ratification: outcomes recorded in docs/spec, one implementation card minted per adopted ballot",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-07T19:10:04.531Z"
+          "evidence": "docs/spec/syntax-decisions.md:7353-7387 records the one-crossing slate; docs/spec/spec.md:1735-1753 plus the grid row at :1067 record D-BOUND-BIND1, which had shipped (#1819) but was written down NOWHERE in docs/spec. Nine implementation cards exist, one per adopted ballot, all phase=done, verified by Tower id rather than number because numbers get reused: #1813 c03jh01p LAW1, #1814 c0igyd1l HEAD1, #1815 c0wji8qh RAW1, #1816 c0am2fst SINK1, #1817 c0oolhyo TAINT1, #1818 c02qrwab EVOLVE1, #1819 c0gp49xp BIND1, #1820 c0uvs9qs UNDO1, #1821 c090fxus PROV1.",
+          "at": "2026-08-20T04:50:41.418Z"
         },
         {
           "n": 4,
           "text": "After ratification: epoch-3 cards reconciled — overlapped cards re-homed or closed (#1567 #1569 #1570 #1577 #1628 #1618 #1394 #1395), Phase-A defect cards added, no e3 card plans against the pre-law shape",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-07T19:10:04.868Z"
+          "evidence": "Reconciled by Tower id, not number: #1577 c0hmpent, #1618 c0lzyla1, #1628 c0i1asfe and #1394 c00sqr4z are done and pruned; #1569 c0zjmtah is a keyword collision and out of scope per its own 2026-08-07 log; #1567 c09mc3y7, #1570 c0exxobe and #1395 c05y3gfw stay live and now carry reconciliation notes. A sweep of all 105 open e3 cards for pre-law markers found exactly ONE real hit, #1570, whose criterion 1 still names the retired pkg.jet and whose trust sub-block predates PROV1. Phase-A defect cards minted from this audit: #2097 (five JSON escapers, two emitting invalid JSON), #2098 (second JSON parser), #2099 (JIT copies of the Prelude encoding types).",
+          "at": "2026-08-20T04:50:44.476Z"
         },
         {
           "n": 5,
           "text": "Syntax.rs entry updated",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-07T20:04:12.142Z"
+          "evidence": "The slate names each syntax owner (syntax-decisions.md:7381-7387). Shipped rows: crates/jet-foundation/src/Syntax/core_surface.rs:451-529 (TYPE_URL/TYPE_PATH/TYPE_DATETIME, the checked-text carrier and its contextual words, TypedHeadKind) and Syntax.rs:28 (MARKER_UNDO). The chores themselves are owned by #1814/#1815/#1816/#1820.",
+          "at": "2026-08-20T04:50:41.861Z"
         },
         {
           "n": 6,
           "text": "syntax-decisions.md log entry",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-07T20:04:12.142Z"
+          "evidence": "docs/spec/syntax-decisions.md:7353-7387.",
+          "at": "2026-08-20T04:50:42.288Z"
         },
         {
           "n": 7,
           "text": "jet devtools grammars regenerated",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-07T20:04:12.142Z"
+          "evidence": "editors/tree-sitter/grammar.js:158-161 carries the marker_decl `on [.Text]` rule; corpus files typed_boundary_heads.txt and declared_text_heads.txt cover the typed and declared heads; `Undo` is present in all four generated grammars (jet.tmGrammar, tree-sitter grammar.js, vscode jet.tmLanguage.json, zed highlights.scm).",
+          "at": "2026-08-20T04:50:42.720Z"
         },
         {
           "n": 8,
           "text": "snapshots re-blessed",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-07T20:04:12.142Z"
+          "evidence": "tests/ui/typed_head_url_scheme_hole.stderr, typed_head_url_port_hole.stderr, typed_head_datetime_hole.stderr (HEAD1/E0155); declared_text_head_check_failure.stderr, declared_text_head_string_sink.stderr, declared_text_block_check_failure.stderr, declared_text_block_undeclared.stderr (SINK1/E2712); taint_sink_unsanitized.stderr and crypto_secret_nested_provenance.stderr (TAINT1/E0721); tests/cli/bind_data_invalid_e3208.txt (BIND1); tests/cli/inspect_provenance.txt and .json (PROV1). TAINT1 added no new code - it reuses E0721 - so per-code fixture coverage is unchanged.",
+          "at": "2026-08-20T04:50:43.163Z"
         },
         {
           "n": 9,
           "text": "docs/spec/syntax-decisions.md has a one-crossing slate section with one bullet per ratified D-BOUND outcome and names the SINK1, RAW1, PROV1 and TAINT1 amendments",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-08T02:41:48.488Z"
+          "evidence": "Section-scoped validation: 9 bullets, 9 unique D-BOUND-* rows, and each of the four amendments named in its own bullet - SINK1 (types not markers), RAW1 (regex literal untouched), PROV1 (manifest trust block), TAINT1 (off-switch spelling still owner-gated).",
+          "at": "2026-08-20T04:50:43.609Z"
         },
         {
           "n": 10,
           "text": "Every minted implementation card states the I9 requirement that the Prelude owns the crossing behaviour and AOT, JIT and interpreter all call the same jet_* symbol",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-08T02:41:48.831Z"
+          "evidence": "All nine implementation cards now carry the shared I9 sentence in their body, verified token by token: each of #1813 #1814 #1815 #1816 #1817 #1818 #1819 #1820 #1821 contains Prelude, AOT, JIT, interpreter and jet_. Before this the five-token scan failed on all nine - two had the word Prelude in a plan only and none named the shared symbol - so the tier obligation existed in the slate but not on the cards that own it.",
+          "at": "2026-08-20T04:51:40.770Z"
         },
         {
           "n": 11,
           "text": "A machine check reads `docs/spec/syntax-decisions.md`, finds exactly nine unique `D-BOUND-*` rows in the one-crossing slate, and `node plugins/tower/tower.mjs decision show <ID> --json` reports `ratified` for each.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-12T18:17:55.037Z"
+          "evidence": "Slate check returns exactly 9 unique D-BOUND-* rows, and `decision show` reports ratified with outcome A dated 2026-08-07 for all nine: LAW1 HEAD1 RAW1 SINK1 TAINT1 EVOLVE1 BIND1 UNDO1 PROV1.",
+          "at": "2026-08-20T04:50:44.036Z"
         },
         {
           "n": 12,
           "text": "`node plugins/tower/tower.mjs card show <card> --json` succeeds for every implementation-card ID in that slate, and each JSON body contains `Prelude`, `AOT`, `JIT`, `interpreter`, and `jet_`.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-12T18:17:55.469Z"
+          "evidence": "card show succeeds for all nine Tower ids and the five-token body requirement now passes for every one of them (see criterion 10 evidence). Ids rather than numbers were used throughout because card numbers get reused on this board.",
+          "at": "2026-08-20T04:51:41.349Z"
         }
       ],
       "refs": [
@@ -107937,8 +107953,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-07T19:09:55.438Z",
-      "updated": "2026-08-19T13:31:33.965Z",
-      "updatedBy": "fable"
+      "updated": "2026-08-20T04:51:42.476Z",
+      "updatedBy": "fable-e3-burndown",
+      "completedAt": "2026-08-20T04:51:42.475Z"
     },
     {
       "id": "c0e6i560",
@@ -119173,7 +119190,7 @@
       "id": "c03jh01p",
       "num": 1813,
       "title": "Every crossing names schema and leaves fact",
-      "body": "Ratified D-BOUND-LAW1=A. Make every comptime, build, link, and runtime crossing name its schema and leave an origin fact.",
+      "body": "Ratified D-BOUND-LAW1=A. Make every comptime, build, link, and runtime crossing name its schema and leave an origin fact. I9: the Prelude owns this crossing behaviour; AOT emit, the Cranelift JIT hosts, and the interpreter ambient all call the same jet_* symbol instead of re-encoding the rule.",
       "kind": "task",
       "track": "epoch",
       "epoch": "e3",
@@ -119225,15 +119242,15 @@
       "parentId": "c0psk4rw",
       "needsAcceptance": false,
       "created": "2026-08-08T19:06:52.087Z",
-      "updated": "2026-08-13T17:25:04.004Z",
-      "updatedBy": "fable",
+      "updated": "2026-08-20T04:51:15.578Z",
+      "updatedBy": "fable-e3-burndown",
       "completedAt": "2026-08-13T17:25:04.004Z"
     },
     {
       "id": "c0igyd1l",
       "num": 1814,
       "title": "URL Path DateTime typed heads",
-      "body": "Ratified D-BOUND-HEAD1=A. Add checked URL, Path, and DateTime literal heads with the shared hole law.",
+      "body": "Ratified D-BOUND-HEAD1=A. Add checked URL, Path, and DateTime literal heads with the shared hole law. I9: the Prelude owns this crossing behaviour; AOT emit, the Cranelift JIT hosts, and the interpreter ambient all call the same jet_* symbol instead of re-encoding the rule.",
       "kind": "task",
       "track": "epoch",
       "epoch": "e3",
@@ -119316,15 +119333,15 @@
       "parentId": "c0psk4rw",
       "needsAcceptance": false,
       "created": "2026-08-08T19:06:52.990Z",
-      "updated": "2026-08-12T17:51:45.491Z",
-      "updatedBy": "fable-e3-audit",
+      "updated": "2026-08-20T04:51:16.472Z",
+      "updatedBy": "fable-e3-burndown",
       "completedAt": "2026-08-12T17:43:51.777Z"
     },
     {
       "id": "c0wji8qh",
       "num": 1815,
       "title": "Typed head bodies own raw escapes",
-      "body": "Ratified D-BOUND-RAW1=A. Treat backslashes inside typed heads as literal text while preserving quote, brace, and per-head hole rules.",
+      "body": "Ratified D-BOUND-RAW1=A. Treat backslashes inside typed heads as literal text while preserving quote, brace, and per-head hole rules. I9: the Prelude owns this crossing behaviour; AOT emit, the Cranelift JIT hosts, and the interpreter ambient all call the same jet_* symbol instead of re-encoding the rule.",
       "kind": "task",
       "track": "epoch",
       "epoch": "e3",
@@ -119412,15 +119429,15 @@
       "parentId": "c0psk4rw",
       "needsAcceptance": false,
       "created": "2026-08-08T19:06:53.841Z",
-      "updated": "2026-08-17T19:10:09.447Z",
-      "updatedBy": "grok-e3",
+      "updated": "2026-08-20T04:51:17.353Z",
+      "updatedBy": "fable-e3-burndown",
       "completedAt": "2026-08-17T19:10:09.447Z"
     },
     {
       "id": "c0am2fst",
       "num": 1816,
       "title": "Libraries declare checked text heads",
-      "body": "Ratified D-BOUND-SINK1=A. Extend the ratified marker rail to [.Text] so libraries can define checked text heads and typed sinks.",
+      "body": "Ratified D-BOUND-SINK1=A. Extend the ratified marker rail to [.Text] so libraries can define checked text heads and typed sinks. I9: the Prelude owns this crossing behaviour; AOT emit, the Cranelift JIT hosts, and the interpreter ambient all call the same jet_* symbol instead of re-encoding the rule.",
       "kind": "task",
       "track": "epoch",
       "epoch": "e3",
@@ -119503,15 +119520,15 @@
       "parentId": "c0psk4rw",
       "needsAcceptance": false,
       "created": "2026-08-08T19:06:54.692Z",
-      "updated": "2026-08-17T19:10:11.315Z",
-      "updatedBy": "grok-e3",
+      "updated": "2026-08-20T04:51:18.233Z",
+      "updatedBy": "fable-e3-burndown",
       "completedAt": "2026-08-17T19:10:11.315Z"
     },
     {
       "id": "c0oolhyo",
       "num": 1817,
       "title": "Origin facts clear on typed decode",
-      "body": "Ratified D-BOUND-TAINT1=A. Seed origin facts at external boundaries, propagate them through one flow store, and clear them only on typed decode.",
+      "body": "Ratified D-BOUND-TAINT1=A. Seed origin facts at external boundaries, propagate them through one flow store, and clear them only on typed decode. I9: the Prelude owns this crossing behaviour; AOT emit, the Cranelift JIT hosts, and the interpreter ambient all call the same jet_* symbol instead of re-encoding the rule.",
       "kind": "task",
       "track": "epoch",
       "epoch": "e3",
@@ -119587,15 +119604,15 @@
       "parentId": "c0psk4rw",
       "needsAcceptance": false,
       "created": "2026-08-08T19:06:55.543Z",
-      "updated": "2026-08-13T17:25:07.402Z",
-      "updatedBy": "fable",
+      "updated": "2026-08-20T04:51:19.120Z",
+      "updatedBy": "fable-e3-burndown",
       "completedAt": "2026-08-13T17:25:07.402Z"
     },
     {
       "id": "c02qrwab",
       "num": 1818,
       "title": "PublishedSchema preserves unknown fields",
-      "body": "Ratified D-BOUND-EVOLVE1=A. Make #PublishedSchema preserve unknown wire fields across decode and re-encode while plain #Codable keeps drop.",
+      "body": "Ratified D-BOUND-EVOLVE1=A. Make #PublishedSchema preserve unknown wire fields across decode and re-encode while plain #Codable keeps drop. I9: the Prelude owns this crossing behaviour; AOT emit, the Cranelift JIT hosts, and the interpreter ambient all call the same jet_* symbol instead of re-encoding the rule.",
       "kind": "task",
       "track": "epoch",
       "epoch": "e3",
@@ -119647,15 +119664,15 @@
       "parentId": "c0psk4rw",
       "needsAcceptance": false,
       "created": "2026-08-08T19:06:56.393Z",
-      "updated": "2026-08-13T17:25:09.424Z",
-      "updatedBy": "fable",
+      "updated": "2026-08-20T04:51:19.983Z",
+      "updatedBy": "fable-e3-burndown",
       "completedAt": "2026-08-13T17:25:09.424Z"
     },
     {
       "id": "c0gp49xp",
       "num": 1819,
       "title": "jet bind reads data schemas",
-      "body": "Ratified D-BOUND-BIND1=A. Extend jet bind from language headers to JSON, CSV, SQL DDL, XML, and proto data schemas.",
+      "body": "Ratified D-BOUND-BIND1=A. Extend jet bind from language headers to JSON, CSV, SQL DDL, XML, and proto data schemas. I9: the Prelude owns this crossing behaviour; AOT emit, the Cranelift JIT hosts, and the interpreter ambient all call the same jet_* symbol instead of re-encoding the rule.",
       "kind": "task",
       "track": "epoch",
       "epoch": "e3",
@@ -119748,15 +119765,15 @@
       "parentId": "c0psk4rw",
       "needsAcceptance": false,
       "created": "2026-08-08T19:06:57.237Z",
-      "updated": "2026-08-12T01:33:02.158Z",
-      "updatedBy": "owner",
+      "updated": "2026-08-20T04:51:20.858Z",
+      "updatedBy": "fable-e3-burndown",
       "completedAt": "2026-08-12T01:33:02.158Z"
     },
     {
       "id": "c0uvs9qs",
       "num": 1820,
       "title": "FFI calls in Transact declare undo",
-      "body": "Ratified D-BOUND-UNDO1=A. Treat FFI as irreversible in #Transact unless the binding declares a compensating #Undo.",
+      "body": "Ratified D-BOUND-UNDO1=A. Treat FFI as irreversible in #Transact unless the binding declares a compensating #Undo. I9: the Prelude owns this crossing behaviour; AOT emit, the Cranelift JIT hosts, and the interpreter ambient all call the same jet_* symbol instead of re-encoding the rule.",
       "kind": "task",
       "track": "epoch",
       "epoch": "e3",
@@ -119819,7 +119836,7 @@
       "parentId": "c0psk4rw",
       "needsAcceptance": false,
       "created": "2026-08-08T19:06:58.094Z",
-      "updated": "2026-08-14T22:48:57.532Z",
+      "updated": "2026-08-20T04:51:21.754Z",
       "updatedBy": "fable-e3-burndown",
       "completedAt": "2026-08-14T22:48:57.532Z"
     },
@@ -119827,7 +119844,7 @@
       "id": "c090fxus",
       "num": 1821,
       "title": "Dependency provenance is inspectable and selectable",
-      "body": "Ratified D-BOUND-PROV1=A. Show dependency integrity, transparency, publisher, and build provenance by default, with manifest-selectable requirements.",
+      "body": "Ratified D-BOUND-PROV1=A. Show dependency integrity, transparency, publisher, and build provenance by default, with manifest-selectable requirements. I9: the Prelude owns this crossing behaviour; AOT emit, the Cranelift JIT hosts, and the interpreter ambient all call the same jet_* symbol instead of re-encoding the rule.",
       "kind": "task",
       "track": "epoch",
       "epoch": "e3",
@@ -119908,7 +119925,7 @@
       "parentId": "c0psk4rw",
       "needsAcceptance": false,
       "created": "2026-08-08T19:06:58.949Z",
-      "updated": "2026-08-14T11:19:18.663Z",
+      "updated": "2026-08-20T04:51:22.619Z",
       "updatedBy": "fable-e3-burndown",
       "completedAt": "2026-08-14T11:19:18.662Z"
     },
@@ -136882,6 +136899,162 @@
       "needsAcceptance": false,
       "created": "2026-08-20T01:49:08.629Z",
       "updated": "2026-08-20T01:49:08.629Z",
+      "updatedBy": "fable-e3-burndown"
+    },
+    {
+      "id": "c096hwxg",
+      "num": 2097,
+      "title": "One JSON writer: delete the four escaper copies",
+      "body": "D-BOUND-LAW1=A instance found while recording the one-crossing slate (#1655) on 2026-08-19. The same escaping rule is written FIVE times and two copies emit invalid JSON. Canonical: crates/jet-foundation/src/JSON.rs:340 json_escape. Copies: crates/jetpack/src/Trust.rs:793 (byte-identical), crates/jet-devserver/src/WebHost.rs:703 (control chars become a space), crates/jet-foundation/src/Persist.rs:287 (no control-char escaping at all, in the SAME crate as the canonical one), crates/jet-devserver/src/WatchService.rs:134 (escapes only backslash and quote). Delete the extras and read the one home. I9: the Prelude owns wire-text escaping and every tier reaches it through the same jet_* symbol; a tool-side writer never re-encodes the rule.",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P1",
+      "plan": "Route Trust.rs, WebHost.rs and WatchService.rs at jet_foundation::JSON::json_escape and delete their local fns; both crates already depend on jet-foundation. Persist.rs is a PAIR: its escaper is matched by an unescaper that cannot read \\uXXXX, so switching the writer requires extending the reader in the same change. Re-bless any devserver or watch snapshot the control-char change moves, reading each one. Do not build a new JSON writer here; the format!-built JSON sites are a separate card.",
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Exactly one JSON string escaper exists in crates/ and it is jet-foundation's; a grep for a second escaping fn returns nothing",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-20T04:50:01.986Z"
+        },
+        {
+          "n": 2,
+          "text": "A string containing a newline, a tab and U+0001 round-trips as valid JSON through the devserver watch payload, the WebHost payload, the jetpack trust record and the Persist store",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-20T04:50:02.500Z"
+        },
+        {
+          "n": 3,
+          "text": "No snapshot is blessed without reading it; every changed devserver or watch golden is named in the evidence",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-20T04:50:03.086Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-08-20T04:50:01.548Z",
+      "updated": "2026-08-20T04:50:03.087Z",
+      "updatedBy": "fable-e3-burndown"
+    },
+    {
+      "id": "c05x4s3u",
+      "num": 2098,
+      "title": "Delete the second JSON parser in jet-pkg-model",
+      "body": "D-BOUND-LAW1=A instance found while recording the one-crossing slate (#1655) on 2026-08-19. Two JSON readers decide what a crossing value means. crates/jet-foundation/src/JSON.rs owns JSONValue and parse_json with bounded depth and a hostile-input test; crates/jet-pkg-model/src/JSON.rs is a second 494-line parser with its own JSONValue plus parse/parse_lenient/quote/object_of - in a crate that already depends on jet-foundation. I9: one reader for every tier, and no crate keeps a private tree type.",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P1",
+      "plan": "Map each jet_pkg_model::JSON caller onto the foundation surface, add only the accessors genuinely missing (parse_lenient's tolerance, quote), keep the foundation depth and size bounds, then delete crates/jet-pkg-model/src/JSON.rs. Numbers matter: the foundation tree must keep the exactness jetpack relies on for nix output.",
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "crates/jet-pkg-model/src/JSON.rs no longer exists and no crate declares a second JSONValue",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-20T04:50:03.977Z"
+        },
+        {
+          "n": 2,
+          "text": "Every former caller uses the foundation reader, and the hostile-input bounds (depth, message size) apply to nix --json output and jetpack state files",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-20T04:50:04.427Z"
+        },
+        {
+          "n": 3,
+          "text": "Malformed nix output and a truncated state file both report the existing registered diagnostics with unchanged text",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-20T04:50:04.873Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-08-20T04:50:03.527Z",
+      "updated": "2026-08-20T04:50:04.873Z",
+      "updatedBy": "fable-e3-burndown"
+    },
+    {
+      "id": "c0zfxd69",
+      "num": 2099,
+      "title": "JIT includes the Prelude encoding types instead of copying them",
+      "body": "D-BOUND-LAW1=A plus I9 instance found while recording the one-crossing slate (#1655) on 2026-08-19. crates/jet-jit/src/enc_stream/mod.rs include!s the encoding ALGORITHMS at lines 454 and 457 but hand-copies their TYPE definitions at lines 41-96 - EncodingLimits, EncodingFormat, EncodingErrorKind, EncodingCause, EncodingError - which the Prelude declares at crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:98-104. Add a format or an error kind to the Prelude and the JIT copy silently falls behind. This is the same class as the three enum-path table copies and the two interrupt queues fixed on 2026-08-19.",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P1",
+      "plan": "Split the encoding type declarations out of CommonTypes.rs into one Prelude file that both the Prelude and jet-jit include!, exactly as EncodingStream.rs and EncodingHostileIo.rs are already shared. Delete the JIT copies. Add the drift guard the marker registry already models: no Rust file outside that one home may declare EncodingFormat or EncodingErrorKind.",
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "EncodingFormat, EncodingErrorKind, EncodingCause, EncodingError and EncodingLimits are declared exactly once in the tree, and jet-jit reaches them through include!",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-20T04:50:05.765Z"
+        },
+        {
+          "n": 2,
+          "text": "A new variant added to the Prelude enum appears in the JIT build with no second edit",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-20T04:50:06.238Z"
+        },
+        {
+          "n": 3,
+          "text": "A test fails if any crate re-declares one of those types",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-20T04:50:06.683Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-08-20T04:50:05.312Z",
+      "updated": "2026-08-20T04:50:06.683Z",
       "updatedBy": "fable-e3-burndown"
     }
   ],
@@ -183191,6 +183364,251 @@
   ],
   "events": [
     {
+      "at": "2026-08-20T04:51:42.476Z",
+      "by": "fable-e3-burndown",
+      "action": "card.update",
+      "ref": "c0psk4rw",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-20T04:51:41.350Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0psk4rw",
+      "note": "#12"
+    },
+    {
+      "at": "2026-08-20T04:51:40.770Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0psk4rw",
+      "note": "#10"
+    },
+    {
+      "at": "2026-08-20T04:51:22.619Z",
+      "by": "fable-e3-burndown",
+      "action": "card.update",
+      "ref": "c090fxus",
+      "note": "body"
+    },
+    {
+      "at": "2026-08-20T04:51:21.754Z",
+      "by": "fable-e3-burndown",
+      "action": "card.update",
+      "ref": "c0uvs9qs",
+      "note": "body"
+    },
+    {
+      "at": "2026-08-20T04:51:20.859Z",
+      "by": "fable-e3-burndown",
+      "action": "card.update",
+      "ref": "c0gp49xp",
+      "note": "body"
+    },
+    {
+      "at": "2026-08-20T04:51:19.984Z",
+      "by": "fable-e3-burndown",
+      "action": "card.update",
+      "ref": "c02qrwab",
+      "note": "body"
+    },
+    {
+      "at": "2026-08-20T04:51:19.121Z",
+      "by": "fable-e3-burndown",
+      "action": "card.update",
+      "ref": "c0oolhyo",
+      "note": "body"
+    },
+    {
+      "at": "2026-08-20T04:51:18.234Z",
+      "by": "fable-e3-burndown",
+      "action": "card.update",
+      "ref": "c0am2fst",
+      "note": "body"
+    },
+    {
+      "at": "2026-08-20T04:51:17.353Z",
+      "by": "fable-e3-burndown",
+      "action": "card.update",
+      "ref": "c0wji8qh",
+      "note": "body"
+    },
+    {
+      "at": "2026-08-20T04:51:16.473Z",
+      "by": "fable-e3-burndown",
+      "action": "card.update",
+      "ref": "c0igyd1l",
+      "note": "body"
+    },
+    {
+      "at": "2026-08-20T04:51:15.579Z",
+      "by": "fable-e3-burndown",
+      "action": "card.update",
+      "ref": "c03jh01p",
+      "note": "body"
+    },
+    {
+      "at": "2026-08-20T04:50:46.351Z",
+      "by": "fable-e3-burndown",
+      "action": "card.update",
+      "ref": "c05y3gfw",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-08-20T04:50:45.737Z",
+      "by": "fable-e3-burndown",
+      "action": "card.update",
+      "ref": "c09mc3y7",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-08-20T04:50:45.111Z",
+      "by": "fable-e3-burndown",
+      "action": "card.update",
+      "ref": "c0exxobe",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-08-20T04:50:44.476Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0psk4rw",
+      "note": "#4"
+    },
+    {
+      "at": "2026-08-20T04:50:44.036Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0psk4rw",
+      "note": "#11"
+    },
+    {
+      "at": "2026-08-20T04:50:43.609Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0psk4rw",
+      "note": "#9"
+    },
+    {
+      "at": "2026-08-20T04:50:43.164Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0psk4rw",
+      "note": "#8"
+    },
+    {
+      "at": "2026-08-20T04:50:42.721Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0psk4rw",
+      "note": "#7"
+    },
+    {
+      "at": "2026-08-20T04:50:42.289Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0psk4rw",
+      "note": "#6"
+    },
+    {
+      "at": "2026-08-20T04:50:41.861Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0psk4rw",
+      "note": "#5"
+    },
+    {
+      "at": "2026-08-20T04:50:41.418Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0psk4rw",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-20T04:50:06.683Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-add",
+      "ref": "c0zfxd69",
+      "note": "#3 A test fails if any crate re-declares one of those types"
+    },
+    {
+      "at": "2026-08-20T04:50:06.238Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-add",
+      "ref": "c0zfxd69",
+      "note": "#2 A new variant added to the Prelude enum appears in the JIT b"
+    },
+    {
+      "at": "2026-08-20T04:50:05.765Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-add",
+      "ref": "c0zfxd69",
+      "note": "#1 EncodingFormat, EncodingErrorKind, EncodingCause, EncodingEr"
+    },
+    {
+      "at": "2026-08-20T04:50:05.313Z",
+      "by": "fable-e3-burndown",
+      "action": "card.add",
+      "ref": "c0zfxd69",
+      "note": "JIT includes the Prelude encoding types instead of copying them"
+    },
+    {
+      "at": "2026-08-20T04:50:04.873Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-add",
+      "ref": "c05x4s3u",
+      "note": "#3 Malformed nix output and a truncated state file both report "
+    },
+    {
+      "at": "2026-08-20T04:50:04.427Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-add",
+      "ref": "c05x4s3u",
+      "note": "#2 Every former caller uses the foundation reader, and the host"
+    },
+    {
+      "at": "2026-08-20T04:50:03.977Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-add",
+      "ref": "c05x4s3u",
+      "note": "#1 crates/jet-pkg-model/src/JSON.rs no longer exists and no cra"
+    },
+    {
+      "at": "2026-08-20T04:50:03.527Z",
+      "by": "fable-e3-burndown",
+      "action": "card.add",
+      "ref": "c05x4s3u",
+      "note": "Delete the second JSON parser in jet-pkg-model"
+    },
+    {
+      "at": "2026-08-20T04:50:03.087Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-add",
+      "ref": "c096hwxg",
+      "note": "#3 No snapshot is blessed without reading it; every changed dev"
+    },
+    {
+      "at": "2026-08-20T04:50:02.500Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-add",
+      "ref": "c096hwxg",
+      "note": "#2 A string containing a newline, a tab and U+0001 round-trips "
+    },
+    {
+      "at": "2026-08-20T04:50:01.987Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-add",
+      "ref": "c096hwxg",
+      "note": "#1 Exactly one JSON string escaper exists in crates/ and it is "
+    },
+    {
+      "at": "2026-08-20T04:50:01.548Z",
+      "by": "fable-e3-burndown",
+      "action": "card.add",
+      "ref": "c096hwxg",
+      "note": "One JSON writer: delete the four escaper copies"
+    },
+    {
       "at": "2026-08-20T04:35:49.742Z",
       "by": "fable-e3-burndown",
       "action": "card.criteria-meet",
@@ -186443,251 +186861,6 @@
       "by": "fable",
       "action": "card.update",
       "ref": "c0b6kkbv",
-      "note": "track,epoch,milestoneId"
-    },
-    {
-      "at": "2026-08-19T13:49:10.941Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c0ro98g4",
-      "note": "track,epoch,milestoneId"
-    },
-    {
-      "at": "2026-08-19T13:49:10.339Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c0391j1l",
-      "note": "track,epoch,milestoneId"
-    },
-    {
-      "at": "2026-08-19T13:49:09.739Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c0v7cn5o",
-      "note": "track,epoch,milestoneId"
-    },
-    {
-      "at": "2026-08-19T13:49:09.147Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c0nqa5px",
-      "note": "track,epoch,milestoneId"
-    },
-    {
-      "at": "2026-08-19T13:49:08.567Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c0g5m31z",
-      "note": "track,epoch,milestoneId"
-    },
-    {
-      "at": "2026-08-19T13:49:07.968Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c08g04mg",
-      "note": "track,epoch,milestoneId"
-    },
-    {
-      "at": "2026-08-19T13:49:07.336Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c00sln5l",
-      "note": "track,epoch,milestoneId"
-    },
-    {
-      "at": "2026-08-19T13:49:06.713Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c0te2a80",
-      "note": "track,epoch,milestoneId"
-    },
-    {
-      "at": "2026-08-19T13:49:06.103Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c0lz1y16",
-      "note": "track,epoch,milestoneId"
-    },
-    {
-      "at": "2026-08-19T13:48:39.240Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c0e7kkuf",
-      "note": "track,epoch,milestoneId"
-    },
-    {
-      "at": "2026-08-19T13:48:38.605Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c06s09om",
-      "note": "track,epoch,milestoneId"
-    },
-    {
-      "at": "2026-08-19T13:48:37.971Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c0zcrs0m",
-      "note": "track,epoch,milestoneId"
-    },
-    {
-      "at": "2026-08-19T13:48:37.342Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c0rrypxo",
-      "note": "track,epoch,milestoneId"
-    },
-    {
-      "at": "2026-08-19T13:48:36.725Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c0zhkr0g",
-      "note": "track,epoch,milestoneId"
-    },
-    {
-      "at": "2026-08-19T13:48:36.096Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c0rhcnm6",
-      "note": "track,epoch,milestoneId"
-    },
-    {
-      "at": "2026-08-19T13:48:35.465Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c00pxltq",
-      "note": "track,epoch,milestoneId"
-    },
-    {
-      "at": "2026-08-19T13:48:34.830Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c0r02txw",
-      "note": "track,epoch,milestoneId"
-    },
-    {
-      "at": "2026-08-19T13:48:34.201Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c0sbsdkf",
-      "note": "track,epoch,milestoneId"
-    },
-    {
-      "at": "2026-08-19T13:48:33.589Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c0jb1b32",
-      "note": "track,epoch,milestoneId"
-    },
-    {
-      "at": "2026-08-19T13:48:32.988Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c052m9c1",
-      "note": "track,epoch,milestoneId"
-    },
-    {
-      "at": "2026-08-19T13:48:32.386Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c0mbyz4d",
-      "note": "track,epoch,milestoneId"
-    },
-    {
-      "at": "2026-08-19T13:48:31.765Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c05po1ng",
-      "note": "track,epoch,milestoneId"
-    },
-    {
-      "at": "2026-08-19T13:48:31.157Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c0fa4bu7",
-      "note": "track,epoch,milestoneId"
-    },
-    {
-      "at": "2026-08-19T13:48:30.550Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c06tgncm",
-      "note": "track,epoch,milestoneId"
-    },
-    {
-      "at": "2026-08-19T13:48:29.899Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c0y7e4ru",
-      "note": "track,epoch,milestoneId"
-    },
-    {
-      "at": "2026-08-19T13:48:29.262Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c0ivhxu2",
-      "note": "track,epoch,milestoneId"
-    },
-    {
-      "at": "2026-08-19T13:48:28.633Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c0admppa",
-      "note": "track,epoch,milestoneId"
-    },
-    {
-      "at": "2026-08-19T13:48:27.949Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c0wfwj5u",
-      "note": "track,epoch,milestoneId"
-    },
-    {
-      "at": "2026-08-19T13:48:27.320Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c003jai5",
-      "note": "track,epoch,milestoneId"
-    },
-    {
-      "at": "2026-08-19T13:48:26.687Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c0pj4od3",
-      "note": "track,epoch,milestoneId,logEntry"
-    },
-    {
-      "at": "2026-08-19T13:48:26.057Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c0eexc32",
-      "note": "track,epoch,milestoneId"
-    },
-    {
-      "at": "2026-08-19T13:48:25.463Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c0jmdp7v",
-      "note": "track,epoch,milestoneId"
-    },
-    {
-      "at": "2026-08-19T13:48:24.831Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c0vq4ut4",
-      "note": "track,epoch,milestoneId"
-    },
-    {
-      "at": "2026-08-19T13:48:24.234Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c0byiodf",
-      "note": "track,epoch,milestoneId"
-    },
-    {
-      "at": "2026-08-19T13:48:23.641Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c0ebieja",
       "note": "track,epoch,milestoneId"
     }
   ],
