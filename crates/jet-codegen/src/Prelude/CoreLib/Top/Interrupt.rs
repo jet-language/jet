@@ -157,6 +157,16 @@ pub fn jet_interrupt_clear() {
 /// shared, so a drain with nothing registered — a tier polling before its first
 /// registration, or a tier that is not the one running the program — must leave
 /// a delivered signal for the drain that can actually deliver it.
+///
+/// `invoke` MUST end whatever control transfer its handler raises; a tier that
+/// merely catches one loses it. The payload is the one thing a tier cannot
+/// share — an AOT unwind, a resident-host trap, an evaluator diagnostic — so
+/// each ends it in its own adapter: AOT at `Prelude/Core.rs`'s
+/// `jet_interrupt_handler_unwind` (an explicit `process.exit` still exits, a
+/// stop reports and this drain continues to the next handler), the resident
+/// host by setting a runtime trap, the evaluator by returning the diagnostic.
+/// Dropping it silently is what made a signalled AOT program run forever with
+/// its handlers already done.
 pub fn jet_interrupt_dispatch<T>(handlers: &[T], mut invoke: impl FnMut(&T)) {
     if handlers.is_empty() {
         return;

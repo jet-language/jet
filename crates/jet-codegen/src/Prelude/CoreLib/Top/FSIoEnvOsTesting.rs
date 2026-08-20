@@ -1024,7 +1024,7 @@ mod jet_os_interrupt {
                                     handler();
                                 }),
                             ) {
-                                super::jet_report_caught_unwind(payload);
+                                super::jet_interrupt_handler_unwind(payload);
                             }
                         });
                     }

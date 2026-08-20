@@ -705,6 +705,40 @@ where
     }
 }
 
+/// The same classification, on the one thread that is NOT the program's entry
+/// boundary: the interrupt dispatcher.
+///
+/// A Jet interrupt handler runs on the dispatcher thread — the count and the
+/// drain rule belong to `Prelude/CoreLib/Top/Interrupt.rs`, the thread and the
+/// `Arc<dyn Fn>` storage to this file's `jet_os_interrupt` adapter — so every
+/// control transfer a handler raises unwinds into that thread's `catch_unwind`
+/// and can never reach `jet_runtime_boundary` above. Handing those payloads to
+/// `jet_report_caught_unwind`, which only knows loose panic text, dropped both
+/// meanings a handler can carry: `process.exit` stopped ending the process (a
+/// signalled program then ran forever with its handlers already done) and a
+/// handler's stop printed no report at all.
+///
+/// Two of the terminal rules differ from the entry boundary's, on purpose. An
+/// explicit exit still ends the process: that is what the program asked for,
+/// and which thread asked is not part of the request. A stop only *reports*
+/// here: the drain still owes every later handler its turn in registration
+/// order, so one failing handler must not cancel the ones registered after it.
+fn jet_interrupt_handler_unwind(payload: Box<dyn std::any::Any + Send>) {
+    let payload = match payload.downcast::<JetExplicitExit>() {
+        Ok(exit) => jet_runtime_process_exit(exit.code, None),
+        Err(payload) => payload,
+    };
+    let payload = match payload.downcast::<JetRuntimeDiagnostic>() {
+        Ok(report) => return jet_runtime_caught_stop(&report.rendered),
+        Err(payload) => payload,
+    };
+    match payload.downcast::<JetRenderedRuntimeStop>() {
+        Ok(report) => jet_runtime_caught_stop(&report.rendered),
+        Err(payload) if payload.is::<JetRuntimeExit>() => jet_runtime_panic_exit(),
+        Err(payload) => jet_report_caught_unwind(payload),
+    }
+}
+
 fn jet_entry_error_text<E: std::fmt::Display>(error: &E) -> String {
     error.to_string()
 }
