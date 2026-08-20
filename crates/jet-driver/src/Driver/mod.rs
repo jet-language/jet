@@ -4175,7 +4175,12 @@ fn validate_build_authority(
                 Some(span),
             )]);
         }
-        if !options.inspect_only && (!options.gates.allows(crate::Policy::PolicyKey::Impure) || !effective_grants(options).contains(&effect)) {
+        // D-BUILDPOLICY1: three independent checks — the declaration above, the
+        // `#Impure` source gate above, and the effective grant here. The
+        // per-effect `--allow-<effect>` flag replaced the blanket impure gate,
+        // so asking for both spelled one authorization twice and made the
+        // E3503 fix text ("pass `--allow-fs`") false at the command line.
+        if !options.inspect_only && !effective_grants(options).contains(&effect) {
             if let Some(dependency_name) = dependency_name.as_deref() {
                 return Err(vec![Diagnostic::error(
                     "E3504",
