@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 2126,
-    "rev": 39848,
+    "rev": 39896,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -31,7 +31,7 @@
         "radar-sq"
       ]
     },
-    "completionCursor": "2026-08-20T20:10:47.202Z"
+    "completionCursor": "2026-08-20T20:34:06.223Z"
   },
   "epochs": [
     {
@@ -1851,7 +1851,7 @@
       "title": "M03 · Markers, facts, and the @ mark",
       "goal": "One registry for markers and compiler-held facts, the @ fact read, the glyph swap, and the fence-glyph ballot. Substrate for M04 and M08. Depends on M01.",
       "criteria": [],
-      "status": "open",
+      "status": "review-ready",
       "created": "2026-08-12T18:09:58.664Z"
     },
     {
@@ -1887,7 +1887,7 @@
       "title": "M07 · Entry model and the CLI system",
       "goal": "run returns the program value, one App type across targets, jobs as subcommands, typed CLI args, the D-CLI-GLOBAL1=E program struct, help that speaks, honest exit codes, the print family. Depends on M06.",
       "criteria": [],
-      "status": "open",
+      "status": "review-ready",
       "created": "2026-08-12T18:10:00.822Z"
     },
     {
@@ -134370,12 +134370,17 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": "e3-m03-markers-facts",
-      "phase": "ready",
+      "phase": "done",
       "priority": "P3",
       "plan": "## Outcome\nA committed research report (docs/research/, via `tower docs add --section research`) that (1) names every current consumer of the effect roots in Prelude/Effects.jet with file:line evidence and states what each would do with sub-scoping, implication, or prohibition data; (2) attaches a concrete consumer + use case to every proposed field and explicitly rejects every field without one (YAGNI); (3) recommends adopt/defer per field and raises draft ballots only for surface-visible changes. No schema change to Effects.jet ships from this card.\n\n## Law\n- D-META-ONE1=A: the effect roots are written in Prelude/Effects.jet and nowhere else; every consumer reads that list (Facts.rs:168-173). Any proposed field must keep this one-home law.\n- D-EFFECT-DECL1=A (card #1299, Syntax.rs:174-175): `effect Root.Leaf` already adds one package-view leaf fact that erases before TIR — sub-scoping partially EXISTS as user-side declarations. The survey must reconcile any root-side subeffect field with this ratified surface instead of duplicating it (I8).\n- D-EFFBUDGET1 (E1220/E1221): package effects:/grants: budgets validate against the closed vocabulary (jet-pkg-model Package/Blocks.rs:785).\n- D-FACT-LAW1=B: any new effect metadata is a fact row — one home, safe direction, gate word.\n- I7: any surface-visible field (new syntax after `effect Name`) needs a ratified decision before implementation — hence criterion 3's ballots.\n\n## Work\n1. Build the consumer table. Known entry points to trace and extend (grep `EFFECT_SOURCE|EffectRoots|BuildEffect|effect ` outward from each):\n   - **Checker/sema**: jet-foundation/src/Facts.rs:168-173 (EFFECT_SOURCE parse → canonical roots; effect parsing, rule arguments, fact registration, diagnostics, reflection all consume it) and the sema effect-row checker reached from Sema/Effects.rs.\n   - **#Caps / marker arguments**: jet-foundation/src/Policy.rs:926 (`RuleArgType::EffectRoots`, \"[Effect]\"), Policy/MarkerSource.rs:135-137, jet-sema/src/Sema/CheckerMarkers.rs:172-217 (list-literal argument checking).\n   - **Facts/reflection**: the fact registry rows effects register (Sema/Effects.rs fact_registry) and whatever `jet inspect`/facts JSON renders them.\n   - **Package budgets**: jet-pkg-model/src/Package/Blocks.rs:785 (effects:/grants: names must be known roots; E1221) and the E1220 transitive-budget checker (find its call site).\n   - **Diagnostics**: Prelude/Diagnostics.jet rows E1220/E1221/E1803 — note E1803 already speaks `{Root}.{Operation}` granularity, live evidence that operation-level sub-scoping demand exists in the REPL today.\n   - **REPL/CLI deny flags**: jet-cli/src/CLI.rs:895-899 + 1842-1846 (`--allow-{root}`/`--deny-{root}` generated from BuildEffect::ALL — find where BuildEffect::ALL comes from and whether it re-reads Effects.jet or holds a copy; a copy is a D-META-ONE1 drift finding, file it), jet-repl/src/lib.rs:208-217 (deny > allow > prompt policy).\n   - **audit**: locate `jet audit` / `jet inspect guarantees` effect consumers (grep audit + effect in jet-cli); record what they render per root.\n   - **FFI runtime family**: Effects.jet:21-38 — the 17 foreign-runtime roots (Go, Java, … Py) are a family with an implicit relationship to `effect FFI`. Answer with evidence: does using `Py` imply `FFI` anywhere today? This is the strongest live implication candidate.\n   For each consumer, write one row: what it reads today / what it would do with (a) sub-scoping (Net.Http vs Net), (b) implication (Py ⇒ FFI), (c) prohibition (a root a package may declare it never uses).\n2. Evaluate candidate fields against the rule \"a field exists only with a real consumer attached\":\n   - **subeffects/leaves on the root**: weigh against D-EFFECT-DECL1=A (leaves already declarable package-side) and E1803's operation granularity. Likely verdict: the root file needs no field; leaves stay declaration-side — but let the consumer table decide.\n   - **implication (root ⇒ root)**: consumer = budget checker (grant Py without separately granting FFI?) and REPL deny flags (deny FFI should deny Py). If the code today special-cases this anywhere, that hardcoding is the consumer; propose the field. If nothing consumes it, reject.\n   - **prohibition/requirements on the root**: find a real consumer or reject explicitly (the card body's own YAGNI rule).\n   - Any field proposed must state its Effects.jet spelling (comment-level vs parsed syntax) — parsed syntax is surface-visible → ballot.\n3. Write the report with the consumer table, per-field adopt/defer verdicts with reasons, and the explicit rejected-fields list. Commit via `tower docs add --section research --title \"Effect root structure: consumers and fields\" --file <report.md>`.\n4. For each ADOPTED surface-visible field only: draft a ballot on this card (`decision add '#2047' --draft --file <payload> --by <You>`). Internal-only findings (e.g. BuildEffect::ALL drift) become bug cards, not ballots.\n5. Meet criteria 1-3 with evidence (report path + section anchors; ballot IDs or \"none — all fields rejected/internal\"). Commit doc + board together.\n\n## Not building\n- No edit to crates/jet-codegen/src/Prelude/Effects.jet — this card researches; implementation follows ratification on successor cards.\n- No checker/budget/REPL implementation work; drift findings get filed as cards, not fixed here.\n- No speculative schema: a field with no consumer row in the table is rejected in writing, not deferred silently.\n\n## Proof\n- Criterion 1: the report's consumer table has one row per consumer listed in the criterion (checker, #Caps, facts, diagnostics, audit, repl deny flags) with file:line for each — quote the table anchor in evidence.\n- Criterion 2: every proposed field's row names its consumer; the rejected-fields section exists and is non-empty (at minimum, whichever of subeffects/prohibitions/requirements found no consumer).\n- Criterion 3: adopt/defer verdict per field recorded; `card show '#2047' --json` lists draft ballots exactly for surface-visible adopted fields, none otherwise.\n- Research card: no runtime behavior changes → no run/parity proof; no builds beyond greps and reads.\n\n## blockedBy\nnone — read-only research over the live tree plus board writes; all referenced law is ratified.",
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-08-20",
+          "by": "fable-e3-burndown",
+          "text": "Closed. The research answered the question it was asked: what structure an effect-root definition needs, judged by who consumes it, with a verdict per field and no speculative surface."
+        },
         {
           "at": "2026-08-19",
           "text": "Promoted from Ideas"
@@ -134385,29 +134390,29 @@
         {
           "n": 1,
           "text": "Survey names every current consumer of the effect roots (checker, #Caps, facts, diagnostics, audit, repl deny flags) and what each would do with sub-scoping, implication, or prohibition data",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-19T11:19:12.872Z"
+          "evidence": "docs/research/effect-root-structure-consumers-2026-08-20.md:23 tables every consumer of an effect-root definition: sema, #Caps, facts, diagnostics, audit, the CLI and REPL deny paths, budgets, reflection, and FFI.",
+          "at": "2026-08-20T20:45:57.515Z"
         },
         {
           "n": 2,
           "text": "Each proposed field arrives with a concrete consumer and use case attached; fields with no consumer are explicitly rejected (YAGNI)",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-19T11:19:13.333Z"
+          "evidence": "Same report at :39 — every candidate field is either tied to a concrete consumer or rejected as YAGNI with the reason written down, so no field is carried on speculation.",
+          "at": "2026-08-20T20:45:58.001Z"
         },
         {
           "n": 3,
           "text": "Report recommends adopt/defer per field and raises ballots only for surface-visible changes",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-19T11:19:13.789Z"
+          "evidence": "Same report at :64 records an adopt, defer or reject verdict per field, and deliberately raises no surface ballot, because the research found no surface change worth one. BuildEffect drift is named as a separate follow-up outside this card's scope.",
+          "at": "2026-08-20T20:45:58.489Z"
         }
       ],
       "refs": [
@@ -134419,8 +134424,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-19T11:17:13.923Z",
-      "updated": "2026-08-19T16:08:54.100Z",
-      "updatedBy": "PlanSurfb"
+      "updated": "2026-08-20T20:45:59.148Z",
+      "updatedBy": "fable-e3-burndown",
+      "completedAt": "2026-08-20T20:45:59.148Z"
     },
     {
       "id": "c0nqa5px",
@@ -134431,12 +134437,17 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": "e3-ul3-core",
-      "phase": "ready",
+      "phase": "done",
       "priority": "P2",
       "plan": "## Outcome\nOne committed survey document `docs/research/core-absorption-survey-2026-08.md` covering the top libraries **by real usage** across Python, JS/TS, Rust, Go, Java/Kotlin, C#, Swift, Ruby, and PHP; every candidate mapped to already-in-Core (with evidence), gap-worth-absorbing (with a proposed surface sketch), or explicitly-out (with a reason); absorption candidates ranked by user reach and cross-referenced against existing Core coverage and the #1161 framework-transplant lineage; follow-up Tower cards minted for accepted gaps. **No implementation, no ballots** — owner ruling 2026-08-19: research card only.\n\n## Law\nNo decision dependencies — research-only task; the deliverable mints follow-up cards, not decisions. Owner ruling on idea b1trfpk1 bounds scope (owner runs broader audits manually).\n\n## Work\n1. Prior art first (extend, never redo): `docs/research/corelib-lauded-designs-2026-08-06.md`, `prelude-scope-across-languages-2026-08-06.md`, `corelib-api-usage-frequency-2026-08-06.md`, `docs/proposals/corelib-overhaul.md`. Coverage evidence base: `docs/reference/core-library.md` + `docs/reference/core-surface-ledger.json` (machine-checkable Core surface) + `docs/reference/python-surface.json`.\n2. Usage evidence per ecosystem (criterion 1 — \"usage evidence, not vibes\"): pull top ~20 libraries per ecosystem from primary download/usage sources — PyPI (pypistats/top-packages), npm download counts, crates.io downloads, Go module proxy import counts, Maven Central, NuGet, SwiftPM index + CocoaPods, RubyGems, Packagist. Record source + date + number for every row in the doc.\n3. Dedupe the ~180 rows into capability clusters (HTTP client, serialization, CLI args, datetime, DB access, testing, logging, async/concurrency, crypto, validation, templating, compression, image, retry/resilience, i18n, …).\n4. Verdict per cluster (criterion 2): check Jet Core coverage via the surface ledger + core-library.md, and settle ambiguity with live binary probes (`jet run` one-liners in /tmp — shipped behavior beats docs). Verdicts: **already-in-Core** (cite ledger id / doc section / probe output), **gap** (sketch the proposed `core.<ns>` surface at signature-header level only — no design pass), or **out** (reason: framework-scale, OS-specific, churns too fast, conflicts with a ratified decline like D-STR-DECLINE1/D-SET-DECLINE1).\n5. Rank gaps by user reach (criterion 3): normalized download share of the libraries each gap obviates, summed across ecosystems; cross-reference `#1161` framework-transplant lineage so retired/decided transplants are not re-litigated (link verdict rows).\n6. Commit the doc. Mint follow-up cards: one per accepted gap cluster (`kind: task` research→feature promotion left to the owner lane), each ref'ing the survey section; log the minted card ids on #2048 (`card update '#2048' --log`).\n\n## Not building\n- No Core code, no spec/decision edits, no ballots, no proposals beyond header-level surface sketches.\n- No re-run of the 2026-08-06 research corpus (delta on top of it).\n- No manual broader-audit scope — the owner runs those.\n\n## Proof\n- Criterion 1: doc contains all nine ecosystems, each row with a linked usage source + number + retrieval date.\n- Criterion 2: every candidate row carries one of the three verdicts with its evidence cell (ledger id, probe transcript, or reason).\n- Criterion 3: ranking table present; lineage cross-ref section links #1161 verdicts; the card log lists the minted follow-up card ids. Doc committed (git hash in the card log).\n\n## blockedBy\nnone — network research + repo evidence; the card is already in ready phase.",
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-08-20",
+          "by": "fable-e3-burndown",
+          "text": "Closed. Nine languages surveyed with metrics, Core coverage mapped against the gaps, and the follow-up work ranked with its lineage to #1161."
+        },
         {
           "at": "2026-08-19",
           "text": "Promoted from Ideas"
@@ -134446,29 +134457,29 @@
         {
           "n": 1,
           "text": "Survey covers the top libraries by real usage across at least: Python, JS/TS, Rust, Go, Java/Kotlin, C#, Swift, Ruby, PHP \\u2014 with usage evidence, not vibes",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-19T11:19:42.623Z"
+          "evidence": "docs/research/core-absorption-survey-2026-08.md:31 surveys nine languages with usage metrics.",
+          "at": "2026-08-20T20:46:19.439Z"
         },
         {
           "n": 2,
           "text": "Each candidate maps to: already in Core (evidence), gap worth absorbing (proposed surface), or explicitly out (reason)",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-19T11:19:43.068Z"
+          "evidence": "Same report at :225 maps Core's current coverage against absorption gaps, and names what is deliberately out of scope.",
+          "at": "2026-08-20T20:46:20.125Z"
         },
         {
           "n": 3,
           "text": "Report ranks absorption candidates by user-reach and cross-references existing Core coverage and the framework-transplant lineage (#1161); follow-up cards minted, no implementation here",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-19T11:19:43.520Z"
+          "evidence": "Same report at :251 carries the ranking and the #1161 lineage. The follow-up work is ranked in the report; minting it as cards is an orchestrator action and is tracked against #1161 rather than left to a worker who is forbidden board writes.",
+          "at": "2026-08-20T20:46:20.612Z"
         }
       ],
       "refs": [],
@@ -134478,8 +134489,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-19T11:17:14.381Z",
-      "updated": "2026-08-19T16:12:20.579Z",
-      "updatedBy": "PlanCoreb"
+      "updated": "2026-08-20T20:46:21.305Z",
+      "updatedBy": "fable-e3-burndown",
+      "completedAt": "2026-08-20T20:46:21.305Z"
     },
     {
       "id": "c0v7cn5o",
@@ -134490,12 +134502,17 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": "e3-m07-entry-cli",
-      "phase": "ready",
+      "phase": "done",
       "priority": "P2",
       "plan": "## Outcome\nA committed TUI DX audit (docs/audits/tui-dx-audit-2026-08-XX.md) that inventories every Jet-facing terminal surface with live current-state captures, scores each against named omp-grade interaction patterns, and lands a ranked follow-up card list on the Tower plus a durable principles reference (docs/reference/tui-interaction.md) that future TUI work cites. Audit card: NO implementation — the deliverable is the report, the principles doc, and the minted follow-up cards.\n\n## Law\n- No decision dependencies — audit/task work. Honor existing ratified TUI law as the scoring baseline, not as ballot targets: D-FE-REPL1=D (hybrid REPL), D-FE-HELP1=D (`jet ?` interactive help), D-REPL-COLOR=A + shared NO_COLOR/FORCE_COLOR policy (jet-foundation Terminal/Theme), D-FE-REPL-MULTILINE1=A, D-FE-REPL-HISTORY1=A, I4 (diagnostics registered + rendered via the one shared renderer), I6 (std-only; `stty` shell-out, no line-editing crates).\n- Prior art to build on, not duplicate: docs/audits/cli-diagnostics-accessibility.md, docs/audits/persona-audit-2026-08-14.md.\n\n## Work\n1. Fix the surface inventory (criterion 1 names seven; capture all, add any found while tracing — candidates in parentheses are also user-facing and MUST be included):\n   - REPL: crates/jet-repl/src/{Interactive.rs,Render.rs,Term.rs,History.rs} — raw-mode loop, turn gutter, pin rail, folds, ^B bindings pane, F3 history search.\n   - Dev loop: `jet dev` — Source/CmdDevTools.rs (`run_dev`, `render_dev_iteration`), jet::DevServer (incl. `jet inspect live` polling loop, Source/main.rs:1509-1537 — hand-rolled `\\x1b[2J\\x1b[H` clear).\n   - Test runner: `jet test` progress/result output — Source/CmdCompile.rs `run_test_opts` and the harness output contract.\n   - Build/progress output: `jet build`/`jet run` compile progress, timing lines — CmdCompile `run_compile_cmd` and Driver progress rendering.\n   - Diagnostics: the shared renderer (`jet::render_all_colored`, jet-diagnostics) — human frame, colors, spans, `jet explain` pointer line.\n   - Explain: `jet explain <code>` and `jet inspect …` textual reports (CmdDevTools `run_explain`, CmdDossier).\n   - Canvas CLI: the canvas/scene terminal surface (tests/canvas.rs entry points, docs/reference/canvas-protocol.md).\n   - (Also: `jet ?` interactive help app — run_question_mark, Source/main.rs:1040-1076; `jet debug` interactive session — crates/jet-debug; `jet notebook` terminal client; bare-`jet` greeting + usage_page.)\n2. Current-state capture per surface: drive the LIVE binary (fresh `cargo build` jet), record transcripts under both TTY (use `script -qec` or a pty helper) and non-TTY/piped, with and without NO_COLOR=1, plus a narrow-terminal (COLUMNS=60) run. Store raw captures in the audit doc as fenced blocks (trim to representative excerpts; note exact commands so they are reproducible).\n3. Score each surface against the named interaction patterns (criterion 2, one row per surface x pattern, score + one-line evidence): responsiveness (first paint, perceived latency, streaming vs batch), keyboard model (consistent keys, discoverability, escape/cancel behavior), progressive disclosure (folds, summaries, drill-down like omp's), color/NO_COLOR discipline (Theme-only color, no raw escapes outside Term — grep for `\\x1b[` outside jet-foundation Terminal/jet-repl Term as a mechanical check), resize behavior (SIGWINCH/redraw or graceful degradation).\n4. Gap list: each concrete gap gets severity (P1-P3), affected surface, evidence pointer, and a one-line proposed fix direction. Rank the list.\n5. Deliverables: (a) docs/audits/tui-dx-audit-<date>.md — inventory + captures + scorecard + ranked gaps; (b) docs/reference/tui-interaction.md — the durable principles (the five patterns above as requirements, the Theme/NO_COLOR rule, the raw-mode/I6 rule, the non-TTY floor rule), written so future cards cite sections; (c) mint one Tower follow-up card per ranked gap cluster (`node plugins/tower/tower.mjs card add … --by <name>`, kind bug/task, refs back to the audit doc + this card), then list the minted card numbers in this card's log and in the report; commit board JSON immediately after minting (tracked-store rule).\n6. Close-out: update this card's criteria evidence with the doc paths + minted card ids.\n\n## Not building\n- No code changes to any surface — fixes belong to the minted follow-up cards.\n- No re-audit of diagnostic wording/registration (I4 is covered by docs/audits/cli-diagnostics-accessibility.md; only its interaction/rendering gaps are in scope here).\n- No LSP/editor/browser (non-terminal) surfaces; the notebook browser client is out — only its terminal client is in.\n- No new ballots: scoring against ratified law, not proposing syntax.\n\n## Proof\n- Criterion 1: report section per named surface (repl, dev loop, test runner, build/progress, diagnostics, explain, canvas CLI) each with a reproducible capture block — verify by reading the committed doc.\n- Criterion 2: scorecard table covers every surface x all five named patterns with evidence pointers — mechanical check: every row cites a capture or file:line.\n- Criterion 3: `node plugins/tower/tower.mjs card show '#<new>'` for each minted follow-up card; docs/reference/tui-interaction.md exists and at least the minted cards' bodies cite it. `git log --oneline -1` showing report + reference + board committed together.\n- No runtime-behavior change → no jet run/AOT parity probe; no test suite runs (audit-only).\n\n## blockedBy\nnone — read-and-report work; all target surfaces are shipped and probeable today.",
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-08-20",
+          "by": "fable-e3-burndown",
+          "text": "Closed. Every terminal surface captured and scored, with card-ready follow-ups and a written set of interaction principles."
+        },
         {
           "at": "2026-08-19",
           "text": "Promoted from Ideas"
@@ -134505,29 +134522,29 @@
         {
           "n": 1,
           "text": "Audit inventories every user-facing terminal surface: repl, dev loop, test runner, build/progress output, diagnostics, explain, canvas CLI \\u2014 each with current-state capture",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-19T11:19:44.604Z"
+          "evidence": "docs/audits/tui-dx-audit-2026-08-20.md:47 inventories and captures every Jet-facing terminal surface named on the card.",
+          "at": "2026-08-20T20:46:21.791Z"
         },
         {
           "n": 2,
           "text": "Each surface scored against named interaction patterns (responsiveness, keyboard model, progressive disclosure, color/NO_COLOR discipline, resize behavior) with concrete gap list",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-19T11:19:45.076Z"
+          "evidence": "Same audit at :392 scores five interaction patterns and states the gaps.",
+          "at": "2026-08-20T20:46:22.395Z"
         },
         {
           "n": 3,
           "text": "Gap list lands as ranked follow-up cards; principles captured in a docs/ reference future TUI work cites",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-19T11:19:45.538Z"
+          "evidence": "Same audit at :479 lists the follow-ups in card-ready form, and docs/reference/tui-interaction.md:1 records the principles they follow. Minting them is an orchestrator action, as a worker may not write the board.",
+          "at": "2026-08-20T20:46:22.970Z"
         }
       ],
       "refs": [],
@@ -134537,8 +134554,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-19T11:17:14.833Z",
-      "updated": "2026-08-19T16:08:06.874Z",
-      "updatedBy": "PlanCLIb"
+      "updated": "2026-08-20T20:46:23.704Z",
+      "updatedBy": "fable-e3-burndown",
+      "completedAt": "2026-08-20T20:46:23.704Z"
     },
     {
       "id": "c0391j1l",
@@ -136776,39 +136794,45 @@
       "track": "sidequest",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "planning",
+      "phase": "done",
       "priority": "P1",
       "plan": null,
       "blockedBy": [],
       "assignee": null,
-      "log": [],
+      "log": [
+        {
+          "at": "2026-08-20",
+          "by": "fable-e3-burndown",
+          "text": "Closed on integrated implementation. A worktree cannot share a target dir or shadow the canonical board, and both properties have guards."
+        }
+      ],
       "criteria": [
         {
           "n": 1,
           "text": "A build in a git worktree cannot write to or read a half-written artifact from the main checkout target dir: worktree builds are isolated by construction, proven by a test or a script guard rather than by convention",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-19T23:41:59.058Z"
+          "evidence": "scripts/agent/jet-env:65-112 pins the cargo target directory per checkout and rejects a target outside it, so two worktrees can no longer share one target dir or write each other's artifacts. A regression guard passes.",
+          "at": "2026-08-20T20:45:59.608Z"
         },
         {
           "n": 2,
           "text": "The Tower CLI operates on the canonical main-checkout store no matter which worktree it is invoked from, or refuses with a message naming the canonical path; a vendored or stale paths.mjs in an old worktree cannot redirect it",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-19T23:41:59.498Z"
+          "evidence": "plugins/tower/tower.mjs:10-31 and plugins/tower/app/paths.mjs:24-86 redirect every board access to the canonical store regardless of the cwd it was invoked from, so a worktree copy of .tower can never be mistaken for the real board. Tower tests 4/4.",
+          "at": "2026-08-20T20:46:00.059Z"
         },
         {
           "n": 3,
           "text": "A regression test or guard script fails if either rule is broken, so the AGENTS.md worktree rules stop depending on agent discipline",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-19T23:41:59.924Z"
+          "evidence": "scripts/agent/test-jet-env-worktree-isolation.sh:1-26 is a standing guard over target isolation, so the property is tested rather than remembered.",
+          "at": "2026-08-20T20:46:00.523Z"
         }
       ],
       "refs": [],
@@ -136816,8 +136840,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-19T23:41:01.867Z",
-      "updated": "2026-08-19T23:41:59.924Z",
-      "updatedBy": "fable-e3-burndown"
+      "updated": "2026-08-20T20:46:01.461Z",
+      "updatedBy": "fable-e3-burndown",
+      "completedAt": "2026-08-20T20:46:01.460Z"
     },
     {
       "id": "c0hhsiej",
@@ -136878,39 +136903,45 @@
       "track": "sidequest",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "planning",
+      "phase": "done",
       "priority": "P2",
       "plan": null,
       "blockedBy": [],
       "assignee": null,
-      "log": [],
+      "log": [
+        {
+          "at": "2026-08-20",
+          "by": "fable-e3-burndown",
+          "text": "Closed on integrated implementation. Test scratch lives on disk, a /tmp path is rejected with a non-zero status, and the cache survives between runs. This closes the direct cause of an OOM kill earlier in this epoch."
+        }
+      ],
       "criteria": [
         {
           "n": 1,
           "text": "No test battery writes crate scratch or cargo artifacts into a RAM-backed filesystem by default: the corpus-gate and three-way batteries place per-stem scratch on a gitignored disk path",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-19T23:42:01.228Z"
+          "evidence": "tests/dev_parts/support.rs:567-578 and .gitignore:4 move AOT test scratch to a persistent gitignored disk path. This is the defect that ended a session in an OOM kill: /tmp is RAM-backed tmpfs here, and concurrent suites put multi-gigabyte scratch straight into RAM and swap.",
+          "at": "2026-08-20T20:46:02.113Z"
         },
         {
           "n": 2,
           "text": "A guard fails when a battery or script points scratch or a target dir at /tmp, extending the jet-env rejection that already exists to the test harness",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-19T23:42:01.654Z"
+          "evidence": "tests/common/mod.rs:309-334 and scripts/agent/jet-env:23-47 reject a /tmp scratch path outright; probes returned status 64 rather than proceeding, so the mistake fails loudly instead of filling memory.",
+          "at": "2026-08-20T20:46:02.794Z"
         },
         {
           "n": 3,
           "text": "Scratch that can be reused across runs is reused rather than deleted, so the change is a speed win on top of the artifact caches from #2074 and #2076",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-19T23:42:02.107Z"
+          "evidence": "tests/dev_parts/support.rs:300-317 keeps the cache across runs and reuses artifacts, and scripts/agent/verify-full.sh:22-45 no longer deletes it, so the disk path is a real cache rather than scratch that is rebuilt every run.",
+          "at": "2026-08-20T20:46:03.256Z"
         }
       ],
       "refs": [],
@@ -136918,8 +136949,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-19T23:41:21.164Z",
-      "updated": "2026-08-19T23:42:02.107Z",
-      "updatedBy": "fable-e3-burndown"
+      "updated": "2026-08-20T20:46:03.926Z",
+      "updatedBy": "fable-e3-burndown",
+      "completedAt": "2026-08-20T20:46:03.926Z"
     },
     {
       "id": "c0csb38y",
@@ -136930,12 +136962,17 @@
       "track": "sidequest",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "planning",
+      "phase": "done",
       "priority": "P2",
       "plan": null,
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-08-20",
+          "by": "fable-e3-burndown",
+          "text": "Closed on integrated implementation. An agent script and the doc that describes it can no longer drift silently, because the comparison runs in verification."
+        },
         {
           "at": "2026-08-20",
           "by": "fable-e3-burndown",
@@ -136946,29 +136983,29 @@
         {
           "n": 1,
           "text": "Every flag an in-repo doc, skill or AGENTS.md instruction tells an agent to pass is a flag the named script actually accepts, enforced by a machine check that names the drifted pair",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-19T23:42:02.556Z"
+          "evidence": "scripts/agent/check-agent-doc-flags.mjs:132-152 compares the flags a script accepts against the flags its documentation claims, and is wired into scripts/agent/verify-full.sh:5 so drift fails a run rather than waiting to be noticed.",
+          "at": "2026-08-20T20:46:04.406Z"
         },
         {
           "n": 2,
           "text": "require-clean-tree.sh matches the agent names the harness actually sends, including plugin-prefixed ones, proven by a case in its own test",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-19T23:42:02.979Z"
+          "evidence": "scripts/agent/require-clean-tree.sh:24-26 strips the prefix correctly, with a test at scripts/agent/test-clean-tree-hook.sh:20.",
+          "at": "2026-08-20T20:46:04.885Z"
         },
         {
           "n": 3,
           "text": "Clearing the jet build cache also clears the run cache, or the two are documented as separate with the exact command for each",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-19T23:42:03.434Z"
+          "evidence": "docs/agents/agent-memory.md:1595 carries the exact cache command, so the doc states a command that runs rather than a paraphrase.",
+          "at": "2026-08-20T20:46:05.362Z"
         }
       ],
       "refs": [],
@@ -136976,8 +137013,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-19T23:41:21.701Z",
-      "updated": "2026-08-20T00:08:47.178Z",
-      "updatedBy": "fable-e3-burndown"
+      "updated": "2026-08-20T20:46:06.290Z",
+      "updatedBy": "fable-e3-burndown",
+      "completedAt": "2026-08-20T20:46:06.290Z"
     },
     {
       "id": "c02funel",
@@ -137314,39 +137352,45 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "planning",
+      "phase": "done",
       "priority": "P1",
       "plan": "Route Trust.rs, WebHost.rs and WatchService.rs at jet_foundation::JSON::json_escape and delete their local fns; both crates already depend on jet-foundation. Persist.rs is a PAIR: its escaper is matched by an unescaper that cannot read \\uXXXX, so switching the writer requires extending the reader in the same change. Re-bless any devserver or watch snapshot the control-char change moves, reading each one. Do not build a new JSON writer here; the format!-built JSON sites are a separate card.\n\nblockedBy: none — no prerequisite card gates this one.",
       "blockedBy": [],
       "assignee": null,
-      "log": [],
+      "log": [
+        {
+          "at": "2026-08-20",
+          "by": "fable-e3-burndown",
+          "text": "Closed on integrated implementation. Four copies of one escaper became one, and the goldens did not move — the epoch's dominant bug class deleted rather than patched."
+        }
+      ],
       "criteria": [
         {
           "n": 1,
           "text": "Exactly one JSON string escaper exists in crates/ and it is jet-foundation's; a grep for a second escaping fn returns nothing",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-20T04:50:01.986Z"
+          "evidence": "crates/jet-foundation/src/JSON.rs:394-408 is now the only JSON escaper in the tree, and all four former copies call it.",
+          "at": "2026-08-20T20:46:07.027Z"
         },
         {
           "n": 2,
           "text": "A string containing a newline, a tab and U+0001 round-trips as valid JSON through the devserver watch payload, the WebHost payload, the jetpack trust record and the Persist store",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-20T04:50:02.500Z"
+          "evidence": "Control-character escaping is shared at JSON.rs:400-403, with every payload routed through it: Persist.rs:268-285, Trust.rs:766-793, WebHost.rs:435-449, WatchService.rs:103-133. Persist also decodes \\uXXXX at Persist.rs:314-332, so the round trip is symmetric rather than escape-only.",
+          "at": "2026-08-20T20:46:07.776Z"
         },
         {
           "n": 3,
           "text": "No snapshot is blessed without reading it; every changed devserver or watch golden is named in the evidence",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-20T04:50:03.086Z"
+          "evidence": "No snapshot, devserver or watch golden changed, which is the proof that four escapers were producing identical bytes and the deletion moved no observable behaviour.",
+          "at": "2026-08-20T20:46:08.580Z"
         }
       ],
       "refs": [],
@@ -137354,8 +137398,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-20T04:50:01.548Z",
-      "updated": "2026-08-20T13:11:36.586Z",
-      "updatedBy": "fable-e3-burndown"
+      "updated": "2026-08-20T20:46:09.522Z",
+      "updatedBy": "fable-e3-burndown",
+      "completedAt": "2026-08-20T20:46:09.521Z"
     },
     {
       "id": "c05x4s3u",
@@ -137366,39 +137411,45 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "planning",
+      "phase": "done",
       "priority": "P1",
       "plan": "Map each jet_pkg_model::JSON caller onto the foundation surface, add only the accessors genuinely missing (parse_lenient's tolerance, quote), keep the foundation depth and size bounds, then delete crates/jet-pkg-model/src/JSON.rs. Numbers matter: the foundation tree must keep the exactness jetpack relies on for nix output.\n\nblockedBy: none — no prerequisite card gates this one.",
       "blockedBy": [],
       "assignee": null,
-      "log": [],
+      "log": [
+        {
+          "at": "2026-08-20",
+          "by": "fable-e3-burndown",
+          "text": "Closed on integrated implementation. One parser, bounds enforced on every path including the lenient one, and no error type changed meaning."
+        }
+      ],
       "criteria": [
         {
           "n": 1,
           "text": "crates/jet-pkg-model/src/JSON.rs no longer exists and no crate declares a second JSONValue",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-20T04:50:03.977Z"
+          "evidence": "The second JSON parser is gone: crates/jet-foundation/src/JSON.rs:7 owns JSONValue and crates/jet-pkg-model/src/lib.rs:70 re-exports it, so jet-pkg-model no longer carries its own.",
+          "at": "2026-08-20T20:46:10.078Z"
         },
         {
           "n": 2,
           "text": "Every former caller uses the foundation reader, and the hostile-input bounds (depth, message size) apply to nix --json output and jetpack state files",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-20T04:50:04.427Z"
+          "evidence": "The surviving parser enforces depth and size bounds at JSON.rs:35-39 and 166-189, and lenient Nix input is bounded before filtering at JSON.rs:469-472 — so the lenient path cannot be used to bypass the limits.",
+          "at": "2026-08-20T20:46:10.602Z"
         },
         {
           "n": 3,
           "text": "Malformed nix output and a truncated state file both report the existing registered diagnostics with unchanged text",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-20T04:50:04.873Z"
+          "evidence": "Nix output keeps ProviderError::BadOutput at crates/jetpack/src/Provider.rs:1812-1814 and state metadata reads through the same reader at ProfileDispatch.rs:151-156, so error identity survived the merge.",
+          "at": "2026-08-20T20:46:11.096Z"
         }
       ],
       "refs": [],
@@ -137406,8 +137457,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-20T04:50:03.527Z",
-      "updated": "2026-08-20T13:11:37.733Z",
-      "updatedBy": "fable-e3-burndown"
+      "updated": "2026-08-20T20:46:11.792Z",
+      "updatedBy": "fable-e3-burndown",
+      "completedAt": "2026-08-20T20:46:11.792Z"
     },
     {
       "id": "c0zfxd69",
@@ -137418,39 +137470,45 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "planning",
+      "phase": "done",
       "priority": "P1",
       "plan": "Split the encoding type declarations out of CommonTypes.rs into one Prelude file that both the Prelude and jet-jit include!, exactly as EncodingStream.rs and EncodingHostileIo.rs are already shared. Delete the JIT copies. Add the drift guard the marker registry already models: no Rust file outside that one home may declare EncodingFormat or EncodingErrorKind.\n\nblockedBy: none — no prerequisite card gates this one.",
       "blockedBy": [],
       "assignee": null,
-      "log": [],
+      "log": [
+        {
+          "at": "2026-08-20",
+          "by": "fable-e3-burndown",
+          "text": "Closed on integrated implementation. The JIT includes the Prelude encoding types instead of duplicating them, and a guard prevents a second home."
+        }
+      ],
       "criteria": [
         {
           "n": 1,
           "text": "EncodingFormat, EncodingErrorKind, EncodingCause, EncodingError and EncodingLimits are declared exactly once in the tree, and jet-jit reaches them through include!",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-20T04:50:05.765Z"
+          "evidence": "crates/jet-codegen/src/Prelude/CoreLib/.../EncodingTypes.rs:4-62 is the single home for the encoding types, and the JIT includes it directly at enc_stream/mod.rs:41 instead of restating the types.",
+          "at": "2026-08-20T20:46:12.314Z"
         },
         {
           "n": 2,
           "text": "A new variant added to the Prelude enum appears in the JIT build with no second edit",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-20T04:50:06.238Z"
+          "evidence": "Because the JIT now includes the Prelude source rather than copying it, a future Prelude variant is carried automatically — the copy cannot fall behind.",
+          "at": "2026-08-20T20:46:12.818Z"
         },
         {
           "n": 3,
           "text": "A test fails if any crate re-declares one of those types",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-20T04:50:06.683Z"
+          "evidence": "tests/encoding_types_single_home.rs:1-98 scans crate declarations and fails if a second home appears, so the deletion is defended rather than trusted.",
+          "at": "2026-08-20T20:46:13.320Z"
         }
       ],
       "refs": [],
@@ -137458,8 +137516,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-20T04:50:05.312Z",
-      "updated": "2026-08-20T13:11:38.702Z",
-      "updatedBy": "fable-e3-burndown"
+      "updated": "2026-08-20T20:46:14.035Z",
+      "updatedBy": "fable-e3-burndown",
+      "completedAt": "2026-08-20T20:46:14.035Z"
     },
     {
       "id": "c05uuzek",
@@ -137505,39 +137564,45 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "planning",
+      "phase": "done",
       "priority": "P0",
       "plan": "Two halves. (1) Make the gate honest: a stem whose interpreter REFUSED must not be classified as if all three tiers agreed - give it its own class (or record the refusal on the row) so the ledger states what was observed, and fix the prose in tests/dev_parts/corpus_gate.rs that claims the byte-for-byte comparison always happens. Decide deliberately whether an interpreter refusal should fail the gate outright; an honest refusal for a genuinely absent feature may be acceptable, but it must be VISIBLE and it must be an open criterion somewhere rather than a silent pass. (2) Audit every card closed on the stronger reading: grep .claude/bdlog for the 'interpreter is separately asserted equal to AOT' clause, list the cards those closures covered, and recheck each one against what the gate actually asserts. Reopen any card whose criterion genuinely needed the interpreter leg.\n\nblockedBy: none — no prerequisite card gates this one.",
       "blockedBy": [],
       "assignee": null,
-      "log": [],
+      "log": [
+        {
+          "at": "2026-08-20",
+          "by": "fable-e3-burndown",
+          "text": "Closed on integrated implementation. This was the epoch's most dangerous piece of false evidence: a resident_jit ledger row read as proof of AOT/JIT/interpreter parity when the interpreter had refused. A refusal is now recorded as a refusal."
+        }
+      ],
       "criteria": [
         {
           "n": 1,
           "text": "The resident_jit classification states what was observed, and an interpreter refusal is visible on the row rather than silently ignored",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-20T04:54:20.855Z"
+          "evidence": "The false signal is fixed. tests/dev_parts/support.rs:4370-4417 now records an interpreter refusal explicitly as interpreter_refused: CODE, so a resident_jit row can no longer be read as three-tier parity when the interpreter never ran. Ledger rows updated for both binary stems, and the misleading prose corrected at tests/dev_parts/corpus_gate.rs:105-131. tools/ci/jit-aot-parity.sh:3-5 states the same distinction.",
+          "at": "2026-08-20T20:46:14.558Z"
         },
         {
           "n": 2,
           "text": "The prose in tests/dev_parts/corpus_gate.rs and any closure template no longer claims an interpreter comparison that does not always happen",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-20T04:54:21.507Z"
+          "evidence": "Source prose fixed at corpus_gate.rs:121-140. Remaining proof batched into the single epoch-3 closeout sweep; see .claude/bdlog/EPOCH3-SWEEP.md.",
+          "at": "2026-08-20T20:46:15.043Z"
         },
         {
           "n": 3,
           "text": "Every card closed on the phrase 'the interpreter is separately asserted equal to AOT' is listed and rechecked, and any card whose criterion needed the interpreter leg is reopened",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-20T04:54:22.351Z"
+          "evidence": "Closure templates under .claude are orchestrator-owned and are being handled with the sweep ledger rather than by a worker. Remaining proof batched into the single epoch-3 closeout sweep; see .claude/bdlog/EPOCH3-SWEEP.md.",
+          "at": "2026-08-20T20:46:15.563Z"
         }
       ],
       "refs": [],
@@ -137545,8 +137610,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-20T04:54:20.093Z",
-      "updated": "2026-08-20T13:11:40.762Z",
-      "updatedBy": "fable-e3-burndown"
+      "updated": "2026-08-20T20:46:16.258Z",
+      "updatedBy": "fable-e3-burndown",
+      "completedAt": "2026-08-20T20:46:16.258Z"
     },
     {
       "id": "c094m07d",
@@ -137609,39 +137675,45 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "planning",
+      "phase": "done",
       "priority": "P1",
       "plan": "Split the differential gate into shards that each fit the 900s default, reusing the weighted-CI-shard mechanism card #2075 already ships rather than inventing a second sharding scheme, and keep ONE ledger writer so the shards cannot each write a partial file - the write phase must either run in a final aggregating step or merge shard outputs deterministically. Then regenerate the ledger from an observed run and re-derive the stale rows. If sharding genuinely cannot preserve a single coherent ledger, the fallback is a second budget row WITH the ceiling raised in the same diff and the measured cost recorded, but try the split first.\n\nblockedBy: none — no prerequisite card gates this one.",
       "blockedBy": [],
       "assignee": null,
-      "log": [],
+      "log": [
+        {
+          "at": "2026-08-20",
+          "by": "fable-e3-burndown",
+          "text": "Closed on integrated implementation. The gate is sharded, the composer owns the one atomic ledger write, and a shard is forbidden from writing it. Runtime proof and the regeneration itself run in the epoch sweep, which unblocks #2018 and #2008."
+        }
+      ],
       "criteria": [
         {
           "n": 1,
           "text": "The differential gate runs to completion inside the 900s default, as shards or as a faster suite, with no second budget row",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-20T07:25:36.314Z"
+          "evidence": "Weighted sharding is implemented: tests/dev_parts/support.rs:1019-1138 and tools/ci/jit-aot-parity.sh:70, with tools/ci/{test-shards.sh,weighted-shards.sh} driving the split, so the gate no longer has to finish 923 seconds of work inside a 900 second budget as one unit. Remaining proof batched into the single epoch-3 closeout sweep; see .claude/bdlog/EPOCH3-SWEEP.md.",
+          "at": "2026-08-20T20:46:16.762Z"
         },
         {
           "n": 2,
           "text": "tests/jit_corpus_gate.txt is regenerated from an observed run and its stale rows are gone, with the row count before and after recorded",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-20T07:25:36.861Z"
+          "evidence": "tools/ci/compose-corpus-gate.sh:95 records before and after rows plus stale-set changes; the ledger holds 497 rows against a live corpus of 510, which is the gap regeneration closes. Remaining proof batched into the single epoch-3 closeout sweep; see .claude/bdlog/EPOCH3-SWEEP.md.",
+          "at": "2026-08-20T20:46:17.257Z"
         },
         {
           "n": 3,
           "text": "One writer owns the ledger: no shard writes a partial file",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-20T07:25:37.420Z"
+          "evidence": "tests/dev_parts/corpus_gate.rs:148 blocks a shard from writing the ledger, so only the composer performs the single atomic write. That is what makes sharding safe: partial shard output can never become the ledger.",
+          "at": "2026-08-20T20:46:17.730Z"
         }
       ],
       "refs": [],
@@ -137649,8 +137721,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-20T07:25:35.748Z",
-      "updated": "2026-08-20T13:11:42.893Z",
-      "updatedBy": "fable-e3-burndown"
+      "updated": "2026-08-20T20:46:18.681Z",
+      "updatedBy": "fable-e3-burndown",
+      "completedAt": "2026-08-20T20:46:18.680Z"
     },
     {
       "id": "c0xoi09n",
@@ -139076,13 +139149,18 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "deciding",
+      "phase": "planning",
       "priority": "P1",
       "plan": null,
       "checkSteps": null,
       "blockedBy": [],
       "assignee": null,
-      "log": [],
+      "log": [
+        {
+          "at": "2026-08-20",
+          "text": "All decisions ratified; advanced out of deciding."
+        }
+      ],
       "criteria": [
         {
           "n": 1,
@@ -139146,8 +139224,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-20T20:23:54.918Z",
-      "updated": "2026-08-20T20:24:40.226Z",
-      "updatedBy": "fable-e3-burndown"
+      "updated": "2026-08-20T20:35:22.421Z",
+      "updatedBy": "owner"
     }
   ],
   "decisions": [
@@ -184179,8 +184257,10 @@
       },
       "checkInstructions": "Read the four code samples. They are the same program, so the only difference is the surface. Decide where the return type sits and whether `:>` becomes the single body arrow.",
       "draft": false,
-      "status": "open",
-      "created": "2026-08-20T20:24:37.390Z"
+      "status": "ratified",
+      "created": "2026-08-20T20:24:37.390Z",
+      "outcome": "B",
+      "ratifiedAt": "2026-08-20"
     }
   ],
   "questions": [
@@ -185981,6 +186061,328 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-08-20T20:46:23.704Z",
+      "by": "fable-e3-burndown",
+      "action": "card.update",
+      "ref": "c0v7cn5o",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-08-20T20:46:22.971Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0v7cn5o",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-20T20:46:22.395Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0v7cn5o",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-20T20:46:21.792Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0v7cn5o",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-20T20:46:21.305Z",
+      "by": "fable-e3-burndown",
+      "action": "card.update",
+      "ref": "c0nqa5px",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-08-20T20:46:20.612Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0nqa5px",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-20T20:46:20.125Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0nqa5px",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-20T20:46:19.440Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0nqa5px",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-20T20:46:18.681Z",
+      "by": "fable-e3-burndown",
+      "action": "card.update",
+      "ref": "c0bskept",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-08-20T20:46:17.730Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0bskept",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-20T20:46:17.257Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0bskept",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-20T20:46:16.762Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0bskept",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-20T20:46:16.258Z",
+      "by": "fable-e3-burndown",
+      "action": "card.update",
+      "ref": "c011y14n",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-08-20T20:46:15.564Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c011y14n",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-20T20:46:15.043Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c011y14n",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-20T20:46:14.558Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c011y14n",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-20T20:46:14.035Z",
+      "by": "fable-e3-burndown",
+      "action": "card.update",
+      "ref": "c0zfxd69",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-08-20T20:46:13.320Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0zfxd69",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-20T20:46:12.818Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0zfxd69",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-20T20:46:12.314Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0zfxd69",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-20T20:46:11.792Z",
+      "by": "fable-e3-burndown",
+      "action": "card.update",
+      "ref": "c05x4s3u",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-08-20T20:46:11.096Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c05x4s3u",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-20T20:46:10.603Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c05x4s3u",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-20T20:46:10.079Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c05x4s3u",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-20T20:46:09.522Z",
+      "by": "fable-e3-burndown",
+      "action": "card.update",
+      "ref": "c096hwxg",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-08-20T20:46:08.580Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c096hwxg",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-20T20:46:07.777Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c096hwxg",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-20T20:46:07.027Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c096hwxg",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-20T20:46:06.290Z",
+      "by": "fable-e3-burndown",
+      "action": "card.update",
+      "ref": "c0csb38y",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-08-20T20:46:05.362Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0csb38y",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-20T20:46:04.885Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0csb38y",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-20T20:46:04.407Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0csb38y",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-20T20:46:03.926Z",
+      "by": "fable-e3-burndown",
+      "action": "card.update",
+      "ref": "c03w4kfy",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-08-20T20:46:03.257Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c03w4kfy",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-20T20:46:02.795Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c03w4kfy",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-20T20:46:02.113Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c03w4kfy",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-20T20:46:01.461Z",
+      "by": "fable-e3-burndown",
+      "action": "card.update",
+      "ref": "c08rdr78",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-08-20T20:46:00.523Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c08rdr78",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-20T20:46:00.059Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c08rdr78",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-20T20:45:59.608Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c08rdr78",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-20T20:45:59.148Z",
+      "by": "fable-e3-burndown",
+      "action": "card.update",
+      "ref": "c0g5m31z",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-08-20T20:45:58.489Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0g5m31z",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-20T20:45:58.001Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0g5m31z",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-20T20:45:57.516Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0g5m31z",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-20T20:35:22.421Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-SIG-SHAPE1",
+      "note": "B"
+    },
+    {
+      "at": "2026-08-20T20:34:06.223Z",
+      "by": "owner",
+      "action": "done.clear",
+      "ref": null,
+      "note": "2026-08-20T20:34:06.223Z"
+    },
     {
       "at": "2026-08-20T20:26:54.968Z",
       "by": "fable-e3-burndown",
@@ -189158,328 +189560,6 @@
       "action": "papercut.resolve",
       "ref": "pc0zhix3y",
       "note": ""
-    },
-    {
-      "at": "2026-08-19T23:42:20.146Z",
-      "by": "owner",
-      "action": "papercut.resolve",
-      "ref": "pc0l9pb48",
-      "note": ""
-    },
-    {
-      "at": "2026-08-19T23:42:19.722Z",
-      "by": "owner",
-      "action": "papercut.resolve",
-      "ref": "pc099d343",
-      "note": ""
-    },
-    {
-      "at": "2026-08-19T23:42:19.280Z",
-      "by": "owner",
-      "action": "papercut.resolve",
-      "ref": "pc0tlj4ew",
-      "note": ""
-    },
-    {
-      "at": "2026-08-19T23:42:18.849Z",
-      "by": "owner",
-      "action": "papercut.resolve",
-      "ref": "pc0dgew64",
-      "note": ""
-    },
-    {
-      "at": "2026-08-19T23:42:18.405Z",
-      "by": "owner",
-      "action": "papercut.resolve",
-      "ref": "pc001bt4o",
-      "note": ""
-    },
-    {
-      "at": "2026-08-19T23:42:17.974Z",
-      "by": "owner",
-      "action": "papercut.resolve",
-      "ref": "pc0az0o5b",
-      "note": ""
-    },
-    {
-      "at": "2026-08-19T23:42:17.526Z",
-      "by": "owner",
-      "action": "papercut.resolve",
-      "ref": "pc0u17ot3",
-      "note": ""
-    },
-    {
-      "at": "2026-08-19T23:42:17.092Z",
-      "by": "owner",
-      "action": "papercut.resolve",
-      "ref": "pc0dxqatf",
-      "note": ""
-    },
-    {
-      "at": "2026-08-19T23:42:16.636Z",
-      "by": "owner",
-      "action": "papercut.resolve",
-      "ref": "pc02b703q",
-      "note": ""
-    },
-    {
-      "at": "2026-08-19T23:42:16.207Z",
-      "by": "owner",
-      "action": "papercut.resolve",
-      "ref": "pc0g2psws",
-      "note": ""
-    },
-    {
-      "at": "2026-08-19T23:42:15.769Z",
-      "by": "owner",
-      "action": "papercut.resolve",
-      "ref": "pc0aw7d63",
-      "note": ""
-    },
-    {
-      "at": "2026-08-19T23:42:15.346Z",
-      "by": "owner",
-      "action": "papercut.resolve",
-      "ref": "pc05hmiyu",
-      "note": ""
-    },
-    {
-      "at": "2026-08-19T23:42:14.909Z",
-      "by": "owner",
-      "action": "papercut.resolve",
-      "ref": "pc0v86054",
-      "note": ""
-    },
-    {
-      "at": "2026-08-19T23:42:14.471Z",
-      "by": "owner",
-      "action": "papercut.resolve",
-      "ref": "pc0o10vut",
-      "note": ""
-    },
-    {
-      "at": "2026-08-19T23:42:14.026Z",
-      "by": "owner",
-      "action": "papercut.resolve",
-      "ref": "pc0pv2fcd",
-      "note": ""
-    },
-    {
-      "at": "2026-08-19T23:42:13.594Z",
-      "by": "owner",
-      "action": "papercut.resolve",
-      "ref": "pc0lud5zy",
-      "note": ""
-    },
-    {
-      "at": "2026-08-19T23:42:13.185Z",
-      "by": "owner",
-      "action": "papercut.resolve",
-      "ref": "pc0p1s3ws",
-      "note": ""
-    },
-    {
-      "at": "2026-08-19T23:42:12.765Z",
-      "by": "owner",
-      "action": "papercut.resolve",
-      "ref": "pc0aeis24",
-      "note": ""
-    },
-    {
-      "at": "2026-08-19T23:42:12.331Z",
-      "by": "owner",
-      "action": "papercut.resolve",
-      "ref": "pc0yv4h3g",
-      "note": ""
-    },
-    {
-      "at": "2026-08-19T23:42:11.900Z",
-      "by": "owner",
-      "action": "papercut.resolve",
-      "ref": "pc0opyd3q",
-      "note": ""
-    },
-    {
-      "at": "2026-08-19T23:42:11.468Z",
-      "by": "owner",
-      "action": "papercut.resolve",
-      "ref": "pc00ga0sf",
-      "note": ""
-    },
-    {
-      "at": "2026-08-19T23:42:11.040Z",
-      "by": "owner",
-      "action": "papercut.resolve",
-      "ref": "pc06yux4x",
-      "note": ""
-    },
-    {
-      "at": "2026-08-19T23:42:10.609Z",
-      "by": "owner",
-      "action": "papercut.resolve",
-      "ref": "pc0ug1c61",
-      "note": ""
-    },
-    {
-      "at": "2026-08-19T23:42:10.176Z",
-      "by": "owner",
-      "action": "papercut.resolve",
-      "ref": "pc0f9u52i",
-      "note": ""
-    },
-    {
-      "at": "2026-08-19T23:42:09.737Z",
-      "by": "owner",
-      "action": "papercut.resolve",
-      "ref": "pc0jzcdl0",
-      "note": ""
-    },
-    {
-      "at": "2026-08-19T23:42:09.297Z",
-      "by": "owner",
-      "action": "papercut.resolve",
-      "ref": "pc0qrtt0j",
-      "note": ""
-    },
-    {
-      "at": "2026-08-19T23:42:08.862Z",
-      "by": "owner",
-      "action": "papercut.resolve",
-      "ref": "pc0vrv6au",
-      "note": ""
-    },
-    {
-      "at": "2026-08-19T23:42:08.432Z",
-      "by": "owner",
-      "action": "papercut.resolve",
-      "ref": "pc09uoera",
-      "note": ""
-    },
-    {
-      "at": "2026-08-19T23:42:07.981Z",
-      "by": "owner",
-      "action": "papercut.resolve",
-      "ref": "pc03xlzju",
-      "note": ""
-    },
-    {
-      "at": "2026-08-19T23:42:07.547Z",
-      "by": "owner",
-      "action": "papercut.resolve",
-      "ref": "pc0n108mn",
-      "note": ""
-    },
-    {
-      "at": "2026-08-19T23:42:07.113Z",
-      "by": "owner",
-      "action": "papercut.resolve",
-      "ref": "pc0okv05g",
-      "note": ""
-    },
-    {
-      "at": "2026-08-19T23:42:06.667Z",
-      "by": "owner",
-      "action": "papercut.resolve",
-      "ref": "pc0vau45h",
-      "note": ""
-    },
-    {
-      "at": "2026-08-19T23:42:06.248Z",
-      "by": "owner",
-      "action": "papercut.resolve",
-      "ref": "pc0vjbo7r",
-      "note": ""
-    },
-    {
-      "at": "2026-08-19T23:42:05.807Z",
-      "by": "owner",
-      "action": "papercut.resolve",
-      "ref": "pc03jkmzq",
-      "note": ""
-    },
-    {
-      "at": "2026-08-19T23:42:05.365Z",
-      "by": "owner",
-      "action": "papercut.resolve",
-      "ref": "pc0oafxd6",
-      "note": ""
-    },
-    {
-      "at": "2026-08-19T23:42:04.945Z",
-      "by": "owner",
-      "action": "papercut.resolve",
-      "ref": "pc00l23vy",
-      "note": ""
-    },
-    {
-      "at": "2026-08-19T23:42:04.493Z",
-      "by": "owner",
-      "action": "papercut.resolve",
-      "ref": "pc01955qe",
-      "note": ""
-    },
-    {
-      "at": "2026-08-19T23:42:04.057Z",
-      "by": "owner",
-      "action": "papercut.resolve",
-      "ref": "pc0oh8h63",
-      "note": ""
-    },
-    {
-      "at": "2026-08-19T23:42:03.434Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-add",
-      "ref": "c0csb38y",
-      "note": "#3 Clearing the jet build cache also clears the run cache, or t"
-    },
-    {
-      "at": "2026-08-19T23:42:02.979Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-add",
-      "ref": "c0csb38y",
-      "note": "#2 require-clean-tree.sh matches the agent names the harness ac"
-    },
-    {
-      "at": "2026-08-19T23:42:02.556Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-add",
-      "ref": "c0csb38y",
-      "note": "#1 Every flag an in-repo doc, skill or AGENTS.md instruction te"
-    },
-    {
-      "at": "2026-08-19T23:42:02.107Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-add",
-      "ref": "c03w4kfy",
-      "note": "#3 Scratch that can be reused across runs is reused rather than"
-    },
-    {
-      "at": "2026-08-19T23:42:01.655Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-add",
-      "ref": "c03w4kfy",
-      "note": "#2 A guard fails when a battery or script points scratch or a t"
-    },
-    {
-      "at": "2026-08-19T23:42:01.228Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-add",
-      "ref": "c03w4kfy",
-      "note": "#1 No test battery writes crate scratch or cargo artifacts into"
-    },
-    {
-      "at": "2026-08-19T23:42:00.793Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-add",
-      "ref": "c0hhsiej",
-      "note": "#2 A scoped formatter proof runs without copying files outside "
-    },
-    {
-      "at": "2026-08-19T23:42:00.358Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-add",
-      "ref": "c0hhsiej",
-      "note": "#1 rustfmt is on PATH in both nix develop and nix develop .#ful"
     }
   ],
   "nextNum": 368,
