@@ -948,7 +948,10 @@ fn jet_std_env_decode<T: __jet_Decode>(
         }
     }
     // Process values win over `.env`, matching pydantic-settings source order.
-    for (raw_name, raw_value) in jet_env_snapshot_raw() {
+    // One snapshot, the one every tier defines: `jet_std_env_snapshot_raw`
+    // (native reads the process table, the JIT host marshals to it). A second
+    // spelling here compiled nowhere.
+    for (raw_name, raw_value) in jet_std_env_snapshot_raw() {
         let (Some(name), Some(value)) = (raw_name.to_str(), raw_value.to_str()) else {
             continue;
         };
