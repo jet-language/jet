@@ -192,7 +192,7 @@ impl<'a> Checker<'a> {
     /// Shared tail of `check_func_body` / `check_func_body_bundle`:
     /// declare parameters, check the body, enforce definite return.
     pub(crate) fn check_params_and_body(&mut self, f: &mut Func, owner_type: Option<&str>) {
-        // D-ARROW-CONTROL1=A: an explicit *value* result contract makes the
+        // D-BODY-LAST1=B: an explicit *value* result contract makes the
         // final expression of a multiline body its normal result. () / Unit
         // and fallible () (`() ? …`) keep a trailing expression as a
         // statement — rewriting `print(...)` into `return print(...)` would

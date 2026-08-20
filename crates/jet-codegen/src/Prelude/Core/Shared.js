@@ -39,13 +39,25 @@ function jet_stm_begin() {
   return transaction;
 }
 
+function jet_shared_read_txn(shared, callback) {
+  const transaction = jet_web_stm_stack[jet_web_stm_stack.length - 1];
+  if (!transaction) throw new Error("Shared read outside #Transact");
+  if (!transaction.parts.has(shared)) {
+    transaction.parts.set(shared, { shared, value: undefined, callbacks: [], writes: false });
+  }
+  return callback(shared.value);
+}
+
 function jet_shared_edit_txn(shared, callback) {
   const transaction = jet_web_stm_stack[jet_web_stm_stack.length - 1];
   if (!transaction) throw new Error("Shared edit outside #Transact");
   let part = transaction.parts.get(shared);
   if (!part) {
-    part = { shared, value: jet_web_clone(shared.value), callbacks: [] };
+    part = { shared, value: jet_web_clone(shared.value), callbacks: [], writes: true };
     transaction.parts.set(shared, part);
+  } else if (!part.writes) {
+    part.value = jet_web_clone(shared.value);
+    part.writes = true;
   }
   part.callbacks.push(callback);
 }
@@ -59,7 +71,7 @@ function jet_stm_commit(transaction) {
       const result = callback(value);
       if (result !== undefined) value = result;
     }
-    part.shared.value = value;
+    if (part.writes) part.shared.value = value;
   }
   jet_web_stm_stack.pop();
 }

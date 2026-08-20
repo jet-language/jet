@@ -925,10 +925,10 @@ impl<'a> Parser<'a> {
                         let span = self.bump().span;
                         Err(self.foreign_keyword_diagnostic(&word, span))
                     }
-                    // Test and benchmark declarations own semantic Test/Bench
-                    // sites even when their surface begins with `fn`.
+                    // Test declarations own the semantic Test site even when
+                    // their surface begins with `fn`.
                     TokKind::Hash if self.at_test_def() => self.test_def().map(Item::Test),
-                    TokKind::Hash if self.at_bench_def() => self.bench_def().map(Item::Bench),
+                    TokKind::Hash if self.at_bench_def() => self.retired_bench_marker(),
                     TokKind::Hash if self.marker_sequence_leads_to_function() => {
                         self.func_with_marker_list().map(Item::Func)
                     }

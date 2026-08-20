@@ -379,6 +379,9 @@ fn jet_decimal_from_str(s: &String) -> jet_std::JetDecimal {
 fn jet_fraction_new(numerator: i64, denominator: i64) -> Option<jet_std::JetFraction> {
     jet_std::JetFraction::new(numerator, denominator)
 }
+fn jet_fraction_from_parts(numerator: i64, denominator: i64) -> jet_std::JetFraction {
+    jet_std::JetFraction::new(numerator, denominator).expect("invalid exact quotient")
+}
 fn jet_fraction_add(a: &jet_std::JetFraction, b: &jet_std::JetFraction) -> jet_std::JetFraction {
     a.add(b).expect("this sum of ratios overflows the value type")
 }

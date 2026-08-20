@@ -710,9 +710,6 @@ fn core_fixed_sig_impl(
         ("core.testing", "test_suite") => {
             Some((vec![], Some(Type::Named("TestSuite".to_string()))))
         }
-        ("core.testing", "bench_suite") => {
-            Some((vec![], Some(Type::Named("BenchSuite".to_string()))))
-        }
         ("core.math", "sqrt" | "floor" | "ceil") => {
             Some((vec![(read, float.clone())], Some(float)))
         }

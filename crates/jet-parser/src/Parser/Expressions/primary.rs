@@ -6,6 +6,21 @@ use super::super::{
 impl<'a> Parser<'a> {
         pub(super) fn expr_primary(&mut self, allow_struct_lit: bool) -> Result<Expr, Diagnostic> {
             match self.peek().kind.clone() {
+                // D-SUBJECT-CALL1=A: keep the bare lower-case member atom in
+                // the primary path so the ordinary postfix loop parses the
+                // rest of `.member.method(args)`.
+                TokKind::Dot
+                    if matches!(&self.peek2().kind, TokKind::Ident(name) if name.chars().next().is_some_and(char::is_lowercase)) =>
+                {
+                    let dot = self.bump().span;
+                    let (member, member_span) =
+                        self.expect_ident("after `.` in a bare member shorthand")?;
+                    Ok(Expr::Field(
+                        Box::new(Expr::Ident(String::new(), dot)),
+                        member,
+                        member_span,
+                    ))
+                }
                 TokKind::KwLoop => self.yielding_loop_expr(),
                 TokKind::KwIt => {
                     let span = self.bump().span;

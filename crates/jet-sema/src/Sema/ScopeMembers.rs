@@ -50,13 +50,6 @@ pub fn check(
                 items,
                 &mut diags,
             ),
-            Item::Bench(b) => check_marker_body(
-                Syntax::KW_BENCH,
-                &b.body,
-                vocabulary,
-                items,
-                &mut diags,
-            ),
             Item::Func(f) => reject_all(&f.body, vocabulary, &mut diags),
             Item::Impl(i) => {
                 for m in &i.methods {
@@ -529,7 +522,6 @@ fn check_dsl_items(
     for item in items {
         match item {
             Item::Test(test) => check_dsl_body(&test.body, vocabulary, diags),
-            Item::Bench(bench) => check_dsl_body(&bench.body, vocabulary, diags),
             Item::Func(func) => check_dsl_body(&func.body, vocabulary, diags),
             Item::Impl(implementation) => {
                 for method in &implementation.methods {

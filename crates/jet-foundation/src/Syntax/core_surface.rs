@@ -86,10 +86,10 @@ pub const PUB_PACKAGE_QUALIFIER: &str = "package";
 /// S2 / D-BIND1 / D-BIND4 / D-BIND-BARE1: immutable binding sigil `name :: expr`.
 /// D-BIND-BARE1 retires typed bindings (`name: Type :: expr`); types ride the
 /// value (`Type{ … }`) or live on signatures and fields.
-/// Amended by D-ONELINE-BODY1=B (ratified 2026-08-13, cards #1453/#1454): `::`
-/// also opens a one-line function body after the return type
-/// (`fn twice(n: Int) :> Int :: n * 2`), `:>` sends a head to a one-statement
-/// effect body, and `=` is retired from bodies (E0065 teaches the rewrite).
+/// D-BODY-LAST1=B and D-SIG-SHAPE1=B retire `::` as a function-body marker:
+/// `:>` introduces a one-expression body, while braces hold statements and a
+/// trailing value; `::` keeps its binding meaning and `=` remains for
+/// slot-filling declarations such as extern bindings.
 pub const SIGIL_BIND_IMMUT: &str = "::";
 
 /// S2 / D-BIND1 (ratified 2026-06-18): mutable binding sigil `name := expr`

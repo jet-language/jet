@@ -39,6 +39,9 @@ impl<'a> Checker<'a> {
             match ty {
                 Type::InlineRange { base, .. } => visit(checker, base, active),
                 Type::Tagged { inner, .. } => visit(checker, inner, active),
+                Type::Tuple(fields) => fields
+                    .iter()
+                    .all(|(_, field)| visit(checker, field, active)),
                 Type::Named(name) => {
                     if let Some(numeric) = crate::AST::numeric_type_from_name(name) {
                         return matches!(numeric, Type::Int | Type::IntN { .. });

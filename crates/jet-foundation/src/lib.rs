@@ -42,6 +42,7 @@ pub mod RegexSyntax;
 pub mod Registry;
 pub mod Report;
 pub mod Reflection;
+pub mod ServiceTree;
 pub mod SHA256;
 pub mod MatchScan;
 pub mod MemSentry;

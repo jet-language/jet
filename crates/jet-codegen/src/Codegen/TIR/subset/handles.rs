@@ -229,7 +229,6 @@ pub(crate) fn handle_method_op(handle: &str, method: &str, nargs: usize) -> Opti
         ("Stderr", "is_tty", 0) => THandleOp::StderrIsTty,
         ("Stopwatch", "elapsed_millis", 0) => THandleOp::StopwatchElapsedMillis,
         ("TestSuite", "run", 0) => THandleOp::TestSuiteRun,
-        ("BenchSuite", "run", 0) => THandleOp::BenchSuiteRun,
         // D-DET1: deterministic injected Clock/Rng capability methods.
         ("Clock", "now", 0) => THandleOp::ClockNow,
         ("Clock", "tick", 1) => THandleOp::ClockTick,

@@ -122,6 +122,8 @@
 // exact form `defer close(^resource)`; KW_DEFER/RESOURCE_CLOSE are canonical.
 // D-SHAPE3a=A adds no token: expected-type `.new(...)` reuses MEM_ALLOC_NEW
 // and ordinary call punctuation, with the receiver resolved by sema.
+// D-SUBJECT-CALL1=A adds no token: bare lower-case `.member` chains reuse the
+// existing dot punctuation and lower to ordinary one-parameter lambdas.
 // D-GENERIC-CALL1=A adds no token: `call<T>(...)` reuses the existing angle and
 // call tokens for explicit type arguments on every generic call family.
 // D-SHAPE-OPAQUE-INFER1=A adds no token: `Type.new(...)` may omit generic
@@ -160,10 +162,10 @@
 // arrow selects dispatch/guard values, yields finite-loop items, and marks a
 // one-line effect `if`/`loop` body. D-LOOP-STMT-ARROW1=C (ratified
 // 2026-08-13, card #1453) gives every statement-position loop header this
-// body form. D-ONELINE-BODY1=B (ratified 2026-08-13,
-// cards #1453/#1454) makes `::` the one-line function-body marker; callable
-// heads keep `:>`; braces remain the multi-statement/scoped form. `=` remains
-// for slot-filling declarations such as extern bindings.
+// body form. D-BODY-LAST1=B and D-SIG-SHAPE1=B make `:>` the one-expression
+// function-body marker; braces hold statements and a trailing value. `::`
+// remains the name-binding sigil, and `=` remains for slot-filling declarations
+// such as extern bindings.
 // D-LOOP-COMMA1=A (ratified 2026-07-30, card #1336) uses commas between loop
 // clauses and `(key, value)` for a two-name source binding.
 // D-LOOPSTATE1 owns break/next target arguments, and

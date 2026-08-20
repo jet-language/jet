@@ -2138,11 +2138,11 @@ impl JetSyncDocument {
     }
 
     /// The typed CRDT carriers merge by identity above this String boundary.
-    /// `app.sync` still receives their canonical display, so preserve the
-    /// same commutative/idempotent session law for the display forms: maps
-    /// union keys, lists union members, counters take per-replica maxima, and
-    /// opaque displays use a deterministic winner. A malformed display is a
-    /// denied publish, never a replacement that bypasses the typed law.
+    /// `app.sync` still receives their display, so the boundary may merge only
+    /// facts that survive display serialization: map keys with equal values,
+    /// list members, and counter components. A conflicting map value or an
+    /// opaque text document is denied instead of being silently replaced by a
+    /// lexical winner. Malformed displays are denied as well.
     fn merge(&self, other: &Self) -> Option<Self> {
         if self.representation == other.representation {
             return Some(self.clone());
@@ -2152,14 +2152,13 @@ impl JetSyncDocument {
         {
             let mut entries = jet_sync_document_map_entries(&self.representation)?;
             for (key, value) in jet_sync_document_map_entries(&other.representation)? {
-                entries
-                    .entry(key)
-                    .and_modify(|existing| {
-                        if value.as_str() > existing.as_str() {
-                            *existing = value.clone();
-                        }
-                    })
-                    .or_insert(value);
+                match entries.get(&key) {
+                    Some(existing) if existing != &value => return None,
+                    Some(_) => {}
+                    None => {
+                        entries.insert(key, value);
+                    }
+                }
             }
             if entries.len() > MAX_SYNC_ENTRIES {
                 return None;
@@ -2227,10 +2226,6 @@ impl JetSyncDocument {
                     .collect::<Vec<_>>()
                     .join(",")
             )
-        } else if self.representation.starts_with("SyncText(")
-            && other.representation.starts_with("SyncText(")
-        {
-            std::cmp::max(self.representation.clone(), other.representation.clone())
         } else {
             return None;
         };

@@ -144,7 +144,6 @@ fn item_names(item: &Item, traits: &HashSet<String>, out: &mut Vec<Diagnostic>) 
             expr_names(&c.value, out);
         }
         Item::Test(t) => { for p in &t.params { snake(&p.name, p.name_span, "parameter", out); } stmt_names(&t.body, out); }
-        Item::Bench(b) => stmt_names(&b.body, out),
         Item::Module(m) => {
             snake(&m.name, m.name_span, "module", out);
             for source in &m.sources {

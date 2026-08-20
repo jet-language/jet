@@ -103,7 +103,6 @@ fn walk_item_exprs(item: &mut Item, visit: &mut impl FnMut(&Expr)) {
             }
         }
         Item::Test(test) => walk_stmts(&mut test.body, visit),
-        Item::Bench(bench) => walk_stmts(&mut bench.body, visit),
         Item::Const(constant) => walk_expr(&mut constant.value, visit),
         Item::ErrorConv(conversion) => walk_stmts(&mut conversion.body, visit),
         Item::CodeModule(module) => {

@@ -1361,15 +1361,16 @@ impl<'a> Parser<'a> {
         })
     }
 
-    /// D-TXN4: parse a `#Transact(name) { … }` transaction block in statement
-    /// position. Cursor is on the `#` token. `name` binds a user-chosen
-    /// transaction handle (any ident, mirroring `region r { … }`).
+    /// D-TXN4: parse a `#Transact { … }` or named `#Transact(name) { … }`
+    /// transaction block in statement position. Cursor is on the `#` token.
+    /// The optional `name` binds a user-chosen transaction handle (any ident,
+    /// mirroring `region r { … }`).
     pub(super) fn at_transact_stmt(&mut self) -> Result<Stmt, Diagnostic> {
         let start = self.peek().span;
         let marker_name_span = self.peek2().span;
         self.bump(); // `#`
         self.bump(); // `Transact`
-                     // D-TXN4: `#Transact(name) { … }` binds a handle; a bare `#Transact { … }`
+                     // D-TXN4: a named form binds a handle; bare `#Transact { … }`
                      // (no handle, hence no `on_commit` hooks) stays legal.
         let (name, name_span) = if matches!(self.peek().kind, TokKind::LParen) {
             self.bump(); // `(`

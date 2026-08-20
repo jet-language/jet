@@ -365,6 +365,8 @@ pub enum PackageParseError {
     ReservedSection(&'static str),
     /// D-EFFBUDGET1: a malformed `effects:`/`grants:`/`build.allow:` block.
     BadEffectsBlock(String),
+    /// D-AUTHORITY-MANIFEST1: a grant authority field moved into `authority:`.
+    RetiredAuthorityField { field: String, replacement: String },
     /// D-PACKAGE-POLICY-SCOPE1: malformed or widening package memory policy.
     BadMemoryPolicy { detail: String },
     /// D-ONCE-RETIRE1=C: a retired package policy field needs migration.
@@ -403,6 +405,9 @@ impl fmt::Display for PackageParseError {
             Self::BadTargetField { name, detail } => write!(f, "package `{name}`: {detail}"),
             Self::ReservedSection(section) => write!(f, "`{section}` is reserved"),
             Self::BadEffectsBlock(detail) => f.write_str(detail),
+            Self::RetiredAuthorityField { field, replacement } => {
+                write!(f, "`{field}` is retired; use `{replacement}` in `authority:`")
+            }
             Self::BadMemoryPolicy { detail } => f.write_str(detail),
             Self::RetiredPolicyField { field, replacement } => {
                 write!(f, "`{field}` is retired; use `{replacement}`")
@@ -429,7 +434,7 @@ impl PackageFacts {
         let mut semantic = String::new();
         write!(
             &mut semantic,
-            "name={:?};version={:?};jet={:?};source={:?};deps={:?};services={:?};outputs={:?};environments={:?};defaults={:?};build_profiles={:?};settings={:?};configs={:?};members={:?};authority={:?};policy_contain={:?};policy_harden={:?};",
+            "name={:?};version={:?};jet={:?};source={:?};deps={:?};services={:?};outputs={:?};environments={:?};defaults={:?};build_profiles={:?};settings={:?};configs={:?};members={:?};authority={:?};effects_enabled={:?};effects_allow={:?};effects_deny={:?};policy_contain={:?};policy_harden={:?};",
             self.name,
             self.version,
             self.jet,
@@ -444,6 +449,9 @@ impl PackageFacts {
             self.configs,
             self.members,
             self.authority,
+            self.effects_enabled,
+            self.effects_allow,
+            self.effects_deny,
             self.policy.contain,
             self.policy.harden,
         )
@@ -1729,7 +1737,12 @@ fn parse_common(
                 facts.effects_deny = deny;
             }
             "grants" if config => return Err(PackageParseError::UnknownField(field.clone())),
-            "grants" => facts.grants = Blocks::parse_grants(record_body(&value, "grants")?)?,
+            "grants" => {
+                return Err(PackageParseError::RetiredAuthorityField {
+                    field: field.clone(),
+                    replacement: "authority.grants".to_string(),
+                })
+            }
             "authority" if config => return Err(PackageParseError::UnknownField(field.clone())),
             "authority" => {
                 let body = record_body(&value, "authority")?;

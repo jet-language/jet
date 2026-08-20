@@ -4561,9 +4561,9 @@ impl<'a> Checker<'a> {
         self.sendability_problem_inner(ty, closure_taken, strict_callable, &mut seen)
     }
 
-    /// D-FACT-OWN1 / D-MEMPROVENANCE3: a crossing query includes the
-    /// prover-supplied flow fact and the view/fixed-backing provenance of the
-    /// binding. No boundary keeps a private view or sendability checker.
+    /// D-FACT-OWN1 / D-MEMPROVENANCE3 / D-DATARACE1: a crossing query includes
+    /// the prover-supplied flow fact, binding pin, and view/fixed-backing
+    /// provenance. No boundary keeps a private view or sendability checker.
     pub(crate) fn crossing_problem_for_name(
         &self,
         name: &str,
@@ -4576,6 +4576,20 @@ impl<'a> Checker<'a> {
                 root: None,
                 path: Vec::new(),
                 kind: SendProblemKind::ViewBorrow,
+            });
+        }
+        if matches!(
+            crossing,
+            SendCrossing::TaskCapture
+                | SendCrossing::ChannelSend
+                | SendCrossing::ParallelWorker
+        ) && self.lookup(name).is_some_and(|info| {
+            info.reactive_local && crate::Sema::CheckerInfer::is_reactive_handle_ty(&info.ty)
+        }) {
+            return Some(SendabilityProblem {
+                root: None,
+                path: Vec::new(),
+                kind: SendProblemKind::LocalReactive(ty.name()),
             });
         }
         let fact_ty = self.lookup(name).map_or(ty, |info| &info.ty);
@@ -5165,6 +5179,12 @@ impl<'a> Checker<'a> {
             (SendCrossing::ChannelSend, SendProblemKind::ViewBorrow) => {
                 format!("{} cannot be shared across channels — it is a view that does not live long enough", value_text)
             }
+            (SendCrossing::TaskCapture, SendProblemKind::LocalReactive(_)) => {
+                format!("{} is pinned `#Local` and can't cross into a task", value_text)
+            }
+            (SendCrossing::ChannelSend, SendProblemKind::LocalReactive(_)) => {
+                format!("{} is pinned `#Local` and can't be sent on a channel", value_text)
+            }
             (SendCrossing::TaskCapture, _) => {
                 format!(
                     "{} can't cross into a task because `{}` isn't sendable",
@@ -5183,6 +5203,12 @@ impl<'a> Checker<'a> {
             (SendCrossing::ParallelWorker, SendProblemKind::ViewBorrow) => {
                 format!(
                     "{} cannot cross a parallel worker boundary — it is a view that does not live long enough",
+                    value_text
+                )
+            }
+            (SendCrossing::ParallelWorker, SendProblemKind::LocalReactive(_)) => {
+                format!(
+                    "{} is pinned `#Local` and can't cross into a parallel worker",
                     value_text
                 )
             }
@@ -5205,7 +5231,9 @@ impl<'a> Checker<'a> {
                 )
             }
         };
-        let why = if matches!(crossing, SendCrossing::InterruptCallback) {
+        let why = if matches!(&problem.kind, SendProblemKind::LocalReactive(_)) {
+            describe_sendability_problem(&problem)
+        } else if matches!(crossing, SendCrossing::InterruptCallback) {
             "core.sys.on_interrupt retains callbacks until signal delivery, so the callback and its captured state must be owned and thread-safe".to_string()
         } else if matches!(crossing, SendCrossing::ParallelWorker | SendCrossing::Kernel) {
             format!(
@@ -5226,35 +5254,53 @@ impl<'a> Checker<'a> {
                     "Cell" | "CellReadGuard" | "CellEditGuard"
                 )
         );
-        let fix = match (local_cell, crossing) {
-            (true, SendCrossing::ChannelSend) => {
+        let fix = match (&problem.kind, local_cell, crossing) {
+            (SendProblemKind::LocalReactive(_), _, SendCrossing::TaskCapture) => {
+                "remove `#Local`, or send owned values through a channel"
+            }
+            (SendProblemKind::LocalReactive(_), _, SendCrossing::ChannelSend) => {
+                "remove `#Local`, or send an owned copy of the value"
+            }
+            (SendProblemKind::LocalReactive(_), _, SendCrossing::ParallelWorker) => {
+                "remove `#Local`, or keep the reactive graph off the parallel path"
+            }
+            (SendProblemKind::LocalReactive(_), _, SendCrossing::TaskResult) => {
+                "remove `#Local`, or return an owned value from the task"
+            }
+            (SendProblemKind::LocalReactive(_), _, SendCrossing::Kernel) => {
+                "remove `#Local`, or keep the reactive graph outside the kernel"
+            }
+            (SendProblemKind::LocalReactive(_), _, SendCrossing::InterruptCallback) => {
+                "remove `#Local`, or keep the callback on its creating thread"
+            }
+            (_, true, SendCrossing::ChannelSend) => {
                 "send the owned value instead, or use `Shared<T>` for synchronized state"
             }
-            (true, SendCrossing::TaskCapture | SendCrossing::TaskResult) => {
+            (_, true, SendCrossing::TaskCapture | SendCrossing::TaskResult) => {
                 "create the `Cell<T>` inside the task, or use `Shared<T>` for synchronized state"
             }
-            (true, SendCrossing::ParallelWorker) => {
+            (_, true, SendCrossing::ParallelWorker) => {
                 "create the `Cell<T>` inside each worker, or use `Shared<T>` for synchronized state"
             }
-            (true, SendCrossing::Kernel) => {
+            (_, true, SendCrossing::Kernel) => {
                 "pass an owned sendable value to the kernel, or keep the local cell outside the kernel"
             }
-            (true, SendCrossing::InterruptCallback) => {
+            (_, true, SendCrossing::InterruptCallback) => {
                 "pass a named function, or capture only owned sendable values in the callback"
             }
-            (false, SendCrossing::ChannelSend) => {
+            (_, false, SendCrossing::ChannelSend) => {
                 "send plain owned data instead, or rebuild the value as an owned copy before calling `.send()`"
             }
-            (false, SendCrossing::TaskCapture | SendCrossing::TaskResult) => {
+            (_, false, SendCrossing::TaskCapture | SendCrossing::TaskResult) => {
                 "give the task plain owned data, or rebuild the value as an owned copy before spawning"
             }
-            (false, SendCrossing::ParallelWorker) => {
+            (_, false, SendCrossing::ParallelWorker) => {
                 "copy plain owned data into the worker, or keep this operation sequential"
             }
-            (false, SendCrossing::Kernel) => {
+            (_, false, SendCrossing::Kernel) => {
                 "use a read-only effect-free kernel over checked Core compute values"
             }
-            (false, SendCrossing::InterruptCallback) => {
+            (_, false, SendCrossing::InterruptCallback) => {
                 "pass a named function, or capture only owned sendable values in the callback"
             }
         };
@@ -5774,28 +5820,7 @@ impl<'a> Checker<'a> {
             } else if crate::Sema::CheckerInfer::is_reactive_handle_ty(&got) {
                 match &arg.expr {
                     Expr::Ident(name, _) => {
-                        if self.lookup(name).is_some_and(|info| info.reactive_local) {
-                            self.diags.push(Diagnostic::error(
-                                "E1102",
-                                format!(
-                                    "`{name}` is pinned `#{}` and can't be sent on a channel",
-                                    crate::Syntax::MARKER_LOCAL
-                                ),
-                                format!(
-                                    "`#{}` keeps `{}` in the fast one-thread form",
-                                    crate::Syntax::MARKER_LOCAL,
-                                    got.name()
-                                ),
-                                format!(
-                                    "remove `#{}`, or send an owned copy of the value",
-                                    crate::Syntax::MARKER_LOCAL
-                                ),
-                                Some(arg.expr.span()),
-                            ));
-                            sendability_failed = true;
-                        } else {
-                            self.note_reactive_upgrade(name, &got, "channel");
-                        }
+                        self.note_reactive_upgrade(name, &got, "channel");
                     }
                     _ => self.note_reactive_upgrade("this value", &got, "channel"),
                 }

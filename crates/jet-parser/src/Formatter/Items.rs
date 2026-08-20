@@ -344,7 +344,6 @@ impl<'a> Fmt<'a> {
             }
             Item::Const(c) => self.fmt_const(c),
             Item::Test(t) => self.fmt_test(t),
-            Item::Bench(b) => self.fmt_bench(b),
             Item::ExternRust(b) => self.fmt_extern_rust(b),
             Item::Trait(t) => self.fmt_trait(t),
             // D-QUAL2: tag declarations are emitted verbatim (non-destructive).
@@ -866,20 +865,6 @@ impl<'a> Fmt<'a> {
         self.end_block();
     }
 
-    fn fmt_bench(&mut self, b: &crate::AST::BenchDef) {
-        self.write(&format!("#{}", Syntax::KW_BENCH));
-        // D-BENCH-MARKER1=A: benchmark blocks use the same parenthesized
-        // marker-argument shape as `#Test("name")`.
-        self.write("(");
-        self.fmt_expr(&b.name_expr, Prec::OrFallback);
-        self.write(")");
-        self.write(" ");
-        self.write(Syntax::BLOCK_OPEN);
-        self.newline();
-        self.with_indent(|f| f.fmt_block_stmts(&b.body));
-        self.end_block();
-    }
-
     fn fmt_pub_qualifier(&mut self, is_pub: bool, is_package_pub: bool) {
         if is_package_pub {
             self.write("pub(package) ");
@@ -1142,10 +1127,10 @@ impl<'a> Fmt<'a> {
         }
         let saved_return_type =
             std::mem::replace(&mut self.expected_return_type, f.return_type.clone());
-        // D-ONELINE-BODY1=B: preserve the canonical concise callable body.
+        // D-SIG-SHAPE1=B: preserve the canonical concise callable body.
         // The parser desugars the marker plus expression to `return expr`; its
         // synthetic return span starts on the author-written marker. Retired
-        // `=` input is recovered for the teaching diagnostic and rewritten.
+        // `::`/`=` input is recovered for the teaching diagnostic and rewritten.
         if let [crate::AST::Stmt::Return(Some(expr), span)] = f.body.as_slice() {
             let marker = self.src.get(span.start..span.start.saturating_add(2));
             let retired_marker = self

@@ -35,9 +35,6 @@ pub enum Item {
     Const(ConstDef),
     /// S43 (M6): `#Test "name" { … }` — only at file top level.
     Test(TestDef),
-    /// D-BENCH1/D-BENCH-MARKER1=A: `#Bench("name") { … }` — a region
-    /// benchmark, the exact sibling of `#Test`. Run by `jet bench`.
-    Bench(BenchDef),
     /// S50 (M7): `extern rust "crate@version" { … }`.
     ExternRust(ExternRustBlock),
     /// U3 (unified-ecosystem §4): `module name { … }` — a named, composable
@@ -900,21 +897,6 @@ pub struct TestDef {
     /// D-TEST1: span of the `fn name(…)` signature for diagnostics on a property
     /// test (param-type errors point here). `None` for the block form.
     pub fn_keyword_span: Option<Span>,
-    pub body: Vec<Stmt>,
-}
-
-/// D-BENCH1/D-BENCH-MARKER1=A: `#Bench("name") { … }` — identical structure to `TestDef`. The
-/// body is a bare statement list timed by the generated bench harness.
-#[derive(Debug, Clone)]
-pub struct BenchDef {
-    pub span: Span,
-    /// Sema-resolved static benchmark identity.
-    pub name: Option<String>,
-    /// Raw `#Bench(...)` name expression; sema resolves it to `name`.
-    pub name_expr: Expr,
-    /// Generic-module instance prefix applied to the resolved identity.
-    pub name_prefix: Option<String>,
-    pub name_span: Span,
     pub body: Vec<Stmt>,
 }
 

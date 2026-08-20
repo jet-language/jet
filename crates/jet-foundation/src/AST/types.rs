@@ -6,8 +6,10 @@ use crate::Diagnostics::Span;
 /// Keys are nominal base-dimension identities. Entries stay sorted and zero
 /// exponents are removed, so equality and serialized API identity are stable.
 /// Runtime values carry no dimension metadata.
+/// Exponents use the shared measure representation; the `axes` and identity
+/// methods keep the existing concrete dimension API for callers.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct Dimension(std::collections::BTreeMap<String, i32>);
+pub struct Dimension(std::collections::BTreeMap<String, Measure>);
 
 impl Dimension {
     pub fn scalar() -> Self {
@@ -15,7 +17,13 @@ impl Dimension {
     }
 
     pub fn base(identity: impl Into<String>) -> Self {
-        Self(std::iter::once((identity.into(), 1)).collect())
+        Self(
+            std::iter::once((
+                identity.into(),
+                Measure::signed_literal("exponent", 1),
+            ))
+            .collect(),
+        )
     }
 
     pub fn multiply(&self, rhs: &Self) -> Option<Self> {
@@ -29,17 +37,15 @@ impl Dimension {
     fn combine(&self, rhs: &Self, subtract: bool) -> Option<Self> {
         let mut out = self.0.clone();
         for (axis, exponent) in &rhs.0 {
-            let exponent = if subtract {
-                exponent.checked_neg()?
-            } else {
-                *exponent
-            };
-            let next = out
+            let factor = Measure::signed_literal("exponent", if subtract { -1 } else { 1 });
+            let exponent = exponent.combine(&factor, MeasureRule::Mul)?;
+            let current = out
                 .get(axis)
-                .copied()
-                .unwrap_or(0)
-                .checked_add(exponent)?;
-            if next == 0 {
+                .cloned()
+                .unwrap_or_else(|| Measure::signed_literal("exponent", 0));
+            let next = current.combine(&exponent, MeasureRule::Add)?;
+            let value = i32::try_from(next.signed_literal_value()?).ok()?;
+            if value == 0 {
                 out.remove(axis);
             } else {
                 out.insert(axis.clone(), next);
@@ -51,8 +57,10 @@ impl Dimension {
     pub fn pow(&self, exponent: i32) -> Option<Self> {
         let mut out = std::collections::BTreeMap::new();
         for (axis, current) in &self.0 {
-            let next = current.checked_mul(exponent)?;
-            if next != 0 {
+            let factor = Measure::signed_literal("exponent", i64::from(exponent));
+            let next = current.combine(&factor, MeasureRule::Mul)?;
+            let value = i32::try_from(next.signed_literal_value()?).ok()?;
+            if value != 0 {
                 out.insert(axis.clone(), next);
             }
         }
@@ -60,24 +68,26 @@ impl Dimension {
     }
 
     pub fn axes(&self) -> impl Iterator<Item = (&str, i32)> {
-        self.0.iter().map(|(axis, exponent)| (axis.as_str(), *exponent))
+        self.0
+            .iter()
+            .map(|(axis, exponent)| {
+                (
+                    axis.as_str(),
+                    Self::exponent_value(exponent)
+                        .expect("dimension exponent must be a concrete i32 measure"),
+                )
+            })
     }
 
     /// D-TYPE2-MEASURE1=A: expose dimension exponents through the same measure
     /// projection used by lengths, shapes, and lanes.
     pub fn measure_exponents(&self) -> impl Iterator<Item = (&str, Measure)> {
-        self.0.iter().map(|(axis, exponent)| {
-            (
-                axis.as_str(),
-                Measure::signed_literal("exponent", i64::from(*exponent)),
-            )
-        })
+        self.0.iter().map(|(axis, exponent)| (axis.as_str(), exponent.clone()))
     }
 
     /// Stable identity used by API/type serialization.
     pub fn identity(&self) -> String {
-        self.0
-            .iter()
+        self.axes()
             .map(|(axis, exponent)| format!("{}:{exponent}", escape_axis(axis)))
             .collect::<Vec<_>>()
             .join(";")
@@ -90,8 +100,15 @@ impl Dimension {
         }
         for part in identity.split(';') {
             let (axis, exponent) = part.rsplit_once(':')?;
-            let exponent = exponent.parse().ok()?;
-            if exponent == 0 || axes.insert(unescape_axis(axis)?, exponent).is_some() {
+            let exponent = exponent.parse::<i32>().ok()?;
+            if exponent == 0
+                || axes
+                    .insert(
+                        unescape_axis(axis)?,
+                        Measure::signed_literal("exponent", i64::from(exponent)),
+                    )
+                    .is_some()
+            {
                 return None;
             }
         }
@@ -100,9 +117,9 @@ impl Dimension {
 
     pub fn display_name(&self) -> String {
         let mut parts = Vec::new();
-        for (axis, exponent) in &self.0 {
+        for (axis, exponent) in self.axes() {
             let name = axis.rsplit("::").next().unwrap_or(axis);
-            parts.push(if *exponent == 1 {
+            parts.push(if exponent == 1 {
                 name.to_string()
             } else {
                 format!("{name}^{exponent}")
@@ -113,6 +130,12 @@ impl Dimension {
         } else {
             parts.join(" * ")
         }
+    }
+
+    fn exponent_value(measure: &Measure) -> Option<i32> {
+        measure
+            .signed_literal_value()
+            .and_then(|value| i32::try_from(value).ok())
     }
 }
 
@@ -146,7 +169,7 @@ fn unescape_axis(axis: &str) -> Option<String> {
 /// One compile-time number attached to a type. The measure plane owns the
 /// resolved value; only literals, module value parameters, and declared
 /// combination rules can construct it.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Measure {
     Literal { kind: String, value: u64 },
     SignedLiteral { kind: String, value: i64 },
@@ -161,7 +184,7 @@ pub enum Measure {
 
 /// The closed combination algebra declared by measure-bearing type surfaces.
 /// User code never selects a rule.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum MeasureRule {
     Add,
     /// Scaling: a declared measure times a declared measure. A vector width of
@@ -210,6 +233,31 @@ impl Measure {
             _ => None,
         }
     }
+
+    pub fn signed_literal_value(&self) -> Option<i64> {
+        match self {
+            Self::SignedLiteral { value, .. } => Some(*value),
+            Self::Literal { value, .. } => i64::try_from(*value).ok(),
+            Self::Combined {
+                rule: MeasureRule::Add,
+                left,
+                right,
+                ..
+            } => left
+                .signed_literal_value()?
+                .checked_add(right.signed_literal_value()?),
+            Self::Combined {
+                rule: MeasureRule::Mul,
+                left,
+                right,
+                ..
+            } => left
+                .signed_literal_value()?
+                .checked_mul(right.signed_literal_value()?),
+            _ => None,
+        }
+    }
+
     pub fn require_literal(&self) -> u64 {
         self.literal_value()
             .expect("symbolic measure reached runtime type lowering before specialization")
@@ -241,12 +289,22 @@ impl Measure {
                         };
                         folded.map(|value| Self::literal(left_kind, value))
                     }
-                    _ => Some(Self::Combined {
-                        kind: left_kind.to_string(),
-                        rule,
-                        left: Box::new(self.clone()),
-                        right: Box::new(rhs.clone()),
-                    }),
+                    _ => match (self.signed_literal_value(), rhs.signed_literal_value()) {
+                        (Some(left), Some(right)) => {
+                            let folded = if matches!(rule, MeasureRule::Add) {
+                                left.checked_add(right)
+                            } else {
+                                left.checked_mul(right)
+                            };
+                            folded.map(|value| Self::signed_literal(left_kind, value))
+                        }
+                        _ => Some(Self::Combined {
+                            kind: left_kind.to_string(),
+                            rule,
+                            left: Box::new(self.clone()),
+                            right: Box::new(rhs.clone()),
+                        }),
+                    },
                 }
             }
         }
@@ -2512,6 +2570,13 @@ mod tests {
         assert_eq!(
             force.identity(),
             "pkg%3A%3ALength:1;pkg%3A%3AMass:1;pkg%3A%3ATime:-2"
+        );
+        assert_eq!(
+            force
+                .measure_exponents()
+                .find(|(axis, _)| *axis == "pkg::Time")
+                .map(|(_, measure)| measure),
+            Some(Measure::signed_literal("exponent", -2))
         );
         assert_eq!(Dimension::from_identity(&force.identity()), Some(force));
         let max = Dimension::from_identity("pkg%3A%3ALength:2147483647").unwrap();

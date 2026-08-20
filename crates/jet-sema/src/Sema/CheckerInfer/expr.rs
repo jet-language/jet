@@ -10,7 +10,8 @@ use crate::Sema::CheckerCore::{contextual_literal, ContextualLiteral};
 use crate::Sema::Diagnostics::{owned_type_for_read_view, soft_public_use};
 use crate::AST::{
     AccessConvention, BinOp, Call, CallArg, CallArgFlags, EnumLitArg, Expr, IndexKind, OrFallback,
-    StrPart, Type, TypedLitBody, UnOp, noelse_terminated,
+    Lambda, LambdaBody, LambdaMeta, LambdaParam, StrPart, Type, TypedLitBody, UnOp,
+    noelse_terminated,
 };
 use jet_foundation::Prelude as CorePrelude;
 use jet_foundation::Prelude::Target;
@@ -21,6 +22,28 @@ fn field_path(expr: &Expr) -> Option<String> {
         Expr::Ident(name, _) | Expr::ComptimeName { name, .. } => Some(name.clone()),
         Expr::Field(base, field, _) => Some(format!("{}.{}", field_path(base)?, field)),
         _ => None,
+    }
+}
+
+const BARE_MEMBER_SUBJECT: &str = "__jet_subject";
+
+fn is_bare_member_chain(expr: &Expr) -> bool {
+    match expr {
+        Expr::Field(inner, ..) => {
+            matches!(inner.as_ref(), Expr::Ident(name, _) if name.is_empty())
+                || is_bare_member_chain(inner)
+        }
+        Expr::MethodCall { receiver, .. } => is_bare_member_chain(receiver),
+        _ => false,
+    }
+}
+
+fn replace_bare_member_subject(expr: &mut Expr) {
+    match expr {
+        Expr::Ident(name, _) if name.is_empty() => *name = BARE_MEMBER_SUBJECT.to_string(),
+        Expr::Field(inner, ..) => replace_bare_member_subject(inner),
+        Expr::MethodCall { receiver, .. } => replace_bare_member_subject(receiver),
+        _ => {}
     }
 }
 
@@ -1699,6 +1722,31 @@ impl<'a> Checker<'a> {
 
     pub(crate) fn infer_inner(&mut self, e: &mut Expr) -> Option<Type> {
         self.normalize_contextual_expr(e);
+
+        // D-SUBJECT-CALL1=A: resolve the parser's empty-receiver member chain
+        // only when the surrounding call has one concrete callable parameter.
+        // Rewriting to the ordinary lambda node keeps every execution tier on
+        // the existing closure path.
+        if let Some(Type::Fn { params, .. }) = self.expected_type.clone() {
+            if params.len() == 1 && is_bare_member_chain(e) {
+                let span = e.span();
+                let mut body = std::mem::replace(e, Expr::Absent(span));
+                replace_bare_member_subject(&mut body);
+                *e = Expr::Lambda(Lambda {
+                    take_names: Vec::new(),
+                    params: vec![LambdaParam {
+                        name: BARE_MEMBER_SUBJECT.to_string(),
+                        name_span: span,
+                        ty: Some(params[0].clone()),
+                        ty_span: None,
+                    }],
+                    body: LambdaBody::Expr(Box::new(body)),
+                    span,
+                    meta: LambdaMeta::default(),
+                });
+                return self.infer(e);
+            }
+        }
 
         // D-EMPTYLIT1: an empty `[]` always parses as `Expr::ListLit`. When the
         // expected-type context says Map, rewrite the node to an empty

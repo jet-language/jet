@@ -24,10 +24,6 @@ pub fn desugar_member_spreads(bundle: &mut ProgramBundle) {
                     }
                     desugar_stmts(&mut t.body);
                 }
-                Item::Bench(b) => {
-                    desugar_expr(&mut b.name_expr);
-                    desugar_stmts(&mut b.body);
-                }
                 Item::Struct(s) => {
                     for m in &mut s.methods {
                         desugar_stmts(&mut m.body);

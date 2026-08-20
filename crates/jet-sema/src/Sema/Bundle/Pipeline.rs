@@ -127,7 +127,6 @@ fn collect_item_declared_text_blocks(
             collect_declared_text_blocks(&function.body, source, block_spans, blocks)
         }
         Item::Test(test) => collect_declared_text_blocks(&test.body, source, block_spans, blocks),
-        Item::Bench(bench) => collect_declared_text_blocks(&bench.body, source, block_spans, blocks),
         Item::Impl(implementation) => {
             for method in &implementation.methods {
                 collect_declared_text_blocks(&method.body, source, block_spans, blocks);
@@ -876,9 +875,6 @@ fn check_bundle_opts_for_output_inner(
                         st.tests.insert(name.clone(), t.name_span);
                     }
                 }
-                // D-BENCH1: `#Bench` blocks define no referenceable name; codegen
-                // discovers them straight from the AST, so registration is a no-op.
-                Item::Bench(_) => {}
                 Item::ExternRust(block) => {
                     if check_extern_block(block, &st.registry, &mut diags) {
                         for ef in &block.functions {

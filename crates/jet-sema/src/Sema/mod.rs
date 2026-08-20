@@ -1233,6 +1233,7 @@ pub(crate) enum SendProblemKind {
     CallableValue,
     TraitValue(String),
     ThreadConfined(String),
+    LocalReactive(String),
     ViewBorrow,
 }
 

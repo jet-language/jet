@@ -3050,7 +3050,6 @@ fn collect_item_implicit_copy_spans(
             }
         }
         Item::Test(definition) => collect_stmts_implicit_copy_spans(&definition.body, spans),
-        Item::Bench(definition) => collect_stmts_implicit_copy_spans(&definition.body, spans),
         Item::CodeModule(definition) => {
             if let Some(body) = &definition.body {
                 for item in body {

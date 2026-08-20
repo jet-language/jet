@@ -61,6 +61,8 @@ const JS_EXECUTION_PRELUDE: &str = concat!(
     "\n",
     include_str!("../Prelude/Core/Shared.js"),
     "\n",
+    include_str!("../Prelude/Core/Authority.js"),
+    "\n",
     include_str!("../Prelude/Core/FloatProvenance.js"),
     "\n",
     include_str!("../Prelude/Core/InlineRange.js"),
@@ -1453,7 +1455,7 @@ fn web_shared_host_call_supported(host: &TIR::THostCall) -> bool {
         TIR::THostCall::YieldSend { value } => web_expr_supported(value),
         TIR::THostCall::Method { recv, method, args }
             if matches!(&recv.ty, Type::Shared(_))
-                && matches!(method.as_str(), "read" | "edit" | "edit_txn")
+                && matches!(method.as_str(), "read" | "read_txn" | "edit" | "edit_txn")
                 && args.len() == 1 =>
         {
             web_expr_supported(recv) && args.iter().all(web_expr_supported)
@@ -1516,6 +1518,12 @@ fn web_expr_supported(expr: &TIR::TExpr) -> bool {
         } if path == "jet_std::JetShared" && method.name == "new" && args.len() == 1 => {
             web_expr_supported(&args[0].value)
         }
+        E::StaticCall {
+            owner: TIR::TStaticOwner::Prelude { path, .. },
+            method,
+            args,
+            ..
+        } if path == "JetAuthority" && method.name == "workspace" && args.is_empty() => true,
         E::Present(inner) | E::Ok(inner) | E::Err(inner) => web_expr_supported(inner),
         E::Try { inner, note, .. } => {
             web_expr_supported(inner)
@@ -7374,12 +7382,13 @@ fn tir_js_expr(expr: &TIR::TExpr, funcs: &[FuncWeb], file_prefix: Option<&str>) 
             TIR::THostCall::Method { recv, method, args }
                 if matches!(&recv.ty, Type::Shared(_))
                     && args.len() == 1
-                    && matches!(method.as_str(), "read" | "edit" | "edit_txn") =>
+                    && matches!(method.as_str(), "read" | "read_txn" | "edit" | "edit_txn") =>
             {
                 let recv = tir_js_expr(recv, funcs, file_prefix)?;
                 let callback = tir_js_expr(&args[0], funcs, file_prefix)?;
                 match method.as_str() {
                     "read" => format!("jet_shared_read({recv}, {callback})"),
+                    "read_txn" => format!("jet_shared_read_txn({recv}, {callback})"),
                     "edit" => format!("jet_shared_edit({recv}, {callback})"),
                     "edit_txn" => format!("jet_shared_edit_txn({recv}, {callback})"),
                     _ => return Err(()),
@@ -7397,6 +7406,14 @@ fn tir_js_expr(expr: &TIR::TExpr, funcs: &[FuncWeb], file_prefix: Option<&str>) 
                 "jet_shared_new({})",
                 tir_js_expr(&args[0].value, funcs, file_prefix)?
             )
+        }
+        E::StaticCall {
+            owner: TIR::TStaticOwner::Prelude { path, .. },
+            method,
+            args,
+            ..
+        } if path == "JetAuthority" && method.name == "workspace" && args.is_empty() => {
+            "jet_authority_workspace()".to_string()
         }
         // D-EXPSEM1=A / D-FLOORDIV1=A: `^` and `/%` call the JS preamble, which
         // carries the same rules the Prelude helpers do.

@@ -76,30 +76,10 @@
         }
     }
 
-    // D-MIGRATE3=A / D-MIGRATE4=A: decode-time migration transparency plus the
-    // runtime engine. Decoding a `#PublishedSchema` type with `migration { }`
-    // blocks tries the current shape first; on mismatch the type's generated
-    // `jet_decode_with_status` override detects which historical shape the
-    // data's key set matches and walks the step functions forward (oldest
-    // matching version → current). The public `decode` call drops this
-    // internal report. Types without migrations keep the trait's default
-    // identity path, with no per-type chain code emitted.
-    #[derive(Clone, Debug, PartialEq)]
-    pub struct JetMigrationStatus {
-        pub migrated: bool,
-        pub from: String,
-        pub steps: Vec<String>,
-    }
-
-    impl JetMigrationStatus {
-        pub fn fresh() -> JetMigrationStatus {
-            JetMigrationStatus {
-                migrated: false,
-                from: String::new(),
-                steps: Vec::new(),
-            }
-        }
-    }
+    // D-MIGRATE3=A / D-MIGRATE4=A: migration is transparent inside the one
+    // canonical `__jet_Decode::jet_decode` operation. The generated decoder
+    // tries the current shape first, then walks a matching historical shape
+    // forward before returning the value. No second result envelope exists.
 
     /// D-MIGRATE4: the sorted set of top-level object keys of a `DataTree`, used
     /// by a `#PublishedSchema` type's migration chain-walker to detect which

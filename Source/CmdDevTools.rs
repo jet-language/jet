@@ -3690,6 +3690,129 @@ fn collect_bench_evidence_with_filter(
     evidence
 }
 
+/// D-CLAIM-BENCH1=A: collect the same exact twenty samples through the test
+/// harness used by `jet test --measure`. Budget providers call this seam; the
+/// retired benchmark command is not part of measurement anymore.
+pub(crate) fn collect_measure_evidence(
+    file: &str,
+    src: &str,
+    mode: OutputMode,
+    filter: Option<&str>,
+) -> Vec<BenchEvidence> {
+    let (rust_code, ffi_link) = match jet::compile_tests_with_path(src, file) {
+        Ok(value) => value,
+        Err(diags) => {
+            report_problems(mode, file, src, &diags);
+            exit(ExitCodes::USER_ERROR);
+        }
+    };
+    let bin = PathBuf::from("build").join(format!("test_measure_{}", stem(file)));
+    build(
+        file,
+        &rust_code,
+        bin.clone(),
+        BuildProfile::Release,
+        ffi_link.as_ref(),
+        &[],
+        false,
+        None,
+        None,
+        None,
+        mode,
+        None,
+    );
+    let mut command = Command::new(&bin);
+    command
+        .env("JET_TEST_MEASURE", "1")
+        .env("JET_TEST_MEASURE_EVIDENCE", "1");
+    if let Some(filter) = filter {
+        command.env("JET_TEST_FILTER", filter);
+    }
+    let output = command.output().unwrap_or_else(|error| {
+        eprintln!("measure: couldn't run `{}`: {}", bin.display(), error);
+        exit(ExitCodes::USER_ERROR);
+    });
+    if !output.stderr.is_empty() {
+        eprint!("{}", String::from_utf8_lossy(&output.stderr));
+    }
+    if !output.status.success() {
+        exit(crate::CmdCompile::child_exit_code(output.status));
+    }
+    let stdout = String::from_utf8(output.stdout).unwrap_or_else(|_| {
+        eprintln!("measure: harness emitted non-UTF-8 evidence");
+        exit(ExitCodes::USER_ERROR);
+    });
+    let mut evidence = Vec::new();
+    for line in stdout.lines() {
+        if let Some(wire) = line.strip_prefix("JETALLOC1\t") {
+            let mut fields = wire.split('\t');
+            let name = fields.next().and_then(decode_hex).unwrap_or_else(|| {
+                eprintln!("measure: harness emitted malformed allocation identity");
+                exit(ExitCodes::USER_ERROR);
+            });
+            let iters = fields
+                .next()
+                .and_then(|value| value.parse::<u64>().ok())
+                .filter(|value| *value > 0)
+                .unwrap_or_else(|| {
+                    eprintln!("measure: harness emitted invalid allocation iteration count");
+                    exit(ExitCodes::USER_ERROR);
+                });
+            let samples = fields
+                .map(|value| {
+                    let (count, bytes) = value.split_once(':').ok_or(())?;
+                    Ok((
+                        count.parse::<u128>().map_err(|_| ())?,
+                        bytes.parse::<u128>().map_err(|_| ())?,
+                        iters,
+                    ))
+                })
+                .collect::<Result<Vec<_>, ()>>()
+                .unwrap_or_else(|_| {
+                    eprintln!("measure: harness emitted malformed allocation evidence");
+                    exit(ExitCodes::USER_ERROR);
+                });
+            if samples.len() != 20 {
+                eprintln!("measure: harness emitted {} allocation samples; policy requires 20", samples.len());
+                exit(ExitCodes::USER_ERROR);
+            }
+            let entry = evidence.iter_mut().find(|entry: &&mut BenchEvidence| entry.name == name).unwrap_or_else(|| {
+                eprintln!("measure: allocation evidence preceded its named claim");
+                exit(ExitCodes::USER_ERROR);
+            });
+            entry.allocation_samples = samples;
+            continue;
+        }
+        let Some(wire) = line.strip_prefix("JETBENCH1\t") else { continue };
+        let mut fields = wire.split('\t');
+        let name = fields.next().and_then(decode_hex).unwrap_or_else(|| {
+            eprintln!("measure: harness emitted malformed claim identity");
+            exit(ExitCodes::USER_ERROR);
+        });
+        let iters = fields
+            .next()
+            .and_then(|value| value.parse::<u64>().ok())
+            .filter(|value| *value > 0)
+            .unwrap_or_else(|| {
+                eprintln!("measure: harness emitted invalid iteration count");
+                exit(ExitCodes::USER_ERROR);
+            });
+        let samples = fields
+            .map(|value| value.parse::<u128>().map(|elapsed| (elapsed, iters)))
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap_or_else(|_| {
+                eprintln!("measure: harness emitted invalid exact sample");
+                exit(ExitCodes::USER_ERROR);
+            });
+        if samples.len() != 20 {
+            eprintln!("measure: harness emitted {} samples; policy requires 20", samples.len());
+            exit(ExitCodes::USER_ERROR);
+        }
+        evidence.push(BenchEvidence { name, samples, allocation_samples: Vec::new() });
+    }
+    evidence
+}
+
 fn run_bench_override_program(
     file: &str,
     shown: &str,

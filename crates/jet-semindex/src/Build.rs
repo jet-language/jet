@@ -792,7 +792,6 @@ fn item_span(item: &AST::Item) -> Span {
         AST::Item::Impl(x) => x.span,
         AST::Item::Const(x) => x.span,
         AST::Item::Test(x) => x.span,
-        AST::Item::Bench(x) => x.span,
         AST::Item::ExternRust(x) => x.span,
         AST::Item::Module(x) => x.span,
         AST::Item::CModule(x) => x.span,
@@ -1822,9 +1821,6 @@ fn collect_item(item: &Item, mp: &str, module: &LoadedModule, ctx: &mut WalkCtx<
         }
         Item::Test(t) => {
             structural_slot(ctx, "body", StructuralSlotKind::List, |ctx| collect_stmts(&t.body, mp, module, ctx));
-        }
-        Item::Bench(b) => {
-            structural_slot(ctx, "body", StructuralSlotKind::List, |ctx| collect_stmts(&b.body, mp, module, ctx));
         }
         Item::ExternRust(_) => {}
         Item::Module(m) => {

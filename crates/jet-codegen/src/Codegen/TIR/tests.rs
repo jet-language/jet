@@ -1589,18 +1589,18 @@ fn greet() => String { return input() }
     }
 
     #[test]
-    fn covers_require_builtins() {
-        // c109 Phase 26: the rich-runtime-report builtins `require`/`require_eq`/`panic`
+    fn covers_assert_builtins() {
+        // c109 Phase 26: the rich-runtime-report builtins `assert`/`assert_eq`/`panic`
         // (S36) route. Each is a bare `Expr::Call` whose name is the builtin (not a user
         // fn / local) with the right arity; the whole emit string is rendered at lowering.
-        assert!(covers("fn f() { require((1 + 1) == 2) }", "f"));
-        assert!(covers("fn f() { require(false, \"nope\") }", "f"));
-        assert!(covers("fn f() { require_eq(2, 2) }", "f"));
+        assert!(covers("fn f() { assert((1 + 1) == 2) }", "f"));
+        assert!(covers("fn f() { assert(false, \"nope\") }", "f"));
+        assert!(covers("fn f() { assert_eq(2, 2) }", "f"));
         assert!(covers("fn f() { panic(\"stop\") }", "f"));
-        // A user fn / local named `require` shadows the builtin — it then routes via the
+        // A user fn / local named `assert` shadows the builtin — it then routes via the
         // plain-fn shape, NOT the builtin (still covered, different path).
         assert!(covers(
-            "fn require(x: Int) => Int { return x }\nfn f() => Int { return require(3) }",
+            "fn assert(x: Int) => Int { return x }\nfn f() => Int { return assert(3) }",
             "f"
         ));
     }

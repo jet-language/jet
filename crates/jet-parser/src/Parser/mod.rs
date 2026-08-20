@@ -164,6 +164,7 @@ fn is_teaching_parse_diag(code: &str) -> bool {
             | "E0057"
             | "E0065"
             | "E0066"
+            | "E0068"
             | "E0070"
             | "E0077"
             | "E0146"
@@ -1437,7 +1438,8 @@ fn notify(ready: Bool) :[Net]> {
         for (src, code) in [
             ("fn old() -> Int { return 1 }\n", "E0070"),
             ("fn old() --[FS]-> Int { return 1 }\n", "E0066"),
-            ("fn old() => Int = 1\n", "E0065"),
+            ("fn old() :> Int { return 1 }\n", "E0068"),
+            ("fn old() Int :: 1\n", "E0065"),
             ("fn run() { if ready send() }\n", "E0372"),
             ("fn run() { #Grant(FS) { caps -> use_caps(caps) } }\n", "E0077"),
             (
@@ -1463,7 +1465,7 @@ fn notify(ready: Bool) :[Net]> {
                         .find(|diagnostic| diagnostic.code == code)
                         .and_then(|diagnostic| diagnostic.edit.as_ref())
                         .map(|edit| edit.new_text.as_str()),
-                    Some("::"),
+                    Some(":>"),
                     "the retired function-body marker must offer the canonical replacement"
                 );
             }

@@ -908,9 +908,6 @@ fn collect_capture_items(
             Item::Test(test) => {
                 collect_capture_statements(&test.body, aliases, local_functions, sites);
             }
-            Item::Bench(bench) => {
-                collect_capture_statements(&bench.body, aliases, local_functions, sites);
-            }
             Item::CodeModule(module) => {
                 if let Some(body) = &module.body {
                     collect_capture_items(body, aliases, local_functions, sites);

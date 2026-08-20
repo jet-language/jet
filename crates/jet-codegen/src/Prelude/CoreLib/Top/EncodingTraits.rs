@@ -10,19 +10,6 @@ pub trait __jet_Encode {
 #[allow(non_camel_case_types)]
 pub trait __jet_Decode: Sized {
     fn jet_decode(tree: &jet_std::DataTree) -> Result<Self, Vec<jet_std::FieldError>>;
-    /// D-MIGRATE4: decode this value, reporting whether it arrived as an older
-    /// `#PublishedSchema` shape and was walked forward through the migration
-    /// chain. The default is the zero-cost identity: no migrations declared, so
-    /// decode the current shape and report `fresh`. Codegen overrides this only
-    /// for a `#PublishedSchema` type that has `migration { }` blocks and a
-    /// runtime decode path — every other type keeps this default, so no
-    /// per-type code is emitted and the decode path is byte-for-byte unchanged.
-    /// parity: guard tests/corelib.rs::typed_codec_decode_matches_between_full_build_and_quick_run
-    fn jet_decode_with_status(
-        tree: &jet_std::DataTree,
-    ) -> Result<(Self, jet_std::JetMigrationStatus), Vec<jet_std::FieldError>> {
-        Ok((Self::jet_decode(tree)?, jet_std::JetMigrationStatus::fresh()))
-    }
 }
 
 impl __jet_Encode for i64 {
@@ -515,10 +502,8 @@ fn jet_enc_json_decode<T: __jet_Decode>(text: &String) -> Result<T, Vec<jet_std:
     let tree = jet_std::parse_json_typed_datatree(text).map_err(|e| {
         jet_std::FieldError::one(format!("invalid JSON (line {}): {}", e.line, e.message))
     })?;
-    // D-MIGRATE4: plain decode walks the same migration chain, silently — the
-    // status is dropped. Types without migrations hit the trait default, which
-    // is exactly `jet_decode` (zero cost).
-    Ok(T::jet_decode_with_status(&tree)?.0)
+    // D-MIGRATE4: migration is part of the sole canonical decode operation.
+    T::jet_decode(&tree)
 }
 
 // CSV typed decode: header row maps columns to fields by name; each data row
@@ -543,8 +528,8 @@ fn jet_enc_csv_decode<T: __jet_Decode>(text: &String) -> Result<Vec<T>, Vec<jet_
             .collect();
         let tree = jet_std::DataTree::Object(obj);
         // D-MIGRATE4: plain decode walks the migration chain silently (see json's).
-        match T::jet_decode_with_status(&tree) {
-            Ok((value, _)) => out.push(value),
+        match T::jet_decode(&tree) {
+            Ok(value) => out.push(value),
             Err(error) => errors.extend(jet_std::FieldError::under_errors(
                 &format!("row {}", i + 1),
                 error,

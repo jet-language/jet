@@ -653,7 +653,6 @@ fn validate_declared_effects(
                     }
                 }
                 Item::Test(test) => check_stmts(&test.body, facts, diags),
-                Item::Bench(bench) => check_stmts(&bench.body, facts, diags),
                 Item::CodeModule(module) => {
                     if let Some(body) = &module.body {
                         check_items(body, facts, diags);

@@ -207,8 +207,9 @@ fn compatible_report(root:&Path,bundle:&jet::AST::ProgramBundle,specs:&[LocatedB
 fn emit_stored_build_gates(stored:&StoredBuildReport)->i32{let mut failed=0;for fact in &stored.facts{if fact.outcome=="fail"{failed+=1;let code=if fact.evidence=="unavailable"{"E2906"}else{"E2907"};let state=if fact.evidence=="unavailable"{"has no usable evidence"}else if fact.evidence=="inconclusive"{"is inconclusive"}else{"regressed"};eprintln!("Error [{code}]: performance budget {} {state}\n --> {}\n Why: {}\n Fix: {}",fact.name,fact.source,fact.reason,if code=="E2906"{"correct the provider evidence or bootstrap only when absent or stale evidence is eligible"}else{"improve the measured behavior, inspect `jet budget check --verbose`, or record an explicit exception"});}}let short=&stored.report_id[..12];if failed>0{eprintln!("budgets failed: {} · report {short}",count(failed,"budget failed","budgets failed"));1}else{eprintln!("budgets: {} passed · report {short}",count(stored.facts.len(),"budget","budgets"));0}}
 fn build_gate_tool_failure(why:&str)->i32{eprintln!("Error [E2908]: performance budget operation failed\n Why: {why}\n Fix: correct the named failure and retry");1}
 
-/// `jet bench` owns BenchMeasurement and Bench-scoped AllocationProbe refresh.
-/// Both come from the same harness invocation; no second workload pass exists.
+/// Measurement budgets reuse the `jet test --measure` harness. Both
+/// BenchMeasurement and allocation samples come from the same invocation; no
+/// second workload pass exists.
 pub(crate) fn reuse_bench_report(entry:&str)->Option<i32>{
     let entry=match std::path::Path::new(entry).canonicalize(){Ok(path)=>path,Err(error)=>return Some(build_gate_tool_failure(&format!("cannot resolve benchmark entry: {error}")))};
     let root=jet::Loader::find_manifest_root(entry.parent().unwrap_or(Path::new("."))).unwrap_or_else(||entry.parent().unwrap_or(Path::new(".")).to_path_buf());
@@ -568,8 +569,8 @@ fn bench_measurement_provider(request:&ProviderRequest,_:&ProviderCancellation)-
     let Some(CanonicalJson::String(name))=workload.get("name") else{return Err(ProviderFailure::malformed("BenchMeasurement workload has no benchmark name"))};
     let source=std::fs::read_to_string(path).map_err(|error|ProviderFailure::malformed(format!("cannot read benchmark source: {error}")))?;
     let mode=crate::OutputMode{json:false,color:jet::Diagnostics::ColorChoice::Never,quiet:false};
-    let evidence=crate::CmdDevTools::collect_bench_evidence(path,&source,mode,false);
-    let bench=evidence.into_iter().find(|bench|bench.name==*name).ok_or_else(||ProviderFailure::malformed(format!("#Bench `{name}` was not emitted by its selected benchmark target")))?;
+    let evidence=crate::CmdDevTools::collect_measure_evidence(path,&source,mode,Some(name));
+    let bench=evidence.into_iter().find(|bench|bench.name==*name).ok_or_else(||ProviderFailure::malformed(format!("measured claim `{name}` was not emitted by `jet test --measure")))?;
     let mut events=Vec::new();
     for(index,spec)in request.specs.iter().enumerate(){if !spec.metric.starts_with("BenchTime("){return Err(ProviderFailure::malformed(format!("BenchMeasurement does not support metric `{}`",spec.metric)))}for(elapsed,iters)in &bench.samples{let value=Rational::parse(&elapsed.to_string(),&iters.to_string()).map_err(ProviderFailure::malformed)?;events.push(ProviderEvent::Sample{spec:index as u32,metric:spec.metric.clone(),value});}}
     let samples=events.len()as u64;events.push(ProviderEvent::Complete{request_id:request.request_id.clone(),samples});Ok(events)
@@ -581,8 +582,8 @@ fn allocation_probe_provider(request:&ProviderRequest,_:&ProviderCancellation)->
     let Some(CanonicalJson::String(name))=workload.get("name") else{return Err(ProviderFailure::malformed("AllocationProbe workload has no benchmark name"))};
     let source=std::fs::read_to_string(path).map_err(|error|ProviderFailure::malformed(format!("cannot read allocation workload source: {error}")))?;
     let mode=crate::OutputMode{json:false,color:jet::Diagnostics::ColorChoice::Never,quiet:false};
-    let evidence=crate::CmdDevTools::collect_bench_evidence(path,&source,mode,false);
-    let bench=evidence.into_iter().find(|bench|bench.name==*name).ok_or_else(||ProviderFailure::malformed(format!("#Bench `{name}` was not emitted by its selected allocation workload")))?;
+    let evidence=crate::CmdDevTools::collect_measure_evidence(path,&source,mode,Some(name));
+    let bench=evidence.into_iter().find(|bench|bench.name==*name).ok_or_else(||ProviderFailure::malformed(format!("measured claim `{name}` was not emitted by its selected allocation workload")))?;
     if bench.allocation_samples.len()!=20{return Err(ProviderFailure::malformed(format!("AllocationProbe `{name}` emitted {} trials; policy requires 20",bench.allocation_samples.len())))}
     let mut events=Vec::new();
     for(index,spec)in request.specs.iter().enumerate(){

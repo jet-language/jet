@@ -478,32 +478,14 @@ use std::collections::HashSet;
                                 // `task` closures with no `take`; suppress the same lint.
                         if is_reactive_handle_ty(&cap_ty) {
                             if let Some(info) = self.lookup(name) {
-                                if info.reactive_local {
-                                    self.diags.push(Diagnostic::error(
-                                        "E1102",
-                                        format!(
-                                            "`{name}` is pinned `#{}` and can't cross into a task",
-                                            crate::Syntax::MARKER_LOCAL
-                                        ),
-                                        format!(
-                                            "`#{}` keeps `{}` in the fast one-thread form",
-                                            crate::Syntax::MARKER_LOCAL,
-                                            cap_ty.name()
-                                        ),
-                                        format!(
-                                            "remove `#{}`, or send owned values through a channel",
-                                            crate::Syntax::MARKER_LOCAL
-                                        ),
-                                        Some(lam.span),
-                                    ));
-                                    continue;
+                                if !info.reactive_local {
+                                    let crossing = if info.reactive_shared {
+                                        "#Shared pin + task"
+                                    } else {
+                                        "task"
+                                    };
+                                    self.note_reactive_upgrade(name, &cap_ty, crossing);
                                 }
-                                let crossing = if info.reactive_shared {
-                                    "#Shared pin + task"
-                                } else {
-                                    "task"
-                                };
-                                self.note_reactive_upgrade(name, &cap_ty, crossing);
                             } else {
                                 self.note_reactive_upgrade(name, &cap_ty, "task");
                             }

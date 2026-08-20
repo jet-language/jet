@@ -328,29 +328,9 @@ impl<'a> Checker<'a> {
                     .map(|info| info.ty.clone())
                     .or_else(|| self.consts.get(&name).cloned());
                 let Some(ty) = captured else { continue };
-                if let Some(info) = self.lookup(&name) {
-                    if info.reactive_local && super::super::is_reactive_handle_ty(&ty) {
-                        self.diags.push(Diagnostic::error(
-                            "E1102",
-                            format!(
-                                "`{name}` is pinned `#{}` and can't cross into a parallel worker",
-                                Syntax::MARKER_LOCAL
-                            ),
-                            format!(
-                                "`#{}` keeps `{}` in the fast one-thread form",
-                                Syntax::MARKER_LOCAL,
-                                ty.name()
-                            ),
-                            format!(
-                                "remove `#{}`, or keep the reactive graph off the parallel path",
-                                Syntax::MARKER_LOCAL
-                            ),
-                            Some(lam.span),
-                        ));
-                        continue;
-                    }
-                }
-                if super::super::is_reactive_handle_ty(&ty) {
+                if super::super::is_reactive_handle_ty(&ty)
+                    && !self.lookup(&name).is_some_and(|info| info.reactive_local)
+                {
                     self.note_reactive_upgrade(&name, &ty, "parallel");
                 }
                 if let Some(problem) = self.crossing_problem_for_name(

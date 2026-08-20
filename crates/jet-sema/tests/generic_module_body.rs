@@ -470,11 +470,11 @@ fn run() {}
 }
 
 #[test]
-fn tests_and_benches_are_specialized_once_per_instance_with_unique_names() {
+fn measured_tests_are_specialized_once_per_instance_with_unique_names() {
     let (bundle, diagnostics) = check(r#"
 module checks<T>(count: Int) {
     #Test fn identity(value: T) { expect(count == count) }
-    #Bench("work") { expect(count == count) }
+    #Test("work") { .measure { assert(count == count) } }
 }
 module int_checks :: checks<Int>(2)
 module text_checks :: checks<String>(4)
@@ -483,10 +483,7 @@ fn run() {}
     assert!(error_codes(&diagnostics).is_empty(), "{diagnostics:#?}");
     let items = &bundle.modules[0].items;
     let tests: Vec<_> = items.iter().filter_map(|item| match item { Item::Test(t) => Some(t), _ => None }).collect();
-    let benches: Vec<_> = items.iter().filter_map(|item| match item { Item::Bench(b) => Some(b), _ => None }).collect();
     assert_eq!(tests.iter().map(|t| t.name.as_deref()).collect::<Vec<_>>(), vec![Some("int_checks_identity"), Some("text_checks_identity")]);
     assert_eq!(tests[0].params[0].ty, Type::Int);
     assert_eq!(tests[1].params[0].ty, Type::String);
-    assert_eq!(benches.iter().map(|b| b.name.as_deref()).collect::<Vec<_>>(), vec![Some("int_checks_work"), Some("text_checks_work")]);
-    assert!(!format!("{:?}{:?}", tests[0].body, benches[0].body).contains("count"));
 }

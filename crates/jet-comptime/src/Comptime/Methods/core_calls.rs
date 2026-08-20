@@ -2218,8 +2218,12 @@ pub fn apply_core_call_with_type(
         }
         // D-COMPUTE1=D / I9: same Prelude as AOT (`ComputeLite` includes Compute.rs).
         ("core.compute", method) => super::super::ComputeLite::apply(method, &args, span),
-        // D-SERVICE1=D / I9: same Prelude as AOT (`ServicesLite` includes Services.rs).
-        ("core.service" | "core.services", method) => {
+        // D-SERVICE1=D / I9: typed `core.service.tree` has no string-keyed
+        // fallback. The old procedural rows are private migration machinery.
+        ("core.service", "tree") => {
+            super::super::ServicesLite::apply_typed_tree(one(0)?, span)
+        }
+        ("core.services", method) => {
             super::super::ServicesLite::apply(method, &args, span)
         }
         // D-AUTH1=A / I9: session batteries (JWT/PASETO stay on AOT/subset path).

@@ -1017,6 +1017,7 @@ impl<'a> Parser<'a> {
         let retired_double = matches!(self.peek().kind, TokKind::MinusMinus);
         let retired_ballot = matches!(self.peek().kind, TokKind::Minus)
             && matches!(self.peek2().kind, TokKind::LBracket);
+        let prefix_effect_span = decorated.then(|| self.peek().span);
         if decorated || retired_eq || retired_double || retired_ballot {
             if retired_eq || retired_double || retired_ballot {
                 self.diags.push(Self::retired_effect_syntax(self.peek().span));
@@ -1031,8 +1032,14 @@ impl<'a> Parser<'a> {
                 arrow_return = true;
                 let (r, span) = self.type_()?;
                 return_type_span = Some(span);
+                self.diags.push(Self::retired_signature_shape(
+                    prefix_effect_span.unwrap_or(span),
+                ));
                 Some(Box::new(r))
             } else if let Some((ty, span)) = self.parse_unit_fallible_return()? {
+                self.diags.push(Self::retired_signature_shape(
+                    prefix_effect_span.unwrap_or(span),
+                ));
                 return_type_span = Some(span);
                 Some(Box::new(ty))
             } else {
@@ -1043,13 +1050,24 @@ impl<'a> Parser<'a> {
             || retired_ballot
             || self.at_unified_arrow()
         {
-            arrow_return = true;
+            let arrow = self.at_unified_arrow().then(|| self.bump());
+            arrow_return = arrow.is_some() || retired_eq || retired_double || retired_ballot;
             if !retired_eq && !retired_double && !retired_ballot {
-                self.expect_unified_arrow("before a callable result type")?;
+                if arrow.is_none() {
+                    self.expect_unified_arrow("before a callable result type")?;
+                }
             }
             if self.type_starts_here() {
                 let (r, span) = self.type_()?;
                 return_type_span = Some(span);
+                if arrow
+                    .as_ref()
+                    .is_some_and(|token| matches!(&token.kind, TokKind::UnifiedArrow))
+                {
+                    self.diags.push(Self::retired_signature_shape(
+                        arrow.as_ref().map(|token| token.span).unwrap_or(span),
+                    ));
+                }
                 Some(Box::new(r))
             } else {
                 None

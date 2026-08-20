@@ -1072,6 +1072,12 @@ pub(super) fn parse_policy(
     let mut out = Vec::new();
     let mut seen = HashSet::new();
     for (name, raw) in key_value_entries(body)? {
+        if matches!(name.as_str(), "trust" | "providers") {
+            return Err(PackageParseError::RetiredAuthorityField {
+                field: format!("policy.{name}"),
+                replacement: format!("authority.{name}"),
+            });
+        }
         let Some(key) = crate::Policy::PolicyKey::parse(&name) else {
             let replacement = match name.as_str() {
                 "no_alloc" => Some("`effects: .{ deny: [Mem.Alloc] }`".to_string()),

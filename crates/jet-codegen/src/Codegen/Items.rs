@@ -5,6 +5,7 @@ use crate::AST::{
     ConstAttr, DistinctDef, EnumDef, Expr, Field, Func, ImplDef, Item, Marker, Param,
     RustConstKind, StrPart, StructDef, TraitImplBlock, Type, VariantPayload,
 };
+use crate::Codegen::TIR::{SerdeCodec, TFunc, TFuncKind};
 use std::collections::HashMap;
 
 /// D-FIELDPOL1: the Rust expression that reads field `f` off `self` — a
@@ -2112,12 +2113,12 @@ pub(super) fn migration_shapes(
     shapes
 }
 
-/// D-MIGRATE4: the `jet_decode_with_status` override emitted inside the type's
-/// `__jet_Decode` impl. Tries the current shape first (plain `jet_decode` — the
-/// cheap happy path, and the documented "prefer newest" ambiguity rule); on
-/// failure detects which historical shape the data's key set matches, newest
-/// first, and walks the step functions forward from there. Data matching no
-/// shape returns the original decode error unchanged.
+/// D-MIGRATE4: the canonical `jet_decode` implementation for a published type.
+/// It tries the current shape first; on failure it detects which historical
+/// shape the data's key set matches, newest first, and walks the step functions
+/// forward from there. Data matching no shape returns the original decode error
+/// unchanged. The current-shape body lives in the type's private inherent
+/// helper so this remains the sole Decode entry point.
 fn emit_migration_chain_walker(cx: &Cx, s: &StructDef, style: Option<&str>, out: &mut String) {
     let blocks = migration_blocks(cx, s).expect("caller checked");
     let shapes = migration_shapes(style, s, blocks);
@@ -2126,9 +2127,9 @@ fn emit_migration_chain_walker(cx: &Cx, s: &StructDef, style: Option<&str>, out:
         "    // D-MIGRATE4: #PublishedSchema migration chain — v1..v{} are historical shapes.\n",
         k
     ));
-    out.push_str("    fn jet_decode_with_status(__t: &jet_std::DataTree) -> Result<(Self, jet_std::JetMigrationStatus), Vec<jet_std::FieldError>> {\n");
-    out.push_str("        let __err = match Self::jet_decode(__t) {\n");
-    out.push_str("            Ok(__v) => return Ok((__v, jet_std::JetMigrationStatus::fresh())),\n");
+    out.push_str("    fn jet_decode(__t: &jet_std::DataTree) -> Result<Self, Vec<jet_std::FieldError>> {\n");
+    out.push_str("        let __err = match Self::__jet_migrate_decode_current(__t) {\n");
+    out.push_str("            Ok(__v) => return Ok(__v),\n");
     out.push_str("            Err(__e) => __e,\n");
     out.push_str("        };\n");
     out.push_str("        let __keys = jet_std::jet_datatree_key_set(__t);\n");
@@ -2147,28 +2148,29 @@ fn emit_migration_chain_walker(cx: &Cx, s: &StructDef, style: Option<&str>, out:
         };
         out.push_str(&format!("        if {} {{\n", cond));
         out.push_str("            let mut __pairs = match __t { jet_std::DataTree::Object(__es) => __es.clone(), _ => return Err(__err) };\n");
-        out.push_str("            let mut __steps: Vec<String> = Vec::new();\n");
         for i in j..k {
             out.push_str(&format!(
                 "            jet_migrate_step_{}_{}(&mut __pairs)?;\n",
                 s.name,
                 i + 1
             ));
-            out.push_str(&format!(
-                "            __steps.push({:?}.to_string());\n",
-                crate::Codegen::TIR::migration_step_name(i)
-            ));
         }
         out.push_str("            let __tree = jet_std::DataTree::Object(__pairs);\n");
-        out.push_str("            let __v = Self::jet_decode(&__tree)?;\n");
-        out.push_str(&format!(
-            "            return Ok((__v, jet_std::JetMigrationStatus {{ migrated: true, from: {:?}.to_string(), steps: __steps }}));\n",
-            crate::Codegen::TIR::migration_shape_name(j)
-        ));
+        out.push_str("            return Self::__jet_migrate_decode_current(&__tree);\n");
         out.push_str("        }\n");
     }
     out.push_str("        Err(__err)\n");
     out.push_str("    }\n");
+}
+
+fn is_decode_method(tir: &TFunc) -> bool {
+    matches!(
+        &tir.kind,
+        TFuncKind::TraitMethod {
+            serde: Some(SerdeCodec::Decode),
+            ..
+        }
+    )
 }
 
 /// D-MIGRATE4: one step function per migration block —
@@ -2400,6 +2402,30 @@ pub(crate) fn emit_trait_impl(
         }
     }
     let tp_impl = Generics::rust_type_param_list(type_params, &extra);
+    let migration_struct = struct_def.filter(|s| {
+        block.trait_name == crate::Generics::DECODE && migration_blocks(cx, s).is_some()
+    });
+    let migration_style = migration_struct.and_then(|s| container_rename_all(&s.serde_markers));
+    if migration_struct.is_some() {
+        out.push_str(&format!(
+            "impl{} {}{} {{\n",
+            tp_impl,
+            mangle_path(type_name),
+            tp_use
+        ));
+        for method in &lowered_methods {
+            if is_decode_method(method) {
+                TIR::emit_tir_serde_method_named(
+                    method,
+                    SerdeCodec::Decode,
+                    cx,
+                    out,
+                    "__jet_migrate_decode_current",
+                );
+            }
+        }
+        out.push_str("}\n\n");
+    }
     out.push_str(&format!(
         "impl{} {} for {}{} {{\n",
         tp_impl,
@@ -2416,16 +2442,15 @@ pub(crate) fn emit_trait_impl(
         ));
     }
     for method in &lowered_methods {
+        if migration_struct.is_some() && is_decode_method(method) {
+            continue;
+        }
         TIR::emit_tir_func(method, cx, out);
     }
     // R11/D-SERDE2: built-in Decode derives are now ordinary Jet trait
     // impls. Keep the migration override attached to that impl instead of the
     // retired compiler-owned serde emitter; otherwise published historical
     // data silently bypasses its migration chain.
-    let migration_struct = struct_def.filter(|s|
-        block.trait_name == crate::Generics::DECODE && migration_blocks(cx, s).is_some()
-    );
-    let migration_style = migration_struct.and_then(|s| container_rename_all(&s.serde_markers));
     if let Some(s) = migration_struct {
         emit_migration_chain_walker(cx, s, migration_style.as_deref(), out);
     }
@@ -2554,6 +2579,33 @@ pub(crate) fn emit_external_trait_impl(
         }
         Generics::rust_type_param_list(impl_params, &extra)
     };
+    let migration_struct = struct_def.filter(|s| {
+        trait_name == crate::Generics::DECODE && migration_blocks(cx, s).is_some()
+    });
+    let migration_style = migration_struct.and_then(|s| container_rename_all(&s.serde_markers));
+    if migration_struct.is_some() {
+        out.push_str(&format!(
+            "impl{} {}{} {{\n",
+            tp_impl,
+            mangle_path(&i.type_name),
+            tp_use
+        ));
+        for method in &i.methods {
+            if method.name == "decode" {
+                emit_trait_method(
+                    cx,
+                    trait_name,
+                    &i.type_name,
+                    method,
+                    out,
+                    1,
+                    i.is_generated_serde,
+                    Some("__jet_migrate_decode_current"),
+                );
+            }
+        }
+        out.push_str("}\n\n");
+    }
     out.push_str(&format!(
         "impl{} {} for {}{} {{\n",
         tp_impl,
@@ -2600,13 +2652,21 @@ pub(crate) fn emit_external_trait_impl(
         // `emit_trait_impl`.
         let compiler_written = i.is_generated_serde;
         for m in &i.methods {
-            emit_trait_method(cx, trait_name, &i.type_name, m, out, 1, compiler_written);
+            if migration_struct.is_some() && m.name == "decode" {
+                continue;
+            }
+            emit_trait_method(
+                cx,
+                trait_name,
+                &i.type_name,
+                m,
+                out,
+                1,
+                compiler_written,
+                None,
+            );
         }
     }
-    let migration_struct = struct_def.filter(|s|
-        trait_name == crate::Generics::DECODE && migration_blocks(cx, s).is_some()
-    );
-    let migration_style = migration_struct.and_then(|s| container_rename_all(&s.serde_markers));
     if let Some(s) = migration_struct {
         emit_migration_chain_walker(cx, s, migration_style.as_deref(), out);
     }
@@ -2698,6 +2758,7 @@ fn emit_trait_method(
     out: &mut String,
     indent: usize,
     compiler_written: bool,
+    helper_name: Option<&str>,
 ) {
     // c109 Phase N: the typed IR is the only codegen seam (R7). A trait-impl
     // method always emits at indent 1 inside the `impl Trait for __jet_<T>` block
@@ -2718,6 +2779,16 @@ fn emit_trait_method(
     // one. A hand-written `impl T.Encode` keeps the unconditional ICE.
     if compiler_written || TIR::tir_covers_trait_method(f, type_name, cx, trait_name) {
         let tir = TIR::lower_trait_method(f, type_name, cx, trait_name);
+        if let Some(name) = helper_name {
+            if let TFuncKind::TraitMethod {
+                serde: Some(codec),
+                ..
+            } = &tir.kind
+            {
+                TIR::emit_tir_serde_method_named(&tir, *codec, cx, out, name);
+                return;
+            }
+        }
         TIR::emit_tir_func(&tir, cx, out);
         return;
     }

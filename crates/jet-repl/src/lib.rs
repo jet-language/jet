@@ -3693,7 +3693,7 @@ mod tests {
     #[test]
     fn notebook_item_classifier_uses_the_parser_item_plane() {
         assert!(is_item_input("@answer :: 42"));
-        assert!(is_item_input("#Test(\"answer\") { require(true) }"));
+        assert!(is_item_input("#Test(\"answer\") { assert(true) }"));
         assert!(!is_item_input("answer :: 42"));
     }
 

@@ -90,7 +90,7 @@ impl<'a> EvalCtx<'a> {
                     self.decode_codec_value("core.encoding.json", &target, text, span)?
                 };
                 Ok(match decoded {
-                    Ok((value, _migration)) => ok(value),
+                    Ok(value) => ok(value),
                     Err(error) => err(error),
                 })
             }

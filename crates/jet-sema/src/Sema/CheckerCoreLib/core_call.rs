@@ -953,6 +953,41 @@ impl<'a> Checker<'a> {
                 }
                 return Some(core_compiler_return(name));
             }
+            // D-SERVICE1=D: the first service slice is a declaration language,
+            // not an executable callback. Type the callback normally, then
+            // require the one worker-only shape that TIR can carry to the
+            // shared Prelude without inventing a second runtime mechanism.
+            if module == "core.service" && name == "tree" {
+                if args.len() != 1 {
+                    self.diags.push(wrong_core_arity(name, 1, args.len(), span));
+                }
+                let builder = Type::Fn {
+                    params: vec![Type::Named("ServiceTreeBuilder".to_string())],
+                    ret: Some(Box::new(Type::Named("Unit".to_string()))),
+                    effect_bound: None,
+                    param_contract: None,
+                    call_metadata: None,
+                    return_view_provenance: None,
+                };
+                if let Some(arg) = args.get_mut(0) {
+                    self.expect_core_arg(name, 0, &builder, arg);
+                    if let Expr::Lambda(lambda) = &arg.expr {
+                        if jet_foundation::ServiceTree::worker_declarations(lambda).is_none() {
+                            self.diags.push(Diagnostic::error(
+                                "E0112",
+                                "`service.tree` needs an inline named-worker declaration block".to_string(),
+                                "this slice carries only statically declared `root.worker(\"name\", handler)` topology to the service Prelude".to_string(),
+                                "write `service.tree((root) :> { root.worker(\"name\", handler) })`".to_string(),
+                                Some(arg.expr.span()),
+                            ));
+                        }
+                    }
+                }
+                for arg in args.iter_mut().skip(1) {
+                    self.infer(&mut arg.expr);
+                }
+                return Some(Type::Named("ServiceTree".to_string()));
+            }
             // D-SQL-SURFACE1=C: typed CSV query and in-memory query share one
             // checked row shape and one Prelude result carrier.
             if module == "core.encoding.csv" && name == "query" && !type_args.is_empty() {

@@ -25,7 +25,7 @@ use crate::Sema::CheckerCoreLib::{
     text_cursor_method_return, u8_ty, ui_backend_method_return, unit_ty, url_mime_method_return,
     wrong_core_arity,
 };
-use crate::Sema::CheckerInfer::{contains_tuple_type, exact_integer_fits, exact_integer_literal};
+use crate::Sema::CheckerInfer::{contains_tuple_type, exact_integer_literal, IntegerInterval};
 use crate::Sema::Diagnostics::{
     builtin_type_from_ident, expr_root_ident, is_printable, suggest_method_for_receiver,
     type_is_copy, MethodSuggestion,
@@ -1246,7 +1246,7 @@ impl<'a> Checker<'a> {
                     call.resolved_ret = Some(target.clone());
                 }
                 if let Some((value, literal_span)) = inline_range_literal(&args[0].expr) {
-                    if !exact_integer_fits(&value, i128::from(lo), i128::from(hi)) {
+                    if !IntegerInterval::new(i128::from(lo), i128::from(hi)).contains_exact(&value) {
                         self.diags.push(
                             crate::Sema::Diagnostics::inline_range_literal_out_of_bounds(
                                 &value,
@@ -1528,41 +1528,47 @@ impl<'a> Checker<'a> {
                             .flatten()
                             .expect("numeric distinct conversion has a numeric base");
                             let converted_literal = match (&args[0].expr, &source, &base) {
-                                (Expr::Int(n, literal_span, _, _), source, base)
-                                    if source.is_integer() && base.is_integer() => {
-                                    let fits_base = match base {
-                                        Type::Int => true,
-                                        Type::IntN { signed, bits } => {
-                                            let (lo, hi) = crate::AST::int_range(*signed, *bits);
-                                            i128::from(*n) >= lo && i128::from(*n) <= hi
-                                        }
-                                        _ => false,
-                                    };
-                                    fits_base.then_some((*n, *literal_span))
+                                (Expr::Int(n, literal_span, _, raw), source, base)
+                                    if source.is_integer() && base.is_integer() =>
+                                {
+                                    let value = exact_integer_literal(*n, raw.as_deref());
+                                    let fits_base = base
+                                        .integer_range()
+                                        .map(IntegerInterval::from_bounds)
+                                        .is_none_or(|interval| interval.contains_exact(&value));
+                                    fits_base.then_some((value, *literal_span))
                                 }
                                 (Expr::Float(n, literal_span, _, _), source, base)
                                     if source.is_float() && base.is_integer() && n.is_finite() => {
                                     let truncated = n.trunc();
                                     let (lo, upper_exclusive) = match base {
                                         Type::Int => (i64::MIN as f64, -(i64::MIN as f64)),
-                                        Type::IntN { signed, bits } => {
-                                            let (lo, hi) = crate::AST::int_range(*signed, *bits);
-                                            (lo as f64, hi as f64 + 1.0)
+                                        Type::IntN { .. } => {
+                                            let interval = IntegerInterval::from_bounds(
+                                                base
+                                                    .integer_range()
+                                                    .expect("fixed integer widths carry an interval fact"),
+                                            );
+                                            (interval.lo as f64, interval.hi as f64 + 1.0)
                                         }
                                         _ => unreachable!(),
                                     };
-                                    (truncated >= lo && truncated < upper_exclusive)
-                                        .then_some((truncated as i64, *literal_span))
+                                    (truncated >= lo && truncated < upper_exclusive).then_some((
+                                        crate::Numeric::CtBigInt::from_int(truncated as i64),
+                                        *literal_span,
+                                    ))
                                 }
                                 _ => None,
                             };
                             let literal_in_range = self.registry.distinct_range(type_name).and_then(|(lo, hi)| {
-                                converted_literal.map(|(n, literal_span)| {
-                                    if n < lo || n > hi {
+                                converted_literal.map(|(value, literal_span)| {
+                                    let interval = IntegerInterval::new(i128::from(lo), i128::from(hi));
+                                    if !interval.contains_exact(&value) {
+                                        let shown = value.to_string_rep();
                                         self.diags.push(Diagnostic::error(
                                             "E0135",
-                                            format!("`{n}` is outside `{display_type_name}`'s range {lo}..{hi}"),
-                                            format!("a range type only holds values inside its bounds; `{n}` can never be a `{display_type_name}`"),
+                                            format!("`{shown}` is outside `{display_type_name}`'s range {lo}..{hi}"),
+                                            format!("a range type only holds values inside its bounds; `{shown}` can never be a `{display_type_name}`"),
                                             format!("use a value in `{lo}..{hi}`, or widen the type's range"),
                                             Some(literal_span),
                                         ));

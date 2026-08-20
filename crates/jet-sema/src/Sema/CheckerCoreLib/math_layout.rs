@@ -25,12 +25,28 @@ pub fn math_scalar_ty(name: &str) -> Type {
     }
 }
 
+/// Read a named SIMD type's lane measure from the shared registry projection.
+/// The name remains the surface discriminator; the numeric payload comes from
+/// the same Measure plane used by fixed lists, shapes, and dimensions.
+fn registered_lane_arity(name: &str) -> Option<usize> {
+    Type::Named(name.to_string())
+        .knowledge_vector()
+        .facts(crate::Registry::type_plane("Measure"))
+        .find_map(|fact| match fact {
+            crate::AST::KnowledgeFact::Measure(measure) if measure.kind() == "lane" => {
+                measure.literal_value().and_then(|value| usize::try_from(value).ok())
+            }
+            _ => None,
+        })
+}
+
 /// The number of scalar slots in the positional constructor / `from_array` bridge.
-/// Lanes: lane count. Vectors: dimension. Matrices: N*N (column-major flat).
+/// Lanes: the registered measure. Vectors: dimension. Matrices: N*N (column-major flat).
 pub(crate) fn math_arity(name: &str) -> usize {
+    if let Some(arity) = registered_lane_arity(name) {
+        return arity;
+    }
     match name {
-        "F32x4" => 4,
-        "F64x2" => 2,
         "Vec2" => 2,
         "Vec3" => 3,
         "Vec4" => 4,
@@ -372,7 +388,7 @@ pub fn layout_method_arg_ty(method: &str, arg_index: usize) -> Option<Type> {
     }
 }
 
-/// D-DECIMAL1: binary ops on exact decimal values.
+/// D-TYPE2-DEFAULT1 / D-NUMTYPE1: binary ops on exact numeric values.
 pub fn precise_binop_result(op: crate::AST::BinOp, lt: &str, rt: &str) -> Option<Type> {
     use crate::Numeric::is_decimal_type_name;
     use crate::AST::BinOp;
@@ -382,11 +398,19 @@ pub fn precise_binop_result(op: crate::AST::BinOp, lt: &str, rt: &str) -> Option
             Some(Type::Named(crate::Syntax::TYPE_DECIMAL.to_string()))
         }
         BinOp::Add | BinOp::Sub | BinOp::Mul | BinOp::Div
+            if same && lt == crate::Syntax::TYPE_FRACTION =>
+        {
+            Some(Type::Named(crate::Syntax::TYPE_FRACTION.to_string()))
+        }
+        BinOp::Add | BinOp::Sub | BinOp::Mul | BinOp::Div
             if same && lt == crate::Syntax::TYPE_COMPLEX =>
         {
             Some(Type::Named(crate::Syntax::TYPE_COMPLEX.to_string()))
         }
         BinOp::Eq | BinOp::Ne if same && is_decimal_type_name(lt) => {
+            Some(Type::Bool)
+        }
+        BinOp::Eq | BinOp::Ne if same && lt == crate::Syntax::TYPE_FRACTION => {
             Some(Type::Bool)
         }
         _ => None,

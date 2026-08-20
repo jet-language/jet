@@ -1842,23 +1842,6 @@ pub fn compile_fuzz_with_path(
     with_compiler_stack(|| Driver::compile_fuzz(file, test_name))
 }
 
-/// D-BENCH1: compile for `jet bench` when the file has `#Bench` blocks —
-/// optional `main`, bodies type-checked in `Bench` mode, then lowered to the
-/// timing harness.
-pub fn compile_benches_with_path(
-    file: &str,
-) -> Result<(String, Option<FFI::FfiLink>), Vec<Diagnostic>> {
-    with_compiler_stack(|| Driver::compile_benches(file))
-}
-
-/// D-CMD-OVERRIDE1=C: compile the entry function override for `jet bench`.
-pub fn compile_bench_override_with_path(
-    src: &str,
-    file: &str,
-) -> Result<(String, Option<FFI::FfiLink>), Vec<Diagnostic>> {
-    let _ = src;
-    with_compiler_stack(|| Driver::compile_bench_override(file))
-}
 
 /// Does the entry file define one command-named function? The loader owns
 /// source discovery, so imported functions never accidentally become command
@@ -1868,21 +1851,6 @@ pub fn has_entry_fn(file: &str, name: &str) -> bool {
         Ok(bundle) => bundle.modules[bundle.entry].items.iter().any(|item| {
             matches!(item, AST::Item::Func(function) if function.name == name)
         }),
-        Err(_) => false,
-    })
-}
-
-/// D-BENCH1: does this entry file declare any `#Bench` blocks? `jet bench`
-/// uses per-region timing when it does, and falls back to whole-program timing
-/// otherwise. A load failure returns `false` so the caller surfaces the real
-/// compile error on its normal path.
-pub fn has_bench_blocks(file: &str) -> bool {
-    with_compiler_stack(|| match Loader::load_entry_with_overlay(file, None, false) {
-        Ok(bundle) => bundle
-            .modules
-            .iter()
-            .flat_map(|module| module.items.iter())
-            .any(|i| matches!(i, AST::Item::Bench(_))),
         Err(_) => false,
     })
 }

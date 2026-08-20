@@ -1,4 +1,5 @@
-//! D-SERVICE1=D / I9: `core.services` ambient includes Prelude `Services.rs`.
+//! D-SERVICE1=D / I9: the typed `core.service` slice includes Prelude
+//! `Services.rs`; older procedural helpers remain private migration machinery.
 
 use crate::AST::{CtReport, CtValue, Type};
 use crate::Diagnostics::{Diagnostic, Span};
@@ -1208,6 +1209,25 @@ pub fn take_mut_ok(value: CtValue) -> Result<(CtValue, CtValue), CtValue> {
         },
         other => Err(other),
     }
+}
+
+/// Marshal the compiler-owned declaration payload for `core.service.tree`.
+/// The public source surface cannot construct this string; TIR creates it only
+/// after sema accepts the typed worker declaration block.
+pub fn apply_typed_tree(value: &CtValue, span: Span) -> Result<CtValue, Diagnostic> {
+    let CtValue::Str(payload) = value else {
+        return Err(unsupported(
+            "core.service.tree needs a compiler declaration payload",
+            span,
+        ));
+    };
+    if !payload.starts_with(SERVICE_TREE_PAYLOAD_PREFIX) {
+        return Err(unsupported(
+            "core.service.tree received an invalid declaration payload",
+            span,
+        ));
+    }
+    Ok(tree_to_ct(&jet_services_tree_declared(payload.clone())))
 }
 
 pub fn apply(method: &str, args: &[CtValue], span: Span) -> Result<CtValue, Diagnostic> {

@@ -44,7 +44,6 @@ fn item_has_comptime_evaluation(item: &Item) -> bool {
         Item::Impl(value) => value.methods.iter().any(function),
         Item::Const(value) => value.is_comptime,
         Item::Test(value) => stmts_have_comptime_evaluation(&value.body),
-        Item::Bench(value) => stmts_have_comptime_evaluation(&value.body),
         Item::CodeModule(value) => value
             .body
             .as_deref()

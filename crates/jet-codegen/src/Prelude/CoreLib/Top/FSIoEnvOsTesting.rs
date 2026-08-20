@@ -968,8 +968,7 @@ fn jet_std_env_decode<T: __jet_Decode>(
         origins.push((entry.name, entry.segments.join(".")));
         jet_env_insert_tree(&mut tree, &entry.segments, entry.value);
     }
-    T::jet_decode_with_status(&tree)
-        .map(|(value, _)| value)
+    T::jet_decode(&tree)
         .map_err(|errors| {
             errors
                 .into_iter()

@@ -1097,8 +1097,6 @@ impl<'a> Parser<'a> {
             TokKind::KwConst => self.retired_const_def().map(Item::Const),
             TokKind::KwComptime => self.comptime_def().map(Item::Const),
             TokKind::Hash if self.at_test_def() => self.test_def().map(Item::Test),
-            // D-BENCH1/D-BENCH-MARKER1=A: `#Bench("name") { … }`.
-            TokKind::Hash if self.at_bench_def() => self.bench_def().map(Item::Bench),
             TokKind::Hash if self.at_persist_binding() => self.persist_def().map(Item::Const),
             TokKind::Hash if self.at_comptime_marker() => self.comptime_def().map(Item::Const),
             TokKind::Hash if self.at_known_lead() => self.comptime_def().map(Item::Const),

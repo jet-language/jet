@@ -30,6 +30,13 @@ mod inline_range_rt {
     include!("../../jet-codegen/src/Prelude/Core/InlineRange.rs");
 }
 
+// D-CONFIG-ENV1 / I9: source collection is the same Prelude fragment used by
+// generated AOT programs and the whole-program interpreter. This module only
+// supplies the resident heap adapter below.
+mod env_config_rt {
+    include!("../../jet-codegen/src/Prelude/Core/EnvConfig.rs");
+}
+
 mod codec_rt {
     pub(crate) mod jet_std {
         pub(crate) type JetDecimal = jet_foundation::Numeric::CtDecimal;
@@ -425,6 +432,174 @@ fn result_err_decode(path: &str, reason: &str) -> i64 {
         json_rt::FieldError::at(path, reason)
     };
     result_err_fields(errors)
+}
+
+fn clone_string_list(list: i64) -> Vec<String> {
+    Concurrency::with_runtime_mut(|rt| {
+        let len = rt.heap.list_len(list).unwrap_or(0);
+        (0..len)
+            .filter_map(|index| rt.heap.list_get_int(list, index))
+            .filter_map(|handle| rt.heap.clone_string(handle))
+            .collect()
+    })
+}
+
+fn env_config_insert_tree(
+    tree: &mut json_rt::DataTree,
+    segments: &[String],
+    value: String,
+) {
+    let json_rt::DataTree::Object(entries) = tree else {
+        return;
+    };
+    let Some(segment) = segments.first() else {
+        return;
+    };
+    if segments.len() == 1 {
+        if let Some((_, existing)) = entries
+            .iter_mut()
+            .find(|(name, _)| name.eq_ignore_ascii_case(segment))
+        {
+            *existing = json_rt::DataTree::Text(value);
+        } else {
+            entries.push((segment.clone(), json_rt::DataTree::Text(value)));
+        }
+        return;
+    }
+    if let Some((_, child)) = entries.iter_mut().find(|(name, child)| {
+        name.eq_ignore_ascii_case(segment)
+            && matches!(child, json_rt::DataTree::Object(_))
+    }) {
+        env_config_insert_tree(child, &segments[1..], value);
+    } else {
+        let mut child = json_rt::DataTree::Object(Vec::new());
+        env_config_insert_tree(&mut child, &segments[1..], value);
+        entries.push((segment.clone(), child));
+    }
+}
+
+fn alloc_env_config_origins(origins: &[(String, String)]) -> i64 {
+    Concurrency::with_runtime_mut(|rt| {
+        let list = rt.heap.alloc_empty_list();
+        for (name, path) in origins {
+            let record = rt.heap.alloc_record(2);
+            let name = rt.heap.alloc_string(name.clone());
+            let path = rt.heap.alloc_string(path.clone());
+            let _ = rt.heap.record_set_string(record, 0, name);
+            let _ = rt.heap.record_set_string(record, 1, path);
+            let _ = rt.heap.list_push_int(list, record);
+        }
+        list
+    })
+}
+
+/// Build the resident `DataTree` source carrier for `core.sys.decode`.
+///
+/// The source order, dotenv parser, prefix fold, nested-key split, and
+/// allowlist are all owned by `Prelude/Core/EnvConfig.rs`; this function only
+/// converts its result to the Cranelift heap ABI.
+fn jet_jit_env_config(prefix: i64, file: i64, allow: i64) -> i64 {
+    let prefix = clone_string(prefix);
+    let file = clone_string(file);
+    let allow = clone_string_list(allow);
+    if !env_config_rt::jet_env_config_file_is_project_relative(&file) {
+        return result_err_decode("", "E2416: Dotenv.file must be project-relative");
+    }
+    let dotenv = if file.is_empty() {
+        None
+    } else {
+        match std::fs::read_to_string(&file) {
+            Ok(text) => Some(text),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
+            Err(error) => {
+                return result_err_decode(
+                    "",
+                    &format!("E2416: cannot read Dotenv.file `{file}`: {error}"),
+                )
+            }
+        }
+    };
+    let process = crate::CoreHost::jit_env_snapshot_raw()
+        .into_iter()
+        .filter_map(|(name, value)| Some((name.into_string().ok()?, value.into_string().ok()?)));
+    let entries = match env_config_rt::jet_env_config_entries(
+        &prefix,
+        dotenv.as_deref(),
+        &allow,
+        process,
+    ) {
+        Ok(entries) => entries,
+        Err(reason) => return result_err_decode("", &format!("E2416: {reason}")),
+    };
+    let mut tree = json_rt::DataTree::Object(Vec::new());
+    let mut origins = Vec::with_capacity(entries.len());
+    for entry in entries {
+        origins.push((entry.name, entry.segments.join(".")));
+        env_config_insert_tree(&mut tree, &entry.segments, entry.value);
+    }
+    let tree = alloc_datatree(&tree);
+    let origins = alloc_env_config_origins(&origins);
+    let carrier = Concurrency::with_runtime_mut(|rt| {
+        let carrier = rt.heap.alloc_record(2);
+        let _ = rt.heap.record_set_int(carrier, 0, tree);
+        let _ = rt.heap.record_set_int(carrier, 1, origins);
+        carrier
+    });
+    result_ok(carrier as u64)
+}
+
+fn env_config_secret_path(path: &str) -> bool {
+    path.split(['.', '[', ']']).any(|segment| {
+        matches!(
+            segment.to_ascii_lowercase().as_str(),
+            "secret" | "password" | "token" | "key"
+        )
+    })
+}
+
+fn clone_env_config_origins(handle: i64) -> Vec<(String, String)> {
+    Concurrency::with_runtime_mut(|rt| {
+        let len = rt.heap.list_len(handle).unwrap_or(0);
+        (0..len)
+            .filter_map(|index| {
+                let record = rt.heap.list_get_int(handle, index)?;
+                let name = rt.heap.record_get_string(record, 0)?;
+                let path = rt.heap.record_get_string(record, 1)?;
+                Some((rt.heap.clone_string(name)?, rt.heap.clone_string(path)?))
+            })
+            .collect()
+    })
+}
+
+/// Reframe the existing typed decoder's `[FieldError]` list with its source
+/// environment variable. Success results pass through unchanged; all
+/// validation still comes from the regular generated Decode function.
+fn jet_jit_env_config_map(result: i64, origins: i64) -> i64 {
+    let Some(errors) = result_errors(result) else {
+        return result;
+    };
+    let origins = clone_env_config_origins(origins);
+    let mapped = errors
+        .into_iter()
+        .map(|mut error| {
+            let path = error.path.clone();
+            let origin = origins
+                .iter()
+                .find(|(_, mapped)| mapped.eq_ignore_ascii_case(&path))
+                .map(|(name, _)| name.as_str());
+            let reason = if env_config_secret_path(&path) {
+                "secret value rejected".to_string()
+            } else {
+                error.reason
+            };
+            error.reason = match origin {
+                Some(name) => format!("E2416: env var {name} -> {path}: {reason}"),
+                None => format!("E2416: config field {path}: {reason}"),
+            };
+            error
+        })
+        .collect();
+    result_err_fields(mapped)
 }
 
 fn hex_encode(bytes: &[u8]) -> String {
@@ -2123,6 +2298,8 @@ host_fns! {
     yaml_to_string: "jet_jit_yaml_to_string" => jet_jit_yaml_to_string: sig_unary;
     decode_error_show: "jet_jit_decode_error_show" => jet_jit_decode_error_show: sig_unary;
     encoding_error_show: "jet_jit_encoding_error_show" => jet_jit_encoding_error_show: sig_unary;
+    env_config: "jet_jit_env_config" => jet_jit_env_config: sig_ternary;
+    env_config_map: "jet_jit_env_config_map" => jet_jit_env_config_map: sig_binary;
 }
 
 

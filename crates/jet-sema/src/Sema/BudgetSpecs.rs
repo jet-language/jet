@@ -174,9 +174,14 @@ impl AttachmentCatalog {
 fn attachment_catalog(items: &[Item]) -> AttachmentCatalog {
     let mut catalog = AttachmentCatalog::default();
     for item in items {
-        if let Item::Bench(bench) = item {
-            if let Some(name) = &bench.name {
-                catalog.benches.insert(name.clone());
+        if let Item::Test(test) = item {
+            if test.body.iter().any(|statement| matches!(
+                statement,
+                Stmt::ScopeMember { name, .. } if name == crate::Syntax::SCOPE_TEST_MEASURE
+            )) {
+                if let Some(name) = &test.name {
+                    catalog.benches.insert(name.clone());
+                }
             }
             continue;
         }

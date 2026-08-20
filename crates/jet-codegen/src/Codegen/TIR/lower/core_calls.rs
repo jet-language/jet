@@ -1,4 +1,4 @@
-use crate::AST::{Expr, Lambda, LambdaBody, Stmt, StrPart, Type};
+use crate::AST::{Expr, Lambda, Type};
 use crate::Codegen::Cx;
 use crate::Codegen::TIR::core_closure_call_return_ty;
 use crate::Codegen::TIR::lower_lambda_expecting_value;
@@ -171,68 +171,17 @@ pub(super) fn core_module_path_from_receiver(
 /// pretending that arbitrary callback code is a service declaration.
 const SERVICE_TREE_PAYLOAD_PREFIX: &str = "\0jet.service.tree.v1\0";
 
-fn service_tree_literal_string(expr: &Expr) -> Option<String> {
-    let Expr::Str(parts, _) = expr else {
-        return None;
-    };
-    let mut value = String::new();
-    for part in parts {
-        match part {
-            StrPart::Lit(text) => value.push_str(text),
-            StrPart::Interp(_, _) => return None,
-        }
-    }
-    Some(value)
-}
-
 fn service_tree_payload(lambda: &Lambda) -> Option<String> {
-    let LambdaBody::Block(statements) = &lambda.body else {
-        return None;
-    };
-    let root = lambda.params.first()?.name.as_str();
-    let mut workers: Vec<(String, String)> = Vec::with_capacity(statements.len());
-    for statement in statements {
-        let Stmt::Expr(Expr::MethodCall {
-            receiver,
-            method,
-            args,
-            ..
-        }) = statement
-        else {
-            return None;
-        };
-        if method != "worker"
-            || args.len() != 2
-            || args.iter().any(|arg| arg.label.is_some())
-        {
-            return None;
-        }
-        let Expr::Ident(receiver_name, _) = receiver.as_ref() else {
-            return None;
-        };
-        if receiver_name != root {
-            return None;
-        }
-        let worker_name = service_tree_literal_string(&args[0].expr)?;
-        let handler = match &args[1].expr {
-            Expr::Ident(name, _) => name.clone(),
-            _ => return None,
-        };
-        if worker_name.trim().is_empty()
-            || worker_name.chars().any(char::is_control)
-            || worker_name.len() > 256
-            || handler.is_empty()
-            || handler.chars().any(char::is_control)
-            || handler.len() > 256
-            || workers.iter().any(|(name, _)| name == &worker_name)
-        {
-            return None;
-        }
-        workers.push((worker_name, handler));
-    }
+    let workers = jet_foundation::ServiceTree::worker_declarations(lambda)?;
     let mut payload = format!("{SERVICE_TREE_PAYLOAD_PREFIX}{}|", workers.len());
-    for (name, handler) in workers {
-        payload.push_str(&format!("{}:{}{}:{}", name.len(), name, handler.len(), handler));
+    for worker in workers {
+        payload.push_str(&format!(
+            "{}:{}{}:{}",
+            worker.name.len(),
+            worker.name,
+            worker.handler.len(),
+            worker.handler
+        ));
     }
     Some(payload)
 }

@@ -434,6 +434,23 @@ fn jet_jit_decimal_mul(a: i64, b: i64) -> i64 {
     push_decimal(left.mul(&right))
 }
 
+fn jet_jit_decimal_equal(a: i64, b: i64) -> i8 {
+    Concurrency::with_runtime_mut(|rt| {
+        let left = rt
+            .decimal_values
+            .get(a.saturating_sub(1) as usize)
+            .and_then(|value| value.as_ref());
+        let right = rt
+            .decimal_values
+            .get(b.saturating_sub(1) as usize)
+            .and_then(|value| value.as_ref());
+        match (left, right) {
+            (Some(left), Some(right)) => i8::from(left == right),
+            _ => 0,
+        }
+    })
+}
+
 fn jet_jit_decimal_to_string(a: i64) -> i64 {
     let text = with_decimal(a, |d| d.to_string_rep()).unwrap_or_else(|| "0".to_string());
     Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(text))
@@ -444,6 +461,16 @@ fn jet_jit_fraction_new(numerator: i64, denominator: i64) -> i64 {
     match CtFraction::new(numerator, denominator) {
         Some(f) => push_fraction(f).wrapping_add(1),
         None => 0,
+    }
+}
+
+fn jet_jit_fraction_from_parts(numerator: i64, denominator: i64) -> i64 {
+    match CtFraction::new(numerator, denominator) {
+        Some(f) => push_fraction(f),
+        None => {
+            trap_fraction("invalid exact quotient");
+            0
+        }
     }
 }
 
@@ -675,8 +702,10 @@ host_fns! {
     decimal_add: "jet_jit_decimal_add" => jet_jit_decimal_add: sig_binary;
     decimal_sub: "jet_jit_decimal_sub" => jet_jit_decimal_sub: sig_binary;
     decimal_mul: "jet_jit_decimal_mul" => jet_jit_decimal_mul: sig_binary;
+    decimal_equal: "jet_jit_decimal_equal" => jet_jit_decimal_equal: sig_compare;
     decimal_to_string: "jet_jit_decimal_to_string" => jet_jit_decimal_to_string: sig_unary;
     fraction_new: "jet_jit_fraction_new" => jet_jit_fraction_new: sig_binary;
+    fraction_from_parts: "jet_jit_fraction_from_parts" => jet_jit_fraction_from_parts: sig_binary;
     fraction_add: "jet_jit_fraction_add" => jet_jit_fraction_add: sig_binary;
     fraction_sub: "jet_jit_fraction_sub" => jet_jit_fraction_sub: sig_binary;
     fraction_mul: "jet_jit_fraction_mul" => jet_jit_fraction_mul: sig_binary;

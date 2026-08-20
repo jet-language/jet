@@ -621,6 +621,18 @@ pub fn apply_static_type_method(
     args: Vec<CtValue>,
     span: Span,
 ) -> Option<Result<CtValue, Diagnostic>> {
+    // D-AUTHORITY-NAME1=A: the interpreter/comptime carrier has the same
+    // ordinary-data shape as the Prelude value. Boundary narrowing is a later
+    // operation family; construction is the only surface in this slice.
+    if matches!(type_name, "Authority" | "JetAuthority")
+        && method == "workspace"
+        && args.is_empty()
+    {
+        return Some(Ok(CtValue::Struct {
+            type_name: crate::Syntax::TYPE_AUTHORITY.to_string(),
+            fields: Vec::new(),
+        }));
+    }
     if method == "new" {
         if let Some(result) = super::CollectionEval::prelude_new(type_name, args.clone(), span) {
             return Some(result);

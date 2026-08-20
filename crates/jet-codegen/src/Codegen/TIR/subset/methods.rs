@@ -353,7 +353,7 @@ pub(crate) fn method_call_in_subset(
     }
     if recv_type.as_deref() == Some("Shared") {
         return match method {
-            "read" | "edit" => {
+            "read" | "edit" | "read_txn" => {
                 args.len() == 1
                     && matches!(&args[0].expr, Expr::Lambda(lam) if lambda_in_subset(lam, cx, locals))
             }
@@ -1475,6 +1475,7 @@ pub(crate) fn static_method_call_in_subset(
         ("Clock", "new", 1)
             | ("Clock", "system", 0)
             | ("Clock", "now", 0)
+            | ("Authority", "workspace", 0)
             | ("Date", "today", 0)
             | ("Path", "home", 0)
     ) {

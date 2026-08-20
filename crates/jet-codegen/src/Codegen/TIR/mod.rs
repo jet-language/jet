@@ -3103,12 +3103,12 @@ pub struct TPanicLoc {
 }
 
 pub enum TRequireKind {
-    /// `require(cond[, msg])`
+    /// `assert(cond[, msg])`
     Require {
         cond: Box<TExpr>,
         msg: Option<Box<TExpr>>,
     },
-    /// `require_eq(left, right)`
+    /// `assert_eq(left, right)`
     RequireEq {
         left: Box<TExpr>,
         right: Box<TExpr>,
@@ -3872,14 +3872,14 @@ pub enum TExprKind {
     AmbientInput {
         prompt: Option<Box<TExpr>>,
     },
-    /// c109 Phase 26: a `require(cond[, msg])` / `require_eq(a, b)` / `panic(msg)`
+    /// c109 Phase 26: an `assert(cond[, msg])` / `assert_eq(a, b)` / `panic(msg)`
     /// rich-runtime-report builtin (S36). Structured facts only — emit formats
     /// `jet_panic_rich` / test-mode `return Err` (I3: no `cx.src` re-read for
     /// location; `loc` was captured at lowering).
     RequireStop {
         kind: TRequireKind,
         loc: TPanicLoc,
-        /// True only for the unconditional builtin `panic(...)`; `require`
+        /// True only for the unconditional builtin `panic(...)`; `assert`
         /// may fall through when the condition holds.
         always_stops: bool,
     },
@@ -5384,8 +5384,6 @@ pub enum THandleOp {
     StopwatchElapsedMillis,
     /// D-CMD-OVERRIDE1=C: `TestSuite.run()` calls the installed command runner.
     TestSuiteRun,
-    /// D-CMD-OVERRIDE1=C: `BenchSuite.run()` calls the installed command runner.
-    BenchSuiteRun,
     /// D-DET1 Clock: `now()` → `{root}jet_clock_now(&(recv))` (current ms, no advance).
     ClockNow,
     /// D-DET1 Clock: `tick(ms)` → `{root}jet_clock_tick(&mut (recv), a0)` (advance + read).

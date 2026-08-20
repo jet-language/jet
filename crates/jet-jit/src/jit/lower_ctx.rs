@@ -2073,6 +2073,36 @@ impl LowerCtx<'_, '_> {
             }
         }
         let target = self.erase_distinct_ty(target);
+        // `Secret` is a core crypto carrier, not a user record with a
+        // generated JIT decode function. Decode its wire text through the
+        // same `Secret.from_text` Prelude seam used by ordinary runtime code,
+        // while leaving the text-to-String validation and FieldError framing
+        // to the existing DataTree decoder.
+        if matches!(&target, Type::Named(name) if name == "Secret") {
+            let text_result = self.lower_datatree_decode(tree, &Type::String)?;
+            let is_ok = self.call_host(self.host.result_is_ok, &[text_result]);
+            let ok_block = self.b.create_block();
+            let err_block = self.b.create_block();
+            let merge = self.b.create_block();
+            self.b.append_block_param(merge, types::I64);
+            self.b.ins().brif(is_ok, ok_block, &[], err_block, &[]);
+
+            self.b.switch_to_block(err_block);
+            self.b.seal_block(err_block);
+            self.b.ins().jump(merge, &[text_result]);
+
+            self.b.switch_to_block(ok_block);
+            self.b.seal_block(ok_block);
+            let text = self.result_payload(text_result, &Type::String)?;
+            let secret = self.call_host(self.host.crypto.secret_from_text, &[text]);
+            let ok_tag = self.b.ins().iconst(types::I8, 1);
+            let decoded = self.call_host(self.host.result_new_i64, &[ok_tag, secret]);
+            self.b.ins().jump(merge, &[decoded]);
+
+            self.b.switch_to_block(merge);
+            self.b.seal_block(merge);
+            return Ok(self.b.block_params(merge)[0]);
+        }
         if Self::is_datatree_value_ty(&target) {
             let tag = self.b.ins().iconst(types::I8, 1);
             return Ok(self.call_host(self.host.result_new_i64, &[tag, tree]));
@@ -2422,6 +2452,66 @@ impl LowerCtx<'_, '_> {
 
     fn lower_typed_json_decode(&mut self, text: &TExpr, ok_ty: &Type) -> Result<Value, String> {
         self.lower_typed_tree_decode(text, ok_ty, self.host.encoding.json_parse_ordered)
+    }
+
+    /// `core.sys.decode<T>` source adapter. The host builds the same
+    /// environment-plus-dotenv DataTree carrier as the Prelude, then this
+    /// lowerer invokes the ordinary generated `Decode` function and reframes
+    /// only its existing FieldError list with the source variable name.
+    fn lower_typed_env_decode(
+        &mut self,
+        args: &[TExpr],
+        ok_ty: &Type,
+    ) -> Result<Value, String> {
+        if args.len() > 3 {
+            return Err(format!("jit core.sys.decode expects at most 3 arguments, got {}", args.len()));
+        }
+        let empty_string = |this: &mut Self, value: &str| {
+            let handle = this.runtime.heap.alloc_string(value.to_string());
+            this.b.ins().iconst(types::I64, handle)
+        };
+        let prefix = match args.first() {
+            Some(arg) => self.lower_expr(arg)?,
+            None => empty_string(self, ""),
+        };
+        let file = match args.get(1) {
+            Some(arg) => self.lower_expr(arg)?,
+            None => empty_string(self, ".env"),
+        };
+        let allow = match args.get(2) {
+            Some(arg) => self.lower_expr(arg)?,
+            None => self.call_host(self.host.coll.list_new, &[]),
+        };
+        let source = self.call_host(
+            self.host.encoding.env_config,
+            &[prefix, file, allow],
+        );
+        let is_ok = self.call_host(self.host.result_is_ok, &[source]);
+        let ok_block = self.b.create_block();
+        let err_block = self.b.create_block();
+        let merge = self.b.create_block();
+        self.b.append_block_param(merge, types::I64);
+        self.b.ins().brif(is_ok, ok_block, &[], err_block, &[]);
+
+        self.b.switch_to_block(err_block);
+        self.b.seal_block(err_block);
+        self.b.ins().jump(merge, &[source]);
+
+        self.b.switch_to_block(ok_block);
+        self.b.seal_block(ok_block);
+        let carrier = self.call_host(self.host.result_get_i64, &[source]);
+        let zero = self.b.ins().iconst(types::I64, 0);
+        let tree = self.call_host(self.host.struct_get_i64, &[carrier, zero]);
+        let one = self.b.ins().iconst(types::I64, 1);
+        let origins = self.call_host(self.host.struct_get_i64, &[carrier, one]);
+        let decoded = self.lower_datatree_decode_migrating(tree, ok_ty)?;
+        let mapped = self
+            .call_host(self.host.encoding.env_config_map, &[decoded, origins]);
+        self.b.ins().jump(merge, &[mapped]);
+
+        self.b.switch_to_block(merge);
+        self.b.seal_block(merge);
+        Ok(self.b.block_params(merge)[0])
     }
 
     /// D-HTTP-JSON1=A: body text under `limit`, then typed `#Codable` JSON decode.
@@ -8721,11 +8811,22 @@ impl LowerCtx<'_, '_> {
             }
             THostCall::Method { recv, method, args }
                 if matches!(&recv.ty, Type::Shared(_))
-                    && matches!(method.as_str(), "read" | "edit" | "edit_txn")
+                    && matches!(method.as_str(), "read" | "read_txn" | "edit" | "edit_txn")
                     && args.len() == 1 =>
             {
                 in_own_frame(|| -> Result<Value, String> {
                     let handle = self.lower_expr(recv)?;
+                    if method == "read_txn" {
+                        if !self.in_shared_transaction {
+                            return Err("jit Shared.read_txn outside #Transact".to_string());
+                        }
+                        let touch = self.module.declare_func_in_func(
+                            self.host.memory.shared_txn_touch,
+                            self.b.func,
+                        );
+                        self.b.ins().call(touch, &[handle]);
+                        self.emit_trap_check()?;
+                    }
                     let transactional = method == "edit_txn" && self.in_shared_transaction;
                     let TExprKind::Lambda(lambda) = &args[0].kind else {
                         return Err("jit Shared callback must be a lambda".to_string());
@@ -9444,6 +9545,9 @@ impl LowerCtx<'_, '_> {
             }
             Type::Named(name) if name == jet_foundation::Syntax::TYPE_COMPLEX => {
                 Ok(self.call_host(self.host.num.complex_to_string, &[value]))
+            }
+            Type::Named(name) if name == jet_foundation::Syntax::TYPE_FRACTION => {
+                Ok(self.call_host(self.host.num.fraction_to_string, &[value]))
             }
             Type::Named(name) if name == "ServiceUpgradeReceipt" => {
                 Ok(self.call_host(self.host.service_show, &[value]))
@@ -14388,6 +14492,12 @@ impl LowerCtx<'_, '_> {
                     }
                     if module == "core.sys" {
                         return in_own_frame(|| -> Result<Value, String> {
+                            if method == "decode" {
+                                if let Type::Result { ok, .. } = &expr.ty {
+                                    return self.lower_typed_env_decode(args, ok);
+                                }
+                                return Err("jit core.sys.decode needs a Result return type".to_string());
+                            }
                             let (host_id, arg_vals): (FuncId, Vec<Value>) = match method.as_str() {
                                 "name" if args.is_empty() => (self.host.core.os_name, vec![]),
                                 "family" if args.is_empty() => (self.host.core.os_family, vec![]),
@@ -18882,6 +18992,28 @@ impl LowerCtx<'_, '_> {
                             return Ok(self.call_host(self.host.memory.shared_new, &[value]));
                         });
                     }
+                    // D-AUTHORITY-NAME1=A: the JIT carries Authority as the
+                    // ordinary heap-record handle returned by the same static
+                    // Prelude construction seam. The rights payload is private
+                    // to that carrier until the narrowing slice lands.
+                    let is_authority_workspace = method.name == "workspace"
+                        && args.is_empty()
+                        && prelude_path.is_some_and(|path| {
+                            path == "JetAuthority" || path.ends_with("::JetAuthority")
+                    });
+                    if is_authority_workspace {
+                        let string_kind = self.b.ins().iconst(types::I64, 1);
+                        let rights = self
+                            .call_host(self.host.coll.sorted_set_new, &[string_kind]);
+                        let fields = self.b.ins().iconst(types::I64, 1);
+                        let handle = self.call_host(self.host.struct_new, &[fields]);
+                        let set = self
+                            .module
+                            .declare_func_in_func(self.host.struct_set_i64, self.b.func);
+                        let zero = self.b.ins().iconst(types::I64, 0);
+                        self.b.ins().call(set, &[handle, zero, rights]);
+                        return Ok(handle);
+                    }
                     // D-ENCSTREAM-SURFACE1: `EncodingLimits.safe()` — fixed defaults, no host.
                     let is_encoding_limits_safe = method.name == "safe"
                         && args.is_empty()
@@ -19351,6 +19483,7 @@ impl LowerCtx<'_, '_> {
                         ("Decimal", "sub") => self.host.num.decimal_sub,
                         ("Decimal", "mul") => self.host.num.decimal_mul,
                         ("Decimal", "to_string") => self.host.num.decimal_to_string,
+                        ("Fraction", "from_parts") => self.host.num.fraction_from_parts,
                         ("Fraction", "add") => self.host.num.fraction_add,
                         ("Fraction", "sub") => self.host.num.fraction_sub,
                         ("Fraction", "mul") => self.host.num.fraction_mul,
@@ -19379,7 +19512,8 @@ impl LowerCtx<'_, '_> {
                     let host_ref = self.module.declare_func_in_func(host_fn, self.b.func);
                     let call = self.b.ins().call(host_ref, &arg_vals);
                     let result = self.b.inst_results(call)[0];
-                    if func == "from_str" || matches!(func.as_str(), "add" | "sub" | "mul" | "div")
+                    if func == "from_str"
+                        || matches!(func.as_str(), "from_parts" | "add" | "sub" | "mul" | "div")
                         && type_name == "Fraction"
                     {
                         self.emit_trap_check()?;
@@ -27393,6 +27527,21 @@ impl LowerCtx<'_, '_> {
                 }
                 _ => {}
             }
+        }
+        if matches!(op, BinOp::Eq | BinOp::Ne)
+            && matches!((&lhs_ty, &rhs_ty), (
+                Type::Named(left),
+                Type::Named(right)
+            ) if left == jet_foundation::Syntax::TYPE_DECIMAL
+                && right == jet_foundation::Syntax::TYPE_DECIMAL)
+        {
+            let equal = self.call_host(self.host.num.decimal_equal, &[l, r]);
+            return Ok(if matches!(op, BinOp::Eq) {
+                equal
+            } else {
+                let one = self.b.ins().iconst(types::I8, 1);
+                self.b.ins().isub(one, equal)
+            });
         }
         // ProcessResult.signal is a packed Option carrier in the JIT record
         // (0 = None, payload + 1 = Some — `Process.rs` `alloc_process_result`).

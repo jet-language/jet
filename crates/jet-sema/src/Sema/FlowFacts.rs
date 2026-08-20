@@ -830,4 +830,18 @@ mod tests {
         store.leave_depth(2);
         assert_eq!(store.get("window"), Some(&10));
     }
+
+    #[test]
+    fn sendability_is_joined_in_the_shared_flow_store() {
+        let mut before = FlowFacts::default();
+        before.sendability.set("value", true);
+
+        let mut then = before.clone();
+        then.sendability.set("value", true);
+        let mut otherwise = before.clone();
+        otherwise.sendability.set("value", false);
+
+        let merged = FlowFacts::merge_paths(&before, &[then, otherwise]);
+        assert_eq!(merged.sendability.get("value"), Some(&false));
+    }
 }

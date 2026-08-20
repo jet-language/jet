@@ -154,7 +154,7 @@ fn jet_enc_toml_decode<T: __jet_Decode>(text: &String) -> Result<T, Vec<jet_std:
         jet_std::FieldError::one(format!("invalid TOML (line {}): {}", e.line, e.message))
     })?;
     // D-MIGRATE4: plain decode walks the migration chain silently (see json's).
-    Ok(T::jet_decode_with_status(&tree)?.0)
+    T::jet_decode(&tree)
 }
 
 // YAML typed decode: parse flat scalars into a DataTree::Object of Text, then decode.
@@ -176,7 +176,7 @@ fn jet_enc_yaml_decode<T: __jet_Decode>(text: &String) -> Result<T, Vec<jet_std:
         jet_std::FieldError::one(format!("invalid YAML (line {}): {}", e.line, e.message))
     })?;
     // D-MIGRATE4: plain decode walks the migration chain silently (see json's).
-    Ok(T::jet_decode_with_status(&tree)?.0)
+    T::jet_decode(&tree)
 }
 fn jet_enc_toml_to_string<T: __jet_Encode>(v: &T) -> String {
     jet_std::toml::render(&v.jet_encode())

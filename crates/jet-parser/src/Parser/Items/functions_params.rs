@@ -406,23 +406,39 @@ impl<'a> Parser<'a> {
             let mut arrow_return = false;
             let (return_type, return_type_span) = if has_prefix_effect {
                 arrow_return = true;
-                if self.type_starts_here() {
+                if self.legacy_result_type_starts_here() {
                     let (ty, span) = self.return_type()?;
+                    self.diags.push(Self::retired_signature_shape(
+                        prefix_effect_span.unwrap_or(span),
+                    ));
                     (Some(ty), Some(span))
                 } else if let Some((ty, span)) = self.parse_unit_fallible_return()? {
+                    self.diags.push(Self::retired_signature_shape(
+                        prefix_effect_span.unwrap_or(span),
+                    ));
                     (Some(ty), Some(span))
                 } else {
                     (None, None)
                 }
             } else if self.at_unified_arrow() {
                 arrow_return = true;
-                self.expect_unified_arrow("before a callable result type")?;
-                if self.type_starts_here() {
+                let arrow = self.bump();
+                let canonical_arrow = matches!(arrow.kind, TokKind::UnifiedArrow);
+                if self.legacy_result_type_starts_here() {
                     let (ty, span) = self.return_type()?;
+                    if canonical_arrow {
+                        self.diags.push(Self::retired_signature_shape(arrow.span));
+                    }
                     (Some(ty), Some(span))
                 } else if let Some((ty, span)) = self.parse_unit_fallible_return()? {
+                    if canonical_arrow {
+                        self.diags.push(Self::retired_signature_shape(arrow.span));
+                    }
                     (Some(ty), Some(span))
                 } else {
+                    // `:>` is the body marker when no result type follows.
+                    // Leave it for the body parser below.
+                    self.pos = self.pos.saturating_sub(1);
                     (None, None)
                 }
             } else if self.type_starts_here() {
@@ -451,6 +467,34 @@ impl<'a> Parser<'a> {
             ))
         }
 
+        /// D-SIG-SHAPE1=B: a result after an arrow is the retired signature
+        /// shape. Probe the type and require a declaration-body boundary, so
+        /// a list or parenthesized one-expression body stays an expression.
+        fn legacy_result_type_starts_here(&mut self) -> bool {
+            let saved_pos = self.pos;
+            let saved_diags = self.diags.len();
+            let saved_pending_type_gt = self.pending_type_gt;
+            let saved_type_generic_depth = self.type_generic_depth;
+            let saved_type_generic_chain_len = self.type_generic_chain.len();
+            let saved_type_generic_truncated = self.type_generic_truncated;
+            let parsed_span = self.return_type().ok().map(|(_, span)| span);
+            let parsed_end = parsed_span.map(|span| span.end);
+            let legacy_boundary = parsed_end.is_some_and(|end| {
+                matches!(
+                    self.peek().kind,
+                    TokKind::ColonColon | TokKind::Eq | TokKind::UnifiedArrow
+                ) || (matches!(self.peek().kind, TokKind::LBrace)
+                    && end < self.peek().span.start)
+            });
+            self.pos = saved_pos;
+            self.diags.truncate(saved_diags);
+            self.pending_type_gt = saved_pending_type_gt;
+            self.type_generic_depth = saved_type_generic_depth;
+            self.type_generic_chain.truncate(saved_type_generic_chain_len);
+            self.type_generic_truncated = saved_type_generic_truncated;
+            legacy_boundary
+        }
+
         /// Lookahead shared by signature parsing. `parse_opt_func_effects`
         /// accepts these old spellings too, so the migration stays readable.
         pub(super) fn func_effect_starts_here(&self) -> bool {
@@ -468,10 +512,14 @@ impl<'a> Parser<'a> {
         fn parse_optional_function_body_marker(&mut self) -> Option<Span> {
             match self.peek().kind {
                 TokKind::UnifiedArrow => Some(self.bump().span),
-                TokKind::ColonColon => Some(self.bump().span),
+                TokKind::ColonColon => {
+                    let span = self.bump().span;
+                    self.diags.push(Self::retired_function_body(span, "::"));
+                    Some(span)
+                }
                 TokKind::Eq => {
                     let span = self.bump().span;
-                    self.diags.push(Self::retired_function_body(span));
+                    self.diags.push(Self::retired_function_body(span, "="));
                     Some(span)
                 }
                 _ => None,
@@ -614,6 +662,16 @@ impl<'a> Parser<'a> {
             )
         }
 
+        pub(in crate::Parser) fn retired_signature_shape(span: Span) -> Diagnostic {
+            Diagnostic::error(
+                "E0068",
+                "This callable uses the retired result-arrow shape.".to_string(),
+                "a return type sits after the parameter list, and `:>` introduces the body; an effect ceiling follows the return type".to_string(),
+                "write `fn name(...) Type :> body`, or `fn name(...) Type :[Effects]> { … }`".to_string(),
+                Some(span),
+            )
+        }
+
         // Turned on by the change that closes #2081, once `jet fmt` has
         // respelled the corpus. See Parser/mod.rs::expect_unified_arrow.
         #[allow(dead_code)]
@@ -627,13 +685,13 @@ impl<'a> Parser<'a> {
             )
         }
 
-        pub(in crate::Parser) fn retired_function_body(span: Span) -> Diagnostic {
+        pub(in crate::Parser) fn retired_function_body(span: Span, marker: &str) -> Diagnostic {
             Diagnostic::error(
                 "E0065",
-                "This function uses the retired `=` body marker.".to_string(),
-                "`:>` introduces a one-expression function body; `=` fills a slot inside a definition."
+                format!("This function uses the retired `{marker}` body marker."),
+                "A one-expression function body uses `:>`; `::` binds a name, and `=` fills a slot inside a definition."
                     .to_string(),
-                "Replace `=` with `:>`; `jet fmt` applies this fix.".to_string(),
+                format!("Replace `{marker}` with `:>`; `jet fmt` applies this fix."),
                 Some(span),
             )
         }

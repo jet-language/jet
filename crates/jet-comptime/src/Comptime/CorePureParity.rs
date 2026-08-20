@@ -583,6 +583,11 @@ pub(super) fn display(value: &CtValue) -> Option<String> {
     if core_type == crate::Syntax::TYPE_COMPLEX {
         return crate::Comptime::ComplexParity::to_string(value);
     }
+    if core_type == crate::Syntax::TYPE_FRACTION {
+        return crate::Numeric::CtFraction::from_value(value)
+            .ok()
+            .map(|fraction| fraction.to_string_rep());
+    }
     if core_type == "DateTime" {
         return datetime_string(value, Span::new(0, 0)).ok();
     }

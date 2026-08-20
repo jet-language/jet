@@ -936,35 +936,6 @@ fn env_config_map_result(value: CtValue, origins: &[(String, String)]) -> CtValu
     }
 }
 
-/// Internal migration report for a record that arrived in the current shape.
-fn migration_status_fresh() -> CtValue {
-    migration_status_value(false, String::new(), Vec::new())
-}
-
-/// D-MIGRATE4: internal migration report for a record that entered the chain at
-/// historical shape `start` and was walked forward through `total` steps. The
-/// names come from the same vocabulary codegen bakes into the chain-walker.
-fn migration_status(start: usize, total: usize) -> CtValue {
-    migration_status_value(
-        true,
-        crate::Codegen::TIR::migration_shape_name(start),
-        (start..total)
-            .map(|step| CtValue::Str(crate::Codegen::TIR::migration_step_name(step)))
-            .collect(),
-    )
-}
-
-fn migration_status_value(migrated: bool, from: String, steps: Vec<CtValue>) -> CtValue {
-    CtValue::Struct {
-        type_name: "JetMigrationStatus".to_string(),
-        fields: vec![
-            ("migrated".to_string(), CtValue::Bool(migrated)),
-            ("from".to_string(), CtValue::Str(from)),
-            ("steps".to_string(), CtValue::List(steps)),
-        ],
-    }
-}
-
 /// A CSV cell as text. The dynamic parser hands back `Str` cells; anything
 /// else renders through the shared display so no row silently reads empty.
 fn string_cell(value: &CtValue) -> String {
@@ -972,12 +943,6 @@ fn string_cell(value: &CtValue) -> String {
         CtValue::Str(text) => text.clone(),
         other => other.jet_show(),
     }
-}
-
-fn migration_did_run(status: &CtValue) -> bool {
-    matches!(status, CtValue::Struct { fields, .. }
-        if fields.iter().any(|(name, value)|
-            name == "migrated" && matches!(value, CtValue::Bool(true))))
 }
 
 /// The codec name the Prelude puts in `invalid <CODEC> (line n): …`.
@@ -1160,7 +1125,10 @@ fn eval_host_children(host: &THostCall) -> Vec<&TExpr> {
             })
             .collect(),
         THostCall::Method { recv, method, args } => {
-            let lazy_callback = matches!(method.as_str(), "read" | "edit" | "get_or_set" | "with");
+            let lazy_callback = matches!(
+                method.as_str(),
+                "read" | "read_txn" | "edit" | "get_or_set" | "with"
+            );
             std::iter::once(recv.as_ref())
                 .chain(args.iter().filter(move |arg| {
                     !(lazy_callback && matches!(&arg.kind, TExprKind::Lambda(_)))
@@ -2906,13 +2874,13 @@ impl<'a> EvalCtx<'a> {
     }
 
     /// Replay the D-MIGRATE4 chain over a tree the current shape rejected.
-    /// `Ok` carries the migrated tree and an internal report describing the
-    /// walk, the same `from`/`steps` the generated chain-walker reports.
+    /// `Ok` carries the migrated tree. The public decode result remains only
+    /// the decoded value or its accumulated field errors.
     fn apply_codec_migration(
         &mut self,
         type_name: &str,
         tree: &CtValue,
-    ) -> Result<Option<Result<(CtValue, CtValue), CtValue>>, Diagnostic> {
+    ) -> Result<Option<Result<CtValue, CtValue>>, Diagnostic> {
         let Some(plan) = self.codec_migrations.get(type_name).cloned() else {
             return Ok(None);
         };
@@ -2990,18 +2958,7 @@ impl<'a> EvalCtx<'a> {
                 }
             }
         }
-        Ok(Some(Ok((
-            datatree_object(pairs),
-            migration_status(start, plan.steps.len()),
-        ))))
-    }
-
-    fn eval_datatree_decode(
-        &mut self,
-        tree: CtValue,
-        ty: &Type,
-    ) -> Result<CtValue, Diagnostic> {
-        self.eval_datatree_decode_status(tree, ty, &mut None)
+        Ok(Some(Ok(datatree_object(pairs))))
     }
 
     /// `json|toml|yaml|csv . decode<T>`.
@@ -3036,8 +2993,8 @@ impl<'a> EvalCtx<'a> {
         } else {
             self.decode_codec_value(module, &target, text, span)?
         };
-        let (value, _) = match decoded {
-            Ok(pair) => pair,
+        let value = match decoded {
+            Ok(value) => value,
             Err(error) => return Ok(CtValue::failed(Box::new(error))),
         };
         Ok(CtValue::Present(Box::new(value)))
@@ -3050,7 +3007,7 @@ impl<'a> EvalCtx<'a> {
         target: &Type,
         text: String,
         span: Span,
-    ) -> Result<Result<(CtValue, CtValue), CtValue>, Diagnostic> {
+    ) -> Result<Result<CtValue, CtValue>, Diagnostic> {
         let parsed = if module == "core.encoding.json" {
             Ok(crate::Comptime::parse_ordered_json_for_tir(&text))
         } else {
@@ -3072,11 +3029,8 @@ impl<'a> EvalCtx<'a> {
             }
             _ => return Err(unsupported(&format!("`{module}.parse()` result"), span)),
         };
-        let mut status = None;
-        Ok(match self.eval_datatree_decode_status(tree, target, &mut status)? {
-            CtValue::Present(value) => {
-                Ok((*value, status.unwrap_or_else(migration_status_fresh)))
-            }
+        Ok(match self.eval_datatree_decode(tree, target)? {
+            CtValue::Present(value) => Ok(*value),
             CtValue::Failed(CtReport::Told(error)) => Err(*error),
             _ => unreachable!("Decode protocol returns Result"),
         })
@@ -3092,7 +3046,7 @@ impl<'a> EvalCtx<'a> {
         target: &Type,
         text: String,
         span: Span,
-    ) -> Result<Result<(CtValue, CtValue), CtValue>, Diagnostic> {
+    ) -> Result<Result<CtValue, CtValue>, Diagnostic> {
         let Type::List(item) = target else {
             return Err(unsupported("`core.encoding.csv.decode()` row type", span));
         };
@@ -3115,12 +3069,11 @@ impl<'a> EvalCtx<'a> {
         };
         let mut rows = rows.into_iter();
         let Some(CtValue::List(header)) = rows.next() else {
-            return Ok(Ok((CtValue::List(Vec::new()), migration_status_fresh())));
+            return Ok(Ok(CtValue::List(Vec::new())));
         };
         let header: Vec<String> = header.iter().map(string_cell).collect();
         let mut values = Vec::new();
         let mut errors = Vec::new();
-        let mut migration = migration_status_fresh();
         for (index, row) in rows.enumerate() {
             let cells = match row {
                 CtValue::List(cells) => cells,
@@ -3136,16 +3089,8 @@ impl<'a> EvalCtx<'a> {
                     })
                     .collect(),
             );
-            let mut status = None;
-            match self.eval_datatree_decode_status(tree, item, &mut status)? {
-                CtValue::Present(value) => {
-                    if let Some(status) = status {
-                        if migration_did_run(&status) && !migration_did_run(&migration) {
-                            migration = status;
-                        }
-                    }
-                    values.push(*value);
-                }
+            match self.eval_datatree_decode(tree, item)? {
+                CtValue::Present(value) => values.push(*value),
                 CtValue::Failed(CtReport::Told(error)) => {
                     if let CtValue::List(entries) =
                         decode_error_under(&format!("row {}", index + 1), *error)
@@ -3159,22 +3104,16 @@ impl<'a> EvalCtx<'a> {
         if !errors.is_empty() {
             return Ok(Err(CtValue::List(errors)));
         }
-        Ok(Ok((CtValue::List(values), migration)))
+        Ok(Ok(CtValue::List(values)))
     }
 
-    /// `status` carries an internal top-level migration report. Nested fields
-    /// pass `None`, so a nested migration cannot leak into its parent's report;
-    /// this matches AOT, where nested fields call plain `jet_decode`.
-    fn eval_datatree_decode_status(
-        &mut self,
-        tree: CtValue,
-        ty: &Type,
-        status: &mut Option<CtValue>,
-    ) -> Result<CtValue, Diagnostic> {
+    /// Decode through the same canonical value/error contract as AOT. Migration
+    /// is silent and remains inside this operation.
+    fn eval_datatree_decode(&mut self, tree: CtValue, ty: &Type) -> Result<CtValue, Diagnostic> {
         let result: Result<CtValue, CtValue> = match ty {
             Type::Named(name) if name == "DataTree" || name == "JSON" => Ok(tree),
             Type::InlineRange { base, lo, hi } => {
-                let decoded = self.eval_datatree_decode_status(tree, base, status)?;
+                let decoded = self.eval_datatree_decode(tree, base)?;
                 match decoded {
                     CtValue::Present(value) => match *value {
                         CtValue::Int(value) => match super::range_semantics::jet_inline_range_from_int(
@@ -3190,7 +3129,7 @@ impl<'a> EvalCtx<'a> {
                 }
             }
             Type::Quantity { base, .. } => {
-                return self.eval_datatree_decode_status(tree, base, status);
+                return self.eval_datatree_decode(tree, base);
             }
             Type::Int | Type::IntN { .. } => {
                 let decoded = match datatree_variant(&tree) {
@@ -3505,7 +3444,6 @@ impl<'a> EvalCtx<'a> {
                         return Ok(decoded);
                     }
                     if let Some(codec_name) = builtin_codec_name(ty) {
-                        *status = Some(migration_status_fresh());
                         return Ok(builtin_codec_decode(tree, codec_name));
                     }
                 }
@@ -3535,13 +3473,9 @@ impl<'a> EvalCtx<'a> {
                         }
                     }
                     match self.apply_codec_migration(&ty.name(), &tree)? {
-                        Some(Ok((migrated, walked))) => {
+                        Some(Ok(migrated)) => {
                             let mut child = HashMap::new();
-                            let out = self.run_func(func, vec![migrated], &mut child)?;
-                            if matches!(out, CtValue::Present(_)) {
-                                *status = Some(walked);
-                            }
-                            return Ok(out);
+                            return self.run_func(func, vec![migrated], &mut child);
                         }
                         Some(Err(error)) => {
                             return Ok(CtValue::failed(Box::new(error)));
@@ -3549,7 +3483,6 @@ impl<'a> EvalCtx<'a> {
                         None => {}
                     }
                 }
-                *status = Some(migration_status_fresh());
                 return Ok(result);
             }
             _ => Err(decode_error(
@@ -8162,7 +8095,16 @@ impl<'a> EvalCtx<'a> {
                             });
                             return Ok(CtValue::Unit);
                         }
-                        let editable = method != "read";
+                        if method == "read_txn" {
+                            let Some(transaction) = self.shared_transactions.last_mut() else {
+                                return Err(unsupported(
+                                    "Shared.read_txn outside #Transact",
+                                    self.span(),
+                                ));
+                            };
+                            transaction.transaction.touch(shared.protocol.clone());
+                        }
+                        let editable = method == "edit";
                         let _lease = shared
                             .acquire(editable, self.task_cancel.as_ref())
                             .ok_or_else(|| {
@@ -10573,7 +10515,7 @@ fn eval_precise_builtin(
     args: Vec<CtValue>,
     span: crate::Diagnostics::Span,
 ) -> Result<CtValue, Diagnostic> {
-    use jet_foundation::Numeric::CtDecimal;
+    use jet_foundation::Numeric::{CtDecimal, CtFraction};
 
     fn complex_part(value: &CtValue) -> Option<f64> {
         match value {
@@ -10622,6 +10564,14 @@ fn eval_precise_builtin(
                 .map_err(|_| unsupported(&format!("`Decimal(\"{s}\")`"), span)),
             _ => Err(unsupported("`Decimal.from_str`", span)),
         },
+        ("Fraction", "from_parts") => {
+            let [CtValue::Int(numerator), CtValue::Int(denominator)] = args.as_slice() else {
+                return Err(unsupported("`Fraction.from_parts`", span));
+            };
+            CtFraction::new(*numerator, *denominator)
+                .map(|fraction| fraction.to_value())
+                .ok_or_else(|| unsupported("invalid exact quotient", span))
+        }
         ("Decimal", "add" | "sub" | "mul" | "to_string")
         | (
             "Fraction",

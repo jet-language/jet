@@ -274,6 +274,15 @@ pub(crate) fn emit_host_call(call: &THostCall, recv_ty: Option<&Type>, cx: &Cx) 
                     arg_str
                 );
             }
+            if method == "read_txn" {
+                let stm = crate::Codegen::TIR::TLocal::stm().rust_place();
+                return format!(
+                    "({}).read_txn(&mut {}, {})",
+                    emit_tir_expr(recv, cx),
+                    stm,
+                    arg_str
+                );
+            }
             if matches!(&recv.ty, Type::Shared(_))
                 && matches!(method.as_str(), "guard_read" | "guard_edit")
             {
@@ -4109,9 +4118,6 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                 }
                 THandleOp::TestSuiteRun => {
                     format!("{}jet_test_suite_run(&mut ({}))", root, recv)
-                }
-                THandleOp::BenchSuiteRun => {
-                    format!("{}jet_bench_suite_run(&mut ({}))", root, recv)
                 }
                 // D-DET1: deterministic injected Clock/Rng capability methods.
                 THandleOp::ClockNow => format!("{}jet_clock_now(&({}))", root, recv),

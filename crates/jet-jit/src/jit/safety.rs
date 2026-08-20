@@ -3010,7 +3010,7 @@ fn resident_safe_expr_recursive(expr: &TExpr, callees: &HashSet<String>) -> bool
                     Type::Shared(_) => matches!(
                         (method.as_str(), args.len()),
                         ("guard_read" | "guard_edit" | "downgrade" | "strong_count", 0)
-                            | ("read" | "edit" | "edit_txn", 1)
+                            | ("read" | "read_txn" | "edit" | "edit_txn", 1)
                     ),
                     Type::Apply { name, .. }
                         if name == jet_foundation::Syntax::TYPE_SHARED_WEAK =>

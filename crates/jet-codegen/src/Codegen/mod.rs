@@ -15,10 +15,7 @@ use crate::Sema::CompileMode;
 use crate::Syntax;
 use crate::Traits;
 use crate::AST::FfiLink;
-use crate::AST::{
-    BenchDef, Expr, Func, Item, Program, ProgramBundle, ResolvedOutput, Stmt, TestDef,
-    Type,
-};
+use crate::AST::{Expr, Func, Item, Program, ProgramBundle, ResolvedOutput, Stmt, TestDef, Type};
 use std::collections::{HashMap, HashSet};
 
 pub(crate) use jet_foundation::Names::{mangle, mangle_generated, mangle_path};
@@ -2360,10 +2357,6 @@ fn allocator_constructor_types(items: &[Item], cx: &Cx) -> HashSet<String> {
                 let mut locals = HashSet::new();
                 collect_allocator_constructors(&def.body, cx, &mut locals, &mut found);
             }
-            Item::Bench(def) => {
-                let mut locals = HashSet::new();
-                collect_allocator_constructors(&def.body, cx, &mut locals, &mut found);
-            }
             Item::CodeModule(def) => {
                 if let Some(body) = &def.body {
                     found.extend(allocator_constructor_types(body, cx));
@@ -2695,7 +2688,7 @@ pub fn emit(prog: &Program, src: &str, file: &str) -> String {
             Item::EffectDecl(_)
             | Item::MarkerDecl(_)
             | Item::FactDecl(_)
-            | Item::Func(_) | Item::Impl(_) | Item::Test(_) | Item::Bench(_) | Item::ExternRust(_)
+            | Item::Func(_) | Item::Impl(_) | Item::Test(_) | Item::ExternRust(_)
             | Item::Module(_) | Item::CodeModule(_) | Item::ErrorConv(_)
             | Item::Tag(_) // D-QUAL2: tags erase
             | Item::TypeAlias(_) // D-TYPEALIAS1: erases
@@ -3902,7 +3895,7 @@ pub fn emit_tests(prog: &Program, src: &str, file: &str) -> String {
             Item::EffectDecl(_)
             | Item::MarkerDecl(_)
             | Item::FactDecl(_)
-            | Item::Func(_) | Item::Impl(_) | Item::Test(_) | Item::Bench(_) | Item::ExternRust(_)
+            | Item::Func(_) | Item::Impl(_) | Item::Test(_) | Item::ExternRust(_)
             | Item::Module(_) | Item::CodeModule(_) | Item::ErrorConv(_)
             | Item::Tag(_) // D-QUAL2: tags erase
             | Item::TypeAlias(_) // D-TYPEALIAS1: erases
@@ -4071,15 +4064,20 @@ fn emit_test_main_cov_mode(
     // D-CLAIM-BENCH1=A: measurement is an explicit test mode. A plain test
     // keeps every claim, while `--measure` selects only `.measure` claims.
     out.push_str("    let measure_mode = std::env::var_os(\"JET_TEST_MEASURE\").is_some();\n");
+    out.push_str("    let measure_evidence = std::env::var_os(\"JET_TEST_MEASURE_EVIDENCE\").is_some();\n");
     out.push_str("    if measure_mode { slots.retain(|s| s.measure && !s.skip); }\n");
     out.push_str("    if measure_mode {\n");
+    out.push_str("        fn jet_measure_hex(bytes: &[u8]) -> String { const H: &[u8; 16] = b\"0123456789abcdef\"; let mut out = String::with_capacity(bytes.len() * 2); for byte in bytes { out.push(H[(byte >> 4) as usize] as char); out.push(H[(byte & 15) as usize] as char); } out }\n");
     out.push_str("        let mut measured = 0usize;\n");
     out.push_str("        for slot in &slots {\n");
     out.push_str("            let mut samples = Vec::with_capacity(20);\n");
+    out.push_str("            let mut exact_samples: Vec<u128> = Vec::with_capacity(20);\n");
+    out.push_str("            let mut allocation_samples: Vec<(usize, usize)> = Vec::with_capacity(20);\n");
     out.push_str("            for _ in 0..20 {\n");
+    out.push_str("                jet_allocation_probe_reset();\n");
     out.push_str("                let started = std::time::Instant::now();\n");
     out.push_str("                match (slot.run)() {\n");
-    out.push_str("                    Ok(()) => samples.push(started.elapsed().as_nanos() as f64),\n");
+    out.push_str("                    Ok(()) => { let elapsed = started.elapsed().as_nanos(); exact_samples.push(elapsed); samples.push(elapsed as f64); allocation_samples.push(jet_allocation_probe_take()); }\n");
     out.push_str("                    Err(message) => { eprintln!(\"{}: FAIL during measurement: {}\", slot.name, message);\n");
     if override_entry.is_some() {
         out.push_str("                        return (measured as i64, 1); }\n");
@@ -4091,7 +4089,7 @@ fn emit_test_main_cov_mode(
     out.push_str("            let mean = samples.iter().sum::<f64>() / samples.len() as f64;\n");
     out.push_str("            let variance = samples.iter().map(|sample| (sample - mean) * (sample - mean)).sum::<f64>() / samples.len() as f64;\n");
     out.push_str("            let deviation = variance.sqrt();\n");
-    out.push_str("            if json { println!(\"{{\\\"name\\\":\\\"{}\\\",\\\"mean_ns\\\":{:.3},\\\"stddev_ns\\\":{:.3},\\\"samples\\\":{}}}\", slot.name, mean, deviation, samples.len()); } else { println!(\"{}: {:.3} ns ±{:.3} ({} samples)\", slot.name, mean, deviation, samples.len()); }\n");
+    out.push_str("            if measure_evidence { print!(\"JETBENCH1\\t{}\\t1\", jet_measure_hex(slot.name.as_bytes())); for sample in &exact_samples { print!(\"\\t{}\", sample); } println!(); print!(\"JETALLOC1\\t{}\\t1\", jet_measure_hex(slot.name.as_bytes())); for (count, bytes) in &allocation_samples { print!(\"\\t{}:{}\", count, bytes); } println!(); } else if json { println!(\"{{\\\"name\\\":\\\"{}\\\",\\\"mean_ns\\\":{:.3},\\\"stddev_ns\\\":{:.3},\\\"samples\\\":{}}}\", slot.name, mean, deviation, samples.len()); } else { println!(\"{}: {:.3} ns ±{:.3} ({} samples)\", slot.name, mean, deviation, samples.len()); }\n");
     out.push_str("            measured += 1;\n");
     out.push_str("        }\n");
     if override_entry.is_some() {
@@ -4728,7 +4726,6 @@ pub fn emit_bundle_tests(bundle: &ProgramBundle, link: Option<&FfiLink>) -> Stri
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum CommandOverrideKind {
     Test,
-    Bench,
 }
 
 /// D-COV1: emit the `jet test` harness, optionally with coverage instrumentation.
@@ -4743,8 +4740,7 @@ pub fn emit_bundle_tests_cov(
     emit_bundle_tests_cov_inner(bundle, link, coverage, false)
 }
 
-/// D-CMD-OVERRIDE1=C: emit the selected command override with the same
-/// checked test/bench bodies as the stock harness.
+/// D-CMD-OVERRIDE1=C: emit the selected test command override.
 pub fn emit_bundle_command_override(
     bundle: &ProgramBundle,
     link: Option<&FfiLink>,
@@ -4753,7 +4749,6 @@ pub fn emit_bundle_command_override(
 ) -> String {
     match kind {
         CommandOverrideKind::Test => emit_bundle_tests_cov_inner(bundle, link, coverage, true),
-        CommandOverrideKind::Bench => emit_bundle_benches_inner(bundle, link, true),
     }
 }
 
@@ -5373,296 +5368,4 @@ fn emit_fuzz_main(
     out.push_str("    }\n");
     out.push_str("    println!(\"{}: {} iteration(s), no failure found\", name, n);\n");
     out.push_str("}\n");
-}
-
-/// D-BENCH1: emit a benchmark harness binary — every definition plus a `main`
-/// that times each `#Bench("…") { }` region and reports ns/iter + ops/sec.
-/// Mirrors `emit_bundle_tests`; the only divergence is the per-block tail,
-/// which wraps each body in an auto-scaled timed loop instead of a pass/fail
-/// check. Each body is emitted exactly like a `#Test` body (a bare statement
-/// list in a `Result<(), String>` fn), so `return Err(…)` from `require` stays
-/// valid; the timing wrapper aborts the benchmark command on such an error
-/// instead of printing false timings.
-pub fn emit_bundle_benches(bundle: &ProgramBundle, link: Option<&FfiLink>) -> String {
-    emit_bundle_benches_inner(bundle, link, false)
-}
-
-fn emit_bundle_benches_inner(
-    bundle: &ProgramBundle,
-    link: Option<&FfiLink>,
-    command_override: bool,
-) -> String {
-    let entry = &bundle.modules[bundle.entry];
-    let bundle_auto_derives =
-        crate::Traits::TraitRegistry::bundle_auto_derives(bundle, &bundle.name_ledger);
-    let benches: Vec<&BenchDef> = entry
-        .items
-        .iter()
-        .filter_map(|i| match i {
-            Item::Bench(b) => Some(b),
-            _ => None,
-        })
-        .collect();
-    if !command_override {
-        assert!(
-            !benches.is_empty(),
-            "emit_bundle_benches called with no bench blocks"
-        );
-    }
-    // Benches never declare property params, so they never need the generator prelude.
-    let want_prop_prelude = false;
-    // D-COV1: coverage instrumentation is a `jet test` feature; benches don't use it.
-    let coverage = false;
-
-    let mut out = String::new();
-    out.push_str(&format!(
-        "// Generated by {} bench harness — do not edit.\n",
-        Syntax::BINARY_NAME
-    ));
-    out.push_str("#![allow(warnings)]\n\n");
-    if let Some(ffi) = link {
-        out.push_str(&format!("extern crate {};\n\n", ffi.crate_name));
-    }
-    push_cached_runtime_begin(&mut out, bundle, link);
-    out.push_str(TEST_PRELUDE);
-    out.push_str(TESTING_SHARED_PRELUDE);
-    out.push_str(REPORT_PRELUDE);
-    out.push_str(TEST_REPORT_PRELUDE);
-    if want_prop_prelude {
-        out.push_str(PROP_PRELUDE);
-    }
-    if coverage {
-        out.push_str(COV_PRELUDE);
-    }
-    out.push_str(CACHED_RUNTIME_END);
-    push_core_runtime(&mut out, bundle, true);
-    out.push('\n');
-    push_secret_decode_impl(&mut out, bundle, link);
-
-    let import_mods = import_mod_map(bundle, bundle.entry);
-    let extern_funcs = bundle_extern_funcs(bundle);
-
-    for (i, module) in bundle.modules.iter().enumerate() {
-        if i == bundle.entry {
-            continue;
-        }
-        let ns = module.alias.clone();
-        out.push_str(&format!("mod {} {{\n", mangle(&ns)));
-        out.push_str(MOD_USE);
-        out.push_str("use super::jet_stack_enter;\n");
-        let mut cx = build_cx_items(
-            &module.items,
-            &module.source,
-            &module.display,
-            link,
-            &extern_funcs,
-        );
-        populate_cx_module_facts(&mut cx, bundle, i);
-        cx.foreign_undos = bundle_foreign_undos(bundle, i);
-        apply_auto_derives(&mut cx, &bundle_auto_derives[i]);
-        cx.module_alias = module.alias.clone();
-        cx.core_archive_source = bundle.modules.iter().any(|module| module.alias == "core_archive");
-        cx.test_mode = true;
-        cx.coverage = coverage;
-        cx.import_mods = import_mod_map(bundle, i);
-        cx.foreign_types = foreign_type_map(bundle, i);
-        TIR::register_imported_struct_shapes(&mut cx, bundle, i);
-        register_foreign_enum_variants(&mut cx, bundle, i);
-        update_cloneability_with_foreign_types(&mut cx, &module.items);
-        cx.reexport_calls = reexport_call_map(bundle, i);
-        cx.import_sigs = import_sig_map(bundle, i);
-        cx.import_rets = import_ret_map(bundle, i);
-        cx.core_imports = core_import_map(bundle, i);
-        register_core_import_surfaces(&mut cx);
-        cx.used_core = bundle.used_core.clone();
-        cx.ffi_callback_fns = bundle.ffi_callback_fns.clone();
-        cx.root_prefix = "super::".to_string();
-        let (uinline, ufile) = unqualified_import_maps(bundle, i);
-        cx.unqualified_inline = uinline;
-        cx.unqualified_file = ufile;
-        let (inline, file, names, reexports) = inline_import_maps(bundle, i);
-        cx.inline_unqualified = inline;
-        cx.inline_unqualified_file = file;
-        cx.inline_import_names = names;
-        cx.inline_reexport_inline = reexports;
-        let (inline_core, reexport_core) = inline_core_import_maps(bundle, i);
-        cx.inline_core_imports = inline_core;
-        cx.inline_reexport_core = reexport_core;
-        cx.inline_foreign_imports = inline_foreign_import_maps(bundle, i);
-        let (inline_foreign_sigs, inline_foreign_rets) =
-            inline_foreign_import_signature_maps(bundle, i);
-        cx.inline_foreign_sigs = inline_foreign_sigs;
-        cx.inline_foreign_rets = inline_foreign_rets;
-        cx.inline_reexport_foreign = inline_foreign_reexport_maps(bundle, i);
-        let (inline_foreign_reexport_sigs, inline_foreign_reexport_rets) =
-            inline_foreign_reexport_signature_maps(bundle, i);
-        cx.inline_foreign_reexport_sigs = inline_foreign_reexport_sigs;
-        cx.inline_foreign_reexport_rets = inline_foreign_reexport_rets;
-        emit_program_items(&cx, &module.items, &mut out, false, true);
-        out.push_str("}\n\n");
-    }
-
-    let mut cx = build_cx_items(
-        &entry.items,
-        &entry.source,
-        &entry.display,
-        link,
-        &extern_funcs,
-    );
-    populate_cx_module_facts(&mut cx, bundle, bundle.entry);
-    cx.foreign_undos = bundle_foreign_undos(bundle, bundle.entry);
-    apply_auto_derives(&mut cx, &bundle_auto_derives[bundle.entry]);
-    cx.module_alias = entry.alias.clone();
-    cx.core_archive_source = bundle.modules.iter().any(|module| module.alias == "core_archive");
-    cx.test_mode = true;
-    cx.coverage = coverage;
-    cx.import_mods = import_mods;
-    cx.foreign_types = foreign_type_map(bundle, bundle.entry);
-    TIR::register_imported_struct_shapes(&mut cx, bundle, bundle.entry);
-    register_foreign_enum_variants(&mut cx, bundle, bundle.entry);
-    update_cloneability_with_foreign_types(&mut cx, &entry.items);
-    cx.reexport_calls = reexport_call_map(bundle, bundle.entry);
-    cx.import_sigs = import_sig_map(bundle, bundle.entry);
-    cx.import_rets = import_ret_map(bundle, bundle.entry);
-    cx.core_imports = core_import_map(bundle, bundle.entry);
-    register_core_import_surfaces(&mut cx);
-    cx.used_core = bundle.used_core.clone();
-    cx.ffi_callback_fns = bundle.ffi_callback_fns.clone();
-    let (uinline, ufile) = unqualified_import_maps(bundle, bundle.entry);
-    cx.unqualified_inline = uinline;
-    cx.unqualified_file = ufile;
-    let (inline, file, names, reexports) = inline_import_maps(bundle, bundle.entry);
-    cx.inline_unqualified = inline;
-    cx.inline_unqualified_file = file;
-    cx.inline_import_names = names;
-    cx.inline_reexport_inline = reexports;
-    let (inline_core, reexport_core) = inline_core_import_maps(bundle, bundle.entry);
-    cx.inline_core_imports = inline_core;
-    cx.inline_reexport_core = reexport_core;
-    cx.inline_foreign_imports = inline_foreign_import_maps(bundle, bundle.entry);
-    let (inline_foreign_sigs, inline_foreign_rets) =
-        inline_foreign_import_signature_maps(bundle, bundle.entry);
-    cx.inline_foreign_sigs = inline_foreign_sigs;
-    cx.inline_foreign_rets = inline_foreign_rets;
-    cx.inline_reexport_foreign = inline_foreign_reexport_maps(bundle, bundle.entry);
-    let (inline_foreign_reexport_sigs, inline_foreign_reexport_rets) =
-        inline_foreign_reexport_signature_maps(bundle, bundle.entry);
-    cx.inline_foreign_reexport_sigs = inline_foreign_reexport_sigs;
-    cx.inline_foreign_reexport_rets = inline_foreign_reexport_rets;
-    // D-CMD-OVERRIDE1=C: see the test harness — the override `main` calls the
-    // Jet entry the driver installed, so this harness has to emit it.
-    let override_entry = command_override.then(|| {
-        command_override_entry(&entry.items)
-            .expect("Driver::swap_command_entry_point installs the override entry before codegen")
-    });
-    emit_program_items(&cx, &entry.items, &mut out, override_entry.is_some(), false);
-
-    out.push_str(
-        "fn jet_bench_check(result: Result<(), String>) {\n\
-    if let Err(error) = result {\n\
-        let message = format!(\"bench region failed: {}\", error);\n\
-        jet_runtime_boundary(|| jet_runtime_stop(\"E3001\", \"\", 0, &message));\n\
-    }\n\
-}\n\n",
-    );
-
-    // One body fn + one timing wrapper per bench. The body fn is shaped exactly
-    // like a test fn (so `require`'s `return Err(…)` compiles); the wrapper
-    // auto-scales the iteration count until a batch lasts >= 1ms, then collects
-    // 20 exact batch-duration samples and returns (elapsed_ns, iters). The
-    // command layer alone projects means/stddev or feeds exact rationals into
-    // the canonical performance-budget provider/evaluator.
-    for (i, bench) in benches.iter().enumerate() {
-        out.push_str(&format!(
-            "fn jet_bench_body_{}() -> Result<(), String> {{\n",
-            i
-        ));
-        emit_test_body(&cx, &bench.body, &mut out);
-        out.push_str("    Ok(())\n");
-        out.push_str("}\n\n");
-
-        out.push_str(&format!("fn jet_bench_{}() -> (Vec<u128>, Vec<(usize, usize)>, u64) {{\n", i));
-        out.push_str("    let mut iters: u64 = 1;\n");
-        out.push_str("    while iters < (1u64 << 30) {\n");
-        out.push_str("        let t0 = std::time::Instant::now();\n");
-        out.push_str(&format!(
-            "        for _ in 0..iters {{ jet_bench_check(std::hint::black_box(jet_bench_body_{}())); }}\n",
-            i
-        ));
-        out.push_str("        if t0.elapsed().as_millis() >= 1 { break; }\n");
-        out.push_str("        iters = iters.saturating_mul(2);\n");
-        out.push_str("    }\n");
-        out.push_str("    let mut samples: Vec<u128> = Vec::new();\n");
-        out.push_str("    let mut allocations: Vec<(usize, usize)> = Vec::new();\n");
-        out.push_str("    for _ in 0..20 {\n");
-        out.push_str("        jet_allocation_probe_reset();\n");
-        out.push_str("        let t0 = std::time::Instant::now();\n");
-        out.push_str(&format!(
-            "        for _ in 0..iters {{ jet_bench_check(std::hint::black_box(jet_bench_body_{}())); }}\n",
-            i
-        ));
-        out.push_str("        samples.push(t0.elapsed().as_nanos());\n");
-        out.push_str("        allocations.push(jet_allocation_probe_take());\n");
-        out.push_str("    }\n");
-        out.push_str("    (samples, allocations, iters)\n");
-        out.push_str("}\n\n");
-    }
-
-    if command_override {
-        out.push_str("fn jet_bench_command_run() -> (i64, i64) {\n");
-        out.push_str("    let output = jet_test_take_output();\n");
-        out.push_str("    if !output.is_empty() { print!(\"{}\", output); }\n");
-    } else {
-        out.push_str("fn main() {\n");
-        out.push_str("    jet_std_env_init();\n");
-        out.push_str(&format!(
-            "    jet_mem::jet_sentry_set_hardened({});\n",
-            cx.package_hardened
-        ));
-        out.push_str("    jet_gc::runtime_or_exit(jet_gc::initialize_trace());\n");
-    }
-    if command_override {
-        out.push_str("    let mut selected: i64 = 0;\n");
-    }
-    out.push_str("    let bench_filter = std::env::var(\"JET_BENCH_FILTER\").ok();\n");
-    out.push_str("    fn hex(bytes: &[u8]) -> String { const H: &[u8; 16] = b\"0123456789abcdef\"; let mut out = String::with_capacity(bytes.len() * 2); for byte in bytes { out.push(H[(byte >> 4) as usize] as char); out.push(H[(byte & 15) as usize] as char); } out }\n");
-    for (i, bench) in benches.iter().enumerate() {
-        let name = escape_rust_str(
-            bench
-                .name
-                .as_deref()
-                .expect("sema resolves every benchmark marker name before codegen"),
-        );
-        out.push_str(&format!(
-            "    {{\n        let name = {};\n        if bench_filter.as_ref().map_or(true, |filter| name.contains(filter.as_str())) {{\n        let (samples, allocations, iters) = jet_bench_{}();\n",
-            name,
-            i
-        ));
-        if command_override {
-            out.push_str("        selected += 1;\n");
-        }
-        out.push_str("        print!(\"JETBENCH1\\t{}\\t{}\", hex(name.as_bytes()), iters);\n");
-        out.push_str("        for sample in samples { print!(\"\\t{}\", sample); }\n        println!();\n");
-        out.push_str("        print!(\"JETALLOC1\\t{}\\t{}\", hex(name.as_bytes()), iters);\n");
-        out.push_str("        for (count, bytes) in allocations { print!(\"\\t{}:{}\", count, bytes); }\n        println!();\n");
-        out.push_str("        }\n    }\n");
-    }
-    if command_override {
-        out.push_str("    (selected, 0)\n");
-    }
-    out.push_str("}\n");
-    if let Some(entry_fn) = override_entry {
-        emit_command_override_main(
-            &entry_fn,
-            "jet_bench_suite_install",
-            "jet_bench_command_run",
-            "jet_bench_suite_status",
-            cx.package_hardened,
-            false,
-            &mut out,
-        );
-    }
-    strip_unused_os_signal_prelude(strip_unused_raylib_prelude(strip_unused_term_prelude(strip_unused_gc_prelude(
-        strip_unused_txn_prelude(strip_unused_mem_prelude(out)),
-    ))))
 }

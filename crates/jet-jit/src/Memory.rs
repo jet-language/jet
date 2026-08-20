@@ -1345,6 +1345,17 @@ fn jet_jit_shared_txn_begin() {
     });
 }
 
+fn jet_jit_shared_txn_touch(handle: i64) {
+    let Some(shared) = Concurrency::with_runtime_mut(|rt| shared(rt, handle)) else {
+        return;
+    };
+    SHARED_TRANSACTIONS.with(|transactions| {
+        if let Some(transaction) = transactions.borrow_mut().last_mut() {
+            transaction.transaction.touch(Arc::clone(&shared.protocol));
+        }
+    });
+}
+
 fn jet_jit_shared_txn_record(
     handle: i64,
     callback_ptr: i64,
@@ -1576,6 +1587,7 @@ host_fns! {
     shared_guard_end: "jet_jit_shared_guard_end" => jet_jit_shared_guard_end: unary_void;
     shared_guard_wait_once: "jet_jit_shared_guard_wait_once" => jet_jit_shared_guard_wait_once: binary;
     shared_txn_begin: "jet_jit_shared_txn_begin" => jet_jit_shared_txn_begin: Signature::new(cc);
+    shared_txn_touch: "jet_jit_shared_txn_touch" => jet_jit_shared_txn_touch: unary_void;
     shared_txn_record: "jet_jit_shared_txn_record" => jet_jit_shared_txn_record: quaternary;
     shared_txn_commit: "jet_jit_shared_txn_commit" => jet_jit_shared_txn_commit: Signature::new(cc);
     shared_txn_abort: "jet_jit_shared_txn_abort" => jet_jit_shared_txn_abort: Signature::new(cc);

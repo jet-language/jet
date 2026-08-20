@@ -941,6 +941,11 @@ fn builtin_static_return(ty: &Type, method: &str, nargs: usize) -> Option<Option
         (Type::Named(n), "now", 0) if n == crate::Syntax::CLOCK_TYPE => {
             Some(Some(Type::Named("Instant".to_string())))
         }
+        // D-AUTHORITY-NAME1=A: `Authority.workspace()` constructs the one
+        // named rights carrier. Its narrowing methods are a later slice.
+        (Type::Named(n), "workspace", 0) if n == crate::Syntax::TYPE_AUTHORITY => {
+            Some(Some(Type::Named(crate::Syntax::TYPE_AUTHORITY.to_string())))
+        }
         (Type::Named(n), "today", 0) if n == "Date" => {
             Some(Some(Type::Named("Date".to_string())))
         }

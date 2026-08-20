@@ -109,6 +109,22 @@ impl<'a> Interp<'a> {
             }
             return self.call_inline_closure(&recv, argv, span, scope);
         }
+        // D-AUTHORITY-NAME1=A: comptime static construction uses the same
+        // built-in seam as TIR interpretation.
+        if let Expr::Ident(type_name, _) = receiver {
+            if type_name == crate::Syntax::TYPE_AUTHORITY
+                && method == "workspace"
+                && args.is_empty()
+            {
+                return super::super::super::Builtins::apply_static_type_method(
+                    "JetAuthority",
+                    method,
+                    Vec::new(),
+                    span,
+                )
+                .expect("Authority.workspace is registered");
+            }
+        }
         // D-ENC-XML-SURFACE1=A: qualified safe whole-value XML constructors.
         // D-JSONCANON1=A: EncodingLimits.safe() for edition-2027 defaults.
         if method == "safe" && args.is_empty() {
@@ -631,9 +647,9 @@ impl<'a> Interp<'a> {
                                     "XML value cannot be projected for typed decode",
                                 ))))
                             }
-                        };
+                    };
                     return match self.typed_decode_top(&type_args[0], &projected, span) {
-                        Ok((value, _)) => Ok(CtValue::Present(Box::new(value))),
+                        Ok(value) => Ok(CtValue::Present(Box::new(value))),
                         Err(error) => Ok(CtValue::failed(Box::new(error))),
                     };
                 }
@@ -715,7 +731,7 @@ impl<'a> Interp<'a> {
                         }
                     };
                     return match self.typed_decode_top(&type_args[0], &tree, span) {
-                        Ok((value, _)) => Ok(CtValue::Present(Box::new(value))),
+                        Ok(value) => Ok(CtValue::Present(Box::new(value))),
                         Err(error) => Ok(CtValue::failed(Box::new(error))),
                     };
                 }

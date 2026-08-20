@@ -2717,7 +2717,56 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                 // `Complex` constructor before the precise rule below fires, but a
                 // comptime item or TirBridge fragment lowers the raw AST first
                 // (`eval_comptime_items` runs early), so the mix still arrives here.
-                let (lhs, rhs) = complexize_operands(*op, lhs, rhs, cx);
+                let (mut lhs, mut rhs) = complexize_operands(*op, lhs, rhs, cx);
+                // D-TYPE2-DEFAULT1 / D-NUMTYPE1: sema permits a Fraction to
+                // absorb a bare exact integer literal. Materialize that literal
+                // through the same Fraction Prelude constructor before the
+                // shared precise-builtin path runs.
+                let fraction_ty = Type::Named(Syntax::TYPE_FRACTION.to_string());
+                let fraction_from_int = |value: TExpr| TExpr {
+                    ty: fraction_ty.clone(),
+                    kind: TExprKind::PreciseBuiltin {
+                        type_name: Syntax::TYPE_FRACTION.to_string(),
+                        func: "from_parts".to_string(),
+                        args: vec![
+                            value,
+                            TExpr {
+                                ty: Type::Int,
+                                kind: TExprKind::IntLit(1, None),
+                            },
+                        ],
+                    },
+                };
+                if matches!(
+                    *op,
+                    BinOp::Add
+                        | BinOp::Sub
+                        | BinOp::Mul
+                        | BinOp::Div
+                        | BinOp::Eq
+                        | BinOp::Ne
+                ) {
+                    let lhs_fraction = lhs.ty == fraction_ty;
+                    let rhs_fraction = rhs.ty == fraction_ty;
+                    if lhs_fraction && rhs.ty == Type::Int {
+                        rhs = fraction_from_int(rhs);
+                    } else if rhs_fraction && lhs.ty == Type::Int {
+                        lhs = fraction_from_int(lhs);
+                    }
+                }
+                // D-TYPE2-DEFAULT1 amends D-INTDIV1: exact whole-number
+                // division constructs a rational before any machine arithmetic
+                // path can see the operands.
+                if *op == BinOp::Div && lhs.ty == Type::Int && rhs.ty == Type::Int {
+                    return TExpr {
+                        ty: fraction_ty,
+                        kind: TExprKind::PreciseBuiltin {
+                            type_name: Syntax::TYPE_FRACTION.to_string(),
+                            func: "from_parts".to_string(),
+                            args: vec![lhs, rhs],
+                        },
+                    };
+                }
                 // Overflow decision for trapping JetArith helpers. Prefer the
                 // resolved TIR operand types so call results, fields, and other
                 // shapes the AST replay cannot see still trap (I2 / #1484). The
@@ -2730,8 +2779,8 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                 // leaks — I2). A shift's
                 // overflow is governed by its LEFT operand's integer-ness (the value),
                 // never the count.
-                // D-INTDIV1=A: `Int / Int` is widened to Float before lowering, so
-                // those operands are not `is_integer()` here and keep bare `/`.
+                // Exact `Int / Int` returned above as a Fraction. Fixed-width
+                // integer division remains on the ordinary trapping path.
                 // Fixed-width `IntN` keeps same-width `/` and must trap via jet_div.
                 // D-MODSEM1=A: `%` and `%%` always call their Prelude helper above.
                 let tir_integer = lhs.ty.is_integer() || rhs.ty.is_integer();
@@ -2791,21 +2840,30 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                 } else {
                     lhs.ty.clone()
                 });
-                // D-DECIMAL1 / D-TYPE2-IMAG1=A: precise arithmetic lowers through
+                // D-DECIMAL1 / D-NUMTYPE1 / D-TYPE2-IMAG1=A: precise arithmetic lowers through
                 // the shared typed-value Prelude helpers.
                 if let (Type::Named(ln), Type::Named(rn)) = (&lhs.ty, &rhs.ty) {
                     if ln == rn
                     {
                         if let Some(result_ty) = crate::Sema::precise_binop_result(*op, ln, rn) {
-                            if matches!(op, BinOp::Add | BinOp::Sub | BinOp::Mul | BinOp::Div) {
+                            if matches!(
+                                *op,
+                                BinOp::Add
+                                    | BinOp::Sub
+                                    | BinOp::Mul
+                                    | BinOp::Div
+                                    | BinOp::Eq
+                                    | BinOp::Ne
+                            ) {
                                 let func = match op {
                                     BinOp::Add => "add",
                                     BinOp::Sub => "sub",
                                     BinOp::Mul => "mul",
                                     BinOp::Div => "div",
+                                    BinOp::Eq | BinOp::Ne => "equal",
                                     _ => unreachable!(),
                                 };
-                                return TExpr {
+                                let precise = TExpr {
                                     ty: result_ty,
                                     kind: TExprKind::PreciseBuiltin {
                                         type_name: ln.clone(),
@@ -2813,6 +2871,16 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                                         args: vec![lhs, rhs],
                                     },
                                 };
+                                if *op == BinOp::Ne {
+                                    return TExpr {
+                                        ty: Type::Bool,
+                                        kind: TExprKind::Unary {
+                                            op: crate::AST::UnOp::Not,
+                                            operand: Box::new(precise),
+                                        },
+                                    };
+                                }
+                                return precise;
                             }
                         }
                     }

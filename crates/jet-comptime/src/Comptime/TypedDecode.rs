@@ -1,12 +1,11 @@
 //! Card #392 pass 5: typed `Decode` dispatch at comptime — the machinery
 //! behind `json.decode<T>` (and the csv/toml/yaml
 //! siblings, plus `core.data.csv<T>`'s row decode). Mirrors AOT's derived
-//! `__jet_Decode::jet_decode` / `jet_decode_with_status` field-by-field walk from
-//! the shared typed codec item bodies and migration-chain walker
+//! `__jet_Decode::jet_decode` field-by-field walk from the shared typed codec
+//! item bodies and migration-chain walker
 //! and `Sema::SchemaMigration`'s `#PublishedSchema` migration chain
 //! byte-for-byte (R12 parity) — including error message text (E2410/E2412)
-//! and the `[FieldError]` / internal migration-report shape
-//! `jet_std` defines.
+//! and the canonical `[FieldError]` value defined by `jet_std`.
 //! parity: guard tests/corelib.rs::typed_codec_decode_matches_between_full_build_and_quick_run
 //!
 //! Operates directly on the `JSON`-tagged `CtValue` tree `JSONInterp`/
@@ -33,7 +32,7 @@ mod inline_range_semantics {
     include!("../../../jet-codegen/src/Prelude/Core/InlineRange.rs");
 }
 
-// ── [FieldError] / internal migration-report CtValue shape ────────────────
+// ── canonical [FieldError] CtValue shape ─────────────────────────────────
 
 pub(super) fn decode_error(reason: impl Into<String>) -> CtValue {
     decode_error_at("", reason)
@@ -90,35 +89,6 @@ pub(super) fn decode_error_under(seg: &str, e: CtValue) -> CtValue {
                 .collect(),
         ),
         other => decode_error(other.jet_show()),
-    }
-}
-
-fn migration_status(migrated: bool, from: String, steps: Vec<String>) -> CtValue {
-    CtValue::Struct {
-        type_name: "JetMigrationStatus".to_string(),
-        fields: vec![
-            ("migrated".to_string(), CtValue::Bool(migrated)),
-            ("from".to_string(), CtValue::Str(from)),
-            (
-                "steps".to_string(),
-                CtValue::List(steps.into_iter().map(CtValue::Str).collect()),
-            ),
-        ],
-    }
-}
-
-fn migration_status_fresh() -> CtValue {
-    migration_status(false, String::new(), Vec::new())
-}
-
-fn migration_migrated(status: &CtValue) -> bool {
-    match status {
-        CtValue::Struct { fields, .. } => fields
-            .iter()
-            .find(|(n, _)| n == "migrated")
-            .map(|(_, v)| matches!(v, CtValue::Bool(true)))
-            .unwrap_or(false),
-        _ => false,
     }
 }
 
@@ -1100,16 +1070,15 @@ impl<'a> Interp<'a> {
         Ok(())
     }
 
-    /// The typed decoder's full entry point — mirrors the generated
-    /// `jet_decode_with_status` path's
-    /// default (try `jet_decode`, report fresh) plus, for a
+    /// The typed decoder's full entry point — mirrors the generated canonical
+    /// `jet_decode` path's default (try current shape) plus, for a
     /// `#PublishedSchema` type with `migration { }` blocks, the runtime
     /// chain-walker (`emit_migration_chain_walker`): on failure, detect which
     /// historical shape the data's key set matches (newest first) and walk
     /// the step functions forward.
-    pub(super) fn typed_decode_top(&mut self, ty: &Type, tree: &CtValue, span: Span) -> Result<(CtValue, CtValue), CtValue> {
+    pub(super) fn typed_decode_top(&mut self, ty: &Type, tree: &CtValue, span: Span) -> Result<CtValue, CtValue> {
         match self.typed_decode_value(ty, tree, span) {
-            Ok(v) => Ok((v, migration_status_fresh())),
+            Ok(v) => Ok(v),
             Err(e) => {
                 let Type::Named(name) = ty else { return Err(e) };
                 let Some(sdef) = self.structs.get(name.as_str()).copied() else { return Err(e) };
@@ -1136,14 +1105,12 @@ impl<'a> Interp<'a> {
                         continue;
                     }
                     let Some(mut pairs) = object_pairs(tree) else { return Err(e) };
-                    let mut steps = Vec::new();
                     for i in j..shapes.len() {
                         self.apply_migration_step(sdef, style.as_deref(), blocks[i], &mut pairs, span)?;
-                        steps.push(format!("v{}->v{}", i + 1, i + 2));
                     }
                     let new_tree = rebuild_object(pairs);
                     let value = self.typed_decode_value(ty, &new_tree, span)?;
-                    return Ok((value, migration_status(true, format!("v{}", j + 1), steps)));
+                    return Ok(value);
                 }
                 Err(e)
             }
@@ -1185,7 +1152,7 @@ impl<'a> Interp<'a> {
             Err(e) => return Ok(CtValue::failed(Box::new(e))),
         };
         match self.typed_decode_top(ty, &tree, span) {
-            Ok((value, _)) => Ok(CtValue::Present(Box::new(value))),
+            Ok(value) => Ok(CtValue::Present(Box::new(value))),
             Err(e) => Ok(CtValue::failed(Box::new(e))),
         }
     }
@@ -1221,7 +1188,7 @@ impl<'a> Interp<'a> {
                 .collect();
             let tree = json_variant("Object", Some(CtValue::Map(entries.into_iter().collect())));
             match self.typed_decode_top(ty, &tree, span) {
-                Ok((v, _)) => values.push(v),
+                Ok(v) => values.push(v),
                 Err(e) => {
                     extend_decode_errors(
                         &mut errors,

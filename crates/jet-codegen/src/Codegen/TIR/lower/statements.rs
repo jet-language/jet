@@ -3768,13 +3768,32 @@ fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmt
                 );
             });
         }
-        // D-TXN1–D-TXN4 (ratified 2026-06-24): `#Transact(name) { … }` block. Bind the
-        // handle (typed `Transaction`) in a child env so `name.on_commit(…)` lowers
-        // against it without escaping the emitted Rust block. The
-        // `let mut <handle> = jet_transaction(); … <handle>.commit();` framing is
+        // D-TXN1–D-TXN4 (ratified 2026-06-24): `#Transact { … }` block. A named
+        // form binds the handle (typed `Transaction`) in a child env so
+        // `name.on_commit(…)` lowers against it without escaping the emitted Rust
+        // block. The `let mut <handle> = jet_transaction(); … <handle>.commit();` framing is
         // emitted in `emit_tir_stmt`; codegen is dumb (I3).
-        Stmt::Transact { name, body, .. } => {
+        Stmt::Transact {
+            name,
+            body,
+            implicit,
+            ..
+        } => {
             return in_own_frame(|| {
+                // D-CONC-SHARE1=A: a shared RHS is hoisted into an implicit
+                // transaction wrapper before the destination edit is queued.
+                // When that wrapper sits inside an authored #Transact, it must
+                // join the outer STM commit instead of opening a nested commit.
+                // The wrapper still needs a lexical block for its hoisted local.
+                if *implicit && cx.in_stm_transact.get() {
+                    let scoped = clone_env(env);
+                    return deferred_stmt(
+                        vec![LowerBody::scoped(body, scoped)],
+                        |mut lowered| TStmt::Region(
+                            lowered.pop().expect("joined shared access body was deferred"),
+                        ),
+                    );
+                }
                 let mut scoped = clone_env(env);
                 let handle = name.as_ref().map(|name| {
                     let slot = TLocal::user(name);

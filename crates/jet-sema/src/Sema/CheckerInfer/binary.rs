@@ -630,6 +630,29 @@ impl<'a> Checker<'a> {
         )
     }
 
+    fn is_exact_numeric_literal(expr: &Expr) -> bool {
+        match expr {
+            Expr::Int(..) | Expr::Float(..) => true,
+            Expr::Paren(inner, _) | Expr::Unary(crate::AST::UnOp::Neg, inner, _) => {
+                Self::is_exact_numeric_literal(inner)
+            }
+            _ => false,
+        }
+    }
+
+    fn known_measurement_expr(&self, expr: &Expr) -> bool {
+        matches!(
+            expr,
+            Expr::Call(call)
+                if call.name == "measurement"
+                    && self.funcs.get(&call.name).is_none()
+                    && self.lookup(&call.name).is_none()
+        )
+            || self
+                .operator_expr_type(expr)
+                .is_some_and(|ty| Self::is_measurement_type(&ty))
+    }
+
     fn zero_uncertainty(expr: &mut Box<Expr>, span: Span) {
         let value = std::mem::replace(expr, Box::new(Expr::Absent(span)));
         *expr = Box::new(Expr::Call(crate::AST::Call {
@@ -715,7 +738,12 @@ impl<'a> Checker<'a> {
         // Only a synthetic read/read hook borrows a non-Copy field operand.
         // Ordinary expressions retain the canonical owning-read clone rule.
         self.borrow_ctx = self.operator_operand_needs_borrow(lhs, op);
+        let saved_expected = self.expected_type.clone();
+        if Self::is_exact_numeric_literal(lhs) && self.known_measurement_expr(rhs) {
+            self.expected_type = Some(Type::Float);
+        }
         let lt = self.infer(lhs);
+        self.expected_type = saved_expected;
 
         // S31: pattern-shaped `==` before RHS name lookup.
         if op == BinOp::Eq {
@@ -749,10 +777,15 @@ impl<'a> Checker<'a> {
                 | BinOp::Gt
                 | BinOp::Ge
         ) {
-            self.expected_type = lt
-                .as_ref()
-                .filter(|_| expr_wants_expected_type(rhs))
-                .cloned();
+            self.expected_type = if lt.as_ref().is_some_and(Self::is_measurement_type)
+                && Self::is_exact_numeric_literal(rhs)
+            {
+                Some(Type::Float)
+            } else {
+                lt.as_ref()
+                    .filter(|_| expr_wants_expected_type(rhs))
+                    .cloned()
+            };
         }
         let rt = self.infer(rhs);
         self.expected_type = saved_expected;
@@ -855,11 +888,19 @@ impl<'a> Checker<'a> {
         }
 
         // D-TYPE2-UNCERT1=A: entering the measured grade is contagious.
-        // Ordinary Float values are exact with respect to uncertainty, so the
-        // checker inserts the canonical zero-uncertainty constructor.
+        // Exact numeric operands enter it through the canonical zero-uncertainty
+        // constructor; widening to the Measurement<Float> carrier is implicit.
         if matches!(op, BinOp::Add | BinOp::Sub | BinOp::Mul | BinOp::Div)
             && (Self::is_measurement_type(&lt) || Self::is_measurement_type(&rt))
         {
+            if lt != Type::Float && lt.numeric_widening_to(&Type::Float).is_some() {
+                self.widen_numeric_expr(lhs, &lt, &Type::Float);
+                lt = Type::Float;
+            }
+            if rt != Type::Float && rt.numeric_widening_to(&Type::Float).is_some() {
+                self.widen_numeric_expr(rhs, &rt, &Type::Float);
+                rt = Type::Float;
+            }
             if lt == Type::Float {
                 Self::zero_uncertainty(lhs, span);
                 lt = Type::Apply {
@@ -1608,7 +1649,7 @@ impl<'a> Checker<'a> {
             }
         }
 
-        // D-DECIMAL1: exact decimal operators.
+        // D-TYPE2-DEFAULT1 / D-NUMTYPE1: exact decimal and rational operators.
         {
             let lname = match &lt {
                 Type::Named(n) if !self.registry.contains(n) => n.clone(),
@@ -1620,6 +1661,8 @@ impl<'a> Checker<'a> {
             };
             if crate::Numeric::is_decimal_type_name(&lname)
                 || crate::Numeric::is_decimal_type_name(&rname)
+                || lname == crate::Syntax::TYPE_FRACTION
+                || rname == crate::Syntax::TYPE_FRACTION
             {
                 // D-TYPE2-DEFAULT1: an exact decimal may absorb an untyped
                 // integer literal. Keep the promotion at sema so TIR and all
@@ -1656,6 +1699,22 @@ impl<'a> Checker<'a> {
                         Some(span),
                     ));
                     return None;
+                }
+                let fraction_and_integer_literal =
+                    (lname == crate::Syntax::TYPE_FRACTION
+                        && rt == Type::Int
+                        && Self::is_bare_integer_literal(rhs))
+                        || (rname == crate::Syntax::TYPE_FRACTION
+                            && lt == Type::Int
+                            && Self::is_bare_integer_literal(lhs));
+                if fraction_and_integer_literal {
+                    return match op {
+                        BinOp::Add | BinOp::Sub | BinOp::Mul | BinOp::Div => Some(Type::Named(
+                            crate::Syntax::TYPE_FRACTION.to_string(),
+                        )),
+                        BinOp::Eq | BinOp::Ne => Some(Type::Bool),
+                        _ => None,
+                    };
                 }
                 if let Some(result) = precise_binop_result(op, &lname, &rname) {
                     return Some(result);
@@ -1717,15 +1776,12 @@ impl<'a> Checker<'a> {
                 }
             }
             BinOp::Add | BinOp::Sub | BinOp::Mul | BinOp::Div => {
-                // D-INTDIV1=A: `/` always answers the true quotient, so
-                // `7 / 2` is 3.5 rather than 3. Both sides move to Float first
-                // and the result is a Float. `/%` is the whole-number path.
-                // Sized widths keep the D-SG9 same-width rule and are not
-                // touched here.
+                // D-TYPE2-DEFAULT1 amends D-INTDIV1: `/` on exact whole numbers
+                // answers an exact Fraction. `/%` remains the whole-number
+                // floor path. Sized widths keep the D-SG9 same-width rule and
+                // are not touched here.
                 if op == BinOp::Div && lt == Type::Int && rt == Type::Int {
-                    self.widen_numeric_expr(lhs, &lt, &Type::Float);
-                    self.widen_numeric_expr(rhs, &rt, &Type::Float);
-                    return Some(Type::Float);
+                    return Some(Type::Named(crate::Syntax::TYPE_FRACTION.to_string()));
                 }
                 // D-VERDICT-1304-1: the widening join above rewrites both
                 // operands to one numeric type. Arithmetic keeps that type.

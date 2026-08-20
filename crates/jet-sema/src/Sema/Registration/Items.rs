@@ -521,7 +521,6 @@ impl<'a> ComptimeTypeResolver<'a> {
                 }
                 self.resolve_stmts(&mut test.body);
             }
-            Item::Bench(bench) => self.resolve_stmts(&mut bench.body),
             Item::ExternRust(block) => {
                 for function in &mut block.functions {
                     self.resolve_params(&mut function.params);
@@ -990,7 +989,6 @@ pub(crate) fn comptime_context_from_items(
             }
             Item::EffectDecl(_)
             | Item::Test(_)
-            | Item::Bench(_)
             | Item::Const(_)
             | Item::Trait(_)
             | Item::Tag(_) // D-QUAL2: tags contribute no comptime context

@@ -509,7 +509,6 @@ pub fn core_module_items(module: &str) -> Vec<String> {
             "fake_rng",
             "fake_data",
             "test_suite",
-            "bench_suite",
         ],
         // D-FILES-WRITE1 (merge, was `core.fs` + `core.files`): one module for
         // both whole-file convenience helpers and streaming handle constructors.

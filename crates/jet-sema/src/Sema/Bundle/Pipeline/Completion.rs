@@ -19,24 +19,6 @@ pub(super) fn complete_bundle_check(
     // owning module instead of a registry-order-dependent leaf name.
     check_strong_shared_cycles(&states, &name_ledger, &mut diags);
 
-    // D-CLAIM-BENCH1=A: `#Bench` is no longer a source-level claim. Keep the
-    // private benchmark compiler path available to the budget adapter while
-    // every user-facing compile teaches the one canonical measured-test form.
-    if !matches!(mode, CompileMode::Bench | CompileMode::BenchOverride) {
-        for module in &bundle.modules {
-            for item in &module.items {
-                let Item::Bench(bench) = item else { continue };
-                diags.push(Diagnostic::error(
-                    "E0927",
-                    "`#Bench` is a retired claim spelling".to_string(),
-                    "measurement is a mode of `#Test`, so Jet has one claim family".to_string(),
-                    "write `#Test(\"name\") { .measure { ... } }` and run `jet test --measure`".to_string(),
-                    Some(bench.name_span),
-                ));
-            }
-        }
-    }
-
     for idx in 0..bundle.modules.len() {
         for item in &bundle.modules[idx].items {
             let Item::Impl(i) = item else { continue };
@@ -108,9 +90,6 @@ pub(super) fn complete_bundle_check(
                 }
                 Item::Test(t) => {
                     walk_stmts_for_const_refs(&t.body, &const_names, &mut address_taken)
-                }
-                Item::Bench(b) => {
-                    walk_stmts_for_const_refs(&b.body, &const_names, &mut address_taken)
                 }
                 Item::EffectDecl(_)
                 | Item::MarkerDecl(_)

@@ -359,16 +359,6 @@ fn specialize_test(source: &crate::AST::TestDef, alias: &str,
     result
 }
 
-fn specialize_bench(source: &crate::AST::BenchDef, alias: &str,
-    types: &HashMap<String, Type>, values: &HashMap<String, crate::AST::CtValue>) -> crate::AST::BenchDef {
-    let mut result = source.clone();
-    substitute_expr(&mut result.name_expr, types, values);
-    result.name = None;
-    result.name_prefix = Some(alias.to_string());
-    substitute_stmts(&mut result.body, types, values);
-    result
-}
-
 fn specialize_trait(
     source: &crate::AST::TraitDef,
     params: &[ResolvedModuleParam],
@@ -512,7 +502,6 @@ fn specialize_nested_code_module(
             Item::Impl(def) => Some(Item::Impl(specialize_impl(def, params, args, types, values))),
             Item::ErrorConv(def) => Some(Item::ErrorConv(specialize_error_conv(def, types, values))),
             Item::Test(def) => Some(Item::Test(specialize_test(def, &module.name, types, values))),
-            Item::Bench(def) => Some(Item::Bench(specialize_bench(def, &module.name, types, values))),
             _ => None,
         }).collect()
     });
@@ -801,7 +790,7 @@ fn clone_definition_items(items: &[Item]) -> Vec<Item> {
         .iter()
         .filter(|item| matches!(item, Item::Func(_) | Item::Struct(_) | Item::Enum(_)
             | Item::Trait(_) | Item::Tag(_) | Item::Impl(_) | Item::ErrorConv(_)
-            | Item::Test(_) | Item::Bench(_) | Item::Const(_)))
+            | Item::Test(_) | Item::Const(_)))
         .cloned()
         .collect()
 }
@@ -827,7 +816,6 @@ fn specialize_nested_template_outer(
         Item::Impl(def) => Item::Impl(specialize_impl(&def, &[], &[], types, values)),
         Item::ErrorConv(def) => Item::ErrorConv(specialize_error_conv(&def, types, values)),
         Item::Test(def) => Item::Test(specialize_test(&def, &source.name, types, values)),
-        Item::Bench(def) => Item::Bench(specialize_bench(&def, &source.name, types, values)),
         Item::GenericModule(def) => Item::GenericModule(specialize_nested_template_outer(&def, types, values)),
         other => other,
     }).collect();
@@ -1560,11 +1548,6 @@ fn expand_alias(
         }
         if let Item::Test(def) = item {
             declarations.push(Item::Test(specialize_test(
-                def, &alias.name, &definition_types, &definition_values,
-            )));
-        }
-        if let Item::Bench(def) = item {
-            declarations.push(Item::Bench(specialize_bench(
                 def, &alias.name, &definition_types, &definition_values,
             )));
         }

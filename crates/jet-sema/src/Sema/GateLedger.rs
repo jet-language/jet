@@ -191,7 +191,6 @@ fn visit_items(source: &str, items: &[Item], ledger: &mut GateLedger) {
                 }
             }
             Item::Test(test) => visit_statements(source, &test.body, ledger),
-            Item::Bench(bench) => visit_statements(source, &bench.body, ledger),
             Item::CodeModule(module) => {
                 if let Some(body) = &module.body {
                     visit_items(source, body, ledger);

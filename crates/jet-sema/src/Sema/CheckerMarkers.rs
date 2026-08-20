@@ -409,7 +409,7 @@ pub(crate) fn resolve_static_rule_products(
         .filter(|application| {
             !matches!(
                 application.marker.name.as_str(),
-                Syntax::KW_TEST | Syntax::KW_BENCH
+                Syntax::KW_TEST
             )
         })
         .cloned()
@@ -442,12 +442,6 @@ pub(crate) fn resolve_static_rule_products(
                 }
                 (Syntax::KW_TEST, args, arg_labels, test.span)
             }
-            Item::Bench(bench) => (
-                Syntax::KW_BENCH,
-                vec![bench.name_expr.clone()],
-                vec![None],
-                bench.span,
-            ),
             _ => continue,
         };
         facts.push(crate::AST::AppliedRuleApplication {
@@ -461,11 +455,7 @@ pub(crate) fn resolve_static_rule_products(
                 ct: None,
             },
             target: Some(span),
-            site: Some(if name == Syntax::KW_TEST {
-                crate::Policy::RuleSite::Test
-            } else {
-                crate::Policy::RuleSite::Bench
-            }),
+            site: Some(crate::Policy::RuleSite::Test),
         });
     }
     let mut validated = HashMap::new();
@@ -666,11 +656,6 @@ pub(crate) fn resolve_static_rule_products(
         .filter(|(name, _, _)| name == Syntax::KW_TEST)
         .map(|(_, _, text)| text.clone())
         .collect();
-    let mut bench_names: VecDeque<_> = static_strings
-        .iter()
-        .filter(|(name, _, _)| name == Syntax::KW_BENCH)
-        .map(|(_, _, text)| text.clone())
-        .collect();
     for item in &mut module.items {
         let (name, prefix, text) = match item {
             Item::Test(test) => {
@@ -683,11 +668,6 @@ pub(crate) fn resolve_static_rule_products(
                     test_names.pop_front(),
                 )
             }
-            Item::Bench(bench) => (
-                &mut bench.name,
-                bench.name_prefix.as_deref(),
-                bench_names.pop_front(),
-            ),
             _ => continue,
         };
         let Some(text) = text else {

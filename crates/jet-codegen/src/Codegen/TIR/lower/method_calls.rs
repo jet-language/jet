@@ -5504,6 +5504,25 @@ fn lower_method_call_impl(
     // (Expression.rs ~L1644): `__jet_<Type>::__jet_<method>(args)`.
     if let Some(type_name) = static_call_type_name_lower(receiver, env) {
         return in_own_frame(|| {
+            // D-AUTHORITY-NAME1=A: keep construction as a Prelude static call
+            // so every engine receives the same named rights carrier.
+            if type_name == Syntax::TYPE_AUTHORITY
+                && method == "workspace"
+                && args.is_empty()
+            {
+                return TExpr {
+                    ty: resolved_ret
+                        .cloned()
+                        .unwrap_or_else(|| Type::Named(Syntax::TYPE_AUTHORITY.to_string())),
+                    kind: TExprKind::StaticCall {
+                        owner: rooted_owner("JetAuthority"),
+                        owner_type: None,
+                        method: TMethodRef::bare("workspace"),
+                        type_args: Vec::new(),
+                        args: Vec::new(),
+                    },
+                };
+            }
             if type_name == "Date" && method == "today" && args.is_empty() {
                 return in_own_frame(|| {
                     return TExpr {

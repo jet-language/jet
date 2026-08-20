@@ -4,7 +4,7 @@
 //! binding that maps a role to ordered mirrors, trust material, and an
 //! optional typed credential-provider label. Secrets never enter this file,
 //! URLs, argv, locks, or logs. Endpoint adapters exchange the same signed
-//! narinfo and canonical NAR bytes, and a capability failure is reported
+//! narinfo and canonical NAR bytes, and an access failure is reported
 //! before an object is made locally usable.
 
 use super::{NarInfo, Roots, StoreEntry};
@@ -1196,13 +1196,13 @@ fn publish_remote_atomic<'a>(
     let capabilities = endpoint.capabilities();
     if !capabilities.write {
         return Err(invalid(&format!(
-            "{} cache endpoint does not provide a write capability",
+            "{} cache endpoint does not provide write access",
             endpoint.label()
         )));
     }
     if !capabilities.promote {
         return Err(invalid(&format!(
-            "{} cache endpoint has no atomic promotion capability",
+            "{} cache endpoint has no atomic promotion support",
             endpoint.label()
         )));
     }
@@ -2061,7 +2061,7 @@ fn validate_endpoint(endpoint: &str) -> io::Result<()> {
     let parsed = parse_endpoint(endpoint)?;
     let caps = parsed.capabilities();
     if !caps.read {
-        return Err(invalid("cache endpoint does not provide read capability"));
+        return Err(invalid("cache endpoint does not provide read access"));
     }
     Ok(())
 }
@@ -2074,19 +2074,19 @@ fn validate_endpoint_binding(
     let caps = endpoint.capabilities();
     if !caps.read {
         return Err(invalid(&format!(
-            "{} cache endpoint does not provide a read capability",
+            "{} cache endpoint does not provide read access",
             endpoint.label()
         )));
     }
     if write && !caps.write {
         return Err(invalid(&format!(
-            "{} cache endpoint does not provide a write capability",
+            "{} cache endpoint does not provide write access",
             endpoint.label()
         )));
     }
     if !caps.trust {
         return Err(invalid(&format!(
-            "{} cache endpoint does not provide a trust capability",
+            "{} cache endpoint does not provide trust support",
             endpoint.label()
         )));
     }
@@ -2288,6 +2288,20 @@ mod tests {
             allow_write: false,
         };
         assert!(binding.validate().is_err());
+    }
+
+    #[test]
+    fn cache_write_errors_use_access_language() {
+        let binding = CacheBinding {
+            role: "public".to_string(),
+            mirrors: vec!["https://cache.example/jet".to_string()],
+            trust_key: PathBuf::from("/tmp/cache.key"),
+            credential_provider: None,
+            allow_write: true,
+        };
+        let error = binding.validate().unwrap_err().to_string();
+        assert!(error.contains("write access"), "{error}");
+        assert!(!error.contains("capability"), "{error}");
     }
 
     #[test]

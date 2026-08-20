@@ -4,15 +4,15 @@
 //! `shared expr` builds the cell (the parser's one construction shape).
 //! `handle.field` reads it, `handle.field = v` and `handle.field += v` write
 //! it, and each statement is one atomic locked step. Several statements commit
-//! together under `#Transact`. The `read(f)` / `edit(f)` closure spellings are
-//! retired at the source surface; expert guards and `Condition` are unchanged.
+//! together under `#Transact`. The compiler's internal read/edit seam is not a
+//! source spelling; expert guards and `Condition` are unchanged.
 //!
 //! One desugar owns the whole surface, and it targets the shape every
 //! execution tier already lowers:
 //!
 //! ```text
-//! label :: config.name      →  label :: config.read(v => v.name)
-//! config.hits += 1          →  config.edit(v => { v.hits += 1 })
+//! label :: config.name      →  internal locked-read call
+//! config.hits += 1          →  internal locked-edit call
 //! ```
 //!
 //! That keeps the semantics in the Prelude with engines only marshalling (I9).
@@ -28,10 +28,10 @@
 //! A statement that also reads another shared cell would otherwise nest one
 //! cell's lock inside another's, which is the only way plain access could
 //! deadlock. Such a statement is wrapped in a synthesized one-statement
-//! transaction: the other cell's read runs (and releases) in the body, the
-//! write defers, and the commit takes every participant's write lock through
-//! `jet_shared_acquire_ordered` — stable address order, one engine, no
-//! nesting. The synthesized transaction carries the commit plane only; the
+//! transaction: the other cell's read registers its participant and runs in
+//! the body, the write defers, and the commit takes every participant's write
+//! lock through `jet_shared_acquire_ordered` — stable address order, one
+//! engine, no nesting. The synthesized transaction carries the commit plane only; the
 //! D-TXN2 effect wall stays with transactions the author wrote.
 
 use super::*;
@@ -189,10 +189,12 @@ impl<'a> Checker<'a> {
         let op_span = *op_span;
         let field = field.clone();
         let other_cells = self.value_touches_another_shared_cell(value);
-        // An explicit transaction already owns the ordered commit. A nested
-        // synthesized transaction would commit this one statement early and
-        // break the user's multi-statement atomicity.
-        let needs_implicit_transaction = other_cells && self.txn_depth == 0;
+        // A deferred edit runs at commit, while every participant already has
+        // its write lock. Evaluate shared RHS reads in the transaction body so
+        // they cannot re-enter a lock held by that edit. The wrapper is a real
+        // implicit transaction outside an authored block; inside one, lowering
+        // erases the nested wrapper to a plain joined block.
+        let needs_implicit_transaction = other_cells;
         let handle = std::mem::replace(&mut **base, Expr::Absent(span));
         let value = std::mem::replace(value, Expr::Absent(span));
         *stmt = if needs_implicit_transaction {

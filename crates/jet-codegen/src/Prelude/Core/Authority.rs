@@ -5,3 +5,13 @@
 pub struct JetAuthority {
     rights: std::collections::BTreeSet<String>,
 }
+
+impl JetAuthority {
+    /// D-AUTHORITY-NAME1=A: the workspace authority starts with the workspace
+    /// rights set. Boundary operations may narrow it, but never widen it.
+    pub fn workspace() -> Self {
+        Self {
+            rights: std::collections::BTreeSet::new(),
+        }
+    }
+}

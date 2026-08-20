@@ -122,7 +122,6 @@ pub(crate) fn collect_used_core(
                     }
                 }
                 Item::Test(t) => collect_core_stmts(&t.body, &module_imports, &mut used, &mut spans, &mut ffi_cb),
-                Item::Bench(b) => collect_core_stmts(&b.body, &module_imports, &mut used, &mut spans, &mut ffi_cb),
                 Item::Const(c) => collect_core_expr(&c.value, &module_imports, &mut used, &mut spans, &mut ffi_cb),
                 Item::CodeModule(cm) => {
                     let Some(body) = &cm.body else { continue };

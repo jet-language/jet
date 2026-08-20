@@ -492,6 +492,9 @@ pub fn manifest_parse_diagnostic(path: &Path, err: &PackageParseError) -> Diagno
         }
         PackageParseError::ReservedSection(section) => e1209(&file, section),
         PackageParseError::BadEffectsBlock(detail) => e1221(&file, detail),
+        PackageParseError::RetiredAuthorityField { field, replacement } => {
+            e1206_retired_authority(&file, field, replacement)
+        }
         PackageParseError::BadMemoryPolicy { detail } => {
             e1206(&file, &format!("memory policy is malformed: {detail}"))
         }
@@ -528,23 +531,20 @@ fn e1206_unknown_field(field: &str) -> Diagnostic {
     )
 }
 
-/// D-EFFBUDGET1 (E1221): a malformed `effects:`/`grants:` block — an unknown
-/// field, a non-list value, or an effect name outside the closed D-EFF4
-/// vocabulary.
+/// D-AUTHORITY-MANIFEST1 (E1221): a malformed `authority:` block — an unknown
+/// field, a non-list value, or a right name outside the closed vocabulary.
 fn e1221(_file: &str, detail: &str) -> Diagnostic {
     Diagnostic::error(
         "E1221",
         format!(
-            "`{}` has a malformed `{}`/`{}` block",
+            "`{}` has a malformed `{}` block",
             Syntax::PACKAGE_FILE,
-            Syntax::MANIFEST_BLOCK_EFFECTS,
-            Syntax::MANIFEST_BLOCK_GRANTS,
+            Syntax::MANIFEST_BLOCK_AUTHORITY,
         ),
         detail.to_string(),
         format!(
-            "`{}: {{ allow: […], deny: […] }}` and `{}: {{ \"dep\": […] }}` only take effect names from the ten-effect vocabulary",
-            Syntax::MANIFEST_BLOCK_EFFECTS,
-            Syntax::MANIFEST_BLOCK_GRANTS,
+            "`{}: .{{ holds: {{ allow: […], deny: […] }}, grants: {{ \"dep\": […] }}, trust: {{ … }}, providers: {{ … }} }}` is the one package authority block and its rights must use the closed vocabulary",
+            Syntax::MANIFEST_BLOCK_AUTHORITY,
         ),
         None,
     )
@@ -573,6 +573,16 @@ fn e1206_retired_policy(_file: &str, field: &str, replacement: &str) -> Diagnost
         format!(
             "remove `{field}` for the default, or put `auto_derive` in `policy.lints.deny` as `{replacement}` to refuse auto-derive"
         ),
+        None,
+    )
+}
+
+fn e1206_retired_authority(_file: &str, field: &str, replacement: &str) -> Diagnostic {
+    Diagnostic::error(
+        "E1206",
+        format!("`{field}` is retired"),
+        format!("`{field}` moved into the one `authority:` block."),
+        format!("write `{replacement}` inside `authority: .{{ … }}`"),
         None,
     )
 }

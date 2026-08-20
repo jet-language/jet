@@ -159,47 +159,28 @@ impl<'a> Parser<'a> {
             })
         }
     
-        /// D-BENCH1/D-BENCH-MARKER1=A: true when cursor is at `#Bench`.
+        /// D-CLAIM-BENCH1=A: true when cursor is at the retired `#Bench` spelling.
         pub(in crate::Parser) fn at_bench_def(&self) -> bool {
             matches!(self.peek().kind, TokKind::Hash)
                 && matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::KW_BENCH)
         }
-    
-        /// Parse `#Bench("name") { … }` (D-BENCH1/D-BENCH-MARKER1=A). Structurally identical to
-        /// `test_def`; there is no retired lowercase spelling for benches.
-        pub(in crate::Parser) fn bench_def(&mut self) -> Result<crate::AST::BenchDef, Diagnostic> {
-            let item_start = self.peek().span.start;
-            let marker = self.parse_registered_marker_at_site(crate::Policy::RuleSite::Bench)?;
-            let arguments = self.bound_registered_rule_arguments(&marker)?;
-            let Some(name_argument) = arguments.parameter(0) else {
-                return Err(crate::Policy::marker_argument_shape_error(
-                    Syntax::KW_BENCH,
-                    marker.span,
-                ));
-            };
-            let (name, name_span) = match name_argument {
-                crate::AST::Expr::Str(parts, span) if parts.len() == 1 => match &parts[0] {
-                    crate::AST::StrPart::Lit(name) => (Some(name.clone()), *span),
-                    crate::AST::StrPart::Interp(..) => (None, *span),
-                },
-                other => (None, other.span()),
-            };
-            self.expect(TokKind::LBrace, "to open the benchmark body")?;
-            let body = self.block_stmts();
-            let bench = crate::AST::BenchDef {
-                span: Span::new(item_start, self.toks[self.pos.saturating_sub(1)].span.end),
-                name,
-                name_expr: name_argument.clone(),
-                name_prefix: None,
-                name_span,
-                body,
-            };
-            self.bind_rule_fact(
-                marker.name_span,
-                Some(bench.span),
-                crate::Policy::RuleSite::Bench,
-            );
-            Ok(bench)
+
+        /// `#Bench` is no longer an AST item. Consume its marker head and
+        /// teach the single measured-test spelling; top-level recovery skips
+        /// the retired body in the ordinary way.
+        pub(in crate::Parser) fn retired_bench_marker(
+            &mut self,
+        ) -> Result<crate::AST::Item, Diagnostic> {
+            self.bump();
+            let name = self.bump();
+            Err(Diagnostic::error(
+                "E0927",
+                "`#Bench` is retired".to_string(),
+                "measurement is a mode of `#Test`, so Jet has one claim family".to_string(),
+                "write `#Test(\"name\") { .measure { ... } }` and run `jet test --measure`"
+                    .to_string(),
+                Some(name.span),
+            ))
         }
     
         /// S14: a bare lowercase `test` introduces a test block only when followed by
@@ -678,11 +659,14 @@ impl<'a> Parser<'a> {
             let mut return_type_span = None;
             let mut arrow_return = false;
             if self.at_unified_arrow() {
+                let arrow = self.expect_unified_arrow("before a callable result type")?;
                 arrow_return = true;
-                self.expect_unified_arrow("before a callable result type")?;
                 let (ty, span) = self.return_type()?;
                 return_type = Some(ty);
                 return_type_span = Some(span);
+                if matches!(arrow.kind, TokKind::UnifiedArrow) {
+                    self.diags.push(Self::retired_signature_shape(arrow.span));
+                }
             } else if self.type_starts_here() {
                 let (ty, span) = self.return_type()?;
                 return_type = Some(ty);

@@ -249,7 +249,7 @@ mod tests {
         assert!(!SOURCE.contains("into("));
 
         let total = [
-            "print", "panic", "require", "assert", "assert_eq", "eprint", "file_exists",
+            "print", "panic", "assert", "assert_eq", "eprint", "file_exists",
             "channel",
         ];
         let result = ["input", "read_file", "write_file"];

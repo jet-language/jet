@@ -763,6 +763,22 @@ mod shared_protocol_tests {
     }
 
     #[test]
+    fn ordered_acquisition_uses_protocol_address_order() {
+        let first = JetSharedProtocol::new();
+        let second = JetSharedProtocol::new();
+        let expected = std::cmp::min(
+            std::sync::Arc::as_ptr(&first) as usize,
+            std::sync::Arc::as_ptr(&second) as usize,
+        );
+        let permits = jet_shared_acquire_ordered(vec![second, first]);
+        assert_eq!(
+            std::sync::Arc::as_ptr(&permits[0].protocol) as usize,
+            expected,
+            "multi-cell commit locks must use stable address order"
+        );
+    }
+
+    #[test]
     fn contended_transaction_waits_and_applies_its_body_once() {
         let protocol = JetSharedProtocol::new();
         let held = protocol.acquire(true, || false).unwrap();

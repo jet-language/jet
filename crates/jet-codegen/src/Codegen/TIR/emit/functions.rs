@@ -701,6 +701,23 @@ pub(crate) fn emit_tir_trait_method(
 ///   `Data` param becomes a borrow with an owned clone re-bound at the head (`let <tree> =
 ///   <tree>.clone();`), so the body reads an owned `Data` local exactly as written.
 pub(crate) fn emit_tir_serde_method(tir: &TFunc, codec: SerdeCodec, cx: &Cx, out: &mut String) {
+    let name = match codec {
+        SerdeCodec::Encode => "jet_encode",
+        SerdeCodec::Decode => "jet_decode",
+    };
+    emit_tir_serde_method_named(tir, codec, cx, out, name);
+}
+
+/// Emit a serde method with a compiler-private name. Migration-aware decoders
+/// use this only in an inherent helper impl; their one public trait entry point
+/// remains `jet_decode` and the generated chain walker calls that entry point.
+pub(crate) fn emit_tir_serde_method_named(
+    tir: &TFunc,
+    codec: SerdeCodec,
+    cx: &Cx,
+    out: &mut String,
+    name: &str,
+) {
     let indent = 1;
     let pad = "    ".repeat(indent);
     // E2-M12 D-OBS1: track the current function name for rich panic reports.
@@ -708,7 +725,7 @@ pub(crate) fn emit_tir_serde_method(tir: &TFunc, codec: SerdeCodec, cx: &Cx, out
     match codec {
         SerdeCodec::Encode => {
             out.push_str(&format!(
-                "{pad}fn jet_encode(&self) -> jet_std::DataTree {{\n"
+                "{pad}fn {name}(&self) -> jet_std::DataTree {{\n"
             ));
             emit_stack_guard(tir, cx, out, indent + 1);
             emit_sentry_gate(tir, cx, out, indent + 1);
@@ -732,7 +749,7 @@ pub(crate) fn emit_tir_serde_method(tir: &TFunc, codec: SerdeCodec, cx: &Cx, out
                 None => "Result<Self, Vec<jet_std::FieldError>>".to_string(),
             };
             out.push_str(&format!(
-                "{pad}fn jet_decode({tree}: &jet_std::DataTree) -> {ret} {{\n"
+                "{pad}fn {name}({tree}: &jet_std::DataTree) -> {ret} {{\n"
             ));
             emit_stack_guard(tir, cx, out, indent + 1);
             emit_sentry_gate(tir, cx, out, indent + 1);

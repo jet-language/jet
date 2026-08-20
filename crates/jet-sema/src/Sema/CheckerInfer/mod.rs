@@ -30,6 +30,10 @@ impl IntegerInterval {
         self.lo <= subset.lo && subset.hi <= self.hi
     }
 
+    pub(crate) fn contains_exact(self, value: &crate::Numeric::CtBigInt) -> bool {
+        exact_integer_fits(value, self.lo, self.hi)
+    }
+
     pub(crate) fn negated(self) -> Option<Self> {
         Some(Self::new(self.hi.checked_neg()?, self.lo.checked_neg()?))
     }

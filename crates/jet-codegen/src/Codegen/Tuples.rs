@@ -524,11 +524,6 @@ pub(crate) fn collect_type_shapes(items: &[Item]) -> CollectedTypeShapes {
                     collect_tuple_shapes_from_stmt(s, &mut out);
                 }
             }
-            Item::Bench(b) => {
-                for s in &b.body {
-                    collect_tuple_shapes_from_stmt(s, &mut out);
-                }
-            }
             Item::EffectDecl(_)
             | Item::MarkerDecl(_)
             | Item::FactDecl(_)

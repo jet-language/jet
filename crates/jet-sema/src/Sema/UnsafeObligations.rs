@@ -95,7 +95,6 @@ fn visit_item(
         }
         Item::Impl(implementation) => for function in &implementation.methods { visit_function(function, source, declarations, rule_facts, gates, result); },
         Item::Test(test) => visit_plain_body(&test.body, source, declarations, gates, result),
-        Item::Bench(bench) => visit_plain_body(&bench.body, source, declarations, gates, result),
         Item::CodeModule(module) => {
             if let Some(items) = &module.body {
                 for item in items { visit_item(item, source, declarations, rule_facts, gates, result); }
@@ -423,7 +422,6 @@ fn strip_item(item: &mut Item) {
         Item::Enum(definition) => { for function in &mut definition.methods { strip_body(&mut function.body); } for implementation in &mut definition.trait_impls { for function in &mut implementation.methods { strip_body(&mut function.body); } } }
         Item::Impl(implementation) => for function in &mut implementation.methods { strip_body(&mut function.body); },
         Item::Test(test) => strip_body(&mut test.body),
-        Item::Bench(bench) => strip_body(&mut bench.body),
         Item::CodeModule(module) => {
             if let Some(items) = &mut module.body {
                 for item in items { strip_item(item); }

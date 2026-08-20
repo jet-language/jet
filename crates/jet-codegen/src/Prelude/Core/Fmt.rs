@@ -33,6 +33,11 @@ fn pretty_fragment(value: &str, indent: usize) -> String {
     if body.trim().is_empty() {
         return format!("{prefix} {open}{close}").trim_start().to_string();
     }
+    if open == '['
+        && (body.trim() == ":" || body.trim().eq_ignore_ascii_case("redacted"))
+    {
+        return value.to_string();
+    }
     let mut out = String::new();
     if !prefix.is_empty() {
         out.push_str(prefix);

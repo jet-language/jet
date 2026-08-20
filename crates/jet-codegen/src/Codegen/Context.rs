@@ -4593,7 +4593,7 @@ pub(crate) fn build_cx_items(
             Item::EffectDecl(_)
             | Item::MarkerDecl(_)
             | Item::FactDecl(_)
-            | Item::Impl(_) | Item::Test(_) | Item::Bench(_) | Item::Module(_) | Item::ErrorConv(_)
+            | Item::Impl(_) | Item::Test(_) | Item::Module(_) | Item::ErrorConv(_)
             | Item::StateDecl(_) // D-STATE-DECL: erases
             | Item::ProtocolDecl(_) // D-PROTO1/D-PROTO2: erases
             | Item::UserDerive(_) // D-METADERIVE1=A: erase (expanded in sema)

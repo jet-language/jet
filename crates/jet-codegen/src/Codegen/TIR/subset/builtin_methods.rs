@@ -234,11 +234,11 @@ pub(crate) fn is_process_handle_method_name(
     }
 }
 
-/// D-TYPE2-UNCERT1=A: the source-visible Measurement observations.
+/// D-TYPE2-UNCERT1=A: Measurement observations plus the internal `sqrt` route.
 /// Arithmetic lowers directly from the ordinary operators to the resident
 /// Measurement handle op, so this table does not keep named arithmetic aliases.
 pub(crate) fn is_measurement_method_name(method: &str, nargs: usize) -> bool {
-    matches!((method, nargs), ("value" | "uncertainty", 0))
+    matches!((method, nargs), ("value" | "uncertainty" | "sqrt", 0))
 }
 
 /// D-PENDING1=B: is `(method, nargs)` a `Loadable<T,E>` method?
