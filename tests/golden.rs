@@ -74,6 +74,20 @@ fn assert_front_end(entry: &GoldenEntry, src: &str) {
     );
 }
 
+/// Does running this example start a service that serves until the process is
+/// stopped? One canonical answer, `jet::AST::bundle_serves_until_stopped` — the
+/// same fact `tests/dev_parts/support.rs` reads, never a stem list.
+fn example_serves_until_stopped(path: &Path) -> bool {
+    let Some(path) = path.to_str() else {
+        return false;
+    };
+    let Ok(mut bundle) = jet::Loader::load_entry(path) else {
+        return false;
+    };
+    let _ = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
+    jet::AST::bundle_serves_until_stopped(&bundle)
+}
+
 #[test]
 fn statement_attributes_codegen_shape() {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
@@ -526,6 +540,21 @@ fn check_golden_entry(entry: &GoldenEntry, env: &GoldenEnv) {
         stem,
         String::from_utf8_lossy(&out.stderr)
     );
+    // #2016 / D-WEBAPP-SERVE1=D: an `App`-returning entry is handed to
+    // `App::serve`, which binds a listener and then serves until the process is
+    // stopped. Such a program has no terminating stdout and no exit code of its
+    // own, so it cannot have a `.out` golden — running it here would hang the
+    // suite (or, for the three `App` examples, race a fixed port). It stays in
+    // the COMPILE universe: front end, I1, and I2 above all still apply.
+    // Held back by the canonical derived predicate — the same one
+    // `tests/dev_parts/support.rs` uses — so a fourth service example is
+    // classified instead of discovered as a timeout.
+    if example_serves_until_stopped(&entry.path) {
+        eprintln!(
+            "note: built examples/features/{stem}.jet; not run (service entry serves until stopped)"
+        );
+        return;
+    }
 
     let mut run_cmd = Command::new(&bin);
     if needs_gtk {

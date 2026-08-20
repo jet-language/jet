@@ -28,8 +28,15 @@ derive T.Summarize {
     fn compile_field_names(self) => String :: "{@type_name}: {@first},{@second},{@third} range={@range_start} effects={@method_effects} send={@method_sendability} moved={@method_movedness} track={@method_track_origin} view={@method_view_mutable} maturity={@method_maturity == .Experimental}"
 }
 
+// `reflect.of(x)` is legal exactly where `"{x}"` is, so a reflected type owns a
+// `Display`. A generic box cannot interpolate its `T` without a bound, so it
+// shows its own shape; the reflected FIELD still carries the substituted type.
 struct Box<T> {
     value: T
+
+    impl Display {
+        fn display(self) => String :: "Box"
+    }
 }
 
 #Summarize

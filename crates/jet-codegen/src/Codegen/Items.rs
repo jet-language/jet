@@ -1491,7 +1491,13 @@ fn emit_entry_invocation(
                 error = mangle_generated("entry_error"),
                 text = error_text(&mangle_generated("entry_error")),
             ),
-            None => format!("{indent}jet_runtime_boundary(|| {call}).serve();\n"),
+            // `serve()` runs INSIDE the boundary, like the fallible arm above
+            // and the service-target arm. Outside it, a stop raised while
+            // serving (bind failure, a handler's `panic`/bounds check) escapes
+            // as a bare `resume_unwind` payload the scheduler's panic hook
+            // suppresses: the process dies with exit 101 and no report at all,
+            // instead of the rendered E3001 and exit 70 the boundary owns.
+            None => format!("{indent}jet_runtime_boundary(|| {call}.serve());\n"),
         };
     }
     match entry_error {
@@ -2419,17 +2425,26 @@ pub(crate) fn emit_trait_impl(
     if let Some(s) = migration_struct {
         emit_migration_step_fns(cx, s, migration_style.as_deref(), out);
     }
+    // I2: the bridge impls stand beside the user impl emitted above, so they
+    // carry the SAME generic header. Emitting `impl JetDisplay for __jet_Box`
+    // for a `Box<T>` is rustc E0107 (missing generics) — a generated-code
+    // defect, never a user diagnostic. `tp_impl`/`tp_use` are empty for a
+    // non-generic type, so this is byte-identical there.
     if block.trait_name == crate::Syntax::TRAIT_DISPLAY {
         out.push_str(&format!(
-            "impl JetDisplay for {} {{\n    fn jet_display(&self) -> String {{ <{} as {}>::display(self) }}\n}}\n\n",
+            "impl{} JetDisplay for {}{} {{\n    fn jet_display(&self) -> String {{ <{}{} as {}>::display(self) }}\n}}\n\n",
+            tp_impl,
             mangle_path(type_name),
+            tp_use,
             mangle_path(type_name),
+            tp_use,
             crate::Codegen::mangle(crate::Syntax::TRAIT_DISPLAY),
         ));
     }
     if block.trait_name == crate::Syntax::TRAIT_DEBUG {
         out.push_str(&format!(
-            "impl JetDebug for {}{} {{\n    fn jet_debug(&self) -> String {{ <{}{} as __jet_Debug>::debug(self) }}\n}}\n\n",
+            "impl{} JetDebug for {}{} {{\n    fn jet_debug(&self) -> String {{ <{}{} as __jet_Debug>::debug(self) }}\n}}\n\n",
+            tp_impl,
             mangle_path(type_name),
             tp_use,
             mangle_path(type_name),
@@ -2616,17 +2631,24 @@ pub(crate) fn emit_external_trait_impl(
     if let Some(s) = migration_struct {
         emit_migration_step_fns(cx, s, migration_style.as_deref(), out);
     }
+    // I2: same rule as `emit_trait_impl` — the bridge impl repeats the user
+    // impl's generic header, or rustc rejects `impl JetDisplay for __jet_Box`
+    // with E0107.
     if trait_name == crate::Syntax::TRAIT_DISPLAY {
         out.push_str(&format!(
-            "impl JetDisplay for {} {{\n    fn jet_display(&self) -> String {{ <{} as {}>::display(self) }}\n}}\n\n",
+            "impl{} JetDisplay for {}{} {{\n    fn jet_display(&self) -> String {{ <{}{} as {}>::display(self) }}\n}}\n\n",
+            tp_impl,
             mangle_path(&i.type_name),
+            tp_use,
             mangle_path(&i.type_name),
+            tp_use,
             crate::Codegen::mangle(crate::Syntax::TRAIT_DISPLAY),
         ));
     }
     if trait_name == crate::Syntax::TRAIT_DEBUG {
         out.push_str(&format!(
-            "impl JetDebug for {}{} {{\n    fn jet_debug(&self) -> String {{ <{}{} as __jet_Debug>::debug(self) }}\n}}\n\n",
+            "impl{} JetDebug for {}{} {{\n    fn jet_debug(&self) -> String {{ <{}{} as __jet_Debug>::debug(self) }}\n}}\n\n",
+            tp_impl,
             mangle_path(&i.type_name),
             tp_use,
             mangle_path(&i.type_name),

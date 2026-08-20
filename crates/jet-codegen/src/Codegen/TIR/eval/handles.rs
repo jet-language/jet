@@ -325,13 +325,33 @@ fn reflect_handle(recv: &CtValue, method: &str, span: Span) -> Result<CtValue, D
         // HandleMethod evaluator routes it through `EvalCtx::show_value`; a
         // context-free fallback would silently use JetShow instead.
         "display" => Err(unsupported("reflect display evaluator", span)),
+        // D-ANY-JAI1: `.fields()` is populated for a struct receiver and empty
+        // for anything else. A carrier built without `__reflected_fields` means
+        // ONE of those two things, and the receiver says which: a non-struct
+        // value has no rows by construction (`reflect.of(42).fields()` is
+        // legitimately empty), while a struct value whose rows were never
+        // registered means this evaluator has no reflection model. The fragment
+        // evaluator behind comptime folding is assembled without the item walk
+        // that registers them (`eval::eval_expr_hook` / `eval_block_hook`), so
+        // answering "empty" there would bake a WRONG constant into the program
+        // — the declared fields are simply invisible. Decline instead, and the
+        // call stays a runtime `reflect.of(...)` the AOT/JIT emitters build
+        // from the registered rows.
         "fields" => match recv {
-            CtValue::Struct { type_name, fields } if type_name == "__Reflect" => Ok(fields
+            CtValue::Struct { type_name, fields } if type_name == "__Reflect" => fields
                 .iter()
                 .find_map(|(name, value)| {
                     (name == "__reflected_fields").then_some(value.clone())
                 })
-                .unwrap_or_else(|| CtValue::List(Vec::new()))),
+                .map_or_else(
+                    || match reflect_inner(recv) {
+                        Some(CtValue::Struct { .. }) => {
+                            Err(unsupported("reflect fields evaluator", span))
+                        }
+                        _ => Ok(CtValue::List(Vec::new())),
+                    },
+                    Ok,
+                ),
             _ => Err(unsupported("reflect value", span)),
         },
         "name" => match recv {
