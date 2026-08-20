@@ -106,58 +106,6 @@ fn run() {
     assert_tiers_agree("tir_generated_name_patterns", src, "7\n6\nok:7:7:6\n");
 }
 
-#[test]
-fn binary_pattern_u24_both_endians_match_all_tiers() {
-    let src = r#"fn run() {
-    packet :: [U8].{1, 0, 0, 1, 0, 0}
-    if packet == {
-        [U8].{"{be:U24be}{le:U24le}"} -> { print("{be} {le}") }
-        else -> { print("miss") }
-    }
-}
-"#;
-    assert_tiers_agree("binary_pattern_u24_tiers", src, "65536 1\n");
-}
-
-#[test]
-fn binary_pattern_u40_both_endians_match_all_tiers() {
-    let src = r#"fn run() {
-    packet :: [U8].{1, 0, 0, 0, 0, 1, 0, 0, 0, 0}
-    if packet == {
-        [U8].{"{be:U40be}{le:U40le}"} -> { print("{be} {le}") }
-        else -> { print("miss") }
-    }
-}
-"#;
-    assert_tiers_agree("binary_pattern_u40_tiers", src, "4294967296 1\n");
-}
-
-#[test]
-fn binary_pattern_u48_both_endians_match_all_tiers() {
-    let src = r#"fn run() {
-    packet :: [U8].{1, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0}
-    if packet == {
-        [U8].{"{be:U48be}{le:U48le}"} -> { print("{be} {le}") }
-        else -> { print("miss") }
-    }
-}
-"#;
-    assert_tiers_agree("binary_pattern_u48_tiers", src, "1099511627776 1\n");
-}
-
-#[test]
-fn binary_pattern_u56_both_endians_match_all_tiers() {
-    let src = r#"fn run() {
-    packet :: [U8].{1, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0}
-    if packet == {
-        [U8].{"{be:U56be}{le:U56le}"} -> { print("{be} {le}") }
-        else -> { print("miss") }
-    }
-}
-"#;
-    assert_tiers_agree("binary_pattern_u56_tiers", src, "281474976710656 1\n");
-}
-
 /// c109 (builtin-name collision): a user method whose name collides with a builtin
 /// (`get`/`len`) was mis-dispatched by `emit_builtin_method` (name-keyed, not
 /// receiver-typed) → `b.get()` emitted garbage, `b.len()` → E0599. The fix dispatches

@@ -132,7 +132,7 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{mpsc, Arc, Condvar, Mutex, OnceLock};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use crate::AST::{BinMatchPart, Expr, Func, Item, ProgramBundle, Stmt, Type, UnitFamilyDef};
+use crate::AST::{Expr, Func, Item, ProgramBundle, Stmt, Type, UnitFamilyDef};
 use crate::Codegen::mangle;
 use super::Cx;
 use crate::Codegen::TIR::{
@@ -142,39 +142,10 @@ use crate::Codegen::TIR::{
 use super::build_cx_items;
 use crate::Comptime::{self, CtReport, CtValue, DevSink};
 use crate::Diagnostics::{Diagnostic, Span};
-use jet_foundation::MatchScan::BinBind;
 use jet_foundation::Reflection::ReflectionField;
 
 /// Cross-tier hook: Cranelift-native functions callable from the TIR evaluator (#778).
 pub type NativeCallHook = fn(&str, &[CtValue]) -> Option<Result<CtValue, Diagnostic>>;
-
-/// Binary-pattern marshalling shared by arm probes and direct pattern binds.
-/// The scan and endian policy live in Foundation's Prelude kernel.
-pub(super) fn bin_match_scan_value(
-    value: &CtValue,
-    parts: &[BinMatchPart],
-    consume_prefix: bool,
-) -> Option<(usize, Vec<(String, Type, BinBind)>)> {
-    let bytes = match value {
-        CtValue::Bytes(bytes) => bytes.clone(),
-        CtValue::List(items) => items
-            .iter()
-            .map(|item| match item {
-                CtValue::Int(value) => Some(*value as u8),
-                _ => None,
-            })
-            .collect::<Option<Vec<_>>>()?,
-        _ => return None,
-    };
-    jet_foundation::MatchScan::bin_match_scan(&bytes, parts, consume_prefix)
-}
-
-pub(super) fn bin_match_bind_value(bind: BinBind) -> CtValue {
-    match bind {
-        BinBind::Int(value) => CtValue::Int(value),
-        BinBind::Rest(bytes) => CtValue::Bytes(bytes),
-    }
-}
 
 /// D-MEMO1=A: the evaluator/deopt carrier for one run's Prelude memo stores.
 /// The cache implementation remains in `Prelude/Memo.rs`; this type only keeps

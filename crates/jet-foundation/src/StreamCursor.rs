@@ -119,12 +119,12 @@ pub fn jet_cursor_skip_ws(c: &mut JetCursor) {
     c.pos += skipped;
 }
 
-// `take_pattern` uses one scan policy per pattern family on every tier. Binary
-// AOT emits descriptors into the Foundation kernel; text AOT keeps its generated
-// text scanner; the Cranelift host and interpreter marshal parsed pattern data.
-// What surrounds the match is the same everywhere, so it lives here: what the
-// scan may look at, how far a hit advances, and what a miss reports. A tier
-// supplies the match and projects the bindings; it decides nothing else.
+// `take_pattern` runs a different match engine on every tier: AOT inlines a
+// closure specialized to the pattern, the Cranelift host and the interpreter
+// walk the pattern as data. What surrounds the match is the same everywhere,
+// so it lives here: what the scan may look at, how far a hit advances, and
+// what a miss reports. A tier supplies the match and projects the bindings;
+// it decides nothing else.
 
 pub fn jet_cursor_tail(c: &JetCursor) -> &str {
     &c.buf[c.pos..]

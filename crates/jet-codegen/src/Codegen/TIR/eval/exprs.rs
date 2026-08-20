@@ -2641,14 +2641,12 @@ impl<'a> EvalCtx<'a> {
         let _deadline = self
             .context_deadline
             .map(crate::scheduler::jet_ctx_push_deadline);
-        let result = self.scheduler_wait("time sleep", || {
-            crate::scheduler::jet_std_time_sleep_duration_ns(nanos)
-        });
-        drop(_deadline);
-        Some(result.and_then(|()| {
-            self.task_wait_cancel_check()?;
-            Ok(CtValue::Unit)
-        }))
+        Some(
+            self.scheduler_wait("time sleep", || {
+                crate::scheduler::jet_std_time_sleep_duration_ns(nanos)
+            })
+            .map(|()| CtValue::Unit),
+        )
     }
 
     fn serde_codec(&self, ty: &Type, method: &str) -> Option<&'a crate::Codegen::TIR::TFunc> {
@@ -7664,46 +7662,6 @@ impl<'a> EvalCtx<'a> {
                                 &values,
                                 self.span(),
                             )
-                        }
-                    }
-                }
-                crate::Codegen::TIR::THostCall::BinMatchScan { parts, probe } => {
-                    let subject = self
-                        .switch_subject
-                        .as_ref()
-                        .ok_or_else(|| unsupported("binary pattern outside switch", self.span()))?;
-                    let hit = super::bin_match_scan_value(subject, parts, false);
-                    match probe {
-                        crate::Codegen::TIR::TMatchProbe::IsSome => {
-                            Ok(CtValue::Bool(hit.is_some()))
-                        }
-                        crate::Codegen::TIR::TMatchProbe::Unwrap => {
-                            let Some((_, binds)) = hit else {
-                                return Err(unsupported("binary pattern unwrap", self.span()));
-                            };
-                            let Type::Tuple(fields) = &expr.ty else {
-                                return Err(unsupported("binary pattern tuple", self.span()));
-                            };
-                            if fields.len() != binds.len() {
-                                return Err(unsupported("binary pattern binding count", self.span()));
-                            }
-                            let plain_fields = fields
-                                .iter()
-                                .map(|(name, ty)| (name.clone(), (**ty).clone()))
-                                .collect::<Vec<_>>();
-                            let values = binds
-                                .into_iter()
-                                .map(|(_, _, bind)| super::bin_match_bind_value(bind));
-                            Ok(CtValue::Struct {
-                                type_name: crate::Codegen::Tuples::tuple_struct_name(
-                                    &plain_fields,
-                                ),
-                                fields: fields
-                                    .iter()
-                                    .map(|(name, _)| name.clone())
-                                    .zip(values)
-                                    .collect(),
-                            })
                         }
                     }
                 }

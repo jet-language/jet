@@ -2601,16 +2601,7 @@ pub(super) fn bind_match_pattern(
             }
             Ok(true)
         }
-        Pattern::StrMatch { .. } => Ok(false),
-        Pattern::BinMatch { parts, .. } => {
-            let Some((_, binds)) = super::bin_match_scan_value(value, parts, false) else {
-                return Ok(false);
-            };
-            for (name, _, bind) in binds {
-                scope.insert(name, super::bin_match_bind_value(bind));
-            }
-            Ok(true)
-        }
+        Pattern::StrMatch { .. } | Pattern::BinMatch { .. } => Ok(false),
     }
 }
 

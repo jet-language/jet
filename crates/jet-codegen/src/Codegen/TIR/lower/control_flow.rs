@@ -1478,9 +1478,14 @@ pub(crate) fn str_match_scan_closure_ex(
     (closure, holes)
 }
 
-/// D-BINPAT1 (card #506): marshal a binary pattern into the Foundation-owned
-/// Prelude scan kernel and project its values into the generated tuple.
-/// `switch` uses full-match mode; `Reader.take_pattern` uses prefix mode.
+/// D-BINPAT1 (card #506): build the Rust closure that scans a `[U8]` subject
+/// against a binary pattern with a sequential MSB-first bit cursor, returning
+/// `Option<(T1, T2, …)>` (`None` on any short read, byte mismatch, or a
+/// pattern with no trailing rest that doesn't consume the whole subject). This
+/// is the byte-mode sibling of `str_match_scan_closure` — one matcher engine
+/// (I8) — and must read bit-for-bit identically to the tier-0 interpreter's
+/// `Pattern::BinMatch` arm (R12 parity). Thin wrapper over
+/// `bin_match_scan_closure_ex` in full-match mode (the `switch`-arm shape).
 pub(crate) fn bin_match_scan_closure(pattern: &Pattern, cx: &Cx) -> (String, Vec<(String, Type)>) {
     let Pattern::BinMatch { parts, .. } = pattern else {
         return ("(|| -> Option<()> { Some(()) })()".to_string(), Vec::new());
@@ -1493,87 +1498,121 @@ pub(crate) fn bin_match_scan_closure(pattern: &Pattern, cx: &Cx) -> (String, Vec
     )
 }
 
-/// D-BINPAT1 (card #506 follow-up): marshal any byte-pattern subject into the
-/// Foundation-owned Prelude kernel. The returned `holes` list describes only
-/// user bindings; consume mode appends the matched byte count to the generated
-/// tuple, matching `lower_reader_take_pattern`.
+/// D-BINPAT1 (card #506 follow-up): the same bit-scan engine, generalized
+/// over WHERE the subject bytes come from (`subject_src`, a raw Rust
+/// expression yielding `&[u8]`) and whether the WHOLE subject must be
+/// consumed (`require_full_match`) — the byte-mode sibling of
+/// `str_match_scan_closure_ex`. `switch` uses the whole-buffer subject and
+/// full consumption; `Reader.take_pattern` scans a local `__jet_tail` slice
+/// and only needs a PREFIX match, ending on a byte boundary (a `Reader`
+/// advances by whole bytes) — the caller advances the reader's position by
+/// the consumed byte count, appended as one extra trailing `usize` in the
+/// returned Rust tuple (not reflected in the returned `holes` list — callers
+/// reconstruct the same trailing slot themselves, `lower_reader_take_pattern`
+/// does exactly that, mirroring `lower_cursor_take_pattern`).
 pub(crate) fn bin_match_scan_closure_ex(
     parts: &[crate::AST::BinMatchPart],
     cx: &Cx,
     subject_src: &str,
     require_full_match: bool,
 ) -> (String, Vec<(String, Type)>) {
-    use crate::AST::{BinMatchPart, BinSpec};
+    use crate::AST::{BinEndian, BinMatchPart, BinSpec};
     let mut holes: Vec<(String, Type)> = Vec::new();
     let mut body = String::new();
     body.push_str(&jet_format!("let {jet_prefix}bm: &[u8] = {};\n", subject_src));
-    let kernel_parts = parts
-        .iter()
-        .map(|part| match part {
-            BinMatchPart::Lit(bytes) => {
-                let bytes = bytes
-                    .iter()
-                    .map(|byte| format!("{byte}u8"))
-                    .collect::<Vec<_>>()
-                    .join(", ");
-                format!("JetBinMatchPart::Lit(&[{bytes}])")
-            }
-            BinMatchPart::Hole { spec, .. } => match spec {
-                BinSpec::Bits { width, endian } => format!(
-                    "JetBinMatchPart::Bits {{ width: {}usize, little: {} }}",
-                    width,
-                    matches!(endian, crate::AST::BinEndian::Little)
-                ),
-                BinSpec::Rest => "JetBinMatchPart::Rest".to_string(),
-            },
-        })
-        .collect::<Vec<_>>()
-        .join(", ");
     body.push_str(&jet_format!(
-        "let ({jet_prefix}bm_pos, mut {jet_prefix}bm_values) = match jet_bin_match_scan({jet_prefix}bm, &[{kernel_parts}], {require_full_match}) {{ Some((pos, values)) => (pos, values.into_iter()), None => return None }};\n",
-        kernel_parts = kernel_parts,
-        require_full_match = require_full_match,
+        "let {jet_prefix}total: usize = {jet_prefix}bm.len().saturating_mul(8);\n"
     ));
-    let mut tuple_vars = Vec::new();
+    body.push_str(&jet_format!("let mut {jet_prefix}pos: usize = 0;\n"));
+    let ends_in_rest = matches!(
+        parts.last(),
+        Some(BinMatchPart::Hole { spec: BinSpec::Rest, .. })
+    );
     for part in parts {
         match part {
-            BinMatchPart::Lit(_) => {}
-            BinMatchPart::Hole { name, spec, .. } => {
-                let var = jet_format!(
-                    "{jet_prefix}bm_{}",
-                    crate::Syntax::generated_suffix(&mangle(name))
-                );
-                let (ty, value) = match spec {
-                    BinSpec::Rest => (
-                        Type::List(Box::new(Type::IntN { signed: false, bits: 8 })),
-                        "Some(JetBinMatchValue::Rest(value)) => value".to_string(),
-                    ),
-                    BinSpec::Bits { width, .. } => {
-                        let ty = bin_bits_type(*width);
-                        let rust_ty = cx.rust_type(&ty);
-                        (
-                            ty,
-                            format!(
-                                "Some(JetBinMatchValue::Int(value)) => value as {rust_ty}"
-                            ),
-                        )
-                    }
-                };
+            BinMatchPart::Lit(bytes) => {
+                let arr = bytes
+                    .iter()
+                    .map(|b| format!("{}u8", b))
+                    .collect::<Vec<_>>()
+                    .join(", ");
                 body.push_str(&jet_format!(
-                    "let {var}: {rust_ty} = match {jet_prefix}bm_values.next() {{ {value}, _ => return None }};\n",
-                    var = var,
-                    rust_ty = cx.rust_type(&ty),
-                    value = value,
+                    "if {jet_prefix}pos % 8 != 0 {{ return None; }}\n"
                 ));
-                tuple_vars.push(var);
-                holes.push((name.clone(), ty));
+                body.push_str(&jet_format!(
+                    "{{ let __s = {jet_prefix}pos / 8; let __lit: &[u8] = &[{arr}]; if __s + __lit.len() > {jet_prefix}bm.len() || &{jet_prefix}bm[__s..__s + __lit.len()] != __lit {{ return None; }} {jet_prefix}pos += __lit.len() * 8; }}\n",
+                ));
             }
+            BinMatchPart::Hole { name, spec, .. } => match spec {
+                BinSpec::Rest => {
+                    let var = jet_format!(
+                        "{jet_prefix}bm_{}",
+                        crate::Syntax::generated_suffix(&mangle(name))
+                    );
+                    body.push_str(&jet_format!(
+                        "if {jet_prefix}pos % 8 != 0 {{ return None; }}\n"
+                    ));
+                    body.push_str(&jet_format!(
+                        "let {var}: Vec<u8> = {jet_prefix}bm[{jet_prefix}pos / 8..].to_vec(); {jet_prefix}pos = {jet_prefix}total;\n"
+                    ));
+                    holes.push((
+                        name.clone(),
+                        Type::List(Box::new(Type::IntN { signed: false, bits: 8 })),
+                    ));
+                }
+                BinSpec::Bits { width, endian } => {
+                    let var = jet_format!(
+                        "{jet_prefix}bm_{}",
+                        crate::Syntax::generated_suffix(&mangle(name))
+                    );
+                    let ty = cx.rust_type(&bin_bits_type(*width));
+                    let w = *width as usize;
+                    body.push_str(&jet_format!("if {jet_prefix}pos + {w} > {jet_prefix}total {{ return None; }}\n"));
+                    body.push_str(&jet_format!(
+                        "let {var}: {ty} = {{ let mut __v: u64 = 0; let mut __k = 0usize; while __k < {w} {{ let __p = {jet_prefix}pos + __k; __v = (__v << 1) | (({jet_prefix}bm[__p / 8] >> (7 - (__p % 8))) & 1) as u64; __k += 1; }} {jet_prefix}pos += {w}; "
+                    ));
+                    if matches!(endian, BinEndian::Little) {
+                        let nb = w / 8;
+                        body.push_str(&format!(
+                            "{{ let mut __sw: u64 = 0; let mut __i = 0usize; while __i < {nb} {{ __sw |= ((__v >> (8 * __i)) & 0xff) << (8 * ({nb} - 1 - __i)); __i += 1; }} __v = __sw; }} "
+                        ));
+                    }
+                    body.push_str(&format!("__v as {ty} }};\n"));
+                    holes.push((name.clone(), bin_bits_type(*width)));
+                }
+            },
         }
     }
+    // A full-match pattern (`switch`) must consume the WHOLE subject, not
+    // just a prefix — a trailing `{...}` rest hole already takes the rest by
+    // construction, so only a non-rest ending needs the check. A
+    // `take_pattern` consume mode (`!require_full_match`) skips this — the
+    // caller only wanted a PREFIX matched — but a `Reader` only advances by
+    // whole bytes, so the match point must still land on a byte boundary.
+    if require_full_match {
+        if !ends_in_rest {
+            body.push_str(&jet_format!(
+                "if {jet_prefix}pos != {jet_prefix}total {{ return None; }}\n"
+            ));
+        }
+    } else {
+        body.push_str(&jet_format!(
+            "if {jet_prefix}pos % 8 != 0 {{ return None; }}\n"
+        ));
+    }
+    let mut tuple_vars: Vec<String> = holes
+        .iter()
+        .map(|(n, _)| {
+            mangle_generated(&format!(
+                "bm_{}",
+                crate::Syntax::generated_suffix(&mangle(n))
+            ))
+        })
+        .collect();
     let mut tuple_tys: Vec<String> = holes.iter().map(|(_, t)| cx.rust_type(t)).collect();
     if !require_full_match {
         body.push_str(&jet_format!(
-            "let {jet_prefix}consumed: usize = {jet_prefix}bm_pos / 8;\n"
+            "let {jet_prefix}consumed: usize = {jet_prefix}pos / 8;\n"
         ));
         tuple_vars.push(mangle_generated("consumed"));
         tuple_tys.push("usize".to_string());
