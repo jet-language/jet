@@ -604,10 +604,9 @@ impl<'a> Fmt<'a> {
                 self.write(&dimension.display_name());
                 self.write(">");
             }
-            // D-COMPUTE-TYPE1: the literal shape argument in `Vec<3>` /
-            // `Matrix<2, 3>`, round-tripped through `fmt_type` like any other
-            // `Type::Apply` argument (see `type_generic_arg`).
-            Type::ComputeDim(value) => self.write(&value.to_string()),
+            // D-TYPE2-MEASURE1=A: shape arguments round-trip through the
+            // shared measure representation.
+            Type::Measure(measure) => self.write(&measure.expression()),
             Type::TraitObject(t) => {
                 // Only the parser's `dyn`/`Box<dyn>` teaching-error recovery paths
                 // ever construct this AST-facing arm with more than a formatting
@@ -631,11 +630,7 @@ impl<'a> Fmt<'a> {
                 self.write("[");
                 self.fmt_type(elem);
                 self.write("#");
-                if let Some(expression) = len.pending_expression() {
-                    self.fmt_expr(expression, Prec::OrFallback);
-                } else {
-                    self.write(&len.expression());
-                }
+                self.write(&len.expression());
                 self.write("]");
             }
             // D-QUAL4=A: `#TagName Type` — prefix value-tag.

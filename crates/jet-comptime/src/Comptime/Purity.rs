@@ -120,7 +120,7 @@ pub(super) fn check_purity(
 }
 
 fn impure_builtin(name: &str) -> bool {
-    crate::Syntax::IMPURE_BUILTINS.contains(&name)
+    jet_foundation::Authority::builtin_effect(name).is_some()
 }
 
 /// D-META-EFFECT1 c3: the one call-graph purity walk. Walks the call graph

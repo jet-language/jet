@@ -2612,7 +2612,7 @@ Channels carry one type:
 use core.tasks as tasks
 
 fn run() {
-(sender, ch) :: tasks.channel<Int>()
+(sender, ch) :: channel<Int>()
     handle :: task {
         sender.send(42)
     }
@@ -2621,8 +2621,8 @@ fn run() {
 }
 ```
 
-`tasks.channel<T>()` returns the send/receive pair directly (D-TUPLE-DESTRUCT1) —
-destructure it with `(tx, rx) := tasks.channel<T>()`. The bounded form follows
+`channel<T>()` returns the send/receive pair directly (D-CONC-CHAN1) —
+destructure it with `(tx, rx) := channel<T>()`. The bounded form follows
 the [Bounded buffering law](../spec/spec.md#bounded-buffering-law). A second sender is `~tx`
 (D-SHAPE-COPY1's copy sigil makes a cheap handle duplicate;
 there's no combined channel value).
@@ -2640,8 +2640,8 @@ there's no combined channel value).
 | `handle.pause()` | nothing | Request paused state on the task control plane (D-COROUTINE1) |
 | `handle.resume()` | nothing | Clear paused state on the task control plane |
 | `handle.cancel()` | nothing | Request cancellation on the task control plane |
-| `tasks.channel<T>()` | `(Sender<T>, Receiver<T>)` | Create an unbounded linked send/receive pair |
-| `tasks.channel<T>(capacity: N)` | `(Sender<T>, Receiver<T>)` | Create a bounded pair; see the [buffering law](../spec/spec.md#bounded-buffering-law) |
+| `channel<T>()` | `(Sender<T>, Receiver<T>)` | Create an unbounded linked send/receive pair |
+| `channel<T>(capacity: N)` | `(Sender<T>, Receiver<T>)` | Create a bounded pair; see the [buffering law](../spec/spec.md#bounded-buffering-law) |
 | `tasks.after(duration: Duration)` | `Receiver<Unit>` | One-shot timer channel |
 | `tasks.after(duration: Duration, value: fallback)` | `Receiver<T>` | One-shot typed timer channel for timeout values |
 | `tasks.interval(duration: Duration)` | `Receiver<Int>` | Interval timer channel sending `1`, `2`, ... |

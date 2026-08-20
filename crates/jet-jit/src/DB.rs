@@ -54,13 +54,13 @@ thread_local! {
     /// JIT-local policy capabilities. The token is passed through Cranelift
     /// as the DBScope value; the policy and user never become mutable heap
     /// fields visible to Jet code.
-    static DB_SCOPES: std::cell::RefCell<HashMap<u64, (u64, String, String, String)>> =
+    static DB_SCOPES: std::cell::RefCell<HashMap<u64, (u64, String, wire::JetRowPolicyExpr, String)>> =
         std::cell::RefCell::new(HashMap::new());
 }
 
 static NEXT_DB_SCOPE: AtomicU64 = AtomicU64::new(1_000_000_000);
 
-fn scope_parts(handle: u64) -> Option<(u64, String, String, String)> {
+fn scope_parts(handle: u64) -> Option<(u64, String, wire::JetRowPolicyExpr, String)> {
     DB_SCOPES.with(|scopes| scopes.borrow().get(&handle).cloned())
 }
 
@@ -70,50 +70,54 @@ fn base_handle(handle: u64) -> u64 {
         .unwrap_or(handle)
 }
 
-fn alloc_policy_record(table: &str, expression: &str) -> i64 {
+fn alloc_policy_record(table: &str, compiled: wire::JetRowPolicyExpr) -> i64 {
     let table_id = table.to_string();
-    let expression_id = expression.to_string();
+    let expression_id = compiled.canonical().to_string();
+    let compiled_id = match compiled {
+        wire::JetRowPolicyExpr::AllowAll => 0,
+        wire::JetRowPolicyExpr::OwnerEqualsUser => 1,
+    };
     Concurrency::with_runtime_mut(|rt| {
         let table_id = rt.heap.alloc_string(table_id);
         let expression_id = rt.heap.alloc_string(expression_id);
         let record = rt.heap.alloc_record(3);
         let _ = rt.heap.record_set_int(record, 0, table_id);
         let _ = rt.heap.record_set_int(record, 1, expression_id);
-        let _ = rt.heap.record_set_int(record, 2, 0);
+        let _ = rt.heap.record_set_int(record, 2, compiled_id);
         record
     })
 }
 
-fn policy_record_parts(policy: i64) -> Option<(String, String)> {
+fn policy_record_parts(policy: i64) -> Option<(String, wire::JetRowPolicyExpr)> {
     Concurrency::with_runtime_mut(|rt| {
         let table = rt
             .heap
             .record_get_int(policy, 0)
             .and_then(|id| rt.heap.clone_string(id))?;
-        let expression = rt
-            .heap
-            .record_get_int(policy, 1)
-            .and_then(|id| rt.heap.clone_string(id))?;
-        Some((table, expression))
+        let compiled = match rt.heap.record_get_int(policy, 2)? {
+            0 => wire::JetRowPolicyExpr::AllowAll,
+            1 => wire::JetRowPolicyExpr::OwnerEqualsUser,
+            _ => return None,
+        };
+        Some((table, compiled))
     })
 }
 
-fn new_scope(connection: u64, table: String, expression: String, user: String) -> i64 {
+fn new_scope(
+    connection: u64,
+    table: String,
+    compiled: wire::JetRowPolicyExpr,
+    user: String,
+) -> i64 {
     if connection == 0 {
         return 0;
     }
-    // Park the COMPILED policy, never the caller's raw text: the normalized
-    // table and canonical expression are what every later SQL operation reads,
-    // so this tier accepts exactly the policies AOT accepts.
-    let Ok((table, compiled)) = wire::jet_db_policy_compile(&table, &expression) else {
-        return 0;
-    };
     let id = NEXT_DB_SCOPE.fetch_add(1, Ordering::Relaxed);
     let base = base_handle(connection);
     DB_SCOPES.with(|scopes| {
         scopes
             .borrow_mut()
-            .insert(id, (base, table, compiled.canonical().to_string(), user));
+            .insert(id, (base, table, compiled, user));
     });
     id as i64
 }
@@ -181,20 +185,20 @@ fn jet_jit_db_policy(table: i64, expression: i64) -> i64 {
     let expression = clone_string(expression);
     match wire::jet_db_policy_compile(&table, &expression) {
         Ok((table, compiled)) => {
-            result_ok(alloc_policy_record(&table, compiled.canonical()) as u64)
+            result_ok(alloc_policy_record(&table, compiled) as u64)
         }
         Err(message) => result_err_msg(&message),
     }
 }
 
 fn jet_jit_db_with_policy(connection: i64, policy: i64, user: i64) -> i64 {
-    let Some((table, expression)) = policy_record_parts(policy) else {
+    let Some((table, compiled)) = policy_record_parts(policy) else {
         return 0;
     };
     let scope = new_scope(
         connection as u64,
         table,
-        expression,
+        compiled,
         clone_string(user),
     );
     scope
@@ -282,12 +286,12 @@ fn jet_jit_db_rollback(handle: i64) -> i8 {
 }
 
 fn jet_jit_db_execute(handle: i64, sql: i64, params: i64) -> i64 {
-    let Some((base, table, expression, user)) = scope_parts(handle as u64) else {
+    let Some((base, table, compiled, user)) = scope_parts(handle as u64) else {
         return result_err_msg("database row operations require a policy scope");
     };
     let values = values_from_list(params);
     let sql = clone_string(sql);
-    let (sql, values) = match wire::jet_db_apply_policy(&sql, &values, &table, &expression, &user) {
+    let (sql, values) = match wire::jet_db_apply_compiled_policy(&sql, &values, &table, compiled, &user) {
         Ok(value) => value,
         Err(error) => return result_err_msg(&error.message),
     };
@@ -300,12 +304,12 @@ fn jet_jit_db_execute(handle: i64, sql: i64, params: i64) -> i64 {
 }
 
 fn jet_jit_db_query(handle: i64, sql: i64, params: i64) -> i64 {
-    let Some((base, table, expression, user)) = scope_parts(handle as u64) else {
+    let Some((base, table, compiled, user)) = scope_parts(handle as u64) else {
         return result_err_msg("database row operations require a policy scope");
     };
     let values = values_from_list(params);
     let sql = clone_string(sql);
-    let (sql, values) = match wire::jet_db_apply_policy(&sql, &values, &table, &expression, &user) {
+    let (sql, values) = match wire::jet_db_apply_compiled_policy(&sql, &values, &table, compiled, &user) {
         Ok(value) => value,
         Err(error) => return result_err_msg(&error.message),
     };
@@ -351,15 +355,15 @@ fn scoped_execute(
     params: &Vec<wire::DBValue>,
     allow_schema: bool,
 ) -> Result<i64, wire::DBError> {
-    let Some((base, table, expression, user)) = scope_parts(scope) else {
+    let Some((base, table, compiled, user)) = scope_parts(scope) else {
         return Err(wire::DBError {
             message: "database row operations require a policy scope".to_string(),
         });
     };
     let (sql, values) = if allow_schema {
-        wire::jet_db_apply_migration_policy(sql, params, &table, &expression, &user)?
+        wire::jet_db_apply_compiled_migration_policy(sql, params, &table, compiled, &user)?
     } else {
-        wire::jet_db_apply_policy(sql, params, &table, &expression, &user)?
+        wire::jet_db_apply_compiled_policy(sql, params, &table, compiled, &user)?
     };
     let result = runtime::jet_db_execute(base, &sql, &wire::jet_db_encode_params(&values));
     wire::jet_db_decode_execute_result(&result)
@@ -371,15 +375,15 @@ fn scoped_query(
     params: &Vec<wire::DBValue>,
     allow_schema: bool,
 ) -> Result<Vec<wire::JetDBRow>, wire::DBError> {
-    let Some((base, table, expression, user)) = scope_parts(scope) else {
+    let Some((base, table, compiled, user)) = scope_parts(scope) else {
         return Err(wire::DBError {
             message: "database row operations require a policy scope".to_string(),
         });
     };
     let (sql, values) = if allow_schema {
-        wire::jet_db_apply_migration_policy(sql, params, &table, &expression, &user)?
+        wire::jet_db_apply_compiled_migration_policy(sql, params, &table, compiled, &user)?
     } else {
-        wire::jet_db_apply_policy(sql, params, &table, &expression, &user)?
+        wire::jet_db_apply_compiled_policy(sql, params, &table, compiled, &user)?
     };
     let result = runtime::jet_db_query(base, &sql, &wire::jet_db_encode_params(&values));
     wire::jet_db_decode_query_result(&result)
@@ -639,6 +643,4 @@ host_fns! {
     dbvalue_bool: "jet_jit_dbvalue_bool" => jet_jit_dbvalue_bool: unary;
     dbvalue_is_null: "jet_jit_dbvalue_is_null" => jet_jit_dbvalue_is_null: unary_i8;
 }
-
-
 

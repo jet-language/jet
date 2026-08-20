@@ -826,6 +826,22 @@ pub(crate) fn jet_db_policy_new(table: String, expression: String) -> Result<Jet
     })
 }
 
+pub(crate) fn jet_db_policy_compiled(policy: &JetRowPolicy) -> jet_std::JetRowPolicyExpr {
+    policy.compiled
+}
+
+pub(crate) fn jet_db_policy_from_compiled(
+    table: String,
+    compiled: jet_std::JetRowPolicyExpr,
+) -> Result<JetRowPolicy, String> {
+    let table = jet_std::jet_db_policy_validate_table(&table)?;
+    Ok(JetRowPolicy {
+        table,
+        expression: compiled.canonical().to_string(),
+        compiled,
+    })
+}
+
 pub(crate) fn jet_db_policy_allows(policy: &JetRowPolicy, user: &String, row_owner: &String) -> bool {
     if !jet_sync_token_is_valid(user) || !jet_sync_token_is_valid(row_owner) {
         return false;
@@ -834,13 +850,6 @@ pub(crate) fn jet_db_policy_allows(policy: &JetRowPolicy, user: &String, row_own
         jet_std::JetRowPolicyExpr::OwnerEqualsUser => user == row_owner,
         jet_std::JetRowPolicyExpr::AllowAll => true,
     }
-}
-
-/// Return the expression selected by the typed policy constructor. Callers do
-/// not re-read the public source spelling, so a scope cannot replace the
-/// compiled policy between validation and execution.
-pub(crate) fn jet_db_policy_expression(policy: &JetRowPolicy) -> &'static str {
-    policy.compiled.canonical()
 }
 
 pub(crate) fn jet_db_policy_show(policy: &JetRowPolicy) -> String {

@@ -130,9 +130,8 @@
     }
 
     // The closed policy language lives in `RowPolicy.rs`, included beside this
-    // fragment on every tier. `jet_db_apply_policy_inner` below compiles through
-    // it once per operation, so the SQL transformer and the policy constructor
-    // can never accept different policies.
+    // fragment on every tier. Public raw-text entry points compile once at the
+    // boundary; scoped entry points below receive the compiled enum directly.
 
     fn db_sql_tokens(sql: &str) -> Vec<(usize, usize, String)> {
         let bytes = sql.as_bytes();
@@ -376,7 +375,21 @@
         expression: &str,
         user: &str,
     ) -> Result<(String, Vec<DBValue>), DBError> {
-        jet_db_apply_policy_inner(sql, params, table, expression, user, false)
+        let (table, compiled) = jet_db_policy_compile(table, expression)
+            .map_err(|message| DBError { message })?;
+        jet_db_apply_compiled_policy(sql, params, &table, compiled, user)
+    }
+
+    /// Apply an already compiled policy. Scope carriers use this path so a
+    /// later operation cannot re-parse or replace the policy's source text.
+    pub fn jet_db_apply_compiled_policy(
+        sql: &str,
+        params: &Vec<DBValue>,
+        table: &str,
+        compiled: JetRowPolicyExpr,
+        user: &str,
+    ) -> Result<(String, Vec<DBValue>), DBError> {
+        jet_db_apply_policy_inner(sql, params, table, compiled, user, false)
     }
 
     /// Apply a policy while executing an explicit `db.migrate` step. Schema
@@ -389,19 +402,32 @@
         expression: &str,
         user: &str,
     ) -> Result<(String, Vec<DBValue>), DBError> {
-        jet_db_apply_policy_inner(sql, params, table, expression, user, true)
+        let (table, compiled) = jet_db_policy_compile(table, expression)
+            .map_err(|message| DBError { message })?;
+        jet_db_apply_compiled_migration_policy(sql, params, &table, compiled, user)
+    }
+
+    /// Migration form of [`jet_db_apply_compiled_policy`]. Schema statements
+    /// remain the only extra authority granted by migration.
+    pub fn jet_db_apply_compiled_migration_policy(
+        sql: &str,
+        params: &Vec<DBValue>,
+        table: &str,
+        compiled: JetRowPolicyExpr,
+        user: &str,
+    ) -> Result<(String, Vec<DBValue>), DBError> {
+        jet_db_apply_policy_inner(sql, params, table, compiled, user, true)
     }
 
     fn jet_db_apply_policy_inner(
         sql: &str,
         params: &Vec<DBValue>,
         table: &str,
-        expression: &str,
+        compiled: JetRowPolicyExpr,
         user: &str,
         allow_schema: bool,
     ) -> Result<(String, Vec<DBValue>), DBError> {
-        let (policy_table, compiled) = jet_db_policy_compile(table, expression)
-            .map_err(|message| DBError { message })?;
+        let policy_table = table;
         if sql.len() > 1024 * 1024
             || sql
                 .chars()

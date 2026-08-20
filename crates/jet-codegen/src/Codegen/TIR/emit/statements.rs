@@ -1658,6 +1658,17 @@ fn emit_tir_stmt(
                         0
                     ));
                 }
+                Some(TForInMethod::ChannelReceiver) => {
+                    out.push_str(&jet_format!(
+                        "{}{}for {jet_prefix}item in std::iter::from_fn(|| ({}).receive().ok()){} {{\n    {}let {} = {jet_prefix}item;\n",
+                        pad,
+                        lbl,
+                        collection_str,
+                        stride_suffix,
+                        pad,
+                        mangle(var)
+                    ));
+                }
                 Some(TForInMethod::Iterable {
                     coll_type,
                     iter_type,

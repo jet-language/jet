@@ -43,7 +43,7 @@ fn contains_taskgroup(ty: &Type) -> bool {
         Type::Map { key, value, .. } | Type::Result { ok: key, err: value } => {
             contains_taskgroup(key) || contains_taskgroup(value)
         }
-        // Function signatures have their own direct TaskGroup parameter/return
+        // Function signatures have their own direct Group parameter/return
         // checks; do not duplicate those diagnostics at the binding site.
         Type::Fn { .. } => false,
         Type::Apply { args, .. } | Type::Union(args) => args.iter().any(contains_taskgroup),
@@ -57,7 +57,7 @@ fn contains_taskgroup(ty: &Type) -> bool {
         | Type::IntN { .. }
         | Type::Float32 => false,
         Type::Quantity { .. } => false,
-        Type::ComputeDim(_) => false,
+        Type::Measure(_) => false,
     }
 }
 pub(crate) fn check_meta_attr_fields(meta: &MetaAttr) -> Vec<Diagnostic> {
@@ -864,14 +864,17 @@ impl<'a> Checker<'a> {
                 }
             }
     
-            // A name is poisoned only when nothing typed it — the `(None, None)`
-            // arm below, where the initializer reported an error and handed back
-            // no type at all. An ownership, sendability, or contract error still
-            // leaves the binding well-typed, and every later report about that
-            // name must survive: `.detach()` on an unsendable task (E1103/E1106,
-            // D-DETACH1) and an unchecked `.join()` (E0402) are exactly the
-            // reports that exist because the spawn was already wrong.
-            let init_type_unusable = init_has_error && b.ty.is_none() && it.is_none();
+            // Poison a binding when inference has no usable type, including a
+            // recovery type produced by an initializer type error (E0801/E3203).
+            // Ownership, sendability, and contract errors still leave the
+            // binding well-typed, so later reports about that name survive:
+            // `.detach()` on an unsendable task (E1103/E1106, D-DETACH1) and an
+            // unchecked `.join()` (E0402) are exactly such secondary reports.
+            let initializer_type_error = self.diags[diagnostics_before_init..]
+                .iter()
+                .any(|diagnostic| matches!(diagnostic.code.as_str(), "E0801" | "E3203"));
+            let init_type_unusable = init_has_error
+                && (initializer_type_error || b.ty.is_none() && it.is_none());
             let final_ty = match (&b.ty, it) {
                 (Some(_), Some(actual)) if !annot_valid => actual,
                 (Some(annot), Some(actual)) => {
@@ -944,10 +947,10 @@ impl<'a> Checker<'a> {
             {
                 self.diags.push(Diagnostic::error(
                     "E1110",
-                    "`TaskGroup` cannot be stored inside another value".to_string(),
+                    "`Group` cannot be stored inside another value".to_string(),
                     "a task group is call-stack-only spawn authority; aliases and aggregates could outlive its owner"
                         .to_string(),
-                    "pass `group: TaskGroup` directly to a helper function or method and use it there"
+                    "pass `group: Group` directly to a helper function or method and use it there"
                         .to_string(),
                     Some(b.name_span),
                 ));

@@ -60,7 +60,7 @@ pub fn effect_row_var(name: &str) -> Option<&str> {
 /// The root segment of a dotted effect path (`"FS.Read"` → `"FS"`; a bare
 /// name is its own root). D-EFFTREE1.
 pub fn effect_root(name: &str) -> &str {
-    name.split('.').next().unwrap_or(name)
+    jet_foundation::Authority::root(name)
 }
 
 /// D-EFFTREE1: validate a user-written effect path — bare (`FS`) or dotted
@@ -138,7 +138,7 @@ pub fn effect_leaf_required(root: &str, span: Option<Span>) -> Diagnostic {
 /// (`FS.Read`) covers only itself and any deeper path under it — a sibling
 /// (`FS.Write`) is never covered.
 pub fn effect_covers(bound: &str, e: &str) -> bool {
-    jet_foundation::Facts::fact_covers(bound, e)
+    jet_foundation::Authority::covers(bound, e)
 }
 
 /// The subset of `inferred` NOT covered by any entry of `bound_set` — the
@@ -146,22 +146,14 @@ pub fn effect_covers(bound: &str, e: &str) -> bool {
 /// entries subsume their whole subtree (D-EFFTREE1). Used at every "is the
 /// inferred set within its declared bound" check (E0740/E0741/E0712/E0747/E0742).
 pub fn effects_uncovered(inferred: &EffectSet, bound_set: &EffectSet) -> EffectSet {
-    inferred
-        .iter()
-        .filter(|e| !bound_set.iter().any(|b| effect_covers(b, e)))
-        .cloned()
-        .collect()
+    jet_foundation::Authority::uncovered(inferred, bound_set)
 }
 
 /// The subset of `inferred` covered by any entry of `set` — used for
 /// prohibition matching (D-PROP1 + D-EFFTREE1): a prohibited root prohibits
 /// its whole subtree, the symmetric reading of ancestor-subsumption.
 pub fn effects_covered(inferred: &EffectSet, set: &EffectSet) -> EffectSet {
-    inferred
-        .iter()
-        .filter(|e| set.iter().any(|b| effect_covers(b, e)))
-        .cloned()
-        .collect()
+    jet_foundation::Authority::covered(inferred, set)
 }
 
 /// True when `set` contains an effect rooted at `root` (the bare root itself,

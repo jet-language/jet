@@ -4,13 +4,7 @@ use crate::Diagnostics::Span;
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::LazyLock;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Ord, PartialOrd)]
-pub enum PolicyScope { Organization, Package, Module, Function, Block }
-
-impl PolicyScope {
-    pub const fn name(self) -> &'static str { match self { Self::Organization => "organization", Self::Package => "package", Self::Module => "module", Self::Function => "function", Self::Block => "block" } }
-    const fn rank(self) -> u8 { match self { Self::Organization => 0, Self::Package => 1, Self::Module => 2, Self::Function => 3, Self::Block => 4 } }
-}
+pub use crate::Authority::Scope as PolicyScope;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Ord, PartialOrd)]
 pub enum PolicyKey { NoAlloc, ZeroRc, ArenaBounded, Unsafe, Impure, Nondeterministic, ScopedGc, ExplicitUnits, Copies, Sentries }
@@ -953,7 +947,7 @@ pub struct CompanionSite {
 fn canonical_rule_arg_variants(name: &str) -> Option<&'static [&'static str]> {
     Some(match name {
         "ABI" => &["system", "cdecl", "stdcall", "fastcall", "win64", "sysv64"],
-        "Capability" => crate::Facts::EFFECT_ROOTS.as_slice(),
+        "Capability" => crate::Authority::EFFECT_ROOTS.as_slice(),
         "FfiLanguage" => &["c", "cpp", "asm"],
         "InlineMode" => &["Hint", "Always", "Never"],
         "JobScope" => crate::Syntax::JOB_SCOPE_VARIANTS,
@@ -1730,7 +1724,7 @@ mod tests {
             variants("NamingCase"),
             &["camel", "snake", "pascal", "kebab", "screaming"]
         );
-        assert_eq!(variants("Capability"), crate::Facts::EFFECT_ROOTS.as_slice());
+        assert_eq!(variants("Capability"), crate::Authority::EFFECT_ROOTS.as_slice());
     }
 
     /// D-MARK-FORM1=A / D-MARK-REPEAT1=A / D-VERDICT-1455-1: the facts the

@@ -3296,6 +3296,7 @@ fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmt
                             TForInMethod::EncodingReader { .. }
                             | TForInMethod::Iterable { .. },
                         )
+                        | Some(TForInMethod::ChannelReceiver)
                         | None => {}
                     }
                     // A list whose elements cannot be cloned is iterated by value: the

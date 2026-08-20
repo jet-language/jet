@@ -1213,7 +1213,7 @@ impl TraitRegistry {
             }
             // A const compute dimension carries no runtime value; it is
             // compile-time-only and therefore has no DataTree codec.
-            Type::ComputeDim(_) => !matches!(trait_name, ENCODE | DECODE),
+            Type::Measure(_) => !matches!(trait_name, ENCODE | DECODE),
             Type::Shared(_) | Type::TraitObject(_) | Type::Fn { .. } => false,
         }
     }
@@ -2441,7 +2441,7 @@ fn field_auto_ok(ty: &Type, owner: &str) -> bool {
         Type::Named(_) => true,
         Type::Apply { name, .. } => name != Syntax::TYPE_SHARED_GUARD,
         Type::Quantity { base, .. } => field_auto_ok(base, owner),
-        Type::ComputeDim(_) => true,
+        Type::Measure(_) => true,
         Type::Shared(_) | Type::TraitObject(_) | Type::Fn { .. } => false,
     }
 }

@@ -32,21 +32,11 @@
         }
     }
 
-    /// Compile the closed policy language. `Ok` carries the normalized table
-    /// name and the compiled expression; a rejection is one message, identical
-    /// on every tier. Compiling an already-compiled pair is idempotent.
-    pub fn jet_db_policy_compile(
-        table: &str,
-        expression: &str,
-    ) -> Result<(String, JetRowPolicyExpr), String> {
+    pub fn jet_db_policy_validate_table(table: &str) -> Result<String, String> {
         let table = table.trim();
-        let expression = expression.trim();
         if table.is_empty()
-            || expression.is_empty()
             || table.len() > JET_ROW_POLICY_MAX_TEXT
-            || expression.len() > JET_ROW_POLICY_MAX_TEXT
             || table.chars().any(char::is_control)
-            || expression.chars().any(char::is_control)
         {
             return Err("row policy needs a table and expression".to_string());
         }
@@ -58,6 +48,24 @@
         if !head_ok || !chars.all(|c| c.is_ascii_alphanumeric() || c == '_') {
             return Err("row policy table must be a simple identifier".to_string());
         }
+        Ok(table.to_string())
+    }
+
+    /// Compile the closed policy language. `Ok` carries the normalized table
+    /// name and the compiled expression; a rejection is one message, identical
+    /// on every tier. Compiling an already-compiled pair is idempotent.
+    pub fn jet_db_policy_compile(
+        table: &str,
+        expression: &str,
+    ) -> Result<(String, JetRowPolicyExpr), String> {
+        let expression = expression.trim();
+        let table = jet_db_policy_validate_table(table)?;
+        if expression.is_empty()
+            || expression.len() > JET_ROW_POLICY_MAX_TEXT
+            || expression.chars().any(char::is_control)
+        {
+            return Err("row policy needs a table and expression".to_string());
+        }
         let compiled = match expression {
             "true" => JetRowPolicyExpr::AllowAll,
             "owner == user" => JetRowPolicyExpr::OwnerEqualsUser,
@@ -67,5 +75,5 @@
                 ));
             }
         };
-        Ok((table.to_string(), compiled))
+        Ok((table, compiled))
     }

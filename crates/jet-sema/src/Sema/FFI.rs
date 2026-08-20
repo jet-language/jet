@@ -148,7 +148,7 @@ pub(crate) fn is_c_abi_type(ty: &Type, registry: &TypeRegistry) -> bool {
         Type::InlineRange { base, .. } => is_c_abi_type(base, registry),
         Type::Union(_) => false,
         Type::Quantity { .. } => false,
-        Type::ComputeDim(_) => false,
+        Type::Measure(_) => false,
     }
 }
 
@@ -397,7 +397,7 @@ pub(crate) fn is_ffi_type(ty: &Type, registry: &TypeRegistry) -> bool {
         Type::InlineRange { base, .. } => is_ffi_type(base, registry),
         Type::Union(_) => false,
         Type::Quantity { .. } => false,
-        Type::ComputeDim(_) => false,
+        Type::Measure(_) => false,
     }
 }
 

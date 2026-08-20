@@ -414,7 +414,7 @@ fn register_effect_facts(
     facts: &mut jet_foundation::Facts::FactRegistry,
 ) {
     use jet_foundation::Facts::FactKind;
-    for effect in jet_foundation::Facts::EFFECT_ROOTS.iter() {
+    for effect in jet_foundation::Authority::EFFECT_ROOTS.iter() {
         facts.declare(FactKind::Effect, (*effect).to_string(), std::iter::empty());
     }
     for name in crate::Syntax::BUILTIN_EFFECT_LEAVES {

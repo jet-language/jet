@@ -132,29 +132,14 @@ fn unescape_axis(axis: &str) -> Option<String> {
 }
 
 
-#[derive(Debug, Clone)]
-pub struct PendingMeasure {
-    expression: Box<Expr>,
-    identity: String,
-}
-
-impl PartialEq for PendingMeasure {
-    fn eq(&self, other: &Self) -> bool {
-        self.identity == other.identity
-    }
-}
-
-impl Eq for PendingMeasure {}
-
 /// One compile-time number attached to a type. The measure plane owns the
-/// resolved value; a D-META-CONST1 expression is retained only until the
-/// ordinary comptime evaluator resolves the declaration.
+/// resolved value; only literals, module value parameters, and declared
+/// combination rules can construct it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Measure {
     Literal { kind: String, value: u64 },
     SignedLiteral { kind: String, value: i64 },
     Symbol { kind: String, name: String },
-    Pending { kind: String, value: PendingMeasure },
     Combined {
         kind: String,
         rule: MeasureRule,
@@ -164,8 +149,7 @@ pub enum Measure {
 }
 
 /// The closed combination algebra declared by measure-bearing type surfaces.
-/// User code never selects a rule; declaration expressions resolve before
-/// this algebra reaches type checking or lowering.
+/// User code never selects a rule.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MeasureRule {
     Add,
@@ -194,31 +178,6 @@ impl Measure {
         }
     }
 
-    pub fn pending(kind: impl Into<String>, expression: Expr) -> Self {
-        let identity = String::from_utf8(crate::CanonicalAST::canonical_fragment(&expression))
-            .expect("canonical AST fragments are UTF-8");
-        Self::Pending {
-            kind: kind.into(),
-            value: PendingMeasure {
-                expression: Box::new(expression),
-                identity,
-            },
-        }
-    }
-
-    pub fn pending_expression(&self) -> Option<&Expr> {
-        match self {
-            Self::Pending { value, .. } => Some(&value.expression),
-            _ => None,
-        }
-    }
-
-    pub fn pending_expression_mut(&mut self) -> Option<&mut Expr> {
-        match self {
-            Self::Pending { value, .. } => Some(&mut value.expression),
-            _ => None,
-        }
-    }
     pub fn literal_value(&self) -> Option<u64> {
         match self {
             Self::Literal { value, .. } => Some(*value),
@@ -292,7 +251,6 @@ impl Measure {
             Self::Literal { kind, .. }
             | Self::SignedLiteral { kind, .. }
             | Self::Symbol { kind, .. }
-            | Self::Pending { kind, .. }
             | Self::Combined { kind, .. } => kind,
         }
     }
@@ -302,7 +260,6 @@ impl Measure {
             Self::Literal { value, .. } => value.to_string(),
             Self::SignedLiteral { value, .. } => value.to_string(),
             Self::Symbol { name, .. } => name.clone(),
-            Self::Pending { .. } => "<computed>".to_string(),
             Self::Combined {
                 rule: MeasureRule::Add,
                 left,
@@ -319,10 +276,7 @@ impl Measure {
     }
 
     fn canonical(&self) -> String {
-        match self {
-            Self::Pending { kind, value } => format!("{kind}:pending:{}", value.identity),
-            _ => format!("{}:{}", self.kind(), self.expression()),
-        }
+        format!("{}:{}", self.kind(), self.expression())
     }
 }
 impl std::fmt::Display for Measure {
@@ -1003,12 +957,10 @@ pub enum Type {
         base: Box<Type>,
         dimension: Dimension,
     },
-    /// D-COMPUTE-TYPE1: a fixed const dimension in `Vec<N>` / `Matrix<M, N>`,
-    /// carried as one `Type::Apply` argument. Card #1662: replaces the retired
-    /// `\0compute.dimension.<N>`-prefixed `Type::Named` string encoding — a
-    /// real `u64` payload can't be confused with a user type name, so unlike
-    /// that encoding this needs no unspellable-prefix trick.
-    ComputeDim(u64),
+    /// D-TYPE2-MEASURE1=A: one compile-time measure in a type position.
+    /// Shape arguments use this same node as list lengths, lanes, and
+    /// dimension exponents; the owning surface supplies the combination rule.
+    Measure(Measure),
 }
 
 /// Failure returned when two composite types do not have the same shape.
@@ -1433,10 +1385,10 @@ impl Type {
                     );
                 }
             }
-            Type::ComputeDim(value) => {
+            Type::Measure(measure) => {
                 vector.push(
                     crate::Registry::type_plane("Measure"),
-                    KnowledgeFact::Measure(Measure::literal("shape", *value)),
+                    KnowledgeFact::Measure(measure.clone()),
                 );
             }
             Type::Tagged { marker, inner } if is_core_crypto(marker) => {
@@ -1467,7 +1419,7 @@ impl Type {
             Type::Apply { name, args } => {
                 for (index, arg) in args.iter().enumerate() {
                     if matches!(name.as_str(), "Vec" | "Matrix")
-                        && matches!(arg, Type::ComputeDim(_) | Type::Named(_))
+                        && matches!(arg, Type::Measure(_))
                     {
                         continue;
                     }
@@ -1690,7 +1642,7 @@ impl Type {
             Type::Quantity { base, .. } => base.erased_carrier(),
             Type::FixedList { elem, .. } => Type::List(Box::new(elem.erased_carrier())),
             Type::InlineRange { base, .. } => base.erased_carrier(),
-            Type::ComputeDim(_) => Type::Int,
+            Type::Measure(_) => Type::Int,
             Type::Tagged { inner, .. } => inner.erased_carrier(),
             Type::Fn {
                 params, ret, ..
@@ -1841,20 +1793,20 @@ impl Type {
                 .collect::<Vec<_>>()
                 .join(" | "),
             Type::Quantity { base, .. } => base.carrier_identity_name(),
-            Type::ComputeDim(_) => "Int".to_string(),
+            Type::Measure(_) => "Int".to_string(),
             _ => self.name(),
         }
     }
 
-    /// D-COMPUTE-TYPE1: preserve a fixed compute dimension in the type tree.
+    /// D-TYPE2-MEASURE1=A: preserve a fixed shape measure in the type tree.
     pub fn compute_dimension_type(value: u64) -> Type {
-        Type::ComputeDim(value)
+        Type::Measure(Measure::literal("shape", value))
     }
 
-    /// Return a fixed compute dimension, if this is the compiler-owned marker.
+    /// Return a fixed shape measure, if this is a compiler-owned measure node.
     pub fn compute_dimension_value(&self) -> Option<u64> {
         match self {
-            Type::ComputeDim(value) => Some(*value),
+            Type::Measure(measure) if measure.kind() == "shape" => measure.literal_value(),
             _ => None,
         }
     }
@@ -1886,8 +1838,7 @@ impl Type {
         }
         args.iter()
             .map(|argument| match argument {
-                Type::ComputeDim(value) => Some(Measure::literal("shape", *value)),
-                Type::Named(name) => Some(Measure::symbol("shape", name)),
+                Type::Measure(measure) if measure.kind() == "shape" => Some(measure.clone()),
                 _ => None,
             })
             .collect()
@@ -1914,7 +1865,7 @@ impl Type {
             {
                 let expected = if name == "Vec" { 1 } else { 2 };
                 args.len() == expected
-                    // Sema retains the fixed ComputeDim facts. TIR receives
+                    // Sema retains the fixed Measure facts. TIR receives
                     // only their erased Int carrier, so both exact forms
                     // belong to the same compiler-owned compute family.
                     && (self.compute_shape_dimensions().is_some()
@@ -2039,7 +1990,7 @@ impl Type {
                 }
             }
             Type::Named(n) => format!("`{}`", n),
-            Type::ComputeDim(value) => format!("{value} (a fixed compute dimension)"),
+            Type::Measure(measure) => format!("{} (a compile-time measure)", measure.expression()),
             // D-CAP9: the raw-pointer type shows as the canonical `*T`.
             Type::Apply { name, args } if name == crate::Syntax::TYPE_PTR && args.len() == 1 => {
                 format!("`*{}`", args[0].name())
@@ -2122,7 +2073,7 @@ impl Type {
                 }
             }
             Type::Named(n) => n.clone(),
-            Type::ComputeDim(value) => value.to_string(),
+            Type::Measure(measure) => measure.expression(),
             // D-CAP9: the raw-pointer type names as the canonical `*T`.
             Type::Apply { name, args } if name == crate::Syntax::TYPE_PTR && args.len() == 1 => {
                 format!("*{}", args[0].name())

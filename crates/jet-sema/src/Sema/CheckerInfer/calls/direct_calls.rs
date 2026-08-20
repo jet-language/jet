@@ -61,7 +61,11 @@ impl<'a> Checker<'a> {
                 ));
                 return None;
             }
-            if let Some(problem) = self.sendability_problem(&result_ty, true) {
+            if let Some(problem) = self.crossing_problem(
+                &result_ty,
+                crate::Sema::SendCrossing::TaskCapture,
+                true,
+            ) {
                 self.report_unsendable(
                     "this frozen value",
                     &result_ty,

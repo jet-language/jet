@@ -2225,6 +2225,13 @@ impl<'a> Checker<'a> {
                                 {
                                     self.declare_loop_var(var.clone(), *var_span, &args[0]);
                                 }
+                                // D-CONC-CHAN1=A: a receiver is a pull source. The loop
+                                // ends on the channel's closed sentinel.
+                                Some(Type::Apply { name, args })
+                                    if name == crate::Syntax::TYPE_RECEIVER && args.len() == 1 =>
+                                {
+                                    self.declare_loop_var(var.clone(), *var_span, &args[0]);
+                                }
                                 // D-DYNARRAY1 / D-RANGE-EXCL1=C: `loop x; window` — View iterates
                                 // elements; two bindings are index then item.
                                 Some(Type::Apply { name, args })

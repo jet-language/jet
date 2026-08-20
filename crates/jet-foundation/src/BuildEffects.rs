@@ -1,5 +1,7 @@
 //! Closed authority vocabulary shared by build sema, policy, CLI, and runtime.
 
+use crate::Authority;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum BuildEffect {
     Net,
@@ -59,8 +61,12 @@ impl BuildEffect {
     }
 
     pub fn parse(value: &str) -> Option<Self> {
+        if value.contains('.') {
+            return None;
+        }
+        let canonical = Authority::parse_root(value)?;
         Self::ALL.into_iter().find(|effect| {
-            value.eq_ignore_ascii_case(effect.name()) || value.eq_ignore_ascii_case(effect.flag())
+            canonical == effect.name()
         })
     }
 }

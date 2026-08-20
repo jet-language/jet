@@ -10,9 +10,9 @@ fn use_slot(token: Int, token_sender: Sender<Int>) => Int {
 fn run() {
     // A capacity-one buffer accepts the first value. The second sender waits
     // until the receiver drains that slot.
-    (sender, values) :: tasks.channel<Int>(capacity: 1)
+    (sender, values) :: channel<Int>(capacity: 1)
     second_sender :: ~sender
-    (done_sender, done) :: tasks.channel<Int>()
+    (done_sender, done) :: channel<Int>()
     sender.send(10)
     second :: task {
         second_sender.send(20)
@@ -29,7 +29,7 @@ fn run() {
     // A capacity-two channel starts with two tokens. A worker receives one
     // before work and sends it back after work, so at most two workers can be
     // active. Returned slot IDs prove that every worker held one of two leases.
-    (token_sender, tokens) :: tasks.channel<Int>(capacity: 2)
+    (token_sender, tokens) :: channel<Int>(capacity: 2)
     token_sender.send(1)
     token_sender.send(2)
     token_sender_two :: ~token_sender

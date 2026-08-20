@@ -226,11 +226,19 @@ fn list_to_ct(l: &JetSyncList) -> CtValue {
 }
 
 fn policy_to_ct(p: &JetRowPolicy) -> CtValue {
+    let compiled = jet_db_policy_compiled(p);
     CtValue::Struct {
         type_name: "RowPolicy".to_string(),
         fields: vec![
             ("table".to_string(), CtValue::Str(p.table.clone())),
             ("expression".to_string(), CtValue::Str(p.expression.clone())),
+            (
+                "compiled".to_string(),
+                CtValue::Int(match compiled {
+                    jet_std::JetRowPolicyExpr::AllowAll => 0,
+                    jet_std::JetRowPolicyExpr::OwnerEqualsUser => 1,
+                }),
+            ),
         ],
     }
 }
@@ -650,15 +658,20 @@ fn ct_to_policy(v: &CtValue, span: Span) -> Result<JetRowPolicy, Diagnostic> {
             _ => None,
         })
         .ok_or_else(|| unsupported("table", span))?;
-    let expression = fields
+    let code = fields
         .iter()
-        .find(|(n, _)| n == "expression")
+        .find(|(n, _)| n == "compiled")
         .and_then(|(_, v)| match v {
-            CtValue::Str(s) => Some(s.clone()),
+            CtValue::Int(code) => Some(*code),
             _ => None,
         })
-        .ok_or_else(|| unsupported("expression", span))?;
-    jet_db_policy_new(table, expression)
+        .ok_or_else(|| unsupported("compiled row policy", span))?;
+    let compiled = match code {
+        0 => jet_std::JetRowPolicyExpr::AllowAll,
+        1 => jet_std::JetRowPolicyExpr::OwnerEqualsUser,
+        _ => return Err(unsupported("compiled row policy", span)),
+    };
+    jet_db_policy_from_compiled(table, compiled)
         .map_err(|_| unsupported("unsupported row policy", span))
 }
 

@@ -67,7 +67,7 @@ pub fn e3403(what: &str, span: Option<crate::Diagnostics::Span>) -> Diagnostic {
 /// Derives from `Syntax::IMPURE_BUILTINS` (c44 consolidation). Add new impure
 /// builtins to Syntax.rs; the comptime purity checker uses the same list.
 pub(crate) fn is_impure_builtin(name: &str) -> bool {
-    crate::Syntax::IMPURE_BUILTINS.contains(&name)
+    jet_foundation::Authority::builtin_effect(name).is_some()
 }
 
 /// D-STDIN1=A: std module calls that are impure (read from environment/stdin).

@@ -221,7 +221,7 @@ use std::collections::HashSet;
                             if callback_safe {
                                 None
                             } else {
-                                self.sendability_problem(&cap_ty, false).or(Some(
+                                self.crossing_problem(&cap_ty, SendCrossing::InterruptCallback, false).or(Some(
                                     SendabilityProblem {
                                         root: None,
                                         path: Vec::new(),
@@ -230,7 +230,12 @@ use std::collections::HashSet;
                                 ))
                             }
                         } else {
-                            self.sendability_problem(&cap_ty, true)
+                            self.crossing_problem_for_name(
+                                name,
+                                &cap_ty,
+                                SendCrossing::InterruptCallback,
+                                true,
+                            )
                         };
                         if let Some(problem) = problem {
                             self.report_unsendable(
@@ -245,7 +250,7 @@ use std::collections::HashSet;
                     }
                     if self.is_task_spawn && self.type_contains_cell_guard(&cap_ty) {
                         let problem = self
-                            .sendability_problem(&cap_ty, true)
+                            .crossing_problem(&cap_ty, SendCrossing::TaskCapture, true)
                             .expect("Cell guards are thread-confined");
                         self.report_unsendable(
                             name,
@@ -266,11 +271,11 @@ use std::collections::HashSet;
                     if matches!(&cap_ty, Type::Named(ty) if ty == Syntax::TYPE_TASKGROUP) {
                         self.diags.push(Diagnostic::error(
                             "E1110",
-                            format!("`{name}` is a `TaskGroup` and cannot escape in a lambda"),
+                            format!("`{name}` is a `Group` and cannot escape in a lambda"),
                             "a task group is a scoped spawn authority that may flow only through a direct function or method parameter"
                                 .to_string(),
                             format!(
-                                "move this work to a function or method that takes `{name}: TaskGroup` and call it directly"
+                                "move this work to a function or method that takes `{name}: Group` and call it directly"
                             ),
                             Some(lam.span),
                         ));

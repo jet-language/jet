@@ -202,9 +202,9 @@ impl<'a> Checker<'a> {
             self.diags.push(Diagnostic::error(
                 "E1110",
                 "`task` needs an active task group".to_string(),
-                "structured spawning goes through a lexical `task.group` or a `TaskGroup` parameter"
+                "structured spawning goes through a lexical `task.group` or a `Group` parameter"
                     .to_string(),
-                "write `task work()` inside a group, or pass a `TaskGroup` parameter".to_string(),
+                "write `task work()` inside a group, or pass a `Group` parameter".to_string(),
                 Some(span),
             ));
             return false;
@@ -223,9 +223,9 @@ impl<'a> Checker<'a> {
                     "`task` must use the active task group `{}`, not `{}`",
                     active, name
                 ),
-                "each lexical `task.group` block owns spawns; a helper can instead receive `TaskGroup` as a parameter".to_string(),
+                "each lexical `task.group` block owns spawns; a helper can instead receive `Group` as a parameter".to_string(),
                 format!(
-                    "write `task work()` in the active group, or pass `{active}` to `fn helper(group: TaskGroup)`"
+                    "write `task work()` in the active group, or pass `{active}` to `fn helper(group: Group)`"
                 ),
                 Some(*rspan),
             ));
@@ -233,9 +233,9 @@ impl<'a> Checker<'a> {
             self.diags.push(Diagnostic::error(
                 "E1110",
                 "`task` needs an active task group".to_string(),
-                "structured spawning is scoped to a lexical `task.group` or a `TaskGroup` parameter"
+                "structured spawning is scoped to a lexical `task.group` or a `Group` parameter"
                     .to_string(),
-                "wrap the call in `task.group g { … }`, or add `group: TaskGroup` to this helper"
+                "wrap the call in `task.group g { … }`, or add `group: Group` to this helper"
                     .to_string(),
                 Some(*rspan),
             ));
@@ -254,7 +254,7 @@ impl<'a> Checker<'a> {
     /// Reads are admitted freely; a write is admitted only when its place is
     /// provably disjoint from every place a sibling already holds. A group can
     /// only lend what outlives its own join, so two shapes are never lent:
-    /// a group reached through a `TaskGroup` parameter (its join runs in
+    /// a group reached through a `Group` parameter (its join runs in
     /// another frame) and an owner declared inside the group's own block (it
     /// drops before the group joins).
     ///
@@ -556,8 +556,8 @@ impl<'a> Checker<'a> {
             other => {
                 self.diags.push(Diagnostic::error(
                     "E0102",
-                    format!("`TaskGroup` has no method `{other}`"),
-                    "task groups use the `task` keyword; `TaskGroup` values only support the fluent select builder"
+                    format!("`Group` has no method `{other}`"),
+                    "task groups use the `task` keyword; `Group` values only support the fluent select builder"
                         .to_string(),
                     "write `task work()`, `task.all { … }`, or `task.group g { g.select().recv(ch).wait() }".to_string(),
                     Some(span),
@@ -641,7 +641,7 @@ impl<'a> Checker<'a> {
             }
             None => Type::Named("Unit".to_string()),
         };
-        if let Some(problem) = self.sendability_problem(&t, false) {
+        if let Some(problem) = self.crossing_problem(&t, SendCrossing::TaskResult, false) {
             self.report_unsendable(
                 "task result",
                 &t,

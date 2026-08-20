@@ -168,8 +168,9 @@ impl<'a> Checker<'a> {
     /// handle into the locked edit. Returns `true` when `stmt` was rewritten.
     ///
     /// When the value also reads another shared cell, the write goes through a
-    /// synthesized one-statement transaction so the commit acquires in address
-    /// order instead of nesting one cell's lock inside another's.
+    /// synthesized one-statement transaction outside an explicit transaction,
+    /// so the commit acquires in address order instead of nesting one cell's
+    /// lock inside another's. Inside `#Transact`, it joins that outer commit.
     pub(crate) fn desugar_shared_field_write(&mut self, stmt: &mut Stmt) -> bool {
         let Stmt::Assign {
             target: LValue::Field { base, field, span },
@@ -188,9 +189,13 @@ impl<'a> Checker<'a> {
         let op_span = *op_span;
         let field = field.clone();
         let other_cells = self.value_touches_another_shared_cell(value);
+        // An explicit transaction already owns the ordered commit. A nested
+        // synthesized transaction would commit this one statement early and
+        // break the user's multi-statement atomicity.
+        let needs_implicit_transaction = other_cells && self.txn_depth == 0;
         let handle = std::mem::replace(&mut **base, Expr::Absent(span));
         let value = std::mem::replace(value, Expr::Absent(span));
-        *stmt = if other_cells {
+        *stmt = if needs_implicit_transaction {
             let body = vec![
                 hoisted_rhs_binding(value, span),
                 Stmt::Expr(shared_access_call(

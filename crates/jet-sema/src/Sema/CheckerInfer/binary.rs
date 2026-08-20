@@ -124,8 +124,8 @@ impl<'a> Checker<'a> {
         [8u8, 16, 32, 64]
             .into_iter()
             .find_map(|bits| {
-                let (lower, upper) = crate::AST::int_range(*signed, bits);
-                super::exact_integer_fits(value, lower, upper).then_some(Type::IntN {
+                let interval = super::integer_width_interval(*signed, bits);
+                super::exact_integer_fits(value, interval.lo, interval.hi).then_some(Type::IntN {
                     signed: *signed,
                     bits,
                 })
@@ -199,11 +199,8 @@ impl<'a> Checker<'a> {
             Expr::Unary(crate::AST::UnOp::Neg, inner, _) => match (inner.as_mut(), target) {
                 (Expr::Int(value, span, width, raw), Type::InlineRange { base, lo, hi }) => {
                     let negated = super::exact_integer_literal(*value, raw.as_deref()).neg();
-                    if !super::exact_integer_fits(
-                        &negated,
-                        i128::from(*lo),
-                        i128::from(*hi),
-                    ) {
+                    let interval = super::IntegerInterval::new(i128::from(*lo), i128::from(*hi));
+                    if !super::exact_integer_fits(&negated, interval.lo, interval.hi) {
                         self.diags.push(
                             crate::Sema::Diagnostics::inline_range_literal_out_of_bounds(
                                 &negated,
@@ -222,8 +219,8 @@ impl<'a> Checker<'a> {
                 }
                 (Expr::Int(value, span, width, raw), Type::IntN { signed: true, bits }) => {
                     let negated = super::exact_integer_literal(*value, raw.as_deref()).neg();
-                    let (lower, upper) = crate::AST::int_range(true, *bits);
-                    if !super::exact_integer_fits(&negated, lower, upper) {
+                    let interval = super::integer_width_interval(true, *bits);
+                    if !super::exact_integer_fits(&negated, interval.lo, interval.hi) {
                         self.diags
                             .push(crate::Sema::int_range_error(true, *bits, *span));
                     }
@@ -240,7 +237,8 @@ impl<'a> Checker<'a> {
                 }
                 Type::InlineRange { base, lo, hi } => {
                     let exact = super::exact_integer_literal(*value, raw.as_deref());
-                    if !super::exact_integer_fits(&exact, i128::from(*lo), i128::from(*hi)) {
+                    let interval = super::IntegerInterval::new(i128::from(*lo), i128::from(*hi));
+                    if !super::exact_integer_fits(&exact, interval.lo, interval.hi) {
                         self.diags.push(
                             crate::Sema::Diagnostics::inline_range_literal_out_of_bounds(
                                 &exact,
@@ -258,9 +256,9 @@ impl<'a> Checker<'a> {
                     })
                 }
                 Type::IntN { signed, bits } => {
-                    let (lower, upper) = crate::AST::int_range(*signed, *bits);
+                    let interval = super::integer_width_interval(*signed, *bits);
                     let exact = super::exact_integer_literal(*value, raw.as_deref());
-                    if !super::exact_integer_fits(&exact, lower, upper) {
+                    if !super::exact_integer_fits(&exact, interval.lo, interval.hi) {
                         self.diags
                             .push(crate::Sema::int_range_error(*signed, *bits, *span));
                     }

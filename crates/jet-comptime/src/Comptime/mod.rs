@@ -2249,7 +2249,7 @@ fn expand_template_type(
         | Type::TraitObject(_)
         | Type::IntN { .. }
         | Type::Float32
-        | Type::ComputeDim(_) => {}
+        | Type::Measure(_) => {}
     }
     Ok(())
 }

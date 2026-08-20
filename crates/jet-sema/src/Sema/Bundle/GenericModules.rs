@@ -422,9 +422,6 @@ fn specialize_module_type(
         match ty {
             Type::FixedList { elem, len } => {
                 lengths(elem, types, values);
-                if let Some(expression) = len.pending_expression_mut() {
-                    substitute_expr(expression, types, values);
-                }
                 *len = len.resolve_symbols(&|name| {
                     values.get(name).and_then(|value| match value {
                         crate::AST::CtValue::Int(value) => u64::try_from(*value).ok(),
@@ -439,12 +436,13 @@ fn specialize_module_type(
             Type::Apply { name, args } => {
                 if matches!(name.as_str(), "Vec" | "Matrix") {
                     for argument in args.iter_mut() {
-                        if let Type::Named(symbol) = argument {
-                            if let Some(crate::AST::CtValue::Int(value)) = values.get(symbol) {
-                                if let Ok(value) = u64::try_from(*value) {
-                                    *argument = Type::compute_dimension_type(value);
-                                }
-                            }
+                        if let Type::Measure(measure) = argument {
+                            *measure = measure.resolve_symbols(&|symbol| {
+                                values.get(symbol).and_then(|value| match value {
+                                    crate::AST::CtValue::Int(value) => u64::try_from(*value).ok(),
+                                    _ => None,
+                                })
+                            });
                         }
                     }
                 }
@@ -1138,7 +1136,11 @@ fn type_full_key(ty: &Type) -> Vec<u8> {
                 write(out, base);
                 frame_text(out, &dimension.identity());
             }
-            ComputeDim(value) => { out.push(21); out.extend_from_slice(&value.to_be_bytes()); }
+            Measure(measure) => {
+                out.push(21);
+                frame_text(out, measure.kind());
+                frame_text(out, &measure.expression());
+            }
             InlineRange { base, lo, hi } => {
                 out.push(22);
                 write(out, base);

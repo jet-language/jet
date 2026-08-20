@@ -2711,10 +2711,10 @@ impl Cx {
             // Erased by the `quantity_parts()` guard above `rust_type` returns
             // through; a runtime quantity value IS its base numeric type.
             Type::Quantity { .. } => unreachable!("quantity_parts() erased above"),
-            // A const compute-dimension only ever appears as a `Vec`/`Matrix`
+            // A compile-time measure only ever appears as a `Vec`/`Matrix`
             // shape arg, intercepted by name above before reaching the
             // generic `Type::Apply` args recursion that would call here.
-            Type::ComputeDim(_) => unreachable!("compute-dimension arg handled by the Vec/Matrix Apply arm above"),
+            Type::Measure(_) => unreachable!("type measure handled by the Vec/Matrix Apply arm above"),
         }
     }
 
@@ -5246,7 +5246,7 @@ pub(crate) fn field_type_cloneable(
         // Same as the retired `\0compute.dimension.N` string encoding: it
         // never matched the `Type::Named` user-type-registry lookup above
         // (only ever reached as an `Apply` arg via the fallback above it).
-        Type::ComputeDim(_) => false,
+        Type::Measure(_) => false,
     }
 }
 
@@ -5311,7 +5311,7 @@ pub(crate) fn field_type_rust_eq_compatible(
         // Same as the retired `\0compute.dimension.N` string encoding: it
         // never matched the `Type::Named` user-type-registry lookup above
         // (only ever reached as an `Apply` arg via the fallback above it).
-        Type::ComputeDim(_) => false,
+        Type::Measure(_) => false,
     }
 }
 
@@ -5393,7 +5393,7 @@ pub(crate) fn field_type_hashable(
         // Same as the retired `\0compute.dimension.N` string encoding: it
         // never matched the `Type::Named` user-type-registry lookup above
         // (only ever reached as an `Apply` arg via the fallback above it).
-        Type::ComputeDim(_) => false,
+        Type::Measure(_) => false,
     }
 }
 

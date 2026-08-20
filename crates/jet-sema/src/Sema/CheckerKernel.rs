@@ -127,6 +127,33 @@ impl<'a> super::Checker<'a> {
 
         if let Some(failure) = failure {
             marker.proof = None;
+            if failure.obligation == "sendable kernel boundary values" {
+                if let Some((name, ty, problem)) = f.params.iter().find_map(|param| {
+                    self.crossing_problem(&param.ty, SendCrossing::Kernel, true)
+                        .map(|problem| (param.name.clone(), param.ty.clone(), problem))
+                }) {
+                    self.report_unsendable(
+                        &name,
+                        &ty,
+                        problem,
+                        SendCrossing::Kernel,
+                        marker.span,
+                    );
+                    return;
+                }
+                if let Some(ty) = f.return_type.as_ref() {
+                    if let Some(problem) = self.crossing_problem(ty, SendCrossing::Kernel, true) {
+                        self.report_unsendable(
+                            "kernel result",
+                            ty,
+                            problem,
+                            SendCrossing::Kernel,
+                            marker.span,
+                        );
+                        return;
+                    }
+                }
+            }
             self.diags.push(kernel_failure(failure.obligation, failure.span));
         } else {
             marker.proof = Some(KernelProof::parallel());

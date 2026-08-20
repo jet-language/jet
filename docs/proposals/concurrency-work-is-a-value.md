@@ -195,7 +195,7 @@ D-CONC-OUTCOME1=A.
 **Today.** A module call, a manual drain dance, and a builder chain.
 
 ```jet
-(tx, rx) :: tasks.channel<Int>(capacity: 8)
+(tx, rx) :: channel<Int>(capacity: 8)
 loop {
     job :: rx.receive() ?? break
     handle(job)
@@ -226,7 +226,9 @@ if {
 - The dead `Channel` table entry and the `.read` arm (accepted today, silently
   dropped on every tier) are deleted.
 
-**Deleted:** the `g.select()` builder, `tasks.channel`, and the `.read` arm.
+**Canonical:** `channel<T>()` is builtin and needs no import. The old
+`g.select()` builder, `tasks.channel`, and `.read` arm still need deletion in
+the select migration.
 D-CONC-CHAN1=A amends D-CONCSELECT1 and narrows D-TASKRUNTIME1's module
 surface. D-CONC-CHAN2=D makes the wait spelling the subjectless `if` table
 shown above.

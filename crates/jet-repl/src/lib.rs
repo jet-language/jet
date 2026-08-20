@@ -44,6 +44,7 @@ pub mod SemanticSymbols;
 pub mod Term;
 
 use jet_foundation::Terminal::{ColorChoice, Theme};
+use jet_foundation::Authority::covers;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::io::{self, BufRead, Write};
 use std::path::Path;
@@ -216,10 +217,10 @@ impl crate::Comptime::ReplAuthorizer for ReplAuthorization<'_> {
     fn authorize(&mut self, request: &crate::Comptime::ReplEffectRequest, span: crate::Diagnostics::Span) -> Result<(), Diagnostic> {
         self.validate_file_target(request, span)?;
         let root = request.root.to_ascii_lowercase();
-        if self.policy.flags.deny.contains(&root) {
+        if self.policy.flags.deny.iter().any(|bound| covers(bound, &root)) {
             return Err(self.e1803(request, "an explicit `--deny` policy overrides every prompt and allowance", span));
         }
-        if self.policy.flags.allow.contains(&root)
+        if self.policy.flags.allow.iter().any(|bound| covers(bound, &root))
             && (request.operation != "Exit" || self.prompt.is_none())
         {
             return Ok(());

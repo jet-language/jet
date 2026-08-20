@@ -695,7 +695,7 @@ pub const COMMANDS: &[CommandSpec] = &[
     },
     CommandSpec {
         name: "eval",
-        summary: "Evaluate pure Jet and print JSON",
+        summary: "Evaluate pure Jet and print the value (`--json` for JSON)",
         headline: false,
         actions: &[],
         exhaustive: false,

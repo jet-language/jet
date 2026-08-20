@@ -310,7 +310,7 @@ fn collect_free(ty: &Type, out: &mut HashSet<String>) {
         Type::Tagged { inner, .. } => collect_free(inner, out),
         Type::Union(members) => members.iter().for_each(|m| collect_free(m, out)),
         Type::Quantity { base, .. } => collect_free(base, out),
-        Type::ComputeDim(_) => {}
+        Type::Measure(_) => {}
     }
 }
 
@@ -496,10 +496,22 @@ pub fn e0913(trait_name: &str, missing: &[String], span: Span) -> Diagnostic {
     )
 }
 
+fn join_with_or(items: &[String]) -> String {
+    match items {
+        [] => String::new(),
+        [item] => item.clone(),
+        _ => format!(
+            "{}, or {}",
+            items[..items.len() - 1].join(", "),
+            items.last().expect("non-empty list")
+        ),
+    }
+}
+
 /// D-ATTR4=A/D-FMT-INTERP1=A/D-FMT-PRETTY1=A/D-QUANTITY-PRINT1=A+D:
 /// unknown interpolation selector after `:`.
 pub fn e0914(selector: &str, span: Span) -> Diagnostic {
-    let valid = crate::Syntax::INTERPOLATION_SELECTORS
+    let valid_items = crate::Syntax::INTERPOLATION_SELECTORS
         .iter()
         .map(|selector| match selector.arguments {
             crate::Syntax::InterpolationSelectorArguments::None => {
@@ -514,8 +526,8 @@ pub fn e0914(selector: &str, span: Span) -> Diagnostic {
                 styles.join("|")
             ),
         })
-        .collect::<Vec<_>>()
-        .join(", ");
+        .collect::<Vec<_>>();
+    let valid = join_with_or(&valid_items);
     let fix = crate::Syntax::INTERPOLATION_SELECTORS
         .iter()
         .map(|selector| match selector.arguments {
@@ -797,7 +809,7 @@ pub fn collect_clone_type_param_mentions(
                 out.insert(n.clone());
             }
         }
-        Type::Shared(_) | Type::Fn { .. } | Type::TraitObject(_) | Type::ComputeDim(_) => {}
+        Type::Shared(_) | Type::Fn { .. } | Type::TraitObject(_) | Type::Measure(_) => {}
         Type::List(inner)
         | Type::Option(inner)
         | Type::FixedList { elem: inner, .. }

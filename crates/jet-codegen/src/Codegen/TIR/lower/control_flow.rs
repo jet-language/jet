@@ -198,6 +198,9 @@ pub(crate) fn lower_forin_collection(
         }
     } else {
         let coll = lower_expr(collection, cx, env);
+        if matches!(&coll.ty, Type::Apply { name, args } if name == Syntax::TYPE_RECEIVER && args.len() == 1) {
+            return (coll, Some(TForInMethod::ChannelReceiver));
+        }
         let method = encoding_reader_method(&coll.ty);
         (coll, method)
     }

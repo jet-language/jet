@@ -43,6 +43,20 @@ struct RootCallTarget {
 }
 
 impl<'a> Checker<'a> {
+    fn record_static_time_effect(&mut self, type_name: &str, method: &str, span: Span) {
+        let api = match (type_name, method) {
+            (crate::Syntax::CLOCK_TYPE, "system") => Some("Clock.system"),
+            (crate::Syntax::CLOCK_TYPE, "now") => Some("Clock.now"),
+            ("Date", "today") => Some("Date.today"),
+            _ => None,
+        };
+        let Some(api) = api else { return };
+        self.record_effect(Effect::Time.name(), span);
+        if self.in_pure && self.det_suppress == 0 {
+            self.diags.push(crate::Sema::e3403(api, Some(span)));
+        }
+    }
+
     fn method_suggestion(
         &self,
         method: &str,
@@ -979,15 +993,7 @@ impl<'a> Checker<'a> {
                                 return Some(ret);
                             }
                             if let Some(ret) = Collections::builtin_method_return(&ty, method, args.len(), true) {
-                                if type_name == crate::Syntax::CLOCK_TYPE && method == "system" {
-                                    self.record_effect(Effect::Time.name(), span);
-                                    if self.in_pure && self.det_suppress == 0 {
-                                        self.diags.push(crate::Sema::e3403(
-                                            "Clock.system",
-                                            Some(span),
-                                        ));
-                                    }
-                                }
+                                self.record_static_time_effect(type_name, method, span);
                                 let ret = self.finish_builtin_method(receiver, method, &ty, args, span, ret);
                                 let ret = if type_name == crate::Syntax::CLOCK_TYPE {
                                     if method == "system" {
@@ -1393,7 +1399,20 @@ impl<'a> Checker<'a> {
                 }
                 if ((type_name == "EncodingLimits" || type_name == "CBOROptions" || type_name == "XMLLimits" || type_name == "XMLParseOptions" || type_name == "Limits" || type_name == "DataLimits") && method == "safe")
                     || self.resolve_method_sig(type_name, method).is_some() {
-                    return self.check_static_method(type_name, method, span, owner_type_args, type_args, args);
+                    self.record_static_time_effect(type_name, method, span);
+                    let ret = self.check_static_method(
+                        type_name,
+                        method,
+                        span,
+                        owner_type_args,
+                        type_args,
+                        args,
+                    );
+                    return if type_name == crate::Syntax::CLOCK_TYPE && method == "system" {
+                        ret.map(crate::Sema::Diagnostics::system_clock_type)
+                    } else {
+                        ret
+                    };
                 }
                 // D-FIDELITY-API1=A: `core.perf.Perf` static API. `use core.perf as perf`
                 // remains accepted as the existing module-alias path.
@@ -1415,24 +1434,7 @@ impl<'a> Checker<'a> {
                         if let Some(ret) =
                             Collections::builtin_method_return(&ty, method, args.len(), true)
                         {
-                            if (type_name == crate::Syntax::CLOCK_TYPE && method == "system")
-                                || (type_name == crate::Syntax::CLOCK_TYPE && method == "now")
-                                || (type_name == "Date" && method == "today")
-                            {
-                                self.record_effect(Effect::Time.name(), span);
-                                if self.in_pure && self.det_suppress == 0 {
-                                    self.diags.push(crate::Sema::e3403(
-                                        if type_name == "Date" {
-                                            "Date.today"
-                                        } else if method == "now" {
-                                            "Clock.now"
-                                        } else {
-                                            "Clock.system"
-                                        },
-                                        Some(span),
-                                    ));
-                                }
-                            }
+                            self.record_static_time_effect(type_name, method, span);
                             let ret =
                                 self.finish_builtin_method(receiver, method, &ty, args, span, ret);
                             return if type_name == crate::Syntax::CLOCK_TYPE {
@@ -2190,6 +2192,7 @@ impl<'a> Checker<'a> {
             }
             if receiver_is_clock
                 && !clock_is_deterministic
+                && !crate::Sema::Diagnostics::is_system_clock_type(&recv_ty)
                 && matches!(method, "now" | "tick" | "advance" | "wait")
             {
                 self.record_effect(Effect::Time.name(), span);

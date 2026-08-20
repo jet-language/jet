@@ -218,9 +218,6 @@ fn measure_info(measure: &Measure) -> CtValue {
         Measure::Symbol { kind, name } => {
             (kind.clone(), None, Some(ct_str(name.clone())))
         }
-        Measure::Pending { kind, .. } => {
-            (kind.clone(), None, Some(ct_str(measure.expression())))
-        }
         Measure::Combined { kind, .. } => {
             let value = measure
                 .literal_value()

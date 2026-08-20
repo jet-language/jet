@@ -5,139 +5,13 @@
 //! to inspect commands. No entry is carried into TIR or generated Rust.
 
 use crate::AST::{Expr, Func, Item, ProgramBundle, Stmt, StrPart};
-use crate::Diagnostics::{Diagnostic, Span};
+use crate::Diagnostics::Span;
 use crate::Policy::GateSet;
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub enum GateKind {
-    Unsafe,
-    Impure,
-    DependencyGrant,
-    BuildFlag,
-    SessionFlag,
-    TrustGrant,
-    ForcePin,
-    TaintScrub,
-    DutyDrop,
-    StateTransition,
-    PrecisionDemotion,
-    Nondeterministic,
-}
-
-impl GateKind {
-    pub const fn name(self) -> &'static str {
-        match self {
-            Self::Unsafe => "unsafe",
-            Self::Impure => "impure",
-            Self::DependencyGrant => "dependency_grant",
-            Self::BuildFlag => "build_flag",
-            Self::SessionFlag => "session_flag",
-            Self::TrustGrant => "trust_grant",
-            Self::ForcePin => "force_pin",
-            Self::TaintScrub => "taint_scrub",
-            Self::DutyDrop => "duty_drop",
-            Self::StateTransition => "state_transition",
-            Self::PrecisionDemotion => "precision_demotion",
-            Self::Nondeterministic => "nondeterministic",
-        }
-    }
-
-    pub fn parse(value: &str) -> Option<Self> {
-        match value.trim().to_ascii_lowercase().as_str() {
-            "unsafe" | "unsafe_region" | "unsafe_fn" => Some(Self::Unsafe),
-            "impure" => Some(Self::Impure),
-            "dependency" | "dependency_grant" | "grant" => Some(Self::DependencyGrant),
-            "build" | "build_flag" => Some(Self::BuildFlag),
-            "session" | "session_flag" => Some(Self::SessionFlag),
-            "trust" | "trust_grant" => Some(Self::TrustGrant),
-            "force" | "force_pin" => Some(Self::ForcePin),
-            "scrub" | "taint" | "taint_scrub" => Some(Self::TaintScrub),
-            "drop" | "detach" | "duty" | "duty_drop" => Some(Self::DutyDrop),
-            "state" | "transition" | "state_transition" => Some(Self::StateTransition),
-            "approx"
-            | "precision"
-            | "precision_demotion"
-            | "rounded"
-            | "wrapping"
-            | "saturating"
-            | "checked" => Some(Self::PrecisionDemotion),
-            "nondeterministic" | "determinism" => Some(Self::Nondeterministic),
-            _ => None,
-        }
-    }
-
-    pub const fn is_security(self) -> bool {
-        matches!(
-            self,
-            Self::Unsafe
-                | Self::Impure
-                | Self::DependencyGrant
-                | Self::BuildFlag
-                | Self::SessionFlag
-                | Self::TrustGrant
-                | Self::ForcePin
-                | Self::Nondeterministic
-        )
-    }
-
-    pub const fn is_rights_kind(self) -> bool {
-        self.is_security()
-    }
-
-    const fn display_order(self) -> u8 {
-        match self {
-            Self::Unsafe => 0,
-            Self::Impure => 1,
-            Self::Nondeterministic => 2,
-            Self::DependencyGrant => 3,
-            Self::BuildFlag => 4,
-            Self::SessionFlag => 5,
-            Self::TrustGrant => 6,
-            Self::ForcePin => 7,
-            Self::TaintScrub => 8,
-            Self::DutyDrop => 9,
-            Self::StateTransition => 10,
-            Self::PrecisionDemotion => 11,
-        }
-    }
-}
-
-#[derive(Debug, Clone)]
-pub struct GateOperation {
-    pub kind: String,
-    pub span: Span,
-    pub required: Vec<String>,
-    pub asserted: Vec<String>,
-    pub discharged: bool,
-}
-
-#[derive(Debug, Clone)]
-pub struct GateEntry {
-    pub kind: GateKind,
-    /// Broad fact plane used by `--scope` and by the human security-first view.
-    pub domain: String,
-    /// Lexical/build scope of the written gate (`function`, `block`, `package`, …).
-    pub scope: String,
-    pub source: String,
-    pub span: Option<Span>,
-    pub subject: String,
-    pub reason: Option<String>,
-    pub status: Option<String>,
-    pub detail: String,
-    pub provenance: Vec<String>,
-    pub operations: Vec<GateOperation>,
-}
-
-#[derive(Debug, Clone)]
-pub struct GateDiagnostic {
-    pub source: String,
-    pub diagnostic: Diagnostic,
-}
+pub use jet_foundation::Authority::{GateDiagnostic, GateEntry, GateKind, GateOperation};
 
 #[derive(Debug, Clone, Default)]
 pub struct GateLedger {
-    entries: Vec<GateEntry>,
-    diagnostics: Vec<GateDiagnostic>,
+    inner: jet_foundation::Authority::GateLedger,
 }
 
 impl GateLedger {
@@ -175,14 +49,16 @@ impl GateLedger {
                     .collect(),
             });
         }
-        ledger.diagnostics = inspection
-            .diagnostics
-            .into_iter()
-            .map(|entry| GateDiagnostic {
-                source: entry.source,
-                diagnostic: entry.diagnostic,
-            })
-            .collect();
+        ledger.set_diagnostics(
+            inspection
+                .diagnostics
+                .into_iter()
+                .map(|entry| GateDiagnostic {
+                    source: entry.source,
+                    diagnostic: entry.diagnostic,
+                })
+                .collect(),
+        );
 
         for module in &bundle.modules {
             visit_statements(&module.display, &module.script_body, &mut ledger);
@@ -194,61 +70,25 @@ impl GateLedger {
     }
 
     pub fn entries(&self) -> &[GateEntry] {
-        &self.entries
+        self.inner.entries()
     }
 
     pub fn diagnostics(&self) -> &[GateDiagnostic] {
-        &self.diagnostics
+        self.inner.diagnostics()
+    }
+
+    pub fn set_diagnostics(&mut self, diagnostics: Vec<GateDiagnostic>) {
+        self.inner.set_diagnostics(diagnostics);
     }
 
     /// Add one writer's fact while coalescing the same fact with another
     /// provenance source. The ledger never drops provenance.
-    pub fn push(&mut self, mut entry: GateEntry) {
-        if entry.provenance.is_empty() {
-            entry.provenance.push(entry.source.clone());
-        }
-        if let Some(existing) = self.entries.iter_mut().find(|candidate| same_fact(candidate, &entry)) {
-            for provenance in entry.provenance {
-                if !existing.provenance.contains(&provenance) {
-                    existing.provenance.push(provenance);
-                }
-            }
-            if existing.reason.is_none() {
-                existing.reason = entry.reason;
-            }
-            if existing.status.is_none() {
-                existing.status = entry.status;
-            }
-            existing.provenance.sort();
-            return;
-        }
-        entry.provenance.sort();
-        self.entries.push(entry);
+    pub fn push(&mut self, entry: GateEntry) {
+        self.inner.push(entry);
     }
 
     pub fn sort(&mut self) {
-        self.entries.sort_by(|left, right| {
-            (
-                !left.kind.is_security(),
-                left.kind.display_order(),
-                left.kind.name(),
-                left.source.as_str(),
-                left.span.map(|span| span.start).unwrap_or(usize::MAX),
-                left.span.map(|span| span.end).unwrap_or(usize::MAX),
-                left.subject.as_str(),
-                left.detail.as_str(),
-            )
-                .cmp(&(
-                    !right.kind.is_security(),
-                    right.kind.display_order(),
-                    right.kind.name(),
-                    right.source.as_str(),
-                    right.span.map(|span| span.start).unwrap_or(usize::MAX),
-                    right.span.map(|span| span.end).unwrap_or(usize::MAX),
-                    right.subject.as_str(),
-                    right.detail.as_str(),
-                ))
-        });
+        self.inner.sort();
     }
 }
 
@@ -283,21 +123,6 @@ fn append_fact_gates(
             });
         }
     }
-}
-
-fn same_fact(left: &GateEntry, right: &GateEntry) -> bool {
-    left.kind == right.kind
-        && left.domain == right.domain
-        && left.scope == right.scope
-        && left.subject == right.subject
-        && left.detail == right.detail
-        && match (left.span, right.span) {
-            (None, None) => true,
-            (Some(left_span), Some(right_span)) => {
-                left_span == right_span && left.source == right.source
-            }
-            _ => false,
-        }
 }
 
 fn source_entry(

@@ -22,25 +22,13 @@ impl<'a> Parser<'a> {
 
     fn type_generic_arg(&mut self, label: &str) -> Result<(Type, Span), Diagnostic> {
         let span = self.peek().span;
-        // D-COMPUTE-TYPE1: `Vec<N>` and `Matrix<M, N>` use literal shape
-        // arguments, not ordinary types. Keep the value in the existing type
-        // tree so sema can enforce exact shaped aliases without adding a
-        // second parser or runtime representation.
+        // D-TYPE2-MEASURE1=A: `Vec<N>` and `Matrix<M, N>` use the shared
+        // declared-measure parser, not a private shape representation.
         if matches!(label.rsplit('.').next(), Some("Vec" | "Matrix")) {
-            if let TokKind::Int(value, _) = self.peek().kind {
-                self.bump();
-                if value >= 0 {
-                    return Ok((Type::compute_dimension_type(value as u64), span));
-                }
-                self.diags.push(Diagnostic::error(
-                    "E0119",
-                    "compute shape dimensions must be non-negative".to_string(),
-                    "fixed compute aliases use literal dimensions known at compile time".to_string(),
-                    "write a non-negative dimension such as `Vec<3>`".to_string(),
-                    Some(span),
-                ));
-                return Ok((Type::compute_dimension_type(0), span));
-            }
+            return Ok((
+                Type::Measure(self.parse_declared_measure("shape")?),
+                span,
+            ));
         }
         if !self.enter_generic_type_layer(label, span) {
             self.sync_type_arg();
@@ -52,6 +40,42 @@ impl<'a> Parser<'a> {
         let parsed = self.type_();
         self.leave_generic_type_layer();
         Ok(parsed?)
+    }
+
+    /// Parse the closed measure language. Literals, module value parameters,
+    /// and the declared additive rule are typeable; calls and other user code
+    /// are not.
+    fn parse_declared_measure(&mut self, kind: &str) -> Result<crate::AST::Measure, Diagnostic> {
+        let measure = match self.peek().kind.clone() {
+            TokKind::Int(value, _) if value >= 0 => {
+                self.bump();
+                crate::AST::Measure::literal(kind, value as u64)
+            }
+            TokKind::Ident(name) => {
+                self.bump();
+                crate::AST::Measure::symbol(kind, name)
+            }
+            TokKind::LParen => {
+                self.bump();
+                let left = self.parse_declared_measure(kind)?;
+                self.expect(TokKind::Plus, "in the additive measure rule")?;
+                let right = self.parse_declared_measure(kind)?;
+                self.expect(TokKind::RParen, "after the additive measure rule")?;
+                left.combine(&right, crate::AST::MeasureRule::Add)
+                    .expect("measure operands use the same kind")
+            }
+            _ => {
+                let span = self.peek().span;
+                return Err(Diagnostic::error(
+                    "E0963",
+                    "a type measure must be a declared integer".to_string(),
+                    "type measures accept literals, module value parameters, and declared combination rules; user code cannot compute a type".to_string(),
+                    "write an integer literal, a module value parameter, or an additive measure such as `(N + M)`".to_string(),
+                    Some(span),
+                ));
+            }
+        };
+        Ok(measure)
     }
 
     pub(in crate::Parser) fn type_starts_here(&self) -> bool {
@@ -490,27 +514,10 @@ impl<'a> Parser<'a> {
                         value: Box::new(value),
                     }
                 } else if matches!(self.peek().kind, TokKind::Hash) {
-                    // D-META-CONST1=A: literals and generic-module value
-                    // parameters enter the measure plane directly. Every
-                    // other form keeps its AST until the ordinary closed
-                    // comptime evaluator resolves the declaration.
+                    // D-TYPE2-MEASURE1=A: fixed lengths use the same declared
+                    // measure grammar as shapes.
                     self.bump(); // consume `#`
-                    let len = match self.peek().kind.clone() {
-                        TokKind::Int(value, _)
-                            if value >= 0
-                                && matches!(self.peek2().kind, TokKind::RBracket) =>
-                        {
-                            self.bump();
-                            crate::AST::Measure::literal("length", value as u64)
-                        }
-                        TokKind::Ident(name)
-                            if matches!(self.peek2().kind, TokKind::RBracket) =>
-                        {
-                            self.bump();
-                            crate::AST::Measure::symbol("length", name)
-                        }
-                        _ => crate::AST::Measure::pending("length", self.expr()?),
-                    };
+                    let len = self.parse_declared_measure("length")?;
                     self.expect(TokKind::RBracket, "after the size in `[T#N]`")?;
                     Type::FixedList {
                         elem: Box::new(first),

@@ -570,7 +570,7 @@ fn is_cloneable_rec(
             .iter()
             .all(|m| is_cloneable_rec(m, registry, visiting)),
         Type::Quantity { base, .. } => is_cloneable_rec(base, registry, visiting),
-        Type::ComputeDim(_) => true,
+        Type::Measure(_) => true,
     }
 }
 
@@ -690,7 +690,7 @@ fn type_owns_heap_rec(ty: &Type, registry: &TypeRegistry, visiting: &mut HashSet
             .iter()
             .any(|m| type_owns_heap_rec(m, registry, visiting)),
         Type::Quantity { base, .. } => type_owns_heap_rec(base, registry, visiting),
-        Type::ComputeDim(_) => false,
+        Type::Measure(_) => false,
     }
 }
 
@@ -1111,7 +1111,7 @@ pub(crate) fn core_crypto_nominal(ty: Type) -> Type {
             base: Box::new(core_crypto_nominal(*base)),
             dimension,
         },
-        Type::ComputeDim(value) => Type::ComputeDim(value),
+        Type::Measure(measure) => Type::Measure(measure),
     }
 }
 
@@ -1352,7 +1352,7 @@ pub(crate) fn is_printable(
         // Same as the retired `\0compute.dimension.N` string encoding: it
         // never matched any of the `Type::Named` arms above, so this stayed
         // non-printable on its own (only ever seen as a `Type::Apply` arg).
-        Type::ComputeDim(_) => false,
+        Type::Measure(_) => false,
     }
 }
 
@@ -1417,7 +1417,7 @@ pub(crate) fn is_displayable(
             .all(|m| is_displayable(m, type_reg, trait_reg)),
         // Same as `is_printable`'s note: preserves the retired string
         // encoding's behavior (never matched, so non-displayable on its own).
-        Type::ComputeDim(_) => false,
+        Type::Measure(_) => false,
     }
 }
 
@@ -1508,7 +1508,7 @@ pub(crate) fn is_debuggable(
             .all(|m| is_debuggable(m, type_reg, trait_reg)),
         // Same as `is_printable`'s note: preserves the retired string
         // encoding's behavior (never matched, so non-debuggable on its own).
-        Type::ComputeDim(_) => false,
+        Type::Measure(_) => false,
     }
 }
 
@@ -1574,7 +1574,7 @@ pub(crate) fn is_equatable(
         // `Equatable` impl for the marker name, so this stayed non-equatable.
         Type::Quantity { .. } => false,
         // Same note applies to the retired `\0compute.dimension.N` encoding.
-        Type::ComputeDim(_) => false,
+        Type::Measure(_) => false,
     }
 }
 
@@ -1668,7 +1668,7 @@ pub(crate) fn types_comparable(ty: &Type, registry: &TypeRegistry) -> bool {
         // `Equatable` impl for the marker name, so this stayed non-comparable.
         Type::Quantity { .. } => false,
         // Same note applies to the retired `\0compute.dimension.N` encoding.
-        Type::ComputeDim(_) => false,
+        Type::Measure(_) => false,
     }
 }
 
@@ -1963,7 +1963,7 @@ mod tests {
             | Type::Named(_)
             | Type::TraitObject(_)
             | Type::IntN { .. }
-            | Type::ComputeDim(_)
+            | Type::Measure(_)
             | Type::Float32 => 0,
         }
     }

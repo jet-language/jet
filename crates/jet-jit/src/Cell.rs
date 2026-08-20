@@ -112,10 +112,10 @@ impl CellSchema {
             // Runtime values carry no dimension metadata (I3): a quantity's
             // cell shape is its erased base numeric type.
             Type::Quantity { base, .. } => Self::from_type(base, meta),
-            // A const compute-dimension only ever appears as a `Vec`/`Matrix`
+            // A compile-time measure only ever appears as a `Vec`/`Matrix`
             // shape arg, never as its own cell/local type.
-            Type::ComputeDim(_) => {
-                Err("a compute-dimension arg is not a JIT cell type".to_string())
+            Type::Measure(_) => {
+                Err("a type measure is not a JIT cell type".to_string())
             }
         }
     }

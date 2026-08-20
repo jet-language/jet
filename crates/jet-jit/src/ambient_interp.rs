@@ -1384,22 +1384,43 @@ fn db_conn_value(handle: u64) -> CtValue {
     }
 }
 
-fn db_policy_value(table: String, expression: String) -> CtValue {
+fn row_policy_code(compiled: wire::JetRowPolicyExpr) -> i64 {
+    match compiled {
+        wire::JetRowPolicyExpr::AllowAll => 0,
+        wire::JetRowPolicyExpr::OwnerEqualsUser => 1,
+    }
+}
+
+fn row_policy_from_code(code: i64) -> Option<wire::JetRowPolicyExpr> {
+    match code {
+        0 => Some(wire::JetRowPolicyExpr::AllowAll),
+        1 => Some(wire::JetRowPolicyExpr::OwnerEqualsUser),
+        _ => None,
+    }
+}
+
+fn db_policy_value(table: String, compiled: wire::JetRowPolicyExpr) -> CtValue {
     CtValue::Struct {
         type_name: "RowPolicy".to_string(),
         fields: vec![
             ("table".to_string(), CtValue::Str(table)),
-            ("expression".to_string(), CtValue::Str(expression)),
+            ("expression".to_string(), CtValue::Str(compiled.canonical().to_string())),
+            ("compiled".to_string(), CtValue::Int(row_policy_code(compiled))),
         ],
     }
 }
 
-fn db_scope_value(handle: u64, table: String, expression: String, user: String) -> CtValue {
+fn db_scope_value(
+    handle: u64,
+    table: String,
+    compiled: wire::JetRowPolicyExpr,
+    user: String,
+) -> CtValue {
     CtValue::Struct {
         type_name: "DBScope".to_string(),
         fields: vec![
             ("handle".to_string(), CtValue::Int(handle as i64)),
-            ("policy".to_string(), db_policy_value(table, expression)),
+            ("policy".to_string(), db_policy_value(table, compiled)),
             ("user".to_string(), CtValue::Str(user)),
         ],
     }
@@ -1459,7 +1480,7 @@ fn mod_value(handle: i64) -> CtValue {
     }
 }
 
-fn db_scope_parts(recv: &CtValue) -> Option<(u64, String, String, String)> {
+fn db_scope_parts(recv: &CtValue) -> Option<(u64, String, wire::JetRowPolicyExpr, String)> {
     let handle = db_handle(recv)?;
     let CtValue::Struct { fields, .. } = recv else {
         return None;
@@ -1474,15 +1495,16 @@ fn db_scope_parts(recv: &CtValue) -> Option<(u64, String, String, String)> {
         ("table", CtValue::Str(value)) => Some(value.clone()),
         _ => None,
     })?;
-    let expression = policy_fields.iter().find_map(|(name, value)| match (name.as_str(), value) {
-        ("expression", CtValue::Str(value)) => Some(value.clone()),
+    let compiled = policy_fields.iter().find_map(|(name, value)| match (name.as_str(), value) {
+        ("compiled", CtValue::Int(value)) => row_policy_from_code(*value),
         _ => None,
     })?;
+    let table = wire::jet_db_policy_validate_table(&table).ok()?;
     let user = fields.iter().find_map(|(name, value)| match (name.as_str(), value) {
         ("user", CtValue::Str(value)) => Some(value.clone()),
         _ => None,
     })?;
-    Some((handle, table, expression, user))
+    Some((handle, table, compiled, user))
 }
 
 fn service_runtime_value(store: String, retention_ms: i64) -> CtValue {
@@ -1684,39 +1706,39 @@ fn db_params(list: &CtValue, span: Span) -> Result<Vec<wire::DBValue>, Diagnosti
 }
 
 fn ambient_db_scope_execute(
-    scope: &(u64, String, String, String),
+    scope: &(u64, String, wire::JetRowPolicyExpr, String),
     sql: &str,
     params: &Vec<wire::DBValue>,
     allow_schema: bool,
 ) -> Result<i64, wire::DBError> {
-    let (handle, table, expression, user) = scope;
+    let (handle, table, compiled, user) = scope;
     let (sql, values) = if allow_schema {
-        wire::jet_db_apply_migration_policy(sql, params, table, expression, user)?
+        wire::jet_db_apply_compiled_migration_policy(sql, params, table, *compiled, user)?
     } else {
-        wire::jet_db_apply_policy(sql, params, table, expression, user)?
+        wire::jet_db_apply_compiled_policy(sql, params, table, *compiled, user)?
     };
     let result = DB::runtime_execute(*handle, &sql, &wire::jet_db_encode_params(&values));
     wire::jet_db_decode_execute_result(&result)
 }
 
 fn ambient_db_scope_query(
-    scope: &(u64, String, String, String),
+    scope: &(u64, String, wire::JetRowPolicyExpr, String),
     sql: &str,
     params: &Vec<wire::DBValue>,
     allow_schema: bool,
 ) -> Result<Vec<wire::JetDBRow>, wire::DBError> {
-    let (handle, table, expression, user) = scope;
+    let (handle, table, compiled, user) = scope;
     let (sql, values) = if allow_schema {
-        wire::jet_db_apply_migration_policy(sql, params, table, expression, user)?
+        wire::jet_db_apply_compiled_migration_policy(sql, params, table, *compiled, user)?
     } else {
-        wire::jet_db_apply_policy(sql, params, table, expression, user)?
+        wire::jet_db_apply_compiled_policy(sql, params, table, *compiled, user)?
     };
     let result = DB::runtime_query(*handle, &sql, &wire::jet_db_encode_params(&values));
     wire::jet_db_decode_query_result(&result)
 }
 
 struct AmbientDbBackend {
-    scope: (u64, String, String, String),
+    scope: (u64, String, wire::JetRowPolicyExpr, String),
 }
 
 impl wire::JetDBBackend for AmbientDbBackend {
@@ -3194,10 +3216,7 @@ pub fn ambient_core_call(
             // Carry the COMPILED policy forward, not the caller's raw text, so a
             // later scope operation reads exactly what AOT would have stored.
             Some(Ok(match wire::jet_db_policy_compile(table, expression) {
-                Ok((table, compiled)) => CtValue::Present(Box::new(db_policy_value(
-                    table,
-                    compiled.canonical().to_string(),
-                ))),
+                Ok((table, compiled)) => CtValue::Present(Box::new(db_policy_value(table, compiled))),
                 Err(error) => CtValue::failed(Box::new(CtValue::Str(error))),
             }))
         }
@@ -4111,7 +4130,7 @@ pub fn ambient_handle(
             Ok((table, compiled)) => Ok(db_scope_value(
                 handle,
                 table,
-                compiled.canonical().to_string(),
+                compiled,
                 user.clone(),
             )),
             Err(error) => Err(unsupported(&format!("row policy: {error}"), span)),
@@ -4203,8 +4222,8 @@ pub fn ambient_handle(
                 Err(e) => return Some(Err(e)),
             };
             let (handle, sql, values) = match db_scope_parts(recv) {
-                Some((handle, table, expression, user)) => match wire::jet_db_apply_policy(
-                    &sql, &values, &table, &expression, &user,
+                Some((handle, table, compiled, user)) => match wire::jet_db_apply_compiled_policy(
+                    &sql, &values, &table, compiled, &user,
                 ) {
                     Ok((sql, values)) => (handle, sql, values),
                     Err(error) => return Some(Ok(CtValue::failed(Box::new(db_err(error.message))))),
@@ -4230,8 +4249,8 @@ pub fn ambient_handle(
                 Err(e) => return Some(Err(e)),
             };
             let (handle, sql, values) = match db_scope_parts(recv) {
-                Some((handle, table, expression, user)) => match wire::jet_db_apply_policy(
-                    &sql, &values, &table, &expression, &user,
+                Some((handle, table, compiled, user)) => match wire::jet_db_apply_compiled_policy(
+                    &sql, &values, &table, compiled, &user,
                 ) {
                     Ok((sql, values)) => (handle, sql, values),
                     Err(error) => return Some(Ok(CtValue::failed(Box::new(db_err(error.message))))),
@@ -4288,7 +4307,7 @@ pub fn ambient_handle(
                 Ok(values) => values,
                 Err(error) => return Some(Err(error)),
             };
-            let (handle, table, expression, user) = match db_scope_parts(recv) {
+            let (handle, table, compiled, user) = match db_scope_parts(recv) {
                 Some(parts) => parts,
                 None => {
                     return Some(Ok(CtValue::failed(Box::new(db_err(
@@ -4296,11 +4315,11 @@ pub fn ambient_handle(
                     )))))
                 }
             };
-            let (sql, values) = match wire::jet_db_apply_policy(
+            let (sql, values) = match wire::jet_db_apply_compiled_policy(
                 &raw_sql,
                 &raw_values,
                 &table,
-                &expression,
+                compiled,
                 &user,
             ) {
                 Ok(value) => value,
@@ -4316,7 +4335,7 @@ pub fn ambient_handle(
                     let footprint = table.clone();
                     let initial = format!("{rows:?}");
                     let rerun_table = table.clone();
-                    let rerun_expression = expression.clone();
+                    let rerun_compiled = compiled;
                     let rerun_user = user.clone();
                     let rerun_sql = raw_sql.clone();
                     let rerun_values = raw_values.clone();
@@ -4324,11 +4343,11 @@ pub fn ambient_handle(
                         footprint,
                         initial,
                         move || {
-                            let (sql, values) = wire::jet_db_apply_policy(
+                            let (sql, values) = wire::jet_db_apply_compiled_policy(
                                 &rerun_sql,
                                 &rerun_values,
                                 &rerun_table,
-                                &rerun_expression,
+                                rerun_compiled,
                                 &rerun_user,
                             )
                             .map_err(|error| error.message)?;

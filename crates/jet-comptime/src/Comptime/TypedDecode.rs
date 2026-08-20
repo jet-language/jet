@@ -348,7 +348,7 @@ fn typed_union_wire_shapes(
         Type::Result { .. }
         | Type::Fn { .. }
         | Type::TraitObject(_)
-        | Type::ComputeDim(_) => Vec::new(),
+        | Type::Measure(_) => Vec::new(),
     };
     shapes.sort_unstable();
     shapes.dedup();

@@ -1907,7 +1907,8 @@ impl<'a> Checker<'a> {
                 };
                 if let Some(Type::InlineRange { base, lo, hi }) = expected {
                     let value = super::exact_integer_literal(n, raw.as_deref());
-                    if !super::exact_integer_fits(&value, i128::from(lo), i128::from(hi)) {
+                    let interval = super::IntegerInterval::new(i128::from(lo), i128::from(hi));
+                    if !super::exact_integer_fits(&value, interval.lo, interval.hi) {
                         self.diags.push(
                             crate::Sema::Diagnostics::inline_range_literal_out_of_bounds(
                                 &value,
@@ -1920,9 +1921,9 @@ impl<'a> Checker<'a> {
                     *width = None;
                     Some(Type::InlineRange { base, lo, hi })
                 } else if let Some(Type::IntN { signed, bits }) = expected {
-                    let (lo, hi) = crate::AST::int_range(signed, bits);
+                    let interval = super::integer_width_interval(signed, bits);
                     let value = super::exact_integer_literal(n, raw.as_deref());
-                    if !super::exact_integer_fits(&value, lo, hi) {
+                    if !super::exact_integer_fits(&value, interval.lo, interval.hi) {
                         self.diags.push(int_range_error(signed, bits, span));
                     }
                     *width = Some((signed, bits));
@@ -2678,11 +2679,8 @@ impl<'a> Checker<'a> {
                     ) = (inner.as_mut(), self.expected_type.clone())
                     {
                         let value = super::exact_integer_literal(*n, raw.as_deref()).neg();
-                        if !super::exact_integer_fits(
-                            &value,
-                            i128::from(lo),
-                            i128::from(hi),
-                        ) {
+                        let interval = super::IntegerInterval::new(i128::from(lo), i128::from(hi));
+                        if !super::exact_integer_fits(&value, interval.lo, interval.hi) {
                             self.diags.push(
                                 crate::Sema::Diagnostics::inline_range_literal_out_of_bounds(
                                     &value,
@@ -2699,8 +2697,8 @@ impl<'a> Checker<'a> {
                         (inner.as_mut(), self.expected_type.clone())
                     {
                         let v = super::exact_integer_literal(*n, raw.as_deref()).neg();
-                        let (lo, hi) = crate::AST::int_range(true, bits);
-                        if !super::exact_integer_fits(&v, lo, hi) {
+                        let interval = super::integer_width_interval(true, bits);
+                        if !super::exact_integer_fits(&v, interval.lo, interval.hi) {
                             self.diags.push(int_range_error(true, bits, *ispan));
                         }
                         *width = Some((true, bits));
@@ -4247,16 +4245,23 @@ impl<'a> Checker<'a> {
     /// expression. The interval comes from the existing type knowledge vector;
     /// arithmetic only widens it, so a proof can never claim fewer values than
     /// the expression may produce.
-    fn proven_integer_interval(&self, expr: &Expr) -> Option<(i128, i128)> {
+    fn proven_type_integer_interval(&self, ty: &Type) -> Option<IntegerInterval> {
+        let ty = ty.without_user_tags();
+        ty.integer_range()
+            .or_else(|| self.registry.integer_interval(ty))
+            .map(IntegerInterval::from_bounds)
+    }
+
+    fn proven_integer_interval(&self, expr: &Expr) -> Option<IntegerInterval> {
         match expr {
-            Expr::Int(value, _, _, _) => {
-                let value = i128::from(*value);
-                Some((value, value))
+            Expr::Int(value, _, _, raw) => {
+                let value = super::exact_integer_literal(*value, raw.as_deref()).try_i128()?;
+                Some(IntegerInterval::new(value, value))
             }
             Expr::Paren(inner, _) => self.proven_integer_interval(inner),
             Expr::Ident(name, _) => self
                 .lookup(name)
-                .and_then(|local| self.registry.integer_interval(&local.ty)),
+                .and_then(|local| self.proven_type_integer_interval(&local.ty)),
             Expr::MethodCall {
                 receiver,
                 method,
@@ -4266,33 +4271,15 @@ impl<'a> Checker<'a> {
                 self.proven_integer_interval(receiver)
             }
             Expr::Unary(crate::AST::UnOp::Neg, inner, _) => {
-                let (lo, hi) = self.proven_integer_interval(inner)?;
-                Some((hi.checked_neg()?, lo.checked_neg()?))
+                self.proven_integer_interval(inner)?.negated()
             }
             Expr::Binary(op, lhs, rhs, _) => {
-                let (left_lo, left_hi) = self.proven_integer_interval(lhs)?;
-                let (right_lo, right_hi) = self.proven_integer_interval(rhs)?;
+                let left = self.proven_integer_interval(lhs)?;
+                let right = self.proven_integer_interval(rhs)?;
                 match op {
-                    crate::AST::BinOp::Add => Some((
-                        left_lo.checked_add(right_lo)?,
-                        left_hi.checked_add(right_hi)?,
-                    )),
-                    crate::AST::BinOp::Sub => Some((
-                        left_lo.checked_sub(right_hi)?,
-                        left_hi.checked_sub(right_lo)?,
-                    )),
-                    crate::AST::BinOp::Mul => {
-                        let products = [
-                            left_lo.checked_mul(right_lo)?,
-                            left_lo.checked_mul(right_hi)?,
-                            left_hi.checked_mul(right_lo)?,
-                            left_hi.checked_mul(right_hi)?,
-                        ];
-                        Some((
-                            *products.iter().min()?,
-                            *products.iter().max()?,
-                        ))
-                    }
+                    crate::AST::BinOp::Add => left.add(right),
+                    crate::AST::BinOp::Sub => left.sub(right),
+                    crate::AST::BinOp::Mul => left.mul(right),
                     _ => None,
                 }
             }
@@ -4366,78 +4353,56 @@ impl<'a> Checker<'a> {
             Type::FixedList { elem, len, .. } => {
                 let len = len.require_literal();
                 *kind = IndexKind::List;
-                if !matches!(index_value_ty, Type::Int | Type::InlineRange { .. }) {
-                    if let Type::Named(name) = index_value_ty {
-                        if let Some((lo, hi)) = self.registry.distinct_range(name) {
-                            let base_is_int =
-                                matches!(self.registry.distinct_base(name), Some(Type::Int));
-                            if base_is_int && lo >= 0 && (hi as u64) < len {
-                                *kind = IndexKind::FixedListProof;
-                                return Some((**elem).clone());
-                            }
-                            self.diags.push(Diagnostic::error(
-                                "E0965",
-                                format!(
-                                    "`{}` proves {}..{}, which is not inside this fixed-size list's indexes",
-                                    name, lo, hi
-                                ),
-                                format!(
-                                    "this `[T#{}]` value only has proven indexes 0 through {}",
-                                    len,
-                                    len.saturating_sub(1)
-                                ),
-                                "use a refinement whose invariant fits the list length".to_string(),
-                                Some(index.span()),
-                            ));
-                            return Some((**elem).clone());
-                        }
+                if let Some(proven) = self.proven_integer_interval(index) {
+                    let valid = IntegerInterval::fixed_list_indexes(len);
+                    if valid.is_some_and(|valid| valid.contains_interval(proven)) {
+                        *kind = IndexKind::FixedListProof;
+                        return Some((**elem).clone());
                     }
-                    self.diags.push(Diagnostic::error(
-                        "E0505",
-                        format!(
-                            "list indexes must be {}, not {}",
-                            Type::Int.show(),
-                            idx_ty.show()
-                        ),
-                        "count positions with a whole number starting at 0".to_string(),
-                        "use an Int index, like `items[0]`".to_string(),
-                        Some(index.span()),
-                    ));
-                } else if let Expr::Int(n, _, _, _) = index.as_ref() {
-                    // E0965: compile-time out-of-bounds index.
-                    if *n < 0 || *n as u64 >= len {
-                        self.diags.push(Diagnostic::error(
-                            "E0965",
+                    let (what, why, fix) = match index.as_ref() {
+                        Expr::Int(value, ..) => (
                             format!(
                                 "index {} is out of range for a fixed-size list of {} element{}",
-                                n,
+                                value,
                                 len,
                                 if len == 1 { "" } else { "s" }
                             ),
                             "the valid indexes for `[T#N]` are 0 through N-1".to_string(),
                             format!("use an index between 0 and {}", len.saturating_sub(1)),
-                            Some(index.span()),
-                        ));
-                    }
-                } else if let Some((lo, hi)) = self.proven_integer_interval(index) {
-                    if lo >= 0 && hi < i128::from(len) {
-                        *kind = IndexKind::FixedListProof;
-                        return Some((**elem).clone());
-                    }
+                        ),
+                        Expr::Ident(name, ..) => (
+                            format!(
+                                "`{}` proves {}..{}, which is not inside this fixed-size list's indexes",
+                                name, proven.lo, proven.hi
+                            ),
+                            format!(
+                                "this `[T#{}]` value only has proven indexes 0 through {}",
+                                len,
+                                len.saturating_sub(1)
+                            ),
+                            "use a refinement whose invariant fits the list length".to_string(),
+                        ),
+                        _ => (
+                            format!(
+                                "the index interval {}..{} is not inside this fixed-size list's indexes",
+                                proven.lo, proven.hi
+                            ),
+                            format!(
+                                "this `[T#{}]` value only has proven indexes 0 through {}",
+                                len,
+                                len.saturating_sub(1)
+                            ),
+                            "use an index whose proven interval fits the list length".to_string(),
+                        ),
+                    };
                     self.diags.push(Diagnostic::error(
                         "E0965",
-                        format!(
-                            "the index interval {lo}..{hi} is not inside this fixed-size list's indexes"
-                        ),
-                        format!(
-                            "this `[T#{}]` value only has proven indexes 0 through {}",
-                            len,
-                            len.saturating_sub(1)
-                        ),
-                        "use an index whose proven interval fits the list length".to_string(),
+                        what,
+                        why,
+                        fix,
                         Some(index.span()),
                     ));
-                } else if index_value_ty != &Type::Int {
+                } else if !matches!(index_value_ty, Type::Int | Type::InlineRange { .. }) {
                     self.diags.push(Diagnostic::error(
                         "E0505",
                         format!(

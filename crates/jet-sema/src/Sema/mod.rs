@@ -835,9 +835,10 @@ pub(crate) struct LocalInfo {
     /// Pure compile-time value for immutable-local diagnostics and folding.
     /// This does not make an ordinary local available to `comptime` code.
     constant_value: Option<crate::Comptime::CtValue>,
-    /// The initializer reported an error AND handed back no type, so this name
-    /// has no meaning. Reads stop here so the original diagnostic stays the only
-    /// report. A well-typed value whose initializer failed an ownership,
+    /// The initializer reported a type error, so this name has no usable
+    /// meaning, even when inference supplied a recovery type. Reads stop here
+    /// so the original diagnostic stays paired with the required use-site
+    /// diagnostic. A well-typed value whose initializer failed an ownership,
     /// sendability, or contract rule is NOT invalid — its later reports stand.
     invalid: bool,
 }
@@ -1382,7 +1383,7 @@ pub(crate) fn type_uses_default_int(ty: &Type) -> bool {
         | Type::Char
         | Type::Named(_)
         | Type::TraitObject(_)
-        | Type::ComputeDim(_) => false,
+        | Type::Measure(_) => false,
     }
 }
 

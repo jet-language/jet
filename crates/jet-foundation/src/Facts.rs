@@ -2,7 +2,8 @@
 
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::path::Path;
-use std::sync::LazyLock;
+
+pub use crate::Authority::{EFFECT_ROOTS, EFFECT_SOURCE};
 
 /// D-CONF-STAMP1=B: the provenance carried by the build fact plane. `at` is
 /// deliberately a lock-history value; it is empty until a lock-writing path
@@ -165,21 +166,6 @@ impl FactKind {
     }
 }
 
-/// D-META-ONE1=A: the effect roots are written as `effect Name` declarations
-/// in `Prelude/Effects.jet`, so this file keeps no copy of the vocabulary.
-pub const EFFECT_SOURCE: &str = include_str!("../../jet-codegen/src/Prelude/Effects.jet");
-
-/// Canonical closed effect roots, read from `EFFECT_SOURCE`. Effect parsing,
-/// rule arguments, fact registration, diagnostics, and reflection all consume
-/// this list.
-pub static EFFECT_ROOTS: LazyLock<Vec<&'static str>> = LazyLock::new(|| {
-    EFFECT_SOURCE
-        .lines()
-        .filter_map(|line| line.trim().strip_prefix("effect "))
-        .map(str::trim)
-        .collect()
-});
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FactDeclaration {
     pub kind: FactKind,
@@ -275,10 +261,7 @@ impl FactRegistry {
 
 /// One subsumption rule for every hierarchical fact family.
 pub fn fact_covers(bound: &str, fact: &str) -> bool {
-    fact == bound
-        || fact
-            .strip_prefix(bound)
-            .is_some_and(|suffix| suffix.starts_with('.'))
+    crate::Authority::covers(bound, fact)
 }
 
 /// Values propagated by one call-graph fact row. Each row uses the finite-set

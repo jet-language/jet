@@ -20,10 +20,10 @@
 use crate::Diagnostics::{Diagnostic, Span};
 use crate::Package::PackageFacts;
 use crate::Sema::{
-    effect_covers, effect_root, effect_set_has_root, parse_effect_name, Effect, EffectSet,
-    EffectSummary,
+    effect_set_has_root, parse_effect_name, Effect, EffectSet, EffectSummary,
 };
 use crate::AST::{ImportKind, Item, ProgramBundle};
+use jet_foundation::Authority::{covers as effect_covers, root as effect_root};
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 
 /// One package's (root, or a dependency) aggregated effect set.

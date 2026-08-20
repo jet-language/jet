@@ -270,7 +270,7 @@ impl<'a> Checker<'a> {
                     base: Box::new(self.resolve_type(*base)),
                     dimension,
                 },
-                Type::ComputeDim(value) => Type::ComputeDim(value),
+                Type::Measure(measure) => Type::Measure(measure),
             }
         }
     

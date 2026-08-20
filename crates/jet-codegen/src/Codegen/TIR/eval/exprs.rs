@@ -1731,7 +1731,7 @@ fn datatree_object(pairs: Vec<(String, CtValue)>) -> CtValue {
     )
 }
 
-fn handle_index(value: &CtValue, type_name: &str) -> Option<usize> {
+pub(super) fn handle_index(value: &CtValue, type_name: &str) -> Option<usize> {
     let CtValue::Struct {
         type_name: actual,
         fields,
@@ -2706,7 +2706,7 @@ impl<'a> EvalCtx<'a> {
             Type::Result { .. }
             | Type::Fn { .. }
             | Type::TraitObject(_)
-            | Type::ComputeDim(_) => Vec::new(),
+            | Type::Measure(_) => Vec::new(),
         };
         shapes.sort_unstable();
         shapes.dedup();

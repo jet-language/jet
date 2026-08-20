@@ -5946,6 +5946,16 @@ impl LowerCtx<'_, '_> {
                 body,
             } => {
                 in_own_frame(|| -> Result<(), String> {
+                    if matches!(method_kind, Some(TForInMethod::ChannelReceiver)) {
+                        return self.lower_channel_for_in(
+                            label,
+                            var,
+                            source,
+                            step.as_ref(),
+                            body,
+                            &collection.ty,
+                        );
+                    }
                     if matches!(
                         &collection.ty,
                         Type::Apply { name, .. } if name == "Stream"
@@ -7331,6 +7341,78 @@ impl LowerCtx<'_, '_> {
             .declare_func_in_func(self.host.conc.channel_close, self.b.func);
         self.b.ins().call(close, &[channel]);
         self.b.ins().jump(exit, &[]);
+        self.b.seal_block(header);
+        self.b.switch_to_block(exit);
+        self.b.seal_block(exit);
+        self.dead = false;
+        Ok(())
+    }
+
+    fn lower_channel_for_in(
+        &mut self,
+        label: &Option<String>,
+        var: &str,
+        source: &TExpr,
+        step: Option<&TExpr>,
+        body: &[TStmt],
+        receiver_type: &Type,
+    ) -> Result<(), String> {
+        if step.is_some() {
+            return Err("jit channel receiver stride unsupported".to_string());
+        }
+        let Type::Apply { args, .. } = receiver_type else {
+            return Err("jit channel receiver type missing".to_string());
+        };
+        let item_type = args.first().cloned().ok_or("jit channel item type missing")?;
+        let channel = self.lower_expr(source)?;
+        let channel_var = self.fresh_var(types::I64);
+        self.b.def_var(channel_var, channel);
+        let header = self.b.create_block();
+        let body_block = self.b.create_block();
+        let exit = self.b.create_block();
+        self.b.ins().jump(header, &[]);
+
+        self.b.switch_to_block(header);
+        let channel = self.b.use_var(channel_var);
+        let receive = self.module.declare_func_in_func(
+            self.host.conc.channel_receive_status,
+            self.b.func,
+        );
+        let call = self.b.ins().call(receive, &[channel]);
+        let packed = self.finish_wait_call(self.b.inst_results(call)[0]);
+        let zero = self.b.ins().iconst(types::I64, 0);
+        let closed = self.b.ins().icmp(IntCC::Equal, packed, zero);
+        self.b.ins().brif(closed, exit, &[], body_block, &[]);
+
+        let loop_outer_names = self.vars.keys().cloned().collect::<HashSet<_>>();
+        let loop_resource_mark = self.compute_resources.len();
+        self.b.switch_to_block(body_block);
+        self.b.seal_block(body_block);
+        let value = self.unpack_option_payload(packed, &item_type)?;
+        let clif = self
+            .meta
+            .clif_ty(&item_type)
+            .ok_or_else(|| format!("jit channel item unsupported: {item_type:?}"))?;
+        let loop_var = self.fresh_var(clif);
+        self.b.def_var(loop_var, value);
+        self.track_compute_value(value, &item_type)?;
+        self.vars.insert(TIR::local_place(var), loop_var);
+        self.var_tys.insert(TIR::local_place(var), item_type);
+        self.loop_stack.push(LoopTargets {
+            label: label.clone(),
+            continue_block: header,
+            break_block: exit,
+            break_value_ty: None,
+            shield_depth: self.shield_depth,
+            shared_transaction_depth: self.shared_transaction_depth,
+            compute_resource_depth: loop_resource_mark,
+            compute_preserve_names: loop_outer_names.iter().cloned().collect(),
+        });
+        self.lower_stmts_scoped_with_names_from(body, &loop_outer_names, loop_resource_mark)?;
+        self.loop_stack.pop();
+        if !self.dead {
+            self.b.ins().jump(header, &[]);
+        }
         self.b.seal_block(header);
         self.b.switch_to_block(exit);
         self.b.seal_block(exit);

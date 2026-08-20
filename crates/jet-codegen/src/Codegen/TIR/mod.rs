@@ -2735,6 +2735,8 @@ pub enum TForInMethod {
     /// `jet_process_stream_next_line(&recv)` via a `let Some(x) = … else { break }`,
     /// so (unlike `LinesFile`/`LinesStdin`) no extra wrapper block is needed.
     LinesProcessStream,
+    /// D-CONC-CHAN1=A: `loop value, receiver` pulls until the receiver closes.
+    ChannelReceiver,
     /// D-ENCSTREAM-SURFACE1=A: bounded synchronous codec-reader pull source.
     EncodingReader { reader_type: String },
     /// D-ITER-HOOK: `loop x; mytype` when `mytype` implements `Iterable`.

@@ -3245,7 +3245,7 @@ impl<'a> Checker<'a> {
                     } else {
                         Type::Named("Unit".to_string())
                     };
-                    if let Some(problem) = self.sendability_problem(&elem, false) {
+                    if let Some(problem) = self.crossing_problem(&elem, SendCrossing::ChannelSend, false) {
                         self.report_unsendable(
                             "timer value",
                             &elem,

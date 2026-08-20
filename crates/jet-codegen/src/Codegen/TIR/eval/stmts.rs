@@ -1223,6 +1223,33 @@ impl<'a> EvalCtx<'a> {
                 }
                 }
                 if progress.is_none() {
+                    if matches!(method_kind, Some(TForInMethod::ChannelReceiver)) {
+                        let index = super::exprs::handle_index(&coll, "Receiver")
+                            .ok_or_else(|| unsupported("channel receiver loop", self.span()))?;
+                        loop {
+                            self.burn()?;
+                            let next = self.receive_eval_channel(index)?;
+                            let CtValue::Present(value) = next else {
+                                if matches!(next, CtValue::Failed(CtReport::Clean(_))) {
+                                    break;
+                                }
+                                return Err(unsupported("channel receiver loop", self.span()));
+                            };
+                            scope.insert(var.clone(), *value);
+                            match self.exec_stmts(body, scope)? {
+                                Flow::Normal | Flow::Continue => {}
+                                Flow::Break => break,
+                                Flow::BreakLabel(ref name)
+                                    if label.as_deref() == Some(name.as_str()) => break,
+                                Flow::ContinueLabel(ref name)
+                                    if label.as_deref() == Some(name.as_str()) => {}
+                                other => return Ok(other),
+                            }
+                        }
+                        return Ok(Flow::Normal);
+                    }
+                }
+                if progress.is_none() {
                     if let Some(TForInMethod::Chars) = method_kind {
                         // I9: same semantics as AOT/JIT `({recv}).chars()` —
                         // iterate Unicode scalar values of the receiver string.

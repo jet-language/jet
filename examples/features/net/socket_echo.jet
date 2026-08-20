@@ -9,7 +9,7 @@ fn run() ? Closed | IOError | NetError | RangeError | TaskFailure {
     listener :: net.tcp_listen_addr(typed)?
     local :: net.listener_local_socket_addr(listener)?
     print("tcp-listen:{net.socket_host(local)}")
-    (ready_tx, ready_rx) :: tasks.channel<String>()
+    (ready_tx, ready_rx) :: channel<String>()
     tcp_task :: task {
         ready_tx.send(net.socket_to_string(net.listener_local_socket_addr(listener)?))
         stream :: listener.accept()?
@@ -45,7 +45,7 @@ fn run() ? Closed | IOError | NetError | RangeError | TaskFailure {
     print("udp:{net.udp_packet_bytes(packet)}:{net.udp_packet_original_len(packet)}:{net.udp_packet_truncated(packet)}")
     path :: "/tmp/jet-socket-echo-{time.now()}.sock"
     unix_listener :: net.unix_listen(path)?
-    (unix_tx, unix_rx) :: tasks.channel<String>()
+    (unix_tx, unix_rx) :: channel<String>()
     unix_task :: task {
         unix_tx.send("ready")
         s :: net.unix_accept(unix_listener)?

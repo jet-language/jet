@@ -4747,7 +4747,7 @@ impl<'a> Checker<'a> {
             | Type::IntN { .. }
             | Type::Float32 => false,
             Type::Quantity { .. } => false,
-            Type::ComputeDim(_) => false,
+            Type::Measure(_) => false,
         }
     }
 
@@ -4846,7 +4846,7 @@ impl<'a> Checker<'a> {
             | Type::IntN { .. }
             | Type::Float32 => false,
             Type::Quantity { .. } => false,
-            Type::ComputeDim(_) => false,
+            Type::Measure(_) => false,
         }
     }
 
@@ -5025,7 +5025,7 @@ impl<'a> Checker<'a> {
             Type::Quantity { base, .. } => {
                 self.sendability_problem_inner(base, closure_taken, strict_callable, seen)
             }
-            Type::ComputeDim(_) => None,
+            Type::Measure(_) => None,
         }
     }
 
@@ -5096,28 +5096,19 @@ impl<'a> Checker<'a> {
         found
     }
 
-    pub(crate) fn expr_sendability_problem(
+    pub(crate) fn expr_crossing_problem(
         &self,
         expr: &Expr,
         ty: &Type,
+        crossing: SendCrossing,
         closure_taken: bool,
     ) -> Option<SendabilityProblem> {
         if let Expr::Ident(name, _) = expr {
-            if let Some(info) = self.lookup(name) {
-                if !self.sendability_for(name) {
-                    return self
-                        .sendability_problem(&info.ty, closure_taken)
-                        .or_else(|| {
-                            Some(SendabilityProblem {
-                                root: None,
-                                path: Vec::new(),
-                                kind: SendProblemKind::ClosureCaptures,
-                            })
-                        });
-                }
+            if self.lookup(name).is_some() {
+                return self.crossing_problem_for_name(name, ty, crossing, closure_taken);
             }
         }
-        self.sendability_problem(ty, closure_taken)
+        self.crossing_problem(ty, crossing, closure_taken)
     }
 
     pub(crate) fn note_reactive_upgrade(&mut self, name: &str, ty: &Type, crossing: &str) {
@@ -5758,9 +5749,10 @@ impl<'a> Checker<'a> {
                     Some(arg.expr.span()),
                 ));
             }
-            if let Some(problem) = self.expr_sendability_problem(
+            if let Some(problem) = self.expr_crossing_problem(
                 &arg.expr,
                 &got,
+                SendCrossing::ChannelSend,
                 matches!(arg.convention, AccessConvention::Move),
             ) {
                 let value_name = match &arg.expr {

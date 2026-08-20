@@ -5,7 +5,7 @@
 //! it. Sema reads it to check declared bounds; the comptime evaluator reads
 //! the same table to decide which tier a call belongs to, instead of keeping
 //! a second hard-coded list of its own.
-use std::collections::BTreeSet;
+pub use crate::Authority::builtin_effect;
 /// A primitive effect. Closed, compiler-known set; each Core operation
 /// contributes exactly one. Ordered for deterministic diagnostics.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -163,7 +163,7 @@ impl Effect {
     /// entry is a bare root, which (D-EFFTREE1 ancestor subsumption) covers
     /// its whole subtree — so this is still the true maximal set.
     pub fn all() -> EffectSet {
-        crate::Facts::EFFECT_ROOTS
+        crate::Authority::EFFECT_ROOTS
             .iter()
             .map(|effect| (*effect).to_string())
             .collect()
@@ -171,7 +171,7 @@ impl Effect {
 }
 /// D-EFFTREE1: an effect set's elements are canonical dotted paths (`"FS"`,
 /// `"FS.Read"`) rather than bare `Effect` roots — see the module doc.
-pub type EffectSet = BTreeSet<String>;
+pub type EffectSet = crate::Authority::Holds;
 
 /// D-DET1: Core calls whose result depends on ambient wall-clock or PRNG
 /// state. This is the one classification used by purity checking and
@@ -401,12 +401,4 @@ pub fn core_requires_comptime_gate(module: &str, method: &str) -> bool {
 /// state a rollback must undo, and DB rollback is the transaction's own job.
 pub fn is_irreversible_effect(e: Effect) -> bool {
     matches!(e, Effect::Net | Effect::FS | Effect::Exec | Effect::FFI)
-}
-/// The effect carried by an ambient builtin call (`print`, `input`, …).
-pub fn builtin_effect(name: &str) -> Option<Effect> {
-    if crate::Syntax::IMPURE_BUILTINS.contains(&name) {
-        Some(Effect::IO)
-    } else {
-        None
-    }
 }

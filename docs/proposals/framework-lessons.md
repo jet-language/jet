@@ -12,7 +12,7 @@ an implementation boundary; it does not keep that behavior as an option.
 |---|---|
 | One semantic mechanism must serve every execution tier. | Core behavior stays in the shared Prelude. AOT, JIT, and comptime only marshal values into it. |
 | A source string can be a compatibility boundary, but not the state model. | Live footprints, auth records, row policies, and sync receipts use typed runtime state. Display strings are emitted only at fixed observability boundaries. |
-| Safe denial is part of the feature. | Poisoned locks, bad identifiers, invalid policy tables, expired auth state, malformed snapshots, and non-canonical sync values return bounded failure instead of widening access. Denial must cover every read of a denied carrier, not only its display: `SyncMap.get` answering from an invalid carrier was a hole, and `SyncCounter.value` reporting `0` for one still is. |
+| Safe denial is part of the feature. | Poisoned locks, bad identifiers, invalid policy tables, expired auth state, malformed snapshots, and non-canonical sync values return bounded failure instead of widening access. Denial covers every read of a denied carrier: `SyncMap.get` returns absence for invalid carriers. `SyncCounter.value` still reports `0`; changing that public return type requires an owner ballot. |
 | Transaction scope must be explicit. | Shared edits buffer on the emitted `#Transact` guard. No ambient thread-local transaction stack owns production state. |
 | Tooling readers must parse the producer schema. | `jet inspect live` validates the closed snapshot objects through the foundation JSON parser before rendering facts. |
 | Ratified syntax needs consumers, not only parser checks. | Every consumer reads the checked `#Every` value from the shared time rail. |

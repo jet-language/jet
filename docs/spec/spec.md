@@ -2434,16 +2434,16 @@ lands on the outcome the in-flight unwind reports, and a failure already on its
 way out is never replaced by it. A generator's completion notification is
 therefore still delivered while its producer is being cancelled.
 
-`tasks.channel<T>() => (Sender<T>, Receiver<T>)` (D-TUPLE-DESTRUCT1) creates a
+`channel<T>() => (Sender<T>, Receiver<T>)` (D-CONC-CHAN1) creates a
 linked send/receive pair, destructured at the call site: `(tx, rx) :=
-tasks.channel<T>()`. A second sender is `~tx` — there's no combined
+channel<T>()`. A second sender is `~tx` — there's no combined
 "channel" value to fetch one off of. `sender.send(value)` moves a `T` into the
 channel (ownership semantics for non-copy values), and
 `receiver.receive() => T ? Closed` blocks until a value arrives or all senders
 are gone. Channel payloads
 must be sendable (**E1102**).
 
-`tasks.channel<T>(capacity: N)` creates the same pair with a bounded buffer.
+`channel<T>(capacity: N)` creates the same pair with a bounded buffer.
 Its full-buffer behavior is defined by the [Bounded buffering law](#bounded-buffering-law).
 To limit active work, seed the channel with `N`
 tokens; each worker receives one before work and sends it back afterward. Token
@@ -2455,7 +2455,7 @@ in `examples/features/concurrency/bounded_workers.jet`.
 Jet bounded buffers preserve accepted values and apply backpressure by default.
 Only `AsyncEvent` may discard a payload, and only when its immutable
 `AsyncPolicy` explicitly selects `DropNewest` or `DropOldest`; `Block` preserves
-it by waiting. This split follows ratified roles: `tasks.channel` is typed work
+it by waiting. This split follows ratified roles: `channel` is typed work
 transfer, where capacity bounds queued memory and active work, while `AsyncEvent`
 is an asynchronous many-subscriber occurrence stream whose pressure choice is
 explicit and observable in its dispatch report. No primitive gains a new
@@ -2463,13 +2463,13 @@ overflow knob here. See [D-EVENT2=A](syntax-decisions.md) and
 [D-TASKRUNTIME1=A](syntax-decisions.md).
 
 Both queue APIs use `capacity` for the numeric bound:
-`tasks.channel<T>(capacity: N)` and
+`channel<T>(capacity: N)` and
 `AsyncPolicy.{ capacity: N, overflow: ... }`. Channel capacity applies
 backpressure only; channels have no drop policy.
 
 | Primitive | Full behavior | Buffering law |
 |---|---|---|
-| `tasks.channel<T>(capacity: N)` | `send` waits for receiver space; deadline or cancellation can wake the wait | Preserve work-queue values and FIFO; capacity bounds queued memory and producer pressure |
+| `channel<T>(capacity: N)` | `send` waits for receiver space; deadline or cancellation can wake the wait | Preserve work-queue values and FIFO; capacity bounds queued memory and producer pressure |
 | `AsyncEvent<T, E>` | `Block` waits; `DropNewest` drops the new attempt; `DropOldest` drops the oldest queued attempt | Only explicit loss path; report exposes acceptance and terminal state |
 | `core.services` worker mailbox | Full delivery waits under deadline or returns `Full` | At-most-once, per-sender FIFO; no silent drop |
 | `core.files` buffered handles | Reader/writer calls block or flush; no Jet queue or drop policy | Bounded-memory stream; caller pace controls progress |
@@ -2678,7 +2678,7 @@ instead of nesting one value's lock inside another's.
 
 **Non-guarantee.** Jet does not guarantee deadlock freedom for arbitrary
 structured-concurrency programs, and it does not detect arbitrary deadlocks at runtime.
-`task`, `task.group`, join duties, and `tasks.channel` define ownership,
+`task`, `task.group`, join duties, and `channel` define ownership,
 lifetime, and wait behavior; they do not prove progress. Two tasks can wait for
 each other through bounded channels, or a task can wait for a result that no task
 sends.

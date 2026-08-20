@@ -1572,7 +1572,7 @@ fn jet_showable_type(cx: &Cx, ty: &Type) -> bool {
         | Type::Tuple(_)
         | Type::Shared(_)
         | Type::Fn { .. }
-        | Type::ComputeDim(_) => false,
+        | Type::Measure(_) => false,
     }
 }
 
@@ -1618,7 +1618,7 @@ fn jet_debuggable_type(cx: &Cx, ty: &Type) -> bool {
         | Type::Tuple(_)
         | Type::Shared(_)
         | Type::Fn { .. }
-        | Type::ComputeDim(_) => false,
+        | Type::Measure(_) => false,
     }
 }
 

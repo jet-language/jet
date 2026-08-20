@@ -4,6 +4,79 @@ pub(crate) use super::*;
 use crate::Syntax;
 use crate::AST::Type;
 
+/// One inclusive interval fact used by every integer proof in sema.
+///
+/// Widths, user refinements, literal checks, and fixed-list indexes all ask
+/// the same question: is one value set contained by another? Keep the
+/// arithmetic and containment law here so those callers cannot grow their own
+/// subtly different `(lo, hi)` checks.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct IntegerInterval {
+    pub(crate) lo: i128,
+    pub(crate) hi: i128,
+}
+
+impl IntegerInterval {
+    pub(crate) const fn new(lo: i128, hi: i128) -> Self {
+        Self { lo, hi }
+    }
+
+    pub(crate) const fn from_bounds(bounds: (i128, i128)) -> Self {
+        Self::new(bounds.0, bounds.1)
+    }
+
+    /// Value-set containment: a subset needs no conversion or runtime check.
+    pub(crate) fn contains_interval(self, subset: Self) -> bool {
+        self.lo <= subset.lo && subset.hi <= self.hi
+    }
+
+    pub(crate) fn negated(self) -> Option<Self> {
+        Some(Self::new(self.hi.checked_neg()?, self.lo.checked_neg()?))
+    }
+
+    pub(crate) fn add(self, other: Self) -> Option<Self> {
+        Some(Self::new(
+            self.lo.checked_add(other.lo)?,
+            self.hi.checked_add(other.hi)?,
+        ))
+    }
+
+    pub(crate) fn sub(self, other: Self) -> Option<Self> {
+        Some(Self::new(
+            self.lo.checked_sub(other.hi)?,
+            self.hi.checked_sub(other.lo)?,
+        ))
+    }
+
+    pub(crate) fn mul(self, other: Self) -> Option<Self> {
+        let products = [
+            self.lo.checked_mul(other.lo)?,
+            self.lo.checked_mul(other.hi)?,
+            self.hi.checked_mul(other.lo)?,
+            self.hi.checked_mul(other.hi)?,
+        ];
+        Some(Self::new(
+            *products.iter().min()?,
+            *products.iter().max()?,
+        ))
+    }
+
+    pub(crate) fn fixed_list_indexes(len: u64) -> Option<Self> {
+        Some(Self::new(0, i128::from(len).checked_sub(1)?))
+    }
+}
+
+/// Project the canonical width fact. The width formula belongs to the type's
+/// knowledge vector; sema only consumes that fact through this one interval
+/// interface.
+pub(crate) fn integer_width_interval(signed: bool, bits: u8) -> IntegerInterval {
+    IntegerInterval::from_bounds(
+        Type::IntN { signed, bits }
+            .integer_range()
+            .expect("fixed integer widths carry an interval fact"),
+    )
+}
+
 /// D-INTBIG1: the parser's i64 field is only a fast path. Keep all fixed-width
 /// checks on the exact source value so an overflowed token cannot reappear as
 /// the lexer sentinel `0`.

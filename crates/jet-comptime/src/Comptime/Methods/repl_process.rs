@@ -3,6 +3,7 @@
 use crate::Diagnostics::{Diagnostic, Span};
 use super::super::Diagnostics::unsupported;
 use crate::AST::{CtValue, Type};
+use jet_foundation::Authority::covers;
 use jet_foundation::Effects::{core_effect, is_nondeterministic_core, Effect};
 use super::core_calls::{
     apply_core_call_with_type, apply_impure_core_call_with_type, as_string, io_error_value,
@@ -188,9 +189,7 @@ pub fn apply_repl_authorized_core_call_with_type(
         ));
     };
     authorizer.preflight(&request, span)?;
-    let granted = grants.iter().any(|cap| {
-        cap == &request.root || cap.starts_with(&format!("{}.", request.root))
-    });
+    let granted = grants.iter().any(|cap| covers(&request.root, cap));
     if !granted {
         return Err(Diagnostic::error(
             "E1803",

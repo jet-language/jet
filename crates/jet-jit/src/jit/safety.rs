@@ -4843,6 +4843,10 @@ pub(crate) fn resident_safe_stmt(stmt: &TStmt, callees: &HashSet<String>) -> boo
             use jet_codegen::Codegen::TIR::TForInMethod;
             let chars_ok = matches!(method_kind, Some(TForInMethod::Chars))
                 && matches!(&source.ty, Type::String);
+            let channel_ok = matches!(method_kind, Some(TForInMethod::ChannelReceiver))
+                && var2.is_none()
+                && matches!(&collection.ty, Type::Apply { name, args } if name == "Receiver" && args.len() == 1)
+                && jit_concurrency_type(&collection.ty);
             let iterable_ok = matches!(
                 method_kind,
                 Some(TForInMethod::Iterable { coll_type, iter_type })
@@ -4882,6 +4886,11 @@ pub(crate) fn resident_safe_stmt(stmt: &TStmt, callees: &HashSet<String>) -> boo
             // Predicate and lowering admit the same set; a wider predicate would
             // be a Cranelift rejection of generated code, i.e. an ICE (I2), and a
             // narrower one would leave the host dead.
+            if channel_ok {
+                return resident_safe_expr(source, callees)
+                    && step.as_ref().is_none_or(|step| resident_safe_expr(step, callees))
+                    && body.iter().all(|s| resident_safe_stmt(s, callees));
+            }
             if process_lines_ok || file_lines_ok || stdin_lines_ok {
                 return resident_safe_expr(source, callees)
                     && step

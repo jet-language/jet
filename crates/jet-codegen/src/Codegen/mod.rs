@@ -2441,21 +2441,21 @@ pub(crate) fn emit_synthetic_close_builtin_impls(cx: &Cx, items: &[Item], out: &
             ));
             out.push_str(&format!(
                 "fn jet_db_scope_execute(scope: &{root}JetDbScope, sql: &String, params: &Vec<{root}jet_std::DBValue>) -> Result<i64, {root}jet_std::DBError> {{\n\
-let (__sql, __params) = {root}jet_std::jet_db_apply_policy(sql, params, &scope.policy.table, {root}jet_db_policy_expression(&scope.policy), &scope.user)?;\n\
+let (__sql, __params) = {root}jet_std::jet_db_apply_compiled_policy(sql, params, &scope.policy.table, {root}jet_db_policy_compiled(&scope.policy), &scope.user)?;\n\
 {root}jet_std::jet_db_decode_execute_result(&{ffi}::jet_db_execute(scope.handle, &__sql, &{root}jet_std::jet_db_encode_params(&__params)))\n\
 }}\n\
 fn jet_db_scope_query(scope: &{root}JetDbScope, sql: &String, params: &Vec<{root}jet_std::DBValue>) -> Result<Vec<{root}jet_std::JetDBRow>, {root}jet_std::DBError> {{\n\
-let (__sql, __params) = {root}jet_std::jet_db_apply_policy(sql, params, &scope.policy.table, {root}jet_db_policy_expression(&scope.policy), &scope.user)?;\n\
+let (__sql, __params) = {root}jet_std::jet_db_apply_compiled_policy(sql, params, &scope.policy.table, {root}jet_db_policy_compiled(&scope.policy), &scope.user)?;\n\
 {root}jet_std::jet_db_decode_query_result(&{ffi}::jet_db_query(scope.handle, &__sql, &{root}jet_std::jet_db_encode_params(&__params)))\n\
 }}\n"
             ));
             out.push_str(&format!(
                 "fn jet_db_scope_execute_migration(scope: &{root}JetDbScope, sql: &String, params: &Vec<{root}jet_std::DBValue>) -> Result<i64, {root}jet_std::DBError> {{\n\
-let (__sql, __params) = {root}jet_std::jet_db_apply_migration_policy(sql, params, &scope.policy.table, {root}jet_db_policy_expression(&scope.policy), &scope.user)?;\n\
+let (__sql, __params) = {root}jet_std::jet_db_apply_compiled_migration_policy(sql, params, &scope.policy.table, {root}jet_db_policy_compiled(&scope.policy), &scope.user)?;\n\
 {root}jet_std::jet_db_decode_execute_result(&{ffi}::jet_db_execute(scope.handle, &__sql, &{root}jet_std::jet_db_encode_params(&__params)))\n\
 }}\n\
 fn jet_db_scope_query_migration(scope: &{root}JetDbScope, sql: &String, params: &Vec<{root}jet_std::DBValue>) -> Result<Vec<{root}jet_std::JetDBRow>, {root}jet_std::DBError> {{\n\
-let (__sql, __params) = {root}jet_std::jet_db_apply_migration_policy(sql, params, &scope.policy.table, {root}jet_db_policy_expression(&scope.policy), &scope.user)?;\n\
+let (__sql, __params) = {root}jet_std::jet_db_apply_compiled_migration_policy(sql, params, &scope.policy.table, {root}jet_db_policy_compiled(&scope.policy), &scope.user)?;\n\
 {root}jet_std::jet_db_decode_query_result(&{ffi}::jet_db_query(scope.handle, &__sql, &{root}jet_std::jet_db_encode_params(&__params)))\n\
 }}\n"
             ));
@@ -2466,11 +2466,11 @@ fn begin(&mut self) -> bool {{ {ffi}::jet_db_begin(self.scope.handle) }}\n\
 fn commit(&mut self) -> bool {{ {ffi}::jet_db_commit(self.scope.handle) }}\n\
 fn rollback(&mut self) {{ let _ = {ffi}::jet_db_rollback(self.scope.handle); }}\n\
 fn execute(&mut self, sql: &String, params: &Vec<{root}jet_std::DBValue>, allow_schema: bool) -> Result<i64, {root}jet_std::DBError> {{\n\
-let (__sql, __params) = if allow_schema {{ {root}jet_std::jet_db_apply_migration_policy(sql, params, &self.scope.policy.table, {root}jet_db_policy_expression(&self.scope.policy), &self.scope.user)? }} else {{ {root}jet_std::jet_db_apply_policy(sql, params, &self.scope.policy.table, {root}jet_db_policy_expression(&self.scope.policy), &self.scope.user)? }};\n\
+let (__sql, __params) = if allow_schema {{ {root}jet_std::jet_db_apply_compiled_migration_policy(sql, params, &self.scope.policy.table, {root}jet_db_policy_compiled(&self.scope.policy), &self.scope.user)? }} else {{ {root}jet_std::jet_db_apply_compiled_policy(sql, params, &self.scope.policy.table, {root}jet_db_policy_compiled(&self.scope.policy), &self.scope.user)? }};\n\
 {root}jet_std::jet_db_decode_execute_result(&{ffi}::jet_db_execute(self.scope.handle, &__sql, &{root}jet_std::jet_db_encode_params(&__params)))\n\
 }}\n\
 fn query(&mut self, sql: &String, params: &Vec<{root}jet_std::DBValue>, allow_schema: bool) -> Result<Vec<{root}jet_std::JetDBRow>, {root}jet_std::DBError> {{\n\
-let (__sql, __params) = if allow_schema {{ {root}jet_std::jet_db_apply_migration_policy(sql, params, &self.scope.policy.table, {root}jet_db_policy_expression(&self.scope.policy), &self.scope.user)? }} else {{ {root}jet_std::jet_db_apply_policy(sql, params, &self.scope.policy.table, {root}jet_db_policy_expression(&self.scope.policy), &self.scope.user)? }};\n\
+let (__sql, __params) = if allow_schema {{ {root}jet_std::jet_db_apply_compiled_migration_policy(sql, params, &self.scope.policy.table, {root}jet_db_policy_compiled(&self.scope.policy), &self.scope.user)? }} else {{ {root}jet_std::jet_db_apply_compiled_policy(sql, params, &self.scope.policy.table, {root}jet_db_policy_compiled(&self.scope.policy), &self.scope.user)? }};\n\
 {root}jet_std::jet_db_decode_query_result(&{ffi}::jet_db_query(self.scope.handle, &__sql, &{root}jet_std::jet_db_encode_params(&__params)))\n\
 }}\n\
 }}\n\
