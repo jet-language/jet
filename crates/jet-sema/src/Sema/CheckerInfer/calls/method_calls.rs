@@ -993,7 +993,7 @@ impl<'a> Checker<'a> {
                                 return Some(ret);
                             }
                             if let Some(ret) = Collections::builtin_method_return(&ty, method, args.len(), true) {
-                                self.record_static_time_effect(type_name, method, span);
+                                self.record_static_time_effect(&type_name, method, span);
                                 let ret = self.finish_builtin_method(receiver, method, &ty, args, span, ret);
                                 let ret = if type_name == crate::Syntax::CLOCK_TYPE {
                                     if method == "system" {
