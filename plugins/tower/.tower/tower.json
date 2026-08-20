@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 2097,
-    "rev": 39451,
+    "rev": 39455,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -98932,20 +98932,20 @@
         {
           "n": 7,
           "text": "`scripts/agent/jet-env cargo test --test task_control_tiers -- stream_drop_uses_task_cancel_cleanup_path task_control_plane_matches_on_default_run task_control_plane_matches_under_aot` passes, including a forced-interpreter assertion.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-12T18:17:44.855Z"
+          "evidence": "PROOF cargo test --test task_control_tiers 19/19 ok (17.3s, 2026-08-19, builder 8f4597960).",
+          "at": "2026-08-20T04:35:49.184Z"
         },
         {
           "n": 8,
           "text": "`examples/features/streams/generators.jet` and its expected output pin early loop exit plus `defer` cleanup; `jet run --release`, default `jet run`, and `jet run --interpret` match the golden byte-for-byte.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-12T18:17:45.292Z"
+          "evidence": "PROOF JET_GOLDEN_FILTER=streams cargo test --test golden examples_compile_and_run ok (11.5s, 2026-08-19, builder 8f4597960): examples/features/streams/generators.jet matches its expected output, which pins early loop exit plus defer cleanup.",
+          "at": "2026-08-20T04:35:49.742Z"
         }
       ],
       "refs": [
@@ -98958,8 +98958,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-06T21:35:31.122Z",
-      "updated": "2026-08-12T18:17:45.867Z",
-      "updatedBy": "fable-e3-audit",
+      "updated": "2026-08-20T04:35:49.742Z",
+      "updatedBy": "fable-e3-burndown",
       "workOrder": 700
     },
     {
@@ -99210,12 +99210,17 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": "e3-m11-concurrency",
-      "phase": "ready",
+      "phase": "frozen",
       "priority": "P2",
       "plan": "Implements D-CONC-OUTCOME1 — ratified 2026-08-06. Read each decision verbatim (tower brief on this card's parent proposal, or tower decision show) before building; the ratified outcome text is the law, this plan is the route. Every requirement is a discrete exit criterion below: meet each with targeted proof (tests, snapshots, examples with golden output), and keep I9 tier parity inside this card — AOT, default jet run (JIT), and the interpreter must agree on every surface this card ships before it closes. Delete every superseded form the decisions retire in the same change; do not leave compatibility shims or parallel spellings. Reference: docs/proposals/concurrency-work-is-a-value.md.",
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-08-20",
+          "by": "fable-e3-burndown",
+          "text": "SUPERSEDED, verified 2026-08-19. This card implements D-CONC-OUTCOME1=A, which a LATER ratified ruling retired: docs/spec/syntax-decisions.md:2196-2204 records D-CONC-OUTCOME1=A as 'retired by D-CONC-FAIL1=A', and :2265-2271 records D-CONC-FAIL1=A (ratified the same day, card #1505, 'amends D-COROUTINE1 and retires D-CONC-OUTCOME1') as the operative law: join() returns T ? TaskFailure, TaskFailure is a normal enum with .Cancelled/.DeadlineBlown/.Panicked(reason), and the spec states plainly that TaskOutcome, TaskStatus, trace() and exception() DO NOT SHIP. Building criteria 1-3 would therefore introduce the exact parallel surface the later ruling deleted, so implementation was refused rather than attempted. Criterion 4 is satisfied by the replacement ruling itself: no trace()/exception() rows exist in the syntax registry. The canonical vocabulary already ships as TaskFailure with its own examples and tests. Authority order per AGENTS.md puts a newer ratified verdict above a stale card, so this card is dropped rather than closed-as-done: nothing was built for it and nothing should be."
+        },
         {
           "at": "2026-08-19",
           "by": "fable",
@@ -99310,8 +99315,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-06T21:35:38.699Z",
-      "updated": "2026-08-19T13:31:30.309Z",
-      "updatedBy": "fable",
+      "updated": "2026-08-20T04:35:48.623Z",
+      "updatedBy": "fable-e3-burndown",
       "workOrder": 990
     },
     {
@@ -183186,6 +183191,34 @@
   ],
   "events": [
     {
+      "at": "2026-08-20T04:35:49.742Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c07zohrf",
+      "note": "#8"
+    },
+    {
+      "at": "2026-08-20T04:35:49.185Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c07zohrf",
+      "note": "#7"
+    },
+    {
+      "at": "2026-08-20T04:35:48.624Z",
+      "by": "fable-e3-burndown",
+      "action": "card.update",
+      "ref": "c0pb8211",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-20T04:35:26.005Z",
+      "by": "fable-e3-burndown",
+      "action": "card.update",
+      "ref": "c0pb8211",
+      "note": "logEntry"
+    },
+    {
       "at": "2026-08-20T04:28:09.999Z",
       "by": "fable-e3-burndown",
       "action": "card.update",
@@ -186655,34 +186688,6 @@
       "by": "fable",
       "action": "card.update",
       "ref": "c0ebieja",
-      "note": "track,epoch,milestoneId"
-    },
-    {
-      "at": "2026-08-19T13:48:23.025Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c0crgq0c",
-      "note": "track,epoch,milestoneId"
-    },
-    {
-      "at": "2026-08-19T13:48:22.407Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c0ty2kv2",
-      "note": "track,epoch,milestoneId"
-    },
-    {
-      "at": "2026-08-19T13:48:21.765Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c0xs3xot",
-      "note": "track,epoch,milestoneId"
-    },
-    {
-      "at": "2026-08-19T13:48:21.134Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c09khtdb",
       "note": "track,epoch,milestoneId"
     }
   ],
