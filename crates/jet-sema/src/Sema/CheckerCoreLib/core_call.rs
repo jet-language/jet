@@ -1603,7 +1603,9 @@ impl<'a> Checker<'a> {
                                 &Type::List(Box::new(Type::String)),
                                 arg,
                             ),
-                            _ => self.infer(&mut arg.expr),
+                            _ => {
+                                self.infer(&mut arg.expr);
+                            }
                         }
                     }
                     let Some(t) = exactly_one_type_arg(self, name, type_args, span) else {
