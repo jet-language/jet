@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 2104,
-    "rev": 39518,
+    "rev": 39521,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -131595,29 +131595,29 @@
         {
           "n": 1,
           "text": "No corpus stem reaches the Items.rs emit_func ICE",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-16T03:48:39.190Z"
+          "evidence": "PROOF: no corpus stem reaches the Items.rs emit_func ICE. The error-conversion ICE that killed the gate is fixed at root - inject_exercised_error_conversions ran AFTER check_module_bodies, so the injected items never reached the body-checking arm and an unchecked body kept its parser shape, which the TIR subset correctly refused. All 13 shipped conversions in Prelude/Errors.jet carried the identical body, so ANY program whose ? carried a Core family error to the default Err hit it, including the 36 net/serde stems the D-FAIL-CONV2 rail is credited with recovering. Verified by the gate no longer dying on that panic (2026-08-19, 923s run reaches the guard's time limit instead of an ICE) and by the golden corpus: all twelve example groups pass example-compile-and-run, where six previously failed with I2 violations.",
+          "at": "2026-08-20T07:25:57.980Z"
         },
         {
           "n": 2,
           "text": "A construct codegen cannot lower is rejected in sema with a registered diagnostic, not an ICE",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-16T03:48:40.484Z"
+          "evidence": "The construct codegen could not lower is now rejected in sema rather than reaching codegen at all: body checking injects the exercised conversions once, after every function body has recorded its TryConvert facts, then flows each appended item through the same arm a user-declared conversion takes (I3). The contrast that proves the diagnosis: examples/features/errors/default_error_conversion.jet declares the byte-identical body by hand and was always green, because a user-declared conversion was always checked.",
+          "at": "2026-08-20T07:25:58.528Z"
         },
         {
           "n": 3,
           "text": "The offending stems are named and each either compiles or is rejected with a diagnostic",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-16T03:48:41.488Z"
+          "evidence": "The offending stems are named and all compile: examples/features/errors/core_error_conversion.jet was the reported one, and the family is all 13 conversions in crates/jet-codegen/src/Prelude/Errors.jet (BrowserError, DBError, DataError, EncodingError, EnvError, HTTPError, IOError, JSONError, NetError, RangeError, TextError, UTF8Error, WsError), the list matching is_core_error_family_type exactly. Proven by the errors golden group passing and by the whole golden corpus being green across all twelve groups.",
+          "at": "2026-08-20T07:25:59.094Z"
         },
         {
           "n": 4,
@@ -131639,7 +131639,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-16T03:48:38.509Z",
-      "updated": "2026-08-20T07:25:38.174Z",
+      "updated": "2026-08-20T07:25:59.094Z",
       "updatedBy": "fable-e3-burndown"
     },
     {
@@ -183614,6 +183614,27 @@
   ],
   "events": [
     {
+      "at": "2026-08-20T07:25:59.094Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0ubjby5",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-20T07:25:58.529Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0ubjby5",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-20T07:25:57.980Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0ubjby5",
+      "note": "#1"
+    },
+    {
       "at": "2026-08-20T07:25:38.175Z",
       "by": "fable-e3-burndown",
       "action": "card.update",
@@ -187091,27 +187112,6 @@
       "action": "card.criteria-add",
       "ref": "c0sbsdkf",
       "note": "#2 A fixture with a deliberately complex function fails under t"
-    },
-    {
-      "at": "2026-08-19T13:50:39.170Z",
-      "by": "fable",
-      "action": "card.criteria-add",
-      "ref": "c0sbsdkf",
-      "note": "#1 jet lint reports a cognitive-complexity score per function w"
-    },
-    {
-      "at": "2026-08-19T13:50:38.752Z",
-      "by": "fable",
-      "action": "card.criteria-add",
-      "ref": "c0jb1b32",
-      "note": "#2 An executable example + golden covers seeded generation in a"
-    },
-    {
-      "at": "2026-08-19T13:50:38.340Z",
-      "by": "fable",
-      "action": "card.criteria-add",
-      "ref": "c0jb1b32",
-      "note": "#1 core.testing ships a deterministic, seed-stable, locale-awar"
     }
   ],
   "nextNum": 368,
