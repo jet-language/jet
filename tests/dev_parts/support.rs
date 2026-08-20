@@ -1941,34 +1941,48 @@ fn run_child_stem_battery(
                     else {
                         break;
                     };
-                    let mut command =
-                        Command::new(std::env::current_exe().expect("current dev test binary"));
-                    command
-                        .args(["--exact", test_name.as_str(), "--nocapture"])
-                        .env(&child_env, &stem)
-                        .env("NO_COLOR", "1");
-                    for (key, value) in &extra_env {
-                        command.env(key, value);
-                    }
-                    let output = command_output_with_timeout(
-                        command,
-                        timeout,
-                        &format!("{label} `{stem}`"),
-                    );
-                    if !output.status.success() {
-                        lock_recovered(&failures, "child stem battery failures").push(format!(
-                            "{stem}: status={:?}\nstdout:\n{}\nstderr:\n{}",
-                            output.status,
-                            String::from_utf8_lossy(&output.stdout),
-                            String::from_utf8_lossy(&output.stderr)
-                        ));
+                    // Every sibling battery in this file already does this
+                    // (`dev default`, `interpreter`, `three-way`, `corpus
+                    // gate`): a per-stem panic becomes THIS stem's failure
+                    // line, so the run keeps going and the report names the
+                    // stem and its real message. Letting the panic ride the
+                    // thread out instead cost the batch twice — `join()`
+                    // re-panicked with a `Box<dyn Any>` that `expect` renders
+                    // as `Any { .. }`, and every stem still queued behind the
+                    // first casualty was never judged at all.
+                    let judged = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                        let mut command =
+                            Command::new(std::env::current_exe().expect("current dev test binary"));
+                        command
+                            .args(["--exact", test_name.as_str(), "--nocapture"])
+                            .env(&child_env, &stem)
+                            .env("NO_COLOR", "1");
+                        for (key, value) in &extra_env {
+                            command.env(key, value);
+                        }
+                        command_output_with_timeout(command, timeout, &format!("{label} `{stem}`"))
+                    }));
+                    match judged {
+                        Ok(output) if output.status.success() => {}
+                        Ok(output) => {
+                            lock_recovered(&failures, "child stem battery failures").push(format!(
+                                "{stem}: status={:?}\nstdout:\n{}\nstderr:\n{}",
+                                output.status,
+                                String::from_utf8_lossy(&output.stdout),
+                                String::from_utf8_lossy(&output.stderr)
+                            ));
+                        }
+                        Err(payload) => lock_recovered(&failures, "child stem battery failures")
+                            .push(format!("{stem}: {}", panic_message(payload))),
                     }
                 })
                 .expect("child stem battery worker"),
         );
     }
     for handle in handles {
-        handle.join().expect("child stem battery worker panicked");
+        handle
+            .join()
+            .expect("child stem battery worker panicked outside the per-stem guard");
     }
     let failures = judged_report(&failures, "child stem battery failures");
     assert!(
@@ -2337,49 +2351,6 @@ fn assert_cranelift_three_way(file: &str, stem: &str) {
         jet_jit::resident_jit_safe_bundle(&bundle) && compile.is_ok(),
         "`{stem}` must be resident-JIT safe for three-way differential: safety={safety_detail:?}, compile={compile:?}"
     );
-
-    if stem == "memory/pool_stale_id" {
-        let interpreted = match dev_iteration(file, false, true) {
-            RunOutcome::Problems(diags) => diags,
-            outcome => panic!("stale Pool Id unexpectedly ran in interpreter: {outcome:?}"),
-        };
-        assert_eq!(interpreted.len(), 1);
-        assert_eq!(interpreted[0].code, "E0953");
-
-        jet_jit::reset_jit_trace_for_test();
-        let mut backend = CraneliftBackend::new();
-        let native = jet_jit::with_program_args(&[file.to_string()], || {
-            backend.run(&bundle, false)
-        });
-        let native = match native {
-            RunOutcome::Problems(diags) => diags,
-            outcome => panic!("stale Pool Id unexpectedly ran in resident JIT: {outcome:?}"),
-        };
-        assert_eq!(native.len(), 1);
-        assert_eq!(
-            (native[0].code.as_str(), native[0].what.as_str(), native[0].why.as_str()),
-            (
-                interpreted[0].code.as_str(),
-                interpreted[0].what.as_str(),
-                interpreted[0].why.as_str(),
-            ),
-            "stale Pool diagnostic diverged between interpreter and resident JIT"
-        );
-        assert!(jet_jit::jit_executed_for_test());
-        assert!(!jet_jit::deopt_invoked_for_test() && !jet_jit::fallback_invoked_for_test());
-
-        let dir =
-            std::env::temp_dir().join(format!("jet_jit_3way_{}", std::process::id()));
-        let aot = compiled_binary_output(&dir, "jit_3way", next_oracle_index(), stem, file);
-        assert_ne!(aot.exit_code, 0, "stale Pool Id unexpectedly ran in AOT");
-        assert!(
-            aot.stderr.contains(
-                "this Id no longer refers to a live value — its pool slot was removed"
-            ),
-            "AOT stale Pool report diverged: {aot:?}"
-        );
-        return;
-    }
 
     // Honest pre-scan / TIR boundaries (typed CLI, env, etc.) skip the
     // interpreter leg — same contract as assert_ui_and_web_three_way. JIT and

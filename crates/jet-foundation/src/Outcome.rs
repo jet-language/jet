@@ -996,6 +996,14 @@ pub fn jet_list_bounds_message(len: impl std::fmt::Display, index: i64) -> Strin
     )
 }
 
+/// Shared wording for a stale `Id<T>` — a pool slot that was removed. Sibling
+/// of `jet_list_bounds_message`, and for the same reason: `jet_pool_get`,
+/// `jet_pool_get_mut` and the JIT's pool host all reach a stale slot, and none
+/// of them owns the user-facing text.
+pub fn jet_pool_stale_message() -> &'static str {
+    "this Id no longer refers to a live value — its pool slot was removed"
+}
+
 /// Shared wording for a missing map key. `None` is used when the adapter cannot
 /// marshal a displayable key value.
 pub fn jet_missing_map_key_message(key: Option<&str>) -> String {

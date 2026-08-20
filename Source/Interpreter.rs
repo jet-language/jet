@@ -194,10 +194,15 @@ pub fn run_checked(bundle: &ProgramBundle, try_anyway: bool) -> RunOutcome {
 }
 
 fn runtime_trap_from_e0953(mut sink: crate::Comptime::DevSink, d: Diagnostic) -> RunOutcome {
+    // Same extraction `EvalCtx::route_runtime_panic` performs: a comptime
+    // E0953 carries the panic message in `why` behind this prefix, and every
+    // other E0953 carries it in `what`. Falling back to `why` here published
+    // the registered row's explanation ("a child task panicked") as if it
+    // were the program's own panic message.
     let msg = d
         .why
         .strip_prefix("while computing this value at compile time, the program panicked: ")
-        .unwrap_or(d.why.as_str());
+        .unwrap_or(d.what.as_str());
     let report = jet_foundation::Outcome::jet_render_runtime_stop(
         "E3001", "", 0, "", "", 1, 1, msg, "",
     );

@@ -1379,7 +1379,7 @@ impl<'a> EvalCtx<'a> {
                         Ok(_) => {}
                         Err(error)
                             if super::stream_producer_cancel_completed(&producer, &error) => {}
-                        Err(error) => return Err(error),
+                        Err(error) => return Err(self.stream_producer_failure(error)),
                     }
                     return Ok(Flow::Normal);
                 }

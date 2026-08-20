@@ -1591,6 +1591,46 @@ impl<'a> EvalCtx<'a> {
         )
     }
 
+    /// Republish the report a failed stream producer recorded at its stop.
+    ///
+    /// `Prelude/Stream.rs`'s completion boundary does exactly this: a failed
+    /// producer publishes the COMPLETE report from
+    /// `jet_stream_take_failure_report()`, not the bare message a task frame
+    /// carries. The producer runs inline in the consumer's frame here, so the
+    /// record and the take are on one thread and the slot is the whole
+    /// handoff.
+    ///
+    /// The stop is already rendered, so this is the same "print it verbatim"
+    /// edge `jet_runtime_caught_stop` owns — hand the boundary a soft exit
+    /// afterwards so it does not render a second, locationless report from a
+    /// `why` that was never a panic message.
+    fn stream_producer_failure(&self, error: Diagnostic) -> Diagnostic {
+        // Only the child's own panic claims the slot. `task_child_stop` is the
+        // one recorder, and it mints exactly this code, so an escape that never
+        // recorded — a cancel, an `unsupported` boundary — cannot walk off with
+        // a report some earlier task on this pooled thread left behind.
+        if error.code != "E0953" {
+            return error;
+        }
+        let Some(report) = crate::scheduler::jet_stream_take_failure_report() else {
+            return error;
+        };
+        let Some(sink) = self.sink.as_ref() else {
+            return error;
+        };
+        let mut sink = sink.lock().expect("evaluator sink poisoned");
+        sink.stderr.push_str(&report);
+        if !report.ends_with('\n') {
+            sink.stderr.push('\n');
+        }
+        sink.exit_code = Some(jet_foundation::ExitCodes::RUNTIME_PANIC);
+        crate::Sema::Diagnostics::soft_exit(
+            "70".to_string(),
+            "stream producer failure".to_string(),
+            Some(self.span()),
+        )
+    }
+
     fn scheduler_wait<T>(
         &self,
         wait_kind: &str,

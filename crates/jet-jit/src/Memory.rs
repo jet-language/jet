@@ -716,13 +716,19 @@ fn pool_value(handle: i64, id: i64) -> Option<i64> {
     (slot.generation == generation).then_some(slot.value).flatten()
 }
 
-fn jet_jit_pool_get(handle: i64, id: i64) -> i64 {
+/// `line` is the Jet line of the `pool[id]` read, the same fact AOT hands
+/// `jet_pool_get(&pool, id, file, line)`. Without it the shared report boundary
+/// renders a locationless stop and this tier disagrees with AOT on the `-->`
+/// line for one identical program (I9).
+fn jet_jit_pool_get(handle: i64, id: i64, line: u32) -> i64 {
     match pool_value(handle, id) {
         Some(value) => value,
         None => {
             Concurrency::with_runtime_mut(|rt| {
-                rt.set_trap(
-                    "this Id no longer refers to a live value — its pool slot was removed",
+                rt.set_runtime_stop(
+                    "E3001",
+                    line,
+                    jet_foundation::Outcome::jet_pool_stale_message(),
                 )
             });
             0
@@ -1518,6 +1524,10 @@ host_fns! {
         binary_i8.params.push(AbiParam::new(types::I64));
         binary_i8.params.push(AbiParam::new(types::I64));
         binary_i8.returns.push(AbiParam::new(types::I8));
+        // (handle, id, line) -> value: the same `line` tail every other
+        // report-bearing host shim carries (`Collections.rs`'s `sig_get`).
+        let mut binary_i32 = binary.clone();
+        binary_i32.params.push(AbiParam::new(types::I32));
 
 
     }
@@ -1537,7 +1547,7 @@ host_fns! {
     gc_add_edge: "jet_jit_gc_add_edge" => jet_jit_gc_add_edge: ternary_void;
     pool_new: "jet_jit_pool_new" => jet_jit_pool_new: noarg_i64;
     pool_add: "jet_jit_pool_add" => jet_jit_pool_add: binary;
-    pool_get: "jet_jit_pool_get" => jet_jit_pool_get: binary;
+    pool_get: "jet_jit_pool_get" => jet_jit_pool_get: binary_i32;
     pool_remove: "jet_jit_pool_remove" => jet_jit_pool_remove: binary;
     pool_ids: "jet_jit_pool_ids" => jet_jit_pool_ids: unary;
     shared_new: "jet_jit_shared_new" => jet_jit_shared_new: unary;

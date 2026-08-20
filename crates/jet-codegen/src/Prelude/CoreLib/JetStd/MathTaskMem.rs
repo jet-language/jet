@@ -1209,11 +1209,7 @@
     pub fn jet_pool_get<T: Clone>(pool: &JetPool<T>, id: JetId<T>, file: &str, line: u32) -> T {
         match pool.slots.get(id.index as usize) {
             Some(JetPoolSlot::Occupied(gen, v)) if *gen == id.generation => v.clone(),
-            _ => super::jet_panic(
-                file,
-                line,
-                "this Id no longer refers to a live value — its pool slot was removed",
-            ),
+            _ => super::jet_panic(file, line, super::jet_pool_stale_message()),
         }
     }
 
@@ -1233,11 +1229,7 @@
             Some(JetPoolSlot::Occupied(gen, _)) if *gen == id.generation
         );
         if !valid {
-            super::jet_panic(
-                file,
-                line,
-                "this Id no longer refers to a live value — its pool slot was removed",
-            );
+            super::jet_panic(file, line, super::jet_pool_stale_message());
         }
         match &mut pool.slots[idx] {
             JetPoolSlot::Occupied(_, v) => v,

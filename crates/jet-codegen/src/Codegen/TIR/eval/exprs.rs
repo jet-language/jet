@@ -4452,7 +4452,7 @@ impl<'a> EvalCtx<'a> {
     ) -> Result<(), Diagnostic> {
         let message = message.jet_show();
         if self.task_cancel.is_some() {
-            return Err(super::task_child_panic(message, self.span()));
+            return Err(self.task_child_stop(loc, message, scope));
         }
         if !self.runtime_execution {
             return Err(unsupported("or-fallback panic", self.span()));
@@ -4484,7 +4484,7 @@ impl<'a> EvalCtx<'a> {
         scope: &HashMap<String, CtValue>,
     ) -> Result<(), Diagnostic> {
         if self.task_cancel.is_some() {
-            return Err(super::task_child_panic(message.to_string(), self.span()));
+            return Err(self.task_child_stop(loc, message.to_string(), scope));
         }
         if !self.runtime_execution {
             return Err(unsupported("require/panic stop", self.span()));
@@ -4536,6 +4536,51 @@ impl<'a> EvalCtx<'a> {
             loc.caret,
             message,
             &locals,
+        )
+    }
+
+    /// A stop on a frame that unwinds as a task carries only its message, so
+    /// the COMPLETE report goes into the one Prelude slot first. This is the
+    /// evaluator's spelling of `Prelude/Core.rs`'s
+    /// `if jet_runtime_should_unwind() { jet_stream_record_failure_report(…) }`
+    /// — the same `jet_foundation::Outcome` slot, recorded at the same point.
+    /// The stream consumer takes it back at its completion boundary, the way
+    /// `Prelude/Stream.rs` does when a failed producer publishes.
+    ///
+    /// Without this the child's file, line and function are gone before
+    /// anything renders: the bare `task_child_panic` E0953 escapes to
+    /// `Interpreter::runtime_trap_from_e0953`, which has no source facts left
+    /// to name (I9 — AOT keeps them through `jet_panic`, the resident JIT
+    /// through the report it transports as its panic payload).
+    fn task_child_stop(
+        &self,
+        loc: &crate::Codegen::TIR::TPanicLoc,
+        message: String,
+        scope: &HashMap<String, CtValue>,
+    ) -> Diagnostic {
+        if self.runtime_execution {
+            let report = self.runtime_panic_report(loc, &message, scope);
+            crate::scheduler::jet_stream_record_failure_report(report.rendered);
+        }
+        super::task_child_panic(message, self.span())
+    }
+
+    /// D-MEM1 S6 (D-POOLID-API1=A): a stale `Id<T>` is a generation check that
+    /// failed while the program ran, so it reports through the same shared
+    /// boundary its list and map siblings use here — `runtime_index_stop`,
+    /// which is this tier's marshalling of the `jet_panic` inside
+    /// `jet_pool_get` — naming this file and line.
+    ///
+    /// It used to be a hand-built comptime `E0953` ("your comptime code
+    /// stopped the build") carrying no span, so a running program's stop
+    /// reached `Interpreter::runtime_trap_from_e0953` with no file, line or
+    /// function left to name while AOT printed `--> …:13` for the very same
+    /// read (I9).
+    fn pool_stale_stop(&mut self, line: u32) -> Diagnostic {
+        self.runtime_index_stop(
+            "E3001",
+            line,
+            jet_foundation::Outcome::jet_pool_stale_message(),
         )
     }
 
@@ -8661,15 +8706,16 @@ impl<'a> EvalCtx<'a> {
                 pool,
                 id,
                 field,
+                line,
                 ..
             } => {
                 let pool_value = self.eval_expr_child(pool, scope)?;
                 let id_value = self.eval_expr_child(id, scope)?;
                 let Some((index, generation)) = pool_id_parts(&id_value) else {
-                    return Err(pool_stale_diagnostic());
+                    return Err(self.pool_stale_stop(*line as u32));
                 };
                 let CtValue::Struct { fields, .. } = pool_value else {
-                    return Err(pool_stale_diagnostic());
+                    return Err(self.pool_stale_stop(*line as u32));
                 };
                 let slots = fields.iter().find_map(|(name, value)| match value {
                     CtValue::List(slots) if name == "slots" => Some(slots),
@@ -8681,15 +8727,15 @@ impl<'a> EvalCtx<'a> {
                     ..
                 }) = slots.and_then(|slots| slots.get(index))
                 else {
-                    return Err(pool_stale_diagnostic());
+                    return Err(self.pool_stale_stop(*line as u32));
                 };
                 if variant != "Occupied"
                     || !matches!(args.first(), Some((_, CtValue::Int(found))) if *found == generation)
                 {
-                    return Err(pool_stale_diagnostic());
+                    return Err(self.pool_stale_stop(*line as u32));
                 }
                 let Some((_, mut value)) = args.get(1).cloned() else {
-                    return Err(pool_stale_diagnostic());
+                    return Err(self.pool_stale_stop(*line as u32));
                 };
                 if let Some(field) = field {
                     let CtValue::Struct { fields, .. } = value else {
@@ -9500,15 +9546,16 @@ impl<'a> EvalCtx<'a> {
                 pool,
                 id,
                 field,
+                line,
                 ..
             } => {
                 let mut pool_value = self.eval_expr_child(pool, scope)?;
                 let id_value = self.eval_expr_child(id, scope)?;
                 let Some((index, generation)) = pool_id_parts(&id_value) else {
-                    return Err(pool_stale_diagnostic());
+                    return Err(self.pool_stale_stop(*line as u32));
                 };
                 let CtValue::Struct { fields, .. } = &mut pool_value else {
-                    return Err(pool_stale_diagnostic());
+                    return Err(self.pool_stale_stop(*line as u32));
                 };
                 let slots = fields.iter_mut().find_map(|(name, value)| match value {
                     CtValue::List(slots) if name == "slots" => Some(slots),
@@ -9520,15 +9567,15 @@ impl<'a> EvalCtx<'a> {
                     ..
                 }) = slots.and_then(|slots| slots.get_mut(index))
                 else {
-                    return Err(pool_stale_diagnostic());
+                    return Err(self.pool_stale_stop(*line as u32));
                 };
                 if variant != "Occupied"
                     || !matches!(args.first(), Some((_, CtValue::Int(found))) if *found == generation)
                 {
-                    return Err(pool_stale_diagnostic());
+                    return Err(self.pool_stale_stop(*line as u32));
                 }
                 let Some((_, payload)) = args.get_mut(1) else {
-                    return Err(pool_stale_diagnostic());
+                    return Err(self.pool_stale_stop(*line as u32));
                 };
                 if let Some(field) = field {
                     let CtValue::Struct { type_name, fields } = payload else {
@@ -10309,17 +10356,6 @@ fn pool_id_parts(value: &CtValue) -> Option<(usize, i64)> {
         })
     };
     Some((usize::try_from(int_field("index")?).ok()?, int_field("generation")?))
-}
-
-fn pool_stale_diagnostic() -> Diagnostic {
-    crate::Sema::Diagnostics::render_registered(
-        "E0953",
-        "your comptime code stopped the build".to_string(),
-        "while computing this value at compile time, the program panicked: this Id no longer refers to a live value — its pool slot was removed".to_string(),
-        "this is the sanctioned way to validate at compile time — fix the input the check rejects"
-            .to_string(),
-        None,
-    )
 }
 
 fn eval_precise_builtin(

@@ -370,14 +370,20 @@ impl LowerCtx<'_, '_> {
     }
 
     /// [`Self::list_push_host`] keyed by the LIST type, for the callers that
-    /// hold the collection rather than the element. `Type::List` only: that is
-    /// the same outer shape `jit_list_float_type` answered for before the lift,
-    /// so a `FixedList` carrier keeps its old answer rather than being widened
-    /// blind. The ELEMENT question is the shared one above, so a distinct-float
-    /// element now agrees with the element-keyed callers.
+    /// hold the collection rather than the element.
+    ///
+    /// `FixedList` is the same carrier as `List`: `jit_list_float_type` answers
+    /// for BOTH outer shapes (safety.rs), and `lower_list_lit` builds a `[F#N]`
+    /// literal with the same `list_new`/push pair a `[F]` literal gets. The
+    /// `Type::List`-only spelling this replaced sent every `[Float#N]` literal
+    /// through the integer host carrying an f64 SSA value, which Cranelift's
+    /// verifier reported as `arg 1 has type f64, expected i64` —
+    /// `F64x2.from_array([1.5, 2.5])` in `examples/features/lowlevel/linalg_simd.jet`
+    /// was the corpus case. The ELEMENT question is the shared one above, so a
+    /// distinct-float element agrees with the element-keyed callers.
     fn list_push_host_for_list(&self, list_ty: &Type) -> FuncId {
         match list_ty {
-            Type::List(elem) => self.list_push_host(elem),
+            Type::List(elem) | Type::FixedList { elem, .. } => self.list_push_host(elem),
             _ => self.host.coll.list_push,
         }
     }
@@ -392,10 +398,12 @@ impl LowerCtx<'_, '_> {
     }
 
     /// [`Self::list_get_host`] keyed by the LIST type, mirroring
-    /// [`Self::list_push_host_for_list`].
+    /// [`Self::list_push_host_for_list`] — the read side MUST admit the same
+    /// outer shapes the write side does, or a `[Float#N]` written through the
+    /// float column is read back as raw integer bits.
     fn list_get_host_for_list(&self, list_ty: &Type) -> FuncId {
         match list_ty {
-            Type::List(elem) => self.list_get_host(elem),
+            Type::List(elem) | Type::FixedList { elem, .. } => self.list_get_host(elem),
             _ => self.host.coll.list_get,
         }
     }
@@ -897,7 +905,15 @@ impl LowerCtx<'_, '_> {
         }
     }
 
-    fn raw_place_local(expr: &TExpr) -> Option<&TLocal> {
+    /// The bare local a raw-memory operand names, or `None` when the operand is
+    /// not a place at all.
+    ///
+    /// This is the whole difference between a raw pointer this tier can mint
+    /// and one it must decline: a bare local has a real Cranelift stack slot,
+    /// live for the frame, so its address IS the value's storage. `safety.rs`
+    /// reads the same predicate to decide residency, because a gate that
+    /// admitted more than this would hand out a pointer to a COPY (I8).
+    pub(crate) fn raw_place_local(expr: &TExpr) -> Option<&TLocal> {
         match &expr.kind {
             TExprKind::Local(local) => Some(local),
             TExprKind::Borrow { place, .. } => Self::raw_place_local(place),
@@ -4796,12 +4812,17 @@ impl LowerCtx<'_, '_> {
                             pool,
                             id,
                             field: Some(field),
+                            line,
                             ..
                         } = &place_expr.kind
                         {
                             let pool_handle = self.lower_expr(pool)?;
                             let id_value = self.lower_expr(id)?;
-                            let record = self.call_host(self.host.memory.pool_get, &[pool_handle, id_value]);
+                            let line = self.b.ins().iconst(types::I32, *line as i64);
+                            let record = self.call_host(
+                                self.host.memory.pool_get,
+                                &[pool_handle, id_value, line],
+                            );
                             self.emit_trap_check()?;
                             let elem_ty = match &pool.ty {
                                 Type::Apply { args, .. } if !args.is_empty() => &args[0],
@@ -10191,6 +10212,25 @@ impl LowerCtx<'_, '_> {
         } else {
             self.lower_expr(&arg.value)?
         };
+        // S48: a concrete value entering a single-trait value slot boxes
+        // invisibly. TIR decides that at the one place that knows both the
+        // argument and the parameter type (`lower_one_call_arg`'s
+        // `box_as_trait`), and this builds the record that decision names — the
+        // same box a literal in the same slot already got from
+        // `lower_struct_lit`'s `as_trait` arm. Handing the bare concrete record
+        // to a trait parameter would make `lower_trait_object_method` read a
+        // field as a type id, so this was refused outright until now, which
+        // deopted every program with an S48 argument
+        // (`print_area(one)` in `examples/features/types/traits.jet`).
+        //
+        // The box goes on before the borrow wrapper, matching AOT
+        // (`emit/helpers.rs`) — in this tier a borrow IS the same handle, so
+        // there is nothing left to apply after it.
+        if arg.box_as_trait.is_some() {
+            let concrete_name = user_type_name(ty)
+                .ok_or_else(|| format!("jit trait arg concrete type: {ty:?}"))?;
+            return self.lower_trait_object_box(val, concrete_name);
+        }
         if let Some(Type::Union(members)) = &arg.widen_to_union {
             let enum_name = jet_codegen::AST::union_enum_name(members);
             let variant = jet_codegen::AST::union_member_tag(ty);
@@ -11909,6 +11949,22 @@ impl LowerCtx<'_, '_> {
         let Some((_, concrete_name)) = as_trait else {
             return Ok(concrete);
         };
+        self.lower_trait_object_box(concrete, concrete_name)
+    }
+
+    /// S48: wrap a concrete record handle in the two-slot `{type_id, concrete}`
+    /// trait object [`Self::lower_trait_object_method`] dispatches on.
+    ///
+    /// One writer for one reader. A literal in a trait slot
+    /// (`lower_struct_lit`'s `as_trait`) and a value in a trait slot
+    /// (`lower_call_arg`'s `box_as_trait`) are the SAME box, and the dispatch
+    /// reads slot 0 as the type id and slot 1 as the concrete record — so a
+    /// second spelling of this shape is a wrong answer waiting to happen.
+    fn lower_trait_object_box(
+        &mut self,
+        concrete: Value,
+        concrete_name: &str,
+    ) -> Result<Value, String> {
         let type_id = self
             .meta
             .struct_type_id(concrete_name)
@@ -12779,6 +12835,77 @@ impl LowerCtx<'_, '_> {
             .ok_or_else(|| "jit crypto lowering produced no value".to_string())
     }
 
+    /// Every `core.crypto` / `core.crypto.expert` pair the resident tier
+    /// lowers, and the Jet-side argument count it takes.
+    ///
+    /// The residency gate must admit exactly the calls
+    /// [`Self::lower_crypto_core_call_values`] can emit, and this is the one
+    /// table that says which those are (I8: one mechanism, one fact — the
+    /// `service_core_arity` treatment). `safety.rs` used to carry a second,
+    /// hand-maintained copy that lagged this file by eight rows, so
+    /// `crypto.hkdf_sha256`, `crypto.constant_time_equal`,
+    /// `crypto.__secret_from_bytes`, `crypto.x25519_shared` and friends were
+    /// refused as unsupported constructs while the host row sat right here.
+    ///
+    /// `core.crypto.random.bytes` is deliberately absent: it does not lower
+    /// through this function at all.
+    pub(crate) fn crypto_core_arity(module: &str, method: &str) -> Option<usize> {
+        let arity = match (module, method) {
+            ("core.crypto", "__signing_generate" | "__x25519_generate" | "__hasher_new") => 0,
+            (
+                "core.crypto",
+                "__signing_public"
+                | "__x25519_public"
+                | "sha256"
+                | "sha1"
+                | "sha224"
+                | "sha384"
+                | "sha3_224"
+                | "sha3_256"
+                | "sha3_384"
+                | "sha3_512"
+                | "sha512_bytes"
+                | "blake3_bytes"
+                | "password_hash"
+                | "__password_text"
+                | "__hasher_digest"
+                | "__secret_from_bytes"
+                | "x25519_public"
+                | "__digest256_hex"
+                | "__digest256_bytes"
+                | "__signature_bytes"
+                | "__sealed_bytes"
+                | "__x25519_public_bytes"
+                | "__x25519_public_text"
+                | "__x25519_public_from_text"
+                | "__secret_from_text"
+                | "__vault_wrapped_from_bytes"
+                | "__vault_wrapped_bytes"
+                | "__vault_unlock_recipient"
+                | "__vault_unlock_passphrase",
+            ) => 1,
+            (
+                "core.crypto",
+                "sign"
+                | "password_verify"
+                | "__hasher_update"
+                | "x25519_shared"
+                | "constant_time_equal"
+                | "constant_time_equal_bytes",
+            ) => 2,
+            ("core.crypto", "verify" | "seal" | "open" | "file_open" | "file_seal") => 3,
+            ("core.crypto", "pbkdf2_hmac" | "hkdf_sha256") => 4,
+            ("core.crypto.expert", "secret_bytes") => 1,
+            ("core.crypto.expert", "open_v1" | "x25519_raw") => 2,
+            (
+                "core.crypto.expert",
+                "aes256gcm_seal" | "aes256gcm_open" | "migrate_v1" | "hkdf_sha256_raw",
+            ) => 4,
+            _ => return None,
+        };
+        Some(arity)
+    }
+
     #[inline(never)]
     fn lower_crypto_core_call_values(
         &mut self,
@@ -12787,113 +12914,130 @@ impl LowerCtx<'_, '_> {
         arg_values: &[Value],
         expr: &TExpr,
     ) -> Result<Value, String> {
-        let (host_id, append_mode) = match (module, method, arg_values.len()) {
-            ("core.crypto", "__signing_generate", 0) => {
+        // I8/I9: the pair-and-arity table is ONE table, and `safety.rs` reads
+        // it to decide residency instead of keeping a second hand-written copy
+        // (the `service_core_arity` treatment). That second copy is what refused
+        // `examples/features/crypto/random_api_split.jet`: the gate never listed
+        // `hkdf_sha256`, `constant_time_equal` or `__secret_from_bytes`, all
+        // three of which have had a host row here for as long as the arm below.
+        // The match under this gate carries the HOST for a pair, never its
+        // arity.
+        let Some(expected) = Self::crypto_core_arity(module, method) else {
+            return Err(format!("jit core call unsupported: {module}.{method}"));
+        };
+        if arg_values.len() != expected {
+            return Err(format!(
+                "jit core call arity: {module}.{method} takes {expected}, got {}",
+                arg_values.len()
+            ));
+        }
+        let (host_id, append_mode) = match (module, method) {
+            ("core.crypto", "__signing_generate") => {
                 (self.host.crypto.signing_generate, false)
             }
-            ("core.crypto", "__x25519_generate", 0) => {
+            ("core.crypto", "__x25519_generate") => {
                 (self.host.crypto.x25519_generate, false)
             }
-            ("core.crypto", "__signing_public", 1) => {
+            ("core.crypto", "__signing_public") => {
                 (self.host.crypto.signing_public, false)
             }
-            ("core.crypto", "__x25519_public", 1) => {
+            ("core.crypto", "__x25519_public") => {
                 (self.host.crypto.x25519_public, false)
             }
-            ("core.crypto", "sign", 2) => (self.host.crypto.sign, false),
-            ("core.crypto", "verify", 3) => (self.host.crypto.verify, false),
-            ("core.crypto", "sha256", 1) => (self.host.crypto.sha256, false),
-            ("core.crypto", "sha1", 1) => (self.host.crypto.sha1, false),
-            ("core.crypto", "sha224", 1) => (self.host.crypto.sha224, false),
-            ("core.crypto", "sha384", 1) => (self.host.crypto.sha384, false),
-            ("core.crypto", "sha3_224", 1) => (self.host.crypto.sha3_224, false),
-            ("core.crypto", "sha3_256", 1) => (self.host.crypto.sha3_256, false),
-            ("core.crypto", "sha3_384", 1) => (self.host.crypto.sha3_384, false),
-            ("core.crypto", "sha3_512", 1) => (self.host.crypto.sha3_512, false),
-            ("core.crypto", "pbkdf2_hmac", 4) => (self.host.crypto.pbkdf2_hmac, false),
-            ("core.crypto", "sha512_bytes", 1) => (self.host.crypto.sha512_bytes, false),
-            ("core.crypto", "blake3_bytes", 1) => (self.host.crypto.blake3_bytes, false),
-            ("core.crypto", "seal", 3) => (self.host.crypto.seal, false),
-            ("core.crypto", "open", 3) => (self.host.crypto.open, false),
-            ("core.crypto", "password_hash", 1) => (self.host.crypto.password_hash, false),
-            ("core.crypto", "password_verify", 2) => {
+            ("core.crypto", "sign") => (self.host.crypto.sign, false),
+            ("core.crypto", "verify") => (self.host.crypto.verify, false),
+            ("core.crypto", "sha256") => (self.host.crypto.sha256, false),
+            ("core.crypto", "sha1") => (self.host.crypto.sha1, false),
+            ("core.crypto", "sha224") => (self.host.crypto.sha224, false),
+            ("core.crypto", "sha384") => (self.host.crypto.sha384, false),
+            ("core.crypto", "sha3_224") => (self.host.crypto.sha3_224, false),
+            ("core.crypto", "sha3_256") => (self.host.crypto.sha3_256, false),
+            ("core.crypto", "sha3_384") => (self.host.crypto.sha3_384, false),
+            ("core.crypto", "sha3_512") => (self.host.crypto.sha3_512, false),
+            ("core.crypto", "pbkdf2_hmac") => (self.host.crypto.pbkdf2_hmac, false),
+            ("core.crypto", "sha512_bytes") => (self.host.crypto.sha512_bytes, false),
+            ("core.crypto", "blake3_bytes") => (self.host.crypto.blake3_bytes, false),
+            ("core.crypto", "seal") => (self.host.crypto.seal, false),
+            ("core.crypto", "open") => (self.host.crypto.open, false),
+            ("core.crypto", "password_hash") => (self.host.crypto.password_hash, false),
+            ("core.crypto", "password_verify") => {
                 (self.host.crypto.password_verify, false)
             }
-            ("core.crypto", "__password_text", 1) => {
+            ("core.crypto", "__password_text") => {
                 (self.host.crypto.password_text, false)
             }
-            ("core.crypto", "__hasher_new", 0) => (self.host.crypto.hasher_new, false),
-            ("core.crypto", "__hasher_update", 2) => (self.host.crypto.hasher_update, false),
-            ("core.crypto", "__hasher_digest", 1) => (self.host.crypto.hasher_digest, false),
-            ("core.crypto", "file_open", 3) => (self.host.crypto.file_open, false),
-            ("core.crypto", "__secret_from_bytes", 1) => {
+            ("core.crypto", "__hasher_new") => (self.host.crypto.hasher_new, false),
+            ("core.crypto", "__hasher_update") => (self.host.crypto.hasher_update, false),
+            ("core.crypto", "__hasher_digest") => (self.host.crypto.hasher_digest, false),
+            ("core.crypto", "file_open") => (self.host.crypto.file_open, false),
+            ("core.crypto", "__secret_from_bytes") => {
                 (self.host.crypto.secret_from_bytes, false)
             }
-            ("core.crypto", "hkdf_sha256", 4) => (self.host.crypto.hkdf_sha256, false),
-            ("core.crypto", "x25519_public", 1) => {
+            ("core.crypto", "hkdf_sha256") => (self.host.crypto.hkdf_sha256, false),
+            ("core.crypto", "x25519_public") => {
                 (self.host.crypto.x25519_public_from_bytes, false)
             }
-            ("core.crypto", "x25519_shared", 2) => (self.host.crypto.x25519_shared, false),
-            ("core.crypto", "constant_time_equal", 2) => {
+            ("core.crypto", "x25519_shared") => (self.host.crypto.x25519_shared, false),
+            ("core.crypto", "constant_time_equal") => {
                 (self.host.crypto.constant_time_equal, false)
             }
-            ("core.crypto", "constant_time_equal_bytes", 2) => {
+            ("core.crypto", "constant_time_equal_bytes") => {
                 (self.host.crypto.constant_time_equal_bytes, false)
             }
-            ("core.crypto", "file_seal", 3) => (self.host.crypto.file_seal, false),
-            ("core.crypto", "__digest256_hex", 1) => {
+            ("core.crypto", "file_seal") => (self.host.crypto.file_seal, false),
+            ("core.crypto", "__digest256_hex") => {
                 (self.host.crypto.digest256_hex, false)
             }
-            ("core.crypto", "__digest256_bytes", 1) => {
+            ("core.crypto", "__digest256_bytes") => {
                 (self.host.crypto.digest256_bytes, false)
             }
-            ("core.crypto", "__signature_bytes", 1) => {
+            ("core.crypto", "__signature_bytes") => {
                 (self.host.crypto.signature_bytes, false)
             }
-            ("core.crypto", "__sealed_bytes", 1) => (self.host.crypto.sealed_bytes, false),
-            ("core.crypto", "__x25519_public_bytes", 1) => {
+            ("core.crypto", "__sealed_bytes") => (self.host.crypto.sealed_bytes, false),
+            ("core.crypto", "__x25519_public_bytes") => {
                 (self.host.crypto.x25519_public_bytes, false)
             }
-            ("core.crypto", "__x25519_public_text", 1) => {
+            ("core.crypto", "__x25519_public_text") => {
                 (self.host.crypto.x25519_public_text, false)
             }
-            ("core.crypto", "__x25519_public_from_text", 1) => {
+            ("core.crypto", "__x25519_public_from_text") => {
                 (self.host.crypto.x25519_public_from_text, false)
             }
-            ("core.crypto", "__secret_from_text", 1) => {
+            ("core.crypto", "__secret_from_text") => {
                 (self.host.crypto.secret_from_text, false)
             }
-            ("core.crypto", "__vault_wrapped_from_bytes", 1) => {
+            ("core.crypto", "__vault_wrapped_from_bytes") => {
                 (self.host.crypto.vault_wrapped_from_bytes, false)
             }
-            ("core.crypto", "__vault_wrapped_bytes", 1) => {
+            ("core.crypto", "__vault_wrapped_bytes") => {
                 (self.host.crypto.vault_wrapped_bytes, false)
             }
-            ("core.crypto", "__vault_unlock_recipient", 1) => {
+            ("core.crypto", "__vault_unlock_recipient") => {
                 (self.host.crypto.vault_unlock_recipient, false)
             }
-            ("core.crypto", "__vault_unlock_passphrase", 1) => {
+            ("core.crypto", "__vault_unlock_passphrase") => {
                 (self.host.crypto.vault_unlock_passphrase, false)
             }
-            ("core.crypto.expert", "aes256gcm_seal", 4) => {
+            ("core.crypto.expert", "aes256gcm_seal") => {
                 (self.host.crypto.expert_aes256gcm_seal, false)
             }
-            ("core.crypto.expert", "aes256gcm_open", 4) => {
+            ("core.crypto.expert", "aes256gcm_open") => {
                 (self.host.crypto.expert_aes256gcm_open, false)
             }
-            ("core.crypto.expert", "open_v1", 2) => {
+            ("core.crypto.expert", "open_v1") => {
                 (self.host.crypto.expert_open_v1, false)
             }
-            ("core.crypto.expert", "migrate_v1", 4) => {
+            ("core.crypto.expert", "migrate_v1") => {
                 (self.host.crypto.expert_migrate_v1, false)
             }
-            ("core.crypto.expert", "x25519_raw", 2) => {
+            ("core.crypto.expert", "x25519_raw") => {
                 (self.host.crypto.expert_x25519, true)
             }
-            ("core.crypto.expert", "hkdf_sha256_raw", 4) => {
+            ("core.crypto.expert", "hkdf_sha256_raw") => {
                 (self.host.crypto.expert_hkdf_sha256, false)
             }
-            ("core.crypto.expert", "secret_bytes", 1) => {
+            ("core.crypto.expert", "secret_bytes") => {
                 (self.host.crypto.expert_secret_bytes, false)
             }
             _ => {
@@ -18831,6 +18975,7 @@ impl LowerCtx<'_, '_> {
                 pool,
                 id,
                 field,
+                line,
                 ..
             } => {
                 in_own_frame(|| -> Result<Value, String> {
@@ -18840,7 +18985,8 @@ impl LowerCtx<'_, '_> {
                     };
                     let pool = self.lower_expr(pool)?;
                     let id = self.lower_expr(id)?;
-                    let value = self.call_host(self.host.memory.pool_get, &[pool, id]);
+                    let line = self.b.ins().iconst(types::I32, *line as i64);
+                    let value = self.call_host(self.host.memory.pool_get, &[pool, id, line]);
                     self.emit_trap_check()?;
                     if let Some(field) = field {
                         let elem_ty =
@@ -19034,41 +19180,30 @@ impl LowerCtx<'_, '_> {
             }
             TExprKind::PtrFromAddr { addr, .. } => {
                 in_own_frame(|| -> Result<Value, String> {
-                    // Card #1985, second half. S58 says the pointer *is* the
-                    // supplied address (`addr as usize as *mut T`), so it is a
-                    // real machine address exactly when the operand is one, and
-                    // an address the program wrote as an integer literal is
-                    // provably that. `mem.Ptr<Int>.from_addr(1)` names address
-                    // 1; naming an address with no allocation behind it is the
-                    // whole point of the stem, and the shared Prelude sentry
-                    // kernel is what reports R0801 for it (D-MEM-SENTRY1) —
-                    // which is also why `safety.rs` keeps every `core.mem` call
-                    // on canonical TIR. This tier only has to stop reporting a
-                    // pointer it lowered itself as an unsupported construct.
+                    // S58 says the pointer *is* the supplied address
+                    // (`addr as usize as *mut T`), so this arm hands the address
+                    // word straight back. What it must NOT do is call that word
+                    // a REAL address: `real_address_values` is the set the
+                    // trusted load, the raw store and the volatile pair read,
+                    // and membership means "this tier minted this address from a
+                    // live machine slot it owns".
                     //
-                    // The literal has to survive lowering as its own word: an
-                    // `Int` past the inline range becomes a tagged arena handle
-                    // (`IntLit` above), and a tag is not an address. Asking
-                    // `int_from_i64` is asking the one rule that decides it
-                    // rather than restating its range here.
-                    //
-                    // The guards are unchanged and NOT relaxed. Every other
-                    // operand stays unrecorded, including the stable non-zero
-                    // identity the `address_of` arm fabricates for a place with
-                    // no stable address — that word is not an address at all,
-                    // and `Deref` / `volatile_read` / `volatile_write` / the raw
-                    // store keep declining it exactly as before.
-                    let literal_address = match &addr.kind {
-                        TExprKind::IntLit(value, _) => {
-                            self.runtime.heap.int_from_i64(*value) == *value
-                        }
-                        _ => false,
-                    };
-                    let pointer = self.lower_expr(addr)?;
-                    if literal_address {
-                        self.real_address_values.insert(pointer);
-                    }
-                    Ok(pointer)
+                    // `mem.Ptr<Int>.from_addr(1)` names address 1 and the shared
+                    // Prelude sentry kernel is what reports R0801 for reading it
+                    // (D-MEM-SENTRY1,
+                    // `examples/features/memory/unsafe_sentries_provenance.jet`).
+                    // Card #1985 recorded an integer-literal operand as real on
+                    // the reasoning that no admitted expression could then use
+                    // it, because every `core.mem` call was refused. That is no
+                    // longer true — `Deref` and the volatile pair are resident
+                    // now — so recording it would turn an R0801 report into a
+                    // load from address 1. The literal case therefore stays
+                    // OUT: an address the program named out of nothing deopts to
+                    // the tier that owns sentry policy, and every other operand
+                    // keeps whatever provenance it already carried
+                    // (`mem.Ptr<T>.from_addr(mem.address_of(local))` is real
+                    // because `address_of` recorded that very SSA value).
+                    self.lower_expr(addr)
                 })
             }
             TExprKind::RawOf(inner) => {
@@ -19119,32 +19254,19 @@ impl LowerCtx<'_, '_> {
                         self.real_address_values.insert(pointer);
                         return Ok(pointer);
                     }
-                    let value = self.lower_expr(inner)?;
-                    let clif = self
-                        .meta
-                        .clif_ty(&inner.ty)
-                        .ok_or_else(|| format!("jit raw pointer payload unsupported: {:?}", inner.ty))?;
-                    let size = u32::from(clif.bytes());
-                    let slot = self.b.create_sized_stack_slot(StackSlotData::new(
-                        StackSlotKind::ExplicitSlot,
-                        size,
-                        0,
-                    ));
-                    self.b.ins().stack_store(value, slot, 0);
-                    // Card #1985: this temporary's slot is a real machine
-                    // address in this frame, exactly like the bare-local
-                    // branch above, so the provenance set has to record it.
-                    // Omitting it made `Deref` / `volatile_*` refuse a pointer
-                    // the JIT itself minted from its own stack slot, and the
-                    // refusal read as an unsupported construct. The guards are
-                    // unchanged: they still admit only addresses recorded here.
-                    let pointer = self.b.ins().stack_addr(
-                        self.module.target_config().pointer_type(),
-                        slot,
-                        0,
-                    );
-                    self.real_address_values.insert(pointer);
-                    Ok(pointer)
+                    // The operand is not a place, so it has no storage of its
+                    // own for a pointer to name. Copying the value into a fresh
+                    // stack slot and handing out THAT address is a pointer to a
+                    // COPY: `*arena.alloc(7)` would then survive `arena.reset()`
+                    // and read 7 back, where the shared Prelude sentry kernel
+                    // reports R0802 for it
+                    // (`examples/features/memory/unsafe_sentries.jet`, and I9 —
+                    // the interpreter and AOT both take the address of the real
+                    // allocation). Card #1985 added that copy so `Deref` would
+                    // stop refusing a pointer this tier had minted itself; the
+                    // pointer was wrong, not the refusal. Decline, and let the
+                    // tier that owns provenance answer.
+                    Err("jit raw pointer of a non-place operand".to_string())
                 })
             }
             TExprKind::Deref(inner) => {
@@ -22415,6 +22537,20 @@ impl LowerCtx<'_, '_> {
                     | "WsMessage"
                     | "Condition"
             ) {
+                return self.lower_expr(inner);
+            }
+            // A named type with NO record layout is not a record at all: it is
+            // an opaque i64 host handle, and clone copies the handle. That fact
+            // used to be hand-listed per family (the two tables above), so every
+            // Core handle type that was not on a list arrived as
+            // `jit clone unsupported type` — `KeyRef`
+            // (`examples/features/crypto/vault_keys.jet`) was the current one,
+            // and it refused the whole program from the resident tier.
+            // `lower_clone_record_value` needs exactly this layout to deep-copy
+            // a record, so its absence IS the answer; every user struct in the
+            // bundle has one, because `lower_jit_program` registers every
+            // `Item::Struct` (`Codegen/TIR/mod.rs`).
+            if self.meta.struct_layout(name).is_none() {
                 return self.lower_expr(inner);
             }
             return self.lower_clone_struct(inner);

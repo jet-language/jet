@@ -1217,6 +1217,48 @@ pub(crate) fn jit_result_payload_type(ty: &Type) -> bool {
         || jit_value_type(ty)
 }
 
+/// D-CAP9 / S58: which raw pointers this tier may mint, stated once for the
+/// worklist gate and the recursive predicate that shadows it.
+///
+/// I1: an `#Unsafe` region is audited USER code, not a licence for the compiler
+/// to give up, so `RawOf` and `Deref` are not refused for being raw. They are
+/// refused for naming storage this tier does not own. `LowerCtx`'s
+/// `TExprKind::RawOf` arm mints an address from a bare local's own Cranelift
+/// stack slot — live for the whole frame, sized by the pointee's ABI — and
+/// declines every other operand, because a non-place operand has no storage of
+/// its own and a pointer to a copy is a wrong answer (that is what made
+/// `*arena.alloc(7)` outlive `arena.reset()` instead of reporting R0802).
+///
+/// The `Ptr<_>` operand is the no-op cast a `*T.{*x}` literal wraps around its
+/// `*x`; the lowering passes it through, and the walk gates the inner `*x` on
+/// its own, so the answer here is unconditional.
+///
+/// D-MEM-SENTRY1 is why this admitted set is exactly the safe one: the Prelude
+/// sentry kernel owns provenance, quarantine and R08xx, and this tier pushes no
+/// `jet_sentry_scope`, so it can report nothing. Inside the admitted set there
+/// is nothing to report — a frame-lived slot cannot be quarantined by an arena
+/// reset and cannot be shorter than its own pointee — and every shape whose
+/// answer the kernel does own (`from_addr(<literal>)`, `*<non-place>`) leaves
+/// the set at the pointer instead of at the region.
+fn resident_safe_raw_of(operand: &TExpr) -> bool {
+    if matches!(&operand.ty, Type::Apply { name, args }
+        if name == jet_foundation::Syntax::TYPE_PTR && args.len() == 1)
+    {
+        return true;
+    }
+    crate::lower_ctx::LowerCtx::raw_place_local(operand).is_some()
+        && super::types_meta::clif_ty(&operand.ty).is_some()
+}
+
+/// The load half of [`resident_safe_raw_of`]: `p.*` needs a machine type to
+/// land in (`LowerCtx`'s `TExprKind::Deref` arm asks `meta.clif_ty` for exactly
+/// this). Provenance stays a lowering-time fact — it is a property of the SSA
+/// value, not of the type — and the lowering refuses through it, which is a
+/// deopt and never a wrong answer.
+fn resident_safe_raw_deref(result: &Type) -> bool {
+    super::types_meta::clif_ty(result).is_some()
+}
+
 enum ResidentSafeExprTask<'a> {
     Visit(&'a TExpr),
     FinishAll(usize),
@@ -1373,7 +1415,8 @@ fn resident_safe_expr_work_item<'a>(
             relative_uncertainty,
             ..
         } => Some((relative_uncertainty.is_none(), vec![arg])),
-        TExprKind::Deref(arg) | TExprKind::RawOf(arg) => Some((false, vec![arg])),
+        TExprKind::RawOf(arg) => Some((resident_safe_raw_of(arg), vec![arg])),
+        TExprKind::Deref(arg) => Some((resident_safe_raw_deref(&expr.ty), vec![arg])),
         TExprKind::Borrow { place, .. } => Some((true, vec![place])),
         TExprKind::Unary { op, operand } => Some((
             jit_value_type(&expr.ty) && matches!(op, UnOp::Neg | UnOp::Not),
@@ -1486,73 +1529,37 @@ fn resident_safe_expr_work_item<'a>(
     }
 }
 
+/// I8/I9: admission is not a second policy.
+///
+/// `LowerCtx::lower_crypto_core_call_values` accepts a call exactly when
+/// `LowerCtx::crypto_core_arity` names the pair and the arity matches, then
+/// marshals it into the host that reaches the same Prelude symbol AOT embeds —
+/// so consulting that one table here is the whole gate (the
+/// `service_core_arity` treatment). This used to be a hand-written second copy
+/// of the pair list, and it lagged the lowering by eight rows: `hkdf_sha256`,
+/// `constant_time_equal`, `constant_time_equal_bytes`, `__secret_from_bytes`,
+/// `__password_text`, `x25519_public`, `x25519_shared` and `file_seal` all had
+/// host rows, and every program that used one was refused as an unsupported
+/// construct (`examples/features/crypto/random_api_split.jet`).
+///
+/// `core.crypto.random.bytes` is the one crypto call that does NOT lower
+/// through that function, so it keeps its own row here.
 fn resident_safe_crypto_work_item<'a>(
     module: &str,
     method: &str,
     args: &'a [TExpr],
 ) -> Option<(bool, Vec<&'a TExpr>)> {
     let children = || -> Vec<&'a TExpr> { args.iter().collect() };
-    if module == "core.crypto" {
-        return Some(match (method, args) {
-            ("__signing_generate" | "__x25519_generate", []) => (true, Vec::new()),
-            (
-                "__signing_public"
-                | "__x25519_public"
-                | "sha256"
-                | "sha1"
-                | "sha224"
-                | "sha384"
-                | "sha3_224"
-                | "sha3_256"
-                | "sha3_384"
-                | "sha3_512"
-                | "sha512_bytes"
-                | "blake3_bytes"
-                | "__digest256_hex"
-                | "__digest256_bytes"
-                | "__signature_bytes"
-                | "__sealed_bytes"
-                | "__x25519_public_bytes"
-                | "__x25519_public_text"
-                | "__x25519_public_from_text"
-                | "__secret_from_text"
-                | "__vault_wrapped_from_bytes"
-                | "__vault_wrapped_bytes"
-                | "__vault_unlock_recipient"
-                | "__vault_unlock_passphrase"
-                | "password_hash",
-                [value],
-            ) => (true, vec![value]),
-            ("__hasher_new", []) => (true, Vec::new()),
-            ("__hasher_update", [hasher, chunk]) => (true, vec![hasher, chunk]),
-            ("__hasher_digest", [hasher]) => (true, vec![hasher]),
-            ("pbkdf2_hmac", [password, salt, iterations, key_len]) => {
-                (true, vec![password, salt, iterations, key_len])
-            },
-            ("sign" | "password_verify", [a, b]) => (true, vec![a, b]),
-            ("verify" | "seal" | "open" | "file_open", [a, b, c]) => {
-                (true, vec![a, b, c])
-            }
-            _ => (false, children()),
-        });
+    if module == "core.crypto.random" {
+        return Some((method == "bytes" && args.len() == 1, children()));
     }
-    if module == "core.crypto.expert" {
-        return Some(match (method, args) {
-            ("secret_bytes", [value]) => (true, vec![value]),
-            ("open_v1" | "x25519_raw", args) if args.len() == 2 => (true, children()),
-            ("hkdf_sha256_raw", args) if args.len() == 4 => (true, children()),
-            ("aes256gcm_seal" | "aes256gcm_open" | "migrate_v1", args)
-                if args.len() == 4 => (true, children()),
-            _ => (false, children()),
-        });
+    if !matches!(module, "core.crypto" | "core.crypto.expert") {
+        return None;
     }
-    if module == "core.crypto.random" && method == "bytes" {
-        return Some(match args {
-            [arg] => (true, vec![arg]),
-            _ => (false, children()),
-        });
-    }
-    None
+    Some((
+        crate::lower_ctx::LowerCtx::crypto_core_arity(module, method) == Some(args.len()),
+        children(),
+    ))
 }
 
 fn resident_safe_call_arg_gate(arg: &TCallArg) -> bool {
@@ -1651,80 +1658,13 @@ fn resident_safe_expr_recursive(expr: &TExpr, callees: &HashSet<String>) -> bool
             args,
             ..
         } => {
-            if module == "core.crypto" {
-                return match (method.as_str(), args.as_slice()) {
-                    ("__signing_generate" | "__x25519_generate", []) => true,
-                    (
-                        "__signing_public"
-                        | "__x25519_public"
-                        | "sha256"
-                        | "sha1"
-                        | "sha224"
-                        | "sha384"
-                        | "sha3_224"
-                        | "sha3_256"
-                        | "sha3_384"
-                        | "sha3_512"
-                        | "sha512_bytes"
-                        | "blake3_bytes"
-                        | "__digest256_hex"
-                        | "__digest256_bytes"
-                        | "__signature_bytes"
-                        | "__sealed_bytes"
-                        | "__x25519_public_bytes"
-                        | "__x25519_public_text"
-                        | "__x25519_public_from_text"
-                        | "__secret_from_text"
-                        | "__vault_wrapped_from_bytes"
-                        | "__vault_wrapped_bytes"
-                        | "__vault_unlock_recipient"
-                        | "__vault_unlock_passphrase"
-                        | "password_hash",
-                        [value],
-                    ) => resident_safe_expr(value, callees),
-                    ("__hasher_new", []) => true,
-                    ("__hasher_update", [hasher, chunk]) => {
-                        resident_safe_expr(hasher, callees)
-                            && resident_safe_expr(chunk, callees)
-                    },
-                    ("__hasher_digest", [hasher]) => resident_safe_expr(hasher, callees),
-                    ("pbkdf2_hmac", [password, salt, iterations, key_len]) => {
-                        resident_safe_expr(password, callees)
-                            && resident_safe_expr(salt, callees)
-                            && resident_safe_expr(iterations, callees)
-                            && resident_safe_expr(key_len, callees)
-                    },
-                    ("sign" | "password_verify", [a, b]) => {
-                        resident_safe_expr(a, callees) && resident_safe_expr(b, callees)
-                    }
-                    ("verify" | "seal" | "open" | "file_open", [a, b, c]) => {
-                        resident_safe_expr(a, callees)
-                            && resident_safe_expr(b, callees)
-                            && resident_safe_expr(c, callees)
-                    }
-                    _ => false,
-                };
-            }
-            if module == "core.crypto.expert" {
-                return match (method.as_str(), args.as_slice()) {
-                    ("secret_bytes", [value]) => resident_safe_expr(value, callees),
-                    ("open_v1" | "x25519_raw", args) if args.len() == 2 => {
-                        args.iter().all(|arg| resident_safe_expr(arg, callees))
-                    }
-                    ("hkdf_sha256_raw", args) if args.len() == 4 => {
-                        args.iter().all(|arg| resident_safe_expr(arg, callees))
-                    }
-                    ("aes256gcm_seal" | "aes256gcm_open" | "migrate_v1", args)
-                        if args.len() == 4 =>
-                    {
-                        args.iter().all(|arg| resident_safe_expr(arg, callees))
-                    }
-                    _ => false,
-                };
-            }
-            if module == "core.crypto.random" && method == "bytes" {
-                return matches!(args.as_slice(), [arg] if resident_safe_expr(arg, callees));
-            }
+            // `core.crypto`, `core.crypto.expert` and `core.crypto.random` are
+            // answered by `resident_safe_crypto_work_item`, which
+            // `resident_safe_expr` consults BEFORE reaching this predicate. The
+            // three arms that used to be repeated here were therefore
+            // unreachable, and they had already drifted from both the work item
+            // and the lowering — the exact way this file has produced wrong
+            // refusals before. One law, one arm.
             if module == "core.auth" && matches!(method.as_str(), "verify_jwt" | "verify_paseto") {
                 return (3..=7).contains(&args.len())
                     && args.iter().all(|arg| resident_safe_expr(arg, callees));
@@ -1916,11 +1856,43 @@ fn resident_safe_expr_recursive(expr: &TExpr, callees: &HashSet<String>) -> bool
                     && args.iter().all(|arg| resident_safe_expr(arg, callees));
             }
             if module == "core.mem" {
-                // D-MEM-SENTRY1: raw memory stays on canonical TIR so the
-                // Prelude witness owns gate state, provenance, quarantine,
-                // poison, and R08xx reporting. Cranelift only marshals safe
-                // values; it does not grow a second memory policy.
-                return false;
+                // D-MEM-SENTRY1: the shared Prelude sentry kernel owns gate
+                // state, provenance, quarantine, poison and R08xx reporting,
+                // and this tier pushes no `jet_sentry_scope`, so it can report
+                // nothing. That is a reason to keep the shapes the kernel
+                // ANSWERS off this tier — not a reason to refuse raw memory as
+                // a category (I1: an audited region is audited user code).
+                //
+                // These three have resident lowerings (`LowerCtx`'s `core.mem`
+                // arms) that admit only a pointer minted from a real machine
+                // slot in this frame — `real_address_values`, which
+                // `TExprKind::RawOf` and `address_of`-on-a-bare-local are the
+                // only writers of — and refuse every other pointer to the
+                // deopt tier. Inside that set the kernel has nothing to say: an
+                // explicit stack slot is live for the whole frame, it is sized
+                // by the pointee's own ABI, and no arena reset can quarantine
+                // it. `address_of` on a place with no stable address mints the
+                // same synthetic identity `TIR::stable_place_address` gives the
+                // interpreter, so the two non-AOT tiers still agree.
+                //
+                // Every raw shape whose answer the kernel DOES own leaves the
+                // admitted set at the pointer instead: `from_addr(<literal>)`
+                // records no provenance and `*<non-place>` is refused by
+                // `resident_safe_raw_of`, which is what keeps R0801 on
+                // `examples/features/memory/unsafe_sentries_provenance.jet` and
+                // R0802 on `examples/features/memory/unsafe_sentries.jet`.
+                return match (method.as_str(), args.as_slice()) {
+                    ("address_of", [place]) => resident_safe_expr(place, callees),
+                    ("volatile_read", [pointer]) => {
+                        super::types_meta::clif_ty(&expr.ty).is_some()
+                            && resident_safe_expr(pointer, callees)
+                    }
+                    ("volatile_write", [pointer, value]) => {
+                        resident_safe_expr(pointer, callees)
+                            && resident_safe_expr(value, callees)
+                    }
+                    _ => false,
+                };
             }
             if (module == "app" || module == "core.web")
                 && matches!(
