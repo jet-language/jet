@@ -1922,7 +1922,7 @@ pub(crate) fn soft_public_use(name: &str, span: Span) -> Diagnostic {
 
 #[cfg(test)]
 mod tests {
-    use super::{core_crypto_nominal, is_secret_bearing_crypto_type, suggest_field};
+    use super::{core_crypto_nominal, is_secret_bearing_crypto_type, suggest_field, suggest_method};
     use crate::AST::{InternalTag, TagMarker, Type};
 
     fn count_core_crypto_markers(ty: &Type) -> usize {
