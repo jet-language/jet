@@ -344,19 +344,22 @@ impl Diagnostic {
         if code.chars().any(char::is_control) {
             return Err("custom diagnostic code must not contain control characters");
         }
-        let row = crate::Registry::diagnostic(&code)
-            .unwrap_or_else(|| crate::ice!(None, "diagnostic `{code}` has no typed row"));
-        let edit = row_edit(row, span);
+        // A project-owned code has no compiler row by definition, so the row is
+        // an optional source of moment, severity, and edit — never a
+        // requirement. Demanding one turned every build-authored diagnostic
+        // into an internal compiler error.
+        let row = crate::Registry::diagnostic(&code);
+        let edit = row.and_then(|row| row_edit(row, span));
         Ok(Self {
-            moment: row.moment,
-            severity: row.severity,
+            moment: row.map_or(ReportMoment::Compile, |row| row.moment),
+            severity: row.map_or(Severity::Error, |row| row.severity),
             code,
             what,
             why,
             fix,
             span,
             cause: Vec::new(),
-            applicability: row_applicability(row, edit.as_ref()),
+            applicability: row.and_then(|row| row_applicability(row, edit.as_ref())),
             edit,
             detail: None,
             structured: None,
