@@ -28,20 +28,25 @@ fn run() {
     }
 
     // Drain. The worker takes no new work and hands back what it already holds,
-    // in order, until the mailbox is empty.
+    // in order, until the mailbox is empty and the worker stops.
     services.drain_worker(&tree, worker).drop("already draining is not an error")
     print("drained:{services.receive(&tree, worker) ?? "none"}")
-    print("drained:{services.receive(&tree, worker) ?? "none"}")
     print("depth:{services.mailbox_depth(tree, worker) ?? -1}")
+    print("drained:{services.receive(&tree, worker) ?? "none"}")
+
+    // A drained worker is stopped. Restarting the tree brings it back with an
+    // empty mailbox, because this tree's state adapter is Empty.
+    services.stop(&tree).drop("the restart count below is the check")
+    services.start(&tree).drop("the restart count below is the check")
 
     // Supervision. A supervisor is a task that owns a group; OneForOne restarts
     // the failed worker inside that group.
     services.fail_worker(&tree, worker) ?? panic("fail")
     print("restarts:{services.restarts(tree, worker) ?? panic("restarts")}")
 
-    // The restart budget is data on the group: five restarts per minute. Spend
-    // the rest of it, then the sixth failure escalates to the parent group
-    // instead of restarting forever, and the tree stops.
+    // The restart budget is data on the group: five restarts per rolling minute.
+    // Spend the rest of it, and the sixth failure escalates to the parent group
+    // instead of restarting forever, which stops the tree.
     services.fail_worker(&tree, worker).drop("the restart count below is the check")
     services.fail_worker(&tree, worker).drop("the restart count below is the check")
     services.fail_worker(&tree, worker).drop("the restart count below is the check")
@@ -52,7 +57,6 @@ fn run() {
         .Ok(_) -> { print("escalate:none") }
         .Err(_) -> { print("escalate:parent") }
     }
-    print("restarts:{services.restarts(tree, worker) ?? -1}")
     print(services.observe(tree))
     services.stop(&tree) ?? panic("stop")
 }
