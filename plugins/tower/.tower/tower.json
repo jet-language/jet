@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 2096,
-    "rev": 39435,
+    "rev": 39436,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -133992,11 +133992,11 @@
         {
           "n": 3,
           "text": "Same report shape on every execution tier: AOT, default jet run, jet dev deopt (I9)",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-19T11:18:42.818Z"
+          "evidence": "PROOF (2026-08-19, builder at the closure_ops caller commit): all three legs of examples/features/errors/error_context.jet now print the byte-identical report - jet run, jet run --release (AOT), and jet run --interpret each emit 'Error: file not found' then ' Trail [E3002] (3 hops via ?, origin first):' with the same three numbered frames and notes. Before the fix --interpret printed the root cause with NO trail block. Root cause was not a missing adapter: the hop store is a thread_local and the TIR evaluator runs every interpreted program on a spawned jet-tir-eval worker, so hops were recorded in the worker while the report edge drained the caller's empty list after the join. The same boundary covered the JIT whole-program deopt edge; mid-run deopt was never affected because it stays on the JIT's own thread. Fixed as marshalling - Foundation still owns the list, the collapse and the rendering, and adopting replays carried hops through the same collapse. A cross-tier snapshot test was added, which the trail example had never had; that absence is why the divergence shipped.",
+          "at": "2026-08-20T01:40:58.289Z"
         },
         {
           "n": 4,
@@ -134013,7 +134013,7 @@
       "parentId": null,
       "needsAcceptance": true,
       "created": "2026-08-19T11:17:12.546Z",
-      "updated": "2026-08-20T01:22:40.638Z",
+      "updated": "2026-08-20T01:40:58.289Z",
       "updatedBy": "fable-e3-burndown"
     },
     {
@@ -183140,6 +183140,13 @@
   ],
   "events": [
     {
+      "at": "2026-08-20T01:40:58.289Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0te2a80",
+      "note": "#3"
+    },
+    {
       "at": "2026-08-20T01:22:40.638Z",
       "by": "fable-e3-burndown",
       "action": "card.update",
@@ -186630,13 +186637,6 @@
       "by": "fable",
       "action": "card.update",
       "ref": "c0xsk2wa",
-      "note": "track,epoch,milestoneId,logEntry"
-    },
-    {
-      "at": "2026-08-19T13:48:11.299Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c0oeuws4",
       "note": "track,epoch,milestoneId,logEntry"
     }
   ],
