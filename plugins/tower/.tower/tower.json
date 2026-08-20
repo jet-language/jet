@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 2097,
-    "rev": 39449,
+    "rev": 39451,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -133007,7 +133007,7 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": "e3-m13-jit-parity",
-      "phase": "ready",
+      "phase": "done",
       "priority": "P2",
       "plan": "## Outcome\nOne signal-handler mechanism owns one interrupt queue, living in the Prelude source (`crates/jet-codegen/src/Prelude/CoreLib/Top/Interrupt.rs`), with AOT, the Cranelift JIT host, and the interpreter ambient all marshalling to that one instance instead of keeping private copies. The redundant queue statics are deleted, not synchronised. A cross-tier test observes the same signal-delivery behavior on AOT, default jet run, and the interpreter, so future divergence fails instead of hiding.\n\n## Law\nNo decision dependencies — mechanical I8/I9 dedup. I9: semantics (count-first, registration-order pending-interrupt consumption) belong in the Prelude; engines marshal.\n\n## Work\n1. Current state (located): `Interrupt.rs` (JetInterruptQueue + `jet_interrupt_install_{unix,windows}_handler` + consumption rules) is `include!`'d TWICE inside the jet binary — `jet-jit/src/CoreHost.rs:18` and `Codegen/TIR/eval/mod.rs:84` — each instantiation getting its OWN `QUEUE` static and its own `unix_mark`/`windows_mark` (CoreHost.rs:194-217, eval/mod.rs:169-180). The third copy is the AOT prelude path (`Prelude/CoreLib/Top/FSIoEnvOsTesting.rs:1004-1028`), which is the canonical in-generated-program usage (separate process — that instance is correct and stays).\n2. In-process dedup (criteria 1-2): compile Interrupt.rs exactly ONCE in the jet binary. Concrete shape: jet-codegen exposes one public runtime instance wrapping the `include!` (e.g. `pub mod interrupt_runtime`) — the .rs source stays under `Prelude/` as the single semantic home; jet-jit's CoreHost deletes its `include!` + `unix_mark`/`windows_mark`/`note_interrupt` copy and calls the shared instance; TIR eval's `mod interrupt_queue` include and `interpreter_unix_mark` collapse onto the same instance. End state: one `QUEUE` static per process, one platform-handler-install path, one mark function pair. If handler-install must differ per engine (it should not — both install the same extern \"C\" mark), that difference dies too.\n3. AOT verification: FSIoEnvOsTesting.rs already marshals via `super::jet_interrupt_install_unix_handler` into the same source — sweep for any interrupt POLICY (queue semantics, poll interval, dispatch order) encoded outside Interrupt.rs in any tier and fold it in.\n4. Divergence-detection test (criterion 3): a program registering `core.sys.on_interrupt`, delivered a real SIGINT (self-signal via the os API or harness kill), asserting identical observable behavior (callback invocation count/order, exit path) on `jet run --release`, default `jet run`, and the interpreter. Follow the `io/os_stop_cleanup` / process-control example precedent for signal-driven goldens. If real-signal delivery is untestable deterministically in CI, ship (a) one end-to-end smoke on the tier where delivery is reliable plus (b) a Rust-level test driving each engine's queue entry points against the shared instance so a future re-fork of the queue fails to compile or fails the test.\n5. Risk note: pre-fix, a signal delivered while one engine executes lands only in that engine's queue; post-fix it is globally visible. Re-run interrupt-adjacent examples/goldens to confirm no output change beyond the intended unification.\n\n## Not building\n- No new signal surfaces or Windows behavior redesign.\n- No change to the generated-program (AOT) runtime shape beyond policy-sweep.\n- #2036's terminal work (coordinate only: both dedups must not mint a new copies-of-one-source pattern).\n\n## Proof\n- Criterion 1+2: grep-level evidence — exactly one `QUEUE` static, one `unix_mark`/`windows_mark` pair, no `include!` of Interrupt.rs outside the single shared instance (plus the AOT prelude's in-program use); redundant statics deleted.\n- Criterion 3: cross-tier signal test green on AOT, default jet run, and interpreter. Focused checks only; full suite at epoch closeout.\n\n## blockedBy\nnone — all three copies located; pure in-repo restructuring.",
       "blockedBy": [],
@@ -133035,11 +133035,11 @@
         {
           "n": 3,
           "text": "A cross-tier test observes the same signal-delivery behaviour on AOT, default jet run and the interpreter, so a future divergence between them fails rather than hides",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-17T09:30:38.946Z"
+          "evidence": "PROOF cargo test --test corelib_compile core_os_interrupt 6/6 ok (17.4s, 2026-08-19, builder 8f4597960): delivery_matches_aot_jit_and_interpreter, callback_forms_match_dev_tiers, handlers_are_additive_and_ordered, deadline_diagnostic_unwinds_inside_handler_boundary, runtime_failures_use_the_boundary_aware_helpers, prelude_is_emitted_only_when_used. Getting there exposed three further defects, each fixed: (1) a handler's control transfer was caught but never ended, because process.exit had become an unwind whose payload only the entry boundary consumes, so a signalled program spun forever with its stop report swallowed; (2) on the resident tier process.exit did not exit at all - the host set the exit code and then asked for a trap, but the trap setter early-returns once an exit code exists, so the emitted trap check always fell through and the program kept running past its own exit (measured: print/exit/print printed BOTH lines under jet run, now prints one on all three tiers); (3) the interpreter's E2201 refusal for signal handlers was stale rather than honest - the ambient arms through the one shared count, drains through the one Prelude rule, and is polled at every statement and loop boundary including a bare loop, so the refusal is deleted on evidence. Structural guards intact: a program not using on_interrupt still carries no signal FFI, and the one-mechanism checks in jit_no_unwind_boundary pass 17/17.",
+          "at": "2026-08-20T04:28:09.254Z"
         }
       ],
       "refs": [],
@@ -133047,8 +133047,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-17T09:30:37.393Z",
-      "updated": "2026-08-20T02:39:53.292Z",
-      "updatedBy": "fable-e3-burndown"
+      "updated": "2026-08-20T04:28:09.998Z",
+      "updatedBy": "fable-e3-burndown",
+      "completedAt": "2026-08-20T04:28:09.998Z"
     },
     {
       "id": "c06zs6dw",
@@ -183185,6 +183186,20 @@
   ],
   "events": [
     {
+      "at": "2026-08-20T04:28:09.999Z",
+      "by": "fable-e3-burndown",
+      "action": "card.update",
+      "ref": "c0p6kqj5",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-20T04:28:09.255Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0p6kqj5",
+      "note": "#3"
+    },
+    {
       "at": "2026-08-20T03:34:34.857Z",
       "by": "fable-e3-burndown",
       "action": "card.update",
@@ -186668,20 +186683,6 @@
       "by": "fable",
       "action": "card.update",
       "ref": "c09khtdb",
-      "note": "track,epoch,milestoneId"
-    },
-    {
-      "at": "2026-08-19T13:48:20.513Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c0gett6z",
-      "note": "track,epoch,milestoneId"
-    },
-    {
-      "at": "2026-08-19T13:48:19.931Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c0kqubkv",
       "note": "track,epoch,milestoneId"
     }
   ],
