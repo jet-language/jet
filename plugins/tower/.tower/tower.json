@@ -2,8 +2,8 @@
   "meta": {
     "version": 4,
     "project": "Jet",
-    "nextNum": 2123,
-    "rev": 39745,
+    "nextNum": 2124,
+    "rev": 39752,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -131548,9 +131548,16 @@
       "phase": "ready",
       "priority": "P1",
       "plan": "Two candidate fixes, and the choice is a semantics call rather than a mechanical one.\n\n(a) Guard jet_task_deliver_cancel on !std::thread::panicking(), matching jet_scheduler_shield_leave_status. Minimal and consistent with existing practice, but it silently drops the cancel delivery when it collides with an unwind.\n\n(b) Send the completion inside a shield, so a dropped consumer still observes Completed or Failed rather than losing the notification. Semantically better -- the consumer learns the real outcome -- but it changes when cancellation is deliverable, which is a D-CANCELMODEL1 call and may need ratification.\n\nWhichever lands, no host seam may panic: under an FDE-less JIT frame a raise aborts (#1997). Prefer a status. blockedBy: none",
-      "blockedBy": [],
+      "blockedBy": [
+        "c0yqej63"
+      ],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-08-20",
+          "by": "fable-e3-burndown",
+          "text": "Criterion 4 is not met and now has a named blocker. Ran both named tests at HEAD: stream_pull_hostile_matrix_matches_interpreter_jit_and_aot passes; collections_memory_and_streams_match_interpreter_jit_and_aot FAILS with a JIT versus interpreter divergence for memory/shared_transact. Probed it directly: --interpret prints from=200/to=800/total=1000 matching the golden, while default jet run prints from=500/to=500 and then repeats Stop [E3012] stack overflow in transfer for 24 lines. So the default tier both loses the write and then blows the stack. Filed as #2123 (P0, i9). The battery also reported memory/arena_regions timing out after 30s, but that example runs clean standalone on both tiers in under a second, so that one looks like harness contention rather than a program defect."
+        },
         {
           "at": "2026-08-20",
           "by": "fable-e3-burndown",
@@ -131605,7 +131612,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-16T03:48:35.147Z",
-      "updated": "2026-08-20T00:01:45.347Z",
+      "updated": "2026-08-20T19:23:20.566Z",
       "updatedBy": "fable-e3-burndown"
     },
     {
@@ -138753,6 +138760,70 @@
       "needsAcceptance": false,
       "created": "2026-08-20T19:19:14.361Z",
       "updated": "2026-08-20T19:19:16.221Z",
+      "updatedBy": "fable-e3-burndown"
+    },
+    {
+      "id": "c0yqej63",
+      "num": 2123,
+      "title": "Default jet run gives the wrong answer for shared_transact, then overflows the stack",
+      "body": "A shipped example about shared mutable state gives a different, WRONG answer on the default execution tier, then dies of a stack overflow. This is an I9 violation where the failing tier is the one a user gets by default.\n\nReproduce at HEAD:\n\n    ./target/debug/jet run --interpret examples/features/memory/shared_transact.jet\n      from=200\n      to=800\n      total=1000          <- matches examples/features/expected/memory/shared_transact.out\n\n    ./target/debug/jet run examples/features/memory/shared_transact.jet\n      from=500\n      to=500\n      total=1000          <- the transfer never happened\n      Stop [E3012]: stack overflow in `transfer`\n        --> examples/features/memory/shared_transact.jet:22 in transfer\n      ... the E3012 repeats, 24 lines total\n\nTwo distinct defects in one program, and the second hides the first:\n\n1. WRONG ANSWER. On the Cranelift tier the transfer does not take effect: both accounts keep their starting balance. The interpreter and the golden agree on from=200 and to=800, so the default tier is the odd one out. A silent wrong answer about shared state is worse than a crash.\n\n2. UNBOUNDED RECURSION. The transfer function then overflows the stack on the same tier only. Whatever re-entry the JIT takes through Shared<Account> does not terminate.\n\nFound by tests/dev_tier_parity.rs::collections_memory_and_streams_match_interpreter_jit_and_aot, which reports a JIT versus interpreter divergence for memory/shared_transact. Its sibling stream_pull_hostile_matrix_matches_interpreter_jit_and_aot passes.\n\nPer I9 the fix belongs in the shared Prelude that AOT already calls, not in a Cranelift host helper. Start by asking why the JIT path for a Shared<T> write inside a called function does not commit, and whether the retry or transact wrapper is re-entering itself.\n\nBlocks card #2007 criterion 4.\n",
+      "kind": "bug",
+      "track": "epoch",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P0",
+      "plan": null,
+      "checkSteps": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Default jet run and --interpret agree with examples/features/expected/memory/shared_transact.out: from=200, to=800, total=1000",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-20T19:23:07.825Z"
+        },
+        {
+          "n": 2,
+          "text": "No E3012 stack overflow on any tier for this example",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-20T19:23:08.272Z"
+        },
+        {
+          "n": 3,
+          "text": "The fix lives in the shared Prelude that AOT calls, not in a Cranelift host helper (I9)",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-20T19:23:08.728Z"
+        },
+        {
+          "n": 4,
+          "text": "tests/dev_tier_parity.rs::collections_memory_and_streams_match_interpreter_jit_and_aot passes",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-20T19:23:09.183Z"
+        }
+      ],
+      "refs": [],
+      "tags": [
+        "i9"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-08-20T19:23:07.360Z",
+      "updated": "2026-08-20T19:23:09.183Z",
       "updatedBy": "fable-e3-burndown"
     }
   ],
@@ -185433,6 +185504,55 @@
   ],
   "events": [
     {
+      "at": "2026-08-20T19:23:20.567Z",
+      "by": "fable-e3-burndown",
+      "action": "card.update",
+      "ref": "c0aps31f",
+      "note": "blockedBy"
+    },
+    {
+      "at": "2026-08-20T19:23:19.879Z",
+      "by": "fable-e3-burndown",
+      "action": "card.update",
+      "ref": "c0aps31f",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-08-20T19:23:09.183Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-add",
+      "ref": "c0yqej63",
+      "note": "#4 tests/dev_tier_parity.rs::collections_memory_and_streams_mat"
+    },
+    {
+      "at": "2026-08-20T19:23:08.728Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-add",
+      "ref": "c0yqej63",
+      "note": "#3 The fix lives in the shared Prelude that AOT calls, not in a"
+    },
+    {
+      "at": "2026-08-20T19:23:08.272Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-add",
+      "ref": "c0yqej63",
+      "note": "#2 No E3012 stack overflow on any tier for this example"
+    },
+    {
+      "at": "2026-08-20T19:23:07.825Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-add",
+      "ref": "c0yqej63",
+      "note": "#1 Default jet run and --interpret agree with examples/features"
+    },
+    {
+      "at": "2026-08-20T19:23:07.360Z",
+      "by": "fable-e3-burndown",
+      "action": "card.add",
+      "ref": "c0yqej63",
+      "note": "Default jet run gives the wrong answer for shared_transact, then overflows the stack"
+    },
+    {
       "at": "2026-08-20T19:19:31.660Z",
       "by": "fable-e3-burndown",
       "action": "card.update",
@@ -188882,55 +189002,6 @@
       "action": "card.criteria-meet",
       "ref": "c0be4wgi",
       "note": "#2"
-    },
-    {
-      "at": "2026-08-19T21:22:37.782Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0be4wgi",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-19T21:22:21.381Z",
-      "by": "fable-e3-burndown",
-      "action": "card.update",
-      "ref": "c0be4wgi",
-      "note": "blockedBy"
-    },
-    {
-      "at": "2026-08-19T21:21:23.614Z",
-      "by": "fable-e3-burndown",
-      "action": "card.delete",
-      "ref": "c0zcrs0m",
-      "note": "Retire @if: plain if folds comptime-known branches, pattern arms included"
-    },
-    {
-      "at": "2026-08-19T21:21:23.109Z",
-      "by": "fable-e3-burndown",
-      "action": "decision.delete",
-      "ref": "D-IF-FOLD1",
-      "note": "Retire @if: plain if folds compile-time branches"
-    },
-    {
-      "at": "2026-08-19T21:10:46.592Z",
-      "by": "owner",
-      "action": "done.clear",
-      "ref": null,
-      "note": "2026-08-19T21:10:46.592Z"
-    },
-    {
-      "at": "2026-08-19T21:10:40.673Z",
-      "by": "owner",
-      "action": "decision.ratify",
-      "ref": "D-ARROW-UNIFY1",
-      "note": "B"
-    },
-    {
-      "at": "2026-08-19T21:10:40.673Z",
-      "by": "owner",
-      "action": "card.criteria-add",
-      "ref": "c0ma0xb6",
-      "note": "#8 snapshots re-blessed"
     }
   ],
   "nextNum": 368,
