@@ -52,12 +52,13 @@ fn unsupported(what: &str, span: Span) -> Diagnostic {
     jet_foundation::Prelude::jet_e0956_unsupported(what, span)
 }
 
-fn ambient_fs_walk_parallel(
-    args: &[CtValue],
-    span: Span,
-) -> Result<CtValue, Diagnostic> {
+/// Both `core.files.walk` and `core.files.walk_parallel` answer with the same
+/// sorted entry list; only the traversal strategy differs, and the shared
+/// kernel owns that. One arm serves both so the interpreter cannot answer a
+/// different set than AOT or the resident host (I9).
+fn ambient_fs_walk(args: &[CtValue], span: Span) -> Result<CtValue, Diagnostic> {
     let Some(CtValue::Str(path)) = args.first() else {
-        return Err(unsupported("core.files.walk_parallel path", span));
+        return Err(unsupported("core.files walk path", span));
     };
     if crate::fault_injection::jet_fault_should_fail("FS.Read") {
         return Ok(CtValue::failed(Box::new(io_error_at(
@@ -2640,8 +2641,8 @@ pub fn ambient_core_call(
             )));
         }
     }
-    if module == "core.files" && method == "walk_parallel" {
-        return Some(ambient_fs_walk_parallel(&args, span));
+    if module == "core.files" && matches!(method, "walk" | "walk_parallel") {
+        return Some(ambient_fs_walk(&args, span));
     }
     if module == "core.mem" {
         if let Some(result) = mem_sentry_prelude::ambient_core_call(

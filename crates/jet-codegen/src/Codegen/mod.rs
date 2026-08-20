@@ -199,6 +199,12 @@ const PRELUDE_PARTS: &[&str] = &[
     include_str!("../Prelude/TypedText.rs"),
     include_str!("../Prelude/Core/Progress.rs"),
     include_str!("../Prelude/Core/Bytes.rs"),
+    // The one parallel-walk kernel. AOT embeds it here; the resident JIT host,
+    // the interpreter ambient and the comptime evaluator `include!` the same
+    // file, so no tier re-implements directory traversal (I9). A nested
+    // `include!` inside an embedded part cannot work: the generated crate has
+    // no Prelude tree to read from.
+    include_str!("../Prelude/Core/FSWalk.rs"),
     include_str!("../Prelude/CoreLib/JetStd/Iter.rs"),
     include_str!("../Prelude/Core/Collections.rs"),
     include_str!("../Prelude/Memo.rs"),

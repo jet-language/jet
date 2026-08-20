@@ -257,7 +257,9 @@ fn core_fixed_sig_impl(
             vec![(read, path)],
             Some(result_ty(Type::String, io_error_ty())),
         )),
-        ("core.files", "walk") => Some((
+        // `walk` and `walk_parallel` are one surface with one result shape: the
+        // parallel form only chooses how the directories are traversed.
+        ("core.files", "walk" | "walk_parallel") => Some((
             vec![(read, path)],
             Some(result_ty(
                 Type::List(Box::new(Type::Named("WalkEntry".to_string()))),

@@ -585,6 +585,7 @@ pub fn core_module_items(module: &str) -> Vec<String> {
             "canonicalize",
             "absolute",
             "walk",
+            "walk_parallel",
             "glob",
             "read_at",
             "write_at",

@@ -1,5 +1,3 @@
-include!("../../Core/FSWalk.rs");
-
 fn jet_std_fs_symlink(from: &String, to: &String) -> Result<(), jet_std::IOError> {
     if jet_fault_should_fail("FS.Write") {
         return Err(jet_std::IOError::other(
