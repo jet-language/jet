@@ -7484,6 +7484,52 @@ claim cannot be checked, and the spec-over-code authority in AGENTS.md inverts
 silently. Delete the empty citation and state in prose what the code actually
 guarantees. Do not invent a ratification record after the fact.
 
+**2026-08-20 — D-BODY-LAST1=B** *(card #2124)*: a block yields its trailing
+expression. `return` narrows to early exit only. The rule is checked, not
+inferred: Jet always writes the return type in the signature, so a stray
+trailing value is an ordinary type mismatch. This is what lets a function body,
+a REPL cell and a notebook cell obey one rule.
+
+**2026-08-20 — D-SIG-SHAPE1=B** *(card #2125)*: the return type sits bare after
+the parameter list, and `:>` becomes the one body arrow across the whole
+language.
+
+```
+fn double(n: Int) Int :> n * 2
+fn origin() Point :> {x: 0, y: 0}
+fn run() { print(double(21)) }
+
+fn load(path: String) String :[IO]> {
+    text :: files.read(path)?
+    text.trim()
+}
+
+fn name_of(n: Int) String {
+    if n == {
+        0 :> "zero"
+        1 :> "one"
+        else :> "many"
+    }
+}
+```
+
+Three consequences. `:>` has exactly one meaning everywhere — the body follows —
+instead of carrying a type in a signature and a value in an arm. The effect
+ceiling takes the body-arrow position as `:[IO]>`, which is where it belongs,
+because the ceiling bounds what the body may do. And `::` retires as a body
+form, returning to its single meaning: bind a name to a value.
+
+Uniformity here is not one body form. It is the same two forms everywhere: `:>`
+for one expression, braces for many, with the trailing expression as the value.
+Arms, control bodies and lambdas already read that way and do not change, so a
+pattern table is untouched.
+
+Measured before ratification over 600 shipped examples: 427 signatures declared
+a return type, 34 carried an effect ceiling, 641 declared nothing, 230 functions
+used the `::` body, and 387 arm, lambda and control sites already read `:>` as
+the body marker. The migration is 461 signatures and 230 bodies, performed by
+`jet fmt`.
+
 ## Ratified decision index
 
 <!-- BEGIN GENERATED RATIFIED INDEX -->
