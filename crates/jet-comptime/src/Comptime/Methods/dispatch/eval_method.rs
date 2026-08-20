@@ -959,7 +959,7 @@ impl<'a> Interp<'a> {
         // plain `apply_method` entries. Guarded to the receiver shapes they
         // actually apply to; anything else falls through to the generic
         // dispatch at the end of this function.
-        const HOF_METHODS: &[&str] = &["filter", "map", "each", "sort_by", "find"];
+        const HOF_METHODS: &[&str] = &["filter", "map", "each", "sort_by", "sort_by_desc", "find"];
         if HOF_METHODS.contains(&method) {
             let recv = match evaluated_receiver.take() {
                 Some(value) => value,
@@ -1027,7 +1027,7 @@ impl<'a> Interp<'a> {
                 // (D-BIND4 `:=` receiver) — key every element once, sort the
                 // keyed pairs, then write the reordered list back through the
                 // same lvalue path `push`/`pop`/… use.
-                (CtValue::List(xs), "sort_by")
+                (CtValue::List(xs), method @ ("sort_by" | "sort_by_desc"))
                     if matches!(receiver, Expr::Ident(..) | Expr::Field(..)) =>
                 {
                     let f = self.eval(&args[0].expr, scope)?;
@@ -1042,7 +1042,9 @@ impl<'a> Interp<'a> {
                         keyed.push((k, x.clone()));
                     }
                     let mut sort_err = None;
+                    let descending = method == "sort_by_desc";
                     keyed.sort_by(|a, b| match cmp(a.0.clone(), b.0.clone(), span) {
+                        Ok(o) if descending => o.reverse(),
                         Ok(o) => o,
                         Err(e) => {
                             sort_err.get_or_insert(e);
@@ -1854,7 +1856,7 @@ impl<'a> Interp<'a> {
 
         // Mutating list/map methods on a named variable write back in place.
         const MUTATING: &[&str] = &[
-            "push", "pop", "insert", "add", "add_new", "remove", "extend", "clear", "reverse", "sort",
+            "push", "pop", "insert", "add", "add_new", "remove", "extend", "clear", "reverse", "sort", "sort_desc",
         ];
         if MUTATING.contains(&method) && matches!(receiver, Expr::Ident(..) | Expr::Field(..)) {
             let mut container = match evaluated_receiver.take() {

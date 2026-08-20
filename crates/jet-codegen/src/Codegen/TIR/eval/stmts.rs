@@ -28,7 +28,7 @@ struct LiveTerminalMode;
 
 impl Drop for LiveTerminalMode {
     fn drop(&mut self) {
-        super::term_key::jet_term_leave();
+        crate::terminal_runtime::jet_term_leave();
     }
 }
 
@@ -2063,7 +2063,7 @@ impl<'a> EvalCtx<'a> {
                         self.span(),
                     ))
                 } else {
-                    super::term_key::jet_term_enter();
+                    crate::terminal_runtime::jet_term_enter();
                     let _restore = LiveTerminalMode;
                     self.exec_stmts(body, scope)
                 }

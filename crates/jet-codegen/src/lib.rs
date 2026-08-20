@@ -136,6 +136,13 @@ pub mod memo {
 pub mod interrupt_runtime {
     include!("Prelude/CoreLib/Top/Interrupt.rs");
 }
+/// D-TERM1 / I9: one in-process terminal key kernel. The TIR evaluator and
+/// resident JIT both call this module; neither includes a private copy.
+#[allow(dead_code)]
+pub mod terminal_runtime {
+    include!("Prelude/Term.rs");
+    include!("Prelude/Core/TermKey.rs");
+}
 /// Card #1751: the one 80x24 terminal default, read by both AOT's
 /// `TerminalPolicy::default` and this crate's `PtyConfig::default`.
 #[path = "Prelude/TerminalDefault.rs"]

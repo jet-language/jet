@@ -581,8 +581,8 @@ impl CoreCallRecord {
             ("core.files", "read" | "read_bytes" | "exists" | "is_dir" | "remove"
                 | "remove_dir" | "remove_all" | "list_dir" | "create_dir"
                 | "create_dir_all" | "stat" | "canonicalize" | "absolute" | "walk"
-                | "glob" | "fsync" | "lock" | "open" | "create" | "append") => &[true],
-            ("core.files", "write" | "append_all" | "write_atomic") => &[true],
+                | "walk_parallel" | "glob" | "fsync" | "lock" | "open" | "create" | "append") => &[true],
+            ("core.files", "write" | "write_bytes" | "append_all" | "write_atomic") => &[true],
             ("core.files", "copy" | "copy_dir" | "rename" | "symlink" | "hard_link") => {
                 &[true, true]
             }
@@ -680,6 +680,7 @@ pub const CORE_CALLS: &[CoreCallRecord] = &[
     CoreCallRecord::new("core.files", "read", "jet_std_fs_read", true, &[true]), // D-FILES-WRITE1 (merge, was `core.fs`): whole-file convenience helpers now // live in `core.files` alongside the streaming handle constructors below. // D-FILES-APPEND1=A: whole-file one-shot is `append_all`, not `append` — // that name stays reserved for the streaming handle's `.append(text)`.
     CoreCallRecord::new("core.files", "read_bytes", "jet_std_fs_read_bytes", true, &[true]),
     CoreCallRecord::new("core.files", "write", "jet_std_fs_write", true, &[true, true]),
+    CoreCallRecord::new("core.files", "write_bytes", "jet_std_fs_write_bytes", true, &[true, true]),
     CoreCallRecord::new("core.files", "append_all", "jet_std_fs_append", true, &[true, true]),
     CoreCallRecord::new("core.files", "exists", "jet_std_fs_exists", true, &[true]),
     CoreCallRecord::new("core.files", "remove", "jet_std_fs_remove", true, &[true]),
@@ -699,6 +700,7 @@ pub const CORE_CALLS: &[CoreCallRecord] = &[
     CoreCallRecord::new("core.files", "canonicalize", "jet_std_fs_canonicalize", true, &[true]),
     CoreCallRecord::new("core.files", "absolute", "jet_std_fs_absolute", true, &[true]),
     CoreCallRecord::new("core.files", "walk", "jet_std_fs_walk", true, &[true]),
+    CoreCallRecord::new("core.files", "walk_parallel", "jet_std_fs_walk_parallel", true, &[true]),
     CoreCallRecord::new("core.files", "glob", "jet_std_fs_glob", true, &[true]),
     CoreCallRecord::new("core.files", "read_at", "jet_std_fs_read_at", true, &[true, false, false]),
     CoreCallRecord::new("core.files", "write_at", "jet_std_fs_write_at", true, &[true, false, true]),

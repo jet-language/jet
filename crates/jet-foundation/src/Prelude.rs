@@ -180,7 +180,7 @@ mod tests {
 
     #[test]
     fn source_is_the_complete_ambient_registry() {
-        assert_eq!(entries().len(), 19);
+        assert_eq!(entries().len(), 20);
         assert_eq!(entry("print").map(|entry| entry.target), Some(Target::Builtin));
         assert_eq!(entry("assert_eq").map(|entry| entry.target), Some(Target::Builtin));
         assert_eq!(
@@ -250,6 +250,7 @@ mod tests {
 
         let total = [
             "print", "panic", "require", "assert", "assert_eq", "eprint", "file_exists",
+            "channel",
         ];
         let result = ["input", "read_file", "write_file"];
         for entry in entries() {

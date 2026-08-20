@@ -1952,6 +1952,9 @@ pub struct BuildRun {
 pub struct BuildCompileOutput {
     pub compile: crate::CompileOutput,
     pub build: Option<BuildRun>,
+    /// Final runtime bundle after generated-source staging. Test harnesses
+    /// that exercise the same in-process tier path consume this exact bundle.
+    pub runtime: Option<crate::AST::ProgramBundle>,
     /// The exact fact snapshot used to check the returned program. Query and
     /// explain callers consume this instead of rebuilding contribution state.
     pub build_facts: jet_foundation::Facts::BuildFactSnapshot,
@@ -3326,6 +3329,7 @@ fn compile_build_from_front_end(
                 layer_ceiling: bundle.layer_ceiling,
             },
             build: build_run,
+            runtime: None,
             build_facts: bundle.build_facts.clone(),
         });
     }
@@ -3405,10 +3409,12 @@ fn compile_build_from_front_end(
     if let Some(transaction) = filesystem_transaction.as_mut() {
         transaction.commit();
     }
+    let build_facts = bundle.build_facts.clone();
     Ok(BuildCompileOutput {
         compile,
         build: build_run,
-        build_facts: bundle.build_facts.clone(),
+        runtime: Some(bundle),
+        build_facts,
     })
 }
 

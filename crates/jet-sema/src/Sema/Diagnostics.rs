@@ -202,6 +202,24 @@ pub(crate) fn type_fix_hint(want: &Type, got: &Type) -> String {
             want.show()
         );
     }
+    // A qualified projection can differ only by the enclosing file alias
+    // (`bank.Account` vs `vis2.bank.Account`). Naming the shorter side would
+    // repeat the declaration spelling already present in the source. Keep the
+    // repair deterministic without pretending the two declarations are known
+    // equal at this display-only layer.
+    let nominal_leaf = |ty: &Type| match ty {
+        Type::Named(name) => name
+            .rsplit_once("::")
+            .or_else(|| name.rsplit_once('.'))
+            .map_or(name.as_str(), |(_, leaf)| leaf),
+        _ => "",
+    };
+    if !nominal_leaf(want).is_empty() && nominal_leaf(want) == nominal_leaf(got) {
+        return format!(
+            "these names may refer to one declaration; make both sides use one spelling for `{}`",
+            nominal_leaf(want)
+        );
+    }
     match (want, got) {
         (Type::Float, Type::Int) => "write the number with a decimal part, like `2.0`".to_string(),
         (Type::Int, Type::Float) => "drop the decimal part, like `2`".to_string(),
@@ -879,16 +897,26 @@ pub(crate) fn pattern_binding_types(payload: &VariantPayload) -> Vec<Type> {
 /// disagree; the caller keeps its ordinary fix text instead (card #2002).
 pub(crate) fn suggest_field(name: &str, candidates: &[String]) -> Option<String> {
     let mut best: Option<(String, usize)> = None;
+    let mut ambiguous = false;
     for cand in candidates {
         let d = edit_distance(name, cand);
         if d == 0 {
             continue;
         }
-        if d <= 2 && best.as_ref().map_or(true, |(_, bd)| d < *bd) {
-            best = Some((cand.clone(), d));
+        if d > 2 {
+            continue;
+        }
+        match best.as_ref() {
+            None => best = Some((cand.clone(), d)),
+            Some((_, best_distance)) if d < *best_distance => {
+                best = Some((cand.clone(), d));
+                ambiguous = false;
+            }
+            Some((_, best_distance)) if d == *best_distance => ambiguous = true,
+            Some(_) => {}
         }
     }
-    best.map(|(s, _)| s)
+    best.filter(|_| !ambiguous).map(|(s, _)| s)
 }
 
 /// The one home for cross-language method names (card #1965).
@@ -909,39 +937,45 @@ pub(crate) fn suggest_field(name: &str, candidates: &[String]) -> Option<String>
 /// teaches a method that does something else. A name failing (3) is dead
 /// weight: the call resolves and this table is never consulted.
 ///
-/// The right-hand side is an ordered list of alternatives, and `suggest_method`
-/// keeps only the ones the receiver actually carries. That is what lets one
-/// receiver-agnostic table serve every receiver: `add` means `push` on a
-/// `List` while resolving untouched on `Map`/`Set`, and `contains_key` reaches
-/// `has_key` on a `Map` and `has` on a `Set`, with no second
-/// receiver-classification table to keep in step (I8).
-const FOREIGN_METHOD_ALIASES: &[(&str, &[&str])] = &[
+/// The receiver family is the same label used by E0311's `Why:` text. Keep
+/// target membership as a second check: a family row must name a method the
+/// receiver actually carries.
+const FOREIGN_METHOD_ALIASES: &[(&str, &str, &str)] = &[
     // Sequence append: Python `list.append`, Java/C# `add`/`Add`, C++ `push_back`.
-    ("append", &["push"]),
-    ("add", &["push"]),
-    ("push_back", &["push"]),
+    ("append", "List", "push"),
+    ("add", "List", "push"),
+    ("push_back", "List", "push"),
+    ("extend", "List", "push"),
     // Size: C++/Java `size`, JavaScript/Java-String `length`, C#/Swift `Count`/`count`.
-    ("size", &["len"]),
-    ("length", &["len"]),
-    ("count", &["len"]),
+    ("size", "List", "len"),
+    ("size", "Map", "len"),
+    ("size", "String", "len"),
+    ("length", "List", "len"),
+    ("length", "Map", "len"),
+    ("length", "String", "len"),
+    ("count", "List", "len"),
+    ("count", "Map", "len"),
+    ("count", "String", "len"),
     // Membership: Rust `contains_key`, JavaScript `Map.has`, Rust/Java/C++ set
     // `contains`, JavaScript `Array.includes`.
-    ("contains_key", &["has_key", "has"]),
-    ("has", &["has_key"]),
-    ("contains", &["has"]),
-    ("includes", &["contains", "has"]),
+    ("contains_key", "Map", "has_key"),
+    ("contains_key", "Set", "has"),
+    ("has", "Map", "has_key"),
+    ("contains", "List", "contains"),
+    ("contains", "Set", "has"),
+    ("includes", "List", "contains"),
     // Keyed store: JavaScript `Map.set`, Java `Map.put`, Rust `HashMap::insert`.
-    ("set", &["add"]),
-    ("put", &["add"]),
-    ("insert", &["add"]),
+    ("set", "Map", "add"),
+    ("put", "Map", "add"),
+    ("insert", "Map", "add"),
     // Text: Python `str.upper`/`lower`/`strip`, Java/JavaScript
     // `substring`/`substr`, Rust `to_str`.
-    ("upper", &["to_upper"]),
-    ("lower", &["to_lower"]),
-    ("strip", &["trim"]),
-    ("substring", &["slice"]),
-    ("substr", &["slice"]),
-    ("to_str", &["to_string"]),
+    ("upper", "String", "to_upper"),
+    ("lower", "String", "to_lower"),
+    ("strip", "String", "trim"),
+    ("substring", "String", "slice"),
+    ("substr", "String", "slice"),
+    ("to_str", "String", "to_string"),
 ];
 
 /// A method name the receiver really carries, plus the `Fix:` line that names
@@ -956,16 +990,20 @@ pub(crate) struct MethodSuggestion {
 /// First target of `name`'s alias row that this receiver actually carries.
 /// A target equal to `name` is refused for the same reason `suggest_field`
 /// refuses distance 0 (#2002): it would hand back the spelling just refused.
-fn alias_target(name: &str, candidates: &[String]) -> Option<String> {
-    let (_, targets) = FOREIGN_METHOD_ALIASES
+fn alias_target(
+    name: &str,
+    receiver_family: Option<&str>,
+    candidates: &[String],
+) -> Option<String> {
+    FOREIGN_METHOD_ALIASES
         .iter()
-        .find(|(foreign, _)| *foreign == name)?;
-    targets
-        .iter()
-        .find(|target| {
-            **target != name && candidates.iter().any(|known| known.as_str() == **target)
+        .find(|(foreign, family, target)| {
+                *foreign == name
+                && receiver_family.map_or(true, |receiver| receiver == *family)
+                && *target != name
+                && candidates.iter().any(|known| known.as_str() == *target)
         })
-        .map(|target| (*target).to_string())
+        .map(|(_, _, target)| (*target).to_string())
 }
 
 /// `indexOf` → `index_of`. `None` when the name carries no capital, so a name
@@ -995,17 +1033,18 @@ fn foreign_method_fix(name: &str, jet: &str) -> String {
 /// The one method-name suggestion picker, for a receiver that has already
 /// refused `name`.
 ///
-/// Exact evidence outranks a guess. A name this table knows, or a name that is
-/// only Jet's snake_case convention away from one the receiver carries, is a
-/// fact about what the caller meant; edit distance is a guess that happens to
-/// land close. Ordering them the other way is how `items.add(x)` on a `List`
-/// came to suggest `all` — two edits away, and not the operation asked for —
-/// instead of `push` (card #1965).
-pub(crate) fn suggest_method(name: &str, candidates: &[String]) -> Option<MethodSuggestion> {
-    if let Some(jet) = alias_target(name, candidates) {
+/// Edit distance keeps priority. Foreign aliases are the fallback when no
+/// unambiguous close typo exists; that preserves the original typo fix while
+/// letting `items.add(x)` reach `push` when nearby candidates are ambiguous.
+pub(crate) fn suggest_method_for_receiver(
+    name: &str,
+    receiver_family: Option<&str>,
+    candidates: &[String],
+) -> Option<MethodSuggestion> {
+    if let Some(candidate) = suggest_field(name, candidates) {
         return Some(MethodSuggestion {
-            fix: foreign_method_fix(name, &jet),
-            name: jet,
+            fix: format!("did you mean `{candidate}`?"),
+            name: candidate,
         });
     }
     if let Some(snake) = snake_case_of_camel(name) {
@@ -1015,17 +1054,21 @@ pub(crate) fn suggest_method(name: &str, candidates: &[String]) -> Option<Method
                 name: snake,
             });
         }
-        if let Some(jet) = alias_target(&snake, candidates) {
+        if let Some(jet) = alias_target(&snake, receiver_family, candidates) {
             return Some(MethodSuggestion {
                 fix: foreign_method_fix(name, &jet),
                 name: jet,
             });
         }
     }
-    suggest_field(name, candidates).map(|candidate| MethodSuggestion {
-        fix: format!("did you mean `{candidate}`?"),
-        name: candidate,
+    alias_target(name, receiver_family, candidates).map(|jet| MethodSuggestion {
+        fix: foreign_method_fix(name, &jet),
+        name: jet,
     })
+}
+
+pub(crate) fn suggest_method(name: &str, candidates: &[String]) -> Option<MethodSuggestion> {
+    suggest_method_for_receiver(name, None, candidates)
 }
 
 fn secret_bearing_crypto_leaf(name: &str) -> bool {

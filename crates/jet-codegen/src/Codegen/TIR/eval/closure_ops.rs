@@ -560,7 +560,7 @@ impl<'a> EvalCtx<'a> {
                 }
                 Ok(acc)
             }
-            TClosureOp::SortBy => {
+            TClosureOp::SortBy | TClosureOp::SortByDesc => {
                 let CtValue::List(items) = recv_v else {
                     return Err(unsupported("sort_by receiver", self.span()));
                 };
@@ -571,7 +571,9 @@ impl<'a> EvalCtx<'a> {
                 }
                 let span = self.span();
                 let mut sort_err = None;
+                let descending = matches!(op, TClosureOp::SortByDesc);
                 keyed.sort_by(|a, b| match cmp(a.0.clone(), b.0.clone(), span) {
+                    Ok(o) if descending => o.reverse(),
                     Ok(o) => o,
                     Err(e) => {
                         sort_err.get_or_insert(e);

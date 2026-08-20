@@ -5,13 +5,16 @@
 //! protection to the exact proposed set. Manual external roots use the same
 //! journal and lock through the typed atomic update seam below.
 
-use super::{Closure, Roots};
+use super::{
+    legacy_user_hangar_dir, legacy_user_root, Closure, PreparedProfileGenerationRoot, Roots,
+};
 use crate::SHA256;
 use std::collections::{BTreeMap, BTreeSet};
+use std::fs;
 use std::error::Error;
 use std::fmt;
 use std::io::{self, Read, Write};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 mod Directory;
@@ -32,6 +35,159 @@ const MAX_ROOTS: usize = 4096;
 const MAX_TARGETS_PER_ROOT: usize = 4096;
 const MAX_TOTAL_TARGETS: usize = 65_536;
 const MAX_RECOVERY_WORK: usize = 1_000_000;
+/// Move a pre-D-ECO-HANGARPATH1 user Hangar into the native per-user data
+/// path. The old tree stays in place, so an operator can roll back by removing
+/// the new tree and restoring the old resolver. A staging tree makes a crash
+/// visible instead of presenting a partial migration as a live Hangar.
+pub fn migrate_legacy_hangar(roots: &Roots) -> std::io::Result<bool> {
+    if !roots.dev_mode {
+        return Ok(false);
+    }
+    let destination = roots.hangar_dir();
+    if fs::symlink_metadata(&destination).is_ok() {
+        return Ok(false);
+    }
+    let legacy_source = legacy_user_hangar_dir();
+    let mut sources = vec![legacy_source.clone(), PathBuf::from(crate::Syntax::HANGAR_DIR)];
+    sources.dedup();
+    let Some(source) = sources
+        .into_iter()
+        .find(|candidate| fs::symlink_metadata(candidate).is_ok())
+    else {
+        return Ok(false);
+    };
+    if source == destination {
+        return Ok(false);
+    }
+    let parent = destination
+        .parent()
+        .ok_or_else(|| std::io::Error::other("native Hangar path has no parent"))?;
+    let stage = parent.join(format!(
+        ".{}-migration.partial",
+        destination
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or("hangar")
+    ));
+    let migrate_unlocked = || {
+        if fs::symlink_metadata(&destination).is_ok() {
+            return Ok(false);
+        }
+        if fs::symlink_metadata(&stage).is_ok() {
+            return Err(std::io::Error::other(format!(
+                "incomplete Hangar migration remains at `{}`; inspect or remove it before retrying",
+                stage.display()
+            )));
+        }
+        fs::create_dir_all(parent)?;
+        copy_migration_tree(&source, &stage, &source)?;
+        super::sync_store_directory(&stage)?;
+        fs::rename(&stage, &destination)?;
+        super::sync_store_directory(parent)?;
+        Ok(true)
+    };
+    super::super::RuntimePolicy::with_lock(&roots.root, "hangar-migration", || {
+        if source == legacy_source {
+            super::super::RuntimePolicy::with_lock(
+                &legacy_user_root(),
+                "hangar-migration-source",
+                migrate_unlocked,
+            )
+        } else {
+            migrate_unlocked()
+        }
+    })
+}
+
+fn copy_migration_tree(source: &Path, destination: &Path, root: &Path) -> std::io::Result<()> {
+    let metadata = fs::symlink_metadata(source)?;
+    if metadata.file_type().is_symlink() {
+        let target = fs::read_link(source)?;
+        if target.is_absolute() {
+            if !target.starts_with("/nix/store") {
+                return Err(std::io::Error::other(format!(
+                    "legacy Hangar symlink `{}` escapes the approved compatibility root",
+                    source.display()
+                )));
+            }
+        } else if !relative_target_stays_in_root(source, &target, root) {
+            return Err(std::io::Error::other(format!(
+                "legacy Hangar symlink `{}` escapes its migration root",
+                source.display()
+            )));
+        }
+        create_migration_symlink(&target, destination, source)?;
+        return Ok(());
+    }
+    if metadata.is_dir() {
+        fs::create_dir(destination)?;
+        for entry in fs::read_dir(source)? {
+            let entry = entry?;
+            copy_migration_tree(&entry.path(), &destination.join(entry.file_name()), root)?;
+        }
+        fs::set_permissions(destination, metadata.permissions())?;
+        return Ok(());
+    }
+    if metadata.is_file() {
+        fs::copy(source, destination)?;
+        fs::set_permissions(destination, metadata.permissions())?;
+        return Ok(());
+    }
+    Err(std::io::Error::other(format!(
+        "legacy Hangar contains unsupported node `{}`",
+        source.display()
+    )))
+}
+
+fn relative_target_stays_in_root(link: &Path, target: &Path, root: &Path) -> bool {
+    let Some(parent) = link.parent() else {
+        return false;
+    };
+    let Ok(relative_parent) = parent.strip_prefix(root) else {
+        return false;
+    };
+    let mut normalized = root.join(relative_parent);
+    for component in target.components() {
+        match component {
+            std::path::Component::CurDir => {}
+            std::path::Component::Normal(name) => normalized.push(name),
+            std::path::Component::ParentDir => {
+                if normalized == root || !normalized.pop() {
+                    return false;
+                }
+            }
+            _ => return false,
+        }
+    }
+    true
+}
+
+fn create_migration_symlink(target: &Path, destination: &Path, source: &Path) -> std::io::Result<()> {
+    #[cfg(unix)]
+    {
+        // `source` only tells Windows whether to make a dir or file symlink.
+        let _ = source;
+        std::os::unix::fs::symlink(target, destination)
+    }
+    #[cfg(windows)]
+    {
+        let target_is_dir = fs::metadata(source)
+            .map(|metadata| metadata.is_dir())
+            .unwrap_or(false);
+        if target_is_dir {
+            std::os::windows::fs::symlink_dir(target, destination)
+        } else {
+            std::os::windows::fs::symlink_file(target, destination)
+        }
+    }
+    #[cfg(not(any(unix, windows)))]
+    {
+        let _ = (target, destination, source);
+        Err(std::io::Error::other(
+            "legacy Hangar migration needs symlink support on this host",
+        ))
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) enum RootKind {
@@ -1963,8 +2119,326 @@ impl WriteControl {
     }
 }
 
+/// A manually retained Hangar closure, projected for the external-root CLI
+/// and consumers. The lifecycle WAL remains the source of truth; this is only
+/// the typed Store view of one committed root.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct ExternalRootView {
+    pub(crate) label: String,
+    pub(crate) reference: String,
+    pub(crate) etag: String,
+    pub(crate) closure_size: usize,
+    pub(crate) prepared: bool,
+    pub(crate) expires_at: Option<u64>,
+}
+
+#[derive(Debug)]
+pub(crate) enum ExternalRootError {
+    Conflict {
+        label: String,
+        expected: Option<String>,
+        current: Option<String>,
+    },
+    ReferenceNotFound(String),
+    Store(std::io::Error),
+}
+
+impl std::fmt::Display for ExternalRootError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Conflict {
+                label,
+                expected,
+                current,
+            } => {
+                write!(
+                    f,
+                    "external root `{label}` changed before the request applied (expected {:?}, current {:?})",
+                    expected,
+                    current
+                )
+            }
+            Self::ReferenceNotFound(reference) => {
+                write!(f, "no Hangar entry matches `{reference}`")
+            }
+            Self::Store(error) => error.fmt(f),
+        }
+    }
+}
+
+impl std::error::Error for ExternalRootError {}
+
+fn validate_external_root_label(label: &str) -> std::io::Result<()> {
+    if label.is_empty()
+        || label.len() > 128
+        || label == "."
+        || label == ".."
+        || label.contains('/')
+        || label.contains('\\')
+        || label.bytes().any(|byte| byte.is_ascii_control())
+    {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "external root label must be one safe path component",
+        ));
+    }
+    Ok(())
+}
+
+fn manual_root_id(
+    principal: &Lifecycle::ProducerId,
+    label: &str,
+) -> std::io::Result<Lifecycle::RootId> {
+    Lifecycle::RootId::new(format!("manual:{}:{label}", principal.as_str()))
+}
+
+fn manual_root_witness(
+    principal: &Lifecycle::ProducerId,
+    label: &str,
+    reference: &str,
+    targets: &[String],
+) -> std::io::Result<Lifecycle::RootWitness> {
+    let mut canonical = String::from("jet-manual-root-v1\n");
+    for value in [principal.as_str(), label, reference] {
+        canonical.push_str(&value.len().to_string());
+        canonical.push('\n');
+        canonical.push_str(value);
+        canonical.push('\n');
+    }
+    for target in targets {
+        canonical.push_str(target);
+        canonical.push('\n');
+    }
+    Lifecycle::RootWitness::new(format!(
+        "sha256-{}",
+        SHA256::sha256_hex(canonical.as_bytes())
+    ))
+}
+
+fn external_root_targets(
+    roots: &Roots,
+    reference: &str,
+) -> Result<Vec<String>, ExternalRootError> {
+    let entry = super::list_checked(roots)
+        .map_err(ExternalRootError::Store)?
+        .into_iter()
+        .find(|entry| entry.reference == reference)
+        .ok_or_else(|| ExternalRootError::ReferenceNotFound(reference.to_string()))?;
+    let mut targets = Closure::closure_of(roots, &entry.envelope.output_hash)
+        .map_err(ExternalRootError::Store)?;
+    targets.sort();
+    targets.dedup();
+    if targets.is_empty() {
+        return Err(ExternalRootError::Store(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            format!("Hangar entry `{reference}` has no closure objects"),
+        )));
+    }
+    Ok(targets)
+}
+
+pub(crate) fn external_root_closure_size(
+    roots: &Roots,
+    reference: &str,
+) -> Result<usize, ExternalRootError> {
+    Ok(external_root_targets(roots, reference)?.len())
+}
+
+fn external_root_view(root: &Lifecycle::LifecycleRoot) -> std::io::Result<ExternalRootView> {
+    let label = root.metadata.label.clone().ok_or_else(|| {
+        std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "manual lifecycle root has no label metadata",
+        )
+    })?;
+    let reference = root.metadata.reference.clone().ok_or_else(|| {
+        std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "manual lifecycle root has no reference metadata",
+        )
+    })?;
+    Ok(ExternalRootView {
+        label,
+        reference,
+        etag: root.etag().render(),
+        closure_size: root.targets.len(),
+        prepared: root.phase == Lifecycle::RootPhase::Prepared,
+        expires_at: root.metadata.expires_at.map(|value| value.get()),
+    })
+}
+
+fn map_external_root_error(label: &str, error: std::io::Error) -> ExternalRootError {
+    if let Some(conflict) = error
+        .get_ref()
+        .and_then(|cause| cause.downcast_ref::<Lifecycle::CasConflict>())
+    {
+        return ExternalRootError::Conflict {
+            label: label.to_string(),
+            expected: conflict.expected.clone(),
+            current: conflict.current.clone(),
+        };
+    }
+    ExternalRootError::Store(error)
+}
+
+/// Atomically create or replace one manually retained Hangar closure.
+/// Lifecycle owns the typed identity, CAS check, expiry metadata, and
+/// prepare/commit journal sequence while this Store adapter resolves the
+/// reference to the complete closure under Hangar authority.
+pub(crate) fn register_external_root_at(
+    roots: &Roots,
+    principal: &str,
+    label: &str,
+    reference: &str,
+    expires_at: Option<u64>,
+    expected_etag: Option<&str>,
+    at: u64,
+) -> Result<ExternalRootView, ExternalRootError> {
+    validate_external_root_label(label).map_err(ExternalRootError::Store)?;
+    let producer = Lifecycle::ProducerId::new(principal.to_string())
+        .map_err(ExternalRootError::Store)?;
+    let metadata = Lifecycle::RootMetadata::manual(
+        label,
+        reference,
+        expires_at.map(Lifecycle::LifecycleTimestamp::from_unix_seconds),
+    )
+    .map_err(ExternalRootError::Store)?;
+    let id = manual_root_id(&producer, label).map_err(ExternalRootError::Store)?;
+    let mut targets = external_root_targets(roots, reference)?;
+    let witness = manual_root_witness(&producer, label, reference, &targets)
+        .map_err(ExternalRootError::Store)?;
+    let update = Lifecycle::RootUpdate {
+        identity: Lifecycle::RootIdentity::new(
+            Lifecycle::RootKind::Manual,
+            id.clone(),
+            producer,
+            Lifecycle::Incarnation::new(1).map_err(ExternalRootError::Store)?,
+            witness,
+        ),
+        targets: std::mem::take(&mut targets),
+        metadata,
+        expected_etag: expected_etag.map(str::to_string),
+        at: Lifecycle::LifecycleTimestamp::from_unix_seconds(at),
+    };
+    let snapshot = Lifecycle::atomic_update(roots, update)
+        .map_err(|error| map_external_root_error(label, error))?;
+    let root = snapshot.roots.get(&id).ok_or_else(|| {
+        ExternalRootError::Store(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            format!("manual lifecycle root `{label}` disappeared after update"),
+        ))
+    })?;
+    external_root_view(root).map_err(ExternalRootError::Store)
+}
+
+pub(crate) fn list_external_roots(
+    roots: &Roots,
+    principal: &str,
+) -> Result<Vec<ExternalRootView>, ExternalRootError> {
+    let producer = Lifecycle::ProducerId::new(principal.to_string())
+        .map_err(ExternalRootError::Store)?;
+    Lifecycle::snapshot(roots)
+        .map_err(ExternalRootError::Store)?
+        .roots
+        .values()
+        .filter(|root| {
+            root.identity.kind == Lifecycle::RootKind::Manual
+                && root.identity.producer == producer
+                && root.phase != Lifecycle::RootPhase::Tombstoned
+        })
+        .map(external_root_view)
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(ExternalRootError::Store)
+}
+
+pub(crate) fn unregister_external_root_at(
+    roots: &Roots,
+    principal: &str,
+    label: &str,
+    expected_etag: &str,
+    at: u64,
+) -> Result<(), ExternalRootError> {
+    validate_external_root_label(label).map_err(ExternalRootError::Store)?;
+    let producer = Lifecycle::ProducerId::new(principal.to_string())
+        .map_err(ExternalRootError::Store)?;
+    let id = manual_root_id(&producer, label).map_err(ExternalRootError::Store)?;
+    let snapshot = Lifecycle::snapshot(roots).map_err(ExternalRootError::Store)?;
+    let Some(root) = snapshot.roots.get(&id) else {
+        return Err(ExternalRootError::Store(std::io::Error::new(
+            std::io::ErrorKind::NotFound,
+            format!("external root `{label}` was not found"),
+        )));
+    };
+    if root.identity.kind != Lifecycle::RootKind::Manual
+        || root.identity.producer != producer
+    {
+        return Err(ExternalRootError::Store(std::io::Error::new(
+            std::io::ErrorKind::PermissionDenied,
+            format!("external root `{label}` is owned by another producer"),
+        )));
+    }
+    Lifecycle::atomic_remove(
+        roots,
+        &id,
+        expected_etag,
+        Lifecycle::LifecycleTimestamp::from_unix_seconds(at),
+    )
+    .map_err(|error| map_external_root_error(label, error))?;
+    Ok(())
+}
+
+pub(crate) fn reconcile_profile_generation_root(
+    roots: &Roots,
+    owner: &str,
+    profile: &str,
+    generation: u64,
+    witness: &str,
+    mut targets: Vec<String>,
+    at: u64,
+) -> std::io::Result<Option<PreparedProfileGenerationRoot>> {
+    targets.sort();
+    targets.dedup();
+    let id = Lifecycle::RootId::new(format!(
+        "profile-generation:{owner}:{profile}:{generation}"
+    ))?;
+    let expected_targets = targets.iter().cloned().collect::<BTreeSet<_>>();
+    if let Some(root) = Lifecycle::snapshot(roots)?.roots.get(&id) {
+        if root.identity.kind != Lifecycle::RootKind::ProfileGeneration
+            || root.identity.producer.as_str() != "jetpack-profile-generation"
+            || root.identity.incarnation.get() != 1
+            || root.identity.witness.as_str() != witness
+            || root.targets != expected_targets
+            || root.phase == Lifecycle::RootPhase::Tombstoned
+        {
+            return Err(std::io::Error::other(
+                "generation root disagrees with immutable metadata",
+            ));
+        }
+        if root.phase == Lifecycle::RootPhase::Committed {
+            return Ok(None);
+        }
+        return Ok(Some(PreparedProfileGenerationRoot {
+            id,
+            incarnation: Lifecycle::Incarnation::new(1)?,
+            witness: Lifecycle::RootWitness::new(witness)?,
+        }));
+    }
+    let prepared = super::prepare_profile_generation_root(
+        roots,
+        owner,
+        profile,
+        generation,
+        witness,
+        targets,
+        at,
+    )?;
+    Ok(Some(prepared))
+}
+
+
 #[cfg(test)]
 mod tests {
+
     use super::*;
     use std::fs;
     use std::sync::atomic::{AtomicU64, Ordering};

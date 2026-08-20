@@ -1014,21 +1014,55 @@ impl<'a> Checker<'a> {
             }
         }
 
-        fn same_declared_name_identity(&self, want: &str, got: &str) -> bool {
-            let (want_ns, want_name) = Self::split_type_name(want);
-            let (got_ns, got_name) = Self::split_type_name(got);
-            let (Some(want_owner), Some(got_owner)) = (
-                self.struct_owner_module(want_name, want_ns),
-                self.struct_owner_module(got_name, got_ns),
-            ) else {
-                return false;
-            };
-            if want_owner != got_owner || want_name != got_name {
-                return false;
+        fn declared_nominal_identity(&self, spelling: &str) -> Option<String> {
+            let (namespace, leaf) = Self::split_type_name(spelling);
+            if let Some(owner) = self.struct_owner_module(leaf, namespace) {
+                return Some(self.canonical_nominal_name(owner, leaf));
             }
-            self.modules
-                .and_then(|modules| modules.get(want_owner))
-                .is_some_and(|module| module.registry.contains(want_name))
+
+            // Inline-module types have a compiler-owned leaf (`M...Account`) but
+            // source names (`bank.Account`). A return path can add the enclosing
+            // file alias (`vis2.bank.Account`) before display projection. Resolve
+            // both through the ledger's one display map instead of comparing
+            // spellings or inventing another alias table.
+            let current_prefix = self
+                .modules
+                .and_then(|modules| modules.get(self.module_idx))
+                .map(|module| format!("{}.", module.module_alias));
+            let visible_spellings = |name: &str| {
+                std::iter::once(name)
+                    .chain(current_prefix.as_deref().and_then(|prefix| {
+                        name.strip_prefix(prefix)
+                    }))
+            };
+            let Some(modules) = self.modules else {
+                return None;
+            };
+            for (owner, module) in modules.iter().enumerate() {
+                for candidate in module.registry.types.keys() {
+                    if owner != self.module_idx && !self.type_is_pub_in(owner, candidate) {
+                        continue;
+                    }
+                    let display = self
+                        .name_ledger
+                        .display_path(self.module_idx, candidate, Some(owner));
+                    let matches = display
+                        .as_deref()
+                        .into_iter()
+                        .chain(std::iter::once(candidate.as_str()))
+                        .any(|target| visible_spellings(spelling).any(|name| name == target));
+                    if matches {
+                        return Some(self.canonical_nominal_name(owner, candidate));
+                    }
+                }
+            }
+            None
+        }
+
+        fn same_declared_name_identity(&self, want: &str, got: &str) -> bool {
+            self.declared_nominal_identity(want)
+                .zip(self.declared_nominal_identity(got))
+                .is_some_and(|(want, got)| want == got)
         }
 
         pub(crate) fn report_option_mismatch(&mut self, want: &Type, got: &Type, span: Span) {

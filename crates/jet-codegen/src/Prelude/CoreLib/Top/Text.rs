@@ -862,6 +862,16 @@ fn jet_std_fs_write(path: &String, text: &String) -> Result<(), jet_std::IOError
     }
     std::fs::write(path, text).map_err(|e| jet_std::io_error_at(jet_std::IOOperation::Write, path, e))
 }
+fn jet_std_fs_write_bytes(path: &String, bytes: &Vec<u8>) -> Result<(), jet_std::IOError> {
+    if jet_fault_should_fail("FS.Write") {
+        return Err(jet_std::IOError::other(
+            jet_std::IOOperation::Write,
+            Some(path.clone()),
+            "fault injected: FS.Write",
+        ));
+    }
+    std::fs::write(path, bytes).map_err(|e| jet_std::io_error_at(jet_std::IOOperation::Write, path, e))
+}
 fn jet_std_fs_append(path: &String, text: &String) -> Result<(), jet_std::IOError> {
     if jet_fault_should_fail("FS.Write") {
         return Err(jet_std::IOError::other(

@@ -138,8 +138,9 @@ trait __jet_Serialize {
 // ── D-TERM1 (ratified 2026-06-22): terminal direct-input rendering ────────────
 // The key kernel itself — `JetKey`, the per-platform byte decoders and the
 // `jet_term_enter`/`jet_term_leave`/`jet_term_read_key` dispatchers — lives in
-// `Prelude/Core/TermKey.rs`, which the TIR evaluator and the resident JIT host
-// also `include!` in-process so all three tiers share one decode (I9).
+// `Prelude/Core/TermKey.rs`. The TIR evaluator and resident JIT call the one
+// in-process `jet_codegen::terminal_runtime` instance; AOT embeds this source
+// in its generated program (I9).
 //
 // `JetShow` is an AOT-only rendering trait, so this projection stays here with
 // the rest of the generated program's show surface.

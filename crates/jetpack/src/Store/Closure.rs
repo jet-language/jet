@@ -5,6 +5,72 @@ const JOURNAL_DIR: &str = "journal";
 const PARTIAL_SUFFIX: &str = ".partial";
 const TXN_SUFFIX: &str = ".txn";
 const COMPACT_AFTER: usize = 64;
+pub struct DuEntry {
+    pub id: String,
+    pub name: String,
+    pub bytes: u64,
+    /// True when the A4 provenance shows a first-party source build.
+    pub source_built: bool,
+}
+
+/// D-JPK-GC1 / U22: honest per-object disk usage. Sizes each realized object's
+/// output tree (source-built objects live under the hangar; nix outputs live in
+/// `/nix/store` and size 0 here since Jetpack doesn't own those bytes). A
+/// source-built object is counted honestly, envelope and all.
+pub fn du(roots: &Roots) -> Vec<DuEntry> {
+    super::list(roots)
+        .into_iter()
+        .map(|e| {
+            let bytes = dir_size(std::path::Path::new(&e.out));
+            let source_built = e.envelope.provenance.contains("core-");
+            DuEntry {
+                id: e.id,
+                name: e.name,
+                bytes,
+                source_built,
+            }
+        })
+        .collect()
+}
+
+/// Total bytes on disk of a directory tree (0 if it isn't a local dir, e.g. a
+/// `/nix/store` path Jetpack references but does not own).
+pub(crate) fn dir_size(path: &std::path::Path) -> u64 {
+    if !path.is_dir() {
+        return 0;
+    }
+    let mut total = 0u64;
+    if let Ok(rd) = fs::read_dir(path) {
+        for ent in rd.flatten() {
+            let p = ent.path();
+            if p.is_dir() {
+                total += dir_size(&p);
+            } else if let Ok(meta) = p.metadata() {
+                total += meta.len();
+            }
+        }
+    }
+    total
+}
+
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+pub struct CleanReport {
+    pub removed_objects: usize,
+    pub removed_bytes: u64,
+    pub swept_tmp: usize,
+    pub swept_tmp_bytes: u64,
+    pub optimized_files: usize,
+    pub optimized_bytes: u64,
+}
+
+impl CleanReport {
+    pub fn is_empty(&self) -> bool {
+        self.removed_objects == 0
+            && self.removed_bytes == 0
+            && self.swept_tmp == 0
+            && self.swept_tmp_bytes == 0
+            && self.optimized_files == 0
+            && self.optimized_bytes == 0
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ClosureObject {

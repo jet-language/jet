@@ -1723,6 +1723,7 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                 ),
                 TBuiltinOp::Reverse => format!("({}).reverse()", recv),
                 TBuiltinOp::Sort => format!("({}).sort()", recv),
+                TBuiltinOp::SortDesc => format!("{{ jet_list_sort_desc(&mut {}); }}", recv),
                 TBuiltinOp::OrderingThen => format!(
                     "{}jet_ordering_then(&({}), &({}))",
                     cx.root_prefix,
@@ -3817,6 +3818,9 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                 TClosureOp::BagAny => format!("({}).keys().any({})", recv, a(0)),
                 TClosureOp::All => format!("jet_list_all({vec_src}, {})", a(0)),
                 TClosureOp::SortBy => format!("{{ jet_list_sort_by(&mut {}, {}); }}", recv, a(0)),
+                TClosureOp::SortByDesc => {
+                    format!("{{ jet_list_sort_by_desc(&mut {}, {}); }}", recv, a(0))
+                }
                 TClosureOp::SortByCompare => {
                     format!("{{ jet_list_sort_by_compare(&mut {}, {}); }}", recv, a(0))
                 }

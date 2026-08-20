@@ -16,6 +16,62 @@ use std::io::{self, Read, Write};
 use std::path::{Component, Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::time::{SystemTime, UNIX_EPOCH};
+pub(crate) fn make_tree_writable_for_removal(path: &Path) -> std::io::Result<()> {
+    let Ok(meta) = fs::symlink_metadata(path) else {
+        return Ok(());
+    };
+    if meta.is_dir() {
+        let mut permissions = meta.permissions();
+        permissions.set_readonly(false);
+        fs::set_permissions(path, permissions)?;
+        for entry in fs::read_dir(path)? {
+            make_tree_writable_for_removal(&entry?.path())?;
+        }
+    }
+    Ok(())
+}
+/// Validate then seal a locally produced output before it becomes reusable.
+/// Files keep executable bits but lose all write bits; directories are sealed
+/// bottom-up. Canonical archive validation rejects external hardlinks first.
+pub fn seal_local_output(path: &Path) -> std::io::Result<()> {
+    super::super::Envelope::try_output_hash_of(&path.to_string_lossy())
+        .map_err(std::io::Error::other)?;
+    seal_node(path)
+}
+
+pub(crate) fn seal_node(path: &Path) -> std::io::Result<()> {
+    let meta = fs::symlink_metadata(path)?;
+    if meta.file_type().is_symlink() {
+        return Ok(());
+    }
+    if meta.is_dir() {
+        for entry in fs::read_dir(path)? {
+            seal_node(&entry?.path())?;
+        }
+    }
+    let mut permissions = meta.permissions();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt as _;
+        permissions.set_mode(permissions.mode() & !0o222);
+    }
+    #[cfg(not(unix))]
+    permissions.set_readonly(true);
+    fs::set_permissions(path, permissions)
+}
+
+pub(crate) fn fsync_tree(path: &Path) -> std::io::Result<()> {
+    let meta = fs::symlink_metadata(path)?;
+    if meta.file_type().is_symlink() {
+        return Ok(());
+    }
+    if meta.is_dir() {
+        for entry in fs::read_dir(path)? {
+            fsync_tree(&entry?.path())?;
+        }
+    }
+    super::sync_store_node(path, meta.is_dir())
+}
 
 const BINDING_MAGIC: &str = "jet-cache-bind-v1";
 const MAX_BINDING_BYTES: u64 = 1024 * 1024;

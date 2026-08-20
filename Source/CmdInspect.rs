@@ -12,16 +12,170 @@ use jet_foundation::Registry;
 /// `jet inspect digest` — emit the one-file language surface used by agents.
 /// Every registry-shaped section is projected from the same typed rows used by
 /// the compiler's introspection and report surfaces.
-pub(crate) fn run_digest(json: bool) {
-    let digest = llm_digest();
+pub(crate) fn run_digest(args: &[String], json: bool) {
+    let (topic, list_topics) = parse_digest_args(args);
+    if !list_topics && topic.is_none() {
+        emit_digest(&llm_digest(), json);
+        return;
+    }
+    let slices = digest_slices();
+    if list_topics {
+        if topic.is_some() {
+            crate::cli_error!(
+                @fix "E2104",
+                "`--list-topics` cannot be combined with `--topic`",
+                "use `jet inspect digest --list-topics` or `jet inspect digest --topic <name>`"
+            );
+            exit(jet::ExitCodes::USAGE);
+        }
+        if json {
+            let topics = slices
+                .iter()
+                .map(|slice| format!("\"{}\"", json_escape(&slice.topic)))
+                .collect::<Vec<_>>()
+                .join(",");
+            println!("{{\"schema_version\":1,\"topics\":[{topics}]}}");
+        } else {
+            for slice in &slices {
+                println!("{}", slice.topic);
+            }
+        }
+        return;
+    }
+
+    let digest = match topic {
+        Some(topic) => match slices
+            .iter()
+            .find(|slice| slice.topic.as_str() == topic.as_str())
+        {
+            Some(slice) => slice.bytes.clone(),
+            None => {
+                let closest = slices
+                    .iter()
+                    .min_by_key(|slice| (jet::Syntax::edit_distance(&topic, &slice.topic), &slice.topic))
+                    .map(|slice| slice.topic.as_str())
+                    .unwrap_or("first-program");
+                crate::cli_error!(
+                    @fix "E2104",
+                    format!("unknown digest topic `{topic}`"),
+                    format!("use `--topic {closest}`, or list topics with `jet inspect digest --list-topics`")
+                );
+                exit(jet::ExitCodes::USAGE);
+            }
+        },
+        None => llm_digest(),
+    };
+    emit_digest(&digest, json);
+}
+
+fn emit_digest(digest: &str, json: bool) {
     if json {
         println!(
             "{{\"schema_version\":1,\"digest\":\"{}\"}}",
-            json_escape(&digest)
+            json_escape(digest)
         );
     } else {
         print!("{digest}");
     }
+}
+
+struct DigestSlice {
+    topic: String,
+    bytes: String,
+}
+
+fn parse_digest_args(args: &[String]) -> (Option<String>, bool) {
+    let mut topic = None;
+    let mut list_topics = false;
+    let mut index = 0;
+    while index < args.len() {
+        let arg = &args[index];
+        if arg == "--json" {
+            index += 1;
+            continue;
+        }
+        if arg == "--list-topics" {
+            list_topics = true;
+        } else if let Some(value) = arg.strip_prefix("--topic=") {
+            topic = Some(value.to_string());
+        } else if arg == "--topic" {
+            let Some(value) = args.get(index + 1).filter(|value| !value.starts_with('-')) else {
+                crate::cli_error!(
+                    @fix "E2104",
+                    "`--topic` needs a value",
+                    "write `--topic <name>`; use `--list-topics` to discover names"
+                );
+                exit(jet::ExitCodes::USAGE);
+            };
+            topic = Some(value.clone());
+            index += 1;
+        }
+        index += 1;
+    }
+    (topic, list_topics)
+}
+
+/// Split the one rendered digest into byte-exact topic slices. The full digest
+/// remains the only source: slices are ranges of its output, so concatenating
+/// the listed slices reproduces the whole file exactly.
+fn digest_slices() -> Vec<DigestSlice> {
+    let digest = llm_digest();
+    let headings = [
+        ("first-program", "## First program"),
+        ("core.source-rules", "## Core source rules"),
+        ("canonical", "## Canonical compiling example"),
+        ("syntax.keywords", "## Keywords"),
+        ("syntax.types", "## Built-in type names"),
+        ("syntax.reserved", "## Reserved first-party names"),
+        ("markers", "## Markers"),
+        ("core", "## Core module index"),
+        ("diagnostics", "## Diagnostics"),
+    ];
+    let starts = headings
+        .iter()
+        .map(|(_, heading)| digest.find(heading).expect("digest heading disappeared"))
+        .collect::<Vec<_>>();
+    let mut slices = Vec::new();
+    for (index, (topic, _)) in headings.iter().enumerate() {
+        let start = if index == 0 { 0 } else { starts[index] };
+        let end = starts.get(index + 1).copied().unwrap_or(digest.len());
+        if *topic != "core" {
+            slices.push(DigestSlice {
+                topic: (*topic).to_string(),
+                bytes: digest[start..end].to_string(),
+            });
+            continue;
+        }
+
+        let header_end = digest[start..end]
+            .find("module\titems\n")
+            .map(|offset| start + offset + "module\titems\n".len())
+            .expect("core digest header disappeared");
+        let rows = digest[header_end..end]
+            .split_inclusive('\n')
+            .scan(header_end, |offset, line| {
+                let start = *offset;
+                *offset += line.len();
+                line.starts_with("core.").then_some((start, *offset))
+            })
+            .collect::<Vec<_>>();
+        for (row_index, (row_start, row_end)) in rows.iter().enumerate() {
+            let topic = digest[*row_start..*row_end]
+                .split_once('\t')
+                .map(|(module, _)| module)
+                .expect("core digest row lost module name");
+            let slice_start = if row_index == 0 { start } else { *row_start };
+            let slice_end = rows
+                .get(row_index + 1)
+                .map(|(next_start, _)| *next_start)
+                .unwrap_or(end);
+            slices.push(DigestSlice {
+                topic: topic.to_string(),
+                bytes: digest[slice_start..slice_end].to_string(),
+            });
+        }
+    }
+    slices
 }
 
 fn llm_digest() -> String {

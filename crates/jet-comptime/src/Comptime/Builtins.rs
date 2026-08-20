@@ -954,6 +954,10 @@ pub fn apply_mutating_with_type(
             xs.sort_by(|a, b| cmp(a.clone(), b.clone(), span).unwrap_or(std::cmp::Ordering::Equal));
             Ok(CtValue::Unit)
         }
+        (CtValue::List(xs), "sort_desc") => {
+            xs.sort_by(|a, b| cmp(b.clone(), a.clone(), span).unwrap_or(std::cmp::Ordering::Equal));
+            Ok(CtValue::Unit)
+        }
         (CtValue::List(xs), "clear") => {
             xs.clear();
             Ok(CtValue::Unit)

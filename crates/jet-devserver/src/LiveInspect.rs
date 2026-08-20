@@ -446,7 +446,7 @@ mod tests {
 
     #[test]
     fn render_uses_only_bounded_runtime_facts() {
-        let snapshot = "{\"schema_version\":1,\"pid\":42,\"captured_ms\":1,\"tasks\":[{\"id\":1,\"parent\":0,\"state\":\"running\",\"wait\":\"\",\"deadline_ms\":null,\"cancelled\":false},{\"id\":2,\"parent\":1,\"state\":\"blocked\",\"wait\":\"channel send\",\"deadline_ms\":480,\"cancelled\":false}],\"channels\":[{\"id\":1,\"depth\":4,\"capacity\":4,\"send_waiters\":1,\"recv_waiters\":0,\"closed\":false}],\"effects\":{\"compute\":1,\"waiting\":1,\"channel\":1,\"time\":0,\"io\":0},\"resources\":{\"workers\":4,\"running\":1,\"queued\":0,\"cancelled\":0,\"arenas\":0,\"arena_allocations\":0,\"arena_bytes\":0}}";
+        let snapshot = "{\"schema_version\":1,\"pid\":42,\"start_id\":\"test\",\"captured_ms\":1,\"tasks\":[{\"id\":1,\"parent\":0,\"state\":\"running\",\"wait\":\"\",\"deadline_ms\":null,\"cancelled\":false},{\"id\":2,\"parent\":1,\"state\":\"blocked\",\"wait\":\"channel send\",\"deadline_ms\":480,\"cancelled\":false}],\"channels\":[{\"id\":1,\"depth\":4,\"capacity\":4,\"send_waiters\":1,\"recv_waiters\":0,\"closed\":false}],\"effects\":{\"compute\":1,\"waiting\":1,\"channel\":1,\"time\":0,\"io\":0},\"resources\":{\"workers\":4,\"running\":1,\"queued\":0,\"cancelled\":0,\"arenas\":0,\"arena_allocations\":0,\"arena_bytes\":0}}";
         let rendered = render(snapshot);
         assert!(rendered.contains("task 2"));
         assert!(rendered.contains("channel send"));

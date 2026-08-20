@@ -51,7 +51,7 @@ impl<'a> Parser<'a> {
     }
 
         #[allow(clippy::too_many_arguments)]
-        pub(super) fn func_after_fn(
+    pub(super) fn func_after_fn(
             &mut self,
             is_pub: bool,
             is_package_pub: bool,
@@ -134,6 +134,28 @@ impl<'a> Parser<'a> {
                     return_type = Some(ty);
                     return_type_span = Some(span);
                 } else if let Some((ty, span)) = self.parse_unit_fallible_return()? {
+                    return_type = Some(ty);
+                    return_type_span = Some(span);
+                }
+            } else if matches!(self.peek().kind, TokKind::Colon) {
+                let colon = self.bump();
+                self.diags.push(
+                    Diagnostic::error(
+                        "E0003",
+                        "a function return type uses `:`".to_string(),
+                        "Jet uses `:` for parameter and field types; callable results use `=>`"
+                            .to_string(),
+                        "replace `:` with `=>` before the return type".to_string(),
+                        Some(colon.span),
+                    )
+                    .with_edit(crate::Diagnostics::TextEdit {
+                        span: colon.span,
+                        new_text: Syntax::OP_CALLABLE_ARROW.to_string(),
+                    }),
+                );
+                arrow_return = true;
+                if self.type_starts_here() {
+                    let (ty, span) = self.return_type()?;
                     return_type = Some(ty);
                     return_type_span = Some(span);
                 }
@@ -301,6 +323,32 @@ impl<'a> Parser<'a> {
                 compiler_generated: false,
                 body,
             })
+        }
+
+        pub(in crate::Parser) fn foreign_function(&mut self) -> Result<Func, Diagnostic> {
+            self.func_after_fn(
+                false,
+                false,
+                false,
+                None,
+                None,
+                false,
+                false,
+                None,
+                None,
+                None,
+                false,
+                None,
+                false,
+                None,
+                None,
+                None,
+                false,
+                false,
+                None,
+                false,
+                None,
+            )
         }
     
         #[allow(clippy::too_many_arguments)]

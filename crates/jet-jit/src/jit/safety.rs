@@ -3446,6 +3446,12 @@ fn resident_safe_closure_method(
                 && resident_safe_expr_callback(args, 1, callees)
                     .is_some_and(|body| matches!(&body.ty, Type::Int))
         }
+        TIR::TClosureOp::SortByDesc => {
+            jit_closure_elem_type(&recv.ty)
+                .is_some_and(|elem| matches!(elem, Type::String | Type::Named(_)))
+                && resident_safe_expr_callback(args, 1, callees)
+                    .is_some_and(|body| matches!(&body.ty, Type::Int | Type::String))
+        }
         TIR::TClosureOp::SortByCompare => {
             jit_closure_elem_type(&recv.ty)
                 .is_some_and(|elem| matches!(elem, Type::Int | Type::String | Type::Named(_)))
@@ -3708,6 +3714,9 @@ fn resident_safe_builtin_op(
             jit_map_string_type(recv_ty) && args.is_empty()
         }
         TBuiltinOp::Sort => {
+            (jit_list_int_type(recv_ty) || jit_list_string_type(recv_ty)) && args.is_empty()
+        }
+        TBuiltinOp::SortDesc => {
             (jit_list_int_type(recv_ty) || jit_list_string_type(recv_ty)) && args.is_empty()
         }
         TBuiltinOp::LenList => {

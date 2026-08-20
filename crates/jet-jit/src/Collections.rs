@@ -1439,6 +1439,21 @@ fn jet_jit_list_sort(list: i64) {
     });
 }
 
+fn jet_jit_list_sort_desc(list: i64) {
+    Concurrency::with_runtime_mut(|rt| {
+        let mut values = rt
+            .heap
+            .clone_int_list(list)
+            .expect("jit list sort_desc: bad handle");
+        values.sort_by(|left, right| right.cmp(left));
+        for (index, value) in values.into_iter().enumerate() {
+            rt.heap
+                .list_set_int(list, index as i64, value)
+                .expect("jit list sort_desc: set");
+        }
+    });
+}
+
 /// Lexicographic sort of a `[String]` list (handles are string arena ids).
 fn jet_jit_list_sort_str(list: i64) {
     Concurrency::with_runtime_mut(|rt| {
@@ -1459,6 +1474,24 @@ fn jet_jit_list_sort_str(list: i64) {
             rt.heap
                 .list_set_int(list, i as i64, id)
                 .expect("jit list sort_str: set");
+        }
+    });
+}
+
+fn jet_jit_list_sort_str_desc(list: i64) {
+    Concurrency::with_runtime_mut(|rt| {
+        let Some(ids) = rt.heap.clone_int_list(list) else {
+            jet_foundation::ice!(None, "jit list sort_str_desc: bad handle");
+        };
+        let mut pairs: Vec<(String, i64)> = ids
+            .into_iter()
+            .map(|id| (rt.heap.clone_string(id).unwrap_or_default(), id))
+            .collect();
+        pairs.sort_by(|a, b| b.0.cmp(&a.0));
+        for (index, (_, id)) in pairs.into_iter().enumerate() {
+            rt.heap
+                .list_set_int(list, index as i64, id)
+                .expect("jit list sort_str_desc: set");
         }
     });
 }
@@ -3015,6 +3048,14 @@ fn jet_jit_list_replace(list: i64, index: i64, new: i64) -> i64 {
 
 /// Stable sort `list` in place by parallel i64 `keys` (same length).
 fn jet_jit_list_sort_by_i64_keys(list: i64, keys: i64) {
+    jet_jit_list_sort_by_i64_keys_impl(list, keys, false);
+}
+
+fn jet_jit_list_sort_by_i64_keys_desc(list: i64, keys: i64) {
+    jet_jit_list_sort_by_i64_keys_impl(list, keys, true);
+}
+
+fn jet_jit_list_sort_by_i64_keys_impl(list: i64, keys: i64, descending: bool) {
     Concurrency::with_runtime_mut(|rt| {
         let xs = rt
             .heap
@@ -3026,7 +3067,13 @@ fn jet_jit_list_sort_by_i64_keys(list: i64, keys: i64) {
             .expect("jit sort_by: bad keys handle");
         debug_assert_eq!(xs.len(), keys.len());
         let mut order: Vec<usize> = (0..xs.len()).collect();
-        order.sort_by_key(|&i| keys[i]);
+        order.sort_by(|&a, &b| {
+            if descending {
+                keys[b].cmp(&keys[a])
+            } else {
+                keys[a].cmp(&keys[b])
+            }
+        });
         for (dst, src) in order.into_iter().enumerate() {
             rt.heap
                 .list_set_int(list, dst as i64, xs[src])
@@ -3037,6 +3084,14 @@ fn jet_jit_list_sort_by_i64_keys(list: i64, keys: i64) {
 
 /// Stable sort `list` by parallel string-handle keys (Jet `String` heap ids).
 fn jet_jit_list_sort_by_str_keys(list: i64, keys: i64) {
+    jet_jit_list_sort_by_str_keys_impl(list, keys, false);
+}
+
+fn jet_jit_list_sort_by_str_keys_desc(list: i64, keys: i64) {
+    jet_jit_list_sort_by_str_keys_impl(list, keys, true);
+}
+
+fn jet_jit_list_sort_by_str_keys_impl(list: i64, keys: i64, descending: bool) {
     Concurrency::with_runtime_mut(|rt| {
         let xs = rt
             .heap
@@ -3052,7 +3107,13 @@ fn jet_jit_list_sort_by_str_keys(list: i64, keys: i64) {
             .map(|id| rt.heap.clone_string(*id).unwrap_or_default())
             .collect();
         let mut order: Vec<usize> = (0..xs.len()).collect();
-        order.sort_by(|&a, &b| key_strs[a].cmp(&key_strs[b]));
+        order.sort_by(|&a, &b| {
+            if descending {
+                key_strs[b].cmp(&key_strs[a])
+            } else {
+                key_strs[a].cmp(&key_strs[b])
+            }
+        });
         for (dst, src) in order.into_iter().enumerate() {
             rt.heap
                 .list_set_int(list, dst as i64, xs[src])
@@ -5258,7 +5319,9 @@ host_fns! {
     list_order_f64: "jet_jit_list_order_f64" => jet_jit_list_order_f64: sig_list_eq;
     list_indexes: "jet_jit_list_indexes" => jet_jit_list_indexes: sig_len;
     list_sort: "jet_jit_list_sort" => jet_jit_list_sort: sig_sort;
+    list_sort_desc: "jet_jit_list_sort_desc" => jet_jit_list_sort_desc: sig_sort;
     list_sort_str: "jet_jit_list_sort_str" => jet_jit_list_sort_str: sig_sort;
+    list_sort_str_desc: "jet_jit_list_sort_str_desc" => jet_jit_list_sort_str_desc: sig_sort;
     list_clone: "jet_jit_list_clone" => jet_jit_list_clone: sig_len;
     list_copy: "jet_jit_list_copy" => jet_jit_list_copy: sig_len;
     list_count: "jet_jit_list_count" => jet_jit_list_count: sig_get_opt;
@@ -5336,7 +5399,9 @@ host_fns! {
     iter_zip_family: "jet_jit_iter_zip_family" => jet_jit_iter_zip_family: sig_zip_family;
     list_unzip: "jet_jit_list_unzip" => jet_jit_list_unzip: sig_three_ret;
     list_sort_by_i64_keys: "jet_jit_list_sort_by_i64_keys" => jet_jit_list_sort_by_i64_keys: sig_sort_by_keys;
+    list_sort_by_i64_keys_desc: "jet_jit_list_sort_by_i64_keys_desc" => jet_jit_list_sort_by_i64_keys_desc: sig_sort_by_keys;
     list_sort_by_str_keys: "jet_jit_list_sort_by_str_keys" => jet_jit_list_sort_by_str_keys: sig_sort_by_keys;
+    list_sort_by_str_keys_desc: "jet_jit_list_sort_by_str_keys_desc" => jet_jit_list_sort_by_str_keys_desc: sig_sort_by_keys;
     print_enum: "jet_jit_print_enum" => jet_jit_print_enum: sig_print_enum;
     list_debug: "jet_jit_list_debug" => jet_jit_list_debug: sig_get_opt;
     string_debug: "jet_jit_string_debug" => jet_jit_string_debug: sig_len;

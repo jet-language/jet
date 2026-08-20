@@ -35,8 +35,8 @@ mod math_lib_pure {
 /// value carrier. The variant names are the ratified Jet `Key` variant names
 /// and the payloads are the same `Char`/`Int` the AOT and resident tiers carry,
 /// so a key read on one tier renders identically on the others.
-fn key_to_ct(key: super::term_key::JetKey) -> CtValue {
-    use super::term_key::JetKey;
+fn key_to_ct(key: crate::terminal_runtime::JetKey) -> CtValue {
+    use crate::terminal_runtime::JetKey;
     // Positional payloads keep `label: None`, the same shape a `Key.Char('h')`
     // enum literal evaluates to, so a read key and a written key compare and
     // render identically.
@@ -4860,7 +4860,7 @@ impl<'a> EvalCtx<'a> {
             && method == "read_key"
             && args.is_empty()
         {
-            return Ok(key_to_ct(super::term_key::jet_term_read_key()));
+            return Ok(key_to_ct(crate::terminal_runtime::jet_term_read_key()));
         }
         // D-PIN1 / S58: `mem.address_of(place)` returns the stable address
         // identity and records its allocation provenance in the sentry

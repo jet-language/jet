@@ -988,6 +988,25 @@ fn canonical_rule_arg_variants(name: &str) -> Option<&'static [&'static str]> {
     })
 }
 
+/// Source argument kinds that are checked by the language itself instead of
+/// published as closed menus in `core.compiler.lang`. `Type` is the ordinary
+/// declared-type slot for `#SQL` (D-SQL-ARG1=B), not a language enum.
+const RULE_ARG_TYPES_WITHOUT_CORE_DECLARATION: &[&str] = &[
+    "Value",
+    "String",
+    "Ident",
+    "Bool",
+    "Int",
+    "Duration | String",
+    "[Effect]",
+    "Type",
+    "T.default",
+];
+
+fn rule_arg_needs_core_declaration(name: &str) -> bool {
+    !RULE_ARG_TYPES_WITHOUT_CORE_DECLARATION.contains(&name)
+}
+
 /// Generated from the active/retired applied-rule signatures. `Track` is the
 /// compatibility reflection enum retained by D-RULEARG-TYPES1.
 pub static RULE_ARG_DECLARATIONS: LazyLock<Vec<RuleArgDeclaration>> = LazyLock::new(|| {
@@ -1682,10 +1701,7 @@ mod tests {
         }
         for row in super::APPLIED_RULES.iter() {
             for param in row.signature.params {
-                if matches!(
-                    param.source_type,
-                    "Value" | "String" | "Ident" | "Bool" | "Int" | "Duration | String" | "[Effect]" | "T.default"
-                ) {
+                if !super::rule_arg_needs_core_declaration(param.source_type) {
                     continue;
                 }
                 assert!(
@@ -1697,10 +1713,7 @@ mod tests {
                 );
             }
             if let Some(source_type) = row.signature.variadic_source_type {
-                if !matches!(
-                    source_type,
-                    "Value" | "String" | "Ident" | "Bool" | "Int" | "Duration | String"
-                ) {
+                if super::rule_arg_needs_core_declaration(source_type) {
                     assert!(
                         super::rule_arg_declaration(source_type).is_some(),
                         "#{} variadic type core.compiler.lang.{source_type}",

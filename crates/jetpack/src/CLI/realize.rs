@@ -691,25 +691,6 @@ fn typed_plan_with_defaults(
         );
         2
     })?;
-    let target = std::env::var("JET_TARGET").unwrap_or_else(|_| {
-        let os = if cfg!(target_os = "macos") {
-            "darwin"
-        } else {
-            std::env::consts::OS
-        };
-        format!("{}-{os}", std::env::consts::ARCH)
-    });
-    for integration in &plan.integrations {
-        if let Err(error) = integration.validate_target(&target) {
-            theme.error_coded(
-                "E1335",
-                "environment integration target check failed",
-                &error,
-                "set JET_TARGET to an explicitly supported target, or remove the integration from this environment",
-            );
-            return Err(2);
-        }
-    }
     let mut table = plan.table;
     table.merge_defaults(toml_defaults);
     // U12: a dev service with no explicit `run:` that matches the built-in

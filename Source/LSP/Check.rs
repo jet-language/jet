@@ -1,6 +1,6 @@
 //! Document check (used by LSP and tests) + unified fix engine + doctor/bench.
 
-use crate::Diagnostics::{Diagnostic, FixApplicability, TextEdit};
+use crate::Diagnostics::{Diagnostic, FixApplicability, FixSafety, TextEdit};
 use crate::AST::ProgramBundle;
 use std::path::{Path, PathBuf};
 
@@ -57,6 +57,9 @@ pub struct Fix {
     pub edit: TextEdit,
     /// The row-owned promise used by CLI policy; editors show both grades.
     pub applicability: FixApplicability,
+    /// Closed report safety class. CLI applies only formatting and
+    /// behavior-preserving edits unless `--all` is explicit.
+    pub safety: FixSafety,
 }
 
 /// Collect every machine-projected fix for a document, in diagnostic order.
@@ -71,6 +74,7 @@ pub fn safe_fixes(fixes: &[Fix]) -> Vec<Fix> {
     fixes
         .iter()
         .filter(|fix| fix.applicability == FixApplicability::Safe)
+        .filter(|fix| fix.safety.auto_apply())
         .cloned()
         .collect()
 }
@@ -88,6 +92,7 @@ pub fn collect_fixes_from_diagnostics(diagnostics: Vec<Diagnostic>, text: &str) 
                     .to_string(),
                 edit,
                 applicability: FixApplicability::Safe,
+                safety: FixSafety::Formatting,
             }),
     );
     fixes.extend(
@@ -97,6 +102,7 @@ pub fn collect_fixes_from_diagnostics(diagnostics: Vec<Diagnostic>, text: &str) 
                 title: "rewrite retired print-family spelling (D-ONCE-PRINT1)".to_string(),
                 edit,
                 applicability: FixApplicability::Safe,
+                safety: FixSafety::Formatting,
             }),
     );
     fixes.extend(
@@ -106,6 +112,7 @@ pub fn collect_fixes_from_diagnostics(diagnostics: Vec<Diagnostic>, text: &str) 
                 title: "rewrite retired Core container name (D-COLLNAME1=A)".to_string(),
                 edit,
                 applicability: FixApplicability::Safe,
+                safety: FixSafety::Formatting,
             }),
     );
     fixes
@@ -115,11 +122,16 @@ pub fn fixes_from_diagnostics(diagnostics: Vec<Diagnostic>) -> Vec<Fix> {
     diagnostics
         .into_iter()
         .filter_map(|d| {
-            d.edit.clone().zip(d.applicability).map(|(edit, applicability)| Fix {
-                title: d.fix.clone(),
-                edit,
-                applicability,
-            })
+            d.edit
+                .clone()
+                .zip(d.applicability)
+                .zip(d.safety)
+                .map(|((edit, applicability), safety)| Fix {
+                    title: d.fix.clone(),
+                    edit,
+                    applicability,
+                    safety,
+                })
         })
         .collect()
 }

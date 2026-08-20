@@ -1,8 +1,72 @@
 use crate::Comptime::Build::BuildPlanReplay;
 use crate::SHA256;
+use super::{CacheExpectation, CacheIdentity, Closure, Roots, StoreEntry};
 use std::collections::BTreeMap;
 
 const HEADER: &str = "jet-producer-record-v1";
+/// Build the canonical producer record shared by every store ingestion phase.
+pub(crate) fn canonical_producer(
+    provider: &str,
+    immutable_source: &str,
+    source_digest: &str,
+    identity: &CacheIdentity,
+    mut facts: BTreeMap<String, String>,
+) -> std::io::Result<String> {
+    facts.insert("action.recipe".into(), identity.recipe_fingerprint.clone());
+    facts.insert("closure.authority".into(), "hangar-cas".into());
+    let plan = crate::Comptime::Build::BuildPlanReplay::from_facts(facts.clone())
+        .map_err(std::io::Error::other)?;
+    ProducerRecord::new(
+        provider,
+        immutable_source,
+        source_digest,
+        plan,
+        "jetpack-std-provider",
+        format!(
+            "policy={}\nplatform={}",
+            identity.policy_fingerprint, identity.platform
+        ),
+        facts,
+    )
+    .map(|record| record.encode())
+    .map_err(std::io::Error::other)
+}
+
+/// Refresh the immutable producer facts after the Nix provider publishes the
+/// realization it just recorded in the project lock. The lock digest is part
+/// of the Nix action key, so leaving the pre-publication digest in the closure
+/// record would let a later replay accept stale provenance.
+pub(crate) fn refresh_nix_lock_digest(
+    roots: &Roots,
+    entry: &StoreEntry,
+    lock_digest: &str,
+) -> std::io::Result<StoreEntry> {
+    if lock_digest.is_empty() {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "cannot refresh a Nix producer with an empty project lock digest",
+        ));
+    }
+    let mut producer = ProducerRecord::decode(&entry.producer_record)
+        .map_err(std::io::Error::other)?;
+    if producer.provider != "nix" {
+        return Ok(entry.clone());
+    }
+    producer
+        .facts
+        .insert("nix.lock.digest".to_string(), lock_digest.to_string());
+    producer.plan = crate::Comptime::Build::BuildPlanReplay::from_facts(producer.facts.clone())
+        .map_err(std::io::Error::other)?;
+
+    let mut refreshed = entry.clone();
+    refreshed.producer_record = producer.encode();
+    super::super::RuntimePolicy::with_lock(&roots.root, "hangar", || {
+        Closure::recover_closure_journal_unlocked(roots)?;
+        Closure::register_entry_unlocked(roots, &refreshed)?;
+        Ok(refreshed)
+    })
+}
+
 
 /// Immutable producer facts committed beside package/object relations.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -172,8 +236,154 @@ fn nibble(byte: u8) -> Result<u8, String> {
     }
 }
 
+fn hook_fact_mismatch(name: &str, expected: &str, actual: Option<&str>) -> std::io::Error {
+    std::io::Error::new(
+        std::io::ErrorKind::InvalidData,
+        format!(
+            "adapter build hook provenance mismatch for `{name}`: expected `{expected}`, got `{}`",
+            actual.unwrap_or("<missing>")
+        ),
+    )
+}
+
+fn validate_adapter_hook_producer(
+    producer: &ProducerRecord,
+    plan: &jet_env_model::ModuleEval::AdapterPlan,
+    expectation: &CacheExpectation,
+) -> std::io::Result<()> {
+    let jet_env_model::ModuleEval::AdapterRecipe::Build(recipe) = &plan.recipe else {
+        return Ok(());
+    };
+    if producer.provider != "adapter" {
+        return Err(hook_fact_mismatch(
+            "provider",
+            "adapter",
+            Some(&producer.provider),
+        ));
+    }
+    if producer.source_digest != expectation.identity.source_fingerprint {
+        return Err(hook_fact_mismatch(
+            "source-digest",
+            &expectation.identity.source_fingerprint,
+            Some(&producer.source_digest),
+        ));
+    }
+    if producer.facts.get("adapter.source").map(String::as_str) != Some(plan.source.as_str()) {
+        return Err(hook_fact_mismatch(
+            "provider-source",
+            &plan.source,
+            producer.facts.get("adapter.source").map(String::as_str),
+        ));
+    }
+    let identity = super::Provider::adapter_action_identity(
+        plan,
+        recipe,
+        &expectation.identity.source_fingerprint,
+        &expectation.identity.platform,
+    );
+    if producer.facts.get("build.identity").map(String::as_str) != Some(identity.as_str()) {
+        return Err(hook_fact_mismatch(
+            "build.identity",
+            &identity,
+            producer.facts.get("build.identity").map(String::as_str),
+        ));
+    }
+    let capabilities = recipe.declared_capabilities().join(",");
+    if producer.facts.get("build.capabilities").map(String::as_str)
+        != Some(capabilities.as_str())
+    {
+        return Err(hook_fact_mismatch(
+            "build.capabilities",
+            &capabilities,
+            producer.facts.get("build.capabilities").map(String::as_str),
+        ));
+    }
+    Ok(())
+}
+
+pub(crate) fn validate_cached_adapter_hook(
+    entry: &StoreEntry,
+    plan: &jet_env_model::ModuleEval::AdapterPlan,
+    expectation: &CacheExpectation,
+) -> std::io::Result<()> {
+    if !matches!(
+        &plan.recipe,
+        jet_env_model::ModuleEval::AdapterRecipe::Build(_)
+    ) {
+        return Ok(());
+    }
+    if entry.cache_identity != expectation.identity {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "adapter cache identity is not the exact build-hook identity",
+        ));
+    }
+    let producer = ProducerRecord::decode(&entry.producer_record)
+        .map_err(std::io::Error::other)?;
+    validate_adapter_hook_producer(&producer, plan, expectation)
+}
+
+pub(crate) fn bind_adapter_hook_identity(
+    realized: &mut super::Provider::Realized,
+    plan: &jet_env_model::ModuleEval::AdapterPlan,
+    expectation: &CacheExpectation,
+    ctx: &super::Provider::Ctx<'_>,
+) -> std::io::Result<()> {
+    if !matches!(
+        &plan.recipe,
+        jet_env_model::ModuleEval::AdapterRecipe::Build(_)
+    ) {
+        return Ok(());
+    }
+    validate_adapter_hook_producer(&realized.producer, plan, expectation)?;
+    let expected = super::Provider::adapter_cache_identity(
+        &expectation.identity.source_fingerprint,
+        realized
+            .producer
+            .facts
+            .get("build.identity")
+            .ok_or_else(|| hook_fact_mismatch("build.identity", "exact subject", None))?,
+        ctx,
+    );
+    if expected != expectation.identity {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "adapter cache expectation is not derived from the exact build-hook subject",
+        ));
+    }
+    for (name, expected, actual) in [
+        (
+            "source-fingerprint",
+            &expectation.identity.source_fingerprint,
+            &realized.cache_identity.source_fingerprint,
+        ),
+        (
+            "policy-fingerprint",
+            &expectation.identity.policy_fingerprint,
+            &realized.cache_identity.policy_fingerprint,
+        ),
+        (
+            "platform",
+            &expectation.identity.platform,
+            &realized.cache_identity.platform,
+        ),
+    ] {
+        if expected != actual {
+            return Err(hook_fact_mismatch(
+                name,
+                expected.as_str(),
+                Some(actual.as_str()),
+            ));
+        }
+    }
+    realized.cache_identity = expected;
+    Ok(())
+}
+
+
 #[cfg(test)]
 mod tests {
+
     use super::*;
 
     fn record() -> ProducerRecord {

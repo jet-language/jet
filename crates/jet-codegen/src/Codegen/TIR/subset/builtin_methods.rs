@@ -32,7 +32,7 @@ pub(crate) fn is_covered_builtin_name(method: &str, nargs: usize) -> bool {
         |         ("len", 0) | ("is_empty", 0) | ("clear", 0)
         // List-only, except for Iter's positional terminal.
         | ("push", 1) | ("pop", 0) | ("pop", 1) | ("first", 0) | ("last", 0)
-        | ("index_of", 1) | ("reverse", 0) | ("sort", 0) | ("join", 1)
+        | ("index_of", 1) | ("reverse", 0) | ("sort", 0) | ("sort_desc", 0) | ("join", 1)
         // List + map: insert/remove/get (the Map vs List branch resolves at lowering).
         | ("insert", 2) | ("add", 2) | ("add_new", 2) | ("remove", 1 | 2) | ("get", 1)
         // List + string: contains.

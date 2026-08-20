@@ -104,6 +104,8 @@ pub fn write(workspace_root: &Path, plan: &WorkspacePlan) -> Result<(), String> 
         }
         let source_digest = if !plan.source_digest.is_empty() {
             plan.source_digest.clone()
+        } else if let Some(source) = &source {
+            jet_pkg_model::SHA256::sha256_hex(source.source.as_bytes())
         } else {
             "no-workspace-source".to_string()
         };
@@ -243,6 +245,13 @@ mod tests {
         .unwrap();
     }
 
+    fn write_workspace_index(root: &std::path::Path) -> String {
+        let source = "module workspace { members: find(\"./packages\") }\n";
+        std::fs::create_dir_all(root.join("packages")).unwrap();
+        std::fs::write(root.join(Syntax::WORKSPACE_FILE), source).unwrap();
+        jet_pkg_model::SHA256::sha256_hex(source.as_bytes())
+    }
+
     #[test]
     fn roundtrip_empty() {
         let plan = WorkspacePlan {
@@ -257,6 +266,7 @@ mod tests {
                 .subsec_nanos()
         ));
         std::fs::create_dir_all(&tmp).unwrap();
+        write_workspace_index(&tmp);
         write(&tmp, &plan).unwrap();
         let lock_path = tmp.join(Syntax::UNIFIED_LOCK_FILE);
         assert!(
@@ -286,6 +296,7 @@ mod tests {
                 .subsec_nanos()
         ));
         std::fs::create_dir_all(&tmp).unwrap();
+        write_workspace_index(&tmp);
         write_member_manifest(&tmp, "packages/hello", "hello");
         write_member_manifest(&tmp, "packages/ranker", "ranker");
         write(&tmp, &plan).unwrap();
@@ -308,6 +319,7 @@ mod tests {
                 .as_nanos()
         ));
         std::fs::create_dir_all(&tmp).unwrap();
+        write_workspace_index(&tmp);
         std::fs::write(tmp.join(Syntax::PACKAGE_FILE), "name: \"root\"\n").unwrap();
         let plan = WorkspacePlan {
             members: vec![member("root", ".")],
@@ -331,6 +343,7 @@ mod tests {
                 .subsec_nanos()
         ));
         std::fs::create_dir_all(tmp.join(".jet")).unwrap();
+        let source_digest = write_workspace_index(&tmp);
         write_member_manifest(&tmp, "packages/hello", "hello");
         let canonical = tmp.join("packages/hello").canonicalize().unwrap();
         let package_digest = jet_pkg_model::Package::PackageFacts::load(&canonical)
@@ -340,8 +353,8 @@ mod tests {
         std::fs::write(
             tmp.join(Syntax::UNIFIED_LOCK_FILE),
             format!(
-                "version = 1\nworkspace_source_digest = \"no-workspace-source\"\n\n[[workspace_member]]\nname = \"hello\"\npath = \"packages/hello\"\nsource_digest = \"no-workspace-source\"\ncanonical_path = \"packages/hello\"\npackage_digest = \"{}\"\n",
-                package_digest,
+                "version = 1\nworkspace_source_digest = \"{}\"\n\n[[workspace_member]]\nname = \"hello\"\npath = \"packages/hello\"\nsource_digest = \"{}\"\ncanonical_path = \"packages/hello\"\npackage_digest = \"{}\"\n",
+                source_digest, source_digest, package_digest,
             ),
         )
         .unwrap();
@@ -356,6 +369,7 @@ mod tests {
                 .subsec_nanos()
         ));
         std::fs::create_dir_all(moved.join(".jet")).unwrap();
+        write_workspace_index(&moved);
         std::fs::create_dir_all(moved.join("packages/hello")).unwrap();
         std::fs::copy(
             tmp.join("packages/hello").join(Syntax::PACKAGE_FILE),
@@ -386,6 +400,7 @@ mod tests {
                 .as_nanos()
         ));
         std::fs::create_dir_all(&tmp).unwrap();
+        write_workspace_index(&tmp);
         write_member_manifest(&tmp, "packages/hello", "hello");
         let plan = WorkspacePlan {
             members: vec![member("hello", "packages/hello")],
@@ -420,6 +435,7 @@ mod tests {
                 .as_nanos()
         ));
         std::fs::create_dir_all(&tmp).unwrap();
+        write_workspace_index(&tmp);
         write_member_manifest(&tmp, "packages/hello", "hello");
         let plan = WorkspacePlan {
             members: vec![member("hello", "packages/hello")],
@@ -487,6 +503,7 @@ mod tests {
             members: vec![member("hello", "packages/hello")],
             ..Default::default()
         };
+        write_workspace_index(&tmp);
         write_member_manifest(&tmp, "packages/hello", "hello");
         write(&tmp, &plan).unwrap();
         let raw = std::fs::read_to_string(tmp.join(Syntax::UNIFIED_LOCK_FILE)).unwrap();

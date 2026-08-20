@@ -1757,6 +1757,15 @@ where
 {
     xs.sort_by_key(f);
 }
+fn jet_list_sort_desc<T: Ord>(xs: &mut Vec<T>) {
+    xs.sort_by(|left, right| right.cmp(left));
+}
+fn jet_list_sort_by_desc<T, K: Ord, F>(xs: &mut Vec<T>, f: F)
+where
+    F: FnMut(&T) -> K,
+{
+    xs.sort_by_key(|item| std::cmp::Reverse(f(item)));
+}
 fn jet_list_sort_by_compare<T, F>(xs: &mut Vec<T>, mut f: F)
 where
     F: FnMut(&T, &T) -> __jet_Ordering,

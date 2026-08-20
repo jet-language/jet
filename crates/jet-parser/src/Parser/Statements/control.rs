@@ -2,6 +2,32 @@ use super::super::*;
 use super::bindings::desugar_layout_anchors;
 use jet_foundation::Names::mangle;
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum ForeignKeywordKind {
+    For,
+    While,
+    Continue,
+    Do,
+    Declaration,
+    MutableBinding,
+    ImmutableBinding,
+}
+
+const FOREIGN_KEYWORDS: &[(&str, ForeignKeywordKind)] = &[
+    (Syntax::FOREIGN_FOR, ForeignKeywordKind::For),
+    (Syntax::FOREIGN_WHILE, ForeignKeywordKind::While),
+    (Syntax::FOREIGN_CONTINUE, ForeignKeywordKind::Continue),
+    (Syntax::FOREIGN_DO, ForeignKeywordKind::Do),
+    (Syntax::FOREIGN_FUN, ForeignKeywordKind::Declaration),
+    (Syntax::FOREIGN_FUNC, ForeignKeywordKind::Declaration),
+    (Syntax::FOREIGN_DEF, ForeignKeywordKind::Declaration),
+    (Syntax::FOREIGN_FUNCTION, ForeignKeywordKind::Declaration),
+    (Syntax::FOREIGN_VAR, ForeignKeywordKind::MutableBinding),
+    (Syntax::FOREIGN_LET, ForeignKeywordKind::ImmutableBinding),
+    (Syntax::FOREIGN_CONST, ForeignKeywordKind::ImmutableBinding),
+    (Syntax::FOREIGN_VAL, ForeignKeywordKind::ImmutableBinding),
+];
+
 impl<'a> Parser<'a> {
     /// D-LOOPEVAL1: parse a finite `loop … -> …` as an immediately invoked,
     /// compiler-private collecting closure. This reuses the existing callable
@@ -1605,13 +1631,7 @@ impl<'a> Parser<'a> {
                 if name == Syntax::KW_DEFER
                     || name == Syntax::KW_ASSERT
                     || name == Syntax::KW_NEXT
-                    || matches!(
-                        name.as_str(),
-                        Syntax::FOREIGN_FOR
-                            | Syntax::FOREIGN_WHILE
-                            | Syntax::FOREIGN_CONTINUE
-                            | Syntax::FOREIGN_DO
-                    )
+                    || Self::is_foreign_loop_word(name)
         ) || self.looks_like_sigil_binding()
         {
             return self.stmt();
@@ -1720,10 +1740,85 @@ impl<'a> Parser<'a> {
         false
     }
 
+    fn foreign_keyword_kind(word: &str) -> Option<ForeignKeywordKind> {
+        FOREIGN_KEYWORDS
+            .iter()
+            .find_map(|(known, kind)| (*known == word).then_some(*kind))
+    }
+
+    fn is_foreign_loop_word(word: &str) -> bool {
+        matches!(
+            Self::foreign_keyword_kind(word),
+            Some(
+                ForeignKeywordKind::For
+                    | ForeignKeywordKind::While
+                    | ForeignKeywordKind::Continue
+                    | ForeignKeywordKind::Do
+            )
+        )
+    }
+
+    fn is_foreign_declaration_word(word: &str) -> bool {
+        matches!(
+            Self::foreign_keyword_kind(word),
+            Some(ForeignKeywordKind::Declaration)
+        )
+    }
+
+    fn is_foreign_binding_word(word: &str) -> bool {
+        matches!(
+            Self::foreign_keyword_kind(word),
+            Some(ForeignKeywordKind::MutableBinding | ForeignKeywordKind::ImmutableBinding)
+        )
+    }
+
+    fn foreign_declaration_shape(&self) -> bool {
+        matches!(self.peek2().kind, TokKind::Ident(_))
+            && matches!(self.peek3().kind, TokKind::LParen)
+    }
+
+    fn foreign_binding_shape(&self) -> bool {
+        let word = match &self.peek().kind {
+            TokKind::Ident(word) => word,
+            _ => return false,
+        };
+        let name_offset = if word == Syntax::FOREIGN_LET
+            && matches!(&self.peek2().kind, TokKind::Ident(name) if name == "mut")
+        {
+            2
+        } else {
+            1
+        };
+        if !matches!(
+            self.toks.get(self.pos + name_offset).map(|token| &token.kind),
+            Some(TokKind::Ident(_))
+        ) {
+            return false;
+        }
+        matches!(
+            self.toks
+                .get(self.pos + name_offset + 1)
+                .map(|token| &token.kind),
+            Some(TokKind::Eq | TokKind::Colon)
+        )
+    }
+
+    pub(in crate::Parser) fn at_foreign_declaration(&self) -> bool {
+        matches!(&self.peek().kind, TokKind::Ident(word)
+            if Self::is_foreign_declaration_word(word) && self.foreign_declaration_shape())
+    }
+
+    pub(in crate::Parser) fn at_foreign_binding(&self) -> bool {
+        matches!(&self.peek().kind, TokKind::Ident(word)
+            if Self::is_foreign_binding_word(word) && self.foreign_binding_shape())
+    }
+
     fn at_foreign_loop_word_statement(&self, word: &str) -> bool {
-        match word {
-            Syntax::FOREIGN_FOR | Syntax::FOREIGN_WHILE => self.foreign_loop_has_block(),
-            Syntax::FOREIGN_CONTINUE => {
+        match Self::foreign_keyword_kind(word) {
+            Some(ForeignKeywordKind::For | ForeignKeywordKind::While) => {
+                self.foreign_loop_has_block()
+            }
+            Some(ForeignKeywordKind::Continue) => {
                 matches!(self.peek2().kind, TokKind::Semi | TokKind::RBrace | TokKind::Eof)
                     || (matches!(self.peek2().kind, TokKind::Ident(_))
                         && matches!(
@@ -1731,27 +1826,118 @@ impl<'a> Parser<'a> {
                             TokKind::Semi | TokKind::RBrace | TokKind::Eof
                         ))
             }
-            Syntax::FOREIGN_DO => matches!(self.peek2().kind, TokKind::LBrace),
+            Some(ForeignKeywordKind::Do) => matches!(self.peek2().kind, TokKind::LBrace),
             _ => false,
         }
     }
 
-    fn foreign_loop_word_diagnostic(word: &str, span: Span) -> Diagnostic {
-        let fix = match word {
-            Syntax::FOREIGN_FOR => "write `loop item, source { … }`",
-            Syntax::FOREIGN_WHILE => "write `loop condition { … }`",
-            Syntax::FOREIGN_CONTINUE => "write `next`",
-            Syntax::FOREIGN_DO => "write `loop { … }`",
-            _ => "write the current loop form",
+    fn foreign_binding_edit(&self, word_span: Span, word: &str) -> Option<crate::Diagnostics::TextEdit> {
+        let word_pos = self.pos.saturating_sub(1);
+        let mutable = self.foreign_binding_is_mutable(word, word_pos);
+        let sigil = if mutable {
+            Syntax::SIGIL_BIND_MUT
+        } else {
+            Syntax::SIGIL_BIND_IMMUT
         };
-        Diagnostic::error(
-            "E0003",
-            format!("expected a statement, found `{word}`"),
-            "this position accepts only Jet's current statement grammar; retired foreign loop words are not statement keywords"
-                .to_string(),
-            fix.to_string(),
-            Some(span),
-        )
+        let name_offset = if word == Syntax::FOREIGN_LET
+            && matches!(
+                self.toks.get(word_pos + 1).map(|token| &token.kind),
+                Some(TokKind::Ident(name)) if name == "mut"
+            )
+        {
+            2
+        } else {
+            1
+        };
+        let Some(name_token) = self.toks.get(word_pos + name_offset) else {
+            return None;
+        };
+        let TokKind::Ident(name) = &name_token.kind else {
+            return None;
+        };
+        let Some(operator) = self.toks.get(word_pos + name_offset + 1) else {
+            return None;
+        };
+        matches!(&operator.kind, TokKind::Eq).then(|| crate::Diagnostics::TextEdit {
+            span: Span::new(word_span.start, operator.span.end),
+            new_text: format!("{name} {sigil}"),
+        })
+    }
+
+    fn foreign_binding_is_mutable(&self, word: &str, word_pos: usize) -> bool {
+        matches!(
+            Self::foreign_keyword_kind(word),
+            Some(ForeignKeywordKind::MutableBinding)
+        ) || (word == Syntax::FOREIGN_LET
+            && matches!(
+                self.toks.get(word_pos + 1).map(|token| &token.kind),
+                Some(TokKind::Ident(name)) if name == "mut"
+            ))
+    }
+
+    pub(in crate::Parser) fn foreign_keyword_diagnostic(
+        &self,
+        word: &str,
+        span: Span,
+    ) -> Diagnostic {
+        let kind = Self::foreign_keyword_kind(word);
+        let (what, why, fix) = match kind {
+            Some(ForeignKeywordKind::For) => (
+                format!("expected a statement, found `{word}`"),
+                "this position accepts only Jet's current statement grammar; retired foreign loop words are not statement keywords".to_string(),
+                "write `loop item, source { … }`".to_string(),
+            ),
+            Some(ForeignKeywordKind::While) => (
+                format!("expected a statement, found `{word}`"),
+                "this position accepts only Jet's current statement grammar; retired foreign loop words are not statement keywords".to_string(),
+                "write `loop condition { … }`".to_string(),
+            ),
+            Some(ForeignKeywordKind::Continue) => (
+                format!("expected a statement, found `{word}`"),
+                "this position accepts only Jet's current statement grammar; retired foreign loop words are not statement keywords".to_string(),
+                "write `next`".to_string(),
+            ),
+            Some(ForeignKeywordKind::Do) => (
+                format!("expected a statement, found `{word}`"),
+                "this position accepts only Jet's current statement grammar; retired foreign loop words are not statement keywords".to_string(),
+                "write `loop { … }`".to_string(),
+            ),
+            Some(ForeignKeywordKind::Declaration) => (
+                format!("`{word}` is a function declaration keyword; Jet writes `{}`", Syntax::KW_FN),
+                "Jet uses one function declaration spelling so every declaration has one shape".to_string(),
+                format!("replace `{word}` with `{}`", Syntax::KW_FN),
+            ),
+            Some(ForeignKeywordKind::MutableBinding | ForeignKeywordKind::ImmutableBinding) => {
+                let mutable = self.foreign_binding_is_mutable(word, self.pos.saturating_sub(1));
+                let sigil = if mutable {
+                    Syntax::SIGIL_BIND_MUT
+                } else {
+                    Syntax::SIGIL_BIND_IMMUT
+                };
+                (
+                    format!("`{word}` is a foreign binding keyword; Jet writes `{sigil}`"),
+                    "Jet puts binding mutability on `:=` or `::`, not on a declaration keyword".to_string(),
+                    format!("write `name {sigil} value`"),
+                )
+            }
+            _ => (
+                format!("expected a statement, found `{word}`"),
+                "this position accepts only Jet's current statement grammar".to_string(),
+                "write a complete Jet statement".to_string(),
+            ),
+        };
+        let mut diagnostic = Diagnostic::error("E0003", what, why, fix, Some(span));
+        if Self::is_foreign_declaration_word(word) {
+            diagnostic = diagnostic.with_edit(crate::Diagnostics::TextEdit {
+                span,
+                new_text: Syntax::KW_FN.to_string(),
+            });
+        } else if Self::is_foreign_binding_word(word) {
+            if let Some(edit) = self.foreign_binding_edit(span, word) {
+                diagnostic = diagnostic.with_edit(edit);
+            }
+        }
+        diagnostic
     }
 
     /// Parse statements until the closing `}` (consumed). Recovers at
@@ -2138,17 +2324,12 @@ impl<'a> Parser<'a> {
                 Ok(Stmt::Continue(span))
             }
             TokKind::Ident(name)
-                if matches!(
-                    name.as_str(),
-                    Syntax::FOREIGN_FOR
-                        | Syntax::FOREIGN_WHILE
-                        | Syntax::FOREIGN_CONTINUE
-                        | Syntax::FOREIGN_DO
-                ) && self.at_foreign_loop_word_statement(name) =>
+                if Self::is_foreign_loop_word(name)
+                    && self.at_foreign_loop_word_statement(name) =>
             {
                 let word = name.clone();
                 let span = self.bump().span;
-                Err(Self::foreign_loop_word_diagnostic(&word, span))
+                Err(self.foreign_keyword_diagnostic(&word, span))
             }
             TokKind::KwLoop => self.loop_stmt(None),
             // D-LOOPLABEL3=A: `name :: loop { }` declares a compile-time loop name.
@@ -2501,6 +2682,13 @@ impl<'a> Parser<'a> {
             {
                 return self.retired_layout_keyword();
             }
+            TokKind::Ident(word)
+                if self.at_foreign_declaration() || self.at_foreign_binding() =>
+            {
+                let word = word.clone();
+                let span = self.bump().span;
+                Err(self.foreign_keyword_diagnostic(&word, span))
+            }
             // `self.items.push(x);` — method bodies state effects on `self`
             // exactly like on any other name (S27).
             TokKind::Ident(_) | TokKind::KwSelf => {
@@ -2554,16 +2742,9 @@ impl<'a> Parser<'a> {
                     // spell that way. Keep the rejection, drop the false
                     // unused-value claim (D-S14-PAUSE: no teaching alias,
                     // only an honest statement-position error).
-                    Expr::Ident(word, span)
-                        if matches!(
-                            word.as_str(),
-                            Syntax::FOREIGN_FOR
-                                | Syntax::FOREIGN_WHILE
-                                | Syntax::FOREIGN_CONTINUE
-                                | Syntax::FOREIGN_DO
-                        ) =>
+                    Expr::Ident(word, span) if Self::is_foreign_loop_word(word) =>
                     {
-                        return Err(Self::foreign_loop_word_diagnostic(word, *span));
+                        return Err(self.foreign_keyword_diagnostic(word, *span));
                     }
                     other => {
                         return Err(Diagnostic::error(

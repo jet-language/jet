@@ -79,16 +79,24 @@ impl<'a> Checker<'a> {
                 .into_iter()
                 .chain(self.consts.keys().cloned())
                 .collect();
-            if let Some(cand) = suggest_field(name, &candidates) {
+            let suggestion = suggest_field(name, &candidates);
+            if let Some(cand) = suggestion.as_deref() {
                 fix = format!("did you mean `{}`?", cand);
             }
-        self.diags.push(Diagnostic::error(
+            let mut diagnostic = Diagnostic::error(
                 "E0107",
                 format!("nothing named `{}` exists here", name),
                 "a name must be declared before it's used".to_string(),
                 fix,
                 Some(span),
-            ));
+            );
+            if let Some(cand) = suggestion {
+                diagnostic = diagnostic.with_edit(crate::Diagnostics::TextEdit {
+                    span,
+                    new_text: cand,
+                });
+            }
+            self.diags.push(diagnostic);
         }
     
         /// D-INCR1: type-check `++`/`--`. Prefix returns the updated value; postfix

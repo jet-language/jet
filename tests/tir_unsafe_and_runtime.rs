@@ -52,7 +52,7 @@ cell :: 1337
 /// address. The one syntactic guard that used to sit in
 /// crates/jet-sema/src/Sema/CheckerCore/bindings.rs was bypassable by any
 /// wrapping form (e.g. one extra `( )`, preserved as `Expr::Paren` under
-/// D-FMTPARENS1=A) and never covered the `#Known` / method-call / constant
+/// D-FMTPARENS1=A) and never covered the `@` / method-call / constant
 /// paths at all. Fixed at the one place the value is actually minted
 /// (crates/jet-codegen/src/Codegen/TIR/eval/exprs.rs's CoreCall handling for
 /// `core.mem.address_of`): it now refuses outside `runtime_execution`,
@@ -90,7 +90,7 @@ fn run() {{
     }
 }
 
-/// The explicit `#Known` path demands a compile-time answer (unlike the
+/// The explicit `@` path demands a compile-time answer (unlike the
 /// silent-decline implicit path above) — `mem.address_of` genuinely has none,
 /// so it must now surface a real diagnostic instead of silently baking the
 /// same wild-address bug under an even stronger "I promise this is checked"
@@ -100,12 +100,12 @@ fn mem_address_of_known_binding_is_a_compile_error_not_a_silent_bake() {
     let src = "\
 use core.mem
 fn run() {
-    cell :: 1337
-    #Known addr :: mem.address_of(cell)
-    print(addr)
+    @cell :: 1337
+    @addr :: mem.address_of(@cell)
+    print(@addr)
 }
 ";
-    let diags = jet::compile(src).expect_err("#Known mem.address_of must not silently fold");
+    let diags = jet::compile(src).expect_err("@ mem.address_of must not silently fold");
     assert!(
         diags.iter().any(|d| d.code == "E0956"),
         "expected E0956 (can't run at compile time), got: {diags:?}"
@@ -953,6 +953,7 @@ fn run() {
         results :: tasks.join_all(^handles)
         print(results.len())
     }
+    return
 }
 ";
     let compiled = jet::compile(valid).expect("join_all should consume the handle list");
@@ -1178,9 +1179,7 @@ fn run() {
     task.group g {
         (sender, receiver) :: tasks.channel<Int>()
         sender.send(42)
-        value :: if {
-            received, receiver -> received
-        }
+        value :: g.select().recv(receiver).wait()
         print(value)
     }
 }

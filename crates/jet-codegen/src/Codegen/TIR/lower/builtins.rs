@@ -466,6 +466,7 @@ pub(crate) fn resolve_builtin_op(
         // below — Set.sort() returns a fresh List instead of mutating in place.
         ("sort", 0) if is_set => TBuiltinOp::SetSort,
         ("sort", 0) => TBuiltinOp::Sort,
+        ("sort_desc", 0) => TBuiltinOp::SortDesc,
         ("join", 1) if is_deque => TBuiltinOp::DequeJoin,
         ("join", 1) => TBuiltinOp::JoinSep,
         ("split", 1) if is_deque => TBuiltinOp::DequeSplit,
@@ -879,6 +880,7 @@ pub(crate) fn resolve_builtin_op(
             | TBuiltinOp::ExtendList
             | TBuiltinOp::Reverse
             | TBuiltinOp::Sort
+            | TBuiltinOp::SortDesc
             | TBuiltinOp::Clear
             | TBuiltinOp::SetInsert
             | TBuiltinOp::SetRemove
@@ -997,6 +999,7 @@ pub(crate) fn resolve_closure_op(
             TClosureOp::SortByCompare
         }
         "sort_by" => TClosureOp::SortBy,
+        "sort_by_desc" => TClosureOp::SortByDesc,
         "reduce" => TClosureOp::Reduce,
         // D-ITER1: new closure adapters.
         "take_while" => TClosureOp::TakeWhile,
@@ -1064,7 +1067,7 @@ pub(crate) fn resolve_closure_op(
         // The gate (`is_closure_method`) admits only the names above.
         _ => unreachable!("non-closure method in resolve_closure_op (gate)"),
     };
-    if matches!(op, TClosureOp::SortBy | TClosureOp::SortByCompare) {
+    if matches!(op, TClosureOp::SortBy | TClosureOp::SortByDesc | TClosureOp::SortByCompare) {
         debug_assert_eq!(
             crate::Collections::builtin_receiver_borrow(recv_ty, method),
             crate::Collections::BuiltinReceiverBorrow::EagerWrite

@@ -1,10 +1,10 @@
 //! D-CONC-UNIT1 / D-CONC-JOIN1 (Tower #1557): task state and join duty share
 //! the existing typestate and D-LIN1 flow facts.
 
-fn lint_codes(source: &str) -> Vec<String> {
+fn diagnostic_codes(source: &str) -> Vec<String> {
     match jet::compile(source) {
         Ok(output) => output.lints.into_iter().map(|diagnostic| diagnostic.code).collect(),
-        Err(_) => Vec::new(),
+        Err(diagnostics) => diagnostics.into_iter().map(|diagnostic| diagnostic.code).collect(),
     }
 }
 
@@ -16,8 +16,11 @@ fn run() {
     print(0)
 }
 "#;
-    let lints = lint_codes(unjoined);
-    assert!(lints.iter().any(|code| code == "L1101"), "missing shared join-duty lint: {lints:?}");
+    let diagnostics = diagnostic_codes(unjoined);
+    assert!(
+        diagnostics.iter().any(|code| code == "L1101"),
+        "missing shared join-duty error: {diagnostics:?}"
+    );
 
     let joined = r#"
 fn run() {
@@ -26,9 +29,9 @@ fn run() {
 }
 "#;
     assert!(
-        lint_codes(joined).iter().all(|code| code != "L1101"),
+        diagnostic_codes(joined).iter().all(|code| code != "L1101"),
         "joining must discharge the D-LIN1 duty: {:?}",
-        lint_codes(joined)
+        diagnostic_codes(joined)
     );
 }
 

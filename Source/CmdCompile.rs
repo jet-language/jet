@@ -1419,7 +1419,7 @@ fn write_sbom_for_build(file: &str, bin: &Path, mode: OutputMode) {
 /// fix in the editor are byte-identical. `--dry-run` shows the diff without
 /// writing. With `--edition=2027`, apply encoding-surface migrations first
 /// (D-JSONCANON1 / D-ENC-CBOR-SURFACE1 / D-ENCBASE-STRICT1).
-pub(crate) fn run_fix(file: &str, dry_run: bool, edition: Option<&str>) {
+pub(crate) fn run_fix(file: &str, dry_run: bool, edition: Option<&str>, all: bool) {
     let src = match fs::read_to_string(file) {
         Ok(s) => s,
         Err(_) => {
@@ -1444,12 +1444,16 @@ pub(crate) fn run_fix(file: &str, dry_run: bool, edition: Option<&str>) {
     let retired_print_count = jet::Formatter::retired_print_family_edits(&migrated).len();
     let retired_type_count = jet::Formatter::retired_type_edits(&migrated).len();
     let fixes = jet::LSP::collect_fixes(file, &migrated);
-    let safe_fixes = jet::LSP::safe_fixes(&fixes);
-    let skipped_suggestions = fixes.len().saturating_sub(safe_fixes.len());
-    let fixed = if safe_fixes.is_empty() {
+    let selected_fixes = if all {
+        fixes.clone()
+    } else {
+        jet::LSP::safe_fixes(&fixes)
+    };
+    let skipped_suggestions = fixes.len().saturating_sub(selected_fixes.len());
+    let fixed = if selected_fixes.is_empty() {
         migrated
     } else {
-        jet::LSP::apply_all(&migrated, &safe_fixes)
+        jet::LSP::apply_all(&migrated, &selected_fixes)
     };
     if fixed == src {
         if skipped_suggestions == 0 {
@@ -1464,7 +1468,7 @@ pub(crate) fn run_fix(file: &str, dry_run: bool, edition: Option<&str>) {
         }
         return;
     }
-    let n = safe_fixes.len();
+    let n = selected_fixes.len();
     if dry_run {
         print!("{}", jet::Formatter::unified_diff(file, &src, &fixed));
         if n == 0

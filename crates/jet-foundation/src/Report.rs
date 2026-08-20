@@ -6,6 +6,32 @@
 
 pub const REPORT_SCHEMA: &str = "jet.report/v1";
 
+/// D-REPORT-FIXGRADE1=D: closed safety classes for machine edits.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum FixSafety {
+    Formatting,
+    BehaviorPreserving,
+    ApiChanging,
+    TargetChanging,
+    NeedsReview,
+}
+
+impl FixSafety {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Formatting => "formatting",
+            Self::BehaviorPreserving => "behavior-preserving",
+            Self::ApiChanging => "api-changing",
+            Self::TargetChanging => "target-changing",
+            Self::NeedsReview => "needs-review",
+        }
+    }
+
+    pub const fn auto_apply(self) -> bool {
+        matches!(self, Self::Formatting | Self::BehaviorPreserving)
+    }
+}
+
 /// D-REPORT-FIXGRADE1=D: the promise attached to a machine-applicable edit.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum FixApplicability {
@@ -26,9 +52,9 @@ impl FixApplicability {
 
 /// A source identity suitable for a report consumer to open from its process.
 ///
-/// Relative disk paths are made absolute lexically. No manifest or `.git`
-/// search is involved, and the source does not need to exist yet. Synthetic
-/// labels such as `<cli>` remain labels.
+/// Process-supplied paths remain in the spelling the caller provided. No
+/// manifest, `.git`, or current-directory prefix is added. Synthetic labels
+/// such as `<cli>` remain labels.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ReportPath(String);
 
@@ -38,10 +64,7 @@ impl ReportPath {
     }
 
     pub fn from_process(value: &str) -> Self {
-        if value.is_empty() || value.starts_with('<') {
-            return Self::new(value);
-        }
-        Self::from_path(std::path::Path::new(value))
+        Self::new(value)
     }
 
     pub fn from_path(path: &std::path::Path) -> Self {
@@ -116,14 +139,21 @@ pub struct ReportEdit {
     pub file: ReportPath,
     pub span: ReportSpan,
     pub new_text: String,
+    pub safety: FixSafety,
 }
 
 impl ReportEdit {
-    pub fn new(file: ReportPath, span: ReportSpan, new_text: impl Into<String>) -> Self {
+    pub fn new(
+        file: ReportPath,
+        span: ReportSpan,
+        new_text: impl Into<String>,
+        safety: FixSafety,
+    ) -> Self {
         Self {
             file,
             span,
             new_text: new_text.into(),
+            safety,
         }
     }
 }
@@ -236,11 +266,12 @@ impl ReportEnvelope {
                 out.push(',');
             }
             out.push_str(&format!(
-                "{{\"file\":{},\"span\":{{\"start\":{},\"end\":{}}},\"new_text\":{}}}",
+                "{{\"file\":{},\"span\":{{\"start\":{},\"end\":{}}},\"new_text\":{},\"safety\":{}}}",
                 report_json_string(edit.file.as_str()),
                 edit.span.start,
                 edit.span.end,
                 report_json_string(&edit.new_text),
+                report_json_string(edit.safety.as_str()),
             ));
         }
         out.push_str("],\"cause\":[");

@@ -24,7 +24,7 @@
 
 use std::sync::LazyLock;
 
-use crate::Diagnostics::{FixApplicability, ReportMoment, Severity};
+use crate::Diagnostics::{FixApplicability, FixSafety, ReportMoment, Severity};
 use crate::Policy::{AppliedRule, RuleSite, APPLIED_RULES};
 
 /// What a row attaches to. This is the whole difference between the six uses
@@ -462,6 +462,7 @@ pub struct DiagnosticRow {
     pub template_holes: &'static [&'static str],
     pub detail: bool,
     pub structured_fix: Option<StructuredFix>,
+    pub fix_safety: Option<FixSafety>,
 }
 
 /// Machine-applicable behavior declared by a diagnostic row.
@@ -999,11 +1000,14 @@ fn diagnostic_row_from_source(line: &str) -> DiagnosticRow {
         "false" => false,
         other => crate::ice!(None, "diagnostic detail flag `{other}` is not bool in {line}"),
     };
-    let structured_fix = match fields[11] {
-        "-" => None,
+    let (structured_fix, fix_safety) = match fields[11] {
+        "-" => (None, None),
         value => {
             let marker = leak(&unescape_source(value));
-            Some(structured_fix_from_source(marker, line))
+            (
+                Some(structured_fix_from_source(marker, line)),
+                fix_safety_from_source(marker, line),
+            )
         }
     };
     DiagnosticRow {
@@ -1020,24 +1024,26 @@ fn diagnostic_row_from_source(line: &str) -> DiagnosticRow {
         template_holes: template_holes(&[what, why, fix]),
         detail,
         structured_fix,
+        fix_safety,
     }
 }
 
 fn structured_fix_from_source(value: &'static str, line: &str) -> StructuredFix {
-    if value == "source_edit" {
-        return StructuredFix::SourceEdit;
-    }
-    if value == "suggested_source_edit" {
-        return StructuredFix::SuggestedSourceEdit;
-    }
     if value == "crypto_misuse" {
         return StructuredFix::CryptoMisuse;
     }
-    if let Some(text) = value.strip_prefix("remove:") {
+    let marker = value.split_once('|').map_or(value, |(marker, _)| marker);
+    if marker == "source_edit" {
+        return StructuredFix::SourceEdit;
+    }
+    if marker == "suggested_source_edit" {
+        return StructuredFix::SuggestedSourceEdit;
+    }
+    if let Some(text) = marker.strip_prefix("remove:") {
         assert!(!text.is_empty(), "empty structured remove fix in {line}");
         return StructuredFix::Remove { text };
     }
-    if let Some(replacement) = value.strip_prefix("replace:") {
+    if let Some(replacement) = marker.strip_prefix("replace:") {
         let (from, to) = replacement
             .split_once("=>")
             .unwrap_or_else(|| crate::ice!(None, "structured replace fix needs `=>` in {line}"));
@@ -1050,7 +1056,7 @@ fn structured_fix_from_source(value: &'static str, line: &str) -> StructuredFix 
             to: leak(to),
         };
     }
-    if let Some(kind) = value.strip_prefix("generated:") {
+    if let Some(kind) = marker.strip_prefix("generated:") {
         return match kind {
             "marker_group" => StructuredFix::GeneratedMarkerGroup,
             "missing_arms" => StructuredFix::GeneratedMissingArms,
@@ -1059,7 +1065,24 @@ fn structured_fix_from_source(value: &'static str, line: &str) -> StructuredFix 
             _ => crate::ice!(None, "unknown generated structured fix `{kind}` in {line}"),
         };
     }
-    crate::ice!(None, "unknown structured diagnostic fix `{value}` in {line}");
+    crate::ice!(None, "unknown structured diagnostic fix `{marker}` in {line}");
+}
+
+fn fix_safety_from_source(value: &'static str, line: &str) -> Option<FixSafety> {
+    if value == "crypto_misuse" {
+        return None;
+    }
+    let (_, safety) = value
+        .rsplit_once('|')
+        .unwrap_or_else(|| crate::ice!(None, "structured fix `{value}` has no safety grade in {line}"));
+    Some(match safety {
+        "formatting" => FixSafety::Formatting,
+        "behavior-preserving" => FixSafety::BehaviorPreserving,
+        "api-changing" => FixSafety::ApiChanging,
+        "target-changing" => FixSafety::TargetChanging,
+        "needs-review" => FixSafety::NeedsReview,
+        other => crate::ice!(None, "unknown fix safety `{other}` in {line}"),
+    })
 }
 
 /// A row field whose text itself contains backticks is written as a markdown

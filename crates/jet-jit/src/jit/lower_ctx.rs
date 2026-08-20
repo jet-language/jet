@@ -20628,6 +20628,18 @@ impl LowerCtx<'_, '_> {
                     Ok(self.b.ins().iconst(types::I8, 0))
                 })
             }
+            TBuiltinOp::SortDesc => {
+                in_own_frame(|| -> Result<Value, String> {
+                    let host_id = if jit_list_string_type(&recv_ty) {
+                        self.host.coll.list_sort_str_desc
+                    } else {
+                        self.host.coll.list_sort_desc
+                    };
+                    let host_ref = self.module.declare_func_in_func(host_id, self.b.func);
+                    self.b.ins().call(host_ref, &[recv_val]);
+                    Ok(self.b.ins().iconst(types::I8, 0))
+                })
+            }
             TBuiltinOp::OrderingThen => {
                 in_own_frame(|| -> Result<Value, String> {
                     let other = self.lower_expr(&args[0])?;
@@ -28531,7 +28543,8 @@ impl LowerCtx<'_, '_> {
             TClosureOp::EachMut => self.lower_iter_each(recv, args, true),
             TClosureOp::EachRef => self.lower_iter_each(recv, args, false),
             TClosureOp::FilterMap => self.lower_iter_filter_map(recv, args),
-            TClosureOp::SortBy => self.lower_iter_sort_by(recv, args),
+            TClosureOp::SortBy => self.lower_iter_sort_by(recv, args, false),
+            TClosureOp::SortByDesc => self.lower_iter_sort_by(recv, args, true),
             TClosureOp::SortByCompare => self.lower_iter_sort_by_compare(recv, args),
             TClosureOp::TakeWhile => self.lower_iter_take_skip_while(recv, args, false),
             TClosureOp::SkipWhile => self.lower_iter_take_skip_while(recv, args, true),
@@ -30705,6 +30718,7 @@ impl LowerCtx<'_, '_> {
         &mut self,
         recv: &TExpr,
         args: &[TExpr],
+        descending: bool,
     ) -> Result<Value, String> {
         let elem_ty = jit_closure_elem_type(&recv.ty)
             .ok_or_else(|| Self::CLOSURE_UNSUPPORTED.to_string())?;
@@ -30712,9 +30726,10 @@ impl LowerCtx<'_, '_> {
             return Err(Self::CLOSURE_UNSUPPORTED.to_string());
         }
         let (param_place, body_expr) = self.closure_unary_lambda(args)?;
-        if !matches!(body_expr.ty, Type::Int) {
-            return Err("jit sort_by key must be Int".to_string());
+        if !matches!(body_expr.ty, Type::Int | Type::String) {
+            return Err("jit sort_by key must be Int or String".to_string());
         }
+        let key_is_string = matches!(body_expr.ty, Type::String);
         let recv_val = self.lower_expr(recv)?;
         let recv_val = self.collect_progress(recv_val);
         let coll_var = self.fresh_var(types::I64);
@@ -30772,9 +30787,13 @@ impl LowerCtx<'_, '_> {
         self.b.seal_block(exit);
         let coll = self.b.use_var(coll_var);
         let keys = self.b.use_var(keys_var);
-        let sort_ref = self
-            .module
-            .declare_func_in_func(self.host.coll.list_sort_by_i64_keys, self.b.func);
+        let sort_host = match (key_is_string, descending) {
+            (false, false) => self.host.coll.list_sort_by_i64_keys,
+            (false, true) => self.host.coll.list_sort_by_i64_keys_desc,
+            (true, false) => self.host.coll.list_sort_by_str_keys,
+            (true, true) => self.host.coll.list_sort_by_str_keys_desc,
+        };
+        let sort_ref = self.module.declare_func_in_func(sort_host, self.b.func);
         self.b.ins().call(sort_ref, &[coll, keys]);
         Ok(self.b.ins().iconst(types::I8, 0))
     }

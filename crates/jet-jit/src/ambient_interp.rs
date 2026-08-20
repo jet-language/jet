@@ -17,6 +17,10 @@ use crate::DB;
 use crate::IO;
 use jet_codegen::Comptime::ServicesLite as service_prelude;
 
+mod fs_walk_kernel {
+    include!("../../jet-codegen/src/Prelude/Core/FSWalk.rs");
+}
+
 trait JetShow {
     fn jet_show(&self) -> String;
 }
@@ -46,6 +50,60 @@ mod wire {
 
 fn unsupported(what: &str, span: Span) -> Diagnostic {
     jet_foundation::Prelude::jet_e0956_unsupported(what, span)
+}
+
+fn ambient_fs_walk_parallel(
+    args: &[CtValue],
+    span: Span,
+) -> Result<CtValue, Diagnostic> {
+    let Some(CtValue::Str(path)) = args.first() else {
+        return Err(unsupported("core.files.walk_parallel path", span));
+    };
+    if crate::fault_injection::jet_fault_should_fail("FS.Read") {
+        return Ok(CtValue::failed(Box::new(io_error_at(
+            "Other",
+            "Read",
+            path,
+            "fault injected: FS.Read",
+        ))));
+    }
+    let mut entries = fs_walk_kernel::jet_fs_walk_parallel(
+        path,
+        path,
+        |path, relative, is_dir, depth| (path, relative, is_dir, depth),
+        |_, error| error,
+    )
+    .map_err(|error| {
+        let kind = match error.kind() {
+            std::io::ErrorKind::InvalidInput | std::io::ErrorKind::InvalidData => "InvalidInput",
+            std::io::ErrorKind::NotFound => "NotFound",
+            std::io::ErrorKind::PermissionDenied => "PermissionDenied",
+            std::io::ErrorKind::TimedOut => "TimedOut",
+            std::io::ErrorKind::NotConnected | std::io::ErrorKind::BrokenPipe => "Closed",
+            _ => "Other",
+        };
+        io_error_at(kind, "Read", path, error.to_string())
+    });
+    match entries.as_mut() {
+        Ok(entries) => {
+            entries.sort_by(|left, right| left.0.cmp(&right.0));
+            Ok(CtValue::Present(Box::new(CtValue::List(
+                entries
+                    .drain(..)
+                    .map(|(path, relative, is_dir, depth)| CtValue::Struct {
+                        type_name: "WalkEntry".to_string(),
+                        fields: vec![
+                            ("path".to_string(), CtValue::Str(path)),
+                            ("relative".to_string(), CtValue::Str(relative)),
+                            ("is_dir".to_string(), CtValue::Bool(is_dir)),
+                            ("depth".to_string(), CtValue::Int(depth)),
+                        ],
+                    })
+                    .collect(),
+            ))))
+        }
+        Err(error) => Ok(CtValue::failed(Box::new(error.clone()))),
+    }
 }
 
 /// D-MEM-SENTRY1: the ambient tier is a CtValue adapter only. Raw memory is
@@ -2581,6 +2639,9 @@ pub fn ambient_core_call(
                 span,
             )));
         }
+    }
+    if module == "core.files" && method == "walk_parallel" {
+        return Some(ambient_fs_walk_parallel(&args, span));
     }
     if module == "core.mem" {
         if let Some(result) = mem_sentry_prelude::ambient_core_call(

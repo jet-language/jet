@@ -191,6 +191,51 @@ fn llm_digest_regenerates_byte_identically() {
             .and_then(jet_foundation::JSON::json_str),
         Some(generated.as_str())
     );
+
+    let inventory = Command::new(env!("CARGO_BIN_EXE_jet"))
+        .args(["inspect", "digest", "--list-topics"])
+        .current_dir(&root)
+        .output()
+        .expect("jet must list digest topics");
+    assert!(
+        inventory.status.success(),
+        "jet inspect digest --list-topics failed:\n{}",
+        String::from_utf8_lossy(&inventory.stderr)
+    );
+    let topics = String::from_utf8(inventory.stdout)
+        .expect("digest topic inventory is UTF-8")
+        .lines()
+        .map(str::to_string)
+        .collect::<Vec<_>>();
+    assert!(topics.iter().any(|topic| topic == "core.time"));
+    assert!(topics.iter().any(|topic| topic == "diagnostics"));
+    let mut composed = Vec::new();
+    for topic in &topics {
+        let slice = Command::new(env!("CARGO_BIN_EXE_jet"))
+            .args(["inspect", "digest", "--topic", topic])
+            .current_dir(&root)
+            .output()
+            .expect("jet must emit each digest topic");
+        assert!(
+            slice.status.success(),
+            "digest topic `{topic}` failed:\n{}",
+            String::from_utf8_lossy(&slice.stderr)
+        );
+        composed.extend_from_slice(&slice.stdout);
+    }
+    assert_eq!(composed, generated.as_bytes(), "digest topic slices drifted");
+
+    let unknown = Command::new(env!("CARGO_BIN_EXE_jet"))
+        .args(["inspect", "digest", "--topic", "diagnostcs"])
+        .current_dir(&root)
+        .output()
+        .expect("jet must reject an unknown digest topic");
+    assert!(!unknown.status.success());
+    assert!(
+        String::from_utf8_lossy(&unknown.stderr).contains("diagnostics"),
+        "unknown topic did not name nearest topic:\n{}",
+        String::from_utf8_lossy(&unknown.stderr)
+    );
 }
 
 // ---------------------------------------------------------------------------

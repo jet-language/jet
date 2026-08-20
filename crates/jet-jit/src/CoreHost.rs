@@ -15,6 +15,10 @@ mod path_kernel {
     include!("../../jet-codegen/src/Prelude/Core/Path.rs");
 }
 
+mod fs_walk_kernel {
+    include!("../../jet-codegen/src/Prelude/Core/FSWalk.rs");
+}
+
 // #2027 / I8+I9: the resident host reaches the one signal mechanism through the
 // single in-binary instance of `Prelude/CoreLib/Top/Interrupt.rs` that the TIR
 // evaluator ambient also uses. A private `include!` here compiled a second
@@ -895,6 +899,18 @@ fn jet_jit_fs_write(path: i64, text: i64) -> i64 {
     }
 }
 
+fn jet_jit_fs_write_bytes(path: i64, bytes: i64) -> i64 {
+    let p = clone_string(path);
+    let data = clone_bytes(bytes);
+    if crate::fault_injection::jet_fault_should_fail("FS.Write") {
+        return result_err_msg(&format!("fault injected: FS.Write for {p}"));
+    }
+    match std::fs::write(&p, data) {
+        Ok(()) => result_ok(0),
+        Err(e) => result_err_msg(&format!("write_bytes {p}: {e}")),
+    }
+}
+
 fn jet_jit_fs_create_dir(path: i64) -> i64 {
     let p = clone_string(path);
     if crate::fault_injection::jet_fault_should_fail("FS.Write") {
@@ -1443,6 +1459,38 @@ fn jet_jit_fs_walk(path: i64) -> i64 {
         Ok(e) => e,
         Err(e) => return result_err_msg(&format!("walk {p}: {e}")),
     };
+    let list = Concurrency::with_runtime_mut(|rt| {
+        let list = rt.heap.alloc_empty_list();
+        for (path, relative, is_dir, depth) in entries {
+            let rec = rt.heap.alloc_record(4);
+            let ps = rt.heap.alloc_string(path);
+            let rs = rt.heap.alloc_string(relative);
+            let _ = rt.heap.record_set_string(rec, 0, ps);
+            let _ = rt.heap.record_set_string(rec, 1, rs);
+            let _ = rt.heap.record_set_bool(rec, 2, is_dir);
+            let _ = rt.heap.record_set_int(rec, 3, depth);
+            let _ = rt.heap.list_push_int(list, rec);
+        }
+        list
+    });
+    result_ok(list as u64)
+}
+
+fn jet_jit_fs_walk_parallel(path: i64) -> i64 {
+    let p = clone_string(path);
+    if crate::fault_injection::jet_fault_should_fail("FS.Read") {
+        return result_err_msg(&format!("fault injected: FS.Read for {p}"));
+    }
+    let mut entries = match fs_walk_kernel::jet_fs_walk_parallel(
+        &p,
+        &p,
+        |path, relative, is_dir, depth| (path, relative, is_dir, depth),
+        |_, error| error.to_string(),
+    ) {
+        Ok(entries) => entries,
+        Err(error) => return result_err_msg(&format!("walk {p}: {error}")),
+    };
+    entries.sort_by(|left, right| left.0.cmp(&right.0));
     let list = Concurrency::with_runtime_mut(|rt| {
         let list = rt.heap.alloc_empty_list();
         for (path, relative, is_dir, depth) in entries {
@@ -2073,6 +2121,7 @@ host_fns! {
     fs_read: "jet_jit_fs_read" => jet_jit_fs_read: sig_unary_i64;
     fs_read_bytes: "jet_jit_fs_read_bytes" => jet_jit_fs_read_bytes: sig_unary_i64;
     fs_write: "jet_jit_fs_write" => jet_jit_fs_write: sig_i64_i64_i64;
+    fs_write_bytes: "jet_jit_fs_write_bytes" => jet_jit_fs_write_bytes: sig_i64_i64_i64;
     fs_create_dir: "jet_jit_fs_create_dir" => jet_jit_fs_create_dir: sig_unary_i64;
     fs_create_dir_all: "jet_jit_fs_create_dir_all" => jet_jit_fs_create_dir_all: sig_unary_i64;
     fs_list_dir: "jet_jit_fs_list_dir" => jet_jit_fs_list_dir: sig_unary_i64;
@@ -2084,6 +2133,7 @@ host_fns! {
     fs_fsync: "jet_jit_fs_fsync" => jet_jit_fs_fsync: sig_unary_i64;
     fs_write_atomic: "jet_jit_fs_write_atomic" => jet_jit_fs_write_atomic: sig_i64_i64_i64;
     fs_walk: "jet_jit_fs_walk" => jet_jit_fs_walk: sig_unary_i64;
+    fs_walk_parallel: "jet_jit_fs_walk_parallel" => jet_jit_fs_walk_parallel: sig_unary_i64;
     fs_glob: "jet_jit_fs_glob" => jet_jit_fs_glob: sig_unary_i64;
     fs_symlink: "jet_jit_fs_symlink" => jet_jit_fs_symlink: sig_i64_i64_i64;
     fs_read_link: "jet_jit_fs_read_link" => jet_jit_fs_read_link: sig_unary_i64;

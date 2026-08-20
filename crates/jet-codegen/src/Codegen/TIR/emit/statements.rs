@@ -1853,12 +1853,11 @@ fn emit_tir_stmt(
                 "jet_sentry_scope"
             };
             let gate_guard = format!(
-                "{}jet_mem::{scope}({}, {:?}, {}, {:?})",
+                "{}jet_mem::{scope}({}, {:?}, {}, \"\")",
                 cx.root_prefix,
                 gate.enabled,
                 gate.file,
                 gate.line,
-                gate.reason,
             );
             out.push_str(&format!("{}unsafe {{\n", pad));
             out.push_str(&format!("{}    let _jet_sentry = {};\n", pad, gate_guard));

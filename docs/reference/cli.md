@@ -25,6 +25,13 @@ Run a job with `jet run app.jet -- seed_data`. Cross-job dependencies are ordina
 In a workspace, use `jet jobs -p member` to list jobs for one member.
 A bare `jet jobs` names the members when the choice is ambiguous.
 
+## LLM surface digest
+
+`jet inspect digest` prints the complete generated LLM surface. Use
+`jet inspect digest --list-topics` to discover byte-exact slices, then fetch one
+with `jet inspect digest --topic diagnostics` or `jet inspect digest --topic core.time`.
+Concatenating every listed slice reproduces the complete digest.
+
 ## Build provenance
 
 Jet folds these build facts to constants before runtime:

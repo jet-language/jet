@@ -957,8 +957,8 @@ fn dev_iteration_with_timeout(stem: &str, file: &str, use_interpreter: bool) -> 
 /// `settings: .{ cache_slots: … }` and `build:` profiles that
 /// `modules/fact_value_arguments.jet` reads through `@build.settings.*`, so it
 /// is load-bearing on disk and can never parse as a program — a manifest binds
-/// `name: "…"`, which is E0003 in source. Discovering it as an example is what
-/// put one permanent unjudgeable row into `out_of_universe`, the corpus gate's
+/// `name: "…"`, which is E0003 in source. Discovering it as an example put one
+/// permanent unjudgeable row into `out_of_universe`, the corpus gate's
 /// `frontend_rejected:`, and `typechecked_example_stems`'s rejected list at the
 /// same time (#2018). Removing it HERE, at the one discovery seam every oracle
 /// reads, removes it from all three at once, and is not a skip list: the name
@@ -1077,12 +1077,9 @@ fn interpreter_example_stems() -> Vec<String> {
 ///   * `modules/package`, which was never an example — it is that topic's
 ///     manifest, now excluded at `topic_jet_files`, the one discovery seam.
 ///
-/// The one remaining row is `tooling/compiler_api`. `jet check` keeps a build
-/// entry (`Pipeline.rs`: `mode != CompileMode::Check` guards the strip), so its
-/// `fn build` body is checked as ordinary code and `core.compiler.lex` is E0956
-/// — compile-time only. That is a property of checking a build entry outside a
-/// build session, not a broken example: `jet run` accepts the same file.
-const SEMA_REJECTED_CEILING: usize = 1;
+/// Build entries use the full staged build front end, so compiler-only calls
+/// and generated runtime declarations are checked in their real context.
+const SEMA_REJECTED_CEILING: usize = 0;
 
 /// The stems the run-path front end accepts, and the ones it rejects together
 /// with the reason the compiler gave (#2020). Nothing is discarded.
@@ -1090,7 +1087,18 @@ fn typechecked_example_stems() -> (Vec<String>, Vec<String>) {
     let mut accepted = Vec::new();
     let mut rejected = Vec::new();
     for stem in all_example_stems() {
-        let diags = jet::check_with_path(&example_path(&stem));
+        let file = example_path(&stem);
+        let diags = if let Ok(source) = fs::read_to_string(&file) {
+            if jet::Driver::selects_build_entry(&source, None) {
+                jet::Driver::compile_bundle_path_build(&file, jet::Driver::BuildRunOptions::default())
+                    .map(|_| Vec::new())
+                    .unwrap_or_else(|diags| diags)
+            } else {
+                jet::check_with_path(&file)
+            }
+        } else {
+            jet::check_with_path(&file)
+        };
         if diags
             .iter()
             .any(|d| matches!(d.severity, jet::Diagnostics::Severity::Error))
@@ -1195,18 +1203,10 @@ const EXAMPLE_CORPUS_FLOOR: usize = 497;
 /// `classify_corpus_stem` does, so the two in-process front ends can no longer
 /// judge the same `@build.*`-reading stem in two different contexts.
 ///
-/// The one remaining row is `tooling/compiler_api`, and its reason is structural
-/// rather than a defect to fix: its `fn run` calls `generated_compiler_api()`,
-/// which is declared only by the module its OWN `fn build` generates. A
-/// `Loader::load_entry` + `Sema::check_bundle` oracle never runs a build entry,
-/// so the declarer cannot exist by the time sema looks for it — the stem needs
-/// the full generate pipeline (`compile_with_path`), not a wider load+check
-/// context. `comptime/distinct_reflect` proves a `fn build` alone is no obstacle:
-/// it is compile-covered, because nothing in its `run` depends on generated
-/// source. This is a stated reason, not a skip: the row is still derived from the
-/// compiler's diagnostic on every run, and if the stem ever compiles, the
-/// `OUT_OF_UNIVERSE_CEILING == 0` assertion below forces this constant to 0.
-const OUT_OF_UNIVERSE_CEILING: usize = 1;
+/// Build entries now use the same staged runtime bundle as `jet run`, so
+/// generated declarations enter this oracle instead of being reported outside
+/// it.
+const OUT_OF_UNIVERSE_CEILING: usize = 0;
 
 /// How many compile-covered stems the resident JIT must still be willing to run
 /// — the universe `cranelift_three_way_differential_battery` is scoped to
@@ -1337,6 +1337,26 @@ fn observe_jit_coverage() -> JitCoverage {
 /// Put one example in front of the JIT lowerer, or say what stopped it.
 fn classify_jit_compile(path: &std::path::Path) -> JitCompileVerdict {
     let file = path.to_string_lossy();
+    if fs::read_to_string(path)
+        .ok()
+        .is_some_and(|source| jet::Driver::selects_build_entry(&source, None))
+    {
+        return match jet::Driver::compile_bundle_path_build(
+            &file,
+            jet::Driver::BuildRunOptions::default(),
+        ) {
+            Ok(output) => match output.runtime {
+                Some(bundle) => classify_jit_bundle(bundle),
+                None => JitCompileVerdict::OutOfUniverse(
+                    "build front end returned no runtime bundle".to_string(),
+                ),
+            },
+            Err(diagnostics) => JitCompileVerdict::OutOfUniverse(format!(
+                "build: {}",
+                first_diagnostic_summary(&diagnostics)
+            )),
+        };
+    }
     // #1998: this arm was `Err(_) => continue`, which dropped the stem.
     let mut bundle = match jet::Loader::load_entry(&file) {
         Ok(bundle) => bundle,
@@ -1380,6 +1400,10 @@ fn classify_jit_compile(path: &std::path::Path) -> JitCompileVerdict {
             first_diagnostic_summary(&errors)
         ));
     }
+    classify_jit_bundle(bundle)
+}
+
+fn classify_jit_bundle(bundle: jet::AST::ProgramBundle) -> JitCompileVerdict {
     match jet_jit::try_compile_bundle(&bundle) {
         // #2012: one more question about a bundle the lowerer already accepted:
         // will the resident JIT run it? `resident_jit_safe_bundle_detail` is a
@@ -4004,18 +4028,50 @@ fn classify_corpus_stem(stem: &str, have_rustc: bool) -> CorpusGateRecord {
         };
     }
 
-    let mut bundle = match jet::Loader::load_entry(&file) {
-        Ok(b) => b,
-        Err(diags) => {
-            let detail = diags
-                .first()
-                .map(|d| format!("{}: {}", d.code, d.what))
-                .unwrap_or_else(|| "load failed".to_string());
-            return CorpusGateRecord {
-                stem: stem.to_string(),
-                class: CorpusGateClass::FrontendRejected,
-                detail,
-            };
+    let build_entry = fs::read_to_string(&file)
+        .ok()
+        .is_some_and(|source| jet::Driver::selects_build_entry(&source, None));
+    let mut bundle = if build_entry {
+        match jet::Driver::compile_bundle_path_build(
+            &file,
+            jet::Driver::BuildRunOptions::default(),
+        ) {
+            Ok(output) => match output.runtime {
+                Some(bundle) => bundle,
+                None => {
+                    return CorpusGateRecord {
+                        stem: stem.to_string(),
+                        class: CorpusGateClass::FrontendRejected,
+                        detail: "build front end returned no runtime bundle".to_string(),
+                    }
+                }
+            },
+            Err(diags) => {
+                let detail = diags
+                    .first()
+                    .map(|d| format!("{}: {}", d.code, d.what))
+                    .unwrap_or_else(|| "build failed".to_string());
+                return CorpusGateRecord {
+                    stem: stem.to_string(),
+                    class: CorpusGateClass::FrontendRejected,
+                    detail,
+                };
+            }
+        }
+    } else {
+        match jet::Loader::load_entry(&file) {
+            Ok(b) => b,
+            Err(diags) => {
+                let detail = diags
+                    .first()
+                    .map(|d| format!("{}: {}", d.code, d.what))
+                    .unwrap_or_else(|| "load failed".to_string());
+                return CorpusGateRecord {
+                    stem: stem.to_string(),
+                    class: CorpusGateClass::FrontendRejected,
+                    detail,
+                };
+            }
         }
     };
     // The run tier's bundle is the one `jet run` builds, not a load+check
@@ -4026,19 +4082,23 @@ fn classify_corpus_stem(stem: &str, have_rustc: bool) -> CorpusGateRecord {
     // only, so `comptime/build_stamp` printed the harness's defaults against the
     // oracle's locked `.jet/lock` stamp and the gate blamed the run tier for a
     // snapshot the gate itself never took (I9: engines marshal one snapshot).
-    let errors: Vec<_> = match jet::Driver::seed_build_facts(
-        &mut bundle,
-        "dev",
-        false,
-        &std::collections::BTreeMap::new(),
-    ) {
-        // Seeding answers with errors only, so they are already the run-path
-        // rejection the block below classifies.
-        Err(diags) => diags,
-        Ok(()) => jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run)
-            .into_iter()
-            .filter(|d| matches!(d.severity, jet::Diagnostics::Severity::Error))
-            .collect(),
+    let errors: Vec<_> = if build_entry {
+        Vec::new()
+    } else {
+        match jet::Driver::seed_build_facts(
+            &mut bundle,
+            "dev",
+            false,
+            &std::collections::BTreeMap::new(),
+        ) {
+            // Seeding answers with errors only, so they are already the run-path
+            // rejection the block below classifies.
+            Err(diags) => diags,
+            Ok(()) => jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run)
+                .into_iter()
+                .filter(|d| matches!(d.severity, jet::Diagnostics::Severity::Error))
+                .collect(),
+        }
     };
     if !errors.is_empty() {
         let detail = errors

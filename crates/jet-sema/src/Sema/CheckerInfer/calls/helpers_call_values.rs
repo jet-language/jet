@@ -311,7 +311,11 @@ impl<'a> Checker<'a> {
                             param_ty,
                             param_convention,
                         );
-                        if got != *param_ty {
+                        let boxes_as_trait = self.trait_slot_accepts(param_ty, &got);
+                        if boxes_as_trait {
+                            self.note_move_if_direct_ident(&arg.expr);
+                        }
+                        if got != *param_ty && !boxes_as_trait {
                             self.diags.push(Diagnostic::error(
                                 "E0112",
                                 format!(

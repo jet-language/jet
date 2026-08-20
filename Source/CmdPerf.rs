@@ -2308,9 +2308,9 @@ fn export_json_envelope(trace: &CanonicalJson) -> CanonicalJson {
         || native_summary(trace).is_some()
         || span_summary(trace).is_some()
     {
-        "json-envelope; domains present are wall/cpu/alloc/browser/tasks/locks/io/native/spans only — no pprof/otel/chrome payloads"
+        "json-envelope; domains present are wall/cpu/alloc/browser/tasks/locks/io/native/spans only — standard Trace Event payload available with --chrome; pprof/OTel remain JSON projections"
     } else {
-        "json-envelope-only; no pprof/otel/chrome payloads in skeleton"
+        "json-envelope-only; standard Trace Event payload available with --chrome; pprof/OTel remain JSON projections"
     };
     CanonicalJson::object([
         ("kind".into(), CanonicalJson::String("jet.trace.projection".into())),
@@ -2386,51 +2386,149 @@ fn export_otel_projection(trace: &CanonicalJson) -> CanonicalJson {
 
 fn export_chrome_projection(trace: &CanonicalJson) -> CanonicalJson {
     let mut events = Vec::new();
-    if let Some(wall) = sample_duration(trace, "wall") {
-        events.push(
-            CanonicalJson::object([
-                ("dur".into(), CanonicalJson::Integer(wall.to_string())),
-                ("name".into(), CanonicalJson::String("wall".into())),
-                ("ph".into(), CanonicalJson::String("X".into())),
-                ("pid".into(), CanonicalJson::Integer("1".into())),
-                ("tid".into(), CanonicalJson::Integer("1".into())),
-                ("ts".into(), CanonicalJson::Integer("0".into())),
-            ])
-            .unwrap(),
-        );
+    chrome_process_name(&mut events);
+    for (tid, name) in [
+        (1, "wall samples"),
+        (2, "cpu samples"),
+        (3, "browser"),
+        (4, "lock contention"),
+        (5, "native CPU"),
+        (6, "allocations"),
+    ] {
+        chrome_thread_name(&mut events, tid, name);
     }
     if let Some(content) = content_object(trace) {
+        if let Some(CanonicalJson::Array(items)) = content.get("samples") {
+            for item in items {
+                let CanonicalJson::Object(fields) = item else {
+                    continue;
+                };
+                let Some(duration_ns) = chrome_integer(fields, "duration_ns") else {
+                    continue;
+                };
+                let Some(domain) = fields.get("domain").and_then(chrome_string) else {
+                    continue;
+                };
+                let tid = match domain {
+                    "wall" => 1,
+                    "cpu" => 2,
+                    _ => continue,
+                };
+                chrome_symbol_event(&mut events, fields, 0, duration_ns, tid);
+            }
+        }
+        if let Some(CanonicalJson::Array(items)) = content.get("allocations") {
+            for item in items {
+                let CanonicalJson::Object(fields) = item else {
+                    continue;
+                };
+                chrome_symbol_event(&mut events, fields, 0, 0, 6);
+            }
+        }
+        if let Some(CanonicalJson::Array(items)) = content.get("tasks") {
+            for item in items {
+                let CanonicalJson::Object(fields) = item else {
+                    continue;
+                };
+                let Some(task_id) = chrome_integer(fields, "id") else {
+                    continue;
+                };
+                chrome_thread_name(&mut events, chrome_task_tid(task_id), &format!("task {task_id}"));
+            }
+        }
         if let Some(CanonicalJson::Array(items)) = content.get("browser") {
             for item in items {
                 let CanonicalJson::Object(fields) = item else {
                     continue;
                 };
-                let start = match fields.get("start_ns") {
-                    Some(CanonicalJson::Integer(text)) => text.clone(),
-                    _ => continue,
+                let Some(start_ns) = chrome_integer(fields, "start_ns") else {
+                    continue;
                 };
-                let dur = match fields.get("duration_ns") {
-                    Some(CanonicalJson::Integer(text)) => text.clone(),
-                    _ => continue,
+                let Some(duration_ns) = chrome_integer(fields, "duration_ns") else {
+                    continue;
                 };
-                let name = match fields.get("symbol") {
-                    Some(CanonicalJson::Object(symbol)) => match symbol.get("name") {
-                        Some(CanonicalJson::String(name)) => name.clone(),
-                        _ => "browser".into(),
-                    },
-                    _ => "browser".into(),
+                chrome_symbol_event(&mut events, fields, start_ns, duration_ns, 3);
+            }
+        }
+        if let Some(CanonicalJson::Array(items)) = content.get("spans") {
+            for item in items {
+                let CanonicalJson::Object(fields) = item else {
+                    continue;
                 };
-                events.push(
-                    CanonicalJson::object([
-                        ("dur".into(), CanonicalJson::Integer(dur)),
-                        ("name".into(), CanonicalJson::String(name)),
-                        ("ph".into(), CanonicalJson::String("X".into())),
-                        ("pid".into(), CanonicalJson::Integer("1".into())),
-                        ("tid".into(), CanonicalJson::Integer("2".into())),
-                        ("ts".into(), CanonicalJson::Integer(start)),
-                    ])
-                    .unwrap(),
+                if fields.get("status") != Some(&CanonicalJson::String("captured".into())) {
+                    continue;
+                }
+                let Some(start_ns) = chrome_integer(fields, "start_ns") else {
+                    continue;
+                };
+                let Some(end_ns) = chrome_integer(fields, "end_ns") else {
+                    continue;
+                };
+                let Some(task_id) = chrome_integer(fields, "task_id") else {
+                    continue;
+                };
+                let tid = chrome_task_tid(task_id);
+                chrome_symbol_event(
+                    &mut events,
+                    fields,
+                    start_ns,
+                    end_ns.saturating_sub(start_ns),
+                    tid,
                 );
+            }
+        }
+        if let Some(CanonicalJson::Array(items)) = content.get("io") {
+            for item in items {
+                let CanonicalJson::Object(fields) = item else {
+                    continue;
+                };
+                let Some(start_ns) = chrome_integer(fields, "start_ns") else {
+                    continue;
+                };
+                let Some(end_ns) = chrome_integer(fields, "end_ns") else {
+                    continue;
+                };
+                let Some(task_id) = chrome_integer(fields, "task_id") else {
+                    continue;
+                };
+                let tid = chrome_task_tid(task_id);
+                chrome_symbol_event(
+                    &mut events,
+                    fields,
+                    start_ns,
+                    end_ns.saturating_sub(start_ns),
+                    tid,
+                );
+            }
+        }
+        if let Some(CanonicalJson::Array(items)) = content.get("locks") {
+            for item in items {
+                let CanonicalJson::Object(fields) = item else {
+                    continue;
+                };
+                chrome_symbol_event(&mut events, fields, 0, 0, 4);
+            }
+        }
+        if let Some(CanonicalJson::Array(items)) = content.get("native") {
+            for item in items {
+                let CanonicalJson::Object(fields) = item else {
+                    continue;
+                };
+                if fields.get("status") != Some(&CanonicalJson::String("captured".into())) {
+                    continue;
+                }
+                let Some(start_ns) = chrome_integer(fields, "observed_at_ns") else {
+                    continue;
+                };
+                let Some(duration_ns) = chrome_integer(fields, "duration_ns") else {
+                    continue;
+                };
+                let tid = fields
+                    .get("task_id")
+                    .and_then(chrome_value_integer)
+                    .map(chrome_task_tid)
+                    .unwrap_or(5);
+                chrome_symbol_event(&mut events, fields, start_ns, duration_ns, tid);
             }
         }
     }
@@ -2442,7 +2540,7 @@ fn export_chrome_projection(trace: &CanonicalJson) -> CanonicalJson {
         (
             "loss".into(),
             CanonicalJson::String(
-                "chrome-trace-json; X events from wall/browser only — no thread names, no async flows, no screenshot/counter tracks"
+                "chrome-trace-json; X events cover wall/cpu/alloc/browser/task spans/io/locks/native and M lane metadata — no async flow events, counter tracks, screenshots, or source-map events"
                     .into(),
             ),
         ),
@@ -2452,6 +2550,124 @@ fn export_chrome_projection(trace: &CanonicalJson) -> CanonicalJson {
         ("version".into(), CanonicalJson::Integer(TRACE_VERSION.into())),
     ])
     .expect("chrome projection keys are unique")
+}
+
+fn chrome_process_name(events: &mut Vec<CanonicalJson>) {
+    events.push(
+        CanonicalJson::object([
+            (
+                "args".into(),
+                CanonicalJson::object([(
+                    "name".into(),
+                    CanonicalJson::String("Jet perf".into()),
+                ])
+                .unwrap(),
+            ),
+            ("name".into(), CanonicalJson::String("process_name".into())),
+            ("ph".into(), CanonicalJson::String("M".into())),
+            ("pid".into(), CanonicalJson::Integer("1".into())),
+        ])
+        .unwrap(),
+    );
+}
+
+fn chrome_thread_name(events: &mut Vec<CanonicalJson>, tid: u64, name: &str) {
+    events.push(
+        CanonicalJson::object([
+            (
+                "args".into(),
+                CanonicalJson::object([(
+                    "name".into(),
+                    CanonicalJson::String(name.into()),
+                )])
+                .unwrap(),
+            ),
+            ("name".into(), CanonicalJson::String("thread_name".into())),
+            ("ph".into(), CanonicalJson::String("M".into())),
+            ("pid".into(), CanonicalJson::Integer("1".into())),
+            ("tid".into(), CanonicalJson::Integer(tid.to_string())),
+        ])
+        .unwrap(),
+    );
+}
+
+fn chrome_symbol_event(
+    events: &mut Vec<CanonicalJson>,
+    fields: &BTreeMap<String, CanonicalJson>,
+    start_ns: u64,
+    duration_ns: u64,
+    tid: u64,
+) {
+    let Some(symbol) = fields.get("symbol") else {
+        return;
+    };
+    let Some(name) = symbol_label(symbol) else {
+        return;
+    };
+    let Some(args) = chrome_symbol_args(symbol) else {
+        return;
+    };
+    events.push(
+        CanonicalJson::object([
+            ("args".into(), args),
+            (
+                "dur".into(),
+                CanonicalJson::Integer((duration_ns / 1_000).to_string()),
+            ),
+            ("name".into(), CanonicalJson::String(name)),
+            ("ph".into(), CanonicalJson::String("X".into())),
+            ("pid".into(), CanonicalJson::Integer("1".into())),
+            ("tid".into(), CanonicalJson::Integer(tid.to_string())),
+            (
+                "ts".into(),
+                CanonicalJson::Integer((start_ns / 1_000).to_string()),
+            ),
+        ])
+        .unwrap(),
+    );
+}
+
+fn chrome_symbol_args(value: &CanonicalJson) -> Option<CanonicalJson> {
+    let CanonicalJson::Object(fields) = value else {
+        return None;
+    };
+    let CanonicalJson::String(path) = fields.get("path")? else {
+        return None;
+    };
+    let CanonicalJson::String(name) = fields.get("name")? else {
+        return None;
+    };
+    CanonicalJson::object([
+        (
+            "location".into(),
+            CanonicalJson::String(format!("{path}:{name}")),
+        ),
+        ("file".into(), CanonicalJson::String(path.clone())),
+        ("symbol".into(), CanonicalJson::String(name.clone())),
+    ])
+    .ok()
+}
+
+fn chrome_integer(fields: &BTreeMap<String, CanonicalJson>, key: &str) -> Option<u64> {
+    chrome_value_integer(fields.get(key)?)
+}
+
+fn chrome_value_integer(value: &CanonicalJson) -> Option<u64> {
+    match value {
+        CanonicalJson::Integer(value) => value.parse().ok(),
+        _ => None,
+    }
+}
+
+fn chrome_string(value: &CanonicalJson) -> Option<&str> {
+    match value {
+        CanonicalJson::String(value) => Some(value),
+        _ => None,
+    }
+}
+
+fn chrome_task_tid(task_id: u64) -> u64 {
+    1_000u64.saturating_add(task_id)
 }
 
 fn export_profile_map_projection(trace: &CanonicalJson) -> CanonicalJson {

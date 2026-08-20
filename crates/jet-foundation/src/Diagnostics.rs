@@ -83,8 +83,8 @@ impl ReportMoment {
 
 /// D-REPORT-MACHINE1: one machine report schema for every Jet surface.
 pub use crate::Report::{
-    FixApplicability, ReportEdit, ReportEnvelope, ReportExtension, ReportPath, ReportSpan,
-    REPORT_SCHEMA,
+    FixApplicability, FixSafety, ReportEdit, ReportEnvelope, ReportExtension, ReportPath,
+    ReportSpan, REPORT_SCHEMA,
 };
 
 /// Source nesting accepted by sema and the canonical TIR evaluator.
@@ -190,6 +190,8 @@ pub struct Diagnostic {
     pub edit: Option<TextEdit>,
     /// D-REPORT-FIXGRADE1=D: the registry-owned promise for `edit`.
     pub applicability: Option<FixApplicability>,
+    /// D-REPORT-FIXGRADE1=D: closed class projected into each `fix_edits` entry.
+    pub safety: Option<FixSafety>,
     /// Extra indented detail (e.g. tool output for E0704).
     pub detail: Option<String>,
     /// Decision-owned machine fields. Human prose never gets parsed back into
@@ -246,6 +248,7 @@ impl Diagnostic {
             span,
             cause: Vec::new(),
             applicability: row_applicability(row, edit.as_ref()),
+            safety: row_safety(row, edit.as_ref()),
             edit,
             detail: None,
             structured: None,
@@ -272,6 +275,7 @@ impl Diagnostic {
             self.code
         );
         self.applicability = row_applicability(row, Some(&edit));
+        self.safety = row_safety(row, Some(&edit));
         self.edit = Some(edit);
     }
 
@@ -299,6 +303,7 @@ impl Diagnostic {
             span,
             cause: Vec::new(),
             applicability: row_applicability(row, edit.as_ref()),
+            safety: row_safety(row, edit.as_ref()),
             edit,
             detail: None,
             structured: None,
@@ -322,6 +327,7 @@ impl Diagnostic {
             self.code
         );
         self.applicability = row_applicability(row, Some(&edit));
+        self.safety = row_safety(row, Some(&edit));
         self.edit = Some(edit);
         self
     }
@@ -360,6 +366,7 @@ impl Diagnostic {
             span,
             cause: Vec::new(),
             applicability: row.and_then(|row| row_applicability(row, edit.as_ref())),
+            safety: row.and_then(|row| row_safety(row, edit.as_ref())),
             edit,
             detail: None,
             structured: None,
@@ -389,6 +396,7 @@ impl Diagnostic {
             cause: Vec::new(),
             edit: None,
             applicability: None,
+            safety: None,
             detail: None,
             structured: None,
         }
@@ -473,6 +481,7 @@ impl Diagnostic {
             span,
             cause: Vec::new(),
             applicability: row_applicability(row, edit.as_ref()),
+            safety: row_safety(row, edit.as_ref()),
             edit,
             detail: None,
             structured: None,
@@ -667,7 +676,9 @@ impl Diagnostic {
     ///   "detail": "…" | null,
     ///   "file": "a.jet", "line": 2, "col": 5,
     ///   "span": { "start": 12, "end": 17 } | null,
-    ///   "fix_edits": [{ "file": "a.jet", "span": {…}, "new_text": "…" }],
+    ///   "fix_edits": [{ "file": "a.jet", "span": {…}, "new_text": "…",
+    ///                   "safety": "formatting" | "behavior-preserving" |
+    ///                              "api-changing" | "target-changing" | "needs-review" }],
     ///   "cause": ["E0109", "E0108"],
     ///   "clears": 2
     /// }
@@ -709,10 +720,18 @@ impl Diagnostic {
         }
         match &self.edit {
             Some(e) => {
+                let safety = self.safety.unwrap_or_else(|| {
+                    crate::ice!(
+                        self.span,
+                        "diagnostic `{}` has an edit without a safety grade",
+                        self.code
+                    )
+                });
                 report.fix_edits.push(ReportEdit::new(
                     file.clone(),
                     ReportSpan::new(e.span.start, e.span.end),
                     e.new_text.clone(),
+                    safety,
                 ));
             }
             None => {}
@@ -762,8 +781,21 @@ fn row_applicability(
     row: &crate::Registry::DiagnosticRow,
     edit: Option<&TextEdit>,
 ) -> Option<FixApplicability> {
+    row_safety(row, edit).map(|safety| {
+        if safety.auto_apply() {
+            FixApplicability::Safe
+        } else {
+            FixApplicability::Suggested
+        }
+    })
+}
+
+fn row_safety(
+    row: &crate::Registry::DiagnosticRow,
+    edit: Option<&TextEdit>,
+) -> Option<FixSafety> {
     edit.and_then(|_| row.structured_fix)
-        .and_then(crate::Registry::StructuredFix::applicability)
+        .and_then(|_| row.fix_safety)
 }
 
 /// Escape a string as a JSON string literal (RFC 8259), std-only (I6).

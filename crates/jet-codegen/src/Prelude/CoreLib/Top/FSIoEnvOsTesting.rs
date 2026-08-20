@@ -1,3 +1,5 @@
+include!("../../Core/FSWalk.rs");
+
 fn jet_std_fs_symlink(from: &String, to: &String) -> Result<(), jet_std::IOError> {
     if jet_fault_should_fail("FS.Write") {
         return Err(jet_std::IOError::other(
@@ -191,6 +193,28 @@ fn jet_std_fs_walk(path: &String) -> Result<Vec<jet_std::WalkEntry>, jet_std::IO
         Ok(())
     }
     walk_dir(&root, &root, 0, &mut out, path)?;
+    Ok(out)
+}
+fn jet_std_fs_walk_parallel(path: &String) -> Result<Vec<jet_std::WalkEntry>, jet_std::IOError> {
+    if jet_fault_should_fail("FS.Read") {
+        return Err(jet_std::IOError::other(
+            jet_std::IOOperation::Read,
+            Some(path.clone()),
+            "fault injected: FS.Read",
+        ));
+    }
+    let mut out = jet_fs_walk_parallel(
+        path,
+        path,
+        |path, relative, is_dir, depth| jet_std::WalkEntry {
+            path,
+            relative,
+            is_dir,
+            depth,
+        },
+        |shown, error| jet_std::io_error_at(jet_std::IOOperation::Read, shown, error),
+    )?;
+    out.sort_by(|left, right| left.path.cmp(&right.path));
     Ok(out)
 }
 fn jet_std_fs_glob(pattern: &String) -> Result<Vec<String>, jet_std::IOError> {
@@ -544,7 +568,7 @@ fn jet_std_io_binread(path: &String) -> Result<Vec<u8>, jet_std::IOError> {
 }
 
 fn jet_std_io_binwrite(path: &String, bytes: &Vec<u8>) -> Result<(), jet_std::IOError> {
-    jet_std_fs_write_atomic(path, bytes)
+    jet_std_fs_write_bytes(path, bytes)
 }
 
 // D-COREIO1=A: stdout/stderr stream handles and TTY-aware terminal helpers.

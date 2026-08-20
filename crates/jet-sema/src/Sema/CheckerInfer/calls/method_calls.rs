@@ -27,8 +27,8 @@ use crate::Sema::CheckerCoreLib::{
 };
 use crate::Sema::CheckerInfer::{contains_tuple_type, exact_integer_fits, exact_integer_literal};
 use crate::Sema::Diagnostics::{
-    builtin_type_from_ident, expr_root_ident, is_printable, suggest_method, type_is_copy,
-    MethodSuggestion,
+    builtin_type_from_ident, expr_root_ident, is_printable, suggest_method_for_receiver,
+    type_is_copy, MethodSuggestion,
 };
 use crate::Sema::Effects::Effect;
 use crate::Syntax;
@@ -80,7 +80,8 @@ impl<'a> Checker<'a> {
         }
         candidates.sort_unstable();
         candidates.dedup();
-        suggest_method(method, &candidates)
+        let receiver_family = Self::receiver_method_label(receiver_ty);
+        suggest_method_for_receiver(method, Some(&receiver_family), &candidates)
     }
 
     fn receiver_method_label(receiver_ty: &Type) -> String {

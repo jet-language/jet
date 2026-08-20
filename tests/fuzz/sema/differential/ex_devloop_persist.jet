@@ -1,12 +1,13 @@
 // D-PERSIST1 — `#Persist` dev-hot-reload state survival.
-// A module-level binding marked `#Persist` is meant to survive a `jet dev`
-// hot reload instead of resetting (identity = module path + binding name).
-// Release semantics are identical with or without the marker — this example
-// documents the surface and its ordinary (non-dev) run: `#Persist` is inert
-// here, so `counter` is simply its initial value. Dev-tier carry-across is
-// covered by tests/dev.rs::persist_binding_survives_hot_swap_and_resets_on_shape_change.
+// First plain `jet run` prints 1: `run()` increments the initial counter once.
+// During `jet dev`, an unrelated edit reruns against surviving state, so the
+// next print is 2. A binding shape change resets it from its new initializer.
+// Plain `jet run` always starts fresh, so it always prints 1.
 #Persist counter := 0
 
-fn run() { print("{counter}") }
+fn run() {
+    counter += 1
+    print("{counter}")
+}
 // --- expected output --------------------------------------------------
-// 0
+// 1

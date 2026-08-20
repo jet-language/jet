@@ -3347,7 +3347,7 @@ impl<'a> Checker<'a> {
                 // asks the foreign-import table to rediscover it.
                 let code_module_type = import_ns.as_ref().and_then(|namespace| {
                     self.code_modules.get(namespace).map(|module| {
-                        jet_foundation::Names::member_name(module, type_name)
+                        crate::Sema::Bundle::module_type_name(module, type_name)
                     })
                 });
                 // D-MEM1/S7 (D-NOALLOC-SEM1=A): a struct literal for a type

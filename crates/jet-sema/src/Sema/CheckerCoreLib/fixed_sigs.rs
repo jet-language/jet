@@ -213,6 +213,10 @@ fn core_fixed_sig_impl(
             vec![(read, path), (read, Type::String)],
             Some(io_unit),
         )),
+        ("core.files", "write_bytes") => Some((
+            vec![(read, path), (read, list_u8.clone())],
+            Some(io_unit),
+        )),
         ("core.files", "exists" | "is_dir") => Some((vec![(read, path)], Some(bool_))),
         (
             "core.files",

@@ -2185,7 +2185,7 @@ mod tests {
     #[test]
     fn core_provider_builds_local_package() {
         use super::super::RefSpec::{classify_in, ProviderKind, SourceTable};
-        // Repo with pkg.jet + a `module hello` declaration + bin/. No env.jet
+        // Repo with package.jet + a `module hello` declaration + bin/. No env.jet
         // (U10 Chunk 3: CoreProvider discovers the package by module name).
         let base = unique_dir("jpk-core");
         let repo = base.join("jet-pkgs");
@@ -2220,7 +2220,7 @@ mod tests {
 
     #[test]
     fn core_provider_kind_decides_path_entry() {
-        // U10 Chunk 4: the repo's `pkg.jet` `packages:` index decides what a
+        // U10 Chunk 4: the repo's `package.jet` `packages:` index decides what a
         // realized `core` package puts on PATH. `executable` → a `bin/` dir;
         // `library` → no bin (staged source only). Both stage the tree.
         use super::super::RefSpec::{classify_in, ProviderKind, SourceTable};
@@ -2230,7 +2230,7 @@ mod tests {
         std::fs::create_dir_all(&store).unwrap();
         std::fs::create_dir_all(&repo).unwrap();
         std::fs::write(
-            repo.join("pkg.jet"),
+            repo.join("package.jet"),
             "name: \"p\"\nversion: \"0.1.0\"\npackages: { hello: executable, mathlib: library }\n",
         )
         .unwrap();
@@ -2378,11 +2378,11 @@ mod tests {
         let store = base.join("store");
         std::fs::create_dir_all(&store).unwrap();
 
-        // A repo carrying `pkg.jet` is a Jet package source → core.
+        // A repo carrying `package.jet` is a Jet package source → core.
         let with = base.join("with-pack");
         if !init_git_repo(
             &with,
-            &[("pkg.jet", "name: \"p\"\nversion: \"0.1.0\"\n")],
+            &[("package.jet", "name: \"p\"\nversion: \"0.1.0\"\n")],
         ) {
             eprintln!("note: skipping remote probe test (git not found)");
             return;
@@ -2396,10 +2396,10 @@ mod tests {
         assert_eq!(
             resolve_kind(&with_spec, &with_table, false, &store),
             ProviderKind::Core,
-            "a remote carrying pkg.jet must infer core"
+            "a remote carrying package.jet must infer core"
         );
 
-        // A repo with no `pkg.jet` is a plain (nix) flake/source → nix.
+        // A repo with no `package.jet` is a plain (nix) flake/source → nix.
         let without = base.join("no-pack");
         init_git_repo(&without, &[("flake.nix", "{}\n")]);
         let without_table = SourceTable::from_decls([(
@@ -2411,11 +2411,11 @@ mod tests {
         assert_eq!(
             resolve_kind(&without_spec, &without_table, false, &store),
             ProviderKind::Nix,
-            "a remote with no pkg.jet must infer nix"
+            "a remote with no package.jet must infer nix"
         );
 
         // Offline with no cached checkout can't probe → defaults to nix even for
-        // the pkg.jet-bearing repo.
+        // the package.jet-bearing repo.
         let cold = base.join("cold-store");
         std::fs::create_dir_all(&cold).unwrap();
         assert_eq!(
@@ -2439,7 +2439,7 @@ mod tests {
         let repo = base.join("repo");
         if !init_git_repo(
             &repo,
-            &[("pkg.jet", "name: \"p\"\nversion: \"0.1.0\"\n")],
+            &[("package.jet", "name: \"p\"\nversion: \"0.1.0\"\n")],
         ) {
             eprintln!("note: skipping commit-sha probe test (git not found)");
             return;
@@ -2462,7 +2462,7 @@ mod tests {
         assert_eq!(
             resolve_kind(&spec, &table, false, &store),
             ProviderKind::Core,
-            "a commit-SHA-pinned remote with pkg.jet must infer core"
+            "a commit-SHA-pinned remote with package.jet must infer core"
         );
         std::fs::remove_dir_all(&base).ok();
     }
@@ -2470,7 +2470,7 @@ mod tests {
     #[test]
     fn realize_resolves_inferred_remote_to_core() {
         // U9 end-to-end at the realize boundary: an `Infer` source — the kind a
-        // typed `…@github` source carries — whose remote has a `pkg.jet`
+        // typed `…@github` source carries — whose remote has a `package.jet`
         // resolves to the `core` provider and builds the first-party package,
         // with no nix and no declared marker.
         use super::super::RefSpec::{classify_in, ProviderKind, SourceTable};
@@ -2481,7 +2481,7 @@ mod tests {
         if !init_git_repo(
             &repo,
             &[
-                ("pkg.jet", "name: \"p\"\nversion: \"0.1.0\"\n"),
+                ("package.jet", "name: \"p\"\nversion: \"0.1.0\"\n"),
                 ("pkgs/hello/hello.jet", "module hello { }\n"),
                 ("pkgs/hello/bin/hello", "#!/bin/sh\necho hi-infer\n"),
             ],
@@ -2521,13 +2521,13 @@ mod tests {
                     "module workspace { members: find(\"./packages\") }\n",
                 ),
                 (
-                    "packages/hello/pkg.jet",
+                    "packages/hello/package.jet",
                     "name: \"hello\"\nversion: \"0.1.0\"\n",
                 ),
                 ("packages/hello/hello.jet", "module hello { }\n"),
                 ("packages/hello/bin/hello", "#!/bin/sh\necho hi\n"),
                 (
-                    "packages/world/pkg.jet",
+                    "packages/world/package.jet",
                     "name: \"world\"\nversion: \"0.1.0\"\n",
                 ),
                 ("packages/world/world.jet", "module world { }\n"),
@@ -2553,7 +2553,7 @@ mod tests {
         let remote = parse_remote_source(&upstream).unwrap();
         let cache = source_cache_dir(&store, &remote);
         assert!(
-            cache.join("packages/hello/pkg.jet").is_file(),
+            cache.join("packages/hello/package.jet").is_file(),
             "addressed member must be checked out: {}",
             cache.display()
         );
@@ -2585,17 +2585,17 @@ mod tests {
                 // whose alias (`log`) differs from the member name — exercises
                 // path-target resolution, not just name matching.
                 (
-                    "packages/app/pkg.jet",
+                    "packages/app/package.jet",
                     "name: \"app\"\nversion: \"0.1.0\"\ndeps: { log: ../logging }\n",
                 ),
                 ("packages/app/app.jet", "module app { }\n"),
                 (
-                    "packages/logging/pkg.jet",
+                    "packages/logging/package.jet",
                     "name: \"logging\"\nversion: \"0.1.0\"\n",
                 ),
                 ("packages/logging/logging.jet", "module logging { }\n"),
                 (
-                    "packages/unrelated/pkg.jet",
+                    "packages/unrelated/package.jet",
                     "name: \"unrelated\"\nversion: \"0.1.0\"\n",
                 ),
                 ("packages/unrelated/unrelated.jet", "module unrelated { }\n"),
@@ -2618,9 +2618,9 @@ mod tests {
 
         let remote = parse_remote_source(&upstream).unwrap();
         let cache = source_cache_dir(&store, &remote);
-        assert!(cache.join("packages/app/pkg.jet").is_file(), "app subtree");
+        assert!(cache.join("packages/app/package.jet").is_file(), "app subtree");
         assert!(
-            cache.join("packages/logging/pkg.jet").is_file(),
+            cache.join("packages/logging/package.jet").is_file(),
             "in-repo dependency `logging` must be pulled into the sparse checkout: {}",
             cache.display()
         );
@@ -2647,9 +2647,9 @@ mod tests {
                     "module workspace { members: find(\"./packages\") }\n",
                 ),
                 // `app` depends on `packages/ghost`, a real repo directory that
-                // is NOT a workspace member (no pkg.jet of its own).
+                // is NOT a workspace member (no package.jet of its own).
                 (
-                    "packages/app/pkg.jet",
+                    "packages/app/package.jet",
                     "name: \"app\"\nversion: \"0.1.0\"\ndeps: { ghost: ../ghost }\n",
                 ),
                 ("packages/app/app.jet", "module app { }\n"),
@@ -2747,7 +2747,7 @@ mod tests {
         std::fs::create_dir_all(&store).unwrap();
         std::fs::create_dir_all(&repo).unwrap();
         std::fs::write(
-            repo.join("pkg.jet"),
+            repo.join("package.jet"),
             "name: \"p\"\nversion: \"0.1.0\"\npackages: { mathlib: library }\n",
         )
         .unwrap();

@@ -899,6 +899,25 @@ impl<'a> Parser<'a> {
                     },
                     TokKind::KwExtern => self.extern_rust_block().map(Item::ExternRust),
                     TokKind::KwFn => self.func().map(Item::Func),
+                    TokKind::Ident(_) if self.at_foreign_declaration() => {
+                        let word = match self.peek().kind.clone() {
+                            TokKind::Ident(word) => word,
+                            _ => unreachable!(),
+                        };
+                        let span = self.bump().span;
+                        self.diags
+                            .push(self.foreign_keyword_diagnostic(&word, span));
+                        self.foreign_function().map(Item::Func)
+                    }
+                    TokKind::Ident(_) if self.at_foreign_binding() =>
+                    {
+                        let word = match self.peek().kind.clone() {
+                            TokKind::Ident(word) => word,
+                            _ => unreachable!(),
+                        };
+                        let span = self.bump().span;
+                        Err(self.foreign_keyword_diagnostic(&word, span))
+                    }
                     // Test and benchmark declarations own semantic Test/Bench
                     // sites even when their surface begins with `fn`.
                     TokKind::Hash if self.at_test_def() => self.test_def().map(Item::Test),
@@ -1384,35 +1403,6 @@ impl<'a> Parser<'a> {
                         ));
                         self.sync_top();
                         continue;
-                    }
-                    TokKind::Ident(name)
-                        if false
-                            && (name == Syntax::FOREIGN_DEF || name == Syntax::FOREIGN_FUNC) =>
-                    {
-                        // D-S14-PAUSE: def/func teaching is paused.
-                        let t = self.bump();
-                        let foreign = if let TokKind::Ident(n) = &t.kind {
-                            n.clone()
-                        } else {
-                            unreachable!()
-                        };
-                        self.diags.push(Diagnostic::error(
-                            "E0008",
-                            format!(
-                                "functions are written with `{}`, not `{}`",
-                                Syntax::KW_FN,
-                                foreign
-                            ),
-                            "Jet has exactly one spelling for each thing, so all code reads the same"
-                                .to_string(),
-                            format!("replace `{}` with `{}`", foreign, Syntax::KW_FN),
-                            Some(t.span),
-                        ));
-                        self.func_after_fn(
-                            false, false, false, None, None, false, false, None, None, None, false, None,
-                            false, None, None, None, false, false, None, false, None,
-                        )
-                        .map(Item::Func)
                     }
                     TokKind::Ident(name)
                         if false && name == Syntax::FOREIGN_IMPORT =>

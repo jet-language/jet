@@ -723,7 +723,7 @@ mod tests {
         let lib = dir.join("lib.jet");
         let css = dir.join("app.css");
         let html = dir.join("app.html");
-        let manifest = dir.join("pkg.jet");
+        let manifest = dir.join("package.jet");
         let lock = dir.join(".jet");
         fs::create_dir_all(&lock).unwrap();
         let lock_file = lock.join("lock");

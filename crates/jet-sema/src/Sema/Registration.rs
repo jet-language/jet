@@ -10,8 +10,8 @@ use crate::AST::{
 use std::collections::{HashMap, HashSet};
 
 mod Items;
-mod Derives;
 mod Serde;
+mod Derives;
 
 pub(crate) use Items::{
     check_strong_shared_cycles, comptime_context_from_items, eval_comptime_items, name_defined,

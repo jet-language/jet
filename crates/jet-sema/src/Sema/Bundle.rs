@@ -28,6 +28,7 @@ pub(crate) use InlineCalls::{mangle_inline_sibling_calls, rewrite_inline_calls_s
 
 pub(crate) use GenericModules::expand_generic_module_aliases;
 pub(crate) use GenericModules::hoist_inline_module_member_types;
+pub(crate) use GenericModules::module_type_name;
 pub use GenericModules::specialize_function_types;
 use GenericModules::{clone_enum, clone_struct};
 use Outputs::{cli_entry_param_shape, no_run_error, resolve_outputs, CLIEntryShape};

@@ -1,11 +1,12 @@
 // ── D-TERM1 (ratified 2026-06-22): terminal direct-input primitives ───────────
 // The ONE terminal key kernel. AOT embeds this source into the generated
 // program; the canonical TIR evaluator (`Codegen/TIR/eval/mod.rs`
-// `term_key`) and the resident Cranelift host (`jet-jit` `IO.rs` `term_key`)
-// `include!` the same file, so every execution tier decodes the same bytes into
-// the same `Key` and enters/restores the same terminal mode (I9). An engine
-// marshals arguments and results; it never re-encodes the decode table or the
-// raw-mode entry policy.
+// The in-process TIR evaluator and resident Cranelift host call the one
+// `jet-codegen::terminal_runtime` instance. AOT embeds this source into its
+// generated program. Every execution tier therefore decodes the same bytes
+// into the same `Key` and enters/restores the same terminal mode (I9). An
+// engine marshals arguments and results; it never re-encodes the decode table
+// or raw-mode entry policy.
 //
 // `live { … }` blocks in Jet source emit:
 //   jet_term_enter();
@@ -16,7 +17,7 @@
 //
 // The raw-mode kernel itself (`jet_term_mode_enter` / `jet_term_mode_leave`)
 // lives in `Prelude/Term.rs` beside the rest of the terminal device surface;
-// in-process include sites bring those two names into scope.
+// each in-process owner includes both files in one module before this source.
 //
 // I6: zero external crates. Platform-specific setup uses inline `extern "C"` /
 // `extern "system"` declarations — standard Rust FFI, not the `libc` crate.
@@ -28,7 +29,7 @@
 /// `JetShow` trait is an AOT-only rendering seam, and the in-process engines
 /// project a key into their own value carrier instead.
 #[derive(Clone, Debug, PartialEq)]
-pub(crate) enum JetKey {
+pub enum JetKey {
     /// A printable character.
     Char(char),
     /// Enter / Return.
@@ -172,24 +173,24 @@ mod jet_term_windows {
 
 /// Enter un-buffered, no-echo terminal input mode.
 /// Called at the top of every `live { … }` block.
-pub(crate) fn jet_term_enter() {
+pub fn jet_term_enter() {
     let _ = jet_term_mode_enter(true);
 }
 
 /// Disable terminal echo but keep canonical line editing for secret input.
-pub(crate) fn jet_term_enter_secret() -> bool {
+pub fn jet_term_enter_secret() -> bool {
     jet_term_mode_enter(false)
 }
 
 /// Restore the terminal to the state captured by the most recent `jet_term_enter`.
 /// Called by the scope guard that `live { … }` installs.
-pub(crate) fn jet_term_leave() {
+pub fn jet_term_leave() {
     jet_term_mode_leave();
 }
 
 /// Read one key event from stdin (blocking).
 /// Used by `term.read_key()`.
-pub(crate) fn jet_term_read_key() -> JetKey {
+pub fn jet_term_read_key() -> JetKey {
     #[cfg(unix)]
     return jet_term_unix::read_key();
     #[cfg(windows)]

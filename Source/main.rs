@@ -1846,7 +1846,8 @@ fn main() {
             return;
         }
         "digest" => {
-            run_digest(mode.json);
+            let digest_args: Vec<String> = raw.iter().skip(1).cloned().collect();
+            run_digest(&digest_args, mode.json);
             return;
         }
         "impact" => {
@@ -2470,7 +2471,8 @@ fn main() {
             let edition = jet_argv
                 .iter()
                 .find_map(|a| a.strip_prefix("--edition=").map(str::to_string));
-            run_fix(target, dry_run, edition.as_deref());
+            let all = jet_argv.iter().any(|a| a == "--all");
+            run_fix(target, dry_run, edition.as_deref(), all);
         }
         "new" => run_new(target, annotated, mode),
         "test" => {

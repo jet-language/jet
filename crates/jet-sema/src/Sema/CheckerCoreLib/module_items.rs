@@ -565,6 +565,7 @@ pub fn core_module_items(module: &str) -> Vec<String> {
             "read",
             "read_bytes",
             "write",
+            "write_bytes",
             "append_all",
             "exists",
             "remove",

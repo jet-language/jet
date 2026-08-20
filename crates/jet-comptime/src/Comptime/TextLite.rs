@@ -115,6 +115,14 @@ mod text_kernel {
             pub path: String,
             pub is_dir: bool,
         }
+
+        #[derive(Clone, Debug, PartialEq)]
+        pub struct WalkEntry {
+            pub path: String,
+            pub relative: String,
+            pub is_dir: bool,
+            pub depth: i64,
+        }
     }
 
     #[allow(unused_imports)]
@@ -131,6 +139,7 @@ mod text_kernel {
         false
     }
     include!("../../../jet-codegen/src/Prelude/CoreLib/Top/Text.rs");
+    include!("../../../jet-codegen/src/Prelude/Core/FSWalk.rs");
 
     pub(super) fn nfd(s: &str) -> String {
         jet_text_nfd(&s.to_string())
@@ -331,6 +340,23 @@ mod text_kernel {
     pub(super) fn fs_list_dir(path: &str) -> Result<Vec<jet_std::DirEntry>, jet_std::IOError> {
         jet_std_fs_list_dir(&path.to_string())
     }
+    pub(super) fn fs_walk_parallel(
+        path: &str,
+    ) -> Result<Vec<jet_std::WalkEntry>, jet_std::IOError> {
+        let mut entries = jet_fs_walk_parallel(
+            path,
+            path,
+            |path, relative, is_dir, depth| jet_std::WalkEntry {
+                path,
+                relative,
+                is_dir,
+                depth,
+            },
+            |shown, error| jet_std::io_error_at(jet_std::IOOperation::Read, shown, error),
+        )?;
+        entries.sort_by(|left, right| left.path.cmp(&right.path));
+        Ok(entries)
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -464,6 +490,18 @@ pub(super) fn fs_list_dir(path: &str) -> FsResult<Vec<(String, String, bool)>> {
             entries
                 .into_iter()
                 .map(|entry| (entry.name, entry.path, entry.is_dir))
+                .collect()
+        })
+        .map_err(io_error_ct)
+}
+pub(super) fn fs_walk_parallel(
+    path: &str,
+) -> FsResult<Vec<(String, String, bool, i64)>> {
+    text_kernel::fs_walk_parallel(path)
+        .map(|entries| {
+            entries
+                .into_iter()
+                .map(|entry| (entry.path, entry.relative, entry.is_dir, entry.depth))
                 .collect()
         })
         .map_err(io_error_ct)

@@ -93,7 +93,7 @@ pub fn is_hashable_type(ty: &Type) -> bool {
 pub fn is_closure_method(method: &str) -> bool {
     matches!(
         method,
-        "map" | "filter" | "each" | "find" | "any" | "all" | "sort_by" | "reduce"
+        "map" | "filter" | "each" | "find" | "any" | "all" | "sort_by" | "sort_by_desc" | "reduce"
         // D-ITER1: lazy adapter set
         | "take_while" | "skip_while" | "flat_map" | "scan"
         | "position" | "min_by" | "max_by" | "fold" | "group_by" | "count_by"
@@ -243,7 +243,7 @@ const BUILTIN_METHOD_VOCABULARY: &str = concat!(
     "pop_back pop_first pop_front position probe product public_key push push_back push_front queued queued_count ",
     "random reaches_panic read read_byte read_bytes read_string receive reduce remove remove_prefix remove_suffix repeat ",
     "replace require reverse rewind right rsplit run running_count sample scan second seek ",
-    "semantic_index send set shuffle shutdown signing skip skip_while slice sort sort_by source ",
+    "semantic_index send set shuffle shutdown signing skip skip_while slice sort sort_desc sort_by sort_by_desc source ",
     "sources split split_once split_write starts_with state status step_by string strong_count sum summary ",
     "swapcase symmetric_difference syntax system take take_while text then tick title to_bytes to_float ",
     "to_int to_list to_lower to_set to_sorted_list to_string to_title to_upper today tokens toolchain trace ",
@@ -1046,7 +1046,7 @@ fn list_method_return(inner: &Type, method: &str, nargs: usize) -> Option<Option
     match (method, nargs) {
         ("len", 0) => Some(Some(Type::Int)),
         ("is_empty", 0) => Some(Some(Type::Bool)),
-        ("push" | "insert" | "reverse" | "sort" | "clear", _) => Some(None),
+        ("push" | "insert" | "reverse" | "sort" | "sort_desc" | "clear", _) => Some(None),
         ("try_push", 1) | ("try_reserve", 1) => Some(Some(Type::Result {
             ok: Box::new(Type::Named("Unit".to_string())),
             err: Box::new(Type::Named(Syntax::TYPE_ALLOC_ERROR.to_string())),
@@ -1069,7 +1069,7 @@ fn list_method_return(inner: &Type, method: &str, nargs: usize) -> Option<Option
         ("each", 1) => Some(None),
         ("find", 1) => Some(Some(Type::Option(Box::new(inner.clone())))),
         ("any" | "all", 1) => Some(Some(Type::Bool)),
-        ("sort_by", 1) => Some(None),
+        ("sort_by" | "sort_by_desc", 1) => Some(None),
         ("reduce", 2) => Some(Some(Type::Int)), // placeholder; sema refines from init arg
         // D-ITERTOOLS1=A: non-closure lazy adapters return `Iter<T>`.
         ("take" | "skip" | "step_by", 1) => Some(Some(iter_ty(inner.clone()))),
@@ -2165,6 +2165,8 @@ pub fn builtin_method_mutates(recv_ty: &Type, method: &str) -> bool {
                 | "reverse"
                 | "sort"
                 | "sort_by"
+                | "sort_desc"
+                | "sort_by_desc"
                 | "clear"
                 | "split_write"
                 | "get_disjoint_write"
@@ -2437,7 +2439,7 @@ pub fn builtin_method_arg_types(recv_ty: &Type, method: &str) -> Option<Vec<Type
                 call_metadata: None,
             }]),
             // D-ITER1: key-extracting closure methods.
-            "sort_by" => Some(vec![sort_by_callback_type(inner, false)]),
+            "sort_by" | "sort_by_desc" => Some(vec![sort_by_callback_type(inner, false)]),
             "min_by" | "max_by" | "group_by" | "count_by" => Some(vec![Type::Fn {
                 params: vec![(**inner).clone()],
                 ret: None, // sema refines key type
@@ -3077,7 +3079,7 @@ pub fn builtin_receiver_borrow(recv_ty: &Type, method: &str) -> BuiltinReceiverB
     } else if !builtin_method_mutates(recv_ty, method) {
         BuiltinReceiverBorrow::Read
     } else if (matches!(recv_ty, Type::List(_))
-        && matches!(method, "remove" | "sort_by" | "edit_disjoint"))
+        && matches!(method, "remove" | "sort_by" | "sort_desc" | "sort_by_desc" | "edit_disjoint"))
         || matches!(
             recv_ty,
             Type::Named(name)

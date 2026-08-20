@@ -609,7 +609,7 @@ mod tests {
             crate::Manifest::manifest_path_in(&dir),
             r#"name: "p"
 version: "0.1.0"
-policy: {
+authority: {
     providers: {
         ruby: {
             registry: "https://mirror.example.test",

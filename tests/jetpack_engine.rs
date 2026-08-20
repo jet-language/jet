@@ -2689,7 +2689,7 @@ fn bridge_flake_commits_transitive_locked_registry_facts_without_nix() {
         .unwrap_or_default();
     assert_eq!(
         failure_line,
-        "    flake.lock root input `tools` maps to node `tools` with a different source URL or indirect alias",
+        "Error [E1340]: flake.lock root input `tools` maps to node `tools` with a different source URL or indirect alias",
         "{failure_stderr}"
     );
 }

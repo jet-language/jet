@@ -287,6 +287,7 @@ pub(super) fn eval_builtin(
         TBuiltinOp::IndexOf => apply_method(recv, "index_of", args, span),
         TBuiltinOp::Reverse => apply_mutating(recv, "reverse", args, span),
         TBuiltinOp::Sort => apply_mutating(recv, "sort", args, span),
+        TBuiltinOp::SortDesc => apply_mutating(recv, "sort_desc", args, span),
         TBuiltinOp::OrderingThen => apply_method(recv, "then", args, span),
         TBuiltinOp::OrderingReverse => apply_method(recv, "reverse", args, span),
         TBuiltinOp::JoinSep => apply_method(recv, "join", args, span),

@@ -140,22 +140,26 @@ mod jet_std {
     pub struct JetRegex {
         pattern: String,
         flags: RegexFlags,
-        program: RegexProgram,
-        group_names: Vec<Option<String>>,
+        program: std::sync::Arc<RegexProgram>,
+        group_names: std::sync::Arc<[Option<String>]>,
         groups: usize,
     }
 
     #[derive(Clone, Debug)]
     pub struct JetRegexMatch {
-        text: String,
-        spans: Vec<Option<(usize, usize)>>,
-        names: Vec<Option<String>>,
+        text: std::sync::Arc<str>,
+        span: (usize, usize),
+        program: std::sync::Arc<RegexProgram>,
+        flags: RegexFlags,
+        groups: usize,
+        names: std::sync::Arc<[Option<String>]>,
     }
 
     #[derive(Clone, Debug)]
     struct RegexProgram {
         insts: Vec<RegexInst>,
         start: usize,
+        literal: Option<Vec<u8>>,
     }
 
     #[derive(Clone, Debug)]
@@ -239,7 +243,36 @@ mod jet_std {
     #[derive(Clone)]
     struct RegexThread {
         pc: usize,
-        caps: Vec<Option<usize>>,
+        start: usize,
+        caps: Option<Vec<Option<usize>>>,
+    }
+
+    struct RegexState {
+        threads: Vec<RegexThread>,
+        seen: Vec<u32>,
+        stack: Vec<RegexThread>,
+        epoch: u32,
+    }
+
+    impl RegexState {
+        fn new(inst_count: usize) -> Self {
+            Self {
+                threads: Vec::with_capacity(inst_count),
+                seen: vec![0; inst_count],
+                stack: Vec::with_capacity(inst_count),
+                epoch: 0,
+            }
+        }
+
+        fn clear(&mut self) {
+            self.threads.clear();
+            self.epoch = self.epoch.wrapping_add(1);
+            if self.epoch == 0 {
+                self.seen.fill(0);
+                self.epoch = 1;
+            }
+        }
+
     }
 
     impl Default for RegexFlags {
@@ -283,7 +316,14 @@ mod jet_std {
     impl JetRegexMatch {
         pub fn group(&self, n: i64) -> JetOutcome<String, JetAbsent> {
             let Ok(n) = usize::try_from(n) else { return Err(JetAbsent) };
-            let Some((start, end)) = self.spans.get(n).copied().flatten() else { return Err(JetAbsent) };
+            let span = if n == 0 {
+                Some(self.span)
+            } else if n > self.groups {
+                None
+            } else {
+                self.capture_spans().get(n).copied().flatten()
+            };
+            let Some((start, end)) = span else { return Err(JetAbsent) };
             Ok(self.text[start..end].to_string())
         }
 
@@ -308,37 +348,58 @@ mod jet_std {
 
         pub fn group_start(&self, n: i64) -> JetOutcome<i64, JetAbsent> {
             let Ok(n) = usize::try_from(n) else { return Err(JetAbsent) };
-            jet_outcome_of(
-                self.spans
-                    .get(n)
-                    .copied()
-                    .flatten()
-                    .map(|(start, _)| start as i64),
-            )
+            jet_outcome_of(self.span_for(n).map(|(start, _)| start as i64))
         }
 
         pub fn group_end(&self, n: i64) -> JetOutcome<i64, JetAbsent> {
             let Ok(n) = usize::try_from(n) else { return Err(JetAbsent) };
-            jet_outcome_of(
-                self.spans
-                    .get(n)
-                    .copied()
-                    .flatten()
-                    .map(|(_, end)| end as i64),
-            )
+            jet_outcome_of(self.span_for(n).map(|(_, end)| end as i64))
         }
 
         /// Named capture pairs as `[[name, value], …]` (unnamed groups omitted).
         pub fn named_captures(&self) -> Vec<Vec<String>> {
+            if self.groups == 0 {
+                return Vec::new();
+            }
+            let spans = self.capture_spans();
             self.names
                 .iter()
                 .enumerate()
                 .filter_map(|(i, n)| {
                     let name = n.as_ref()?.clone();
-                    let value = self.group(i as i64).ok()?;
+                    let (start, end) = spans.get(i).copied().flatten()?;
+                    let value = self.text[start..end].to_string();
                     Some(vec![name, value])
                 })
                 .collect()
+        }
+
+        fn span_for(&self, n: usize) -> Option<(usize, usize)> {
+            if n == 0 {
+                Some(self.span)
+            } else if n > self.groups {
+                None
+            } else {
+                self.capture_spans().get(n).copied().flatten()
+            }
+        }
+
+        fn capture_spans(&self) -> Vec<Option<(usize, usize)>> {
+            if self.groups == 0 {
+                return vec![Some(self.span)];
+            }
+            regex_run(
+                &self.program,
+                &self.flags,
+                self.groups,
+                &self.text,
+                self.span.0,
+                true,
+                true,
+            )
+            .and_then(|run| run.caps)
+            .map(|caps| regex_slots_to_spans(&caps))
+            .unwrap_or_else(|| vec![Some(self.span)])
         }
     }
 
@@ -382,9 +443,8 @@ mod jet_std {
         }
 
         pub fn full_match(&self, text: &str) -> bool {
-            self.run_at(text, 0)
-                .and_then(|spans| spans.first().copied().flatten())
-                .is_some_and(|(start, end)| start == 0 && end == text.len())
+            regex_run(&self.program, &self.flags, self.groups, text, 0, true, false)
+                .is_some_and(|run| run.span == (0, text.len()))
         }
 
         pub fn match_value(&self, text: &str) -> JetOutcome<JetRegexMatch, JetAbsent> {
@@ -403,14 +463,14 @@ mod jet_std {
         }
 
         pub fn matches(&self, text: &str) -> Vec<JetRegexMatch> {
+            let shared = std::sync::Arc::<str>::from(text);
             let mut out = Vec::new();
             let mut pos = 0;
             while pos <= text.len() {
-                let Some(m) = self.find_from(text, pos) else {
+                let Some(m) = self.find_from_shared(&shared, pos) else {
                     break;
                 };
-                let end = m.spans[0].map(|(_, e)| e).unwrap_or(pos);
-                let start = m.spans[0].map(|(s, _)| s).unwrap_or(pos);
+                let (start, end) = m.span;
                 out.push(m);
                 pos = regex_next_search_pos(text, start, end);
             }
@@ -437,6 +497,7 @@ mod jet_std {
         }
 
         pub fn split_limit(&self, text: &str, limit: i64) -> Vec<String> {
+            let shared = std::sync::Arc::<str>::from(text);
             let mut out = Vec::new();
             let mut pos = 0;
             let mut splits = 0i64;
@@ -444,12 +505,10 @@ mod jet_std {
                 if limit > 0 && splits >= limit - 1 {
                     break;
                 }
-                let Some(m) = self.find_from(text, pos) else {
+                let Some(m) = self.find_from_shared(&shared, pos) else {
                     break;
                 };
-                let Some((start, end)) = m.spans[0] else {
-                    break;
-                };
+                let (start, end) = m.span;
                 out.push(text[pos..start].to_string());
                 pos = regex_next_search_pos(text, start, end);
                 splits += 1;
@@ -462,15 +521,14 @@ mod jet_std {
         where
             F: Fn(&JetRegexMatch) -> String,
         {
+            let shared = std::sync::Arc::<str>::from(text);
             let mut out = String::new();
             let mut pos = 0;
             while pos <= text.len() {
-                let Some(m) = self.find_from(text, pos) else {
+                let Some(m) = self.find_from_shared(&shared, pos) else {
                     break;
                 };
-                let Some((start, end)) = m.spans[0] else {
-                    break;
-                };
+                let (start, end) = m.span;
                 out.push_str(&text[pos..start]);
                 out.push_str(&repl(&m));
                 pos = regex_next_search_pos(text, start, end);
@@ -483,107 +541,62 @@ mod jet_std {
         }
 
         fn find_match(&self, text: &str) -> Option<JetRegexMatch> {
-            self.find_from(text, 0)
+            let shared = std::sync::Arc::<str>::from(text);
+            self.find_from_shared(&shared, 0)
         }
 
-        fn find_from(&self, text: &str, start: usize) -> Option<JetRegexMatch> {
-            for pos in regex_search_positions(text, start) {
-                if let Some(spans) = self.run_at(text, pos) {
-                    return Some(JetRegexMatch {
-                        text: text.to_string(),
-                        spans,
-                        names: self.group_names.clone(),
-                    });
-                }
-            }
-            None
-        }
-
-        fn run_at(&self, text: &str, start: usize) -> Option<Vec<Option<(usize, usize)>>> {
-            let mut current = Vec::new();
-            let caps = vec![None; (self.groups + 1) * 2];
-            self.add_thread(&mut current, self.program.start, caps, start, text);
-            let mut pos = start;
-            let mut last_match: Option<Vec<Option<(usize, usize)>>> = None;
-            loop {
-                if let Some(found) = current
-                    .iter()
-                    .find(|t| matches!(self.program.insts[t.pc], RegexInst::Match))
-                {
-                    let mut caps = found.caps.clone();
-                    caps[0] = Some(start);
-                    caps[1] = Some(pos);
-                    last_match = Some(regex_slots_to_spans(&caps));
-                }
-                let Some(ch) = text[pos..].chars().next() else {
-                    return last_match;
-                };
-                let next_pos = pos + ch.len_utf8();
-                let mut next = Vec::new();
-                for thread in current {
-                    if let RegexInst::Consume(matcher, Some(target)) =
-                        &self.program.insts[thread.pc]
-                    {
-                        if regex_matcher_matches(matcher, ch, &self.flags) {
-                            self.add_thread(&mut next, *target, thread.caps, next_pos, text);
-                        }
-                    }
-                }
-                if next.is_empty() {
-                    return last_match;
-                }
-                current = next;
-                pos = next_pos;
-            }
-        }
-
-        fn add_thread(
+        fn find_from_shared(
             &self,
-            out: &mut Vec<RegexThread>,
-            pc: usize,
-            caps: Vec<Option<usize>>,
-            pos: usize,
-            text: &str,
-        ) {
-            let mut stack = vec![(pc, caps)];
-            let mut seen = std::collections::BTreeSet::new();
-            while let Some((pc, caps)) = stack.pop() {
-                if !seen.insert(pc) {
-                    continue;
+            text: &std::sync::Arc<str>,
+            start: usize,
+        ) -> Option<JetRegexMatch> {
+            if let Some(literal) = self.program.literal.as_deref() {
+                if !self.flags.case_insensitive {
+                    let needle = std::str::from_utf8(literal).unwrap();
+                    let mut candidate = start;
+                    while candidate <= text.len() {
+                        let offset = text[candidate..].find(needle)?;
+                        candidate += offset;
+                        if let Some(run) = regex_run(
+                            &self.program,
+                            &self.flags,
+                            self.groups,
+                            text,
+                            candidate,
+                            true,
+                            false,
+                        ) {
+                            return Some(self.make_match(text, run.span));
+                        }
+                        candidate = regex_next_search_pos(text, candidate, candidate);
+                    }
+                    return None;
                 }
-                match &self.program.insts[pc] {
-                    RegexInst::Save(slot, Some(next)) => {
-                        let mut next_caps = caps;
-                        if *slot < next_caps.len() {
-                            next_caps[*slot] = Some(pos);
-                        }
-                        stack.push((*next, next_caps));
-                    }
-                    RegexInst::Split(a, Some(b)) => {
-                        stack.push((*b, caps.clone()));
-                        stack.push((*a, caps));
-                    }
-                    RegexInst::AssertStart(Some(next)) => {
-                        if pos == 0
-                            || (self.flags.multiline
-                                && text[..pos].chars().last().is_some_and(|ch| ch == '\n'))
-                        {
-                            stack.push((*next, caps));
-                        }
-                    }
-                    RegexInst::AssertEnd(Some(next)) => {
-                        if pos == text.len()
-                            || (self.flags.multiline
-                                && text[pos..].chars().next().is_some_and(|ch| ch == '\n'))
-                        {
-                            stack.push((*next, caps));
-                        }
-                    }
-                    RegexInst::Match | RegexInst::Consume(_, _) => {
-                        out.push(RegexThread { pc, caps });
-                    }
-                    _ => {}
-                }
+            }
+            regex_run(
+                &self.program,
+                &self.flags,
+                self.groups,
+                text,
+                start,
+                false,
+                false,
+            )
+            .map(|run| self.make_match(text, run.span))
+        }
+
+        fn make_match(
+            &self,
+            text: &std::sync::Arc<str>,
+            span: (usize, usize),
+        ) -> JetRegexMatch {
+            JetRegexMatch {
+                text: std::sync::Arc::clone(text),
+                span,
+                program: std::sync::Arc::clone(&self.program),
+                flags: self.flags.clone(),
+                groups: self.groups,
+                names: std::sync::Arc::clone(&self.group_names),
             }
         }
     }
@@ -650,11 +663,12 @@ mod jet_std {
         Ok(JetRegex {
             pattern: pattern.to_string(),
             flags: flags.clone(),
-            program: RegexProgram {
+            program: std::sync::Arc::new(RegexProgram {
                 insts: compiler.insts,
                 start: frag.start,
-            },
-            group_names: parser.names,
+                literal: regex_literal_candidate(&root),
+            }),
+            group_names: std::sync::Arc::from(parser.names.into_boxed_slice()),
             groups: parser.groups,
         })
     }
@@ -1270,11 +1284,165 @@ mod jet_std {
             .collect()
     }
 
-    fn regex_search_positions(text: &str, start: usize) -> impl Iterator<Item = usize> + '_ {
-        text.char_indices()
-            .map(|(idx, _)| idx)
-            .filter(move |idx| *idx >= start)
-            .chain(std::iter::once(text.len()).filter(move |idx| *idx >= start))
+    struct RegexRun {
+        span: (usize, usize),
+        caps: Option<Vec<Option<usize>>>,
+    }
+
+    fn regex_run(
+        program: &RegexProgram,
+        flags: &RegexFlags,
+        groups: usize,
+        text: &str,
+        start: usize,
+        anchored: bool,
+        capture: bool,
+    ) -> Option<RegexRun> {
+        let mut current = RegexState::new(program.insts.len());
+        let mut next = RegexState::new(program.insts.len());
+        current.clear();
+        let mut pos = start;
+        let mut winner_start = None;
+        let mut last_match = None;
+
+        loop {
+            if !anchored || pos == start {
+                let caps = capture.then(|| vec![None; (groups + 1) * 2]);
+                regex_add_thread(
+                    &mut current,
+                    program,
+                    flags,
+                    RegexThread {
+                        pc: program.start,
+                        start: pos,
+                        caps,
+                    },
+                    pos,
+                    text,
+                );
+            }
+
+            if let Some(found) = current
+                .threads
+                .iter()
+                .find(|thread| matches!(program.insts[thread.pc], RegexInst::Match))
+            {
+                if winner_start.is_none() {
+                    winner_start = Some(found.start);
+                }
+                if winner_start == Some(found.start) {
+                    let caps = found.caps.as_ref().map(|source| {
+                        let mut caps = source.clone();
+                        caps[0] = Some(found.start);
+                        caps[1] = Some(pos);
+                        caps
+                    });
+                    last_match = Some(RegexRun {
+                        span: (found.start, pos),
+                        caps,
+                    });
+                }
+            }
+
+            if pos == text.len() {
+                return last_match;
+            }
+            let ch = text[pos..].chars().next().unwrap();
+            let next_pos = pos + ch.len_utf8();
+            next.clear();
+            for thread in &current.threads {
+                let RegexInst::Consume(matcher, Some(target)) = &program.insts[thread.pc]
+                else { continue };
+                if regex_matcher_matches(matcher, ch, flags) {
+                    regex_add_thread(
+                        &mut next,
+                        program,
+                        flags,
+                        RegexThread {
+                            pc: *target,
+                            start: thread.start,
+                            caps: thread.caps.clone(),
+                        },
+                        next_pos,
+                        text,
+                    );
+                }
+            }
+            std::mem::swap(&mut current, &mut next);
+            if let Some(winner) = winner_start {
+                if !current.threads.iter().any(|thread| thread.start == winner) {
+                    return last_match;
+                }
+            }
+            pos = next_pos;
+        }
+    }
+
+    fn regex_add_thread(
+        state: &mut RegexState,
+        program: &RegexProgram,
+        flags: &RegexFlags,
+        thread: RegexThread,
+        pos: usize,
+        text: &str,
+    ) {
+        state.stack.clear();
+        state.stack.push(thread);
+        while let Some(mut thread) = state.stack.pop() {
+            if state.seen[thread.pc] == state.epoch {
+                continue;
+            }
+            state.seen[thread.pc] = state.epoch;
+            match &program.insts[thread.pc] {
+                RegexInst::Save(slot, Some(next)) => {
+                    if let Some(caps) = thread.caps.as_mut() {
+                        if *slot < caps.len() {
+                            caps[*slot] = Some(pos);
+                        }
+                    }
+                    thread.pc = *next;
+                    state.stack.push(thread);
+                }
+                RegexInst::Split(a, Some(b)) => {
+                    let mut right = thread.clone();
+                    right.pc = *b;
+                    state.stack.push(right);
+                    thread.pc = *a;
+                    state.stack.push(thread);
+                }
+                RegexInst::AssertStart(Some(next)) => {
+                    if pos == 0
+                        || (flags.multiline && text[..pos].ends_with('\n'))
+                    {
+                        thread.pc = *next;
+                        state.stack.push(thread);
+                    }
+                }
+                RegexInst::AssertEnd(Some(next)) => {
+                    if pos == text.len()
+                        || (flags.multiline && text.as_bytes()[pos] == b'\n')
+                    {
+                        thread.pc = *next;
+                        state.stack.push(thread);
+                    }
+                }
+                RegexInst::Match | RegexInst::Consume(_, _) => state.threads.push(thread),
+                _ => {}
+            }
+        }
+    }
+
+    fn regex_literal_candidate(node: &RegexNode) -> Option<Vec<u8>> {
+        let RegexNode::Seq(pieces) = node else { return None };
+        let mut literal = String::new();
+        for piece in pieces {
+            if !matches!(&piece.quant, RegexQuant::One) {
+                return None;
+            }
+            let RegexAtom::Literal(ch) = &piece.atom else { return None };
+            literal.push(*ch);
+        }
+        (!literal.is_empty()).then(|| literal.into_bytes())
     }
 
     fn regex_next_search_pos(text: &str, start: usize, end: usize) -> usize {

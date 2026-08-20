@@ -990,6 +990,68 @@ fn watching_dev_deopts_on_gap_edit_and_recovers() {
     let _ = fs::remove_dir_all(&dir);
 }
 
+/// D-PERSIST1: the shipped teaching example shows mutation, compatible reload,
+/// and shape-reset behavior through a real watching `jet dev` process.
+#[test]
+fn persist_example_survives_hot_reload() {
+    use std::io::{BufRead, BufReader};
+
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let source = root.join("examples/features/devloop/persist.jet");
+    let dir = common::unique_tmp("jet_dev_persist_example");
+    fs::create_dir_all(&dir).unwrap();
+    let file = dir.join("persist.jet");
+    let original = fs::read(&source).unwrap();
+    fs::write(&file, &original).unwrap();
+    let shown = file.to_string_lossy().to_string();
+
+    let mut child = Command::new(env!("CARGO_BIN_EXE_jet"))
+        .args(["dev", &shown])
+        .env("NO_COLOR", "1")
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("spawn persist example jet dev");
+    let stdout = child.stdout.take().unwrap();
+    let (lines_tx, lines_rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        for line in BufReader::new(stdout).lines() {
+            if lines_tx.send(line).is_err() {
+                break;
+            }
+        }
+    });
+    let wait_for = |expected: &str| {
+        loop {
+            let line = lines_rx
+                .recv_timeout(Duration::from_secs(30))
+                .expect("persist example output")
+                .expect("persist example stdout line");
+            if line == expected {
+                break;
+            }
+        }
+    };
+
+    wait_for("1");
+    let compatible = String::from_utf8(original.clone())
+        .unwrap()
+        .replace("print(\"{counter}\")", "print(\"count={counter}\")");
+    fs::write(&file, compatible).unwrap();
+    wait_for("count=2");
+
+    let shape_changed = String::from_utf8(original)
+        .unwrap()
+        .replace("#Persist counter := 0", "#Persist counter := 0.0")
+        .replace("print(\"{counter}\")", "print(\"count={counter}\")");
+    fs::write(&file, shape_changed).unwrap();
+    wait_for("count=1.0");
+
+    let _ = child.kill();
+    let _ = child.wait_with_output().expect("stop persist example jet dev");
+    let _ = fs::remove_dir_all(&dir);
+}
+
 /// D-AUTH-TOKENPOLICY1=A: auth verification stays resident in the default JIT;
 /// forced interpretation uses the same ambient Prelude adapter.
 #[test]

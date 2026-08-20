@@ -92,7 +92,7 @@ pub fn apply_impure_core_call_with_type(
             "core.files",
             "read" | "read_bytes" | "write" | "append_all" | "exists" | "is_dir"
             | "create_dir" | "create_dir_all" | "remove" | "remove_dir" | "remove_all"
-            | "list_dir" | "copy",
+            | "list_dir" | "copy" | "walk_parallel",
         ) => {
             let resolve = |value: &CtValue| -> Result<String, Diagnostic> {
                 Ok(base_dir
@@ -125,6 +125,22 @@ pub fn apply_impure_core_call_with_type(
                 "remove_dir" => unit(files_kernel::fs_remove_dir(&path)),
                 "remove_all" => unit(files_kernel::fs_remove_all(&path)),
                 "copy" => unit(files_kernel::fs_copy(&path, &resolve(one(1)?)?)),
+                "walk_parallel" => present(files_kernel::fs_walk_parallel(&path).map(|entries| {
+                    CtValue::List(
+                        entries
+                            .into_iter()
+                            .map(|(path, relative, is_dir, depth)| CtValue::Struct {
+                                type_name: "WalkEntry".to_string(),
+                                fields: vec![
+                                    ("path".to_string(), CtValue::Str(path)),
+                                    ("relative".to_string(), CtValue::Str(relative)),
+                                    ("is_dir".to_string(), CtValue::Bool(is_dir)),
+                                    ("depth".to_string(), CtValue::Int(depth)),
+                                ],
+                            })
+                            .collect(),
+                    )
+                })),
                 // D-LSDIR1: the kernel returns rows already sorted by name.
                 _ => present(files_kernel::fs_list_dir(&path).map(|entries| {
                     CtValue::List(

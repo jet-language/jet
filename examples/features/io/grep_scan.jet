@@ -1,0 +1,36 @@
+// D-FSOPS1: parallel directory queue + regex file scan.
+use core.files as fs
+use core.regex as re
+use core.testing as testing
+
+fn run() ? {
+    root :: testing.temp_dir("grep-scan")
+    src :: Path.from(root).join("src")
+    fs.create_dir_all(src) ?? return Err("mkdir failed")
+    fs.write(Path.from(root).join("notes.txt"), "needle in notes\n") ?? return Err("write failed")
+    fs.write(src.join("alpha.txt"), "needle in alpha\n") ?? return Err("write failed")
+    fs.write(src.join("beta.txt"), "no match\n") ?? return Err("write failed")
+
+    parallel :: fs.walk_parallel(root) ?? return Err("parallel walk failed")
+    sequential :: fs.walk(root) ?? return Err("sequential walk failed")
+    parallel_set := [String].{}
+    sequential_set := [String].{}
+    loop entry, parallel -> parallel_set.push("{entry.relative}:{entry.is_dir}")
+    loop entry, sequential -> sequential_set.push("{entry.relative}:{entry.is_dir}")
+    parallel_set.sort()
+    sequential_set.sort()
+
+    matches := [String].{}
+    loop entry, parallel {
+        if !entry.is_dir {
+            text :: fs.read(entry.path) ?? return Err("read failed")
+            if re.is_match(.{"needle"}, text) {
+                matches.push("{entry.relative}: needle")
+            }
+        }
+    }
+    matches.sort()
+    print("matches: {matches.len()}")
+    loop line, matches -> print(line)
+    print("walks agree: {parallel_set == sequential_set}")
+}

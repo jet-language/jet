@@ -1274,6 +1274,25 @@ fn run() {
 }
 
 #[test]
+fn canonical_time_week_uses_one_family_scale_and_ordering() {
+    let src = r#"
+fn run() {
+    week :: 1week
+    print(week == 7d)
+    print(2week + 12h)
+    print(week > 6d)
+    print(week < 8d)
+    print("{1week}")
+}
+"#;
+    tir_support::assert_tiers_agree(
+        "canonical_time_week",
+        src,
+        "true\n1252800000000000ns\ntrue\ntrue\n604800000000000ns\n",
+    );
+}
+
+#[test]
 fn canonical_time_timeout_and_sleep_spellings_compile() {
     let src = r#"
 use core.time.[sleep]

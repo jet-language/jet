@@ -158,7 +158,16 @@ impl<'a> Checker<'a> {
                             if let Expr::Ident(name, span) = &arg.expr {
                                 self.mark_moved(name.clone(), *span);
                             }
-                        } else if got != elem_ty {
+                        } else {
+                            let boxes_as_trait = self.trait_slot_accepts(&elem_ty, &got);
+                            if boxes_as_trait {
+                                self.note_move_if_direct_ident(&arg.expr);
+                            }
+                            if got == elem_ty || boxes_as_trait {
+                                pack_span = Span::new(pack_span.start, arg.expr.span().end);
+                                packed_elems.push(arg.expr);
+                                continue;
+                            }
                             self.diags.push(Diagnostic::error(
                                 "E0112",
                                 format!(

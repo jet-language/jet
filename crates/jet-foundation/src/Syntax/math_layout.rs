@@ -547,8 +547,16 @@ pub const FOREIGN_WHILE: &str = "while";
 pub const FOREIGN_FOR: &str = "for";
 pub const FOREIGN_DO: &str = "do";
 pub const FOREIGN_TRY: &str = "try";
+/// D-S14-PAUSE: foreign declaration and binding words are diagnostic-only;
+/// they never enter Jet grammar.
+pub const FOREIGN_FUN: &str = "fun";
 pub const FOREIGN_FUNC: &str = "func";
 pub const FOREIGN_DEF: &str = "def";
+pub const FOREIGN_FUNCTION: &str = "function";
+pub const FOREIGN_LET: &str = "let";
+pub const FOREIGN_VAR: &str = "var";
+pub const FOREIGN_CONST: &str = "const";
+pub const FOREIGN_VAL: &str = "val";
 pub const FOREIGN_IMPORT: &str = "import";
 pub const FOREIGN_PRINTLN: &str = "println";
 pub const FOREIGN_TEXT: &str = "Text";
