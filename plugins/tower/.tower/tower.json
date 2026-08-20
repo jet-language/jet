@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 2097,
-    "rev": 39444,
+    "rev": 39449,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -136686,20 +136686,40 @@
       "track": "sidequest",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "planning",
+      "phase": "done",
       "priority": "P1",
       "plan": null,
       "blockedBy": [],
       "assignee": null,
       "log": [],
-      "criteria": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "The residency gate and its lowering read ONE table wherever the pairing is a pure set, with set-equality tests that fail when the two halves disagree; every pairing that cannot be lifted is named in the test with the reason it needs a live FunctionBuilder",
+          "status": "met",
+          "metBy": "fable-e3-burndown",
+          "verifiedBy": null,
+          "evidence": "PROOF cargo test --test ownership 208/208 ok, --test shared_guards 16/16 ok (2026-08-19, builder c6fb65dfb). The gate_follows_lowering module in crates/jet-jit/src/jit/lower_ctx.rs asserts set equality for the OP table, the payload-type table and the builtin-method receiver dimension. Unliftable pairings are named with their reason: the subset-gate-versus-AOT-emit boundary and the builtin receiver table have lowering halves that need a live FunctionBuilder, so they have no pure set to compare until each dispatch is lifted into its own table.",
+          "at": "2026-08-20T03:34:33.589Z"
+        },
+        {
+          "n": 2,
+          "text": "The four drifts found on 2026-08-19 (Option ordering, Unit, Unzip payload kinds, distinct-blind column classification) each have a check that would have caught them, proven by cargo test --test ownership and the jit lower_ctx gate_follows_lowering module",
+          "status": "met",
+          "metBy": "fable-e3-burndown",
+          "verifiedBy": null,
+          "evidence": "All four drifts were caught by checks rather than by a red example: Option ordering (safety.rs admitted only Eq/Ne while lowering had Lt/Gt/Le/Ge since 27e1906b6), TExprKind::Unit with no gate arm, Unzip admitted one payload kind wider than the host could honour, and the lifted table answering distinct-BLIND while the row writer was distinct-AWARE. Each is now pinned: the first two by the OP and payload set-equality assertions, the second two by the unzip_column_round_trip tests in crates/jet-jit/src/Collections.rs.",
+          "at": "2026-08-20T03:34:34.133Z"
+        }
+      ],
       "refs": [],
       "tags": [],
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-19T23:57:44.982Z",
-      "updated": "2026-08-19T23:57:44.982Z",
-      "updatedBy": "fable-e3-burndown"
+      "updated": "2026-08-20T03:34:34.857Z",
+      "updatedBy": "fable-e3-burndown",
+      "completedAt": "2026-08-20T03:34:34.856Z"
     },
     {
       "id": "c01g2ptl",
@@ -183165,6 +183185,41 @@
   ],
   "events": [
     {
+      "at": "2026-08-20T03:34:34.857Z",
+      "by": "fable-e3-burndown",
+      "action": "card.update",
+      "ref": "c02funel",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-20T03:34:34.133Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c02funel",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-20T03:34:33.589Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c02funel",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-20T03:34:33.028Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-add",
+      "ref": "c02funel",
+      "note": "#2 The four drifts found on 2026-08-19 (Option ordering, Unit, "
+    },
+    {
+      "at": "2026-08-20T03:34:32.461Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-add",
+      "ref": "c02funel",
+      "note": "#1 The residency gate and its lowering read ONE table wherever "
+    },
+    {
       "at": "2026-08-20T03:34:12.564Z",
       "by": "fable-e3-burndown",
       "action": "card.update",
@@ -186627,41 +186682,6 @@
       "by": "fable",
       "action": "card.update",
       "ref": "c0kqubkv",
-      "note": "track,epoch,milestoneId"
-    },
-    {
-      "at": "2026-08-19T13:48:19.334Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c0qr70g1",
-      "note": "track,epoch,milestoneId,logEntry"
-    },
-    {
-      "at": "2026-08-19T13:48:18.692Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c07okf4s",
-      "note": "track,epoch,milestoneId"
-    },
-    {
-      "at": "2026-08-19T13:48:18.072Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c07drezi",
-      "note": "track,epoch,milestoneId"
-    },
-    {
-      "at": "2026-08-19T13:48:17.483Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c0d2uwy7",
-      "note": "track,epoch,milestoneId"
-    },
-    {
-      "at": "2026-08-19T13:48:16.880Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c08lw188",
       "note": "track,epoch,milestoneId"
     }
   ],
