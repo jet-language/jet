@@ -577,8 +577,10 @@ impl<'a> Parser<'a> {
                             }
                             self.expect(TokKind::RParen, "to finish the call")?;
                             self.parse_generate_template_arg(&member, &mut args)?;
+                            let receiver = Expr::Ident(type_name, span);
+                            self.teach_retired_shared_new(&receiver, &member, member_span);
                             let result = Expr::MethodCall {
-                                receiver: Box::new(Expr::Ident(type_name, span)),
+                                receiver: Box::new(receiver),
                                 method: member,
                                 method_span: member_span,
                                 owner_type_args: type_args,

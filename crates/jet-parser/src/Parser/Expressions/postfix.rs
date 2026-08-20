@@ -10,6 +10,26 @@ fn is_adjacent_call_result(expr: &Expr) -> bool {
     }
 }
 
+/// D-CONC-SHARE1=A (card #1561): the retired `Shared.new(x)` call. Both call
+/// sites — the chained postfix loop and `expr_primary`'s bare-leading-ident
+/// fast path — build the same node the `shared x` desugar builds, so the
+/// teaching lives here once instead of in whichever site was remembered.
+impl<'a> Parser<'a> {
+    pub(super) fn teach_retired_shared_new(
+        &mut self,
+        receiver: &Expr,
+        member: &str,
+        member_span: Span,
+    ) {
+        if member == "new"
+            && matches!(receiver, Expr::Ident(name, _) if name == Syntax::TYPE_SHARED)
+        {
+            self.diags
+                .push(Diagnostic::from_row("E1115", &[], Some(member_span)));
+        }
+    }
+}
+
 impl<'a> Parser<'a> {
         pub(super) fn expr_postfix(&mut self, allow_struct_lit: bool) -> Result<Expr, Diagnostic> {
             let mut expr = self.expr_primary(allow_struct_lit)?;
@@ -147,15 +167,7 @@ impl<'a> Parser<'a> {
                             // word. Teach here, then recover as the same node
                             // the prefix form builds so the rest of the file
                             // still checks.
-                            if matches!(&expr, Expr::Ident(name, _) if name == Syntax::TYPE_SHARED)
-                                && member == "new"
-                            {
-                                self.diags.push(Diagnostic::from_row(
-                                    "E1115",
-                                    &[],
-                                    Some(member_span),
-                                ));
-                            }
+                            self.teach_retired_shared_new(&expr, &member, member_span);
                             expr = Expr::MethodCall {
                                 receiver: Box::new(expr),
                                 method: member,
