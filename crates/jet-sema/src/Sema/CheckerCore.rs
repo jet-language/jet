@@ -1,5 +1,6 @@
 mod scopes;
 mod type_assign;
+pub(crate) use type_assign::is_core_view_generic;
 mod blocks;
 mod statements;
 mod control_flow;

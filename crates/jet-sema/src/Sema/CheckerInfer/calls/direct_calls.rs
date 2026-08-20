@@ -1435,6 +1435,17 @@ impl<'a> Checker<'a> {
                         // D-ENUMDOT2=A: propagate named/optional type so `.Variant` can
                         // resolve to the correct enum from context.
                         self.expected_type = Some(param_ty.clone());
+                    } else if crate::Sema::CheckerCore::is_core_view_generic(param_ty) {
+                        // D-MEM-COPYSEM1=A: a `View`/`ViewMut`/`Pin` parameter is a
+                        // borrowed-window slot, not an owning one. The slot fact has to
+                        // reach inference: without it a wrapper around the window
+                        // (`Val(v) ?? v`, an optional payload) is treated as an owning
+                        // slot and materialized into `[T]` by `infer_owning_value`,
+                        // which both drops the window's loan and makes the argument
+                        // unassignable to its own parameter. Method arguments already
+                        // carry the slot fact (`CheckerItems.rs:935` propagates the
+                        // whole parameter type), so this is the same rule, not a new one.
+                        self.expected_type = Some(param_ty.clone());
                     }
                 }
                 // D-EFF2 (callback param bound): snapshot the effect accumulator

@@ -125,33 +125,65 @@ fn run() {
     );
 }
 
+/// D-CONC-SHARE1=A (card #1561): plain field access on a `Shared<T>` is the
+/// only source spelling. Sema desugars a field read into ONE locked read and a
+/// field write into ONE locked edit, both through the same Prelude seam the
+/// retired closure forms used, so no execution tier grows a second mechanism.
+/// The synthesized payload parameter is `__jet_shared_value`, a name no user
+/// program can spell, so counting its closures counts the locks taken.
 #[test]
 fn shared_callbacks_receive_exactly_one_host_borrow() {
     let src = r#"
 struct Config { hits: Int }
 fn run() {
-    config := Shared.new(Config.{ hits: 0 })
-    config.read((c) => c.hits)
-    config.edit((c) => { c.hits += 1 })
+    config := shared Config.{ hits: 0 }
+    print(config.hits)
+    config.hits += 1
 }
 "#;
-    let out = jet::compile(src).expect("Shared callbacks must lower without double borrowing");
-    assert!(out.rust.contains("|__jet_c: &__jet_Config|"), "{}", out.rust);
+    let out = jet::compile(src).expect("plain shared access must lower without double borrowing");
     assert!(
-        out.rust.contains("|__jet_c: &mut __jet_Config|"),
+        out.rust.contains("|__jet_shared_value: &__jet_Config|"),
+        "{}",
+        out.rust
+    );
+    assert!(
+        out.rust.contains("|__jet_shared_value: &mut __jet_Config|"),
         "{}",
         out.rust
     );
     assert!(!out.rust.contains("&&__jet_Config"), "{}", out.rust);
     assert!(!out.rust.contains("&mut &__jet_Config"), "{}", out.rust);
+    // The single-write property. `config.hits += 1` is a read-modify-write, and
+    // the desugar must keep both halves inside ONE edit so no update is lost. A
+    // two-step lowering would either add a second read closure (the `+=` load)
+    // or nest a read inside the edit; either way the counts below move. One
+    // read closure (`print(config.hits)`) and one edit closure (`+= 1`) is the
+    // only shape in which the write's load and store share a single lock.
+    assert_eq!(
+        out.rust
+            .matches("|__jet_shared_value: &__jet_Config|")
+            .count(),
+        1,
+        "the field read is one locked read: {}",
+        out.rust
+    );
+    assert_eq!(
+        out.rust
+            .matches("|__jet_shared_value: &mut __jet_Config|")
+            .count(),
+        1,
+        "the read-modify-write is one locked edit: {}",
+        out.rust
+    );
 }
 
 #[test]
 fn shared_edit_guard_spans_helper_calls() {
     let src = r#"
-struct Queue { items: [Int] }
+struct Jobs { items: [Int] }
 
-impl Queue {
+impl Jobs {
     fn add(&self, value: Int) {
         self.items.push(value)
     }
@@ -162,8 +194,8 @@ impl Queue {
 }
 
 fn run() {
-    queue := Shared.new(Queue.{ items: [Int].{} })
-    other := Shared.new(Queue.{ items: [Int].{} })
+    queue := shared Jobs.{ items: [Int].{} }
+    other := shared Jobs.{ items: [Int].{} }
     guard :: queue.guard_edit()
     other_guard :: other.guard_read()
     guard.value.add(1)
@@ -194,7 +226,7 @@ fn shared_read_guard_value_is_not_writable() {
 struct Counter { value: Int }
 
 fn run() {
-    counter := Shared.new(Counter.{ value: 0 })
+    counter := shared Counter.{ value: 0 }
     guard :: counter.guard_read()
     guard.value.value += 1
 }
@@ -217,8 +249,8 @@ fn inspect(guard: SharedGuard<Int>) {
 }
 
 fn run() {
-    shared := Shared.new(1)
-    guard :: shared.guard_edit()
+    cell := shared 1
+    guard :: cell.guard_edit()
     inspect(guard)
     guard.value += 1
 }
@@ -234,8 +266,8 @@ fn bump(&guard: SharedGuard<Int>) {
 }
 
 fn run() {
-    shared := Shared.new(1)
-    guard := shared.guard_read()
+    cell := shared 1
+    guard := cell.guard_read()
     bump(&guard)
 }
 "#;
@@ -252,13 +284,13 @@ fn run() {
 #[test]
 fn returned_public_guard_is_read_only_without_write_helper_access() {
     let src = r#"
-fn acquire(shared: Shared<Int>) => SharedGuard<Int> {
-    return shared.guard_edit()
+fn acquire(handle: Shared<Int>) => SharedGuard<Int> {
+    return handle.guard_edit()
 }
 
 fn run() {
-    shared := Shared.new(1)
-    guard := acquire(shared)
+    cell := shared 1
+    guard := acquire(cell)
     guard.value += 1
 }
 "#;
@@ -278,11 +310,11 @@ fn shared_guard_map_and_split_preserve_disjoint_places() {
 struct Pair { left: Int, right: Int }
 
 fn run() {
-    first := Shared.new(Pair.{ left: 1, right: 2 })
+    first := shared Pair.{ left: 1, right: 2 }
     mapped :: first.guard_edit().map(value => value.left)
     mapped.value += 1
 
-    second := Shared.new(Pair.{ left: 3, right: 4 })
+    second := shared Pair.{ left: 3, right: 4 }
     (left, right) :: second.guard_edit().split(
         value => value.left,
         value => value.right
@@ -300,8 +332,8 @@ fn shared_guard_split_rejects_overlapping_places() {
 struct Pair { left: Int, right: Int }
 
 fn run() {
-    shared := Shared.new(Pair.{ left: 1, right: 2 })
-    guard :: shared.guard_edit()
+    cell := shared Pair.{ left: 1, right: 2 }
+    guard :: cell.guard_edit()
     _ :: guard.split(value => value.left, value => value.left)
 }
 "#;
@@ -318,8 +350,8 @@ fn run() {
 fn shared_guard_is_owned_and_noncloneable() {
     let src = r#"
 fn run() {
-    shared := Shared.new(1)
-    guard :: shared.guard_read()
+    cell := shared 1
+    guard :: cell.guard_read()
     _ :: ~guard
 }
 "#;
@@ -334,9 +366,9 @@ fn run() {
 fn shared_guard_wait_requires_edit_access_and_bool_predicate() {
     let read_src = r#"
 fn run() {
-    shared := Shared.new(1)
+    cell := shared 1
     changed := Condition.new()
-    guard :: shared.guard_read()
+    guard :: cell.guard_read()
     _ :: guard.wait(changed, value => value == 1)
 }
 "#;
@@ -349,9 +381,9 @@ fn run() {
 
     let predicate_src = r#"
 fn run() {
-    shared := Shared.new(1)
+    cell := shared 1
     changed := Condition.new()
-    guard :: shared.guard_edit()
+    guard :: cell.guard_edit()
     _ :: guard.wait(changed, value => value)
 }
 "#;
@@ -369,8 +401,8 @@ fn run() {
 fn shared_guard_long_scope_has_lock_order_lint() {
     let src = r#"
 fn run() {
-    shared := Shared.new(1)
-    guard :: shared.guard_edit()
+    cell := shared 1
+    guard :: cell.guard_edit()
     print(guard.value)
     print(guard.value)
     print(guard.value)
@@ -1369,10 +1401,14 @@ fn run() {
 
 #[test]
 fn reactive_capture_materializes_local_views_before_rustc() {
+    // `a..b` is inclusive (spec.md:127), so the window has to be narrower than
+    // the owner for the length to prove anything: `jet_view_copy` must copy the
+    // WINDOW, not the root. `values[0..1]` is the whole list and would pass on
+    // either behaviour.
     let source = r#"
 fn run() {
     values := [1, 2]
-    first :: values[0..1]
+    first :: values[0..0]
     #Reactive { print(first.len()) }
 }
 "#;
@@ -2677,7 +2713,10 @@ fn run() {
 
 /// #1162: a simulation may keep statically disjoint particle edit windows
 /// live while reading grid cells. D-SHAPE-PLACE1 lowers the particle windows
-/// through safe structural splits.
+/// through safe structural splits. Card #1361 / I2: the owner itself may not
+/// be read beside a live exclusive window (E0220) — only the windows and
+/// values copied before them, exactly as
+/// `examples/features/memory/place_windows.jet` is written.
 #[test]
 fn indexed_simulation_static_update_lowers_to_safe_splits() {
     let src = r#"
@@ -2696,13 +2735,14 @@ fn run() {
         Tile.{ force: 11 }
     }
 
+    middle_before :: ~particles[1]
     left :: &particles[0]
     right :: &particles[2]
     left.velocity += grid[0].force
     right.velocity += grid[2].force
     left.position += left.velocity
     right.position += right.velocity
-    print("{left.position},{particles[1].position},{right.position}")
+    print("{left.position},{middle_before.position},{right.position}")
 }
 "#;
     let out = jet::compile(src).expect("static particle indexes must compile");
@@ -2851,9 +2891,18 @@ fn run() {
         "write view must tie to parameter 0: {}",
         out.rust
     );
+    // A compound field write lowers to one mutable place borrow plus a
+    // read-modify-write through it, so the assignment target is the ViewMut
+    // element itself and no temporary is cloned in between.
     assert!(
-        out.rust.contains("].__jet_pages +="),
+        out.rust
+            .contains("&mut (__jet_dune)[0i64 as usize].__jet_pages"),
         "field write must assign through the ViewMut element, not a cloned temporary: {}",
+        out.rust
+    );
+    assert!(
+        !out.rust.contains("(__jet_dune).clone()"),
+        "the write must not go through a cloned view: {}",
         out.rust
     );
 }
@@ -3119,9 +3168,27 @@ fn run() {
         .find("fn jet_view_range_new")
         .expect("view helper definition");
     assert!(helper < check, "bounds-checking helper must exist before use");
-    assert!(out
-        .rust
-        .contains("jet_checked_range_bounds(xs.len() as i64, range, \"view\""));
+    // The window policy is one shared rule (`jet_checked_view_window` ->
+    // `jet_checked_view_bounds` -> `jet_range_bounds`) for AOT, the resident
+    // JIT, and the interpreter, so the check lives inside the helper and runs
+    // before the borrow rather than at the call site.
+    assert!(
+        out.rust.contains("fn jet_checked_view_bounds"),
+        "the shared view-bounds rule must be emitted: {}",
+        out.rust
+    );
+    let helper_body = &out.rust[helper..];
+    let bounds = helper_body
+        .find("jet_checked_view_window(")
+        .expect("the view helper must check bounds");
+    let borrow = helper_body
+        .find("&xs[start as usize..end as usize]")
+        .expect("the view helper must borrow the checked window");
+    assert!(
+        bounds < borrow,
+        "bounds must be checked before the window is borrowed: {}",
+        out.rust
+    );
 }
 
 #[test]
@@ -4159,12 +4226,17 @@ fn run() {
     outside :: [&values[0..0], &values[2..2]]
 }
 "#;
+    // D-FAIL-BREACH1=A: every tier renders this failure through the one
+    // `jet_runtime_stop_report` boundary, over the shared bounds message
+    // `Prelude/Core/RangeBounds.rs::jet_view_bounds_error` produces. No tier
+    // prints the bare message, and none may drop the Jet source location.
+    let stop = "Stop [E3001]: `panic: can't view 1 items from 2 to 2 (inclusive)`";
     jet::compile(src).expect("dynamic view bounds must reach runtime validation");
     if common::have_rustc() {
         let (code, _stdout, stderr) =
             common::build_and_run("jet_view_mut_bounds_aot", "view_mut_bounds_aot", src);
         assert_ne!(code, 0, "AOT accepted an invalid mutable view");
-        assert!(stderr.contains("can't view 1 items from 2 to 2"), "{stderr}");
+        assert!(stderr.contains(stop), "AOT reported the wrong runtime failure: {stderr}");
     }
 
     let root = common::unique_tmp("jet_view_mut_bounds_tiers");
@@ -4178,6 +4250,7 @@ fn run() {
         .collect();
     assert!(errors.is_empty(), "{errors:?}");
 
+    let mut jit_report = None;
     if jet_jit::cranelift_host_supported() {
         assert!(
             jet_jit::resident_jit_safe_bundle(&bundle),
@@ -4191,11 +4264,11 @@ fn run() {
                 stderr, exit_code, ..
             } => {
                 assert_eq!(exit_code, 70, "resident JIT exit drift: {stderr}");
-                assert_eq!(
-                    stderr,
-                    "panic: can't view 1 items from 2 to 2 (inclusive)\n",
-                    "resident JIT reported the wrong runtime failure"
+                assert!(
+                    stderr.starts_with(stop),
+                    "resident JIT reported the wrong runtime failure: {stderr}"
                 );
+                jit_report = Some(stderr);
             }
             RunOutcome::Problems(diags) => panic!(
                 "resident JIT returned diagnostics instead of running: {diags:?}"
@@ -4208,11 +4281,23 @@ fn run() {
             stderr, exit_code, ..
         } => {
             assert_eq!(exit_code, 70, "forced interpreter exit drift: {stderr}");
-            assert_eq!(
-                stderr,
-                "panic: can't view 1 items from 2 to 2 (inclusive)\n",
-                "forced interpreter reported the wrong runtime failure"
+            assert!(
+                stderr.starts_with(stop),
+                "forced interpreter reported the wrong runtime failure: {stderr}"
             );
+            // The stop names the failing Jet place, not just the message: an
+            // engine that loses its source facts reports a different thing
+            // from the engine beside it (I9).
+            assert!(
+                stderr.contains("main.jet:4 in run"),
+                "forced interpreter dropped the Jet source location: {stderr}"
+            );
+            if let Some(jit) = jit_report {
+                assert_eq!(
+                    jit, stderr,
+                    "the resident JIT and the interpreter must report one failure"
+                );
+            }
         }
         RunOutcome::Problems(diags) => panic!(
             "forced interpreter returned diagnostics instead of running: {diags:?}"
