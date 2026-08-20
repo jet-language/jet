@@ -2122,15 +2122,17 @@ impl<'a> Checker<'a> {
                 other => other,
             };
             // D-CALLVALUE1=B: `.call(...)` is the builtin projection for a
-            // function-typed receiver. Keep a struct member named `call` on the
-            // ordinary lookup path below, so user fields and methods shadow the
-            // projection as promised by the surface decision.
+            // function-typed receiver. Keep a member named `call` on the
+            // ordinary lookup path below — a user struct field, a user `impl`
+            // method, or a Core handle's own method — so a real `call` shadows
+            // the projection as promised by the surface decision.
             if method == Syntax::METHOD_CALL {
-                let has_user_call_member = match &recv_ty {
+                let has_call_member = match &recv_ty {
                     Type::Named(name) => {
                         self.struct_fields_for_type_name(name).is_some_and(|fields| {
                             fields.iter().any(|(field, _, _)| field == Syntax::METHOD_CALL)
                         }) || self.resolve_method_sig(name, Syntax::METHOD_CALL).is_some()
+                            || crate::Sema::core_handle_owns_method(name, Syntax::METHOD_CALL)
                     }
                     Type::Apply { name, args } => {
                         self.struct_fields_for_type_name(name).is_some_and(|fields| {
@@ -2148,7 +2150,7 @@ impl<'a> Checker<'a> {
                     }),
                     _ => false,
                 };
-                if !matches!(&recv_ty, Type::Fn { .. }) && !has_user_call_member {
+                if !matches!(&recv_ty, Type::Fn { .. }) && !has_call_member {
                     let mut callee = receiver.clone();
                     let end = args.last().map(|arg| arg.expr.span().end).unwrap_or(span.end);
                     return self.infer_call_value(

@@ -3,9 +3,10 @@
 // `sandbox_src/` builds `mathkit.wasm` (see its package.jet for the rebuild
 // command); this file is the HOST, an ordinary native Jet program. Loading
 // and calling the sandbox never needs `#Unsafe` (I1) — the sandbox itself is
-// the safety boundary (the wasmtime host registers zero host imports, so a
-// sandbox code that tried to touch the filesystem/network would simply fail to
-// instantiate, not silently succeed).
+// the safety boundary: it runs deny-by-default with zero host authority (the
+// wasmtime host registers no host imports), so sandbox code that tried to touch
+// the filesystem or the network would fail to instantiate rather than silently
+// succeed. That is the law E1258 states at compile time.
 use core.plugin as plugin
 
 fn run() {

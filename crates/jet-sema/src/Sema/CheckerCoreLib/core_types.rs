@@ -1919,6 +1919,27 @@ pub(crate) fn core_service_error_variants(
     )
 }
 
+/// D-CALLVALUE1=B: does a Core handle type own a method under this name?
+///
+/// The builtin `.call(…)` projection is defined for function-typed receivers,
+/// and spec.md ("Function-value calls") says a field or method literally named
+/// `call` shadows it. A Core handle's methods live in these tables rather than
+/// in the user struct/impl registries, so the shadow test has to ask here too —
+/// otherwise `Plugin.call` (D-DEP-WASM1=A / D-PLUGIN1=B) is hijacked by the
+/// projection and reported as E0803 "this is `Plugin`, not a function", while
+/// its sibling `.call_int` resolves normally.
+///
+/// Only the bespoke, receiver-name-dispatched handle tables answer: the generic
+/// ones (`file_handle_method_return` and friends) diagnose as they resolve, so
+/// they cannot be consulted as a predicate.
+pub fn core_handle_owns_method(handle_ty: &str, method: &str) -> bool {
+    match handle_ty {
+        "Plugin" => super::plugin_method_return_ty(method).is_some(),
+        "Mod" => super::mod_method_return_ty(method).is_some(),
+        _ => false,
+    }
+}
+
 /// E2-M7: type-check a method call on a FileReader or FileWriter handle (D-IO2).
 /// Returns `Some(return_type)` when the method is valid, or emits E2501 and
 /// returns `None` for an invalid method / wrong-direction call.

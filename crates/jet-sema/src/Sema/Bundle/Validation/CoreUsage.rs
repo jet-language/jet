@@ -215,12 +215,22 @@ fn note_core_usage(
     }
 }
 
-fn note_typed_boundary_core_usage(
+fn note_typed_head_core_usage(
     used: &mut HashSet<String>,
     spans: &mut HashMap<String, crate::Diagnostics::Span>,
     name: &str,
     span: Option<crate::Diagnostics::Span>,
 ) {
+    // D-REGEX-LIT1=D: `Regex.{"…"}` rewrites to the compiler-owned one-argument
+    // `Regex(pattern)` constructor, which lowers to `jet_std::jet_regex_literal`.
+    // No `use core.regex` import exists for the import walk to see, so a program
+    // whose only regex is a typed literal emitted that call with no `mod jet_std`
+    // at all (R10 pay-for-what-you-call) — rustc E0433 on generated code, an I2
+    // compiler bug. Record exactly what the import would have recorded.
+    if name == Syntax::TYPE_REGEX {
+        note_core_usage(used, spans, "core.regex::literal", span);
+        return;
+    }
     let Some(kind) = Syntax::typed_head_kind(name).filter(|kind| kind.is_boundary()) else {
         return;
     };
@@ -723,10 +733,10 @@ pub(crate) fn collect_core_expr(
             {
                 note_core_usage(used, spans, "core.units::from", Some(c.name_span));
             }
-            // D-BOUND-HEAD1=A: sema rewrites typed boundary heads to their
-            // ordinary alternating literal/hole call before this reachability
+            // D-BOUND-HEAD1=A / D-REGEX-LIT1=D: sema rewrites a typed literal
+            // head to its ordinary constructor call before this reachability
             // walk. The Syntax descriptor selects the owning prelude fragment.
-            note_typed_boundary_core_usage(used, spans, &c.name, Some(c.name_span));
+            note_typed_head_core_usage(used, spans, &c.name, Some(c.name_span));
             for arg in &c.args {
                 // D-CABI-CALLBACK1: `arg.flags.c_callback_symbol` means sema
                 // already proved this bare function name is passed as a stable
@@ -830,7 +840,7 @@ pub(crate) fn collect_core_expr(
         }
         Expr::TypedLit { head, body, span } => {
             if let Some(Type::Named(name)) = head {
-                note_typed_boundary_core_usage(used, spans, name, Some(*span));
+                note_typed_head_core_usage(used, spans, name, Some(*span));
             }
             body.for_each_expr(|e| collect_core_expr(e, imports, used, spans, ffi_cb));
         }
