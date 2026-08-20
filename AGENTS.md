@@ -246,12 +246,17 @@ Worktrees are allowed for isolated or concurrent writes. Record ownership before
 the intended branch promptly, verify it there, then remove the worktree and temporary branch immediately. Never park
 finished work unmerged. Paused work keeps a named coherent handoff branch and resume note, not an orphaned worktree.
 
-Build-heavy agent tasks reuse the persistent builder worktree at `.claude/worktrees/builder` instead of a fresh
-random-path worktree: cargo fingerprints embed absolute paths, so a fresh path means a full cold workspace rebuild
-(~15-20 minutes) while the fixed path rebuilds only what changed. Claim it with
-`scripts/agent/builder-sync.sh <claimant>` (refreshes to master HEAD; exits 75 when busy), release with
-`--release`, and never remove it or its `target/`. One build agent at a time; doc-only and board-only tasks keep
-disposable isolated worktrees.
+Build-heavy agent tasks share the main checkout’s one `target/`. A second build tree is not free: the
+retired builder worktree reached 517G (438G of stale `deps` generations that nothing prunes, 40G incremental,
+39G scratch) and the machine ended a session in an OOM kill. Workers type-check with
+`scripts/agent/lane-check.sh`; the orchestrator tests with `scripts/agent/proof-parallel.sh`, which refuses to
+run past `JET_TARGET_CAP_GB` (120G default). `scripts/agent/disk-report.sh` prints the current footprint and
+the command to reclaim each piece.
+
+`/tmp` is RAM-backed here, so never point scratch, a target dir, or a log at it: agent scripts export
+`TMPDIR=~/.cache/jet-test-scratch` before `jet-env` (the nix shell inherits it) and set `CARGO_INCREMENTAL=0`.
+Briefs and worker logs live in `~/.cache/jet-luna`. The runtime rlib cache (`~/.cache/jet/runtime`) has no
+pruning yet (card #2084) and reached 28G; clear it when it grows.
 
 Worktree location is absolute (no exceptions for cloud agents, Cursor, Claude, or temp names):
 

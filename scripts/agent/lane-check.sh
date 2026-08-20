@@ -31,6 +31,12 @@ if [ "$#" -eq 0 ]; then
   set -- --workspace --all-targets
 fi
 
+# /tmp is RAM-backed here, and a check can fork rustc: keep scratch on disk and
+# skip incremental artifacts, which reached 24G in one target dir.
+scratch="${JET_TEST_SCRATCH:-$HOME/.cache/jet-test-scratch}"
+mkdir -p "$scratch"
+export TMPDIR="$scratch" TMP="$scratch" TEMP="$scratch"
+export CARGO_INCREMENTAL=0
 export JET_NIX_TMP_CLEANED=1
 tmp="$(mktemp)"
 trap 'rm -f "$tmp"' EXIT

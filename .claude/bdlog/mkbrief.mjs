@@ -2,7 +2,7 @@
 // Generate a Luna brief from Tower card JSON.
 // usage: node .claude/bdlog/mkbrief.mjs <out-name> <card-ref>... [-- extra note file]
 import { execFileSync } from "node:child_process";
-import { writeFileSync, readFileSync, existsSync } from "node:fs";
+import { writeFileSync, readFileSync, existsSync, mkdirSync } from "node:fs";
 
 const argv = process.argv.slice(2);
 const sep = argv.indexOf("--");
@@ -113,5 +113,8 @@ let note = "";
 if (noteFile && existsSync(noteFile)) note = `## Orchestrator note\n\n${readFileSync(noteFile, "utf8")}\n\n`;
 
 const brief = head + CHECK_CONTRACT + body + note + NON_NEGOTIABLES;
-writeFileSync(`/tmp/luna/${outName}.md`, brief);
-console.log(`/tmp/luna/${outName}.md`, brief.length, "bytes");
+// Briefs live on disk: /tmp is RAM-backed here and a session already died of it.
+const dir = `${process.env.HOME}/.cache/jet-luna`;
+mkdirSync(dir, { recursive: true });
+writeFileSync(`${dir}/${outName}.md`, brief);
+console.log(`${dir}/${outName}.md`, brief.length, "bytes");

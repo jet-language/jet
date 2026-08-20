@@ -82,10 +82,21 @@ codex `workspace-write` protects worktree `.git` pointers and blocks the Nix dae
 Every brief therefore restricts the worker to its assigned worktree and forbids the main
 checkout, sibling worktrees, and `plugins/tower`.
 
-Implementation workers type-check but never test. The persistent
-`.claude/worktrees/builder` is the sole test lane. The orchestrator integrates each result
-on its `CHECK OK` receipt, advances the builder, and runs the smallest proof that can
-reject the patch.
+Implementation workers type-check but never test. The orchestrator integrates each
+result on its `CHECK OK` receipt and runs the smallest proof that can reject the patch, in
+the main checkout, against the one warm target dir.
+
+**One build cache, bounded.** A second build tree in a worktree is not free: one grew to
+517G (438G of stale `deps` generations, 40G incremental, 39G scratch) and the machine
+ended a session in an OOM kill. There is now one target dir. `scripts/agent/disk-report.sh`
+prints the footprint and the exact command to give each piece back;
+`proof-parallel.sh` refuses to run when `target/` is over `JET_TARGET_CAP_GB` (120 by
+default).
+
+**Nothing heavy in /tmp.** `/tmp` is RAM-backed tmpfs on this machine, so test scratch
+there is RAM. Every agent script exports `TMPDIR=~/.cache/jet-test-scratch` before
+`jet-env` so the nix shell inherits it, and sets `CARGO_INCREMENTAL=0`. Briefs and lane
+logs live in `~/.cache/jet-luna`, not `/tmp/luna`.
 
 **Prove in parallel, not end to end.** `scripts/agent/proof-parallel.sh [-j N] SUITE…
 [--crate NAME]…` builds every test binary once, then runs the named suites concurrently and
