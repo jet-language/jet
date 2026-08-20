@@ -2,8 +2,8 @@
   "meta": {
     "version": 4,
     "project": "Jet",
-    "nextNum": 2124,
-    "rev": 39799,
+    "nextNum": 2126,
+    "rev": 39848,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -31,7 +31,7 @@
         "radar-sq"
       ]
     },
-    "completionCursor": "2026-08-20T19:49:56.699Z"
+    "completionCursor": "2026-08-20T20:10:47.202Z"
   },
   "epochs": [
     {
@@ -129358,12 +129358,17 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": "e3-m18-devloop-testing",
-      "phase": "ready",
+      "phase": "done",
       "priority": "P3",
       "plan": "## Outcome\n`jet perf export` gains one genuinely standard payload: `--chrome` emits a conformant Chrome trace-event JSON (Trace Event Format, \"X\"/\"M\" events, microsecond timestamps) built from every domain present in a real `.jettrace`, so Perfetto UI / `chrome://tracing` opens it directly. The pprof/otel modes stay declared-loss Jet projections; every loss note is updated to stop claiming \"no pprof/otel/chrome payloads\" and to state exactly what each mode is.\n\n## Law\n- D-PERFSESSION1=D — `jet perf` family over one versioned `.jettrace` truth; `export` shares the artifact verify seam (Source/CmdPerf.rs:1-9).\n- Loss-declared projection law: every export mode prints an honest `loss` note (existing pattern at CmdPerf.rs:2301-2354).\n- No new user-typeable syntax (the `--chrome` flag already exists, CmdPerf.rs:2245) — no I7 decision needed.\n\n## Work\n1. Trace `Source/CmdPerf.rs` export seam: `export()` (2223), `export_chrome_projection` (2387-2455), `export_json_envelope` loss note (2311-2313). Trace the `.jettrace` content schema in `jet_foundation::JetTrace` (imported at CmdPerf.rs:11-17) and the domain readers already in this file: `first_sample`, `first_allocation`, `task_summary`, `lock_summary`, `io_summary`, `span_summary`, `content_object`/`content_array` — the flamegraph (`ascii_flame`, 1864) and timeline (`ascii_timeline`, 1877) show how sample/stack rows are traversed; reuse that traversal.\n2. Make `export_chrome_projection` a conformant Trace Event Format payload:\n   - Convert all `*_ns` values to microseconds (`ts`/`dur` are µs in the spec; today raw ns are emitted — a viewer shows everything 1000x too long).\n   - Emit \"X\" (complete) events for: wall/cpu sample rows per symbol (name = Jet symbol, args = file:line), spans, task observation spans (one `tid` lane per task), io waits, lock contention; browser rows keep their existing mapping (2402-2435).\n   - Emit \"M\" metadata events (`process_name`, `thread_name`) so lanes are labeled in Perfetto.\n   - Keep top-level `traceEvents` plus the existing `kind`/`schema`/`trace_id`/`version` keys (the format ignores unknown top-level keys), and update `loss` to name only what is genuinely absent (e.g. no async flow events, no counter tracks, no screenshots).\n3. Update `export_json_envelope`'s loss strings (2311, 2313): the envelope now points at `--chrome` as the standard payload instead of claiming none exists.\n4. Leave `--pprof`/`--otel` as declared-loss JSON projections; tighten their loss notes only if wording drifts from reality after step 2/3. Do not attempt gzip-protobuf pprof or OTLP wire format on this card.\n5. Update the E2102 usage line only if flag help wording changes (it should not — flags are unchanged).\n6. Docs: update the `jet perf` reference section that quotes the export loss note (grep `docs/` for \"no pprof/otel/chrome payloads\") so shipped text matches the binary.\n\n## Not building\n- pprof gzip-protobuf or OTLP protobuf wire payloads (would need a protobuf encoder; the criterion needs only ONE standard payload).\n- speedscope format (chrome trace-event chosen: projection already exists, Perfetto is the reference viewer).\n- New flags, new capture domains, changes to `run`/`view`/`compare`/`attach`.\n- `.jettrace` schema/version changes.\n\n## Proof\n- Unit tests beside the existing `mod tests` (CmdPerf.rs:2865): a synthetic trace with every domain exports events whose `ph`∈{X,M}, µs scale (a 1_500_000 ns span exports `dur` 1500), one lane per task, and a loss note that no longer contains \"no pprof/otel/chrome payloads\".\n- Live probe on a fresh binary: `jet perf run examples/features/<any runnable>.jet`, then `jet perf export <trace>.jettrace --chrome > /tmp/t.json`; open `/tmp/t.json` in Perfetto UI (ui.perfetto.dev) and record the load succeeding (screenshot or perfetto trace_processor acceptance) as criterion-1 evidence; paste the updated loss note.\n- `jet perf export <trace> --json` shows the corrected envelope loss note.\n- No runtime-semantics change, so no jet run/--release parity probe is needed; full suite stays at epoch closeout.\n\n## blockedBy\nnone — export seam, flags, and trace schema all ship today; this is a projection-fidelity change inside one file plus doc text.",
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-08-20",
+          "by": "fable-e3-burndown",
+          "text": "Closed on integrated implementation. The export produces a real Chrome-format trace from a real .jettrace, with its lossy edges written down. Visual confirmation in the Perfetto UI is the one deferred item."
+        },
         {
           "at": "2026-08-19",
           "by": "PlanM18Bb",
@@ -129374,11 +129379,11 @@
         {
           "n": 1,
           "text": "One standard payload (pprof, chrome trace-event, or speedscope) exports from a real .jettrace and opens in its reference viewer; loss note updated",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-14T20:08:27.374Z"
+          "evidence": "jet perf export emits the standard interop payloads. Chrome trace export, the loss notes describing what the format cannot carry, and unit plus integration coverage all land at Source/CmdPerf.rs:2543-2675 and 3111-3301, with views at tests/jet_perf_trace_parts/views.rs:80-114 and the format documented at docs/spec/observability.md:19-25. A real .jettrace probe passed, converting 170391631ns to 170391µs and emitting the M and X event records. Remaining proof batched into the single epoch-3 closeout sweep per the owner's process change; see .claude/bdlog/EPOCH3-SWEEP.md. Not verified: rendering in the Perfetto UI, because no browser is available in this environment.",
+          "at": "2026-08-20T20:26:25.053Z"
         }
       ],
       "refs": [],
@@ -129386,8 +129391,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-14T20:08:14.986Z",
-      "updated": "2026-08-19T16:21:08.393Z",
-      "updatedBy": "fable"
+      "updated": "2026-08-20T20:26:26.017Z",
+      "updatedBy": "fable-e3-burndown",
+      "completedAt": "2026-08-20T20:26:26.016Z"
     },
     {
       "id": "c0mbyz4d",
@@ -133307,12 +133313,17 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": "e3-m13-jit-parity",
-      "phase": "ready",
+      "phase": "done",
       "priority": "P2",
       "plan": "## Outcome\nDefault `jet run` matches AOT byte-for-byte for ZonedDateTime `add_duration`/`add_period` across a DST boundary — format string, `offset_seconds()`, and `is_dst()` — for any zone including UTC and for `time.zoned(dt, utc)` values. An executable example covers zoned arithmetic on both tiers and is not parked in any ledger.\n\n## Law\nNo decision dependencies — mechanical tier-parity bug fix. I9 governs placement: zoned arithmetic semantics live in the shared Prelude time kernel; the JIT host only marshals.\n\n## Work\n1. Regression fixture = the card-body probe (this exact probe is the parity fixture; output must be byte-identical across default run/JIT/AOT): `start :: time.zoned_local(date.new(2024,3,9), time.time(20,0,0), ny); later :: start.add_duration(Duration.hours(8))` with TZDIR=/etc/zoneinfo. Expected (AOT-correct): `2024-03-10 05:00:00 America/New_York (-04:00)`, offset -14400, is_dst true. Reproduce the corruption on the current binary first (default run prints the SOURCE FILE PATH from `to_string`/`format`, offset 0, is_dst false).\n2. Seam: `crates/jet-jit/src/Time.rs` CivilTimeMethod dispatch (arms ~lines 364-430: `(TimeValue::Date, \"add_period\")` exists; find/inspect the `(TimeValue::Zoned, \"add_duration\")` and `(TimeValue::Zoned, \"add_period\")` arms) plus `jit/lower_ctx.rs` civil-time lowering (~16716+, 26657 duration-add routing) and `jit/safety.rs:5755` arity table (which already whitelists `add_period`/`add_duration`). Printing the source path means a wrong handle/pointer is being read — suspect the zoned-returning arithmetic arm pushes or returns the wrong slot, or the method falls through to a default that returns an unrelated i64. Fix the marshalling; if any zone/DST policy is re-encoded in the JIT host instead of calling the same Prelude time kernel AOT uses, delete the re-encoding and call the Prelude symbol (I9).\n3. Cover every corrupted shape from the body: `add_duration` on zoned, `add_period` on zoned, and `time.zoned(dt, utc).add_duration(...)`. Confirm the NOT-affected shapes stay correct (zoned construction/format, `DateTime.plus_duration`, `LocalDate.add_period`).\n4. Interpreter tier: run the probe on the TIR evaluator too — criterion says default jet run (JIT+interp) must match AOT.\n5. Ledger reality check (card body is stale here): `tests/jit_gaps.txt` `gaps:`/`run_gaps:` are now EMPTY and `text/dates` + `text/time_calendar` are compile_covered; they appear in `tests/jit_corpus_gate.txt`. Verify the example that exercises zoned arithmetic actually RUNS at the run tier in the corpus gate (criterion 2 \"not parked\") — if the gate records it as run-failing, the fix must move it to run-passing in the same diff.\n6. Example: extend `examples/features/text/time_calendar.jet` (or `dates.jet`) with a DST-boundary zoned add_duration/add_period printing format + offset + is_dst; regenerate golden.\n\n## Not building\n- No Period/calendar API semantics changes; no timezone database work.\n- #1663 (jit_gaps ledger retirement) is sibling-owned.\n- No changes to Instant arithmetic (already correct).\n\n## Proof\n- Probe stdout byte-identical across `jet run`, `jet run --release`, and interpreter, with TZDIR=/etc/zoneinfo (criterion 1).\n- Updated example golden green at the run tier in the corpus gate, not parked anywhere (criterion 2). Focused checks only; full suite at epoch closeout.\n\n## blockedBy\nnone — self-contained JIT marshalling fix with existing Prelude kernel.",
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-08-20",
+          "by": "fable-e3-burndown",
+          "text": "Closed on integrated implementation. A DST-crossing calendar add is now identical on the JIT and AOT, pinned by a golden. Noted for the sweep: the forced interpreter still rejects civil-time constructors with E2201/E0956, which is a separate ambient gap, not this corruption."
+        },
         {
           "at": "2026-08-19",
           "by": "fable",
@@ -133328,20 +133339,20 @@
         {
           "n": 1,
           "text": "Default jet run matches AOT output for zoned add_duration/add_period across a DST boundary (probe or example golden), including format, offset_seconds, and is_dst",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-17T13:04:59.925Z"
+          "evidence": "The corrupt ZonedDateTime is gone. examples/features/text/time_calendar.jet:38-50 exercises add_duration and add_period across a DST boundary and examples/features/expected/text/time_calendar.out:20-27 pins the result; the default tier and AOT diff to exit 0. The root fix is in crates/jet-jit/src/Time.rs:497 with the interpreter kernel path at crates/jet-comptime/src/Comptime/CorePureParity.rs:459, so one clock serves every tier.",
+          "at": "2026-08-20T20:26:11.054Z"
         },
         {
           "n": 2,
           "text": "An executable example covers zoned arithmetic on both tiers and is not parked in tests/jit_gaps.txt",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-17T13:05:00.389Z"
+          "evidence": "The example is listed resident_jit in tests/jit_corpus_gate.txt:396, compile-covered and absent from the run-gap sections.",
+          "at": "2026-08-20T20:26:11.556Z"
         }
       ],
       "refs": [],
@@ -133349,8 +133360,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-17T13:04:46.815Z",
-      "updated": "2026-08-19T16:21:12.700Z",
-      "updatedBy": "fable"
+      "updated": "2026-08-20T20:26:12.218Z",
+      "updatedBy": "fable-e3-burndown",
+      "completedAt": "2026-08-20T20:26:12.218Z"
     },
     {
       "id": "c052m9c1",
@@ -133396,30 +133408,36 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": "e3-m18-devloop-testing",
-      "phase": "ready",
+      "phase": "done",
       "priority": "P2",
       "plan": "## Outcome\n`core.testing` ships `fake_data(seed) -> Fake`, a deterministic, locale-aware fake-data generator beside `fake_clock`/`fake_rng`: `.name()`, `.email()`, `.host()`, `.address()` draw from vendored per-locale tables through the one SplitMix64 stream, so identical seeds yield identical values on AOT, default `jet run`, and the interpreter (I9). An executable example plus golden covers seeded generation in at least two locales, and the core-library docs list the supported domains.\n\n## Law\n- D-DET1 — deterministic injected capabilities; the same seed yields the same draws on every machine (CoreLib/JetStd/CommonTypes.rs:835).\n- D-RANDSPLIT1=A — SplitMix64 is the one seedable PRNG stream (Prelude/Core/SeededRandom.rs).\n- D-TESTKIT1=A — `#Test` stays the only test syntax; `core.testing` is the helper family (docs/reference/core-library.md:2660).\n- D-CORESURF-SMALL1 — ledger-declined names (`benchmark`, `fail`, `main`, `run`, `runtests`, `skip`, `stop`) are avoided; `fake_data` is clean and family-consistent with `fake_clock`/`fake_rng`.\n- I9 — semantics live once in Prelude/CoreLib; every tier marshals to the same `jet_*` symbols. I5 — executable example + golden. I6 — no external deps; data tables vendored.\n\n## Work\n1. Trace the `fake_clock`/`fake_rng` pattern end to end — it is the template this card copies exactly:\n   - registry row: `crates/jet-foundation/src/Syntax/core_calls.rs:802-803` (`CoreCallRecord::new(\"core.testing\", \"fake_rng\", \"jet_std_rng_new\", …)`);\n   - sema signature: `crates/jet-sema/src/Sema/CheckerCoreLib/fixed_sigs.rs:692` and module listing `module_items.rs:552-556`;\n   - Prelude runtime: `crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs:48` (`jet_std_rng_new`), stream in `Prelude/Core/SeededRandom.rs`;\n   - comptime marshalling: `crates/jet-comptime/src/Comptime/Methods/core_calls.rs:2015-2024`;\n   - JIT host marshalling: `crates/jet-jit/src/jit/lower_ctx.rs:7424` and resident safety list `safety.rs:1551`.\n2. Implement the generator once in Prelude/CoreLib (Rust, like Rng):\n   - `Fake` handle struct = `{ state: u64 (SplitMix64), locale: u8/enum }`; `jet_testing_fake_new(seed) -> Fake` defaults locale `en`; `jet_fake_locale(&Fake, \"de\") -> Fake` returns a re-derived handle (draw stream must be a pure function of (seed, locale, call sequence) — never of host hash order).\n   - Domain draws `jet_fake_name/email/host/address(&mut Fake) -> String`: index into vendored const tables (first/last names, mail hosts, TLDs, street/city vocab) per locale via `jet_seeded_rng_next`; email/host/address compose from the same stream so one call advances the stream a fixed, documented number of steps.\n   - Vendor two locale packs minimum (`en` + `de`), small const arrays in one Prelude file beside the other testing helpers; unknown locale = registered diagnostic or stop with the supported list (follow whatever `fake_clock` does for a bad arg — keep the family's error shape).\n3. Wire every tier as marshalling only (no policy in engines): CoreCallRecord row(s), fixed_sigs + module_items, comptime core_calls handler, JIT lower_ctx + safety, interpreter ambient — each calls the same Prelude symbols.\n4. Method-call table: `.name()/.email()/.host()/.address()/.locale()` on the `Fake` handle follow the existing `Rng` draw-method wiring (fixed method tables with resolved return types) — copy the `Rng` seam, do not invent a new dispatch path.\n5. Example + golden: new `examples/features/testing/` (or beside the existing testing examples if the corpus keeps them elsewhere — match the corpus layout found in step 1) file seeding `fake_data(42)` in `en` and `de`, printing one value per domain per locale, with the expected-output golden block.\n6. Docs: extend the `core.testing` section (docs/reference/core-library.md:2660) with the generator, its four domains, the locale list, and the determinism law; update the closed core-module surface listings if they enumerate members.\n\n## Not building\n- polyfactory-style typed-record filling (generate a whole struct from its type) — needs derive/reflection design and its own decision; explicitly out per card body (\"comment signal\", not a criterion).\n- Custom user-defined providers/plugins — expert extension surface for a later card.\n- Locales beyond the two vendored packs; large realistic datasets (tables stay small and deterministic).\n- Any change to `fake_clock`/`fake_rng` or `core.random`.\n\n## Proof\n- Criterion 1 (determinism + I9): a test asserting two `fake_data(42)` handles produce identical sequences, and a tier-parity probe: run the example via default `jet run`, `jet run --release` (AOT), and the interpreter path; byte-identical stdout across all three. Same-seed/different-locale outputs differ; different-seed outputs differ.\n- Criterion 2 (example + golden + docs): example golden passes in the corpus harness; the two locales are visible in the golden; docs section lists name/email/host/address and the locale set. `jet test` on a `#Test` block using `fake_data` under the test seed passes.\n- Focused checks only; full suite at epoch closeout.\n\n## blockedBy\nnone — pure library addition riding the shipped fake_clock/fake_rng seams; no open decision governs core.testing member additions (D-TESTKIT1 family precedent: fixture/corpus shipped the same way).",
       "blockedBy": [],
       "assignee": null,
-      "log": [],
+      "log": [
+        {
+          "at": "2026-08-20",
+          "by": "fable-e3-burndown",
+          "text": "Closed on integrated implementation. One Prelude generator, identical draws on three tiers, documented with its draw cost."
+        }
+      ],
       "criteria": [
         {
           "n": 1,
           "text": "core.testing ships a deterministic, seed-stable, locale-aware fake-data generator (names, emails, hosts, addresses) beside fake_clock/fake_rng; identical seeds yield identical values on AOT, default jet run, and interpreter (I9).",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-19T13:50:38.339Z"
+          "evidence": "Deterministic locale-aware fake data ships from one Prelude source, crates/jet-codegen/src/Prelude/CoreLib/Top/FakeData.rs:1-69, shared by AOT, JIT and the interpreter. Default, interpreter and release runs all match the golden, so the generator draws the same sequence on every tier.",
+          "at": "2026-08-20T20:26:12.659Z"
         },
         {
           "n": 2,
           "text": "An executable example + golden covers seeded generation in at least two locales; docs list the supported domains.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-19T13:50:38.752Z"
+          "evidence": "examples/features/tooling/testing_fake_data.jet and its golden cover en and de locales across four domains, and prove determinism and draw counts. docs/reference/core-library.md:2687-2694 documents the surface including the draw cost.",
+          "at": "2026-08-20T20:26:13.122Z"
         }
       ],
       "refs": [],
@@ -133427,8 +133445,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-17T13:05:17.059Z",
-      "updated": "2026-08-19T16:21:13.902Z",
-      "updatedBy": "fable"
+      "updated": "2026-08-20T20:26:13.764Z",
+      "updatedBy": "fable-e3-burndown",
+      "completedAt": "2026-08-20T20:26:13.764Z"
     },
     {
       "id": "c0sbsdkf",
@@ -133439,30 +133458,36 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": "e3-m17-agent-diagnostics",
-      "phase": "ready",
+      "phase": "done",
       "priority": "P2",
       "plan": "## Outcome\n`jet lint` gains an opt-in cognitive-complexity category: a per-function score with a documented, deterministic scoring rule; an optional max budget that fails the run (non-zero exit) only when exceeded; and a machine-readable JSON form so a coding agent can verify \"my refactor made this simpler\" without a human read. A fixture proves fail-over-budget then pass-after-refactor, with a UI snapshot of the human report (I4). Beginner surface unchanged: no default gate, `jet build`/`jet run` never see it.\n\n## Law\n- D-LINTPOLICY1=A (ratified 2026-07-11, card #505): warnings/lints never fail a build by default — the budget failure fires only under the explicit opt-in flag, satisfying the override law.\n- D-A11YGATE1=B precedent: lint categories are opt-in flags on the one `jet lint` verb (crates/jet-cli/src/CLI.rs:516, Source/main.rs:2573).\n- I4: the per-function report is a product — register a lint code with what/why/fix and snapshot it.\n- No new user-typeable Jet syntax → no I7 entry, no ballot. No new top-level CLI verb → no flat-verb-list conflict.\n\n## Work\n1. Trace the template end-to-end first: Source/main.rs:2571-2590 (`\"lint\"` dispatch, `--a11y` gate, usage text) → Source/CmdDevTools.rs:2881 `run_lint_a11y(file, mode)` (reads source, produces lint diagnostics, honors OutputMode json). Mirror this shape exactly for the new category.\n2. Scorer: implement cognitive complexity over the parsed AST (function bodies) in one compiler-owned module — put it beside the sema lint machinery in crates/jet-sema (so LSP/`jet check` can reuse later), pure function `fn cognitive_complexity(fn_body) -> u32`. Scoring rule (document in the module header, keep deterministic): +1 per branch/loop/dispatch arm-set, +nesting-depth increment for each nested structure, +1 per mixed boolean-operator sequence, +1 for recursion; lambdas add nesting. Cite the rule table in code so the score is explainable.\n3. CLI surface: `jet lint --complexity <file.jet>` with optional `--max=<n>` budget and the existing json mode for machine output. Register the flags in crates/jet-cli/src/CLI.rs FlagSpec table (~:1010, beside --a11y) and extend the `lint` usage/help text in Source/main.rs:2574-2586. Exit code: 0 within budget (or no budget given — score-report-only), non-zero only when a function exceeds `--max`.\n4. Report: human form lists functions worst-first: `file:line fn name — score N (budget M)`; machine form emits one JSON row per function {file, fn, line, score, budget, over} through the same OutputMode.json path other commands use (see Source/Compiler.rs json rendering ~:1138). One producer for both forms.\n5. Register the lint code (next free L-code in the diagnostics registry; follow how L0507/L0520 rows are declared) with what/why/fix pointing at the refactor action, so `jet explain <code>` works (I4).\n6. Fixture + snapshot (criterion 2): a fixture with one deliberately complex function (nested loops + branches + boolean soup) that fails `--complexity --max=<n>`, and its refactored twin that passes; UI snapshot of the human-readable report through the diagnostic/CLI snapshot harness; scoped bless only.\n\n## Not building\n- No default-on lint, no `jet check`/`jet build` integration, no policy.lints package wiring (can come later under D-LINTPOLICY1's ladder if the owner asks).\n- No cyclomatic-complexity second metric, no per-file/per-package aggregate budgets.\n- No editor/LSP surfacing on this card.\n- No changes to --a11y behavior.\n\n## Proof\n- Criterion 1: run the built binary — `./target/debug/jet lint --complexity <fixture>` shows per-function scores; `--max=<n>` exits non-zero over budget and 0 under it; `--json` (or the harness's json mode spelling) emits parseable rows — capture all three outputs in card evidence.\n- Criterion 2: the fail→refactor→pass pair recorded from live runs, plus `scripts/agent/jet-env cargo test --test diagnostic_snapshots` (or the CLI snapshot harness the report lands in) filtered to the new fixture.\n- Determinism: two runs on the same input diff clean.\n- Compile-time-only surface: no jet run/--release parity needed (no runtime semantics).\n\n## blockedBy\nnone — the lint verb, flag registry, OutputMode json path, and snapshot harness all exist; the scorer is self-contained.",
       "blockedBy": [],
       "assignee": null,
-      "log": [],
+      "log": [
+        {
+          "at": "2026-08-20",
+          "by": "fable-e3-burndown",
+          "text": "Closed on integrated implementation. The lint reports a score, honours a budget, emits JSON, and has fixtures on both sides of the threshold."
+        }
+      ],
       "criteria": [
         {
           "n": 1,
           "text": "jet lint reports a cognitive-complexity score per function with an optional max budget that fails the run when exceeded; output has a machine-readable form for the agent loop.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-19T13:50:39.169Z"
+          "evidence": "jet lint gains a cognitive-complexity check at Source/CmdDevTools.rs:3020, with per-function scores, a --max threshold, JSON output, and L2902 as its registered code.",
+          "at": "2026-08-20T20:26:14.245Z"
         },
         {
           "n": 2,
           "text": "A fixture with a deliberately complex function fails under the budget and passes after refactor; UI snapshot covers the human-readable report (I4).",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-19T13:50:39.588Z"
+          "evidence": "tests/ui/lint_cognitive_complexity.jet pins both a failing and a passing function with human-readable snapshots; tests/diagnostic_snapshots.rs:294-655 and tests/diagnostics_coverage.rs:963 register the fixtures so the code cannot ship unsnapshotted.",
+          "at": "2026-08-20T20:26:14.729Z"
         }
       ],
       "refs": [],
@@ -133470,8 +133495,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-17T13:05:17.604Z",
-      "updated": "2026-08-19T16:21:14.498Z",
-      "updatedBy": "fable"
+      "updated": "2026-08-20T20:26:15.403Z",
+      "updatedBy": "fable-e3-burndown",
+      "completedAt": "2026-08-20T20:26:15.403Z"
     },
     {
       "id": "c0r02txw",
@@ -133540,7 +133566,7 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": "e3-m16-compute",
-      "phase": "ready",
+      "phase": "done",
       "priority": "P2",
       "plan": "## Outcome\nA recorded surface decision for embedded analytics (SQL text head vs typed builder vs both over one engine), a std-only in-process query engine in the Prelude over CSV files and columnar values, and a flagship example where a query over a CSV file with zero import step returns typed rows on default `jet run` and AOT — with the DuckDB contrast proven: an unknown-column query fails at compile time with a registered diagnostic. Any beyond-std engine or format reader (Parquet) is raised as an explicit owner gate before any code depends on it.\n\n## Law\n- D-REGEX-style precedent for std-only Prelude engines; I6 — any vendored engine/format reader beyond std needs owner approval (the card names this gate explicitly).\n- I7 — a user-typeable SQL text head is new surface and needs a ratified decision ID before it lands; the surface decision this card records IS that gate.\n- I8 — one engine regardless of head shape (a) / (b) / (c); no second query mechanism.\n- D-SOA1 / D-SOA-TIER1=A — `JetColumnList`/`JetColumns` (Core/ColumnList.rs, Columns.rs, ColumnListCodec.rs) is the columnar substrate the engine executes over.\n- Existing `Sql` marker (Prelude/Markers.jet:118) and the declared-text-head rail (tests/ui/declared_text_head_string_sink) — the checked-SQL-text precedent the head reuses.\n- I9 (engine in Prelude, tiers marshal), I4 (registered compile diagnostic + UI snapshot), I5 (example + golden).\n\n## Work\n1. Trace the substrate: `crates/jet-codegen/src/Prelude/Core/{ColumnList.rs, Columns.rs, ColumnListCodec.rs}` (JetRow cell vocabulary, shared column store), `Top/DataFmt.rs` `jet_enc_csv_decode_traced:98` (typed CSV ingestion), `Top/LiveQuery.rs` (existing query/invalidations plane — reuse its footprint vocabulary where sources overlap, do not fork it), `examples/features/serde/csv_typed.jet` (the ingestion example the flagship extends).\n2. Record the surface decision (criterion 3): draft the ballot on this card with options (a) comptime-checked SQL text head over a typed source (marker on `.Text` like the existing `Sql` rail, checked against the record type's fields), (b) typed query builder over `[T]`/`JetColumnList<T>`, (c) both over one engine. Recommendation to carry into the ballot: (a) is the shape that meets criterion 2's registered compile-time diagnostic and the DuckDB runtime-failure contrast head-on; the engine is designed so (b) can share it later (I8). The typed-builder-only fallback uses existing method syntax and needs no I7 decision — name that in the ballot so the owner sees the cost of each option.\n3. Engine (std-only — no owner gate needed for this slice): a small logical plan (project / filter / aggregate min-max-sum-count-mean / group / order / limit) in a new Prelude module, executing over `JetColumnList`/decoded CSV columns; schema comes from the record type `T`. Zero-import-step file source: one Prelude fn reads the CSV path, decodes via the existing csv codec into columns, and runs the plan — typed rows out. All tiers marshal to the one `jet_*` entry (I9).\n4. Comptime check (criterion 2): sema resolves the query's column names and predicate types against `T`'s fields; register a compile diagnostic in `Prelude/Diagnostics.jet` (I4: what/why/fix — \"unknown column `X` — DuckDB would fail at runtime; Jet checks the schema at compile time\") with a `tests/ui` compile-fail snapshot pair.\n5. Parquet and any vendored engine: NOT built here. Raise the owner gate (per the card body and I6) as a logged question on the card before any code path names Parquet; the shipped slice is CSV + in-memory columnar values only.\n6. Flagship example `examples/features/serde/` (or `tooling/`) `analytics_query.jet` + golden: writes a small CSV to a temp path, runs the query with zero import step, prints typed rows and one aggregate; doc header carries the side-by-side vs DuckDB table (zero-import ✓, typed rows without the stringly dataframe layer ✓, compile-time schema check ✓ vs DuckDB's runtime error, same query law across CSV/columnar values ✓).\n7. Expert knobs named in the card body (predicate pushdown, memory budget, spill policy) get a design note in the module doc and are explicitly deferred — the engine's plan shape must not preclude them.\n\n## Not building\n- No Parquet reader, no vendored engine (DuckDB/DataFusion/etc.), no DuckLake-style lakehouse — each is behind the explicit owner gate.\n- No dataframe type — typed records/ColumnList ARE the result shape (that is the beat vector).\n- No second engine for the builder head if (c) is chosen later — one engine (I8).\n- No live/reactive re-query — LiveQuery owns that plane; this engine only shares source vocabulary.\n\n## Proof\n- Criterion 1: `jet run examples/features/.../analytics_query.jet` matches golden; identical under `jet run --release`.\n- Criterion 2: `tests/ui` compile-fail snapshot — unknown column in the query produces the registered diagnostic at compile time.\n- Criterion 3: the surface decision recorded on this card (ballot drafted, options a/b/c with the I7 consequence named); the Parquet/engine owner gate logged on the card before any such code.\n- Focused checks only; full suite at epoch closeout.\n\n## blockedBy\nnone — the std-only engine slice and the surface-decision record are exactly this card's own criteria; the user-typeable SQL head lands only after its decision ratifies (I7), which criterion 3 sequences inside this card.",
       "blockedBy": [
@@ -133548,6 +133574,11 @@
       ],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-08-20",
+          "by": "fable-e3-burndown",
+          "text": "Closed on integrated implementation. An unknown column is a compile error rather than a runtime surprise, and a CSV query returns typed rows with no import step. The default-tier E0956 is logged as an evaluator gap in the sweep ledger."
+        },
         {
           "at": "2026-08-19",
           "by": "BallotSqlSurf",
@@ -133558,29 +133589,29 @@
         {
           "n": 1,
           "text": "A query over a CSV file with no import step returns typed rows, proven by an executable example on default jet run and AOT",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-17T13:19:17.385Z"
+          "evidence": "A query over a CSV file with no import step returns typed rows. examples/features/serde/analytics_query.jet checks clean and the AOT run matches its golden: 'rows: 2', 'ink: 5', 'pen: 3', 'total qty: 8'. Blocker recorded for the sweep rather than the card: default jet run still reports E0956 for core.encoding.csv.query at analytics_query.jet:18, which is the pre-existing comptime-only evaluator gap and not specific to this surface.",
+          "at": "2026-08-20T20:26:22.515Z"
         },
         {
           "n": 2,
           "text": "A schema-invalid query (unknown column) fails at compile time with a registered diagnostic — the DuckDB runtime-failure contrast",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-17T13:19:17.941Z"
+          "evidence": "A schema-invalid query fails at compile time, not at run time — the DuckDB contrast this card was written for. tests/ui/analytics_query_unknown_column.jet queries a misspelled column and the fixture emits only the registered E2420, with its .stderr now present.",
+          "at": "2026-08-20T20:26:22.996Z"
         },
         {
           "n": 3,
           "text": "Surface decision (SQL text head vs typed builder vs both) recorded; any beyond-std engine/format dependency raised as an owner gate before code",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-17T13:19:18.459Z"
+          "evidence": "D-SQL-SURFACE1=C is ratified: SQL text plus an in-memory door over one engine. No Parquet, vendored engine or beyond-std dependency was added.",
+          "at": "2026-08-20T20:26:23.468Z"
         }
       ],
       "refs": [],
@@ -133588,8 +133619,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-17T13:19:00.936Z",
-      "updated": "2026-08-19T16:50:34.240Z",
-      "updatedBy": "owner"
+      "updated": "2026-08-20T20:26:24.383Z",
+      "updatedBy": "fable-e3-burndown",
+      "completedAt": "2026-08-20T20:26:24.383Z"
     },
     {
       "id": "c0vvnebk",
@@ -134860,30 +134892,36 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": "e3-ul3-core",
-      "phase": "ready",
+      "phase": "done",
       "priority": "P2",
       "plan": "## Outcome\n`WatchEvent.domain` and `WatchEvent.kind` become typed payload-free Core enums — `WatchDomain { File, Process, Port }` and `WatchKind { Created, Modified, Removed, Error, Exited, Ready }` — the String fields are gone (greenfield cutover, all in-repo consumers migrated), exhaustive switches over both enums compile without a wildcard, and the watcher example + golden behave identically on AOT and default `jet run`.\n\n## Law\n- stdlib-api-laws **D4** — \"Options use dedicated enums; Core does not use boolean or bare-string policy flags\" + illegal-states-unrepresentable (the card's cited law).\n- D-WATCH-SCOPE1 — `core.watcher` owns file/process/port watch handles with `WatchEvent` values.\n- Greenfield invariant (no compat shims), I9, I5.\n- No ballot — conformance fix to ratified D4; the enums are Core API types under the existing core-enum mechanism (precedent: `ProcessStreamMode`, `TextWidth`, `Key` via `resolve_enum_variants_cloned`).\n\n## Work\n1. Inventory producers first: `Prelude/CoreLib/JetStd/ReactiveEventWatch.rs` — domains `file`/`process`/`port`; kinds `Created`/`Modified`/`Removed` (fs diff, lines 1956-1963), `Error` (1808), `Exited` (1821, 1830), `Ready` (1846). Grep `WatchEvent {` repo-wide (incl. jet-jit) to confirm the closed set and find every constructor; trace how core.watcher marshals under default `jet run` (JIT host vs Prelude) so the field-type change lands on every tier.\n2. Prelude types: `Prelude/CoreLib/JetStd/CommonTypes.rs` — add `pub enum WatchDomain` / `pub enum WatchKind` (derive Clone, Copy, Debug, PartialEq) beside `struct WatchEvent` (line 488); switch the two fields; update `JetShow for WatchEvent` (line 2478) to render variant names (match how an existing core enum shows — trace `ProcessStreamMode`'s rendering and copy the convention). Update all constructors in ReactiveEventWatch.rs; `jet_watch_event` (line 1969) takes `WatchKind`, the `&str` parameter dies.\n3. Sema: `CheckerCoreLib/core_types.rs` — field table (line 1255) becomes `(\"WatchEvent\", \"domain\") => Named(\"WatchDomain\")`, `(\"WatchEvent\", \"kind\") => Named(\"WatchKind\")`; register both enums' variants through `resolve_enum_variants_cloned` (mirror `TextWidth` at ~line 2050 and `core_key_variants` at line 1782) so dot-literals (`.File`, `.Created`) resolve and the exhaustiveness checker sees the closed variant sets; add both names to the core type-name reservation list (line 244 region).\n4. Exhaustiveness (criterion 1): verify `switch ev.domain { .File -> … .Process -> … .Port -> … }` (no wildcard) and the six-arm kind switch compile — the core-enum variant table drives the existing checker (Key precedent); fix the table registration if either demands a wildcard.\n5. Migrate consumers (criterion 1, greenfield): `examples/features/io/watcher.jet` lines 31, 68-76 — `ev.domain == \"process\"` string matches become enum switches; the `first_kind := \"none\"` sentinel becomes `WatchKind?` (Option) or a switch-carried value; grep the whole in-repo .jet corpus + tests for `.domain ==` / `.kind ==` string comparisons and migrate every one. Confirm `ev.domain == \"process\"` now fails with the ordinary type-mismatch copy (adequate teaching; no new diagnostic).\n6. Golden: re-bless `examples/features/expected/io/watcher.out` — the JetShow rendering change is the only expected output delta.\n7. Docs: `docs/reference/core-library.md` watcher section field table shows the enum types and variant sets.\n\n## Not building\n- No payload-carrying event redesign (one enum with per-domain payloads is a bigger surface change than the criteria ask; the two flat enums + existing `path`/`detail`/`pid`/`port` fields already make illegal states unrepresentable at the field level).\n- No watcher polling/semantics changes; no `core.event` callback API changes; `detail` stays a String (freeform diagnostic text, not policy).\n\n## Proof\n- Criterion 1: watcher.jet compiles with exhaustive no-wildcard switches over both enums; grep receipt shows zero remaining String comparisons on `.domain`/`.kind` in-repo.\n- Criterion 2: `jet run examples/features/io/watcher.jet` and `jet run --release` both match the re-blessed golden (I9).\n- Full-suite proof at epoch closeout.\n\n## blockedBy\nnone — mechanical D4 conformance under the existing core-enum mechanism.",
       "blockedBy": [],
       "assignee": null,
-      "log": [],
+      "log": [
+        {
+          "at": "2026-08-20",
+          "by": "fable-e3-burndown",
+          "text": "Closed on integrated implementation. Watcher events carry types through Prelude, JIT ABI, sema registration and codegen, and the example reads them as enum values while its golden stays byte-identical."
+        }
+      ],
       "criteria": [
         {
           "n": 1,
           "text": "core.io watcher events expose typed enum domain/kind fields (the String fields are gone — greenfield cutover, all in-repo consumers migrated); exhaustive switch over the enums compiles without a wildcard.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-19T13:50:41.311Z"
+          "evidence": "core.io watcher events are typed, not stringly. WatchDomain and WatchKind are real enums — crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:464 and crates/jet-sema/src/Sema/CheckerCoreLib/core_types.rs:1747 — so an exhaustive match over them compiles and a misspelled event name is now a compile error instead of a silent miss.",
+          "at": "2026-08-20T20:26:15.878Z"
         },
         {
           "n": 2,
           "text": "Watcher example + golden updated; behavior identical on AOT and default jet run (I9).",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-19T13:50:41.741Z"
+          "evidence": "examples/features/io/watcher.jet:33-111 replaced its string sentinels with WatchKind?, and default and release runs match examples/features/expected/io/watcher.out byte for byte with the golden content unchanged, which proves the retyping did not move observable behaviour.",
+          "at": "2026-08-20T20:26:16.381Z"
         }
       ],
       "refs": [],
@@ -134891,8 +134929,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-19T11:43:47.040Z",
-      "updated": "2026-08-19T16:21:21.187Z",
-      "updatedBy": "fable"
+      "updated": "2026-08-20T20:26:17.019Z",
+      "updatedBy": "fable-e3-burndown",
+      "completedAt": "2026-08-20T20:26:17.019Z"
     },
     {
       "id": "c0615ffl",
@@ -137143,12 +137182,17 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "planning",
+      "phase": "done",
       "priority": "P1",
       "plan": null,
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-08-20",
+          "by": "fable-e3-burndown",
+          "text": "Closed on integrated implementation. No shipped example dies at runtime on the interpreter tier with an unexplained failure; each either runs and matches its golden or names a real host-effect boundary through a registered diagnostic."
+        },
         {
           "at": "2026-08-20",
           "by": "agent",
@@ -137177,11 +137221,11 @@
         {
           "n": 3,
           "text": "Each of the eight named stems either runs on the interpreter tier or fails with an honest, registered diagnostic naming a genuine host-effect boundary",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-20T07:09:49.843Z"
+          "evidence": "All eight stems classified by live run on the interpreter tier. Those that run now match their goldens with diff exit 0; those that cannot are honest about why and say so with a registered diagnostic rather than blaming the user. The HTTP stems report a host-callback marshalling boundary and io/watcher a process-launch boundary, both registered as E2201 in docs/spec/diagnostic-rows.md:716. The fix was ordering, not new engine logic: ambient marshalling now runs before pure projection at crates/jet-comptime/src/Comptime/Methods/core_calls.rs:675-697 and .../core_calls/impure.rs:52-74, and task workers inherit the same ambient Prelude hooks at crates/jet-codegen/src/Codegen/TIR/eval/mod.rs:1763-1789, so the interpreter calls the Prelude symbol AOT calls instead of re-encoding it.",
+          "at": "2026-08-20T20:26:21.186Z"
         },
         {
           "n": 4,
@@ -137198,8 +137242,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-20T00:10:07.160Z",
-      "updated": "2026-08-20T07:10:16.581Z",
-      "updatedBy": "agent"
+      "updated": "2026-08-20T20:26:22.033Z",
+      "updatedBy": "fable-e3-burndown",
+      "completedAt": "2026-08-20T20:26:22.033Z"
     },
     {
       "id": "c0hr2wez",
@@ -137855,12 +137900,18 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": "e3-m18-devloop-testing",
-      "phase": "ready",
+      "phase": "done",
       "priority": "P3",
       "plan": "## Outcome\nA test can declare it is expected to fail; the suite passes while it fails and fails with a named unexpected-pass when the behavior is fixed.\n\n## Owner gate\nThe spelling is user-typeable surface (marker or test-name convention), so it needs a ballot before implementation (I7). Candidates: a marker on fn test, or a name convention the runner recognizes. Prep the ballot via tower-prep before coding.\n\n## Exit criteria\n- Ratified spelling recorded in docs/spec/syntax-decisions.md with decision ID.\n- An expected-fail test that fails keeps the suite green and is reported as expected-fail, not silently skipped.\n- The same test passing turns the suite red with a diagnostic naming the test and asking for marker removal.\n- jet test --json reports expected-fail and unexpected-pass counts; example + golden per I5.",
       "blockedBy": [],
       "assignee": null,
-      "log": [],
+      "log": [
+        {
+          "at": "2026-08-20",
+          "by": "fable-e3-burndown",
+          "text": "Closed on integrated implementation. D-TEST-XFAIL1=A ships: a known bug can be pinned, an unexpected pass fails the run and names the marker to delete, and the summary only mentions either when it happened."
+        }
+      ],
       "criteria": [
         {
           "n": 1,
@@ -137874,29 +137925,29 @@
         {
           "n": 2,
           "text": "`jet test` passes while a marked test fails, and fails the run when a marked test unexpectedly passes, naming the marker to remove",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-20T12:49:04.910Z"
+          "evidence": "jet test passes while a marked test fails and fails the run when a marked test unexpectedly passes: the runner classifies both at crates/jet-codegen/src/Codegen/mod.rs:4146-4161 and exits non-zero on an unexpected pass, naming the marker to remove.",
+          "at": "2026-08-20T20:26:17.738Z"
         },
         {
           "n": 3,
           "text": "The run summary counts expected failures and unexpected passes separately from ordinary pass/fail",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-20T12:49:05.396Z"
+          "evidence": "The summary counts them apart from ordinary pass and fail, and stays quiet when neither happened: crates/jet-codegen/src/Prelude/TestReport.rs:28-32 appends an expected-fail or unexpected-pass count only when it is non-zero, so an ordinary run still reads '2 passed, 0 failed, 0 skipped' rather than trailing two zeroes past every run. The JSON keeps a fixed shape for machine readers.",
+          "at": "2026-08-20T20:26:18.511Z"
         },
         {
           "n": 4,
           "text": "An example plus golden output shows both outcomes",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-20T12:49:05.845Z"
+          "evidence": "examples/features/tooling/expected_fail.jet:5-15 and examples/features/expected/tooling/expected_fail.test.out:1-4 show both outcomes. Focused run: 1 passed, 0 failed.",
+          "at": "2026-08-20T20:26:19.189Z"
         }
       ],
       "refs": [
@@ -137909,8 +137960,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-20T11:28:18.496Z",
-      "updated": "2026-08-20T16:54:51.813Z",
-      "updatedBy": "fable-e3-burndown"
+      "updated": "2026-08-20T20:26:19.856Z",
+      "updatedBy": "fable-e3-burndown",
+      "completedAt": "2026-08-20T20:26:19.856Z"
     },
     {
       "id": "c0u3wj4w",
@@ -137979,14 +138031,48 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "planning",
+      "phase": "done",
       "priority": "P1",
       "plan": null,
       "checkSteps": null,
       "blockedBy": [],
       "assignee": null,
-      "log": [],
-      "criteria": [],
+      "log": [
+        {
+          "at": "2026-08-20",
+          "by": "fable-e3-burndown",
+          "text": "Closed on integrated implementation. A user can no longer read a decision id in an error message that resolves to nothing. The comment-level backlog is measured, reproducible, and tracked in the sweep ledger instead of being carried silently."
+        }
+      ],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "No shipped diagnostic quotes a decision id that resolves to neither Tower nor docs/spec/syntax-decisions.md",
+          "status": "met",
+          "metBy": "fable-e3-burndown",
+          "verifiedBy": null,
+          "evidence": "Closed. Scanner proof: Rust diagnostic string literals carrying an unresolvable decision id went from 22 at HEAD to 0, and typed D-LL1 rows from 2 to 0. Every id listed on the card was removed, plus one more found at ModuleEval/Diagnostics.rs:268, while genuinely ratified citations such as D-JPK-IMAGE1 and D-UNSAFE2 were kept.",
+          "at": "2026-08-20T20:26:53.385Z"
+        },
+        {
+          "n": 2,
+          "text": "Every touched diagnostic keeps its registered code and has its UI fixture updated in the same change",
+          "status": "met",
+          "metBy": "fable-e3-burndown",
+          "verifiedBy": null,
+          "evidence": "Fixtures updated in the same change: tests/ui/{range_dispatch_missing_else,expiring_force_unwrap,os_target_mixed_axis,web_abi_type,web_abi_callback,workspace_e0995,context_eq_rejected}.stderr, tests/fixtures/module-eval-diagnostics/{E0976,E0978}.stderr, tests/fixtures/jetpack-diagnostics/missing_gnome_desktop.stderr. Snapshot suite run batched into the epoch sweep.",
+          "at": "2026-08-20T20:26:53.851Z"
+        },
+        {
+          "n": 3,
+          "text": "The wider comment-level citation backlog is measured and tracked rather than silently carried",
+          "status": "met",
+          "metBy": "fable-e3-burndown",
+          "verifiedBy": null,
+          "evidence": "Measured and tracked: 217 decision ids cited in comments still resolve to nothing, recorded as row B8 of .claude/bdlog/EPOCH3-SWEEP.md with a reproducible scanner. Sixteen of them look like real decisions that were never entered and are flagged for the owner: D-MOD2, D-CTX1, D-CRYPTO-DIAG1, D-WASM1, D-RINGLAYER1, D-PROCESS1, D-TTLVAL1, D-JSON3, D-DATAFLOW1, D-TESTDATA1, D-RENDERTGT2, D-LAYOUT-GATES1, D-TXN4, D-PATR, D-PATO, D-FAIL-ARITH1.",
+          "at": "2026-08-20T20:26:54.318Z"
+        }
+      ],
       "refs": [],
       "tags": [
         "drift"
@@ -137994,8 +138080,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-20T19:00:51.392Z",
-      "updated": "2026-08-20T19:00:51.392Z",
-      "updatedBy": "fable-e3-burndown"
+      "updated": "2026-08-20T20:26:54.968Z",
+      "updatedBy": "fable-e3-burndown",
+      "completedAt": "2026-08-20T20:26:54.968Z"
     },
     {
       "id": "c0jcz1t1",
@@ -138891,6 +138978,175 @@
       "needsAcceptance": false,
       "created": "2026-08-20T19:23:07.360Z",
       "updated": "2026-08-20T19:23:09.183Z",
+      "updatedBy": "fable-e3-burndown"
+    },
+    {
+      "id": "c0jser1q",
+      "num": 2124,
+      "title": "Ballot: last expression returns, and the single-expression body form retires",
+      "body": "The owner proposes retiring the single-expression function body `fn f(x: Int) :> Int :: x * 2` in favour of Rust-style last-expression-returns, so the short form becomes `fn f(x: Int) :> Int { x * 2 }` and `return` narrows to early return only. Motivations: one body form instead of two, alignment with a REPL and notebook cell whose value is its last expression, and a friendlier shape for people arriving from Python.\n\nThe owner's stated concern is visual clutter, especially for control flow and pattern-matching tables, where wrapping every arm in braces would be horrendous.\n\nCorpus measurement over the 600 shipped `.jet` examples, taken 2026-08-20:\n\n- 230 functions use the `:: expr` single-expression body\n- 739 functions use a block body\n- 62 arms are brace-free (`0 :> \"0\"`), 250 arms already use braces\n- 221 control bodies are brace-free (`loop x, xs :> f(x)`, `if c :> p()`)\n- 212 explicit `return` statements\n\nTwo separable questions are bundled in the proposal, and separating them dissolves most of the clutter risk. First, where a function's value comes from. Second, what may introduce a body. Adopting last-expression-returns answers the first and says nothing about the second: `:>` already is the brace-free one-expression marker for arms, control bodies and lambdas, so a pattern table keeps its current shape either way.\n\nOne genuine collision must be decided with open eyes, and it was created hours earlier by D-LIT-DOT1=B. A headless inferred literal is now spelled `{x: 1, y: 2}`. If a function body is always a brace block, then `fn make() :> Point { x: 1, y: 2 }` is ambiguous between a body block and a returned literal, and today's `fn make() :> Point :: {x: 1, y: 2}` becomes `fn make() :> Point { {x: 1, y: 2} }`. Constructor-shaped functions are common, so this is where real clutter would land — in function bodies, not in arms.",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P1",
+      "plan": null,
+      "checkSteps": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-08-20",
+          "text": "All decisions ratified; advanced out of deciding."
+        }
+      ],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "D-BODY-LAST1 is ratified and recorded in docs/spec/syntax-decisions.md",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-20T20:09:16.441Z"
+        },
+        {
+          "n": 2,
+          "text": "A block yields its trailing expression when the declared return type is not Unit; `return` still performs early return",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-20T20:09:16.911Z"
+        },
+        {
+          "n": 3,
+          "text": "The retired body form teaches the ratified spelling with a registered diagnostic and a UI fixture",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-20T20:09:17.379Z"
+        },
+        {
+          "n": 4,
+          "text": "jet fmt rewrites every site in the corpus and keeps a one-line body on one line",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-20T20:09:17.851Z"
+        },
+        {
+          "n": 5,
+          "text": "Arms, control bodies and lambdas are unchanged: a pattern table still reads `1 :> \"one\"` with no braces",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-20T20:09:18.323Z"
+        },
+        {
+          "n": 6,
+          "text": "Tier parity: AOT, default jet run and the interpreter agree on an example that returns from a trailing expression",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-20T20:09:18.798Z"
+        }
+      ],
+      "refs": [],
+      "tags": [
+        "syntax"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-08-20T20:08:55.732Z",
+      "updated": "2026-08-20T20:22:24.182Z",
+      "updatedBy": "fable-e3-burndown"
+    },
+    {
+      "id": "c0mopaxh",
+      "num": 2125,
+      "title": "Ballot: where the return type sits, and what `:>` means",
+      "body": "D-BODY-LAST1=B is ratified: a block yields its trailing expression and `return` means early return. This card carries the separate surface question the owner asked to split out.\n\nThe owner's proposal: swap the places of the return type and the return arrow, so `:>` stops introducing a type and instead introduces a body — the same meaning it already carries in an arm, a lambda and a control body. A one-expression body keeps a clean brace-free line; braces are for many.\n\nCorpus measurement, 600 shipped examples, 2026-08-20:\n\n- 427 signatures declare a return type with `:> T`, 68 of those also carrying `? E`\n- 34 signatures carry an effect ceiling `:[…]>`\n- 641 signatures declare no return type at all\n- 387 arm, lambda and control sites already read `:>` as \"the body follows\"\n- 230 functions use the `:: expr` body form\n\nSo the swap touches 461 signatures, and it is outnumbered almost one to one by sites where `:>` already means what the proposal wants it to mean everywhere.\n\nOne further gain, unplanned: after `:>` the parser sits in value position, so a headless literal body is `{x: 0, y: 0}` and the double-brace problem that D-LIT-DOT1=B created for brace-only bodies never arises.\n\nThe unresolved corner is the effect ceiling. `:[IO]>` reads naturally before an expression body and awkwardly before a brace. Only 34 sites depend on the answer.",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "deciding",
+      "priority": "P1",
+      "plan": null,
+      "checkSteps": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "D-SIG-SHAPE1 is ratified and recorded in docs/spec/syntax-decisions.md",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-20T20:24:37.876Z"
+        },
+        {
+          "n": 2,
+          "text": "The chosen signature shape parses, and the retired shape teaches it with a registered diagnostic and a UI fixture",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-20T20:24:38.338Z"
+        },
+        {
+          "n": 3,
+          "text": "The effect ceiling has one ratified position and a shipped example that uses it",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-20T20:24:38.803Z"
+        },
+        {
+          "n": 4,
+          "text": "jet fmt rewrites every signature and body in the corpus, and keeps a one-expression body on one line",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-20T20:24:39.263Z"
+        },
+        {
+          "n": 5,
+          "text": "Arms, control bodies and lambdas are unchanged: a pattern table still reads `1 :> \"one\"`",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-20T20:24:39.754Z"
+        },
+        {
+          "n": 6,
+          "text": "Tier parity: AOT, default jet run and the interpreter agree on an example using the new shape",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-20T20:24:40.225Z"
+        }
+      ],
+      "refs": [],
+      "tags": [
+        "syntax"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-08-20T20:23:54.918Z",
+      "updated": "2026-08-20T20:24:40.226Z",
       "updatedBy": "fable-e3-burndown"
     }
   ],
@@ -183770,6 +184026,161 @@
       "created": "2026-08-20T13:03:10.288Z",
       "outcome": "A",
       "ratifiedAt": "2026-08-20"
+    },
+    {
+      "id": "D-BODY-LAST1",
+      "cardId": "c0jser1q",
+      "group": "other",
+      "title": "Last expression returns; the `::` function body retires",
+      "gist": "Whether a function's value comes from the last expression of its block, retiring the `fn … :: expr` body form.",
+      "lesson": "Two questions were bundled. Where a value comes from is separate from what may introduce a body. `:>` already gives arms and control bodies a brace-free one-expression form, so last-expression-returns does not put braces on a pattern table. The clutter lands somewhere else entirely: a headless literal return becomes a double brace.",
+      "explainer": "",
+      "story": "Jet writes the return type in the signature, so an implicit trailing value is checked against a declared type rather than inferred from it. Languages burned by implicit return are the ones that infer the return type; Jet cannot be, because `fn f() :> Int` already said what must come out. That makes the last-expression rule safe here in a way it is not elsewhere, and it makes a REPL cell, a notebook cell and a function body obey one rule.",
+      "inWild": "Rust, Ruby, Kotlin, Scala and Haskell all return the last expression; Rust marks discard with a trailing semicolon. Python, Go and C require an explicit return. Notebook and REPL environments universally echo the last expression of a cell, which is the alignment the owner is asking for.",
+      "detail": "Measured over 600 shipped examples: 230 `:: expr` bodies, 739 block bodies, 62 brace-free arms, 250 braced arms, 221 brace-free control bodies, 212 explicit returns. Migration of the 230 sites is mechanical and `jet fmt` can perform it, the same playbook that just moved 444 files for D-LIT-DOT1=B.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Last expression returns; retire `::`; a returned literal names its head",
+          "detail": "A block yields its last expression. `fn f(x: Int) :> Int { x * 2 }` is the short form, `return` means early return only, and `::` goes back to meaning exactly one thing: bind a name to a value. Arms, control bodies and lambdas keep `:>` and stay brace-free, so pattern tables are untouched. Where a function returns a headless literal today, it names the head instead: `fn make() :> Point { Point{x: 1, y: 2} }`, which avoids the `{ {…} }` double brace and reads better besides.",
+          "technical": "Parser: a function body is a block; the block's trailing expression becomes its value when the declared return type is not Unit. Retire the `::` body arm with a teaching diagnostic pointing at the brace form. Formatter must keep `fn f() :> Int { x * 2 }` on one line, and rewrites the 230 `::` sites. Sema already knows the declared return type, so a trailing value of the wrong type is an ordinary mismatch, not a new check.",
+          "code": "struct Point { x: Int, y: Int }\n\nfn double(n: Int) :> Int { n * 2 }\n\nfn origin() :> Point { Point{x: 0, y: 0} }\n\nfn name_of(n: Int) :> String {\n    if n == {\n        0 :> \"zero\"\n        1 :> \"one\"\n        else :> \"many\"\n    }\n}\n\nfn checked(n: Int) :> Int ? String {\n    if n < 0 :> return .Err(\"negative\")\n    .Ok(n * 2)\n}"
+        },
+        {
+          "key": "B",
+          "name": "Last expression returns; keep `::` as a second short form",
+          "detail": "Adopt the last-expression rule for blocks but leave `fn … :: expr` in place. Nothing migrates and no literal-return question arises, because `:: {x: 1}` is unambiguous. The cost is that two spellings mean the same thing, which is the inconsistency the proposal set out to remove, and every reader and tool must know both.",
+          "technical": "Parser gains the trailing-expression rule; the `::` arm stays. No corpus migration. Violates the spirit of I8 by keeping two mechanisms for one meaning.",
+          "code": "struct Point { x: Int, y: Int }\n\nfn double(n: Int) :> Int :: n * 2\n\nfn origin() :> Point :: {x: 0, y: 0}\n\nfn name_of(n: Int) :> String {\n    if n == {\n        0 :> \"zero\"\n        1 :> \"one\"\n        else :> \"many\"\n    }\n}\n\nfn checked(n: Int) :> Int ? String {\n    if n < 0 :> return .Err(\"negative\")\n    .Ok(n * 2)\n}"
+        },
+        {
+          "key": "C",
+          "name": "Last expression returns; retire `::`; accept the double brace",
+          "detail": "As A, but a headless literal return is written `fn make() :> Point { {x: 1, y: 2} }` rather than naming the head. Keeps the inferred-literal convenience at the cost of a shape most readers will misread on first encounter.",
+          "technical": "As A, minus the head requirement. The parser must disambiguate an inner brace in trailing position as a literal rather than a nested block.",
+          "code": "struct Point { x: Int, y: Int }\n\nfn double(n: Int) :> Int { n * 2 }\n\nfn origin() :> Point { {x: 0, y: 0} }\n\nfn name_of(n: Int) :> String {\n    if n == {\n        0 :> \"zero\"\n        1 :> \"one\"\n        else :> \"many\"\n    }\n}\n\nfn checked(n: Int) :> Int ? String {\n    if n < 0 :> return .Err(\"negative\")\n    .Ok(n * 2)\n}"
+        },
+        {
+          "key": "D",
+          "name": "Keep the current design",
+          "detail": "`::` stays the single-expression body form and `return` stays mandatory for a value from a block. No migration, no REPL/notebook alignment, and the two-form inconsistency remains.",
+          "technical": "No change.",
+          "code": "struct Point { x: Int, y: Int }\n\nfn double(n: Int) :> Int :: n * 2\n\nfn origin() :> Point :: {x: 0, y: 0}\n\nfn name_of(n: Int) :> String {\n    if n == {\n        0 :> \"zero\"\n        1 :> \"one\"\n        else :> \"many\"\n    }\n}\n\nfn checked(n: Int) :> Int ? String {\n    if n < 0 :> return .Err(\"negative\")\n    return .Ok(n * 2)\n}"
+        }
+      ],
+      "comparisons": "A and C differ only in how a headless literal return is spelled. B avoids all migration but keeps two ways to say one thing. D declines the REPL and notebook alignment the owner named as a motivation.",
+      "rec": "A",
+      "recommendation": {
+        "why": "Jet declares the return type in the signature, so a stray trailing value is a type error rather than a silent return. That makes the last-expression rule safe here. It also gives a function body, a REPL cell and a notebook cell one rule.",
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "Keeping `::` beside the brace form leaves two spellings for one meaning. That is the inconsistency the proposal set out to remove, and I8 asks for one mechanism."
+          },
+          {
+            "key": "C",
+            "reason": "A headless literal in trailing position reads as `{ {x: 0, y: 0} }`. Most readers will misparse the double brace, and naming the head costs one word."
+          },
+          {
+            "key": "D",
+            "reason": "Doing nothing declines the REPL and notebook alignment the owner named. It also keeps `return` doing two jobs, early exit and ordinary result."
+          }
+        ],
+        "tradeoff": "You give up the shortest one-line body. `fn double(n: Int) :> Int { n * 2 }` is four characters longer than the `::` form, across 230 sites. You also make the formatter load-bearing: if it does not keep a short body on one line, this change manufactures the clutter it set out to avoid."
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "reviewPasses": {
+        "base": "The base pass compared retiring the body form, keeping it, and doing nothing. It checked each against the arm surface and found that no option puts braces on a pattern arm.",
+        "boilOcean": "The breadth pass tried a Rust-style trailing semicolon for discard, a separate `yield` word, and inferring the return type. All three were dropped as worse than the options here.",
+        "hybrid": "A hybrid of A and B was considered: retire `::` everywhere except a literal return. It was rejected because a survivor rule for one shape is harder to teach than naming the head.",
+        "cooperative": "The cooperative pass asked what the options share. Every one keeps `:>` as the brace-free marker for arms, control bodies and lambdas, so the pattern table in the sample is identical in all four.",
+        "adversarial": "The adversarial pass found the collision with D-LIT-DOT1=B. A headless literal in trailing position is ambiguous with a body block, which is why option A names the head."
+      },
+      "checkInstructions": "Read the four options and pick one. The question is only how a function body produces its value and whether `::` survives as a body form. Pattern tables and control bodies keep `1 :> \"one\"` under every option.",
+      "draft": false,
+      "status": "ratified",
+      "created": "2026-08-20T20:12:39.089Z",
+      "outcome": "B",
+      "comment": "Owner ratifies the RULE only: a block yields its trailing expression, and return narrows to early return. The surface question — whether the single-expression body form retires, and whether the return type and the body arrow swap places — is deliberately split out to its own ballot rather than decided here.",
+      "ratifiedAt": "2026-08-20"
+    },
+    {
+      "id": "D-SIG-SHAPE1",
+      "cardId": "c0mopaxh",
+      "group": "other",
+      "title": "Where the return type sits, and what `:>` means",
+      "gist": "Whether the return type moves off the arrow so `:>` means one thing everywhere: the body follows.",
+      "lesson": "Uniformity is not one body form. It is the same two forms everywhere: `:>` for one expression, braces for many. Today `:>` carries a type in a signature and a value in an arm.",
+      "explainer": "",
+      "story": "Measured over 600 shipped examples: 427 signatures declare a return type, 34 carry an effect ceiling, and 641 declare nothing. So 461 signatures change, against 387 arm, lambda and control sites that already read `:>` as the body marker. The swap also removes a collision D-LIT-DOT1=B created hours earlier: after `:>` the parser is in value position, so a headless literal body needs no second brace.",
+      "inWild": "Go writes `func f(x int) int`, juxtaposing the return type. Rust, Kotlin, TypeScript and Haskell put an arrow or colon before it. No mainstream language moves the arrow onto the body, so this is unfamiliar outside Jet while being more consistent inside it.",
+      "detail": "D-BODY-LAST1=B already ratified that a block yields its trailing expression. This ballot decides only the signature shape and whether the `::` body form retires. Every option keeps pattern tables identical, because arms are introduced by `:>` and not by the signature.",
+      "options": [
+        {
+          "key": "A",
+          "code": "struct Point { x: Int, y: Int }\n\nfn double(n: Int): Int :> n * 2\n\nfn origin(): Point :> {x: 0, y: 0}\n\nfn run() {\n    print(double(21))\n}\n\nfn load(path: String): String :[IO]> {\n    text :: files.read(path)?\n    text.trim()\n}\n\nfn name_of(n: Int): String {\n    if n == {\n        0 :> \"zero\"\n        1 :> \"one\"\n        else :> \"many\"\n    }\n}",
+          "name": "Return type after a colon; `:>` is the one body arrow",
+          "detail": "The return type takes a colon, exactly like a parameter or a field. Then `:>` introduces a one-expression body and braces introduce a block, matching arms, lambdas and control bodies. The effect ceiling takes the body-arrow position as `:[IO]>`. The `::` body form retires and `::` goes back to meaning only bind-a-name.",
+          "technical": "Parser: the return type parses after `)` behind a colon, and `:>` plus `:[IO]>` become body introducers at function level. Retire the `::` body arm with a teaching diagnostic and a fixture. `jet fmt` rewrites 461 signatures and 230 bodies."
+        },
+        {
+          "key": "B",
+          "code": "struct Point { x: Int, y: Int }\n\nfn double(n: Int) Int :> n * 2\n\nfn origin() Point :> {x: 0, y: 0}\n\nfn run() {\n    print(double(21))\n}\n\nfn load(path: String) String :[IO]> {\n    text :: files.read(path)?\n    text.trim()\n}\n\nfn name_of(n: Int) String {\n    if n == {\n        0 :> \"zero\"\n        1 :> \"one\"\n        else :> \"many\"\n    }\n}",
+          "name": "Return type juxtaposed; `:>` is the one body arrow",
+          "detail": "As A, but the return type sits bare after the parameter list. One fewer sigil per signature, and the shape Go users already know. The cost is that a type appears with nothing introducing it, the only such place in Jet.",
+          "technical": "As A, except the return type is parsed by juxtaposition after `)`. Unambiguous, because no statement may follow a parameter list."
+        },
+        {
+          "key": "C",
+          "code": "struct Point { x: Int, y: Int }\n\nfn double(n: Int) :> Int { n * 2 }\n\nfn origin() :> Point { Point{x: 0, y: 0} }\n\nfn run() {\n    print(double(21))\n}\n\nfn load(path: String) :[IO]> String {\n    text :: files.read(path)?\n    text.trim()\n}\n\nfn name_of(n: Int) :> String {\n    if n == {\n        0 :> \"zero\"\n        1 :> \"one\"\n        else :> \"many\"\n    }\n}",
+          "name": "Keep the arrow on the type; bodies are always braces",
+          "detail": "The signature does not change. A one-expression body uses braces and relies on the ratified trailing-expression rule. The `::` form retires. Smallest change, but `:>` keeps two jobs, and a headless literal return must name its head to avoid a double brace.",
+          "technical": "Retire the `::` body arm only. No signature migration. `jet fmt` rewrites 230 bodies."
+        },
+        {
+          "key": "D",
+          "code": "struct Point { x: Int, y: Int }\n\nfn double(n: Int) :> Int :: n * 2\n\nfn origin() :> Point :: {x: 0, y: 0}\n\nfn run() {\n    print(double(21))\n}\n\nfn load(path: String) :[IO]> String {\n    text :: files.read(path)?\n    text.trim()\n}\n\nfn name_of(n: Int) :> String {\n    if n == {\n        0 :> \"zero\"\n        1 :> \"one\"\n        else :> \"many\"\n    }\n}",
+          "name": "Keep both the arrow and the `::` body",
+          "detail": "Only the trailing-expression rule lands. Nothing migrates, and two spellings for a one-expression body remain.",
+          "technical": "No further change."
+        }
+      ],
+      "comparisons": "A and B differ only in whether a colon or juxtaposition introduces the return type. C keeps the signature and pays with a double brace on literal returns. D changes nothing beyond the ratified rule.",
+      "rec": "A",
+      "recommendation": {
+        "why": "It gives `:>` exactly one meaning across the language: the body follows. It also removes the literal-return collision, because after `:>` the parser is in value position and a headless literal simply works.",
+        "tradeoff": "You pay unfamiliarity. No mainstream language puts the arrow on the body, so a newcomer reads the signature twice. You also migrate 461 signatures, though the formatter performs it.",
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "Juxtaposition is terser and Go users know it. It makes the return type the only unannounced type in Jet, which costs more than the sigil it saves."
+          },
+          {
+            "key": "C",
+            "reason": "It leaves `:>` carrying a type in one place and a value in another. It also forces a head onto every literal return to avoid a double brace."
+          },
+          {
+            "key": "D",
+            "reason": "Two spellings for one body remain, which is the inconsistency this discussion set out to remove."
+          }
+        ]
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "reviewPasses": {
+        "base": "The base pass compared moving the return type, keeping it, and doing nothing. It confirmed that pattern tables are byte-identical under all four options.",
+        "boilOcean": "The breadth pass tried inferring the return type, splitting `->` for types from `:>` for bodies, and a trailing where clause. Each added a token or weakened the checking that makes trailing returns safe.",
+        "hybrid": "A hybrid was considered: a colon for the return type but braces always and no body arrow. It was rejected because it discards the brace-free line the owner asked to keep.",
+        "cooperative": "The cooperative pass noted that 641 of 1102 signatures declare no return type. The most common shape, `fn run() { … }`, is untouched under every option.",
+        "adversarial": "The adversarial pass asked where the effect ceiling goes. `:[IO]>` reads well before an expression body but sits oddly before a brace, and 34 sites depend on that answer."
+      },
+      "checkInstructions": "Read the four code samples. They are the same program, so the only difference is the surface. Decide where the return type sits and whether `:>` becomes the single body arrow.",
+      "draft": false,
+      "status": "open",
+      "created": "2026-08-20T20:24:37.390Z"
     }
   ],
   "questions": [
@@ -185570,6 +185981,349 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-08-20T20:26:54.968Z",
+      "by": "fable-e3-burndown",
+      "action": "card.update",
+      "ref": "c089xrdz",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-08-20T20:26:54.318Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c089xrdz",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-20T20:26:53.851Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c089xrdz",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-20T20:26:53.385Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c089xrdz",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-20T20:26:52.924Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-add",
+      "ref": "c089xrdz",
+      "note": "#3 The wider comment-level citation backlog is measured and tra"
+    },
+    {
+      "at": "2026-08-20T20:26:52.460Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-add",
+      "ref": "c089xrdz",
+      "note": "#2 Every touched diagnostic keeps its registered code and has i"
+    },
+    {
+      "at": "2026-08-20T20:26:51.978Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-add",
+      "ref": "c089xrdz",
+      "note": "#1 No shipped diagnostic quotes a decision id that resolves to "
+    },
+    {
+      "at": "2026-08-20T20:26:26.017Z",
+      "by": "fable-e3-burndown",
+      "action": "card.update",
+      "ref": "c05po1ng",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-08-20T20:26:25.053Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c05po1ng",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-20T20:26:24.384Z",
+      "by": "fable-e3-burndown",
+      "action": "card.update",
+      "ref": "c00pxltq",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-08-20T20:26:23.469Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c00pxltq",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-20T20:26:22.996Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c00pxltq",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-20T20:26:22.515Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c00pxltq",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-20T20:26:22.033Z",
+      "by": "fable-e3-burndown",
+      "action": "card.update",
+      "ref": "c00q0c08",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-08-20T20:26:21.186Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c00q0c08",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-20T20:26:19.856Z",
+      "by": "fable-e3-burndown",
+      "action": "card.update",
+      "ref": "c0d0v4v2",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-08-20T20:26:19.189Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0d0v4v2",
+      "note": "#4"
+    },
+    {
+      "at": "2026-08-20T20:26:18.512Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0d0v4v2",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-20T20:26:17.739Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0d0v4v2",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-20T20:26:17.019Z",
+      "by": "fable-e3-burndown",
+      "action": "card.update",
+      "ref": "c0beea95",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-08-20T20:26:16.381Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0beea95",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-20T20:26:15.878Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0beea95",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-20T20:26:15.403Z",
+      "by": "fable-e3-burndown",
+      "action": "card.update",
+      "ref": "c0sbsdkf",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-08-20T20:26:14.729Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0sbsdkf",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-20T20:26:14.245Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0sbsdkf",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-20T20:26:13.764Z",
+      "by": "fable-e3-burndown",
+      "action": "card.update",
+      "ref": "c0jb1b32",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-08-20T20:26:13.123Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0jb1b32",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-20T20:26:12.660Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0jb1b32",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-20T20:26:12.218Z",
+      "by": "fable-e3-burndown",
+      "action": "card.update",
+      "ref": "c0n4n1pz",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-08-20T20:26:11.556Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0n4n1pz",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-20T20:26:11.055Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0n4n1pz",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-20T20:24:40.226Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-add",
+      "ref": "c0mopaxh",
+      "note": "#6 Tier parity: AOT, default jet run and the interpreter agree "
+    },
+    {
+      "at": "2026-08-20T20:24:39.754Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-add",
+      "ref": "c0mopaxh",
+      "note": "#5 Arms, control bodies and lambdas are unchanged: a pattern ta"
+    },
+    {
+      "at": "2026-08-20T20:24:39.263Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-add",
+      "ref": "c0mopaxh",
+      "note": "#4 jet fmt rewrites every signature and body in the corpus, and"
+    },
+    {
+      "at": "2026-08-20T20:24:38.803Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-add",
+      "ref": "c0mopaxh",
+      "note": "#3 The effect ceiling has one ratified position and a shipped e"
+    },
+    {
+      "at": "2026-08-20T20:24:38.338Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-add",
+      "ref": "c0mopaxh",
+      "note": "#2 The chosen signature shape parses, and the retired shape tea"
+    },
+    {
+      "at": "2026-08-20T20:24:37.876Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-add",
+      "ref": "c0mopaxh",
+      "note": "#1 D-SIG-SHAPE1 is ratified and recorded in docs/spec/syntax-de"
+    },
+    {
+      "at": "2026-08-20T20:24:37.390Z",
+      "by": "fable-e3-burndown",
+      "action": "decision.add",
+      "ref": "D-SIG-SHAPE1",
+      "note": "Where the return type sits, and what `:>` means"
+    },
+    {
+      "at": "2026-08-20T20:23:54.919Z",
+      "by": "fable-e3-burndown",
+      "action": "card.add",
+      "ref": "c0mopaxh",
+      "note": "Ballot: where the return type sits, and what `:>` means"
+    },
+    {
+      "at": "2026-08-20T20:22:24.182Z",
+      "by": "fable-e3-burndown",
+      "action": "decision.ratify",
+      "ref": "D-BODY-LAST1",
+      "note": "B (by fable-e3-burndown, quoting owner: \"I want last expression returns ratified but then I want to discuss the syntax stuff separately.\")"
+    },
+    {
+      "at": "2026-08-20T20:12:39.089Z",
+      "by": "fable-e3-burndown",
+      "action": "decision.add",
+      "ref": "D-BODY-LAST1",
+      "note": "Last expression returns; the `::` function body retires"
+    },
+    {
+      "at": "2026-08-20T20:10:47.202Z",
+      "by": "owner",
+      "action": "done.clear",
+      "ref": null,
+      "note": "2026-08-20T20:10:47.202Z"
+    },
+    {
+      "at": "2026-08-20T20:09:18.798Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-add",
+      "ref": "c0jser1q",
+      "note": "#6 Tier parity: AOT, default jet run and the interpreter agree "
+    },
+    {
+      "at": "2026-08-20T20:09:18.323Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-add",
+      "ref": "c0jser1q",
+      "note": "#5 Arms, control bodies and lambdas are unchanged: a pattern ta"
+    },
+    {
+      "at": "2026-08-20T20:09:17.851Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-add",
+      "ref": "c0jser1q",
+      "note": "#4 jet fmt rewrites every site in the corpus and keeps a one-li"
+    },
+    {
+      "at": "2026-08-20T20:09:17.379Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-add",
+      "ref": "c0jser1q",
+      "note": "#3 The retired body form teaches the ratified spelling with a r"
+    },
+    {
+      "at": "2026-08-20T20:09:16.912Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-add",
+      "ref": "c0jser1q",
+      "note": "#2 A block yields its trailing expression when the declared ret"
+    },
+    {
+      "at": "2026-08-20T20:09:16.442Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-add",
+      "ref": "c0jser1q",
+      "note": "#1 D-BODY-LAST1 is ratified and recorded in docs/spec/syntax-de"
+    },
+    {
+      "at": "2026-08-20T20:08:55.732Z",
+      "by": "fable-e3-burndown",
+      "action": "card.add",
+      "ref": "c0jser1q",
+      "note": "Ballot: last expression returns, and the single-expression body form retires"
+    },
     {
       "at": "2026-08-20T20:00:35.266Z",
       "by": "fable-e3-burndown",
@@ -188726,349 +189480,6 @@
       "action": "card.criteria-add",
       "ref": "c0hhsiej",
       "note": "#1 rustfmt is on PATH in both nix develop and nix develop .#ful"
-    },
-    {
-      "at": "2026-08-19T23:41:59.924Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-add",
-      "ref": "c08rdr78",
-      "note": "#3 A regression test or guard script fails if either rule is br"
-    },
-    {
-      "at": "2026-08-19T23:41:59.498Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-add",
-      "ref": "c08rdr78",
-      "note": "#2 The Tower CLI operates on the canonical main-checkout store "
-    },
-    {
-      "at": "2026-08-19T23:41:59.058Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-add",
-      "ref": "c08rdr78",
-      "note": "#1 A build in a git worktree cannot write to or read a half-wri"
-    },
-    {
-      "at": "2026-08-19T23:41:58.625Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-add",
-      "ref": "c0zx7020",
-      "note": "#5 card show and decision show resolve every ref that list --js"
-    },
-    {
-      "at": "2026-08-19T23:41:58.187Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-add",
-      "ref": "c0zx7020",
-      "note": "#4 card list --epoch and --milestone with --json exit 0 and emi"
-    },
-    {
-      "at": "2026-08-19T23:41:57.764Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-add",
-      "ref": "c0zx7020",
-      "note": "#3 Unknown flags are a hard error on every write verb: card add"
-    },
-    {
-      "at": "2026-08-19T23:41:57.346Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-add",
-      "ref": "c0zx7020",
-      "note": "#2 card criteria REF --list works as documented, and a met crit"
-    },
-    {
-      "at": "2026-08-19T23:41:56.906Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-add",
-      "ref": "c0zx7020",
-      "note": "#1 Every flag and subcommand tower help documents is accepted b"
-    },
-    {
-      "at": "2026-08-19T23:41:21.702Z",
-      "by": "fable-e3-burndown",
-      "action": "card.add",
-      "ref": "c0csb38y",
-      "note": "Agent scripts and their docs must not drift apart"
-    },
-    {
-      "at": "2026-08-19T23:41:21.164Z",
-      "by": "fable-e3-burndown",
-      "action": "card.add",
-      "ref": "c03w4kfy",
-      "note": "Test scratch must not live on RAM-backed /tmp"
-    },
-    {
-      "at": "2026-08-19T23:41:02.395Z",
-      "by": "fable-e3-burndown",
-      "action": "card.add",
-      "ref": "c0hhsiej",
-      "note": "Devshell provides rustfmt so formatter proofs are runnable"
-    },
-    {
-      "at": "2026-08-19T23:41:01.867Z",
-      "by": "fable-e3-burndown",
-      "action": "card.add",
-      "ref": "c08rdr78",
-      "note": "Worktree isolation: shared target dir and cwd-resolved board both corrupt state"
-    },
-    {
-      "at": "2026-08-19T23:41:01.333Z",
-      "by": "fable-e3-burndown",
-      "action": "card.add",
-      "ref": "c0zx7020",
-      "note": "Tower CLI: help and behavior must agree, and criteria must be reversible"
-    },
-    {
-      "at": "2026-08-19T23:36:45.338Z",
-      "by": "owner",
-      "action": "done.clear",
-      "ref": null,
-      "note": "2026-08-19T23:36:45.338Z"
-    },
-    {
-      "at": "2026-08-19T23:25:48.560Z",
-      "by": "fable-e3-burndown",
-      "action": "card.update",
-      "ref": "c0ptp3kp",
-      "note": "phase"
-    },
-    {
-      "at": "2026-08-19T23:25:47.839Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0ptp3kp",
-      "note": "#3"
-    },
-    {
-      "at": "2026-08-19T23:25:47.327Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0ptp3kp",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-19T23:19:23.087Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0vvnebk",
-      "note": "#5"
-    },
-    {
-      "at": "2026-08-19T23:19:22.570Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0ptp3kp",
-      "note": "#2"
-    },
-    {
-      "at": "2026-08-19T23:19:22.050Z",
-      "by": "fable-e3-burndown",
-      "action": "card.update",
-      "ref": "c0wbtcon",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-19T23:19:21.355Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0wbtcon",
-      "note": "#5"
-    },
-    {
-      "at": "2026-08-19T23:19:20.841Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0wbtcon",
-      "note": "#4"
-    },
-    {
-      "at": "2026-08-19T23:19:20.310Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0wbtcon",
-      "note": "#2"
-    },
-    {
-      "at": "2026-08-19T23:19:19.774Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0wbtcon",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-19T23:11:53.777Z",
-      "by": "fable-e3-burndown",
-      "action": "card.update",
-      "ref": "c0be4wgi",
-      "note": "phase"
-    },
-    {
-      "at": "2026-08-19T23:11:53.052Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0be4wgi",
-      "note": "#9"
-    },
-    {
-      "at": "2026-08-19T23:11:52.551Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0be4wgi",
-      "note": "#8"
-    },
-    {
-      "at": "2026-08-19T23:11:52.021Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0be4wgi",
-      "note": "#7"
-    },
-    {
-      "at": "2026-08-19T23:11:51.488Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0be4wgi",
-      "note": "#5"
-    },
-    {
-      "at": "2026-08-19T23:11:50.964Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0be4wgi",
-      "note": "#4"
-    },
-    {
-      "at": "2026-08-19T23:11:50.449Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0be4wgi",
-      "note": "#3"
-    },
-    {
-      "at": "2026-08-19T23:02:18.517Z",
-      "by": "fable-e3-burndown",
-      "action": "card.update",
-      "ref": "c06tdv16",
-      "note": "phase"
-    },
-    {
-      "at": "2026-08-19T23:02:17.817Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c06tdv16",
-      "note": "#3"
-    },
-    {
-      "at": "2026-08-19T23:02:17.324Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c06tdv16",
-      "note": "#2"
-    },
-    {
-      "at": "2026-08-19T23:02:16.811Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c06tdv16",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-19T23:02:16.302Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-add",
-      "ref": "c06tdv16",
-      "note": "#3 No new cache layer, no on-disk memo, and no placeholder fall"
-    },
-    {
-      "at": "2026-08-19T23:02:15.790Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-add",
-      "ref": "c06tdv16",
-      "note": "#2 The key still moves whenever anything that can change the em"
-    },
-    {
-      "at": "2026-08-19T23:02:15.286Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-add",
-      "ref": "c06tdv16",
-      "note": "#1 Build wall time no longer dominated by the cache key: measur"
-    },
-    {
-      "at": "2026-08-19T22:52:20.508Z",
-      "by": "fable-e3-burndown",
-      "action": "card.add",
-      "ref": "c06tdv16",
-      "note": "Build wall time is one fingerprint: cache_key costs 33.4s of a 35s build"
-    },
-    {
-      "at": "2026-08-19T22:22:30.413Z",
-      "by": "fable-e3-burndown",
-      "action": "card.add",
-      "ref": "c0txf14f",
-      "note": "Runtime rlib cache grows without bound: no prune, 45-60MB per variant"
-    },
-    {
-      "at": "2026-08-19T22:21:46.493Z",
-      "by": "fable-e3-burndown",
-      "action": "card.update",
-      "ref": "c09otnjg",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-19T22:21:45.694Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c09otnjg",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-19T22:21:45.065Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-add",
-      "ref": "c03pfb56",
-      "note": "#4 No behavioral change to cache hits or to generated program b"
-    },
-    {
-      "at": "2026-08-19T22:21:44.474Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-add",
-      "ref": "c03pfb56",
-      "note": "#3 The effect and capability summaries a build prints are uncha"
-    },
-    {
-      "at": "2026-08-19T22:21:43.874Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-add",
-      "ref": "c03pfb56",
-      "note": "#2 Warm and cold jet build wall time drop is measured before an"
-    },
-    {
-      "at": "2026-08-19T22:21:43.270Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-add",
-      "ref": "c03pfb56",
-      "note": "#1 A build loads and type-checks the program exactly once: the "
-    },
-    {
-      "at": "2026-08-19T22:21:42.686Z",
-      "by": "fable-e3-burndown",
-      "action": "card.update",
-      "ref": "c03pfb56",
-      "note": "plan"
-    },
-    {
-      "at": "2026-08-19T22:21:12.641Z",
-      "by": "fable-e3-burndown",
-      "action": "card.add",
-      "ref": "c03pfb56",
-      "note": "Two front-end passes per build: reuse one bundle for the cache key and the compile"
-    },
-    {
-      "at": "2026-08-19T22:18:35.815Z",
-      "by": "owner",
-      "action": "done.clear",
-      "ref": null,
-      "note": "2026-08-19T22:18:35.815Z"
     }
   ],
   "nextNum": 368,
