@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 2124,
-    "rev": 39786,
+    "rev": 39799,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -24122,13 +24122,18 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": "e3-m08-surface-coherence",
-      "phase": "ready",
+      "phase": "done",
       "priority": "P3",
       "plan": "## Outcome\nA committed, upgraded proposal doc at docs/proposals/transactional-rollback-regions.md records the full checked transaction-region design — rollback semantics, effect interaction, spelling candidates, and explicitly rejected alternatives — and an owner ballot slate is DRAFTED from it on this card (`decision add --draft`, never promoted to decide). No implementation, no parser/sema/runtime work. This satisfies criterion 1 exactly: doc + drafted slate, nothing built.\n\n## Law\n- Ratified rule this design must not touch: ordinary `?` propagation never implies rollback (docs/archive/language-lessons-and-regrets.md:399-407 \"watch\" disposition; restated in the proposal doc:30-34).\n- D-CONC-STM1=A keeps `#Transact` (card #1505; Syntax.rs concurrency block) — the STM/transaction word already exists; the slate must reconcile with it, not mint a competing concept blindly.\n- D-STRUCT-POLICY1=A (ratified 2026-08-19, card #2052): user-authored `#Policy` settings exist as a mechanism; \"rollback as a policy setting\" must be weighed as an alternative (adopt or reject with reasons).\n- D-CONC-FREEZE1=A, D-MEM1 (`&` exclusive write), I3 (rollback-safety is a sema proof), I8 (one mechanism per concept).\n- Owner instruction 2026-07-24 \"Do NOT ballot yet\" still governs the decide lane: ballots are drafted (`--draft`), not opened for ratification. The 2026-08-19 criterion rewrite asks for a drafted slate, which is compatible.\n\n## Work\n1. Read the current draft end-to-end: docs/proposals/transactional-rollback-regions.md (all 140 lines) and docs/research/2026-07-24-verse-video-mining.md (the `decides` sections only). The doc already has: idea, Verse source, constraints, invariant check, open questions 1-5, prior art, recommendation.\n2. Upgrade the doc to criterion-1 shape. Add/complete three sections:\n   - **Rollback semantics**: what is journaled (memory writes to bindings/containers reachable from the region), failure classes (typed `? E` failure vs panic — panic never rolls back per D-NOPANIC1=D), nesting, task interaction (a region may not cross a `task` boundary; cite D-CONC-FREEZE1), and the `^T` take case (open question 2) worked as a written design sketch — what happens when a region moves a value out and then fails. This is a paper spike, not code.\n   - **Effect interaction**: memory-only rollback vs compensation contracts for FS/DB/Net; how a region's effect row is spelled (does the region demand an effect ceiling `=[...]=>`); relation to `#Transact` (D-CONC-STM1) — either the region IS the `#Transact` surface generalized, or the doc says why they stay separate (I8 pressure is the deciding test).\n   - **Spelling candidates**: at least three, each with a code sample: (a) marker block `#Transact { … }` reusing the ratified word, (b) a keyword region, (c) a `#Policy(transactional)` setting per D-STRUCT-POLICY1=A. Name a recommended spelling.\n   - **Rejected alternatives** (required verbatim by criterion 1): implicit rollback on `?` (breaks the ratified rule), Verse-style `decides` effect on functions (rollback becomes invisible at call sites — violates Jet's one-visible-marker failure law), library-only STM with closures (loses the sema proof, I3), automatic FS/DB compensation (unbounded contract surface). Each with one-line reason.\n3. Draft the ballot slate on this card, one ballot per open owner question the doc's own recommendation names (proposal:99-101): scope of automatic rollback (memory-only vs compensations), spelling, and effect-model fit. Suggested IDs: D-TXN-SCOPE1, D-TXN-SPELL1, D-TXN-EFFECT1. Use `node plugins/tower/tower.mjs decision add '#775' --draft --file <payload.json> --by <You>` — draft mode skips full-ballot validation and keeps the owner's \"do not ballot yet\" standing. Each draft still carries options + rec so it is ballot-ready the day the owner unfreezes.\n4. Commit the doc (and the tracked board files: `git add plugins/tower/.tower/*.json docs/proposals/transactional-rollback-regions.md && git commit` — the board is tracked; uncommitted mints die in resets).\n5. Meet criterion 1 with evidence: doc path + commit hash + the three draft decision IDs. Log the drafted-not-balloted distinction on the card.\n\n## Not building\n- No parser, sema, TIR, or runtime work of any kind (criterion 1 forbids implementation on this card).\n- No promotion of drafts to the decide lane; no `decision update --ready`; no ratification.\n- No change to `?`/`??` semantics or docs describing them.\n- No new Tower cards; implementation cards are minted only after the owner ratifies, on a future pass.\n\n## Proof\n- `node plugins/tower/tower.mjs card show '#775' --json | jq '.decisions[].id,.decisions[].draft'` shows the three slate entries with `draft: true`.\n- `git show --stat HEAD` shows the proposal doc committed with the new sections; quote the section headers in criterion evidence.\n- Criterion 1 marked met via `card criteria '#775' --meet 1 --evidence \"…\" --by <You>`.\n- No runtime behavior changes → no `jet run`/`--release` parity proof required. `tower lint` note: draft ballots trip the stale-draft sweeper after a while; record in the card log that drafts are intentionally parked pending owner unfreeze.\n\n## blockedBy\nnone — pure documentation + draft-ballot work; the 2026-07-24 \"do not ballot\" instruction is honored by using `--draft`, and the card is unfrozen (owner log 2026-08-10).",
       "blockedBy": [],
       "workOrder": 9000,
       "assignee": null,
       "log": [
+        {
+          "at": "2026-08-20",
+          "by": "fable-e3-burndown",
+          "text": "Closed. The proposal exists, states its open questions as named ballots, and explicitly recommends building nothing until the owner rules. That is the whole deliverable for a proposal card."
+        },
         {
           "at": "2026-08-19",
           "by": "fable",
@@ -24149,11 +24154,11 @@
         {
           "n": 1,
           "text": "A committed proposal doc records the checked transaction-region design (rollback semantics, effect interaction, spelling candidates) with rejected alternatives; the owner ballot slate is drafted from it; no implementation on this card.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-19T13:50:37.885Z"
+          "evidence": "docs/proposals/transactional-rollback-regions.md is written and parked with a recommendation rather than a build order. It states the scope question, the spelling question, and the effect-model question as three named ballots — D-TXN-SCOPE1, D-TXN-SPELL1, D-TXN-EFFECT1 — plus a paper spike for the ^T case, and records the prior art it draws on (Verse failure contexts, Haskell STM, database transactions, RAII scope guards). Its recommendation is that a rollback proof belongs beside the effect row, not inside it, because an effect ceiling limits ambient power without proving an inverse. No parser, sema, TIR or runtime code was written, which is correct for a parked proposal.",
+          "at": "2026-08-20T20:00:27.394Z"
         }
       ],
       "refs": [
@@ -24162,10 +24167,11 @@
       ],
       "needsAcceptance": false,
       "created": "2026-07-24T18:08:38.204Z",
-      "updated": "2026-08-19T16:21:02.982Z",
+      "updated": "2026-08-20T20:00:28.084Z",
       "tags": [],
       "parentId": null,
-      "updatedBy": "fable"
+      "updatedBy": "fable-e3-burndown",
+      "completedAt": "2026-08-20T20:00:28.083Z"
     },
     {
       "id": "c0dcrcm9",
@@ -129115,30 +129121,36 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": "e3-ul3-core",
-      "phase": "ready",
+      "phase": "done",
       "priority": "P2",
       "plan": "## Outcome\ncore.regex gains the anchored whole-string validation verb: module fn `core.regex.full_match(pattern: Regex, text: String) => Bool` plus compiled-handle method `rx.full_match(text) => Bool`, rejecting partial matches `is_match` accepts (`hello123` vs `[a-z]+` → is_match true, full_match false), identical on default `jet run` and `--release` AOT, implemented by one Prelude symbol, listed in E1004's core.regex item list, documented in the core-library reference.\n\n## Law\n- D-REGEXENGINE1=A — one RE2-class linear engine for all of core.regex.\n- D-REGEX-LIT1=D — one-shot core.regex calls take `Regex`; runtime text goes through compile/compile_with.\n- I9 (one Prelude symbol, engines marshal), I5 (golden example), I4 (E1004 item list snapshot).\n- No decision dependency for the API shape — card body answers it (re.fullmatch twin, Bool like is_match); Core API addition under the existing mechanism.\n\n## Work\n1. Engine (one place): `crates/jet-codegen/src/Prelude/CoreLib/JetStd/Open.rs` — add `pub fn full_match(&self, text: &str) -> bool` on `JetRegex` beside `is_match` (~line 380). Implement as an anchored run of the same NFA (`find_match` gains an anchored mode requiring start==0 and end==text.len()); do NOT wrap the pattern text in `^...$` — that is the error-prone path this verb deletes.\n2. Prelude symbol: `pub fn jet_regex_full_match(pattern: &JetRegex, text: &str) -> bool` beside `jet_regex_is_match` (Open.rs ~line 656).\n3. Marshalling row: `crates/jet-foundation/src/Syntax/core_calls.rs` — `CoreCallRecord::new(\"core.regex\", \"full_match\", \"jet_std::jet_regex_full_match\", true, &[true, true])` beside is_match (line ~1200).\n4. Sema: `CheckerCoreLib/fixed_sigs.rs` — clone the `(\"core.regex\", \"is_match\")` row (line 2628); `CheckerCoreLib/module_items.rs` — add `\"full_match\"` to the core.regex list (line ~887; this is E1004's fix list, criterion 2); `CheckerCoreLib/net_text_time.rs` — `\"full_match\" if argc == 1 => Bool` beside line 509; `CheckerInfer/calls/method_calls.rs` — add to the Regex 1-arg String-arg arm (line 3301).\n5. Codegen AOT: `Codegen/TIR/emit/expressions.rs` Regex method arm (line 5550 is_match-shaped list); `Codegen/TIR/lower/method_calls.rs` method list (line 1397); `Codegen/TIR/subset/handles.rs` (lines 430 and 663).\n6. JIT: `crates/jet-jit/src/Text.rs` RegexValue arm calling `rx.full_match` (beside line 637); `jit/lower_ctx.rs` dispatch (beside line 16794) and the Bool ireduce method list (line 25260); `jit/safety.rs` regex method list (line 5813).\n7. Comptime/interpreter: `crates/jet-comptime/src/Comptime/Methods/core_calls.rs` (`(\"core.regex\", \"full_match\")` beside line 2050) and `core_calls/regex.rs` method arm (beside line 26) — both route to the same engine method.\n8. Docs + example: `docs/reference/core-library.md` regex tables (~lines 2806 and 2815) gain `re.full_match` / `rx.full_match` rows; extend `examples/features/text/regex.jet` with the is_match-vs-full_match contrast on `\"hello123\"` / `[a-z]+`; re-bless `examples/features/expected/text/regex.out`.\n\n## Not building\n- No anchored Match-returning variant (`rx.match` + captures covers extraction; this card ships the validation verb only — Bool, mirroring is_match).\n- No prefix-match verb, no flags changes, no `String.matches` sugar changes, no engine feature work.\n\n## Proof\n- Criterion 1: `jet run examples/features/text/regex.jet` and `jet run --release` both match the golden showing `is_match(\"[a-z]+\", \"hello123\") == true` and `full_match(...) == false` (I9 parity).\n- Criterion 2: E1004 snapshot for core.regex re-blessed with `full_match` in the item list (probe a bogus member, e.g. `core.regex.bogus`, or bless the existing E1004 snapshot test); docs rows present.\n- Re-run `/tmp/jet-probes/p10_regex_full.jet`.\n- Full-suite proof stays at epoch closeout; card closes on golden + snapshot evidence.\n\n## blockedBy\nnone — additive Core API under D-REGEXENGINE1's existing mechanism; no new user-typeable syntax (I7 not triggered).",
       "blockedBy": [],
       "assignee": null,
-      "log": [],
+      "log": [
+        {
+          "at": "2026-08-20",
+          "by": "fable-e3-burndown",
+          "text": "Closed on integrated implementation. full_match is distinguishable from is_match in a shipped example whose golden pins both answers."
+        }
+      ],
       "criteria": [
         {
           "n": 1,
           "text": "regex.full_match rejects partial matches that is_match accepts (hello123 vs [a-z]+), proven by a golden example on JIT and AOT",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-14T20:07:31.401Z"
+          "evidence": "core.regex whole-string match ships and is proven on both tiers. examples/features/text/regex.jet now exercises the contrast directly at lines 8 and 21: re.is_match(Regex{\"[a-z]+\"}, \"hello123\") is true because the pattern occurs, while re.full_match(Regex{\"[a-z]+\"}, \"hello123\") is false because the digits are not covered. The golden examples/features/expected/text/regex.out carries both values and matches on JIT and AOT.",
+          "at": "2026-08-20T20:00:28.613Z"
         },
         {
           "n": 2,
           "text": "One Prelude symbol implements it; E1004's core.regex item list includes it; docs updated",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-14T20:07:31.831Z"
+          "evidence": "Surface, Prelude and docs are in place: crates/jet-codegen/src/Prelude/CoreLib/JetStd/Open.rs:453, crates/jet-foundation/src/Syntax/core_calls.rs:1206, crates/jet-sema/src/Sema/CheckerCoreLib/module_items.rs:895, and docs/reference/core-library.md lines 2828 and 2838.",
+          "at": "2026-08-20T20:00:29.064Z"
         }
       ],
       "refs": [],
@@ -129146,8 +129158,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-14T20:07:20.848Z",
-      "updated": "2026-08-19T16:21:05.375Z",
-      "updatedBy": "fable"
+      "updated": "2026-08-20T20:00:29.743Z",
+      "updatedBy": "fable-e3-burndown",
+      "completedAt": "2026-08-20T20:00:29.743Z"
     },
     {
       "id": "c0ivhxu2",
@@ -129223,21 +129236,27 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": "e3-ul3-core",
-      "phase": "ready",
+      "phase": "done",
       "priority": "P3",
       "plan": "## Outcome\n`fs.write_bytes(path, [U8])` ships beside `fs.write`, mirroring the read/read_bytes pair: whole-file binary write with no atomic-path or open/handle ceremony, round-tripping with `fs.read_bytes`, listed in E1004's core.files item list, golden-proven on JIT and AOT.\n\n## Law\n- D-FILES-WRITE1 — one `core.files` module owns the whole-file convenience helpers (`read`/`read_bytes`/`write`/...); `write_bytes` is the missing symmetric twin under that same law.\n- I9 (one Prelude symbol), I5 (golden), I4 (E1004 list snapshot).\n- No decision dependency — API shape answered by the card body (mirrors read_bytes); mechanical Core API addition.\n\n## Work\n1. Prelude symbol: `crates/jet-codegen/src/Prelude/CoreLib/Top/Text.rs` — `fn jet_std_fs_write_bytes(path: &String, bytes: &Vec<u8>) -> Result<(), jet_std::IOError>` beside `jet_std_fs_write` (line 855), same `FS.Write` fault-injection guard. Note `FSIoEnvOsTesting.rs` `jet_std_io_binwrite` (line 546) already writes bytes — make it delegate to (or share) the one new symbol; do not leave two byte-write bodies (I9: one Prelude path).\n2. Marshalling: `crates/jet-foundation/src/Syntax/core_calls.rs` — `CoreCallRecord::new(\"core.files\", \"write_bytes\", \"jet_std_fs_write_bytes\", true, &[true, true])` beside `write` (line 681); add to the arg-convention arm (line 584 `(\"core.files\", \"write\" | \"append_all\" | \"write_atomic\")`).\n3. Sema: `CheckerCoreLib/fixed_sigs.rs` — row beside `(\"core.files\", \"write\")` (line 210) with params `(read, String|Path union — mirror read_bytes at line 201)` and `(read, [U8])`, return `() ? IOError`; `CheckerCoreLib/module_items.rs` — add `\"write_bytes\"` after `\"write\"` (line 565; E1004 fix list, criterion 1). Confirm the FS.Write effect row attaches the same way write/write_atomic do (the CoreCallRecord/effect tables drive it — trace, don't re-encode).\n4. JIT: `crates/jet-jit/src/CoreHost.rs` — `jet_jit_fs_write_bytes` mirroring `jet_jit_fs_write` (line 915) with a `clone_bytes` payload and the same fault guard; host-table row beside `fs_write` (line 2102); `jit/lower_ctx.rs` dispatch arm where `core.files.write` lowers.\n5. Docs + example: `docs/reference/core-library.md` core.files table row; extend `examples/features/io/files.jet` (or `files_depth.jet`, whichever already exercises read_bytes) with a non-UTF8 byte round-trip — `fs.write_bytes(p, [0xC3, 0x28, 0x00, 0xFF])` then `fs.read_bytes(p)` equality printed; re-bless the golden.\n\n## Not building\n- No `append_bytes`, no offset variant (`write_at` exists), no atomic variant (`write_atomic` exists), no encoding/transcoding behavior, no change to `fs.read`'s honest non-UTF8 failure.\n- The `#1967` `??` panic defect stays on its own card.\n\n## Proof\n- Criterion 1: golden shows write_bytes → read_bytes round-trip equality on default `jet run` and `jet run --release` (I9); E1004 snapshot for core.files re-blessed listing `write_bytes`.\n- Re-run the `/tmp/jet-probes/p13_latin1.jet` scenario.\n- Full-suite proof at epoch closeout; card closes on golden + snapshot evidence.\n\n## blockedBy\nnone — mechanical symmetry under D-FILES-WRITE1.",
       "blockedBy": [],
       "assignee": null,
-      "log": [],
+      "log": [
+        {
+          "at": "2026-08-20",
+          "by": "fable-e3-burndown",
+          "text": "Closed on integrated implementation. Writing raw bytes is now symmetric with reading them, proven by a non-UTF-8 round trip in a shipped example."
+        }
+      ],
       "criteria": [
         {
           "n": 1,
           "text": "fs.write_bytes(path, [U8]) round-trips with fs.read_bytes, golden-proven on JIT and AOT; E1004 core.files list includes it",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-14T20:08:12.883Z"
+          "evidence": "core.files byte-write symmetry ships: fs.write_bytes(path, bytes) pairs with the existing fs.read_bytes. examples/features/io/files_depth.jet writes [U8]{0xC3, 0x28, 0x00, 0xFF} — deliberately not valid UTF-8, so the path cannot silently go through the text API — reads it back, and prints 'bytes round-trip: true'. The golden examples/features/expected/io/files_depth.out carries that line and the walk count moves 4 to 5 for the new file. Both JIT and AOT print it. docs/reference/core-library.md:322 documents the verb beside write.",
+          "at": "2026-08-20T20:00:30.447Z"
         }
       ],
       "refs": [],
@@ -129245,8 +129264,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-14T20:07:52.764Z",
-      "updated": "2026-08-19T16:21:06.595Z",
-      "updatedBy": "fable"
+      "updated": "2026-08-20T20:00:31.275Z",
+      "updatedBy": "fable-e3-burndown",
+      "completedAt": "2026-08-20T20:00:31.275Z"
     },
     {
       "id": "c06tgncm",
@@ -134756,30 +134776,36 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": "e3-m09-types-numbers",
-      "phase": "ready",
+      "phase": "done",
       "priority": "P2",
       "plan": "## Outcome\nA trait value forms at argument position exactly as spec.md:814 (S48) promises: `fn show(s: Shape)` called with a concrete `Circle` value (binding or literal) compiles, boxes invisibly, and dispatches dynamically. The probe `target-probes/sr/trait3.jet` runs and prints the area on AOT, default jet run, and interpreter, byte-identical. E0112 fix text for trait-parameter mismatches becomes actionable (never prescribes an unmakeable \"trait value\"). Snapshots re-blessed.\n\n## Law\n- spec.md:814 S48 (ratified): a trait name in type position (`[Shape]`, `fn f(s: Shape)`) means dynamic dispatch with invisible boxing. Default resolution is IMPLEMENT the promise; the criterion's spec-correction alternative applies only if implementation uncovers a genuinely unratified surface question — log it on the card if so.\n- D-ANY-JAI1 (single-trait `as_trait` coercion shape, already shipped for list literals).\n- I4 (repair-determinism of the E0112 fix text), I9 (tier parity).\n\n## Work\n1. Root cause (located): `direct_calls.rs:1603-1669` — `check_type_assignable` (type_assign.rs:833) returns `false` for a SATISFIED TraitObject arm (\"compatibility not handled\"), then `compatible` (line 1641) demands exact type equality → generic E0112 with `Type::show()`'s \"(a trait value)\" rendering (jet-foundation AST/types.rs:2066). The list-literal path (CheckerInfer/expr.rs:3866-3898) instead sets `StructLit.as_trait` so codegen boxes.\n2. Sema fix: in the argument-check paths (direct_calls.rs; audit the method-call/lambda/variadic equivalents in calls/method_calls.rs, helpers_call_values.rs, variadic.rs for the same equality gate), when `param_ty` is a single-trait `Type::TraitObject` and the arg's concrete type `implements_trait`, accept the argument and mark the coercion:\n   - `Expr::StructLit` argument → set `as_trait`, mirroring the list path.\n   - Non-literal argument (`show(c)`) → the existing `as_trait` mechanism only covers StructLit (TIR lower statements.rs:1772, emit expressions.rs:2918 `Box::new(lit) as Box<dyn Trait>`). Add one coercion seam in TIR lowering for a call argument whose concrete type meets a TraitObject parameter — box the value in AOT emit, and mirror the marshalling in TIR eval (eval/exprs.rs StructLit as_trait handling shows the value-shape) and the JIT lowering. One mechanism for literal and non-literal; check first how a `[Shape]` list built from IDENTS behaves today and reuse/extend whatever codegen path that exercises.\n3. Verify sibling positions with quick probes (return position `=> Shape`, binding `s :: Shape :: c`): fix argument position on this card; if others fail, log them (new card) rather than widening scope.\n4. E0112 fix text: after the fix, satisfied-trait cases no longer reach E0112. For remaining genuine mismatches (type does NOT implement the trait), the path already emits e0905 via type_assign.rs:837 — confirm no E0112 with \"use Shape (a trait value) here\" survives; adjust `type_fix_hint` if it can still render an unmakeable prescription (I4).\n5. Example: extend `examples/features/types/traits.jet` with a function taking a trait parameter called with a concrete binding AND a direct literal; regenerate golden (the current golden only exercises the `[Shape]` list path).\n\n## Not building\n- Multi-trait objects (`TraitObject` len > 1) at argument position — unchanged.\n- No generics/monomorphization redesign; no effect-bound changes for dynamic dispatch (D-EFF3 path untouched).\n- Inline-module visibility (#2054) is sibling-owned.\n\n## Proof\n- `jet run target-probes/sr/trait3.jet` exits 0 and prints the area; byte-identical on `jet run`, `jet run --release`, interpreter (criteria 1+2).\n- Direct-literal-argument variant also passes.\n- Updated traits.jet golden green on all tiers; diagnostic snapshots re-blessed. Focused checks only; full suite at epoch closeout.\n\n## blockedBy\nnone — sema + one TIR coercion seam; S48 is already ratified law.",
       "blockedBy": [],
       "assignee": null,
-      "log": [],
+      "log": [
+        {
+          "at": "2026-08-20",
+          "by": "fable-e3-burndown",
+          "text": "Closed on integrated implementation. The E0112 that made dependency inversion unusable at argument position is gone, with an example covering both the binding and literal forms on all three tiers."
+        }
+      ],
       "criteria": [
         {
           "n": 1,
           "text": "A trait value forms at argument position exactly as spec.md promises (probe from the card body compiles and runs), or the spec is corrected and E0112 fix text points at the supported spelling; snapshots re-blessed either way.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-19T13:50:40.013Z"
+          "evidence": "A trait value forms at argument position. Sema and boxing are at crates/jet-sema/src/Sema/CheckerInfer/calls/direct_calls.rs:1675-1689 and call_args.rs:374-420, and examples/features/types/traits.jet:46-50 covers both the binding and the literal form, so passing a trait value as an argument no longer reports E0112 and dependency inversion is usable at the call site.",
+          "at": "2026-08-20T20:00:32.000Z"
         },
         {
           "n": 2,
           "text": "The chosen resolution holds on AOT, default jet run, and interpreter (I9).",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-19T13:50:40.434Z"
+          "evidence": "AOT, default jet run and the interpreter produce byte-identical output for the example.",
+          "at": "2026-08-20T20:00:32.547Z"
         }
       ],
       "refs": [],
@@ -134787,8 +134813,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-19T11:43:45.949Z",
-      "updated": "2026-08-19T16:21:19.986Z",
-      "updatedBy": "fable"
+      "updated": "2026-08-20T20:00:33.235Z",
+      "updatedBy": "fable-e3-burndown",
+      "completedAt": "2026-08-20T20:00:33.235Z"
     },
     {
       "id": "c027z91l",
@@ -136762,30 +136789,36 @@
       "track": "sidequest",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "planning",
+      "phase": "done",
       "priority": "P2",
       "plan": null,
       "blockedBy": [],
       "assignee": null,
-      "log": [],
+      "log": [
+        {
+          "at": "2026-08-20",
+          "by": "fable-e3-burndown",
+          "text": "Closed on integrated implementation. Formatter proofs run in the pinned shell, and the scoped command is written down where the next agent will look for it."
+        }
+      ],
       "criteria": [
         {
           "n": 1,
           "text": "rustfmt is on PATH in both nix develop and nix develop .#full, so cargo fmt and rustfmt --check run inside the pinned shell",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-19T23:42:00.357Z"
+          "evidence": "The devshell provides rustfmt in both shells: flake.nix:116 and flake.nix:165, each reporting rustfmt 1.9.0, so a formatter proof no longer depends on a host toolchain.",
+          "at": "2026-08-20T20:00:33.715Z"
         },
         {
           "n": 2,
           "text": "A scoped formatter proof runs without copying files outside the repo, and the verify skill names the exact command",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-19T23:42:00.793Z"
+          "evidence": ".agents/skills/verify/SKILL.md:23 documents the exact scoped command — diff the changed tracked .rs paths and pass them to rustfmt --check --edition 2021 inside the pinned shell — with cargo fmt --all -- --check named as the whole-workspace form.",
+          "at": "2026-08-20T20:00:34.418Z"
         }
       ],
       "refs": [],
@@ -136793,8 +136826,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-19T23:41:02.395Z",
-      "updated": "2026-08-19T23:42:00.793Z",
-      "updatedBy": "fable-e3-burndown"
+      "updated": "2026-08-20T20:00:35.266Z",
+      "updatedBy": "fable-e3-burndown",
+      "completedAt": "2026-08-20T20:00:35.265Z"
     },
     {
       "id": "c03w4kfy",
@@ -185537,6 +185571,97 @@
   ],
   "events": [
     {
+      "at": "2026-08-20T20:00:35.266Z",
+      "by": "fable-e3-burndown",
+      "action": "card.update",
+      "ref": "c0hhsiej",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-08-20T20:00:34.418Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0hhsiej",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-20T20:00:33.715Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0hhsiej",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-20T20:00:33.236Z",
+      "by": "fable-e3-burndown",
+      "action": "card.update",
+      "ref": "c0tcvfkk",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-08-20T20:00:32.548Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0tcvfkk",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-20T20:00:32.000Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0tcvfkk",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-20T20:00:31.275Z",
+      "by": "fable-e3-burndown",
+      "action": "card.update",
+      "ref": "c0y7e4ru",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-08-20T20:00:30.447Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0y7e4ru",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-20T20:00:29.744Z",
+      "by": "fable-e3-burndown",
+      "action": "card.update",
+      "ref": "c0admppa",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-08-20T20:00:29.065Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0admppa",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-20T20:00:28.613Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0admppa",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-20T20:00:28.084Z",
+      "by": "fable-e3-burndown",
+      "action": "card.update",
+      "ref": "c0zzylwh",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-08-20T20:00:27.394Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0zzylwh",
+      "note": "#1"
+    },
+    {
       "at": "2026-08-20T19:53:16.541Z",
       "by": "fable-e3-burndown",
       "action": "card.update",
@@ -188944,97 +189069,6 @@
       "action": "done.clear",
       "ref": null,
       "note": "2026-08-19T22:18:35.815Z"
-    },
-    {
-      "at": "2026-08-19T22:07:41.025Z",
-      "by": "fable-e3-burndown",
-      "action": "card.update",
-      "ref": "c09otnjg",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-19T22:02:41.019Z",
-      "by": "fable-e3-burndown",
-      "action": "card.update",
-      "ref": "c0boklxe",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-19T22:02:40.302Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-add",
-      "ref": "c0mantyc",
-      "note": "#8 syntax-decisions.md records the shipped outcome, jet devtool"
-    },
-    {
-      "at": "2026-08-19T22:02:39.774Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-add",
-      "ref": "c0mantyc",
-      "note": "#7 Every #Bench region and jet bench mention in examples, tests"
-    },
-    {
-      "at": "2026-08-19T22:02:39.254Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-add",
-      "ref": "c0mantyc",
-      "note": "#6 The benchmark manifest target and the .Bench(name) budget sc"
-    },
-    {
-      "at": "2026-08-19T22:02:38.752Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-add",
-      "ref": "c0mantyc",
-      "note": "#5 Typing jet bench or #Bench emits a registered teaching diagn"
-    },
-    {
-      "at": "2026-08-19T22:02:38.248Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-add",
-      "ref": "c0mantyc",
-      "note": "#4 Exactly one runner remains: the bench command, its argv pars"
-    },
-    {
-      "at": "2026-08-19T22:02:37.718Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-add",
-      "ref": "c0mantyc",
-      "note": "#3 jet test --measure is measurement mode: warmups, auto-scaled"
-    },
-    {
-      "at": "2026-08-19T22:02:37.208Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-add",
-      "ref": "c0mantyc",
-      "note": "#2 Plain jet test runs a measured claim once as a correctness c"
-    },
-    {
-      "at": "2026-08-19T22:02:36.676Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-add",
-      "ref": "c0mantyc",
-      "note": "#1 #Test carries an optional .measure member registered on the "
-    },
-    {
-      "at": "2026-08-19T22:02:36.173Z",
-      "by": "fable-e3-burndown",
-      "action": "card.update",
-      "ref": "c0mantyc",
-      "note": "plan"
-    },
-    {
-      "at": "2026-08-19T22:02:08.777Z",
-      "by": "fable-e3-burndown",
-      "action": "card.add",
-      "ref": "c0mantyc",
-      "note": "Benchmarks become measured tests: .measure member and jet test --measure"
-    },
-    {
-      "at": "2026-08-19T21:58:10.628Z",
-      "by": "fable-e3-burndown",
-      "action": "card.update",
-      "ref": "c0460ur1",
-      "note": "logEntry"
     }
   ],
   "nextNum": 368,
