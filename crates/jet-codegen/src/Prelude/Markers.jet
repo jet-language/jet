@@ -88,7 +88,10 @@ marker DebugOnly(@sites: [.Statement, .Block])
 // D-TESTFAULT1=A: test-only effect substitution is configured by one typed
 // marker argument; the harness owns fail-nth scheduling.
 marker Test(name: String = "function name", faults: [Effect] = [], expected_fail: Bool = false, @sites: [.Test])
-marker Bench(name: String, @sites: [.Bench])
+// D-CLAIM-BENCH1=A: region benchmarks are test claims with a `.measure`
+// member now. Keep the old row only so the shared marker reader emits the
+// standard retired-marker teaching diagnostic.
+marker Bench(name: String, @sites: [.Bench], @retired: "#Test(\"name\") { .measure { … } }")
 marker Target(target: Target, @sites: [.File, .Module, .Function])
 marker Root(@sites: [.Parameter])
 marker HTML(path: String = none, @sites: [.File, .Block])

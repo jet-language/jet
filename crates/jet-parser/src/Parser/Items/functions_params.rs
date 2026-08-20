@@ -572,6 +572,15 @@ impl<'a> Parser<'a> {
                         self.bump(); // consume `!`
                     }
                     let (name, span) = self.expect_effect_path_name("for an effect name")?;
+                    if !prohibited && name.contains('(') {
+                        return Err(Diagnostic::error(
+                            "E0119",
+                            format!("`{name}` is only valid as a memory denial"),
+                            "the `above: Bytes` argument parameterizes a prohibition, not a positive effect bound".to_string(),
+                            format!("write `:[!{name}]>`"),
+                            Some(span),
+                        ));
+                    }
                     let entry = if prohibited {
                         format!("!{}", name)
                     } else {

@@ -743,10 +743,17 @@ fn parse_effect_list(field: &str, value: &str) -> Result<Vec<String>, PackagePar
                 "`{name}` isn't a known effect (see the closed vocabulary in Prelude/Effects.jet)"
             )));
         }
-        if name.contains('(') && crate::Sema::memory_allocation_bound(name).is_none() {
-            return Err(PackageParseError::BadEffectsBlock(format!(
-                "`{name}` has an invalid parameterized rights entry — use `Mem.Alloc(above: 65536)`"
-            )));
+        if name.contains('(') {
+            if !field.ends_with("deny") {
+                return Err(PackageParseError::BadEffectsBlock(format!(
+                    "`{name}` is a parameterized memory denial and belongs only in an `effects.deny` list — use `Mem.Alloc(above: 65536)` there"
+                )));
+            }
+            if crate::Sema::memory_allocation_bound(name).is_none() {
+                return Err(PackageParseError::BadEffectsBlock(format!(
+                    "`{name}` has an invalid parameterized rights entry — use `Mem.Alloc(above: 65536)`"
+                )));
+            }
         }
     }
     Ok(names)

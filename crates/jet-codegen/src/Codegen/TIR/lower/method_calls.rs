@@ -4438,23 +4438,26 @@ fn lower_method_call_impl(
                     expected,
                     method == "edit",
                 );
-                // D-STM1=A (card #506): a `Shared<T>.edit(f)` inside a `#Transact` block
-                // routes to the deferred `edit_txn` — the write is buffered and applied
-                // atomically at the block's commit, so the call yields nothing (Unit; E0750
-                // rejects a value-producing edit here). The closure is stored past the call,
-                // so it must `move` its captures. A `.read` (or an `.edit` outside a
-                // transaction) is unchanged.
-                let (method_out, ty) =
-                    if method == "edit" && cx.in_stm_transact.get() {
-                        cx.stm_touched.set(true);
+                // D-CONC-STM1=A: a Shared read inside a transaction registers
+                // its participant before doing the ordinary immediate read.
+                // A write still defers to commit. The Prelude then acquires
+                // every registered participant in one stable address order.
+                let (method_out, ty) = if cx.in_stm_transact.get() {
+                    cx.stm_touched.set(true);
+                    if method == "edit" {
+                        // The closure is stored past the call, so it must move
+                        // its captures. A transactional edit yields Unit.
                         tl.is_move = true;
                         ("edit_txn", Type::Tuple(vec![]))
                     } else {
-                        (
-                            method,
-                            lambda_body_ty_expecting(lam, cx, env, Some(expected)),
-                        )
-                    };
+                        ("read_txn", lambda_body_ty_expecting(lam, cx, env, Some(expected)))
+                    }
+                } else {
+                    (
+                        method,
+                        lambda_body_ty_expecting(lam, cx, env, Some(expected)),
+                    )
+                };
                 return TExpr {
                     ty,
                     kind: TExprKind::HostCall(Box::new(THostCall::Method {

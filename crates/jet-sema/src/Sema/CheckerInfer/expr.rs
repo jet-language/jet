@@ -1935,7 +1935,9 @@ impl<'a> Checker<'a> {
             // D-SG9/D-FLOATW1: a float literal is `Float` (f64) by default, but
             // adopts `F32` when that width is expected here. Write the resolution
             // back onto the AST so TIR lowering can read the width from the node.
-            Expr::Float(value, span, is_f32, raw) => {
+            // `value` is unread here: an untyped decimal is rebuilt from `raw`
+            // below, and the machine-float path only resolves the width.
+            Expr::Float(_value, span, is_f32, raw) => {
                 // D-TYPE2-DEFAULT1: an untyped decimal literal is exact. Keep
                 // an explicit Float/F32 context on the machine-float path;
                 // everything else adopts the existing Decimal Prelude carrier.

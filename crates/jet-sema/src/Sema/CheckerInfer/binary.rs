@@ -1639,6 +1639,14 @@ impl<'a> Checker<'a> {
                         lt = promoted;
                     }
                 }
+                let lname = match &lt {
+                    Type::Named(n) if !self.registry.contains(n) => n.clone(),
+                    _ => String::new(),
+                };
+                let rname = match &rt {
+                    Type::Named(n) if !self.registry.contains(n) => n.clone(),
+                    _ => String::new(),
+                };
                 if let Some((code, what, fix)) = precise_mix_error(&lt, &rt) {
                     self.diags.push(Diagnostic::error(
                         code,

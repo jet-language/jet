@@ -10,7 +10,6 @@ use crate::Codegen::TIR::enc_arg_is_json;
 use crate::Codegen::TIR::enc_arg_is_string_rows;
 use crate::Codegen::TIR::enc_ok_is_json;
 use crate::Codegen::TIR::enc_row_target_rust;
-use crate::Codegen::TIR::enc_row_target_rust_traced;
 use crate::Codegen::TIR::enc_target_rust;
 use crate::Codegen::TIR::struct_field_type;
 use crate::Codegen::TIR::emit::emit_symbol_call;

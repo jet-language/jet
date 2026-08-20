@@ -715,6 +715,18 @@
             f(unsafe { &*self.0.value.get() })
             // jet:shared-guard-internal-end
         }
+        /// Register a read participant with the current Shared transaction,
+        /// then perform the ordinary statement read. The read itself remains
+        /// immediate; the transaction owns the participant's fixed-order
+        /// write lock at commit, so a statement that touches several cells
+        /// cannot build a nested lock order.
+        pub fn read_txn<F, R>(&self, stm: &mut super::jet_stm::Guard, f: F) -> R
+        where
+            F: FnOnce(&T) -> R,
+        {
+            stm.touch(self.0.protocol.clone());
+            self.read(f)
+        }
         pub fn edit<F, R>(&self, f: F) -> R
         where
             F: FnOnce(&mut T) -> R,
