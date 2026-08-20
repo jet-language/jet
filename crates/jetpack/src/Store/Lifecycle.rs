@@ -2186,18 +2186,18 @@ fn validate_external_root_label(label: &str) -> std::io::Result<()> {
 }
 
 fn manual_root_id(
-    principal: &Lifecycle::ProducerId,
+    principal: &ProducerId,
     label: &str,
-) -> std::io::Result<Lifecycle::RootId> {
-    Lifecycle::RootId::new(format!("manual:{}:{label}", principal.as_str()))
+) -> std::io::Result<RootId> {
+    RootId::new(format!("manual:{}:{label}", principal.as_str()))
 }
 
 fn manual_root_witness(
-    principal: &Lifecycle::ProducerId,
+    principal: &ProducerId,
     label: &str,
     reference: &str,
     targets: &[String],
-) -> std::io::Result<Lifecycle::RootWitness> {
+) -> std::io::Result<RootWitness> {
     let mut canonical = String::from("jet-manual-root-v1\n");
     for value in [principal.as_str(), label, reference] {
         canonical.push_str(&value.len().to_string());
@@ -2209,7 +2209,7 @@ fn manual_root_witness(
         canonical.push_str(target);
         canonical.push('\n');
     }
-    Lifecycle::RootWitness::new(format!(
+    RootWitness::new(format!(
         "sha256-{}",
         SHA256::sha256_hex(canonical.as_bytes())
     ))
@@ -2244,7 +2244,7 @@ pub(crate) fn external_root_closure_size(
     Ok(external_root_targets(roots, reference)?.len())
 }
 
-fn external_root_view(root: &Lifecycle::LifecycleRoot) -> std::io::Result<ExternalRootView> {
+fn external_root_view(root: &LifecycleRoot) -> std::io::Result<ExternalRootView> {
     let label = root.metadata.label.clone().ok_or_else(|| {
         std::io::Error::new(
             std::io::ErrorKind::InvalidData,
@@ -2262,7 +2262,7 @@ fn external_root_view(root: &Lifecycle::LifecycleRoot) -> std::io::Result<Extern
         reference,
         etag: root.etag().render(),
         closure_size: root.targets.len(),
-        prepared: root.phase == Lifecycle::RootPhase::Prepared,
+        prepared: root.phase == RootPhase::Prepared,
         expires_at: root.metadata.expires_at.map(|value| value.get()),
     })
 }
@@ -2270,7 +2270,7 @@ fn external_root_view(root: &Lifecycle::LifecycleRoot) -> std::io::Result<Extern
 fn map_external_root_error(label: &str, error: std::io::Error) -> ExternalRootError {
     if let Some(conflict) = error
         .get_ref()
-        .and_then(|cause| cause.downcast_ref::<Lifecycle::CasConflict>())
+        .and_then(|cause| cause.downcast_ref::<CasConflict>())
     {
         return ExternalRootError::Conflict {
             label: label.to_string(),
@@ -2295,32 +2295,32 @@ pub(crate) fn register_external_root_at(
     at: u64,
 ) -> Result<ExternalRootView, ExternalRootError> {
     validate_external_root_label(label).map_err(ExternalRootError::Store)?;
-    let producer = Lifecycle::ProducerId::new(principal.to_string())
+    let producer = ProducerId::new(principal.to_string())
         .map_err(ExternalRootError::Store)?;
-    let metadata = Lifecycle::RootMetadata::manual(
+    let metadata = RootMetadata::manual(
         label,
         reference,
-        expires_at.map(Lifecycle::LifecycleTimestamp::from_unix_seconds),
+        expires_at.map(LifecycleTimestamp::from_unix_seconds),
     )
     .map_err(ExternalRootError::Store)?;
     let id = manual_root_id(&producer, label).map_err(ExternalRootError::Store)?;
     let mut targets = external_root_targets(roots, reference)?;
     let witness = manual_root_witness(&producer, label, reference, &targets)
         .map_err(ExternalRootError::Store)?;
-    let update = Lifecycle::RootUpdate {
-        identity: Lifecycle::RootIdentity::new(
-            Lifecycle::RootKind::Manual,
+    let update = RootUpdate {
+        identity: RootIdentity::new(
+            RootKind::Manual,
             id.clone(),
             producer,
-            Lifecycle::Incarnation::new(1).map_err(ExternalRootError::Store)?,
+            Incarnation::new(1).map_err(ExternalRootError::Store)?,
             witness,
         ),
         targets: std::mem::take(&mut targets),
         metadata,
         expected_etag: expected_etag.map(str::to_string),
-        at: Lifecycle::LifecycleTimestamp::from_unix_seconds(at),
+        at: LifecycleTimestamp::from_unix_seconds(at),
     };
-    let snapshot = Lifecycle::atomic_update(roots, update)
+    let snapshot = atomic_update(roots, update)
         .map_err(|error| map_external_root_error(label, error))?;
     let root = snapshot.roots.get(&id).ok_or_else(|| {
         ExternalRootError::Store(std::io::Error::new(
@@ -2335,16 +2335,16 @@ pub(crate) fn list_external_roots(
     roots: &Roots,
     principal: &str,
 ) -> Result<Vec<ExternalRootView>, ExternalRootError> {
-    let producer = Lifecycle::ProducerId::new(principal.to_string())
+    let producer = ProducerId::new(principal.to_string())
         .map_err(ExternalRootError::Store)?;
-    Lifecycle::snapshot(roots)
+    snapshot(roots)
         .map_err(ExternalRootError::Store)?
         .roots
         .values()
         .filter(|root| {
-            root.identity.kind == Lifecycle::RootKind::Manual
+            root.identity.kind == RootKind::Manual
                 && root.identity.producer == producer
-                && root.phase != Lifecycle::RootPhase::Tombstoned
+                && root.phase != RootPhase::Tombstoned
         })
         .map(external_root_view)
         .collect::<Result<Vec<_>, _>>()
@@ -2359,17 +2359,17 @@ pub(crate) fn unregister_external_root_at(
     at: u64,
 ) -> Result<(), ExternalRootError> {
     validate_external_root_label(label).map_err(ExternalRootError::Store)?;
-    let producer = Lifecycle::ProducerId::new(principal.to_string())
+    let producer = ProducerId::new(principal.to_string())
         .map_err(ExternalRootError::Store)?;
     let id = manual_root_id(&producer, label).map_err(ExternalRootError::Store)?;
-    let snapshot = Lifecycle::snapshot(roots).map_err(ExternalRootError::Store)?;
+    let snapshot = snapshot(roots).map_err(ExternalRootError::Store)?;
     let Some(root) = snapshot.roots.get(&id) else {
         return Err(ExternalRootError::Store(std::io::Error::new(
             std::io::ErrorKind::NotFound,
             format!("external root `{label}` was not found"),
         )));
     };
-    if root.identity.kind != Lifecycle::RootKind::Manual
+    if root.identity.kind != RootKind::Manual
         || root.identity.producer != producer
     {
         return Err(ExternalRootError::Store(std::io::Error::new(
@@ -2377,11 +2377,11 @@ pub(crate) fn unregister_external_root_at(
             format!("external root `{label}` is owned by another producer"),
         )));
     }
-    Lifecycle::atomic_remove(
+    atomic_remove(
         roots,
         &id,
         expected_etag,
-        Lifecycle::LifecycleTimestamp::from_unix_seconds(at),
+        LifecycleTimestamp::from_unix_seconds(at),
     )
     .map_err(|error| map_external_root_error(label, error))?;
     Ok(())
@@ -2398,29 +2398,29 @@ pub(crate) fn reconcile_profile_generation_root(
 ) -> std::io::Result<Option<PreparedProfileGenerationRoot>> {
     targets.sort();
     targets.dedup();
-    let id = Lifecycle::RootId::new(format!(
+    let id = RootId::new(format!(
         "profile-generation:{owner}:{profile}:{generation}"
     ))?;
     let expected_targets = targets.iter().cloned().collect::<BTreeSet<_>>();
-    if let Some(root) = Lifecycle::snapshot(roots)?.roots.get(&id) {
-        if root.identity.kind != Lifecycle::RootKind::ProfileGeneration
+    if let Some(root) = snapshot(roots)?.roots.get(&id) {
+        if root.identity.kind != RootKind::ProfileGeneration
             || root.identity.producer.as_str() != "jetpack-profile-generation"
             || root.identity.incarnation.get() != 1
             || root.identity.witness.as_str() != witness
             || root.targets != expected_targets
-            || root.phase == Lifecycle::RootPhase::Tombstoned
+            || root.phase == RootPhase::Tombstoned
         {
             return Err(std::io::Error::other(
                 "generation root disagrees with immutable metadata",
             ));
         }
-        if root.phase == Lifecycle::RootPhase::Committed {
+        if root.phase == RootPhase::Committed {
             return Ok(None);
         }
         return Ok(Some(PreparedProfileGenerationRoot {
             id,
-            incarnation: Lifecycle::Incarnation::new(1)?,
-            witness: Lifecycle::RootWitness::new(witness)?,
+            incarnation: Incarnation::new(1)?,
+            witness: RootWitness::new(witness)?,
         }));
     }
     let prepared = super::prepare_profile_generation_root(

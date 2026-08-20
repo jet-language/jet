@@ -207,13 +207,15 @@ pub(crate) fn type_fix_hint(want: &Type, got: &Type) -> String {
     // repeat the declaration spelling already present in the source. Keep the
     // repair deterministic without pretending the two declarations are known
     // equal at this display-only layer.
-    let nominal_leaf = |ty: &Type| match ty {
-        Type::Named(name) => name
-            .rsplit_once("::")
-            .or_else(|| name.rsplit_once('.'))
-            .map_or(name.as_str(), |(_, leaf)| leaf),
-        _ => "",
-    };
+    fn nominal_leaf(ty: &Type) -> &str {
+        match ty {
+            Type::Named(name) => name
+                .rsplit_once("::")
+                .or_else(|| name.rsplit_once('.'))
+                .map_or(name.as_str(), |(_, leaf)| leaf),
+            _ => "",
+        }
+    }
     if !nominal_leaf(want).is_empty() && nominal_leaf(want) == nominal_leaf(got) {
         return format!(
             "these names may refer to one declaration; make both sides use one spelling for `{}`",
@@ -1067,7 +1069,10 @@ pub(crate) fn suggest_method_for_receiver(
     })
 }
 
-pub(crate) fn suggest_method(name: &str, candidates: &[String]) -> Option<MethodSuggestion> {
+/// Receiver-free convenience for the suggestion tests. Production callers pass
+/// the receiver family so an alias cannot jump between value shapes.
+#[cfg(test)]
+fn suggest_method(name: &str, candidates: &[String]) -> Option<MethodSuggestion> {
     suggest_method_for_receiver(name, None, candidates)
 }
 

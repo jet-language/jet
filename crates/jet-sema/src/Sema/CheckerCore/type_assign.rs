@@ -1029,12 +1029,16 @@ impl<'a> Checker<'a> {
                 .modules
                 .and_then(|modules| modules.get(self.module_idx))
                 .map(|module| format!("{}.", module.module_alias));
-            let visible_spellings = |name: &str| {
+            // A named helper, not a closure: the returned iterator borrows the
+            // caller's `name`, and a closure would tie that borrow to the
+            // closure's own inferred lifetime.
+            fn visible_spellings<'n>(
+                name: &'n str,
+                current_prefix: Option<&'n str>,
+            ) -> impl Iterator<Item = &'n str> {
                 std::iter::once(name)
-                    .chain(current_prefix.as_deref().and_then(|prefix| {
-                        name.strip_prefix(prefix)
-                    }))
-            };
+                    .chain(current_prefix.and_then(|prefix| name.strip_prefix(prefix)))
+            }
             let Some(modules) = self.modules else {
                 return None;
             };
@@ -1050,7 +1054,10 @@ impl<'a> Checker<'a> {
                         .as_deref()
                         .into_iter()
                         .chain(std::iter::once(candidate.as_str()))
-                        .any(|target| visible_spellings(spelling).any(|name| name == target));
+                        .any(|target| {
+                            visible_spellings(spelling, current_prefix.as_deref())
+                                .any(|name| name == target)
+                        });
                     if matches {
                         return Some(self.canonical_nominal_name(owner, candidate));
                     }

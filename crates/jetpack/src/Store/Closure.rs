@@ -71,6 +71,8 @@ impl CleanReport {
             && self.swept_tmp_bytes == 0
             && self.optimized_files == 0
             && self.optimized_bytes == 0
+    }
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ClosureObject {

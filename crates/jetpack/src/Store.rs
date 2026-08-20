@@ -1803,11 +1803,6 @@ fn closure_is_reachable(roots: &Roots, entry: &StoreEntry) -> bool {
     })
 }
 
-/// One line of `jet hangar du` output: a realized object, its on-disk size, and
-/// whether it was built from source (vs substituted/nix).
-#[derive(Debug, Clone, PartialEq, Eq)]
-    }
-}
 
 /// Opaque receipt for one prepared profile-generation root. Profile producers
 /// can commit only the exact incarnation and witness they prepared.
@@ -2471,7 +2466,7 @@ pub(crate) use Cache::{fsync_tree, make_tree_writable_for_removal, seal_node};
 pub(crate) mod Lifecycle;
 pub(crate) use Lifecycle::{
     external_root_closure_size, list_external_roots, reconcile_profile_generation_root,
-    register_external_root_at, unregister_external_root_at, ExternalRootError, ExternalRootView,
+    register_external_root_at, unregister_external_root_at, ExternalRootError,
 };
 #[cfg(test)]
 mod Tests;

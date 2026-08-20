@@ -191,7 +191,7 @@ fn canonical_lock_source(project_root: &Path, package_root: &Path, dependency_na
     format!("path:{relative}")
 }
 
-pub(super) fn owning_package<'a>(bundle: &'a ProgramBundle, module_path: &Path) -> (&'a Path, Option<&'a str>) {
+pub(in crate::Sema) fn owning_package<'a>(bundle: &'a ProgramBundle, module_path: &Path) -> (&'a Path, Option<&'a str>) {
     bundle.dep_roots.iter()
         .filter(|(_, root)| module_path.starts_with(root))
         .max_by_key(|(_, root)| root.components().count())
@@ -199,7 +199,7 @@ pub(super) fn owning_package<'a>(bundle: &'a ProgramBundle, module_path: &Path) 
         .unwrap_or((bundle.project_root.as_path(), None))
 }
 
-pub(super) fn package_identity(bundle: &ProgramBundle, root: &Path, dependency_name: Option<&str>) -> String {
+pub(in crate::Sema) fn package_identity(bundle: &ProgramBundle, root: &Path, dependency_name: Option<&str>) -> String {
     let manifest_path = [crate::Syntax::PACKAGE_FILE, crate::Syntax::PAYLOAD_FILE]
         .iter().map(|name| root.join(name)).find(|path| path.is_file())
         .unwrap_or_else(|| root.join(crate::Syntax::PAYLOAD_FILE));

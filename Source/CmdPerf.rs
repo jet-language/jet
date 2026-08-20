@@ -2560,7 +2560,7 @@ fn chrome_process_name(events: &mut Vec<CanonicalJson>) {
                 CanonicalJson::object([(
                     "name".into(),
                     CanonicalJson::String("Jet perf".into()),
-                ])
+                )])
                 .unwrap(),
             ),
             ("name".into(), CanonicalJson::String("process_name".into())),

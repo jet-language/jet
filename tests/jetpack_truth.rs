@@ -211,7 +211,10 @@ fn ingest_tower_card(
     prefer_existing: bool,
 ) {
     let num = match card.get("num").unwrap() {
-        jetpack::JSON::JSONValue::Num(num) => *num as u64,
+        // One JSON model now: an exact integer stays an integer, and a decimal
+        // is a separate variant (jet-foundation JSON.rs).
+        jetpack::JSON::JSONValue::Number(num) => *num as u64,
+        jetpack::JSON::JSONValue::Flt(num) => *num as u64,
         other => panic!("card num is not numeric: {other:?}"),
     };
     if prefer_existing && cards.contains_key(&num) {

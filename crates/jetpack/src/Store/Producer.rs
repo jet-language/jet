@@ -275,7 +275,7 @@ fn validate_adapter_hook_producer(
             producer.facts.get("adapter.source").map(String::as_str),
         ));
     }
-    let identity = super::Provider::adapter_action_identity(
+    let identity = crate::Provider::adapter_action_identity(
         plan,
         recipe,
         &expectation.identity.source_fingerprint,
@@ -324,10 +324,10 @@ pub(crate) fn validate_cached_adapter_hook(
 }
 
 pub(crate) fn bind_adapter_hook_identity(
-    realized: &mut super::Provider::Realized,
+    realized: &mut crate::Provider::Realized,
     plan: &jet_env_model::ModuleEval::AdapterPlan,
     expectation: &CacheExpectation,
-    ctx: &super::Provider::Ctx<'_>,
+    ctx: &crate::Provider::Ctx<'_>,
 ) -> std::io::Result<()> {
     if !matches!(
         &plan.recipe,
@@ -336,7 +336,7 @@ pub(crate) fn bind_adapter_hook_identity(
         return Ok(());
     }
     validate_adapter_hook_producer(&realized.producer, plan, expectation)?;
-    let expected = super::Provider::adapter_cache_identity(
+    let expected = crate::Provider::adapter_cache_identity(
         &expectation.identity.source_fingerprint,
         realized
             .producer

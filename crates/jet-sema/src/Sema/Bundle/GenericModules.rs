@@ -5,9 +5,12 @@ mod Identity;
 
 use Substitution::{substitute_expr, substitute_marker, substitute_markers, substitute_meta, substitute_stmts};
 use Identity::{
-    definition_full_key, instance_identity, owning_package, package_identity,
-    parameter_bytes, register_instance_fingerprint, type_full_key,
+    definition_full_key, instance_identity, parameter_bytes, register_instance_fingerprint,
+    type_full_key,
 };
+// Budget specs and unit registration read package identity through this module,
+// so the two identity helpers keep their reach at this level.
+pub(in crate::Sema) use Identity::{owning_package, package_identity};
 
 // ---------------------------------------------------------------------------
 // D-CONF-GENSPELL1=A: generic module expansion (R11 pre-pass)
@@ -109,7 +112,7 @@ pub(super) fn module_type_prefix(alias: &str) -> String {
     format!("{visibility}M{encoded}")
 }
 
-pub(super) fn module_type_name(alias: &str, name: &str) -> String {
+pub(crate) fn module_type_name(alias: &str, name: &str) -> String {
     format!("{}{}", module_type_prefix(alias), name.trim_start_matches('_'))
 }
 
