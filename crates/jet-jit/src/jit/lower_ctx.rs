@@ -370,10 +370,11 @@ impl LowerCtx<'_, '_> {
     }
 
     /// [`Self::list_push_host`] keyed by the LIST type, for the callers that
-    /// hold the collection rather than the element. `Type::List` only, which is
-    /// exactly the set `jit_list_float_type` answered for before the lift — a
-    /// `FixedList` element carrier is a separate question and stays where it
-    /// was rather than being widened blind.
+    /// hold the collection rather than the element. `Type::List` only: that is
+    /// the same outer shape `jit_list_float_type` answered for before the lift,
+    /// so a `FixedList` carrier keeps its old answer rather than being widened
+    /// blind. The ELEMENT question is the shared one above, so a distinct-float
+    /// element now agrees with the element-keyed callers.
     fn list_push_host_for_list(&self, list_ty: &Type) -> FuncId {
         match list_ty {
             Type::List(elem) => self.list_push_host(elem),
@@ -5053,9 +5054,10 @@ impl LowerCtx<'_, '_> {
                                 direct_value
                                     .ok_or("jit direct ViewMut assignment missing value")?
                             };
-                            let set_id = match &elem_ty {
-                                Type::Float => self.host.coll.list_set_f64,
-                                _ => self.host.coll.list_set,
+                            let set_id = if self.list_elem_is_f64(&elem_ty) {
+                                self.host.coll.list_set_f64
+                            } else {
+                                self.host.coll.list_set
                             };
                             let set = self.module.declare_func_in_func(set_id, self.b.func);
                             self.b.ins().call(set, &[list, start, assigned, line]);
@@ -5877,9 +5879,10 @@ impl LowerCtx<'_, '_> {
                             let abs = self.view_mut_index(start, idx);
                             let val = self.lower_expr(value)?;
                             let line = self.b.ins().iconst(types::I32, 1);
-                            let host_id = match &value.ty {
-                                Type::Float => self.host.coll.list_set_f64,
-                                _ => self.host.coll.list_set,
+                            let host_id = if self.list_elem_is_f64(&value.ty) {
+                                self.host.coll.list_set_f64
+                            } else {
+                                self.host.coll.list_set
                             };
                             let host_ref = self.module.declare_func_in_func(host_id, self.b.func);
                             self.b.ins().call(host_ref, &[list, abs, val, line]);
@@ -5896,9 +5899,10 @@ impl LowerCtx<'_, '_> {
                             _ => val,
                         };
                         let line = self.b.ins().iconst(types::I32, 1);
-                        let host_id = match &value.ty {
-                            Type::Float => self.host.coll.list_set_f64,
-                            _ => self.host.coll.list_set,
+                        let host_id = if self.list_elem_is_f64(&value.ty) {
+                            self.host.coll.list_set_f64
+                        } else {
+                            self.host.coll.list_set
                         };
                         let host_ref = self.module.declare_func_in_func(host_id, self.b.func);
                         self.b.ins().call(host_ref, &[list, idx, val, line]);
@@ -9400,6 +9404,16 @@ impl LowerCtx<'_, '_> {
         list: Value,
         inner: &Type,
     ) -> Result<Value, String> {
+        // D-VALIDATE-DECODE1=B: `[FieldError]` has one rendering, owned by the
+        // Prelude (`impl JetShow for FieldError` + the `Vec<T>` blanket impl).
+        // The resident tier marshals the record list to that host projection
+        // instead of walking it as an anonymous record, so direct print,
+        // interpolation, and any nested show agree with AOT (I9). Element-wise
+        // lowering below has no registered layout for a Prelude record and
+        // would either deopt or invent a second text.
+        if matches!(inner, Type::Named(name) if name == "FieldError") {
+            return Ok(self.call_host(self.host.encoding.decode_error_show, &[list]));
+        }
         self.lower_jet_show_sequence_value(list, inner, None)
     }
 
@@ -11470,6 +11484,21 @@ impl LowerCtx<'_, '_> {
     /// lowering accepted every receiver and the host answered two EMPTY lists
     /// for a `String` column (#2091, and the reason `["a","bb","c"]
     /// .zip([1,2,3]).unzip()` was refused rather than fixed).
+    ///
+    /// An OPTIONAL column (`(String?, Int)`) maps to `Opaque` here, and that is
+    /// load-bearing rather than incidental: `jit_zip_set_value`'s `optional`
+    /// branch writes the packed presence word through `record_set_int`
+    /// regardless of the payload kind, and the packed word is also what a
+    /// `[T?]` list slot holds.
+    ///
+    /// `Opaque` also carries the one thing this table cannot know. It answers
+    /// for BOTH tiers, so it answers before `JitMeta` exists and reads the
+    /// distinct-blind `clif_ty`: a `distinct Name = String` column is an I64
+    /// handle to it, while the row writer used the distinct-AWARE
+    /// `erase_distinct_ty` and stored a `String` cell. `jit_zip_record_field`
+    /// therefore reads an `Opaque` cell in ITS OWN shape rather than asserting
+    /// `record_get_int`, which is why this table can stay meta-free and still
+    /// name exactly the receivers the host honours.
     pub(crate) fn unzip_column_kinds(
         recv_ty: &Type,
     ) -> Option<(JitZipValueKind, JitZipValueKind)> {
@@ -20295,9 +20324,10 @@ impl LowerCtx<'_, '_> {
             TBuiltinOp::TryPush => {
                 in_own_frame(|| -> Result<Value, String> {
                     let value = self.lower_expr(&args[0])?;
-                    let host_id = match &args[0].ty {
-                        Type::Float => self.host.coll.list_try_push_f64,
-                        _ => self.host.coll.list_try_push,
+                    let host_id = if self.list_elem_is_f64(&args[0].ty) {
+                        self.host.coll.list_try_push_f64
+                    } else {
+                        self.host.coll.list_try_push
                     };
                     Ok(self.call_host(host_id, &[recv_val, value]))
                 })
@@ -27843,17 +27873,6 @@ impl LowerCtx<'_, '_> {
                                 .to_string(),
                         );
                     }
-                    return Ok(());
-                }
-                if matches!(
-                    &print_ty,
-                    Type::List(inner) if matches!(inner.as_ref(), Type::Named(name) if name == "FieldError")
-                ) {
-                    let shown = self.call_host(self.host.encoding.decode_error_show, &[val]);
-                    let print_ref = self
-                        .module
-                        .declare_func_in_func(self.host.print_str, self.b.func);
-                    self.b.ins().call(print_ref, &[shown]);
                     return Ok(());
                 }
                 if matches!(

@@ -2276,13 +2276,41 @@ fn jit_zip_record_field(
             .map_or(JitZipValue::Absent, |value| {
                 JitZipValue::Bits(i64::from(u32::from(value)))
             }),
-        crate::runtime_host::JitZipValueKind::Int
-        | crate::runtime_host::JitZipValueKind::Opaque => heap
+        crate::runtime_host::JitZipValueKind::Int => heap
             .record_get_int(column_fills_handle, index)
             .map_or(JitZipValue::Absent, JitZipValue::Bits),
         crate::runtime_host::JitZipValueKind::String => heap
             .record_get_string(column_fills_handle, index)
             .map_or(JitZipValue::Absent, JitZipValue::Bits),
+        // `Opaque` is the ONE kind that names no payload representation, so it
+        // must not assert one. It is also the only kind
+        // `LowerCtx::unzip_column_kinds` can reach WITHOUT `JitMeta`: the
+        // static `clif_ty` is distinct-blind, so a `distinct Name = String`
+        // column looks like a plain I64 handle to it, while the row writer used
+        // the distinct-AWARE erasure and stored a `String` cell. Asserting
+        // `record_get_int` there read `None` — the same shape that answered two
+        // empty lists, one ICE further on. So read the cell in ITS shape: the
+        // column list this word is republished into is typed by the same field
+        // type, so the cell's own shape is the representation that list slot
+        // wants (`[Float]` slots are floats, `[String]`/`[Bool]`/`[Char]` slots
+        // are the erased int word). `Int` stays first: it is the hot cell and
+        // pays exactly one match, as before.
+        crate::runtime_host::JitZipValueKind::Opaque => {
+            if let Some(value) = heap.record_get_int(column_fills_handle, index) {
+                return JitZipValue::Bits(value);
+            }
+            if let Some(value) = heap.record_get_float(column_fills_handle, index) {
+                return JitZipValue::Float(value);
+            }
+            if let Some(value) = heap.record_get_bool(column_fills_handle, index) {
+                return JitZipValue::Bits(i64::from(value));
+            }
+            if let Some(value) = heap.record_get_char(column_fills_handle, index) {
+                return JitZipValue::Bits(i64::from(u32::from(value)));
+            }
+            heap.record_get_string(column_fills_handle, index)
+                .map_or(JitZipValue::Absent, JitZipValue::Bits)
+        }
     }
 }
 
@@ -2478,34 +2506,380 @@ fn jet_jit_list_unzip(pairs: i64, left_kind: i64, right_kind: i64) -> i64 {
         jet_foundation::ice!(None, "unzip column kind code out of range");
     };
     Concurrency::with_runtime_mut(|rt| {
-        let rows = rt.heap.clone_int_list(pairs).unwrap_or_default();
-        let mut columns = Vec::with_capacity(rows.len());
-        for row in rows {
-            let left = jit_zip_record_field(&mut rt.heap, left_kind, row, 0);
-            let right = jit_zip_record_field(&mut rt.heap, right_kind, row, 1);
-            if matches!(left, JitZipValue::Absent) || matches!(right, JitZipValue::Absent) {
-                jet_foundation::ice!(None, "unzip row representation mismatch");
-            }
-            columns.push((left, right));
-        }
-        let (left_values, right_values) = collection_semantics::list_unzip_pairs(columns);
-        let left = rt.heap.alloc_empty_list();
-        for value in left_values {
-            if jit_zip_push_column_value(&mut rt.heap, left, value).is_none() {
-                jet_foundation::ice!(None, "unzip column representation mismatch");
-            }
-        }
-        let right = rt.heap.alloc_empty_list();
-        for value in right_values {
-            if jit_zip_push_column_value(&mut rt.heap, right, value).is_none() {
-                jet_foundation::ice!(None, "unzip column representation mismatch");
-            }
-        }
-        let result = rt.heap.alloc_record(2);
-        let _ = rt.heap.record_set_int(result, 0, left);
-        let _ = rt.heap.record_set_int(result, 1, right);
-        result
+        jit_list_unzip_columns(&mut rt.heap, pairs, left_kind, right_kind)
     })
+}
+
+/// The arena half of `jet_jit_list_unzip`, split from the runtime borrow so it
+/// can be pinned without a resident runtime.
+///
+/// #2091: the gate arm and the lowering now read ONE table
+/// (`LowerCtx::unzip_column_kinds`), so the last pairing under `.unzip()` that
+/// can still drift is the per-kind representation pair inside this file — the
+/// writer `jit_zip_set_value` against the readers `jit_zip_record_field` and
+/// `jit_zip_read_value`. That pair is exactly what shipped two EMPTY lists, and
+/// it is a pure set over `JitZipValueKind`, so `unzip_column_round_trip` below
+/// checks it instead of leaving a stem as the only witness.
+fn jit_list_unzip_columns(
+    heap: &mut jet_rt::JetArena,
+    pairs: i64,
+    left_kind: crate::runtime_host::JitZipValueKind,
+    right_kind: crate::runtime_host::JitZipValueKind,
+) -> i64 {
+    // A stop, not `unwrap_or_default()`: an unzip receiver that is not a
+    // row-handle list used to answer two EMPTY lists here, which is the same
+    // silent wrong answer the `record_get_int` column read gave.
+    let Some(rows) = heap.clone_int_list(pairs) else {
+        jet_foundation::ice!(None, "unzip receiver is not a row-handle list");
+    };
+    let mut columns = Vec::with_capacity(rows.len());
+    for row in rows {
+        let left = jit_zip_record_field(heap, left_kind, row, 0);
+        let right = jit_zip_record_field(heap, right_kind, row, 1);
+        if matches!(left, JitZipValue::Absent) || matches!(right, JitZipValue::Absent) {
+            jet_foundation::ice!(None, "unzip row representation mismatch");
+        }
+        columns.push((left, right));
+    }
+    let (left_values, right_values) = collection_semantics::list_unzip_pairs(columns);
+    let left = heap.alloc_empty_list();
+    for value in left_values {
+        if jit_zip_push_column_value(heap, left, value).is_none() {
+            jet_foundation::ice!(None, "unzip column representation mismatch");
+        }
+    }
+    let right = heap.alloc_empty_list();
+    for value in right_values {
+        if jit_zip_push_column_value(heap, right, value).is_none() {
+            jet_foundation::ice!(None, "unzip column representation mismatch");
+        }
+    }
+    let result = heap.alloc_record(2);
+    let _ = heap.record_set_int(result, 0, left);
+    let _ = heap.record_set_int(result, 1, right);
+    result
+}
+
+/// The one pairing `.unzip()` still has on both sides of a representation
+/// boundary: `jit_zip_set_value` writes a column word, `jit_zip_record_field`
+/// reads it back out of the row, and `jit_zip_read_value` reads it back out of
+/// the republished column. Total over `JitZipValueKind`, so it is checkable as
+/// a set — unlike the `TBuiltinOp` lowering halves, which need a live
+/// `FunctionBuilder` (#2091).
+#[cfg(test)]
+mod unzip_column_round_trip {
+    use super::{
+        jit_list_unzip_columns, jit_zip_pack_value, jit_zip_read_value, jit_zip_set_value,
+        JitZipValue,
+    };
+    use crate::runtime_host::{JitZipColumn, JitZipValueKind};
+
+    /// No `_` arm: a new column kind must fail to compile here rather than
+    /// quietly skip the round trip.
+    fn kind_name(kind: JitZipValueKind) -> &'static str {
+        match kind {
+            JitZipValueKind::Int => "Int",
+            JitZipValueKind::Float => "Float",
+            JitZipValueKind::Bool => "Bool",
+            JitZipValueKind::Char => "Char",
+            JitZipValueKind::String => "String",
+            JitZipValueKind::Opaque => "Opaque",
+        }
+    }
+
+    const EVERY_KIND: [JitZipValueKind; 6] = [
+        JitZipValueKind::Int,
+        JitZipValueKind::Float,
+        JitZipValueKind::Bool,
+        JitZipValueKind::Char,
+        JitZipValueKind::String,
+        JitZipValueKind::Opaque,
+    ];
+
+    /// One column word per kind, in the encoding that kind's writer expects.
+    fn sample(heap: &mut jet_rt::JetArena, kind: JitZipValueKind, nth: i64) -> JitZipValue {
+        match kind {
+            JitZipValueKind::Float => JitZipValue::Float(0.5 + nth as f64),
+            JitZipValueKind::Bool => JitZipValue::Bits(nth % 2),
+            JitZipValueKind::Char => JitZipValue::Bits(i64::from(u32::from('a')) + nth),
+            JitZipValueKind::String => JitZipValue::Bits(heap.alloc_string(format!("col{nth}"))),
+            JitZipValueKind::Int | JitZipValueKind::Opaque => JitZipValue::Bits(11 * nth + 3),
+        }
+    }
+
+    /// Compare by VALUE, never by word: `record_get_string` republishes a fresh
+    /// handle, so two equal strings hold different handles.
+    fn rendered(heap: &jet_rt::JetArena, kind: JitZipValueKind, value: JitZipValue) -> String {
+        match (kind, value) {
+            (JitZipValueKind::String, JitZipValue::Bits(handle)) => heap
+                .clone_string(handle)
+                .unwrap_or_else(|| format!("<handle {handle} is not a string>")),
+            (_, JitZipValue::Bits(bits)) => bits.to_string(),
+            (_, JitZipValue::Float(value)) => format!("f{:016x}", value.to_bits()),
+            (_, JitZipValue::Absent) => "<absent>".to_string(),
+        }
+    }
+
+    fn round_trip(kind: JitZipValueKind, optional: bool, rows: i64) {
+        let mut heap = jet_rt::JetArena::default();
+        let pairs = heap.alloc_empty_list();
+        let left_column = JitZipColumn {
+            input: kind,
+            field: kind,
+            optional,
+        };
+        let right_column = JitZipColumn {
+            input: JitZipValueKind::Int,
+            field: JitZipValueKind::Int,
+            optional: false,
+        };
+        // `LowerCtx::unzip_column_kinds` maps an OPTIONAL field to `Opaque`
+        // because the optional writer stores the packed presence word through
+        // `record_set_int` whatever the payload kind is.
+        let left_read = if optional {
+            JitZipValueKind::Opaque
+        } else {
+            kind
+        };
+        let mut expected_left = Vec::new();
+        let mut expected_right = Vec::new();
+        for nth in 0..rows {
+            let word = sample(&mut heap, kind, nth);
+            let record = heap.alloc_record(2);
+            assert!(
+                jit_zip_set_value(&mut heap, record, 0, left_column, word).is_some(),
+                "`{}` column word could not be written at all (optional={optional})",
+                kind_name(kind)
+            );
+            let right_word = JitZipValue::Bits(1_000 + nth);
+            assert!(
+                jit_zip_set_value(&mut heap, record, 1, right_column, right_word).is_some(),
+                "Int companion column word could not be written at all"
+            );
+            let stored = if optional {
+                JitZipValue::Bits(jit_zip_pack_value(word))
+            } else {
+                word
+            };
+            expected_left.push(rendered(&heap, left_read, stored));
+            expected_right.push(rendered(&heap, JitZipValueKind::Int, right_word));
+            assert!(heap.list_push_int(pairs, record).is_some());
+        }
+
+        let out = jit_list_unzip_columns(&mut heap, pairs, left_read, JitZipValueKind::Int);
+        let left_list = heap
+            .record_get_int(out, 0)
+            .expect("unzip published no left column handle");
+        let right_list = heap
+            .record_get_int(out, 1)
+            .expect("unzip published no right column handle");
+        assert_eq!(
+            heap.list_len(left_list),
+            Some(rows),
+            "`{}` left column lost rows (optional={optional}) — the empty-list \
+             answer is exactly the shipped bug",
+            kind_name(kind)
+        );
+        assert_eq!(
+            heap.list_len(right_list),
+            Some(rows),
+            "Int right column lost rows next to a `{}` left column \
+             (optional={optional})",
+            kind_name(kind)
+        );
+        for nth in 0..rows {
+            let index = nth as usize;
+            let left = jit_zip_read_value(&heap, left_list, left_read, index)
+                .unwrap_or(JitZipValue::Absent);
+            assert_eq!(
+                rendered(&heap, left_read, left),
+                expected_left[index],
+                "`{}` column word {nth} did not survive the row it was written \
+                 into (optional={optional})",
+                kind_name(kind)
+            );
+            let right = jit_zip_read_value(&heap, right_list, JitZipValueKind::Int, index)
+                .unwrap_or(JitZipValue::Absent);
+            assert_eq!(
+                rendered(&heap, JitZipValueKind::Int, right),
+                expected_right[index],
+                "Int column word {nth} did not survive next to a `{}` column \
+                 (optional={optional})",
+                kind_name(kind)
+            );
+        }
+    }
+
+    #[test]
+    fn every_unzip_column_kind_survives_the_row_it_was_written_into() {
+        for kind in EVERY_KIND {
+            for rows in [0, 1, 3] {
+                round_trip(kind, false, rows);
+                round_trip(kind, true, rows);
+            }
+        }
+    }
+
+    /// The distinct case, which is the whole reason `Opaque` may not assert a
+    /// representation: `unzip_column_kinds` answers for the gate too, so it
+    /// reads the distinct-blind `clif_ty` and calls a `distinct Name = String`
+    /// column `Opaque`, while the row writer stored the cell the AWARE erasure
+    /// chose. Reading that cell must work for every shape the writer can
+    /// produce, or a legal receiver the gate admitted stops on an ICE.
+    #[test]
+    fn an_opaque_column_reads_every_cell_shape_the_writer_can_produce() {
+        for kind in EVERY_KIND {
+            let mut heap = jet_rt::JetArena::default();
+            let pairs = heap.alloc_empty_list();
+            let written = JitZipColumn {
+                input: kind,
+                field: kind,
+                optional: false,
+            };
+            let int_column = JitZipColumn {
+                input: JitZipValueKind::Int,
+                field: JitZipValueKind::Int,
+                optional: false,
+            };
+            let word = sample(&mut heap, kind, 1);
+            let record = heap.alloc_record(2);
+            assert!(jit_zip_set_value(&mut heap, record, 0, written, word).is_some());
+            assert!(
+                jit_zip_set_value(&mut heap, record, 1, int_column, JitZipValue::Bits(5)).is_some()
+            );
+            assert!(heap.list_push_int(pairs, record).is_some());
+            // The cell keeps its own shape, so compare against the shape the
+            // writer chose, not against `Opaque`.
+            let expected = rendered(&heap, kind, word);
+
+            let out = jit_list_unzip_columns(
+                &mut heap,
+                pairs,
+                JitZipValueKind::Opaque,
+                JitZipValueKind::Int,
+            );
+            let left_list = heap
+                .record_get_int(out, 0)
+                .expect("unzip published no left column handle");
+            assert_eq!(
+                heap.list_len(left_list),
+                Some(1),
+                "an `Opaque` read of a `{}` cell dropped the row",
+                kind_name(kind)
+            );
+            let left = jit_zip_read_value(&heap, left_list, kind, 0).unwrap_or(JitZipValue::Absent);
+            assert_eq!(
+                rendered(&heap, kind, left),
+                expected,
+                "an `Opaque` read of a `{}` cell did not republish it in that \
+                 cell's own shape",
+                kind_name(kind)
+            );
+        }
+    }
+
+    /// The stem shape: `["a", "bb", "c"].zip([1, 2, 3]).unzip()`. This answered
+    /// two EMPTY lists, and the residency gate was the only thing standing
+    /// between that and a user (#2091).
+    #[test]
+    fn a_string_int_pair_unzips_into_a_string_column_and_an_int_column() {
+        let mut heap = jet_rt::JetArena::default();
+        let pairs = heap.alloc_empty_list();
+        let string_column = JitZipColumn {
+            input: JitZipValueKind::String,
+            field: JitZipValueKind::String,
+            optional: false,
+        };
+        let int_column = JitZipColumn {
+            input: JitZipValueKind::Int,
+            field: JitZipValueKind::Int,
+            optional: false,
+        };
+        for (text, number) in [("a", 1), ("bb", 2), ("c", 3)] {
+            let text = heap.alloc_string(text);
+            let record = heap.alloc_record(2);
+            assert!(
+                jit_zip_set_value(&mut heap, record, 0, string_column, JitZipValue::Bits(text))
+                    .is_some()
+            );
+            assert!(
+                jit_zip_set_value(&mut heap, record, 1, int_column, JitZipValue::Bits(number))
+                    .is_some()
+            );
+            assert!(heap.list_push_int(pairs, record).is_some());
+        }
+
+        let out = jit_list_unzip_columns(
+            &mut heap,
+            pairs,
+            JitZipValueKind::String,
+            JitZipValueKind::Int,
+        );
+        let left = heap.record_get_int(out, 0).expect("left column handle");
+        let right = heap.record_get_int(out, 1).expect("right column handle");
+        let strings: Vec<String> = (0..3)
+            .map(|index| {
+                heap.list_get_string(left, index)
+                    .unwrap_or_else(|| "<lost>".to_string())
+            })
+            .collect();
+        let numbers: Vec<i64> = (0..3)
+            .map(|index| heap.list_get_int(right, index).unwrap_or(-1))
+            .collect();
+        assert_eq!(
+            strings,
+            vec!["a".to_string(), "bb".to_string(), "c".to_string()],
+            "the String column came back wrong — two empty lists is the shape \
+             the `record_get_int` read produced"
+        );
+        assert_eq!(numbers, vec![1, 2, 3], "the Int column came back wrong");
+    }
+
+    /// An optional column carries the packed presence word, so `none` must
+    /// republish as the zero word and `some` as payload + 1.
+    #[test]
+    fn an_optional_column_republishes_its_packed_presence_word() {
+        let mut heap = jet_rt::JetArena::default();
+        let pairs = heap.alloc_empty_list();
+        let optional_string = JitZipColumn {
+            input: JitZipValueKind::String,
+            field: JitZipValueKind::String,
+            optional: true,
+        };
+        let int_column = JitZipColumn {
+            input: JitZipValueKind::Int,
+            field: JitZipValueKind::Int,
+            optional: false,
+        };
+        let present = heap.alloc_string("here");
+        for word in [JitZipValue::Absent, JitZipValue::Bits(present)] {
+            let record = heap.alloc_record(2);
+            assert!(jit_zip_set_value(&mut heap, record, 0, optional_string, word).is_some());
+            assert!(
+                jit_zip_set_value(&mut heap, record, 1, int_column, JitZipValue::Bits(9)).is_some()
+            );
+            assert!(heap.list_push_int(pairs, record).is_some());
+        }
+
+        let out = jit_list_unzip_columns(
+            &mut heap,
+            pairs,
+            JitZipValueKind::Opaque,
+            JitZipValueKind::Int,
+        );
+        let left = heap.record_get_int(out, 0).expect("left column handle");
+        assert_eq!(
+            heap.list_get_int(left, 0),
+            Some(0),
+            "`none` lost its zero presence word, so the column reads as \
+             `some(handle - 1)`"
+        );
+        assert_eq!(
+            heap.list_get_int(left, 1),
+            Some(present.wrapping_add(1)),
+            "a present optional column word lost its +1 packing"
+        );
+    }
 }
 
 fn jet_jit_list_starts_with(list: i64, prefix: i64) -> i8 {
