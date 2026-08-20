@@ -154,7 +154,7 @@ mod fake_data_kernel {
     include!("../../../../jet-codegen/src/Prelude/CoreLib/Top/FakeData.rs");
 }
 
-pub(crate) fn apply_fake_method(
+pub fn apply_fake_method(
     recv: &mut CtValue,
     method: &str,
     args: &[CtValue],
