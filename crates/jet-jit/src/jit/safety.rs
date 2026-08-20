@@ -1981,7 +1981,7 @@ fn resident_safe_expr_recursive(expr: &TExpr, callees: &HashSet<String>) -> bool
             }
             if module == "core.testing" {
                 return match method.as_str() {
-                    "temp_dir" | "fake_clock" | "fake_rng" if args.len() == 1 => {
+                    "temp_dir" | "fake_clock" | "fake_rng" | "fake_data" if args.len() == 1 => {
                         resident_safe_expr(&args[0], callees)
                     }
                     "snap" | "golden" if args.len() == 2 => {
@@ -6306,6 +6306,15 @@ fn resident_safe_handle_op(op: &THandleOp, recv: &TExpr, args: &[TExpr]) -> bool
         THandleOp::SenderSend => {
             args.len() == 1 && matches!(&recv.ty, Type::Apply { name, .. } if name == "Sender")
         }
+        THandleOp::FakeLocale => {
+            args.len() == 1 && recv.ty == Type::Named("Fake".into()) && args[0].ty == Type::String
+        }
+        THandleOp::FakeName
+        | THandleOp::FakeEmail
+        | THandleOp::FakeHost
+        | THandleOp::FakeAddress => {
+            args.is_empty() && recv.ty == Type::Named("Fake".into())
+        }
         THandleOp::SolverNew => args.is_empty() && recv.ty == Type::Int,
         THandleOp::SolverRequire => args.len() == 1 && recv.ty == Type::Named("Solver".into()) && args[0].ty == Type::Bool,
         THandleOp::SolverFailureCount | THandleOp::SolverStatus => {
@@ -6363,6 +6372,7 @@ fn resident_safe_handle_op(op: &THandleOp, recv: &TExpr, args: &[TExpr]) -> bool
                     "matches"
                         | "match"
                         | "is_match"
+                        | "full_match"
                         | "find"
                         | "find_all"
                         | "split"
@@ -6441,6 +6451,11 @@ fn resident_safe_handle_op(op: &THandleOp, recv: &TExpr, args: &[TExpr]) -> bool
         | THandleOp::RngBool
         | THandleOp::RngFloat
         | THandleOp::RngSplit => args.is_empty(),
+        THandleOp::FakeName
+        | THandleOp::FakeEmail
+        | THandleOp::FakeHost
+        | THandleOp::FakeAddress => args.is_empty(),
+        THandleOp::FakeLocale => args.len() == 1,
         THandleOp::RngInt => args.len() == 2,
         THandleOp::RngFloatRange
         | THandleOp::RngNormal

@@ -541,7 +541,7 @@ pub const COMMANDS: &[CommandSpec] = &[
         headline: false,
         actions: &[],
         exhaustive: false,
-        usage: Some("lint --a11y <file.jet>"),
+        usage: Some("lint --a11y|--complexity <file.jet>"),
     },
     CommandSpec {
         name: "explain",
@@ -1058,6 +1058,8 @@ const BASE_FLAGS: &[FlagSpec] = &[
     FlagSpec { long: "--builder", help: "with build: select a previously bound remote builder" },
     // D-A11YGATE1=B (c134 Phase 6): accessibility is an opt-in lint category.
     FlagSpec { long: "--a11y", help: "with lint: check roles, labels, and other accessibility basics" },
+    FlagSpec { long: "--complexity", help: "with lint: report per-function cognitive complexity" },
+    FlagSpec { long: "--max", help: "with lint --complexity: fail when a function exceeds this score" },
     FlagSpec { long: "--scope", help: "with inspect gates/authority or trust grant: choose a ledger or trust scope" },
     // D-TESTKIT1=A / D-BENCH-PARITY1=B: the shared name-selection flag.
     FlagSpec { long: "--filter", help: "with test/bench: only run regions whose name contains --filter=<substr>" },

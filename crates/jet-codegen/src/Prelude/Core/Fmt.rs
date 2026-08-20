@@ -9,6 +9,153 @@ pub(crate) fn jet_fmt_decimal(value: f64, precision: i64) -> String {
     comma_decimal(format!("{:.*}", precision, value))
 }
 
+/// D-FMT-PRETTY1=A: expand canonical Debug text without inspecting terminal
+/// width. Strings are skipped while scanning, so braces in a string value do
+/// not become structure. The canonical Debug renderer already owns field
+/// order, redaction, and collection ordering; this kernel only lays it out.
+pub(crate) fn jet_fmt_pretty(value: &str) -> String {
+    pretty_fragment(value, 0)
+}
+
+fn pretty_fragment(value: &str, indent: usize) -> String {
+    let value = value.trim();
+    let Some((open, close)) = first_structure(value) else {
+        return value.to_string();
+    };
+    let Some(end) = matching_close(value, open, close) else {
+        return value.to_string();
+    };
+    if !value[end + close.len_utf8()..].trim().is_empty() {
+        return value.to_string();
+    }
+    let prefix = value[..open].trim_end();
+    let body = &value[open + open.len_utf8()..end];
+    if body.trim().is_empty() {
+        return format!("{prefix} {open}{close}").trim_start().to_string();
+    }
+    let mut out = String::new();
+    if !prefix.is_empty() {
+        out.push_str(prefix);
+        out.push(' ');
+    }
+    out.push(open);
+    for item in split_top_level(body) {
+        out.push('\n');
+        out.push_str(&" ".repeat(indent + 2));
+        out.push_str(&pretty_fragment(item, indent + 2));
+    }
+    out.push('\n');
+    out.push_str(&" ".repeat(indent));
+    out.push(close);
+    out
+}
+
+fn first_structure(value: &str) -> Option<(char, char)> {
+    let mut quoted = false;
+    let mut escaped = false;
+    for ch in value.chars() {
+        if quoted {
+            if escaped {
+                escaped = false;
+            } else if ch == '\\' {
+                escaped = true;
+            } else if ch == '"' {
+                quoted = false;
+            }
+            continue;
+        }
+        if ch == '"' {
+            quoted = true;
+        } else if let Some(close) = close_for(ch) {
+            return Some((ch, close));
+        }
+    }
+    None
+}
+
+fn close_for(open: char) -> Option<char> {
+    match open {
+        '{' => Some('}'),
+        '[' => Some(']'),
+        '(' => Some(')'),
+        _ => None,
+    }
+}
+
+fn matching_close(value: &str, start: char, expected: char) -> Option<usize> {
+    let mut stack = vec![expected];
+    let mut quoted = false;
+    let mut escaped = false;
+    let mut seen_start = false;
+    for (index, ch) in value.char_indices() {
+        if !seen_start {
+            if ch == start {
+                seen_start = true;
+            }
+            continue;
+        }
+        if quoted {
+            if escaped {
+                escaped = false;
+            } else if ch == '\\' {
+                escaped = true;
+            } else if ch == '"' {
+                quoted = false;
+            }
+            continue;
+        }
+        if ch == '"' {
+            quoted = true;
+            continue;
+        }
+        if let Some(close) = close_for(ch) {
+            stack.push(close);
+        } else if stack.last().copied() == Some(ch) {
+            stack.pop();
+            if stack.is_empty() {
+                return Some(index);
+            }
+        }
+    }
+    None
+}
+
+fn split_top_level(value: &str) -> Vec<&str> {
+    let mut items = Vec::new();
+    let mut start = 0;
+    let mut stack = Vec::new();
+    let mut quoted = false;
+    let mut escaped = false;
+    for (index, ch) in value.char_indices() {
+        if quoted {
+            if escaped {
+                escaped = false;
+            } else if ch == '\\' {
+                escaped = true;
+            } else if ch == '"' {
+                quoted = false;
+            }
+            continue;
+        }
+        if ch == '"' {
+            quoted = true;
+        } else if let Some(close) = close_for(ch) {
+            stack.push(close);
+        } else if stack.last().copied() == Some(ch) {
+            stack.pop();
+        } else if ch == ',' && stack.is_empty() {
+            if !value[start..index].trim().is_empty() {
+                items.push(value[start..index].trim());
+            }
+            start = index + ch.len_utf8();
+        }
+    }
+    if !value[start..].trim().is_empty() {
+        items.push(value[start..].trim());
+    }
+    items
+}
+
 pub(crate) fn jet_fmt_percent(value: f64, precision: i64) -> String {
     format!("{}%", jet_fmt_decimal(value * 100.0, precision))
 }

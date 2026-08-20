@@ -359,6 +359,7 @@ pub(crate) struct JitRuntime {
     pub(crate) errors: Vec<jet_foundation::Outcome::JetErr>,
     pub(crate) solvers: Vec<Solver::SolverState>,
     pub(crate) rngs: Vec<crate::Random::RngState>,
+    pub(crate) fakes: Vec<crate::Random::FakeState>,
     /// Manual `Clock.new(ms)` handles — 1-based indices into this vec (#729 uuid).
     pub(crate) clocks: Vec<i64>,
     /// `ProcessSpec` handles — 1-based indices (#729 process builder).

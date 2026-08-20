@@ -908,6 +908,11 @@ pub fn apply_mutating_with_type(
     } else {
         None
     };
+    if matches!(&*recv, CtValue::Struct { type_name, .. } if type_name == crate::Syntax::FAKE_TYPE)
+        && matches!(method, "locale" | "name" | "email" | "host" | "address")
+    {
+        return super::Methods::apply_fake_method(recv, method, &args, span);
+    }
     if let Some(mut state) = rng_state {
         let mut argv = args.clone();
         let value = super::Methods::apply_seeded_rng_method_with_type(

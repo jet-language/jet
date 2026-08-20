@@ -15,6 +15,7 @@ pub fn is_polymorphic_core_special(module: &str, name: &str) -> bool {
         ("core.math", "abs")
             | ("core.math", "min")
             | ("core.math", "max")
+            | ("core.text.fmt", "pretty")
             | ("core.math", "clamp")
             // D-FLOATW1: sqrt/floor/ceil/pow are width-generic (Float→Float, F32→F32);
             // their return type is arg-type-dependent, so they use resolved_ret.
@@ -143,6 +144,7 @@ pub fn is_polymorphic_core_special(module: &str, name: &str) -> bool {
                 | "core.encoding.yaml",
                 "to_string" | "to_string_pretty" | "decode" | "decode_traced",
             )
+            | ("core.sys", "decode")
             | ("core.encoding.cbor", "parse" | "decode" | "to_bytes" | "to_bytes_canonical")
             | ("core.encoding.xml", "decode" | "decode_bytes" | "expanded_name")
             // D-REACT1=B: the reactive producers return `Signal<T>`/`Derived<T>` whose
@@ -696,6 +698,10 @@ fn core_fixed_sig_impl(
         ("core.testing", "fake_rng") => {
             Some((vec![(read, Type::Int)], Some(Type::Named("Rng".to_string()))))
         }
+        ("core.testing", "fake_data") => Some((
+            vec![(read, Type::Int)],
+            Some(Type::Named("Fake".to_string())),
+        )),
         ("core.testing", "test_suite") => {
             Some((vec![], Some(Type::Named("TestSuite".to_string()))))
         }
@@ -2626,6 +2632,13 @@ fn core_fixed_sig_impl(
             Some(result_ty(Type::Named("Regex".to_string()), Type::String)),
         )),
         ("core.regex", "is_match") => Some((
+            vec![
+                (read, Type::Named(Syntax::TYPE_REGEX.to_string())),
+                (read, Type::String),
+            ],
+            Some(Type::Bool),
+        )),
+        ("core.regex", "full_match") => Some((
             vec![
                 (read, Type::Named(Syntax::TYPE_REGEX.to_string())),
                 (read, Type::String),

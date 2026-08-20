@@ -1383,6 +1383,13 @@ pub(crate) fn emit_tir_core_call(
                 )
             }
         }
+        ("core.sys", "decode") => {
+            let target = enc_target_rust(ret_ty, cx);
+            let prefix = args.get(0).map(|_| format!("&({})", arg(0))).unwrap_or_else(|| "&\"\".to_string()".to_string());
+            let file = args.get(1).map(|_| format!("&({})", arg(1))).unwrap_or_else(|| "&\".env\".to_string()".to_string());
+            let allow = args.get(2).map(|_| format!("&({})", arg(2))).unwrap_or_else(|| "&Vec::new()".to_string());
+            format!("{}::<{}>({}, {}, {})", helper("jet_std_env_decode"), target, prefix, file, allow)
+        }
         // D-MIGRATE3=A: `decode_traced<T>` — the traced sibling of `decode<T>`,
         // one wrapper deeper (`DecodeResult<T>`), same target-type plumbing.
         ("core.encoding.json", "decode_traced") => {

@@ -4964,6 +4964,9 @@ fn wasm_emit_expr(
                             crate::AST::StrFormat::Debug => value.push_str(&jet_format!(
                                 "{jet_prefix}s.push_str(&format!(\"{{:?}}\", {rendered})); "
                             )),
+                            crate::AST::StrFormat::Pretty => {
+                                unreachable!("Pretty interpolation lowers to core.text.fmt.pretty")
+                            }
                             crate::AST::StrFormat::Fixed(_) => {
                                 unreachable!("Fixed interpolation lowers to core.text.fmt.decimal")
                             }

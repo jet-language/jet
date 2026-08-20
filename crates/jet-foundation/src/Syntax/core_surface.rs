@@ -832,6 +832,8 @@ pub const METHOD_FRESH_NEW_RANDOM: &str = "new_random";
 /// D-DET-CAPAPI (ratified 2026-06-25) widens `Rng` with `bool()` / `pick(list)`
 /// / `shuffle(&list)`, mirroring the ambient `random.*` set.
 pub const RNG_TYPE: &str = "Rng";
+/// D-TESTDATA1: deterministic locale-aware fake-data capability.
+pub const FAKE_TYPE: &str = "Fake";
 
 /// D-SHAPE-DURATION1=A / D-SHAPE-DURATIONCONVERT1=A (ratified 2026-07-14) /
 /// D-TYPE2-TIME1=A (ratified 2026-08-06): runtime numbers become checked

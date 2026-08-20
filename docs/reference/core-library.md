@@ -2355,9 +2355,10 @@ an optional reference line, style, color, and legend.
 
 ### `core.text.fmt` — human-readable formatting
 
-D-HUMANFMT1 keeps formatting as library calls, not a second syntax inside
-interpolation. The beginner path is the thing report and CLI authors need every
-day: readable numbers, bytes, durations, ordinals, plural phrases, and padding.
+D-HUMANFMT1 keeps ordinary formatting as library calls; D-FMT-PRETTY1 also
+exposes the same expanded Debug shape through the `:Pretty` interpolation selector.
+The beginner path is the thing report and CLI authors need every day: readable
+numbers, bytes, durations, ordinals, plural phrases, padding, and nested values.
 Two checked selectors cover language-owned values: `{value#Fixed(n)}` formats
 a `Float`, and `{value#Unit(name)}` or `{value#Unit(bare)}` selects a unit style.
 
@@ -2369,6 +2370,7 @@ a `Float`, and `{value#Unit(name)}` or `{value#Unit(bare)}` selects a unit style
 | `bytes(n)` | `String` | SI byte units (`KB`, `MB`, `GB`, ...) |
 | `duration(ms)` | `String` | Compact `d h m s` / `ms` duration |
 | `ordinal(n)` | `String` | `1st`, `2nd`, `3rd`, `4th` |
+| `pretty(value)` | `String` | Deterministic two-space expansion of canonical Debug text |
 | `plural(n, one, many)` | `String` | Count plus singular/plural noun |
 | `pad_left` / `pad_right` / `pad_center` | `String` | Width padding by character count |
 
@@ -2682,7 +2684,12 @@ fn run() {
 ```
 
 Helpers: `snap`, `golden`, `fixture`, `temp_dir`, `corpus`, `fake_clock`,
-`fake_rng`, `test_suite`, and `bench_suite`. `test_suite()` and `bench_suite()`
+`fake_rng`, `fake_data`, `test_suite`, and `bench_suite`. `fake_data(seed)` returns
+deterministic `Fake` data in locale `en` by default. `fake.locale("de")` selects
+German data; supported locales are `en` and `de`. `Fake` provides `name()`,
+`email()`, `host()`, and `address()`. Each draw advances one shared SplitMix64
+stream, so equal seeds and call sequences produce equal values on every tier.
+`test_suite()` and `bench_suite()`
 return the ordinary command values supplied to an expert `fn test` or `fn bench`
 override; each exposes `iteration`, `result`, and `run()`. Use
 `expect(value).snapshot()` inside `#Test` blocks for assertion snapshots;
@@ -2817,6 +2824,7 @@ fn run() {
 | `re.compile(pat)` | `Regex ? String` | parse once with default flags |
 | `re.compile_with(pat, flags)` | `Regex ? String` | parse once with typed flags |
 | `re.is_match(pat, text)` | `Bool ? String` | whether `pat` occurs anywhere |
+| `re.full_match(pat, text)` | `Bool ? String` | whether `pat` matches the whole text |
 | `re.match(pat, text)` | `Match? ? String` | first match with capture groups, `None` if none |
 | `re.find(pat, text)` | `String? ? String` | first matched substring, `None` if none |
 | `re.find_all(pat, text)` | `[String] ? String` | every non-overlapping match, left to right |
@@ -2826,6 +2834,7 @@ fn run() {
 | `re.split(pat, text)` | `[String] ? String` | split `text` on every match |
 | `re.split_limit(pat, text, n)` | `[String] ? String` | split at most `n - 1` times |
 | `rx.is_match(text)` | `Bool` | reuse a compiled regex |
+| `rx.full_match(text)` | `Bool` | whether a compiled regex matches the whole text |
 | `rx.match(text)` | `Match?` | first match with captures/spans |
 | `rx.matches(text)` | `[Match]` | all matches with captures/spans |
 | `rx.pattern()` / `rx.source()` | `String` | raw pattern text |

@@ -172,8 +172,8 @@ impl<'a> Parser<'a> {
         }))
     }
 
-    /// D-BRANCH-AST1=C: classic effect `if` syntax enters the same arm-table
-    /// node as every other branch directly from the parser.
+    /// D-BRANCH-AST1=C: classic effect `if` syntax enters the same flat,
+    /// ordered arm-table node as every other branch directly from the parser.
     fn classic_if_switch(branch: IfStmt) -> Stmt {
         let IfStmt {
             cond,
@@ -181,18 +181,38 @@ impl<'a> Parser<'a> {
             else_branch,
             span,
         } = branch;
-        let else_body = match else_branch {
-            None => None,
-            Some(ElseBranch::Else(body)) => Some(body),
-            Some(ElseBranch::ElseIf(next)) => Some(vec![Self::classic_if_switch(*next)]),
-        };
+        let mut arms = vec![SwitchArm {
+            span: cond.span(),
+            cond,
+            body: then_body,
+        }];
+        let mut else_body = None;
+        let mut next = else_branch;
+        while let Some(branch) = next {
+            match branch {
+                ElseBranch::Else(body) => {
+                    else_body = Some(body);
+                    break;
+                }
+                ElseBranch::ElseIf(next_branch) => {
+                    let IfStmt {
+                        cond,
+                        then_body,
+                        else_branch,
+                        ..
+                    } = *next_branch;
+                    arms.push(SwitchArm {
+                        span: cond.span(),
+                        cond,
+                        body: then_body,
+                    });
+                    next = else_branch;
+                }
+            }
+        }
         Stmt::Switch {
             subject: Expr::Bool(true, span),
-            arms: vec![SwitchArm {
-                span: cond.span(),
-                cond,
-                body: then_body,
-            }],
+            arms,
             else_body,
             span,
         }

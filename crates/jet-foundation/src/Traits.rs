@@ -1727,6 +1727,7 @@ impl TraitRegistry {
             "RegexMatch",
             "ReservoirSampler",
             "Rng",
+            "Fake",
             "Size",
             "SocketAddr",
             "Solver",

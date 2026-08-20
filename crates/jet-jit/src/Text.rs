@@ -540,6 +540,13 @@ fn jet_jit_regex_is_match(pat: i64, text: i64) -> i8 {
         .unwrap_or_default()
 }
 
+fn jet_jit_regex_full_match(pat: i64, text: i64) -> i8 {
+    let t = clone_string(text);
+    clone_compiled_regex(pat)
+        .map(|regex| i8::from(regex.full_match(&t)))
+        .unwrap_or_default()
+}
+
 fn jet_jit_regex_find(pat: i64, text: i64) -> i64 {
     let t = clone_string(text);
     clone_compiled_regex(pat)
@@ -635,6 +642,7 @@ fn jet_jit_regex_method(recv: i64, method: i64, arg0: i64, arg1: i64) -> i64 {
     let method = clone_string(method);
     with_regex(recv, |v| match (v, method.as_str()) {
         (RegexValue::Regex(rx), "is_match") => i64::from(rx.is_match(&clone_string(arg0))),
+        (RegexValue::Regex(rx), "full_match") => i64::from(rx.full_match(&clone_string(arg0))),
         (RegexValue::Regex(rx), "match") => match rx.match_value(&clone_string(arg0)) {
             Err(_) => 0,
             Ok(m) => push_regex(RegexValue::Match(m)).wrapping_add(1),
@@ -757,6 +765,7 @@ host_fns! {
     regex_escape: "jet_jit_regex_escape" => jet_jit_regex_escape: unary;
     regex_literal: "jet_jit_regex_literal" => jet_jit_regex_literal: unary;
     regex_is_match: "jet_jit_regex_is_match" => jet_jit_regex_is_match: binary_i8;
+    regex_full_match: "jet_jit_regex_full_match" => jet_jit_regex_full_match: binary_i8;
     regex_find: "jet_jit_regex_find" => jet_jit_regex_find: binary;
     regex_find_all: "jet_jit_regex_find_all" => jet_jit_regex_find_all: binary;
     regex_matches: "jet_jit_regex_matches" => jet_jit_regex_matches: binary;
@@ -774,6 +783,4 @@ host_fns! {
             q
         };
 }
-
-
 

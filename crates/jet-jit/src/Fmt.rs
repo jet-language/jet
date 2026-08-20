@@ -11,6 +11,11 @@ fn jet_jit_fmt_number(value: i64) -> i64 {
     alloc_string(fmt_rt::jet_fmt_number(value))
 }
 
+fn jet_jit_fmt_pretty(value: i64) -> i64 {
+    let value = clone_string(value);
+    alloc_string(fmt_rt::jet_fmt_pretty(&value))
+}
+
 fn jet_jit_fmt_decimal(value: f64, precision: i64) -> i64 {
     alloc_string(fmt_rt::jet_fmt_decimal(value, precision))
 }
@@ -76,6 +81,7 @@ host_fns! {
         sig_i64x3.returns.push(AbiParam::new(types::I64));
     }
     number: "jet_jit_fmt_number" => jet_jit_fmt_number: sig_i64;
+    pretty: "jet_jit_fmt_pretty" => jet_jit_fmt_pretty: sig_i64;
     decimal: "jet_jit_fmt_decimal" => jet_jit_fmt_decimal: sig_f64_i64;
     percent: "jet_jit_fmt_percent" => jet_jit_fmt_percent: sig_f64_i64;
     bytes: "jet_jit_fmt_bytes" => jet_jit_fmt_bytes: sig_i64;

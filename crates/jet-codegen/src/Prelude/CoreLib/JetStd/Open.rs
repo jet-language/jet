@@ -381,6 +381,12 @@ mod jet_std {
             self.find_match(text).is_some()
         }
 
+        pub fn full_match(&self, text: &str) -> bool {
+            self.run_at(text, 0)
+                .and_then(|spans| spans.first().copied().flatten())
+                .is_some_and(|(start, end)| start == 0 && end == text.len())
+        }
+
         pub fn match_value(&self, text: &str) -> JetOutcome<JetRegexMatch, JetAbsent> {
             jet_outcome_of(self.find_match(text))
         }
@@ -655,6 +661,10 @@ mod jet_std {
 
     pub fn jet_regex_is_match(pattern: &JetRegex, text: &str) -> bool {
         pattern.is_match(text)
+    }
+
+    pub fn jet_regex_full_match(pattern: &JetRegex, text: &str) -> bool {
+        pattern.full_match(text)
     }
 
     // Core answers the emit boundary with Rust plumbing; `jet_outcome_of` at the

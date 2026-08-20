@@ -472,6 +472,7 @@ pub(crate) fn core_rust_type_name(name: &str) -> Option<&'static str> {
         // D-DET1: deterministic injected capability handles.
         "Clock" => Some("Clock"),
         "Rng" => Some("Rng"),
+        "Fake" => Some("Fake"),
         // D-SOLVER-LIB1=A: explicit finite solver state.
         "Solver" => Some("Solver"),
         // D-SHAPE-DURATION1/D-SHAPE-DURATIONCONVERT1: checked duration values.

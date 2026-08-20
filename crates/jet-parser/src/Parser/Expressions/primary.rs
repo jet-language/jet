@@ -956,6 +956,9 @@ impl<'a> Parser<'a> {
                                     crate::Syntax::InterpolationSelectorKind::Debug => {
                                         format = crate::AST::StrFormat::Debug;
                                     }
+                                    crate::Syntax::InterpolationSelectorKind::Pretty => {
+                                        format = crate::AST::StrFormat::Pretty;
+                                    }
                                     crate::Syntax::InterpolationSelectorKind::Fixed => {
                                         let after_selector =
                                             format!("after `{selector_head}` in interpolation");

@@ -99,6 +99,7 @@ pub(crate) fn fresh_runtime_with_allocator_cap(cap_bytes: Option<u64>) -> JitRun
         errors: Vec::new(),
         solvers: Vec::new(),
         rngs: Vec::new(),
+        fakes: Vec::new(),
         clocks: Vec::new(),
         process_specs: Vec::new(),
         process_children: Vec::new(),
@@ -208,6 +209,7 @@ fn reset_run_heap(rt: &mut JitRuntime) {
     rt.errors.clear();
     rt.solvers.clear();
     rt.rngs.clear();
+    rt.fakes.clear();
     rt.clocks.clear();
     rt.sketches.clear();
     rt.process_specs.clear();

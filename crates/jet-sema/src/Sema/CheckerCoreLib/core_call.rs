@@ -1,7 +1,7 @@
 use crate::AST::{AccessConvention, Expr, ParamZone, Type};
 use crate::Diagnostics::{CryptoMisuseReason, Diagnostic, Span};
 use crate::Sema::Checker;
-use crate::Sema::Diagnostics::{is_displayable, is_printable, type_fix_hint, types_comparable};
+use crate::Sema::Diagnostics::{is_debuggable, is_displayable, is_printable, type_fix_hint, types_comparable};
 use crate::Sema::Effects::{core_effect, e0746, is_irreversible_effect};
 use crate::Sema::FFI::e3301;
 use crate::Sema::Purity::{e3401, is_impure_core};
@@ -1531,6 +1531,29 @@ impl<'a> Checker<'a> {
                     }
                     return Some(Type::String);
                 }
+                ("core.text.fmt", "pretty") => {
+                    if args.len() != 1 {
+                        self.diags.push(wrong_core_arity(name, 1, args.len(), span));
+                    }
+                    if let Some(arg) = args.first_mut() {
+                        self.borrow_ctx = true;
+                        if let Some(t) = self.infer(&mut arg.expr) {
+                            if !is_debuggable(&t, self.registry, self.trait_reg) {
+                                self.diags.push(Diagnostic::error(
+                                    "E0112",
+                                    format!("{} can't use `core.text.fmt.pretty` yet", t.show()),
+                                    "pretty formatting needs a debuggable value".to_string(),
+                                    "implement `Debug` or pass a debuggable value".to_string(),
+                                    Some(arg.expr.span()),
+                                ));
+                            }
+                        }
+                    }
+                    for arg in args.iter_mut().skip(1) {
+                        self.infer(&mut arg.expr);
+                    }
+                    return Some(Type::String);
+                }
                 (
                     "core.encoding.json" | "core.encoding.toml" | "core.encoding.yaml",
                     "to_string" | "to_string_pretty",
@@ -1566,6 +1589,28 @@ impl<'a> Checker<'a> {
                         self.infer(&mut arg.expr);
                     }
                     return Some(result_ty(json_ty(), json_error_ty()));
+                }
+                ("core.sys", "decode") if !type_args.is_empty() => {
+                    if args.len() > 3 {
+                        self.diags.push(wrong_core_arity(name, 3, args.len(), span));
+                    }
+                    for (index, arg) in args.iter_mut().enumerate() {
+                        match index {
+                            0 | 1 => self.expect_core_arg(name, index, &Type::String, arg),
+                            2 => self.expect_core_arg(
+                                name,
+                                index,
+                                &Type::List(Box::new(Type::String)),
+                                arg,
+                            ),
+                            _ => self.infer(&mut arg.expr),
+                        }
+                    }
+                    let Some(t) = exactly_one_type_arg(self, name, type_args, span) else {
+                        return None;
+                    };
+                    self.check_decodable(&t, span);
+                    return Some(result_ty(t, decode_error_ty()));
                 }
                 (
                     "core.encoding.json" | "core.encoding.csv" | "core.encoding.toml"

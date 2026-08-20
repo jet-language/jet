@@ -5,6 +5,27 @@ use crate::AST::{
 };
 
 impl<'a> Fmt<'a> {
+    /// D-FMT-SIMPLIFY1=A / R3: a direct returned struct literal already has its
+    /// type from the function contract, so its `Type.` head is redundant.
+    fn struct_lit_head_is_redundant(
+        &self,
+        type_name: &str,
+        type_args: &[Type],
+        import_ns: Option<&str>,
+    ) -> bool {
+        let Some(expected) = self.expected_return_type.as_ref() else {
+            return false;
+        };
+        let name = import_ns
+            .map(|ns| format!("{ns}.{type_name}"))
+            .unwrap_or_else(|| type_name.to_string());
+        match expected {
+            Type::Named(expected) => type_args.is_empty() && expected == &name,
+            Type::Apply { name: expected, args } => expected == &name && args == type_args,
+            _ => false,
+        }
+    }
+
     /// D-FMT1: render an `if`-expression chain with a shared `inline` decision.
     /// `expr` must be `Expr::If`.
     fn fmt_if_expr(&mut self, expr: &Expr, inline: bool) {
@@ -1149,7 +1170,14 @@ impl<'a> Fmt<'a> {
                 // D-DOTCTOR1: emit `Type.{ … }` (named) or `.{ … }` (inferred).
                 // The formatter is also the auto-fixer for E0320: any old `Type { … }`
                 // (recovered with `inferred: false`) is re-emitted in the new form.
-                if *inferred {
+                let inferred = *inferred
+                    || (self.simplify
+                        && self.struct_lit_head_is_redundant(
+                            type_name,
+                            type_args,
+                            import_ns.as_deref(),
+                        ));
+                if inferred {
                     // `.{ field: val, … }` — type inferred from context.
                 } else {
                     if let Some(ns) = import_ns {
@@ -2391,6 +2419,15 @@ impl<'a> Fmt<'a> {
                 self.write(
                     crate::Syntax::interpolation_selector_for_kind(
                         crate::Syntax::InterpolationSelectorKind::Debug,
+                    )
+                    .name,
+                );
+            }
+            crate::AST::StrFormat::Pretty => {
+                self.write(crate::Syntax::INTERPOLATION_SELECTOR_RAIL);
+                self.write(
+                    crate::Syntax::interpolation_selector_for_kind(
+                        crate::Syntax::InterpolationSelectorKind::Pretty,
                     )
                     .name,
                 );

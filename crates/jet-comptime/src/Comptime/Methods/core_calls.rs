@@ -141,6 +141,73 @@ mod seeded_random_kernel {
     include!("../../../../jet-codegen/src/Prelude/Core/SeededRandom.rs");
 }
 
+mod fake_data_kernel {
+    pub(crate) mod jet_std {
+        #[derive(Clone, Debug, PartialEq)]
+        pub(crate) struct Fake {
+            pub(crate) state: u64,
+            pub(crate) locale: u8,
+        }
+    }
+
+    use super::seeded_random_kernel::jet_seeded_rng_int;
+    include!("../../../../jet-codegen/src/Prelude/CoreLib/Top/FakeData.rs");
+}
+
+pub(crate) fn apply_fake_method(
+    recv: &mut CtValue,
+    method: &str,
+    args: &[CtValue],
+    span: Span,
+) -> Result<CtValue, Diagnostic> {
+    let CtValue::Struct { type_name, fields } = recv else {
+        return Err(unsupported("Fake receiver", span));
+    };
+    if type_name != crate::Syntax::FAKE_TYPE {
+        return Err(unsupported("Fake receiver", span));
+    }
+    let state = fields.iter().find_map(|(name, value)| match (name.as_str(), value) {
+        ("state", CtValue::Int(value)) => Some(*value as u64),
+        _ => None,
+    }).unwrap_or(0);
+    let locale = fields.iter().find_map(|(name, value)| match (name.as_str(), value) {
+        ("locale", CtValue::Int(value)) => Some(*value as u8),
+        _ => None,
+    }).unwrap_or(0);
+    let mut fake = fake_data_kernel::jet_std::Fake { state, locale };
+    let result = match method {
+        "locale" => {
+            let locale = as_string(
+                args.first().ok_or_else(|| unsupported("Fake.locale argument", span))?,
+                span,
+            )?.to_string();
+            let next = fake_data_kernel::jet_fake_locale(&fake, &locale);
+            CtValue::Struct {
+                type_name: crate::Syntax::FAKE_TYPE.to_string(),
+                fields: vec![
+                    ("state".to_string(), CtValue::Int(next.state as i64)),
+                    ("locale".to_string(), CtValue::Int(next.locale as i64)),
+                ],
+            }
+        }
+        "name" => CtValue::Str(fake_data_kernel::jet_fake_name(&mut fake)),
+        "email" => CtValue::Str(fake_data_kernel::jet_fake_email(&mut fake)),
+        "host" => CtValue::Str(fake_data_kernel::jet_fake_host(&mut fake)),
+        "address" => CtValue::Str(fake_data_kernel::jet_fake_address(&mut fake)),
+        _ => return Err(unsupported("this Fake method", span)),
+    };
+    if method != "locale" {
+        *recv = CtValue::Struct {
+            type_name: crate::Syntax::FAKE_TYPE.to_string(),
+            fields: vec![
+                ("state".to_string(), CtValue::Int(fake.state as i64)),
+                ("locale".to_string(), CtValue::Int(fake.locale as i64)),
+            ],
+        };
+    }
+    Ok(result)
+}
+
 mod net_pure_kernel {
     include!("../../../../jet-codegen/src/Prelude/Core/NetPure.rs");
 }
@@ -2052,6 +2119,7 @@ pub fn apply_core_call_with_type(
         }
         ("core.regex", "escape") => regex_escape(args, span),
         ("core.regex", "is_match") => regex_is_match(args, span),
+        ("core.regex", "full_match") => regex_full_match(args, span),
         ("core.regex", "find") => regex_find(args, span),
         ("core.regex", "find_all") => regex_find_all(args, span),
         ("core.regex", "matches") => regex_matches(args, span),
@@ -2100,6 +2168,20 @@ pub fn apply_core_call_with_type(
             Ok(CtValue::Struct {
                 type_name: crate::Syntax::RNG_TYPE.to_string(),
                 fields: vec![("state".to_string(), CtValue::Int(seed as i64))],
+            })
+        }
+        ("core.testing", "fake_data") => {
+            let seed = match one(0)? {
+                CtValue::Int(n) => *n,
+                _ => return Err(unsupported("testing.fake_data expects an Int seed", span)),
+            };
+            let fake = fake_data_kernel::jet_testing_fake_new(seed);
+            Ok(CtValue::Struct {
+                type_name: crate::Syntax::FAKE_TYPE.to_string(),
+                fields: vec![
+                    ("state".to_string(), CtValue::Int(fake.state as i64)),
+                    ("locale".to_string(), CtValue::Int(fake.locale as i64)),
+                ],
             })
         }
         ("core.math.random", "split") => {
@@ -2214,6 +2296,10 @@ pub fn apply_core_call_with_type(
                 .map_err(|error| unsupported(&error.to_string(), span))
         }
         // --- core.text.fmt: CtValue adapters over the shared Prelude kernel ---
+        ("core.text.fmt", "pretty") => {
+            let value = as_string(one(0)?, span)?;
+            Ok(CtValue::Str(fmt_kernel::jet_fmt_pretty(value)))
+        }
         ("core.text.fmt", "number") => {
             let n = match one(0)? {
                 CtValue::Int(n) => *n,

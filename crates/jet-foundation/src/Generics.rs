@@ -496,32 +496,48 @@ pub fn e0913(trait_name: &str, missing: &[String], span: Span) -> Diagnostic {
     )
 }
 
-/// D-ATTR4=A/D-FMT-INTERP1=A/D-QUANTITY-PRINT1=A+D:
+/// D-ATTR4=A/D-FMT-INTERP1=A/D-FMT-PRETTY1=A/D-QUANTITY-PRINT1=A+D:
 /// unknown interpolation selector after `:`.
 pub fn e0914(selector: &str, span: Span) -> Diagnostic {
-    let debug = crate::Syntax::interpolation_selector_for_kind(
-        crate::Syntax::InterpolationSelectorKind::Debug,
-    )
-    .name;
-    let fixed = crate::Syntax::interpolation_selector_for_kind(
-        crate::Syntax::InterpolationSelectorKind::Fixed,
-    )
-    .name;
-    let unit = crate::Syntax::interpolation_selector_for_kind(
-        crate::Syntax::InterpolationSelectorKind::Unit,
-    )
-    .name;
+    let valid = crate::Syntax::INTERPOLATION_SELECTORS
+        .iter()
+        .map(|selector| match selector.arguments {
+            crate::Syntax::InterpolationSelectorArguments::None => {
+                format!("`:{}`", selector.name)
+            }
+            crate::Syntax::InterpolationSelectorArguments::Precision => {
+                format!("`:{}(n)`", selector.name)
+            }
+            crate::Syntax::InterpolationSelectorArguments::UnitStyle(styles) => format!(
+                "`:{}({})`",
+                selector.name,
+                styles.join("|")
+            ),
+        })
+        .collect::<Vec<_>>()
+        .join(", ");
+    let fix = crate::Syntax::INTERPOLATION_SELECTORS
+        .iter()
+        .map(|selector| match selector.arguments {
+            crate::Syntax::InterpolationSelectorArguments::None => {
+                format!("`{{value:{}}}`", selector.name)
+            }
+            crate::Syntax::InterpolationSelectorArguments::Precision => {
+                format!("`{{value:{}(2)}}`", selector.name)
+            }
+            crate::Syntax::InterpolationSelectorArguments::UnitStyle(styles) => styles
+                .iter()
+                .map(|style| format!("`{{value:{}({style})}}`", selector.name))
+                .collect::<Vec<_>>()
+                .join(" or "),
+        })
+        .collect::<Vec<_>>()
+        .join(", ");
     Diagnostic::error(
         "E0914",
         format!("unknown interpolation selector `:{}`", selector),
-        format!(
-            "string interpolation supports a closed selector set — use `:{}`, `:{}(n)`, or `:{}(name|bare)`",
-            debug, fixed, unit
-        ),
-        format!(
-            "write `{{value:{}}}`, `{{value:{}(2)}}`, `{{value:{}(name)}}`, `{{value:{}(bare)}}`, or `{{value}}`",
-            debug, fixed, unit, unit
-        ),
+        format!("string interpolation supports a closed selector set — use {valid}"),
+        format!("write {fix}, or `{{value}}`"),
         Some(span),
     )
 }

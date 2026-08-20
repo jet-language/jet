@@ -4107,6 +4107,13 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                 THandleOp::RngShuffle => {
                     format!("{}jet_rng_shuffle(&mut ({}), &mut ({}))", root, recv, a(0))
                 }
+                THandleOp::FakeLocale => {
+                    format!("{}jet_fake_locale(&({}), &({}))", root, recv, a(0))
+                }
+                THandleOp::FakeName => format!("{}jet_fake_name(&mut ({}))", root, recv),
+                THandleOp::FakeEmail => format!("{}jet_fake_email(&mut ({}))", root, recv),
+                THandleOp::FakeHost => format!("{}jet_fake_host(&mut ({}))", root, recv),
+                THandleOp::FakeAddress => format!("{}jet_fake_address(&mut ({}))", root, recv),
                 // D-SOLVER-LIB1=A: explicit finite solver state.
                 THandleOp::SolverNew => format!("{}jet_solver_new({})", root, recv),
                 THandleOp::SolverRequire => {
@@ -5575,7 +5582,7 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                 },
                 THandleOp::RegexMethod { kind: _, method } => match method.as_str() {
                     "match" => format!("({}).match_value(&({}))", recv, a(0)),
-                    "is_match" | "find" | "find_all" | "matches" | "split" | "name" | "count" => {
+                    "is_match" | "full_match" | "find" | "find_all" | "matches" | "split" | "name" | "count" => {
                         format!("({}).{}(&({}))", recv, method, a(0))
                     }
                     "replace" | "replace_all" => {

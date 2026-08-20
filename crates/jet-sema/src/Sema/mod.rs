@@ -2251,6 +2251,7 @@ mod CheckerTaskGroup;
 use CheckerTaskGroup::TaskGroupCtx;
 mod CheckerValidate;
 pub mod Diagnostics;
+mod CognitiveComplexity;
 mod Edition;
 mod Effects;
 mod FlowFacts;
@@ -2308,6 +2309,7 @@ pub(crate) use CheckerFieldPolicy::*;
 pub(crate) use CheckerPatchable::*;
 pub(crate) use CheckerValidate::*;
 pub(crate) use Diagnostics::*;
+pub use CognitiveComplexity::{cognitive_complexity_reports, CognitiveComplexityReport};
 /// Shared by TIR lowering: a loop consumes any collection whose element type
 /// requires owned iteration.
 pub use Diagnostics::type_requires_owned_iteration;

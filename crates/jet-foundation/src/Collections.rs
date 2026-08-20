@@ -312,6 +312,7 @@ pub fn builtin_method_return(
         // time/randomness THROUGH the handle is reproducible (caller seeded it).
         Type::Named(n) if n == crate::Syntax::CLOCK_TYPE => clock_method_return(method, arg_count),
         Type::Named(n) if n == crate::Syntax::RNG_TYPE => rng_method_return(method, arg_count),
+        Type::Named(n) if n == crate::Syntax::FAKE_TYPE => fake_method_return(method, arg_count),
         // D-SOLVER-LIB1=A: explicit finite solver handle. `new(seed)` constructs
         // state; `require(Bool)` records a checked constraint; query methods read it.
         Type::Named(n) if n == crate::Syntax::SOLVER_TYPE => {
@@ -1550,6 +1551,14 @@ fn rng_method_return(method: &str, nargs: usize) -> Option<Option<Type>> {
     }
 }
 
+fn fake_method_return(method: &str, nargs: usize) -> Option<Option<Type>> {
+    match (method, nargs) {
+        ("name" | "email" | "host" | "address", 0) => Some(Some(Type::String)),
+        ("locale", 1) => Some(Some(Type::Named(crate::Syntax::FAKE_TYPE.to_string()))),
+        _ => None,
+    }
+}
+
 /// D-SOLVER-LIB1=A: explicit finite solver state. This first Core slice admits
 /// ordinary Bool constraints only; richer domains stay future library work.
 fn solver_method_return(method: &str, nargs: usize) -> Option<Option<Type>> {
@@ -2248,6 +2257,9 @@ pub fn builtin_method_mutates(recv_ty: &Type, method: &str) -> bool {
                     | "sample"
                     | "shuffle"
             )
+        }
+        Type::Named(n) if n == crate::Syntax::FAKE_TYPE => {
+            matches!(method, "name" | "email" | "host" | "address")
         }
         Type::Named(n) if n == "Hasher" => method == "update",
         Type::Named(n) if n == crate::Syntax::SOLVER_TYPE => matches!(method, "require"),
@@ -3030,6 +3042,10 @@ pub fn builtin_method_arg_types(recv_ty: &Type, method: &str) -> Option<Vec<Type
             "bytes" => Some(vec![Type::Int]),
             _ => Some(vec![]),
         },
+        Type::Named(n) if n == crate::Syntax::FAKE_TYPE => match method {
+            "locale" => Some(vec![Type::String]),
+            _ => Some(vec![]),
+        },
         Type::Named(n) if n == crate::Syntax::SOLVER_TYPE => match method {
             "new" => Some(vec![Type::Int]),
             "require" => Some(vec![Type::Bool]),
@@ -3067,6 +3083,7 @@ pub fn builtin_receiver_borrow(recv_ty: &Type, method: &str) -> BuiltinReceiverB
             Type::Named(name)
                 if name == Syntax::CLOCK_TYPE
                     || name == Syntax::RNG_TYPE
+                    || name == Syntax::FAKE_TYPE
                     || name == Syntax::SOLVER_TYPE
         )
     {

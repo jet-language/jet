@@ -2183,6 +2183,28 @@ impl<'a> Interp<'a> {
                 )?;
                 return Ok(value);
             }
+            (
+                CtValue::Struct { type_name, .. },
+                method @ ("locale" | "name" | "email" | "host" | "address"),
+            ) if type_name == crate::Syntax::FAKE_TYPE => {
+                if method != "locale" && !matches!(receiver, Expr::Ident(..) | Expr::Field(..)) {
+                    return Err(unsupported("Fake method on a temporary value", span));
+                }
+                let value = super::super::core_calls::apply_fake_method(
+                    &mut recv,
+                    method,
+                    &argv,
+                    span,
+                )?;
+                if method != "locale" {
+                    self.write_back(
+                        receiver,
+                        recv,
+                        scope,
+                    )?;
+                }
+                return Ok(value);
+            }
             // D-SOLVER-LIB1=A: `solver.require(ok)` records a Bool constraint in place.
             (CtValue::Struct { type_name, .. }, "require")
                 if type_name == crate::Syntax::SOLVER_TYPE =>

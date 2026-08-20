@@ -1358,6 +1358,7 @@ fn push_corelib_prelude_body(
     out.push_str(include_str!("../Prelude/CoreLib/Top/Solver.rs"));
     out.push_str(include_str!("../Prelude/Core/SeededRandom.rs"));
     out.push_str(include_str!("../Prelude/CoreLib/Top/MathRandomTime.rs"));
+    out.push_str(include_str!("../Prelude/CoreLib/Top/FakeData.rs"));
 
     if needs_email {
         out.push_str(include_str!("../Prelude/CoreLib/Email.rs"));
@@ -4421,6 +4422,30 @@ fn push_package_edition(out: &mut String, bundle: &ProgramBundle) {
     out.push_str(&format!("const __JET_PACKAGE_EDITION: u16 = {edition_year};\n\n"));
 }
 
+// D-CONFIG-ENV1: `Secret` is a bridge type, so its shared codec impl belongs
+// in the generated root only when this bundle actually links the crypto bridge.
+// Do not put this in the generic cached runtime: unrelated FFI links have no
+// `Secret` type.
+fn push_secret_decode_impl(out: &mut String, bundle: &ProgramBundle, link: Option<&FfiLink>) {
+    let Some(link) = link else { return };
+    if !core_usage_matches(
+        &bundle.used_core,
+        &[
+            "core.crypto",
+            "core.crypto.expert",
+            "core.crypto.random",
+            "core.crypto.vault",
+            "core.crypto.uuid",
+        ],
+    ) {
+        return;
+    }
+    out.push_str(&format!(
+        "impl __jet_Decode for {}::Secret {{\n    fn jet_decode(tree: &jet_std::DataTree) -> Result<Self, Vec<jet_std::FieldError>> {{\n        let text = <String as __jet_Decode>::jet_decode(tree)?;\n        Ok({}::jet_crypto_secret_from_text_impl(text))\n    }}\n}}\nimpl JetShow for {}::Secret {{ fn jet_show(&self) -> String {{ \"[REDACTED]\".to_string() }} }}\nimpl JetDebug for {}::Secret {{ fn jet_debug(&self) -> String {{ \"[REDACTED]\".to_string() }} }}\nimpl JetDisplay for {}::Secret {{ fn jet_display(&self) -> String {{ \"[REDACTED]\".to_string() }} }}\n",
+        link.crate_name, link.crate_name, link.crate_name, link.crate_name, link.crate_name
+    ));
+}
+
 pub fn emit_bundle(bundle: &ProgramBundle, _mode: CompileMode, link: Option<&FfiLink>) -> String {
     emit_bundle_dbg(bundle, link, false, Syntax::OSTarget::host())
 }
@@ -4468,6 +4493,7 @@ pub fn emit_bundle_dbg(
     push_core_runtime(&mut out, bundle, false);
     out.push_str(CACHED_RUNTIME_END);
     out.push('\n');
+    push_secret_decode_impl(&mut out, bundle, link);
 
     let import_mods = import_mod_map(bundle, bundle.entry);
     let extern_funcs = bundle_extern_funcs(bundle);
@@ -4743,6 +4769,7 @@ fn emit_bundle_tests_cov_inner(
     push_core_runtime(&mut out, bundle, true);
     out.push_str(CACHED_RUNTIME_END);
     out.push('\n');
+    push_secret_decode_impl(&mut out, bundle, link);
 
     let import_mods = import_mod_map(bundle, bundle.entry);
     let extern_funcs = bundle_extern_funcs(bundle);
@@ -5022,6 +5049,7 @@ pub fn emit_bundle_fuzz(
     push_core_runtime(&mut out, bundle, true);
     out.push_str(CACHED_RUNTIME_END);
     out.push('\n');
+    push_secret_decode_impl(&mut out, bundle, link);
 
     let import_mods = import_mod_map(bundle, bundle.entry);
     let extern_funcs = bundle_extern_funcs(bundle);
@@ -5346,6 +5374,7 @@ fn emit_bundle_benches_inner(
     push_core_runtime(&mut out, bundle, true);
     out.push_str(CACHED_RUNTIME_END);
     out.push('\n');
+    push_secret_decode_impl(&mut out, bundle, link);
 
     let import_mods = import_mod_map(bundle, bundle.entry);
     let extern_funcs = bundle_extern_funcs(bundle);

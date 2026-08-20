@@ -91,6 +91,7 @@ pub use Methods::{
     display_core_pure_value, eval_regex_replace_all_with,
 };
 pub use Methods::{apply_seeded_rng_method, apply_seeded_rng_method_with_type};
+pub(crate) use Methods::apply_fake_method;
 #[doc(hidden)]
 pub use Methods::{
     eval_build_time_io, eval_net_fetch, is_tier2_core_call, vault_comptime_denied,

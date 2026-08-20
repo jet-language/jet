@@ -101,6 +101,76 @@ pub(crate) fn pool_field_ty_hint(e: &Expr, cx: &Cx, env: &LowerEnv) -> Option<Ty
     struct_field_type(cx, &elem_ty, field)
 }
 
+/// The declared type of a struct-FIELD receiver (`file.relative`,
+/// `self.cfg.name`) — the one receiver shape `tir_recv_jet_ty` leaves
+/// unresolved. Field reads nest, so a base that is itself a field resolves
+/// through the same two steps. Sibling of `pool_field_ty_hint` above and for the
+/// same reason: `tir_recv_jet_ty` has no `cx` with which to read a field's
+/// declared type.
+fn declared_field_ty(e: &Expr, cx: &Cx, env: &LowerEnv) -> Option<Type> {
+    match e {
+        Expr::Paren(inner, _) => declared_field_ty(inner, cx, env),
+        Expr::Field(base, field, _) => {
+            let base_ty =
+                tir_recv_jet_ty(base, env).or_else(|| declared_field_ty(base, cx, env))?;
+            struct_field_type(cx, &base_ty, field)
+        }
+        _ => None,
+    }
+}
+
+/// The receiver type the built-in table dispatches on.
+///
+/// `tir_recv_jet_ty` answers `None` for a struct field read. The table is
+/// receiver-TYPED, so that `None` does not read there as "unknown" — it reads as
+/// "take the List surface". So `file.relative.replace("\\", "/")` on a `String`
+/// field lowered to `jet_list_replace(&String, String, String)` (which wants
+/// `&[T]`, `i64`, `T`) and rustc was handed Jet's own ill-typed output, an
+/// internal compiler error by I2, never a user diagnostic. Every name the String
+/// and List surfaces share had the same hole — `replace`, `len`, `index_of`,
+/// `last_index_of`, `slice`, `count`, `copy`, `equal`, `reverse`, `split`,
+/// `split_once`, `rsplit`, `repeat`, `compare`, `concat`, `try_push`, `matches`,
+/// `match`, `remove_prefix`, `remove_suffix`, `to_int`, `to_float`, `to_title`,
+/// `capitalize`, `swapcase`, `normalize`, `is_lower`, `is_upper`, `is_ascii`,
+/// `is_alphabetic`, `is_numeric`, `is_whitespace` — plus every Map/Set/Rank/
+/// Queue/Tally/LRU/Bytes/Ordering arm the same `rty` gates. This closes it once,
+/// at the dispatch, instead of one arm at a time. Same class as card 2021 (a core
+/// record's field TYPES were not restated, so print picked the integer accessor
+/// for a `String`); one level up, because here the field's type is never asked
+/// for at all.
+///
+/// Sema already resolved this receiver — it type-checked the call against
+/// `Collections::builtin_method_arg_types(String, "replace")` — it just does not
+/// persist the type: a builtin's `recv_type` stays `None`, and that `None` is the
+/// subset gate's own key. So the field type is re-read from the DECLARING tables
+/// (`struct_field_type`: user structs, then every core record), and is trusted
+/// ONLY when the same builtin table sema used has a row for `(that type, method,
+/// arity)`. A receiver whose resolved field type does not carry the method — an
+/// unsubstituted struct type parameter, say — keeps the legacy `None` and the
+/// fallback arm it selects. So this can only ever swap a mis-typed op for the
+/// typed one; it cannot re-route a receiver the table does not recognize.
+///
+/// Deliberately NOT folded into `tir_recv_jet_ty`: its other callers read that
+/// partiality as a fact (the for-in `lines` split recognizes `child.stdout` by
+/// its BASE, the mutable-place hint, the view-owner peeks), and this is the one
+/// place a receiver type becomes an op.
+fn builtin_recv_ty(
+    receiver: &Expr,
+    method: &str,
+    nargs: usize,
+    cx: &Cx,
+    env: &LowerEnv,
+) -> Option<Type> {
+    if let Some(ty) = tir_recv_jet_ty(receiver, env) {
+        return Some(ty);
+    }
+    let ty = crate::Codegen::TIR::builtin_dispatch_ty(declared_field_ty(receiver, cx, env)?);
+    if crate::Collections::builtin_method_return(&ty, method, nargs, false).is_some() {
+        return Some(ty);
+    }
+    None
+}
+
 /// D-MEM1 stage S5: lower a `Binding.string_view` init (`s.trim()` /
 /// `s.after(sep)` / `s.before(sep)`) to the borrowed `&str`-returning
 /// `TBuiltinOp::{TrimView,AfterView,BeforeView}` — the zero-copy sibling of
@@ -137,14 +207,15 @@ pub(super) fn lower_string_view_init(init: &Expr, cx: &Cx, env: &mut LowerEnv) -
 }
 
 /// c109 Phase 9: resolve the built-in method op from the method name, arg count, and
-/// the receiver's resolved type — reproducing the name+`rty` dispatch exactly.
-/// The Map-vs-List branch
-/// (`insert`/`remove`/`get`) and the String-vs-list branch (`len`) come from
-/// `tir_recv_jet_ty` (matching the AST's `rty`). Unknown receivers retain the
-/// AST's legacy list fallback, while known non-list receivers stay available to
-/// their typed lowering paths. Returns `None` for any name/shape the TIR does not
-/// lower (the caller stays on the AST path — the gate already excluded these, so
-/// this is a defensive belt).
+/// the receiver's resolved type. The Map-vs-List branch (`insert`/`remove`/`get`)
+/// and the String-vs-List branch (`len`/`replace`/…) both come from `rty`, so the
+/// receiver type has to be the real one: see `builtin_recv_ty` above for why a
+/// struct-field receiver used to arrive here untyped and take the List surface.
+/// A receiver no table row claims still retains the legacy list fallback (a bare
+/// list literal is exactly that: `[1, 2, 1].replace(1, 9)` —
+/// examples/features/collections/list_surface.jet). Returns `None` for any
+/// name/shape the TIR does not lower (the gate already excluded these, so this is
+/// a defensive belt).
 pub(crate) fn resolve_builtin_op(
     receiver: &Expr,
     method: &str,
@@ -154,7 +225,7 @@ pub(crate) fn resolve_builtin_op(
     env: &LowerEnv,
     cx: &Cx,
 ) -> Option<TBuiltinOp> {
-    let rty = tir_recv_jet_ty(receiver, env);
+    let rty = builtin_recv_ty(receiver, method, args.len(), cx, env);
     if matches!(&rty, Some(Type::Named(name)) if name == crate::Syntax::TYPE_ORDERING) {
         return match (method, args.len()) {
             ("then", 1) => Some(TBuiltinOp::OrderingThen),

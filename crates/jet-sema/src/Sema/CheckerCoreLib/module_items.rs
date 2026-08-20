@@ -43,6 +43,7 @@ pub fn core_module_items(module: &str) -> Vec<String> {
         ],
         "core.sys" => &[
             "get",
+            "decode",
             "set",
             "unset",
             "vars",
@@ -552,6 +553,7 @@ pub fn core_module_items(module: &str) -> Vec<String> {
             "corpus",
             "fake_clock",
             "fake_rng",
+            "fake_data",
             "test_suite",
             "bench_suite",
         ],
@@ -668,6 +670,7 @@ pub fn core_module_items(module: &str) -> Vec<String> {
         ],
         "core.text.fmt" => &[
             "number",
+            "pretty",
             "decimal",
             "percent",
             "bytes",
@@ -885,6 +888,7 @@ pub fn core_module_items(module: &str) -> Vec<String> {
             "compile",
             "compile_with",
             "is_match",
+            "full_match",
             "match",
             "find",
             "find_all",

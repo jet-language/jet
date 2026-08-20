@@ -138,6 +138,41 @@ fn run() {
     assert_eq!(stdout, "42\n7\n");
 }
 
+/// c109 (builtin-name collision, receiver side) — the sibling of the test above.
+/// The builtin table is receiver-TYPED, but the receiver-type resolver answered
+/// `None` for a struct FIELD read, and a `None` there does not read as "unknown",
+/// it reads as "take the List surface". So `entry.relative.replace(a, b)` on a
+/// `String` field lowered to `jet_list_replace(&String, String, String)` — which
+/// wants `&[T]`, `i64`, `T` — and rustc was handed Jet's own ill-typed output,
+/// an internal compiler error by I2 (found by tests/agent_workloads
+/// repository-marker-scan). Every name the String and List surfaces share had the
+/// same hole, `len` included. The fix reads the field's DECLARED type
+/// (`builtin_recv_ty` / `declared_field_ty`, TIR/lower/builtins.rs), so a String
+/// field takes the String arm, a list field keeps the index/element arm, and a
+/// receiver no table row claims (a bare list literal) keeps the legacy list
+/// fallback. All three shapes, and all three tiers, in one snippet.
+#[test]
+fn builtin_dispatch_reads_the_field_receiver_type() {
+    let src = "\
+struct ScanEntry {
+    relative: String
+    marks: [Int]
+}
+fn run() {
+    entry :: ScanEntry.{ relative: \"a-b-c\", marks: [1, 2, 1] }
+    print(entry.relative.replace(\"-\", \"/\"))
+    print(entry.relative.len())
+    print(entry.marks.replace(1, 9))
+    print([1, 2, 1].replace(1, 9))
+}
+";
+    assert_tiers_agree(
+        "tir_builtin_field_receiver_dispatch",
+        src,
+        "a/b/c\n5\n[1, 9, 1]\n[1, 9, 1]\n",
+    );
+}
+
 /// c109 (`is_empty` Bool fix): `Collections::*_method_return` typed `is_empty` as
 /// `Int`, so `e := xs.is_empty()` emitted `let e: i64 = (…).is_empty()` (bool ≠ i64
 /// → rustc E0308) and `if xs.is_empty()` was E0110 at sema. The fix returns `Bool`;

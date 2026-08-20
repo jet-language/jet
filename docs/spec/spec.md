@@ -23,7 +23,7 @@ Vocabulary: [Jet vocabulary](vocabulary.md).
 - String literals: `"..."` on a single line. Escapes (S20): `\n` `\t` `\"`
   `\\` only; anything else after `\` is E0001. Interpolation (S8): `{expr}`
   embeds any printable expression; format selectors use the closed `:` rail
-  (`{value:Debug}`, `{value:Fixed(2)}`, `{value:Unit(name|bare)}`); `{{` and
+  (`{value:Debug}`, `{value:Pretty}`, `{value:Fixed(2)}`, `{value:Unit(name|bare)}`); `{{` and
   `}}` write literal braces; a lone `{` or `}` is E0001.
 - Multi-line strings (S70): `"""…"""` span multiple lines with the same escapes
   and interpolation. The newline right after the opening `"""` and the one right

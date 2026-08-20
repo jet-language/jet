@@ -259,6 +259,7 @@ pub const TRAIT_DRIVER: &str = "Driver";
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum InterpolationSelectorKind {
     Debug,
+    Pretty,
     Fixed,
     Unit,
 }
@@ -284,6 +285,11 @@ pub const INTERPOLATION_SELECTORS: &[InterpolationSelector] = &[
     InterpolationSelector {
         name: "Debug",
         kind: InterpolationSelectorKind::Debug,
+        arguments: InterpolationSelectorArguments::None,
+    },
+    InterpolationSelector {
+        name: "Pretty",
+        kind: InterpolationSelectorKind::Pretty,
         arguments: InterpolationSelectorArguments::None,
     },
     InterpolationSelector {
@@ -332,7 +338,7 @@ mod interpolation_selector_tests {
                 .iter()
                 .map(|selector| selector.name)
                 .collect::<Vec<_>>(),
-            vec!["Debug", "Fixed", "Unit"]
+            vec!["Debug", "Pretty", "Fixed", "Unit"]
         );
         assert!(matches!(
             interpolation_selector("Unit").map(|selector| selector.arguments),

@@ -870,6 +870,14 @@
         pub state: u64,
     }
 
+    // D-TESTDATA1: deterministic fake-data capability. `locale` is a closed
+    // code: 0 = en, 1 = de. The Prelude owns all generation semantics.
+    #[derive(Clone, Debug, PartialEq)]
+    pub struct Fake {
+        pub state: u64,
+        pub locale: u8,
+    }
+
     // D-SOLVER-LIB1=A: explicit finite solver state. This first slice records
     // ordinary Bool constraints in insertion order; no hidden backtracking.
     #[derive(Clone, Debug, PartialEq)]
@@ -2587,6 +2595,11 @@
     impl super::JetShow for Rng {
         fn jet_show(&self) -> String {
             format!("Rng {{ .. }}")
+        }
+    }
+    impl super::JetShow for Fake {
+        fn jet_show(&self) -> String {
+            format!("Fake {{ locale: {} }}", if self.locale == 1 { "de" } else { "en" })
         }
     }
     impl super::JetShow for Solver {

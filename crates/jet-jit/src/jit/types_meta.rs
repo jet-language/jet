@@ -140,7 +140,12 @@ pub(crate) fn init_clif_ty(init: &TExpr, meta: &JitMeta<'_>) -> Result<types::Ty
             | THandleOp::RngSample
             | THandleOp::RngWeightedPick
             | THandleOp::RngPick
-            | THandleOp::RngShuffle => return Ok(types::I64),
+            | THandleOp::RngShuffle
+            | THandleOp::FakeLocale
+            | THandleOp::FakeName
+            | THandleOp::FakeEmail
+            | THandleOp::FakeHost
+            | THandleOp::FakeAddress => return Ok(types::I64),
             THandleOp::SketchMethod { method, .. } if method == "quantile" => {
                 return Ok(types::F64);
             }
@@ -1378,6 +1383,7 @@ static CORE_STRUCT_FIELDS: &[(&[&str], &[&str])] = &[
     (&["LogField"], &["key", "value", "kind", "redacted"]),
     (&["LogSpan"], &["id", "name"]),
     (&["Rng"], &["state"]),
+    (&["Fake"], &["state", "locale"]),
     (&["TestSuite", "BenchSuite"], &["iteration", "result"]),
     (
         &["TLSCertificate"],

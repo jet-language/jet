@@ -2096,7 +2096,7 @@ diagnostic.
 
 | What | Why | Fix |
 |------|-----|-----|
-| Unknown interpolation selector `:…`. | String interpolation supports a closed selector set: `:Debug`, `:Fixed(n)`, `:Unit(name)`, and `:Unit(bare)`. | Write `{value:Debug}`, `{value:Fixed(2)}`, `{value:Unit(name)}`, `{value:Unit(bare)}`, or `{value}`. |
+| Unknown interpolation selector `:…`. | String interpolation supports a closed selector set: `:Debug`, `:Pretty`, `:Fixed(n)`, `:Unit(name)`, and `:Unit(bare)`. | Write `{value:Debug}`, `{value:Pretty}`, `{value:Fixed(2)}`, `{value:Unit(name)}`, `{value:Unit(bare)}`, or `{value}`. |
 
 ### E0915 — No Display implementation (D-DISPLAY-SHAPE)
 

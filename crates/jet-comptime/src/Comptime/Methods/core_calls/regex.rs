@@ -24,6 +24,7 @@ pub(in super::super::super) fn apply_regex_method(
     call_args.extend_from_slice(args);
     Some(match method {
         "is_match" => regex_is_match(call_args, span),
+        "full_match" => regex_full_match(call_args, span),
         "find" => regex_find(call_args, span),
         "find_all" => regex_find_all(call_args, span),
         "matches" => regex_matches(call_args, span),
@@ -126,6 +127,16 @@ pub(super) fn regex_is_match(args: Vec<CtValue>, span: Span) -> Result<CtValue, 
         span,
     )?;
     Ok(CtValue::Bool(re.is_match(text)))
+}
+
+pub(super) fn regex_full_match(args: Vec<CtValue>, span: Span) -> Result<CtValue, Diagnostic> {
+    let re = regex_pattern(&args, span)?;
+    let text = as_string(
+        args.get(1)
+            .ok_or_else(|| unsupported("regex.full_match: missing text argument", span))?,
+        span,
+    )?;
+    Ok(CtValue::Bool(re.full_match(text)))
 }
 
 pub(super) fn regex_find(args: Vec<CtValue>, span: Span) -> Result<CtValue, Diagnostic> {

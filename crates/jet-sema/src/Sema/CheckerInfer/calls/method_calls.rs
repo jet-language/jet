@@ -3310,7 +3310,7 @@ impl<'a> Checker<'a> {
                     ("Regex", "count", 1) => {
                         self.expect_core_arg(method, 0, &Type::String, &mut args[0]);
                     }
-                    ("Regex", "is_match" | "match" | "find" | "find_all" | "matches" | "split", 1) => {
+                    ("Regex", "is_match" | "full_match" | "match" | "find" | "find_all" | "matches" | "split", 1) => {
                         self.expect_core_arg(method, 0, &Type::String, &mut args[0]);
                     }
                     ("Regex", "replace" | "replace_all", 2) => {
@@ -3806,7 +3806,7 @@ impl<'a> Checker<'a> {
                 }
                 if matches!(
                     handle_ty.as_str(),
-                    "Clock" | "Rng" | "Stopwatch" | "Duration" | "Solver" | "TestSuite" | "BenchSuite"
+                    "Clock" | "Rng" | "Fake" | "Stopwatch" | "Duration" | "Solver" | "TestSuite" | "BenchSuite"
                 ) {
                     if let Some(ret) =
                         Collections::builtin_method_return(&recv_ty, method, args.len(), false)

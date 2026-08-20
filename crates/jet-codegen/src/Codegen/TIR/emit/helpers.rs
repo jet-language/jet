@@ -209,6 +209,9 @@ pub(crate) fn emit_tir_str(parts: &[TStrPart], cx: &Cx) -> String {
                 let method = match format {
                     crate::AST::StrFormat::Display => "jet_display",
                     crate::AST::StrFormat::Debug => "jet_debug",
+                    crate::AST::StrFormat::Pretty => {
+                        unreachable!("Pretty interpolation lowers to core.text.fmt.pretty")
+                    }
                     crate::AST::StrFormat::Fixed(_) => {
                         unreachable!("Fixed interpolation lowers to core.text.fmt.decimal")
                     }

@@ -2119,6 +2119,10 @@ impl<'a> Checker<'a> {
                     crate::Syntax::InterpolationSelectorKind::Debug,
                 )
                 .name;
+                let pretty_selector = crate::Syntax::interpolation_selector_for_kind(
+                    crate::Syntax::InterpolationSelectorKind::Pretty,
+                )
+                .name;
                 let fixed_selector = crate::Syntax::interpolation_selector_for_kind(
                     crate::Syntax::InterpolationSelectorKind::Fixed,
                 )
@@ -2236,13 +2240,18 @@ impl<'a> Checker<'a> {
                                         }
                                     }
                                 }
-                                crate::AST::StrFormat::Debug => {
+                                crate::AST::StrFormat::Debug | crate::AST::StrFormat::Pretty => {
+                                    let selector = match fmt {
+                                        crate::AST::StrFormat::Debug => debug_selector,
+                                        crate::AST::StrFormat::Pretty => pretty_selector,
+                                        _ => unreachable!("debug selector family"),
+                                    };
                                     if !is_debuggable(&t, self.registry, self.trait_reg) {
                                         if crate::Sema::Diagnostics::is_secret_bearing_crypto_type(&t) {
                                             self.diags.push(Diagnostic::error(
                                                 "E0112",
                                                 format!(
-                                                    "secret-bearing `{}` cannot use `:{debug_selector}`",
+                                                    "secret-bearing `{}` cannot use `:{selector}`",
                                                     t.name()
                                                 ),
                                                 "Debug output could copy cryptographic secret material into logs or diagnostics".to_string(),
@@ -2251,12 +2260,12 @@ impl<'a> Checker<'a> {
                                             ));
                                             continue;
                                         }
-                                        self.diags.push(Diagnostic::error(
-                                            "E0112",
-                                            format!(
-                                                "{} can't be shown with :{debug_selector} yet",
-                                                t.show()
-                                            ),
+                                            self.diags.push(Diagnostic::error(
+                                                "E0112",
+                                                format!(
+                                                    "{} can't be shown with :{selector} yet",
+                                                    t.show()
+                                                ),
                                             "debug interpolation needs a debuggable value"
                                                 .to_string(),
                                             "implement `Debug` or use a debuggable part"
@@ -3817,6 +3826,17 @@ impl<'a> Checker<'a> {
         ty
     }
 
+    fn list_elem_needs_expected_type(elem: &Expr) -> bool {
+        match elem {
+            Expr::StructLit { inferred: true, .. }
+            | Expr::TypedLit { head: None, .. } => true,
+            Expr::Paren(inner, _) | Expr::Unary(crate::AST::UnOp::Neg, inner, _) => {
+                Self::list_elem_needs_expected_type(inner)
+            }
+            _ => false,
+        }
+    }
+
     pub(crate) fn infer_list_lit(&mut self, elems: &mut [Expr], span: Span) -> Option<Type> {
         for elem in elems.iter() {
             self.reject_fixed_storage(elem, "be stored in a list");
@@ -3983,15 +4003,18 @@ impl<'a> Checker<'a> {
             self.check_list_view_element_aliases(elems, &expected_inner);
             return Some(Type::List(expected_inner));
         }
-        let mut elem_types = Vec::new();
-        for e in elems.iter_mut() {
-            match e {
+        let mut elem_types = vec![None; elems.len()];
+        let mut deferred = Vec::new();
+        for (index, e) in elems.iter_mut().enumerate() {
+            if Self::list_elem_needs_expected_type(e) {
+                deferred.push(index);
+                continue;
+            }
+            let ty = match e {
                 Expr::Spread(inner, spread_span) => {
                     let t = self.infer_owned_list_element(inner);
                     match t {
-                        Some(Type::List(spread_elem)) => {
-                            elem_types.push((*spread_elem).clone());
-                        }
+                        Some(Type::List(spread_elem)) => Some((*spread_elem).clone()),
                         Some(other) => {
                             self.diags.push(Diagnostic::error(
                                 "E1311",
@@ -4001,27 +4024,38 @@ impl<'a> Checker<'a> {
                                 "spread a `[T]` value here".to_string(),
                                 Some(*spread_span),
                             ));
+                            None
                         }
-                        None => {}
+                        None => None,
                     }
                 }
-                _ => {
-                    if let Some(t) = self.infer_owned_list_element(e) {
-                        elem_types.push(t);
-                    }
-                }
-            }
+                _ => self.infer_owned_list_element(e),
+            };
+            elem_types[index] = ty;
         }
         // D-NUMJOIN1=A: numeric elements widen to one element type.
-        let mut first = elem_types.first()?.clone();
-        for t in elem_types.iter().skip(1) {
+        let Some(mut first) = elem_types.iter().flatten().next().cloned() else {
+            for index in deferred {
+                elem_types[index] = self.infer_owned_list_element(&mut elems[index]);
+            }
+            return None;
+        };
+        for t in elem_types.iter().flatten().skip(1) {
             if *t != first {
                 if let Some(joined) = first.numeric_join(t) {
                     first = joined;
                 }
             }
         }
-        for (i, (elem, t)) in elems.iter().zip(&elem_types).enumerate() {
+        // D-DOTCTOR2: a bare dot construction can use an element type supplied
+        // by another list item, regardless of which item appears first.
+        for index in deferred {
+            let saved = self.expected_type.replace(first.clone());
+            elem_types[index] = self.infer_owned_list_element(&mut elems[index]);
+            self.expected_type = saved;
+        }
+        for (i, (elem, ty)) in elems.iter().zip(&elem_types).enumerate() {
+            let Some(t) = ty else { continue };
             let spread_needs_conversion = matches!(elem, Expr::Spread(..)) && *t != first;
             if spread_needs_conversion
                 || (*t != first && t.numeric_widening_to(&first).is_none())
@@ -4041,8 +4075,10 @@ impl<'a> Checker<'a> {
             }
         }
         for (elem, source) in elems.iter_mut().zip(&elem_types) {
-            if !matches!(elem, Expr::Spread(..)) {
-                self.widen_numeric_expr(elem, source, &first);
+            if let Some(source) = source {
+                if !matches!(elem, Expr::Spread(..)) {
+                    self.widen_numeric_expr(elem, source, &first);
+                }
             }
         }
         self.check_list_view_element_aliases(elems, &first);

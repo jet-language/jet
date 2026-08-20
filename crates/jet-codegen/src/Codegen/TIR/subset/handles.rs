@@ -249,6 +249,11 @@ pub(crate) fn handle_method_op(handle: &str, method: &str, nargs: usize) -> Opti
         ("Rng", "weighted_pick", 2) => THandleOp::RngWeightedPick,
         ("Rng", "sample", 2) => THandleOp::RngSample,
         ("Rng", "shuffle", 1) => THandleOp::RngShuffle,
+        ("Fake", "locale", 1) => THandleOp::FakeLocale,
+        ("Fake", "name", 0) => THandleOp::FakeName,
+        ("Fake", "email", 0) => THandleOp::FakeEmail,
+        ("Fake", "host", 0) => THandleOp::FakeHost,
+        ("Fake", "address", 0) => THandleOp::FakeAddress,
         ("Solver", "require", 1) => THandleOp::SolverRequire,
         ("Solver", "failure_count", 0) => THandleOp::SolverFailureCount,
         ("Solver", "status", 0) => THandleOp::SolverStatus,
@@ -427,7 +432,7 @@ pub(crate) fn handle_method_op(handle: &str, method: &str, nargs: usize) -> Opti
                 method: method.to_string(),
             }
         }
-        ("Regex", "is_match" | "match" | "find" | "find_all" | "matches" | "split" | "count", 1) => {
+        ("Regex", "is_match" | "full_match" | "match" | "find" | "find_all" | "matches" | "split" | "count", 1) => {
             THandleOp::RegexMethod {
                 kind: "Regex".to_string(),
                 method: method.to_string(),
@@ -513,7 +518,7 @@ pub(crate) fn handle_method_op(handle: &str, method: &str, nargs: usize) -> Opti
     };
     if matches!(
         handle,
-        Syntax::CLOCK_TYPE | Syntax::RNG_TYPE | Syntax::SOLVER_TYPE
+        Syntax::CLOCK_TYPE | Syntax::RNG_TYPE | Syntax::FAKE_TYPE | Syntax::SOLVER_TYPE
     ) {
         let emitted_borrow = match &op {
             THandleOp::ClockTick
@@ -532,6 +537,10 @@ pub(crate) fn handle_method_op(handle: &str, method: &str, nargs: usize) -> Opti
             | THandleOp::RngWeightedPick
             | THandleOp::RngSample
             | THandleOp::RngShuffle
+            | THandleOp::FakeName
+            | THandleOp::FakeEmail
+            | THandleOp::FakeHost
+            | THandleOp::FakeAddress
             | THandleOp::SolverRequire => {
                 crate::Collections::BuiltinReceiverBorrow::EagerWrite
             }
@@ -660,7 +669,7 @@ pub(crate) fn handle_method_return_ty(
             ("Regex", "pattern" | "source" | "flags" | "options", 0) => Some(Some(Type::String)),
             ("Regex", "names", 0) => Some(Some(Type::List(Box::new(Type::String)))),
             ("Regex", "count", 1) => Some(Some(Type::Int)),
-            ("Regex", "is_match", 1) => Some(Some(Type::Bool)),
+            ("Regex", "is_match" | "full_match", 1) => Some(Some(Type::Bool)),
             ("Regex", "match", 1) => Some(Some(Type::Option(Box::new(Type::Named(
                 "Match".to_string(),
             ))))),

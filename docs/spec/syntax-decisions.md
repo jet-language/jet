@@ -7388,3 +7388,9 @@ heads, RAW1's head-body lexing, SINK1's `marker … on [.Text]` form, and UNDO1'
 regeneration, formatter round-trip, and snapshot blessing — #1814 for the three
 heads, #1815 for head-body escapes, #1816 for declared text heads, #1820 for
 `#Undo`. This slate adds no spelling of its own.
+
+**2026-08-14 — D-FMT-PRETTY1=A** *(card #1966; ratified 2026-08-14)*: `:Pretty`
+rides the existing interpolation selector rail beside `:Debug`, expands canonical
+Debug text with two-space indentation and one field or element per line, and keeps
+output deterministic and width-independent. The selector and `core.text.fmt.pretty`
+call share one Prelude formatter.

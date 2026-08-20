@@ -96,6 +96,16 @@ impl RegexLite {
         self.find(text).is_some()
     }
 
+    pub(super) fn full_match(&self, text: &str) -> bool {
+        let state = State {
+            pos: 0,
+            caps: vec![None; self.groups + 1],
+        };
+        match_node(&self.root, text, state)
+            .into_iter()
+            .any(|found| found.pos == text.len())
+    }
+
     pub(super) fn find(&self, text: &str) -> Option<MatchLite> {
         self.find_from(text, 0)
     }

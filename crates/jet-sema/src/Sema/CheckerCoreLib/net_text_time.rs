@@ -507,6 +507,7 @@ pub fn regex_method_return(
             "names" if argc == 0 => Some(Some(Type::List(Box::new(Type::String)))),
             "count" if argc == 1 => Some(Some(Type::Int)),
             "is_match" if argc == 1 => Some(Some(Type::Bool)),
+            "full_match" if argc == 1 => Some(Some(Type::Bool)),
             "match" if argc == 1 => Some(Some(Type::Option(Box::new(Type::Named(
                 "Match".to_string(),
             ))))),

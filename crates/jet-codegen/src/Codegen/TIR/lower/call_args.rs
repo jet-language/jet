@@ -488,53 +488,61 @@ pub(crate) fn ast_arg_is_named_fn_value(e: &Expr, cx: &Cx, env: &LowerEnv) -> bo
     false
 }
 
-/// c109 Phase 9: reproduce codegen's `expr_jet_ty(receiver, env)` for a built-in
-/// method receiver, using the TIR
-/// lowering env's slot types. This MUST match `expr_jet_ty` bit-for-bit (incl. its
-/// `None` results) because the Map-vs-List-vs-String emit branch in
-/// `emit_builtin_method` is keyed on it: a divergence here flips a branch and breaks
-/// byte-parity. Only `Ident` (via its slot type), `Str`/`Char`, and chained
-/// `chars`/`split`/other method calls resolve; everything else (notably a struct
-/// `Field` read) is `None` — exactly as `expr_jet_ty` does, so a `None`-typed
-/// receiver lands on the AST's default branch (the list/else arm).
-pub(crate) fn tir_recv_jet_ty(e: &Expr, env: &LowerEnv) -> Option<Type> {
-    fn dispatch_ty(ty: Type) -> Type {
-        // D-TAINT1/D-TAG-SURFACE1: most `Type::Tagged` markers (the terminal
-        // capability report's own D-PROCESS-SESSION2 tag, `#Input`/other user
-        // taint facts, …) are compile-time-only dataflow facts with no runtime
-        // representation — the same erasure `Expr::Tainted` gets in
-        // `expr_in_subset` (TIR/subset/expressions.rs). Builtin-method
-        // dispatch here must see the real underlying type (String/List/Map/…)
-        // or a tagged receiver's `.split()`/`.get()`/etc. misses the curated
-        // `TBuiltinOp` fast path and falls back to a generic call the JIT
-        // declines to native-compile.
-        //
-        // The compiler-owned exceptions mirror sema's OWN rule at
-        // `infer_method_call` (Sema/CheckerInfer/calls/method_calls.rs,
-        // "Most fact tags are type-transparent"): SharedGuard read/edit and
-        // the crypto nominal tag carry method POLICY, not just a dataflow
-        // fact — `SharedGuard.wait()` dispatches through the tagged type's
-        // own handle-method table, not a generic `TypeName::method` lookup.
-        // Stripping those here misroutes the call and regresses an
-        // already-JIT-covered stem (memory/shared_guard_queue).
-        match ty {
+/// The type a built-in method dispatches on, once compile-time-only tag
+/// wrappers are erased. Shared by `tir_recv_jet_ty` and by `builtin_recv_ty`
+/// (TIR/lower/builtins.rs), which closes this function's struct-`Field` hole for
+/// the builtin table — one tag rule, read the same way from both.
+///
+/// D-TAINT1/D-TAG-SURFACE1: most `Type::Tagged` markers (the terminal
+/// capability report's own D-PROCESS-SESSION2 tag, `#Input`/other user
+/// taint facts, …) are compile-time-only dataflow facts with no runtime
+/// representation — the same erasure `Expr::Tainted` gets in
+/// `expr_in_subset` (TIR/subset/expressions.rs). Builtin-method
+/// dispatch must see the real underlying type (String/List/Map/…)
+/// or a tagged receiver's `.split()`/`.get()`/etc. misses the curated
+/// `TBuiltinOp` fast path and falls back to a generic call the JIT
+/// declines to native-compile.
+///
+/// The compiler-owned exceptions mirror sema's OWN rule at
+/// `infer_method_call` (Sema/CheckerInfer/calls/method_calls.rs,
+/// "Most fact tags are type-transparent"): SharedGuard read/edit and
+/// the crypto nominal tag carry method POLICY, not just a dataflow
+/// fact — `SharedGuard.wait()` dispatches through the tagged type's
+/// own handle-method table, not a generic `TypeName::method` lookup.
+/// Stripping those here misroutes the call and regresses an
+/// already-JIT-covered stem (memory/shared_guard_queue).
+pub(crate) fn builtin_dispatch_ty(ty: Type) -> Type {
+    match ty {
+        Type::Tagged { marker, inner }
+            if matches!(
+                marker,
+                crate::AST::TagMarker::Internal(
+                    crate::AST::InternalTag::SharedGuardRead
+                        | crate::AST::InternalTag::SharedGuardEdit
+                        | crate::AST::InternalTag::CoreCryptoNominal
+                )
+            ) =>
+        {
             Type::Tagged { marker, inner }
-                if matches!(
-                    marker,
-                    crate::AST::TagMarker::Internal(
-                        crate::AST::InternalTag::SharedGuardRead
-                            | crate::AST::InternalTag::SharedGuardEdit
-                            | crate::AST::InternalTag::CoreCryptoNominal
-                    )
-                ) =>
-            {
-                Type::Tagged { marker, inner }
-            }
-            Type::Tagged { inner, .. } => dispatch_ty(*inner),
-            other => other,
         }
+        Type::Tagged { inner, .. } => builtin_dispatch_ty(*inner),
+        other => other,
     }
+}
 
+/// c109 Phase 9: the receiver type of a built-in method call, read off the TIR
+/// lowering env's slot types. Only `Ident` (via its slot type), `Str`/`Char`, and
+/// chained `chars`/`split`/other method calls resolve; everything else (notably a
+/// struct `Field` read) is `None`.
+///
+/// That partiality is load-bearing for the callers that read a `None` as a fact —
+/// the for-in `lines` split (a `child.stdout` receiver is recognized by its BASE),
+/// the mutable-place hint, the view-owner peeks. It is NOT load-bearing for the
+/// builtin TABLE, which is receiver-TYPED: there a `None` silently means "take the
+/// List surface", which is how a `String` field's `.replace(a, b)` reached
+/// `jet_list_replace` (I2). `builtin_recv_ty` (TIR/lower/builtins.rs) closes that
+/// one hole for the dispatch; keep this function as it is.
+pub(crate) fn tir_recv_jet_ty(e: &Expr, env: &LowerEnv) -> Option<Type> {
     fn literal_ty(expr: &Expr) -> Option<Type> {
         match expr {
             Expr::Int(..) => Some(Type::Int),
@@ -562,10 +570,10 @@ pub(crate) fn tir_recv_jet_ty(e: &Expr, env: &LowerEnv) -> Option<Type> {
         Expr::Binary(crate::AST::BinOp::Compare, _, _, _) => Some(Type::Named(
             crate::Syntax::TYPE_ORDERING.to_string(),
         )),
-        Expr::Ident(name, _) => env.ty_of(name).map(dispatch_ty),
+        Expr::Ident(name, _) => env.ty_of(name).map(builtin_dispatch_ty),
         Expr::Str(_, _) => Some(Type::String),
         Expr::Char(_, _) => Some(Type::Char),
-        Expr::TupleLit(_, _, Some(ty)) => Some(dispatch_ty(ty.clone())),
+        Expr::TupleLit(_, _, Some(ty)) => Some(builtin_dispatch_ty(ty.clone())),
         Expr::MethodCall {
             receiver,
             method,
@@ -576,7 +584,7 @@ pub(crate) fn tir_recv_jet_ty(e: &Expr, env: &LowerEnv) -> Option<Type> {
             // `resolved_ret` exists only when sema persisted a result more exact
             // than the generic method table (or another required exact shape).
             if let Some(ty) = resolved_ret {
-                return Some(dispatch_ty(ty.clone()));
+                return Some(builtin_dispatch_ty(ty.clone()));
             }
             if let Expr::Ident(name, _) = receiver.as_ref() {
                 if !env.locals.contains_key(name)
@@ -612,7 +620,7 @@ pub(crate) fn tir_recv_jet_ty(e: &Expr, env: &LowerEnv) -> Option<Type> {
                 if let Some(Some(ret)) =
                     crate::Collections::builtin_method_return(&recv_ty, method, args.len(), false)
                 {
-                    return Some(dispatch_ty(ret));
+                    return Some(builtin_dispatch_ty(ret));
                 }
             }
             if method == "chars" {

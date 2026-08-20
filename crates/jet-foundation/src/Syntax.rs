@@ -210,6 +210,8 @@
 // every type position. `TYPE_INLINE_RANGE` is re-exported from math_layout.
 // D-FMT-INTERP1=A adds `Fixed` to the closed interpolation-selector set:
 // `{value:Fixed(n)}` uses the colon rail and ordinary integer-call parentheses.
+// D-FMT-PRETTY1=A (ratified 2026-08-14, card #1966) adds `Pretty` to the same
+// rail; it expands canonical Debug output with stable two-space indentation.
 // D-FMT-INTERP2=A: trailing `=` in a hole reprints the expression source,
 // then " = ", then the value — `{count=}` → `count = 3`. Composes with
 // selectors: `{count=:Debug}`.
@@ -599,6 +601,8 @@ mod markers;
 pub use markers::*;
 mod highlights;
 pub use highlights::*;
+mod dictionary;
+pub use dictionary::*;
 mod predicates;
 pub use predicates::*;
 

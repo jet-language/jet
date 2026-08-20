@@ -54,6 +54,149 @@ pub fn canonical_program(prog: &Program) -> Vec<u8> {
     canonicalize_generated_loop_labels(&canonical)
 }
 
+/// D-FMT-SIMPLIFY1=A / R3: named and expected-type-inferred struct literals
+/// carry the same fields and differ only in the construction head. The fmt
+/// identity projection intentionally omits that redundant head. Keep this
+/// projection out of public `canonical_program`, whose semantic identity keeps
+/// constructor types distinct; build-cache identity also retains the head.
+fn canonical_simplify_program(prog: &Program) -> Vec<u8> {
+    canonicalize_struct_literal_heads(&canonical_program(prog))
+}
+
+fn canonicalize_struct_literal_heads(canonical: &[u8]) -> Vec<u8> {
+    const MARK: &[u8] = b"StructLit {";
+    let mut out = Vec::with_capacity(canonical.len());
+    let mut copy_from = 0;
+    let mut i = 0;
+    while i + MARK.len() <= canonical.len() {
+        if !canonical[i..].starts_with(MARK) {
+            i += 1;
+            continue;
+        }
+        let Some(end) = debug_node_end(canonical, i + MARK.len() - 1) else {
+            i += MARK.len();
+            continue;
+        };
+        out.extend_from_slice(&canonical[copy_from..i]);
+        out.extend_from_slice(&canonicalize_struct_literal_node(&canonical[i..end]));
+        i = end;
+        copy_from = end;
+    }
+    out.extend_from_slice(&canonical[copy_from..]);
+    out
+}
+
+fn debug_node_end(bytes: &[u8], open: usize) -> Option<usize> {
+    let mut depth = 0usize;
+    let mut quote = None;
+    let mut escaped = false;
+    for (offset, byte) in bytes.iter().enumerate().skip(open) {
+        if let Some(delimiter) = quote {
+            if escaped {
+                escaped = false;
+            } else if *byte == b'\\' {
+                escaped = true;
+            } else if *byte == delimiter {
+                quote = None;
+            }
+            continue;
+        }
+        match *byte {
+            b'"' | b'\'' => quote = Some(*byte),
+            b'{' => depth += 1,
+            b'}' => {
+                depth = depth.checked_sub(1)?;
+                if depth == 0 {
+                    return Some(offset + 1);
+                }
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
+fn canonicalize_struct_literal_node(node: &[u8]) -> Vec<u8> {
+    let Some(open) = node.iter().position(|byte| *byte == b'{') else {
+        return node.to_vec();
+    };
+    let Some(close) = node.len().checked_sub(1) else {
+        return node.to_vec();
+    };
+    let body = &node[open + 1..close];
+    let mut out = Vec::with_capacity(node.len());
+    out.extend_from_slice(&node[..open + 1]);
+    let mut start = 0usize;
+    for end in debug_field_ends(body) {
+        let field = &body[start..end];
+        let colon = field.iter().position(|byte| *byte == b':');
+        if let Some(colon) = colon {
+            let name = field[..colon]
+                .iter()
+                .copied()
+                .filter(|byte| !byte.is_ascii_whitespace())
+                .collect::<Vec<_>>();
+            let replacement: Option<&[u8]> = match name.as_slice() {
+                b"type_name" => Some(b" \"\""),
+                b"type_args" => Some(b" []"),
+                b"import_ns" => Some(b" None"),
+                b"inferred" => Some(b" true"),
+                _ => None,
+            };
+            if let Some(replacement) = replacement {
+                out.extend_from_slice(&field[..colon + 1]);
+                out.extend_from_slice(replacement);
+                if field.last() == Some(&b',') {
+                    out.push(b',');
+                }
+                start = end;
+                continue;
+            }
+        }
+        out.extend_from_slice(field);
+        start = end;
+    }
+    out.extend_from_slice(&body[start..]);
+    out.extend_from_slice(&node[close..]);
+    out
+}
+
+fn debug_field_ends(body: &[u8]) -> Vec<usize> {
+    let mut ends = Vec::new();
+    let mut braces = 0usize;
+    let mut brackets = 0usize;
+    let mut parens = 0usize;
+    let mut quote = None;
+    let mut escaped = false;
+    for (index, byte) in body.iter().enumerate() {
+        if let Some(delimiter) = quote {
+            if escaped {
+                escaped = false;
+            } else if *byte == b'\\' {
+                escaped = true;
+            } else if *byte == delimiter {
+                quote = None;
+            }
+            continue;
+        }
+        match *byte {
+            b'"' | b'\'' => quote = Some(*byte),
+            b'{' => braces += 1,
+            b'}' => braces = braces.saturating_sub(1),
+            b'[' => brackets += 1,
+            b']' => brackets = brackets.saturating_sub(1),
+            b'(' => parens += 1,
+            b')' => parens = parens.saturating_sub(1),
+            b',' if braces == 0 && brackets == 0 && parens == 0 => ends.push(index + 1),
+            _ => {}
+        }
+    }
+    if ends.last().copied() != Some(body.len()) {
+        ends.push(body.len());
+    }
+    ends
+}
+
 /// D-FMT-SIMPLIFY1=A: the identity check above is span-free, but two generated
 /// loop labels are not. A value loop and a collecting loop each get the label
 /// `<prefix>value_loop_<offset>` / `<prefix>collect_loop_<offset>`, where
@@ -492,6 +635,7 @@ fn format_program_with_tokens(
         policy_declarations: &prog.policy_declarations,
         fenced_statements: &prog.fenced_statements,
         simplify: options.simplify,
+        expected_return_type: None,
         force_control_braces: false,
     };
     let mut first = true;
@@ -736,6 +880,9 @@ struct Fmt<'a> {
     /// D-EACH1=C authored forms corresponding to expanded AST statements.
     fenced_statements: &'a [crate::AST::FencedStatement],
     simplify: bool,
+    /// Return type supplies the expected type for a direct returned literal.
+    /// `--simplify` may then drop a redundant named `Type.` head.
+    expected_return_type: Option<crate::AST::Type>,
     /// Keep a marked statement's control body scoped. Statement attributes
     /// attach to the whole statement, so collapsing their control body to an
     /// arrow changes the authored boundary that the marker covers.
@@ -1697,14 +1844,14 @@ pub fn format_source_with_options(
     Ok(formatted)
 }
 
-/// Canonical program content of formatter output, for the simplify identity
-/// check. Formatter output is Jet source, so it lexes and parses again.
+/// Canonical simplify identity content of formatter output. Formatter output
+/// is Jet source, so it lexes and parses again.
 fn canonical_formatted(formatted: &str) -> Result<Vec<u8>, Vec<crate::Diagnostics::Diagnostic>> {
     let (toks, lex_diags) = crate::Lexer::lex(formatted);
     if !lex_diags.is_empty() {
         return Err(lex_diags);
     }
-    Ok(canonical_program(&crate::Parser::parse_for_fmt(&toks)?))
+    Ok(canonical_simplify_program(&crate::Parser::parse_for_fmt(&toks)?))
 }
 
 /// Simple unified diff for `jet fmt --check`.
@@ -1757,6 +1904,7 @@ mod tests {
     fn retired_selector_rewrites_through_the_parser_and_formatter() {
         for (kind, arguments) in [
             (crate::Syntax::InterpolationSelectorKind::Debug, ""),
+            (crate::Syntax::InterpolationSelectorKind::Pretty, ""),
             (crate::Syntax::InterpolationSelectorKind::Fixed, "(2)"),
             (crate::Syntax::InterpolationSelectorKind::Unit, "(name)"),
             (crate::Syntax::InterpolationSelectorKind::Unit, "(bare)"),

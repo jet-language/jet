@@ -5381,6 +5381,12 @@ pub enum THandleOp {
     RngSample,
     /// D-DET-CAPAPI Rng: `shuffle(&list)` → `{root}jet_rng_shuffle(&mut (recv), &mut (a0))` (in-place).
     RngShuffle,
+    /// D-TESTDATA1 Fake: locale and deterministic fake-data domain draws.
+    FakeLocale,
+    FakeName,
+    FakeEmail,
+    FakeHost,
+    FakeAddress,
     /// D-SOLVER-LIB1=A: `Solver.new(seed)` → `{root}jet_solver_new(seed)`.
     SolverNew,
     /// D-SOLVER-LIB1=A: `solver.require(ok)` → `{root}jet_solver_require(&mut solver, ok)`.

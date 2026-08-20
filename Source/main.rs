@@ -60,7 +60,7 @@ use CmdCompile::{
 };
 use CmdDevTools::{
     run_bench, run_bind, run_completions, run_dev, run_devtools, run_doctor, run_emit_rust,
-    run_eval, run_eval_expression, run_explain, run_explain_marker, run_explain_web_graph, run_lint_a11y, run_repl, watch_policy_from, WatchPolicy,
+    run_eval, run_eval_expression, run_explain, run_explain_marker, run_explain_web_graph, run_lint_a11y, run_lint_complexity, run_repl, watch_policy_from, WatchPolicy,
     BenchRunOpts,
 };
 use CmdDossier::{run_dossier, run_module_explain};
@@ -1191,6 +1191,7 @@ fn main() {
     let verbose = jet_argv.iter().any(|a| a == "--verbose" || a == "-v");
     // D-A11YGATE1=B (c134 Phase 6): `jet lint --a11y` — opt-in, never blocking.
     let a11y = jet_argv.iter().any(|a| a == "--a11y");
+    let complexity = jet_argv.iter().any(|a| a == "--complexity");
     // D-TOOL5 (E2-M11): capability summary flags.
     let capabilities_json = jet_argv.iter().any(|a| a == "--capabilities-json");
     // D-SUPPLY1: `jet build --sbom` writes an SPDX SBOM next to the binary.
@@ -1657,6 +1658,7 @@ fn main() {
                 .map(|value| {
                     is_diagnostic_code(value)
                         || jet::Explain::is_build_fact_query(value)
+                        || jet::Explain::is_syntax_query(value)
                         || jet::Explain::lookup(value).is_some()
                 })
                 .unwrap_or(true)
@@ -2619,22 +2621,40 @@ fn main() {
         // D-A11YGATE1=B (c134 Phase 6): `jet lint --a11y` — opt-in accessibility
         // lints (E2930/E2931), never blocking `jet build`/`jet run`.
         "lint" => {
-            if !a11y {
+            if a11y == complexity {
                 eprintln!(
-                    "usage: {} lint --a11y <file.{}>",
+                    "usage: {} lint --a11y|--complexity <file.{}>",
                     jet::Syntax::BINARY_NAME,
                     jet::Syntax::FILE_EXT
                 );
-                eprintln!(" Why: `lint` needs a category flag; today only `--a11y` is supported (D-A11YGATE1)");
+                eprintln!(" Why: `lint` needs exactly one category flag");
                 eprintln!(
-                    " Fix: run `{} lint --a11y <file.{}>` to check accessibility (missing roles, unlabeled controls)",
+                    " Fix: run `{} lint --a11y <file.{}>` or `{} lint --complexity <file.{}>`",
                     jet::Syntax::BINARY_NAME,
-                    jet::Syntax::FILE_EXT
+                    jet::Syntax::FILE_EXT,
+                    jet::Syntax::BINARY_NAME,
+                    jet::Syntax::FILE_EXT,
                 );
                 exit(ExitCodes::USAGE);
             }
             let resolved = resolve_source_path(target);
-            run_lint_a11y(&resolved, mode);
+            if complexity {
+                let max_budget = jet_argv.iter().find_map(|arg| arg.strip_prefix("--max="));
+                let max_budget = max_budget.map(|value| match value.parse::<u32>() {
+                    Ok(value) => value,
+                    Err(_) => {
+                        crate::cli_error!(
+                            @fix "E2104",
+                            format!("`--max={value}` isn't a non-negative integer"),
+                            "use `--max=<n>` with a non-negative integer"
+                        );
+                        exit(ExitCodes::USAGE);
+                    }
+                });
+                run_lint_complexity(&resolved, mode, max_budget);
+            } else {
+                run_lint_a11y(&resolved, mode);
+            }
         }
         // Teaching error: E0042 foreign manifest filename, E0043 `jet install`
         "install" => {

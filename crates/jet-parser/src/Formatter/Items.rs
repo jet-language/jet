@@ -901,6 +901,8 @@ impl<'a> Fmt<'a> {
         if let Some(map) = &f.declared_return_view_provenance {
             self.fmt_declared_return_view_from(map, &f.params);
         }
+        let saved_return_type =
+            std::mem::replace(&mut self.expected_return_type, f.return_type.clone());
         // D-ONELINE-BODY1=B: preserve the canonical concise callable body.
         // The parser desugars the marker plus expression to `return expr`; its
         // synthetic return span starts on the author-written marker. Retired
@@ -914,6 +916,7 @@ impl<'a> Fmt<'a> {
             if marker == Some("::") || retired_marker {
                 self.write(" :: ");
                 self.fmt_expr(expr, Prec::OrFallback);
+                self.expected_return_type = saved_return_type;
                 return;
             }
         }
@@ -949,6 +952,7 @@ impl<'a> Fmt<'a> {
                         && !self.out[saved_out..].contains('\n')
                         && reads_back_as_one_line_body(&self.out[saved_out..])
                     {
+                        self.expected_return_type = saved_return_type;
                         return;
                     }
                     self.out.truncate(saved_out);
@@ -973,6 +977,7 @@ impl<'a> Fmt<'a> {
             self.indent -= 1;
             self.newline();
             self.write("}");
+            self.expected_return_type = saved_return_type;
             return;
         }
         self.write(" {");
@@ -985,10 +990,12 @@ impl<'a> Fmt<'a> {
                 .is_some_and(|(body, _)| !body.contains('\n') && !body.contains("//") && !body.contains("/*"))
         {
             self.write("}");
+            self.expected_return_type = saved_return_type;
             return;
         }
         // D-FMT1: a one-line `fn` body the author wrote inline survives.
         self.fmt_body(&f.body);
+        self.expected_return_type = saved_return_type;
     }
 
     pub(super) fn fmt_policy_declarations(&mut self, declarations: &[crate::Policy::PolicyDeclaration]) {

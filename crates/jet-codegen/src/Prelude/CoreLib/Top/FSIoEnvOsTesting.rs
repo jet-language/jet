@@ -900,6 +900,162 @@ fn jet_std_env_get(name: &String) -> Option<String> {
     jet_env_value_raw(name).and_then(|value| value.into_string().ok())
 }
 
+// D-CONFIG-ENV1: runtime settings are one more wire source for the existing
+// `__jet_Decode` codec. Keep this adapter beside the logical environment owner;
+// it snapshots once, overlays project `.env` values, then hands all coercion,
+// defaults, optionals, and unknown-field policy to the shared decoder.
+fn jet_std_env_decode<T: __jet_Decode>(
+    prefix: &String,
+    file: &String,
+    allow: &Vec<String>,
+) -> Result<T, Vec<jet_std::FieldError>> {
+    let path = std::path::Path::new(file);
+    if path.is_absolute() || path.components().any(|part| matches!(part, std::path::Component::ParentDir)) {
+        return Err(jet_std::FieldError::one(
+            "Dotenv.file must be project-relative",
+        ));
+    }
+
+    let allowed = |name: &str| {
+        allow.is_empty()
+            || allow
+                .iter()
+                .any(|candidate| candidate.eq_ignore_ascii_case(name))
+    };
+    let mut values = std::collections::BTreeMap::<String, (String, String)>::new();
+    if !file.is_empty() {
+        let text = std::fs::read_to_string(path).map_err(|error| {
+            jet_std::FieldError::one(format!("cannot read Dotenv.file `{file}`: {error}"))
+        })?;
+        for (line_index, line) in text.lines().enumerate() {
+            let line = line.trim();
+            if line.is_empty() || line.starts_with('#') {
+                continue;
+            }
+            let line = line.strip_prefix("export ").unwrap_or(line);
+            let Some((raw_name, raw_value)) = line.split_once('=') else {
+                return Err(jet_std::FieldError::one(format!(
+                    "invalid .env line {}",
+                    line_index + 1
+                )));
+            };
+            let name = raw_name.trim();
+            if !jet_env_name_is_valid(name) || !allowed(name) {
+                continue;
+            }
+            let value = jet_env_dotenv_value(raw_value.trim());
+            values.insert(name.to_ascii_uppercase(), (name.to_string(), value));
+        }
+    }
+    // Process values win over `.env`, matching pydantic-settings source order.
+    for (raw_name, raw_value) in jet_env_snapshot_raw() {
+        let (Some(name), Some(value)) = (raw_name.to_str(), raw_value.to_str()) else {
+            continue;
+        };
+        if jet_env_name_is_valid(name) && allowed(name) {
+            values.insert(name.to_ascii_uppercase(), (name.to_string(), value.to_string()));
+        }
+    }
+
+    let mut tree = jet_std::DataTree::Object(Vec::new());
+    let mut origins = Vec::<(String, String)>::new();
+    for (_, (name, value)) in values {
+        let Some(rest) = name.strip_prefix(prefix) else {
+            continue;
+        };
+        if rest.is_empty() {
+            continue;
+        }
+        let segments: Vec<String> = rest
+            .split("__")
+            .map(|segment| segment.to_lowercase())
+            .filter(|segment| !segment.is_empty())
+            .collect();
+        if segments.is_empty() {
+            continue;
+        }
+        origins.push((name.clone(), segments.join(".")));
+        jet_env_insert_tree(&mut tree, &segments, value);
+    }
+    T::jet_decode_traced(&tree)
+        .map(|(value, _)| value)
+        .map_err(|errors| {
+            errors
+                .into_iter()
+                .map(|mut error| {
+                    let path = error.path.clone();
+                    let origin = origins
+                        .iter()
+                        .find(|(_, mapped)| mapped.eq_ignore_ascii_case(&path))
+                        .map(|(name, _)| name.as_str());
+                    let reason = if jet_env_secret_path(&path) {
+                        "secret value rejected".to_string()
+                    } else {
+                        error.reason
+                    };
+                    error.reason = match origin {
+                        Some(name) => format!("env var {name} -> {path}: {reason}"),
+                        None => format!("config field {path}: {reason}"),
+                    };
+                    error
+                })
+                .collect()
+        })
+}
+
+fn jet_env_name_is_valid(name: &str) -> bool {
+    !name.is_empty() && !name.contains('=') && !name.contains('\0')
+}
+
+fn jet_env_dotenv_value(value: &str) -> String {
+    let value = value.trim();
+    if value.len() >= 2
+        && ((value.starts_with('"') && value.ends_with('"'))
+            || (value.starts_with('\'') && value.ends_with('\'')))
+    {
+        return value[1..value.len() - 1].to_string();
+    }
+    value
+        .split_once(" #")
+        .map_or_else(|| value.to_string(), |(value, _)| value.trim_end().to_string())
+}
+
+fn jet_env_secret_path(path: &str) -> bool {
+    path.split(['.', '[', ']']).any(|segment| {
+        matches!(segment.to_ascii_lowercase().as_str(), "secret" | "password" | "token" | "key")
+    })
+}
+
+fn jet_env_insert_tree(tree: &mut jet_std::DataTree, segments: &[String], value: String) {
+    let jet_std::DataTree::Object(pairs) = tree else {
+        return;
+    };
+    let Some(segment) = segments.first() else {
+        return;
+    };
+    if segments.len() == 1 {
+        if let Some((_, existing)) = pairs
+            .iter_mut()
+            .find(|(name, _)| name.eq_ignore_ascii_case(segment))
+        {
+            *existing = jet_std::DataTree::Text(value);
+        } else {
+            pairs.push((segment.clone(), jet_std::DataTree::Text(value)));
+        }
+        return;
+    }
+    if let Some((_, child)) = pairs
+        .iter_mut()
+        .find(|(name, child)| name.eq_ignore_ascii_case(segment) && matches!(child, jet_std::DataTree::Object(_)))
+    {
+        jet_env_insert_tree(child, &segments[1..], value);
+    } else {
+        let mut child = jet_std::DataTree::Object(Vec::new());
+        jet_env_insert_tree(&mut child, &segments[1..], value);
+        pairs.push((segment.clone(), child));
+    }
+}
+
 fn jet_std_env_set(name: &String, value: &String) -> Result<(), jet_std::EnvError> {
     jet_env_validate_name(name)?;
     jet_env_validate_value(value)?;

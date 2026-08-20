@@ -7498,6 +7498,10 @@ impl LowerCtx<'_, '_> {
                 let seed = self.lower_expr(&args[0])?;
                 Ok(self.call_host(self.host.random.rng_new, &[seed]))
             }
+            "fake_data" if args.len() == 1 => {
+                let seed = self.lower_expr(&args[0])?;
+                Ok(self.call_host(self.host.random.fake_new, &[seed]))
+            }
             "test_suite" if args.is_empty() => {
                 Ok(self.call_host(self.host.testing_test_suite_new, &[]))
             }
@@ -16831,6 +16835,9 @@ impl LowerCtx<'_, '_> {
                     if module == "core.text.fmt" {
                         return in_own_frame(|| -> Result<Value, String> {
                             let (host_id, arg_vals): (FuncId, Vec<Value>) = match method.as_str() {
+                                "pretty" if args.len() == 1 => {
+                                    (self.host.fmt.pretty, vec![self.lower_expr(&args[0])?])
+                                }
                                 "number" | "bytes" | "duration" | "ordinal" if args.len() == 1 => {
                                     let host = match method.as_str() {
                                         "number" => self.host.fmt.number,
@@ -17034,6 +17041,10 @@ impl LowerCtx<'_, '_> {
                                 ),
                                 "is_match" if args.len() == 2 => (
                                     self.host.text.regex_is_match,
+                                    vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
+                                ),
+                                "full_match" if args.len() == 2 => (
+                                    self.host.text.regex_full_match,
                                     vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
                                 ),
                                 "find" if args.len() == 2 => (
@@ -24293,6 +24304,32 @@ impl LowerCtx<'_, '_> {
                         .declare_func_in_func(self.host.random.rng_shuffle, self.b.func);
                     self.b.ins().call(host, &[recv_val, items]);
                     Ok(self.b.ins().iconst(types::I8, 0))
+                })
+            }
+            THandleOp::FakeLocale => {
+                in_own_frame(|| -> Result<Value, String> {
+                    let locale = self.lower_expr(&args[0])?;
+                    Ok(self.call_host(self.host.random.fake_locale, &[recv_val, locale]))
+                })
+            }
+            THandleOp::FakeName => {
+                in_own_frame(|| -> Result<Value, String> {
+                    Ok(self.call_host(self.host.random.fake_name, &[recv_val]))
+                })
+            }
+            THandleOp::FakeEmail => {
+                in_own_frame(|| -> Result<Value, String> {
+                    Ok(self.call_host(self.host.random.fake_email, &[recv_val]))
+                })
+            }
+            THandleOp::FakeHost => {
+                in_own_frame(|| -> Result<Value, String> {
+                    Ok(self.call_host(self.host.random.fake_host, &[recv_val]))
+                })
+            }
+            THandleOp::FakeAddress => {
+                in_own_frame(|| -> Result<Value, String> {
+                    Ok(self.call_host(self.host.random.fake_address, &[recv_val]))
                 })
             }
             THandleOp::SolverNew => {

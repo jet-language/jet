@@ -5536,6 +5536,9 @@ impl<'a> EvalCtx<'a> {
                                         self.debug_value_typed(&v, &e.ty)
                                     }
                                 }
+                                crate::AST::StrFormat::Pretty => {
+                                    unreachable!("Pretty interpolation lowers to core.text.fmt.pretty")
+                                }
                                 crate::AST::StrFormat::Display => {
                                     show_typed_value(&v, &e.ty, false)
                                         .unwrap_or(self.show_value(&v, scope)?)
@@ -6319,6 +6322,33 @@ impl<'a> EvalCtx<'a> {
                         }
                     }
                     self.write_back_place(recv, r, scope)?;
+                    return Ok(result);
+                }
+                if matches!(
+                    op,
+                    crate::Codegen::TIR::THandleOp::FakeLocale
+                        | crate::Codegen::TIR::THandleOp::FakeName
+                        | crate::Codegen::TIR::THandleOp::FakeEmail
+                        | crate::Codegen::TIR::THandleOp::FakeHost
+                        | crate::Codegen::TIR::THandleOp::FakeAddress
+                ) {
+                    let method = match op {
+                        crate::Codegen::TIR::THandleOp::FakeLocale => "locale",
+                        crate::Codegen::TIR::THandleOp::FakeName => "name",
+                        crate::Codegen::TIR::THandleOp::FakeEmail => "email",
+                        crate::Codegen::TIR::THandleOp::FakeHost => "host",
+                        crate::Codegen::TIR::THandleOp::FakeAddress => "address",
+                        _ => unreachable!(),
+                    };
+                    let result = crate::Comptime::apply_fake_method(
+                        &mut r,
+                        method,
+                        &argv,
+                        self.span(),
+                    )?;
+                    if !matches!(op, crate::Codegen::TIR::THandleOp::FakeLocale) {
+                        self.write_back_place(recv, r, scope)?;
+                    }
                     return Ok(result);
                 }
                 if let crate::Codegen::TIR::THandleOp::EventMethod { method } = op {
@@ -7187,6 +7217,7 @@ impl<'a> EvalCtx<'a> {
                     "sort", "tick", "advance", "wait", "int", "float", "float_range", "bool",
                     "normal", "exponential", "bytes", "split", "pick", "weighted_pick", "sample",
                     "shuffle", "require",
+                    "name", "email", "host", "address",
                 ];
                 let try_mutating = MUTATING.contains(&method.name.as_str())
                     || matches!(
@@ -7194,6 +7225,7 @@ impl<'a> EvalCtx<'a> {
                         CtValue::Struct { type_name, .. }
                             if type_name == crate::Syntax::CLOCK_TYPE
                                 || type_name == crate::Syntax::RNG_TYPE
+                                || type_name == crate::Syntax::FAKE_TYPE
                                 || type_name == crate::Syntax::SOLVER_TYPE
                                 || (type_name == crate::Syntax::MEM_POOL
                                     && matches!(method.name.as_str(), "add" | "remove"))

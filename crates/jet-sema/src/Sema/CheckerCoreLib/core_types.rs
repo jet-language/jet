@@ -220,7 +220,7 @@ pub(crate) fn core_type_known(name: &str) -> bool {
         | "TextWidth" | "TextWidthAmbiguous" | "TextWidthControls" | "TextError" | "EnvError"
         // D-DET1: deterministic injected capability handles.
         // D-DET-CAPAPI: `Duration` value type for the widened clock surface.
-        | "Clock" | "Rng" | "Duration" | "DurationUnit" | "RangeError" | "Condition" | "Path"
+        | "Clock" | "Rng" | "Fake" | "Duration" | "DurationUnit" | "RangeError" | "Condition" | "Path"
         | "TestSuite" | "BenchSuite"
         | "GameScene" | "GameAssets" | "GameInputMap"
         | "GameBackend" | "GameReplay" | "GameImage" | "GameSound" | "GameFrame"

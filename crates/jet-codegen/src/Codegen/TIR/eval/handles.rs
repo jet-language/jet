@@ -835,6 +835,11 @@ pub(super) fn eval_handle_with_type_and_sink(
             };
             Ok(value)
         }
+        THandleOp::FakeLocale => crate::Comptime::apply_fake_method(recv, "locale", args, span),
+        THandleOp::FakeName => crate::Comptime::apply_fake_method(recv, "name", args, span),
+        THandleOp::FakeEmail => crate::Comptime::apply_fake_method(recv, "email", args, span),
+        THandleOp::FakeHost => crate::Comptime::apply_fake_method(recv, "host", args, span),
+        THandleOp::FakeAddress => crate::Comptime::apply_fake_method(recv, "address", args, span),
         THandleOp::SolverNew => {
             let seed = match recv {
                 CtValue::Int(n) => *n,

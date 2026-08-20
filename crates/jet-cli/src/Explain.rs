@@ -137,6 +137,18 @@ pub fn is_build_fact_query(query: &str) -> bool {
 
 /// Look up one code (case-insensitive).
 pub fn lookup(code: &str) -> Option<Explanation> {
+    if let Some(row) = jet_foundation::Syntax::lookup(code) {
+        return Some(Explanation {
+            code: code.trim().to_string(),
+            stage: "syntax registry".to_string(),
+            meaning: row.meaning.clone(),
+            what: Some(format!("{}: {}", row.name, row.meaning)),
+            why: Some(format!("owner decision {}", row.decision)),
+            fix: Some(format!("use `{}` at its registered syntax site", row.token)),
+            example: Some(row.example.clone()),
+            retired: false,
+        });
+    }
     let want = normalize(code);
     index()
         .into_iter()
@@ -210,6 +222,14 @@ pub fn lookup(code: &str) -> Option<Explanation> {
                 retired,
             })
         })
+}
+
+pub fn is_syntax_query(query: &str) -> bool {
+    jet_foundation::Syntax::looks_like_query(query)
+}
+
+pub fn nearest_syntax(query: &str) -> Option<String> {
+    jet_foundation::Syntax::nearest(query).map(jet_foundation::Syntax::display)
 }
 
 /// D-FACT-LAW1=B: a row that is not a rule on written code answers with the one
@@ -388,10 +408,14 @@ pub fn render(ex: &Explanation, color: bool) -> String {
             "A longer explanation will land with the detailed typed row.\n\n",
         );
     }
-    out.push_str(&format!(
-        "This explanation comes from {}'s diagnostics reference.\n",
-        crate::Syntax::BINARY_NAME
-    ));
+    if ex.stage == "syntax registry" {
+        out.push_str("This explanation comes from Syntax.rs.\n");
+    } else {
+        out.push_str(&format!(
+            "This explanation comes from {}'s diagnostics reference.\n",
+            crate::Syntax::BINARY_NAME
+        ));
+    }
     out
 }
 

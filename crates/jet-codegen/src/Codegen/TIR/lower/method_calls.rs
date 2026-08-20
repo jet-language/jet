@@ -24,6 +24,7 @@ use crate::Codegen::TIR::is_concurrency_method_name;
 use crate::Codegen::TIR::is_devserver_method_name;
 use crate::Codegen::TIR::is_app_method_name;
 use crate::Codegen::TIR::lower_extern_call_arg;
+use crate::Codegen::TIR::lower_debug_text;
 use crate::Codegen::TIR::is_event_handle_type;
 use crate::Codegen::TIR::is_event_method_name;
 use crate::Codegen::TIR::is_http_method_name;
@@ -1396,6 +1397,7 @@ fn lower_method_call_impl(
                 && matches!(
                     method,
                     "is_match"
+                        | "full_match"
                         | "match"
                         | "find"
                         | "find_all"
@@ -1425,6 +1427,9 @@ fn lower_method_call_impl(
                 }
             }
 
+            if module == "core.text.fmt" && method == "pretty" && index == 0 {
+                return lower_debug_text(lower_expr(expr, cx, env));
+            }
             lower_expr(expr, cx, env)
         };
 
@@ -6971,7 +6976,8 @@ fn demand_generic_serde_codec(
 ) {
     let encoding = matches!(
         module,
-        "core.encoding.json"
+        "core.sys"
+            | "core.encoding.json"
             | "core.encoding.toml"
             | "core.encoding.yaml"
             | "core.encoding.csv"

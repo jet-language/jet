@@ -115,6 +115,12 @@ fn render(symbol: &jet_semindex::SemanticSymbol) -> String {
 }
 
 pub fn lookup(session: &Session, name: &str) -> Option<String> {
+    if let Some(row) = crate::Syntax::lookup(name) {
+        return Some(format!(
+            "{}\n{}\nDecision: {}\nExample: {}\nSource: Syntax.rs\n",
+            row.name, row.meaning, row.decision, row.example
+        ));
+    }
     let index = symbol_index(session);
     if let Some(doc) = index.resolve_visible(name).map(render) {
         return Some(doc);

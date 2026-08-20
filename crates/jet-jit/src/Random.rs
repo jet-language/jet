@@ -8,6 +8,19 @@ mod seeded_random_kernel {
     include!("../../jet-codegen/src/Prelude/Core/SeededRandom.rs");
 }
 
+mod fake_data_kernel {
+    pub(crate) mod jet_std {
+        #[derive(Clone, Debug, PartialEq)]
+        pub(crate) struct Fake {
+            pub(crate) state: u64,
+            pub(crate) locale: u8,
+        }
+    }
+
+    use super::seeded_random_kernel::jet_seeded_rng_int;
+    include!("../../jet-codegen/src/Prelude/CoreLib/Top/FakeData.rs");
+}
+
 #[allow(dead_code)]
 mod ambient_random_kernel {
     pub(crate) mod jet_std {
@@ -463,6 +476,56 @@ fn jet_jit_rng_split(handle: i64) -> i64 {
     })
 }
 
+pub(crate) type FakeState = fake_data_kernel::jet_std::Fake;
+
+fn jet_jit_fake_new(seed: i64) -> i64 {
+    Concurrency::with_runtime_mut(|rt| {
+        rt.fakes.push(fake_data_kernel::jet_testing_fake_new(seed));
+        rt.fakes.len() as i64
+    })
+}
+
+fn jet_jit_fake_locale(handle: i64, locale: i64) -> i64 {
+    Concurrency::with_runtime_mut(|rt| {
+        let locale = rt.heap.clone_string(locale).unwrap_or_default();
+        let next = fake_data_kernel::jet_fake_locale(
+            rt.fakes
+                .get(handle.saturating_sub(1) as usize)
+                .expect("jit fake-data: bad handle"),
+            &locale,
+        );
+        rt.fakes.push(next);
+        rt.fakes.len() as i64
+    })
+}
+
+fn jet_jit_fake_text(handle: i64, draw: fn(&mut FakeState) -> String) -> i64 {
+    Concurrency::with_runtime_mut(|rt| {
+        let text = draw(
+            rt.fakes
+                .get_mut(handle.saturating_sub(1) as usize)
+                .expect("jit fake-data: bad handle"),
+        );
+        rt.heap.alloc_string(text)
+    })
+}
+
+fn jet_jit_fake_name(handle: i64) -> i64 {
+    jet_jit_fake_text(handle, fake_data_kernel::jet_fake_name)
+}
+
+fn jet_jit_fake_email(handle: i64) -> i64 {
+    jet_jit_fake_text(handle, fake_data_kernel::jet_fake_email)
+}
+
+fn jet_jit_fake_host(handle: i64) -> i64 {
+    jet_jit_fake_text(handle, fake_data_kernel::jet_fake_host)
+}
+
+fn jet_jit_fake_address(handle: i64) -> i64 {
+    jet_jit_fake_text(handle, fake_data_kernel::jet_fake_address)
+}
+
 host_fns! {
     struct RandomHostFns;
     register: register_random_symbols;
@@ -548,4 +611,10 @@ host_fns! {
     rng_sample: "jet_jit_rng_sample" => jet_jit_rng_sample: sig_i64_i64_i64_i64;
     rng_bytes: "jet_jit_rng_bytes" => jet_jit_rng_bytes: sig_i64_i64_i64;
     rng_split: "jet_jit_rng_split" => jet_jit_rng_split: sig_i64_i64;
+    fake_new: "jet_jit_fake_new" => jet_jit_fake_new: sig_i64_i64;
+    fake_locale: "jet_jit_fake_locale" => jet_jit_fake_locale: sig_i64_i64_i64;
+    fake_name: "jet_jit_fake_name" => jet_jit_fake_name: sig_i64_i64;
+    fake_email: "jet_jit_fake_email" => jet_jit_fake_email: sig_i64_i64;
+    fake_host: "jet_jit_fake_host" => jet_jit_fake_host: sig_i64_i64;
+    fake_address: "jet_jit_fake_address" => jet_jit_fake_address: sig_i64_i64;
 }

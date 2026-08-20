@@ -546,7 +546,11 @@ impl<'a> Fmt<'a> {
                 self.write(" ");
                 if crate::AST::is_subjectless_guard(subject, *span) {
                     if self.switch_was_classic_if(arms, *span) {
-                        self.fmt_classic_switch(arms, else_body.as_deref());
+                        if self.simplify && arms.len() > 1 {
+                            self.fmt_guard_dispatch(arms, else_body.as_deref());
+                        } else {
+                            self.fmt_classic_switch(arms, else_body.as_deref());
+                        }
                     } else {
                         self.fmt_guard_dispatch(arms, else_body.as_deref());
                     }
@@ -997,29 +1001,23 @@ impl<'a> Fmt<'a> {
             &arm.body,
             matches!(arm.cond, Expr::Paren(..)) || preserve_loop_exit_braces,
         );
-        match else_body {
-            Some([
-                Stmt::Switch {
-                    subject,
-                    arms,
-                    else_body,
-                    span,
-                },
-            ]) if crate::AST::is_subjectless_guard(subject, *span)
-                && self.switch_was_classic_if(arms, *span) =>
-            {
-                self.write(" else if ");
-                self.fmt_classic_switch(arms, else_body.as_deref());
-            }
-            Some(body) => {
-                let then_used_braces = self.out.trim_end().ends_with('}');
-                self.write(" else");
-                self.fmt_control_body_after_header(
-                    body,
-                    then_used_braces || self.authored_braced_loop_exit(body),
-                );
-            }
-            None => {}
+        for arm in arms.iter().skip(1) {
+            self.write(" else if ");
+            self.emit_classic_if_condition_trivia(arm.cond.span().start);
+            let preserve_loop_exit_braces = self.authored_braced_loop_exit(&arm.body);
+            self.fmt_cond(&arm.cond);
+            self.fmt_control_body_after_header(
+                &arm.body,
+                matches!(arm.cond, Expr::Paren(..)) || preserve_loop_exit_braces,
+            );
+        }
+        if let Some(body) = else_body {
+            let then_used_braces = self.out.trim_end().ends_with('}');
+            self.write(" else");
+            self.fmt_control_body_after_header(
+                body,
+                then_used_braces || self.authored_braced_loop_exit(body),
+            );
         }
     }
 

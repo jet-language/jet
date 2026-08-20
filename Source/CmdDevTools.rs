@@ -1734,6 +1734,16 @@ pub(crate) fn run_explain(
     match jet::Explain::lookup(code) {
         Some(ex) => print_explanation(&ex, mode),
         None => {
+            if jet::Explain::is_syntax_query(code) {
+                let closest = jet::Explain::nearest_syntax(code)
+                    .unwrap_or_else(|| "a registered syntax token".to_string());
+                crate::emit_cli_row(
+                    "E2106",
+                    &[("token", code), ("closest", closest.as_str())],
+                    mode.json,
+                );
+                exit(ExitCodes::USER_ERROR);
+            }
             crate::cli_error!(@fix "E2104", format!("no diagnostic code `{}` exists", code), format!("run a command that reports an error to see its code, e.g. `{} check file.{}`", jet::Syntax::BINARY_NAME, jet::Syntax::FILE_EXT));
             exit(ExitCodes::USER_ERROR);
         }
@@ -1794,12 +1804,13 @@ fn print_explanation(explanation: &jet::Explain::Explanation, mode: OutputMode) 
                 .unwrap_or_else(|| "null".to_string())
         };
         println!(
-            "{{\"schema_version\":1,\"code\":{},\"stage\":{},\"what\":{},\"why\":{},\"fix\":{}}}",
+            "{{\"schema_version\":1,\"code\":{},\"stage\":{},\"what\":{},\"why\":{},\"fix\":{},\"example\":{}}}",
             json_string(&explanation.code),
             json_string(&explanation.stage),
             json_string(what),
             optional(explanation.why.as_ref()),
             optional(explanation.fix.as_ref()),
+            optional(explanation.example.as_ref()),
         );
         return;
     }
@@ -3001,6 +3012,105 @@ pub(crate) fn run_lint_a11y(file: &str, mode: OutputMode) {
             "\n{} accessibility warning{} found",
             n,
             if n == 1 { "" } else { "s" }
+        );
+    }
+    exit(ExitCodes::USER_ERROR);
+}
+
+/// `jet lint --complexity <file>` — deterministic per-function scores. The
+/// category reports by default; `--max=<n>` is the explicit failure gate.
+pub(crate) fn run_lint_complexity(file: &str, mode: OutputMode, max_budget: Option<u32>) {
+    let src = match fs::read_to_string(file) {
+        Ok(s) => s,
+        Err(_) => {
+            crate::cli_error!(@fix "E2105", format!("can't find the file `{}`", file), format!("check the spelling, or run {} from the folder that contains it", jet::Syntax::BINARY_NAME));
+            exit(ExitCodes::USER_ERROR);
+        }
+    };
+    let diags = jet::check_with_path(file);
+    let errors: Vec<jet::Diagnostics::Diagnostic> = diags
+        .iter()
+        .filter(|d| matches!(d.severity, jet::Diagnostics::Severity::Error))
+        .cloned()
+        .collect();
+    if !errors.is_empty() {
+        report_problems(mode, file, &src, &errors);
+        exit(ExitCodes::USER_ERROR);
+    }
+    let (tokens, lex_errors) = jet::Lexer::lex(&src);
+    if !lex_errors.is_empty() {
+        report_problems(mode, file, &src, &lex_errors);
+        exit(ExitCodes::USER_ERROR);
+    }
+    let program = match jet::Parser::parse(&tokens) {
+        Ok(program) => program,
+        Err(parse_errors) => {
+            report_problems(mode, file, &src, &parse_errors);
+            exit(ExitCodes::USER_ERROR);
+        }
+    };
+    let reports = jet::Sema::cognitive_complexity_reports(&program);
+    let rows: Vec<_> = reports
+        .iter()
+        .map(|report| {
+            let line = src[..report.span.start].bytes().filter(|byte| *byte == b'\n').count() + 1;
+            let over = max_budget.is_some_and(|budget| report.score > budget);
+            (line, over)
+        })
+        .collect();
+    if mode.json {
+        let json_rows: Vec<String> = reports
+            .iter()
+            .zip(&rows)
+            .map(|(report, (line, over))| {
+                let budget = max_budget.map_or_else(|| "null".to_string(), |value| value.to_string());
+                format!(
+                    "{{\"file\":{},\"fn\":{},\"line\":{},\"score\":{},\"budget\":{},\"over\":{}}}",
+                    json_string(file),
+                    json_string(&report.name),
+                    line,
+                    report.score,
+                    budget,
+                    over
+                )
+            })
+            .collect();
+        println!("[{}]", json_rows.join(","));
+    } else {
+        for (report, (line, _)) in reports.iter().zip(&rows) {
+            match max_budget {
+                Some(budget) => println!(
+                    "{}:{} fn {} — score {} (budget {})",
+                    file, line, report.name, report.score, budget
+                ),
+                None => println!("{}:{} fn {} — score {}", file, line, report.name, report.score),
+            }
+        }
+    }
+    let Some(budget) = max_budget else { return };
+    let exceeded: Vec<_> = reports
+        .iter()
+        .filter(|report| report.score > budget)
+        .map(|report| {
+            jet::Diagnostics::Diagnostic::lint(
+                "L2902",
+                format!(
+                    "function `{}` has cognitive complexity {} above budget {}",
+                    report.name, report.score, budget
+                ),
+                "the function's control flow is harder to read and maintain than the selected budget allows".to_string(),
+                "split the function, reduce nesting, or replace mixed control flow with a focused helper".to_string(),
+                Some(report.span),
+            )
+        })
+        .collect();
+    if exceeded.is_empty() {
+        return;
+    }
+    if !mode.json {
+        eprint!(
+            "{}",
+            jet::render_all_colored(file, &src, &exceeded, mode.color_stderr())
         );
     }
     exit(ExitCodes::USER_ERROR);

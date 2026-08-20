@@ -1988,6 +1988,19 @@ fn lower_display_value(value: TExpr, cx: &Cx) -> TExpr {
     }
 }
 
+/// D-FMT-PRETTY1=A: convert a Debug-capable value to canonical Debug text
+/// before the shared Prelude formatter sees it. This keeps the formatter's
+/// only input a String while preserving one value-to-text path across tiers.
+pub(crate) fn lower_debug_text(value: TExpr) -> TExpr {
+    TExpr {
+        ty: Type::String,
+        kind: TExprKind::StrLit(vec![TStrPart::Interp(
+            value,
+            crate::AST::StrFormat::Debug,
+        )]),
+    }
+}
+
 #[inline(never)]
 fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
     if let Expr::PatternTest {
@@ -2096,6 +2109,22 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                             let value = lower_expr(e, cx, env);
                             TStrPart::Interp(
                                 lower_unit_text(value, *style, cx),
+                                crate::AST::StrFormat::Display,
+                            )
+                        }
+                        StrPart::Interp(e, crate::AST::StrFormat::Pretty) => {
+                            let value = lower_debug_text(lower_expr(e, cx, env));
+                            TStrPart::Interp(
+                                TExpr {
+                                    ty: Type::String,
+                                    kind: TExprKind::CoreCall {
+                                        module: "core.text.fmt".to_string(),
+                                        method: "pretty".to_string(),
+                                        args: vec![value],
+                                        source_span: e.span(),
+                                        widen_to_vec: vec![false],
+                                    },
+                                },
                                 crate::AST::StrFormat::Display,
                             )
                         }
