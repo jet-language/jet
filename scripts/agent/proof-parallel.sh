@@ -86,10 +86,17 @@ logdir="${JET_PROOF_LOGS:-$scratch/proof-logs}"
 mkdir -p "$logdir"
 
 echo "== scratch $scratch · target cap ${cap_gb}G · suites -j $jobs · rustc -j $CARGO_BUILD_JOBS · min free ${min_free_gb}G"
-echo "== building test binaries once"
+# Build ONLY the requested targets. `--workspace` builds every test binary in
+# the repo — about 150 of them at ~250MB to 1.3G each, which writes ~190G in a
+# single pass and is most of how a target dir reached half a terabyte.
+build_args=()
+for s in "${suites[@]+"${suites[@]}"}"; do build_args+=(--test "$s"); done
+for c in "${crates[@]+"${crates[@]}"}"; do build_args+=(-p "$c"); done
+
+echo "== building just these test binaries"
 wait_for_memory
 build_log="$logdir/build.log"
-if ! timeout 3000 scripts/agent/jet-env cargo test --no-run --workspace >"$build_log" 2>&1; then
+if ! timeout 3000 scripts/agent/jet-env cargo test --no-run "${build_args[@]}" >"$build_log" 2>&1; then
   echo "BUILD FAILED — see $build_log"
   node -e 'const fs=require("fs");const s=fs.readFileSync(process.argv[1],"utf8");const e=[...s.matchAll(/^error[^\n]*/gm)].map(m=>m[0]);console.log(e.slice(0,8).join("\n"))' "$build_log"
   exit 1
@@ -147,6 +154,7 @@ done
 # ── give the scratch back ────────────────────────────────────────────────────
 find "$scratch" -mindepth 1 -maxdepth 1 -not -name 'proof-logs' -exec rm -rf {} + 2>/dev/null
 rm -rf target/tmp build/.work* 2>/dev/null
+scripts/agent/target-prune.sh >/dev/null 2>&1
 printf '\ntarget/ now %s · scratch cleared\n' "$(du -sh target 2>/dev/null | cut -f1)"
 
 exit "$fail"
