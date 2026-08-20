@@ -154,6 +154,9 @@ renumbered, and no new `W` code may be allocated.
 | What | Why | Fix |
 |------|-----|-----|
 | `` `defer` only schedules a consuming resource close ``. | Jet has no general deferred-action mechanism; resource cleanup stays explicit and ownership-checked. | Write `defer close(^resource)` with the move marker `^`. |
+| `` `fun` is a function declaration keyword; Jet writes `fn` ``. | Jet uses one function declaration spelling so every declaration has one shape. | Replace `fun` with `fn`; the same rule covers `func`, `def`, and `function`. |
+| `` `var` is a foreign binding keyword; Jet writes `:=` ``. | Jet puts binding mutability on `:=` or `::`, not on a declaration keyword. | Write `name := value`; `let`, `const`, and `val` use `name :: value`. |
+| `a function return type uses :`. | Jet uses `:` for parameter and field types; callable results use `=>`. | Replace `:` with `=>` before the return type. |
 
 ## Error code registry
 

@@ -24,7 +24,11 @@ const FOREIGN_KEYWORDS: &[(&str, ForeignKeywordKind)] = &[
     (Syntax::FOREIGN_FUNCTION, ForeignKeywordKind::Declaration),
     (Syntax::FOREIGN_VAR, ForeignKeywordKind::MutableBinding),
     (Syntax::FOREIGN_LET, ForeignKeywordKind::ImmutableBinding),
-    (Syntax::FOREIGN_CONST, ForeignKeywordKind::ImmutableBinding),
+    // `const` is deliberately absent from this table. It already has a MORE
+    // specific ratified teaching — E0146 "`const` is retired — write `@`" —
+    // which names Jet's comptime-constant spelling instead of the generic
+    // binding advice. A known fact beats a family default, so the generic row
+    // must not shadow it (tests/ui/const_retired.stderr pins that report).
     (Syntax::FOREIGN_VAL, ForeignKeywordKind::ImmutableBinding),
 ];
 
@@ -175,7 +179,7 @@ impl<'a> Parser<'a> {
         } else {
             None
         };
-        if !matches!(self.peek().kind, TokKind::Arrow) {
+        if !self.at_unified_arrow() {
             // D-CHOOSE-FIND1=A: a finite source loop in value position uses
             // its ordinary braced body. Sema later requires the surrounding
             // `??` route and attaches that route to this result carrier.
@@ -1334,7 +1338,7 @@ impl<'a> Parser<'a> {
         // Retired spelling: `{ caps -> … }`.
         let (binding, binding_span) = self.expect_ident("for the authority handle name")?;
         self.expect(
-            TokKind::Arrow,
+            TokKind::UnifiedArrow,
             &format!(
                 "after the `#{}` handle name (`#{}(…) {{ caps {} … }}`)",
                 Syntax::KW_GRANT,
@@ -1422,7 +1426,7 @@ impl<'a> Parser<'a> {
         //   loop cond { }          → conditional (was `while`)
         //   loop x, ... { }        → iteration (was `for`)
         //   loop (k, v), ... { }   → key-value iteration
-        if matches!(self.peek().kind, TokKind::Arrow) {
+        if self.at_unified_arrow() {
             // D-ONELINE-BODY1=B: an infinite effect loop may use the same
             // one-statement arrow body as conditional and source loops.
             let (body, arrow_body) = self.effect_loop_body()?;
@@ -1568,7 +1572,7 @@ impl<'a> Parser<'a> {
     }
 
     fn effect_loop_body(&mut self) -> Result<(Vec<Stmt>, bool), Diagnostic> {
-        if matches!(self.peek().kind, TokKind::Arrow) {
+        if self.at_unified_arrow() {
             self.bump();
             let nested_control = matches!(self.peek().kind, TokKind::KwIf | TokKind::KwLoop)
                 || (matches!(self.peek().kind, TokKind::Ident(_))
@@ -1779,7 +1783,8 @@ impl<'a> Parser<'a> {
 
     fn foreign_binding_shape(&self) -> bool {
         let word = match &self.peek().kind {
-            TokKind::Ident(word) => word,
+            TokKind::Ident(word) => word.as_str(),
+            TokKind::KwConst => Syntax::FOREIGN_CONST,
             _ => return false,
         };
         let name_offset = if word == Syntax::FOREIGN_LET
@@ -1811,6 +1816,7 @@ impl<'a> Parser<'a> {
     pub(in crate::Parser) fn at_foreign_binding(&self) -> bool {
         matches!(&self.peek().kind, TokKind::Ident(word)
             if Self::is_foreign_binding_word(word) && self.foreign_binding_shape())
+            || matches!(self.peek().kind, TokKind::KwConst) && self.foreign_binding_shape()
     }
 
     fn at_foreign_loop_word_statement(&self, word: &str) -> bool {
@@ -1831,7 +1837,11 @@ impl<'a> Parser<'a> {
         }
     }
 
-    fn foreign_binding_edit(&self, word_span: Span, word: &str) -> Option<crate::Diagnostics::TextEdit> {
+    fn foreign_binding_edit(
+        &self,
+        word_span: Span,
+        word: &str,
+    ) -> Option<crate::Diagnostics::TextEdit> {
         let word_pos = self.pos.saturating_sub(1);
         let mutable = self.foreign_binding_is_mutable(word, word_pos);
         let sigil = if mutable {
@@ -1855,11 +1865,38 @@ impl<'a> Parser<'a> {
         let TokKind::Ident(name) = &name_token.kind else {
             return None;
         };
-        let Some(operator) = self.toks.get(word_pos + name_offset + 1) else {
+        let operator_pos = word_pos + name_offset + 1;
+        let Some(operator) = self.toks.get(operator_pos) else {
             return None;
         };
-        matches!(&operator.kind, TokKind::Eq).then(|| crate::Diagnostics::TextEdit {
-            span: Span::new(word_span.start, operator.span.end),
+        let end = match &operator.kind {
+            TokKind::Eq => operator.span.end,
+            TokKind::Colon => {
+                let mut depth = 0usize;
+                let mut eq = None;
+                for token in self.toks.iter().skip(operator_pos + 1) {
+                    match &token.kind {
+                        TokKind::LParen | TokKind::LBracket | TokKind::LBrace => depth += 1,
+                        TokKind::RParen | TokKind::RBracket | TokKind::RBrace => {
+                            if depth == 0 {
+                                break;
+                            }
+                            depth -= 1;
+                        }
+                        TokKind::Eq if depth == 0 => {
+                            eq = Some(token.span.end);
+                            break;
+                        }
+                        TokKind::Semi | TokKind::Eof if depth == 0 => break,
+                        _ => {}
+                    }
+                }
+                eq?
+            }
+            _ => return None,
+        };
+        Some(crate::Diagnostics::TextEdit {
+            span: Span::new(word_span.start, end),
             new_text: format!("{name} {sigil}"),
         })
     }
@@ -2042,6 +2079,10 @@ impl<'a> Parser<'a> {
                 self.finish_stmt()?;
                 Ok(Stmt::Val(binding))
             }
+            TokKind::KwConst if self.at_foreign_binding() => {
+                let span = self.bump().span;
+                Err(self.foreign_keyword_diagnostic(Syntax::FOREIGN_CONST, span))
+            }
             TokKind::Hash if self.at_known_lead() => {
                 if matches!(self.peek3().kind, TokKind::KwIf) {
                     return self.comptime_if_stmt();
@@ -2084,7 +2125,7 @@ impl<'a> Parser<'a> {
                     format!(
                         "write `{} subject {{ value {} body … }}` instead",
                         Syntax::KW_IF,
-                        Syntax::OP_ARM_ARROW
+                        Syntax::OP_UNIFIED_ARROW
                     ),
                     Some(t.span),
                 ));
@@ -2106,7 +2147,7 @@ impl<'a> Parser<'a> {
                     format!(
                         "write `{} subject {{ value {} body … }}` instead",
                         Syntax::KW_IF,
-                        Syntax::OP_ARM_ARROW
+                        Syntax::OP_UNIFIED_ARROW
                     ),
                     Some(t.span),
                 ));
@@ -2197,14 +2238,14 @@ impl<'a> Parser<'a> {
                         "`{}` is the one branching keyword — multi-arm dispatch is `{} subject == {{ arm {} body }}`",
                         Syntax::KW_IF,
                         Syntax::KW_IF,
-                        Syntax::OP_ARM_ARROW
+                        Syntax::OP_UNIFIED_ARROW
                     ),
                     format!(
                         "write `{} subject == {{ value {} body … }}` (an `{} {} body` catch-all)",
                         Syntax::KW_IF,
-                        Syntax::OP_ARM_ARROW,
+                        Syntax::OP_UNIFIED_ARROW,
                         Syntax::KW_ELSE,
-                        Syntax::OP_ARM_ARROW
+                        Syntax::OP_UNIFIED_ARROW
                     ),
                     Some(span),
                 ));
@@ -2858,7 +2899,10 @@ impl<'a> Parser<'a> {
                 TokKind::RParen => parens = parens.saturating_sub(1),
                 TokKind::LBracket => brackets += 1,
                 TokKind::RBracket => brackets = brackets.saturating_sub(1),
-                TokKind::Arrow if braces == 0 && parens == 0 && brackets == 0 => return true,
+                kind if Self::at_unified_arrow_token(&kind)
+                    && braces == 0
+                    && parens == 0
+                    && brackets == 0 => return true,
                 TokKind::KwLoop if braces >= 1 => nested_loop_pending = true,
                 TokKind::KwBreak if parens == 0 && brackets == 0 => {
                     let next = self.toks.get(index + 1).map(|token| &token.kind);
