@@ -939,6 +939,7 @@ fn run() {
     /// Send SIGINT once the child prints `ready`, then collect what it did.
     /// Returns `(exit code, stdout)`.
     fn interrupt_and_collect(mut child: std::process::Child, tier: &str) -> (Option<i32>, String) {
+        use std::time::{Duration, Instant};
         let mut stdout = std::io::BufReader::new(child.stdout.take().unwrap());
         let mut ready = String::new();
         stdout.read_line(&mut ready).unwrap();
