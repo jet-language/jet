@@ -463,6 +463,7 @@ fn assert_group_close_success(name: &str, source: &str, expected_stdout: &str) {
 #[test]
 fn native_cancellation_closes_group_before_caller_continues() {
     let source = r#"
+use core.tasks as tasks
 use core.time as time
 
 fn wait_in_group(sender: Sender<Int>) {
@@ -556,21 +557,46 @@ fn run() {
     assert_group_close_success("taskgroup_wait_panic", source, "settled\ncaller\n");
 }
 
+/// D-CONC-SPAWN1=D (`docs/spec/spec.md:2545`, `docs/spec/syntax-decisions.md:2264`,
+/// `Syntax::KW_CONC_TASK`): `task` is the ONE reserved concurrency word, so a
+/// name position holding it is refused where it is written. That is a stronger
+/// form of this test's property than "it binds a list": the word can never be
+/// quietly read as a spawn, and it can never be quietly read as an ordinary
+/// name either. The earlier assertion (that the binding runs and prints 7)
+/// predates the reservation.
 #[test]
 fn local_task_binding_is_not_parsed_as_spawn_syntax() {
-    let source = r#"
+    let reserved = r#"
 fn run() {
     task :: [7]
     print(task[0])
 }
 "#;
-    let (code, stdout, stderr) = run_default_multi(
-        "task_local_binding",
-        "main.jet",
-        &[("main.jet", source)],
+    let diagnostics = jet::compile(reserved).expect_err("`task` is a reserved word");
+    let refusal = diagnostics
+        .iter()
+        .find(|diagnostic| diagnostic.code == "E0003")
+        .expect("the reserved word must be refused at the name that spells it");
+    assert!(
+        refusal.what.contains("`task`") && refusal.what.contains("reserved"),
+        "the refusal must name the reservation, not a generic parse confusion: {refusal:?}"
     );
-    assert_eq!(code, 0, "{stderr}");
-    assert_eq!(stdout, "7\n", "{stderr}");
+
+    // The other half of the same decision, in the same test so that reserving
+    // the whole family cannot hide behind the refusal above: `all`, `race`,
+    // `any`, and `group` stay free identifiers and are combinators only after
+    // `task.`.
+    let free_selectors = r#"
+fn run() {
+    all :: 1
+    race :: 2
+    any :: 4
+    group :: 8
+    print(all + race + any + group)
+}
+"#;
+    jet::compile(free_selectors)
+        .expect("`all`, `race`, `any`, and `group` are free identifiers");
 }
 
 #[test]

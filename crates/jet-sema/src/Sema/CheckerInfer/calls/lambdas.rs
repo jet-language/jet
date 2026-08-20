@@ -127,6 +127,28 @@ use std::collections::HashSet;
                     self.unknown_name(name, lam.span);
                 }
             }
+            // D-CONC-SHARE1=A: a write through a `Shared<T>` handle is one
+            // locked edit of the CELL, not a change to the handle binding.
+            // `check_stmt` rewrites `handle.field += v` into
+            // `handle.edit(payload => { payload.field += v })`
+            // (`Sema/SharedAccess.rs`), a body that only READS the handle — the
+            // very shape the retired `handle.edit(…)` closure spelling had, and
+            // the reason `shared_capture` below lets a handle cross a task with
+            // no `^`. Capture collection above runs before that rewrite, so it
+            // still sees the projection write and reports the handle as
+            // mutated. Forget that stale fact for an immutable handle, so the
+            // refusal below, `needs_fn_mut`, and `mut_captures` all describe
+            // the body this lambda actually lowers. Nothing is lost: replacing
+            // the handle itself (`handle = other`) is refused where it is
+            // written, by the `Stmt::Assign` rail in
+            // `CheckerCore/statements.rs`, with the same E0111 code. A `:=`
+            // handle keeps its entry, so a genuine rebind still asks for
+            // `FnMut`.
+            mut_caps.retain(|name| {
+                !self.lookup(name).is_some_and(|info| {
+                    !info.mutable && matches!(&info.ty, Type::Shared(_))
+                })
+            });
     
             for name in &mut_caps {
                 if param_names.contains(name) || take_set.contains(name) {

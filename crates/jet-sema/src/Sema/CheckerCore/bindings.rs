@@ -655,7 +655,29 @@ impl<'a> Checker<'a> {
                         ) && !self.type_contains_shared(&info.ty)
                     })
                 });
+            // A `Copy` field is not a window. `type_is_copy` names the types
+            // every execution tier duplicates on read (scalars, `Char`, `U8`,
+            // `Complex`, `Range`), so a field of one of those has no storage to
+            // keep borrowed and no allocation to avoid — the read IS the copy.
+            // Keeping it as a window records the owned value as a live borrow of
+            // the receiver, which is why `step :: self.step` could no longer
+            // cross into a task (E1102) even though it is an `Int`: the fact,
+            // not the type, refused it. `infer_checked`'s twin
+            // `borrowed_param_place` already carries this `!type_is_copy` gate,
+            // and before the window was restored for read-parameter projections
+            // `field_read_to_clone` kept every field read out of the wrap; this
+            // narrows the restoration back to the shapes a window is for.
+            //
+            // Only a FIELD projection is judged here, because only there is the
+            // type exact: `compound_expr_type`'s index arm answers with the
+            // element type even when the index is a range (`xs[band]`), which is
+            // a real window over many elements.
+            let copy_field_read = matches!(&b.init, Expr::Field(..))
+                && self
+                    .compound_expr_type(&b.init)
+                    .is_some_and(|ty| crate::Sema::Diagnostics::type_is_copy(&ty));
             if !b.mutable
+                && !copy_field_read
                 && !matches!(b.init, Expr::Copy(..) | Expr::Place(..))
                 && self.place_from_expr(&b.init).is_some()
                 && (borrowed_param_place
