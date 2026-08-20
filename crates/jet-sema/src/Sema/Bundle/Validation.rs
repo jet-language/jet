@@ -779,7 +779,31 @@ pub(crate) fn check_module_bodies(
     }
     let cache_allowed = view_jobs.is_empty();
     let module_key = module.display.clone();
-    for item in &mut module.items {
+    // D-FAIL-CONV2=A: the shipped `impl <CoreError> => Err` conversions are
+    // demand-driven — which ones a module needs is only known once every body
+    // in it has recorded its `TryConvert::Typed` facts. So the items are
+    // appended at the END of this walk (see the `index == len` arm below) and
+    // the walk keeps going, which routes each injected body through the
+    // `Item::ErrorConv` arm exactly like a user-declared conversion. Injecting
+    // after this function returns instead left the shipped bodies unchecked:
+    // `Err("{self}")` stayed an ordinary `Expr::Call`, never normalized into
+    // the default-error `Err` struct literal, and codegen's TIR gate refused
+    // it as an uncovered construct (an I2 abort, not a user diagnostic).
+    let mut index = 0;
+    let mut conversions_injected = false;
+    loop {
+        if index == module.items.len() {
+            if conversions_injected {
+                break;
+            }
+            conversions_injected = true;
+            diags.extend(super::super::Prelude::inject_exercised_error_conversions(
+                module,
+            ));
+            continue;
+        }
+        let item = &mut module.items[index];
+        index += 1;
         match item {
             Item::Func(f) => {
                 diags.extend(check_func_body_incremental(
