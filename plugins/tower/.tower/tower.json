@@ -2,8 +2,8 @@
   "meta": {
     "version": 4,
     "project": "Jet",
-    "nextNum": 2126,
-    "rev": 40055,
+    "nextNum": 2127,
+    "rev": 40066,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -31,7 +31,7 @@
         "radar-sq"
       ]
     },
-    "completionCursor": "2026-08-20T22:52:02.154Z"
+    "completionCursor": "2026-08-20T23:05:39.940Z"
   },
   "epochs": [
     {
@@ -81872,11 +81872,11 @@
         {
           "n": 6,
           "text": "'loop u, users, if u.active -> u.name' (comma before if) produces the new registered E-code teaching the comma-less form, not E0003, proved by a blessed tests/ui/loop_guard_comma_misspelling.jet/.stderr pair under scripts/agent/jet-env cargo test --test diagnostic_snapshots.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-07T00:57:16.534Z"
+          "evidence": "A retired comprehension-guard spelling now teaches instead of failing generically: crates/jet-parser/src/Parser/Statements/control.rs:128 with a registered E0379 row and a fixture pair. `jet run` emits E0379 rather than E0003, and the snapshot diff is clean.",
+          "at": "2026-08-20T23:43:58.339Z"
         },
         {
           "n": 7,
@@ -81899,11 +81899,11 @@
         {
           "n": 9,
           "text": "', if' in a yielding loop head produces the new registered E-code via blessed tests/ui/loop_guard_comma_misspelling.jet/.stderr under diagnostic_snapshots.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-19T13:38:16.958Z"
+          "evidence": "Same fixture and proof as criterion 6.",
+          "at": "2026-08-20T23:43:58.818Z"
         },
         {
           "n": 10,
@@ -81953,8 +81953,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-04T18:57:43.599Z",
-      "updated": "2026-08-19T13:48:11.299Z",
-      "updatedBy": "fable"
+      "updated": "2026-08-20T23:43:58.819Z",
+      "updatedBy": "fable-e3-burndown"
     },
     {
       "id": "c0xsk2wa",
@@ -99631,11 +99631,11 @@
         {
           "n": 13,
           "text": "effects_uncovered no longer treats Panic as a grantable root, so no #Grant or #Caps site must name it",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-16T11:08:35.520Z"
+          "evidence": "crates/jet-sema/src/Sema/Effects.rs:196-205 with tests/panic_root.rs — the panic root is registered on the one effect-root table rather than special-cased.",
+          "at": "2026-08-20T23:43:59.287Z"
         },
         {
           "n": 14,
@@ -99693,7 +99693,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-06T21:35:44.281Z",
-      "updated": "2026-08-20T20:47:48.179Z",
+      "updated": "2026-08-20T23:43:59.288Z",
       "updatedBy": "fable-e3-burndown",
       "workOrder": 1120
     },
@@ -135626,12 +135626,17 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": "e3-m18-devloop-testing",
-      "phase": "ready",
+      "phase": "done",
       "priority": "P2",
       "plan": "## Outcome\nThe ratified D-RUN/D-CLAIM remainder ships end to end: `jet test --measure` is the measurement mode and `#Bench`/`jet bench` retire (D-CLAIM-BENCH1=A); `--record=NAME` works on `run`/`dev`/`test` and `jet debug --replay=NAME` consumes it (D-RUN-RECORD1=A); `require`/`require_eq` are deleted with `assert`/`assert_eq` the one family (D-CLAIM-WORD1=B); the E0601 fix text names live spellings; the `r/R/t/f/q` keys drive the resident `jet dev` session (D-RUN-SESSION1=A); and bare `jet dev` works in a package (D-CLI-BARE1=A). A fresh-build probe transcript shows every shipped flag working with no E2102 for ratified spellings.\n\n## Law\n- D-CLAIM-BENCH1=A (docs/spec/syntax-decisions.md:7293) — `.measure` member + `jet test --measure`; `#Bench` and `jet bench` retire.\n- D-RUN-RECORD1=A (7316) — `--record=NAME` on run/dev/test writes `.jetproof-replay`; `jet debug --replay=NAME` consumes via the ratified adapters; capture preflight and closed `=NAME` grammar unchanged.\n- D-CLAIM-WORD1=B (7287) — `assert`/`assert_eq` are the one assertion family; `require`/`require_eq` deleted (amends S43, D-PRELUDE-LAW1=A registry, D-FAIL-BREACH1=A wording).\n- D-RUN-SESSION1=A (7310) — `jet dev` owns exact keys `r` re-run, `R` restart fresh, `t` tests, `f` failed claims only, `q` quit.\n- D-CLI-BARE1=A (5680) — `dev` is bare-capable in a package.\n- D-JREPLAY1=A / D-PROVE-REPLAY1=A — the shipped `.jetproof-replay` envelope (Source/ProveReplay.rs) is the artifact both flags reuse.\n- I4 (E0601 text change needs registered code + UI snapshot), I9 (measurement/record semantics via shared seams, no engine forks), greenfield (delete replaced forms, migrate all in-repo consumers).\n\n## Work\n1. Inventory first (the flag vocabulary is already reserved: crates/jet-foundation/src/Syntax/math_layout.rs:735 lists `measure`, `record`, `replay`; `.measure` scope member registered at 692). What's missing is CLI wiring and retirement.\n2. `jet test --measure` (D-CLAIM-BENCH1): add the flag to the test arg parse (Source/main.rs test arm ~2426, TestRunOpts CmdCompile.rs:1723) selecting measurement mode — run only `.measure`-marked claims with the measurement evaluator the bench path uses today (trace `run_bench`/bench harness in CmdCompile/CmdDevTools before deleting; the shared budget evaluator per docs/reference/core-library.md:2683 owns samples/baselines/reports). Plain `jet test` keeps running measured claims once as correctness claims (ballot text).\n3. Retire `jet bench` + `#Bench` (greenfield): delete the top-level verb (main.rs:1499-1501, 2333-2336, 2520+; CLI.rs:682 CommandSpec), the `#Bench` item path (parser Item::Bench, `has_bench_blocks` Source/lib.rs:1818, `bench_suite` core-call rows), and migrate in-repo consumers: examples/features/devloop/bench_override.jet, bench goldens, docs. Retired-spelling teaching: follow the repo's retired-verb pattern (`reject_retired_gate_flags`, Syntax retirements.rs table) so `jet bench` prints a teaching error pointing at `jet test --measure`, not an unknown-command E2102. Rewire `jet perf bench` (CLI.rs:318, CmdPerf run/test/bench session at CmdPerf.rs:122) onto the measure mode (`jet perf test` with `--measure` forwarded) or delete the nested spec — whichever keeps D-PERFSESSION1's base-intent mirroring; record the choice in the log.\n4. `--record=NAME` on run/dev/test (D-RUN-RECORD1): parse via the existing `parse_replay_flag`-style helpers (ProveReplay.rs:125 shows the `=NAME`/path validation pattern; capture writer + envelope already ship for `jet prove --capture`). Recording a run = the same safe capture (Time-only default, `--capture-sensitive` consent path unchanged) wrapped around the run/dev/test child. `jet debug --replay=NAME` consumes through the existing replay adapters (ProveReplay read path). Keep the closed `=NAME` grammar; reject other shapes exactly as prove does.\n5. D-CLAIM-WORD1=B deletion: remove `BUILTIN_REQUIRE_EQ` and any `require` registration (math_layout.rs:638-645 currently registers BOTH families), migrate every in-repo user (grep `require(`/`require_eq(` across examples/, tests/, Prelude, docs), update S43 text in docs/spec/spec.md:1136-1139 which still teaches require/require_eq. Retired spellings get the standard teaching diagnostic per the retirement table, not silence.\n6. E0601 fix text (I4): jet-sema Bundle/Pipeline.rs:2691-2695 currently teaches `#Test \"name\" { }` (a spelling E0930 rejects) — fix to `#Test(\"describes what this checks\") { ... }` and assert-family wording; update the E0601 row in Prelude/Diagnostics.jet:320 and re-bless the diagnostic UI snapshot.\n7. D-RUN-SESSION1 keys: trace the `jet dev` resident session loop in crates/jet-devserver (watch/input handling); wire `r` re-run, `R` restart fresh, `t` tests, `f` failed-claims-only, `q` quit using the key constants Syntax.rs registers (Syntax.rs:42-46 note). Exact key bytes; Title-Case action labels per the ballot.\n8. Bare `jet dev` (D-CLI-BARE1): add `dev` to the bare-capable dispatch (main.rs:2315 match — currently run|build|test|check|bench) resolving through the same `resolve_bare_entry`; while there, probe `debug` (also listed bare-capable in the decision) and fix or mint a follow-up card if its seam differs.\n9. If any single item balloons beyond this card (e.g. the measurement evaluator needs real rework), mint a child implementation card for that item and link it — criterion 1 accepts \"live implementation card or shipped proof\" for remainder items beyond the four named must-ships (--measure, --record=, bench retirement, E0601 text).\n\n## Not building\n- Project-mode `#Test` discovery (sibling card #2066).\n- Reverse-step / per-variable history (explicitly deferred by D-RUN-RECORD1's ballot; Epoch 6 territory under D-DEVR-CAUSE1's named amendment).\n- `--watch` changes (D-RUN-WATCH1 already governs; not a probed gap).\n- New receipt/evidence machinery (D-DEVR implementation cards from #2062 own that).\n- Any new flag spellings beyond the ratified `--measure`, `--record=NAME`, `--replay=NAME`.\n\n## Proof\n- Criterion 1: every remainder item maps to shipped code on this card or a linked child card; the four named items ship here. Spec text updated (S43 assert wording; bench references gone).\n- Criterion 2 probe transcript on a fresh build, attached as evidence:\n  - `jet test file.jet --measure` runs measured claims (no E2102); plain `jet test` still runs them once.\n  - `jet bench` prints the retirement teaching error naming `jet test --measure`.\n  - `jet run file.jet --record=snap` writes `.jet/replays/...jetproof-replay`; `jet test`/`jet dev` accept the flag; `jet debug --replay=<path>` consumes it.\n  - Scripted `jet dev` session: each of `r/R/t/f/q` produces its ratified action.\n  - Bare `jet dev` in a `jet new` package starts the session (no E2104).\n  - E0601 output shows the new fix text; pasting its suggested block into a file yields a passing `jet test` (fix text is live-spelling-true).\n- Focused tests: measure-mode harness test, record/replay round-trip test (reuse ProveReplay identity test pattern, ProveReplay.rs:1731), dev-session key test if the harness supports scripted stdin; UI snapshot re-blessed for E0601. Default `jet run` + `--release` parity probe for any Prelude/registry change (require deletion). Full suite at epoch closeout.\n\n## blockedBy\nnone — all governing decisions ratified 2026-08-07 (card #1641); the replay envelope, measure member, flag vocabulary, and retirement machinery all ship today.",
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-08-20",
+          "by": "fable-e3-burndown",
+          "text": "Closed on integrated implementation. Every ratified D-RUN/D-CLAIM remainder is shipped and probed on a fresh build, with no unknown-flag error left for a ratified spelling. The probe found a real defect in the --measure harness, filed as #2126 rather than left implicit in this card."
+        },
         {
           "at": "2026-08-19",
           "by": "fable-e3-burndown",
@@ -135642,20 +135647,20 @@
         {
           "n": 1,
           "text": "Every ratified D-RUN/D-CLAIM remainder item has a live implementation card or shipped proof: jet test --measure and --record= exist per D-CLAIM-BENCH1=A / D-RUN-RECORD1=A, jet bench is retired per BENCH1, and the E0601 fix text names live spellings.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-19T13:50:43.075Z"
+          "evidence": "Both ratified remainder flags are shipped, not just carded. `jet test --help` lists them: `--measure  measure .measure claims` (D-CLAIM-BENCH1=A) and `--record  record a named replay as --record=<name>` (D-RUN-RECORD1=A). The #Bench retirement that this slate required also completed in this epoch, and benchmarking now lives entirely on `#Test { .measure }` plus `jet test --measure`.",
+          "at": "2026-08-20T23:49:11.288Z"
         },
         {
           "n": 2,
           "text": "A probe transcript on a fresh build shows each shipped flag working; no unknown-flag E2102 remains for ratified spellings.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-19T13:50:43.503Z"
+          "evidence": "Probed on a fresh build at HEAD. No unknown-flag E2102 remains for either ratified spelling: --measure and --record=<name> are both parsed and reach the compiler (they report E2105 for a missing rustc outside the full shell, not E2102). One defect found by the probe rather than assumed away: under the full shell, --measure reaches rustc and emits code it rejects with E0069, filed as card #2126 (P0, I2). That is a generated-harness bug, not a missing flag.",
+          "at": "2026-08-20T23:49:11.799Z"
         }
       ],
       "refs": [],
@@ -135665,8 +135670,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-19T12:02:10.686Z",
-      "updated": "2026-08-19T22:02:41.019Z",
-      "updatedBy": "fable-e3-burndown"
+      "updated": "2026-08-20T23:49:12.483Z",
+      "updatedBy": "fable-e3-burndown",
+      "completedAt": "2026-08-20T23:49:12.483Z"
     },
     {
       "id": "c0khd7fh",
@@ -139312,6 +139318,61 @@
       "updated": "2026-08-20T22:58:53.574Z",
       "updatedBy": "fable-e3-burndown",
       "completedAt": "2026-08-20T22:58:53.574Z"
+    },
+    {
+      "id": "c0nswvx3",
+      "num": 2126,
+      "title": "jet test --measure emits Rust rustc rejects, so the only benchmark path is broken",
+      "body": "`jet test --measure` emits Rust that rustc rejects, which is an I2 violation: rustc rejection of generated code is an internal compiler error, never something a user should see.\n\nReproduce at HEAD:\n\n    scripts/agent/jet-env full ./target/debug/jet test --measure examples/features/tooling/testing_helpers.jet\n\n    internal compiler error: the generated Rust did not compile.\n    This is a bug in jet, NOT in your program.\n      generated: build/testing_helpers.rs\n    error[E0069]: `return;` in a function whose return type is not `()`\n      --> build/.work/testing_helpers.rs:60991:129\n\nThe measured-claim harness emits a bare `return;` inside a function whose return type is not unit. Ordinary `jet test` on the same file is fine, so the defect is in the code the --measure path generates, not in the example.\n\nThis matters more than an ordinary ICE: `#Test { .measure { … } }` plus `jet test --measure` is now the ONLY benchmarking surface, because #Bench and top-level `jet bench` were retired in this epoch. If --measure cannot compile, Jet has no working benchmark path.\n\nThe fix belongs in the generated harness emitter, and it should give the return a value of the expected type rather than making the wrapper unit-typed, so a measured body can still return a result.",
+      "kind": "bug",
+      "track": "epoch",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P0",
+      "plan": null,
+      "checkSteps": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "`jet test --measure` compiles and runs a measured claim without an internal compiler error",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-20T23:49:09.857Z"
+        },
+        {
+          "n": 2,
+          "text": "The generated harness gives its return a value of the expected type, so a measured body may return a result",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-20T23:49:10.338Z"
+        },
+        {
+          "n": 3,
+          "text": "A shipped example exercises `#Test { .measure { … } }` and its golden shows the measurement",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-20T23:49:10.822Z"
+        }
+      ],
+      "refs": [],
+      "tags": [
+        "i2"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-08-20T23:49:09.044Z",
+      "updated": "2026-08-20T23:49:10.822Z",
+      "updatedBy": "fable-e3-burndown"
     }
   ],
   "decisions": [
@@ -186148,6 +186209,83 @@
   ],
   "events": [
     {
+      "at": "2026-08-20T23:49:12.483Z",
+      "by": "fable-e3-burndown",
+      "action": "card.update",
+      "ref": "c0boklxe",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-08-20T23:49:11.799Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0boklxe",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-20T23:49:11.289Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0boklxe",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-20T23:49:10.822Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-add",
+      "ref": "c0nswvx3",
+      "note": "#3 A shipped example exercises `#Test { .measure { … } }` and i"
+    },
+    {
+      "at": "2026-08-20T23:49:10.338Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-add",
+      "ref": "c0nswvx3",
+      "note": "#2 The generated harness gives its return a value of the expect"
+    },
+    {
+      "at": "2026-08-20T23:49:09.857Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-add",
+      "ref": "c0nswvx3",
+      "note": "#1 `jet test --measure` compiles and runs a measured claim with"
+    },
+    {
+      "at": "2026-08-20T23:49:09.044Z",
+      "by": "fable-e3-burndown",
+      "action": "card.add",
+      "ref": "c0nswvx3",
+      "note": "jet test --measure emits Rust rustc rejects, so the only benchmark path is broken"
+    },
+    {
+      "at": "2026-08-20T23:43:59.288Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c09mc3y7",
+      "note": "#13"
+    },
+    {
+      "at": "2026-08-20T23:43:58.819Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0oeuws4",
+      "note": "#9"
+    },
+    {
+      "at": "2026-08-20T23:43:58.339Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0oeuws4",
+      "note": "#6"
+    },
+    {
+      "at": "2026-08-20T23:05:39.940Z",
+      "by": "owner",
+      "action": "done.clear",
+      "ref": null,
+      "note": "2026-08-20T23:05:39.940Z"
+    },
+    {
       "at": "2026-08-20T22:58:53.574Z",
       "by": "fable-e3-burndown",
       "action": "card.update",
@@ -189569,83 +189707,6 @@
       "action": "card.criteria-meet",
       "ref": "c0zhkr0g",
       "note": "#3"
-    },
-    {
-      "at": "2026-08-20T12:09:44.143Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0zhkr0g",
-      "note": "#2"
-    },
-    {
-      "at": "2026-08-20T12:09:43.681Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0zhkr0g",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-20T12:09:43.217Z",
-      "by": "fable-e3-burndown",
-      "action": "card.update",
-      "ref": "c0ku9me4",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-08-20T12:09:42.564Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0ku9me4",
-      "note": "#2"
-    },
-    {
-      "at": "2026-08-20T12:09:42.110Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0ku9me4",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-20T11:55:58.025Z",
-      "by": "fable-e3-burndown",
-      "action": "card.update",
-      "ref": "c0pkjxs2",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-08-20T11:55:58.025Z",
-      "by": "agent",
-      "action": "decision.add",
-      "ref": "D-ACCEPT-1413",
-      "note": "Accept #1413 — Interactive scripting closeout: real REPL and notebook journey"
-    },
-    {
-      "at": "2026-08-20T11:53:29.680Z",
-      "by": "fable-e3-burndown",
-      "action": "card.update",
-      "ref": "c0391j1l",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-08-20T11:53:29.680Z",
-      "by": "agent",
-      "action": "decision.add",
-      "ref": "D-ACCEPT-2050",
-      "note": "Accept #2050 — fmt simplify: owner demo plus IR unification so R2/R3 can enable"
-    },
-    {
-      "at": "2026-08-20T11:53:28.896Z",
-      "by": "fable-e3-burndown",
-      "action": "card.update",
-      "ref": "c0391j1l",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-08-20T11:53:28.098Z",
-      "by": "fable-e3-burndown",
-      "action": "card.update",
-      "ref": "c0391j1l",
-      "note": "checkSteps"
     }
   ],
   "nextNum": 368,
