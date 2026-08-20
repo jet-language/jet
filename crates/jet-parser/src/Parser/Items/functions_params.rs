@@ -518,6 +518,9 @@ impl<'a> Parser<'a> {
             )
         }
 
+        // Turned on by the change that closes #2081, once `jet fmt` has
+        // respelled the corpus. See Parser/mod.rs::expect_unified_arrow.
+        #[allow(dead_code)]
         pub(in crate::Parser) fn retired_unified_arrow(span: Span) -> Diagnostic {
             Diagnostic::error(
                 "E0070",

@@ -317,9 +317,19 @@ impl<'a> Parser<'a> {
                     Ok(Expr::Lambda(self.parse_lambda(vec![])?))
                 }
                 // D-LAMBDA-INFER1 (ratified 2026-07-04): a bare single-param
-                // lambda with no parens — `m => m.hp > 0`. Sema accepts it only
+                // lambda with no parens — `m :> m.hp > 0`. Sema accepts it only
                 // where the expected type fixes the param type (E0801 elsewhere).
-                TokKind::Ident(_) if Self::at_unified_arrow_token(&self.peek2().kind) => {
+                //
+                // Not inside a control header. `allow_struct_lit` is false
+                // exactly where a trailing arrow introduces a BODY —
+                // `loop x, xs :> f(x)`, `if cond :> stmt`, an arm head. Once
+                // D-ARROW-UNIFY1 made one arrow serve both roles, a bare
+                // `xs :> f(x)` there read as a lambda and swallowed the body,
+                // so the header reported "this loop has no body". A lambda in
+                // that position writes its parameter list in parentheses.
+                TokKind::Ident(_)
+                    if allow_struct_lit && Self::at_unified_arrow_token(&self.peek2().kind) =>
+                {
                     Ok(Expr::Lambda(self.parse_bare_lambda()?))
                 }
                 TokKind::LParen => self.parse_paren_primary(allow_struct_lit),
