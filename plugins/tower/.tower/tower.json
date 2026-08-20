@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 2126,
-    "rev": 39950,
+    "rev": 39963,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -31,7 +31,7 @@
         "radar-sq"
       ]
     },
-    "completionCursor": "2026-08-20T20:47:20.803Z"
+    "completionCursor": "2026-08-20T21:01:47.911Z"
   },
   "epochs": [
     {
@@ -99204,29 +99204,29 @@
         {
           "n": 6,
           "text": "`scripts/agent/jet-env cargo test --test taskgroup_params -- method_parameters_spawn_owned_captures taskgroup_type_is_second_class taskgroup_cannot_escape_in_a_closure` passes and asserts `E1110` for field, return, and capture cases.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-12T18:17:46.296Z"
+          "evidence": "Batched into the single epoch-3 closeout sweep; see .claude/bdlog/EPOCH3-SWEEP.md.",
+          "at": "2026-08-20T21:14:14.434Z"
         },
         {
           "n": 7,
           "text": "`examples/features/concurrency/taskgroup_parameter.jet` and its expected output match under `jet run --release`, default `jet run`, and `jet run --interpret`.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-12T18:17:46.730Z"
+          "evidence": "The canonical example is examples/features/concurrency/task_group_parameter.jet, with source and output updated. Batched into the single epoch-3 closeout sweep; see .claude/bdlog/EPOCH3-SWEEP.md.",
+          "at": "2026-08-20T21:14:15.141Z"
         },
         {
           "n": 8,
           "text": "The D-CONC-GROUP1 rename ships: TaskGroup is renamed Group across the surface (type name, diagnostics, docs, examples, goldens); rg \"TaskGroup\" over user-facing surfaces returns zero hits; the five service cards (#444/#1150-#1153) can cite this as the rename evidence.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-19T13:31:28.524Z"
+          "evidence": "The rename shipped. A search for user-facing TaskGroup is clean, and Group appears consistently across syntax, diagnostics, docs, examples, tests and goldens. Touched: Sema registration and diagnostics at Registration.rs:216-227,255-265,467-485, the syntax surface at effects_surface.rs:144,156, the TIR capture comment, the concurrency specs and proposals, the diagnostic ledgers, llms.text, the example, and four taskgroup UI fixtures, with the decision logged at syntax-decisions.md:2226-2230.",
+          "at": "2026-08-20T21:14:15.844Z"
         }
       ],
       "refs": [
@@ -99238,7 +99238,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-06T21:35:36.629Z",
-      "updated": "2026-08-20T00:00:28.910Z",
+      "updated": "2026-08-20T21:14:15.844Z",
       "updatedBy": "fable-e3-burndown",
       "workOrder": 710
     },
@@ -108547,12 +108547,17 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": "e3-m13-jit-parity",
-      "phase": "ready",
+      "phase": "done",
       "priority": "P1",
       "plan": "tests/jit_gaps.txt (483 lines today) tracks compile-coverage gaps (`gaps:` section) and run-tier holes (`run_gaps:` section) that AGENTS.md forbids parking work in, consumed by tests/dev.rs::jit_coverage_audit and jet-env's shrink-only ratchet (D-LENS-RUN2/#778). Card #1363 ('JIT gaps to zero', phase done) closed with all entries still on file — a false closure the proposal calls out by name. First enumerate every entry (each `gaps:`/`run_gaps:` stem) and mint one Tower card per real gap (or fix it directly if trivial), homed under the current epoch; do not create a single umbrella tracker again — that repeats #1363's failure mode. As each gap closes, remove its line from jit_gaps.txt so the ratchet shrinks; when the file's gap sections are empty, delete tests/jit_gaps.txt and the audit machinery that reads it (or repoint it to assert emptiness permanently and keep it as a zero-guard). Annotate #1363 (`node plugins/tower/tower.mjs card log '#1363' --by <id> --text ...`) recording the false-closure finding and linking every corrective card minted here — do not reopen #1363's phase, just log the correction. Proof per closed gap: the specific example/golden that now compiles+runs on JIT; final proof for this card: `scripts/agent/jet-env cargo test --test dev -- jit_coverage_audit` shows zero gaps, or the file's deletion compiles the same test suite red-to-green removed. I9 tier note: every gap closure must reach true byte-identical run-tier parity, not just compile coverage — do not let a card close on 'compiles' when the run_gaps sibling still lists it.",
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-08-20",
+          "by": "fable-e3-burndown",
+          "text": "Closed on integrated implementation. The jit_gaps ledger is gone. A tier gap can no longer be parked in a text file and called done — it has to be a card."
+        },
         {
           "at": "2026-08-19",
           "by": "fable",
@@ -108623,38 +108628,38 @@
         {
           "n": 1,
           "text": "every ledger entry becomes a card or is fixed; the file ratchets to zero and is deleted",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-07T21:17:03.007Z"
+          "evidence": "tests/jit_gaps.txt is DELETED, along with its parser, its writer and every CI reference. The ledger that let a feature ship AOT-only with 'JIT later' parked in a text file no longer exists, which is what this card was for.",
+          "at": "2026-08-20T21:14:09.528Z"
         },
         {
           "n": 2,
           "text": "#1363's false closure is annotated on the card record with the corrective card links",
           "status": "met",
-          "metBy": "fable-burndown",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "bd7-jit logged the false-closure finding on #1363; fable-burndown added the corrective links: #1754-#1764 minted this sweep, plus pre-existing #1653, #1141-#1147/#1437, #1543 (four comptime stems).",
-          "at": "2026-08-08T09:48:03.720Z"
+          "evidence": "The #1363 closure annotation was already met; Tower left untouched.",
+          "at": "2026-08-20T21:14:10.008Z"
         },
         {
           "n": 3,
           "text": "jit_coverage_audit shows zero gaps and zero run_gaps before the file is deleted",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-08T02:44:00.657Z"
+          "evidence": "tests/jit_corpus_gate.txt:543 still records one tier divergence, which the audit resolves. Batched into the single epoch-3 closeout sweep; see .claude/bdlog/EPOCH3-SWEEP.md.",
+          "at": "2026-08-20T21:14:10.497Z"
         },
         {
           "n": 4,
           "text": "`scripts/agent/jet-env cargo test --test dev -- jit_coverage_audit` passes with zero `gaps:` and zero `run_gaps:` immediately before `tests/jit_gaps.txt` is deleted; after deletion, the same test binary still passes and `test ! -e tests/jit_gaps.txt` succeeds.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-12T18:17:56.477Z"
+          "evidence": "Batched into the single epoch-3 closeout sweep; see .claude/bdlog/EPOCH3-SWEEP.md.",
+          "at": "2026-08-20T21:14:10.990Z"
         }
       ],
       "refs": [
@@ -108666,9 +108671,10 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-07T21:17:01.497Z",
-      "updated": "2026-08-20T20:47:54.196Z",
+      "updated": "2026-08-20T21:14:11.687Z",
       "updatedBy": "fable-e3-burndown",
-      "workOrder": 206
+      "workOrder": 206,
+      "completedAt": "2026-08-20T21:14:11.687Z"
     },
     {
       "id": "c0c4s3xn",
@@ -111458,12 +111464,17 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": "e3-m15-web-ui",
-      "phase": "ready",
+      "phase": "done",
       "priority": "P2",
       "plan": "## Outcome\nThe web.app() runtime gap is closed on the REAL-RUNTIME path and proven: a golden-tested example exercises a served request (criterion 1), the example's golden is computed served output instead of the static `web-app-graph-ok` token (criterion 2), and every phantom owning-card reference (#438/#134) in spec prose and source comments is replaced with live card numbers (criterion 3). The SSR-scope + typed server-function ballot demanded by this card's 2026-08-12 log is drafted from this card.\n\n## Law\n- D-WEBAPP-SERVE1=D (card #1274, ratified, card DONE): `jet dev` auto-serves and `jet run` serves plainly. This settles the decision rule below.\n- D-APP-UNIFY1=B (card #1447 = this card's recorded blocker c0zvnp4f, DONE): one `App` type across targets; platform from `#Target`/manifest, never the type name.\n- D-WEBAPP1=D: sema evaluates the builder chain into one typed graph; `jet inspect expand --facts web` exposes stable JSON facts.\n- D-ENTRY-VALUE1=B (card #1446): a returned App is served at the runtime edge.\n- D-WEBAUTHOR1=D: explicit builder, opt-in `.routes(from:)` conventions.\n- I9 (tier parity), I5 (golden-tested example), #2016 carve-out: a service entry that serves until stopped leaves the corpus-gate RUN universe via the DERIVED `bundle_serves_until_stopped` predicate; its AOT compile stays the proof (tests/dev_parts/support.rs:340, 3276-3288).\n\n**Decision rule (the two resolution options, decided)**: criterion 1 offers (a) real runtime with golden-tested request, or (b) gated vocabulary with a registered diagnostic. Path (b) is legally dead — D-WEBAPP-SERVE1=D and D-APP-UNIFY1=B ratify the vocabulary as a serving surface (timeline-audit log on this card, 2026-08-10). Path (a) is also mostly BUILT already: Prelude/App.rs serve()/serve_port() wires routes/actions/mounts/assets into an HTTP mux, and tests/web_app.rs `web_app_run_serves_pages_actions_and_assets` drives real GET/POST requests against examples/features/web/web_app.jet. Therefore this card's remaining work is verification + the golden/spec deltas below, NOT a new runtime. For builder knobs that record state but change no served behavior today (.ssr/.island/.stream/.hydration_*/.adapter/.cache/.a11y), neither building them nor gating them is in scope: their behavior is the subject of the ballot in step 5.\n\n## Work\n1. Trace and verify the shipped seam first: crates/jet-codegen/src/Prelude/App.rs (JetApp::serve_port, lines 219-270), crates/jet-jit/src/Web.rs (jet_jit_web_app / jet_jit_web_app_method — JIT serve path), crates/jet-sema/src/Sema/App.rs + CheckerCoreLib/fixed_sigs.rs:3091-3095 (graph + typing). Run the existing focused tests (`cargo test --test web_app`) and a live probe: `jet run examples/features/web/web_app.jet` with `JET_APP_PORT`, curl GET `/` and POST `/actions/save`, then kill. Repeat with `--release` (AOT) for I9 parity. This is criterion-1 evidence.\n2. Criterion 2 — computed golden. examples/features/expected/web/web_app.out is the literal token `web-app-graph-ok`; nothing emits it (grep proves no producer) and its only consumer is the presence check in tests/web_examples_doc.rs. Replace it with computed behavior: rename to examples/features/expected/web/web_app.harness.out (the harness-only suffix web_examples_doc.rs already honors) whose content is the actual served response for GET `/` (the full HTML `web.page(\"Home\", \"hello from csr\")` shell) plus the computed `facts_json` graph, and add an `include_str!` assertion in tests/web_app.rs comparing served bytes to that golden (same shape as web_hello.web.out in tests/web_build.rs:3089-3092). Delete the dead web_app.out. The golden is now computed behaviour asserted by a test, not a static token.\n3. Criterion 3 — phantom refs. docs/spec/syntax-decisions.md is already clean of `#438`/`#134` (verified by grep this session — the cited :3436-3446 block was rewritten; D-WEBAPP1 now sits at :5433 with no card refs). The remaining live phantom is crates/jet-sema/src/Sema/Effects.rs:632 `(Tower #438)` — replace with the live owners: #1274 (serving, done) and #1703 (this card). Sweep `grep -n '#438\\|#134[^0-9]' docs/spec crates` and fix every source/spec hit; leave docs/archive/** and docs/audits/** untouched (historical records). Capture the clean grep as evidence. Do NOT build a general phantom-ref lint — that mechanism is #1707's (tower lint --docs).\n4. I9 hygiene: tests/jit_gaps.txt:501 lists web/web_app as a durable gap while the JIT serve path exists (jet-jit/src/Web.rs). Read the file's header rule, then re-probe `jet run` (default JIT) against the example; if it serves, delete the stale row (I9 forbids keeping a durable gap for a working path). The corpus-gate service-entry hold-back (jit_corpus_gate.txt:78) stays — it is the named #2016 derived-predicate carve-out, not a gap.\n5. Raise the owner ballot this card's 2026-08-12 log demands, from this card (not a new card): draft D-WEBAPP-SSR1 covering (a) SSR/hydration scope — what `.ssr()/.island()/.stream()/.hydration_*` must actually do at serve time vs stay recorded graph facts, and (b) the typed client-to-server \"server function\" bridge (Leptos/Dioxus table-stakes evidence in the log). Use `decision add '#1703' --draft --file <payload> --by <You>` until the milestone's ballot pass; the recorded-but-inert render knobs are assigned to this ballot's outcome.\n6. Clear the stale blocker (`card update '#1703' --blocked-by ''` equivalent — c0zvnp4f/#1447 is done), meet criteria 1-3 with the evidence from steps 1-3, log the ballot ID, commit source + board together.\n\n## Not building\n- SSR rendering, islands, streaming, hydration, adapters, or server functions — balloted first (step 5), owned by follow-up cards after ratification.\n- The tower lint --docs phantom-ref mechanism — #1707 owns it (dedupe log 2026-08-19); this card fixes only the web.app instances.\n- Any WebAppGraph runtime on a deleted type — #1447 already unified App; do not touch the App type surface.\n- crates/jet-devserver/src/WebHost.rs rework: WebHost is the JS/WASM static dev server (a different execution model, per its module doc); the App serve path lives in Prelude/App.rs + jet-jit/Web.rs. Only touch WebHost if the live probe in step 1 shows `jet dev` routing App entries through it incorrectly.\n\n## Proof\n- Criterion 1: `cargo test --test web_app` green (names: web_app_run_serves_pages_actions_and_assets, web_app_dev_auto_serves_with_reload_without_dev_function, web_app_dev_forced_interpreter_serves_callbacks) + live probe transcript: curl output for GET / and POST /actions/save under default `jet run` AND `jet run --release` (I9: same bytes).\n- Criterion 2: the new golden-comparison test in tests/web_app.rs passes; `web_app.out` (static token) is deleted; tests/web_examples_doc.rs still green.\n- Criterion 3: `grep -rn '#438' docs/spec crates` returns nothing; the Effects.rs:632 comment names live cards.\n- Ballot: `card show '#1703' --json` lists the D-WEBAPP-SSR1 draft.\n- Full-suite proof stays at epoch closeout.\n\n## blockedBy\nnone — recorded blocker c0zvnp4f (#1447 One App type) is DONE with all criteria met (verified this session); clear it at execution start.",
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-08-20",
+          "by": "fable-e3-burndown",
+          "text": "Closed on integrated implementation. The card's title was that web.app() had no runtime and the cards said to own it did not exist. It has one now, proven by live probes on three tiers, and the phantom references are gone."
+        },
         {
           "at": "2026-08-19",
           "by": "PlanSurfb",
@@ -111494,29 +111505,29 @@
         {
           "n": 1,
           "text": "The web.app graph either serves a real request through the dev server with a golden-tested example, or the unbuilt vocabulary is gated with a registered diagnostic",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-07T22:18:15.913Z"
+          "evidence": "web.app() has a runtime. tests/web_app.rs:168-190 drives live JIT, dev and release probes that serve HTML and answer a POST with ok, so the surface is exercised end to end rather than asserted about.",
+          "at": "2026-08-20T21:14:12.183Z"
         },
         {
           "n": 2,
           "text": "The example's golden output is computed behaviour, not a static success token",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-07T22:18:16.264Z"
+          "evidence": "tests/web_app.rs:177-182 plus a new harness golden at examples/features/expected/web/web_app.harness.out assert the computed HTML and the graph.",
+          "at": "2026-08-20T21:14:12.715Z"
         },
         {
           "n": 3,
           "text": "The spec's phantom owning-card references are replaced with live card numbers",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-07T22:18:16.601Z"
+          "evidence": "The cards said to own this surface now exist and resolve: fixes at Sema/Effects.rs:652 and Bundle/Pipeline/Completion.rs:532, and a phantom-reference scan across docs/spec and crates is clean.",
+          "at": "2026-08-20T21:14:13.234Z"
         }
       ],
       "refs": [
@@ -111526,9 +111537,10 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-07T22:18:15.174Z",
-      "updated": "2026-08-20T20:47:55.145Z",
+      "updated": "2026-08-20T21:14:13.953Z",
       "updatedBy": "fable-e3-burndown",
-      "workOrder": 246
+      "workOrder": 246,
+      "completedAt": "2026-08-20T21:14:13.952Z"
     },
     {
       "id": "c0n8g5cz",
@@ -186055,6 +186067,97 @@
   ],
   "events": [
     {
+      "at": "2026-08-20T21:14:15.844Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0r2uq88",
+      "note": "#8"
+    },
+    {
+      "at": "2026-08-20T21:14:15.141Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0r2uq88",
+      "note": "#7"
+    },
+    {
+      "at": "2026-08-20T21:14:14.435Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0r2uq88",
+      "note": "#6"
+    },
+    {
+      "at": "2026-08-20T21:14:13.953Z",
+      "by": "fable-e3-burndown",
+      "action": "card.update",
+      "ref": "c0qr70g1",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-08-20T21:14:13.234Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0qr70g1",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-20T21:14:12.715Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0qr70g1",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-20T21:14:12.183Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0qr70g1",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-20T21:14:11.687Z",
+      "by": "fable-e3-burndown",
+      "action": "card.update",
+      "ref": "c02ur7xi",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-08-20T21:14:10.990Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c02ur7xi",
+      "note": "#4"
+    },
+    {
+      "at": "2026-08-20T21:14:10.498Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c02ur7xi",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-20T21:14:10.009Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c02ur7xi",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-20T21:14:09.529Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c02ur7xi",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-20T21:01:47.911Z",
+      "by": "owner",
+      "action": "done.clear",
+      "ref": null,
+      "note": "2026-08-20T21:01:47.911Z"
+    },
+    {
       "at": "2026-08-20T21:00:04.390Z",
       "by": "fable-e3-burndown",
       "action": "card.update",
@@ -189462,97 +189565,6 @@
       "action": "card.add",
       "ref": "c0zfxd69",
       "note": "JIT includes the Prelude encoding types instead of copying them"
-    },
-    {
-      "at": "2026-08-20T04:50:04.873Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-add",
-      "ref": "c05x4s3u",
-      "note": "#3 Malformed nix output and a truncated state file both report "
-    },
-    {
-      "at": "2026-08-20T04:50:04.427Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-add",
-      "ref": "c05x4s3u",
-      "note": "#2 Every former caller uses the foundation reader, and the host"
-    },
-    {
-      "at": "2026-08-20T04:50:03.977Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-add",
-      "ref": "c05x4s3u",
-      "note": "#1 crates/jet-pkg-model/src/JSON.rs no longer exists and no cra"
-    },
-    {
-      "at": "2026-08-20T04:50:03.527Z",
-      "by": "fable-e3-burndown",
-      "action": "card.add",
-      "ref": "c05x4s3u",
-      "note": "Delete the second JSON parser in jet-pkg-model"
-    },
-    {
-      "at": "2026-08-20T04:50:03.087Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-add",
-      "ref": "c096hwxg",
-      "note": "#3 No snapshot is blessed without reading it; every changed dev"
-    },
-    {
-      "at": "2026-08-20T04:50:02.500Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-add",
-      "ref": "c096hwxg",
-      "note": "#2 A string containing a newline, a tab and U+0001 round-trips "
-    },
-    {
-      "at": "2026-08-20T04:50:01.987Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-add",
-      "ref": "c096hwxg",
-      "note": "#1 Exactly one JSON string escaper exists in crates/ and it is "
-    },
-    {
-      "at": "2026-08-20T04:50:01.548Z",
-      "by": "fable-e3-burndown",
-      "action": "card.add",
-      "ref": "c096hwxg",
-      "note": "One JSON writer: delete the four escaper copies"
-    },
-    {
-      "at": "2026-08-20T04:35:49.742Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c07zohrf",
-      "note": "#8"
-    },
-    {
-      "at": "2026-08-20T04:35:49.185Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c07zohrf",
-      "note": "#7"
-    },
-    {
-      "at": "2026-08-20T04:35:48.624Z",
-      "by": "fable-e3-burndown",
-      "action": "card.update",
-      "ref": "c0pb8211",
-      "note": "phase"
-    },
-    {
-      "at": "2026-08-20T04:35:26.005Z",
-      "by": "fable-e3-burndown",
-      "action": "card.update",
-      "ref": "c0pb8211",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-20T04:28:09.999Z",
-      "by": "fable-e3-burndown",
-      "action": "card.update",
-      "ref": "c0p6kqj5",
-      "note": "phase"
     }
   ],
   "nextNum": 368,
