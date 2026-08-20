@@ -21,7 +21,7 @@ const JET_HIGHLIGHT_TYPE_BUILTIN = ["()", "BTreeMap", "Bits", "Bool", "Budget", 
 const JET_HIGHLIGHT_BUILTIN = ["assert", "assert_eq", "channel", "check", "freeze", "input", "join", "print"];
 const JET_HIGHLIGHT_MARKER_RULE = ["ABI", "Bench", "Bindgen", "CLI", "Caps", "Codable", "CodableAsBase", "Comparable", "Context", "Debug", "DebugOnly", "Decode", "DenyUnknownFields", "Discriminant", "Doc", "Encode", "Env", "Equatable", "Every", "Extern", "FFI", "Flag", "Flatten", "Grant", "HTML", "Impure", "Inline", "Job", "Kernel", "Layout", "Live", "Local", "Memo", "Meta", "MustUse", "NoPrelude", "Nondeterministic", "Numeric", "Off", "Patchable", "Persist", "Policy", "Post", "Pre", "Printable", "PubFile", "PublishedSchema", "Reactive", "Redact", "Region", "Rename", "RenameAll", "Replayable", "Root", "SQL", "Scrub", "Shared", "Shield", "Short", "SingleUse", "Skip", "State", "Static", "Target", "Test", "Todo", "Track", "Transact", "Transition", "Undo", "UnitFamily", "Unsafe", "Untagged", "WasmExport", "allow", "wire"];
 const JET_HIGHLIGHT_SIGIL = ["#", "&", "...", "::", ":=", "@", "@[", "]@", "^", "~"];
-const JET_HIGHLIGHT_OPERATOR = ["!", "!=", "%", "%%", "%%=", "%=", "&&", "&=", "*", "*=", "+", "++", "+=", "-", "--", "-=", "->", "..", "..<", ".[", ".{", "/", "/%", "/%=", "/=", "<", "<<", "<<=", "<=", "<=>", "==", "=>", ">", ">=", ">>", ">>=", "?", "?.", "??", "^=", "|", "|=", "||", "~|", "~|="];
+const JET_HIGHLIGHT_OPERATOR = ["!", "!=", "%", "%%", "%%=", "%=", "&&", "&=", "*", "*=", "+", "++", "+=", "-", "--", "-=", "..", "..<", ".[", "/", "/%", "/%=", "/=", ":>", "<", "<<", "<<=", "<=", "<=>", "==", ">", ">=", ">>", ">>=", "?", "?.", "??", "^=", "{", "|", "|=", "||", "~|", "~|="];
 // END GENERATED JET SYNTAX HIGHLIGHTS
 
 module.exports = grammar({
