@@ -1349,7 +1349,8 @@ pub fn marker_wrong_site_error(
     site: RuleSite,
     span: crate::Diagnostics::Span,
 ) -> crate::Diagnostics::Diagnostic {
-    let legal = applied_rule(name)
+    let row = applied_rule(name);
+    let legal = row
         .map(|row| {
             let mut sites = row
                 .sites
@@ -1374,11 +1375,23 @@ pub fn marker_wrong_site_error(
             .collect::<Vec<_>>()
             .join(", ")
     };
+    // D-CONSTMARK1=A + D-META-STAGE1=B: a row whose only site is `.Constant`
+    // has exactly one legal spelling — the marked compile-time binding
+    // `@name :: value` (spec.md:718-720). "Move it to a registered site"
+    // cannot lead there, because an unmarked `name :: value` is not a
+    // declaration at file or module scope at all.
+    let fix = if row
+        .is_some_and(|row| row.companion_site.is_none() && matches!(row.sites, [RuleSite::Constant]))
+    {
+        format!("write `#{name} @name :: value` — a constant is a marked compile-time binding")
+    } else {
+        format!("move `#{name}` to one of its registered sites")
+    };
     crate::Diagnostics::Diagnostic::error(
         "E0355",
         format!("`#{name}` cannot attach at the {} site", site.name()),
         format!("the registry allows `#{name}` only at: {legal}"),
-        format!("move `#{name}` to one of its registered sites"),
+        fix,
         Some(span),
     )
 }

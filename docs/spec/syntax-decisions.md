@@ -1756,6 +1756,12 @@ because one rule cannot conflict with itself.
 card #762)*: `#Static const` gives the constant a stable address; `#Inline
 const` copies the value into use sites. Retired lowercase `#static` and
 `#inline` fix to those registry-backed forms.
+The `const` keyword this outcome was written against was retired later the same
+milestone by D-CONST-RETIRE1 (E0146). The constant these rules attach to is now
+the marked compile-time binding, so the two spellings are `#Static @name ::
+value` and `#Inline @name :: value` — see spec.md § compile-time bindings. The
+outcome itself is unchanged: `#Static` gives the constant an address, `#Inline`
+copies it into use sites.
 
 **D-CANVASSTATE1=D — Statement switch attributes**: `#Off <stmt>` parses and
 type-checks the statement, then emits no code in every build. `#DebugOnly <stmt>`

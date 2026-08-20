@@ -725,24 +725,48 @@ fn run() {
     assert!(out.rust.contains(").clone()"));
 }
 
+/// D-CONSTMARK1=A (syntax-decisions.md:1756), spelled out at spec.md:718-720:
+/// a constant is the marked compile-time binding `@name :: value`, and
+/// `#Static @` emits a Rust `static` so the value gets one stable address.
+/// There is no unmarked file-level `limit :: 10` to attach to — the only
+/// declaration forms at that scope are `@name ::`, `#Persist name :=`, and the
+/// Output pair (crates/jet-parser/src/Parser/Items/imports_policy.rs:1275-1318).
+///
+/// The symbol name is fixed by the naming law, not by choice: `mangle` rewrites
+/// the `@` mark to `ct_` and prefixes the one machine prefix `__jet_`
+/// (crates/jet-foundation/src/Names.rs:565-571, D-NAME-SIGIL1 at
+/// crates/jet-foundation/src/Syntax/predicates.rs:367), then `emit_const`
+/// uppercases it (crates/jet-codegen/src/Codegen/Items.rs:2864). So `@limit`
+/// can only ever become `__JET_CT_LIMIT`.
 #[test]
 fn const_address_taken_emits_static() {
     let src = r#"
-#Static limit :: 10
+#Static @limit :: 10
 
 fn show(n: Int) {
     print(n)
 }
 
 fn run() {
-    show(limit)
+    show(@limit)
 }
 "#;
     let out = jet::compile(src).expect("should compile");
     assert!(
-        out.rust.contains("static USER_LIMIT"),
-        "address-taken const should emit static: {}",
+        out.rust.contains("static __JET_CT_LIMIT"),
+        "`#Static` should give the constant its own address: {}",
         out.rust
+    );
+    // The other half of the same law: without `#Static` the constant is
+    // address-free — it folds into its use sites and emits no top-level item
+    // (crates/jet-codegen/src/Codegen/Items.rs:2829). Without this the
+    // assertion above would also pass on a build that emitted a symbol for
+    // every constant, which is the opposite of what the marker is for.
+    let inlined = jet::compile(&src.replace("#Static ", "")).expect("should compile");
+    assert!(
+        !inlined.rust.contains("__JET_CT_LIMIT"),
+        "an unmarked constant should inline, not take an address: {}",
+        inlined.rust
     );
 }
 
