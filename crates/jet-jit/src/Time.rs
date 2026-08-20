@@ -318,8 +318,41 @@ fn jet_jit_time_local_time(hour: i64, minute: i64, second: i64) -> i64 {
     )))
 }
 
-/// Civil-time method dispatch. `kind`: 0=Date, 1=DateTime, 2=Period, 3=Instant, 4=Zone, 5=Zoned.
-/// `method` is a string handle; args packed as i64 list handle (or 0).
+/// The receiver kind a civil-time handle carries, for defect reports.
+fn time_value_kind(value: &TimeValue) -> &'static str {
+    match value {
+        TimeValue::Date(_) => "Date",
+        TimeValue::DateTime(_) => "DateTime",
+        TimeValue::Period(_) => "Period",
+        TimeValue::Instant(_) => "Instant",
+        TimeValue::Zone(_) => "Zone",
+        TimeValue::Zoned(_) => "ZonedDateTime",
+        TimeValue::LocalTime(_) => "LocalTime",
+    }
+}
+
+/// A civil-time method the resident JIT admitted but this host cannot marshal is
+/// Jet's own defect, never the running program's fault. Returning `0` handed the
+/// program a null carrier handle that a later read resolved against an unrelated
+/// heap slot, so `ZonedDateTime.add_duration` printed the source file path and
+/// answered `offset_seconds() == 0` (#2030). `set_host_fault` is the branded ICE
+/// rail for a broken compiler invariant (`jit/runtime_host.rs`); `set_trap`
+/// would render `Stop [E3001]` and blame the running program instead.
+fn civil_method_defect(recv: &TimeValue, method: &str, detail: &str) -> i64 {
+    let kind = time_value_kind(recv);
+    Concurrency::with_runtime_mut(|rt| {
+        rt.set_host_fault(&format!(
+            "jit civil-time host: {detail} for `{kind}.{method}`"
+        ));
+        0
+    })
+}
+
+/// Civil-time method dispatch. `recv` is a `TimeValue` handle whose variant IS
+/// the receiver kind; `method` is a string handle; `arg0..arg5` are the args
+/// (unused slots are 0). Every `(receiver, method)` pair the residency gate
+/// admits — `TIR::is_civil_time_method_name`, asked from `jit/safety.rs` — must
+/// have an arm here. A pair with no arm reaches `civil_method_defect`.
 fn jet_jit_civil_time_method(
     recv: i64,
     method: i64,
@@ -343,7 +376,10 @@ fn jet_jit_civil_time_method(
                 TimeValue::Date(od) => Some(od.clone()),
                 _ => None,
             });
-            other.map(|o| d.diff_days(&o)).unwrap_or(0)
+            match other {
+                Some(o) => d.diff_days(&o),
+                None => civil_method_defect(v, &method, "argument is not a Date"),
+            }
         }
         (TimeValue::Date(d), "weekday") => d.weekday(),
         (TimeValue::Date(d), "day_of_year") => d.day_of_year(),
@@ -366,9 +402,13 @@ fn jet_jit_civil_time_method(
                 TimeValue::Period(p) => Some(p.clone()),
                 _ => None,
             });
-            period
-                .map(|p| push(TimeValue::Date(d.add_period(&p))))
-                .unwrap_or(0)
+            match period {
+                Some(p) => push(TimeValue::Date(d.add_period(&p))),
+                None => civil_method_defect(v, &method, "argument is not a Period"),
+            }
+        }
+        (TimeValue::Date(d), "truncate") => {
+            push(TimeValue::Date(d.truncate(&clone_string(arg0))))
         }
         (TimeValue::Date(d), "format") => {
             alloc_string(d.format_pattern(&clone_string(arg0)))
@@ -405,7 +445,10 @@ fn jet_jit_civil_time_method(
                 TimeValue::Zone(z) => Some(z.clone()),
                 _ => None,
             });
-            zone.map(|z| push(TimeValue::Zoned(dt.in_zone(&z)))).unwrap_or(0)
+            match zone {
+                Some(z) => push(TimeValue::Zoned(dt.in_zone(&z))),
+                None => civil_method_defect(v, &method, "argument is not a Zone"),
+            }
         }
         (TimeValue::DateTime(dt), "plus_duration") => {
             // Duration is raw ns i64 after Result unwrap (I9 Duration ABI).
@@ -416,12 +459,18 @@ fn jet_jit_civil_time_method(
                 TimeValue::DateTime(od) => Some(od.clone()),
                 _ => None,
             });
-            other.map(|o| dt.difference_ns(&o)).unwrap_or(0)
+            match other {
+                Some(o) => dt.difference_ns(&o),
+                None => civil_method_defect(v, &method, "argument is not a DateTime"),
+            }
         }
         (TimeValue::Instant(i), "elapsed_millis") => i.elapsed_millis(),
         (TimeValue::Instant(i), "elapsed") => i.elapsed_nanos(),
         (TimeValue::Period(period), "to_string") => alloc_string(period.to_string_fmt()),
         (TimeValue::Instant(instant), "to_string") => alloc_string(instant.to_string_fmt()),
+        (TimeValue::LocalTime(t), "hour") => t.hour(),
+        (TimeValue::LocalTime(t), "minute") => t.minute(),
+        (TimeValue::LocalTime(t), "second") => t.second(),
         (TimeValue::Zone(zone), "to_string") => alloc_string(zone.to_string_fmt()),
         (TimeValue::Zoned(zoned), "to_string") => alloc_string(zoned.to_string_fmt()),
         (TimeValue::LocalTime(t), "to_string") => alloc_string(t.to_string_fmt()),
@@ -436,7 +485,30 @@ fn jet_jit_civil_time_method(
                 0
             }
         }
-        _ => 0,
+        (TimeValue::Zoned(z), "date") => push(TimeValue::Date(z.date())),
+        (TimeValue::Zoned(z), "time") => push(TimeValue::LocalTime(z.time())),
+        (TimeValue::Zoned(z), "zone") => push(TimeValue::Zone(z.zone())),
+        (TimeValue::Zoned(z), "to_datetime") => push(TimeValue::DateTime(z.to_datetime())),
+        // Duration is raw ns i64 after Result unwrap (I9 Duration ABI), the same
+        // shape `DateTime.plus_duration` above marshals. The absolute-vs-civil
+        // choice stays in the Prelude kernel: `add_duration_ns` moves the instant
+        // and keeps the zone, `add_period` re-resolves the local wall clock, so a
+        // DST transition lands correctly without any offset policy living here.
+        (TimeValue::Zoned(z), "add_duration") => {
+            push(TimeValue::Zoned(z.add_duration_ns(arg0)))
+        }
+        (TimeValue::Zoned(z), "add_period") => {
+            let period = with_time(arg0, |o| match o {
+                TimeValue::Period(p) => Some(p.clone()),
+                _ => None,
+            });
+            match period {
+                Some(p) => push(TimeValue::Zoned(z.add_period(&p))),
+                None => civil_method_defect(v, &method, "argument is not a Period"),
+            }
+        }
+        (TimeValue::Zone(zone), "name") => alloc_string(zone.name()),
+        _ => civil_method_defect(v, &method, "no marshalling arm"),
     })
 }
 

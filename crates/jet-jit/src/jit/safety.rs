@@ -423,12 +423,29 @@ fn resident_safe_option_binary(op: &BinOp, lhs: &Type, rhs: &Type) -> bool {
 /// closed enum (`op_name` below has no `_` arm, so a new operator stops the
 /// build until someone decides its Option row), and `lower_value_order`'s
 /// operand table is `LowerCtx::value_order_supported`, which the lowering
-/// refuses through. `THandleOp` and `TBuiltinOp` method tables are NOT pinned:
-/// their lowering halves are `&mut self` emitters that need a live
-/// `FunctionBuilder`, a Cranelift module and a host table, so there is no pure
-/// set to compare against without first lifting each dispatch into a table of
-/// its own — the `service_core_arity` treatment, which removes the second copy
-/// instead of testing it and is the better fix wherever it is affordable.
+/// refuses through.
+///
+/// `TBuiltinOp::Unzip` is not pinned by a test on THIS side because it no
+/// longer needs one: its receiver/column table is
+/// `LowerCtx::unzip_column_kinds`, which BOTH the gate arm and the
+/// `TBuiltinOp::Unzip` lowering read (the `service_core_arity` treatment — the
+/// second copy is deleted, not tested against the first). Every table that can
+/// take that treatment should, and a test is the fallback for the ones that
+/// cannot.
+///
+/// What that lift moved rather than removed: the receiver table is now one
+/// copy, but the host still has to READ each column word back in the kind it
+/// was WRITTEN in, and those two ladders live on either side of the arena. That
+/// pair is the one that shipped two empty lists, it is total over
+/// `JitZipValueKind`, and it is pinned in `Collections.rs`'s
+/// `unzip_column_round_trip` — every kind, optional and not, at zero, one and
+/// three rows.
+///
+/// The rest of the `THandleOp` and `TBuiltinOp` method tables are still two
+/// copies and still unpinned: their lowering halves are `&mut self` emitters
+/// that need a live `FunctionBuilder`, a Cranelift module and a host table, so
+/// there is no pure set to compare against until each dispatch is lifted into a
+/// table of its own, one op family at a time.
 ///
 /// Known residual, deliberately NOT closed here: the gate reaches the payload
 /// through `erase_runtime_qualifiers` (Tagged only) while the lowering reaches
@@ -1540,6 +1557,13 @@ fn resident_safe_crypto_work_item<'a>(
 
 fn resident_safe_call_arg_gate(arg: &TCallArg) -> bool {
     if arg.arc_clone {
+        return false;
+    }
+    // S48 trait-value slot: the argument must arrive as the two-slot
+    // `{type_id, concrete}` trait record `lower_trait_object_method` reads.
+    // `LowerCtx::lower_call_arg` does not build that record yet, so decline
+    // rather than hand a concrete record to a trait-object parameter.
+    if arg.box_as_trait.is_some() {
         return false;
     }
     let ty = &arg.value.ty;
@@ -2891,6 +2915,10 @@ fn resident_safe_call_arg(arg: &TCallArg, callees: &HashSet<String>) -> bool {
     // Arc/fn-coerce still unsupported. borrow/mut_borrow pass heap handles;
     // clone lowers through `lower_clone` for the types below.
     if arg.arc_clone {
+        return false;
+    }
+    // S48 trait-value slot — see `resident_safe_call_arg_gate`.
+    if arg.box_as_trait.is_some() {
         return false;
     }
     let ty = &arg.value.ty;
@@ -6041,57 +6069,19 @@ fn resident_safe_handle_op(op: &THandleOp, recv: &TExpr, args: &[TExpr]) -> bool
                             )
                     )))
         }
-        THandleOp::CivilTimeMethod { method, .. } => {
+        THandleOp::CivilTimeMethod { kind, method } => {
             // Civil date/time/zoned methods are host-backed; arity is checked in lower.
+            //
+            // I8: ask the one table lowering built this node from, never a second
+            // flattened copy. The copy that used to live here dropped `kind`, so
+            // it admitted `ZonedDateTime.add_duration`/`add_period` — which had no
+            // arm in `Time.rs`'s dispatch — and the host answered with a null
+            // carrier handle the program then read as an unrelated heap slot
+            // (#2030). It also refused `Zone.name`, which the host does marshal,
+            // and carried three names (`timestamp`, `add_years`, `with_time`) no
+            // receiver ever offers.
             matches!(args.len(), 0..=6)
-                && matches!(
-                    method.as_str(),
-                    "year"
-                        | "month"
-                        | "day"
-                        | "hour"
-                        | "minute"
-                        | "second"
-                        | "millisecond"
-                        | "microsecond"
-                        | "nanosecond"
-                        | "to_string"
-                        | "weekday"
-                        | "day_of_year"
-                        | "quarter_of_year"
-                        | "days_in_month"
-                        | "is_leap_year"
-                        | "timestamp"
-                        | "to_timestamp"
-                        | "to_unix_ms"
-                        | "date"
-                        | "time"
-                        | "format"
-                        | "format_rfc3339"
-                        | "iso_weekday"
-                        | "iso_week"
-                        | "offset_seconds"
-                        | "is_dst"
-                        | "elapsed_millis"
-                        | "elapsed"
-                        | "add_days"
-                        | "add_months"
-                        | "add_years"
-                        | "add_period"
-                        | "add_duration"
-                        | "diff_days"
-                        | "difference"
-                        | "plus_duration"
-                        | "truncate"
-                        | "round"
-                        | "floor"
-                        | "ceil"
-                        | "replace"
-                        | "in_zone"
-                        | "to_datetime"
-                        | "zone"
-                        | "with_time"
-                )
+                && TIR::is_civil_time_method_name(Some(kind.as_str()), method)
         }
         THandleOp::RegexMethod { method, .. } => {
             matches!(

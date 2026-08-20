@@ -461,8 +461,11 @@ pub(super) fn evaluate_method(
             Ok(ZonedDateTime::from_inner(zoned.inner.add_duration_ns(ns)).value())
         }),
         ("ZonedDateTime", "add_period", 1) => zoned_from_value(recv, span).and_then(|zoned| {
-            let date = date_add_period(zoned.date(), &args[0], span)?;
-            Ok(ZonedDateTime::from_local(date, zoned.time(), zoned.zone).value())
+            // I9/I8: the civil-vs-absolute rule is the Prelude kernel's, not this
+            // tier's. Re-deriving it here (date → add_period → from_local) was a
+            // second copy of `JetZonedDateTime::add_period`'s body.
+            let period = period_from_value(&args[0], span)?;
+            Ok(ZonedDateTime::from_inner(zoned.inner.add_period(&period)).value())
         }),
         ("Period", "to_string", 0) => period_string(recv, span).map(CtValue::Str),
         ("Measurement", "value" | "uncertainty", 0) => {
@@ -646,6 +649,35 @@ pub(super) fn display(value: &CtValue) -> Option<String> {
                 *byte_offset,
                 optional_int("line")?,
                 optional_int("column")?,
+                text("path")?,
+                text("reason")?,
+            ));
+        }
+    }
+    // D-VALIDATE-DECODE1=B / I9: the accumulated decode/validate failure has one
+    // rendering. AOT's `impl JetShow for FieldError` and the Cranelift host both
+    // call `jet_field_error_kernel_show`; the evaluator marshals the two carrier
+    // fields and calls the same kernel. Without this arm a single `{err}` fell
+    // through to the structural record dump while a whole `[FieldError]` list
+    // rendered the projection — the same value printed two ways.
+    if core_type == "FieldError" {
+        if let CtValue::Struct { fields, .. } = value {
+            let text = |wanted: &str| -> Option<&str> {
+                fields
+                    .iter()
+                    .find_map(|(name, held)| {
+                        (name
+                            .strip_prefix(jet_foundation::Syntax::GENERATED_NAME_PREFIX)
+                            .unwrap_or(name.as_str())
+                            == wanted)
+                            .then_some(held)
+                    })
+                    .and_then(|held| match held {
+                        CtValue::Str(text) => Some(text.as_str()),
+                        _ => None,
+                    })
+            };
+            return Some(super::field_error_kernel::jet_field_error_kernel_show(
                 text("path")?,
                 text("reason")?,
             ));
@@ -2126,13 +2158,22 @@ fn datetime_from_value(value: &CtValue, span: Span) -> Result<DateTime, Diagnost
     ))
 }
 
+/// One decode of a `Period` struct value into the Prelude kernel's carrier.
+fn period_from_value(
+    value: &CtValue,
+    span: Span,
+) -> Result<super::time_kernel::JetPeriod, Diagnostic> {
+    Ok(super::time_kernel::JetPeriod::new(
+        int_field(value, "Period", "years", span)?,
+        int_field(value, "Period", "months", span)?,
+        int_field(value, "Period", "days", span)?,
+    ))
+}
+
 fn date_add_period(date: Date, period: &CtValue, span: Span) -> Result<Date, Diagnostic> {
-    let period = super::time_kernel::JetPeriod::new(
-        int_field(period, "Period", "years", span)?,
-        int_field(period, "Period", "months", span)?,
-        int_field(period, "Period", "days", span)?,
-    );
-    Ok(Date::from_inner(date.inner.add_period(&period)))
+    Ok(Date::from_inner(
+        date.inner.add_period(&period_from_value(period, span)?),
+    ))
 }
 
 fn date_truncate(date: Date, unit: &str) -> Date {
@@ -2149,12 +2190,7 @@ fn format_time_pattern(pattern: &str, date: Date, time: LocalTime) -> String {
 }
 
 fn period_string(value: &CtValue, span: Span) -> Result<String, Diagnostic> {
-    Ok(super::time_kernel::JetPeriod::new(
-        int_field(value, "Period", "years", span)?,
-        int_field(value, "Period", "months", span)?,
-        int_field(value, "Period", "days", span)?,
-    )
-    .to_string_fmt())
+    Ok(period_from_value(value, span)?.to_string_fmt())
 }
 
 fn datetime_string(value: &CtValue, span: Span) -> Result<String, Diagnostic> {

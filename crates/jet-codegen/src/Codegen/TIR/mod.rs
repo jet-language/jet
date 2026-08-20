@@ -65,6 +65,7 @@ mod subset;
 pub(crate) use emit::*;
 pub(crate) use lower::*;
 pub(crate) use subset::*;
+pub use subset::is_civil_time_method_name;
 
 use crate::AST::{
     AccessConvention, BinOp, CtValue, Expr, Item, Pattern, ProgramBundle, Type, UnOp,
@@ -1988,6 +1989,24 @@ fn lower_jit_program_on_stack(bundle: &ProgramBundle) -> Option<JitProgram> {
             crate::Syntax::TYPE_TASK_FAILURE
         ),
         vec![Type::String],
+    );
+    // stdlib-api-laws D4 (#2055): `WatchEvent.domain`/`.kind` are Prelude enums
+    // reached only through `core.watcher` polling, never constructed in source —
+    // register their packed JIT/AOT shape for the same reason as `TaskFailure`.
+    // Declaration order must match `Prelude/CoreLib/JetStd/CommonTypes.rs`.
+    enum_variants.insert(
+        "WatchDomain".to_string(),
+        ["File", "Process", "Port"]
+            .into_iter()
+            .map(str::to_string)
+            .collect(),
+    );
+    enum_variants.insert(
+        "WatchKind".to_string(),
+        ["Created", "Modified", "Removed", "Error", "Exited", "Ready"]
+            .into_iter()
+            .map(str::to_string)
+            .collect(),
     );
     let mut int_constants = std::collections::HashMap::new();
     let mut constants = std::collections::HashMap::new();
@@ -5823,6 +5842,12 @@ pub struct TCallArg {
     /// D-UNIONTYPE1=A: a member value passed where a union is expected. When
     /// `Some(union)`, emit wraps as `__jet_<UnionEnum>::<MemberTag>(value)`.
     pub widen_to_union: Option<Type>,
+    /// S48: the parameter is a single-trait value slot (`fn show(s: Shape)`) and
+    /// this argument is a concrete implementor, so it boxes invisibly. When
+    /// `Some(trait)`, emit wraps with `Box::new(value) as Box<dyn <trait>>` —
+    /// the same slot-driven boxing a `[Shape]` list element already gets in
+    /// `emit_tir_expr`'s `ListLit` arm, decided here so emit stays dumb.
+    pub box_as_trait: Option<String>,
 }
 
 /// c109 Phase 13: the resolved Fn-typed-argument coercion (`emit_call_args`).

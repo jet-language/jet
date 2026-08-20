@@ -427,7 +427,12 @@ pub(crate) fn is_http_method_name(recv_type: Option<&str>, method: &str) -> bool
 }
 
 /// D-TIMEDEPTH1=A: is `method` valid for this civil-time type?
-pub(crate) fn is_civil_time_method_name(recv_type: Option<&str>, method: &str) -> bool {
+///
+/// The one table (I8). Lowering builds every `CivilTimeMethod` node from it, and
+/// the resident-JIT residency gate (`jet-jit/src/jit/safety.rs`) asks the same
+/// question instead of keeping a second flattened copy — the copy that admitted
+/// `ZonedDateTime.add_duration` with no host arm behind it (#2030).
+pub fn is_civil_time_method_name(recv_type: Option<&str>, method: &str) -> bool {
     match recv_type {
         Some("Date" | "LocalDate") => matches!(
             method,

@@ -20,4 +20,18 @@ fn run() ? {
     print(span_s)
     inst :: time.instant()
     print(inst.elapsed_millis() >= 0)
+
+    // Zoned arithmetic keeps the whole ZonedDateTime: `add_duration` moves the
+    // instant and holds the zone, `add_period` moves the local wall clock.
+    day :: Duration.hours(24) ?? return Err("duration")
+    absolute :: z.add_duration(day)
+    print(absolute.format("yyyy-MM-dd HH:mm:ss VV XXX"))
+    print(absolute.offset_seconds())
+    print(absolute.is_dst())
+    civil :: z.add_period(time.period_days(1))
+    print(civil.to_string())
+    print(civil.date().to_string())
+    print(civil.time().to_string())
+    print(civil.zone().name())
+    print(civil.to_datetime().format_rfc3339())
 }

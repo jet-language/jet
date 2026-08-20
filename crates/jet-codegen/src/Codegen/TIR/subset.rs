@@ -25,3 +25,7 @@ pub(crate) use methods::*;
 pub(crate) use builtin_methods::*;
 pub(crate) use core_calls::*;
 pub(crate) use handles::*;
+
+// The civil-time `(receiver, method)` table is the one gate every tier asks,
+// including the resident-JIT residency gate in the `jet-jit` crate (I8).
+pub use builtin_methods::is_civil_time_method_name;
