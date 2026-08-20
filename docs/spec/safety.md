@@ -24,24 +24,24 @@ baseline is refreshed.
 <!-- unsafe-ratchet:data
 {
   "schema": 1,
-  "total": 67,
+  "total": 68,
   "counts": {
     "docs": 2,
-    "examples": 22,
+    "examples": 23,
     "tests": 43
   },
   "regions": [
     {
       "package": "docs",
       "file": "docs/reference/syntax-surface.jet",
-      "line": 526,
+      "line": 527,
       "column": 1,
       "reason": "reads through a raw pointer; addr must be live and valid"
     },
     {
       "package": "docs",
       "file": "docs/reference/syntax-surface.jet",
-      "line": 529,
+      "line": 530,
       "column": 5,
       "reason": "addr is the address of a live Int on this frame"
     },
@@ -69,14 +69,14 @@ baseline is refreshed.
     {
       "package": "examples",
       "file": "examples/features/effects/audited_gate_ladder.jet",
-      "line": 7,
+      "line": 6,
       "column": 5,
       "reason": "the audited block has no low-level operation"
     },
     {
       "package": "examples",
       "file": "examples/features/effects/single_use_discard.jet",
-      "line": 39,
+      "line": 35,
       "column": 5,
       "reason": "event cancelled; the ticket admits to nothing, so voiding it is correct"
     },
@@ -160,7 +160,7 @@ baseline is refreshed.
     {
       "package": "examples",
       "file": "examples/features/memory/pin.jet",
-      "line": 41,
+      "line": 43,
       "column": 5,
       "reason": "node storage is fixed for the returned pin; self_addr names this place"
     },
@@ -524,13 +524,13 @@ baseline is refreshed.
 
 | crate/package | file | line | reason |
 | --- | --- | ---: | --- |
-| docs | docs/reference/syntax-surface.jet | 526:1 | "reads through a raw pointer; addr must be live and valid" |
-| docs | docs/reference/syntax-surface.jet | 529:5 | "addr is the address of a live Int on this frame" |
+| docs | docs/reference/syntax-surface.jet | 527:1 | "reads through a raw pointer; addr must be live and valid" |
+| docs | docs/reference/syntax-surface.jet | 530:5 | "addr is the address of a live Int on this frame" |
 | examples | examples/features/crypto/crypto_migration.jet | 26:5 | "AES-256-GCM protocol interoperability" |
 | examples | examples/features/crypto/random_api_split.jet | 28:5 | "compare the typed and raw HKDF rungs" |
 | examples | examples/features/crypto/vault_keys.jet | 36:5 | "restore audited raw signing-key material" |
-| examples | examples/features/effects/audited_gate_ladder.jet | 7:5 | "the audited block has no low-level operation" |
-| examples | examples/features/effects/single_use_discard.jet | 39:5 | "event cancelled; the ticket admits to nothing, so voiding it is correct" |
+| examples | examples/features/effects/audited_gate_ladder.jet | 6:5 | "the audited block has no low-level operation" |
+| examples | examples/features/effects/single_use_discard.jet | 35:5 | "event cancelled; the ticket admits to nothing, so voiding it is correct" |
 | examples | examples/features/io/os_process_control.jet | 25:5 | "POSIX process and pipe control for the core.sys surface" |
 | examples | examples/features/io/os_stop_cleanup.jet | 19:5 | "the stop callback uses the shared cleanup boundary" |
 | examples | examples/features/io/process_exit_cleanup.jet | 15:5 | "the exit callback has no captured state" |
@@ -542,7 +542,7 @@ baseline is refreshed.
 | examples | examples/features/lowlevel/mmio_board_write.jet | 9:5 | "stand-in MMIO cell stays on this stack frame" |
 | examples | examples/features/lowlevel/pointer_cast_deref.jet | 11:5 | "flag is live on this stack frame and the pointer never escapes" |
 | examples | examples/features/lowlevel/unsafe_obligations.jet | 5:5 | "cell stays live and the pointer remains local" |
-| examples | examples/features/memory/pin.jet | 41:5 | "node storage is fixed for the returned pin; self_addr names this place" |
+| examples | examples/features/memory/pin.jet | 43:5 | "node storage is fixed for the returned pin; self_addr names this place" |
 | examples | examples/features/memory/rawptr.jet | 9:5 | "`cell` is a live Int on this stack frame; the pointer never escapes" |
 | examples | examples/features/memory/uninit.jet | 12:5 | "uninitialized plain-data storage is filled before every read" |
 | examples | examples/features/memory/unsafe_sentries.jet | 7:5 | "pointer is used only after arena reset to prove quarantine" |
