@@ -604,7 +604,7 @@ fn export_line(line: &str, masked: &str, scope: Scope) -> String {
         return line.to_string();
     }
     let should_export = match scope {
-        Scope::Module => starts_exportable_item(code),
+        Scope::Module => starts_exportable_item(code) || starts_restricted_reexport(code),
         Scope::Struct => looks_like_struct_field(code),
         Scope::InherentImpl => starts_impl_member(code),
         _ => false,
@@ -651,6 +651,18 @@ fn restricted_visibility_rest(value: &str) -> Option<&str> {
     let rest = value.strip_prefix("pub(")?;
     let close = rest.find(')')?;
     rest.get(close + 1..)?.strip_prefix(' ')
+}
+
+/// A `pub(crate) use …;` at module scope IS part of the runtime boundary: it is
+/// how the Core prelude publishes a fragment it keeps inside a private module
+/// (`mod jet_sync { … } pub(crate) use jet_sync::*;` — `core.sync` CRDTs, the
+/// `core.db` row policy, `app.sync`; `mod jet_crypto_entropy` likewise). Left
+/// alone, the split runtime rlib kept those names crate-private and the user
+/// crate could not see a single one, so rustc rejected generated code that the
+/// monolith accepts. A *bare* `use` is a private import, not a boundary, and
+/// stays private so no `std` path leaks into the program's glob namespace.
+fn starts_restricted_reexport(code: &str) -> bool {
+    restricted_visibility_rest(code).is_some_and(|rest| rest.starts_with("use "))
 }
 
 fn strip_visibility(code: &str) -> &str {
@@ -1078,6 +1090,29 @@ where
 "#;
         let exported = export_runtime_source(source);
         assert!(exported.contains("pub fn run<T>(value: T) -> T\nwhere\n    T: Clone,\n{"));
+    }
+
+    /// The `core.sync` prelude publishes its CRDT/row-policy fragment as
+    /// `mod jet_sync { … }` plus one crate-root `pub(crate) use jet_sync::*;`.
+    /// The exporter has to widen that re-export too, or the split runtime rlib
+    /// hides every `jet_sync_*` / `jet_db_policy_*` / `jet_app_sync` name from
+    /// the user crate and rustc rejects generated code the monolith accepts.
+    /// A bare `use` stays private so no `std` path joins the program's globs.
+    #[test]
+    fn export_promotes_restricted_reexports_but_not_private_imports() {
+        let source = r#"mod jet_sync {
+use std::collections::HashMap;
+pub(crate) fn jet_sync_text_new() -> i64 { 0 }
+}
+pub(crate) use jet_sync::*;
+use std::fmt::Debug;
+"#;
+        let exported = export_runtime_source(source);
+        assert!(exported.contains("pub mod jet_sync {"));
+        assert!(exported.contains("pub fn jet_sync_text_new()"));
+        assert!(exported.contains("pub use jet_sync::*;"));
+        assert!(exported.contains("\nuse std::fmt::Debug;"));
+        assert!(!exported.contains("pub use std::fmt::Debug;"));
     }
 
     #[cfg(unix)]

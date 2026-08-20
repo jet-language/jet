@@ -4003,8 +4003,19 @@ impl<'a> Checker<'a> {
                     // the edits the STM plane actually defers (the codegen routes the same
                     // set, resetting `in_stm_transact` for lambda bodies).
                     if method == "edit" && self.txn_depth > 0 {
-                        return Some(Type::Tuple(vec![]));
+                        let deferred = Type::Tuple(vec![]);
+                        *resolved_ret_out = Some(deferred.clone());
+                        return Some(deferred);
                     }
+                    // D-CONC-SHARE1=A: `read`/`edit` answer whatever the closure
+                    // answers — for the plain-access desugar that is ONE FIELD of
+                    // the payload, not the payload. `shared_method_return`'s row is
+                    // a placeholder that says `T`, so persist the checked type the
+                    // way the Cell branch above does; otherwise every later tier
+                    // re-derives the placeholder and a chained call off the read
+                    // (`queue.jobs.first()`) dispatches against `T` and loses its
+                    // own result type.
+                    *resolved_ret_out = result.clone();
                     return result;
                 }
             }

@@ -295,7 +295,9 @@ end module matrix_math
     let generated = fs::read_to_string(dir.join(".jet/bindings/fortran/matrix.jet")).unwrap();
     assert!(generated.contains("fortran-layout probe.a: column-major 2x3"));
     assert!(generated.contains("a.len() != 6"));
-    assert!(generated.contains("=[Fortran]=>"));
+    // D-NOPANIC1=D: the extent guard is a `panic`, so the generated row
+    // publishes `Panic` — otherwise the binding fails its own front end.
+    assert!(generated.contains("=[Fortran, Panic]=>"));
     assert!(String::from_utf8_lossy(&bind.stdout).contains("layout: probe.a column-major 2x3"));
 
     fs::write(

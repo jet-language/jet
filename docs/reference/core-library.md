@@ -3399,6 +3399,7 @@ for one crossing. Narrowing is never implicit.
 |--------|---------|-----------|
 | `U8.from_int(n)` / `I16.from_int(n)` / … (narrowing) | `T ? String` | fallible (`?`/`??`) |
 | `F32.from_float(n)` | `F32 ? String` | fallible (finite F32 range) |
+| `Int.from_float(n)` / `U8.from_float(n)` / … | `T ? String` | fallible (finite, in-range, truncates toward zero) |
 
 ---
 

@@ -206,13 +206,17 @@ fn run() {
 "#;
     let output =
         jet::compile(src).expect("an edit guard must preserve one write loan across helper calls");
+    // The receipt names the lock by the Rust binding it acquires through, so
+    // the identity carries the one machine prefix every generated local wears
+    // (`Syntax::GENERATED_NAME_PREFIX`, `__jet_`); it was spelled `user_`
+    // before that prefix was unified.
     let first = output
         .rust
-        .find("jet-shared-lock-order-receipt: lock=user_queue; acquire=guard_edit; order=source")
+        .find("jet-shared-lock-order-receipt: lock=__jet_queue; acquire=guard_edit; order=source")
         .expect("first lock receipt needs identity and acquisition mode");
     let second = output
         .rust
-        .find("jet-shared-lock-order-receipt: lock=user_other; acquire=guard_read; order=source")
+        .find("jet-shared-lock-order-receipt: lock=__jet_other; acquire=guard_read; order=source")
         .expect("second lock receipt needs identity and acquisition mode");
     assert!(
         first < second,
