@@ -1064,6 +1064,7 @@ The ratified rules are instances of this same grid:
 | manifest | build / manifest | D-CONF names the accepted fields and manifest diagnostics reject other shapes |
 | dependency | build / dependency | E1204 binds the resolved bytes to the lockfile hash; the trust commands record the grant decision |
 | link | link / foreign signature | D-FFI-UNIFY1 gives a foreign declaration one binder descriptor and one effect root |
+| schema binder | link / foreign signature | D-BOUND-BIND1 turns a JSON, CSV, SQL DDL, XML, or proto schema into visible ordinary Jet source, hashed and stamped in its header |
 | wire | run / wire value | D-SERDE1 and D-ENC1 use DataTree and one typed codec path |
 | validation | run / wire value | D-VALIDATE1 accumulates FieldError values; D-VALIDATE-DECODE1 gives decode failures one shape |
 | migration | run / wire value | D-MIGRATE1 and D-MIGRATE4 apply named schema operations and report migration status |
@@ -1730,6 +1731,26 @@ handle, calls `Release`, and balances `CoUninitialize`; stale, cross-thread,
 and double-close handles fail before invocation. Frames and DataTree recursion
 are capped at 1 MiB and depth 64. Provenance hashes the extracted type-library
 schema and generated surface.
+
+## Data-schema binders (D-BOUND-BIND1=A)
+
+The binder verb reads data schemas as well as language headers:
+`jet inspect bind json|csv|sql|xml|proto <file> [--type <Name>] [-o|--out <path>]`
+writes ordinary Jet source — one `#Codable` struct per record, with `#Rename`
+where the wire key is not a Jet name. The default destination is
+`bindings/<input-stem>.jet`; `-o`/`--out` names another path. Nothing imports it
+for you (D-NAME-FILES1=C): you read it, commit it, and own it like any source,
+and you may edit it by hand.
+
+Every generated file opens with the stable provenance header: the exact
+command, the input path, the `sha256` of the input bytes, the format, and one
+`inference` line per rule the binder applied — the header is where those rules
+are written down, so a reader never has to guess what was inferred. Commands
+and paths are escaped in the header, so a hostile file name cannot inject
+source. Regeneration is explicit. Writing the default destination when its
+recorded command differs is **E2104**, not a silent overwrite; a schema that
+cannot be parsed or yields no record is **E3208**; an unreadable input or
+unwritable output is **E2105**. Grid cell: link / foreign signature.
 
 ## E2-M13 — Expert low-level tier (S58, implemented)
 

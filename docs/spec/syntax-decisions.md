@@ -2210,6 +2210,16 @@ E1111 is tombstoned, and the kernel wording joins the E1101/E1102 family. The se
 ratified by D-PARCAPTURE1 and the kernel decisions stay unchanged; this
 decision amends their prover and diagnostic implementation only.
 
+**D-STM1=A — the `Shared<T>` plane of `#Transact`** *(ratified by owner
+2026-07-12, card #506; commit law amended by D-CONC-STM1=A below)*: reads and
+writes to `Shared` values inside a `#Transact` block form one atomic commit —
+either every touched value's change lands or none does. No new marker (I8);
+E0746 keeps rejecting irreversible effects inside, and the single-task
+local-rollback behavior (D-TXN1–4) is unchanged. The body runs exactly once and
+the commit takes every touched handle's lock in one fixed order with no retry:
+D-CONC-STM1=A below is the operative statement of that law, and this entry does
+not restate its mechanics.
+
 **D-CONC-STM1=A — one-run, ordered transaction commit** *(ratified
 2026-08-06, card #1505; amends D-STM1)*: a transaction body runs exactly once.
 Participants acquire write locks in stable order, buffered changes apply, and
@@ -7339,3 +7349,39 @@ the second pass.
 entries and fields keep `key: value` spacing. The parser and generated grammar
 remain whitespace-agnostic; formatter output and in-repo examples use the one
 canonical type spelling.
+
+## The one-crossing slate (D-BOUND-*, ratified 2026-08-07, card #1655)
+
+The boundary audit's rulings: all nine decisions are ratified as option A. Tower
+is the decision home (D-ONCE-LEDGER1=A); this block records each outcome and
+the card that owns it. The surface text each outcome renders lives with its
+subject — the typed-head entries above, `spec.md` § Boundary crossings and
+§ Data-schema binders, and the registered diagnostic rows — and is not repeated
+here. Four outcomes carry amendments, named in their bullets: SINK1 discloses
+the F9 types-not-markers note, RAW1 narrows D-UNIFYLIT1's head-body lexing to
+backslash handling and leaves D-REGEX-LIT1 untouched, PROV1 amends
+D-AUTHORITY-MANIFEST1's trust block, and TAINT1 names its off-switch spelling.
+
+- **D-BOUND-LAW1=A — one crossing law** *(implementation #1813, `c03jh01p`)*: nothing foreign becomes Jet silently. Every comptime, build, link, and run crossing names its schema and leaves its fact. The five-column grid — time, schema, checker, evolution, fact — is spec law. A new boundary feature names one cell or waits for an owner ruling; the ratified literal, manifest, dependency, link, wire, validation, migration, fact, and trust rules are recorded instances of that grid, not separate mechanisms.
+- **D-BOUND-HEAD1=A — checked URL, Path, and DateTime heads** *(implementation #1814, `c0igyd1l`)*: `URL.{"…"}`, `Path.{"…"}`, and `DateTime.{"…"}` are checked typed values, not fallible runtime constructors; an invalid head is E0155. A URL hole is percent-encoded, a Path hole is one encoded component, and a DateTime head takes no hole. Runtime strings keep their existing `parse`/`from` constructors. No amendment: the forms ride D-UNIFYLIT1, D-DOTCTOR3, and D-CORE-PATH1.
+- **D-BOUND-RAW1=A — typed head bodies own their escapes** *(implementation #1815, `c0wji8qh`)*: inside any `Type.{"…"}` body a backslash is literal text owned by that head's grammar, so a checked pattern reads as written. **Amendment**: this narrows D-UNIFYLIT1's head-body lexing, and backslash handling only — quote, brace, multiline-closing, and hole rules do not move, and D-REGEX-LIT1 stays untouched, so Regex still refuses interpolation. Plain strings keep the four-entry escape table.
+- **D-BOUND-SINK1=A — libraries declare their own checked text heads** *(implementation #1816, `c0am2fst`)*: `marker Name on [.Text] { check … hole … }` declares a checked text type on the ratified D-META-DSL1 marker rail; `check` runs at comptime over the complete body and `hole` encodes every interpolation. A function that takes the declared type is the sink, so the planned sink registry is deleted rather than built; a rejected body is E2712 and `.raw()` remains the audited escape. **Disclosure**: the 2026-07-28 type-unification audit's F9 note recorded types, not markers, for user heads. Both shapes were balloted; the marker rail won because D-META-DSL1 had since ratified it for the sibling job.
+- **D-BOUND-TAINT1=A — origin facts clear on typed decode** *(implementation #1817, `c0oolhyo`)*: `net.*`, `fs.read*`, `env.*`, process output, and FFI marshalling seed a `$origin.*` fact in the one ratified flow store. The fact spreads with no ceremony and clears on a successful typed decode or typed construction, because a value that just proved a schema is not raw attacker text. `SQL.raw`, `HTML.raw`, and `Sh.raw` refuse origin-marked text with E0721; `#Scrub` stays the word for a hand-written sanitizer, and `jet inspect gates` lists every gate. The fact is sema-only and is erased before every execution tier. **Off-switch**: one typed settings row on the D-CONF rail refuses seeding project-wide; the proposed spelling is `settings: { origin_facts: off }`, the final key is the owner's, and the row stays unbuilt until that spelling is ratified (I7).
+- **D-BOUND-EVOLVE1=A — published schemas keep unknown wire fields** *(implementation #1818, `c02qrwab`)*: a `#PublishedSchema` codec keeps the fields it does not recognize and re-emits them in their original relative order, so an old binary cannot eat a new field during a rolling deploy. Plain `#Codable` keeps today's drop and `#DenyUnknownFields` keeps its refusal with E2412 — refuse, drop, preserve, one word each. This extends the D-MIGRATE1/D-MIGRATE4 bookkeeping and changes no known-field decoding, marker behaviour, or FieldError shape.
+- **D-BOUND-BIND1=A — the binder verb reads data schemas** *(implementation #1819, `c0gp49xp`)*: `jet inspect bind json|csv|sql|xml|proto <file>` writes visible ordinary Jet source under a provenance header that records the command, the input, its `sha256`, the format, and each inference rule applied. Regeneration is explicit and nothing imports the result for you, so D-NAME-FILES1=C holds; the same verb still binds language headers.
+- **D-BOUND-UNDO1=A — a foreign call inside `#Transact` declares its undo** *(implementation #1820, `c0uvs9qs`)*: the compiler cannot read a foreign body, so an `extern` call inside `#Transact` is E0746 unless its binding carries `#Undo(inverse)`; the named inverse joins the ratified rollback path and runs in reverse order with the other rollback actions. The error names the whole fix vocabulary: hoist the call out of the block, or declare the inverse. **Amendment**: this extends the D-TXN2-era irreversible set, which was exactly Net, FS, and Exec, and it rides D-ROLLBACK-TRAIT instead of adding a transaction mechanism.
+- **D-BOUND-PROV1=A — dependency provenance has one read surface and a chosen posture** *(implementation #1821, `c090fxus`)*: `jet inspect provenance` prints one lock-backed record per dependency — locked hash, transparency entry, publisher identity, build attestation — each marked enforced, verified, or recorded, with the same record behind the human and JSON output. Integrity stays enforced by E1204. **Amendment**: the `require: none | logged | attested` row is new vocabulary inside D-AUTHORITY-MANIFEST1's ratified trust block; `none` is the default, so an unattested dependency still resolves until a project raises its floor.
+
+These nine cards share one I9 requirement: the Prelude owns the crossing
+behaviour — the typed-head interpolation kernel, the ordered wire merge, the
+taint erasure, the rollback hook, and the provenance record — and AOT emit, the
+Cranelift JIT hosts, and the interpreter ambient all call the same `jet_*`
+symbol instead of re-encoding the rule. A missing tier proof is an open
+criterion, never a `tests/jit_gaps.txt` entry.
+
+Syntax chores: the only user-typeable syntax in this slate is HEAD1's three
+heads, RAW1's head-body lexing, SINK1's `marker … on [.Text]` form, and UNDO1's
+`#Undo` marker row. Each owning card carries its own `Syntax.rs` row, grammar
+regeneration, formatter round-trip, and snapshot blessing — #1814 for the three
+heads, #1815 for head-body escapes, #1816 for declared text heads, #1820 for
+`#Undo`. This slate adds no spelling of its own.
