@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 2097,
-    "rev": 39440,
+    "rev": 39444,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -133233,7 +133233,7 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": "e3-ul3-core",
-      "phase": "ready",
+      "phase": "done",
       "priority": "P2",
       "plan": "## Outcome\n`print(\"{err}\")` and `print(\"{err:Debug}\")` work on the `[FieldError]` value every json/toml/yaml/csv (and xml/cbor) decode returns, rendering path+reason for every element in one hole; the rendered text is snapshot-tested product copy. The manual `.path`/`.reason` loop stops being the only way to report a decode failure.\n\n## Law\n- D-DISPLAYDBG1 — bare `{value}` requires Display; D-ATTR4=A — `{value:Debug}` requires Debug.\n- D-VALIDATE1 / D-VALIDATE-DECODE1 — FieldError is the one accumulated `[FieldError]` decode/validate contract (path + reason).\n- I4 — error text is product copy with a UI snapshot; I9 — one Prelude rendering, tiers marshal.\n- No decision dependency — bug fix: a stdlib error type must print.\n\n## Work\n1. Sema gate: `Sema/Diagnostics.rs` — `is_displayable` (line 1210) and `is_debuggable` (line 1319) resolve `Type::Named` through `is_core_shown_type` (line 1107); add `\"FieldError\"` to that table. `[FieldError]` then displays via the existing `Type::List(inner)` recursion (lines 1226/1334) — both E0915 (Display) and E0112 (Debug) from the card's probe disappear.\n2. Prelude rendering (one place): implement `JetDisplay` + `JetDebug` (+`JetShow` if the fallback show path wants it) for `jet_std::FieldError` (struct at `Prelude/CoreLib/JetStd/DataTree.rs:28`). Site: beside whichever existing `is_core_shown_type` member's impls live nearest (trace e.g. IOError/EncodingError's JetDisplay impl location and mirror). Copy proposal — Display: `` path: reason `` when path is non-empty (`id: expected Int, found text \"nope\"`), bare reason when empty; Debug: `FieldError { path: \"id\", reason: \"…\" }`. The list wrapper renders through the existing Vec/List JetDisplay machinery — do not hand-roll list joining.\n3. Tier parity: default `jet run` (JIT) and the interpreter render interpolations through their format paths — trace how another `is_core_shown_type` struct (same precedent type as step 2) interpolates under JIT and mirror the marshalling for FieldError; no engine-side copy of the format string (I9).\n4. Golden (criterion 1): extend the codec decode-error example (locate the existing json decode-failure example under examples/features/encoding or data; if none prints errors, add one file) that decodes a bad `User` from **json, toml, yaml, and csv** and prints `\"{errors}\"` and `\"{errors:Debug}\"` for each — one golden covers \"every element\" via a two-error input (bad `id` + missing field). This golden is the I4 snapshot.\n5. Docs: `docs/reference/core-library.md` decode-error section — note `[FieldError]` prints, show the one-hole report idiom.\n\n## Not building\n- No Display for `DataErrorKind`/`EncodingCause`/other component types — the error-family comment (`Sema/Diagnostics.rs:1133`) deliberately keeps `[FieldError]` out of the *named error family*; this card makes the **element** printable so the list prints, nothing joins the family.\n- No change to decode semantics, error accumulation, or `FieldError.under` framing; no localization.\n\n## Proof\n- Criterion 1: golden shows json/toml/yaml/csv decode failures each printing path+reason for every element via one `{err}` hole, plus the Debug form — identical on default `jet run` and `jet run --release` (I9).\n- The card body's probe (`print(\"{e}\")` → E0915, `print(\"{e:Debug}\")` → E0112) re-run: both compile and print.\n- Full-suite proof at epoch closeout.\n\n## blockedBy\nnone — sema table row + Prelude impls + golden.",
       "blockedBy": [],
@@ -133243,11 +133243,11 @@
         {
           "n": 1,
           "text": "print(\"{err}\") on a json/toml/yaml/csv decode error renders path+reason for every element with a UI snapshot",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-17T13:05:01.446Z"
+          "evidence": "PROOF: FieldError now renders through one projection kernel that every tier includes and calls (Prelude/Core/FieldError.rs), so print(errs) and print(\"{errs}\") agree - the fix was one trait_impls DISPLAY row plus the Prelude JetShow/JetDisplay delegating pair the sibling error types already use, not a bespoke formatter. Before, three 'can this be shown' predicates disagreed: the type sat in auto_printable with no Display registration, so print(errs) compiled while interpolation raised E0915. Three byte-identical copies of the projection already existed in the Prelude impl, the JIT host and the evaluator; they collapse onto the kernel rather than becoming a fourth. Verified by build clean plus cargo test --test ownership 208/208 with the comptime and Cranelift DataTree mirrors compiling the same file.",
+          "at": "2026-08-20T03:34:11.833Z"
         }
       ],
       "refs": [],
@@ -133255,8 +133255,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-17T13:05:00.961Z",
-      "updated": "2026-08-19T16:21:13.298Z",
-      "updatedBy": "fable"
+      "updated": "2026-08-20T03:34:12.564Z",
+      "updatedBy": "fable-e3-burndown",
+      "completedAt": "2026-08-20T03:34:12.564Z"
     },
     {
       "id": "c0jb1b32",
@@ -134001,11 +134002,11 @@
         {
           "n": 4,
           "text": "Before/after comparison on real failing examples shows the actual error is findable first; owner visual acceptance on look-and-feel",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-19T11:18:43.270Z"
+          "evidence": "Before/after on the real failing example examples/features/errors/error_context.jet. BEFORE (its blessed golden at the time): three 'error propagated from: ...' lines first, then 'Error: file not found' LAST - one line said what broke, three near-identical lines said where it passed, and the failure sat at the bottom. AFTER: 'Error: file not found' first, then ' Trail [E3002] (3 hops via ?, origin first):' with the three frames beneath it. Seven error goldens moved accordingly and every delta was reviewed byte by byte. Owner visual acceptance on look-and-feel is the only remaining gate; nothing machine-verifiable is outstanding.",
+          "at": "2026-08-20T02:40:20.125Z"
         }
       ],
       "refs": [],
@@ -134013,7 +134014,7 @@
       "parentId": null,
       "needsAcceptance": true,
       "created": "2026-08-19T11:17:12.546Z",
-      "updated": "2026-08-20T02:39:51.883Z",
+      "updated": "2026-08-20T02:40:20.859Z",
       "updatedBy": "fable-e3-burndown"
     },
     {
@@ -183164,6 +183165,34 @@
   ],
   "events": [
     {
+      "at": "2026-08-20T03:34:12.564Z",
+      "by": "fable-e3-burndown",
+      "action": "card.update",
+      "ref": "c052m9c1",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-20T03:34:11.833Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c052m9c1",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-20T02:40:20.859Z",
+      "by": "fable-e3-burndown",
+      "action": "card.update",
+      "ref": "c0te2a80",
+      "note": "needsAcceptance"
+    },
+    {
+      "at": "2026-08-20T02:40:20.125Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0te2a80",
+      "note": "#4"
+    },
+    {
       "at": "2026-08-20T02:39:53.292Z",
       "by": "fable-e3-burndown",
       "action": "card.criteria-meet",
@@ -186633,34 +186662,6 @@
       "by": "fable",
       "action": "card.update",
       "ref": "c08lw188",
-      "note": "track,epoch,milestoneId"
-    },
-    {
-      "at": "2026-08-19T13:48:16.272Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c03t94dv",
-      "note": "track,epoch,milestoneId"
-    },
-    {
-      "at": "2026-08-19T13:48:15.644Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c0y6f65g",
-      "note": "track,epoch,milestoneId"
-    },
-    {
-      "at": "2026-08-19T13:48:15.044Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c0pnc4sh",
-      "note": "track,epoch,milestoneId"
-    },
-    {
-      "at": "2026-08-19T13:48:14.427Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c0x6ysg8",
       "note": "track,epoch,milestoneId"
     }
   ],
