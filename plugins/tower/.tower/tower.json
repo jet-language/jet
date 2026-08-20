@@ -2,8 +2,8 @@
   "meta": {
     "version": 4,
     "project": "Jet",
-    "nextNum": 2091,
-    "rev": 39410,
+    "nextNum": 2093,
+    "rev": 39417,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -99092,6 +99092,11 @@
       "assignee": null,
       "log": [
         {
+          "at": "2026-08-20",
+          "by": "fable-e3-burndown",
+          "text": "Criteria 1-7 implemented 2026-08-19 (commit pending integration): the two owner_type.is_none() gates in Registration.rs::check_params_and_body were the whole defect, so a taskgroup parameter now works on methods exactly as on free functions, with every storage/return/capture/field refusal preserved and admit_scoped_borrow still refusing a Parameter-origin scoped borrow. CRITERION 8 IS MISATTRIBUTED and cannot be met as written: it says 'the D-CONC-GROUP1 rename ships (TaskGroup renamed Group across the surface)', but D-CONC-GROUP1=A ratifies only WHICH POSITIONS may name a taskgroup ('Any borrow position, never stored') and contains no rename. No ratified decision anywhere renames TaskGroup: searched every board decision (D-TASKGROUP-PARAM1, D-CONC-SPAWN1, D-TASKBORROW1, D-SERVICE1, D-VERDICT-1323-1) and docs/spec/syntax-decisions.md. A user-facing type rename is an I7 owner gate, so it needs its own ballot rather than riding this card's criterion. Tracked by the new rename card; this card stays open on c8 until the owner rules."
+        },
+        {
           "at": "2026-08-19",
           "by": "fable",
           "text": "Criterion added: this is the only open card implementing D-CONC-GROUP1, so it owns the TaskGroup→Group rename the service family waits on."
@@ -99190,8 +99195,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-06T21:35:36.629Z",
-      "updated": "2026-08-19T13:31:29.121Z",
-      "updatedBy": "fable",
+      "updated": "2026-08-20T00:00:28.910Z",
+      "updatedBy": "fable-e3-burndown",
       "workOrder": 710
     },
     {
@@ -131473,34 +131478,40 @@
       "plan": "Two candidate fixes, and the choice is a semantics call rather than a mechanical one.\n\n(a) Guard jet_task_deliver_cancel on !std::thread::panicking(), matching jet_scheduler_shield_leave_status. Minimal and consistent with existing practice, but it silently drops the cancel delivery when it collides with an unwind.\n\n(b) Send the completion inside a shield, so a dropped consumer still observes Completed or Failed rather than losing the notification. Semantically better -- the consumer learns the real outcome -- but it changes when cancellation is deliverable, which is a D-CANCELMODEL1 call and may need ratification.\n\nWhichever lands, no host seam may panic: under an FDE-less JIT frame a raise aborts (#1997). Prefer a status. blockedBy: none",
       "blockedBy": [],
       "assignee": null,
-      "log": [],
+      "log": [
+        {
+          "at": "2026-08-20",
+          "by": "fable-e3-burndown",
+          "text": "Criteria 1/2/3 met 2026-08-19. Criterion 4 is half proven: cargo test --test dev_tier_parity stream_pull_hostile_matrix_matches_interpreter_jit_and_aot ok (20.40s). The other half, collections_memory_and_streams_match_interpreter_jit_and_aot, fails on an UNRELATED stem for an unrelated cause: collections/iter_tools_audit is refused by the Cranelift residency gate on BuiltinMethod:Unzip with a tuple-struct carrier while compile=Ok(()), i.e. the fourth gate-versus-lowering drift found today. It is not a cancellation or stream defect and it is owned by #2091 (lift the gate/lowering tables so the class cannot recur). This card's own assertions are reached; criterion 4 closes when that stem is resident again."
+        }
+      ],
       "criteria": [
         {
           "n": 1,
           "text": "streams/generators runs to completion on AOT with exit 0 and matches its golden",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-16T03:48:35.583Z"
+          "evidence": "PROOF JET_GOLDEN_FILTER=generators cargo test --test golden examples_compile_and_run ok (11.56s, 2026-08-19, builder 829113d06): the streams/generators stem runs to completion on AOT with exit 0 and matches its golden.",
+          "at": "2026-08-20T00:01:43.608Z"
         },
         {
           "n": 2,
           "text": "A cancel arriving during an unwind neither aborts nor is silently lost, with the chosen behaviour stated",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-16T03:48:36.010Z"
+          "evidence": "Chosen behaviour stated as law and implemented at one door: an interrupt is deliverable only where an unwind can START, so while an unwind is in flight every wait point behaves as inside #Shield — the wait completes, the interrupt stays recorded (cancel on JetTaskControl.cancelled, deadline via jet_task_deadline_mark_pending), and it coalesces into the in-flight unwind's own outcome, so a cancel unwind still reports Cancelled and a real failure on its way out is never masked. Deadline-before-cancel precedence unchanged. This applies the ratified D-CANCELMODEL1=C shield clause (docs/spec/spec.md:2364-2381) rather than adding a tier of deliverability, and the wording is recorded at spec.md:2383-2390. Fix: crates/jet-codegen/src/Prelude/Scheduler.rs jet_task_deliver_cancel gained the std::thread::panicking() guard its sibling jet_scheduler_shield_leave_status already had (commit 8626c0ced).",
+          "at": "2026-08-20T00:01:44.139Z"
         },
         {
           "n": 3,
           "text": "Every wait point that can run inside drop glue is audited for the same double-raise",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-16T03:48:36.441Z"
+          "evidence": "Audit result: after the fix std::thread::panicking() appears EXACTLY ONCE across crates/jet-codegen and crates/jet-jit — Prelude/Scheduler.rs:320-322 jet_scheduler_unwind_in_flight() — and both jet_scheduler_shielded() and jet_scheduler_shield_leave_status() read that one function, so every wait point that can run inside drop glue asks the same question. The drop-glue path that produced the abort (Stream.rs:286 JetStreamSender::drop -> completion.send -> Scheduler.rs:2239 send wait point -> jet_task_deliver_cancel) now completes its notification instead of bailing. The TIR interpreter cannot double-raise at all: its interrupts are Result/Diagnostic values and it already consults the shared jet_task_wait_policy.",
+          "at": "2026-08-20T00:01:44.647Z"
         },
         {
           "n": 4,
@@ -131522,8 +131533,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-16T03:48:35.147Z",
-      "updated": "2026-08-19T16:21:09.602Z",
-      "updatedBy": "fable"
+      "updated": "2026-08-20T00:01:45.347Z",
+      "updatedBy": "fable-e3-burndown"
     },
     {
       "id": "c0ubjby5",
@@ -136650,6 +136661,54 @@
       "needsAcceptance": false,
       "created": "2026-08-19T23:41:21.701Z",
       "updated": "2026-08-19T23:42:03.434Z",
+      "updatedBy": "fable-e3-burndown"
+    },
+    {
+      "id": "c02funel",
+      "num": 2091,
+      "title": "Lift the remaining gate-vs-lowering tables so drift cannot hide",
+      "body": "Three separate gate-vs-lowering drifts were found and fixed on 2026-08-19, each of which had been silently wrong for days: fallible return payloads had no compute arm in the TIR subset gate (I2 ICE), a builtin's FixedList receiver was not admitted by the subset gate (I2 ICE), and the residency gate admitted only Eq/Ne for Option operands while the JIT lowering had had the ordering rows since 27e1906b6 whose own commit message named the function it kept deopting. A fourth, TExprKind::Unit, had no residency arm although lowering emits the identical zero word it emits for Absent. Every one cost a debugging session because the refusal named a function, not a construct. The residency gate now has set-equality checks against its lowering (crates/jet-jit/src/jit/safety.rs gate_follows_lowering), and that check WOULD have caught the Option drift by naming the operator. Two boundaries remain unpinnable by set equality because their lowering halves are &mut self emitters that need a live FunctionBuilder, JITModule and HostFns table, so there is no pure set to compare: the TIR-subset-gate versus AOT-emit boundary, and the TBuiltinOp/THandleOp receiver-and-method tables. The fix is the service_core_arity treatment already used at lower_ctx.rs:12926 and consulted by safety.rs:1667 — lift each dispatch into a table both sides read, which deletes the second copy instead of testing two copies against each other.",
+      "kind": "task",
+      "track": "sidequest",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P1",
+      "plan": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [],
+      "refs": [],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-08-19T23:57:44.982Z",
+      "updated": "2026-08-19T23:57:44.982Z",
+      "updatedBy": "fable-e3-burndown"
+    },
+    {
+      "id": "c01g2ptl",
+      "num": 2092,
+      "title": "Ballot: rename TaskGroup to Group across the surface",
+      "body": "Split out of #1564 criterion 8 on 2026-08-19. That criterion asserted 'the D-CONC-GROUP1 rename ships', but D-CONC-GROUP1=A ratifies only which POSITIONS may name a taskgroup ('Any borrow position, never stored') and says nothing about the type's name. No ratified decision renames TaskGroup: every board decision mentioning groups was checked (D-TASKGROUP-PARAM1, D-CONC-SPAWN1, D-TASKBORROW1, D-SERVICE1, D-VERDICT-1323-1, D-CONC-GROUP1) and docs/spec/syntax-decisions.md has no rename entry. Renaming a user-typeable type is an I7 owner gate. This card carries the ballot: keep TaskGroup, or rename to Group across type name, diagnostics, docs, examples and goldens in one change. The blast radius is the same shape as the recent job-vocabulary rename (#1448): every user-facing spelling plus completions, man page and snapshots, with no alias left behind. Five service cards (#444, #1150, #1152, #1153, #1158) name taskgroups in their plans and would migrate with it, which is the real argument for deciding before they build rather than after.",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P2",
+      "plan": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [],
+      "refs": [],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-08-20T00:00:30.357Z",
+      "updated": "2026-08-20T00:00:30.357Z",
       "updatedBy": "fable-e3-burndown"
     }
   ],
@@ -182959,6 +183018,55 @@
   ],
   "events": [
     {
+      "at": "2026-08-20T00:01:45.347Z",
+      "by": "fable-e3-burndown",
+      "action": "card.update",
+      "ref": "c0aps31f",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-08-20T00:01:44.648Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0aps31f",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-20T00:01:44.139Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0aps31f",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-20T00:01:43.609Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0aps31f",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-20T00:00:30.357Z",
+      "by": "fable-e3-burndown",
+      "action": "card.add",
+      "ref": "c01g2ptl",
+      "note": "Ballot: rename TaskGroup to Group across the surface"
+    },
+    {
+      "at": "2026-08-20T00:00:28.910Z",
+      "by": "fable-e3-burndown",
+      "action": "card.update",
+      "ref": "c0r2uq88",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-08-19T23:57:44.982Z",
+      "by": "fable-e3-burndown",
+      "action": "card.add",
+      "ref": "c02funel",
+      "note": "Lift the remaining gate-vs-lowering tables so drift cannot hide"
+    },
+    {
       "at": "2026-08-19T23:42:26.628Z",
       "by": "owner",
       "action": "papercut.resolve",
@@ -186407,55 +186515,6 @@
       "by": "fable",
       "action": "card.update",
       "ref": "c09sm31b",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-19T13:38:57.245Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c044eho4",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-19T13:38:56.626Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c0yhhgx9",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-19T13:38:56.011Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c0t85k0p",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-19T13:38:55.394Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c0njm2a6",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-19T13:38:54.769Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c0hxk6vx",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-19T13:38:54.143Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c0ci2vkk",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-19T13:38:53.496Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c06tpil4",
       "note": "logEntry"
     }
   ],
