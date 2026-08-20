@@ -74,10 +74,22 @@ impl<'a> Parser<'a> {
             TokKind::LParen => {
                 self.bump();
                 let left = self.parse_declared_measure(kind)?;
-                self.expect(TokKind::Plus, "in the additive measure rule")?;
+                // D-META-CONST1: `(@lanes * 2)` is shipped in
+                // examples/features/comptime/computed_constants.jet, so the
+                // declared rules are addition and scaling, not addition alone.
+                let rule = match self.peek().kind {
+                    TokKind::Star => {
+                        self.bump();
+                        crate::AST::MeasureRule::Mul
+                    }
+                    _ => {
+                        self.expect(TokKind::Plus, "in the declared measure rule")?;
+                        crate::AST::MeasureRule::Add
+                    }
+                };
                 let right = self.parse_declared_measure(kind)?;
-                self.expect(TokKind::RParen, "after the additive measure rule")?;
-                left.combine(&right, crate::AST::MeasureRule::Add)
+                self.expect(TokKind::RParen, "after the declared measure rule")?;
+                left.combine(&right, rule)
                     .expect("measure operands use the same kind")
             }
             _ => {
@@ -86,7 +98,7 @@ impl<'a> Parser<'a> {
                     "E0963",
                     "a type measure must be a declared integer".to_string(),
                     "type measures accept literals, module value parameters, and declared combination rules; user code cannot compute a type".to_string(),
-                    "write an integer literal, a module value parameter, or an additive measure such as `(N + M)`".to_string(),
+                    "write an integer literal, a module value parameter, or a declared measure such as `(N + M)` or `(N * 2)`".to_string(),
                     Some(span),
                 ));
             }

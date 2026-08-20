@@ -153,6 +153,9 @@ pub enum Measure {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MeasureRule {
     Add,
+    /// Scaling: a declared measure times a declared measure. A vector width of
+    /// `(@lanes * 2)` is the shipped spelling this rule exists for.
+    Mul,
     Match,
 }
 
@@ -187,6 +190,12 @@ impl Measure {
                 right,
                 ..
             } => left.literal_value()?.checked_add(right.literal_value()?),
+            Self::Combined {
+                rule: MeasureRule::Mul,
+                left,
+                right,
+                ..
+            } => left.literal_value()?.checked_mul(right.literal_value()?),
             _ => None,
         }
     }
@@ -211,17 +220,24 @@ impl Measure {
         }
         match rule {
             MeasureRule::Match => (self == rhs).then(|| self.clone()),
-            MeasureRule::Add => match (self.literal_value(), rhs.literal_value()) {
-                (Some(left), Some(right)) => left
-                    .checked_add(right)
-                    .map(|value| Self::literal(left_kind, value)),
-                _ => Some(Self::Combined {
-                    kind: left_kind.to_string(),
-                    rule,
-                    left: Box::new(self.clone()),
-                    right: Box::new(rhs.clone()),
-                }),
-            },
+            MeasureRule::Add | MeasureRule::Mul => {
+                match (self.literal_value(), rhs.literal_value()) {
+                    (Some(left), Some(right)) => {
+                        let folded = if matches!(rule, MeasureRule::Add) {
+                            left.checked_add(right)
+                        } else {
+                            left.checked_mul(right)
+                        };
+                        folded.map(|value| Self::literal(left_kind, value))
+                    }
+                    _ => Some(Self::Combined {
+                        kind: left_kind.to_string(),
+                        rule,
+                        left: Box::new(self.clone()),
+                        right: Box::new(rhs.clone()),
+                    }),
+                }
+            }
         }
     }
 
@@ -266,6 +282,12 @@ impl Measure {
                 right,
                 ..
             } => format!("({} + {})", left.expression(), right.expression()),
+            Self::Combined {
+                rule: MeasureRule::Mul,
+                left,
+                right,
+                ..
+            } => format!("({} * {})", left.expression(), right.expression()),
             Self::Combined {
                 rule: MeasureRule::Match,
                 left,
