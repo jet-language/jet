@@ -136,24 +136,21 @@ beside S17 (owner-chosen I8 exception).
 **S1 — Function keyword**: `fn`.
 
 **D-ARROW-CONTROL1=A — Callable and control arrows** *(ratified 2026-07-26,
-card #1209)*:
+card #1209; retired split amended by D-ARROW-UNIFY1=B)*:
 
-- `=>` defines a callable result.
-- `=[Effects]=>` adds an explicit effect ceiling to that callable result.
-- `=[]=>` states an empty effect ceiling. `=[..E]=>` keeps an open row.
-- `->` selects a control-flow arm or yields one finite-loop item.
-- effect-only `if` and `loop` bodies use `->` for one adjacent statement;
-  D-ONELINE-BODY1=B later makes this the canonical one-body form.
-- braces group multiline bodies. They do not imply a result.
+This row's former split is retired. Every callable result, effect ceiling,
+dispatch arm, loop body, and lambda uses `:>`. An explicit effect ceiling uses
+`:[Effects]>`, with `:[]>` for an empty row and `:[..E]>` for an open row.
+Braces group multiline bodies. They do not imply a result.
 
 Named functions, methods, function types, lambdas, computed fields, conversion
 implementations, and migration converters use the callable arrow. A concise
 named callable uses `:: expression` after its result type:
 
 ```jet
-fn double(value: Int) => Int :: value * 2
+fn double(value: Int) :> Int :: value * 2
 
-fn load(path: String) =[FS]=> String {
+fn load(path: String) :[FS]> String {
     text :: core.files.read(path)?
     text.trim()
 }
@@ -161,7 +158,7 @@ fn load(path: String) =[FS]=> String {
 
 A returned block uses its final value. `return` remains the explicit early-exit
 form. A unit-returning callable with no explicit effect ceiling needs no arrow.
-`->` is not a general operator.
+`:>` is not a general operator.
 
 **D-VOID1=A — one no-information result spelling** *(ratified 2026-08-04,
 card #1411)*: user-facing no-information results use `()`. The compiler keeps
@@ -376,10 +373,10 @@ separately ratified `|=` compound assignment keep their existing meanings.
 
 ### Control flow
 
-**S3 — Blocks** *(amended by D-ARROW-CONTROL1, D-BRACE1=A, and
+**S3 — Blocks** *(amended by D-ARROW-CONTROL1, D-ARROW-UNIFY1, D-BRACE1=A, and
 D-ONELINE-BODY1=B)*: curly braces `{ }` give every multi-statement or scoped
 effect `if`, `else`, and `loop` body a visible parse boundary. A legal one-line
-effect body uses `->` followed by one statement. Arrow arm bodies remain
+effect body uses `:>` followed by one statement. Arrow arm bodies remain
 expressions. Braces do not determine whether a construct returns a value.
 
 **S19 — Loops** *(D-LOOP-HEADER2=A, D-LOOP-ADVANCE2=A,
@@ -469,9 +466,9 @@ is control; write `?? (next)` for a same-named fallback value.
 removed; E0115).
 
 **S68 — `if`: effect, value, and ordered arm tables** *(D-IF1 +
-D-IF3 + D-MATCHARM1/2 + D-IFGUARD1=A + D-ARROW-CONTROL1=A + D-IFDIST1=A)*: `if` is the only
+D-IF3 + D-MATCHARM1/2 + D-IFGUARD1=A + D-ARROW-CONTROL1=A + D-ARROW-UNIFY1=B + D-IFDIST1=A)*: `if` is the only
 branching keyword. The canonical multi-branch surface is one ordered arm-table
-model. Write `if subject OP { head -> body }` when a named subject improves
+model. Write `if subject OP { head :> body }` when a named subject improves
 clarity (`OP` is any comparison), or `if { head -> body }` without one. A head may be a value or
 structural pattern against the subject, or any `Bool` expression evaluated as
 written; one table may mix unrelated expressions. The first matching or true
@@ -484,10 +481,10 @@ D-BRANCH-TEACH1=A** *(ratified 2026-07-28, card #1259)*: L0507 points
 multi-line braced branches and all `else if` chains at ordered arm tables.
 One-line effect and value forms stay quiet. Fmt does not change branch shape.
 
-- Effect form uses `->` for one statement: `if ready -> run() else -> wait()`.
+- Effect form uses `:>` for one statement: `if ready :> run() else :> wait()`.
   Braces group multiline or scoped bodies. Parentheses around the condition
   are optional and fmt strips them.
-- Value form marks each selected value: `m :: if a > b -> a else -> b`.
+- Value form marks each selected value: `m :: if a > b :> a else :> b`.
   `else` is required (E0003), and branch types must match (E0124). A returned
   multiline arm uses `-> { ... }`. The same arm-table spelling works in
   expression position and yields `()` or one unified value type (D-IFDIST1).
@@ -497,24 +494,24 @@ One-line effect and value forms stay quiet. Fmt does not change branch shape.
 
 ```jet
 if code == {
-    200 -> print("ok")
-    301 | 302 -> redirect()          // `|` unions distributed atoms
-    .Error(e) && e.fatal -> die(e)   // pattern + boolean guard (== only)
-    code >= 500 -> retry()           // predicate arm
-    else -> log(code)
+    200 :> print("ok")
+    301 | 302 :> redirect()          // `|` unions distributed atoms
+    .Error(e) && e.fatal :> die(e)   // pattern + boolean guard (== only)
+    code >= 500 :> retry()           // predicate arm
+    else :> log(code)
 }
 
 return if n < {
-    16 -> 0
-    48 | 45 && ready -> 2            // `((n < 48 || n < 45) && ready)`
-    else -> 15
+    16 :> 0
+    48 | 45 && ready :> 2            // `((n < 48 || n < 45) && ready)`
+    else :> 15
 }
 ```
 
 Arms: bare values (compared with the table's `OP`), leading-dot enum patterns
 (only with `==`), and any `Bool` expression evaluated as written. `|` binds
 tighter than `&&`/`||` and mixes without requiring parens (D-IFDIST1 amends
-D-MATCHARM2). Catch-all is `else ->`. Braceless single-expression bodies
+D-MATCHARM2). Catch-all is `else :>`. Braceless single-expression bodies
 are allowed. Exhaustive pattern arms may omit `else`.
 
 **D-IFDIST1=A — distributed compare markers + ()-or-value tables** *(ratified
@@ -525,11 +522,11 @@ heads. Pattern heads remain `==`-only. Statement and expression position share
 one table spelling; expression tables unify arm values or yield `()`.
 
 **D-IFGUARD1=A — ordered subjectless guards** *(ratified 2026-07-18, card
-#680; amended by D-ARROW-CONTROL1 and D-ONELINE-BODY1=B)*: `if cond -> statement` is the one-line
+#680; amended by D-ARROW-CONTROL1, D-ARROW-UNIFY1, and D-ONELINE-BODY1=B)*: `if cond :> statement` is the one-line
 effect guard. A direct adjacent nested `if` requires braces when its boundary
 would be ambiguous. The subjectless spelling is the same ordered arm-table
 model without a named subject, not a separate or lesser branching mechanism.
-It keeps `->` because each arrow selects one arm, including an arm yielding `()`. Each
+It keeps `:>` because each arrow selects one arm, including an arm yielding `()`. Each
 head is an arbitrary `Bool` expression evaluated in order; the first true head
 wins. A value table requires a final `else` and all result types unify. A
 pattern binding under `&&` reaches the rest of that head and its body;
@@ -601,18 +598,18 @@ destructure structs, tuples, and lists:
 Redundant `..` on a full pattern is E0327. Nesting one level. Refutable
 statement tests use subject-first `subject == pattern ?? route` (D-CHOOSE-TEST1=A);
 the route must diverge. Dispatch-arm struct-pattern heads
-(`.{ kind: "page", target, .. } -> …`) are source-shipped; #341 owns the
+(`{ kind: "page", target, .. } :> …`) are source-shipped; #341 owns the
 remaining user-facing dispatch/pattern wording audit.
 
 **D-BINPAT1=A — binary patterns** *(ratified by owner 2026-07-12, card
-#506; spelling amended by D-UNIFYLIT1=A 2026-07-28)*: `[U8].{"…"}` binary
+#506; spelling amended by D-UNIFYLIT1=A and D-LIT-DOT1=B)*: `[U8]{"…"}` binary
 pattern literals join the ONE pattern engine (D-PARSESTR1's grammar and
 matcher, byte mode). Bit-typed holes —
-`[U8].{"{version:U4}{ihl:U4}{len:U16be}{rest:...}"}` — with widths U1–U64,
+`[U8]{"{version:U4}{ihl:U4}{len:U16be}{rest:...}"}` — with widths U1–U64,
 `le`/`be` suffixes on multi-byte reads, and a final `{name:...}` rest
 capture. Valid wherever string patterns are: `==` pattern tests,
 if-table arms (refutable — table needs `else`), and consume mode via
-`Reader.take_pattern([U8].{"…"})` (D-SHIFT1, prefix match + advance). Same
+`Reader.take_pattern([U8]{"…"})` (D-SHIFT1, prefix match + advance). Same
 non-greedy anchoring and E0147-class ambiguity law as text holes. The
 retired `b"…"` lexer prefix is gone.
 
@@ -743,13 +740,15 @@ refinement of `[T]`, lowered to a **real stack array**. `::` + literal
 ⇒ `[T#N]`; widens one-way to `[T]` (by copy); `.map` preserves N; `.len` is a
 compile-time constant; length-changing ops rejected (E0963–E0965).
 
-**S29 / D-DOTCTOR1 / D-DOTCTOR2 / D-DOTCTOR3 — Construction**: the only
-struct-literal spellings are **`Type.{ field: expr, … }`** (named) and
-**`.{ … }`** (type inferred from expected type — the D-DOTCTOR2 expected-type
-elaboration, now dot-spelled). Dotless `Type { … }` is E0320. Every field
-exactly once, any order; flush style `Point.{x: 3.0, y: 4.0}` (S29-FLUSH).
-`.{}` constructs an empty/unit value.
-**D-DOTCTOR3=A** *(ratified 2026-07-24)*: the same `Type.{ body }` head is
+**S29 / D-DOTCTOR1 / D-DOTCTOR2 / D-DOTCTOR3 — Construction** *(amended by
+D-LIT-DOT1=B)*: named struct and typed-literal heads touch their braces:
+**`Type{ field: expr, … }`**. An anonymous record is **`{ … }`**. The leading
+dot remains only for enum unit/payload selectors such as `.Tls13` and
+`.Password{ username: u }`. Dotted literal heads are E0320. Every field
+exactly once, any order; flush style `Point{x: 3.0, y: 4.0}` (S29-FLUSH).
+`{}` constructs an empty inferred value.
+**D-DOTCTOR3=A** *(ratified 2026-07-24, amended by D-LIT-DOT1=B)*: the same
+`Type{ body }` head is
 universal for every type. The body uses that type's own literal notation —
 elements for lists, entries for maps, one value for scalars — and elaborates
 against the head exactly like an expected-type position. It never converts; a
@@ -757,9 +756,9 @@ mismatched body is the ordinary type error (teach `from_*` when a conversion
 was intended). Scalar literal bodies keep comptime range checks in the E0135 /
 E1003 family (D-RANGETYPE1 / D-SG9). Nested list bodies may be bare `.{ … }` or
 plain `[ … ]`; both elaborate against the element type. Examples:
-`U8.{ 250 }`, `[U8].{ 42, 0, 0 }`, `[U8#3].{ 255, 128, 0 }`,
-`[String:Int].{}`, `Int.{ fetch_rows() }`, `[[U8]].{ .{ 1, 0 }, [0, 1] }`.
-Amends D-EMPTYLIT1: `[T].{}` / `[K:V].{}` is the explicit empty collection;
+`U8{ 250 }`, `[U8]{ 42, 0, 0 }`, `[U8#3]{ 255, 128, 0 }`,
+`[String:Int]{}`, `Int{ fetch_rows() }`, `[[U8]]{ { 1, 0 }, [0, 1] }`.
+Amends D-EMPTYLIT1: `[T]{}` / `[K:V]{}` is the explicit empty collection;
 bare `[]` stays contextual.
 
 **S30 — Enums**:
@@ -1050,8 +1049,8 @@ list and map — type-directed from the expected-type context (a `[K:V]`
 binding/field/return/arg makes empty `[]` a map, same as `[T]` makes it a
 list). `[:]` is retired; `[` immediately followed by `:` is an ordinary
 parse error (E0003), no special-cased teaching text.
-**D-DOTCTOR3=A** *(ratified 2026-07-24)* amends this: `[T].{}` and
-`[K:V].{}` are the explicit empty forms that name the collection type on the
+**D-DOTCTOR3=A** *(ratified 2026-07-24, amended by D-LIT-DOT1=B)* amends this:
+`[T]{}` and `[K:V]{}` are the explicit empty forms that name the collection type on the
 value; bare `[]` keeps working wherever context already supplies the type.
 
 **S65 — List type shorthand**: `[T]` is the canonical list-type spelling.
@@ -1155,7 +1154,7 @@ read, and the literal text might not match), so an `if == {}` table needs an
 holes with no literal text between them is E0147 (add an anchor, or type
 them so the boundary is unambiguous); a hole-free string in pattern position
 is plain text equality, not a pattern (I8). **D-TYPEDTEXT1 — Typed text** *(amended by D-UNIFYLIT1=A)*: a typed-literal
-head `SQL.{"…"}` / `HTML.{"…"}` elaborates to that checked value — each
+head `SQL{"…"}` / `HTML{"…"}` elaborates to that checked value — each
 `{hole}` becomes a bound parameter (SQL) or an HTML-escaped insertion
 (HTML); a runtime `String` reaching the position directly is E0149.
 `SQL.raw("…")`/`HTML.raw("…")` is the sole audited escape. Implemented for
@@ -1164,21 +1163,21 @@ typed-literal heads (and annotated bindings that still use a typed head);
 back. Bare `"…"` never elaborates into these types.
 **D-TYPEDTEXT2 — Typed text amendment** *(amended by D-UNIFYLIT1=A)*:
 hole-free bodies also elaborate under a typed head; the former `sql"…"` /
-`html"…"` prefixes are retired — use `SQL.{"…"}` / `HTML.{"…"}`.
+`html"…"` prefixes are retired — use `SQL{"…"}` / `HTML{"…"}`.
 User-defined prefixes remain deferred (and D-LITERAL-PREFIX1's prefix
 surface is superseded by D-UNIFYLIT1=A).
 
 **D-UNIFYLIT1=A — unify domain text + pattern modes** *(ratified 2026-07-28,
 card #1265)*: one surface law — the head names the language; the body is that
-language's quoted recipe. Domain text: `SQL`/`HTML`/`Sh.{"…"}` only (plus
-`.raw`). Byte patterns: `[U8].{"…"}` in pattern / `Reader.take_pattern`
+language's quoted recipe. Domain text: `SQL`/`HTML`/`Sh{"…"}` only (plus
+`.raw`). Byte patterns: `[U8]{"…"}` in pattern / `Reader.take_pattern`
 position (retires `b"…"`). Text patterns keep plain `"…"` convenience and
-optional `String.{"…"}`. Amends D-TYPEDTEXT1/2 and D-BINPAT1; supersedes
+optional `String{"…"}`. Amends D-TYPEDTEXT1/2 and D-BINPAT1; supersedes
 D-LITERAL-PREFIX1's prefix-first surface.
 
 **D-REGEX-LIT1=D — checked Regex literals** *(ratified 2026-07-28, card
-#1283)*: a regex pattern is always a typed literal. `Regex.{"…"}` names a
-reusable pattern value. The head can be inferred as `.{"…"}` at a
+#1283)*: a regex pattern is always a typed literal. `Regex{"…"}` names a
+reusable pattern value. The head can be inferred as `{"…"}` at a
 Regex-typed positional or named argument. Sema validates the complete literal
 with the linear engine grammar, and reports E0152 with the pattern offset.
 One-shot `core.regex` calls take `Regex` and return their match value directly.
@@ -1195,11 +1194,11 @@ fallible `parse`/`from` constructors. The forms ride D-UNIFYLIT1, D-DOTCTOR3,
 and D-CORE-PATH1; no compatibility spelling is retained.
 
 **D-BOUND-RAW1=A — typed head bodies own escapes** *(ratified 2026-08-13,
-card #1815)*: inside any `Type.{"…"}` body, backslash is literal text owned
+card #1815)*: inside any `Type{"…"}` body, backslash is literal text owned
 by that head's grammar. Quote, brace, multiline-closing, and interpolation
 rules do not change; Regex still rejects interpolation. Plain strings keep
 the ordinary escape table. The head body is the raw boundary, so a Regex
-grammar can receive `Regex.{"\d+"}` without a second backslash.
+grammar can receive `Regex{"\d+"}` without a second backslash.
 
 **D-BOUND-LAW1=A — one crossing law** (ratified 2026-08-07, card #1813):
 nothing foreign becomes Jet silently. Every comptime, build, link, and runtime
@@ -2317,19 +2316,20 @@ exits — deadline first, then cancel.
 ### Effects & safety
 
 **D-EFF1 — Effect system**: inferred per-fn effect sets (Koka-style rows),
-erased in codegen. Assert or restrict via `=[Net, DB]=>` on a signature and
+erased in codegen. Assert or restrict via `:[Net, DB]>` on a signature and
 `#Caps(Net) { … }` regions.
 
 **D-SHAPE8=A — Effects inside the arrow** *(ratified 2026-07-14,
-owner-amended by D-ARROW-CONTROL1 on 2026-07-26; card #543)*: every explicit
-function effect row uses exactly `=[Effects]=>` in declarations, trait
-methods, function values, and callback types. `=[]=>` explicitly bounds the
-row empty. Open rows stay inside the brackets (`=[Log, ..E]=>`). The older
+owner-amended by D-ARROW-CONTROL1 on 2026-07-26 and D-ARROW-UNIFY1 on
+2026-08-20; card #543)*: every explicit function effect row uses exactly
+`:[Effects]>` in declarations, trait methods, function values, and callback
+types. `:[]>` explicitly bounds the row empty. Open rows stay inside the
+brackets (`:[Log, ..E]>`). The older
 `--[Effects]->`, `-[Effects]->`, `#(Effects)`, `#(via f)`, and `#Pure fn`
 spellings are retired; no alias exists.
 
 **S60 — Purity marking** *(surface superseded by D-SHAPE8=A)*: an explicit
-empty effect row `=[]=>` is the checked purity signature; violations name the
+empty effect row `:[]>` is the checked purity signature; violations name the
 impure call path. The same empty row works in function-type bounds.
 
 **D-EFF4 / D-EFF5 — Vocabulary**: closed set of ten tree ROOTS — `Net`, `FS`,
@@ -2669,10 +2669,11 @@ spelling with `uninit` as a contextual keyword. The original trigger was
 `buffer: [U8#4096] := uninit` (RHS of `:=` on an annotated binding). The old
 `#Uninit buffer: [U8#4096]` marker is a hard parse error (E0426).
 
-**D-UNINIT-SENTINEL2=A — body sentinel `Type.{ uninit }` (ratified
-2026-07-24)**: amends D-UNINIT-SENTINEL1 after D-BIND-BARE1 and D-DOTCTOR3.
+**D-UNINIT-SENTINEL2=A — body sentinel `Type{ uninit }` (ratified
+2026-07-24, amended by D-LIT-DOT1)**: amends D-UNINIT-SENTINEL1 after
+D-BIND-BARE1 and D-DOTCTOR3.
 `uninit` is legal only as the whole body of a typed-literal head:
-`bytes := [U8#128].{ uninit }` (scalars too: `n := Int.{ uninit }`). The
+`bytes := [U8#128]{ uninit }` (scalars too: `n := Int{ uninit }`). The
 annotated form `name: Type := uninit` is gone with typed bindings. Flow proof
 E0420 / E0423 / E0424, POD-only, MaybeUninit lowering, and `use core.mem` stay
 the same — only the spelling moves. Anywhere else, `uninit` is an ordinary
@@ -5994,7 +5995,8 @@ members cannot have members. A single Package needs no `packages:` or
 **S24 — `when` dispatch**: superseded by D-IF1/D-IF3 `if … == { }` (see
 Control flow).
 **S25 — comparison distribution**: retired by D-S25-RETIRE1; use `|`.
-**S29 — dotless struct literal**: superseded by D-DOTCTOR2 `T.{ }` (E0320).
+**S29 — dotless struct literal**: restored and canonicalized by D-LIT-DOT1 as
+`T{ }`; the retired dotted form is E0320.
 **S35 — `or` fallback**: superseded by `??` (S71).
 **S43 — `test` blocks**: superseded by `#Test("name")` (see Testing).
 **S53 — concurrency**: superseded as a deferral. Concurrency is live ratified
@@ -6006,8 +6008,7 @@ for locations/sources.
 **D-CTMARKER1 — `$name` splice marker**: retired outright by D-META-STAGE1=B;
 `$` is the one compile-time mark, not a splice-only sigil.
 **U1 / U10 filenames, D-JPK3/8/13, D-BIND1/2, D-ATTR1/3, D-CAP1/2-words,
-D-JSONOUT1, D-LITSUFFIX-SCOPE, D-UNIT1-spelling, the bare-brace constructor
-spelling superseded by D-DOTCTOR2**: all
+D-JSONOUT1, D-LITSUFFIX-SCOPE, D-UNIT1-spelling**: all
 superseded by the entries above; law as written in this file is final.
 
 ## Enforcement
@@ -6089,16 +6090,16 @@ and source `continue` retired. Semicolon clauses now name every multi-part loop
 header; controller-specific advancement is the third clause; `next` enters that
 edge before retesting. Implemented end to end on card #681.
 
-**2026-07-24 — D-DOTCTOR3=A**: universal typed-literal head `Type.{ body }` for
-every type. Body elaborates against the head with no silent conversion;
-`[T].{}` is the explicit empty; bare `[]` stays contextual. Amends S29 /
+**2026-07-24 — D-DOTCTOR3=A** *(spelling amended by D-LIT-DOT1=B)*: universal
+typed-literal head `Type{ body }` for every type. Body elaborates against the
+head with no silent conversion; `[T]{}` is the explicit empty; bare `[]` stays contextual. Amends S29 /
 D-DOTCTOR1 / D-DOTCTOR2 and D-EMPTYLIT1. Implemented on card #780.
 
 **2026-07-24 — D-BIND-BARE1=A**: bindings are always bare — only
 `name :: value`, `name := value`, and reassignment `name = value`. Retires
 `name: Type :: expr` and `name: Type := expr` as an immediate clean break
 (ordinary parse error, no teaching window). Types ride the value
-(`Type.{ … }` from D-DOTCTOR3) or live on signatures and fields. Amends S2 /
+(`Type{ … }` from D-DOTCTOR3) or live on signatures and fields. Amends S2 /
 D-BIND4. Implemented on card #781.
 
 **2026-07-25 — D-FLOWTYPE1=A**: a direct immutable local or parameter of type
@@ -6132,9 +6133,9 @@ and Canvas. Checked defaults and explicit addresses select Executable or
 Service entries; `jet test` runs every Check. E1321 owns stale, mismatched, and
 ambiguous links. Implemented end to end on card #544.
 
-**2026-07-28 — D-TRAILBLOCK2=A**: code-as-argument uses explicit `() => { … }` inside call parentheses (multiline bodies and multiple code args allowed); retires D-TRAILBLOCK1 trailing `{ }` sugar (`twice { … }` / `f() { … }`). E0335 teaches the `() =>` form. Card #1266.
+**2026-07-28 — D-TRAILBLOCK2=A** *(arrow spelling amended by D-ARROW-UNIFY1=B)*: code-as-argument uses explicit `() :> { … }` inside call parentheses (multiline bodies and multiple code args allowed); retires D-TRAILBLOCK1 trailing `{ }` sugar (`twice { … }` / `f() { … }`). E0335 teaches the `() :>` form. Card #1266.
 
-**2026-07-28 — D-UNIFYLIT1=A**: typed heads only for domain text (`SQL`/`HTML`/`Sh.{"…"}` + `.raw`); byte patterns `[U8].{"…"}`; retires `sql"`/`html"`/`sh"` prefixes, silent expected-type rewrite of bare quotes, and `b"…"`; text patterns keep plain `"…"` convenience. Amends D-TYPEDTEXT1/2 and D-BINPAT1; supersedes D-LITERAL-PREFIX1 prefix surface. Card #1265.
+**2026-07-28 — D-UNIFYLIT1=A** *(head spelling amended by D-LIT-DOT1=B)*: typed heads only for domain text (`SQL{"…"}`/`HTML{"…"}`/`Sh{"…"}` + `.raw`); byte patterns `[U8]{"…"}`; retires `sql"`/`html"`/`sh"` prefixes, silent expected-type rewrite of bare quotes, and `b"…"`; text patterns keep plain `"…"` convenience. Amends D-TYPEDTEXT1/2 and D-BINPAT1; supersedes D-LITERAL-PREFIX1 prefix surface. Card #1265.
 
 **2026-07-29 — D-FACTMODEL1=A**: tags, states, taint kinds, and effect leaves
 are compile-time enum facts. They share one registry, segment-aware
@@ -7191,19 +7192,19 @@ finite-source finding form above. This section records the other outcomes.
 
 **D-ONELINE-BODY1=B — one body rule** *(ratified 2026-08-13, cards #1453 and
 #1454; reconciles D-CHOOSE-FNBODY1=A)*: ordinary and multi-head function
-one-liners put `::` after the return type. Callable heads keep `=>`. An
-effect-only `if` or `loop` may put `->` before one adjacent statement; braces
+one-liners put `::` after the return type. Callable heads use `:>`. An
+effect-only `if` or `loop` may put `:>` before one adjacent statement; braces
 are required for multiple statements and scoped marker blocks. Function-body
 `=` retires with a teaching fix to `::`; `=` remains for slot-filling forms
 such as extern bindings, defaults, reassignment, field defaults, and enum
 discriminants. Marker-scoped blocks retain their own braces.
 
 **D-LOOP-STMT-ARROW1=C — arrow loop bodies in statement position** *(ratified
-2026-08-13, card #1453)*: every statement-position loop header — finite source,
-condition-only, bare infinite, and mutable state — accepts `-> statement`. The
+2026-08-13, card #1453; arrow spelling amended by D-ARROW-UNIFY1=B)*: every statement-position loop header — finite source,
+condition-only, bare infinite, and mutable state — accepts `:> statement`. The
 statement runs for its effect and its value is discarded. A non-unit value gets
-a lint that names the value form `name :: loop … -> value` for collection, or
-the write-capability form `loop item, &values -> item *= 2` for in-place edits.
+a lint that names the value form `name :: loop … :> value` for collection, or
+the write-capability form `loop item, &values :> item *= 2` for in-place edits.
 Value-position finite loops keep their collection arrow semantics. The
 formatter chooses the arrow when one simple body fits and braces otherwise.
 
@@ -7444,3 +7445,635 @@ replacement — `fun`/`func`/`def`/`function` teach `fn`, and
 `var`/`let`/`const`/`val` teach `::` or `:=`. One table owns those
 facts, shared with the loop keywords `for`/`while`/`continue`/`do` that
 card #1887 already fixed; a second table is a defect.
+
+**2026-08-20 — D-WASISRV1=A** *(card #1914; ratified 2026-08-19)*:
+`wasm32-wasip2` is a first-class Jet server target. `jet build --target=wasm32-wasip2`
+passes the target to rustc, emits the target's WASI Preview 2 Component, and
+uses the standard `wasi:sockets` networking surface through the shared network
+and HTTP Prelude. Server code may bind, listen, accept, and serve under a
+standard WASI Preview 2 runtime. Target validation keeps E3302 for unknown or
+uninstalled triples; it does not classify the ratified target as an unknown
+target. There is no AOT-only exception or execution-tier carve-out.
+
+## Ratified decision index
+
+<!-- BEGIN GENERATED RATIFIED INDEX -->
+
+Generated by `scripts/agent/decision-index.mjs` from the Tower store: 609 ratified decisions.
+Do not hand-edit these rows. The decision lives in Tower; this is a lookup so that reading this
+spec is enough to know the law. Sections above carry the teaching prose for decisions that changed
+user-typeable syntax; a row here with no prose above it is still binding.
+
+| Decision | Outcome | Card |
+| --- | --- | --- |
+| `B-E7-BASELINE1` | D | `c0gtqigv` |
+| `B-E7-DESKTOPNS1` | E | `c0fp9sb3` |
+| `D-ACCEPT-1078` | accept | `c08j7uxj` |
+| `D-ACCEPT-1375` | accept | `c01x4i87` |
+| `D-ACCEPT-1376` | accept | `c0x25i2w` |
+| `D-ACCEPT-1413` | accept | `c0pkjxs2` |
+| `D-ACCEPT-2044` | accept | `c0te2a80` |
+| `D-ACCEPT-2050` | accept | `c0391j1l` |
+| `D-ACCEPT-923` | accept | `c0daklaf` |
+| `D-ADOPT-CC1` | B | `c0wxdq1k` |
+| `D-ADOPT-CCSPELL1` | A | `c0wxdq1k` |
+| `D-ADOPT-GUEST1` | A | `c054tv3j` |
+| `D-ADOPT-LTS1` | A | `c0uwwhuv` |
+| `D-ADOPT-PUB1` | A | `c0jv0vxm` |
+| `D-ADOPT-TIER1` | A | `c0rfs1zh` |
+| `D-AGENT-EXEC1` | A | `c0vrs94y` |
+| `D-AGENT-EXEC2` | A | `c0vrs94y` |
+| `D-ALIAS-OP1` | B | `c0pxsuic` |
+| `D-ALLOC-PROGRAM1` | A | `c053e5jw` |
+| `D-ALLOCFAIL1` | A | `c0fki8ve` |
+| `D-AOT-CRANELIFT1` | B | `c0zmoznd` |
+| `D-APILABEL1` | A | `c0vvhs7e` |
+| `D-APP-ARGS1` | A | `c0f7fhoy` |
+| `D-APP-UNIFY1` | B | `c0zvnp4f` |
+| `D-ARGS-EXIT1` | A | `c0rsejxo` |
+| `D-ARROW-UNIFY1` | B | `c0ma0xb6` |
+| `D-AUTH-TOKENPOLICY1` | A | `c0n6vj96` |
+| `D-AUTH1` | A | `c0n6vj96` |
+| `D-AUTH2` | A | `c0n6vj96` |
+| `D-AUTHORITY-GATE1` | A | `c0pp8jfr` |
+| `D-AUTHORITY-MANIFEST1` | A | `c0pp8jfr` |
+| `D-AUTHORITY-MEM1` | B | `c0pp8jfr` |
+| `D-AUTHORITY-MEM2` | A | `c0pp8jfr` |
+| `D-AUTHORITY-MODEL1` | A | `c0pp8jfr` |
+| `D-AUTHORITY-NAME1` | A | `c0pp8jfr` |
+| `D-AUTHORITY-ROOTS1` | A | `c0pp8jfr` |
+| `D-AUTHORITY-SCOPE1` | A | `c0pp8jfr` |
+| `D-AUTHORITY-WORD1` | A | `c0pp8jfr` |
+| `D-AUTHORITY-WORD2` | E | `c0575p3w` |
+| `D-AUTODERIVE-SYNTAX1` | D | `c0yrhvh3` |
+| `D-AUTODERIVE1` | E | `c0yrhvh3` |
+| `D-AUTODIFF1` | A | `c0fb7yl5` |
+| `D-BENCH-KEEP1` | A | `c08jqcnk` |
+| `D-BENCH-PARITY1` | B | `c01pwyjw` |
+| `D-BINDSIG-COUNT1` | A | `c0ry0rka` |
+| `D-BINPAT1` | A | `c0n6vj96` |
+| `D-BINREAD-LEN1` | A | `c083yh6b` |
+| `D-BITNOT1` | A | `c0skl5w6` |
+| `D-BODY-ARROW1` | B | `c0ej2y7w` |
+| `D-BOUND-BIND1` | A | `c0psk4rw` |
+| `D-BOUND-EVOLVE1` | A | `c0psk4rw` |
+| `D-BOUND-HEAD1` | A | `c0psk4rw` |
+| `D-BOUND-LAW1` | A | `c0psk4rw` |
+| `D-BOUND-PROV1` | A | `c0psk4rw` |
+| `D-BOUND-RAW1` | A | `c0psk4rw` |
+| `D-BOUND-SINK1` | A | `c0psk4rw` |
+| `D-BOUND-TAINT1` | A | `c0psk4rw` |
+| `D-BOUND-UNDO1` | A | `c0psk4rw` |
+| `D-BRACE1` | A | `c08mu840` |
+| `D-BRANCH-AST1` | C | `c0tc1fgq` |
+| `D-BRANCH-CODEGEN1` | B | `c0tc1fgq` |
+| `D-BRANCH-ELSEIF1` | A | `c0q4t3oj` |
+| `D-BRANCH-FMT1` | C | `c0q4t3oj` |
+| `D-BRANCH-LINT1` | A | `c0q4t3oj` |
+| `D-BRANCH-ONELINE1` | A | `c0q4t3oj` |
+| `D-BRANCH-PREF1` | A | `c0q4t3oj` |
+| `D-BRANCH-TEACH1` | A | `c0q4t3oj` |
+| `D-BRANCH-VALUE1` | A | `c0q4t3oj` |
+| `D-BUILD-DEFAULT1` | B | `c0zmoznd` |
+| `D-BUILDCTX-FLAGS1` | A | `c08ojicy` |
+| `D-CACHENAME1` | A | `c0g73txq` |
+| `D-CALLDUAL1` | E | `c04cbdzd` |
+| `D-CALLPOLICY1` | E | `c0b4fyko` |
+| `D-CALLPOLICY2` | C | `c0b4fyko` |
+| `D-CALLPOS1` | A | `c0e7kkuf` |
+| `D-CALLVALUE1` | B | `c0nnhbti` |
+| `D-CANVAS-COPYPASTE1` | E | `c0ocarv7` |
+| `D-CANVAS-DEBUG-UX1` | D | `c0ewd6kd` |
+| `D-CANVAS-MULTIEXEC1` | E | `c0zpnwk9` |
+| `D-CANVAS-RAD1` | A | `c0sad0nq` |
+| `D-CANVASMETA1` | B | `c0stzzp4` |
+| `D-CHOOSE-FIND1` | A | `c0btehwy` |
+| `D-CHOOSE-FNBODY1` | A | `c0btehwy` |
+| `D-CHOOSE-HEADS1` | A | `c0btehwy` |
+| `D-CHOOSE-PAT1` | A | `c0btehwy` |
+| `D-CHOOSE-TEST1` | A | `c0btehwy` |
+| `D-CI1` | A | `c0wa2hf8` |
+| `D-CI2` | A | `c0wa2hf8` |
+| `D-CLAIM-BENCH1` | A | `c02thicu` |
+| `D-CLAIM-CASES1` | B | `c02thicu` |
+| `D-CLAIM-WORD1` | B | `c02thicu` |
+| `D-CLI-FIELD-MARKERS1` | A | `c0ozksvh` |
+| `D-CLI-GLOBAL1` | E | `c0n8zb5c` |
+| `D-CLI-HANGAR1` | B | `c0qdr54o` |
+| `D-CMD-OVERRIDE1` | C | `c0wk4xnv` |
+| `D-CMDOVERRIDE1` | A | `c01edx3m` |
+| `D-CMP3WAY1` | B | `c0z2v4l9` |
+| `D-COLLNAME1` | A | `c024dgns` |
+| `D-COMPILE-STACK1` | A | `c0wy20z4` |
+| `D-COMPUTE-AUTODIFF1` | D | `c0r5ttg9` |
+| `D-COMPUTE-BACKEND1` | D | `c0r5ttg9` |
+| `D-COMPUTE-GRAD1` | E | `c0fb7yl5` |
+| `D-COMPUTE-KERNEL-SURFACE1` | B | `c05hy7lo` |
+| `D-COMPUTE-KERNEL1` | D | `c0r5ttg9` |
+| `D-COMPUTE-PLACE1` | D | `c0r5ttg9` |
+| `D-COMPUTE-RAWBOUNDARY1` | A | `c0r5ttg9` |
+| `D-COMPUTE-TYPE1` | D | `c0r5ttg9` |
+| `D-COMPUTE-VJP1` | A | `c0fb7yl5` |
+| `D-COMPUTE1` | D | `c0r5ttg9` |
+| `D-CONC-CHAN1` | A | `c0vzadss` |
+| `D-CONC-CHAN2` | D | `c0vzadss` |
+| `D-CONC-CROSS1` | A | `c0vzadss` |
+| `D-CONC-FAIL1` | A | `c0vzadss` |
+| `D-CONC-FREEZE1` | A | `c00xc67b` |
+| `D-CONC-GROUP1` | A | `c0vzadss` |
+| `D-CONC-JOIN1` | A | `c0vzadss` |
+| `D-CONC-OUTCOME1` | A | `c0vzadss` |
+| `D-CONC-SCHED1` | A | `c0vzadss` |
+| `D-CONC-SHARE1` | A | `c0vzadss` |
+| `D-CONC-SPAWN1` | D | `c0vzadss` |
+| `D-CONC-STM1` | A | `c0vzadss` |
+| `D-CONC-STREAM1` | A | `c0vzadss` |
+| `D-CONC-UNIT1` | A | `c0vzadss` |
+| `D-CONF-ENTRY1` | A | `c0y5llsd` |
+| `D-CONF-GENSPELL1` | A | `c0y5llsd` |
+| `D-CONF-KEY1` | A | `c0y5llsd` |
+| `D-CONF-MERGE1` | A | `c0y5llsd` |
+| `D-CONF-MODULE1` | A | `c0y5llsd` |
+| `D-CONF-NAME1` | A | `c0y5llsd` |
+| `D-CONF-PLANE1` | A | `c0y5llsd` |
+| `D-CONF-READ1` | A | `c0y5llsd` |
+| `D-CONF-SPLIT1` | A | `c0y5llsd` |
+| `D-CONF-STAMP1` | B | `c0y5llsd` |
+| `D-CONF-WORD1` | A | `c0y5llsd` |
+| `D-CORE-DOCTRINE1` | A | `c0hil8nx` |
+| `D-CORE-EAGER1` | A | `c0hil8nx` |
+| `D-CORE-EAGER2` | A | `c0fa4bu7` |
+| `D-CORE-PATH1` | A | `c0hil8nx` |
+| `D-CORE-PRELUDE1` | A | `c0hil8nx` |
+| `D-CORE-PRELUDE2` | B | `c0hil8nx` |
+| `D-CORE-SOURCE-AUTHORITY1` | A | `c02naez8` |
+| `D-CORE-TREE1` | A | `c0hil8nx` |
+| `D-CORE-USELIST1` | A | `c0hil8nx` |
+| `D-CORESURF-SMALL1` | A | `c0gv6ghj` |
+| `D-CRYPTO-PUBKEY1` | D | `c0tyh6b4` |
+| `D-CTCODEGEN1` | A | `c0ath783` |
+| `D-CTCORE1` | A | `c0ath783` |
+| `D-CTEFFECT1` | A | `c0ath783` |
+| `D-CTFIND1` | A | `c0ath783` |
+| `D-CTIO1` | A | `c0ath783` |
+| `D-DBDRIVER1` | A | `c29iz43a` |
+| `D-DBG-AUTH1` | B | `c144` |
+| `D-DBG-DAP1` | A | `c144` |
+| `D-DBG-DIAG1` | A | `c144` |
+| `D-DBG-EDITOR1` | A | `c144` |
+| `D-DBG-NATIVE1` | A | `c144` |
+| `D-DBPOLICY-BIND1` | A | `c0ht1m5j` |
+| `D-DBPOLICY1` | A | `c0n6vj96` |
+| `D-DEP-PY1` | A | `caffiunify` |
+| `D-DERIVED-DIMENSION-CLAIM1` | A | `c03gs87j` |
+| `D-DEVR-CAUSE1` | A | `c0xffwib` |
+| `D-DEVR-CLAIM1` | A | `c0xffwib` |
+| `D-DEVR-CONE1` | A | `c0xffwib` |
+| `D-DEVR-FIND1` | A | `c0xffwib` |
+| `D-DEVR-HOLE1` | A | `c0xffwib` |
+| `D-DEVR-LAW1` | A | `c0xffwib` |
+| `D-DEVR-PROD1` | A | `c0xffwib` |
+| `D-DEVR-REVIEW1` | A | `c0xffwib` |
+| `D-DEVR-SEMID1` | A | `c0xffwib` |
+| `D-DEVR-STATUS1` | A | `c0xffwib` |
+| `D-DEVR-TRY1` | A | `c0xffwib` |
+| `D-DEVR-TWICE1` | A | `c0xffwib` |
+| `D-DEVR-WITNESS1` | A | `c0xffwib` |
+| `D-DIMENSION-OPEN1` | D | `c03gs87j` |
+| `D-E3FROZEN1` | D | `c0kq9cy2` |
+| `D-EACH1` | C | `c0pbnytf` |
+| `D-ECO-FILEROOT1` | A | `c0m1zysi` |
+| `D-ECO-FLEETVERB1` | A | `c0kxss7s` |
+| `D-ECO-JETOS-PREVIEW1` | A | `c0kxss7s` |
+| `D-ECO-JETOS2` | A | `c0kxss7s` |
+| `D-ECO-MEMBERS1` | A | `c002osb3` |
+| `D-ECO-OUTPUT-CALLCONTRACT1` | A | `c0qj346l` |
+| `D-ECO-OUTPUT-DEFAULT1` | A | `c0qj346l` |
+| `D-ECO-OUTPUT-KINDS1` | A | `c0qj346l` |
+| `D-ECO-OUTPUT-PAYLOAD1` | A | `c0qj346l` |
+| `D-ECO-OUTPUT1` | A | `c0qj346l` |
+| `D-ECO-ROOTNAME1` | I | `c002osb3` |
+| `D-ECO-SLICENAME1` | G | `c0m1zysi` |
+| `D-ECO-SOURCE1` | A | `c0m1zysi` |
+| `D-ECO-SPLITPOLICY1` | A | `c0m1zysi` |
+| `D-ECO-TRANSITION1` | A | `c0m1zysi` |
+| `D-ECO1` | A | `c002osb3` |
+| `D-ECO10` | A | `c002osb3` |
+| `D-ECO11` | A | `c002osb3` |
+| `D-ECO12` | A | `c002osb3` |
+| `D-ECO13` | A | `c002osb3` |
+| `D-ECO14` | A | `c002osb3` |
+| `D-ECO15` | A | `c002osb3` |
+| `D-ECO16` | A | `c002osb3` |
+| `D-ECO17` | A | `c002osb3` |
+| `D-ECO18` | A | `c002osb3` |
+| `D-ECO19` | A | `c002osb3` |
+| `D-ECO2` | A | `c002osb3` |
+| `D-ECO3` | A | `c002osb3` |
+| `D-ECO4` | A | `c002osb3` |
+| `D-ECO5` | A | `c002osb3` |
+| `D-ECO6` | A | `c002osb3` |
+| `D-ECO7` | A | `c002osb3` |
+| `D-ECO8` | A | `c002osb3` |
+| `D-ECO9` | A | `c002osb3` |
+| `D-EFFDBREAD1` | A | `c0qdl0gg` |
+| `D-EFFECT-DECL1` | A | `c0325rmi` |
+| `D-EMBED1` | E | `c0xpdgxg` |
+| `D-ENTRY-ORDER1` | B | `c0l653zu` |
+| `D-ENTRY-SCRIPT1` | B | `c0l653zu` |
+| `D-ENTRY-VALUE1` | B | `c0uq2h91` |
+| `D-ENV-FACET1` | A | `c0ecmozp` |
+| `D-ENV-FILES1` | A | `c0s1t30c` |
+| `D-ENV-FLAKEGRAPH1` | A | `c0j346pt` |
+| `D-ENV-FLAKEPARTS1` | A | `c0wetpt1` |
+| `D-ENV-IMAGE1` | A | `c0u5x7kf` |
+| `D-ENV-INTEGRATIONS1` | A | `c02ptuvv` |
+| `D-ENV-LANGPACK1` | A | `c00jpncd` |
+| `D-ENV-LIFECYCLE2` | A | `c0lcnxch` |
+| `D-ENV-PROFILE1` | C | `c0yf5gxv` |
+| `D-ENVFLAG1` | A | `c0vypaig` |
+| `D-ENVHOOK1` | A | `c0n6vj96` |
+| `D-ERR-DECON1` | A | `c06s09om` |
+| `D-EXAMPLES-SHORTPATH1` | A | `c0bda91w` |
+| `D-EXPNEG1` | A | `c0q2s3u5` |
+| `D-EXPOP1` | A | `c0kw5dh0` |
+| `D-EXPSEM1` | A | `c0q2s3u5` |
+| `D-FACT-FLOW1` | A | `c0q81flf` |
+| `D-FACT-GATE1` | A | `c0q81flf` |
+| `D-FACT-HOME1` | A | `c0q81flf` |
+| `D-FACT-LAW1` | B | `c0q81flf` |
+| `D-FACT-OWN1` | A | `c0q81flf` |
+| `D-FACT-READ1` | A | `c0q81flf` |
+| `D-FACT-WORD1` | A | `c0q81flf` |
+| `D-FACTDECL1` | A | `c0a28z9s` |
+| `D-FACTMODEL1` | A | `c09oa1up` |
+| `D-FAIL-BIND1` | A | `c0nrh4dh` |
+| `D-FAIL-BREACH1` | A | `c0nrh4dh` |
+| `D-FAIL-CARRIER1` | A | `c0nrh4dh` |
+| `D-FAIL-CONV1` | A | `c0nrh4dh` |
+| `D-FAIL-CONV2` | A | `c0dr8aqt` |
+| `D-FAIL-CTX1` | A | `c0nrh4dh` |
+| `D-FAIL-EDGE1` | A | `c0nrh4dh` |
+| `D-FAIL-ERROR1` | A | `c0nrh4dh` |
+| `D-FAIL-ERRWIRE1` | D | `c0nb4bwv` |
+| `D-FAIL-EXIT1` | A | `c0nrh4dh` |
+| `D-FAIL-MODEL1` | A | `c0nrh4dh` |
+| `D-FAIL-TIER1` | A | `c0nrh4dh` |
+| `D-FAIL-UNIT1` | A | `c0nrh4dh` |
+| `D-FANOUT3` | C | `c0pbnytf` |
+| `D-FENCE-GLYPH1` | A | `c06k75xs` |
+| `D-FENCE-RANGE1` | A | `c06k75xs` |
+| `D-FFI-ADA1` | A | `c0oqtn3i` |
+| `D-FFI-CAP1` | A | `c00xc67b` |
+| `D-FFI-COBOL1` | A | `c0xede68` |
+| `D-FFI-COM1` | A | `c0oqtn3i` |
+| `D-FFI-DART1` | A | `c0oqtn3i` |
+| `D-FFI-OCTAVE1` | A | `c0xede68` |
+| `D-FFI-PASCAL1` | A | `c0oqtn3i` |
+| `D-FFI-PWSH1` | A | `c0oqtn3i` |
+| `D-FFI-PY1` | A | `caffiunify` |
+| `D-FFI-TCL1` | A | `c0oqtn3i` |
+| `D-FFI-UNIFY1` | A | `caffiunify` |
+| `D-FIELDDEF1` | C | `c0y7ixis` |
+| `D-FIELDMEMO1` | A | `c0rqe5rb` |
+| `D-FLOORDIV1` | A | `c04513m9` |
+| `D-FMT-INTERP1` | A | `c0s24t6f` |
+| `D-FMT-INTERP2` | A | `c067mxf7` |
+| `D-FMT-PRETTY1` | A | `c0wfwj5u` |
+| `D-FMT-SIMPLIFY1` | A | `c0vh9xhx` |
+| `D-FMTCOLLAPSE1` | B | `c01pcsdb` |
+| `D-FSOPS1` | A | `c0m9tjqj` |
+| `D-FSWATCH1` | A | `c0m9tjqj` |
+| `D-GAME-ASSET1` | A | `c9q0534j` |
+| `D-GAME-BACKEND1` | A | `c9q0534j` |
+| `D-GAME-BUDGET1` | A | `c9q0534j` |
+| `D-GAME-ECS1` | B | `c9q0534j` |
+| `D-GAME-INPUT1` | A | `c9q0534j` |
+| `D-GAME-LOOP1` | A | `c0kix3zi` |
+| `D-GAME-REPLAY1` | A | `c9q0534j` |
+| `D-GENERIC-CALL1` | A | `c0o4z47c` |
+| `D-HTML-NAME1` | B | `c0t5khxi` |
+| `D-HTTP-CORS1` | A | `c047avgx` |
+| `D-HTTP-JSON1` | A | `c047avgx` |
+| `D-HTTP-STATIC-FILES1` | A | `c047avgx` |
+| `D-I9-HOME1` | A | `c03ouq0x` |
+| `D-IFDIST1` | A | `c0e1tb2n` |
+| `D-IMPURE-REASON1` | B | `c0t5khxi` |
+| `D-INCR-UNIT1` | A | `c0x6ysg8` |
+| `D-INTBIG1` | A | `c04czzvb` |
+| `D-INTDIV1` | A | `c0kfh1yl` |
+| `D-INTLIT-WIDTH1` | F | `c0b0tifp` |
+| `D-IO-PROMPT1` | A | `c0zmsead` |
+| `D-IOERROR-TREE1` | A | `c0z3l25j` |
+| `D-ITER-DECLINE1` | A | `c0r2dfxz` |
+| `D-JETDOC1` | B | `c1eixac0` |
+| `D-JOB-NAME1` | A | `c04zqxw1` |
+| `D-JOB-NAME2` | B | `c04zqxw1` |
+| `D-JOB-SUBCMD1` | C | `c0a5nr50` |
+| `D-JOS-APPMODULE1` | B | `c013gf7s` |
+| `D-JOS-APPSTORE1` | D | `c0qqwe62` |
+| `D-JOS-BACKUP1` | C | `c0i0ho3h` |
+| `D-JOS-BOOTKERNEL2` | B | `c0cc6n6t` |
+| `D-JOS-CONTAINER1` | A | `c0ppv63p` |
+| `D-JOS-DISK1` | A | `c0txfavt` |
+| `D-JOS-ETCMANAGE1` | A | `c039kz2t` |
+| `D-JOS-FLATPAK1` | A | `c04du0jb` |
+| `D-JOS-FLEETHEALTH1` | A | `c0q1ctbc` |
+| `D-JOS-FLEETPRIV1` | A | `c0fdw5bn` |
+| `D-JOS-FLEETROLLOUT1` | A | `c0nlrm12` |
+| `D-JOS-FLEETTARGET1` | A | `c0nlrm12` |
+| `D-JOS-HARDWARE1` | A | `c0rvu7rz` |
+| `D-JOS-IMAGEFORMAT2` | A | `c0qs8j6u` |
+| `D-JOS-INSTALLTRUST1` | A | `c0kwxkks` |
+| `D-JOS-KERNELTUNE1` | A | `c05hqpe6` |
+| `D-JOS-LIFECYCLE1` | A | `c0svh6c4` |
+| `D-JOS-MIGRATIONVERB1` | A | `c0j57gh4` |
+| `D-JOS-NETWORK1` | B | `c0pfsrnc` |
+| `D-JOS-OPTIONSVERB1` | B | `c0om2gxe` |
+| `D-JOS-PRIORITY-SURFACE2` | A | `c0by6tvm` |
+| `D-JOS-PROVENANCE1` | A | `c0bzkfdl` |
+| `D-JOS-SERVICELOG1` | A | `c0uzefny` |
+| `D-JOS-STUDIO-LAUNCH1` | A | `c6q02qhw` |
+| `D-JOS-STUDIO-PROOFGATE1` | B | `c6q02qhw` |
+| `D-JOS-STUDIO-PROTOCOL1` | C | `c6q02qhw` |
+| `D-JOS-STUDIO-STATE1` | A | `c6q02qhw` |
+| `D-JOS-STUDIO-VIEW1` | A | `c6q02qhw` |
+| `D-JOS-TAKEOVER1` | A | `c0dxl32d` |
+| `D-JOS-THEME1` | A | `c0254elb` |
+| `D-JOS-USERREMOVAL1` | A | `c06lehoq` |
+| `D-JPK-BUILDRECIPE1` | A | `c0glsi0q` |
+| `D-JPK-BUILDSCRIPT1` | D | `c0kalcyg` |
+| `D-JPK-CACHEAUTH1` | D | `c0v0y46r` |
+| `D-JPK-CACHECONFIG1` | D | `c0w7297z` |
+| `D-JPK-DYNAMICPLAN1` | D | `c0xm7b14` |
+| `D-JPK-EPOCHBOUNDARY1` | B | `c0zqnb18` |
+| `D-JPK-EXECLEASE1` | A | `c0t4root` |
+| `D-JPK-EXTPROV1` | A | `caffiunify` |
+| `D-JPK-FRESHNESS1` | D | `c0ux5rmy` |
+| `D-JPK-MULTIUSER-IMPL1` | A | `c0daklaf` |
+| `D-JPK-NIXENGINE1` | D | `c0xe5g33` |
+| `D-JPK-NIXPIN1` | A | `c0xe5g33` |
+| `D-JPK-NIXPRODUCT1` | A | `c0xe5g33` |
+| `D-JPK-NIXSTORE1` | D | `c00wjjmo` |
+| `D-JPK-OVERLAY1` | A | `c0yzg1yu` |
+| `D-JPK-PKGOVERRIDE1` | B | `c0yzg1yu` |
+| `D-JPK-POLICYSURFACE1` | D | `c0ux5rmy` |
+| `D-JPK-PROFILE1` | D | `c0esko6c` |
+| `D-JPK-PROFILECOLLISION1` | A | `c0esko6c` |
+| `D-JPK-PROVIDERS2` | D | `c0mwowfx` |
+| `D-JPK-REGISTRY1` | D | `c09itznu` |
+| `D-JPK-REMOTE1` | D | `c06re5ow` |
+| `D-JPK-REPROCACHE1` | D | `c0pn8z35` |
+| `D-JPK-RESOLUTIONDOMAIN1` | D | `c09itznu` |
+| `D-JPK-RESOLVEMODE1` | D | `c09itznu` |
+| `D-JPK-SANDBOX2` | D | `c0zqnb18` |
+| `D-JPK-SERVICEDEPTH1` | A | `c0nliloo` |
+| `D-JPK-STOREBACKEND1` | D | `c0w7297z` |
+| `D-JPK-STORECLI1` | D | `c0sa3d63` |
+| `D-JPK-VAULTPROV1` | D | `c0gq3vxb` |
+| `D-JPROOF1` | A | `cbq06v8j` |
+| `D-JREPLAY1` | A | `cbq06v8j` |
+| `D-JSON-EXACTNUM1` | A | `c05y3gfw` |
+| `D-LANGNS-NAME1` | A | `c06k73ro` |
+| `D-LAYOUT-FACTS1` | B | `c0cl1dyc` |
+| `D-LEARN1` | learn | `c08mt3r8` |
+| `D-LIB-CALLGRANT1` | A | `c0pwzvbh` |
+| `D-LIB-DYNTRUST1` | A | `c0pwzvbh` |
+| `D-LIB-EXPORT1` | C | `c0pwzvbh` |
+| `D-LIB-NAME1` | A | `c0pwzvbh` |
+| `D-LIB-REUSE1` | B | `c0pwzvbh` |
+| `D-LINTPOLICY1` | A | `c0qdl0gg` |
+| `D-LISTREMOVE1` | F | `c0mfulbb` |
+| `D-LIT-DOT1` | B | `c0buajsm` |
+| `D-LITERAL-PREFIX1` | A | `c0pq9ng2` |
+| `D-LIVEQUERY1` | A | `c0qdl0gg` |
+| `D-LOCALCELL1` | A | `c0wpp6cz` |
+| `D-LOOP-COMMA1` | A | `c0bypiaz` |
+| `D-LOOP-GUARD1` | A | `c0oeuws4` |
+| `D-LOOP-HEADER3` | D | `c0yclhqo` |
+| `D-LOOP-STMT-ARROW1` | C | `c0b6szun` |
+| `D-LOOP-SUBJECT1` | A | `c0xsk2wa` |
+| `D-LOOPLABEL4` | A | `c0yclhqo` |
+| `D-LOOPMAP1` | B | `c0yclhqo` |
+| `D-MAP-KEY1` | A | `c0ivhxu2` |
+| `D-MAP-MERGE1` | E | `c07xgnwn` |
+| `D-MAPSPACE1` | A | `c00zqair` |
+| `D-MAPSPELL1` | A | `c0fwz7dv` |
+| `D-MARK-BLOCK1` | A | `c0ubf542` |
+| `D-MARK-FORM1` | A | `c0t5khxi` |
+| `D-MARK-REPEAT1` | A | `c0t5khxi` |
+| `D-MARKER-NAME-HYGIENE1` | A | `c06cwjlo` |
+| `D-MATRIX-BCAST1` | E | `c09k2xje` |
+| `D-MATRIX-HOME1` | D | `c09k2xje` |
+| `D-MATRIX-INDEX1` | E | `c09k2xje` |
+| `D-MATRIX-LIT1` | E | `c09k2xje` |
+| `D-MATRIX-MUL1` | F | `c09k2xje` |
+| `D-MATRIX-SOLVE1` | B | `c09k2xje` |
+| `D-MCP-SURFACE1` | A | `c0lpd9yg` |
+| `D-MEM-COPYSEM1` | A | `c00xc67b` |
+| `D-MEM-GUARANTEE1` | A | `c00xc67b` |
+| `D-MEM-SENTRY1` | A | `c00xc67b` |
+| `D-MEMDISJOINT1` | A | `c0muyoc2` |
+| `D-MEMO1` | A | `c0o54nhr` |
+| `D-MEMPROVENANCE2` | A | `c0jm15qp` |
+| `D-MEMPROVENANCE3` | A | `c03xl9l8` |
+| `D-META-AUTO1` | A | `c0jq7pog` |
+| `D-META-BODY1` | A | `c0jq7pog` |
+| `D-META-CODE1` | A | `c0jq7pog` |
+| `D-META-CONST1` | A | `c0jq7pog` |
+| `D-META-DSL1` | A | `c0jq7pog` |
+| `D-META-EFFECT1` | A | `c0jq7pog` |
+| `D-META-FORM1` | A | `c0jq7pog` |
+| `D-META-MODNAME1` | A | `c0jq7pog` |
+| `D-META-NAME1` | A | `c0jq7pog` |
+| `D-META-ONE1` | A | `c0jq7pog` |
+| `D-META-REG1` | A | `c0jq7pog` |
+| `D-META-STAGE1` | B | `c0jq7pog` |
+| `D-META-USER1` | A | `c0jq7pog` |
+| `D-METADEPTH1` | A | `c0ath783` |
+| `D-MIGRATE-SRC1` | A | `c0xede68` |
+| `D-MODCOMPUTE1` | A | `c0cqh9xs` |
+| `D-MODSEM1` | A | `c0c74q4f` |
+| `D-NAME-ALIAS1` | A | `c08uj0zl` |
+| `D-NAME-FENCE1` | A | `c08uj0zl` |
+| `D-NAME-FILES1` | C | `c08uj0zl` |
+| `D-NAME-REFLECT1` | A | `c08uj0zl` |
+| `D-NAME-ROLEMOD1` | A | `c08uj0zl` |
+| `D-NAME-SIGIL1` | A | `c08uj0zl` |
+| `D-NAME-TREE1` | A | `c08uj0zl` |
+| `D-NAME-WALK1` | A | `c08uj0zl` |
+| `D-NATIVEUI-ANDROID1` | C | `c0wqwqaq` |
+| `D-NATIVEUI-DEV1` | C | `c0wqwqaq` |
+| `D-NATIVEUI3` | A | `c0wqwqaq` |
+| `D-NETDNS2` | A | `c0z3l25j` |
+| `D-NETERROR1` | A | `c0z3l25j` |
+| `D-NETIO-CONTRACT1` | A | `c0z3l25j` |
+| `D-NETIO-CONTRACT2` | B | `c0z3l25j` |
+| `D-NETIO1` | D | `c0z3l25j` |
+| `D-NETSOCKET1` | A | `c0z3l25j` |
+| `D-NETTASK1` | A | `c0z3l25j` |
+| `D-NETTLSCLOSE1` | A | `c0z3l25j` |
+| `D-NETTLSCONFIG1` | A | `c0z3l25j` |
+| `D-NETTLSPEER1` | A | `c0z3l25j` |
+| `D-NETTLSSTREAM1` | A | `c0z3l25j` |
+| `D-NEVER1` | C | `c08zpu6m` |
+| `D-NOPANIC1` | D | `c05xxydu` |
+| `D-NUMJOIN1` | A | `c0b0tifp` |
+| `D-NUMLIT-PEER1` | A | `c0b0tifp` |
+| `D-NUMTYPE1` | A | `c0hsjnxk` |
+| `D-NUMWIDEN-CROSS1` | E | `c0b0tifp` |
+| `D-OBSERVE-LIVE1` | A | `c0n6vj96` |
+| `D-ONCE-AT1` | D | `c0e6i560` |
+| `D-ONCE-AUTODERIVE1` | A | `c02cl1bk` |
+| `D-ONCE-CASE1` | A | `c0e6i560` |
+| `D-ONCE-DERIVE1` | A | `c0e6i560` |
+| `D-ONCE-DOLLAR1` | B | `c0e6i560` |
+| `D-ONCE-GATE1` | A | `c0e6i560` |
+| `D-ONCE-HASH1` | B | `c0e6i560` |
+| `D-ONCE-LAW1` | A | `c0e6i560` |
+| `D-ONCE-LAYER1` | B | `c0575mwu` |
+| `D-ONCE-LEDGER1` | A | `c0e6i560` |
+| `D-ONCE-PRINT1` | A | `c0tlvysc` |
+| `D-ONCE-RETIRE1` | C | `c0e6i560` |
+| `D-ONCE-SANDBOX1` | A | `c0e6i560` |
+| `D-ONCE-TIER1` | A | `c0e6i560` |
+| `D-ONCE-UITREE1` | C | `c0e6i560` |
+| `D-ONCE-VERB1` | A | `c0e6i560` |
+| `D-ONCE-WORD1` | A | `c0e6i560` |
+| `D-ONELINE-BODY1` | B | `c0ej2y7w` |
+| `D-PANICROOT1` | A | `c09mc3y7` |
+| `D-PERFBUDGET-BASELINE1` | A | `ccq07pav` |
+| `D-PERFBUDGET-BENCHMIGRATE1` | B | `ccq07pav` |
+| `D-PERFBUDGET-COMPILE1` | C | `c0be4wgi` |
+| `D-PERFBUDGET-GAMEMIGRATE1` | A | `ccq07pav` |
+| `D-PERFBUDGET-GRAMMAR1` | A | `ccq07pav` |
+| `D-PERFBUDGET-INTEGRATION1` | A | `ccq07pav` |
+| `D-PERFBUDGET-OUTPUT1` | A | `ccq07pav` |
+| `D-PERFBUDGET-PROVIDER1` | A | `ccq07pav` |
+| `D-PERFBUDGET-REPORT1` | A | `ccq07pav` |
+| `D-PERFBUDGET-SURFACE1` | A | `ccq07pav` |
+| `D-PIN1` | A | `c0tfvwqu` |
+| `D-PIN2` | A | `c0tfvwqu` |
+| `D-PIN3` | A | `c0tfvwqu` |
+| `D-PKGSIGN-NOSIGN1` | A | `c06ahwl4` |
+| `D-PROCESS-CHECKED1` | A | `c0uyofkz` |
+| `D-PROCESS-SESSION2` | D | `c0ft6gme` |
+| `D-PROVE-LENS1` | A | `cbq06v8j` |
+| `D-PROVE-REPLAY1` | A | `cbq06v8j` |
+| `D-PROVE-SEM1` | A | `cbq06v8j` |
+| `D-PROVE-SOLVER1` | A | `cbq06v8j` |
+| `D-QUANTITY-PRINT1` | A | `c01ywo8h` |
+| `D-RANGE-VALUE1` | A | `c0zut94q` |
+| `D-REGCURATE1` | C | `c0vq4ut4` |
+| `D-REGEX-LIT1` | D | `c05051f9` |
+| `D-REPORT-EDITOR1` | A | `c01wqquu` |
+| `D-REPORT-FIXGRADE1` | D | `c0zdso2o` |
+| `D-REPORT-HOME1` | A | `c01wqquu` |
+| `D-REPORT-LAW1` | A | `c01wqquu` |
+| `D-REPORT-MACHINE1` | A | `c01wqquu` |
+| `D-REPORT-SEV1` | A | `c01wqquu` |
+| `D-REPORT-TEST1` | A | `c01wqquu` |
+| `D-ROLEFILE1` | A | `c01edx3m` |
+| `D-RULEARG-TYPES1` | A | `c06k73ro` |
+| `D-RUN-LAW1` | A | `c02thicu` |
+| `D-RUN-RECORD1` | A | `c02thicu` |
+| `D-RUN-SESSION1` | A | `c02thicu` |
+| `D-RUN-WATCH1` | A | `c02thicu` |
+| `D-SCHEDULE1` | A | `c0qdl0gg` |
+| `D-SCRIPT-ENTRY1` | A | `c0dmreif` |
+| `D-SELECT-GENERIC1` | A | `c0eublw4` |
+| `D-SERVICE-AUTHORITY1` | A | `c0auczc4` |
+| `D-SERVICE-DELIVERY1` | D | `c0todzv8` |
+| `D-SERVICE-IDENTITY1` | D | `c0todzv8` |
+| `D-SERVICE-STATE-AUTH1` | A | `c0iu2ebc` |
+| `D-SERVICE-STATE1` | D | `c0todzv8` |
+| `D-SERVICE-UPGRADE1` | D | `c0todzv8` |
+| `D-SERVICE-WORKFLOW1` | D | `c0todzv8` |
+| `D-SERVICE1` | D | `c0todzv8` |
+| `D-SET-DECLINE1` | C | `c0m2slnf` |
+| `D-SHARED-CYCLE1` | C | `c0uhvn0v` |
+| `D-SHAREDGUARD1` | A | `c0zywkq7` |
+| `D-SHAREDGUARD2` | A | `c0zywkq7` |
+| `D-SOA-TIER1` | A | `c0m0jmc6` |
+| `D-SPREAD1` | A | `c00707ob` |
+| `D-SQL-ARG1` | B | `c0t5khxi` |
+| `D-SQL-SURFACE1` | C | `c00pxltq` |
+| `D-STATE-NS1` | A | `c0ts6lkx` |
+| `D-STM1` | A | `c0n6vj96` |
+| `D-STR-DECLINE1` | C | `c01y8s93` |
+| `D-STRUCT-EDGE1` | A | `c0b6kkbv` |
+| `D-STRUCT-LIFE1` | A | `c0b6kkbv` |
+| `D-STRUCT-LIVE1` | A | `c0b6kkbv` |
+| `D-STRUCT-ONCE1` | A | `c0b6kkbv` |
+| `D-STRUCT-PLANE1` | A | `c0b6kkbv` |
+| `D-STRUCT-POLICY1` | A | `c0b6kkbv` |
+| `D-SUBJECT-CALL1` | A | `c075z2hs` |
+| `D-SYNC1` | A | `c0n6vj96` |
+| `D-TAG-SURFACE1` | A | `c0cv24hu` |
+| `D-TAG-UNIFY1` | A | `c0cv24hu` |
+| `D-TAINT2` | A | `c0n6vj96` |
+| `D-TASK-META1` | A | `c0s1t30c` |
+| `D-TASK-PAUSE-TIER1` | E | `c00v6i2i` |
+| `D-TASKBORROW1` | A | `c0q59qu0` |
+| `D-TASKGROUP-PARAM1` | A | `c0wr4ji9` |
+| `D-TASKS-LIST1` | A | `c01xexf7` |
+| `D-TEACH-FOREIGN1` | A | `c02mdks0` |
+| `D-TEST-XFAIL1` | A | `c0d0v4v2` |
+| `D-TESTFAULT1` | A | `c0jr1xem` |
+| `D-TIMERES1` | A | `c0s7isu9` |
+| `D-TRAILBLOCK2` | A | `c0hdc2x6` |
+| `D-TWR-BALLOT-PROFILES1` | A | `c01x4i87` |
+| `D-TYPE2-DEFAULT1` | A | `c0a9ulca` |
+| `D-TYPE2-EXACT1` | A | `c0a9ulca` |
+| `D-TYPE2-FOUND1` | A | `c0a9ulca` |
+| `D-TYPE2-IMAG1` | A | `c0a9ulca` |
+| `D-TYPE2-MEASURE1` | A | `c0a9ulca` |
+| `D-TYPE2-NUM1` | A | `c0a9ulca` |
+| `D-TYPE2-PLANE1` | A | `c0a9ulca` |
+| `D-TYPE2-REFINE1` | A | `c0a9ulca` |
+| `D-TYPE2-SPELL1` | A | `c0a9ulca` |
+| `D-TYPE2-TIME1` | A | `c0a9ulca` |
+| `D-TYPE2-UNCERT1` | A | `c0a9ulca` |
+| `D-TYPECHECK-BOUND1` | A | `c0x6ysg8` |
+| `D-UI-EVT-DISP1` | E | `c0indi4b` |
+| `D-UI-EVT-SET1` | D | `c0indi4b` |
+| `D-UI-MOUNT1` | A | `c0avjyq6` |
+| `D-UI-NODE-ID1` | C | `c0indi4b` |
+| `D-UNIFYLIT1` | A | `c0heu1qh` |
+| `D-UNIT-SCALE-PROVENANCE1` | A | `c03gs87j` |
+| `D-VALIDATE-DECODE1` | B | `c0qijk9s` |
+| `D-VALIDATE1` | A | `c0n6vj96` |
+| `D-VALIDATE2` | B | `c0n6vj96` |
+| `D-VALIDATE3` | A | `c0n6vj96` |
+| `D-VERDICT-1231-1` | User-facing `const` is retired. The only module immutable binding keyword is `comptime` (S57)… | `c0fdcyi6` |
+| `D-VERDICT-1231-2` | #Persist is a marker on a bare module binding (name :: / name :=), not on comptime. Example: … | `c0fdcyi6` |
+| `D-VERDICT-1254-1` | Full JIT/AOT parity required: no case may work under jet build/--release and fail under defau… | `c07z598z` |
+| `D-VERDICT-1304-1` | Implicit lossless widening covers floats as well as whole numbers. An F32 moves on its own in… | `c0b0tifp` |
+| `D-VERDICT-1306-1` | A: name :: Layout.{ Constraint… } (D-DOTCTOR3 element body). Retire layout NAME { } with teac… | `c0boayud` |
+| `D-VERDICT-1308-1` | Retire the comptime keyword. Beginner default is implicit compile-time folding (no keyword). … | `c0lw893m` |
+| `D-VERDICT-1308-2` | The conditional-compilation form is spelled '#Known if' (e.g. '#Known if build.os == { .Linux… | `c0lw893m` |
+| `D-VERDICT-1320-1` | Respell the D-EACH1 fence as symmetric $[ ... ]$ (open $[, close ]$). Expression-position fen… | `c0bx03jx` |
+| `D-VERDICT-1321-1` | print and eprint accept one or more arguments; each argument renders on its own line (print(a… | `c0kjro6g` |
+| `D-VERDICT-1323-1` | Ship the full ergonomic group set: tasks.spawn_group(n, fn) => [Task<T>] plus list methods jo… | `c0r8y9ik` |
+| `D-VERDICT-1324-1` | Remove (not deprecate) the S75 fan-out operator f.[a, b, c] and its E0961/E0962 diagnostics. … | `c0ursuly` |
+| `D-VERDICT-1398-1` | Do not use a hard 1:1 source-count ceiling. Count syntax, but judge added syntax by clarity, … | `c0rwwvb3` |
+| `D-VERDICT-1455-1` | D-MARK-REG1 — mandatory registration: a marker exists if and only if it is a registry row. No… | `c0t5khxi` |
+| `D-VERDICT-1867-1` | No separate import grammar for FFI. Single import stays c.lib; multiple libraries use c.[lib1… | `c003lpmk` |
+| `D-VERDICT-1868-1` | A card closes when its nonempty observable exit criteria are all met with concrete evidence, … | `c05bfqja` |
+| `D-VERDICT-2039-1` | Add week as the only new Time literal suffix, a fixed 7-day scale on the ns carrier. Calendar… | `c0rrypxo` |
+| `D-VERDICT-480-1` | Defer mobile-native platform work; current burndown focuses the Jet language and Linux support. | `c0wqwqaq` |
+| `D-VERDICT-666-1` | One compiler core, two lenses. JIT lens = rapid dev work people love in python/typescript; AO… | `c0zmoznd` |
+| `D-VERDICT-678-1` | Jet’s canonical default program entry file is run.jet, matching the jet run command and fn ru… | `c05e21g2` |
+| `D-VERDICT-687-1` | One compiler core. JIT and AOT are lenses only over the same front end and executable TIR — n… | `c0dbcwz5` |
+| `D-VIEW-TRAP1` | A | `c0ftql8x` |
+| `D-WASISRV1` | A | `c0i0wm0m` |
+| `D-WATCH-SCOPE1` | A | `c0m9tjqj` |
+| `D-WD7-WELCOME1` | B | `c0m3ug2h` |
+| `D-WEB-CLICK-OWN1` | D | `c07m87c8` |
+| `D-WEB-CLICK-PORT1` | D | `c0indi4b` |
+| `D-WEBAPP-SERVE1` | D | `c07m87c8` |
+| `D-XORSPELL1` | A | `c0v2fuet` |
+| `D-ZIPLEN1` | D | `c0a2mcjv` |
+| `D-ZIPPAD1` | E | `c0a2mcjv` |
+
+<!-- END GENERATED RATIFIED INDEX -->
