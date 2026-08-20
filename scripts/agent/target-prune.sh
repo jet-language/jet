@@ -11,10 +11,16 @@
 # unit's hash) and deletes older generations. Deleting a live artifact only
 # costs a rebuild of that one unit, so this is safe to run whenever.
 #
+# It also drops linked test executables that no recent sweep touched. Those are
+# the whole problem by volume: 323 of them measured 156G here (~480MB each),
+# while the reusable compile artifacts they link from — rlib and rmeta — were
+# 1.7G. Relinking one costs seconds; storing all of them costs a disk.
+#
 # Usage:
 #   scripts/agent/target-prune.sh            # prune, print what was reclaimed
 #   scripts/agent/target-prune.sh --dry      # report only
 #   scripts/agent/target-prune.sh --keep 2   # keep two generations per unit
+#   scripts/agent/target-prune.sh --exes 6   # keep executables used in last 6h
 set -uo pipefail
 cd "$(dirname "$0")/../.." || exit 1
 
@@ -26,6 +32,8 @@ const argv = process.argv.slice(2);
 const dry = argv.includes("--dry");
 const keepIdx = argv.indexOf("--keep");
 const keep = keepIdx === -1 ? 1 : Math.max(1, Number(argv[keepIdx + 1]) || 1);
+const exeIdx = argv.indexOf("--exes");
+const exeHours = exeIdx === -1 ? 2 : Math.max(0, Number(argv[exeIdx + 1]) || 0);
 
 const dir = "target/debug/deps";
 if (!fs.existsSync(dir)) {
@@ -71,9 +79,27 @@ for (const gens of units.values()) {
   }
 }
 
+// Linked executables: keep only the ones a recent sweep actually used.
+const cutoff = Date.now() - exeHours * 3600_000;
+let exeFreed = 0;
+let exeDropped = 0;
+for (const name of fs.readdirSync(dir)) {
+  if (name.includes(".")) continue;
+  const full = path.join(dir, name);
+  let st;
+  try { st = fs.lstatSync(full); } catch { continue; }
+  if (!st.isFile() || st.size < 1_000_000) continue;
+  const used = Math.max(st.mtimeMs, st.atimeMs);
+  if (used >= cutoff) continue;
+  if (!dry) { try { fs.rmSync(full); } catch { continue; } }
+  exeDropped += 1;
+  exeFreed += st.size;
+}
+
 const gb = (n) => (n / 1073741824).toFixed(1) + "G";
 console.log(
-  `${dry ? "would drop" : "dropped"} ${dropped} file(s), ${gb(freed)} of ${gb(total)} ` +
-    `(keeping ${keep} generation${keep > 1 ? "s" : ""} per build unit)`,
+  `${dry ? "would drop" : "dropped"} ${dropped} stale artifact(s) (${gb(freed)}) ` +
+    `and ${exeDropped} unused test binar${exeDropped === 1 ? "y" : "ies"} (${gb(exeFreed)}) ` +
+    `of ${gb(total)}; kept 1 generation per unit and executables used in the last ${exeHours}h`,
 );
 NODE
