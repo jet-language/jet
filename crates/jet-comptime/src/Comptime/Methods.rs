@@ -12,8 +12,11 @@ mod time_deadline_kernel;
 mod pool;
 
 pub(super) use core_calls::{
-    apply_core_pure_method, apply_fake_method, apply_regex_method, as_float, as_string, solver_require,
+    apply_core_pure_method, apply_regex_method, as_float, as_string, solver_require,
 };
+// I9: the TIR evaluator in jet-codegen calls this fake-data kernel too, so it
+// leaves this crate rather than stopping at `pub(super)`.
+pub use core_calls::apply_fake_method;
 pub(crate) use core_calls::{evaluate_typed_datetime_literal, url_parts_to_ct, validate_datetime_literal};
 /// Public host entry for the TIR evaluator (#777).
 pub use core_calls::{
