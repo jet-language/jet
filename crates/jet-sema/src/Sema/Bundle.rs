@@ -2241,6 +2241,8 @@ mod structure_tests {
         let outputs = read("src/Sema/Bundle/Outputs.rs");
         let inline_calls = read("src/Sema/Bundle/InlineCalls.rs");
         let pipeline = read("src/Sema/Bundle/Pipeline.rs");
+        let inline_imports = read("src/Sema/Bundle/Pipeline/InlineImports.rs");
+        let completion = read("src/Sema/Bundle/Pipeline/Completion.rs");
         let validation = read("src/Sema/Bundle/Validation.rs");
         let core_usage = read("src/Sema/Bundle/Validation/CoreUsage.rs");
         let production = bundle
@@ -2259,6 +2261,14 @@ mod structure_tests {
             ("src/Sema/Bundle/InlineCalls.rs", inline_calls.as_str()),
             ("src/Sema/Bundle/Outputs.rs", outputs.as_str()),
             ("src/Sema/Bundle/Pipeline.rs", pipeline.as_str()),
+            (
+                "src/Sema/Bundle/Pipeline/InlineImports.rs",
+                inline_imports.as_str(),
+            ),
+            (
+                "src/Sema/Bundle/Pipeline/Completion.rs",
+                completion.as_str(),
+            ),
             ("src/Sema/Bundle/Validation.rs", validation.as_str()),
             ("src/Sema/Bundle/Validation/CoreUsage.rs", core_usage.as_str()),
         ] {
@@ -2286,7 +2296,8 @@ mod structure_tests {
             "collect_used_core(bundle, &states)",
             "apply_helper_layer_inference(bundle, &states, &usage_spans, &mut diags);",
         ];
-        let ordered_source = format!("{production}\n{pipeline}");
+        let ordered_source =
+            format!("{production}\n{pipeline}\n{inline_imports}\n{completion}");
         let positions: Vec<usize> = ordered
             .iter()
             .map(|needle| ordered_source.find(needle).unwrap())

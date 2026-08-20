@@ -1,7 +1,9 @@
 use super::*;
 
-mod Linking;
-use Linking::{complete_bundle_check, resolve_inline_module_imports};
+mod Completion;
+mod InlineImports;
+use Completion::complete_bundle_check;
+use InlineImports::resolve_inline_module_imports;
 
 fn register_generated_union_enums(
     items: &[Item],
@@ -387,7 +389,7 @@ fn check_bundle_opts_for_output_inner(
     freestanding: bool,
     gates: crate::Policy::GateSet,
     explicit_output: Option<&str>,
-    mut incremental: Option<&mut IncrementalSemaCache>,
+    incremental: Option<&mut IncrementalSemaCache>,
     allow_compiler_api: bool,
 ) -> (Vec<Diagnostic>, super::super::Effects::SemIndexEffectFacts) {
     let foreign_diags = validate_foreign_imports(bundle);
