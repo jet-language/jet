@@ -1535,9 +1535,7 @@ fn jet_jit_list_count(list: i64, value: i64) -> i64 {
 
 fn jet_jit_list_remove_value(list: i64, value: i64) -> i64 {
     Concurrency::with_runtime_mut(|rt| {
-        let values: &mut Vec<jet_rt::JetVal> =
-            unsafe { &mut *(&mut rt.heap as *mut jet_rt::JetArena as *mut Vec<jet_rt::JetVal>) };
-        let Some(jet_rt::JetVal::List(xs)) = values.get_mut(list as usize) else {
+        let Some(xs) = rt.heap.list_values_mut(list) else {
             jet_foundation::ice!(None, "jit list remove value: bad handle");
         };
         match collection_semantics::list_remove_value(xs, jet_rt::JetVal::Int(value)) {
@@ -3406,9 +3404,7 @@ fn jet_jit_str_push_debug_variant(
 /// `list.pop()` — Option ABI: `0` = None, `value + 1` = Some (i64/handle elems).
 fn jet_jit_list_pop(list: i64) -> i64 {
     Concurrency::with_runtime_mut(|rt| {
-        let values: &mut Vec<jet_rt::JetVal> =
-            unsafe { &mut *(&mut rt.heap as *mut jet_rt::JetArena as *mut Vec<jet_rt::JetVal>) };
-        let Some(jet_rt::JetVal::List(xs)) = values.get_mut(list as usize) else {
+        let Some(xs) = rt.heap.list_values_mut(list) else {
             jet_foundation::ice!(None, "jit list pop: bad handle");
         };
         match collection_semantics::list_pop(xs) {
@@ -3424,10 +3420,7 @@ fn jet_jit_list_pop(list: i64) -> i64 {
 /// # ponytail: same JetArena layout poke as `list_remove`.
 fn jet_jit_list_insert(list: i64, idx: i64, v: i64) {
     Concurrency::with_runtime_mut(|rt| {
-        // SAFETY: JetArena is `{ values: Vec<JetVal> }` — one field, identical address.
-        let values: &mut Vec<jet_rt::JetVal> =
-            unsafe { &mut *(&mut rt.heap as *mut jet_rt::JetArena as *mut Vec<jet_rt::JetVal>) };
-        let Some(jet_rt::JetVal::List(xs)) = values.get_mut(list as usize) else {
+        let Some(xs) = rt.heap.list_values_mut(list) else {
             jet_foundation::ice!(None, "jit list insert: bad handle");
         };
         let len = xs.len() as i64;
@@ -3447,10 +3440,7 @@ fn jet_jit_list_insert(list: i64, idx: i64, v: i64) {
 /// JIT only marshalling the list handle and runtime-stop boundary.
 fn jet_jit_list_remove_slot(list: i64, idx: i64, line: u32) -> i64 {
     Concurrency::with_runtime_mut(|rt| {
-        // SAFETY: JetArena is `{ values: Vec<JetVal> }` — one field, identical address.
-        let values: &mut Vec<jet_rt::JetVal> =
-            unsafe { &mut *(&mut rt.heap as *mut jet_rt::JetArena as *mut Vec<jet_rt::JetVal>) };
-        let Some(jet_rt::JetVal::List(xs)) = values.get_mut(list as usize) else {
+        let Some(xs) = rt.heap.list_values_mut(list) else {
             jet_foundation::ice!(None, "jit list remove slot: bad handle");
         };
         match collection_semantics::list_remove_slot(xs, idx) {

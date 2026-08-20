@@ -4537,7 +4537,6 @@ impl LowerCtx<'_, '_> {
         self.b.ins().jump(header, &[]);
 
         self.b.switch_to_block(header);
-        self.b.seal_block(header);
         let idx = self.b.use_var(idx_var);
         let done = self.b.ins().icmp(IntCC::SignedGreaterThanOrEqual, idx, len);
         self.b.ins().brif(done, exhausted, &[], body_block, &[]);
@@ -4582,6 +4581,7 @@ impl LowerCtx<'_, '_> {
         let next_idx = self.b.ins().iadd(idx, one);
         self.b.def_var(idx_var, next_idx);
         self.b.ins().jump(header, &[]);
+        self.b.seal_block(header);
 
         self.b.switch_to_block(exit);
         self.b.seal_block(exit);

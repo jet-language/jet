@@ -991,6 +991,10 @@ fn canonical_rule_arg_variants(name: &str) -> Option<&'static [&'static str]> {
 /// Source argument kinds that are checked by the language itself instead of
 /// published as closed menus in `core.compiler.lang`. `Type` is the ordinary
 /// declared-type slot for `#SQL` (D-SQL-ARG1=B), not a language enum.
+///
+/// Only the declaration-coverage test reads this: production code asks
+/// `rule_arg_declaration` for a menu and gets `None` when there is none.
+#[cfg(test)]
 const RULE_ARG_TYPES_WITHOUT_CORE_DECLARATION: &[&str] = &[
     "Value",
     "String",
@@ -1003,6 +1007,7 @@ const RULE_ARG_TYPES_WITHOUT_CORE_DECLARATION: &[&str] = &[
     "T.default",
 ];
 
+#[cfg(test)]
 fn rule_arg_needs_core_declaration(name: &str) -> bool {
     !RULE_ARG_TYPES_WITHOUT_CORE_DECLARATION.contains(&name)
 }

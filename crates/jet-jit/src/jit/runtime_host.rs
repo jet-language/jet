@@ -450,6 +450,8 @@ pub(crate) struct JitRuntime {
     /// panic through a JIT frame — I1). `resident_invoke` turns it into an
     /// `E0953` diagnostic, exactly as the tier-0 interpreter reports the same
     /// panic. Keeps the FIRST message; later traps on the unwind path are noise.
+    /// Host faults use this owned slot for their captured cause; `host_fault`
+    /// selects ICE handling before ordinary runtime-stop handling.
     pub(crate) trapped: Option<String>,
     /// A Rust helper fault is a Jet defect. The resident driver renders the
     /// branded ICE report after generated control flow reaches the boundary.

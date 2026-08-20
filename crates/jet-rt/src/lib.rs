@@ -354,6 +354,25 @@ impl JetArena {
         }
     }
 
+    /// Mutable erased view for collection operations whose shared kernels use
+    /// `JetVal` values. Converting a dense integer carrier here is a cold
+    /// mutation boundary; native read-only reductions keep the dense carrier.
+    pub fn list_values_mut(&mut self, list: i64) -> Option<&mut Vec<JetVal>> {
+        if matches!(self.values.get(list as usize), Some(JetVal::IntList(_))) {
+            let dense = match self.values.get_mut(list as usize)? {
+                JetVal::IntList(values) => std::mem::take(values),
+                _ => unreachable!(),
+            };
+            self.values[list as usize] = JetVal::List(
+                dense.into_iter().map(JetVal::Int).collect(),
+            );
+        }
+        match self.values.get_mut(list as usize)? {
+            JetVal::List(values) => Some(values),
+            _ => None,
+        }
+    }
+
     pub fn list_get_int(&self, list: i64, index: i64) -> Option<i64> {
         if index < 0 {
             return None;
