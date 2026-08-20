@@ -203,8 +203,13 @@ impl<'a> JSONParser<'a> {
                         return Err("expected `:` after object key".into());
                     }
                     let value = self.value(depth + 1)?;
-                    if obj.insert(key, value).is_some() {
-                        return Err(format!("duplicate object key `{key}`"));
+                    match obj.entry(key) {
+                        std::collections::btree_map::Entry::Occupied(taken) => {
+                            return Err(format!("duplicate object key `{}`", taken.key()));
+                        }
+                        std::collections::btree_map::Entry::Vacant(slot) => {
+                            slot.insert(value);
+                        }
                     }
                     self.skip_ws();
                     match self.bump() {
