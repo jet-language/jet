@@ -699,125 +699,157 @@ pub(crate) fn variant_payload_types(
     typed.or_else(|| variant_binding_types(cx, variant))
 }
 
-/// c109 Phase 24: the Rust enum-literal head `{prefix}::{mangle(variant)}` for a payload
-/// or named enum literal, reproducing `emit_enum_lit`'s `type_prefix` (Expression.rs): a
-/// FOREIGN (imported) enum → `{root}{mod}::__jet_<T>::__jet_<V>`, a local enum →
-/// `__jet_<T>::__jet_<V>`. Keyed on the ENUM name in `cx.foreign_types`, byte-for-byte.
-pub(crate) fn tir_enum_lit_prefix(cx: &Cx, type_name: &str, variant: &str) -> String {
+/// The Rust type path a Jet enum name spells, plus whether its variants are
+/// spelled RAW. `true` = a Rust-defined enum (Prelude/host) whose variants are
+/// plain Rust identifiers; `false` = a Jet-declared enum whose variants are
+/// mangled.
+///
+/// This is the ONE table. `tir_enum_lit_prefix` (enum literals and bare
+/// variant-path tests) and `emit_match_pattern` (match-arm heads, Statement.rs)
+/// both read it, so a Prelude enum can never be spelled `jet_std::WatchDomain`
+/// as a value and `__jet_WatchDomain` as a pattern. A second copy of this table
+/// is how `WatchDomain`/`WatchKind` reached rustc as E0433 in generated code
+/// (I2): the copy in `emit_match_pattern` had never heard of them, so every
+/// core enum the copy was missing mangled into a nonexistent local type.
+pub(crate) fn tir_enum_rust_path(cx: &Cx, type_name: &str) -> (String, bool) {
+    let root = cx.root_prefix.as_str();
+    let in_std = |rust: &str| (format!("{root}jet_std::{rust}"), true);
+    let at_root = |rust: &str| (format!("{root}{rust}"), true);
     // D-UNIONTYPE1=A: compiler-generated union enums use bare member-type tags.
     if type_name.starts_with("__JetUnion_") {
-        return format!("{}::{variant}", mangle_path(type_name));
+        return (mangle_path(type_name), true);
+    }
+    // D-ENC-DYN1=A+: `Data` (+ `JSON`/`TOML`/`YAML`/`CSV`) is the user-facing
+    // face of one runtime value, `jet_std::DataTree`.
+    if crate::Codegen::is_json_type_name(type_name) {
+        return in_std("DataTree");
     }
     // D-TERM1 (ratified 2026-06-22): `Key` is a prelude enum; its Rust name is `JetKey`.
     // Variant names are not mangled (Char, Enter, …).
     if type_name == crate::Syntax::TYPE_KEY {
-        return format!("{}JetKey::{}", cx.root_prefix, variant);
+        return at_root("JetKey");
     }
     if type_name == crate::Syntax::TYPE_REMOVE_BY
         || type_name == mangle(crate::Syntax::TYPE_REMOVE_BY)
     {
-        let variant = variant
-            .strip_prefix(crate::Syntax::GENERATED_NAME_PREFIX)
-            .unwrap_or(variant);
-        return format!("{}JetRemoveBy::{}", cx.root_prefix, variant);
+        return at_root("JetRemoveBy");
     }
     if type_name == crate::Syntax::TYPE_TASK_FAILURE {
-        return format!("{}jet_std::JetTaskFailure::{}", cx.root_prefix, variant);
+        return in_std("JetTaskFailure");
     }
     if type_name == "DataEvent" {
-        return format!("{}jet_std::DataEvent::{}", cx.root_prefix, variant);
+        return in_std("DataEvent");
     }
     if matches!(type_name, "EncodingFormat" | "EncodingErrorKind") {
-        return format!("{}jet_std::{}::{}", cx.root_prefix, type_name, variant);
+        return in_std(type_name);
     }
     if matches!(type_name, "XMLEncoding" | "XMLLexicalPolicy" | "XMLCanonicalMode") {
-        return format!("{}jet_std::{}::{}", cx.root_prefix, type_name, variant);
+        return in_std(type_name);
     }
     // D-PROCESS1=A: `ProcessStreamMode` is a core dot-literal enum (`.Stream`/
     // `.Inherit`/`.Capture`) — its Rust type lives in `jet_std`, plain variant names.
     if type_name == "ProcessStreamMode" {
-        return format!("{}jet_std::ProcessStreamMode::{}", cx.root_prefix, variant);
+        return in_std("ProcessStreamMode");
     }
     if type_name == crate::Syntax::TYPE_TERMINAL_MODE {
-        return format!("{}jet_std::TerminalMode::{}", cx.root_prefix, variant);
+        return in_std("TerminalMode");
     }
     // D-TEXTWIDTH1=B: `TextWidth`'s two field enums — same shape.
     if matches!(type_name, "TextWidthAmbiguous" | "TextWidthControls") {
-        return format!("{}jet_std::{}::{}", cx.root_prefix, type_name, variant);
+        return in_std(type_name);
     }
     // stdlib-api-laws D4: `WatchEvent`'s two field enums — same shape.
     if matches!(type_name, "WatchDomain" | "WatchKind") {
-        return format!("{}jet_std::{}::{}", cx.root_prefix, type_name, variant);
+        return in_std(type_name);
     }
     if type_name == crate::Syntax::DURATION_UNIT_TYPE {
-        return format!("{}jet_std::DurationUnit::{}", cx.root_prefix, variant);
+        return in_std("DurationUnit");
     }
     if type_name == "Overflow" {
-        return format!("{}jet_std::JetEventOverflow::{}", cx.root_prefix, variant);
+        return in_std("JetEventOverflow");
     }
     if type_name == "FailurePolicy" {
-        return format!("{}jet_std::JetFailurePolicy::{}", cx.root_prefix, variant);
+        return in_std("JetFailurePolicy");
     }
     if type_name == "DispatchState" {
-        return format!("{}jet_std::JetDispatchState::{}", cx.root_prefix, variant);
+        return in_std("JetDispatchState");
     }
     if type_name == "HookPolicy" {
-        return format!("{}jet_std::JetHookPolicy::{}", cx.root_prefix, variant);
+        return in_std("JetHookPolicy");
     }
     if type_name == "HookDecision" {
-        return format!("{}jet_std::JetHookDecision::{}", cx.root_prefix, variant);
+        return in_std("JetHookDecision");
     }
     if type_name == "HookOutcome" {
-        return format!("{}jet_std::JetHookOutcome::{}", cx.root_prefix, variant);
+        return in_std("JetHookOutcome");
     }
-    if matches!(type_name, "NetShutdown" | "NetReadyInterest") {
-        return format!("{}Jet{}::{}", cx.root_prefix, type_name, variant);
-    }
-    if matches!(type_name, "NetError" | "NetDnsError") {
-        return format!("{}Jet{}::{}", cx.root_prefix, type_name, variant);
+    if matches!(type_name, "NetShutdown" | "NetReadyInterest" | "NetError" | "NetDnsError") {
+        return at_root(&format!("Jet{type_name}"));
     }
     if type_name == "TLSClientTrust" {
-        return format!("{}JetTLSTrust::{}", cx.root_prefix, variant);
+        return at_root("JetTLSTrust");
     }
     if type_name == "TLSVersion" {
-        return format!("{}JetTLSVersion::{}", cx.root_prefix, variant);
+        return at_root("JetTLSVersion");
     }
     if matches!(type_name, "IOError" | "IOOperation") {
-        return format!("{}jet_std::{}::{}", cx.root_prefix, if type_name == "IOError" { "IOError" } else { "IOOperation" }, variant);
+        return in_std(type_name);
     }
     if matches!(type_name, "HTTPError" | "HTTPOperation" | "HTTPProxy" | "HTTPCorsOrigins" | "HTTPRedirectPolicy" | "HTTPRetryPolicy" | "HTTPCookieJar" | "HTTPCompressEncoding") {
-        return format!("{}Jet{}::{}", cx.root_prefix, type_name, variant);
+        return at_root(&format!("Jet{type_name}"));
     }
     if matches!(type_name, "SMTPSecurity" | "RecipientPolicy" | "EmailError" | "SMTPAuth" | "TLSTrust") {
         let rust = if type_name == "EmailError" { "Error" } else { type_name };
-        return format!("{}jet_email::{}::{}", cx.root_prefix, rust, variant);
+        return (format!("{root}jet_email::{rust}"), true);
     }
     if type_name == "AuthError" {
-        return format!("{}JetAuthError::{}", cx.root_prefix, variant);
+        return at_root("JetAuthError");
     }
     if type_name == "ServiceReceipt" {
-        return format!("{}JetServiceReceipt::{}", cx.root_prefix, variant);
+        return at_root("JetServiceReceipt");
     }
     if type_name == "ServiceError" {
-        return format!("{}JetServiceError::{}", cx.root_prefix, variant);
+        return at_root("JetServiceError");
     }
     let foreign_identity = if cx.foreign_types.contains_key(type_name) {
         Some(type_name.to_string())
     } else {
         cx.foreign_type_identity("", type_name)
     };
-    let type_prefix = match foreign_identity {
+    match foreign_identity {
         Some(identity) => {
             let rust_mod = cx
                 .foreign_types
                 .get(&identity)
                 .expect("foreign identity must have a Rust module");
             let leaf = identity.rsplit("::").next().unwrap_or(&identity);
-            format!("{}{}::{}", cx.root_prefix, rust_mod, mangle_path(leaf))
+            (
+                format!("{}{}::{}", cx.root_prefix, rust_mod, mangle_path(leaf)),
+                false,
+            )
         }
-        None => mangle_path(type_name),
-    };
-    format!("{}::{}", type_prefix, mangle_path(variant))
+        None => (mangle_path(type_name), false),
+    }
+}
+
+/// The Rust variant name under a `tir_enum_rust_path` head. A raw (Rust-defined)
+/// variant keeps its own identifier — a mangled spelling reaching it means the
+/// caller carried the generated prefix, which is not part of the Rust name.
+pub(crate) fn tir_enum_variant_rust_name(variant: &str, raw: bool) -> String {
+    if raw {
+        crate::Syntax::generated_suffix(variant).to_string()
+    } else {
+        mangle_path(variant)
+    }
+}
+
+/// c109 Phase 24: the Rust enum-literal head `{prefix}::{mangle(variant)}` for a payload
+/// or named enum literal, reproducing `emit_enum_lit`'s `type_prefix` (Expression.rs): a
+/// FOREIGN (imported) enum → `{root}{mod}::__jet_<T>::__jet_<V>`, a local enum →
+/// `__jet_<T>::__jet_<V>`. Keyed on the ENUM name in `cx.foreign_types`, byte-for-byte.
+pub(crate) fn tir_enum_lit_prefix(cx: &Cx, type_name: &str, variant: &str) -> String {
+    let (path, raw) = tir_enum_rust_path(cx, type_name);
+    format!("{path}::{}", tir_enum_variant_rust_name(variant, raw))
 }
 
 /// c109 Phase 16: the single-payload type of `(type_name, edge)`, mirroring the AST

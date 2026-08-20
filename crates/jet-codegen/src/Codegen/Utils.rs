@@ -1,41 +1,17 @@
 use super::*;
 
+/// The Rust type path of the enum that OWNS `variant`. Reads the one enum-path
+/// table (`TIR::tir_enum_rust_path`), so an if-let head cannot drift from a
+/// match-arm head or an enum literal for the same enum.
 pub(crate) fn enum_type_prefix(cx: &Cx, variant: &str) -> String {
-    cx.variant_owner
-        .get(variant)
-        .map(|t| {
-            if t == crate::Syntax::TYPE_IO_ERROR {
-                format!("{}jet_std::IOError", cx.root_prefix)
-            } else if t == crate::Syntax::TYPE_IO_OPERATION {
-                format!("{}jet_std::IOOperation", cx.root_prefix)
-            } else if t == "HTTPError" {
-                format!("{}JetHTTPError", cx.root_prefix)
-            } else if t == "HTTPOperation" {
-                format!("{}JetHTTPOperation", cx.root_prefix)
-            } else if t == "AuthError" {
-                format!("{}JetAuthError", cx.root_prefix)
-            } else if t == "ServiceReceipt" {
-                format!("{}JetServiceReceipt", cx.root_prefix)
-            } else if t == "ServiceError" {
-                format!("{}JetServiceError", cx.root_prefix)
-            } else if t == "HookOutcome" {
-                format!("{}jet_std::JetHookOutcome", cx.root_prefix)
-            } else if let Some(rust_mod) = cx.foreign_types.get(t.as_str()) {
-                format!("{}{}::{}", cx.root_prefix, rust_mod, mangle_path(t))
-            } else {
-                mangle_path(t)
-            }
-        })
-        .unwrap_or_else(|| {
-            if is_json_variant(variant) {
-                format!("{}jet_std::DataTree", cx.root_prefix)
-            } else if is_key_variant(variant) {
-                // D-TERM1: `Key` variants are in the top-level prelude as `JetKey`.
-                format!("{}JetKey", cx.root_prefix)
-            } else {
-                mangle("TYPE")
-            }
-        })
+    match cx.variant_owner.get(variant) {
+        Some(owner) => crate::Codegen::TIR::tir_enum_rust_path(cx, owner).0,
+        // No owner registered: the variant name itself names the prelude enum.
+        None if is_json_variant(variant) => format!("{}jet_std::DataTree", cx.root_prefix),
+        // D-TERM1: `Key` variants are in the top-level prelude as `JetKey`.
+        None if is_key_variant(variant) => format!("{}JetKey", cx.root_prefix),
+        None => mangle("TYPE"),
+    }
 }
 
 // D-ENC-DYN1=A+: the dynamic `Data` value's variants (face of `jet_std::DataTree`).
@@ -68,28 +44,15 @@ pub(crate) fn is_key_variant(variant: &str) -> bool {
     )
 }
 
+/// The Rust spelling of `variant` under `enum_type_prefix`'s head — raw for a
+/// Rust-defined (Prelude/host) enum, mangled for a Jet-declared one. Same table,
+/// same answer as the head, so the two halves of a pattern cannot disagree.
 pub(crate) fn variant_rust_name(cx: &Cx, variant: &str) -> String {
-    if is_json_variant(variant)
-        || (is_key_variant(variant)
-            && cx
-                .variant_owner
-                .get(variant)
-                .is_none_or(|owner| owner == crate::Syntax::TYPE_KEY))
-        || cx
-            .variant_owner
-            .get(variant)
-            .is_some_and(|owner| matches!(owner.as_str(), "HTTPError" | "HTTPOperation"))
-        || cx.variant_owner.get(variant).is_some_and(|owner| owner == "HookOutcome")
-        || cx.variant_owner.get(variant).is_some_and(|owner| owner == "AuthError")
-        || cx
-            .variant_owner
-            .get(variant)
-            .is_some_and(|owner| matches!(owner.as_str(), "ServiceReceipt" | "ServiceError"))
-    {
-        variant.to_string()
-    } else {
-        mangle_path(variant)
-    }
+    let raw = match cx.variant_owner.get(variant) {
+        Some(owner) => crate::Codegen::TIR::tir_enum_rust_path(cx, owner).1,
+        None => is_json_variant(variant) || is_key_variant(variant),
+    };
+    crate::Codegen::TIR::tir_enum_variant_rust_name(variant, raw)
 }
 
 pub(crate) fn escape_rust_str(s: &str) -> String {

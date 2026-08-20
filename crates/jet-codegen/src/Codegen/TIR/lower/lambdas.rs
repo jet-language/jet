@@ -220,22 +220,16 @@ fn lower_lambda_expecting_with_host_borrow(
             .materialized_captures
             .iter()
             .any(|capture| capture == name);
-        let (cap_ty, init) = if materialized {
-            if let Some((helper, ty)) = materialized_capture_kind(name, env) {
-                (ty, format!("{helper}(({}))", env.place_of(name)))
-            } else {
-                (
-                    env.ty_of(name)
-                        .unwrap_or_else(|| Type::Named("Unit".to_string())),
-                    format!("({}).clone()", env.place_of(name)),
-                )
-            }
-        } else {
-            (
+        let copied_window = materialized
+            .then(|| materialized_capture_kind(name, env))
+            .flatten();
+        let (cap_ty, init) = match &copied_window {
+            Some((helper, ty)) => (ty.clone(), format!("{helper}(({}))", env.place_of(name))),
+            None => (
                 env.ty_of(name)
                     .unwrap_or_else(|| Type::Named("Unit".to_string())),
                 format!("({}).clone()", env.place_of(name)),
-            )
+            ),
         };
         prep.push_str(&format!("let mut {cap} = {init};\n    "));
         captures.push((name.clone(), cap.clone(), cap_ty.clone()));
@@ -244,6 +238,13 @@ fn lower_lambda_expecting_with_host_borrow(
             None => TLocal::generated(&cap),
         };
         lam_env.bind(name, slot, Some(cap_ty));
+        // D-MEM-COPYSEM1=A: the capture slot now OWNS its bytes. Inside the
+        // body the name is no longer a window, so an owning read of it clones
+        // the owned value instead of calling the window kernel a second time
+        // with an owned argument (rustc E0308 — I2).
+        if copied_window.is_some() {
+            lam_env.clear_view_marks(name);
+        }
     }
     // Taken resources (`owned :: ~next`) are neither cloned nor moved-captured in
     // sema — AOT relies on Rust lexical capture. Cranelift needs an explicit pack.
@@ -741,25 +742,28 @@ fn reactive_capture_setup(stmts: &[Stmt], outer_env: &LowerEnv) -> (String, Lowe
         let cap = reactive_capture_name(name);
         // Reactive bodies may update their private clone on every rerun. The
         // runtime serializes the resulting FnMut closure behind a Mutex.
-        let (cap_ty, init) = materialized_capture_kind(name, outer_env)
-            .map(|(helper, ty)| {
-                (
-                    Some(ty),
-                    format!("{helper}(({}))", outer_env.place_of(name)),
-                )
-            })
-            .unwrap_or_else(|| {
-                (
-                    outer_env.ty_of(name),
-                    format!("({}).clone()", outer_env.place_of(name)),
-                )
-            });
+        let copied_window = materialized_capture_kind(name, outer_env);
+        let (cap_ty, init) = match &copied_window {
+            Some((helper, ty)) => (
+                Some(ty.clone()),
+                format!("{helper}(({}))", outer_env.place_of(name)),
+            ),
+            None => (
+                outer_env.ty_of(name),
+                format!("({}).clone()", outer_env.place_of(name)),
+            ),
+        };
         prep.push_str(&format!("let mut {cap} = {init};\n    "));
         let slot = match outer_env.origin_of(name) {
             Some(origin) => TLocal::generated(&cap).with_origin(origin),
             None => TLocal::generated(&cap),
         };
         lam_env.bind(name, slot, cap_ty);
+        // Same owning-slot fact as the stored-lambda prelude above: once the
+        // window has been copied out, the body's name is an owned value.
+        if copied_window.is_some() {
+            lam_env.clear_view_marks(name);
+        }
     }
     (prep, lam_env)
 }

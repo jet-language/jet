@@ -122,6 +122,15 @@ impl LowerEnv {
     pub(super) fn is_string_view_local(&self, name: &str) -> bool {
         self.string_view_locals.contains(name)
     }
+    /// D-MEM-COPYSEM1=A: a window that has been materialized into an OWNED
+    /// slot is no longer a window. Both view marks have to go with it, or a
+    /// later read of the same name materializes a SECOND time and hands the
+    /// owned value to a Prelude kernel that borrows its window (`&str` /
+    /// `&[T]`) — rustc E0308 on generated code (I2).
+    pub(super) fn clear_view_marks(&mut self, name: &str) {
+        self.string_view_locals.remove(name);
+        self.split_view_handles.remove(name);
+    }
     pub(super) fn mark_resource(&mut self, name: &str) {
         self.resource_locals.insert(name.to_string());
     }

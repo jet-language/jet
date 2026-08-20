@@ -23,21 +23,13 @@ pub(crate) fn emit_match_pattern(cx: &Cx, pattern: &Pattern, enum_type: Option<&
     });
     let etype = resolved_type.as_deref().or(enum_type);
     let is_json = etype.map(is_json_type_name).unwrap_or(false);
-    let is_io = etype.map(|t| matches!(t, "IOError" | "IOOperation")).unwrap_or(false);
-    let is_http = etype
-        .map(|t| matches!(t, "HTTPError" | "HTTPOperation"))
-        .unwrap_or(false);
     let is_email = etype.is_some_and(|t| matches!(t, "SMTPSecurity" | "RecipientPolicy" | "EmailError"));
     let is_auth = etype == Some("AuthError");
     let is_service_receipt = etype == Some("ServiceReceipt");
     let is_service_error = etype == Some("ServiceError");
-    let is_hook_outcome = etype == Some("HookOutcome");
-    let is_data_event = etype == Some("DataEvent");
     // D-CONC-FAIL1=A: task failures are published by the shared Prelude, not
     // emitted as the Prelude task-failure enum.
     let is_task_failure = etype == Some(crate::Syntax::TYPE_TASK_FAILURE);
-    // D-UNIONTYPE1=A: anonymous unions lower to `__JetUnion_*` with bare tags.
-    let is_anon_union = etype.is_some_and(|t| t.starts_with("__JetUnion_"));
     // D-TERM1: detect `Key` from the variant name when the type isn't resolved in etype.
     let is_key = {
         let from_etype = etype.map(|t| t == crate::Syntax::TYPE_KEY).unwrap_or(false);
@@ -52,64 +44,17 @@ pub(crate) fn emit_match_pattern(cx: &Cx, pattern: &Pattern, enum_type: Option<&
         };
         from_etype || from_variant
     };
-    let prefix = etype
-        .map(|t| {
-            if is_json_type_name(t) {
-                format!("{}jet_std::DataTree", cx.root_prefix)
-            } else if t.starts_with("__JetUnion_") {
-                mangle_path(t)
-            } else if t == crate::Syntax::TYPE_KEY {
-                format!("{}JetKey", cx.root_prefix)
-            } else if t == "DataEvent" {
-                format!("{}jet_std::DataEvent", cx.root_prefix)
-            } else if t == crate::Syntax::TYPE_IO_ERROR {
-                format!("{}jet_std::IOError", cx.root_prefix)
-            } else if t == crate::Syntax::TYPE_IO_OPERATION {
-                format!("{}jet_std::IOOperation", cx.root_prefix)
-            } else if t == "HTTPError" {
-                format!("{}JetHTTPError", cx.root_prefix)
-            } else if t == "HTTPOperation" {
-                format!("{}JetHTTPOperation", cx.root_prefix)
-            } else if matches!(t, "SMTPSecurity" | "RecipientPolicy" | "EmailError") {
-                let rust = if t == "EmailError" { "Error" } else { t };
-                format!("{}jet_email::{rust}", cx.root_prefix)
-            } else if t == "AuthError" {
-                format!("{}JetAuthError", cx.root_prefix)
-            } else if t == "ServiceReceipt" {
-                format!("{}JetServiceReceipt", cx.root_prefix)
-            } else if t == "ServiceError" {
-                format!("{}JetServiceError", cx.root_prefix)
-            } else if t == "HookOutcome" {
-                format!("{}jet_std::JetHookOutcome", cx.root_prefix)
-            } else if t == crate::Syntax::TYPE_TASK_FAILURE {
-                format!("{}jet_std::JetTaskFailure", cx.root_prefix)
-            } else if let Some(rust_mod) = cx.foreign_types.get(t) {
-                format!("{}{}::{}", cx.root_prefix, rust_mod, mangle_path(t))
-            } else {
-                mangle_path(t)
-            }
-        })
-        .unwrap_or_else(|| {
-            // No etype: infer from the variant name.
-            if let Pattern::Variant { variant, .. } = pattern {
-                if is_key_variant(variant) {
-                    return format!("{}JetKey", cx.root_prefix);
-                }
-            }
-            mangle("TYPE")
-        });
-    // Variant names are mangled for user enums, but JSON/Key/union tags keep
-    // their original Rust name (defined as plain Rust identifiers in the prelude).
-    let vname = |v: &str| -> String {
-        if is_json || is_key || is_data_event || is_io || is_http || is_email || is_auth || is_service_receipt || is_service_error || is_hook_outcome || is_task_failure || is_anon_union {
-            if is_task_failure {
-                return crate::Syntax::generated_suffix(v).to_string();
-            }
-            v.to_string()
-        } else {
-            mangle_path(v)
-        }
+    // A match-arm head is the SAME Rust variant path as an enum literal, so it
+    // reads the one table (`tir_enum_rust_path`) instead of a second copy: a
+    // Prelude enum missing from a private copy here mangled into a nonexistent
+    // local type and reached rustc as E0433 on generated code (I2).
+    let (prefix, raw_variants) = match etype {
+        Some(t) => crate::Codegen::TIR::tir_enum_rust_path(cx, t),
+        // No etype: infer from the variant name.
+        None if is_key => (format!("{}JetKey", cx.root_prefix), true),
+        None => (mangle("TYPE"), false),
     };
+    let vname = |v: &str| -> String { crate::Codegen::TIR::tir_enum_variant_rust_name(v, raw_variants) };
     match pattern {
         Pattern::Variant {
             variant, bindings, ..

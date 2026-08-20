@@ -297,15 +297,13 @@ pub(crate) fn foreign_type_map(
     };
     let mut add_target = |target: usize| {
         let rust_mod = mangle(&bundle.modules[target].alias);
-        // Comparable and its Ordering return type are generated in every
-        // module, so Ordering has no source Item to visit below. Put its
-        // canonical owner in the ordinary pre-lower foreign-type map.
-        if let Some(identity) = bundle
-            .name_ledger
-            .nominal_identity(target, crate::Syntax::TYPE_ORDERING)
-        {
-            map.insert(identity, rust_mod.clone());
-        }
+        // `Ordering` is deliberately absent here. It is declared once per
+        // generated crate (`push_cached_runtime_traits`) and imported into every
+        // module by `MOD_USE`, so it has exactly one Rust identity and nothing
+        // to qualify. Mapping it to an imported module made this module's own
+        // bare `Ordering` leaf-resolve to that module's copy — including in the
+        // `impl __jet_Comparable` blocks whose trait comes from the Prelude
+        // (E0053, I2).
         for item in &bundle.modules[target].items {
             match item {
                 Item::Struct(s)

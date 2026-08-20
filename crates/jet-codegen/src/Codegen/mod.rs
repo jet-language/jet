@@ -320,8 +320,10 @@ const COMPARABLE_PRIMITIVES: &[&str] = &[
 ];
 
 /// Traits used by both the fixed runtime and generated root-program types.
-/// Imported Jet modules keep their module-local traits; the root imports these
-/// from the cached runtime rlib after the native builder splits the source.
+/// Imported Jet modules keep their module-local *trait* copies (their `impl`
+/// blocks are module-local, and the importer brings the owning trait into scope
+/// anonymously through `cx.imported_traits`); the root imports these from the
+/// cached runtime rlib after the native builder splits the source.
 ///
 /// `__jet_Ordering` and `__jet_Comparable` are runtime-owned for the same
 /// reason `__jet_Display` is: the Prelude itself names them — `jet_list_sort_by`
@@ -330,8 +332,13 @@ const COMPARABLE_PRIMITIVES: &[&str] = &[
 /// program crate made the cached runtime crate unbuildable (E0425 on
 /// `__jet_Ordering`), so #1785's rlib cache stored nothing and every native
 /// build re-fed rustc the whole runtime. `emit_synthetic_operator_traits` is
-/// the module-local twin; `cached_runtime_owns_every_runtime_owned_trait`
-/// guards the pairing.
+/// the module-local twin for the traits;
+/// `cached_runtime_owns_every_runtime_owned_trait` guards the pairing.
+///
+/// `__jet_Ordering` has NO module-local twin. It is the one *value* type in this
+/// set, so a second declaration is a second type and every module boundary it
+/// crosses is an I2 internal compiler error; `MOD_USE` imports this declaration
+/// instead (`only_the_runtime_declares_the_ordering_enum`).
 fn push_cached_runtime_traits(out: &mut String) {
     out.push_str("pub trait __jet_Display {\n");
     out.push_str("    fn display(&self) -> String;\n");
@@ -1473,7 +1480,12 @@ fn push_corelib_prelude_body(
     }
     if needs_sync {
         // D-SYNC1=A / D-DBPOLICY1=A: CRDT values + row policies.
-        out.push_str("mod jet_sync {\n");
+        // The module header and its crate-root re-export each need their own
+        // line: the cached-runtime export pass reads the block line by line to
+        // widen `mod`/`pub(crate) use` for the split rlib, so a header glued to
+        // a previous fragment's last line would stay crate-private and hide the
+        // whole `core.sync` surface from the program crate.
+        out.push_str("\nmod jet_sync {\n");
         out.push_str(include_str!("../Prelude/CoreLib/Top/Sync.rs"));
         out.push_str("\n}\npub(crate) use jet_sync::*;\n");
     }
@@ -2095,14 +2107,21 @@ pub(crate) fn emit_synthetic_display_trait(out: &mut String, include_runtime_own
 }
 
 /// `include_runtime_owned` is false for the root program: the cached runtime
-/// block already defines those items (`push_cached_runtime_traits`), and a
-/// second root copy would be a different type from the one the Prelude's own
-/// `jet_list_sort_by` / `jet_ordering_then` use. Every imported module still
-/// gets its own module-local copy.
+/// block already defines the `__jet_Display`/`__jet_Equatable`/`__jet_Comparable`
+/// traits (`push_cached_runtime_traits`), and a second root copy would be a
+/// different trait from the one the Prelude's own `jet_list_sort_by` /
+/// `jet_ordering_then` use. An imported module still declares its own trait
+/// copies — its `impl` blocks are module-local and the importer brings the
+/// owning trait into scope anonymously (`cx.imported_traits`).
+///
+/// `__jet_Ordering` is NOT one of those copies. It is a *value* type that
+/// crosses the module boundary (an imported `compare` returns one, the Prelude
+/// takes and returns one), so a module-local copy is a distinct Rust type from
+/// the Prelude's and every crossing is an E0053/E0308 internal compiler error
+/// (I2). It is declared exactly once per generated crate — by
+/// `push_cached_runtime_traits` for a bundle, next to the inline Prelude for the
+/// single-file emitters — and reaches an imported module through `MOD_USE`.
 pub(crate) fn emit_synthetic_operator_traits(out: &mut String, include_runtime_owned: bool) {
-    if include_runtime_owned {
-        out.push_str(ORDERING_ENUM);
-    }
     for (name, method, ret) in [
         ("Add", "add", "Self"),
         ("Sub", "sub", "Self"),
@@ -2608,6 +2627,10 @@ pub fn emit(prog: &Program, src: &str, file: &str) -> String {
     out.push_str("#![allow(warnings)]\n\n");
     push_ffi_reporter(&mut out, None);
     push_prelude(&mut out);
+    // The Prelude names `__jet_Ordering` (`jet_list_sort_by`, `jet_ordering_then`),
+    // so the one declaration travels with it. `push_cached_runtime_traits` is the
+    // bundle-path twin.
+    out.push_str(ORDERING_ENUM);
     out.push_str(ENV_INIT_PRELUDE);
     push_mem_prelude(&mut out);
     push_gc_prelude(&mut out);
@@ -3500,6 +3523,38 @@ mod tests {
         }
     }
 
+    /// `__jet_Ordering` is a value type that crosses the generated-module
+    /// boundary: an imported `compare` returns one, `jet_list_sort_by` /
+    /// `jet_ordering_then` take one, and the Prelude-owned `__jet_Comparable`
+    /// names it in its signature. A module-local copy is therefore a *different*
+    /// Rust type from the Prelude's, and every crossing is an internal compiler
+    /// error (`modules/generic_modules_imported` failed with E0053: `expected
+    /// jet_runtime::__jet_Ordering, found __jet_defs::__jet_Ordering`). Declare
+    /// it once per generated crate and import it into each module instead.
+    #[test]
+    fn only_the_runtime_declares_the_ordering_enum() {
+        for include_runtime_owned in [false, true] {
+            let mut emitted = String::new();
+            emit_synthetic_operator_traits(&mut emitted, include_runtime_owned);
+            assert!(
+                !emitted.contains("enum __jet_Ordering"),
+                "a module-local `__jet_Ordering` is a second type; the cached \
+                 runtime block owns the only declaration"
+            );
+        }
+        let mut block = String::new();
+        push_cached_runtime(&mut block, None);
+        assert_eq!(
+            block.matches("enum __jet_Ordering").count(),
+            1,
+            "the cached runtime block must declare `__jet_Ordering` exactly once"
+        );
+        assert!(
+            MOD_USE.contains("use super::__jet_Ordering;"),
+            "every generated module must import the one `__jet_Ordering`"
+        );
+    }
+
     /// I2: rustc rejecting generated code is an internal compiler error, never a
     /// user diagnostic. `Prelude/Scheduler.rs` and
     /// `Prelude/CoreLib/Top/ServiceAuthority.rs` each imported
@@ -3771,6 +3826,8 @@ pub fn emit_tests(prog: &Program, src: &str, file: &str) -> String {
     out.push_str("#![allow(warnings)]\n\n");
     push_ffi_reporter(&mut out, None);
     push_prelude(&mut out);
+    // One `__jet_Ordering` per generated crate — see `emit`.
+    out.push_str(ORDERING_ENUM);
     out.push_str(ENV_INIT_PRELUDE);
     push_mem_prelude(&mut out);
     push_gc_prelude(&mut out);

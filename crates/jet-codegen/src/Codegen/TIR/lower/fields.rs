@@ -19,10 +19,12 @@ pub(crate) fn imported_type_owners(bundle: &ProgramBundle, module_idx: usize) ->
 
 fn module_owned_type_names(items: &[Item]) -> HashSet<String> {
     let mut names = HashSet::new();
-    // Every generated module owns the Ordering enum returned by its synthetic
-    // Comparable trait. It has no source Item, but imported signatures must
-    // still retain that declaration-module identity.
-    names.insert(Syntax::TYPE_ORDERING.to_string());
+    // `Ordering` is NOT listed. It has no source Item because it is declared
+    // once per generated crate and imported into every module (`MOD_USE`), so
+    // an imported `compare` return keeps the bare nominal and both sides name
+    // the same Rust type. Claiming module ownership forced a
+    // `__jet_<module>::__jet_Ordering` qualification that the Prelude-owned
+    // `__jet_Comparable` rejects (E0053, I2).
     for item in items {
         match item {
             Item::Struct(definition) => {

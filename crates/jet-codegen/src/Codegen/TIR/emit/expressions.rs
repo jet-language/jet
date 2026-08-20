@@ -87,6 +87,18 @@ pub(super) fn is_view(ty: &Type) -> bool {
     )
 }
 
+/// A write window (`ViewMut<T>` / `ComputeViewMut<T>`). An exclusive window is
+/// never `Clone` in Rust and must never be duplicated — copying one would hand
+/// out a second alias of the same storage — so containers holding one are read
+/// through a reborrowed slot, never through a cloning index helper.
+pub(super) fn is_view_mut(ty: &Type) -> bool {
+    matches!(
+        ty,
+        Type::Apply { name, args }
+            if matches!(name.as_str(), "ViewMut" | "ComputeViewMut") && args.len() == 1
+    )
+}
+
 pub(super) fn is_float_view(ty: &Type) -> bool {
     matches!(
         ty,
@@ -2575,14 +2587,18 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
             }
             if *op == BinOp::Compare {
                 if packed_compare {
-                    return format!(
-                        "match {}jet_std::jet_int_compare({}, {}) {{ -1 => {}Ordering::Less, 1 => {}Ordering::Greater, _ => {}Ordering::Equal }}",
+                    // `Ordering` and its variants are generated names, exactly as
+                    // the `Ordering::then` arm below spells them
+                    // (`{name_prefix}Ordering::{name_prefix}<Variant>`). The
+                    // enum is declared once per generated crate and imported
+                    // into every module, so it takes no `cx.root_prefix` — only
+                    // the `jet_std` helper call does. Spelling the Jet-source
+                    // names here emitted `Ordering::Less` (E0433, I2).
+                    return jet_name_format!(
+                        "match {}jet_std::jet_int_compare({}, {}) {{ -1 => {name_prefix}Ordering::{name_prefix}Less, 1 => {name_prefix}Ordering::{name_prefix}Greater, _ => {name_prefix}Ordering::{name_prefix}Equal }}",
                         cx.root_prefix,
                         ls,
                         rs,
-                        cx.root_prefix,
-                        cx.root_prefix,
-                        cx.root_prefix,
                     );
                 }
                 return jet_name_format!(
@@ -3415,6 +3431,18 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                 )
             } else if is_view(&base.ty) {
                 format!("jet_view_get(&*({}), {}, {:?}, {})", b, i, cx.file, line)
+            } else if is_view_mut(&e.ty) {
+                // D-MEM-VIEWRET1: the element IS an exclusive window
+                // (`&mut [T]`). `jet_index_vec` would clone it — rustc rejects
+                // that (`&mut [T]` is not `Clone`, I2) and it would be wrong
+                // anyway, since a copy of a write window is a second alias of
+                // the same storage. Reborrow the live slot instead: consumers
+                // wrap it in `&*` to read and `&mut *` to write, so the window
+                // stays exclusive and stays attached to the list.
+                format!(
+                    "(*jet_index_vec_mut(&mut ({}), {}, {:?}, {}))",
+                    b, i, cx.file, line
+                )
             } else {
                 format!("jet_index_vec(&({}), {}, {:?}, {})", b, i, cx.file, line)
             }

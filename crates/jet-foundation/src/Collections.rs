@@ -864,12 +864,21 @@ pub fn numeric_conversion_return(target: &Type, method: &str, nargs: usize) -> O
             err: Box::new(Type::String),
         }));
     }
-    Some(Some(match (int_kind(&source), int_kind(target)) {
-        (Some(src), Some(dst)) if !int_conv_widening(src, dst) => Type::Result {
+    // D-SHAPE-CONVERT1=A: a float source can carry NaN, an infinity, or a
+    // magnitude no integer names, so *every* float→integer conversion is
+    // checked narrowing and answers `T ? String`. `int_kind` reports no width
+    // for exact `Int` (D-INTBIG1), so the width table below cannot see this
+    // crossing; naming it here is what keeps the checking layer agreeing with
+    // the AOT emitter, the JIT host, the comptime tier, and the web tier, all
+    // of which already produce the fallible carrier for `FloatToInt`.
+    if source.is_float() && target.is_integer() {
+        return Some(Some(Type::Result {
             ok: Box::new(target.clone()),
             err: Box::new(Type::String),
-        },
-        (None, Some(_)) => Type::Result {
+        }));
+    }
+    Some(Some(match (int_kind(&source), int_kind(target)) {
+        (Some(src), Some(dst)) if !int_conv_widening(src, dst) => Type::Result {
             ok: Box::new(target.clone()),
             err: Box::new(Type::String),
         },
