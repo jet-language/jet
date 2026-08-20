@@ -56,6 +56,17 @@
 //!   and neither is one that depends on a name prefix: the check's first form
 //!   banned `extern "C" fn jet_*`, and `Ffi.rs`'s `jit_ffi_reporter` sat outside
 //!   that family until the rule stopped being a name (#1995).
+//! * The rule is also unfilable. Every ratcheted section of
+//!   `tests/jit_corpus_gate.txt` is shrink-only, so a stem recorded there is one
+//!   the example-corpus gate has agreed never to fail on again — and an abort
+//!   recorded there would be an abort under permanent protection. So
+//!   `corpus_gate_refuse_abort` (`tests/dev_parts/support.rs`) reads the AOT
+//!   oracle, the default `jet run` and the forced interpreter, and any abort
+//!   marker in stderr fails the stem outright rather than becoming a row.
+//!   `streams/generators` is why: it raised a second time from drop glue, died
+//!   as `panic in a destructor during cleanup`, and a classifier that only read
+//!   the exit code filed it as the benign `AOT exit 1`. The marker list lives
+//!   once, in `tests/common`, so the two checks cannot drift.
 //! * The one carve-out is a process signal handler (`CoreHost.rs`), which the
 //!   kernel enters on a borrowed stack that may have a JIT frame under it.
 //!   [`guard_seam`] is the wrong tool there — it reaches

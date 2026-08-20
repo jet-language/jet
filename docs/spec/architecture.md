@@ -766,6 +766,17 @@ may accept; guests never mutate compiler facts or expose rustc (I2/I3).
     `jit_ffi_reporter` — a C frame a foreign library enters when a foreign
     function has already failed, with a Cranelift frame below it — sat outside
     that name for exactly as long as the name was the rule.
+  - The rule is also **unfilable**. Every ratcheted section of
+    `tests/jit_corpus_gate.txt` is shrink-only, so a stem recorded there is a
+    stem this suite has agreed not to fail on again — and an abort recorded
+    there would be an abort under permanent protection. So the gate refuses to
+    classify one: `corpus_gate_refuse_abort` reads the AOT oracle, the default
+    `jet run` and the forced interpreter, and any abort marker in stderr fails
+    the stem outright in every section. `streams/generators` is why. It raised a
+    second time from drop glue, died as `panic in a destructor during cleanup`,
+    and the classifier — which only ever looked at the exit code — filed it as
+    the benign row `AOT exit 1`. The marker list lives once, in `tests/common`,
+    so the corpus gate and `tests/jit_no_unwind_boundary.rs` cannot drift.
   - The one carve-out is a **process signal handler**, which the kernel enters
     on a borrowed stack that may have a JIT frame under it. Conversion is the
     wrong tool there: `guard_seam` reaches

@@ -842,6 +842,20 @@ fn dev_iteration_with_timeout(stem: &str, file: &str, use_interpreter: bool) -> 
 /// (one level: `examples/features/<topic>/<name>.jet`). Skips `expected/`
 /// and skips project-directory examples (`<topic>/<name>/main.jet`) — those
 /// have their own multi-file drivers and are not single-entry dev targets.
+///
+/// A `package.jet` beside the examples is that topic's MANIFEST, not an
+/// example. `examples/features/modules/package.jet` declares the
+/// `settings: .{ cache_slots: … }` and `build:` profiles that
+/// `modules/fact_value_arguments.jet` reads through `@build.settings.*`, so it
+/// is load-bearing on disk and can never parse as a program — a manifest binds
+/// `name: "…"`, which is E0003 in source. Discovering it as an example is what
+/// put one permanent unjudgeable row into `out_of_universe`, the corpus gate's
+/// `frontend_rejected:`, and `typechecked_example_stems`'s rejected list at the
+/// same time (#2018). Removing it HERE, at the one discovery seam every oracle
+/// reads, removes it from all three at once, and is not a skip list: the name
+/// comes from `Syntax::PACKAGE_FILE`, the same constant the package loader
+/// resolves manifests by, so a renamed manifest cannot silently reappear as a
+/// broken example.
 fn topic_jet_files(root: &std::path::Path) -> Vec<PathBuf> {
     let ex_dir = root.join("examples/features");
     let mut files = Vec::new();
@@ -860,9 +874,13 @@ fn topic_jet_files(root: &std::path::Path) -> Vec<PathBuf> {
         }
         for e in fs::read_dir(&topic_path).unwrap().flatten() {
             let path = e.path();
-            if path.extension().and_then(|s| s.to_str()) == Some("jet") {
-                files.push(path);
+            if path.extension().and_then(|s| s.to_str()) != Some("jet") {
+                continue;
             }
+            if path.file_name().and_then(|n| n.to_str()) == Some(jet::Syntax::PACKAGE_FILE) {
+                continue;
+            }
+            files.push(path);
         }
     }
     files
@@ -934,7 +952,28 @@ fn interpreter_example_stems() -> Vec<String> {
 /// different set) and was never a measurement of this battery. Correcting an
 /// estimate to its measurement is not raising a guard: the number may only fall
 /// from here, and card #2018 owns driving it down.
-const SEMA_REJECTED_CEILING: usize = 11;
+///
+/// 1 is the count #2018 drove it to. The 11 it replaces was never measured by
+/// anything: it was written in the same uncommitted snapshot that also renamed
+/// the modules examples, so the number moved without evidence while the ledger
+/// beside it still carried 40 rows. The four #2018 recovered, each by its own
+/// root cause and not by editing the ceiling:
+///   * the E2402 core-error family, by the ratified `impl <CoreError> => Err`
+///     rail (D-FAIL-CONV2=A) — 36 net/serde stems, every cascading E0311/E0302/
+///     E0107/E0114 with them;
+///   * `crypto/vault_secret`, by dropping the D-CRYPTOENV1 `#Unsafe` demand from
+///     `core.crypto.vault.get`, whose gate is the `Secret` effect;
+///   * `memory/shared_guard_queue`, by putting `Condition` on the shared-handle
+///     rail it was always Arc-backed for;
+///   * `modules/package`, which was never an example — it is that topic's
+///     manifest, now excluded at `topic_jet_files`, the one discovery seam.
+///
+/// The one remaining row is `tooling/compiler_api`. `jet check` keeps a build
+/// entry (`Pipeline.rs`: `mode != CompileMode::Check` guards the strip), so its
+/// `fn build` body is checked as ordinary code and `core.compiler.lex` is E0956
+/// — compile-time only. That is a property of checking a build entry outside a
+/// build session, not a broken example: `jet run` accepts the same file.
+const SEMA_REJECTED_CEILING: usize = 1;
 
 /// The stems the run-path front end accepts, and the ones it rejects together
 /// with the reason the compiler gave (#2020). Nothing is discarded.
@@ -1008,7 +1047,14 @@ enum JitCompileVerdict {
 /// #2012: every reader of `collect_jit_coverage` asserts this, not just the
 /// coverage audit, so no battery scoped to a slice of this universe can report
 /// success while the universe itself shrank.
-const EXAMPLE_CORPUS_FLOOR: usize = 498;
+///
+/// #2018 lowered it 498 -> 497 in the same diff as the deletion the rule above
+/// demands: `topic_jet_files` no longer discovers `examples/features/modules/
+/// package.jet`, because that file is the `modules` topic's MANIFEST and never
+/// was an example. It stays on disk — `modules/fact_value_arguments.jet` reads
+/// the `cache_slots` setting it declares — so this is one fewer stem measured,
+/// not one fewer example shipped.
+const EXAMPLE_CORPUS_FLOOR: usize = 497;
 
 /// How many stems the compile oracle is still allowed to be blind to (#1998).
 ///
@@ -1018,7 +1064,29 @@ const EXAMPLE_CORPUS_FLOOR: usize = 498;
 /// skip to accept. The rows are derived from the compiler's own diagnostics at
 /// audit time, so this is a counted ceiling and not an allowlist: no stem can be
 /// written out of the universe by hand.
-const OUT_OF_UNIVERSE_CEILING: usize = 11;
+///
+/// #2018 drove it to 1. It was 53 when the card opened and 11 when the card was
+/// picked up, and that 11 was never measured — it was written in an uncommitted
+/// snapshot while `tests/jit_corpus_gate.txt` beside it still carried 40
+/// `frontend_rejected:` rows, so the exclusion set had been tightened without
+/// evidence. What actually recovered the stems is recorded on
+/// `SEMA_REJECTED_CEILING` above, plus one gap closed HERE: `classify_jit_compile`
+/// now seeds the build-fact snapshot before sema, exactly as
+/// `classify_corpus_stem` does, so the two in-process front ends can no longer
+/// judge the same `@build.*`-reading stem in two different contexts.
+///
+/// The one remaining row is `tooling/compiler_api`, and its reason is structural
+/// rather than a defect to fix: its `fn run` calls `generated_compiler_api()`,
+/// which is declared only by the module its OWN `fn build` generates. A
+/// `Loader::load_entry` + `Sema::check_bundle` oracle never runs a build entry,
+/// so the declarer cannot exist by the time sema looks for it — the stem needs
+/// the full generate pipeline (`compile_with_path`), not a wider load+check
+/// context. `comptime/distinct_reflect` proves a `fn build` alone is no obstacle:
+/// it is compile-covered, because nothing in its `run` depends on generated
+/// source. This is a stated reason, not a skip: the row is still derived from the
+/// compiler's diagnostic on every run, and if the stem ever compiles, the
+/// `OUT_OF_UNIVERSE_CEILING == 0` assertion below forces this constant to 0.
+const OUT_OF_UNIVERSE_CEILING: usize = 1;
 
 /// How many compile-covered stems the resident JIT must still be willing to run
 /// — the universe `cranelift_three_way_differential_battery` is scoped to
@@ -1159,11 +1227,28 @@ fn classify_jit_compile(path: &std::path::Path) -> JitCompileVerdict {
             ));
         }
     };
-    let diagnostics = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
-    let errors: Vec<_> = diagnostics
-        .into_iter()
-        .filter(|d| matches!(d.severity, jet::Diagnostics::Severity::Error))
-        .collect();
+    // #2018: seed the ONE build-fact snapshot before sema, exactly as
+    // `classify_corpus_stem` does. This was the only difference between the two
+    // in-process front ends, and it is the whole of the card's (a) class: an
+    // example reading `@build.settings.*` was judged by this oracle against the
+    // harness's defaults while the corpus gate judged it against the manifest's
+    // locked stamp, so the two oracles could disagree about the same stem and
+    // neither reader could tell which context produced the verdict (AGENTS.md
+    // I8; I9: engines marshal one snapshot, they do not each invent one).
+    let errors: Vec<_> = match jet::Driver::seed_build_facts(
+        &mut bundle,
+        "dev",
+        false,
+        &std::collections::BTreeMap::new(),
+    ) {
+        // Seeding answers with errors only, so they are already a front-end
+        // rejection and belong in the same bucket as a sema rejection below.
+        Err(diagnostics) => diagnostics,
+        Ok(()) => jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run)
+            .into_iter()
+            .filter(|d| matches!(d.severity, jet::Diagnostics::Severity::Error))
+            .collect(),
+    };
     // #1998: this arm was `if !errors.is_empty() { continue }`, same drop.
     if !errors.is_empty() {
         return JitCompileVerdict::OutOfUniverse(format!(
@@ -3640,6 +3725,35 @@ fn corpus_gate_unique_codes<'a>(codes: impl IntoIterator<Item = &'a str>) -> Str
     out.join("; ")
 }
 
+/// R13 (#1997): an abort is never an outcome, so it is never a ledger row
+/// either.
+///
+/// Every other classification below records a real observable — a diagnostic, an
+/// exit code, a diverging stream. An abort records none of those: the process
+/// died before the report boundary could run, and the exit code it leaves behind
+/// describes the corpse rather than the program. Filing one is worse than
+/// missing it, because every ratcheted section here is shrink-only, so the row
+/// then *protects* the abort from ever failing this suite again.
+///
+/// That is not hypothetical. `streams/generators` cancelled a generator at a
+/// wait point inside drop glue, raised a second time, and died with `panic in a
+/// destructor during cleanup`; the classifier saw only `exit_code != 0` and
+/// filed the benign-looking `aot_broken` row `AOT exit 1`. So the check lives
+/// where the bytes are first seen, on every tier, rather than in the manifest
+/// where the abort has already been turned into a number.
+fn corpus_gate_refuse_abort(stem: &str, tier: &str, out: &ProgramOutput) {
+    if let Some(marker) = common::abort_marker(&out.stderr) {
+        panic!(
+            "`{stem}`: the {tier} run carries the abort marker `{marker}`, so a Rust \
+             control transfer killed the process instead of becoming a report. An \
+             abort is never an outcome and never a gate row either — fix the \
+             boundary, do not file the stem (docs/spec/architecture.md R13, \
+             crates/jet-jit/src/host_seam.rs).\nexit: {}\nstdout:\n{}\nstderr:\n{}",
+            out.exit_code, out.stdout, out.stderr
+        );
+    }
+}
+
 /// Which observable stream(s) diverged, as stable tokens.
 ///
 /// The old detail for a divergence was the single word `parity`, which named the
@@ -3915,6 +4029,7 @@ fn classify_corpus_stem(
             };
         }
     };
+    corpus_gate_refuse_abort(stem, "AOT oracle", &aot);
     if aot.exit_code != 0 {
         return CorpusGateRecord {
             stem: stem.to_string(),
@@ -3950,10 +4065,9 @@ fn classify_corpus_stem(
             stderr,
             exit_code,
         } => {
-            let jit_out = normalize_for_parity(
-                stem,
-                ProgramOutput::ran(stdout, stderr, exit_code),
-            );
+            let jit_raw = ProgramOutput::ran(stdout, stderr, exit_code);
+            corpus_gate_refuse_abort(stem, "default `jet run`", &jit_raw);
+            let jit_out = normalize_for_parity(stem, jit_raw);
             let aot_out = normalize_for_parity(stem, aot);
             // The program RAN under the default tier. If its normalized output
             // differs from the oracle's, that is a tier-semantics divergence, not
@@ -3977,10 +4091,9 @@ fn classify_corpus_stem(
                     stderr,
                     exit_code,
                 } => {
-                    let interp_out = normalize_for_parity(
-                        stem,
-                        ProgramOutput::ran(stdout, stderr, exit_code),
-                    );
+                    let interp_raw = ProgramOutput::ran(stdout, stderr, exit_code);
+                    corpus_gate_refuse_abort(stem, "forced interpreter", &interp_raw);
+                    let interp_out = normalize_for_parity(stem, interp_raw);
                     assert_eq!(
                         interp_out, aot_out,
                         "`{stem}` pure-interpreter must match AOT stdout/stderr/exit"

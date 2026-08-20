@@ -39,9 +39,23 @@
 //!    line of `host_fns!` would silently unguard every symbol and leave every
 //!    other test green — and the same is true of the shim's own body, which is
 //!    why check 1's `host_seam.rs` exemption is pinned rather than assumed.
+//! 4. An abort may never become a *ledger row*. The structural checks above
+//!    cover the frames this crate compiles; the example corpus is where an
+//!    escape actually shows up, and every ratcheted section of
+//!    `tests/jit_corpus_gate.txt` is shrink-only, so a filed abort is an abort
+//!    under permanent protection. `corpus_gate_refuse_abort`
+//!    (`tests/dev_parts/support.rs`) refuses to classify one on any tier, using
+//!    the `ABORT_MARKERS` list below so the two checks cannot drift.
 //!
 //! Run: `scripts/agent/jet-env cargo test --test jit_no_unwind_boundary`
 
+mod common;
+
+/// The abort markers come from `tests/common` so this suite and the
+/// example-corpus gate cannot drift: this suite proves one cancelled task never
+/// aborts, and `corpus_gate_refuse_abort` proves no stem in the whole corpus may
+/// be *classified* as one.
+use common::ABORT_MARKERS;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -519,6 +533,52 @@ fn the_boundary_scan_trips_on_seeded_violations() {
     );
 }
 
+/// The marker list is now load-bearing twice over: this suite asserts one
+/// cancelled task never aborts, and `corpus_gate_refuse_abort` asserts no stem
+/// in the example corpus may be *classified* as an abort. So prove the list
+/// recognises every abort family by its real text, and — the half that matters
+/// more, because this list can fail a whole corpus — prove it stays quiet on an
+/// ordinary Jet report.
+#[test]
+fn the_abort_markers_name_every_abort_and_no_report() {
+    for stderr in [
+        "fatal runtime error: failed to initiate panic, error 5, aborting\n",
+        "thread caused non-unwinding panic. aborting.\n",
+        "panicked at library/core/src/panicking.rs: panic in a function that \
+         cannot unwind\n",
+        "panicked at library/core/src/panicking.rs:233:5:\npanic in a destructor \
+         during cleanup\n",
+        "thread 'main' has overflowed its stack\nfatal runtime error: stack \
+         overflow\n",
+        "   2: core::panicking::panic_fmt\n",
+    ] {
+        assert!(
+            common::abort_marker(stderr).is_some(),
+            "an abort went unrecognised, so it could be filed as an outcome \
+             instead of failing: {stderr:?}"
+        );
+    }
+
+    // Every shape a real Jet stop takes, including the words `panic` and
+    // `runtime`: a marker that fired here would refuse the whole example corpus
+    // over correct output, which is the more expensive direction to get wrong.
+    for stderr in [
+        "",
+        "Stop [E3001]: `panic: expected the answer, got none` — with Jet file, \
+         line, function name, source-line context box, and (debug builds only) \
+         safe local variable values.\n",
+        "Error [E3003]: deadline exceeded while waiting in task join\n",
+        "Runtime fault [E3010]: the list has 2 items\n",
+        "panic: can't view 1 items from 2 to 2 (inclusive)\n",
+    ] {
+        assert_eq!(
+            common::abort_marker(stderr),
+            None,
+            "a Jet report was read as an abort: {stderr:?}"
+        );
+    }
+}
+
 fn jet_run(args: &[&str], cache: &Path) -> std::process::Output {
     Command::new(env!("CARGO_BIN_EXE_jet"))
         .args(args)
@@ -539,18 +599,6 @@ fn terminating_signal(status: &std::process::ExitStatus) -> Option<i32> {
 fn terminating_signal(_status: &std::process::ExitStatus) -> Option<i32> {
     None
 }
-
-/// Text that only appears when a control transfer killed the process instead of
-/// becoming a report. `error 5` is the FDE-less JIT frame; the non-unwinding
-/// panic is the `extern "C"` body edge; the stack-overflow pair is the third,
-/// unrelated abort and is listed so a failure names which one it saw.
-const ABORT_MARKERS: &[&str] = &[
-    "failed to initiate panic",
-    "non-unwinding panic",
-    "panic in a function that cannot unwind",
-    "core::panicking",
-    "fatal runtime error: stack overflow",
-];
 
 /// #1995 criterion 4. A cancelled task unwinds at its next wait point
 /// (`Prelude/Scheduler.rs::jet_task_deliver_cancel`), and under default

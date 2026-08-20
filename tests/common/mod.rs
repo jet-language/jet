@@ -604,6 +604,46 @@ pub fn panic_message(payload: Box<dyn std::any::Any + Send>) -> String {
     }
 }
 
+/// Text that only appears when a Rust control transfer killed a process instead
+/// of becoming a Jet report (R13 / D-JITUNWIND1, #1995 / #1997).
+///
+/// One list, because the two checks that need it must not drift: the JIT
+/// boundary suite (`tests/jit_no_unwind_boundary.rs`) asserts a cancelled task
+/// never aborts, and the example-corpus gate refuses to *classify* an abort at
+/// all. `streams/generators` is why the second one exists — it died with
+/// `panic in a destructor during cleanup` and the gate filed it as the benign
+/// row `AOT exit 1`, so an abort became a shrink-only ledger entry instead of a
+/// failure.
+///
+/// The four families, which are four different defects:
+///
+/// * `failed to initiate panic` is `_URC_END_OF_STACK`: phase 1 walked off the
+///   top of the stack without finding a handler, because `cranelift-jit`
+///   registers no unwind information for the code it emits.
+/// * `non-unwinding panic` / `panic in a function that cannot unwind` is an
+///   `extern "C"` body's own abort-on-unwind shim.
+/// * `panic in a destructor during cleanup` is a second raise from drop glue
+///   while an unwind is already in flight (#2007).
+/// * `fatal runtime error: stack overflow` is real stack exhaustion — the only
+///   one `jet_foundation::CompilerStack::COMPILER_STACK_SIZE` can answer for.
+///   Listed so a failure names which abort it saw rather than guessing.
+pub const ABORT_MARKERS: &[&str] = &[
+    "failed to initiate panic",
+    "non-unwinding panic",
+    "panic in a function that cannot unwind",
+    "panic in a destructor during cleanup",
+    "core::panicking",
+    "fatal runtime error: stack overflow",
+];
+
+/// The abort marker `stderr` carries, if any.
+pub fn abort_marker(stderr: &str) -> Option<&'static str> {
+    ABORT_MARKERS
+        .iter()
+        .copied()
+        .find(|marker| stderr.contains(marker))
+}
+
 /// Read a fixture substring filter and normalize it to a repository-relative,
 /// forward-slash path. Absolute paths and parent traversal are rejected so a
 /// copied CI command behaves the same from every checkout.
