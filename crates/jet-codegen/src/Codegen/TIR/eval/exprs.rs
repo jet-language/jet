@@ -2641,12 +2641,18 @@ impl<'a> EvalCtx<'a> {
         let _deadline = self
             .context_deadline
             .map(crate::scheduler::jet_ctx_push_deadline);
-        Some(
-            self.scheduler_wait("time sleep", || {
-                crate::scheduler::jet_std_time_sleep_duration_ns(nanos)
-            })
-            .map(|()| CtValue::Unit),
-        )
+        let result = self.scheduler_wait("time sleep", || {
+            crate::scheduler::jet_std_time_sleep_duration_ns(nanos)
+        });
+        drop(_deadline);
+        // D-CANCELMODEL1=C: a cancelled wait unwinds, so the body after this
+        // sleep must not run. Every other wait point already consults the shared
+        // policy; this one did not, so a cancelled child kept going and printed
+        // its settle line before the cancel was ever observed.
+        Some(result.and_then(|()| {
+            self.task_wait_cancel_check()?;
+            Ok(CtValue::Unit)
+        }))
     }
 
     fn serde_codec(&self, ty: &Type, method: &str) -> Option<&'a crate::Codegen::TIR::TFunc> {
