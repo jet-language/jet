@@ -67,6 +67,18 @@ impl<'a> Parser<'a> {
                     Some(Span::new(start, end)),
                 ));
             }
+            TokKind::Float(_) if kind == "length" => {
+                let span = self.bump().span;
+                return Err(Diagnostic::error(
+                    "E0963",
+                    "a fixed-size list length must be an integer, got Float (a decimal number)"
+                        .to_string(),
+                    "a fixed-size list needs one known number of elements".to_string(),
+                    "use an integer literal or a compile-time expression that produces Int"
+                        .to_string(),
+                    Some(span),
+                ));
+            }
             TokKind::Ident(name) => {
                 self.bump();
                 crate::AST::Measure::symbol(kind, name)
