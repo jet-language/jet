@@ -7455,6 +7455,35 @@ standard WASI Preview 2 runtime. Target validation keeps E3302 for unknown or
 uninstalled triples; it does not classify the ratified target as an unknown
 target. There is no AOT-only exception or execution-tier carve-out.
 
+**2026-08-20 — D-PERSIST-DEVSTATE1=A** *(card #2051; owner ruling in session,
+not a ballot — the question was already answered)*: `#Persist` exists to pin
+live development state across a hot reload. The owner's frame: game state in a
+game you are developing is pinned, you edit an enemy's logic, `jet dev` reloads
+the changed code, and you keep playtesting without resetting the world.
+
+That purpose settles the semantics. A pinned value is state a running program
+mutates — a score, a position, a world — so a `#Persist` binding is writable
+from a function. It is the one module binding that is, because surviving the
+reload is the entire reason it exists; every other module binding stays
+immutable from a function with the existing E0111 teaching text. This amends
+D-VERDICT-1231-2, which ratified the spelling `#Persist counter := 0` but left
+that spelling with no program that compiles: writing `counter += 1` from a
+function reported E0111, so the marker could not express the thing it was for.
+
+**2026-08-20 — D-SERVICE1=D reaffirmed** *(card #444; owner ruling in session)*:
+the typed `service.tree(…)` surface the decision describes is the law, and the
+shipped procedural string-keyed Core is the drift. Build the ratified surface;
+do not amend the decision down to what happens to exist.
+
+**2026-08-20 — D-CITE-EMPTY1=A** *(owner ruling in session)*: a comment may not
+cite a decision id that resolves to nothing. Measured 2026-08-20: of the 1124
+distinct `D-*` ids cited across `crates/` and `Source/`, 220 appear in no Tower
+decision record and nowhere in this spec. A citation is a claim that some
+ratified thing governs the code under it; when the id resolves to nothing the
+claim cannot be checked, and the spec-over-code authority in AGENTS.md inverts
+silently. Delete the empty citation and state in prose what the code actually
+guarantees. Do not invent a ratification record after the fact.
+
 ## Ratified decision index
 
 <!-- BEGIN GENERATED RATIFIED INDEX -->
