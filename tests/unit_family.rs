@@ -1488,10 +1488,14 @@ fn dimensional_quantities_example_stays_in_native_jit() {
             stderr,
             exit_code,
         } => {
-            assert_eq!(
-                stdout,
-                "12 meter\n4 meter/ns\n12 meter\n766 px\n12 Meter\n12\n12.0\n"
-            );
+            // One fact, one place: the example's golden IS the expectation, so
+            // adding a line to the example cannot leave this test asserting a
+            // stale string (it did, when `week` landed).
+            let golden = std::fs::read_to_string(
+                "examples/features/expected/types/dimensional_quantities.out",
+            )
+            .expect("dimensional quantities golden");
+            assert_eq!(stdout, golden);
             assert!(stderr.is_empty());
             assert_eq!(exit_code, 0);
         }
