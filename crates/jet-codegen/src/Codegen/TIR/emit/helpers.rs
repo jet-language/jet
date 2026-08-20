@@ -140,6 +140,16 @@ pub(crate) fn emit_tir_call_args(args: &[TCallArg], cx: &Cx) -> String {
                 // Bare member-type tags — matches `emit_anonymous_unions` / match arms.
                 s = format!("{}::{tag}({s})", mangle_path(&enum_name));
             }
+            // S48: a concrete value entering a trait value slot boxes invisibly.
+            // `rust_param_type` renders that slot as `Box<dyn __jet_<Trait>>`
+            // (`&Box<dyn …>` under `Read`), so the wrapper goes on before the
+            // borrow wrapper below. Same spelling as the `ListLit` element box.
+            if let Some(trait_name) = &a.box_as_trait {
+                s = format!(
+                    "Box::new({s}) as Box<dyn {}>",
+                    crate::Codegen::mangle(trait_name)
+                );
+            }
             // Fn-typed coercion: wrap to match `cx.rust_type` (Rc / Arc / Box for FnMut).
             // Skip wrap when the value already emits Rc/Arc/Box::new (named fn / lambda).
             if let Some(fc) = &a.fn_coerce {

@@ -27,7 +27,8 @@ use crate::Sema::CheckerCoreLib::{
 };
 use crate::Sema::CheckerInfer::{contains_tuple_type, exact_integer_fits, exact_integer_literal};
 use crate::Sema::Diagnostics::{
-    builtin_type_from_ident, expr_root_ident, is_printable, suggest_field, type_is_copy,
+    builtin_type_from_ident, expr_root_ident, is_printable, suggest_method, type_is_copy,
+    MethodSuggestion,
 };
 use crate::Sema::Effects::Effect;
 use crate::Syntax;
@@ -42,12 +43,12 @@ struct RootCallTarget {
 }
 
 impl<'a> Checker<'a> {
-    fn method_candidate(
+    fn method_suggestion(
         &self,
         method: &str,
         receiver_ty: &Type,
         type_name: Option<&str>,
-    ) -> Option<String> {
+    ) -> Option<MethodSuggestion> {
         let mut candidates = Collections::builtin_method_names(receiver_ty);
         let receiver_type_name = match receiver_ty {
             Type::Named(name) | Type::Apply { name, .. } => Some(name.as_str()),
@@ -65,7 +66,7 @@ impl<'a> Checker<'a> {
         }
         candidates.sort_unstable();
         candidates.dedup();
-        suggest_field(method, &candidates)
+        suggest_method(method, &candidates)
     }
 
     fn receiver_method_label(receiver_ty: &Type) -> String {
@@ -95,10 +96,10 @@ impl<'a> Checker<'a> {
         why: String,
         span: Span,
     ) -> Diagnostic {
-        let candidate = self.method_candidate(method, receiver_ty, type_name);
-        let fix = candidate.as_deref().map_or_else(
+        let suggestion = self.method_suggestion(method, receiver_ty, type_name);
+        let fix = suggestion.as_ref().map_or_else(
             || format!("check the spelling of `{method}`"),
-            |candidate| format!("did you mean `{candidate}`?"),
+            |suggestion| suggestion.fix.clone(),
         );
         let mut diagnostic = Diagnostic::error(
             "E0311",
@@ -107,10 +108,10 @@ impl<'a> Checker<'a> {
             fix,
             Some(span),
         );
-        if let Some(candidate) = candidate {
+        if let Some(suggestion) = suggestion {
             diagnostic = diagnostic.with_edit(TextEdit {
                 span,
-                new_text: candidate,
+                new_text: suggestion.name,
             });
         }
         diagnostic
@@ -4679,10 +4680,10 @@ impl<'a> Checker<'a> {
                         None,
                     )
                 } else {
-                    let candidate = self.method_candidate(method, &recv_ty, Some(&type_name));
-                    let fix = candidate
-                        .as_deref()
-                        .map(|candidate| format!("did you mean `{candidate}`?"))
+                    let suggestion = self.method_suggestion(method, &recv_ty, Some(&type_name));
+                    let fix = suggestion
+                        .as_ref()
+                        .map(|suggestion| suggestion.fix.clone())
                         .unwrap_or_else(|| {
                             format!(
                                 "define it inside `struct {display_type_name}` or `impl {display_type_name}`"
@@ -4691,7 +4692,7 @@ impl<'a> Checker<'a> {
                     (
                         "check the method name on this type".to_string(),
                         fix,
-                        candidate,
+                        suggestion.map(|suggestion| suggestion.name),
                     )
                 };
                 let mut diagnostic = Diagnostic::error(

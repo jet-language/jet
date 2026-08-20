@@ -891,3 +891,146 @@ fn resident_jit_terminal_helpers_do_not_bypass_the_runtime_boundary() {
     assert!(!core_host.contains("std::process::exit"));
     assert!(runtime.contains("pub(crate) fn runtime_stop_unwind"));
 }
+
+/// #2027 criterion 3: one signal mechanism means one observable answer.
+///
+/// The same program, the same real `SIGINT`, on all three tiers — AOT, default
+/// `jet run` (resident Cranelift) and `jet run --interpret`. The assertion is
+/// cross-tier EQUALITY first, then the pinned value, because the failure this
+/// guards against is precisely two tiers disagreeing about a delivered signal.
+///
+/// Only the unified part is asserted: that the interrupt is counted once, and
+/// that both handlers run in registration order. A handler's *failure* shape is
+/// the one thing that is still per-tier by design (AOT catches the unwind at the
+/// dispatcher boundary, the resident host sets a runtime trap, the evaluator
+/// returns a diagnostic), so no handler here fails.
+#[cfg(unix)]
+#[test]
+fn core_os_interrupt_delivery_matches_aot_jit_and_interpreter() {
+    use std::io::{BufRead, Read};
+    use std::process::Stdio;
+
+    let src = r#"
+use core.sys as os
+use core.process as process
+
+fn run() {
+    os.on_interrupt(() => { print("first") })
+    os.on_interrupt(() => {
+        print("second")
+        process.exit(0)
+    })
+    print("ready")
+    loop {
+        tick :: 0
+    }
+}
+"#;
+
+    let dir = std::env::temp_dir().join(format!(
+        "jet_corelib_interrupt_tiers_{}",
+        std::process::id()
+    ));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap();
+    let source = dir.join("interrupt_tiers.jet");
+    fs::write(&source, src).unwrap();
+
+    /// Send SIGINT once the child prints `ready`, then collect what it did.
+    /// Returns `(exit code, stdout)`.
+    fn interrupt_and_collect(mut child: std::process::Child, tier: &str) -> (Option<i32>, String) {
+        let mut stdout = std::io::BufReader::new(child.stdout.take().unwrap());
+        let mut ready = String::new();
+        stdout.read_line(&mut ready).unwrap();
+        assert_eq!(ready, "ready\n", "{tier} did not finish registering");
+        unsafe extern "C" {
+            fn kill(pid: i32, signal: i32) -> i32;
+        }
+        assert_eq!(
+            unsafe { kill(child.id() as i32, 2) },
+            0,
+            "send SIGINT to {tier}"
+        );
+        let deadline = Instant::now() + Duration::from_secs(30);
+        let status = loop {
+            if let Some(status) = child.try_wait().unwrap() {
+                break status;
+            }
+            if Instant::now() >= deadline {
+                let _ = child.kill();
+                let _ = child.wait();
+                panic!("{tier} did not exit after SIGINT");
+            }
+            std::thread::sleep(Duration::from_millis(25));
+        };
+        let mut rest = String::new();
+        stdout.read_to_string(&mut rest).unwrap();
+        let mut stderr = String::new();
+        child
+            .stderr
+            .take()
+            .unwrap()
+            .read_to_string(&mut stderr)
+            .unwrap();
+        assert!(
+            !stderr.contains("E2201") && !stderr.contains("unsupported"),
+            "{tier} refused the program instead of running it: {stderr}"
+        );
+        (status.code(), format!("{ready}{rest}"))
+    }
+
+    // AOT. `jet run --release` spawns the built binary as a grandchild, which a
+    // SIGINT aimed at the CLI would never reach, so the AOT tier is signalled
+    // through the binary the release path builds — the same generated Rust.
+    let out = compile_temp("interrupt_tiers.jet", src);
+    let rs = dir.join("main.rs");
+    let bin = dir.join("interrupt-tiers");
+    let mut rustc = Command::new("rustc");
+    common::add_generated_rust(&mut rustc, &rs, &out.rust, out.ffi.is_some(), &[]);
+    let built = rustc.arg("-o").arg(&bin).output().unwrap();
+    assert!(
+        built.status.success(),
+        "rustc failed:\n{}",
+        String::from_utf8_lossy(&built.stderr)
+    );
+    let aot = interrupt_and_collect(
+        Command::new(&bin)
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .unwrap(),
+        "aot",
+    );
+
+    assert_eq!(
+        aot,
+        (Some(0), "ready\nfirst\nsecond\n".to_string()),
+        "AOT interrupt delivery drifted"
+    );
+
+    // Default `jet run` (resident Cranelift) and `jet run --interpret` both run
+    // the program inside the CLI process, so the CLI's pid is the program's pid.
+    for (tier, extra) in [("jit", None), ("interpreter", Some("--interpret"))] {
+        let mut command = Command::new(env!("CARGO_BIN_EXE_jet"));
+        command.arg("run");
+        if let Some(flag) = extra {
+            command.arg(flag);
+        }
+        command
+            .arg("interrupt_tiers.jet")
+            .current_dir(&dir)
+            .env("NO_COLOR", "1")
+            .env("JET_CACHE_DIR", dir.join(format!("cache-{tier}")))
+            .env("JET_RUN_CACHE_DIR", dir.join(format!("run-cache-{tier}")))
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
+        let observed = interrupt_and_collect(command.spawn().unwrap(), tier);
+        assert_eq!(
+            observed, aot,
+            "{tier} and AOT disagree about a delivered signal — the three tiers \
+             must share one interrupt count and one consumption rule (#2027)"
+        );
+    }
+
+    let _ = fs::remove_dir_all(&dir);
+}

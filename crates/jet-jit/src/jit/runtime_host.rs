@@ -4114,6 +4114,65 @@ host_fns! {
     cli_main: "jet_jit_cli_main" => crate::CLI::jet_jit_cli_main: sig_noarg_i64;
 }
 
+/// `JitZipValueKind::code` and `from_code` are two hand-written tables over one
+/// enum, so they can drift the way every other pair in this crate has. A
+/// missing `from_code` row makes `jet_jit_list_unzip` ICE on a legal column; a
+/// SHIFTED row makes it read a `String` field as an `Int` — the silent wrong
+/// answer the unzip host already shipped once.
+#[cfg(test)]
+mod zip_value_kind_tests {
+    use super::JitZipValueKind;
+
+    /// No `_` arm: a new kind must fail to compile here rather than quietly
+    /// miss the wire encoding.
+    fn kind_name(kind: JitZipValueKind) -> &'static str {
+        match kind {
+            JitZipValueKind::Int => "Int",
+            JitZipValueKind::Float => "Float",
+            JitZipValueKind::Bool => "Bool",
+            JitZipValueKind::Char => "Char",
+            JitZipValueKind::String => "String",
+            JitZipValueKind::Opaque => "Opaque",
+        }
+    }
+
+    const EVERY_KIND: [JitZipValueKind; 6] = [
+        JitZipValueKind::Int,
+        JitZipValueKind::Float,
+        JitZipValueKind::Bool,
+        JitZipValueKind::Char,
+        JitZipValueKind::String,
+        JitZipValueKind::Opaque,
+    ];
+
+    #[test]
+    fn every_zip_value_kind_round_trips_through_its_wire_code() {
+        for kind in EVERY_KIND {
+            assert_eq!(
+                JitZipValueKind::from_code(kind.code()),
+                Some(kind),
+                "`{}` does not survive its own wire code {}",
+                kind_name(kind),
+                kind.code()
+            );
+        }
+        let codes: Vec<i64> = EVERY_KIND.iter().map(|kind| kind.code()).collect();
+        for (index, code) in codes.iter().enumerate() {
+            assert!(
+                !codes[..index].contains(code),
+                "`{}` reuses wire code {code}, so one column kind decodes as another",
+                kind_name(EVERY_KIND[index])
+            );
+        }
+        assert_eq!(
+            JitZipValueKind::from_code(EVERY_KIND.len() as i64),
+            None,
+            "from_code accepts a code past the last kind, so a stale immediate \
+             would decode as a real column kind instead of stopping"
+        );
+    }
+}
+
 #[cfg(test)]
 mod host_fns_tests {
     use crate::resident::fresh_runtime;

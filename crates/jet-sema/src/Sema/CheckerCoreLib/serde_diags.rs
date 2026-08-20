@@ -101,6 +101,14 @@ pub(crate) fn unknown_core_item(module: &str, name: &str, span: Span) -> Diagnos
             Some(span),
         );
     }
+    // #1965: Core is one nested tree (D-CORE-TREE1=A), so a miss at one node is
+    // often a hit one level down. Listing this module's own items then hands the
+    // reader a set that provably does not contain what they asked for, and the
+    // edit-distance guess below answers with an unrelated sibling. An exact
+    // submodule hit is a fact about where the name lives, so it outranks both.
+    if let Some(diagnostic) = submodule_path_hint(module, name, span) {
+        return diagnostic;
+    }
     let mut fix = if items.is_empty() {
         "import a specific core module, like `import core.files as fs;`".to_string()
     } else {
@@ -116,6 +124,41 @@ pub(crate) fn unknown_core_item(module: &str, name: &str, span: Span) -> Diagnos
         fix,
         Some(span),
     )
+}
+
+/// E1004 for a name that lives one level down the Core tree: either
+/// `{module}.{name}` is itself a submodule, or `name` is an item of one.
+fn submodule_path_hint(module: &str, name: &str, span: Span) -> Option<Diagnostic> {
+    const WHY: &str = "Core is one nested tree, so a name under this module can belong to a submodule instead of the module itself";
+    let nested = format!("{module}.{name}");
+    if Syntax::is_known_core_module(&nested) {
+        let fix = match core_module_items(&nested).first() {
+            Some(item) => {
+                format!("`{nested}` is a submodule, so name an item on it: `{nested}.{item}`")
+            }
+            None => format!("`{nested}` is a submodule; import it with `import {nested};`"),
+        };
+        return Some(Diagnostic::error(
+            "E1004",
+            format!("`{module}` has no item `{name}`"),
+            WHY.to_string(),
+            fix,
+            Some(span),
+        ));
+    }
+    let prefix = format!("{module}.");
+    let owner = Syntax::KNOWN_CORE_MODULES
+        .iter()
+        .copied()
+        .filter(|candidate| candidate.starts_with(&prefix))
+        .find(|candidate| core_module_items(candidate).iter().any(|item| item == name))?;
+    Some(Diagnostic::error(
+        "E1004",
+        format!("`{module}` has no item `{name}`"),
+        WHY.to_string(),
+        format!("`{name}` lives in the submodule `{owner}`, so write `{owner}.{name}`"),
+        Some(span),
+    ))
 }
 
 pub(crate) fn unknown_core_module(module: &str, span: Span) -> Diagnostic {

@@ -2,6 +2,9 @@
 pub use jet_foundation::Outcome::*;
 include!("../../../jet-codegen/src/Prelude/CoreLib/JetStd/WireOrder.rs");
 include!("../../../jet-codegen/src/Prelude/CoreLib/JetStd/DataTreeKind.rs");
+// The one FieldError projection (I9): `DataTree.rs`'s `JetShow`/`JetDisplay`
+// impls call it, exactly as the AOT Prelude and the Cranelift host do.
+include!("../../../jet-codegen/src/Prelude/Core/FieldError.rs");
 include!("../../../jet-codegen/src/Prelude/CoreLib/JetStd/DataTree.rs");
 jet_datatree_decode_helpers!();
 

@@ -1563,6 +1563,20 @@ fn resident_safe_call_arg_gate(arg: &TCallArg) -> bool {
     // `{type_id, concrete}` trait record `lower_trait_object_method` reads.
     // `LowerCtx::lower_call_arg` does not build that record yet, so decline
     // rather than hand a concrete record to a trait-object parameter.
+    //
+    // When it does (card #2053), this gate and that lowering MUST answer from
+    // ONE meta-free predicate over the argument type — the
+    // `LowerCtx::unzip_column_kinds` shape (lower_ctx.rs:11502), read by this
+    // file and by lowering. Never `record_type_key(..).is_some()` here beside a
+    // fallible lowering: that key is WIDER than a record layout (it answers for
+    // `Type::Tuple` and for any user type name, including a `distinct Meters =
+    // Float`, whose id is absent because `struct_type_id` is a position in
+    // `struct_fields` — types_meta.rs:1066), so it would admit shapes the
+    // lowering must refuse, which is #2091's drift bug. The predicate screens
+    // on HAS A RECORD LAYOUT; a shape this gate cannot resolve without meta is
+    // a DEOPT, never an ICE. The slot ABI is part of that screen: the two-slot
+    // record stores its payload as an I64 cell, so a distinct-over-Float
+    // concrete (an F64 cell, types_meta.rs:343) is out of the admitted set.
     if arg.box_as_trait.is_some() {
         return false;
     }

@@ -432,6 +432,34 @@ fn run() {
         stdout,
         "2024-03-10 01:30:00 America/New_York -05:00\n2024-03-11 01:30:00 America/New_York -04:00\n2024-03-11 02:30:00 America/New_York -04:00\n2024-03-10T06:30:00Z\n2024-03-10 01:30:00 America/New_York -05:00\n"
     );
+
+    // I9: default `jet run` must return the same ZonedDateTime the full build
+    // does, not a flattened carrier. #2030 — the resident-JIT civil-time host
+    // had no arm for a zoned `add_duration`/`add_period` receiver, so dispatch
+    // fell through to a null handle and `format`/`to_string` rendered an
+    // unrelated heap slot (the source file path) with offset 0 and is_dst false.
+    let jet = jet_bin();
+    if jet.exists() {
+        let quick_path = dir.join("time_calendar.jet");
+        fs::write(&quick_path, src).unwrap();
+        let quick = Command::new(&jet)
+            .arg("run")
+            .arg(&quick_path)
+            .current_dir(&dir)
+            .env("JET_TZDB_DIR", &tzdb_env)
+            .output()
+            .unwrap();
+        assert!(
+            quick.status.success(),
+            "default `jet run` failed:\n{}",
+            String::from_utf8_lossy(&quick.stderr)
+        );
+        assert_eq!(
+            String::from_utf8_lossy(&quick.stdout),
+            stdout,
+            "zoned arithmetic must mean the same thing on the default tier and AOT (I9)"
+        );
+    }
 }
 
 #[test]

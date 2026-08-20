@@ -17,6 +17,12 @@ trait JetDebug {
     fn jet_debug(&self) -> String;
 }
 
+/// D-FAIL-CONV2=A: included error fragments render failure text through this
+/// seam, the same one `crate::JetDisplay` names for the other comptime mirrors.
+trait JetDisplay {
+    fn jet_display(&self) -> String;
+}
+
 #[allow(non_camel_case_types)]
 trait __jet_Encode {
     fn jet_encode(&self) -> jet_std::DataTree;

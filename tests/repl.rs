@@ -2917,3 +2917,94 @@ fn repl_core_data_json_ingest_and_select() {
         "json status row missing: {out}"
     );
 }
+
+// ── #2038: `jet repl <file>.jet` ──────────────────────────────────────────
+
+/// A file named on the command line loads its definitions into the session
+/// (turn 1 can call them) and does NOT invoke `fn run` — naming a file is not
+/// running a program. Both halves matter: before #2038 the argument was
+/// accepted and then silently dropped.
+#[test]
+fn repl_file_argument_loads_definitions_without_running_entry() {
+    let fixture = std::env::temp_dir().join(format!("jet_repl_preload_{}", std::process::id()));
+    std::fs::create_dir_all(&fixture).unwrap();
+    let source = fixture.join("defs.jet");
+    std::fs::write(
+        &source,
+        "fn triple(n: Int) => Int { return n * 3 }\nfn run() { print(\"entry ran\"); }\n",
+    )
+    .unwrap();
+
+    let out = jet::REPL::run_transcript_with_preload(
+        &["triple(4)"],
+        None,
+        &source.to_string_lossy(),
+    );
+    std::fs::remove_dir_all(&fixture).ok();
+
+    assert!(
+        out.contains("loaded 2 items"),
+        "preload should report what it loaded, got: {out}"
+    );
+    assert!(
+        out.contains("12 : Int"),
+        "a definition from the file should be callable in turn 1, got: {out}"
+    );
+    assert!(
+        !out.contains("entry ran"),
+        "`fn run` must NOT be invoked by a command-line preload, got: {out}"
+    );
+}
+
+/// A path that isn't there is refused before the session starts: E2105, a
+/// non-zero exit, and no banner. Silently starting an empty session was the
+/// bug this closes.
+#[test]
+fn repl_missing_file_argument_is_refused_before_the_banner() {
+    use std::process::Command;
+
+    let missing = std::env::temp_dir().join(format!("jet_repl_absent_{}.jet", std::process::id()));
+    std::fs::remove_file(&missing).ok();
+
+    let out = Command::new(env!("CARGO_BIN_EXE_jet"))
+        .arg("repl")
+        .arg(&missing)
+        .env("NO_COLOR", "1")
+        .output()
+        .expect("run repl");
+
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert_eq!(out.status.code(), Some(1), "stderr: {stderr}");
+    assert!(stderr.contains("E2105"), "expected E2105, got: {stderr}");
+    assert!(
+        !stdout.contains("Welcome"),
+        "a refused preload must not print the banner, got: {stdout}"
+    );
+}
+
+/// `--project <dir>` keeps its own value: the directory must never be read as
+/// the positional preload file (the `args` filter swallows it).
+#[test]
+fn repl_project_flag_value_is_not_read_as_the_preload_file() {
+    use std::process::Command;
+
+    let project = std::env::temp_dir().join(format!("jet_repl_proj_arg_{}", std::process::id()));
+    std::fs::create_dir_all(&project).unwrap();
+    std::fs::write(project.join("helper.jet"), "fn helper() => Int { return 7 }\n").unwrap();
+
+    let out = Command::new(env!("CARGO_BIN_EXE_jet"))
+        .arg("repl")
+        .arg("--project")
+        .arg(&project)
+        .env("NO_COLOR", "1")
+        .output()
+        .expect("run repl");
+    std::fs::remove_dir_all(&project).ok();
+
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        !stderr.contains("E2105"),
+        "`--project <dir>` must not be mistaken for a preload file: {stderr}"
+    );
+}

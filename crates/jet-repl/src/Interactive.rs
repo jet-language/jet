@@ -36,11 +36,19 @@ pub(crate) fn run_interactive(project_dir: Option<&str>, color: bool, mut guard:
 
     let mut session = Session::new();
     session.enable_persistent_history();
+    let preload = flags.preload.clone();
     let mut policy = ReplPolicy::new(flags, &base_dir);
     if let Some(dir) = project_dir {
         let mut stdout = io::stdout();
         super::load_project_items(Path::new(dir), &mut session, &mut stdout);
         session.preserve_project_baseline();
+    }
+
+    // #2038: `jet repl <file>.jet`. Same loader the cooked loop and `:load`
+    // use; `fn run` is not invoked.
+    if let Some(file) = &preload {
+        let mut stdout = io::stdout();
+        super::cmd_load(file, &mut session, &base_dir, color, false, &mut stdout);
     }
 
     let stdin = io::stdin();

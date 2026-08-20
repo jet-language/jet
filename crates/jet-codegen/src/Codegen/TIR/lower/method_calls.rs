@@ -1131,6 +1131,7 @@ fn lower_method_call_impl(
                 fn_coerce: None,
                 widen_to_vec: false,
                 widen_to_union: None,
+                box_as_trait: None,
             };
             let mut lowered_args = Vec::with_capacity(args.len() + 1);
             lowered_args.push(receiver_arg);
@@ -6065,6 +6066,7 @@ fn lower_method_call_impl(
                                 fn_coerce: None,
                                 widen_to_vec: false,
                                 widen_to_union: None,
+                                box_as_trait: None,
                             }],
                         },
                     };
@@ -6256,6 +6258,7 @@ fn lower_method_call_impl(
                                 fn_coerce: None,
                                 widen_to_vec: false,
                                 widen_to_union: None,
+                                box_as_trait: None,
                             }],
                         },
                     };
@@ -6306,6 +6309,7 @@ fn lower_method_call_impl(
                                 fn_coerce: None,
                                 widen_to_vec: false,
                                 widen_to_union: None,
+                                box_as_trait: None,
                             }],
                         },
                     };

@@ -116,6 +116,9 @@ pub(crate) mod json_rt {
     pub use jet_foundation::Outcome::*;
     include!("../../jet-codegen/src/Prelude/CoreLib/JetStd/WireOrder.rs");
     include!("../../jet-codegen/src/Prelude/CoreLib/JetStd/DataTreeKind.rs");
+    // The one FieldError projection (I9), included beside its caller so
+    // `DataTree.rs`'s `JetShow`/`JetDisplay` impls resolve it here too.
+    include!("../../jet-codegen/src/Prelude/Core/FieldError.rs");
     include!("../../jet-codegen/src/Prelude/CoreLib/JetStd/DataTree.rs");
     jet_datatree_decode_helpers!();
     #[allow(unused_imports)]

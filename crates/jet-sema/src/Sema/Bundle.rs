@@ -27,6 +27,7 @@ use Units::{inject_units_prelude, resolve_unit_dimensions};
 pub(crate) use InlineCalls::{mangle_inline_sibling_calls, rewrite_inline_calls_stmts};
 
 pub(crate) use GenericModules::expand_generic_module_aliases;
+pub(crate) use GenericModules::hoist_inline_module_member_types;
 pub use GenericModules::specialize_function_types;
 use GenericModules::{clone_enum, clone_struct};
 use Outputs::{cli_entry_param_shape, no_run_error, resolve_outputs, CLIEntryShape};
@@ -1320,6 +1321,20 @@ fn populate_name_ledger(
                             display,
                         );
                     }
+                    for (internal, display) in
+                        GenericModules::top_level_instance_display_paths(instance, &module.items)
+                    {
+                        ledger.record_display_path(
+                            module_idx,
+                            format!("{}.{}", module.alias, internal),
+                            display,
+                        );
+                    }
+                }
+                // A plain inline module's member types are lifted with the same
+                // member naming (`hoist_inline_module_member_types`), so project
+                // them back to `module.Type` for every message and tool.
+                if instance.instance_identity.is_none() && instance.body.is_some() {
                     for (internal, display) in
                         GenericModules::top_level_instance_display_paths(instance, &module.items)
                     {

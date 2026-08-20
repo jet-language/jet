@@ -25,12 +25,16 @@
 //!    5, and one no wrapper above it could ever catch. So a boundary can only
 //!    be added by replacing the C frame. **Any** `extern` fn defined in this
 //!    crate is therefore an unguardable seam by construction, whatever its ABI
-//!    and whatever it is called; the two exceptions are stated positively, as
-//!    the shim that *is* the boundary and the signal handlers that cannot
-//!    panic. The first form of this check banned `extern "C" fn jet_*` only,
-//!    and `Ffi.rs`'s `jit_ffi_reporter` — the frame a foreign library enters
-//!    when a foreign function has already failed, with a Cranelift frame below
-//!    it — sat outside that family for as long as the family was the rule.
+//!    and whatever it is called; the one exception is stated positively, as the
+//!    shim that *is* the boundary. The first form of this check banned
+//!    `extern "C" fn jet_*` only, and `Ffi.rs`'s `jit_ffi_reporter` — the frame
+//!    a foreign library enters when a foreign function has already failed, with
+//!    a Cranelift frame below it — sat outside that family for as long as the
+//!    family was the rule. There used to be a second exception, the OS signal
+//!    handler, because this crate compiled its own copy of it; #2027 deleted
+//!    that copy, so the handler is now checked where it actually lives (see
+//!    `SIGNAL_HANDLER_OWNER`) and a copy reappearing here is a bug on both
+//!    counts.
 //! 2. The only `extern "C"` frames generated code can reach are the shims
 //!    `host_seam::guarded` builds, and the only ways to reach one are the
 //!    single `builder.symbol` call inside `host_fns!` and `guarded_addr`. Any
@@ -156,13 +160,14 @@ fn extern_fn_definitions(sources: &[(String, String)]) -> Vec<(String, usize, St
 /// Check 1: an `extern "C"` seam body cannot be guarded from outside, so a C
 /// frame this crate compiles is an unguardable seam unless it *is* the boundary.
 ///
-/// The polarity matters in both directions, so the permitted set is stated
-/// positively and is two entries long:
+/// The permitted set is stated positively and is now ONE entry long:
+/// `host_seam.rs` holds the generated shim — the boundary itself.
 ///
-/// * `host_seam.rs` holds the generated shim — the boundary itself.
-/// * [`SIGNAL_HANDLERS`] are entered by the kernel, not by generated code, and
-///   cannot panic at all. They are pinned by
-///   `the_os_signal_handlers_stay_panic_free_without_a_catch`, not trusted.
+/// It used to be two, because this crate compiled its own copy of the OS signal
+/// handler. #2027 deleted that copy: the one signal handler lives in
+/// [`SIGNAL_HANDLER_OWNER`] and this crate marshals to it, so a C frame named
+/// `unix_mark`/`windows_mark`/`jet_interrupt_mark` appearing here again is a
+/// re-fork of the handler AND an unguardable seam, and check 1 must say so.
 ///
 /// Every other `extern` fn definition is a hole, whatever it is called. The
 /// previous form of this check banned `extern "C" fn jet_*` only, and
@@ -172,28 +177,50 @@ fn extern_fn_definitions(sources: &[(String, String)]) -> Vec<(String, usize, St
 fn unguardable_seam_definitions(sources: &[(String, String)]) -> Vec<String> {
     extern_fn_definitions(sources)
         .into_iter()
-        .filter(|(label, _, name, _)| {
-            label.as_str() != "host_seam.rs" && !SIGNAL_HANDLERS.contains(&name.as_str())
-        })
+        .filter(|(label, _, _, _)| label.as_str() != "host_seam.rs")
         .map(|(label, number, _, line)| format!("{label}:{number}: {line}"))
         .collect()
 }
 
-/// The two OS signal handlers, which are the only C frames in this crate that
-/// are neither the boundary nor routed through it. They must stay that way: a
-/// signal handler runs on a borrowed stack that may have a JIT frame under it,
-/// and `guard_seam` is the wrong tool there — `jet_scheduler_install_panic_hook`
-/// takes the process panic-hook lock and allocates on first call, so catching
-/// inside a handler would trade an unreachable panic for a reachable deadlock.
-/// The guarantee is that the bodies cannot panic, and it is checked, not stated.
-const SIGNAL_HANDLERS: &[&str] = &["unix_mark", "windows_mark"];
+/// The one signal handler's home (#2027). It is not in this crate and must not
+/// come back: a signal handler runs on a borrowed stack that may have a JIT
+/// frame under it, and `guard_seam` is the wrong tool there —
+/// `jet_scheduler_install_panic_hook` takes the process panic-hook lock and
+/// allocates on first call, so catching inside a handler would trade an
+/// unreachable panic for a reachable deadlock. The guarantee is that the body
+/// cannot panic, and it is checked, not stated.
+///
+/// One file, because there is one handler: the Prelude owner AOT embeds in the
+/// generated program and `jet_codegen::interrupt_runtime` compiles once for the
+/// `jet` binary's interpreter ambient and Cranelift host alike.
+const SIGNAL_HANDLER_OWNER: &str = "crates/jet-codegen/src/Prelude/CoreLib/Top/Interrupt.rs";
+
+/// The one handler's name. Both platform arms carry it, under mutually
+/// exclusive `cfg`s, so the process has one mark whatever it is built for.
+const SIGNAL_HANDLER: &str = "jet_interrupt_mark";
 
 /// The complete set of statements a signal handler body may contain. Anything
 /// that allocates, locks, formats, or reports would raise a panic in a frame
 /// that may sit above JIT code — and would do it from a context where the
 /// conversion boundary cannot be used.
-const SIGNAL_HANDLER_STATEMENTS: &[&str] =
-    &["note_interrupt();", "if kind == 0 {", "1", "} else {", "0", "}"];
+const SIGNAL_HANDLER_STATEMENTS: &[&str] = &[
+    "JET_INTERRUPT_PENDING.fetch_add(1, std::sync::atomic::Ordering::Relaxed);",
+    "const CTRL_C_EVENT: u32 = 0;",
+    "if kind == CTRL_C_EVENT {",
+    "1",
+    "} else {",
+    "0",
+    "}",
+];
+
+/// The signal handler's own file, as the one-entry `(label, contents)` list the
+/// scanners above take.
+fn signal_handler_owner_source() -> Vec<(String, String)> {
+    let path = repo_root().join(SIGNAL_HANDLER_OWNER);
+    let text =
+        fs::read_to_string(&path).unwrap_or_else(|error| panic!("read {path:?}: {error}"));
+    vec![(SIGNAL_HANDLER_OWNER.to_string(), text)]
+}
 
 /// The statements inside the definition that starts on `line_index`: the text
 /// between its opening brace and the matching close, trimmed, blank lines and
@@ -288,44 +315,41 @@ fn no_unguardable_extern_c_seam_is_defined_in_the_jit_crate() {
          `host_fns!` generate its boundary;\n\
          \x20 - foreign code calls it -> make it a plain `fn` and hand out \
          `host_seam::guarded(f)`, as `Ffi.rs` does for the bridge reporter;\n\
-         \x20 - the kernel calls it -> it is a signal handler, and it must be \
-         panic-free rather than guarded (see `SIGNAL_HANDLERS`).\n\
+         \x20 - the kernel calls it -> it is a signal handler, and there is \
+         exactly one, in `SIGNAL_HANDLER_OWNER`; marshal to it instead of \
+         re-forking it here (#2027).\n\
          (crates/jet-jit/src/host_seam.rs, docs/spec/architecture.md R13.) \
          Offending definitions:\n{}",
         offenders.join("\n")
     );
 }
 
-/// The other half of check 1's permitted set, stated as a proof rather than a
-/// name. A signal handler may interrupt a JIT frame, so a panic raised in one is
-/// the very abort this file exists to prevent — but the conversion boundary is
-/// unavailable there (`SIGNAL_HANDLERS` says why), so the only guarantee left is
-/// that the body cannot panic. Pin it.
+/// The signal handler is entered by the kernel, not by generated code, so it
+/// cannot be routed through the boundary — and it may interrupt a JIT frame, so
+/// a panic raised in one is the very abort this file exists to prevent. The only
+/// guarantee left is that the body cannot panic. Pin it, at the one owner.
 #[test]
-fn the_os_signal_handlers_stay_panic_free_without_a_catch() {
-    let sources = jit_crate_sources();
+fn the_os_signal_handler_stays_panic_free_without_a_catch() {
+    let sources = signal_handler_owner_source();
     let handlers: Vec<_> = extern_fn_definitions(&sources)
         .into_iter()
-        .filter(|(_, _, name, _)| SIGNAL_HANDLERS.contains(&name.as_str()))
+        .filter(|(_, _, name, _)| name == SIGNAL_HANDLER)
         .collect();
     assert_eq!(
         handlers.len(),
-        SIGNAL_HANDLERS.len(),
-        "check 1 exempts {:?}, so every one of them must exist to be checked; \
-         found {:?}",
-        SIGNAL_HANDLERS,
+        2,
+        "the one signal handler has exactly two platform arms — `extern \"C\"` \
+         for unix and `extern \"system\"` for windows, both named \
+         `{SIGNAL_HANDLER}` under mutually exclusive `cfg`s. Found {:?} in \
+         {SIGNAL_HANDLER_OWNER}. A third arm, or a missing one, means the mark \
+         was renamed or re-forked and this proof stopped covering it.",
         handlers
             .iter()
-            .map(|(_, _, name, _)| name.as_str())
+            .map(|(_, number, name, _)| format!("{name}:{number}"))
             .collect::<Vec<_>>()
     );
     for (label, number, name, _) in handlers {
-        let text = sources
-            .iter()
-            .find(|(candidate, _)| *candidate == label)
-            .map(|(_, text)| text.as_str())
-            .expect("the handler's own file");
-        for statement in definition_body(text, number) {
+        for statement in definition_body(&sources[0].1, number) {
             assert!(
                 SIGNAL_HANDLER_STATEMENTS.contains(&statement.as_str()),
                 "{label}:{number}: `{name}` gained the statement `{statement}`, \
@@ -333,11 +357,141 @@ fn the_os_signal_handlers_stay_panic_free_without_a_catch() {
                  stack that may have a JIT frame under it: anything that \
                  allocates, locks, formats or reports can panic there, and \
                  `guard_seam` cannot be used to catch it. Move the work to the \
-                 thread that drains the queue instead of widening this list.",
+                 drain (`jet_interrupt_dispatch`) instead of widening this list.",
                 SIGNAL_HANDLER_STATEMENTS
             );
         }
     }
+}
+
+/// #2027: the mechanism itself is singular, not just panic-free.
+///
+/// One pending count, one arm path, one mark, and exactly one place that
+/// compiles the owner for in-binary use. Before this check the handler existed
+/// in three copies with three counts, and because `signal(SIGINT, …)` REPLACES
+/// the process handler, whichever tier armed last silently disarmed the others'
+/// counts — a divergence nothing could detect. Re-forking it must fail here
+/// instead.
+#[test]
+fn exactly_one_signal_mechanism_owns_the_interrupt_count() {
+    let mut sources = Vec::new();
+    for root in [repo_root().join("crates"), repo_root().join("Source")] {
+        assert!(root.is_dir(), "scan root moved: {root:?}");
+        let mut files = Vec::new();
+        collect_rs_files(&root, &mut files);
+        files.sort();
+        for path in files {
+            let label = path
+                .strip_prefix(repo_root())
+                .unwrap_or(path.as_path())
+                .to_string_lossy()
+                .into_owned();
+            let text = fs::read_to_string(&path)
+                .unwrap_or_else(|error| panic!("read {path:?}: {error}"));
+            sources.push((label, text));
+        }
+    }
+    let owner_label = SIGNAL_HANDLER_OWNER.to_string();
+    assert!(
+        sources.iter().any(|(label, _)| *label == owner_label),
+        "the scan did not reach the owner {SIGNAL_HANDLER_OWNER}"
+    );
+
+    // The count, the arm state and the mark are declared only by the owner, and
+    // each one is actually there — a rename that made the scan find nothing
+    // would otherwise pass this check vacuously.
+    let mark_definition = format!("fn {SIGNAL_HANDLER}(");
+    for (fact, expected) in [
+        ("static JET_INTERRUPT_PENDING", 1usize),
+        ("static JET_INTERRUPT_ARMED", 1),
+        (mark_definition.as_str(), 2),
+    ] {
+        let declarers: Vec<_> = code_lines(&sources)
+            .into_iter()
+            .filter(|(_, _, line)| line.contains(fact))
+            .map(|(label, number, line)| format!("{label}:{number}: {}", line.trim()))
+            .collect();
+        assert!(
+            declarers.len() == expected
+                && declarers
+                    .iter()
+                    .all(|entry| entry.starts_with(&owner_label)),
+            "`{fact}` belongs to the one signal mechanism in \
+             {SIGNAL_HANDLER_OWNER} (#2027), {expected} time(s) — the mark has \
+             one `cfg`-exclusive arm per platform, everything else is single. A \
+             second declaration elsewhere is a second interrupt count, and \
+             `signal(SIGINT, …)` REPLACES the process handler, so the two would \
+             not merely duplicate: the later arm would silently disarm the \
+             earlier one's count. Marshal to \
+             `jet_interrupt_arm`/`jet_interrupt_dispatch` instead. Found:\n{}",
+            declarers.join("\n")
+        );
+    }
+
+    // Exactly one module compiles the owner for in-binary use, so the `jet`
+    // binary's interpreter ambient and Cranelift host share one count. AOT's
+    // copy is a separate process and comes from `Codegen/mod.rs`'s
+    // `include_str!`, which embeds text rather than compiling a second instance
+    // here.
+    let includers: Vec<_> = code_lines(&sources)
+        .into_iter()
+        .filter(|(_, _, line)| {
+            line.contains("include!(") && line.contains("Top/Interrupt.rs")
+        })
+        .map(|(label, number, line)| format!("{label}:{number}: {}", line.trim()))
+        .collect();
+    assert_eq!(
+        includers.len(),
+        1,
+        "the owner must be compiled exactly once per binary — \
+         `jet_codegen::interrupt_runtime`. Each extra `include!` is another \
+         `JET_INTERRUPT_PENDING` static in the same process (#2027). Found:\n{}",
+        includers.join("\n")
+    );
+    assert!(
+        includers[0].starts_with("crates/jet-codegen/src/lib.rs:"),
+        "the one in-binary instance lives in `jet-codegen/src/lib.rs` as \
+         `pub mod interrupt_runtime`; found {}",
+        includers[0]
+    );
+}
+
+/// #2027: what a signal does inside `#Shield` is answered once, by construction.
+///
+/// A shield defers a *cooperative* interrupt — a cancel or a blown deadline — at
+/// the wait points of the shielded task
+/// (`Prelude/Scheduler.rs::jet_scheduler_shielded`). An OS signal is not a
+/// wait-point outcome: the mark only increments a count, and the drain runs
+/// every registered handler once per counted interrupt. So a signal delivered
+/// while a task is inside `#Shield { … }` is neither deferred to the region's
+/// exit nor discarded — it is counted, and the handlers run on the next drain
+/// while the shielded region keeps running.
+///
+/// All three tiers answer that identically because they call this one drain and
+/// it cannot see shield or task state. Pin the "cannot", so the three tiers
+/// agree by construction rather than by three copies happening to match.
+#[test]
+fn the_interrupt_drain_cannot_consult_shield_or_task_state() {
+    let owner = signal_handler_owner_source();
+    let leaks: Vec<_> = code_lines(&owner)
+        .into_iter()
+        .filter(|(_, _, line)| {
+            ["shield", "SHIELD", "task_cancelled", "current_task", "panicking"]
+                .iter()
+                .any(|probe| line.contains(probe))
+        })
+        .map(|(label, number, line)| format!("{label}:{number}: {}", line.trim()))
+        .collect();
+    assert!(
+        leaks.is_empty(),
+        "the one interrupt drain read shield or task state. That is how the \
+         three tiers stop agreeing: a signal delivered inside `#Shield` would \
+         then be deferred on whichever tier happened to be executing, and \
+         counted on the others. Shield policy belongs to cooperative wait \
+         points (`Prelude/Scheduler.rs`), not to the signal count (#2027). \
+         Offending lines:\n{}",
+        leaks.join("\n")
+    );
 }
 
 #[test]
@@ -475,18 +629,18 @@ fn the_boundary_scan_trips_on_seeded_violations() {
 
     // The signal-handler body scan must trip on a statement that can panic.
     let grown_handler = vec![(
-        "Seeded.rs".to_string(),
+        SIGNAL_HANDLER_OWNER.to_string(),
         concat!(
-            "    extern \"C\" fn unix_mark(_: i32) {\n",
+            "    extern \"C\" fn jet_interrupt_mark(_: i32) {\n",
             "        eprintln!(\"interrupt\");\n",
-            "        note_interrupt();\n",
+            "        JET_INTERRUPT_PENDING.fetch_add(1, std::sync::atomic::Ordering::Relaxed);\n",
             "    }\n",
         )
         .to_string(),
     )];
     let (_, number, _, _) = extern_fn_definitions(&grown_handler)
         .into_iter()
-        .find(|(_, _, name, _)| name == "unix_mark")
+        .find(|(_, _, name, _)| name == SIGNAL_HANDLER)
         .expect("the seeded handler");
     assert!(
         definition_body(&grown_handler[0].1, number)

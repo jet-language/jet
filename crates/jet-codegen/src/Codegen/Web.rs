@@ -4044,6 +4044,11 @@ fn wasm_emit_call_arg(
             )
         );
     }
+    // S48: same Rust slot rule as `emit_tir_call_args` — a concrete value
+    // entering a trait value slot is boxed before any borrow wrapper.
+    if let Some(trait_name) = &arg.box_as_trait {
+        value = format!("Box::new({value}) as Box<dyn {}>", mangle(trait_name));
+    }
     if arg.fn_coerce.is_some() {
         return Err(());
     }
@@ -6950,6 +6955,9 @@ fn tir_call_args(args: &[TIR::TCallArg], funcs: &[FuncWeb], file_prefix: Option<
 }
 
 fn members_are_unused(arg: &TIR::TCallArg) -> bool {
+    // `box_as_trait` is deliberately absent: a JS trait value IS the object
+    // (`emit_struct_lit`'s `as_trait` arm already renders the concrete shape),
+    // so the Rust `Box<dyn …>` wrapper has no JS counterpart to emit.
     arg.fn_coerce.is_none() && !arg.widen_to_vec
 }
 

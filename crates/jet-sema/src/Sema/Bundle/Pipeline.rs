@@ -421,6 +421,12 @@ fn check_bundle_opts_for_output_inner(
     // D-CHOOSE-HEADS1=A: fold ordered multi-head declarations into one
     // ordinary enum pattern table before registration and body checking.
     desugar_multi_head_functions(bundle, &mut diags);
+    // D-MOD2/D-MOD3: lift each inline module's member TYPES to their mangled
+    // member identity beside the module, so registration, checking and every
+    // engine see them the same way they see a generic module's members
+    // (card #2054). Runs after generic expansion (instances are already
+    // lifted) and before sibling-call mangling and registration.
+    hoist_inline_module_member_types(bundle);
     // D-MOD2: rewrite inline-module sibling calls to their mangled names before any
     // registration/checking/codegen sees the bodies.
     mangle_inline_sibling_calls(bundle);

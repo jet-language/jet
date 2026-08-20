@@ -846,6 +846,40 @@ impl<'a> Checker<'a> {
             false
         }
 
+        /// S48 (syntax-decisions.md:1613; spec.md:839, ratified): a
+        /// trait name in type position (`fn f(s: Shape)`) means dynamic dispatch
+        /// with INVISIBLE boxing. A concrete value whose type implements the
+        /// named trait therefore MEETS that slot — sema decides acceptance only;
+        /// the box itself is materialised by the slot-driven boxing lowering
+        /// already applies to a `[Shape]` list element (`TCallArg::box_as_trait`
+        /// / `preserve_typed_list_shape`), never by a second mechanism here.
+        ///
+        /// Single-trait only (the S48 shape). A multi-name `TraitObject` is the
+        /// D-ANY-JAI1 variadic loop element, which has no one `Box<dyn T>` to
+        /// coerce toward and stays on the ordinary equality path.
+        pub(crate) fn trait_slot_accepts(&self, want: &Type, got: &Type) -> bool {
+            // A value that already IS the trait value needs no coercion: an
+            // unresolved bare-trait parameter spelling can equal the argument's
+            // own type, and a `TraitObject` argument is the resolved same thing.
+            if want == got || matches!(got, Type::TraitObject(_)) {
+                return false;
+            }
+            let trait_name = match want {
+                Type::TraitObject(names) if names.len() == 1 => names.first(),
+                // An unresolved signature type still spells the trait as a plain
+                // nominal; `CheckerCore/types.rs:179` uses the same test.
+                Type::Named(name)
+                    if self.trait_reg.is_trait_name(name) && !self.registry.contains(name) =>
+                {
+                    Some(name)
+                }
+                _ => None,
+            };
+            trait_name.is_some_and(|trait_name| {
+                self.trait_reg.type_implements_trait(got, trait_name)
+            })
+        }
+
         pub(crate) fn nominal_type_identity(&self, want: &Type, got: &Type) -> bool {
             if want == got {
                 return true;

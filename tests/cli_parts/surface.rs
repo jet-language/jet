@@ -1231,3 +1231,173 @@ fn question_mark_language_symbol_uses_shared_semantic_index() {
     assert!(stdout.contains("Example:"), "example missing: {stdout}");
     assert!(stdout.contains("core.collections"), "provenance missing: {stdout}");
 }
+
+// ── #2072: the jet binary's own per-command help ─────────────────────────
+
+/// `jet help <cmd>` prints the per-command screen, not the ~200-line global
+/// inventory. The golden pins summary + usage + flag rows.
+#[test]
+fn help_run_is_per_command_not_the_global_screen() {
+    let out = Command::new(jet())
+        .args(["help", "run"])
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(0), "`jet help run` should exit 0");
+    let stdout = String::from_utf8_lossy(&out.stdout).into_owned();
+    assert!(
+        !stdout.contains("Welcome to"),
+        "`jet help run` must not dump the global usage screen:\n{stdout}"
+    );
+    check_snapshot("help_run.txt", &stdout);
+}
+
+/// One renderer, two spellings: `jet help <cmd>` and `jet <cmd> --help` can
+/// never drift because both call `command_help`.
+#[test]
+fn help_command_and_command_help_flag_render_identically() {
+    for command in ["run", "build", "test", "check", "repl", "eval", "fuzz"] {
+        let via_help = Command::new(jet())
+            .args(["help", command])
+            .env("NO_COLOR", "1")
+            .output()
+            .unwrap();
+        let via_flag = Command::new(jet())
+            .args([command, "--help"])
+            .env("NO_COLOR", "1")
+            .output()
+            .unwrap();
+        assert_eq!(
+            String::from_utf8_lossy(&via_help.stdout),
+            String::from_utf8_lossy(&via_flag.stdout),
+            "`jet help {command}` and `jet {command} --help` disagree"
+        );
+    }
+}
+
+/// A target-requiring verb invoked bare prints its OWN usage on stderr with
+/// exit 2 — not the whole command inventory.
+#[test]
+fn bare_target_requiring_verbs_print_targeted_usage() {
+    let out = Command::new(jet()).arg("fix").env("NO_COLOR", "1").output().unwrap();
+    assert_eq!(out.status.code(), Some(2), "bare `jet fix` should exit 2");
+    let stderr = String::from_utf8_lossy(&out.stderr).into_owned();
+    check_snapshot("fix_bare_usage.txt", &stderr);
+
+    for verb in ["fix", "lint", "fuzz"] {
+        let out = Command::new(jet()).arg(verb).env("NO_COLOR", "1").output().unwrap();
+        assert_eq!(out.status.code(), Some(2), "bare `jet {verb}` should exit 2");
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        assert!(
+            !stderr.contains("Welcome to"),
+            "bare `jet {verb}` must not dump the global screen:\n{stderr}"
+        );
+        assert!(
+            stderr.contains(&format!("jet {verb}")),
+            "bare `jet {verb}` should show its own usage line:\n{stderr}"
+        );
+    }
+}
+
+/// The registry carries a real positional shape for the argument-taking
+/// verbs, so help stops saying the meaningless `jet <cmd> [args]`.
+#[test]
+fn per_command_help_shows_real_argument_shapes() {
+    for (command, shape) in [
+        ("repl", "jet repl [<file.jet>]"),
+        ("eval", "jet eval <file.jet|expression>"),
+        ("lint", "jet lint --a11y <file.jet>"),
+        ("fuzz", "jet fuzz <file.jet> [<test>]"),
+    ] {
+        let out = Command::new(jet())
+            .args([command, "--help"])
+            .env("NO_COLOR", "1")
+            .output()
+            .unwrap();
+        let stdout = String::from_utf8_lossy(&out.stdout);
+        assert!(
+            stdout.contains(shape),
+            "`jet {command} --help` should show `{shape}`, got:\n{stdout}"
+        );
+        assert!(
+            !stdout.contains(&format!("jet {command} [args]")),
+            "`jet {command} --help` still shows the placeholder shape:\n{stdout}"
+        );
+    }
+}
+
+// ── #2068: `jet eval` expression form and print output ───────────────────
+
+/// The help contract ("Evaluate pure Jet and print JSON") is honored: an
+/// expression evaluates instead of dying as `E2105 couldn't read '1 + 2'`.
+#[test]
+fn eval_accepts_an_expression_argument() {
+    let json = Command::new(jet())
+        .args(["eval", "1 + 2", "--json"])
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    let stderr = String::from_utf8_lossy(&json.stderr);
+    assert_eq!(json.status.code(), Some(0), "stderr: {stderr}");
+    assert!(!stderr.contains("E2105"), "expression was read as a path: {stderr}");
+    assert_eq!(String::from_utf8_lossy(&json.stdout).trim(), "3");
+
+    let pretty = Command::new(jet())
+        .args(["eval", "1 + 2"])
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    assert_eq!(pretty.status.code(), Some(0));
+    assert_eq!(String::from_utf8_lossy(&pretty.stdout).trim(), "3");
+}
+
+/// A `.jet` name that isn't there stays a file-not-found error. A typo'd
+/// filename must never be silently re-read as an expression.
+#[test]
+fn eval_missing_jet_file_still_reports_not_found() {
+    let out = Command::new(jet())
+        .args(["eval", "no_such_program.jet"])
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(1));
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(stderr.contains("E2105"), "expected a read failure, got: {stderr}");
+}
+
+/// `jet eval <file>` no longer swallows what the program printed. Human mode
+/// shows the output then the value; `--json` keeps stdout to exactly one JSON
+/// document and moves the program's own output to stderr.
+#[test]
+fn eval_file_forwards_print_output_alongside_the_value() {
+    let dir = isolated_cwd("eval_print_output");
+    let file = dir.join("printer.jet");
+    fs::write(&file, "fn run() {\n    print(\"hi\");\n}\n").unwrap();
+
+    let human = Command::new(jet())
+        .args(["eval", &file.to_string_lossy()])
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    let stdout = String::from_utf8_lossy(&human.stdout);
+    assert_eq!(human.status.code(), Some(0), "{}", String::from_utf8_lossy(&human.stderr));
+    assert!(stdout.contains("hi"), "print output was swallowed: {stdout:?}");
+    assert!(stdout.contains("()"), "the run value should still render: {stdout:?}");
+
+    let json = Command::new(jet())
+        .args(["eval", &file.to_string_lossy(), "--json"])
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    assert_eq!(json.status.code(), Some(0));
+    assert!(
+        !String::from_utf8_lossy(&json.stdout).contains("hi"),
+        "--json stdout must stay one JSON document: {:?}",
+        String::from_utf8_lossy(&json.stdout)
+    );
+    assert!(
+        String::from_utf8_lossy(&json.stderr).contains("hi"),
+        "--json should forward program output to stderr: {:?}",
+        String::from_utf8_lossy(&json.stderr)
+    );
+}

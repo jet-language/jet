@@ -1,10 +1,24 @@
-// D-MOD2: inline code modules — group functions under a named namespace.
+// D-MOD2: inline code modules — group functions AND types under a named
+// namespace. A member type is visible to its own module by its bare name and
+// to the rest of the file by its qualified `module.Type` spelling when `pub`.
 module arith {
+    pub struct Tally {
+        total: Int
+    }
+
     pub fn double(n: Int) => Int :: n * 2
     pub fn add(a: Int, b: Int) => Int :: a + b
+
+    pub fn tally(a: Int, b: Int) => Tally {
+        return Tally.{total: add(a, b)}
+    }
 }
+
+fn describe(t: arith.Tally) => String :: "total {t.total}"
 
 fn run() {
     print(arith.double(5))
     print(arith.add(3, 4))
+    print(arith.tally(3, 4).total)
+    print(describe(arith.tally(1, 2)))
 }

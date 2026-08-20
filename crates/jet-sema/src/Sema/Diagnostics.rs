@@ -189,6 +189,19 @@ pub(crate) fn is_default_error(ty: &Type) -> bool {
 }
 
 pub(crate) fn type_fix_hint(want: &Type, got: &Type) -> String {
+    // I4: a fix must never prescribe exactly what the writer already wrote.
+    // When both sides render the same text, "use X here" is a contradiction
+    // (card #2054: `promises to return bank.Account, but this returns
+    // vis2.bank.Account … Fix: use bank.Account here`). Two same-printing
+    // types that reach here are two DIFFERENT declarations — one declaration
+    // reached by two paths is already accepted by `nominal_type_identity` —
+    // so the repair is to make both sides name one declaration.
+    if want.show() == got.show() {
+        return format!(
+            "these are two different declarations that both print as {}; make both sides name the same one (import it once and use that name)",
+            want.show()
+        );
+    }
     match (want, got) {
         (Type::Float, Type::Int) => "write the number with a decimal part, like `2.0`".to_string(),
         (Type::Int, Type::Float) => "drop the decimal part, like `2`".to_string(),
@@ -876,6 +889,143 @@ pub(crate) fn suggest_field(name: &str, candidates: &[String]) -> Option<String>
         }
     }
     best.map(|(s, _)| s)
+}
+
+/// The one home for cross-language method names (card #1965).
+///
+/// A row earns its place only when all three of these hold. A reader deciding
+/// whether to add one answers them in order:
+///
+/// 1. the left spelling is the *primary* name of this operation in at least two
+///    mainstream languages (Python, JavaScript, Java/C#, C++, Rust, Go), so it
+///    is what a newcomer or a coding agent types from habit — not a name one
+///    library happens to use;
+/// 2. one of the right spellings is the real Jet name for the *same* operation
+///    on some Core receiver — the same operation, not a near neighbour;
+/// 3. the left spelling is not itself a Jet method on that receiver, so the row
+///    can only ever fire after real method lookup has already failed.
+///
+/// A name failing (1) is one project's private dictionary. A name failing (2)
+/// teaches a method that does something else. A name failing (3) is dead
+/// weight: the call resolves and this table is never consulted.
+///
+/// The right-hand side is an ordered list of alternatives, and `suggest_method`
+/// keeps only the ones the receiver actually carries. That is what lets one
+/// receiver-agnostic table serve every receiver: `add` means `push` on a
+/// `List` while resolving untouched on `Map`/`Set`, and `contains_key` reaches
+/// `has_key` on a `Map` and `has` on a `Set`, with no second
+/// receiver-classification table to keep in step (I8).
+const FOREIGN_METHOD_ALIASES: &[(&str, &[&str])] = &[
+    // Sequence append: Python `list.append`, Java/C# `add`/`Add`, C++ `push_back`.
+    ("append", &["push"]),
+    ("add", &["push"]),
+    ("push_back", &["push"]),
+    // Size: C++/Java `size`, JavaScript/Java-String `length`, C#/Swift `Count`/`count`.
+    ("size", &["len"]),
+    ("length", &["len"]),
+    ("count", &["len"]),
+    // Membership: Rust `contains_key`, JavaScript `Map.has`, Rust/Java/C++ set
+    // `contains`, JavaScript `Array.includes`.
+    ("contains_key", &["has_key", "has"]),
+    ("has", &["has_key"]),
+    ("contains", &["has"]),
+    ("includes", &["contains", "has"]),
+    // Keyed store: JavaScript `Map.set`, Java `Map.put`, Rust `HashMap::insert`.
+    ("set", &["add"]),
+    ("put", &["add"]),
+    ("insert", &["add"]),
+    // Text: Python `str.upper`/`lower`/`strip`, Java/JavaScript
+    // `substring`/`substr`, Rust `to_str`.
+    ("upper", &["to_upper"]),
+    ("lower", &["to_lower"]),
+    ("strip", &["trim"]),
+    ("substring", &["slice"]),
+    ("substr", &["slice"]),
+    ("to_str", &["to_string"]),
+];
+
+/// A method name the receiver really carries, plus the `Fix:` line that names
+/// it. One picker returns both so E0311 and E0102 cannot drift apart.
+pub(crate) struct MethodSuggestion {
+    /// The Jet spelling to write instead — also the rename `TextEdit`.
+    pub(crate) name: String,
+    /// The rendered `Fix:` sentence.
+    pub(crate) fix: String,
+}
+
+/// First target of `name`'s alias row that this receiver actually carries.
+/// A target equal to `name` is refused for the same reason `suggest_field`
+/// refuses distance 0 (#2002): it would hand back the spelling just refused.
+fn alias_target(name: &str, candidates: &[String]) -> Option<String> {
+    let (_, targets) = FOREIGN_METHOD_ALIASES
+        .iter()
+        .find(|(foreign, _)| *foreign == name)?;
+    targets
+        .iter()
+        .find(|target| {
+            **target != name && candidates.iter().any(|known| known.as_str() == **target)
+        })
+        .map(|target| (*target).to_string())
+}
+
+/// `indexOf` → `index_of`. `None` when the name carries no capital, so a name
+/// already written in Jet's convention never routes through here.
+fn snake_case_of_camel(name: &str) -> Option<String> {
+    if !name.chars().any(|c| c.is_ascii_uppercase()) {
+        return None;
+    }
+    let mut snake = String::with_capacity(name.len() + 4);
+    for (index, c) in name.char_indices() {
+        if c.is_ascii_uppercase() {
+            if index > 0 {
+                snake.push('_');
+            }
+            snake.push(c.to_ascii_lowercase());
+        } else {
+            snake.push(c);
+        }
+    }
+    Some(snake)
+}
+
+fn foreign_method_fix(name: &str, jet: &str) -> String {
+    format!("did you mean `{jet}`? `{name}` is another language's name for the same operation")
+}
+
+/// The one method-name suggestion picker, for a receiver that has already
+/// refused `name`.
+///
+/// Exact evidence outranks a guess. A name this table knows, or a name that is
+/// only Jet's snake_case convention away from one the receiver carries, is a
+/// fact about what the caller meant; edit distance is a guess that happens to
+/// land close. Ordering them the other way is how `items.add(x)` on a `List`
+/// came to suggest `all` — two edits away, and not the operation asked for —
+/// instead of `push` (card #1965).
+pub(crate) fn suggest_method(name: &str, candidates: &[String]) -> Option<MethodSuggestion> {
+    if let Some(jet) = alias_target(name, candidates) {
+        return Some(MethodSuggestion {
+            fix: foreign_method_fix(name, &jet),
+            name: jet,
+        });
+    }
+    if let Some(snake) = snake_case_of_camel(name) {
+        if candidates.iter().any(|known| *known == snake) {
+            return Some(MethodSuggestion {
+                fix: format!("did you mean `{snake}`? Jet method names are snake_case"),
+                name: snake,
+            });
+        }
+        if let Some(jet) = alias_target(&snake, candidates) {
+            return Some(MethodSuggestion {
+                fix: foreign_method_fix(name, &jet),
+                name: jet,
+            });
+        }
+    }
+    suggest_field(name, candidates).map(|candidate| MethodSuggestion {
+        fix: format!("did you mean `{candidate}`?"),
+        name: candidate,
+    })
 }
 
 fn secret_bearing_crypto_leaf(name: &str) -> bool {
@@ -1896,5 +2046,84 @@ mod tests {
         let family = vec!["decode".to_string(), "encode".to_string(), "parse".to_string()];
         assert_ne!(suggest_field("decode", &family).as_deref(), Some("decode"));
         assert_eq!(suggest_field("decod", &family).as_deref(), Some("decode"));
+    }
+
+    #[test]
+    fn foreign_method_names_reach_the_jet_spelling() {
+        let list = vec![
+            "all".to_string(),
+            "any".to_string(),
+            "len".to_string(),
+            "push".to_string(),
+        ];
+        // `add` is two edits from `all`, so edit distance alone answered with a
+        // predicate combinator instead of the append it asked for (#1965).
+        for foreign in ["append", "add", "push_back"] {
+            assert_eq!(
+                suggest_method(foreign, &list).map(|s| s.name).as_deref(),
+                Some("push"),
+                "{foreign} should reach `push`"
+            );
+        }
+        for foreign in ["size", "length", "count"] {
+            assert_eq!(
+                suggest_method(foreign, &list).map(|s| s.name).as_deref(),
+                Some("len"),
+                "{foreign} should reach `len`"
+            );
+        }
+    }
+
+    #[test]
+    fn one_alias_row_serves_every_receiver_that_carries_the_target() {
+        let map = vec!["add".to_string(), "has_key".to_string(), "len".to_string()];
+        let set = vec!["add".to_string(), "has".to_string(), "len".to_string()];
+        assert_eq!(
+            suggest_method("contains_key", &map).map(|s| s.name).as_deref(),
+            Some("has_key")
+        );
+        assert_eq!(
+            suggest_method("contains_key", &set).map(|s| s.name).as_deref(),
+            Some("has")
+        );
+        // `add` is the real Map/Set name, so the row that maps it to `push`
+        // cannot fire on a receiver that has no `push`.
+        assert_eq!(suggest_method("add", &map).map(|s| s.name).as_deref(), None);
+    }
+
+    #[test]
+    fn camel_case_reaches_the_snake_case_method_without_a_table_row() {
+        let text = vec![
+            "index_of".to_string(),
+            "to_string".to_string(),
+            "to_upper".to_string(),
+        ];
+        let suggestion = suggest_method("indexOf", &text).expect("camelCase should resolve");
+        assert_eq!(suggestion.name, "index_of");
+        assert_eq!(
+            suggestion.fix,
+            "did you mean `index_of`? Jet method names are snake_case"
+        );
+        assert_eq!(
+            suggest_method("toString", &text).map(|s| s.name).as_deref(),
+            Some("to_string")
+        );
+        // Normalizing before the table lookup is what lets one snake_case row
+        // answer both spellings of a foreign name: Java's `containsKey`
+        // normalizes to `contains_key`, which the table maps to `has_key`.
+        let map = vec!["add".to_string(), "has_key".to_string()];
+        assert_eq!(
+            suggest_method("containsKey", &map).map(|s| s.name).as_deref(),
+            Some("has_key")
+        );
+    }
+
+    #[test]
+    fn true_typos_keep_the_edit_distance_fix_byte_for_byte() {
+        let list = vec!["len".to_string(), "push".to_string(), "try_push".to_string()];
+        let suggestion = suggest_method("psh", &list).expect("close typo should resolve");
+        assert_eq!(suggestion.name, "push");
+        assert_eq!(suggestion.fix, "did you mean `push`?");
+        assert!(suggest_method("frobnicate", &list).is_none());
     }
 }

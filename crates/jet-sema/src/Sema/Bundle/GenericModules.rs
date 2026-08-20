@@ -2656,6 +2656,142 @@ pub(crate) fn expand_generic_module_aliases(
     }
 }
 
+/// D-MOD2/D-MOD3: give an inline module's member TYPES the same lifted member
+/// identity its member functions already have.
+///
+/// Registration and every engine only ever learn TOP-LEVEL type declarations:
+/// `Bundle/Pipeline.rs`'s `Item::CodeModule` arm registers member `Item::Func`
+/// rows only, and codegen's item loops list `Item::CodeModule` among the items
+/// that declare no type. So a `struct` written inside `module bank { … }` was
+/// invisible everywhere — E0119 "there's no type called `Account`" inside its
+/// own module (card #2054), while a generic module's member struct worked
+/// because `expand_alias` renames and lifts it.
+///
+/// This is that same mechanism, with no arguments to substitute: one member
+/// naming scheme (`module_type_name`), one lifting step, one display
+/// projection (`top_level_instance_display_paths`), no engine change. Generic
+/// instances are skipped — `expand_alias` already lifted their members.
+///
+/// Visibility is preserved: the bare name and the qualified `bank.Account`
+/// spelling resolve inside the module body, but only a `pub` member's
+/// qualified spelling resolves in the rest of the file, so a private member
+/// stays unreachable from outside exactly as `pub` promises.
+pub(crate) fn hoist_inline_module_member_types(bundle: &mut ProgramBundle) {
+    for module in bundle.modules.iter_mut() {
+        let mut declarations: Vec<Item> = Vec::new();
+        let mut exported: HashMap<String, Type> = HashMap::new();
+        for item in module.items.iter_mut() {
+            let Item::CodeModule(code_module) = item else {
+                continue;
+            };
+            if code_module.instance_identity.is_some() {
+                continue;
+            }
+            let module_name = code_module.name.clone();
+            let Some(body) = &mut code_module.body else {
+                continue;
+            };
+            let mut member_types: HashMap<String, Type> = HashMap::new();
+            for inner in body.iter() {
+                let (name, is_pub) = match inner {
+                    Item::Struct(def) => (&def.name, def.is_pub || def.is_package_pub),
+                    Item::Enum(def) => (&def.name, def.is_pub || def.is_package_pub),
+                    Item::Trait(def) => (&def.name, def.is_pub || def.is_package_pub),
+                    Item::Tag(def) => (&def.name, def.is_pub || def.is_package_pub),
+                    _ => continue,
+                };
+                let resolved = Type::Named(module_type_name(&module_name, name));
+                member_types.insert(name.clone(), resolved.clone());
+                member_types.insert(format!("{module_name}.{name}"), resolved.clone());
+                if is_pub {
+                    exported.insert(format!("{module_name}.{name}"), resolved);
+                }
+            }
+            if member_types.is_empty() {
+                continue;
+            }
+            let values: HashMap<String, crate::AST::CtValue> = HashMap::new();
+            let mut kept = Vec::with_capacity(body.len());
+            for inner in std::mem::take(body) {
+                match inner {
+                    Item::Struct(def) => declarations.push(Item::Struct(specialize_struct(
+                        &def,
+                        &module_name,
+                        &[],
+                        &[],
+                        &member_types,
+                        &values,
+                    ))),
+                    Item::Enum(def) => declarations.push(Item::Enum(specialize_enum(
+                        &def,
+                        &module_name,
+                        &[],
+                        &[],
+                        &member_types,
+                        &values,
+                    ))),
+                    Item::Trait(def) => declarations.push(Item::Trait(specialize_trait(
+                        &def,
+                        &[],
+                        &[],
+                        &member_types,
+                        &values,
+                    ))),
+                    Item::Tag(def) => {
+                        declarations.push(Item::Tag(specialize_tag(&def, &member_types, &values)))
+                    }
+                    // An `impl` block belongs beside the type it implements.
+                    Item::Impl(def) => declarations.push(Item::Impl(specialize_impl(
+                        &def,
+                        &[],
+                        &[],
+                        &member_types,
+                        &values,
+                    ))),
+                    // Member callables keep their own name (D-MOD2 mangles it at
+                    // registration); only the member type spellings inside them move.
+                    Item::Func(def) => kept.push(Item::Func(specialize_func(
+                        def,
+                        &[],
+                        &[],
+                        &member_types,
+                        &values,
+                    ))),
+                    Item::Const(mut def) => {
+                        substitute_expr(&mut def.value, &member_types, &values);
+                        def.ty = def
+                            .ty
+                            .as_ref()
+                            .map(|ty| specialize_module_type(ty, &member_types, &values));
+                        kept.push(Item::Const(def));
+                    }
+                    other => kept.push(other),
+                }
+            }
+            *body = kept;
+        }
+        if declarations.is_empty() {
+            continue;
+        }
+        // The rest of the file reaches a lifted member only through its
+        // qualified `module.Type` spelling, and only when it is `pub` — the
+        // same consumer rewrite generic-module instances get.
+        if !exported.is_empty() {
+            for item in &mut module.items {
+                let Item::Func(func) = item else { continue };
+                for param in &mut func.params {
+                    param.ty = crate::Generics::substitute_type(&param.ty, &exported);
+                }
+                if let Some(ret) = &mut func.return_type {
+                    *ret = crate::Generics::substitute_type(ret, &exported);
+                }
+                substitute_stmts(&mut func.body, &exported, &HashMap::new());
+            }
+        }
+        module.items.extend(declarations);
+    }
+}
+
 #[cfg(test)]
 mod instance_collision_tests {
     use super::*;

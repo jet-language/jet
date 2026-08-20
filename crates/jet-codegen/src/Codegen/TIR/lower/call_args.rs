@@ -371,6 +371,29 @@ pub(crate) fn lower_one_call_arg(
         }
         _ => None,
     };
+    // S48: a concrete value meeting a single-trait value slot (`fn show(s: Shape)`)
+    // boxes invisibly. This is the call-argument instance of the boxing a `[Shape]`
+    // list element already gets from its slot's element type (`emit_tir_expr`'s
+    // `ListLit` arm / `preserve_typed_list_shape`), so the rule lives here — the
+    // one place that knows both the argument and the parameter type — and emit
+    // only applies the wrapper. A value that is ALREADY a trait object (a trait
+    // parameter forwarded on, a coerced `as_trait` literal) needs no second box.
+    let box_as_trait = match (&value.ty, conv.as_ref().map(|(_, t)| t)) {
+        (Type::TraitObject(_), _) => None,
+        (Type::Named(concrete) | Type::Apply { name: concrete, .. }, Some(want)) => {
+            let trait_name = match want {
+                Type::TraitObject(names) if names.len() == 1 => names.first(),
+                Type::Named(name) if cx.trait_names.contains(name) => Some(name),
+                _ => None,
+            };
+            // A value whose own type IS the trait is already a trait value: the
+            // parameter's bare-trait spelling just was not resolved.
+            trait_name
+                .filter(|trait_name| *trait_name != concrete)
+                .cloned()
+        }
+        _ => None,
+    };
     // Borrow wrappers (applied after the clone + fn-coerce wrappers). A `Read`
     // non-scalar is `&(…)`; a `Mutate` is `&mut (…)`.
     // When widening to Vec, the borrow wrapper applies to the widened Vec (not the array).
@@ -394,6 +417,7 @@ pub(crate) fn lower_one_call_arg(
         fn_coerce,
         widen_to_vec,
         widen_to_union,
+        box_as_trait,
     }
 }
 

@@ -1641,10 +1641,22 @@ impl<'a> Checker<'a> {
                             arg_ty == param_ty
                                 && Type::obligations_satisfy(&param_ty, &arg_ty)
                         };
+                    // S48: a concrete value meets a trait-typed parameter and is
+                    // boxed invisibly (`TCallArg::box_as_trait` at lowering).
+                    let boxes_as_trait = self.trait_slot_accepts(&param_ty, &arg_ty);
                     let compatible = exact_or_obligation_compatible
                         || fixed_widens
                         || union_widens
+                        || boxes_as_trait
                         || reads_expiring_secret_loan;
+                    if boxes_as_trait {
+                        // The box owns the concrete value, exactly as a trait-object
+                        // list element does (`infer_owned_list_element` →
+                        // `note_move_if_direct_ident`), so a direct name gives its
+                        // value away here. A caller that needs to keep it writes
+                        // `~c` (the copy marker) — no clone is ever silent (D-MEM1/S2).
+                        self.note_move_if_direct_ident(&arg.expr);
+                    }
                     if !reported && !compatible {
                         // D-TYPEDTEXT1=D: a plain runtime `String` reaching a `SQL`/
                         // `HTML` parameter — teach the injection-safety fix instead of

@@ -661,6 +661,7 @@ fn lower_method_pre_contracts(
                 fn_coerce: None,
                 widen_to_vec: false,
                 widen_to_union: None,
+                box_as_trait: None,
             };
             let method_sig = cx
                 .method_sigs
@@ -5710,6 +5711,7 @@ pub(crate) fn wrap_foreign_undo(
                     fn_coerce,
                     widen_to_vec,
                     widen_to_union,
+                    box_as_trait,
                     ..
                 } = arg;
                 (
@@ -5720,6 +5722,7 @@ pub(crate) fn wrap_foreign_undo(
                         fn_coerce,
                         widen_to_vec,
                         widen_to_union,
+                        box_as_trait,
                     )),
                 )
             }
@@ -5748,7 +5751,14 @@ pub(crate) fn wrap_foreign_undo(
             kind: TExprKind::Local(TLocal::user(temp.clone())),
         };
         match module_arg {
-            Some((borrow, mut_borrow, fn_coerce, widen_to_vec, widen_to_union)) => {
+            Some((
+                borrow,
+                mut_borrow,
+                fn_coerce,
+                widen_to_vec,
+                widen_to_union,
+                box_as_trait,
+            )) => {
                 // The capture owns the snapshot. Keep the module-call's boundary
                 // conversions, but do not clone a second time before the forward call.
                 forward_module_args.push(TCallArg {
@@ -5761,6 +5771,7 @@ pub(crate) fn wrap_foreign_undo(
                     fn_coerce,
                     widen_to_vec,
                     widen_to_union,
+                    box_as_trait,
                 });
             }
             None => {
@@ -5790,6 +5801,7 @@ pub(crate) fn wrap_foreign_undo(
             fn_coerce: None,
             widen_to_vec: false,
             widen_to_union: None,
+            box_as_trait: None,
         });
     }
     let inverse_expr = TExpr {
