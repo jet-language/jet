@@ -501,6 +501,9 @@ pub(crate) fn core_rust_type_name(name: &str) -> Option<&'static str> {
         "Stat" => Some("Stat"),
         "WalkEntry" => Some("WalkEntry"),
         "WatchEvent" => Some("WatchEvent"),
+        // stdlib-api-laws D4: `WatchEvent`'s two closed field enums.
+        "WatchDomain" => Some("WatchDomain"),
+        "WatchKind" => Some("WatchKind"),
         "WatchHandle" => Some("WatchHandle"),
         "WatchSet" => Some("WatchSet"),
         "TempDir" => Some("TempDir"),
@@ -3643,6 +3646,37 @@ pub(crate) fn register_core_import_surfaces(cx: &mut Cx) {
         for (variant, _) in &trust { cx.variant_owner.insert(variant.clone(), "TLSClientTrust".to_string()); }
         cx.enum_variants.insert("TLSClientTrust".to_string(), trust);
         cx.cloneable.insert("TLSClientTrust".to_string());
+    }
+    // stdlib-api-laws D4 (#2055): `core.watcher` hands back typed `WatchEvent`
+    // domain/kind values, so the two closed enums must be registered like the
+    // TLS pair above — matching `.File`/`.Created` has to stay on the same
+    // typed-IR path as any other covered enum instead of missing the subset.
+    if cx
+        .core_imports
+        .values()
+        .any(|module| module == Syntax::WATCHER_MODULE)
+    {
+        let watch_enums: [(&str, &[&str]); 2] = [
+            ("WatchDomain", &["File", "Process", "Port"]),
+            (
+                "WatchKind",
+                &["Created", "Modified", "Removed", "Error", "Exited", "Ready"],
+            ),
+        ];
+        for (name, variants) in watch_enums {
+            for variant in variants {
+                cx.variant_owner
+                    .insert((*variant).to_string(), name.to_string());
+            }
+            cx.enum_variants.insert(
+                name.to_string(),
+                variants
+                    .iter()
+                    .map(|variant| ((*variant).to_string(), VariantPayload::Unit))
+                    .collect(),
+            );
+            cx.cloneable.insert(name.to_string());
+        }
     }
     if !cx.core_imports.values().any(|module| module == Syntax::CORE_EMAIL_MODULE) {
         return;

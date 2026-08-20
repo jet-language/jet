@@ -745,6 +745,10 @@ pub(crate) fn tir_enum_lit_prefix(cx: &Cx, type_name: &str, variant: &str) -> St
     if matches!(type_name, "TextWidthAmbiguous" | "TextWidthControls") {
         return format!("{}jet_std::{}::{}", cx.root_prefix, type_name, variant);
     }
+    // stdlib-api-laws D4: `WatchEvent`'s two field enums — same shape.
+    if matches!(type_name, "WatchDomain" | "WatchKind") {
+        return format!("{}jet_std::{}::{}", cx.root_prefix, type_name, variant);
+    }
     if type_name == crate::Syntax::DURATION_UNIT_TYPE {
         return format!("{}jet_std::DurationUnit::{}", cx.root_prefix, variant);
     }

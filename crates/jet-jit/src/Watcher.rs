@@ -11,14 +11,23 @@ use std::rc::Rc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use crate::Marshal::{alloc_string, clone_string, result_err_msg, result_ok};
 
+/// stdlib-api-laws D4 (#2055): `domain`/`kind` are the Prelude's `WatchDomain`/
+/// `WatchKind` enums. This host keeps the variant NAME and marshals it through
+/// the Prelude-derived variant table (`watch_disc`), so a discriminant here can
+/// never drift from `Prelude/CoreLib/JetStd/CommonTypes.rs`.
 #[derive(Clone)]
 struct WatchEvent {
-    domain: String,
-    kind: String,
+    domain: &'static str,
+    kind: &'static str,
     path: String,
     detail: String,
     pid: i64,
     port: i64,
+}
+
+fn watch_disc(enum_name: &str, variant: &str) -> i64 {
+    crate::types_meta::prelude_enum_variant_index(enum_name, variant)
+        .expect("Prelude watch enum variants must be registered")
 }
 
 type Snapshot = BTreeMap<String, (u64, i64, bool)>;
@@ -68,15 +77,15 @@ thread_local! {
 
 fn event_record(ev: &WatchEvent) -> i64 {
     Concurrency::with_runtime_mut(|rt| {
-        let d = rt.heap.alloc_string(ev.domain.clone());
-        let k = rt.heap.alloc_string(ev.kind.clone());
         let p = rt.heap.alloc_string(ev.path.clone());
         let det = rt.heap.alloc_string(ev.detail.clone());
         let rec = rt.heap.alloc_record(6);
-        // String fields must be JetVal::String (`record_set_string`); `struct_get_str`
-        // rejects Int-tagged string ids.
-        let _ = rt.heap.record_set_string(rec, 0, d);
-        let _ = rt.heap.record_set_string(rec, 1, k);
+        // `domain`/`kind` are payload-free Core enums: the packed i64 ABI is the
+        // Prelude declaration-order discriminant. String fields must be
+        // JetVal::String (`record_set_string`); `struct_get_str` rejects
+        // Int-tagged string ids.
+        let _ = rt.heap.record_set_int(rec, 0, watch_disc("WatchDomain", ev.domain));
+        let _ = rt.heap.record_set_int(rec, 1, watch_disc("WatchKind", ev.kind));
         let _ = rt.heap.record_set_string(rec, 2, p);
         let _ = rt.heap.record_set_string(rec, 3, det);
         let _ = rt.heap.record_set_int(rec, 4, ev.pid);
@@ -89,13 +98,11 @@ fn list_from_events(events: Vec<WatchEvent>) -> i64 {
     Concurrency::with_runtime_mut(|rt| {
         let list = rt.heap.alloc_empty_list();
         for ev in &events {
-            let d = rt.heap.alloc_string(ev.domain.clone());
-            let k = rt.heap.alloc_string(ev.kind.clone());
             let p = rt.heap.alloc_string(ev.path.clone());
             let det = rt.heap.alloc_string(ev.detail.clone());
             let rec = rt.heap.alloc_record(6);
-            let _ = rt.heap.record_set_string(rec, 0, d);
-            let _ = rt.heap.record_set_string(rec, 1, k);
+            let _ = rt.heap.record_set_int(rec, 0, watch_disc("WatchDomain", ev.domain));
+            let _ = rt.heap.record_set_int(rec, 1, watch_disc("WatchKind", ev.kind));
             let _ = rt.heap.record_set_string(rec, 2, p);
             let _ = rt.heap.record_set_string(rec, 3, det);
             let _ = rt.heap.record_set_int(rec, 4, ev.pid);
@@ -176,10 +183,10 @@ fn watch_snapshot(root: &str) -> Result<Snapshot, String> {
     Ok(out)
 }
 
-fn watch_event(kind: &str, path: &str, is_dir: bool) -> WatchEvent {
+fn watch_event(kind: &'static str, path: &str, is_dir: bool) -> WatchEvent {
     WatchEvent {
-        domain: "file".to_string(),
-        kind: kind.to_string(),
+        domain: "File",
+        kind,
         path: path.to_string(),
         detail: if is_dir { "dir" } else { "file" }.to_string(),
         pid: 0,
@@ -198,7 +205,9 @@ fn watch_diff(old: &Snapshot, new: &Snapshot) -> Vec<WatchEvent> {
     }
     for (path, facts) in old {
         if !new.contains_key(path) {
-            out.push(watch_event("Deleted", path, facts.2));
+            // `WatchKind::Removed` — this host said `"Deleted"`, a name the
+            // Prelude never emitted, while both fields were untyped strings.
+            out.push(watch_event("Removed", path, facts.2));
         }
     }
     out
@@ -273,8 +282,8 @@ fn poll_watch(handle: i64) -> Vec<WatchEvent> {
                     events
                 }
                 Err(e) => vec![WatchEvent {
-                    domain: "file".to_string(),
-                    kind: "Error".to_string(),
+                    domain: "File",
+                    kind: "Error",
                     path: root.clone(),
                     detail: e,
                     pid: 0,
@@ -286,8 +295,8 @@ fn poll_watch(handle: i64) -> Vec<WatchEvent> {
                 if state.seen_ready && !alive {
                     state.seen_ready = false;
                     vec![WatchEvent {
-                        domain: "process".to_string(),
-                        kind: "Exited".to_string(),
+                        domain: "Process",
+                        kind: "Exited",
                         path: String::new(),
                         detail: "process exited".to_string(),
                         pid: *pid,
@@ -295,8 +304,8 @@ fn poll_watch(handle: i64) -> Vec<WatchEvent> {
                     }]
                 } else if !state.seen_ready && !alive {
                     vec![WatchEvent {
-                        domain: "process".to_string(),
-                        kind: "Exited".to_string(),
+                        domain: "Process",
+                        kind: "Exited",
                         path: String::new(),
                         detail: "process is not running".to_string(),
                         pid: *pid,
@@ -311,8 +320,8 @@ fn poll_watch(handle: i64) -> Vec<WatchEvent> {
                 if ready && !state.seen_ready {
                     state.seen_ready = true;
                     vec![WatchEvent {
-                        domain: "port".to_string(),
-                        kind: "Ready".to_string(),
+                        domain: "Port",
+                        kind: "Ready",
                         path: String::new(),
                         detail: format!("{host}:{port}"),
                         pid: 0,

@@ -8,6 +8,28 @@ use core.process as process
 use core.time as time
 use core.watcher as watcher
 
+// #2055: `WatchEvent.domain` and `.kind` are closed Core enums, not strings, so
+// turning one into output text is an exhaustive match with no `else` arm — a new
+// variant is a compile error here instead of silently taking a default branch.
+fn domain_label(domain: WatchDomain) => String {
+    if domain == {
+        .File -> { return "file" }
+        .Process -> { return "process" }
+        .Port -> { return "port" }
+    }
+}
+
+fn kind_label(kind: WatchKind) => String {
+    if kind == {
+        .Created -> { return "Created" }
+        .Modified -> { return "Modified" }
+        .Removed -> { return "Removed" }
+        .Error -> { return "Error" }
+        .Exited -> { return "Exited" }
+        .Ready -> { return "Ready" }
+    }
+}
+
 fn run() {
     args :: process.argv()
     if args.len() > 1 && (args.get(1) ?? "") == "--watch-child" {
@@ -24,13 +46,13 @@ fn run() {
     files :: watcher.files(root) ?? panic("watch files failed")
     callback_path :: created.to_string()
     sub :: files.on(scope, ev => {
-        if ev.path == callback_path -> print("callback {ev.domain}:{ev.kind}:recursive")
+        if ev.path == callback_path -> print("callback {domain_label(ev.domain)}:{kind_label(ev.kind)}:recursive")
     })
     fs.write(created, "hello") ?? panic("write failed")
     first :: files.poll()
     first_kind := "none"
     loop ev, first {
-        if ev.path == created.to_string() -> first_kind = ev.kind
+        if ev.path == created.to_string() -> first_kind = kind_label(ev.kind)
     }
     print("recursive file: {first_kind}")
     print("callback active: {sub.is_active()}")
@@ -48,7 +70,7 @@ fn run() {
     after_drop_events :: files.poll()
     after_drop_kind := "none"
     loop ev, after_drop_events {
-        if ev.path == after_drop.to_string() -> after_drop_kind = ev.kind
+        if ev.path == after_drop.to_string() -> after_drop_kind = kind_label(ev.kind)
     }
     print("scope drop file: {after_drop_kind}")
     child :: process.cmd([os.executable(), "--watch-child"]).spawn() ?? panic("child spawn failed")
@@ -69,9 +91,9 @@ fn run() {
     port_kind := "none"
     loop ev, combined {
         if ev.domain == {
-            "process" -> process_kind = ev.kind
-            "port" -> port_kind = ev.kind
-            else -> {}
+            .File -> {}
+            .Process -> process_kind = kind_label(ev.kind)
+            .Port -> port_kind = kind_label(ev.kind)
         }
     }
     print("process event: {process_kind}")

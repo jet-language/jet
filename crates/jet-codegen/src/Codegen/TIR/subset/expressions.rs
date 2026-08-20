@@ -743,6 +743,17 @@ fn expr_in_subset_inner(e: &Expr, cx: &Cx, locals: &HashSet<String>) -> bool {
             if type_name == "TextWidthControls" {
                 return matches!(variant.as_str(), "Zero" | "Reject");
             }
+            // stdlib-api-laws D4: `WatchEvent`'s two field enums, always
+            // covered — every variant is unit (no payload args to check).
+            if type_name == "WatchDomain" {
+                return matches!(variant.as_str(), "File" | "Process" | "Port");
+            }
+            if type_name == "WatchKind" {
+                return matches!(
+                    variant.as_str(),
+                    "Created" | "Modified" | "Removed" | "Error" | "Exited" | "Ready"
+                );
+            }
             if type_name == crate::Syntax::DURATION_UNIT_TYPE {
                 return crate::Syntax::DURATION_UNITS.contains(&variant.as_str());
             }

@@ -241,7 +241,8 @@ pub(crate) fn core_type_known(name: &str) -> bool {
         | "StdinHandle" | "StdinLines" | "Stdout" | "Stderr"
         // D-LSDIR1/D-FSOPS1/D-WATCH-SCOPE1: filesystem and watcher values.
         | "DirEntry" | "Stat" | "WalkEntry" | "TempDir" | "TempFile" | "FileLock"
-        | "WatchEvent" | "WatchHandle" | "WatchSet"
+        // stdlib-api-laws D4: `WatchEvent.domain`/`.kind` are closed enums.
+        | "WatchEvent" | "WatchDomain" | "WatchKind" | "WatchHandle" | "WatchSet"
         // D-DATA-SURFACE1=A / D-DATA-STATUS1=A: data summary/status values.
         | "DataGroup" | "DataLineOptions" | "DataColumn" | "DataStatus" | "DataSummary"
         | "DataLimits" | "DataError" | "DataErrorKind" | "DataStream" | "DataPivotCell"
@@ -1252,7 +1253,9 @@ pub(crate) fn core_struct_field(type_name: &str, field: &str) -> Option<Type> {
         ("WalkEntry", "is_dir") => Some(Type::Bool),
         ("WalkEntry", "depth") => Some(Type::Int),
         ("TempDir" | "TempFile" | "FileLock", "path") => Some(Type::String),
-        ("WatchEvent", "domain" | "kind" | "path" | "detail") => Some(Type::String),
+        ("WatchEvent", "domain") => Some(Type::Named("WatchDomain".to_string())),
+        ("WatchEvent", "kind") => Some(Type::Named("WatchKind".to_string())),
+        ("WatchEvent", "path" | "detail") => Some(Type::String),
         ("WatchEvent", "pid" | "port") => Some(Type::Int),
         // D-RENDERTGT2=A (c133 M1): UI geometry fields.
         ("Point", "x" | "y") => Some(Type::Float),
@@ -1703,6 +1706,28 @@ pub(crate) fn core_text_width_variants(
     let names: &[&str] = match enum_name {
         "TextWidthAmbiguous" => &["Narrow", "Wide"],
         "TextWidthControls" => &["Zero", "Reject"],
+        _ => return None,
+    };
+    let mut m = std::collections::HashMap::new();
+    for name in names {
+        m.insert((*name).to_string(), (zero, VariantPayload::Unit));
+    }
+    Some(m)
+}
+
+/// stdlib-api-laws D4 (#2055): `WatchEvent`'s two closed field enums
+/// (`.File`/`.Process`/`.Port`, `.Created`/`.Modified`/`.Removed`/`.Error`/
+/// `.Exited`/`.Ready`) — synthesised the same way as `TextWidth`'s pair, so a
+/// switch over `ev.domain`/`ev.kind` is exhaustive without a wildcard.
+pub(crate) fn core_watch_variants(
+    enum_name: &str,
+) -> Option<std::collections::HashMap<String, (crate::Diagnostics::Span, crate::AST::VariantPayload)>> {
+    use crate::AST::VariantPayload;
+    use crate::Diagnostics::Span;
+    let zero = Span::new(0, 0);
+    let names: &[&str] = match enum_name {
+        "WatchDomain" => &["File", "Process", "Port"],
+        "WatchKind" => &["Created", "Modified", "Removed", "Error", "Exited", "Ready"],
         _ => return None,
     };
     let mut m = std::collections::HashMap::new();

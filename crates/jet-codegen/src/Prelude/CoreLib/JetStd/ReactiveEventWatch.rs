@@ -1804,8 +1804,8 @@
                         events
                     }
                     Err(e) => vec![WatchEvent {
-                        domain: "file".to_string(),
-                        kind: "Error".to_string(),
+                        domain: WatchDomain::File,
+                        kind: WatchKind::Error,
                         path: root.clone(),
                         detail: format!("{:?}", e),
                         pid: 0,
@@ -1817,8 +1817,8 @@
                     if state.seen_ready && !alive {
                         state.seen_ready = false;
                         vec![WatchEvent {
-                            domain: "process".to_string(),
-                            kind: "Exited".to_string(),
+                            domain: WatchDomain::Process,
+                            kind: WatchKind::Exited,
                             path: String::new(),
                             detail: "process exited".to_string(),
                             pid,
@@ -1826,8 +1826,8 @@
                         }]
                     } else if !state.seen_ready && !alive {
                         vec![WatchEvent {
-                            domain: "process".to_string(),
-                            kind: "Exited".to_string(),
+                            domain: WatchDomain::Process,
+                            kind: WatchKind::Exited,
                             path: String::new(),
                             detail: "process is not running".to_string(),
                             pid,
@@ -1842,8 +1842,8 @@
                     if ready && !state.seen_ready {
                         state.seen_ready = true;
                         vec![WatchEvent {
-                            domain: "port".to_string(),
-                            kind: "Ready".to_string(),
+                            domain: WatchDomain::Port,
+                            kind: WatchKind::Ready,
                             path: String::new(),
                             detail: format!("{}:{}", host, port),
                             pid: 0,
@@ -1953,23 +1953,25 @@
         let mut out = Vec::new();
         for (path, facts) in new {
             match old.get(path) {
-                None => out.push(jet_watch_event("Created", path, facts.2)),
-                Some(prev) if prev != facts => out.push(jet_watch_event("Modified", path, facts.2)),
+                None => out.push(jet_watch_event(WatchKind::Created, path, facts.2)),
+                Some(prev) if prev != facts => {
+                    out.push(jet_watch_event(WatchKind::Modified, path, facts.2))
+                }
                 _ => {}
             }
         }
         for (path, facts) in old {
             if !new.contains_key(path) {
-                out.push(jet_watch_event("Removed", path, facts.2));
+                out.push(jet_watch_event(WatchKind::Removed, path, facts.2));
             }
         }
         out
     }
 
-    fn jet_watch_event(kind: &str, path: &str, is_dir: bool) -> WatchEvent {
+    fn jet_watch_event(kind: WatchKind, path: &str, is_dir: bool) -> WatchEvent {
         WatchEvent {
-            domain: "file".to_string(),
-            kind: kind.to_string(),
+            domain: WatchDomain::File,
+            kind,
             path: path.to_string(),
             detail: if is_dir { "dir" } else { "file" }.to_string(),
             pid: 0,

@@ -976,9 +976,16 @@ use core.watcher as watcher
 fn run() {
     scope :: event.scope()
     files :: watcher.files("src") ?? return
-    files.on(scope, (ev) => { print("{ev.kind}: {ev.path}") })
+    files.on(scope, (ev) => { print("changed: {ev.path}") })
     loop ev; files.poll() {
-        print(ev.kind)
+        if ev.kind == {
+            .Created -> print("created {ev.path}")
+            .Modified -> print("modified {ev.path}")
+            .Removed -> print("removed {ev.path}")
+            .Error -> print("watch error: {ev.detail}")
+            .Exited -> print("process {ev.pid} exited")
+            .Ready -> print("port {ev.port} ready")
+        }
     }
 }
 ```
@@ -995,8 +1002,10 @@ fn run() {
 | `set.add(handle)` | nothing | Add a handle to a set |
 | `set.poll()` / `set.events()` | `[WatchEvent]` | Poll all handles |
 
-`WatchEvent` fields are `domain` (`"file"`, `"process"`, `"port"`), `kind`,
-`path`, `detail`, `pid`, and `port`. Example:
+`WatchEvent` fields are `domain: WatchDomain` (`.File`, `.Process`, `.Port`),
+`kind: WatchKind` (`.Created`, `.Modified`, `.Removed`, `.Error`, `.Exited`,
+`.Ready`), `path`, `detail`, `pid`, and `port`. Both are closed enums, so a
+`if ev.kind == { … }` match over every variant needs no `else` arm. Example:
 `examples/features/io/watcher.jet`.
 
 ---

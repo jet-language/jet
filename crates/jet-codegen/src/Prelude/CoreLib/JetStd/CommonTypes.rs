@@ -484,10 +484,30 @@
         pub depth: i64,
     }
 
+    // D-WATCH-SCOPE1 + stdlib-api-laws D4: the watch domain and event kind are
+    // closed sets, so they are dot-literal Core enums (same mechanism as
+    // `ProcessStreamMode` above), not bare strings a consumer has to spell right.
+    #[derive(Clone, Copy, Debug, PartialEq)]
+    pub enum WatchDomain {
+        File,
+        Process,
+        Port,
+    }
+
+    #[derive(Clone, Copy, Debug, PartialEq)]
+    pub enum WatchKind {
+        Created,
+        Modified,
+        Removed,
+        Error,
+        Exited,
+        Ready,
+    }
+
     #[derive(Clone, Debug, PartialEq)]
     pub struct WatchEvent {
-        pub domain: String,
-        pub kind: String,
+        pub domain: WatchDomain,
+        pub kind: WatchKind,
         pub path: String,
         pub detail: String,
         pub pid: i64,
@@ -2508,7 +2528,7 @@
     impl super::JetShow for WatchEvent {
         fn jet_show(&self) -> String {
             format!(
-                "WatchEvent {{ domain: {}, kind: {}, path: {}, detail: {} }}",
+                "WatchEvent {{ domain: {:?}, kind: {:?}, path: {}, detail: {} }}",
                 self.domain, self.kind, self.path, self.detail
             )
         }

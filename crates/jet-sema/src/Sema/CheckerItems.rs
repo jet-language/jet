@@ -947,7 +947,15 @@ impl<'a> Checker<'a> {
                         *param_conv,
                     );
                     let reported = self.check_type_assignable(param_ty, &arg_ty, arg.expr.span());
-                    if !reported && arg_ty != *param_ty {
+                    // S48: a concrete value meets a trait-typed parameter; the
+                    // box is materialised at lowering, not spelled by the caller,
+                    // and it owns the value (same rule as a trait-object list
+                    // element — `~c` keeps a caller's copy, never a silent one).
+                    let boxes_as_trait = self.trait_slot_accepts(param_ty, &arg_ty);
+                    if boxes_as_trait {
+                        self.note_move_if_direct_ident(&arg.expr);
+                    }
+                    if !reported && arg_ty != *param_ty && !boxes_as_trait {
                         self.diags.push(Diagnostic::error(
                             "E0112",
                             format!(
@@ -1577,6 +1585,10 @@ impl<'a> Checker<'a> {
         if matches!(enum_name, "TextWidthAmbiguous" | "TextWidthControls") {
             return true;
         }
+        // stdlib-api-laws D4: `WatchEvent`'s two field enums.
+        if matches!(enum_name, "WatchDomain" | "WatchKind") {
+            return true;
+        }
         if enum_name == Syntax::DURATION_UNIT_TYPE {
             return true;
         }
@@ -1651,6 +1663,12 @@ impl<'a> Checker<'a> {
         // their variant table so `.Narrow`/`.Wide`/`.Zero`/`.Reject` dot-literals
         // resolve (D-ENUMDOT2), same mechanism as `ProcessStreamMode`.
         if let Some(v) = core_text_width_variants(enum_name) {
+            return Some(v);
+        }
+        // stdlib-api-laws D4: `WatchDomain`/`WatchKind` — same mechanism, so
+        // `.File`/`.Created` dot-literals resolve and both switches are
+        // exhaustive without a wildcard.
+        if let Some(v) = core_watch_variants(enum_name) {
             return Some(v);
         }
         if let Some(v) = core_duration_unit_variants(enum_name) {

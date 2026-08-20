@@ -110,6 +110,8 @@ fn write_prelude_enum_meta(manifest: &PathBuf) {
         ("TextWidthAmbiguous", "../jet-codegen/src/Prelude/CoreLib/JetStd/Open.rs", "TextWidthAmbiguous"),
         ("TextWidthControls", "../jet-codegen/src/Prelude/CoreLib/JetStd/Open.rs", "TextWidthControls"),
         ("TerminalMode", "../jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs", "TerminalMode"),
+        ("WatchDomain", "../jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs", "WatchDomain"),
+        ("WatchKind", "../jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs", "WatchKind"),
         ("Key", "../jet-codegen/src/Prelude/Core/TermKey.rs", "JetKey"),
         ("EncodingFormat", "../jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs", "EncodingFormat"),
         ("EncodingErrorKind", "../jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs", "EncodingErrorKind"),
