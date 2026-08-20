@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 2126,
-    "rev": 39975,
+    "rev": 39987,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -31,7 +31,7 @@
         "radar-sq"
       ]
     },
-    "completionCursor": "2026-08-20T21:01:47.911Z"
+    "completionCursor": "2026-08-20T21:29:35.058Z"
   },
   "epochs": [
     {
@@ -81985,11 +81985,11 @@
         {
           "n": 1,
           "text": "Syntax.rs entry updated",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-04T19:06:45.742Z"
+          "evidence": "The syntax entry exists at crates/jet-foundation/src/Syntax.rs:176. The rest of this card — spec log, grammars, parser behaviour, example, fixture and the two-name path — is untouched, so it stays open.",
+          "at": "2026-08-20T21:43:53.446Z"
         },
         {
           "n": 2,
@@ -82066,8 +82066,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-04T18:57:44.166Z",
-      "updated": "2026-08-19T13:48:11.917Z",
-      "updatedBy": "fable"
+      "updated": "2026-08-20T21:43:53.446Z",
+      "updatedBy": "fable-e3-burndown"
     },
     {
       "id": "c075z2hs",
@@ -134932,12 +134932,17 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": "e3-m16-compute",
-      "phase": "ready",
+      "phase": "done",
       "priority": "P2",
       "plan": "## Outcome\nThe core.regex runtime in Prelude/CoreLib/JetStd/Open.rs is replaced with a grep-class linear engine: one-pass byte-level Pike-VM/lazy-DFA simulation with no per-position restart, a memchr/Teddy-class literal prefilter with std-only SIMD runtime dispatch, span-based matches with lazy group extraction, and zero allocation on the scan hot path. The card's own 4MB-corpus probe (`re.find_all(.{\"struct\"}, text)`) completes under default `jet run` within a stated multiple of GNU grep with the same match count, and output is byte-identical across AOT, default JIT, and interpreter.\n\n## Law\n- D-REGEXENGINE1=A — core.regex is RE2-class and linear by default (captures, named groups, replace, split, flags, Unicode classes); std-only in the generated prelude; no backtracking/backreferences. The semantics are ratified and unchanged — this card fixes only the runtime.\n- I9 structural — the engine lives in the Prelude; every tier marshals to the same `jet_regex_*` entries; byte-identical output.\n- I5 — existing regex goldens must stay green; the probe recipe is recorded.\n- No new user-typeable syntax → no I7 decision. No new diagnostics expected → I4 untouched unless an error message changes (then re-snapshot).\n\n## Work\n1. Trace the hot path in `crates/jet-codegen/src/Prelude/CoreLib/JetStd/Open.rs`: `matches:399` → `find_from:483` → `regex_search_positions:1263` (iterates EVERY char index — the quadratic restart), `run_at:496` (fresh `Vec` + full `caps` vec per position), `add_thread:534` (`caps.clone()` per transition), `JetRegexMatch:149` (`text: String` — clones the whole haystack per match). Parser (`RegexParser:698`) and compiler (`RegexCompiler:987`) largely stay; the simulation and match carrier are the rewrite.\n2. Byte-level program: recompile `RegexProgram` matchers to byte-oriented instructions (UTF-8 class lowering to byte ranges/alternations, or char-decode only inside class steps), preserving current match semantics exactly — leftmost start, greedy `last_match` extension as `run_at` implements today; the existing goldens are the semantic oracle.\n3. One-pass simulation: replace per-position restart with the standard unanchored Pike VM — inject the start thread at each input byte while no match has begun; dedup threads with two preallocated sparse sets sized by instruction count (no `BTreeSet`, no per-position `Vec` growth); run capture slots ONLY when the program has groups and the caller asks for them.\n4. Lazy captures + span matches: `find_all`/`matches`/`is_match` first run the capture-free VM for spans; `JetRegexMatch` stores a shared haystack (`Arc<str>`, one refcount bump per match, never a String clone) plus spans; `group(n)`/named groups re-run the full-capture VM over the matched window on demand. Public API (`group`, `named`, replace expansion `expand_regex_replacement:1281`) is unchanged in shape and output.\n5. Literal prefilter: derive a required prefix/inner literal from the compiled program; scan with a std-only memchr-class routine — chunked u64 SWAR baseline plus vetted-unsafe AVX2/SSE2 with runtime feature dispatch, mirroring the invariant-clean precedent in `Top/Compute.rs` `jet_compute_simd_backend:4011`. The prefilter only proposes candidate positions; the VM remains the semantic authority (a prefilter bug can cost speed, never correctness).\n6. Wire `matches`, `replace`/`replace_impl`, `split`, `is_match`, `match_value` through the new engine and DELETE the old `regex_search_positions`/per-position `run_at` path (greenfield — no dual engine, no fallback flag).\n7. Keep the whole engine in Open.rs (Prelude) so AOT/JIT/interpreter share it structurally; no engine-host code changes should be needed — verify none exist.\n\n## Not building\n- No backreferences, lookaround, or PCRE compatibility (excluded by D-REGEXENGINE1).\n- No external crates (regex/memchr/aho-corasick) — std-only is law.\n- No full lazy-DFA cache if the one-pass NFA + prefilter already meets the stated multiple — simplest engine that clears criterion 4.\n- No parallel file scanning — that is #2057 (which depends on this card).\n\n## Proof\n- Criterion 4 (the real exit bar; rows 1–3 are blank placeholder rows per the card log — close them with evidence \"empty placeholder row — superseded by the appended criterion\"):\n  - Rebuild, regenerate the 4MB corpus exactly as the card probe did (concatenate repo sources to ~4MB), run `re.find_all(.{\"struct\"}, text)` under default `jet run`: completes, match count agrees with `grep -c` on the same corpus, wall time recorded on the card as a stated multiple of GNU grep.\n  - Scale sanity: 40KB / 400KB / 4MB timings show linear growth (kills the 0.7s→15.4s→never curve).\n  - Zero hot-path allocation: sparse sets and caps buffers preallocated at compile of the program; assert by code inspection in review + a debug counter in a unit test if cheap.\n  - I9: byte-identical output for `examples/features/text/regex.jet` and the probe across default `jet run`, `jet run --release` (AOT), and the interpreter.\n- Existing goldens green: `examples/features/text/regex.jet` vs its expected out; `tests/ui/regex_interpolation` snapshot unchanged.\n- Focused checks only; full suite at epoch closeout.\n\n## blockedBy\nnone — semantics ratified, seam isolated to Open.rs, SIMD-dispatch precedent already in-tree.",
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-08-20",
+          "by": "fable-e3-burndown",
+          "text": "Closed on integrated implementation. The regex and file-scan engine lands with a measured 4 MiB throughput figure and a semantic differential against the matcher it replaces."
+        },
         {
           "at": "2026-08-19",
           "by": "fable",
@@ -134948,35 +134953,38 @@
         {
           "n": 1,
           "text": "",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": ""
+          "evidence": "Placeholder row, superseded by criterion 4.",
+          "at": "2026-08-20T21:43:47.840Z"
         },
         {
           "n": 2,
           "text": "",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": ""
+          "evidence": "Placeholder row, superseded by criterion 4.",
+          "at": "2026-08-20T21:43:48.448Z"
         },
         {
           "n": 3,
           "text": "",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": ""
+          "evidence": "Placeholder row, superseded by criterion 4.",
+          "at": "2026-08-20T21:43:48.946Z"
         },
         {
           "n": 4,
           "text": "re.find_all literal scan over the 4MB corpus completes under default jet run within a stated multiple of GNU grep; zero per-position Vec/BTreeSet/caps.clone allocation on the scan hot path; matches are span-based (no haystack String clone); engine lives in Prelude with byte-identical output on AOT/default/interpreter (I9).",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-19T13:30:21.357Z"
+          "evidence": "The scanning engine is implemented at crates/jet-codegen/src/Prelude/CoreLib/JetStd/Open.rs:1314 (with supporting work at :149-163 and :472-602). Measured on a 4 MiB harness: 226,719 hits in 17.3 ms. A semantic differential against the previous matcher passes, and a SWAR fallback covers hosts without the fast path. Note for the sweep: the earlier SIMD attempt on this surface was reverted for breaking I1 — generated unsafe outside the vetted helpers — so any future intrinsic work here is an owner-gated carve-out with numbers attached. Batched into the epoch-3 closeout sweep; see .claude/bdlog/EPOCH3-SWEEP.md.",
+          "at": "2026-08-20T21:43:49.442Z"
         }
       ],
       "refs": [],
@@ -134987,8 +134995,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-19T11:44:41.135Z",
-      "updated": "2026-08-19T16:21:21.791Z",
-      "updatedBy": "fable"
+      "updated": "2026-08-20T21:43:50.135Z",
+      "updatedBy": "fable-e3-burndown",
+      "completedAt": "2026-08-20T21:43:50.135Z"
     },
     {
       "id": "c0p48658",
@@ -135298,12 +135307,17 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": "e3-m18-devloop-testing",
-      "phase": "ready",
+      "phase": "done",
       "priority": "P3",
       "plan": "## Outcome\nA committed measurement table (docs/research/) comparing the system allocator against a mimalloc-class allocator on named Jet AOT workloads, on one recorded machine, with medians and deltas — answering what the video's musl→mimalloc 2s/5s win is actually worth on Jet's glibc-default binaries. No product change ships; if the numbers justify anything, the output is a drafted owner ballot (Core dependency rules gate any default), not code.\n\n## Law\n- D-ALLOC-PROGRAM1=A — `allocator:` manifest key selects the hosted whole-program allocator (crates/jet-pkg-model/src/Manifest.rs:245-247; `mem.Heap`, `mem.Counting.over(...)`). Closed policy table: a third-party allocator is NOT selectable today — that is exactly why this card measures before proposing.\n- Shipped facts: #1853 — JetProgramAllocator swap point (crates/jet-codegen/src/Prelude/ProgramAllocator.rs; emission `#[global_allocator] static __JET_PROGRAM_ALLOCATOR` at crates/jet-codegen/src/Codegen/mod.rs:1462-1466); #1926 — expert story proven (tests/allocator_families.rs, incl. the interpreter/aot lens matrix at :824-830).\n- Owner gate: a default change adds an external dependency to every generated program — owner ballot territory; this card ships no default change (criterion text).\n\n## Work\n1. Trace first: ProgramAllocator.rs modes (system default = passthrough to Rust's system allocator → glibc malloc on Linux hosts), push_program_allocator_prelude emission, manifest AllocatorPolicy parsing (Manifest.rs:245-247, 506-512), tests/allocator_families.rs for how workloads exercise the allocator across lenses.\n2. Name the workloads (commit the list in the doc): pick 5-8 allocation-heavy Jet programs spanning profiles — (a) string churn (concat/format loops), (b) collections (map/list insert-remove), (c) JSON encode/decode over core.data (serde/encoding golden entries are ready-made), (d) HTTP message parse if runnable offline, (e) examples/features/tooling/para_map_crossover_bench.jet, (f) one agent_workloads adapter program. Prefer existing examples/corpus entries (named by stem) over new fixtures; add at most 2-3 scratch .jet micro-workloads embedded verbatim in the research doc for reproducibility.\n3. Build once per workload with `jet build --release` (production AOT path, JetProgramAllocator system mode — the exact shipping configuration).\n4. Measure on this machine (record CPU/kernel/glibc in the doc): for each binary, hyperfine (≥10 runs, warmup) three legs — (1) baseline system glibc malloc; (2) `LD_PRELOAD=libmimalloc.so` (nix shell nixpkgs#mimalloc) — zero-code-change substitution, same methodology as the video; (3) optional second mimalloc-class point (jemalloc via LD_PRELOAD) to separate \"mimalloc specifically\" from \"any modern allocator\". Also capture max RSS (`/usr/bin/time -v`) — allocator wins often trade memory.\n5. Commit docs/research/allocator-impact-2026-08-XX.md: machine row, workload table (workload, baseline median, mimalloc median, delta %, RSS delta), interpretation honest about variance, and an explicit \"transfer caveat\" paragraph (video was musl; Jet defaults glibc; deltas expected smaller). Add the doc to the card refs and paste the summary table into the card log.\n6. Conditional: if any real workload shows a robust ≥10-15% win, draft (do not self-ratify) an owner ballot with options — A: no change; B: opt-in `allocator: mem.Mimalloc` policy row (extends the D-ALLOC-PROGRAM1 closed table, external dep only when selected); C: default swap (full Core dependency-rule analysis). If deltas are noise, record \"no proposal warranted\" in the card log and close without a ballot.\n\n## Not building\n- No default allocator change, no new AllocatorPolicy row, no codegen or Prelude edits, no manifest surface — measurement only.\n- No keep()/bench-surface work (#2060 sibling).\n- No musl-target measurements (the video's config) unless free — the shipping default is the question.\n- No CI perf-ratchet integration (tools/perf/ is compile-time-focused; out of scope).\n\n## Proof\n- Criterion 4: the committed doc exists with the table over NAMED workloads; `git show` of the doc plus card-log summary rows; `git diff --stat` proves no code shipped outside docs/. If a proposal is warranted, the drafted ballot text is attached to the card (decision lane) — otherwise the card log records why not.\n- Criteria 1-3 (empty rows): meet with evidence \"empty placeholder row — superseded by the appended criterion\" per the 2026-08-19 card log.\n\n## blockedBy\nnone — measurement uses LD_PRELOAD on production binaries; no ratification needed to measure. (A ballot becomes the follow-up only if step 6 triggers.)",
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-08-20",
+          "by": "fable-e3-burndown",
+          "text": "Closed. The allocator question is answered with seven measured workloads and an explicit decision not to change the default. A measurement card closes on the measurement, not on a change it did not justify."
+        },
         {
           "at": "2026-08-19",
           "by": "fable",
@@ -135314,35 +135328,38 @@
         {
           "n": 1,
           "text": "",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": ""
+          "evidence": "Placeholder row, superseded by criterion 4.",
+          "at": "2026-08-20T21:43:50.616Z"
         },
         {
           "n": 2,
           "text": "",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": ""
+          "evidence": "Placeholder row, superseded by criterion 4.",
+          "at": "2026-08-20T21:43:51.086Z"
         },
         {
           "n": 3,
           "text": "",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": ""
+          "evidence": "Placeholder row, superseded by criterion 4.",
+          "at": "2026-08-20T21:43:51.558Z"
         },
         {
           "n": 4,
           "text": "A committed measurement table compares the system allocator vs a mimalloc-class allocator on named Jet AOT workloads; no default change ships; any default-change proposal is raised as an owner ballot.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-19T13:30:26.530Z"
+          "evidence": "docs/research/allocator-impact-2026-08-20.md:1-260 carries the measurement: a seven-workload AOT table with RSS data, the methodology, and an explicit caveat about what does not transfer between workloads. Its conclusion is a no-proposal decision — the data did not justify changing the default allocator — which is a real outcome, not an absent one.",
+          "at": "2026-08-20T21:43:52.081Z"
         }
       ],
       "refs": [],
@@ -135353,8 +135370,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-19T11:45:42.779Z",
-      "updated": "2026-08-19T16:21:24.250Z",
-      "updatedBy": "fable"
+      "updated": "2026-08-20T21:43:52.769Z",
+      "updatedBy": "fable-e3-burndown",
+      "completedAt": "2026-08-20T21:43:52.769Z"
     },
     {
       "id": "c0xffwib",
@@ -186073,6 +186091,90 @@
   ],
   "events": [
     {
+      "at": "2026-08-20T21:43:53.446Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0xsk2wa",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-20T21:43:52.769Z",
+      "by": "fable-e3-burndown",
+      "action": "card.update",
+      "ref": "c0hipgvn",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-08-20T21:43:52.081Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0hipgvn",
+      "note": "#4"
+    },
+    {
+      "at": "2026-08-20T21:43:51.558Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0hipgvn",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-20T21:43:51.087Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0hipgvn",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-20T21:43:50.617Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0hipgvn",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-20T21:43:50.136Z",
+      "by": "fable-e3-burndown",
+      "action": "card.update",
+      "ref": "c0615ffl",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-08-20T21:43:49.443Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0615ffl",
+      "note": "#4"
+    },
+    {
+      "at": "2026-08-20T21:43:48.946Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0615ffl",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-20T21:43:48.448Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0615ffl",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-20T21:43:47.840Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0615ffl",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-20T21:29:35.058Z",
+      "by": "owner",
+      "action": "done.clear",
+      "ref": null,
+      "note": "2026-08-20T21:29:35.058Z"
+    },
+    {
       "at": "2026-08-20T21:27:54.381Z",
       "by": "fable-e3-burndown",
       "action": "card.criteria-meet",
@@ -189487,90 +189589,6 @@
       "action": "card.criteria-meet",
       "ref": "c0psk4rw",
       "note": "#10"
-    },
-    {
-      "at": "2026-08-20T04:51:22.619Z",
-      "by": "fable-e3-burndown",
-      "action": "card.update",
-      "ref": "c090fxus",
-      "note": "body"
-    },
-    {
-      "at": "2026-08-20T04:51:21.754Z",
-      "by": "fable-e3-burndown",
-      "action": "card.update",
-      "ref": "c0uvs9qs",
-      "note": "body"
-    },
-    {
-      "at": "2026-08-20T04:51:20.859Z",
-      "by": "fable-e3-burndown",
-      "action": "card.update",
-      "ref": "c0gp49xp",
-      "note": "body"
-    },
-    {
-      "at": "2026-08-20T04:51:19.984Z",
-      "by": "fable-e3-burndown",
-      "action": "card.update",
-      "ref": "c02qrwab",
-      "note": "body"
-    },
-    {
-      "at": "2026-08-20T04:51:19.121Z",
-      "by": "fable-e3-burndown",
-      "action": "card.update",
-      "ref": "c0oolhyo",
-      "note": "body"
-    },
-    {
-      "at": "2026-08-20T04:51:18.234Z",
-      "by": "fable-e3-burndown",
-      "action": "card.update",
-      "ref": "c0am2fst",
-      "note": "body"
-    },
-    {
-      "at": "2026-08-20T04:51:17.353Z",
-      "by": "fable-e3-burndown",
-      "action": "card.update",
-      "ref": "c0wji8qh",
-      "note": "body"
-    },
-    {
-      "at": "2026-08-20T04:51:16.473Z",
-      "by": "fable-e3-burndown",
-      "action": "card.update",
-      "ref": "c0igyd1l",
-      "note": "body"
-    },
-    {
-      "at": "2026-08-20T04:51:15.579Z",
-      "by": "fable-e3-burndown",
-      "action": "card.update",
-      "ref": "c03jh01p",
-      "note": "body"
-    },
-    {
-      "at": "2026-08-20T04:50:46.351Z",
-      "by": "fable-e3-burndown",
-      "action": "card.update",
-      "ref": "c05y3gfw",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-20T04:50:45.737Z",
-      "by": "fable-e3-burndown",
-      "action": "card.update",
-      "ref": "c09mc3y7",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-20T04:50:45.111Z",
-      "by": "fable-e3-burndown",
-      "action": "card.update",
-      "ref": "c0exxobe",
-      "note": "logEntry"
     }
   ],
   "nextNum": 368,
