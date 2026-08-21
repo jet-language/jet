@@ -160,10 +160,81 @@ pub(super) fn sync_store_directory(path: &Path) -> std::io::Result<()> {
 /// interval. The unlocked helpers are also used by already-locked operations.
 pub fn recover_hangar(roots: &Roots) -> std::io::Result<usize> {
     super::RuntimePolicy::with_lock(&roots.root, "hangar", || {
+        Ingest::ensure_real_directory(&roots.hangar_dir(), "Hangar root")?;
         let staging = Ingest::recover_hangar_staging_unlocked(roots)?;
+        let archive = Archive::recover_archive_staging_unlocked(roots)?;
+        let leases = recover_stale_leases_unlocked(roots)?;
         let closure = Closure::recover_closure_journal_unlocked(roots)?;
-        Ok(staging + closure)
+        Ok(staging + archive + leases + closure)
     })
+}
+
+const LEASE_NAME_MAX: usize = 256;
+
+fn recover_stale_leases_unlocked(roots: &Roots) -> std::io::Result<usize> {
+    let leases = roots.root.join("leases");
+    let metadata = match fs::symlink_metadata(&leases) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(0),
+        Err(error) => return Err(error),
+    };
+    if metadata.file_type().is_symlink() || !metadata.is_dir() {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "Hangar lease directory is not a real directory; repair the path before recovery",
+        ));
+    }
+    let current = std::process::id();
+    let mut swept = 0;
+    for entry in fs::read_dir(&leases)? {
+        let entry = entry?;
+        let name = entry.file_name();
+        let text = name.to_string_lossy();
+        if text.len() > LEASE_NAME_MAX {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "Hangar lease name exceeds the recovery bound",
+            ));
+        }
+        let Some(pid) = text
+            .split('-')
+            .next()
+            .and_then(|value| value.parse::<u32>().ok())
+        else {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                format!("Hangar lease `{text}` has an invalid owner id"),
+            ));
+        };
+        if pid == current || lease_process_is_alive(pid) {
+            continue;
+        }
+        let path = entry.path();
+        let metadata = fs::symlink_metadata(&path)?;
+        if metadata.file_type().is_symlink() || metadata.is_file() {
+            fs::remove_file(&path)?;
+        } else if metadata.is_dir() {
+            make_tree_writable_for_removal(&path)?;
+            fs::remove_dir_all(&path)?;
+        } else {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                format!("Hangar lease `{}` is not removable", path.display()),
+            ));
+        }
+        swept += 1;
+    }
+    Ok(swept)
+}
+
+#[cfg(unix)]
+fn lease_process_is_alive(pid: u32) -> bool {
+    PathBuf::from(format!("/proc/{pid}")).is_dir()
+}
+
+#[cfg(not(unix))]
+fn lease_process_is_alive(pid: u32) -> bool {
+    pid == std::process::id()
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -482,7 +553,7 @@ fn canonicalize_local_output_unlocked(
     }
     let objects = roots.hangar_dir().join(OBJECTS_DIR);
     let destination = objects.join(digest);
-    fs::create_dir_all(&objects).map_err(|error| {
+    Ingest::ensure_real_directory(&objects, "Hangar object pool").map_err(|error| {
         std::io::Error::new(error.kind(), format!("creating canonical object directory: {error}"))
     })?;
     if source.starts_with(&objects) {
@@ -1136,19 +1207,36 @@ fn snapshot_lease(roots: &Roots, entry: &StoreEntry) -> std::io::Result<CacheLea
     use std::sync::atomic::Ordering;
 
     let leases = roots.root.join("leases");
-    fs::create_dir_all(&leases)?;
+    Ingest::ensure_real_directory(&leases, "Hangar lease directory")?;
+    let mut components = Path::new(&entry.id).components();
+    if !matches!(components.next(), Some(std::path::Component::Normal(_)))
+        || components.next().is_some()
+    {
+        return Err(std::io::Error::other(
+            "cache lease entry identity is not one path component",
+        ));
+    }
     let snapshot_root = leases.join(format!(
         "{}-{}-{}",
         std::process::id(),
         SEQ.fetch_add(1, Ordering::Relaxed),
         entry.id
     ));
-    if snapshot_root.exists() {
-        make_tree_writable_for_removal(&snapshot_root)?;
-        fs::remove_dir_all(&snapshot_root)?;
+    match fs::symlink_metadata(&snapshot_root) {
+        Ok(metadata) => {
+            if metadata.file_type().is_symlink() || !metadata.is_dir() {
+                return Err(std::io::Error::other(
+                    "cache lease snapshot is not a real directory",
+                ));
+            }
+            make_tree_writable_for_removal(&snapshot_root)?;
+            fs::remove_dir_all(&snapshot_root)?;
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => return Err(error),
     }
     if !Path::new(&entry.out).exists() {
-        fs::create_dir_all(&snapshot_root)?;
+        Ingest::ensure_real_directory(&snapshot_root, "cache lease snapshot")?;
         return Ok(CacheLease {
             files: Vec::new(),
             executables: Vec::new(),
@@ -1484,8 +1572,8 @@ pub fn realize_verified(
             .map_err(RealizeError::Store)?
         {
             Some(hit) => {
-                if let RealizeRequest::Adapter { plan, .. } = &request {
-                    validate_cached_adapter_hook(&hit.entry, plan, expectation)
+                if let RealizeRequest::Adapter { plan, table, .. } = &request {
+                    validate_cached_adapter_hook(&hit.entry, plan, table, expectation)
                         .map_err(RealizeError::Store)?;
                 }
                 return Ok(VerifiedRealization {
@@ -1532,9 +1620,9 @@ pub fn realize_verified(
             expectation,
         } => {
             let (tools, _dependency_leases) = realize_adapter_tools(roots, ctx, plan, table)?;
-            let mut realized = super::Provider::realize_adapter(plan, ctx, expectation, &tools)
+            let mut realized = super::Provider::realize_adapter(plan, ctx, expectation, &tools, table)
                 .map_err(RealizeError::Provider)?;
-            bind_adapter_hook_identity(&mut realized, plan, expectation, ctx)
+            bind_adapter_hook_identity(&mut realized, plan, table, expectation, ctx)
                 .map_err(RealizeError::Store)?;
             realized
         }
@@ -1812,6 +1900,12 @@ pub(crate) struct PreparedProfileGenerationRoot {
     witness: Lifecycle::RootWitness,
 }
 
+// Reachable today only from the `#[cfg(test)]` module beside it, so the
+// non-test build reads it as dead. It is product surface, not scaffolding:
+// it prepares a profile generation root for the atomic switch. The consuming path lands with the atomic switch, history and rollback slice, card #931; the
+// allow is scoped to this item so genuinely dead code elsewhere still fails
+// the crate's `deny(warnings)`.
+#[allow(dead_code)]
 pub(crate) fn prepare_profile_generation_root(
     roots: &Roots,
     owner: &str,
@@ -1889,6 +1983,12 @@ pub(crate) fn reconcile_external_consumer_root(
         ));
     }
     let objects = roots.hangar_dir().join(OBJECTS_DIR);
+    let objects_metadata = fs::symlink_metadata(&objects)?;
+    if objects_metadata.file_type().is_symlink() || !objects_metadata.is_dir() {
+        return Err(std::io::Error::other(
+            "external consumer target pool is not a real Hangar directory",
+        ));
+    }
     for target in &targets {
         let metadata = fs::symlink_metadata(objects.join(target));
         if target.len() != 71
@@ -1907,47 +2007,29 @@ pub(crate) fn reconcile_external_consumer_root(
         "external-consumer:{consumer}:{}",
         SHA256::sha256_hex(key.as_bytes())
     ))?;
-    let expected_targets = targets.iter().cloned().collect::<BTreeSet<_>>();
-    let snapshot = Lifecycle::snapshot(roots)?;
-    let (incarnation, resume) = match snapshot.roots.get(&id) {
-        Some(root) => {
-            if root.identity.kind != Lifecycle::RootKind::ExternalConsumer
-                || root.identity.producer.as_str() != consumer
-                || root.phase == Lifecycle::RootPhase::Tombstoned
-            {
-                return Err(std::io::Error::other(
-                    "external consumer root disagrees with immutable identity",
-                ));
-            }
-            if root.identity.witness.as_str() == witness && root.targets == expected_targets {
-                if root.phase == Lifecycle::RootPhase::Committed {
-                    return Ok(None);
-                }
-                (root.identity.incarnation.get(), true)
-            } else {
-                return Err(std::io::Error::other(
-                    "external consumer root cannot replace an immutable publication",
-                ));
-            }
-        }
-        None => (1, false),
-    };
     let witness = Lifecycle::RootWitness::new(witness)?;
-    let incarnation = Lifecycle::Incarnation::new(incarnation)?;
-    if !resume {
-        let identity = Lifecycle::RootIdentity::new(
-            Lifecycle::RootKind::ExternalConsumer,
-            id.clone(),
-            Lifecycle::ProducerId::new(consumer)?,
-            incarnation,
-            witness.clone(),
-        );
-        Lifecycle::prepare(
-            roots,
-            identity,
-            targets,
-            Lifecycle::LifecycleTimestamp::from_unix_seconds(at),
-        )?;
+    let incarnation = Lifecycle::Incarnation::new(1)?;
+    let identity = Lifecycle::RootIdentity::new(
+        Lifecycle::RootKind::ExternalConsumer,
+        id.clone(),
+        Lifecycle::ProducerId::new(consumer)?,
+        incarnation,
+        witness.clone(),
+    );
+    let snapshot = Lifecycle::prepare_if_absent(
+        roots,
+        identity,
+        targets,
+        Lifecycle::LifecycleTimestamp::from_unix_seconds(at),
+    )?;
+    let root = snapshot
+        .roots
+        .get(&id)
+        .ok_or_else(|| {
+            std::io::Error::other("external consumer root disappeared after prepare")
+        })?;
+    if root.phase == Lifecycle::RootPhase::Committed {
+        return Ok(None);
     }
     Ok(Some(PreparedExternalConsumerRoot {
         id,

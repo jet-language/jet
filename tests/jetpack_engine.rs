@@ -42,7 +42,7 @@ use jetpack_fixtures::*;
 #[test]
 fn hangar_path_reports_the_native_user_data_location() {
     let data = Scratch::new("hangar-path-data");
-    let output = jetpack()
+    let output = jet()
         .args(["hangar", "path", "--no-color"])
         .env_remove("JETPACK_ROOT")
         .env("XDG_DATA_HOME", &data.path)
@@ -81,7 +81,7 @@ fn hangar_migration_copies_legacy_state_and_keeps_a_rollback_source() {
     fs::create_dir_all(&old_hangar).unwrap();
     fs::write(old_hangar.join("migration-marker"), "legacy bytes").unwrap();
 
-    let output = jetpack()
+    let output = jet()
         .args(["hangar", "path", "--no-color"])
         .env_remove("JETPACK_ROOT")
         .env("XDG_STATE_HOME", &legacy.path)
@@ -118,7 +118,7 @@ fn hangar_migration_rejects_path_escape_and_leaves_repair_state_visible() {
     fs::write(&outside, "must stay outside").unwrap();
     symlink("../../escape-target", old_hangar.join("escape")).unwrap();
 
-    let output = jetpack()
+    let output = jet()
         .args(["hangar", "path", "--no-color"])
         .env_remove("JETPACK_ROOT")
         .env("XDG_STATE_HOME", &legacy.path)
@@ -128,17 +128,67 @@ fn hangar_migration_rejects_path_escape_and_leaves_repair_state_visible() {
         .unwrap();
     assert_eq!(output.status.code(), Some(2));
     let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("E2604"), "{stderr}");
     assert!(stderr.contains("escapes its migration root"), "{stderr}");
     assert!(!data.join("jet/hangar").exists());
     assert!(data.join("jet/.hangar-migration.partial").is_dir());
-    assert_eq!(fs::read_to_string(outside).unwrap(), "must stay outside");
+    assert_eq!(fs::read_to_string(&outside).unwrap(), "must stay outside");
+
+    let retry = jet()
+        .args(["hangar", "path", "--no-color"])
+        .env_remove("JETPACK_ROOT")
+        .env("XDG_STATE_HOME", &legacy.path)
+        .env("XDG_DATA_HOME", &data.path)
+        .env_remove("LOCALAPPDATA")
+        .output()
+        .unwrap();
+    assert_eq!(retry.status.code(), Some(2));
+    assert!(
+        String::from_utf8_lossy(&retry.stderr).contains("incomplete Hangar migration"),
+        "{}",
+        String::from_utf8_lossy(&retry.stderr)
+    );
+    assert_eq!(fs::read_to_string(&outside).unwrap(), "must stay outside");
+}
+
+#[cfg(unix)]
+#[test]
+fn hangar_migration_rejects_destination_symlink_without_following_it() {
+    use std::os::unix::fs::symlink;
+
+    let data = Scratch::new("hangar-migration-destination-link-data");
+    let state = Scratch::new("hangar-migration-destination-link-state");
+    let outside = Scratch::new("hangar-migration-destination-link-outside");
+    let destination_parent = data.path.join("jet");
+    fs::create_dir_all(&destination_parent).unwrap();
+    fs::write(outside.join("marker"), "must stay outside").unwrap();
+    symlink(&outside.path, destination_parent.join("hangar")).unwrap();
+
+    let output = jet()
+        .args(["hangar", "path", "--no-color"])
+        .env_remove("JETPACK_ROOT")
+        .env("XDG_DATA_HOME", &data.path)
+        .env("XDG_STATE_HOME", &state.path)
+        .env_remove("LOCALAPPDATA")
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(2));
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("E2604"), "{stderr}");
+    assert!(stderr.contains("Inspect the reported Hangar path"), "{stderr}");
+    assert!(stderr.contains("is a symlink"), "{stderr}");
+    assert_eq!(fs::read_to_string(outside.join("marker")).unwrap(), "must stay outside");
+    assert_eq!(fs::read_link(destination_parent.join("hangar")).unwrap(), outside.path);
 }
 
 #[test]
 fn binary_cache_local_publish_verify_and_reject_corruption() {
     let root = Scratch::new("cache-root");
     let source = Scratch::new("cache-source");
+    let blocked = Scratch::new("cache-blocked-mirror");
     let mirror = Scratch::new("cache-mirror");
+    fs::remove_dir_all(&blocked.path).unwrap();
+    fs::write(&blocked.path, "the first mirror is unavailable").unwrap();
     let roots = jetpack::Store::Roots {
         root: root.path.clone(),
         dev_mode: false,
@@ -168,7 +218,10 @@ fn binary_cache_local_publish_verify_and_reject_corruption() {
     jetpack::Store::bind_cache(
         &roots,
         "public",
-        vec![mirror.path.display().to_string()],
+        vec![
+            blocked.path.display().to_string(),
+            mirror.path.display().to_string(),
+        ],
         None,
         None,
         true,
@@ -176,6 +229,7 @@ fn binary_cache_local_publish_verify_and_reject_corruption() {
     .unwrap();
     let published = jetpack::Store::publish_cache_entry(&roots, &entry.id, "public").unwrap();
     assert_eq!(published.output_hash, entry.envelope.output_hash);
+    assert_eq!(published.mirror, mirror.path.display().to_string());
     let verified = jetpack::Store::verify_cache_transfer(&roots, &entry.id, "public").unwrap();
     assert_eq!(verified.output_hash, entry.envelope.output_hash);
 
@@ -192,6 +246,8 @@ fn binary_cache_local_publish_verify_and_reject_corruption() {
         "cache bytes\n"
     );
 
+    // A corrupt first mirror is advisory failure. Lookup must continue to the
+    // next ordered mirror and never install its bytes.
     let nar = mirror
         .join("nar")
         .join(format!("{}.nar", entry.envelope.output_hash));
@@ -201,6 +257,21 @@ fn binary_cache_local_publish_verify_and_reject_corruption() {
     ));
     let nar_bytes = fs::read(&nar).unwrap();
     let info_bytes = fs::read(&info).unwrap();
+    fs::remove_file(&blocked.path).unwrap();
+    fs::create_dir_all(blocked.join("nar")).unwrap();
+    fs::write(
+        blocked.join("nar").join(format!("{}.nar", entry.envelope.output_hash)),
+        b"corrupted first mirror",
+    )
+    .unwrap();
+    fs::write(
+        blocked.join(&format!("{}-{}.narinfo", entry.envelope.output_hash, entry.id)),
+        &info_bytes,
+    )
+    .unwrap();
+    let fallback = jetpack::Store::verify_cache_transfer(&roots, &entry.id, "public").unwrap();
+    assert_eq!(fallback.mirror, mirror.path.display().to_string());
+
     fs::remove_file(&nar).unwrap();
     fs::remove_file(&info).unwrap();
     fs::write(
@@ -216,6 +287,95 @@ fn binary_cache_local_publish_verify_and_reject_corruption() {
     jetpack::Store::publish_cache_entry(&roots, &entry.id, "public").unwrap();
     assert_eq!(fs::read(&nar).unwrap(), nar_bytes);
     assert_eq!(fs::read(&info).unwrap(), info_bytes);
+    assert!(!nar.with_extension("partial").exists());
+    assert!(!info.with_extension("partial").exists());
+
+    let cache_key = jetpack::TrustRoot::TrustKey::from_secret(
+        fs::read(root.join("trust/cache-public.key")).unwrap(),
+    )
+    .unwrap();
+    let clear_negative_hint = || {
+        let _ = fs::remove_dir_all(mirror.join(".jet-negative"));
+    };
+
+    let unsigned = String::from_utf8(info_bytes.clone())
+        .unwrap()
+        .lines()
+        .filter(|line| !line.starts_with("Sig: "))
+        .collect::<Vec<_>>()
+        .join("\n")
+        + "\n";
+    fs::write(&info, unsigned).unwrap();
+    assert!(jetpack::Store::verify_cache_transfer(&roots, &entry.id, "public").is_err());
+    let unsigned_destination = Scratch::new("cache-unsigned-rejected");
+    assert!(jetpack::Store::substitute_cache_entry(
+        &roots,
+        &entry.id,
+        "public",
+        &unsigned_destination.join("out")
+    )
+    .is_err());
+    assert!(!unsigned_destination.join("out").exists());
+    clear_negative_hint();
+    fs::write(&info, &info_bytes).unwrap();
+
+    let mut mismatched =
+        jetpack::Store::NarInfo::parse(std::str::from_utf8(&info_bytes).unwrap()).unwrap();
+    mismatched.deriver = Some(format!("/jet/derivations/{}", "f".repeat(64)));
+    fs::write(
+        &info,
+        mismatched.signed(&cache_key).unwrap().to_text().unwrap(),
+    )
+    .unwrap();
+    assert!(jetpack::Store::verify_cache_transfer(&roots, &entry.id, "public").is_err());
+    let mismatched_destination = Scratch::new("cache-mismatched-rejected");
+    assert!(jetpack::Store::substitute_cache_entry(
+        &roots,
+        &entry.id,
+        "public",
+        &mismatched_destination.join("out")
+    )
+    .is_err());
+    assert!(!mismatched_destination.join("out").exists());
+    clear_negative_hint();
+
+    let mut replayed =
+        jetpack::Store::NarInfo::parse(std::str::from_utf8(&info_bytes).unwrap()).unwrap();
+    replayed.store_path = format!("/jet/hangar/{}-replayed", entry.envelope.output_hash);
+    fs::write(
+        &info,
+        replayed.signed(&cache_key).unwrap().to_text().unwrap(),
+    )
+    .unwrap();
+    assert!(jetpack::Store::verify_cache_transfer(&roots, &entry.id, "public").is_err());
+    clear_negative_hint();
+    fs::write(&info, &info_bytes).unwrap();
+
+    let malicious_nar = b"this is not a NAR";
+    let mut malicious =
+        jetpack::Store::NarInfo::parse(std::str::from_utf8(&info_bytes).unwrap()).unwrap();
+    malicious.file_size = malicious_nar.len() as u64;
+    malicious.nar_size = malicious_nar.len() as u64;
+    malicious.nar_hash = jetpack::Store::nar_digest(malicious_nar);
+    fs::write(&nar, malicious_nar).unwrap();
+    fs::write(
+        &info,
+        malicious.signed(&cache_key).unwrap().to_text().unwrap(),
+    )
+    .unwrap();
+    assert!(jetpack::Store::verify_cache_transfer(&roots, &entry.id, "public").is_err());
+    let malicious_destination = Scratch::new("cache-malicious-rejected");
+    assert!(jetpack::Store::substitute_cache_entry(
+        &roots,
+        &entry.id,
+        "public",
+        &malicious_destination.join("out")
+    )
+    .is_err());
+    assert!(!malicious_destination.join("out").exists());
+    clear_negative_hint();
+    fs::write(&nar, &nar_bytes).unwrap();
+    fs::write(&info, &info_bytes).unwrap();
 
     fs::write(&nar, b"corrupted cache bytes").unwrap();
     assert!(jetpack::Store::verify_cache_transfer(&roots, &entry.id, "public").is_err());
@@ -228,6 +388,124 @@ fn binary_cache_local_publish_verify_and_reject_corruption() {
     )
     .is_err());
     assert!(!rejected.join("out").exists());
+}
+
+#[test]
+fn binary_cache_nar_codec_rejects_noncanonical_and_malicious_input() {
+    fn string(out: &mut Vec<u8>, value: &[u8]) {
+        out.extend_from_slice(&(value.len() as u64).to_le_bytes());
+        out.extend_from_slice(value);
+        out.resize(out.len() + (8 - value.len() % 8) % 8, 0);
+    }
+
+    let mut nar = Vec::new();
+    string(&mut nar, b"nix-archive-1");
+    string(&mut nar, b"(");
+    string(&mut nar, b"(");
+    string(&mut nar, b"type");
+    string(&mut nar, b"regular");
+    string(&mut nar, b"contents");
+    string(&mut nar, b"payload");
+    string(&mut nar, b"executable");
+    string(&mut nar, b"");
+    string(&mut nar, b")");
+    string(&mut nar, b")");
+
+    assert!(jetpack::Store::validate_nar(&nar).is_err());
+    let destination = Scratch::new("nar-malformed-destination");
+    let output = destination.join("out");
+    assert!(jetpack::Store::read_nar(&nar, &output).is_err());
+    assert!(!output.exists());
+
+    fn regular_entry(out: &mut Vec<u8>, name: &[u8]) {
+        string(out, b"entry");
+        string(out, b"(");
+        string(out, b"name");
+        string(out, name);
+        string(out, b"node");
+        string(out, b"(");
+        string(out, b"type");
+        string(out, b"regular");
+        string(out, b"contents");
+        string(out, b"");
+        string(out, b")");
+        string(out, b")");
+    }
+
+    let mut unordered_nar = Vec::new();
+    string(&mut unordered_nar, b"nix-archive-1");
+    string(&mut unordered_nar, b"(");
+    string(&mut unordered_nar, b"(");
+    string(&mut unordered_nar, b"type");
+    string(&mut unordered_nar, b"directory");
+    regular_entry(&mut unordered_nar, b"z");
+    regular_entry(&mut unordered_nar, b"a");
+    string(&mut unordered_nar, b")");
+    string(&mut unordered_nar, b")");
+    assert!(jetpack::Store::validate_nar(&unordered_nar).is_err());
+
+    let mut escape_nar = Vec::new();
+    for value in [
+        b"nix-archive-1".as_slice(),
+        b"(".as_slice(),
+        b"(".as_slice(),
+        b"type".as_slice(),
+        b"directory".as_slice(),
+        b"entry".as_slice(),
+        b"(".as_slice(),
+        b"name".as_slice(),
+        b"escape".as_slice(),
+        b"node".as_slice(),
+        b"(".as_slice(),
+        b"type".as_slice(),
+        b"symlink".as_slice(),
+        b"target".as_slice(),
+        b"../outside".as_slice(),
+        b")".as_slice(),
+        b")".as_slice(),
+        b")".as_slice(),
+        b")".as_slice(),
+    ] {
+        string(&mut escape_nar, value);
+    }
+    assert!(jetpack::Store::validate_nar(&escape_nar).is_err());
+    let escape_output = destination.join("escape-out");
+    assert!(jetpack::Store::read_nar(&escape_nar, &escape_output).is_err());
+    assert!(!escape_output.exists());
+
+    #[cfg(unix)]
+    {
+        let source = Scratch::new("nar-escape-source");
+        fs::write(source.join("outside"), "outside").unwrap();
+        std::os::unix::fs::symlink("../outside", source.join("escape")).unwrap();
+        assert!(jetpack::Store::write_nar(&source.path).is_err());
+    }
+}
+
+#[test]
+fn binary_cache_narinfo_reads_standard_uncompressed_fields() {
+    let hash = jetpack::Store::nar_digest(b"payload");
+    let reference = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-tool";
+    let text = format!(
+        "StorePath: /nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-tool\n\
+URL: nar/tool.nar\n\
+Compression: none\n\
+FileHash: {hash}\n\
+FileSize: 7\n\
+NarHash: {hash}\n\
+NarSize: 7\n\
+References: {reference}\n\
+Deriver: unknown-deriver\n"
+    );
+    let info = jetpack::Store::NarInfo::parse(&text).unwrap();
+    let canonical = info.to_text().unwrap();
+    assert!(canonical.contains("FileHash: "));
+    assert!(canonical.contains(&format!("References: {reference}\n")));
+    assert!(canonical.contains("Deriver: unknown-deriver\n"));
+    assert_eq!(
+        jetpack::Store::NarInfo::parse(&canonical).unwrap(),
+        info
+    );
 }
 
 #[test]
@@ -1385,6 +1663,103 @@ module dev {
 
 
 #[test]
+fn typed_env_build_hook_approval_binds_declared_dependency_refs() {
+    let proj = Scratch::new("build-hook-dependency-identity-project");
+    let root = Scratch::new("build-hook-dependency-identity-root");
+    let fixtures = Scratch::new("build-hook-dependency-identity-fixtures");
+    let home = Scratch::new("build-hook-dependency-identity-home");
+    let staging = Scratch::new("build-hook-dependency-identity-staging");
+    write_runnable_fixture(&fixtures.path, &root.path, &staging.path);
+    // Both refs resolve to the same fixture executable. Only the declared
+    // package ref changes, so a cache/trust key that ignores adapter deps would
+    // incorrectly accept the second build.
+    fs::copy(
+        fixtures.join("nixpkgs-greet.json"),
+        fixtures.join("nixpkgs-hello.json"),
+    )
+    .unwrap();
+    fs::create_dir_all(proj.join("vendor/tool")).unwrap();
+    fs::write(
+        proj.join("env.jet"),
+        r#"
+module dev {
+    env.dev: Env.{
+        packages: [
+            Pkg.adapt(
+                name: "tool",
+                source: "./vendor/tool",
+                deps: [default.greet],
+                recipe: Recipe.build(steps: [
+                    .exec(tool: "greet", args: []),
+                ])
+            )
+        ],
+    }
+}
+"#,
+    )
+    .unwrap();
+    let first = jetpack()
+        .args(["build", "--no-color", "--offline", "--trust"])
+        .current_dir(&proj.path)
+        .env("HOME", &home.path)
+        .env("JETPACK_ROOT", &root.path)
+        .env("JETPACK_FIXTURES", &fixtures.path)
+        .output()
+        .unwrap();
+    assert!(
+        first.status.success(),
+        "initial build failed: {}",
+        String::from_utf8_lossy(&first.stderr)
+    );
+
+    let roots = jetpack::Store::Roots {
+        root: root.path.clone(),
+        dev_mode: false,
+    };
+    let entry = jetpack::Store::list(&roots)
+        .into_iter()
+        .find(|entry| entry.reference == "adapt:tool:./vendor/tool")
+        .expect("initial adapter should be recorded");
+    let old_identity = jetpack::Store::ProducerRecord::decode(&entry.producer_record)
+        .expect("adapter producer record should decode")
+        .facts
+        .get("build.identity")
+        .cloned()
+        .expect("adapter producer should record its build identity");
+
+    let selector = format!("build:{old_identity}");
+    let grant = jetpack()
+        .args(["trust", "grant", &selector, "--scope", "user"])
+        .env("HOME", &home.path)
+        .output()
+        .unwrap();
+    assert!(
+        grant.status.success(),
+        "build identity trust setup failed: {}",
+        String::from_utf8_lossy(&grant.stderr)
+    );
+
+    let changed = fs::read_to_string(proj.join("env.jet"))
+        .unwrap()
+        .replace("default.greet", "default.hello");
+    fs::write(proj.join("env.jet"), changed).unwrap();
+    let second = jetpack()
+        .args(["build", "--no-color", "--offline"])
+        .current_dir(&proj.path)
+        .env("HOME", &home.path)
+        .env("JETPACK_ROOT", &root.path)
+        .env("JETPACK_FIXTURES", &fixtures.path)
+        .output()
+        .unwrap();
+    let stderr = String::from_utf8_lossy(&second.stderr);
+    assert_eq!(second.status.code(), Some(2), "stderr: {stderr}");
+    assert!(stderr.contains("E1255"), "changed dependency was accepted: {stderr}");
+    assert!(stderr.contains("build hook"), "wrong trust failure: {stderr}");
+}
+
+
+#[test]
 fn typed_env_prebuilt_adapter_runs_from_path() {
     let proj = Scratch::new("proj");
     let root = Scratch::new("root");
@@ -2518,7 +2893,7 @@ fn bridge_flake_uses_native_evaluator_without_nix() {
     let output = jetpack()
         .args(["bridge", "flake", "--no-color"])
         .current_dir(&dir.path)
-        .env("PATH", "/usr/bin:/bin") // no nix on PATH
+        .env("PATH", "") // no Nix or other evaluator executable on PATH
         .output()
         .unwrap();
     assert!(
@@ -2531,6 +2906,334 @@ fn bridge_flake_uses_native_evaluator_without_nix() {
         "stdout: {}",
         String::from_utf8_lossy(&output.stdout)
     );
+
+    let lock_text = fs::read_to_string(dir.join(".jet/lock"))
+        .expect("native bridge must commit the pinned evaluator ledger");
+    let lock = jetpack::SemanticLock::parse(&lock_text);
+    let inventory = lock
+        .records
+        .iter()
+        .filter(|record| {
+            record
+                .identity
+                .key
+                .starts_with("flake-evaluator-inventory:")
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(inventory.len(), 17, "{lock_text}");
+    assert_eq!(
+        inventory
+            .iter()
+            .filter(|record| record.identity.exact.contains("class=evaluable"))
+            .count(),
+        10
+    );
+    assert_eq!(
+        inventory
+            .iter()
+            .filter(|record| record.identity.exact.contains("class=buildable"))
+            .count(),
+        5
+    );
+    let skipped = inventory
+        .iter()
+        .filter(|record| record.identity.exact.starts_with("status=skipped;"))
+        .collect::<Vec<_>>();
+    assert_eq!(skipped.len(), 2, "{lock_text}");
+    assert!(skipped.iter().any(|record| {
+        record.identity.key.ends_with(":dynamic-derivations")
+            && record.identity.exact
+                == "status=skipped;class=skipped;reason=dynamic staging has a separate compatibility boundary"
+    }));
+    for (surface, class, reason) in [
+        (
+            "fixed-output-fetchers",
+            "buildable",
+            "explicit fetch authority returns verified canonical store paths",
+        ),
+        (
+            "cross-system-packages",
+            "buildable",
+            "explicit target authority projects pinned systems",
+        ),
+        (
+            "external-flakes",
+            "evaluable",
+            "explicit provider authority evaluates bounded external sources",
+        ),
+    ] {
+        let key = format!("flake-evaluator-inventory:{surface}");
+        let exact = format!("status=covered;class={class};reason={reason}");
+        assert!(
+            inventory
+                .iter()
+                .any(|record| record.identity.key == key && record.identity.exact == exact),
+            "missing inventory record {key}: {lock_text}"
+        );
+    }
+    assert!(lock.records.iter().any(|record| {
+        record.identity.key == "flake-evaluator"
+            && record.identity.exact
+                == "native-nix:2.34.8:b5aa0fbd538984f6e3d201be0005b4463d8b09f8:x86_64-linux"
+    }));
+
+    let before_failure = lock_text;
+    fs::write(dir.join("flake.nix"), " ".repeat((1 << 20) + 1)).unwrap();
+    let failed = jetpack()
+        .args(["bridge", "flake", "--no-color"])
+        .current_dir(&dir.path)
+        .env("PATH", "")
+        .output()
+        .unwrap();
+    assert_eq!(failed.status.code(), Some(1));
+    let stderr = String::from_utf8_lossy(&failed.stderr);
+    assert!(stderr.contains("E1256"), "stderr: {stderr}");
+    assert!(!stderr.contains("nix eval"), "stderr: {stderr}");
+    assert_eq!(fs::read_to_string(dir.join(".jet/lock")).unwrap(), before_failure);
+}
+
+#[test]
+fn bridge_flake_breadth_and_json_budget_use_native_evaluator_without_nix() {
+    let dir = Scratch::new("bridge-native-breadth");
+    fs::write(
+        dir.join("flake.nix"),
+        r#"{ devShells.x86_64-linux.default = pkgs.mkShell {
+  packages = builtins.attrValues (builtins.fromJSON "{\"b\":\"ripgrep\",\"a\":\"fd\"}");
+}; }"#,
+    )
+    .unwrap();
+    let output = jetpack()
+        .args(["bridge", "flake", "--no-color"])
+        .current_dir(&dir.path)
+        .env("PATH", "")
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(
+        String::from_utf8_lossy(&output.stdout).contains("packages: [fd, ripgrep]"),
+        "stdout: {}",
+        String::from_utf8_lossy(&output.stdout)
+    );
+
+    let nested_json = format!(
+        "{}true{}",
+        "[".repeat(257),
+        "]".repeat(257)
+    );
+    let over_budget = format!(
+        "{{ devShells.x86_64-linux.default = pkgs.mkShell {{ packages = builtins.fromJSON \"{nested_json}\"; }}; }}"
+    );
+    fs::write(dir.join("flake.nix"), over_budget).unwrap();
+    let failed = jetpack()
+        .args(["bridge", "flake", "--no-color"])
+        .current_dir(&dir.path)
+        .env("PATH", "")
+        .output()
+        .unwrap();
+    assert!(!failed.status.success());
+    let stderr = String::from_utf8_lossy(&failed.stderr);
+    assert!(stderr.contains("E1256"), "stderr: {stderr}");
+    assert!(stderr.contains("JSON value is too deeply nested"), "stderr: {stderr}");
+    assert!(!stderr.contains("nix eval"), "stderr: {stderr}");
+}
+
+#[test]
+fn bridge_flake_projects_fetchers_cross_packages_and_external_flakes_without_nix() {
+    let dir = Scratch::new("bridge-native-nix-breadth");
+    fs::create_dir_all(dir.join("dep")).unwrap();
+    fs::write(
+        dir.join("dep/flake.nix"),
+        "{ packages.x86_64-linux.default = pkgs.fd; }",
+    )
+    .unwrap();
+    let source_bytes = b"fixed-output\n";
+    fs::write(dir.join("source.txt"), source_bytes).unwrap();
+    let source_hash = jetpack::SHA256::sha256_hex(source_bytes);
+    let source = format!(
+        r#"{{
+  devShells.x86_64-linux.default = pkgs.mkShell {{
+    packages = [
+      (builtins.getFlake "path:./dep").packages.x86_64-linux.default
+      pkgs.pkgsCross.aarch64-multiplatform.foo
+    ];
+  }};
+  packages.x86_64-linux.fetched = builtins.derivationStrict {{
+    name = "fetched";
+    system = "x86_64-linux";
+    builder = "/bin/sh";
+    args = [ "-c" "echo $src > $out" ];
+    src = builtins.fetchurl {{
+      url = "file:./source.txt";
+      sha256 = "{source_hash}";
+      name = "source.txt";
+    }};
+  }};
+}}
+"#
+    );
+    fs::write(dir.join("flake.nix"), source).unwrap();
+
+    let output = jetpack()
+        .args(["bridge", "flake", "--no-color"])
+        .current_dir(&dir.path)
+        .env("PATH", "")
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("packages: [fd, fetched]"), "stdout: {stdout}");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("cross-package:aarch64-linux/foo"),
+        "stderr: {stderr}"
+    );
+    assert!(!stderr.contains("nix eval"), "stderr: {stderr}");
+
+    let lock_path = dir.join(".jet/lock");
+    let lock_before_failure = fs::read_to_string(&lock_path).expect("breadth bridge lock");
+    assert!(
+        lock_before_failure.contains("flake-devshell:devShells:x86_64-linux:default")
+            && lock_before_failure.contains("packages=fd;unsupported=cross-package:aarch64-linux/foo"),
+        "lock: {lock_before_failure}"
+    );
+    assert!(
+        lock_before_failure.contains("flake-derivation:packages:x86_64-linux:fetched"),
+        "lock: {lock_before_failure}"
+    );
+
+    fs::write(dir.join("source.txt"), b"tampered\n").unwrap();
+    let fetch_failed = jetpack()
+        .args(["bridge", "flake", "--no-color"])
+        .current_dir(&dir.path)
+        .env("PATH", "")
+        .output()
+        .unwrap();
+    assert_eq!(fetch_failed.status.code(), Some(1));
+    let fetch_failure_stderr = String::from_utf8_lossy(&fetch_failed.stderr);
+    assert!(fetch_failure_stderr.contains("E1256"), "stderr: {fetch_failure_stderr}");
+    assert!(
+        fetch_failure_stderr.contains("verified fetch hash mismatch"),
+        "stderr: {fetch_failure_stderr}"
+    );
+    assert_eq!(fs::read_to_string(&lock_path).unwrap(), lock_before_failure);
+
+    fs::write(
+        dir.join("flake.nix"),
+        r#"{ devShells.x86_64-linux.default = pkgs.mkShell {
+  packages = [ (builtins.getFlake "github:NixOS/nixpkgs").packages.x86_64-linux.default ];
+}; }"#,
+    )
+    .unwrap();
+    let failed = jetpack()
+        .args(["bridge", "flake", "--no-color"])
+        .current_dir(&dir.path)
+        .env("PATH", "")
+        .output()
+        .unwrap();
+    assert_eq!(failed.status.code(), Some(1));
+    let failure_stderr = String::from_utf8_lossy(&failed.stderr);
+    assert!(failure_stderr.contains("E1256"), "stderr: {failure_stderr}");
+    assert!(
+        failure_stderr.contains("provider authority"),
+        "stderr: {failure_stderr}"
+    );
+    assert!(!failure_stderr.contains("nix eval"), "stderr: {failure_stderr}");
+    assert_eq!(fs::read_to_string(lock_path).unwrap(), lock_before_failure);
+}
+
+#[test]
+fn bridge_flake_projects_overlays_named_devshells_and_all_outputs_without_nix() {
+    let dir = Scratch::new("bridge-native-evaluator-breadth");
+    fs::write(
+        dir.join("flake.nix"),
+        r#"{
+  packages.x86_64-linux.default = builtins.derivation {
+    name = "many";
+    system = "x86_64-linux";
+    builder = "/bin/sh";
+    outputs = [ "out" "dev" "doc" ];
+  };
+  devShells.x86_64-linux.default =
+    (import pkgs { overlays = [ (final: prev: { custom = prev.fd; }) ]; }).mkShell {
+      packages = [ (import pkgs { overlays = [ (final: prev: { custom = prev.fd; }) ]; }).custom ];
+    };
+  devShells.x86_64-linux.debug = {
+    packages = [ pkgs.ripgrep ];
+    inputsFrom = [];
+    shellHook = "export DEBUG=1";
+  };
+}
+"#,
+    )
+    .unwrap();
+
+    let output = jetpack()
+        .args(["bridge", "flake", "--no-color"])
+        .current_dir(&dir.path)
+        .env("PATH", "")
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(
+        String::from_utf8_lossy(&output.stdout).contains("packages: [fd]"),
+        "stdout: {}",
+        String::from_utf8_lossy(&output.stdout)
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("L0204"), "stderr: {stderr}");
+    assert!(stderr.contains("inputsFrom"), "stderr: {stderr}");
+    let lock = fs::read_to_string(dir.join(".jet/lock")).unwrap();
+    assert!(
+        lock.contains("flake-devshell:devShells:x86_64-linux:debug"),
+        "lock: {lock}"
+    );
+    assert!(
+        lock.contains("packages=ripgrep;unsupported=inputsFrom,shellHook"),
+        "lock: {lock}"
+    );
+    assert!(
+        lock.contains("flake-derivation:packages:x86_64-linux:default"),
+        "lock: {lock}"
+    );
+    assert!(
+        lock.contains("drvPath=/nix/store/iqjpmbf780gw1gqzhcvarkhw6h9y4c98-many.drv;dev=/nix/store/0cmdcz6gdcx6k0wf2ir78dh5isib04w3-many-dev;doc=/nix/store/v5m6bfihjhlp2ggsr9zcgw1j4wz1z1az-many-doc;out=/nix/store/3d8xbsqfn74lgzz2x82y3hh8i9mmx7xy-many"),
+        "lock: {lock}"
+    );
+
+    let overlay_list = std::iter::repeat("overlay")
+        .take(65)
+        .collect::<Vec<_>>()
+        .join(" ");
+    let over_budget = format!(
+        "let overlay = final: prev: {{}}; in {{ devShells.x86_64-linux.default = (import pkgs {{ overlays = [ {overlay_list} ]; }}).mkShell {{ packages = []; }}; }}"
+    );
+    fs::write(dir.join("flake.nix"), over_budget).unwrap();
+    let failed = jetpack()
+        .args(["bridge", "flake", "--no-color"])
+        .current_dir(&dir.path)
+        .env("PATH", "")
+        .output()
+        .unwrap();
+    assert_eq!(failed.status.code(), Some(1));
+    let failure_stderr = String::from_utf8_lossy(&failed.stderr);
+    assert!(failure_stderr.contains("E1256"), "stderr: {failure_stderr}");
+    assert!(
+        failure_stderr.contains("overlay list exceeds 64"),
+        "stderr: {failure_stderr}"
+    );
+    assert_eq!(fs::read_to_string(dir.join(".jet/lock")).unwrap(), lock);
 }
 
 #[test]
@@ -3183,24 +3886,15 @@ fn offline_without_fixtures_errors() {
     assert!(stderr.contains("fastfetch@nixpkgs"), "stderr: {stderr}");
 }
 
-// ── D-JPK-FILES Phase 2b: jetpack.toml wiring ─────────────────────────────
-
+// ── D-ONCE-RETIRE1: jetpack.toml adoption ratchet ─────────────────────────
 
 #[test]
-fn malformed_jetpack_toml_fires_e1214_from_cli() {
-    // I4/D-JPK-FILES Phase 2b: E1214 must be reachable from real `jetpack`
-    // usage, not just the in-module unit test. Create a scratch project whose
-    // jetpack.toml has a malformed line, run `jetpack build`, and verify that
-    // E1214 appears in stderr with exit code 2.
-    let proj = Scratch::new("bad-toml-e1214");
-    let root = Scratch::new("bad-toml-root");
-    // Write a jetpack.toml with a malformed line (not a key="value" or [table]).
-    fs::write(
-        proj.join("jetpack.toml"),
-        "[repo]\nname = \"test\"\nbad line here\n",
-    )
-    .unwrap();
-    // Also write a minimal env.jet so the `nothing to do` error isn't hit first.
+fn jetpack_toml_retirement_fires_e1225_from_cli() {
+    // Semantic retirement: presence is enough to reject the second config
+    // grammar, regardless of which old table it contains.
+    let proj = Scratch::new("retired-toml");
+    let root = Scratch::new("retired-toml-root");
+    fs::write(proj.join("jetpack.toml"), "[repo]\nname = \"old\"\n").unwrap();
     fs::write(
         proj.join("env.jet"),
         "use jetpack as pkg;\npub fn shell() => [JSON] {\n    return [pkg.source(\"nixpkgs\"), pkg.packages([\"ripgrep\"])];\n}\n",
@@ -3213,106 +3907,16 @@ fn malformed_jetpack_toml_fires_e1214_from_cli() {
         .env("JETPACK_FIXTURES", example_fixtures(&root.path))
         .output()
         .unwrap();
-    assert_eq!(
-        out.status.code(),
-        Some(2),
-        "expected exit 2, stderr: {}",
-        String::from_utf8_lossy(&out.stderr)
-    );
+    assert_eq!(out.status.code(), Some(2));
     let stderr = String::from_utf8_lossy(&out.stderr);
-    assert!(
-        stderr.contains("E1214"),
-        "expected E1214 in stderr: {stderr}"
-    );
-    assert!(
-        stderr.contains("jetpack.toml"),
-        "expected jetpack.toml in error: {stderr}"
-    );
+    assert_eq!(stderr, include_str!("cli/jetpack_toml_retired.txt"));
 }
 
-
 #[test]
-fn malformed_jetpack_toml_fires_e1215_from_cli() {
-    // I4/D-JPK-FILES Phase 2b: E1215 must be reachable from real `jetpack`
-    // usage. An unknown table name fires E1215 with did-you-mean.
-    let proj = Scratch::new("bad-toml-e1215");
-    let root = Scratch::new("bad-toml-root2");
-    fs::write(proj.join("jetpack.toml"), "[workspace]\nfoo = \"bar\"\n").unwrap();
-    fs::write(
-        proj.join("env.jet"),
-        "use jetpack as pkg;\npub fn shell() => [JSON] {\n    return [pkg.source(\"nixpkgs\"), pkg.packages([\"ripgrep\"])];\n}\n",
-    )
-    .unwrap();
-    let out = jetpack()
-        .args(["build", "--no-color", "--offline"])
-        .current_dir(&proj.path)
-        .env("JETPACK_ROOT", &root.path)
-        .env("JETPACK_FIXTURES", example_fixtures(&root.path))
-        .output()
-        .unwrap();
-    assert_eq!(
-        out.status.code(),
-        Some(2),
-        "expected exit 2, stderr: {}",
-        String::from_utf8_lossy(&out.stderr)
-    );
-    let stderr = String::from_utf8_lossy(&out.stderr);
-    assert!(
-        stderr.contains("E1215"),
-        "expected E1215 in stderr: {stderr}"
-    );
-}
-
-
-#[test]
-fn jetpack_toml_packages_fires_e1225_from_cli() {
-    // D-WORKSPACE1: the old `[packages]` monorepo index moved to
-    // `workspace.jet`; keep a real CLI test so the migration diagnostic is
-    // reachable from user commands.
-    let proj = Scratch::new("bad-toml-e1225");
-    let root = Scratch::new("bad-toml-root3");
-    fs::write(
-        proj.join("jetpack.toml"),
-        "[packages]\ngreeter = \"packages/greeter/package.jet\"\n",
-    )
-    .unwrap();
-    fs::write(
-        proj.join("env.jet"),
-        "use jetpack as pkg;\npub fn shell() => [JSON] {\n    return [pkg.source(\"nixpkgs\"), pkg.packages([\"ripgrep\"])];\n}\n",
-    )
-    .unwrap();
-    let out = jetpack()
-        .args(["build", "--no-color", "--offline"])
-        .current_dir(&proj.path)
-        .env("JETPACK_ROOT", &root.path)
-        .env("JETPACK_FIXTURES", example_fixtures(&root.path))
-        .output()
-        .unwrap();
-    assert_eq!(
-        out.status.code(),
-        Some(2),
-        "expected exit 2, stderr: {}",
-        String::from_utf8_lossy(&out.stderr)
-    );
-    let stderr = String::from_utf8_lossy(&out.stderr);
-    assert!(
-        stderr.contains("E1225"),
-        "expected E1225 in stderr: {stderr}"
-    );
-    assert!(
-        stderr.contains("workspace.jet"),
-        "expected workspace.jet migration hint: {stderr}"
-    );
-}
-
-
-#[test]
-fn jetpack_toml_sources_merge_into_cwd_table() {
-    // D-JPK-FILES Phase 2b: `[sources]` declared in jetpack.toml are folded
-    // into the source table so env.jet can reference them by name. Create a
-    // project whose jetpack.toml declares a named source and whose env.jet
-    // references it — the build should resolve via the folded table.
-    let base = Scratch::new("toml-sources");
+fn env_jet_sources_resolve_without_toml() {
+    // Source aliases are Jet facts in env.jet. The same project resolves a
+    // local package without any TOML file present.
+    let base = Scratch::new("env-sources");
     let repo = base.join("jet-pkgs");
     let proj = base.join("proj");
     let root = base.join("root");
@@ -3322,19 +3926,13 @@ fn jetpack_toml_sources_merge_into_cwd_table() {
     fs::create_dir_all(&proj).unwrap();
     fs::write(hello_pkg.join("hello.jet"), "module hello { }\n").unwrap();
     let greet = hello_bin.join("hello");
-    fs::write(&greet, "#!/bin/sh\necho hello from toml-source\n").unwrap();
+    fs::write(&greet, "#!/bin/sh\necho hello from env-source\n").unwrap();
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
         fs::set_permissions(&greet, fs::Permissions::from_mode(0o755)).unwrap();
     }
-    // jetpack.toml declares `mine` as a path source (no via — inferred as core).
-    fs::write(
-        proj.join("jetpack.toml"),
-        format!("[sources]\nmine = \"{}\"\n", repo.to_string_lossy()),
-    )
-    .unwrap();
-    // env.jet references `hello@mine` — the source name is resolved from jetpack.toml.
+    // env.jet declares `mine` as a path source and references `hello@mine`.
     fs::write(
         proj.join("env.jet"),
         "use jetpack as pkg;\npub fn shell() => [JSON] {\n    return [\n        pkg.source(\"mine\", \"PLACEHOLDER\", \"core\");\n        pkg.packages([\"hello@mine\"]);\n    ];\n}\n".replace(
@@ -3624,7 +4222,7 @@ fn package_transition_cli_covers_split_fold_init_restore_and_failures() {
 #[test]
 fn mono_example_has_two_package_jet_members() {
     // D-WORKSPACE1: the committed monorepo example now uses workspace.jet
-    // instead of the retired jetpack.toml [packages] index.
+    // instead of the retired TOML config plane.
     let mono = mono_example_dir();
     assert!(
         mono.join("workspace.jet").exists(),
