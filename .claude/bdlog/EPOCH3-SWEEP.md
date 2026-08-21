@@ -51,17 +51,46 @@ end, then one comprehensive fix pass. This file is the batch.
 - `lane-guardian.sh` snapshots the tree every three minutes to `~/.cache/jet-luna/snapshots` and sheds the newest worker under a 10 GB floor. Zero memory events across the session; steady state 13 GB of 61.
 - `lane-keeper.sh` holds the lane cap, recycles open cards least-recently-worked-first, and now refuses to implement a card whose ballot is still open — it had started writing code for #2127.
 
-## E. What the epoch taught
+## F. Settled this pass
+
+| Was | Now |
+|---|---|
+| A1-A4 believed blocked on a missing rustc | The plain devshell has none by design; `scripts/agent/jet-env full` has rustc 1.97.1, wasm32, and node. AOT and web rows all run |
+| B1 fmt deletes statements | Fixed: a teaching diagnostic in a nested interpolation parser returned as a hard error, so statement recovery dropped the whole statement |
+| B3 `(a > b) :>` mis-parsed | Fixed: lambda lookahead only searched for a trailing arrow and ignored parameter grammar |
+| B12 `keep` bypassed on two tiers | Fixed: JIT and ambient now call the shared Prelude sink instead of returning the argument |
+| B11 comparator outside the codegen Prelude | Fixed: one `jet_map_key_cmp` in `Prelude/Core/MapKey.rs`, called by AOT, JIT, interpreter and comptime |
+| Corpus 67 failing | 4 failing, then 2, after the effect-row, crossing, and ICE fixes |
+| UI snapshots | 0 mismatches, after reverting a corpus-wide fmt pass that had rewritten 508 fixtures |
+
+## G. Still open
+
+| # | What | Where |
+|---|---|---|
+| G1 | JIT vs AOT divergence on `memory/pool_stale_id` | #2007 c4. Isolated only after raising the tier-parity budget; eight concurrent cold AOT builds against a fixed 30 s were reporting real passes as timeouts |
+| G2 | Float-equality lint is unreachable | #2130. A bare decimal is exact now, and the lint does not fire for a real Float either |
+| G3 | `E0001` prints an unprintable character as nothing | #2129. A literal NUL in a source file produced a message naming no character |
+| G4 | Service runtime substrate | #444 dispatched after correcting a wrong owner-gate call; #1150-#1153 chain behind it |
+| G5 | `D-ERRSIGIL1` | #2127, awaiting the owner |
+
+## H. What the epoch taught
 
 The dominant bug class was **one fact written twice, then drifted**. Every real
-fix this session deleted a copy rather than adding a branch:
+fix deleted a copy rather than adding a branch:
 
 - memory joined `Panic` in the existing deny-only filter instead of getting its own rule;
 - `Decimal` joined `Fraction` at the existing crossing instead of getting its own path;
+- the map-key comparator moved into the one Prelude every tier already includes;
 - the decision index is generated from Tower instead of hand-maintained beside it.
 
-The second lesson is about proof. Three separate changes this session type-checked
-and would have shipped broken: the `Decimal` crossing was checker-only until a
-verification pass caught that AOT emitted a symbol nobody had written. **A change
-that sema accepts is not a change the tiers can run**, and I9 is the invariant that
-keeps catching it.
+The second lesson is about proof, and it cost the most time. **A change sema
+accepts is not a change the tiers can run.** The `Decimal` crossing type-checked
+while AOT emitted a symbol nobody had written; a bare `use std::cmp::Ordering`
+in one Prelude part renamed `Ordering` for every other part and broke every AOT
+build with sixty rustc errors. Both passed `cargo build` and `jet check`. I9 is
+what caught them.
+
+The third is that **a green test run and a true test run are different things**.
+The tier-parity battery was reporting timeouts as failures and hiding one real
+divergence underneath; the UI suite would have accepted 508 blessed snapshots
+that recorded a mistake. Both would have read as progress.
