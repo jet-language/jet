@@ -706,6 +706,9 @@ fn measured_test_cli_and_selected_claim_keep_aot_golden_contract() {
             "--json",
         ])
         .current_dir(&root)
+        .env("JET_CACHE_DIR", scratch.join("bench-cache"))
+        .env("JET_RUN_CACHE_DIR", scratch.join("bench-run-cache"))
+        .env("JET_RUNTIME_CACHE_DIR", scratch.join("bench-runtime-cache"))
         .env("NO_COLOR", "1")
         .output()
         .expect("measure keep sink benchmark");
@@ -731,6 +734,8 @@ fn measured_test_cli_and_selected_claim_keep_aot_golden_contract() {
     };
     let elided_ns = mean_ns("elided baseline");
     let kept_ns = mean_ns("keep loop");
+    // The same-run elided loop is the control; avoid an absolute wall-clock
+    // threshold while still requiring keep() to preserve observable work.
     assert!(
         kept_ns > elided_ns,
         "keep loop must remain slower than the elided control: keep={kept_ns:.3} ns/iter, elided={elided_ns:.3} ns/iter"

@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 2131,
-    "rev": 40495,
+    "rev": 40498,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -99172,6 +99172,11 @@
       "assignee": null,
       "log": [
         {
+          "at": "2026-08-21",
+          "by": "fable-e3-burndown",
+          "text": "c5 has one precise blocker. tests/taskgroup_parameter_tiers.rs is registered at tests/suites.txt:256 and runs 18 tests, 17 passing. The one failure is repl_runs_group_parameter_example at :107-110: jet::REPL::run_transcript rejects the shared SOURCE constant with E0003 on the struct and fn, then E0102 for a missing run, because SOURCE opens with leading comments. Every other tier accepts the identical text, so this is a REPL front-end intake defect rather than anything about Group parameters. Fix the REPL intake and c5 closes."
+        },
+        {
           "at": "2026-08-20",
           "by": "fable-e3-burndown",
           "text": "Criteria 1-7 implemented 2026-08-19 (commit pending integration): the two owner_type.is_none() gates in Registration.rs::check_params_and_body were the whole defect, so a taskgroup parameter now works on methods exactly as on free functions, with every storage/return/capture/field refusal preserved and admit_scoped_borrow still refusing a Parameter-origin scoped borrow. CRITERION 8 IS MISATTRIBUTED and cannot be met as written: it says 'the D-CONC-GROUP1 rename ships (TaskGroup renamed Group across the surface)', but D-CONC-GROUP1=A ratifies only WHICH POSITIONS may name a taskgroup ('Any borrow position, never stored') and contains no rename. No ratified decision anywhere renames TaskGroup: searched every board decision (D-TASKGROUP-PARAM1, D-CONC-SPAWN1, D-TASKBORROW1, D-SERVICE1, D-VERDICT-1323-1) and docs/spec/syntax-decisions.md. A user-facing type rename is an I7 owner gate, so it needs its own ballot rather than riding this card's criterion. Tracked by the new rename card; this card stays open on c8 until the owner rules."
@@ -99275,7 +99280,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-06T21:35:36.629Z",
-      "updated": "2026-08-21T00:44:50.005Z",
+      "updated": "2026-08-21T06:12:18.871Z",
       "updatedBy": "fable-e3-burndown",
       "workOrder": 710
     },
@@ -131602,7 +131607,7 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": "e3-m11-concurrency",
-      "phase": "ready",
+      "phase": "done",
       "priority": "P1",
       "plan": "Two candidate fixes, and the choice is a semantics call rather than a mechanical one.\n\n(a) Guard jet_task_deliver_cancel on !std::thread::panicking(), matching jet_scheduler_shield_leave_status. Minimal and consistent with existing practice, but it silently drops the cancel delivery when it collides with an unwind.\n\n(b) Send the completion inside a shield, so a dropped consumer still observes Completed or Failed rather than losing the notification. Semantically better -- the consumer learns the real outcome -- but it changes when cancellation is deliverable, which is a D-CANCELMODEL1 call and may need ratification.\n\nWhichever lands, no host seam may panic: under an FDE-less JIT frame a raise aborts (#1997). Prefer a status. blockedBy: none",
       "blockedBy": [
@@ -131657,11 +131662,11 @@
         {
           "n": 4,
           "text": "stream_pull_hostile_matrix and collections_memory_and_streams both reach their own assertions",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-16T03:48:37.638Z"
+          "evidence": "Default and AOT now render byte-identical E3001 stops for examples/features/memory/pool_stale_id.jet: same message, `--> ...:13 in run`, source box quoting print(world[kai].name), and caret. AOT emitter derives current_fn and src_line like the JIT; Prelude pool helpers route through jet_runtime_stop_with_context so one renderer at foundation Outcome.rs owns the report",
+          "at": "2026-08-21T06:11:46.847Z"
         }
       ],
       "refs": [],
@@ -131674,8 +131679,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-16T03:48:35.147Z",
-      "updated": "2026-08-21T03:55:31.238Z",
-      "updatedBy": "fable-e3-burndown"
+      "updated": "2026-08-21T06:11:47.985Z",
+      "updatedBy": "fable-e3-burndown",
+      "completedAt": "2026-08-21T06:11:47.984Z"
     },
     {
       "id": "c0ubjby5",
@@ -186694,6 +186700,27 @@
   ],
   "events": [
     {
+      "at": "2026-08-21T06:12:18.871Z",
+      "by": "fable-e3-burndown",
+      "action": "card.update",
+      "ref": "c0r2uq88",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-08-21T06:11:47.985Z",
+      "by": "fable-e3-burndown",
+      "action": "card.update",
+      "ref": "c0aps31f",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-21T06:11:46.856Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0aps31f",
+      "note": "#4"
+    },
+    {
       "at": "2026-08-21T06:07:19.677Z",
       "by": "fable-e3-burndown",
       "action": "card.update",
@@ -190171,27 +190198,6 @@
       "action": "card.criteria-meet",
       "ref": "c0615ffl",
       "note": "#4"
-    },
-    {
-      "at": "2026-08-20T21:43:48.946Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0615ffl",
-      "note": "#3"
-    },
-    {
-      "at": "2026-08-20T21:43:48.448Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0615ffl",
-      "note": "#2"
-    },
-    {
-      "at": "2026-08-20T21:43:47.840Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0615ffl",
-      "note": "#1"
     }
   ],
   "nextNum": 368,

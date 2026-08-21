@@ -5016,7 +5016,7 @@ impl LowerCtx<'_, '_> {
                             let pool_handle = self.lower_expr(pool)?;
                             let id_value = self.lower_expr(id)?;
                             let line = self.b.ins().iconst(types::I64, *line as i64);
-                            let src_line = self.runtime.heap.alloc_string(src_line);
+                            let src_line = self.runtime.heap.alloc_string(src_line.as_str());
                             let src_line = self.b.ins().iconst(types::I64, src_line as i64);
                             let record = self.call_host(
                                 self.host.memory.pool_get,
@@ -19564,6 +19564,7 @@ impl LowerCtx<'_, '_> {
                     let payload = self.load_local(local)?;
                     let map = self.call_host(self.host.encoding.object_entries_to_map, &[payload]);
                     self.emit_trap_check()?;
+                    Ok(map)
                 })
             }
             TExprKind::PoolSlot {
@@ -19582,7 +19583,7 @@ impl LowerCtx<'_, '_> {
                     let pool = self.lower_expr(pool)?;
                     let id = self.lower_expr(id)?;
                     let line = self.b.ins().iconst(types::I64, *line as i64);
-                    let src_line = self.runtime.heap.alloc_string(src_line);
+                    let src_line = self.runtime.heap.alloc_string(src_line.as_str());
                     let src_line = self.b.ins().iconst(types::I64, src_line as i64);
                     let value =
                         self.call_host(self.host.memory.pool_get, &[pool, id, line, src_line]);

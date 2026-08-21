@@ -35,7 +35,7 @@ fn run() {
 
 const AUTHORITY_VALUE_SOURCE: &str = r#"
 fn run() {
-    #Abilities(abilities: FS.Read) {
+    #Abilities(abilities: FS.Read, IO) {
         narrowed :: abilities.with("FS.Read")
         released :: narrowed.without("FS.Read")
         print("abilities")
@@ -168,7 +168,8 @@ fn authority_web_accepts_the_same_value() {
     let _ = std::fs::remove_dir_all(&root);
     std::fs::create_dir_all(&root).expect("web abilities scratch");
     let entry = root.join("run.jet");
-    std::fs::write(&entry, AUTHORITY_VALUE_SOURCE).expect("web Abilities source");
+    let web_source = format!("#Target(Web)\n{AUTHORITY_VALUE_SOURCE}");
+    std::fs::write(&entry, web_source).expect("web Abilities source");
     let output = jet::compile_web(entry.to_str().unwrap()).expect("web should accept Abilities");
     let web = output.web.expect("web tier dropped Abilities");
     assert!(web.js_app.contains("jet_authority_with"), "web lost Abilities.with");
