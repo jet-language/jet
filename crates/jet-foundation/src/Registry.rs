@@ -1350,7 +1350,7 @@ const fn truth_row(
 /// what a writer may attach and where; it holds no fact that moves toward or
 /// away from safety, so it states `none` and names no gate. The moving facts a
 /// marker *writes* belong to the plane, right, or build row that holds them —
-/// `#Abilities` is a gate word on the `Rights` row, not a direction of
+/// `#Caps` is a gate word on the `Rights` row, not a direction of
 /// their own. Stated once here for every marker row, so no row can drift.
 fn marker_row(rule: &'static AppliedRule) -> RegistryRow {
     RegistryRow {

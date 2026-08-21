@@ -41,7 +41,7 @@ fn run() {
     }
 
     // All-missing series: typed optionals, not a second sentinel.
-    missing :: data.series([Val(1.0), no_float(), no_float(), Val(4.0), no_float()])
+    missing :: data.series([Val(Float{1.0}), no_float(), no_float(), Val(Float{4.0}), no_float()])
     print("missing_count: {data.missing_count(missing)}")
 
     // Duplicate-key join keeps SQL multiplicity (2 Core×2 owners + 1 Tools = 5).
@@ -57,46 +57,46 @@ fn run() {
 
     // Equal-key sort ties keep input order (stable).
     tied :: [
-        Ticket{team: "same", minutes: 3.0},
-        Ticket{team: "same", minutes: 1.0},
-        Ticket{team: "same", minutes: 2.0}
+        Ticket{team: "same", minutes: Float{3.0}},
+        Ticket{team: "same", minutes: Float{1.0}},
+        Ticket{team: "same", minutes: Float{2.0}}
     ]
     sorted :: data.sort_by(tied, t :> t.team) ?? panic("sort")
     print("tie_order: {sorted[0].minutes},{sorted[1].minutes},{sorted[2].minutes}")
 
     // Extreme / non-finite numerics fail closed.
-    nan_mean :: data.mean([1.0, Float.NAN, 3.0])
+    nan_mean :: data.mean([Float]{1.0, Float.NAN, 3.0})
     if nan_mean == {
         .Ok(_) :> { print("nan_mean: ok") }
         .Err(error) :> { print("nan_mean: {error}") }
     }
-    inf_sum :: data.sum([1.0, Float.INFINITY])
+    inf_sum :: data.sum([Float]{1.0, Float.INFINITY})
     if inf_sum == {
         .Ok(_) :> { print("inf_sum: ok") }
         .Err(error) :> { print("inf_sum: {error}") }
     }
 
     // Signed zero collapses to +0.0 on reducer output (no silent -0.0).
-    signed_sum :: data.sum([-0.0, -0.0]) ?? panic("signed_sum")
-    signed_mean :: data.mean([-0.0, 0.0]) ?? panic("signed_mean")
+    signed_sum :: data.sum([Float]{-0.0, -0.0}) ?? panic("signed_sum")
+    signed_mean :: data.mean([Float]{-0.0, 0.0}) ?? panic("signed_mean")
     print("signed_zero_sum: {signed_sum}")
     print("signed_zero_mean: {signed_mean}")
 
     // #1657: catastrophic cancellation. One compensated kernel answers on every
     // tier; a naive left-to-right sum would answer 0.0 for both of these.
-    cancel_sum :: data.sum([10000000000000000.0, 1.0, -10000000000000000.0]) ?? panic("cancel_sum")
-    cancel_mean :: data.mean([10000000000000000.0, 1.0, -10000000000000000.0]) ?? panic("cancel_mean")
+    cancel_sum :: data.sum([Float]{10000000000000000.0, 1.0, -10000000000000000.0}) ?? panic("cancel_sum")
+    cancel_mean :: data.mean([Float]{10000000000000000.0, 1.0, -10000000000000000.0}) ?? panic("cancel_mean")
     print("cancellation_sum: {cancel_sum}")
     print("cancellation_mean: {cancel_mean}")
 
     // Population variance (divide by n); singleton series is defined as 0.0.
-    pop_var :: data.variance([1.0, 2.0, 3.0]) ?? panic("pop_var")
-    one_var :: data.variance([4.0]) ?? panic("one_var")
+    pop_var :: data.variance([Float]{1.0, 2.0, 3.0}) ?? panic("pop_var")
+    one_var :: data.variance([Float]{4.0}) ?? panic("one_var")
     print("pop_variance: {pop_var}")
     print("one_variance: {one_var}")
 
     // Invalid quantile domain and rolling width.
-    bad_q :: data.quantile([1.0, 2.0, 3.0], 1.5)
+    bad_q :: data.quantile([Float]{1.0, 2.0, 3.0}, 1.5)
     if bad_q == {
         .Ok(_) :> { print("bad_quantile: ok") }
         .Err(error) :> { print("bad_quantile: {error}") }
@@ -109,8 +109,8 @@ fn run() {
 
     // Hostile plot labels are SVG-escaped; negative counts reject.
     hostile_rows :: [
-        Ticket{team: "<script>&\"x", minutes: 4.0},
-        Ticket{team: "<script>&\"x", minutes: 4.0}
+        Ticket{team: "<script>&\"x", minutes: Float{4.0}},
+        Ticket{team: "<script>&\"x", minutes: Float{4.0}}
     ]
     hostile_groups :: data.group_count(hostile_rows, t :> t.team) ?? panic("hostile_groups")
     svg :: data.bar_svg(hostile_groups) ?? panic("svg")

@@ -1,4 +1,4 @@
-// A named `#Caps` block binds a scoped `Authority` handle. The authority is
+// A named `#Caps` block binds a scoped `Abilities` handle. The abilities are
 // revoked at scope end, and the block's effects must stay inside its list.
 use core.files as fs
 
@@ -7,11 +7,11 @@ fn run() ? {
     // Filesystem + console authority is granted only for the extent of this
     // block. Every effect used inside (`FS` for the file work, `IO` for `print`)
     // must be in the named block's list (E0712). The handle may not escape (E0711).
-    #Caps(auth: FS, IO) {
+    #Caps(abilities: FS, IO) {
         fs.write(path, "granted\nthen revoked") ?? return Err("write failed")
         text :: fs.read(path) ?? return Err("read failed")
         print(text.to_upper())
     }
-    // Outside the grant the authority is revoked — ordinary code resumes.
+    // Outside the block the abilities are revoked — ordinary code resumes.
     print("done")
 }

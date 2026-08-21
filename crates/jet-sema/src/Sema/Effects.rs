@@ -227,7 +227,7 @@ pub fn effect_covers(bound: &str, e: &str) -> bool {
 pub fn effects_uncovered(inferred: &EffectSet, bound_set: &EffectSet) -> EffectSet {
     // D-PANICROOT1=A: Panic is deny-only. It remains in the inferred row for
     // diagnostics, reachability, and `=[!Panic]=>`, but never requires a
-    // positive function bound or a `#Abilities` authority.
+    // positive function bound or a `#Caps` authority.
     // D-AUTHORITY-MEM1=B: memory is deny-only in the same way. Memory events
     // publish `Mem.Alloc`/`Mem.Rc` into the inferred row so `:[!Mem.Alloc]>`
     // and manifest `authority.holds.deny` can match them, but a positive ceiling never
@@ -286,7 +286,7 @@ impl<'a> super::Checker<'a> {
     }
 
     /// D-EFF1: record an effect this function reaches directly — into the
-    /// function's set and every open `#Abilities(…)` region (which must account for
+    /// function's set and every open `#Caps(…)` region (which must account for
     /// effects reached inside it, E0712).
     pub(crate) fn record_effect(&mut self, e: &str, span: Span) {
         self.fx_direct.insert(e.to_string());
@@ -297,7 +297,7 @@ impl<'a> super::Checker<'a> {
     }
 
     /// D-EFF1: record a call-graph edge to a user function `name` — into the
-    /// function's edges and every open `#Abilities(…)` region.
+    /// function's edges and every open `#Caps(…)` region.
     pub(crate) fn record_edge(&mut self, name: String, span: Span) {
         let inline_edge = self.code_modules.values().find_map(|module| {
             let prefix = jet_foundation::Names::member_name(module, "");
@@ -334,7 +334,7 @@ impl<'a> super::Checker<'a> {
     }
 
     /// D-EFF1: record that a foreign (`extern`) call was reached — forcing the
-    /// maximal set on the function and every open `#Abilities(…)` region.
+    /// maximal set on the function and every open `#Caps(…)` region.
     pub(crate) fn record_maximal(&mut self, span: Span) {
         self.fx_maximal = true;
         self.fx_maximal_span.get_or_insert(span);
@@ -543,7 +543,7 @@ pub struct EffectSummary {
     /// This synthetic node is a trait method with no declared dispatch bound.
     /// Any caller that promises an effect ceiling receives E0743.
     pub unbounded_trait_dispatch: bool,
-    /// D-EFF1: `#Abilities(…)` restriction regions found in this body (checked against
+    /// D-EFF1: `#Caps(…)` restriction regions found in this body (checked against
     /// their transitive inferred set in the post-pass — E0712).
     pub regions: Vec<RegionSummary>,
     /// D-EFF2 (callback param bound): obligations recorded at each call to a
@@ -758,7 +758,7 @@ pub struct CallbackObligation {
     pub span: Span,
 }
 
-    /// D-EFF1: an open `#Abilities(…)` region's running accumulator while the checker
+    /// D-EFF1: an open `#Caps(…)` region's running accumulator while the checker
 /// walks its body. Sealed into a `RegionSummary` when the region closes.
 #[derive(Debug, Clone)]
 pub struct RegionAccum {
@@ -769,7 +769,7 @@ pub struct RegionAccum {
     pub maximal: bool,
 }
 
-/// D-EFF1: a `#Abilities(…) { … }` region's accumulated effects, checked (transitively)
+/// D-EFF1: a `#Caps(…) { … }` region's accumulated effects, checked (transitively)
 /// against the declared cap set in the post-pass.
 #[derive(Debug, Clone)]
 pub struct RegionSummary {
@@ -778,7 +778,7 @@ pub struct RegionSummary {
     pub direct: EffectSet,
     pub edges: BTreeSet<String>,
     pub maximal: bool,
-    /// Span of the `#Abilities(…)` list, for the diagnostic.
+    /// Span of the `#Caps(…)` list, for the diagnostic.
     pub caps_span: Span,
 }
 
@@ -1461,7 +1461,7 @@ pub fn e0749_panic(
     )
 }
 
-/// D-EFF1: check every `#Abilities(…)` region across the program against its
+/// D-EFF1: check every `#Caps(…)` region across the program against its
 /// transitive inferred effect set (region.direct ∪ maximal ∪ ⋃ solved[edge]).
 /// An effect used inside a region that its cap list omits is E0712.
 pub fn check_region_caps(
@@ -1496,7 +1496,7 @@ pub fn check_region_caps(
 }
 
 /// D-AUTHORITY-SCOPE1: detect whether the authority handle `handle` bound by a
-/// named `#Abilities(…)` region
+/// named `#Caps(…)` region
 /// region escapes its block — returned, stored, passed, captured, or otherwise
 /// used as a value that outlives the scope. Returns the span of the first escape,
 /// or `None` if the handle is only ever used in place (as the receiver of a
@@ -1748,7 +1748,7 @@ fn expr_handle_escape(e: &crate::AST::Expr, handle: &str) -> Option<Span> {
     }
 }
 
-/// E0712 (D-AUTHORITY-SCOPE1): an effect used inside a `#Abilities(…)` region is not
+/// E0712 (D-AUTHORITY-SCOPE1): an effect used inside a `#Caps(…)` region is not
 /// in the region's list. The same check covers bare and named regions.
 pub fn e0712(over: &EffectSet, caps: &EffectSet, span: Span, marker: &str) -> Diagnostic {
     let over_list = show_set(over);
@@ -1775,7 +1775,7 @@ pub fn e0712(over: &EffectSet, caps: &EffectSet, span: Span, marker: &str) -> Di
     )
 }
 
-/// E0711 (D-AUTHORITY-SCOPE1): the `Abilities` handle bound by a named `#Abilities(…)` region escapes
+/// E0711 (D-AUTHORITY-SCOPE1): the `Abilities` handle bound by a named `#Caps(…)` region escapes
 /// its scope — returned, stored in an outer binding, or captured by an escaping
 /// value. The abilities are revoked at scope end (RAII, S63), so a reference
 /// that outlives the block would name revoked abilities.
@@ -1792,7 +1792,7 @@ pub fn e0711(handle: &str, marker: &str, span: Span) -> Diagnostic {
     )
 }
 
-/// E0119: a `#(…)` or `#Abilities(…)` list names something that isn't a known effect.
+/// E0119: a `#(…)` or `#Caps(…)` list names something that isn't a known effect.
 pub fn unknown_effect(name: &str, span: Span) -> Diagnostic {
     Diagnostic::error(
         "E0119",

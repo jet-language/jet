@@ -167,13 +167,13 @@ fn apply_authority_method(
     }
     if args.len() != 1 {
         return Some(Err(unsupported(
-            &format!("Abilities.{method} expects one String right"),
+            &format!("Authority.{method} expects one String right"),
             span,
         )));
     }
     let CtValue::Str(requested) = &args[0] else {
         return Some(Err(unsupported(
-            &format!("Abilities.{method} expects a String right"),
+            &format!("Authority.{method} expects a String right"),
             span,
         )));
     };
@@ -183,9 +183,9 @@ fn apply_authority_method(
             Ok(rights) => Ok(authority_value(rights)),
             Err(message) => Err(Diagnostic::error(
                 "E0712",
-                format!("this Abilities value cannot narrow to `{requested}`"),
-                "the requested right is not held by this Abilities value".to_string(),
-                format!("use a right already held by the Abilities value: {message}"),
+                format!("this Authority value cannot narrow to `{requested}`"),
+                "the requested right is not held by this Authority value".to_string(),
+                format!("use a right already held by the Authority value: {message}"),
                 Some(span),
             )),
         });
@@ -702,7 +702,7 @@ pub fn apply_static_type_method(
     args: Vec<CtValue>,
     span: Span,
 ) -> Option<Result<CtValue, Diagnostic>> {
-    // D-AUTHORITY-WORD2=E: the interpreter/comptime carrier has the same
+    // D-AUTHORITY-NAME1=A: the interpreter/comptime carrier has the same
     // ordinary-data shape as the Prelude value. Boundary narrowing uses the
     // same rights relation as AOT and JIT.
     if matches!(type_name, crate::Syntax::TYPE_ABILITIES | "JetAuthority")

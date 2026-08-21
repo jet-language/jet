@@ -2,5 +2,6 @@
 fn run() {
     (tx, rx) :: channel<Int>(capacity: 8)
     tx.send(42)
-    print(rx.receive() ?? panic("channel closed"))
+    tx.close()
+    loop value, rx :> print(value)
 }

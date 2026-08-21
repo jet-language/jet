@@ -1,16 +1,31 @@
 // D-CONC-CHAN2=D / card #1560: a readiness table waits on plain endpoints.
+fn wait_for_work(ch1: Receiver<Int>, ch2: Receiver<Int>) {
+    if {
+        job, ch1 :> print(job)
+        msg, ch2 :> print(msg)
+    }
+    if {
+        after 100ms :> print("timed")
+    }
+}
+
+fn failure_label(error: TaskFailure) String {
+    if error == {
+        .Panicked(reason) :> { return "panic:{reason}" }
+        .DeadlineBlown :> { return "deadline" }
+        .Cancelled :> return "cancelled"
+    }
+}
 
 fn run() {
     (s1, ch1) :: channel<Int>()
     (s2, ch2) :: channel<Int>()
     s1.send(11)
-    if {
-        job, ch1 :> print(job)
-        msg, ch2 :> print(msg)
-    }
     s2.send(22)
-    if {
-        job, ch1 :> print(job)
-        msg, ch2 :> print(msg)
+    waiter :: task wait_for_work(ch1, ch2)
+    result :: waiter.join()
+    if result == {
+        .Err(error) :> { print(failure_label(error)) }
+        .Ok(_) :> print("ok")
     }
 }

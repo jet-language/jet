@@ -529,9 +529,6 @@ impl JetShow for JetServiceTree {
 impl Drop for JetServiceTree {
     fn drop(&mut self) {
         jet_services_close_runtime_groups(self);
-        for worker in &self.workers {
-            worker.mailbox.channel.close();
-        }
     }
 }
 

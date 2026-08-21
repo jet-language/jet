@@ -510,7 +510,7 @@ fn visit_statement_gates(source: &str, body: &[Stmt], ledger: &mut GateLedger) {
                 "block",
                 source,
                 *span,
-                "#Abilities",
+                "#Caps",
                 None,
                 &format!(
                     "abilities: {}",

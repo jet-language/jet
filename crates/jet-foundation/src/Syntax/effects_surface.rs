@@ -143,7 +143,7 @@ pub const STATE_ENTRY: &str = "_";
 /// D-AUTHORITY-SCOPE1=A / D-AUTHORITY-WORD2=E (ratified 2026-08-06/17;
 /// implementation #1572):
 /// #1573): one scope marker serves both narrowed blocks and named handles.
-/// Bare `#Abilities(Net, DB) { … }` narrows the block; `#Abilities(g: FS, Net) { … }`
+/// Bare `#Caps(Net, DB) { … }` narrows the block; `#Caps(g: FS, Net) { … }`
 /// binds `g` for the block. The retired Grant marker remains only as a parser
 /// tombstone. PascalCase per D-CASING1. Erased in codegen (I3).
 pub const KW_CAPS: &str = "Abilities";
@@ -151,8 +151,8 @@ pub const KW_CAPS: &str = "Abilities";
 /// D-AUTHORITY-SCOPE1: parser tombstone for the retired Grant marker.
 pub const RETIRED_MARKER_GRANT: &str = "Grant";
 
-/// D-AUTHORITY-SCOPE1 / D-AUTHORITY-WORD2=E: the type of a scoped Abilities
-/// handle bound by `#Abilities(abilities: FS, Net) { … }`. It is an ordinary
+/// D-AUTHORITY-SCOPE1: the type of a scoped Abilities
+/// handle bound by `#Caps(abilities: FS, Net) { … }`. It is an ordinary
 /// value type; the block still erases in codegen, but the handle can cross only
 /// where the surrounding API accepts Abilities.
 pub const CAP_HANDLE_TYPE: &str = "Abilities";

@@ -37,10 +37,10 @@ fn run() {
     joined :: data.inner_join(sorted, budgets, t :> t.team, b :> b.team) ?? panic("join")
     left :: data.left_join(rows, budgets, t :> t.team, b :> b.team) ?? panic("left")
     pivot :: data.pivot_sum(rows, t :> t.team, t :> if t.minutes >= 5.0 :> "long" else :> "short", t :> t.minutes) ?? panic("pivot")
-    values :: [4.0, 5.0, 8.0, 3.0]
+    values :: [Float]{4.0, 5.0, 8.0, 3.0}
     summary :: data.describe(values) ?? panic("describe")
     rolling :: data.rolling_mean(values, 2) ?? panic("rolling")
-    maybe_minutes :: [Val(4.0), no_minutes(), Val(8.0), no_minutes()]
+    maybe_minutes :: [Val(Float{4.0}), no_minutes(), Val(Float{8.0}), no_minutes()]
     series :: data.series(maybe_minutes)
     print(data.count(sorted))
     print(data.count(table))

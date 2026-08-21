@@ -700,7 +700,7 @@ impl<'a> Fmt<'a> {
                 });
                 self.end_block();
             }
-            // D-EFF1 / D-QUAL1: `#Abilities(Net, DB) { … }` effect-restriction region.
+            // D-EFF1 / D-QUAL1: `#Caps(Net, DB) { … }` effect-restriction region.
             Stmt::Caps { body, .. } => {
                 self.with_indent(|f| f.fmt_block_stmts(body));
                 self.end_block();
@@ -955,7 +955,7 @@ impl<'a> Fmt<'a> {
     /// one-field tuple so the existing arm IR can carry it through sema/TIR.
     /// That carrier is not user syntax; always print its canonical arm-table
     /// spelling instead of leaking the tuple or its sentinel field.
-    fn fmt_readiness_head(&mut self, cond: &Expr) -> bool {
+    pub(super) fn fmt_readiness_head(&mut self, cond: &Expr) -> bool {
         match crate::AST::readiness_head(cond) {
             Some(crate::AST::ReadinessHead::Receive { binding, source }) => {
                 self.write(binding);

@@ -1395,7 +1395,7 @@ fn run_repl_step_inner(
         debugger: None,
         depth: 0,
         cur_func: "main".to_string(),
-        // D-REPLCOREEFFECT1=A: only a lexical `#Abilities` opens this depth.
+        // D-REPLCOREEFFECT1=A: only a lexical `#Caps` opens this depth.
         impure_depth: 0,
         gates: jet_foundation::Policy::GateSet::allow(jet_foundation::Policy::PolicyKey::Impure),
         repl_mode: true,

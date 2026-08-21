@@ -572,7 +572,6 @@ pub fn jet_services_authority_update(
     endpoint: &JetServiceEndpoint,
     started: bool,
 ) -> Result<(), JetServiceError> {
-    eprintln!("SERVICE_DEBUG update {}/{}@g{} started={}", endpoint.tree, endpoint.worker, endpoint.generation, started);
     service_authority_validate_endpoint(endpoint)?;
     let key = service_endpoint_key(&endpoint.authority, &endpoint.worker, endpoint.generation);
     let mut registry = service_endpoint_registry()
@@ -607,7 +606,6 @@ fn service_authority_channel(
     let state = registry.get(&key).ok_or_else(|| {
         JetServiceError::Partitioned("service endpoint authority is not registered".to_string())
     })?;
-    eprintln!("SERVICE_DEBUG channel {}/{}@g{} state_started={}", endpoint.tree, endpoint.worker, endpoint.generation, state.started);
     if state.tree != endpoint.tree || state.worker != endpoint.worker {
         return Err(JetServiceError::Revoked(
             "service endpoint authority does not match its tree".to_string(),

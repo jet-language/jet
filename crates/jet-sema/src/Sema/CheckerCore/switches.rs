@@ -1064,6 +1064,11 @@ impl<'a> Checker<'a> {
             else_body: &mut Option<Vec<Stmt>>,
             _span: Span,
         ) {
+            enum ReadinessArm {
+                Receive { binding: String, source: Expr },
+                After { duration: Expr },
+            }
+
             let before = self.flow.clone();
             let mut paths = Vec::with_capacity(arms.len() + usize::from(else_body.is_some()));
             let mut element_ty: Option<Type> = None;
@@ -1072,20 +1077,33 @@ impl<'a> Checker<'a> {
 
             for arm in arms.iter_mut() {
                 self.flow = before.clone();
-                let Some(head) = crate::AST::readiness_head(&arm.cond) else {
-                    self.diags.push(Diagnostic::error(
-                        "E0112",
-                        "a readiness table cannot mix channel arms with Boolean guards".to_string(),
-                        "every arm in one readiness table waits on a Receiver<T> or a Duration".to_string(),
-                        "write `value, receiver :> ...` or move the Boolean guard to a separate `if`".to_string(),
-                        Some(arm.cond.span()),
-                    ));
-                    self.check_block(&mut arm.body, true);
-                    paths.push(self.flow.clone());
-                    continue;
+                let head = match crate::AST::readiness_head(&arm.cond) {
+                    Some(crate::AST::ReadinessHead::Receive { binding, source }) => {
+                        ReadinessArm::Receive {
+                            binding: binding.to_string(),
+                            source: source.clone(),
+                        }
+                    }
+                    Some(crate::AST::ReadinessHead::After { duration }) => {
+                        ReadinessArm::After {
+                            duration: duration.clone(),
+                        }
+                    }
+                    None => {
+                        self.diags.push(Diagnostic::error(
+                            "E0112",
+                            "a readiness table cannot mix channel arms with Boolean guards".to_string(),
+                            "every arm in one readiness table waits on a Receiver<T> or a Duration".to_string(),
+                            "write `value, receiver :> ...` or move the Boolean guard to a separate `if`".to_string(),
+                            Some(arm.cond.span()),
+                        ));
+                        self.check_block(&mut arm.body, true);
+                        paths.push(self.flow.clone());
+                        continue;
+                    }
                 };
                 match head {
-                    crate::AST::ReadinessHead::Receive { binding, source } => {
+                    ReadinessArm::Receive { binding, source } => {
                         has_receive = true;
                         // `readiness_head` borrows the compiler-private tuple carrier. Infer
                         // a private copy, then put the elaborated expression back into the
@@ -1093,7 +1111,7 @@ impl<'a> Checker<'a> {
                         // constructor before TIR coverage is decided; leaving the raw
                         // `UnitLit` behind makes every task containing a timer arm disappear
                         // from the interpreter program and makes AOT report an I2 ICE.
-                        let mut source_expr = source.clone();
+                        let mut source_expr = source;
                         let source_ty = self.infer(&mut source_expr);
                         let source_span = source_expr.span();
                         if let crate::AST::Expr::TupleLit(fields, ..) = &mut arm.cond {
@@ -1139,7 +1157,7 @@ impl<'a> Checker<'a> {
                         self.push_scope();
                         let mut restore_moved = Vec::new();
                         if let Some(restored) =
-                            self.declare_condition_binding(binding, arm.cond.span(), payload)
+                            self.declare_condition_binding(&binding, arm.cond.span(), payload)
                         {
                             restore_moved.push(restored);
                         }
@@ -1149,9 +1167,9 @@ impl<'a> Checker<'a> {
                             self.flow.moved.set(&name, at);
                         }
                     }
-                    crate::AST::ReadinessHead::After { duration } => {
+                    ReadinessArm::After { duration } => {
                         has_after = true;
-                        let mut duration_expr = duration.clone();
+                        let mut duration_expr = duration;
                         let duration_ty = self.infer(&mut duration_expr);
                         let duration_span = duration_expr.span();
                         if let crate::AST::Expr::TupleLit(fields, ..) = &mut arm.cond {

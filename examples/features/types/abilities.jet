@@ -1,0 +1,13 @@
+// D-AUTHORITY-WORD2=E: `Abilities` is the carried rights value. It narrows on
+// the way down and never widens, so a callee cannot hand itself more than it
+// was given.
+struct Holder {
+    abilities: Abilities
+}
+
+fn run() {
+    abilities :: Abilities.workspace()
+    narrowed :: abilities.with("FS.Read")
+    released :: narrowed.without("FS.Read")
+    print("abilities")
+}

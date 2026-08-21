@@ -1,0 +1,21 @@
+use core.service as service
+
+fn run() {
+    tree := service.tree("probe")
+    api :: tree.worker("api", capacity: 2) ?? panic("worker")
+    tree.start() ?? panic("start")
+    tree.send(api, "tree-ping") ?? panic("tree-send")
+    print(tree.receive(api) ?? panic("tree-receive"))
+    result :: api.send("ping")
+    if result == {
+        .Ok(_) :> print("ok")
+        .Err(error) :> {
+            if error == .Full(_) :> print("full")
+            if error == .Ambiguous(_) :> print("ambiguous")
+            if error == .NotStarted(_) :> print("not-started")
+            if error == .Partitioned(_) :> print("partitioned")
+            if error == .Revoked(_) :> print("revoked")
+            print("other")
+        }
+    }
+}

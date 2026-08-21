@@ -754,7 +754,7 @@ impl<'a> Parser<'a> {
                     } else {
                         // D-VARIADIC1: `name: ...T` is the one rest-parameter
                         // spelling, so a marker that takes a list of arguments
-                        // (`#Abilities(Net, FS)`) writes it the same way a function does.
+                        // (`#Caps(Net, FS)`) writes it the same way a function does.
                         if matches!(self.peek().kind, TokKind::DotDotDot) {
                             self.bump();
                             variadic = true;

@@ -3601,7 +3601,11 @@ fn register_core_close_types(cx: &mut Cx) {
 
 /// Populate value-shape tables that depend on bundle-resolved Core imports.
 pub(crate) fn register_core_import_surfaces(cx: &mut Cx) {
-    if cx.core_imports.values().any(|module| module == "core.services") {
+    if cx
+        .core_imports
+        .values()
+        .any(|module| matches!(module.as_str(), "core.service" | "core.services"))
+    {
         let zero = Span::new(0, 0);
         let variants = vec![
             ("Enqueued".to_string(), VariantPayload::Single(Type::String, zero)),
