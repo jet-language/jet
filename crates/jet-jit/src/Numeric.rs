@@ -568,6 +568,13 @@ fn jet_jit_fraction_to_string(a: i64) -> i64 {
     Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(text))
 }
 
+// D-TYPE2-DEFAULT1: the JIT half of the exact-to-approximate crossing. Both
+// exact carriers cross at the irrational-result math functions, so the JIT
+// needs Decimal here for the same reason it needs Fraction.
+fn jet_jit_decimal_to_float(a: i64) -> f64 {
+    with_decimal(a, |d| d.to_string_rep().parse::<f64>().unwrap_or(f64::NAN)).unwrap_or(f64::NAN)
+}
+
 fn jet_jit_fraction_to_float(a: i64) -> f64 {
     with_fraction(a, |f| f.numerator as f64 / f.denominator as f64).unwrap_or(0.0)
 }
@@ -704,6 +711,7 @@ host_fns! {
     decimal_mul: "jet_jit_decimal_mul" => jet_jit_decimal_mul: sig_binary;
     decimal_equal: "jet_jit_decimal_equal" => jet_jit_decimal_equal: sig_compare;
     decimal_to_string: "jet_jit_decimal_to_string" => jet_jit_decimal_to_string: sig_unary;
+    decimal_to_float: "jet_jit_decimal_to_float" => jet_jit_decimal_to_float: sig_unary_f64;
     fraction_new: "jet_jit_fraction_new" => jet_jit_fraction_new: sig_binary;
     fraction_from_parts: "jet_jit_fraction_from_parts" => jet_jit_fraction_from_parts: sig_binary;
     fraction_add: "jet_jit_fraction_add" => jet_jit_fraction_add: sig_binary;

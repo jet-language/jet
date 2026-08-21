@@ -182,6 +182,10 @@ fn jet_jit_process_run(cmd_list: i64) -> i64 {
     }
 }
 
+fn jet_jit_process_run_with_authority(cmd_list: i64, _authority: i64) -> i64 {
+    jet_jit_process_run(cmd_list)
+}
+
 fn jet_jit_process_pipeline(spec_list: i64) -> i64 {
     let handles = Concurrency::with_runtime_mut(|rt| {
         let len = rt.heap.list_len(spec_list).unwrap_or(0);
@@ -518,6 +522,7 @@ host_fns! {
     }
     cmd: "jet_jit_process_cmd" => jet_jit_process_cmd: sig_unary;
     run: "jet_jit_process_run" => jet_jit_process_run: sig_unary;
+    run_with_authority: "jet_jit_process_run_with_authority" => jet_jit_process_run_with_authority: sig_binary;
     pipeline: "jet_jit_process_pipeline" => jet_jit_process_pipeline: sig_unary;
     spec_stdout: "jet_jit_process_spec_stdout" => jet_jit_process_spec_stdout: sig_binary;
     spec_stderr: "jet_jit_process_spec_stderr" => jet_jit_process_spec_stderr: sig_binary;

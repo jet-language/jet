@@ -19,8 +19,9 @@ use jet_codegen::scheduler::{
 };
 use jet_codegen::task_group::{JetTaskGroupPermit, JetTaskGroupRuntime};
 use std::cell::{Cell, RefCell};
+use std::collections::HashMap;
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::{Arc, Mutex, MutexGuard};
+use std::sync::{Arc, Mutex, MutexGuard, OnceLock, Weak};
 
 // Every native host call that reaches the resident runtime crosses this lock.
 // Spawned Cranelift frames share the same arena as their parent, so the raw
@@ -28,6 +29,11 @@ use std::sync::{Arc, Mutex, MutexGuard};
 static RUNTIME_ACCESS: Mutex<()> = Mutex::new(());
 /// Published for HTTP `std::thread` workers that are not jet-scheduler tasks.
 static HTTP_SHARED_RUNTIME: AtomicUsize = AtomicUsize::new(0);
+/// Task cancellation must stay live while a deopt host owns `RUNTIME_ACCESS`
+/// across an interpreter wait. The registry carries only weak control handles;
+/// heap and task-table ownership remain in `JitRuntime`.
+static TASK_CONTROLS: OnceLock<Mutex<HashMap<(usize, usize), Weak<JetTaskControl>>>> =
+    OnceLock::new();
 
 thread_local! {
     static ACTIVE_RUNTIME: RefCell<Option<*mut super::JitRuntime>> = const { RefCell::new(None) };
@@ -224,6 +230,28 @@ fn take_task_trap() -> Option<String> {
 
 fn clear_task_trap() {
     TASK_TRAP.with(|slot| slot.borrow_mut().take());
+}
+
+fn task_controls() -> &'static Mutex<HashMap<(usize, usize), Weak<JetTaskControl>>> {
+    TASK_CONTROLS.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+fn publish_task_control(runtime: usize, task: usize, control: &Arc<JetTaskControl>) {
+    task_controls()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .insert((runtime, task), Arc::downgrade(control));
+}
+
+fn published_task_control(runtime: usize, task: usize) -> Option<Arc<JetTaskControl>> {
+    let mut controls = task_controls()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let control = controls.get(&(runtime, task)).and_then(Weak::upgrade);
+    if control.is_none() {
+        controls.remove(&(runtime, task));
+    }
+    control
 }
 
 
@@ -768,12 +796,18 @@ type SpawnFn3 = extern "C" fn(i64, i64, i64) -> i64;
 type SpawnFn4 = extern "C" fn(i64, i64, i64, i64) -> i64;
 
 fn store_task(join: JetSchedulerJoin<i64>, control: Arc<JetTaskControl>) -> i64 {
-    with_runtime_mut(|rt| {
+    let runtime = active_runtime_ptr().map(|ptr| ptr as usize);
+    let published = control.clone();
+    let task = with_runtime_mut(|rt| {
         let id = rt.tasks.len() as i64;
         rt.tasks.push(Some(join));
         rt.task_controls.push(control);
         id
-    })
+    });
+    if let Some(runtime) = runtime {
+        publish_task_control(runtime, task as usize, &published);
+    }
+    task
 }
 
 fn task_ids_from_list(rt: &mut super::JitRuntime, list: i64) -> Vec<i64> {
@@ -1048,6 +1082,12 @@ fn jet_jit_task_group_close(group: i64) -> i64 {
 }
 
 fn jet_jit_task_cancel(task: i64) {
+    if let Some(runtime) = active_runtime_ptr().map(|ptr| ptr as usize) {
+        if let Some(control) = published_task_control(runtime, task as usize) {
+            control.cancel();
+            return;
+        }
+    }
     with_runtime_mut(|rt| match rt.task_controls.get(task as usize).cloned() {
         Some(control) => control.cancel(),
         None => rt.set_host_fault("jit task cancel: bad task handle"),

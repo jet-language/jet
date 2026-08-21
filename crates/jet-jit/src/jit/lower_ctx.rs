@@ -15833,6 +15833,10 @@ impl LowerCtx<'_, '_> {
                                 "run" if args.len() == 1 => {
                                     (self.host.process.run, vec![self.lower_expr(&args[0])?])
                                 }
+                                "run" if args.len() == 2 => (
+                                    self.host.process.run_with_authority,
+                                    vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
+                                ),
                                 "pipeline" if args.len() == 1 => {
                                     (self.host.process.pipeline, vec![self.lower_expr(&args[0])?])
                                 }
@@ -19558,6 +19562,7 @@ impl LowerCtx<'_, '_> {
                         ("Decimal", "mul") => self.host.num.decimal_mul,
                         ("Decimal", "equal") => self.host.num.decimal_equal,
                         ("Decimal", "to_string") => self.host.num.decimal_to_string,
+                        ("Decimal", "to_float") => self.host.num.decimal_to_float,
                         ("Fraction", "from_parts") => self.host.num.fraction_from_parts,
                         ("Fraction", "add") => self.host.num.fraction_add,
                         ("Fraction", "sub") => self.host.num.fraction_sub,
@@ -25030,6 +25035,7 @@ impl LowerCtx<'_, '_> {
                         ("Decimal", "mul") => (self.host.num.decimal_mul, 1),
                         ("Decimal", "equal") => (self.host.num.decimal_equal, 1),
                         ("Decimal", "to_string") => (self.host.num.decimal_to_string, 0),
+                        ("Decimal", "to_float") => (self.host.num.decimal_to_float, 0),
                         ("Fraction", "add") => (self.host.num.fraction_add, 1),
                         ("Fraction", "sub") => (self.host.num.fraction_sub, 1),
                         ("Fraction", "mul") => (self.host.num.fraction_mul, 1),

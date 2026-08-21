@@ -427,6 +427,13 @@ fn jet_decimal_equal(a: &jet_std::JetDecimal, b: &jet_std::JetDecimal) -> bool {
 fn jet_decimal_to_string(a: &jet_std::JetDecimal) -> String {
     a.to_string_rep()
 }
+// D-TYPE2-DEFAULT1: the AOT half of the exact-to-approximate crossing. The
+// checker admits an exact Decimal at the irrational-result math functions
+// exactly as it admits a Fraction, so every tier needs this conversion, not
+// only the evaluator.
+fn jet_decimal_to_float(a: &jet_std::JetDecimal) -> f64 {
+    a.to_string_rep().parse::<f64>().unwrap_or(f64::NAN)
+}
 
 // D-ENC-DYN1=A+: the dynamic `parse` returns the one rich `Data` value (the
 // user-facing face of `DataTree`). JSON text parses through the internal `JSON`
