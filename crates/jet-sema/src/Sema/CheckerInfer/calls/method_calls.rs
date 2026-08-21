@@ -2650,6 +2650,7 @@ impl<'a> Checker<'a> {
                         if matches!(
                             method,
                             "worker"
+                                | "group"
                                 | "set_restart"
                                 | "set_delivery"
                                 | "start"

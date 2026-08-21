@@ -1,3 +1,4 @@
+mod common;
 mod tir_support;
 
 #[test]

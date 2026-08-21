@@ -560,6 +560,12 @@ fn emit_plain_core_call(
     if !row.coverage.contains(crate::Syntax::CoreCallCoverage::AOT) {
         return None;
     }
+    // A boundary form may carry one extra typed value that sema accepts but
+    // the plain row does not. Keep the direct symbol only for its own arity;
+    // the typed emitter below owns the extra Authority argument.
+    if !row.accepts_arity(args.len()) {
+        return None;
+    }
     if !row.aot_direct {
         return None;
     }

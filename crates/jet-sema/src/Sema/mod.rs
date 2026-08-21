@@ -2247,7 +2247,9 @@ mod CheckerValidate;
 pub mod Diagnostics;
 mod CognitiveComplexity;
 mod Edition;
-mod Effects;
+// The REPL's effect-name gate reads parse_effect_name and effect_covers
+// directly, the same way it reads ApiFreeze and GateLedger above.
+pub mod Effects;
 mod FlowFacts;
 mod MemoryFacts;
 mod MemberSpread;

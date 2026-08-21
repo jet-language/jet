@@ -154,6 +154,18 @@ impl<'a> Checker<'a> {
                 }
                 result_endpoint()
             }
+            "group" => {
+                if self.service_method_arity("ServiceTree.group", args, 2, span) {
+                    self.expect_core_arg("ServiceTree.group", 0, &Type::String, &mut args[0]);
+                    self.expect_core_arg(
+                        "ServiceTree.group",
+                        1,
+                        &Type::List(Box::new(Type::String)),
+                        &mut args[1],
+                    );
+                }
+                result_unit()
+            }
             "set_restart" => {
                 if self.service_method_arity("ServiceTree.set_restart", args, 1, span) {
                     self.expect_core_arg(

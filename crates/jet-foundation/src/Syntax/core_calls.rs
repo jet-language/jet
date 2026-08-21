@@ -797,8 +797,7 @@ pub const CORE_CALLS: &[CoreCallRecord] = &[
     CoreCallRecord::new("core.process", "exit", "jet_std_process_exit", true, &[false]),
     // D-AUTHORITY-NAME1=A: the explicit authority form uses the typed emitter
     // and host adapter below; do not let the one-argument row erase its value.
-    CoreCallRecord::new("core.process", "run", "jet_std_process_run", true, &[true])
-        .without_direct_aot(),
+    CoreCallRecord::new("core.process", "run", "jet_std_process_run", true, &[true]),
     CoreCallRecord::new("core.process", "cmd", "jet_std_process_cmd", true, &[true]),
     CoreCallRecord::new("core.process", "pipeline", "jet_std_process_pipeline", true, &[true]),
     CoreCallRecord::new("core.process", "argv", "jet_std_io_args", true, &[]),
