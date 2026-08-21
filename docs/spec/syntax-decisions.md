@@ -7763,6 +7763,70 @@ one meaning: `T?` means a value might be absent, while a fallible type uses
 keep their current meanings. Option B's `!!` operator and the overloaded `T ? E`
 spelling are rejected.
 
+## The reading-first slate (ratified 2026-08-21, card #2144)
+
+Priority order for surface design, owner-stated: the ability to reason about code comes first, reading second, writing third. Proposal: `docs/proposals/one-callable-one-arrow.md`. Eight outcomes; the entries below are the operative wording.
+
+**2026-08-21 — D-ARROW-RESPELL1=A** *(card #2144)*: the one arrow respells from
+`:>` to `->` in every arrow position — callable bodies, dispatch arms, loop
+bodies, lambdas, the conversion rail (`impl Source -> Target`), and the
+migration verbs. This amends the spelling of D-ARROW-UNIFY1=B,
+D-LOOP-STMT-ARROW1=C, D-SIG-SHAPE1=B, D-TRAILBLOCK2=A and D-ONELINE-BODY1=B
+examples, and D-FAIL-CONV1=A's rail. `:>` and `=>` become teaching
+diagnostics with no alias.
+
+**2026-08-21 — D-EFFECT-ROW2=B** *(card #2144; owner acceptance term)*: the
+effect row stays fused and splits the new arrow: `-[Effect]>`, pure form
+`-[]>` (owner: "It should split the arrow like this: -[Effect]>"). This
+carries D-SHAPE8=A onto the `->` glyph; the standalone `:[E]` row is rejected.
+
+**2026-08-21 — D-CALLABLE-ONE1=A** *(card #2144)*: one callable shape,
+`[fn name] ( params ) [Return facts] [-[Effects]>|->] body`. The plain arrow is
+present exactly when a non-unit success result is declared, or the callable is
+a lambda. Unit bodies — plain or fallible — keep bare braces: D-FAIL-UNIT1=A
+is preserved. Braced value-returning functions gain the arrow. This amends
+D-SIG-SHAPE1=B and subsumes D-BODY-ARROW1=B. `task { … }` remains
+D-CONC-SPAWN1=D's task-specific lowering outside this grammar.
+
+**2026-08-21 — D-LAMBDA-IFACE1=A** *(card #2144)*: a lambda may write any
+suffix of the callable interface — return type, error, effect row — in the
+same shape as a named function. Inference law (D-LAMBDA-INFER1) is untouched:
+annotations stay optional wherever an expected type exists.
+
+**2026-08-21 — D-ERRSUFFIX1=B** *(card #2144)*: the failure surface is a
+suffix zone: `[Success?] [ErrorUnion!]`, one `!` mark on the error type or on
+an explicit parenthesized union — `Entry? StoreError!`,
+`Int (DbError | TimeoutError)!`. Unit-fallible is the error suffix alone
+(`fn save(path: String) IOError!`); bare `!` keeps the default-error meaning.
+This amends D-ERRSIGIL1=A (the mark moves from infix separator to suffix),
+D-UNIONTYPE1=A (the union takes explicit parens under the suffix), and
+D-FAIL-UNIT1=A's spelling. `?` still means absence only.
+
+**2026-08-21 — D-ARMHEAD-PAREN1=A** *(card #2144)*: in a dispatch table, bare
+distributed atoms may not appear as a direct operand of `&&`/`||`; the atom
+group takes parentheses (`(48 | 45) && ready`). A registered diagnostic with a
+machine-applicable fixit inserts the grouping the desugar already uses. Pure
+atom arms, pure predicate arms, and pattern guards are untouched. Amends
+D-IFDIST1=A.
+
+**2026-08-21 — D-SUBJECT-COHERE1=A** *(card #2144)*: subject shorthand follows
+one rule: `.segment[(args)]` chains accept method or member segments in every
+shorthand position, including call slots (`words.map(.len())`). A registered
+lint, selector `subject_shorthand_nesting`, fires on shorthand inside another
+shorthand scope and names the explicit-binding rewrite. Amends
+D-SUBJECT-CALL1=A; D-LOOP-SUBJECT1=A unchanged.
+
+**2026-08-21 — D-DEFAULT-SHAPE1=B** *(card #2144; ratified directly in chat)*:
+a declaration default rides the type as the one typed-value atom:
+`name: Type{value}` — `timeout seconds: Int{30}`, `port: Int{3000}`,
+`x: Int?{None}`, `second: ^Int{first}`, `n: Int{default_retries()}`. The slot
+grammar is `name ':' [cap-mark] Type [suffix] [ '{' default-expr '}' ]`;
+evaluation stays per-call, left to right. `=` retires from the declaration
+plane; reassignment and extern slot fill keep it. Amends D-APILABEL1=A's
+default spelling and D-CLI-GLOBAL1=E's `=` binding form; narrows
+D-CHOOSE-FNBODY1=A's fill scope. Use-side fills keep their colon
+(`f(force: true)`, `Rect{width: 3}`).
+
 ## Ratified decision index
 
 <!-- BEGIN GENERATED RATIFIED INDEX -->
