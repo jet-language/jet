@@ -37,7 +37,7 @@ fn run() {
     print(before_save.run(5, "fallback"))
 
     async_scope :: event.scope()
-    queued :: event.async_result<Int, String>(AsyncPolicy.{capacity: 1, overflow: .Block}, .Collect) ?? panic("policy")
+    queued :: event.async_result<Int, String>(AsyncPolicy{capacity: 1, overflow: .Block}, .Collect) ?? panic("policy")
     queued.on(async_scope, (n: Int) => {
         print("async {n}")
     })

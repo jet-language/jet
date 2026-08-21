@@ -20,10 +20,10 @@ use core.reactive as reactive
 // exposed two real, general compiler bugs unrelated to this file's own logic:
 // (1) a struct declared *inside* an inline `module { }` isn't visible even to
 // that module's own sibling functions (repro: `module m { struct T {} fn f()
-// -> T { return T.{} } }` fails E0119, no #Target/web involved at all);
+// -> T { return T{} } }` fails E0119, no #Target/web involved at all);
 // (2) moving a function into a module changes how native codegen handles an
 // unmodified struct-field forward, producing a real rustc rejection (I2 P0 —
-// `return StatCard.{ ..., color: color, ... }` inside a module wants a
+// `return StatCard{ ..., color: color, ... }` inside a module wants a
 // copy that the identical code at file scope never needed). Both are
 // reported, not fixed here (out of scope for this pass) — so this file keeps
 // the original, verified-working per-function `#Target(JS)` tags below instead.

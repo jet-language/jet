@@ -1,0 +1,31 @@
+// D-SERVICE-UPGRADE1 + D-CONC-JOIN1: a real grouped, durable shard survives
+// partition, generation handoff, and proof-gated reconciliation.
+use core.service as service
+use core.testing as testing
+
+fn worker() {}
+
+fn run() {
+    tree := service.tree("partitioned")
+    tree.set_delivery(service.delivery_durable()) ?? panic("delivery")
+    temp := testing.temp_dir("service-partition")
+    store :: Path.from(temp).join("events.log").to_string()
+    state :: service.state_store(store) ?? panic("state store")
+    tree.set_state_event_log(state, "partition-events", 1, "reversible") ?? panic("state")
+    api :: tree.worker("api", worker, capacity: 1) ?? panic("worker")
+    drained :: tree.worker("drained", worker, capacity: 1) ?? panic("drained worker")
+    tree.group("api-group", ["api", "drained"]) ?? panic("group")
+    tree.start() ?? panic("start")
+    tree.append_event("before-partition") ?? panic("event")
+
+    tree.drain_worker(drained) ?? panic("drain")
+    print("drained:ok")
+    tree.partition_worker(api) ?? panic("partition")
+    print("partitioned:ok")
+    print("handoff:{tree.handoff_generation() ?? panic("handoff")}")
+    print(tree.upgrade_receipt() ?? panic("receipt"))
+    tree.reconcile_worker(api) ?? panic("reconcile")
+    print("reconciled:g{tree.directory_generation()}")
+    print(tree.upgrade_receipt() ?? panic("reconciled receipt"))
+    tree.stop() ?? panic("stop")
+}

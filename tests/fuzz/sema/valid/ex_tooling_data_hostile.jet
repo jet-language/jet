@@ -24,17 +24,17 @@ fn no_float() => Float? :: None
 
 fn run() {
     // Empty analytics → typed Empty errors.
-    empty_mean :: data.mean([Float].{})
+    empty_mean :: data.mean([Float]{})
     if empty_mean == {
         .Ok(_) -> { print("empty_mean: ok") }
         .Err(error) -> { print("empty_mean: {error}") }
     }
-    empty_q :: data.quantile([Float].{}, 0.5)
+    empty_q :: data.quantile([Float]{}, 0.5)
     if empty_q == {
         .Ok(_) -> { print("empty_quantile: ok") }
         .Err(error) -> { print("empty_quantile: {error}") }
     }
-    empty_var :: data.variance([Float].{})
+    empty_var :: data.variance([Float]{})
     if empty_var == {
         .Ok(_) -> { print("empty_variance: ok") }
         .Err(error) -> { print("empty_variance: {error}") }
@@ -57,9 +57,9 @@ fn run() {
 
     // Equal-key sort ties keep input order (stable).
     tied :: [
-        Ticket.{team: "same", minutes: 3.0},
-        Ticket.{team: "same", minutes: 1.0},
-        Ticket.{team: "same", minutes: 2.0}
+        Ticket{team: "same", minutes: 3.0},
+        Ticket{team: "same", minutes: 1.0},
+        Ticket{team: "same", minutes: 2.0}
     ]
     sorted :: data.sort_by(tied, t => t.team) ?? panic("sort")
     print("tie_order: {sorted[0].minutes},{sorted[1].minutes},{sorted[2].minutes}")
@@ -102,8 +102,8 @@ fn run() {
 
     // Hostile plot labels are SVG-escaped; negative counts reject.
     hostile_rows :: [
-        Ticket.{team: "<script>&\"x", minutes: 4.0},
-        Ticket.{team: "<script>&\"x", minutes: 4.0}
+        Ticket{team: "<script>&\"x", minutes: 4.0},
+        Ticket{team: "<script>&\"x", minutes: 4.0}
     ]
     hostile_groups :: data.group_count(hostile_rows, t => t.team) ?? panic("hostile_groups")
     svg :: data.bar_svg(hostile_groups) ?? panic("svg")

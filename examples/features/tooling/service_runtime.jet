@@ -6,6 +6,25 @@ fn worker_a() {}
 
 fn worker_b() {}
 
+fn status_label(status: TaskStatus) String {
+    if status == {
+        .Running :> { return "running" }
+        .Paused :> { return "paused" }
+        .CancelRequested :> { return "cancel-requested" }
+    }
+    return "unknown"
+}
+
+fn outcome_label(outcome: TaskOutcome) String {
+    if outcome == {
+        .Finished :> { return "finished" }
+        .Panicked(_) :> { return "panicked" }
+        .Cancelled :> { return "cancelled" }
+        .DeadlineBlown :> { return "deadline-blown" }
+    }
+    return "unknown"
+}
+
 // D-CONC-JOIN1: the dogfood service task is consumed, not dropped.
 fn service_probe() String {
     probe := service.tree("probe")
@@ -39,14 +58,27 @@ fn run() {
     run_id :: tree.workflow_start("checkout", 1) ?? panic("wf")
     tree.workflow_step(run_id, "pay") ?? panic("step")
     print("hist:{tree.workflow_history(run_id) ?? panic("hist")}")
-
+    scheduled :: tree.workflow_activity(run_id, "charge", "charge-1", 2) ?? panic("activity")
+    print("activity:{status_label(scheduled)}")
+    retried :: tree.workflow_activity_retry(run_id, "charge-1", TaskOutcome.Panicked("timeout")) ?? panic("retry")
+    print("retry:{status_label(retried)}")
+    completed :: tree.workflow_activity_complete(run_id, "charge-1", TaskOutcome.Finished) ?? panic("complete")
+    print("completed:{outcome_label(completed)}")
+    print("outcome:{outcome_label(tree.workflow_outcome(run_id) ?? panic("outcome"))}")
     tree.directory_register("front", a) ?? panic("dir")
     resolved :: tree.directory_resolve("front") ?? panic("resolve")
     print(resolved.show())
 
+    tree.drain_worker(a) ?? panic("drain")
     gen :: tree.handoff_generation() ?? panic("handoff")
     print("gen:{gen}")
     print(tree.upgrade_receipt() ?? panic("upgrade receipt"))
+    blocked :: tree.receive(a)
+    if blocked == {
+        .Ok(_) -> { print("handoff_receive:accepted") }
+        .Err(_) -> { print("handoff_receive:rejected") }
+    }
+    print("handoff_depth:{tree.mailbox_depth(a) ?? panic("handoff depth")}")
     tree.chaos_fail() ?? panic("chaos")
     print(tree.observe())
     tree.stop() ?? panic("stop")

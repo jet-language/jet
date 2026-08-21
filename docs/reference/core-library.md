@@ -3819,15 +3819,19 @@ fn run() {
 
 Sema checks worker names, capacity types, endpoint identity, delivery keys,
 policy values, state-store values, workflow IDs, and directory endpoint types.
+Promoting a handler also requires a closed effect graph, a top-level lifetime,
+and an acyclic worker-call topology.
 The AOT emitter, JIT, and interpreter lower these methods to the same Prelude
 operations; `core.services` remains a private adapter and is not a second
 string-keyed topology surface.
 
-The public tree fronts now cover worker creation, restart and delivery policy,
+The public tree fronts now cover worker and named supervisor-group creation,
+restart and delivery policy,
 start/stop, live and durable send, receive, mailbox/restart inspection, worker
 failure and drain, dead-letter/event counters, state adapters, snapshots and
 events, workflow start/step/history, typed activity scheduling/retry/completion
 and run outcomes, directory register/resolve, generation handoff/rollback,
+partition and reconciliation of a shard across a generation handoff,
 upgrade receipts, chaos failure, observation, and display. Activity retry takes
 `TaskOutcome` and returns `TaskStatus`; completion and `workflow_outcome` return
 the same `TaskOutcome` enum. The durable workflow log frames the enum values

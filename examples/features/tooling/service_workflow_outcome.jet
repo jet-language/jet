@@ -1,0 +1,28 @@
+// D-SERVICE-WORKFLOW1=D: activity retry and run results stay typed and durable.
+use core.service as service
+use core.testing as testing
+
+fn worker() {}
+
+fn run() {
+    temp := testing.temp_dir("service-workflow-outcome")
+    path :: Path.from(temp).join("workflow.log").to_string()
+    tree := service.tree("checkout")
+    store :: service.state_store(path) ?? panic("state store")
+    tree.set_state_event_log(store, "workflow-events", 1, "reversible") ?? panic("state")
+    endpoint :: tree.worker("activities", worker, capacity: 1) ?? panic("worker")
+    tree.start() ?? panic("start")
+
+    run_id :: tree.workflow_start("checkout", 1) ?? panic("workflow")
+    scheduled :: tree.workflow_activity(run_id, "charge", "charge-1", 2) ?? panic("schedule")
+    print("scheduled:{scheduled}")
+    paused :: tree.workflow_activity_retry(run_id, "charge-1", TaskOutcome.Panicked("timeout")) ?? panic("retry")
+    print("retry:{paused}")
+    current :: tree.workflow_activity(run_id, "charge", "charge-1", 2) ?? panic("duplicate")
+    print("current:{current}")
+    result :: tree.workflow_activity_complete(run_id, "charge-1", TaskOutcome.Finished) ?? panic("complete")
+    print("result:{result}")
+    print("outcome:{tree.workflow_outcome(run_id) ?? panic("outcome")}")
+    print("history:{tree.workflow_history(run_id) ?? panic("history")}")
+    tree.stop() ?? panic("stop")
+}
