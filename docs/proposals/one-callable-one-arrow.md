@@ -8,7 +8,7 @@ The owner set a new priority order for Jet's surface: the ability to **reason** 
 
 One idea unifies the fixes: **the arrow means "yields", and every callable is one shape.** A function is a named lambda. Its interface — name, inputs, output, error, effects — sits complete and visible before the arrow. The body sits after the arrow and carries no interface facts. Today that one shape is split into seven costumes: a braced function has no arrow, a one-line function has one, a function with an effect row hides the arrow inside `:[IO]>`, a lambda always has one, a function type has none, a code argument has one, and a task block has none. A reader must learn seven rules for one concept. The proposal collapses them to one rule with one exception a beginner never meets.
 
-The glyph itself is on the table. `:>` was picked for typing comfort; on the page it reads as noise, and the ratified ballot that unified it admitted losing the at-a-glance result cue. The slate offers `->` (lighter, standard) and `=>` (the `=` carries "outputs/binds", and it already rhymes with the ratified `impl Source => Target` conversion rail) as full respells, worked side by side so the choice is visual. The effect row unfuses from the arrow in every option: `:[IO]` becomes a standalone interface fact, which also fixes the false arrow that today dangles in type position (`f: fn(Int) Int :[]>`).
+The glyph itself is on the table. `:>` was picked for typing comfort; on the page it reads as noise, and the ratified ballot that unified it admitted losing the at-a-glance result cue. The slate offers `->` (lighter, standard) and `=>` (the `=` carries "outputs/binds") as full respells, worked side by side so the choice is visual. Both respell every arrow position, including the conversion rail (`impl StoreErr :> Err`) and the migration verbs — the review pass confirmed the whole live surface is already on `:>`, and the spec prose still showing `impl Source => Target` is drift, not law. The effect row unfuses from the arrow under its own ballot: `:[IO]` becomes a standalone interface fact, which also fixes the false arrow that today dangles in type position (`f: fn(Int) Int :[]>`).
 
 Three smaller reasoning hazards ride along, each probed live in the binary: a dispatch arm head that mixes distributed atoms with a guard (`48 | 45 && ready`) desugars invisibly and silently routes values to `else`; the subject shorthand accepts method-head chains in loops but rejects them in call slots (`.map(.len())` is two errors while `loop words if .len() > 1` runs); and parameter defaults use a shape (`name: Type = value`) that never appears in local bindings. The first two get tightening ballots. The third turns out to be lawful under the already-ratified "`::` defines, `=` fills" rule — the proposal teaches it and offers the respell anyway so the owner decides with the full picture.
 
@@ -26,7 +26,7 @@ Jet says "a callable" once in its semantics and seven times in its syntax. The s
 | 4 | Lambda, expression body | `n :> n * 2` | `examples/features/functions/lambda_inference.jet:7` | yes | cannot state a return type at all (AST has no slot: `crates/jet-foundation/src/AST/expressions.rs:256-336`) |
 | 5 | Code argument | `twice(() :> { print("HI") })` | `examples/features/syntax/trailing_block.jet:8` | yes | — |
 | 6 | Function type | `f: fn(Int) Int :[]>` | `examples/features/effects/effect_levers.jet:13` | **dangling** | a body arrow in type position, where no body can follow |
-| 7 | Task block | `task { frozen.value }` | `examples/features/concurrency/freeze_capture.jet:13` | **no** | zero-param lambda in yet another costume |
+| 7 | Task block | `task { frozen.value }` | `examples/features/concurrency/freeze_capture.jet:13` | **no** | a yielding body with no interface and no arrow — a task-specific lowering, not the callable grammar |
 
 Seven costumes, three arrow states (present, absent, fused), and one capability hole (row 4). The reader pays the bill: the arrow's presence tells them nothing reliable about the construct, so they re-derive the rule at every site.
 
@@ -72,15 +72,21 @@ One production covers every callable. Square brackets mark what each rung may om
 
 ```
 [fn name] ( params ) [Return] [! Error] [:[Effects]] -> body
+arrow rule: present exactly when a non-unit success Return is declared, or the callable is a lambda
 body = expression | { statements … trailing-value }
 ```
 
-A function is this shape with `fn name` in front and interface types written. A lambda is this shape with the front matter omitted and types recovered from the call slot. The arrow appears exactly when the callable yields something — which is why the beginner's first function needs none:
+A function is this shape with `fn name` in front and interface types written. A lambda is this shape with the front matter omitted and types recovered from the call slot. The arrow marks a declared success value — which is why the beginner's first function needs none, and why the unit-fallible law (D-FAIL-UNIT1=A: `fn save(path: String) ! IOError` has no arrow and no unit) keeps holding unchanged:
 
 ```jet
 // Rung 0 — beginner types nothing extra. Unit function, no result, no arrow. UNCHANGED.
 fn greet() {
     print("hello")
+}
+
+// Rung 0b — unit-fallible stays arrowless (D-FAIL-UNIT1=A, unchanged).
+fn save(path: String) ! IOError {
+    write(path)? "saving"
 }
 
 // Rung 1 — a result appears, so the arrow appears. One-liners: today vs proposed.
@@ -121,9 +127,11 @@ g: fn(Int) Int :[]      // proposed: explicit empty effect row, no arrow in type
 h: fn(*, force: Bool) Int    // zones stay (D-APILABEL1=A)
 ```
 
-Why this beats today: the reader gets one invariant — *see an arrow, something is yielded; see the arrow's left, that is everything the compiler guarantees; see its right, that is how.* The `Rect {`-vs-`Rect{` squint at rung 2 dies. Row 3's fused arrow dies. Row 6's dangling type arrow dies. The costume count drops from seven to one shape plus one beginner exception (unit functions), and `task { … }` is documented as exactly this shape with an empty interface.
+Why this beats today: the reader gets one invariant — *see an arrow, a success value is declared; see the arrow's left, that is everything the compiler guarantees; see its right, that is how.* The `Rect {`-vs-`Rect{` squint at rung 2 dies. Row 3's fused arrow dies. Row 6's dangling type arrow dies. The costume count drops to one shape plus one stated boundary (unit bodies, fallible or not, take bare braces). Row 7 stays outside the grammar on purpose: `task { … }` is a ratified task-specific lowering (D-CONC-SPAWN1=D) that yields through `join`, and this slate does not touch it.
 
 Expert exits: `jet fmt` performs the whole migration mechanically (arrow insertion is syntax-directed, zero judgment); `jet explain E0068` teaches the shape at the exact error site; no project switch is offered because two callable grammars is precisely the state this ballot deletes (I8).
+
+One current wrinkle the story below the ballot names precisely: the parser today *accepts* `fn describe(age: Int) String :> { … }` and the formatter then strips the marker back to the bare-brace canonical form. The defect is canonical-shape instability — the marker is legal ink that fmt erases — not a parse rejection.
 
 ### The arrow itself *(proposed — D-ARROW-RESPELL1, amends D-ARROW-UNIFY1=B spelling)*
 
@@ -144,7 +152,7 @@ if ready -> run() else -> wait()
 ```
 
 ```jet
-// Candidate B: `=>`  (the `=` says "outputs/binds"; rhymes with impl Source => Target)
+// Candidate B: `=>`  (the `=` says "outputs/binds")
 fn label(n: Int) String => {
     if n == {
         1 => "one"
@@ -177,11 +185,11 @@ The honest tradeoffs, stated once:
 |---|---|---|---|
 | Visual weight | lightest | heavier, but `=` reads "outputs" | reads as a typo of `:` + `>` |
 | Prior-art muscle memory | Rust fn/Haskell/Swift/Python return hints | JS/C#/Scala lambdas, Rust match arms | none |
-| Collision with live Jet | none found | none — and it *matches* the ratified `impl Source => Target` rail (D-FAIL-CONV1=A) | n/a |
+| Collision with live Jet | none found | none — the live surface is fully on `:>`; spec prose still showing `impl Source => Target` is drift | n/a |
 | Colon-family crowding | leaves `::`/`:=`/`:` | leaves `::`/`:=`/`:` | stays inside the crowd |
-| Follow-up if chosen | respell `impl Source => Target` to `impl Source -> Target` for one-arrow purity, or accept the rhyme break | none — conversion rail already agrees | spec/comment drift cleanup only |
+| Follow-up if chosen | full corpus respell: bodies, arms, loops, conversion rail, migration verbs, I7 rows, editor grammar | same respell breadth as `->` | spec/comment drift cleanup only |
 
-In every candidate the effect row unfuses (next element), so no option needs a `-[IO]->` / `=[IO]=>` monster — the exact form the original ballot called unreadable.
+The effect row unfuses under its own ballot (next element). If that ballot loses, the fused row respells with the winner here (`-[IO]->` / `=[IO]=>` / today's `:[IO]>`) — the fused forms are shown so the cost of keeping fusion is priced into both ballots honestly.
 
 ### The effect row stands alone *(proposed — D-EFFECT-ROW2, amends D-SHAPE8=A)*
 
@@ -197,7 +205,7 @@ fn run() :[IO] { … }                    // proposed: unit fn stays arrowless, 
 pure_add: fn(Int, Int) Int :[]          // proposed: type position carries the fact, no fake body arrow
 ```
 
-This is the piece that makes the unit-function exception clean: today `fn run() :[IO]> { … }` *must* write an arrow only because the effect row physically contains one. Unfused, the rule "arrow iff something is yielded" holds with no asterisk.
+This is the piece that makes the unit-body boundary clean: today `fn run() :[IO]> { … }` *must* write an arrow only because the effect row physically contains one. Unfused, the rule "arrow iff a success value is declared" holds with no asterisk — for plain unit functions and for the arrowless unit-fallible law (D-FAIL-UNIT1=A) alike.
 
 ### Lambdas get the whole interface *(proposed — D-LAMBDA-IFACE1)*
 
@@ -266,7 +274,7 @@ fn parse_age(raw: String) Int ! ParseError {
     raw.trim().to_int()? "parsing {raw}"
 }
 
-fn describe(age: Int) String :> {
+fn describe(age: Int) String {         // canonical today: bare braces, no arrow
     if age < {
         13 :> "kid"
         18 | 16 :> "teen"
@@ -344,13 +352,15 @@ The grammar the reader carries after this slate, whole, in one table:
 
 | Ballot | Question | Options (recommended first) | Amends |
 |---|---|---|---|
-| D-ARROW-RESPELL1 | Which glyph is the one arrow? | `->` / `=>` / keep `:>` | D-ARROW-UNIFY1=B (spelling only), D-LOOP-STMT-ARROW1=C, D-SIG-SHAPE1=B spellings |
-| D-CALLABLE-ONE1 | One callable shape, arrow iff yield? | adopt / arrow-always (uniform, unit fns pay) / keep split | D-SIG-SHAPE1=B, D-BODY-ARROW1=B |
+| D-ARROW-RESPELL1 | Which glyph is the one arrow? | `->` / `=>` / keep `:>` | spelling of D-ARROW-UNIFY1=B, D-LOOP-STMT-ARROW1=C, D-SIG-SHAPE1=B, D-FAIL-CONV1=A rail, D-MIGRATE verbs, D-TRAILBLOCK2=A, D-ONELINE-BODY1=B examples, I7 Syntax.rs rows, editor grammar |
+| D-CALLABLE-ONE1 | One callable shape, arrow iff a success value is declared? | adopt / arrow-always (uniform, unit fns pay) / keep split | D-SIG-SHAPE1=B, D-BODY-ARROW1=B; D-FAIL-UNIT1=A explicitly preserved |
 | D-EFFECT-ROW2 | Unfuse `:[E]` from the arrow? | unfuse / keep fused | D-SHAPE8=A |
 | D-LAMBDA-IFACE1 | Lambdas may write return type + error + effects? | adopt / params-only status quo | S46/S47 |
 | D-ARMHEAD-PAREN1 | Parens required when atoms mix with `&&`/`||`? | require / keep + document | D-IFDIST1=A |
 | D-SUBJECT-COHERE1 | Method-head chains in call slots + nesting lint? | widen + lint / narrow loops / keep split | D-SUBJECT-CALL1=A, D-LOOP-SUBJECT1=A |
 | D-DEFAULT-SHAPE1 | Default-value shape | keep + teach fill law / `:=` defaults / annotated locals | D-APILABEL1=A or D-BIND-BARE1=A |
+
+Each ballot is written against the ratified `:>` baseline and stands alone; where a companion ballot would change a spelling, the ballot names the conditional form instead of assuming a winner.
 
 ## Implementation shape
 
