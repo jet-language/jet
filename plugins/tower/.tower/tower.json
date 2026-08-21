@@ -2,8 +2,8 @@
   "meta": {
     "version": 4,
     "project": "Jet",
-    "nextNum": 2144,
-    "rev": 40779,
+    "nextNum": 2145,
+    "rev": 40796,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -27,8 +27,7 @@
         "radar:e10",
         "radar:e11",
         "radar:e12",
-        "radar:e4",
-        "radar-sq"
+        "radar:e4"
       ]
     },
     "completionCursor": "2026-08-21T17:53:03.574Z"
@@ -140727,6 +140726,68 @@
       "created": "2026-08-21T15:46:11.117Z",
       "updated": "2026-08-21T15:46:11.117Z",
       "updatedBy": "fable"
+    },
+    {
+      "id": "c0an426i",
+      "num": 2144,
+      "title": "Reading-first callable and arrow slate (one callable, one arrow)",
+      "body": "First-principles audit of the lambda/function/control-flow surface under the owner's new priority order: reason > read > write. Proposal: docs/proposals/one-callable-one-arrow.md. Research evidence: target-fpa-read/L1-L5 (gitignored). Seven ballots cover the arrow glyph respell, the one-callable shape, effect-row unfusing, lambda interface parity, dispatch arm-head parens, subject-shorthand coherence, and the default-value shape. Probes against the running binary ground the arm-head and subject-shorthand findings.",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "deciding",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "All seven ballots (D-ARROW-RESPELL1, D-CALLABLE-ONE1, D-EFFECT-ROW2, D-LAMBDA-IFACE1, D-ARMHEAD-PAREN1, D-SUBJECT-COHERE1, D-DEFAULT-SHAPE1) are complete full-profile decisions on this card",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-21T21:13:54.693Z"
+        },
+        {
+          "n": 2,
+          "text": "No ratified decision is contradicted without a named amendment inside the relevant ballot text",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-21T21:13:55.216Z"
+        },
+        {
+          "n": 3,
+          "text": "After ratification: outcomes recorded in docs/spec/syntax-decisions.md and implementation cards minted per outcome",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-21T21:13:55.728Z"
+        },
+        {
+          "n": 4,
+          "text": "Drift cleanup card exists for stale arrow spellings in spec prose, explain text, comments, and fixtures",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-21T21:13:56.222Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-08-21T21:13:45.933Z",
+      "updated": "2026-08-21T21:19:15.205Z",
+      "updatedBy": "fable"
     }
   ],
   "decisions": [
@@ -185841,6 +185902,543 @@
       "outcome": "A",
       "ratifiedAt": "2026-08-21",
       "comment": "Absence keeps the question mark and nothing else. A fallible type is written T bang E, for example Config bang IOError. Call sites do not change: the coalescing and propagation forms keep their current spelling. A second call-site sigil was considered and rejected as too much new surface to teach for the distinction it buys."
+    },
+    {
+      "id": "D-ARROW-RESPELL1",
+      "cardId": "c0an426i",
+      "group": "syntax",
+      "title": "The one arrow's glyph: -> or => or keep :>",
+      "gist": "Pick the glyph Jet uses for its one arrow.",
+      "lesson": "Jet has one arrow. It marks every callable body, dispatch arm, loop body, and lambda (D-ARROW-UNIFY1=B). The glyph today is `:>`. It was easy to type, but on the page it reads as noise and sits inside a crowded colon family (`::`, `:=`, `:`, `:[IO]>`). This ballot changes only the ink. The unification itself stays. Whatever wins, the effect row unfuses from the arrow under D-EFFECT-ROW2, so no option needs a fused monster like `=[IO]=>`.",
+      "explainer": "",
+      "story": "Ana reviews a pull request at the end of the day. The diff has forty arrows: function bodies, arm tables, loop bodies. With `:>` her eye keeps stumbling — the glyph looks like a typo of a type annotation. She wants the arrow to disappear into the reading, the way `->` does in Rust, or to say something, the way `=` says 'outputs'.",
+      "inWild": "// One screen of real Jet under each candidate.\nfn label(n: Int) String :> {\n    if n == {\n        1 :> \"one\"\n        2 | 3 :> \"a few\"\n        else :> \"many\"\n    }\n}\nnames :: loop u, users if u.active :> u.name\nm :: if a > b :> a else :> b",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "`->` everywhere",
+          "detail": "The light arrow. It reads as 'maps to / yields' and vanishes into the line, which suits dense arm tables. It is the arrow most programmers' eyes already skip over (Rust, Swift, Haskell). The ratified conversion rail `impl Source => Target` respells to `impl Source -> Target` in the same migration, so the language keeps exactly one arrow.",
+          "technical": "Amends the spelling of D-ARROW-UNIFY1=B, D-LOOP-STMT-ARROW1=C, D-SIG-SHAPE1=B, D-BRANCH-* teach text, and D-FAIL-CONV1=A's `impl` rail. L0507, E0335, E0992, E0068 fix text and UI snapshots re-bless. `jet fmt` migrates the corpus in one change; `:>` and `=>` become teaching diagnostics with no alias.",
+          "code": "fn label(n: Int) String -> {\n    if n == {\n        1 -> \"one\"\n        2 | 3 -> \"a few\"\n        else -> \"many\"\n    }\n}\nnames :: loop u, users if u.active -> u.name\nm :: if a > b -> a else -> b\nimpl ParseError -> Err   // conversion rail joins the one arrow"
+        },
+        {
+          "key": "B",
+          "name": "`=>` everywhere",
+          "detail": "The heavy arrow. The `=` inside it says 'outputs / binds', which matches what the arrow means in Jet: something is yielded. It already agrees with the ratified conversion rail `impl Source => Target`, so that rail needs no change. The cost is visual weight: in a forty-arrow diff, `=>` is louder than `->`.",
+          "technical": "Amends the same spelling rows as option A except D-FAIL-CONV1=A, which already uses `=>`. Same migration mechanics.",
+          "code": "fn label(n: Int) String => {\n    if n == {\n        1 => \"one\"\n        2 | 3 => \"a few\"\n        else => \"many\"\n    }\n}\nnames :: loop u, users if u.active => u.name\nm :: if a > b => a else => b\nimpl ParseError => Err   // already ratified in this glyph"
+        },
+        {
+          "key": "C",
+          "name": "Keep `:>`",
+          "detail": "No migration, no re-bless. The glyph stays cheap to type. But the owner's own reading verdict — it looks sloppy — stands, and the colon family stays four members deep. Every future reader pays the crowding forever, while the migration cost is paid once.",
+          "technical": "No spelling change. The drift cleanup card still lands (stale `->`/`=>` in spec prose and fixtures).",
+          "code": "fn label(n: Int) String :> {\n    if n == {\n        1 :> \"one\"\n        else :> \"many\"\n    }\n}"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Rust",
+          "note": "Uses `->` for function results and `=>` for match arms. Two arrows, two jobs — readers report no confusion, but Jet's one-arrow law removes the split entirely.",
+          "code": "fn double(n: i32) -> i32 { n * 2 }\nmatch code { 200 => ok(), _ => log(code) }"
+        },
+        {
+          "lang": "JavaScript / C#",
+          "note": "`=>` is the lambda arrow. A generation of programmers reads `=>` as 'function body follows'.",
+          "code": "const double = (n) => n * 2;"
+        },
+        {
+          "lang": "Go",
+          "note": "No arrow at all; readability comes from keywords and braces. Evidence that arrow weight is a real reading variable, not decoration.",
+          "code": "func double(n int) int { return n * 2 }"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "The arrow appears more often than any other sigil in Jet — every body, arm, and loop. The glyph that wins is the one the eye skips: `->` carries the 'yields' meaning with the least ink, which serves reading in exactly the dense arm tables Jet leans on.",
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "`=>` says 'outputs' nicely, but it is visibly heavier in tables, and its one structural advantage — agreeing with the `impl` rail — is matched by respelling that rail to `->` in the same migration."
+          },
+          {
+            "key": "C",
+            "reason": "Keeping `:>` saves one migration and nothing else. The glyph reads as a typo beside `::` and `:=`, and the owner has already rejected it on the page."
+          }
+        ],
+        "tradeoff": "Option A retires `=>` from the `impl` conversion rail, so one ratified spelling (D-FAIL-CONV1=A) is respelled purely for glyph unity. That is accepted: one arrow with one meaning is the whole point of this ballot."
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "reviewPasses": {
+        "base": "The first draft compared `->`, `=>`, and the status quo with one worked program per glyph. It recommended `->` for the lowest reading weight in arm tables.",
+        "boilOcean": "The breadth review tested `|>`, `>>`, a keyword, and Unicode arrows. All folded out: bar collides with D-SHAPE-PIPE1=C, keywords bloat tables, Unicode fails the typing floor.",
+        "hybrid": "A split — `=>` for callable bodies, `->` for arms — was tested and rejected. It re-adds the two-rule tax that D-ARROW-UNIFY1=B deleted.",
+        "cooperative": "Option B got its strongest case: `=` reads as 'outputs', the impl rail already agrees, and JS/C# familiarity is huge. Option C got the real re-bless cost.",
+        "adversarial": "Attack on A found no live `-` digraph conflicts in Syntax.rs or the grammar. Rust, Swift, and Haskell use `->` at the same position, so the familiarity claim holds."
+      },
+      "checkInstructions": null,
+      "draft": false,
+      "status": "open",
+      "created": "2026-08-21T21:19:05.966Z"
+    },
+    {
+      "id": "D-CALLABLE-ONE1",
+      "cardId": "c0an426i",
+      "group": "syntax",
+      "title": "One callable shape: a function is a named lambda",
+      "gist": "Make every callable — function, lambda, code argument — one grammar shape.",
+      "lesson": "Today the callable concept wears seven costumes. A braced function has no arrow, a one-line function has one, and effects fuse the arrow into `:[IO]>`. A lambda always has one, a function type has none, and a lambda cannot state a return type at all. A reader re-derives the rule at every site. This ballot picks the one shape: interface facts sit before the arrow, and the body sits after it.",
+      "explainer": "",
+      "story": "Sam is three weeks into Jet. He knows `fn double(n: Int) Int :> n * 2`. He writes a braced version and adds the arrow — parse error. He adds an effect row and the arrow comes back, fused. He asks which rule is real. There is no one rule; that is the bug.",
+      "inWild": "// The three arrow states a reader meets today in one file:\nfn scale(r: Rect, f: Float) Rect {        // no arrow\n    Rect{width: r.width * f, height: r.height * f}\n}\nfn double(n: Int) Int :> n * 2            // arrow\nfn bump(n: Int) Int :[IO]> {              // arrow fused into effects\n    print(n)\n    n + 1\n}",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "Arrow iff yield",
+          "detail": "One rule: the arrow appears exactly when the callable yields something, and everything left of the arrow is the complete interface. Unit functions — the beginner's first function — keep their bare braces, so the common case gains zero ceremony. Braced yielding functions gain the arrow, which also kills the `Rect {` type-or-literal squint. Lambdas are the same shape minus the name and the slot-known types.",
+          "technical": "Amends D-SIG-SHAPE1=B (braced yielding bodies gain the arrow) and subsumes D-BODY-ARROW1=B. Grammar: `[fn name] ( params ) [Return] [! Error] [:[Effects]] -> body` with `body = expr | { … }`; arrow present iff Return, `!`, or lambda-hood demands a yield marker; unit named fn takes bare braces. Function types stay arrowless (no body). `task { … }` is documented as this shape with an empty interface. fmt migrates mechanically.",
+          "code": "fn greet() { print(\"hello\") }                 // rung 0: unchanged, no ceremony\nfn double(n: Int) Int -> n * 2                 // rung 1: one-liner keeps one line\nfn scale(r: Rect, f: Float) Rect -> {          // rung 2: arrow survives braces\n    Rect{width: r.width * f, height: r.height * f}\n}\nfn poll(url: String) Response ! NetError :[IO] -> {   // rung 3: full interface stack\n    fetch(url)? \"polling {url}\"\n}\nnums.map(n -> n * 2)                           // the same shape, anonymous"
+        },
+        {
+          "key": "B",
+          "name": "Arrow always",
+          "detail": "Maximum uniformity: every callable body, including unit functions, takes the arrow. One rule with zero exceptions — but the beginner's first function pays for it: `fn greet() -> { … }` adds a mark that buys the beginner nothing. Ceremony creep on the lowest rung.",
+          "technical": "Same grammar as A but arrow unconditionally required between interface and body, including unit functions and unit lambdas.",
+          "code": "fn greet() -> { print(\"hello\") }   // the first function a beginner writes now carries a mark\nfn double(n: Int) Int -> n * 2\nfn scale(r: Rect, f: Float) Rect -> { … }"
+        },
+        {
+          "key": "C",
+          "name": "Keep today's split",
+          "detail": "No change: braced functions drop the arrow, expression bodies take it, effect rows fuse it back in. Three arrow states stay. Only the glyph respell (D-ARROW-RESPELL1) lands. The seven-costume table remains the callable chapter.",
+          "technical": "No grammar change. D-SIG-SHAPE1=B stands as ratified.",
+          "code": "fn scale(r: Rect, f: Float) Rect { … }   // still arrowless\nfn double(n: Int) Int -> n * 2            // still arrowed (respelled)\nfn bump(n: Int) Int :[IO] -> { … }        // arrow presence still depends on effects under D-EFFECT-ROW2"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Rust",
+          "note": "Functions and closures are two shapes (`fn f(n: i32) -> i32` vs `|n| n * 2`). Readers manage, but Jet can do better: one shape means the lambda chapter is one sentence.",
+          "code": "fn f(n: i32) -> i32 { n * 2 }\nlet g = |n: i32| n * 2;"
+        },
+        {
+          "lang": "Kotlin",
+          "note": "Expression bodies (`= expr`) and block bodies are visually distinct on purpose; the style guide leans on that distinction. Evidence that a visible yield marker helps readers.",
+          "code": "fun double(n: Int): Int = n * 2\nfun greet() { println(\"hi\") }"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "One shape with the arrow meaning 'yields' gives the reader a single invariant that holds at every site, and it costs the beginner nothing — the unit function is untouched. It deletes six costumes and one real ambiguity (`Rect {` vs `Rect{`).",
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "Buys one fewer exception at the exact place Jet must stay ceremony-free: the first function a beginner ever writes."
+          },
+          {
+            "key": "C",
+            "reason": "Keeps the seven-costume table and the re-derive-at-every-site tax that triggered this audit."
+          }
+        ],
+        "tradeoff": "Braced yielding functions gain three characters (` -> `). Accepted: the mark is the reader's guarantee boundary, and the corpus migration is one mechanical fmt pass."
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "reviewPasses": {
+        "base": "The first draft proposed arrow-iff-yield with the unit-function exception. It recommended that over arrow-always and the status quo.",
+        "boilOcean": "The breadth review tested a body keyword, Kotlin's `=` bodies, Python's `:`, and mandatory braces. Each collides with ratified law or kills one-line forms, so all folded out.",
+        "hybrid": "Arrow-iff-yield plus an optional arrow on unit functions was tested and rejected. Optionality re-creates two spellings of one thing (I8).",
+        "cooperative": "Option B was strengthened: zero exceptions is genuinely the simplest statement. Option C was strengthened: zero migration during an active epoch.",
+        "adversarial": "Attacks tested `Rect -> {` misparse risk, multi-head functions, and forced annotations. Type and declaration positions stay distinct, S83 heads fit the shape, and inference law is untouched."
+      },
+      "checkInstructions": null,
+      "draft": false,
+      "status": "open",
+      "created": "2026-08-21T21:19:06.451Z"
+    },
+    {
+      "id": "D-EFFECT-ROW2",
+      "cardId": "c0an426i",
+      "group": "syntax",
+      "title": "The effect row stands alone, outside the arrow",
+      "gist": "Write effects as their own interface fact instead of deforming the arrow.",
+      "lesson": "Today the effect row and the arrow are one fused token: `fn bump(n: Int) Int :[IO]> { … }`. The fusion has three costs. A unit function with effects is forced to carry an arrow it otherwise would not have. The function type drags a body arrow into type position where no body can follow (`f: fn(Int) Int :[]>`). And every arrow-glyph candidate needs a fused variant — the exact `=[IO]=>` form the arrow-unify ballot called unreadable. Unfusing makes effects a plain interface fact between the error and the arrow.",
+      "explainer": "",
+      "story": "Priya writes a callback type: `f: fn(Int) Int :[]>`. Her reviewer asks what the trailing `>` points at. Nothing — there is no body in a type. The glyph is there only because the effect row physically contains an arrow.",
+      "inWild": "fn bump(n: Int) Int :[IO]> {\n    print(n)\n    n + 1\n}\nfn run() :[IO]> { print(bump(2)) }\npure_add: fn(Int, Int) Int :[]>   // a body arrow in type position",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "Standalone `:[Effects]`",
+          "detail": "The row keeps its spelling and loses the fused `>`. It sits with the other interface facts: return type, then `!` error, then `:[Effects]`, then the arrow if the callable yields. Types carry the same fact with no fake arrow. Unit functions with effects stay arrowless.",
+          "technical": "Amends D-SHAPE8=A: EFFECT_ARROW_OPEN/CLOSE (`:[` / `]>`) become `:[` / `]`. Open rows keep `..E` inside the brackets (`:[Log, ..E]`). Prohibitions and `via` unchanged. Order fixed: Return, `! Error`, `:[Effects]`, arrow.",
+          "code": "fn bump(n: Int) Int :[IO] -> {\n    print(n)\n    n + 1\n}\nfn run() :[IO] { print(bump(2)) }      // unit + effects, no arrow\npure_add: fn(Int, Int) Int :[]          // type position, no dangling glyph"
+        },
+        {
+          "key": "B",
+          "name": "Keep the fused arrow",
+          "detail": "No change. The row stays inside the arrow. Every glyph outcome of D-ARROW-RESPELL1 then needs a fused spelling (`-[IO]->` or `=[IO]=>` or today's `:[IO]>`), and the type-position dangle stays.",
+          "technical": "D-SHAPE8=A stands; the fused token respells with the arrow choice.",
+          "code": "fn bump(n: Int) Int -[IO]-> { … }   // the fused form under a -> world\npure_add: fn(Int, Int) Int -[]->     // still a body arrow in a type"
+        },
+        {
+          "key": "C",
+          "name": "Word form: `uses IO`",
+          "detail": "Spell effects as a word clause after the error: `fn poll(url: String) Response ! NetError uses IO -> { … }`. Most readable to a cold reader, but it mints a keyword, breaks the visual rhyme with effect rows in types, and makes dense signatures longer.",
+          "technical": "Mints contextual KW `uses` (I7 row). Type position: `fn(Int) Int uses IO`. Retires `:[` / `]>` entirely.",
+          "code": "fn poll(url: String) Response ! NetError uses IO -> {\n    fetch(url)? \"polling {url}\"\n}\nhandler: fn(Request) Response uses IO, Net"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Koka",
+          "note": "Effect rows sit in the type between params and result (`(int) -> io int`) — a fact in the interface, not a decoration on an arrow.",
+          "code": "fun bump(n : int) : io int { println(n); n + 1 }"
+        },
+        {
+          "lang": "Unison",
+          "note": "Abilities appear in braces inside the type signature, positionally, not fused to any glyph.",
+          "code": "bump : Nat ->{IO} Nat"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "Effects are a guarantee, so they belong with the guarantees. Standalone `:[IO]` keeps the ratified spelling readers already know, fixes the type-position dangle, and frees every arrow candidate from a fused monster.",
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "Keeps a body arrow in type position pointing at nothing, and taxes the arrow ballot with fused variants nobody defends on the page."
+          },
+          {
+            "key": "C",
+            "reason": "A new keyword for a solved spelling; it breaks I7 economy and reads worse in dense callback types than the bracket row."
+          }
+        ],
+        "tradeoff": "One character of separation (` `) replaces the fusion, and every effect-row snapshot re-blesses. Accepted: the re-bless rides the same migration as the arrow respell."
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "reviewPasses": {
+        "base": "The first draft proposed the standalone row and recommended it over the fused status quo.",
+        "boilOcean": "The breadth review added the `uses` word form and tested effects-before-params and a marker form. The last two folded out for burying or colliding with the marker plane.",
+        "hybrid": "Standalone row plus a word-form sugar was tested and rejected as two spellings of one fact (I8).",
+        "cooperative": "Option B's best case is zero re-bless during the epoch. Option C wins only on first contact and loses on every dense callback type after.",
+        "adversarial": "Attacks tested `:[` tokenization against type colons and the open, empty, and prohibition rows. `:[` stays one token and every row form is unchanged inside the brackets."
+      },
+      "checkInstructions": null,
+      "draft": false,
+      "status": "open",
+      "created": "2026-08-21T21:19:06.924Z"
+    },
+    {
+      "id": "D-LAMBDA-IFACE1",
+      "cardId": "c0an426i",
+      "group": "syntax",
+      "title": "Lambdas may state their whole interface",
+      "gist": "Let a lambda write a return type, error, and effect row when its author wants them visible.",
+      "lesson": "A lambda today can annotate its parameters but physically cannot state a return type, error, or effect row — the AST has no slot for them. Usually the call slot supplies those facts. But a lambda stored in a binding has no slot, and its author has no way to make the contract visible. Under the one-callable shape this is not a new mechanism: it is the same grammar with the front matter omitted.",
+      "explainer": "",
+      "story": "Marco stores a parser step: `parse :: raw -> raw.trim().to_int()`. Six weeks later a reader wants to know: can this fail? The answer lives in the body's `?` chain. Marco wanted to write the contract on the interface, where readers look first. The grammar refused.",
+      "inWild": "// Today: the only way to give this stored callable a visible contract\n// is to promote it to a named fn.\nparse :: (raw: String) :> raw.trim().to_int()   // returns? fails? read the body",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "Full parity, inference unchanged",
+          "detail": "A lambda may write any suffix of the interface — return type, `!` error, `:[Effects]` — in the same order and shape as a named function. Nothing becomes required that was not required before: slot inference stays the default, annotations stay optional. Beginners never see the upper rungs.",
+          "technical": "Extends S46/S47: lambda grammar gains the optional Return / `! Error` / `:[Effects]` slots from D-CALLABLE-ONE1's production. AST Lambda gains result/error/effects fields (today absent, crates/jet-foundation/src/AST/expressions.rs:256-336). D-LAMBDA-INFER1 untouched: annotation required only where no expected type exists.",
+          "code": "nums.map(n -> n * 2)                          // rung 0: unchanged\nparse :: (raw: String) Int ! ParseError -> {   // rung 2: stored lambda, visible contract\n    raw.trim().to_int()? \"parsing {raw}\"\n}\non_tick :: () :[IO] -> flush()                 // effects visible where the author wants"
+        },
+        {
+          "key": "B",
+          "name": "Params-only (status quo)",
+          "detail": "Lambdas keep parameter annotations only. A stored callable that needs a visible contract must become a named `fn`. Cheap rule, but it forces a name and a promotion for what is a spelling need, and it keeps the one-shape law half-true.",
+          "technical": "No grammar change.",
+          "code": "// The contract needs a promotion today:\nfn parse(raw: String) Int ! ParseError -> {\n    raw.trim().to_int()? \"parsing {raw}\"\n}"
+        },
+        {
+          "key": "C",
+          "name": "Required interface on stored lambdas",
+          "detail": "Any lambda bound with `::`/`:=` must write its full interface. Maximum explicitness at every storage site — and ceremony creep everywhere a two-line helper closure is bound locally. The beginner rung pays.",
+          "technical": "Same grammar as A plus a sema rule: Lambda in a binding initializer without expected type requires Return (and `!`/effects when inferred non-empty).",
+          "code": "double :: (n: Int) Int -> n * 2   // forced even for this\n// double :: n -> n * 2           // E: stored lambda must state its interface"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Rust",
+          "note": "Closures elide types because context supplies them; named functions are explicit because they are interfaces. Rust readers report the boundary works; Jet adopts the same boundary but keeps one grammar.",
+          "code": "let g = |n| n * 2;\nfn f(n: i32) -> i32 { n * 2 }"
+        },
+        {
+          "lang": "TypeScript",
+          "note": "Arrow functions may annotate a return type when the author wants the contract visible; most call-site lambdas do not. The optionality is used and liked.",
+          "code": "const parse = (raw: string): number => Number(raw);"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "It completes the 'function is a named lambda' law with zero new mechanism and zero new ceremony: pure capability, opt-in, on the exact shape the reader already knows.",
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "Keeps the promotion tax and leaves the one-shape law with a documented hole."
+          },
+          {
+            "key": "C",
+            "reason": "Converts a reading aid into a beginner toll at every local closure binding."
+          }
+        ],
+        "tradeoff": "The lambda AST and sema grow interface slots that most lambdas never use. Accepted: the slots are the same checked fields named functions already carry."
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "reviewPasses": {
+        "base": "The first draft proposed full parity with inference unchanged and recommended it over the status quo.",
+        "boilOcean": "The breadth review tested a cast-style ascription escape and contract-in-binding. Both folded out: the first moves the contract off the interface, the second collides with D-BIND-BARE1=A.",
+        "hybrid": "Parity plus a lint nudging stored lambdas toward annotations was tested. The lint was kept out: style policy should follow corpus data, not precede it.",
+        "cooperative": "Option C was steelmanned: every stored callable reads like an interface at review time. The cost stands — local two-line closures are the common case.",
+        "adversarial": "Attacks tested double errors on disagreeing annotations and `!`/`:[` precedence in lambda position. Both resolve to the existing declaration grammar with no new ambiguity."
+      },
+      "checkInstructions": null,
+      "draft": false,
+      "status": "open",
+      "created": "2026-08-21T21:19:07.419Z"
+    },
+    {
+      "id": "D-ARMHEAD-PAREN1",
+      "cardId": "c0an426i",
+      "group": "syntax",
+      "title": "Parentheses required when arm atoms mix with boolean guards",
+      "gist": "Make a mixed dispatch arm head show the grouping the compiler uses.",
+      "lesson": "In a dispatch table, a bare atom desugars against the subject: `if n < { 48 | 45 && ready -> 2 }` means `((n < 48 || n < 45) && ready)` (D-IFDIST1=A). The desugar is invisible, and `|` binds tighter than `&&`. A probe against today's binary confirms the trap: `grade(46, false)` silently falls to `else`. Pure atom arms, pure predicate arms, and pattern-plus-guard arms are all honest on the page; only the atom-plus-boolean mix hides the real predicate.",
+      "explainer": "",
+      "story": "Lena ports a pricing rule: 'tier 2 when under 48 or under 45 and the account is ready'. She writes `48 | 45 && ready -> 2`, reads it back, and cannot say which grouping runs without opening the spec. Her reviewer cannot either. The compiler knows; the page does not.",
+      "inWild": "fn grade(n: Int, ready: Bool) Int {\n    if n < {\n        16 -> 0\n        48 | 45 && ready -> 2    // ((n < 48 || n < 45) && ready) — probed today\n        else -> 15\n    }\n}\n// grade(46, true) = 2, grade(46, false) = 15: the mixed head silently reroutes to else.",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "Require parens on the mix",
+          "detail": "When distributed atoms and `&&`/`||` meet in one arm head, the atom group must be parenthesized: `(48 | 45) && ready`. A new diagnostic carries a machine-applicable fixit that inserts the parens the compiler already assumes. Pure atom arms and pure predicate arms are untouched.",
+          "technical": "Amends D-IFDIST1=A: bare-atom lists may not appear as a direct operand of `&&`/`||`; the atom group takes parens. New E-code with MachineApplicable fixit; UI snapshot per I4. No runtime or lowering change — the required spelling is the current desugar made visible.",
+          "code": "if n < {\n    16 -> 0\n    (48 | 45) && ready -> 2   // the grouping you see is the grouping that runs\n    else -> 15\n}\n// 48 | 45 && ready -> 2     // E____: mixed arm head needs parens; fixit inserts them"
+        },
+        {
+          "key": "B",
+          "name": "Keep and document",
+          "detail": "The mix stays legal; the book and `jet explain` teach the precedence. Zero migration, but the trap stays armed for every cold reader, and the probe shows real values silently rerouting.",
+          "technical": "No grammar change. Docs and explain text gain the precedence rule.",
+          "code": "48 | 45 && ready -> 2   // still legal; reader must know | binds tighter"
+        },
+        {
+          "key": "C",
+          "name": "Forbid the mix entirely",
+          "detail": "An arm head is either an atom list or a boolean predicate, never both. Strongest reading guarantee, but it deletes a real form: pattern-plus-guard (`.Err(e) && e.fatal`) is ratified, useful, and honest — collateral damage unless carved out, and the carve-out rebuilds the mix.",
+          "technical": "Amends D-IFDIST1=A to reject `&&`/`||` in any arm containing bare atoms; pattern guards would need an explicit carve-out.",
+          "code": "48 | 45 -> 2            // atoms: legal\nn < 48 && ready -> 2    // predicate: legal, subject written out\n// 48 | 45 && ready -> 2  // E____: pick one form"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Rust",
+          "note": "Match or-patterns plus guards read unambiguously because the guard is keyword-fenced: `1 | 2 if ready =>`. The `if` keyword is the visible boundary Jet's mix lacks.",
+          "code": "match n { 1 | 2 if ready => a(), _ => b() }"
+        },
+        {
+          "lang": "Python",
+          "note": "PEP 572 banned several walrus placements purely 'to avoid user confusion' — precedent for requiring parens exactly where a compact form hides grouping.",
+          "code": "while chunk := f.read(1024): ..."
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "It makes the page and the compiler agree at the exact spot they diverge today, costs two characters, and arrives with a fixit so the repair is one deterministic edit.",
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "Documents a live trap instead of disarming it; the probe shows the misread producing wrong values, not style complaints."
+          },
+          {
+            "key": "C",
+            "reason": "Deletes the ratified pattern-plus-guard form or rebuilds the mix through a carve-out — more law for less capability."
+          }
+        ],
+        "tradeoff": "Existing mixed heads break until the fixit runs. Accepted: the corpus contains few, fmt/fixit migrates them mechanically, and each break is a site where a reader was already exposed."
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "reviewPasses": {
+        "base": "The first draft proposed required parens with a fixit, against keep-and-document and a full ban.",
+        "boilOcean": "The breadth review tested a Rust-style guard keyword and reversed `|` precedence. The keyword collides with guard heads; the precedence change silently rewrites ratified semantics.",
+        "hybrid": "Parens-required with a lint-only first release was tested and rejected. Greenfield law ships the final form once.",
+        "cooperative": "Option B was steelmanned for expert table authors who know the rule. Option C was steelmanned as the simplest law; its pattern-guard damage stands.",
+        "adversarial": "Attacks confirmed `.Err(e) && e.fatal` stays legal and the fixit preserves the current desugar exactly. The rule keys only on atom lists meeting boolean operators."
+      },
+      "checkInstructions": null,
+      "draft": false,
+      "status": "open",
+      "created": "2026-08-21T21:19:07.882Z"
+    },
+    {
+      "id": "D-SUBJECT-COHERE1",
+      "cardId": "c0an426i",
+      "group": "syntax",
+      "title": "One rule for subject shorthand: method heads and a nesting fence",
+      "gist": "Make `.member` shorthand follow one rule in loops and call slots, and fence it out of nested scopes.",
+      "lesson": "Two ratified features share the bare `.member` spelling. The loop's implicit subject accepts method heads: `loop words if .len() > 1 -> .len()` runs today (D-LOOP-SUBJECT1=A). The call-slot shorthand accepts member heads only: `words.map(.len())` fails with E0302 plus E0104, and neither error names the real rule (D-SUBJECT-CALL1=A). Same spelling, two verdicts — a false rhyme, probed live. Separately, prior art (Kotlin's style law) marks nested implicit scopes as the point where the shorthand stops being obvious.",
+      "explainer": "",
+      "story": "Noor writes `words.map(.len())` after reading `loop words if .len() > 1` two lines above. The compiler answers with a struct-field error and an arity error. She concludes the shorthand is unpredictable and stops using it — including where it genuinely reads better.",
+      "inWild": "words :: [\"x\", \"yy\", \"zzz\"]\nactive :: loop words if .len() > 1 -> .len()   // runs today\nlens :: words.map(.len())                      // E0302 + E0104 today",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "Widen to method heads, add a nesting lint",
+          "detail": "A `.method(args)` head chain becomes legal in call slots, matching loops: one rule everywhere the shorthand exists. A new lint fires when shorthand appears inside another shorthand scope (nested loops or nested unary lambdas), naming the explicit-binding rewrite. Deletes a rule instead of adding one; the two misleading errors stop firing on a form readers expect to work.",
+          "technical": "Amends D-SUBJECT-CALL1=A: the chain grammar becomes `.segment[(args)] [.segment[(args)]]*` with method or member segments in any position. Lowering unchanged (one-parameter lambda). New L-code lint for shorthand-inside-shorthand with a named-binding suggestion; UI snapshot per I4. E0302/E0104 no longer reachable from this form.",
+          "code": "lens :: words.map(.len())                 // now legal, same lowering as (w) -> w.len()\nupper :: users.map(.name.to_upper())      // mixed chain, already legal, unchanged\nouter :: loop groups -> .items.map(.score) // L____: shorthand inside shorthand; name a binding"
+        },
+        {
+          "key": "B",
+          "name": "Narrow loops to member heads",
+          "detail": "Loops adopt the call-slot rule: member heads only. One rule, achieved by deleting a working, readable form (`if .len() > 1`) that real examples use today. Consistency by subtraction.",
+          "technical": "Amends D-LOOP-SUBJECT1=A: implicit-subject guard/body chains reject method heads; teaching diagnostic points to a named binding.",
+          "code": "active :: loop w, words if w.len() > 1 -> w.len()   // the only spelling left"
+        },
+        {
+          "key": "C",
+          "name": "Keep the split, teach it",
+          "detail": "Both rules stand; E0302/E0104 get rewritten to name the member-head rule and suggest the lambda rewrite. Cheapest, but the false rhyme stays: the same glyph sequence keeps two verdicts by position.",
+          "technical": "Diagnostic text change only; both decisions stand as ratified.",
+          "code": "lens :: words.map((w) -> w.len())   // the taught rewrite\nactive :: loop words if .len() > 1 -> .len()   // still legal in loops"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Kotlin",
+          "note": "Official conventions: use `it` in short, non-nested lambdas; declare parameters explicitly in nested ones. The nesting fence is the tested boundary, adopted by option A's lint.",
+          "code": "ints.filter { it > 0 }.map { it * 2 }   // fine\n// nested: declare names explicitly"
+        },
+        {
+          "lang": "Swift",
+          "note": "Key-path literals in function position (`\\.name`) accept property chains but not method calls — the same member-only cliff option B would generalize; Swift users routinely hit it and rewrite to closures.",
+          "code": "users.map(\\.name)      // fine\n// users.map(\\.name.uppercased())  // needs a closure"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "One rule replaces two, the rule matches what readers already assume, and the one real hazard prior art identifies — nesting — gets a targeted fence instead of a blanket ban.",
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "Buys consistency by deleting the more useful half of the feature and rewriting working corpus code."
+          },
+          {
+            "key": "C",
+            "reason": "Better error text on top of a false rhyme is still a false rhyme; every new reader re-discovers the split."
+          }
+        ],
+        "tradeoff": "Widening lets longer computations hide the subject in call slots. Accepted: the nesting lint plus the existing named forms bound the damage, and the loop surface has run this way without incident."
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "reviewPasses": {
+        "base": "The first draft proposed widening plus the nesting lint, against narrowing and keep-plus-teach.",
+        "boilOcean": "The breadth review tested an explicit `it` keyword and free-standing method references. The first was already rejected in c0xsk2wa; the second is its own ballot-sized feature.",
+        "hybrid": "Widening without the lint was tested and rejected. Kotlin's evidence is that the win needs the nesting fence.",
+        "cooperative": "Option B was steelmanned as one crisp grammar everywhere. Option C was steelmanned as a two-string fix; neither answers the probe's reader.",
+        "adversarial": "Attacks tested argument-position ambiguity for `.len()` and lint reach over ratified single-level chains. The parse is unique and the lint fires only inside another shorthand scope."
+      },
+      "checkInstructions": null,
+      "draft": false,
+      "status": "open",
+      "created": "2026-08-21T21:19:08.334Z"
+    },
+    {
+      "id": "D-DEFAULT-SHAPE1",
+      "cardId": "c0an426i",
+      "group": "syntax",
+      "title": "Default values: keep the fill law or unify the shapes",
+      "gist": "Decide whether parameter and field defaults keep `name: Type = value` or adopt a binding-style shape.",
+      "lesson": "Locals bind with the type riding the value: `version :: Float{0.1}` (D-BIND-BARE1=A). Parameters and fields annotate and fill: `timeout seconds: Int = 30` (D-APILABEL1=A). Two shapes for one job. The audit found the split is lawful: the ratified fill law (D-CHOOSE-FNBODY1=A) says `::`/`:=` define a new thing and `=` fills an existing slot. A parameter default is a fill. The question is whether that law carries the weight or one shape should win anyway.",
+      "explainer": "",
+      "story": "Sam learns `version :: Float{0.1}` in chapter one. In chapter three he meets `timeout: Int = 30` and asks why the type moved and the glyph changed. The honest answer — 'an interface declares a slot, a local defines a value' — exists, but nothing in the language ever told him.",
+      "inWild": "version :: Float{0.1}                       // local: type rides the value\nn := 100                                     // mutable local\nfn connect(host: String, /, *, timeout seconds: Int = 30, tls: Bool = true) String -> {\n    \"{host} t={seconds} tls={tls}\"           // parameter slots filled by `=`\n}\nstruct Server { port: Int = 3000 }           // field fill, same shape",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "Keep both, teach the fill law",
+          "detail": "No spelling changes. The fill law gets stated where beginners meet it: one glossary line in the book's first chapter, and the E-codes around bindings and defaults name it (`::` defines, `:=` defines mutable, `=` fills). The split stops being a mystery and starts being information: see `=`, an existing slot gets a value.",
+          "technical": "No grammar change. Doc and diagnostic-text additions only; touched snapshots re-bless.",
+          "code": "version :: Float{0.1}          // defines\nfn connect(*, timeout: Int = 30) String -> { … }   // fills a declared slot\nn = 200                         // refills a := slot — the same `=`"
+        },
+        {
+          "key": "B",
+          "name": "Defaults adopt the binding glyph",
+          "detail": "Parameters and fields spell defaults with `:=`: `timeout: Int := 30`. One glyph family for 'name gets value' — but the rhyme lies: a parameter default is neither mutable nor a local definition, and `=` would remain for reassignment anyway. The glyph count stays; the meanings blur.",
+          "technical": "Amends D-APILABEL1=A and field grammar: default slots take `:=`. `=` remains as statement reassignment. Retires the `=` fill in signatures only.",
+          "code": "fn connect(*, timeout seconds: Int := 30, tls: Bool := true) String -> { … }\nstruct Server { port: Int := 3000 }"
+        },
+        {
+          "key": "C",
+          "name": "Locals may annotate like interfaces",
+          "detail": "Re-admit `name: Type :: value` / `name: Type := value` for locals, so the interface shape appears everywhere. Reopens ratified D-BIND-BARE1=A, re-adds the second local spelling it deleted (I8 pressure), and the type gets stated twice whenever the value already shows it.",
+          "technical": "Amends (reverses) D-BIND-BARE1=A. Both local shapes become legal; fmt policy would need a canonical pick — which re-creates the original debate.",
+          "code": "port: Int :: 3000        // interface shape in a local\nversion :: Float{0.1}     // the existing shape stays too — two spellings"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Swift",
+          "note": "Same split as Jet today: locals infer (`let x = 3`), parameter defaults annotate and fill (`timeout: Int = 30`). Nobody reads it as inconsistency because 'interfaces declare, locals infer' is taught early.",
+          "code": "func connect(timeout: Int = 30) -> String { … }\nlet version = 0.1"
+        },
+        {
+          "lang": "Python",
+          "note": "One `=` fills defaults and binds locals; the resulting mutable-default trap is a famous footgun. Evidence that merging the define and fill planes can cost more than the second shape.",
+          "code": "def connect(timeout=30): ..."
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "The split carries real information once the law is stated, and stating it costs a glossary line instead of a migration. This is the one place the audit found the current design already reasoning-first.",
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "Makes `:=` mean two unrelated things — mutable local definition and immutable slot fill — trading a taught distinction for a false rhyme."
+          },
+          {
+            "key": "C",
+            "reason": "Reopens a ratified deletion to reintroduce the duplicate local shape that D-BIND-BARE1=A existed to remove."
+          }
+        ],
+        "tradeoff": "Two shapes remain in the language and must be taught. Accepted: the shapes mark a real semantic boundary (define vs fill), and the teaching surface is one sentence."
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "reviewPasses": {
+        "base": "The first draft framed the split under the ratified fill law. It recommended keep-and-teach over both unification directions.",
+        "boilOcean": "The breadth review tested fused value-riding defaults and a `default` keyword. The fusion hides which part is the type; the keyword is ceremony with no reader gain.",
+        "hybrid": "Keep-and-teach plus `Type{value}` on the right of a default `=` was tested. That form is already legal, so it becomes doc text, not law.",
+        "cooperative": "Option B was steelmanned: scanning for `:=` would find every value entry. Option C was steelmanned as the simplest one-shape story; each buys consistency with a lie or a duplicate.",
+        "adversarial": "The attack asked whether teaching is a shrug. The confusion is locatable, the law is one sentence, and `n = 200` reassignment proves the fill law total, so the fix mechanism is real."
+      },
+      "checkInstructions": null,
+      "draft": false,
+      "status": "open",
+      "created": "2026-08-21T21:19:15.204Z"
     }
   ],
   "questions": [
@@ -187668,6 +188266,90 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-08-21T21:19:15.205Z",
+      "by": "fable",
+      "action": "decision.add",
+      "ref": "D-DEFAULT-SHAPE1",
+      "note": "Default values: keep the fill law or unify the shapes"
+    },
+    {
+      "at": "2026-08-21T21:19:08.334Z",
+      "by": "fable",
+      "action": "decision.add",
+      "ref": "D-SUBJECT-COHERE1",
+      "note": "One rule for subject shorthand: method heads and a nesting fence"
+    },
+    {
+      "at": "2026-08-21T21:19:07.882Z",
+      "by": "fable",
+      "action": "decision.add",
+      "ref": "D-ARMHEAD-PAREN1",
+      "note": "Parentheses required when arm atoms mix with boolean guards"
+    },
+    {
+      "at": "2026-08-21T21:19:07.419Z",
+      "by": "fable",
+      "action": "decision.add",
+      "ref": "D-LAMBDA-IFACE1",
+      "note": "Lambdas may state their whole interface"
+    },
+    {
+      "at": "2026-08-21T21:19:06.925Z",
+      "by": "fable",
+      "action": "decision.add",
+      "ref": "D-EFFECT-ROW2",
+      "note": "The effect row stands alone, outside the arrow"
+    },
+    {
+      "at": "2026-08-21T21:19:06.451Z",
+      "by": "fable",
+      "action": "decision.add",
+      "ref": "D-CALLABLE-ONE1",
+      "note": "One callable shape: a function is a named lambda"
+    },
+    {
+      "at": "2026-08-21T21:19:05.967Z",
+      "by": "fable",
+      "action": "decision.add",
+      "ref": "D-ARROW-RESPELL1",
+      "note": "The one arrow's glyph: -> or => or keep :>"
+    },
+    {
+      "at": "2026-08-21T21:13:56.222Z",
+      "by": "fable",
+      "action": "card.criteria-add",
+      "ref": "c0an426i",
+      "note": "#4 Drift cleanup card exists for stale arrow spellings in spec "
+    },
+    {
+      "at": "2026-08-21T21:13:55.728Z",
+      "by": "fable",
+      "action": "card.criteria-add",
+      "ref": "c0an426i",
+      "note": "#3 After ratification: outcomes recorded in docs/spec/syntax-de"
+    },
+    {
+      "at": "2026-08-21T21:13:55.216Z",
+      "by": "fable",
+      "action": "card.criteria-add",
+      "ref": "c0an426i",
+      "note": "#2 No ratified decision is contradicted without a named amendme"
+    },
+    {
+      "at": "2026-08-21T21:13:54.693Z",
+      "by": "fable",
+      "action": "card.criteria-add",
+      "ref": "c0an426i",
+      "note": "#1 All seven ballots (D-ARROW-RESPELL1, D-CALLABLE-ONE1, D-EFFE"
+    },
+    {
+      "at": "2026-08-21T21:13:45.934Z",
+      "by": "fable",
+      "action": "card.add",
+      "ref": "c0an426i",
+      "note": "Reading-first callable and arrow slate (one callable, one arrow)"
+    },
     {
       "at": "2026-08-21T18:49:47.522Z",
       "by": "orchestrator",
@@ -191083,90 +191765,6 @@
       "action": "card.criteria-meet",
       "ref": "c0fa4bu7",
       "note": "#1"
-    },
-    {
-      "at": "2026-08-21T00:41:49.722Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c06tgncm",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-21T00:41:49.253Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0ivhxu2",
-      "note": "#2"
-    },
-    {
-      "at": "2026-08-21T00:41:48.791Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0ivhxu2",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-21T00:41:48.337Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0wfwj5u",
-      "note": "#5"
-    },
-    {
-      "at": "2026-08-21T00:41:47.855Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0wfwj5u",
-      "note": "#4"
-    },
-    {
-      "at": "2026-08-21T00:41:47.382Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0wfwj5u",
-      "note": "#3"
-    },
-    {
-      "at": "2026-08-21T00:41:46.924Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0wfwj5u",
-      "note": "#2"
-    },
-    {
-      "at": "2026-08-21T00:41:46.446Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c003jai5",
-      "note": "#4"
-    },
-    {
-      "at": "2026-08-21T00:41:46.011Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c003jai5",
-      "note": "#3"
-    },
-    {
-      "at": "2026-08-21T00:41:45.557Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c003jai5",
-      "note": "#2"
-    },
-    {
-      "at": "2026-08-21T00:41:45.107Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c003jai5",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-21T00:41:44.655Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0i0wm0m",
-      "note": "#9"
     }
   ],
   "nextNum": 368,
