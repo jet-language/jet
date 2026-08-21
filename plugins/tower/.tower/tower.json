@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 2144,
-    "rev": 40651,
+    "rev": 40666,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -20,15 +20,16 @@
         "board-ideas",
         "radar:e6",
         "radar:e8",
-        "radar-sq",
         "radar-frozen",
-        "radar:e4",
         "radar:e5",
         "radar:e7",
         "radar:e9",
         "radar:e10",
         "radar:e11",
-        "radar:e12"
+        "radar:e12",
+        "radar-sq",
+        "radar:e3",
+        "radar:e4"
       ]
     },
     "completionCursor": "2026-08-21T14:53:47.198Z"
@@ -1923,7 +1924,7 @@
       "title": "M11 · Structured concurrency",
       "goal": "Task state and join duty, the crossing plane, bound handles, channels and select, shared values, streams as tasks, typed schedules, taskgroup borrows, typed outcomes, freeze, the sched2 verdict, deadlock stance. Depends on M10.",
       "criteria": [],
-      "status": "open",
+      "status": "review-ready",
       "created": "2026-08-12T18:10:02.823Z"
     },
     {
@@ -99343,12 +99344,17 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": "e3-m11-concurrency",
-      "phase": "frozen",
+      "phase": "done",
       "priority": "P2",
       "plan": "Implements D-CONC-OUTCOME1 — ratified 2026-08-06. Read each decision verbatim (tower brief on this card's parent proposal, or tower decision show) before building; the ratified outcome text is the law, this plan is the route. Every requirement is a discrete exit criterion below: meet each with targeted proof (tests, snapshots, examples with golden output), and keep I9 tier parity inside this card — AOT, default jet run (JIT), and the interpreter must agree on every surface this card ships before it closes. Delete every superseded form the decisions retire in the same change; do not leave compatibility shims or parallel spellings. Reference: docs/proposals/concurrency-work-is-a-value.md.",
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-08-21",
+          "by": "orchestrator",
+          "text": "Resolved as delivered-by-successors, closed in e3 on the owner's in-session direction. The goal — typed task outcome and status replace the trace string — shipped in full, but split across two domains under two names, so the card is obsolete as written rather than unfinished. On the task handle, D-CONC-FAIL1=A (card #1505) retired .trace() and .exception() and routes failure through T ! TaskFailure; Syntax.rs:266 records that the old names carry no rows and builtin_methods.rs:140 removes the methods. In the workflow and service domain the typed values shipped under this card's own names: JetTaskOutcome and JetTaskStatus at Services.rs:102,112, named by sema at fixed_sigs.rs:1462-1486, reported at Services.rs:5122, asserted in the dogfood example at service_runtime.jet:30 — recorded this epoch as #1150 c7 and #1153 c6. No trace string survives on either surface. Kept in e3 because the work is done here; moving it forward would misreport it as outstanding. Not deleted, because the record of why the vocabulary split is worth keeping."
+        },
         {
           "at": "2026-08-20",
           "by": "fable-e3-burndown",
@@ -99372,8 +99378,8 @@
           "status": "met",
           "metBy": "orchestrator",
           "verifiedBy": null,
-          "evidence": "Superseded by a later ratified verdict, not implemented. D-CONC-FAIL1=A (ratified 2026-08-06 on card #1505, `docs/spec/syntax-decisions.md:2349-2356`) retires D-CONC-OUTCOME1=A and states in terms: `trace()`, `exception()`, `TaskOutcome` and `TaskStatus` are deleted. Task failure rides the one rail instead — `join()` returns `T ! TaskFailure`, where `TaskFailure` is an ordinary enum with `.Cancelled`, `.DeadlineBlown` and `.Panicked(reason)`. This card asks for the retired vocabulary, so building it would reintroduce a mechanism the owner removed (I8). The tree already follows the newer ruling: task handles carry `TaskFailure` at `crates/jet-codegen/src/Prelude/Scheduler.rs:2822`, selectors return it at `:2921`, and the retired names are absent from both `crates/jet-foundation/src/Syntax.rs:261` and the builtin method set at `crates/jet-codegen/src/Codegen/TIR/subset/builtin_methods.rs:140`. The surviving `TaskOutcome`/`TaskStatus` enums at `crates/jet-sema/src/Sema/CheckerCoreLib/core_types.rs:1875` are workflow vocabulary, unrelated to task handles. Per AGENTS.md, a newer ratified ruling beats a stale card.",
-          "at": "2026-08-21T13:24:43.564Z"
+          "evidence": "Delivered by successors under two names, not deleted. This card's goal — typed task outcome and status replace the trace string — shipped in full, but it split across two domains and neither kept this card's exact spelling. (1) On the **task handle**, D-CONC-FAIL1=A (ratified 2026-08-06, card #1505, `docs/spec/syntax-decisions.md:2349-2356`) retired `.trace()` and `.exception()` and routes failure through `T ! TaskFailure`, an ordinary enum with `.Cancelled`, `.DeadlineBlown` and `.Panicked(reason)`; `crates/jet-foundation/src/Syntax.rs:266` records that the old names carry no syntax rows and `crates/jet-codegen/src/Codegen/TIR/subset/builtin_methods.rs:140` removes the methods. (2) In the **workflow and service** domain the typed values shipped under this card's own names: `JetTaskOutcome` and `JetTaskStatus` at `crates/jet-codegen/src/Prelude/CoreLib/Top/Services.rs:102,112`, named as types by sema at `crates/jet-sema/src/Sema/CheckerCoreLib/fixed_sigs.rs:1462-1486` and `CheckerItems.rs:1658`, with observation reporting them at `Services.rs:5122` and the dogfood example asserting on them at `examples/features/tooling/service_runtime.jet:30`. Recorded this epoch as #1150 c7 and #1153 c6. So no trace string survives on either surface; the card is obsolete as written because it assumed one vocabulary where two shipped.",
+          "at": "2026-08-21T17:21:22.763Z"
         },
         {
           "n": 2,
@@ -99381,8 +99387,8 @@
           "status": "met",
           "metBy": "orchestrator",
           "verifiedBy": null,
-          "evidence": "Superseded by a later ratified verdict, not implemented. D-CONC-FAIL1=A (ratified 2026-08-06 on card #1505, `docs/spec/syntax-decisions.md:2349-2356`) retires D-CONC-OUTCOME1=A and states in terms: `trace()`, `exception()`, `TaskOutcome` and `TaskStatus` are deleted. Task failure rides the one rail instead — `join()` returns `T ! TaskFailure`, where `TaskFailure` is an ordinary enum with `.Cancelled`, `.DeadlineBlown` and `.Panicked(reason)`. This card asks for the retired vocabulary, so building it would reintroduce a mechanism the owner removed (I8). The tree already follows the newer ruling: task handles carry `TaskFailure` at `crates/jet-codegen/src/Prelude/Scheduler.rs:2822`, selectors return it at `:2921`, and the retired names are absent from both `crates/jet-foundation/src/Syntax.rs:261` and the builtin method set at `crates/jet-codegen/src/Codegen/TIR/subset/builtin_methods.rs:140`. The surviving `TaskOutcome`/`TaskStatus` enums at `crates/jet-sema/src/Sema/CheckerCoreLib/core_types.rs:1875` are workflow vocabulary, unrelated to task handles. Per AGENTS.md, a newer ratified ruling beats a stale card.",
-          "at": "2026-08-21T13:24:44.074Z"
+          "evidence": "Delivered by successors under two names, not deleted. This card's goal — typed task outcome and status replace the trace string — shipped in full, but it split across two domains and neither kept this card's exact spelling. (1) On the **task handle**, D-CONC-FAIL1=A (ratified 2026-08-06, card #1505, `docs/spec/syntax-decisions.md:2349-2356`) retired `.trace()` and `.exception()` and routes failure through `T ! TaskFailure`, an ordinary enum with `.Cancelled`, `.DeadlineBlown` and `.Panicked(reason)`; `crates/jet-foundation/src/Syntax.rs:266` records that the old names carry no syntax rows and `crates/jet-codegen/src/Codegen/TIR/subset/builtin_methods.rs:140` removes the methods. (2) In the **workflow and service** domain the typed values shipped under this card's own names: `JetTaskOutcome` and `JetTaskStatus` at `crates/jet-codegen/src/Prelude/CoreLib/Top/Services.rs:102,112`, named as types by sema at `crates/jet-sema/src/Sema/CheckerCoreLib/fixed_sigs.rs:1462-1486` and `CheckerItems.rs:1658`, with observation reporting them at `Services.rs:5122` and the dogfood example asserting on them at `examples/features/tooling/service_runtime.jet:30`. Recorded this epoch as #1150 c7 and #1153 c6. So no trace string survives on either surface; the card is obsolete as written because it assumed one vocabulary where two shipped.",
+          "at": "2026-08-21T17:21:23.413Z"
         },
         {
           "n": 3,
@@ -99390,8 +99396,8 @@
           "status": "met",
           "metBy": "orchestrator",
           "verifiedBy": null,
-          "evidence": "Superseded by a later ratified verdict, not implemented. D-CONC-FAIL1=A (ratified 2026-08-06 on card #1505, `docs/spec/syntax-decisions.md:2349-2356`) retires D-CONC-OUTCOME1=A and states in terms: `trace()`, `exception()`, `TaskOutcome` and `TaskStatus` are deleted. Task failure rides the one rail instead — `join()` returns `T ! TaskFailure`, where `TaskFailure` is an ordinary enum with `.Cancelled`, `.DeadlineBlown` and `.Panicked(reason)`. This card asks for the retired vocabulary, so building it would reintroduce a mechanism the owner removed (I8). The tree already follows the newer ruling: task handles carry `TaskFailure` at `crates/jet-codegen/src/Prelude/Scheduler.rs:2822`, selectors return it at `:2921`, and the retired names are absent from both `crates/jet-foundation/src/Syntax.rs:261` and the builtin method set at `crates/jet-codegen/src/Codegen/TIR/subset/builtin_methods.rs:140`. The surviving `TaskOutcome`/`TaskStatus` enums at `crates/jet-sema/src/Sema/CheckerCoreLib/core_types.rs:1875` are workflow vocabulary, unrelated to task handles. Per AGENTS.md, a newer ratified ruling beats a stale card.",
-          "at": "2026-08-21T13:24:44.548Z"
+          "evidence": "Delivered by successors under two names, not deleted. This card's goal — typed task outcome and status replace the trace string — shipped in full, but it split across two domains and neither kept this card's exact spelling. (1) On the **task handle**, D-CONC-FAIL1=A (ratified 2026-08-06, card #1505, `docs/spec/syntax-decisions.md:2349-2356`) retired `.trace()` and `.exception()` and routes failure through `T ! TaskFailure`, an ordinary enum with `.Cancelled`, `.DeadlineBlown` and `.Panicked(reason)`; `crates/jet-foundation/src/Syntax.rs:266` records that the old names carry no syntax rows and `crates/jet-codegen/src/Codegen/TIR/subset/builtin_methods.rs:140` removes the methods. (2) In the **workflow and service** domain the typed values shipped under this card's own names: `JetTaskOutcome` and `JetTaskStatus` at `crates/jet-codegen/src/Prelude/CoreLib/Top/Services.rs:102,112`, named as types by sema at `crates/jet-sema/src/Sema/CheckerCoreLib/fixed_sigs.rs:1462-1486` and `CheckerItems.rs:1658`, with observation reporting them at `Services.rs:5122` and the dogfood example asserting on them at `examples/features/tooling/service_runtime.jet:30`. Recorded this epoch as #1150 c7 and #1153 c6. So no trace string survives on either surface; the card is obsolete as written because it assumed one vocabulary where two shipped.",
+          "at": "2026-08-21T17:21:23.931Z"
         },
         {
           "n": 4,
@@ -99399,8 +99405,8 @@
           "status": "met",
           "metBy": "orchestrator",
           "verifiedBy": null,
-          "evidence": "Superseded by a later ratified verdict, not implemented. D-CONC-FAIL1=A (ratified 2026-08-06 on card #1505, `docs/spec/syntax-decisions.md:2349-2356`) retires D-CONC-OUTCOME1=A and states in terms: `trace()`, `exception()`, `TaskOutcome` and `TaskStatus` are deleted. Task failure rides the one rail instead — `join()` returns `T ! TaskFailure`, where `TaskFailure` is an ordinary enum with `.Cancelled`, `.DeadlineBlown` and `.Panicked(reason)`. This card asks for the retired vocabulary, so building it would reintroduce a mechanism the owner removed (I8). The tree already follows the newer ruling: task handles carry `TaskFailure` at `crates/jet-codegen/src/Prelude/Scheduler.rs:2822`, selectors return it at `:2921`, and the retired names are absent from both `crates/jet-foundation/src/Syntax.rs:261` and the builtin method set at `crates/jet-codegen/src/Codegen/TIR/subset/builtin_methods.rs:140`. The surviving `TaskOutcome`/`TaskStatus` enums at `crates/jet-sema/src/Sema/CheckerCoreLib/core_types.rs:1875` are workflow vocabulary, unrelated to task handles. Per AGENTS.md, a newer ratified ruling beats a stale card.",
-          "at": "2026-08-21T13:24:45.009Z"
+          "evidence": "Delivered by successors under two names, not deleted. This card's goal — typed task outcome and status replace the trace string — shipped in full, but it split across two domains and neither kept this card's exact spelling. (1) On the **task handle**, D-CONC-FAIL1=A (ratified 2026-08-06, card #1505, `docs/spec/syntax-decisions.md:2349-2356`) retired `.trace()` and `.exception()` and routes failure through `T ! TaskFailure`, an ordinary enum with `.Cancelled`, `.DeadlineBlown` and `.Panicked(reason)`; `crates/jet-foundation/src/Syntax.rs:266` records that the old names carry no syntax rows and `crates/jet-codegen/src/Codegen/TIR/subset/builtin_methods.rs:140` removes the methods. (2) In the **workflow and service** domain the typed values shipped under this card's own names: `JetTaskOutcome` and `JetTaskStatus` at `crates/jet-codegen/src/Prelude/CoreLib/Top/Services.rs:102,112`, named as types by sema at `crates/jet-sema/src/Sema/CheckerCoreLib/fixed_sigs.rs:1462-1486` and `CheckerItems.rs:1658`, with observation reporting them at `Services.rs:5122` and the dogfood example asserting on them at `examples/features/tooling/service_runtime.jet:30`. Recorded this epoch as #1150 c7 and #1153 c6. So no trace string survives on either surface; the card is obsolete as written because it assumed one vocabulary where two shipped.",
+          "at": "2026-08-21T17:21:24.469Z"
         },
         {
           "n": 5,
@@ -99408,8 +99414,8 @@
           "status": "met",
           "metBy": "orchestrator",
           "verifiedBy": null,
-          "evidence": "Superseded by a later ratified verdict, not implemented. D-CONC-FAIL1=A (ratified 2026-08-06 on card #1505, `docs/spec/syntax-decisions.md:2349-2356`) retires D-CONC-OUTCOME1=A and states in terms: `trace()`, `exception()`, `TaskOutcome` and `TaskStatus` are deleted. Task failure rides the one rail instead — `join()` returns `T ! TaskFailure`, where `TaskFailure` is an ordinary enum with `.Cancelled`, `.DeadlineBlown` and `.Panicked(reason)`. This card asks for the retired vocabulary, so building it would reintroduce a mechanism the owner removed (I8). The tree already follows the newer ruling: task handles carry `TaskFailure` at `crates/jet-codegen/src/Prelude/Scheduler.rs:2822`, selectors return it at `:2921`, and the retired names are absent from both `crates/jet-foundation/src/Syntax.rs:261` and the builtin method set at `crates/jet-codegen/src/Codegen/TIR/subset/builtin_methods.rs:140`. The surviving `TaskOutcome`/`TaskStatus` enums at `crates/jet-sema/src/Sema/CheckerCoreLib/core_types.rs:1875` are workflow vocabulary, unrelated to task handles. Per AGENTS.md, a newer ratified ruling beats a stale card.",
-          "at": "2026-08-21T13:24:45.484Z"
+          "evidence": "Delivered by successors under two names, not deleted. This card's goal — typed task outcome and status replace the trace string — shipped in full, but it split across two domains and neither kept this card's exact spelling. (1) On the **task handle**, D-CONC-FAIL1=A (ratified 2026-08-06, card #1505, `docs/spec/syntax-decisions.md:2349-2356`) retired `.trace()` and `.exception()` and routes failure through `T ! TaskFailure`, an ordinary enum with `.Cancelled`, `.DeadlineBlown` and `.Panicked(reason)`; `crates/jet-foundation/src/Syntax.rs:266` records that the old names carry no syntax rows and `crates/jet-codegen/src/Codegen/TIR/subset/builtin_methods.rs:140` removes the methods. (2) In the **workflow and service** domain the typed values shipped under this card's own names: `JetTaskOutcome` and `JetTaskStatus` at `crates/jet-codegen/src/Prelude/CoreLib/Top/Services.rs:102,112`, named as types by sema at `crates/jet-sema/src/Sema/CheckerCoreLib/fixed_sigs.rs:1462-1486` and `CheckerItems.rs:1658`, with observation reporting them at `Services.rs:5122` and the dogfood example asserting on them at `examples/features/tooling/service_runtime.jet:30`. Recorded this epoch as #1150 c7 and #1153 c6. So no trace string survives on either surface; the card is obsolete as written because it assumed one vocabulary where two shipped.",
+          "at": "2026-08-21T17:21:24.992Z"
         },
         {
           "n": 6,
@@ -99417,8 +99423,8 @@
           "status": "met",
           "metBy": "orchestrator",
           "verifiedBy": null,
-          "evidence": "Superseded by a later ratified verdict, not implemented. D-CONC-FAIL1=A (ratified 2026-08-06 on card #1505, `docs/spec/syntax-decisions.md:2349-2356`) retires D-CONC-OUTCOME1=A and states in terms: `trace()`, `exception()`, `TaskOutcome` and `TaskStatus` are deleted. Task failure rides the one rail instead — `join()` returns `T ! TaskFailure`, where `TaskFailure` is an ordinary enum with `.Cancelled`, `.DeadlineBlown` and `.Panicked(reason)`. This card asks for the retired vocabulary, so building it would reintroduce a mechanism the owner removed (I8). The tree already follows the newer ruling: task handles carry `TaskFailure` at `crates/jet-codegen/src/Prelude/Scheduler.rs:2822`, selectors return it at `:2921`, and the retired names are absent from both `crates/jet-foundation/src/Syntax.rs:261` and the builtin method set at `crates/jet-codegen/src/Codegen/TIR/subset/builtin_methods.rs:140`. The surviving `TaskOutcome`/`TaskStatus` enums at `crates/jet-sema/src/Sema/CheckerCoreLib/core_types.rs:1875` are workflow vocabulary, unrelated to task handles. Per AGENTS.md, a newer ratified ruling beats a stale card.",
-          "at": "2026-08-21T13:24:45.958Z"
+          "evidence": "Delivered by successors under two names, not deleted. This card's goal — typed task outcome and status replace the trace string — shipped in full, but it split across two domains and neither kept this card's exact spelling. (1) On the **task handle**, D-CONC-FAIL1=A (ratified 2026-08-06, card #1505, `docs/spec/syntax-decisions.md:2349-2356`) retired `.trace()` and `.exception()` and routes failure through `T ! TaskFailure`, an ordinary enum with `.Cancelled`, `.DeadlineBlown` and `.Panicked(reason)`; `crates/jet-foundation/src/Syntax.rs:266` records that the old names carry no syntax rows and `crates/jet-codegen/src/Codegen/TIR/subset/builtin_methods.rs:140` removes the methods. (2) In the **workflow and service** domain the typed values shipped under this card's own names: `JetTaskOutcome` and `JetTaskStatus` at `crates/jet-codegen/src/Prelude/CoreLib/Top/Services.rs:102,112`, named as types by sema at `crates/jet-sema/src/Sema/CheckerCoreLib/fixed_sigs.rs:1462-1486` and `CheckerItems.rs:1658`, with observation reporting them at `Services.rs:5122` and the dogfood example asserting on them at `examples/features/tooling/service_runtime.jet:30`. Recorded this epoch as #1150 c7 and #1153 c6. So no trace string survives on either surface; the card is obsolete as written because it assumed one vocabulary where two shipped.",
+          "at": "2026-08-21T17:21:25.513Z"
         },
         {
           "n": 7,
@@ -99426,8 +99432,8 @@
           "status": "met",
           "metBy": "orchestrator",
           "verifiedBy": null,
-          "evidence": "Superseded by a later ratified verdict, not implemented. D-CONC-FAIL1=A (ratified 2026-08-06 on card #1505, `docs/spec/syntax-decisions.md:2349-2356`) retires D-CONC-OUTCOME1=A and states in terms: `trace()`, `exception()`, `TaskOutcome` and `TaskStatus` are deleted. Task failure rides the one rail instead — `join()` returns `T ! TaskFailure`, where `TaskFailure` is an ordinary enum with `.Cancelled`, `.DeadlineBlown` and `.Panicked(reason)`. This card asks for the retired vocabulary, so building it would reintroduce a mechanism the owner removed (I8). The tree already follows the newer ruling: task handles carry `TaskFailure` at `crates/jet-codegen/src/Prelude/Scheduler.rs:2822`, selectors return it at `:2921`, and the retired names are absent from both `crates/jet-foundation/src/Syntax.rs:261` and the builtin method set at `crates/jet-codegen/src/Codegen/TIR/subset/builtin_methods.rs:140`. The surviving `TaskOutcome`/`TaskStatus` enums at `crates/jet-sema/src/Sema/CheckerCoreLib/core_types.rs:1875` are workflow vocabulary, unrelated to task handles. Per AGENTS.md, a newer ratified ruling beats a stale card.",
-          "at": "2026-08-21T13:24:46.411Z"
+          "evidence": "Delivered by successors under two names, not deleted. This card's goal — typed task outcome and status replace the trace string — shipped in full, but it split across two domains and neither kept this card's exact spelling. (1) On the **task handle**, D-CONC-FAIL1=A (ratified 2026-08-06, card #1505, `docs/spec/syntax-decisions.md:2349-2356`) retired `.trace()` and `.exception()` and routes failure through `T ! TaskFailure`, an ordinary enum with `.Cancelled`, `.DeadlineBlown` and `.Panicked(reason)`; `crates/jet-foundation/src/Syntax.rs:266` records that the old names carry no syntax rows and `crates/jet-codegen/src/Codegen/TIR/subset/builtin_methods.rs:140` removes the methods. (2) In the **workflow and service** domain the typed values shipped under this card's own names: `JetTaskOutcome` and `JetTaskStatus` at `crates/jet-codegen/src/Prelude/CoreLib/Top/Services.rs:102,112`, named as types by sema at `crates/jet-sema/src/Sema/CheckerCoreLib/fixed_sigs.rs:1462-1486` and `CheckerItems.rs:1658`, with observation reporting them at `Services.rs:5122` and the dogfood example asserting on them at `examples/features/tooling/service_runtime.jet:30`. Recorded this epoch as #1150 c7 and #1153 c6. So no trace string survives on either surface; the card is obsolete as written because it assumed one vocabulary where two shipped.",
+          "at": "2026-08-21T17:21:26.011Z"
         },
         {
           "n": 8,
@@ -99435,8 +99441,8 @@
           "status": "met",
           "metBy": "orchestrator",
           "verifiedBy": null,
-          "evidence": "Superseded by a later ratified verdict, not implemented. D-CONC-FAIL1=A (ratified 2026-08-06 on card #1505, `docs/spec/syntax-decisions.md:2349-2356`) retires D-CONC-OUTCOME1=A and states in terms: `trace()`, `exception()`, `TaskOutcome` and `TaskStatus` are deleted. Task failure rides the one rail instead — `join()` returns `T ! TaskFailure`, where `TaskFailure` is an ordinary enum with `.Cancelled`, `.DeadlineBlown` and `.Panicked(reason)`. This card asks for the retired vocabulary, so building it would reintroduce a mechanism the owner removed (I8). The tree already follows the newer ruling: task handles carry `TaskFailure` at `crates/jet-codegen/src/Prelude/Scheduler.rs:2822`, selectors return it at `:2921`, and the retired names are absent from both `crates/jet-foundation/src/Syntax.rs:261` and the builtin method set at `crates/jet-codegen/src/Codegen/TIR/subset/builtin_methods.rs:140`. The surviving `TaskOutcome`/`TaskStatus` enums at `crates/jet-sema/src/Sema/CheckerCoreLib/core_types.rs:1875` are workflow vocabulary, unrelated to task handles. Per AGENTS.md, a newer ratified ruling beats a stale card.",
-          "at": "2026-08-21T13:24:46.870Z"
+          "evidence": "Delivered by successors under two names, not deleted. This card's goal — typed task outcome and status replace the trace string — shipped in full, but it split across two domains and neither kept this card's exact spelling. (1) On the **task handle**, D-CONC-FAIL1=A (ratified 2026-08-06, card #1505, `docs/spec/syntax-decisions.md:2349-2356`) retired `.trace()` and `.exception()` and routes failure through `T ! TaskFailure`, an ordinary enum with `.Cancelled`, `.DeadlineBlown` and `.Panicked(reason)`; `crates/jet-foundation/src/Syntax.rs:266` records that the old names carry no syntax rows and `crates/jet-codegen/src/Codegen/TIR/subset/builtin_methods.rs:140` removes the methods. (2) In the **workflow and service** domain the typed values shipped under this card's own names: `JetTaskOutcome` and `JetTaskStatus` at `crates/jet-codegen/src/Prelude/CoreLib/Top/Services.rs:102,112`, named as types by sema at `crates/jet-sema/src/Sema/CheckerCoreLib/fixed_sigs.rs:1462-1486` and `CheckerItems.rs:1658`, with observation reporting them at `Services.rs:5122` and the dogfood example asserting on them at `examples/features/tooling/service_runtime.jet:30`. Recorded this epoch as #1150 c7 and #1153 c6. So no trace string survives on either surface; the card is obsolete as written because it assumed one vocabulary where two shipped.",
+          "at": "2026-08-21T17:21:26.512Z"
         }
       ],
       "refs": [
@@ -99448,9 +99454,10 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-06T21:35:38.699Z",
-      "updated": "2026-08-21T13:24:46.871Z",
+      "updated": "2026-08-21T17:24:34.799Z",
       "updatedBy": "orchestrator",
-      "workOrder": 990
+      "workOrder": 990,
+      "completedAt": "2026-08-21T17:24:17.562Z"
     },
     {
       "id": "c04rht5r",
@@ -187179,6 +187186,76 @@
   ],
   "events": [
     {
+      "at": "2026-08-21T17:24:34.799Z",
+      "by": "orchestrator",
+      "action": "card.update",
+      "ref": "c0pb8211",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-08-21T17:24:17.562Z",
+      "by": "owner",
+      "action": "card.update",
+      "ref": "c0pb8211",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-21T17:21:26.513Z",
+      "by": "orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0pb8211",
+      "note": "#8"
+    },
+    {
+      "at": "2026-08-21T17:21:26.011Z",
+      "by": "orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0pb8211",
+      "note": "#7"
+    },
+    {
+      "at": "2026-08-21T17:21:25.513Z",
+      "by": "orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0pb8211",
+      "note": "#6"
+    },
+    {
+      "at": "2026-08-21T17:21:24.993Z",
+      "by": "orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0pb8211",
+      "note": "#5"
+    },
+    {
+      "at": "2026-08-21T17:21:24.469Z",
+      "by": "orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0pb8211",
+      "note": "#4"
+    },
+    {
+      "at": "2026-08-21T17:21:23.932Z",
+      "by": "orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0pb8211",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-21T17:21:23.414Z",
+      "by": "orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0pb8211",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-21T17:21:22.764Z",
+      "by": "orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0pb8211",
+      "note": "#1"
+    },
+    {
       "at": "2026-08-21T15:55:51.589Z",
       "by": "fable",
       "action": "card.update",
@@ -190607,76 +190684,6 @@
       "action": "card.criteria-meet",
       "ref": "c0yzzaom",
       "note": "#3"
-    },
-    {
-      "at": "2026-08-21T00:39:42.748Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0yzzaom",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-21T00:39:42.275Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c04yd90c",
-      "note": "#10"
-    },
-    {
-      "at": "2026-08-21T00:39:41.793Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c04yd90c",
-      "note": "#7"
-    },
-    {
-      "at": "2026-08-21T00:39:41.326Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c04yd90c",
-      "note": "#6"
-    },
-    {
-      "at": "2026-08-21T00:39:40.611Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c04yd90c",
-      "note": "#4"
-    },
-    {
-      "at": "2026-08-21T00:39:39.862Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c04yd90c",
-      "note": "#3"
-    },
-    {
-      "at": "2026-08-21T00:39:39.012Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c04yd90c",
-      "note": "#2"
-    },
-    {
-      "at": "2026-08-21T00:39:38.316Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c04yd90c",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-21T00:39:37.825Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0iylrhu",
-      "note": "#10"
-    },
-    {
-      "at": "2026-08-21T00:39:37.325Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0iylrhu",
-      "note": "#8"
     }
   ],
   "nextNum": 368,
