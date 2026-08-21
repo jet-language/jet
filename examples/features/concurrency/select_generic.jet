@@ -1,11 +1,15 @@
-// D-SELECT-GENERIC1=A: select carries a non-Int payload through one generic door.
+// D-CONC-CHAN1=A: generic channel endpoints are nameable in signatures.
 use core.tasks as tasks
+
+fn send_generic(tx: Sender<String>) { tx.send("generic") }
+
+fn receive_generic(rx: Receiver<String>) Receiver<String> { return rx }
 
 fn run() {
     task.group g {
         (sender, receiver) :: tasks.channel<String>()
-        sender.send("generic")
-        value :: g.select().recv(receiver).wait()
+        send_generic(sender)
+        value :: g.select().recv(receive_generic(receiver)).wait()
         print(value)
     }
 }

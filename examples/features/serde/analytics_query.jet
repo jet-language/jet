@@ -12,12 +12,13 @@ struct Sale {
 }
 
 fn run() ? IOError | [FieldError] {
-    scratch :: files.temp_dir("jet-analytics-query")?
-    path :: Path.from(scratch.path).join("sales.csv").to_string()
+    path :: "/tmp/jet-analytics-query.csv"
     files.write(path, "item,qty\npen,3\nink,5\nclip,1")?
     query :: SQL{"SELECT * FROM sales WHERE qty > 1 ORDER BY qty DESC LIMIT 2"}
     sales :: csv.query<Sale>(path, query)?
     total :: sales.map(s :> s.qty).sum()
-    print("rows: {sales}")
+    print("rows: {sales.len()}")
+    loop sale, sales :> print("  {sale.item}: {sale.qty}")
     print("total qty: {total}")
+    files.remove(path)?
 }

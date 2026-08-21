@@ -11,7 +11,7 @@ use core.watcher as watcher
 // #2055: `WatchEvent.domain` and `.kind` are closed Core enums, not strings, so
 // turning one into output text is an exhaustive match with no `else` arm — a new
 // variant is a compile error here instead of silently taking a default branch.
-fn domain_label(domain: WatchDomain) :> String {
+fn domain_label(domain: WatchDomain) String {
     if domain == {
         .File :> { return "file" }
         .Process :> { return "process" }
@@ -19,7 +19,7 @@ fn domain_label(domain: WatchDomain) :> String {
     }
 }
 
-fn kind_label(kind: WatchKind) :> String {
+fn kind_label(kind: WatchKind) String {
     if kind == {
         .Created :> { return "Created" }
         .Modified :> { return "Modified" }
@@ -29,6 +29,15 @@ fn kind_label(kind: WatchKind) :> String {
         .Ready :> { return "Ready" }
     }
 }
+
+fn optional_kind_label(kind: WatchKind?) String {
+    if kind == {
+        .Val(value) :> { return kind_label(value) }
+        .None :> { return "none" }
+    }
+}
+
+fn no_kind() WatchKind? :> None
 
 fn run() {
     args :: process.argv()
@@ -52,11 +61,11 @@ fn run() {
     })
     fs.write(created, "hello") ?? panic("write failed")
     first :: files.poll()
-    first_kind := "none"
+    first_kind := no_kind()
     loop ev, first {
-        if ev.path == created.to_string() :> first_kind = kind_label(ev.kind)
+        if ev.path == created.to_string() :> first_kind = Val(ev.kind)
     }
-    print("recursive file: {first_kind}")
+    print("recursive file: {optional_kind_label(first_kind)}")
     print("callback active: {sub.is_active()}")
     scope.cancel()
     print("callback after scope cancel: {sub.is_active()}")
@@ -70,11 +79,11 @@ fn run() {
     }
     fs.write(after_drop, "cleanup") ?? panic("scope-drop write failed")
     after_drop_events :: files.poll()
-    after_drop_kind := "none"
+    after_drop_kind := no_kind()
     loop ev, after_drop_events {
-        if ev.path == after_drop.to_string() :> after_drop_kind = kind_label(ev.kind)
+        if ev.path == after_drop.to_string() :> after_drop_kind = Val(ev.kind)
     }
-    print("scope drop file: {after_drop_kind}")
+    print("scope drop file: {optional_kind_label(after_drop_kind)}")
     child :: process.cmd([os.executable(), "--watch-child"]).spawn() ?? panic("child spawn failed")
     exited :: watcher.process_pid(child.id())
     before_exit :: exited.poll()
@@ -89,17 +98,17 @@ fn run() {
     set.add(ready)
     print(set.summary())
     combined :: set.poll()
-    process_kind := "none"
-    port_kind := "none"
+    process_kind := no_kind()
+    port_kind := no_kind()
     loop ev, combined {
         if ev.domain == {
             .File :> {}
-            .Process :> { process_kind = kind_label(ev.kind) }
-            .Port :> { port_kind = kind_label(ev.kind) }
+            .Process :> { process_kind = Val(ev.kind) }
+            .Port :> { port_kind = Val(ev.kind) }
         }
     }
-    print("process event: {process_kind}")
-    print("port event: {port_kind}")
+    print("process event: {optional_kind_label(process_kind)}")
+    print("port event: {optional_kind_label(port_kind)}")
     print("set events: {combined.len()}")
     files.cancel()
     print("file watcher active: {files.is_active()}")

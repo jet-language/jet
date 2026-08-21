@@ -24,21 +24,23 @@ fn run() {
     print("implicit copy={implicit_domain(padded)}")
 }
 
-fn implicit_domain(s: String) :> String {
+fn implicit_domain(s: String) String {
     d :: s.after("@")
     return d
 }
 
-fn domain_of(s: String) :> String {
+fn domain_of(s: String) String {
     d :: s.after("@")
     return ~d
 }
 
-#Bench("string view: after/before/trim, no owning materialization") {
-    email :: "nate@jet.dev"
-    loop i, 0..1000 {
-        d :: email.after("@")
-        s :: "{d}"
-        require_eq(s, "jet.dev")
+#Test("string view: after/before/trim, no owning materialization") {
+    .measure {
+        email :: "nate@jet.dev"
+        loop i, 0..1000 {
+            d :: email.after("@")
+            s :: "{d}"
+            assert_eq(s, "jet.dev")
+        }
     }
 }

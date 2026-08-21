@@ -1,0 +1,35 @@
+// D-VALIDATE-DECODE1=B / D-MIGRATE4=A — one canonical typed decode result.
+// Published-schema migration runs silently inside Result<T, [FieldError]>.
+use core.encoding.json as json
+
+#Codable
+struct Point {
+    x: Int
+    y: Int
+}
+
+#[PublishedSchema, Codable]
+struct UserRecord {
+    id: Int
+    display_name: String
+    verified: Bool
+}
+
+migration UserRecord {
+    rename name :> display_name
+    add verified: Bool = false
+}
+
+fn run() ? [FieldError] {
+    p_raw :: "{{\"x\": 3, \"y\": 4}}"
+    p :: json.decode<Point>(p_raw)?
+    print("point: ({p.x}, {p.y})")
+
+    fresh_raw :: "{{\"id\": 7, \"display_name\": \"Betty\", \"verified\": true}}"
+    fresh :: json.decode<UserRecord>(fresh_raw)?
+    print("record {fresh.id} arrived fresh")
+
+    old_raw :: "{{\"id\": 3, \"name\": \"Ada\"}}"
+    user :: json.decode<UserRecord>(old_raw)?
+    print("name: {user.display_name}, verified: {user.verified}")
+}

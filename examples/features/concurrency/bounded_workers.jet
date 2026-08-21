@@ -1,10 +1,13 @@
-use core.tasks as tasks
 use core.time as time
 
-fn use_slot(token: Int, token_sender: Sender<Int>) :> Int {
+fn use_slot(token: Int, token_sender: Sender<Int>) Int {
     time.sleep(20ms)
     token_sender.send(token)
     return token
+}
+
+fn receive_one(receiver: Receiver<Int>) Int {
+    return receiver.receive() ?? panic("value channel closed")
 }
 
 fn run() {
@@ -12,7 +15,7 @@ fn run() {
     // until the receiver drains that slot.
     (sender, values) :: channel<Int>(capacity: 1)
     second_sender :: ~sender
-    (done_sender, done) :: channel<Int>()
+    (done_sender, done) :: channel<Int>(capacity: 8)
     sender.send(10)
     second :: task {
         second_sender.send(20)
@@ -20,7 +23,7 @@ fn run() {
     }
 
     print("buffered first item")
-    print(values.receive() ?? panic("value channel closed"))
+    print(receive_one(values))
     done.receive() ?? panic("done channel closed")
     print("second send completed")
     print(values.receive() ?? panic("value channel closed"))

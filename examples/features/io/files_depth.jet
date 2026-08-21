@@ -19,6 +19,11 @@ fn run() {
     fs.fsync(file) ?? return Err("fsync failed")
     text :: fs.read(file) ?? return Err("read failed")
     print(text)
+    bytes_path :: nested.join("bytes.bin")
+    bytes :: [U8]{0xC3, 0x28, 0x00, 0xFF}
+    fs.write_bytes(bytes_path, bytes) ?? return Err("byte write failed")
+    roundtrip :: fs.read_bytes(bytes_path) ?? return Err("byte read failed")
+    print("bytes round-trip: {roundtrip == bytes}")
     atom :: [U8]{79, 75}
     atomic_path :: nested.join("atomic.txt")
     fs.write_atomic(atomic_path, atom) ?? return Err("atomic write failed")

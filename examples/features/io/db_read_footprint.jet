@@ -11,7 +11,7 @@ use core.db as db
 // so it adds no effect — the `conn.query_one` read and the `?? panic` fallbacks
 // are the whole set. A `conn.execute` hiding in here would need `DB.Write` and be
 // rejected by E0740, which is the point.
-fn person_count(conn: DBScope) :[DB.Read, Panic]> Int {
+fn person_count(conn: DBScope) Int :[DB.Read, Panic]> {
     row_opt :: conn.query_one("SELECT COUNT(*) AS n FROM person", []) ?? panic("count failed")
     if row_opt == .Val(row) {
         n_val :: row.get("n") ?? panic("missing n")

@@ -7,15 +7,25 @@
 // The same rules at compile time: this power is folded while compiling.
 @folded :: 2 ^ 3 ^ 2
 
+// D-TYPE2-NUM1: exact Int has no overflow boundary; this remains a whole
+// number even when the result is far beyond the machine-word fast path.
+@large_exact :: 2 ^ 200
+
+fn show_exact(value: Int) { print(value) }
+
+fn raise(base: Int, exponent: Int) Int { return base ^ exponent }
+
 fn run() {
     print(2 ^ 3 ^ 2)
     print(-3 ^ 2)
     print(2 ^ 10)
     print(2 ^ -1)
     print(@folded)
+    show_exact(raise(2, 200))
+    show_exact(@large_exact)
     // Parentheses ask for the other grouping.
     print((2 ^ 3) ^ 2)
     print((-3) ^ 2)
     // Any Float operand makes the whole power a Float.
-    print(2.0 ^ 10)
+    print(Float.from_int(2) ^ Float.from_int(10))
 }

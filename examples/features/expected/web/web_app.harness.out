@@ -1,0 +1,49 @@
+<!doctype html><html><head><meta charset="utf-8"><title>Home</title></head><body>hello from csr</body></html>
+
+--- facts_json ---
+{
+  "entry": "examples/features/web/web_app.jet",
+  "hydration": "dev-overlay",
+  "shared_tir": true,
+  "routes": [
+    {
+      "path": "/",
+      "handler": "home",
+      "render": "csr",
+      "provenance": "builder"
+    },
+    {
+      "path": "/widget",
+      "handler": "home",
+      "render": "island",
+      "provenance": "builder"
+    }
+  ],
+  "actions": [
+    {
+      "name": "save",
+      "handler": "save",
+      "kind": "action",
+      "provenance": "builder"
+    }
+  ],
+  "mounts": [
+    {
+      "prefix": "/api",
+      "handler": "api_mount",
+      "effects": ["Net"],
+      "security": ["csrf"],
+      "provenance": "builder"
+    }
+  ],
+  "routes_from": [
+  ],
+  "policy": {
+    "security": ["csp-default"],
+    "assets": ["examples/features/web/public"],
+    "split": ["widget"],
+    "cache": ["revalidate"],
+    "a11y": ["wcag-aa"],
+    "adapters": ["node"]
+  }
+}

@@ -1,5 +1,5 @@
 // `if` as a value, and optional condition parens (S68, D-SG2, D-IFDIST1).
-fn classify(n: Int) :> String {
+fn classify(n: Int) String {
     // An ordered arm table produces one value; `else` makes it exhaustive.
     return if {
         n > 0 :> "positive"
@@ -9,7 +9,7 @@ fn classify(n: Int) :> String {
 }
 
 // D-IFDIST1: distributed comparison marker — bare atoms become `n < atom`.
-fn hi_band(n: Int) :> Int {
+fn hi_band(n: Int) Int {
     return if n < {
         16 :> 0
         32 :> 1
@@ -18,7 +18,7 @@ fn hi_band(n: Int) :> Int {
 }
 
 // D-IFDIST1: `|` unions distributed atoms; `&&` combines Bools without parens.
-fn hex_nibble(n: Int) :> String {
+fn hex_nibble(n: Int) String {
     return if n == {
         0 :> "0"
         10 | 11 && true :> "a"
@@ -26,7 +26,7 @@ fn hex_nibble(n: Int) :> String {
     }
 }
 
-fn is_nonzero(n: Int) :> String {
+fn is_nonzero(n: Int) String {
     // Distributed `!=`: a bare atom becomes `n != atom`.
     return if n != {
         0 :> "nonzero"
@@ -64,4 +64,4 @@ fn run() {
     print(band)
 }
 
-fn n_val() :> Int :: 3
+fn n_val() Int :> 3

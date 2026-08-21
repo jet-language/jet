@@ -1,16 +1,19 @@
-// D-CMD-OVERRIDE1=C (card #1451): `fn bench` owns command policy while the
-// compiler-owned BenchSuite remains an ordinary value.
+// D-CLAIM-BENCH1=A: measurement is selected by `jet test --measure`; the
+// command override remains the ordinary `fn test` path.
 use core.testing as testing
 
-fn bench(suite: BenchSuite) {
-    print("bench setup")
-    print("bench suite {suite.iteration}:{suite.result}")
+fn test(suite: TestSuite) {
+    print("test setup")
+    print("test suite {suite.iteration}:{suite.result}")
     suite.run()
-    print("bench teardown")
+    print("test teardown")
 }
 
-#Bench("override body") {
-    print("bench body")
+#Test("override body") {
+    .measure {
+        print("test body")
+        assert(true)
+    }
 }
 
-fn run() { bench(testing.bench_suite()) }
+fn run() { test(testing.test_suite()) }

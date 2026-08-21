@@ -6,6 +6,12 @@ fn run() {
     print(ids)
     // Eager map + terminal reducer.
     print(nums.map(n :> n * n).sum())
+    // Eager flatten/flat_map return Lists; `.lazy()` keeps the one-pass plane.
+    nested :: [[1, 2], [3], [4, 5]]
+    print(nested.flatten())
+    print(nested.flat_map((xs: [Int]) :> xs))
+    print(nested.lazy().flatten().to_list())
+    print(nested.lazy().flat_map((xs: [Int]) :> xs).to_list())
     // Opt into one-pass lazy pipelines when chaining many adapters.
     hot :: nums.lazy().filter(n :> n > 2).map(n :> n * 10).to_list()
     print(hot)

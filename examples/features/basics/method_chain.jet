@@ -1,4 +1,9 @@
 // D-SG3: a broken dot-chain keeps one step per line, each freely commented.
+struct User {
+    active: Bool
+    name: String
+}
+
 fn run() {
     raw :: "  hello world  "
     shout :: raw
@@ -9,4 +14,14 @@ fn run() {
     // A short chain stays on one line.
     n :: "Jet".to_lower().len()
     print("{n}")
+
+    // D-SUBJECT-CALL1=A: a one-parameter callable can use its subject directly.
+    users :: [
+        User{active: true, name: "Ada"},
+        User{active: false, name: "Grace"}
+    ]
+    names :: users.filter(.active).map(.name)
+    print(names)
+    shouting :: users.map(.name.to_upper())
+    print(shouting)
 }

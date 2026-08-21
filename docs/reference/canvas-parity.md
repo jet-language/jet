@@ -25,7 +25,6 @@ Vocabulary: [Jet vocabulary](../spec/vocabulary.md).
 - [Item::Const] status=readonly symbol facts, source edits.
 - [Item::MarkerDecl] status=readonly marker registry facts, source edits.
 - [Item::Test] status=readonly marker scope, source edits.
-- [Item::Bench] status=readonly marker scope, source edits.
 - [Item::ExternRust] status=unsupported expert FFI surface, source edits only.
 - [Item::Module] status=readonly Jetpack contribution facts, source edits.
 - [Item::CModule] status=unsupported expert FFI surface, source edits only.

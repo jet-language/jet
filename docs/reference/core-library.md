@@ -177,15 +177,23 @@ See `examples/features/types/option_combinators.jet`.
 
 ---
 
-## Collections and iterators (D-CORE-EAGER1=A, D-LOOPMAP1=B)
+## Collections and iterators (D-CORE-EAGER1=A, D-CORE-EAGER2=A, D-LOOPMAP1=B)
 
 Core collection spellings stay explicit: `[T]` for lists, `[K:V]` for the
 default ordered map, and named types for specialized behavior. `map` and
 `filter` on a concrete list, map, or set execute immediately and return a plain
-collection. Write `.lazy()` before the chain to enter the deferred `Iter<T>`
+collection. On a concrete list, `flatten` and `flat_map` are eager too and
+return a plain list. Write `.lazy()` before the chain to enter the deferred `Iter<T>`
 view; call `to_list()`, `collect()`, or a reducer (`sum`, `fold`, …) to drive
 it. File lines, streams, channels, and String `.split` are already arriving
 over time, so they return the deferred view directly.
+
+Map keys follow D-MAP-KEY1: `Int`, `String`, `Bool`, `Char`, `U8`/`IntN`,
+payload-free enums, and tuples or structs whose fields recursively follow that
+rule. Maps are ordered; equality and order are deep value semantics over fields,
+with no separate hash path. Floats, views,
+`Shared`, functions, lists, maps, sets, and payload-carrying enums remain
+ineligible; E0502 names the rule and its fix.
 
 Under D-COMPREHENSION1, a finite `loop ... :> value` executes immediately and
 returns `[T]`. Build maps with ordinary map operations, build sets with
@@ -198,7 +206,7 @@ uses that truth row.
 
 | Type | Constructors | Main methods |
 | --- | --- | --- |
-| `[T]` | list literal `[a, b]` | `map`, `filter`, `each`, `find`, `any`, `all`, `sort_by`, `reduce`, `take`, `skip`, `step_by`, `dedup`, `dedup_by`, `chunks`, `windows`, `chunk_while`, `indexed`, `indexes`, `zip`, `zip_short`, `zip_pad`, `unzip`, `take_while`, `skip_while`, `flat_map`, `filter_map`, `scan`, `fold`, `sum`, `product`, `min`, `max`, `min_by`, `max_by`, `min_max`, `min_max_by`, `group_by`, `count_by`, `count`, `extend`, `concat`, `partition`, `flatten`, `intersperse`, `repeat`, `cycle`, `drop_last`, `shuffle`, `is_sorted`, `is_sorted_by`, `last_index_of`, `average`, `compare`, `split`, `to_set`, `join`, `to_list`/`collect`, `lazy`, `starts_with`, `ends_with`, `slice`, `copy`, `equal`, `binary_search`, `binary_search_by`, `union`, `intersection`, `difference`, `random`, `replace(index, value)`, `pop` |
+| `[T]` | list literal `[a, b]` | `map`, `filter`, `each`, `find`, `any`, `all`, `sort`, `sort_by`, `sort_desc`, `sort_by_desc`, `reduce`, `take`, `skip`, `step_by`, `dedup`, `dedup_by`, `chunks`, `windows`, `chunk_while`, `indexed`, `indexes`, `zip`, `zip_short`, `zip_pad`, `unzip`, `take_while`, `skip_while`, `flat_map`, `filter_map`, `scan`, `fold`, `sum`, `product`, `min`, `max`, `min_by`, `max_by`, `min_max`, `min_max_by`, `group_by`, `count_by`, `count`, `extend`, `concat`, `partition`, `flatten`, `intersperse`, `repeat`, `cycle`, `drop_last`, `shuffle`, `is_sorted`, `is_sorted_by`, `last_index_of`, `average`, `compare`, `split`, `to_set`, `join`, `to_list`/`collect`, `lazy`, `starts_with`, `ends_with`, `slice`, `copy`, `equal`, `binary_search`, `binary_search_by`, `union`, `intersection`, `difference`, `random`, `replace(index, value)`, `pop` |
 | `[K:V]` | map literal `["a": 1]`, `Map.new()`, `Map.from_keys(keys, default)` | `keys`/`values` (lazy `Iter` views), `has_key`, `get`, `add`, `add_new`, `remove`/`pop`, `pop_first`, `contains_value`, `merge`, `copy`, `equal`, `first`, `to_list`, `any`, `all`, `map`, `filter`, `flat_map`, `fold`, `min`, `max`, `intersection`, `slice`, `len`, `is_empty`, `clear` |
 | `Set<T>` | `Set.new()`, `Set.from(xs)` | `add`, `remove`, `pop`, `has`, `union`, `intersection`, `difference`, `symmetric_difference`, `is_subset`, `is_superset`, `is_disjoint`, `copy`, `to_set`, `equal`, `capacity`, `first`, `values`, `all`, `filter`, `each`, `max`, `min`, `fold`, `map`, `flat_map`, `to_list`, `len`, `is_empty`, `clear` |
 | `Rank<T>` | `Rank.new()`, `Rank.from(xs)` | `add`, `remove`, `has`, `first`, `last`, `union`, `intersection`, `difference`, `symmetric_difference`, `is_subset`, `is_superset`, `is_disjoint`, `to_list`, `len`, `is_empty`, `clear` |
@@ -208,6 +216,9 @@ uses that truth row.
 | `Tally<T>` | `Tally.new()`, `Tally.from(xs)` | `add`, `remove`, `has`, `count`, `to_list`, `len`, `is_empty`, `clear` |
 | `Bits` | `Bits.new()` | `add`, `remove`, `has`, `count`, `to_list`, `copy`, `len`, `is_empty`, `clear` |
 | `Bytes` | `Bytes.new()`, `Bytes.with_capacity(n)`, `Bytes.from(bytes)` | write: `write_u8`/`write_byte`, `write_u16_le`/`be`, `write_u32_le`/`be`, `write_u64_le`/`be`, `write_bytes`/`write`, `write_to`; cursor: `position`, `eof`, `seek`, `rewind`, `read`, `read_byte`/`next`, `read_bytes`, `read_string`, `get`, `first`; string-like: `contains`, `starts_with`, `ends_with`, `trim`/`trim_start`/`trim_end`, `to_lower`/`to_upper`/`to_title`/`title`, `replace`, `split`, `join`, `lines`, `index_of`/`last_index_of`, `is_ascii`, `to_string`/`string`, `parse`; lifecycle: `flush`, `close`, `shutdown`, `copy`/`clone`, `copy_to`, `equal`, `compare`, `capacity`, `get_buffer`/`buffer`, `to_bytes`, `len`, `is_empty`, `clear` |
+
+For the `[T]` row, `flatten` and `flat_map` return a plain list immediately;
+`.lazy().flatten()` and `.lazy().flat_map(...)` return deferred `Iter` views.
 
 `Set`'s closure and sequence adapters (`all`, `each`, `filter`, `fold`, `map`,
 `flat_map`, `min`, `max`) use the same collection kernels as every other
@@ -319,6 +330,7 @@ Whole-file helpers:
 | `read(path)` | `String ? IOError` | Read entire file as UTF-8 text |
 | `read_bytes(path)` | `[U8] ? IOError` | Read entire file as bytes |
 | `write(path, text)` | `() ? IOError` | Create or overwrite a text file |
+| `write_bytes(path, bytes)` | `() ? IOError` | Create or overwrite a file with raw bytes |
 | `append_all(path, text)` | `() ? IOError` | Append text to a file, one shot |
 | `exists(path)` | `Bool` | Whether the path exists |
 | `remove(path)` | `() ? IOError` | Delete a file |
@@ -918,9 +930,13 @@ mechanisms, and adds no external dependency.
 Examples: `examples/features/crypto/auth_tokens.jet`,
 `examples/features/crypto/auth_sessions.jet`.
 
-### `core.sync` — CRDT values and row policy
+### `core.sync` — shipped CRDT and row-policy boundary
 
-`core.sync` ships D-SYNC1 CRDT value types and D-DBPOLICY1 row policies:
+The current production boundary for `core.sync` is the fixed String carrier
+surface below plus the closed row-policy language. The broader ratified
+`SyncMap<K,V>`/`SyncList<T>`/`#Codable` carrier surface, vector-clock access,
+authenticated remote reconnect, and general policy-closure compiler remain
+unshipped and are recorded in the framework-transplant closeout.
 
 ```jet
 text_new / text_set / text_edit / text_merge / text_show / text_metadata
@@ -931,25 +947,30 @@ policy_new(table, expression) :> RowPolicy ? String
 policy_allows(policy, user, row_owner) :> Bool
 ```
 
-Merges are deterministic and keep every replica's edits. A malformed carrier
-or a merge that would exceed a bound becomes an explicit invalid value; no
-replica, map key, or list member is silently truncated. `SyncText` is a
-sequence CRDT: `text_edit(doc, replica, at, delete_count, insert)` writes at a
-character position, and two replicas that edit while apart reach one document.
-A replica name must own one line of edits; editing two copies of a document
-under one name is not a concurrent edit and does not merge. `text_metadata`
-reports the highest counter each replica has written, which orders edits but
-does not decide causality. Beginner
-row policies use `owner == user`; expert policies may use `true`. `app.sync(doc,
-  over: session)` publishes a canonical CRDT display through a bounded session
-  registry, merges duplicate/reordered map/list/counter displays
-  deterministically, publishes the latest receipt through the local live
-  transport, and returns a monotonic delivery receipt. Typed `core.sync`
-  carriers retain atom and LWW metadata before this fixed String seam; the
-  session receipt does not replace that typed metadata or provide vector clocks.
-  The registry is process-local; authenticated remote reconnect is not a
-  transport promise. Database row-policy enforcement uses the explicit
-  `DBScope` selected by `D-DBPOLICY-BIND1`.
+Merges are deterministic for each carrier law. Text is an atom-set union with
+tombstones, lists are add-only unions, counters merge per-replica maxima, and
+map conflicts are last-writer-wins on the typed `(clock, writer, value)` order.
+The losing map value does not survive. A malformed carrier or a merge that
+would exceed a bound becomes an explicit invalid value; no valid contribution
+is silently truncated. `SyncText` is a sequence CRDT: `text_edit(doc, replica,
+at, delete_count, insert)` writes at a character position, and two replicas
+that edit while apart reach one document. A replica name must own one line of
+edits; editing two copies of a document under one name is rejected as an
+identity collision. `text_metadata` reports the highest counter each replica
+has written, which orders edits but does not decide causality. An invalid map
+returns absence from `map_get`; an invalid counter still renders `0`, pending
+an owner decision on that public return contract.
+
+Beginner row policies use `owner == user`; expert policies may use `true`.
+Only those two expressions compile. `DBScope` carries the compiled policy and
+user through query, mutation, transaction, and live-query paths. `app.sync(doc,
+  over: session)` publishes a canonical CRDT display through a bounded
+  process-local session registry, merges duplicate/reordered list/counter
+  displays and equal-valued map entries, publishes the latest receipt through
+  the local live transport, and returns a monotonic delivery receipt. A
+  conflicting map value or opaque text document is denied because that fixed
+  String seam carries no typed atom/LWW metadata or vector clocks; it is not an
+  authenticated remote transport.
 
 Example: `examples/features/tooling/sync_crdt.jet`.
 
@@ -2148,6 +2169,15 @@ fractional to `.Float`; objects keep field order.
 
 **`JSONError`** — `line` and `message` pointing at the parse failure.
 
+Typed JSON decoding keeps each number token exact until its target consumes it.
+`json.decode<Decimal>` preserves exponent and scale (`12.340` stays `12.340`),
+and `json.decode<Int>` accepts arbitrary-precision whole numbers without a
+Float round trip. `data.json<T>` uses the same rule for streamed rows. A
+fractional value that is not an integer, quoted text supplied to an exact
+numeric target, non-finite input, target mismatch, fixed-width overflow, and
+configured digit/exponent limits return ordinary decode errors. `JetBigInt` is
+internal storage; `Int` is the exact-integer decode destination.
+
 **`core.encoding.csv`** — `parse(text) :> [[String]] ? String` (rows of fields),
 `to_string(rows) :> String`, plus bounded `reader` / `writer` handles over
 RFC-4180 records. Quoted fields preserve commas, escaped quotes, and embedded
@@ -2483,22 +2513,11 @@ impl Email.Decode {
 items := tree.field("items")?.decode<[LineItem]>()?
 ```
 
-**Traced decode — was this migrated?** (D-MIGRATE3=A, D-MIGRATE4=A):
-`decode_traced<T>(text)` sits beside `decode<T>` on every codec
-(json/csv/toml/yaml share the decode machinery) and returns
-`DecodeResult<T> ? [FieldError]` — `{ value: T, migration: MigrationStatus }`.
-`MigrationStatus` carries `.migrated: Bool`, `.from` (the source shape's
-version label, `"v1"` = oldest), and `.steps` (one entry per migration step
-applied, `"v1->v2"` style). `decode` itself is untouched — same call, same
-cost, for anyone not asking (I8).
-
-```jet
-r    :: json.decode_traced<UserRecord>(raw)?
-user :: r.value
-if r.migration.migrated {
-    log.info("record {user.id} arrived as schema {r.migration.from}")
-}
-```
+**Decode migration (D-MIGRATE3=A, retired by D-VALIDATE-DECODE1=B):** every
+codec's typed `decode<T>` has one canonical result, `Result<T, [FieldError]>`
+(or `Result<[T], [FieldError]>` for CSV). Published-schema migration runs
+silently inside that call. There is no second decoder or migration-report
+wrapper.
 
 Decoding a `#PublishedSchema` type with `migration { }` blocks (below) runs
 the runtime chain: the current shape is tried first; on mismatch the data's
@@ -2506,9 +2525,7 @@ field-name set picks the historical shape it matches (newest match wins) and
 the migration steps rewrite it forward — `rename` moves a key, `remove` drops
 one, `add` fills the default, `change` runs the `via { … }` converter. Plain
 `decode` applies the same chain silently; data matching no shape keeps the
-ordinary decode error. `.migrated` is `false` and `.from`/`.steps` are empty
-for a plain type and for fresh (current-shape) data, and types without
-migration blocks pay nothing.
+ordinary decode error, and types without migration blocks pay nothing.
 
 **Accumulated validation — `validate { }`** (D-VALIDATE1, card #506): a
 struct declares its own validation rules in the body, beside its fields —
@@ -2684,28 +2701,48 @@ fn run() {
 ```
 
 Helpers: `snap`, `golden`, `fixture`, `temp_dir`, `corpus`, `fake_clock`,
-`fake_rng`, `fake_data`, `test_suite`, and `bench_suite`. `fake_data(seed)` returns
+`fake_rng`, `fake_data`, and `test_suite`. `fake_data(seed)` returns
 deterministic `Fake` data in locale `en` by default. `fake.locale("de")` selects
 German data; supported locales are `en` and `de`. `Fake` provides `name()`,
 `email()`, `host()`, and `address()`. Each draw advances one shared SplitMix64
 stream, so equal seeds and call sequences produce equal values on every tier.
-`test_suite()` and `bench_suite()`
-return the ordinary command values supplied to an expert `fn test` or `fn bench`
-override; each exposes `iteration`, `result`, and `run()`. Use
+`name()` consumes two draws, `email()` three, `host()` one, and `address()`
+three.
+`test_suite()` returns the ordinary command values supplied to an expert
+`fn test` override; it exposes `iteration`, `result`, and `run()`. Use
 `expect(value).snapshot()` inside `#Test` blocks for assertion snapshots;
 `testing.snap` is for explicit named files.
 
-Benchmark limits use a `#Bench` region plus a typed `Budget` declaration. The
-shared budget evaluator owns samples, baselines, confidence, reports, and CI
-outcomes; `core.testing` has no separate benchmark evaluator.
+Measurement budgets use a `.measure` claim plus a typed `Budget` declaration.
+The shared budget evaluator owns samples, baselines, confidence, reports, and CI
+outcomes; `core.testing` has no separate measurement evaluator.
+
+#### Optimizer traps in measured regions
+
+The benchmark harness sinks the region result. It does not keep values that a
+loop computes and drops inside its body.
+
+- A dead nested loop can vanish, leaving a benchmark that measures integer
+  division, as shown by `UJ_W0O3sFnY`.
+- An mmap benchmark can skip page faults when it never reads the mapped bytes in
+  the timed region. The first grep benchmark in `BOrAVwwCXq8` overstated its
+  speed by about 2000x.
+- Loop-invariant work can move out of the loop or fold to a constant.
+- The harness sink cannot force work that happens after the region, or protect a
+  value that dies inside a unit-returning body.
+
+Force lazy resources and feed each iteration's value to the approved identity
+sink, `keep(value)`, after D-BENCH-KEEP1 is ratified. This catalog describes
+measured regions. D-CLAIM-BENCH1 moves measurement to `.measure` with
+`jet test --measure`; there is no separate benchmark runner.
 
 **Ledger-declined names (D-CORESURF-SMALL1).** `benchmark`, `fail`, `main`,
 `run`, `runtests`, `skip`, and `stop` all ask for the same behavior
-`#Test`/`#Bench` markers plus `jet test`/`jet bench` above already give —
-defining, running, skipping, and failing a test — spelled as a marker
+`#Test` markers plus `jet test` above already give — defining, running,
+skipping, and failing a test — spelled as a marker
 instead of a module function call (D-TESTKIT1).
 
-#### `jet test` and `jet bench` — shared targets and filters
+#### `jet test` — targets, filters, and measurement
 
 `jet test <dir>` walks every subdirectory (skipping `build/` and dotdirs),
 running every `.jet` file found, in sorted path order. Bare `jet test` inside a
@@ -2728,12 +2765,13 @@ jet test <file|dir> --serial     # one test at a time
 jet test <file> --filter=foo     # only run tests whose name contains "foo"
 jet test <file> --shuffle        # random (printed) order — order-dependence check
 jet test <file> --shuffle=42     # reproduce a specific shuffled order
+jet test <file> --measure        # measure only `.measure` claims
 ```
 
-`jet bench <file|dir>` uses the same file, recursive-directory, and project
-targets. `--filter=foo` selects benchmark regions by name; benches always run
-serially for timing integrity. Test-only flags such as `--shuffle`, `--coverage`,
-and `--update-snapshots` do not apply to `jet bench`.
+`--measure` keeps the test target, selects only `.measure` claims, and reports
+the shared twenty-sample result. Plain `jet test` still runs measured claims
+once as correctness claims. The retired benchmark command teaches this form
+instead of dispatching a second runner.
 
 #### `jet fuzz` — fuzz a property test
 
@@ -3661,7 +3699,12 @@ profile; F32 inference, gradient descent, and model round trips do not widen
 silently to F64.
 `matmul_f32_tile` records the runtime CPU SIMD dispatch, vector width, and
 scalar tail in its placement receipt; its lane products use f32 arithmetic and
-an ordered CPU-oracle reduction.
+an ordered CPU-oracle reduction. The only SIMD lowering in this slice is
+`matmul_f32_tile`; its AVX2 and SSE2 dot paths are differentially checked
+against the scalar path bit-for-bit, including tails, and the selected path
+records a measured speedup receipt in the CPU backend test. Its VJP and JVP
+use the same f32 projection and tiled matmul rule, then restore each input's
+precision profile.
 The wire stores logical view values and deserializes them into contiguous
 storage with the recorded shape and profile. A corrupted or unsupported model
 wire returns `ComputeError::Serialization`; serializing a traced Tensor returns
@@ -3704,84 +3747,42 @@ Backend facts for Core modules (ownership/effects/failure/platform) live in
 
 ---
 
-## `core.services` — service trees and mailboxes
+## `core.service` — typed tree declaration (D-SERVICE1=D)
 
-D-SERVICE1=D / D-SERVICE-DELIVERY1=D / D-SERVICE-STATE1=D /
-D-SERVICE-WORKFLOW1=D / D-SERVICE-IDENTITY1=D / D-SERVICE-UPGRADE1=D: typed
-service trees over the existing task/channel model. Workers own mailboxes; the
-delivery pressure rule is in the [Bounded buffering law](../spec/spec.md#bounded-buffering-law).
-`send_durable` requires DurableAtLeastOnce plus an idempotency key; state
-adapters are Empty / Snapshot / EventLog; workflows, directory identity, and
-generation handoff/rollback are first-class.
-
-A supervisor is a task that owns a group, and a restart rule is data on that
-group (D-CONC-SCHED1=A). `services.group` gives each declared group a restart
-strategy — OneForOne by default, also OneForAll and RestForOne — and the
-ratified restart budget: five restarts per rolling minute. `services.restarts`
-reports how much of that budget the worker has spent inside the window, and
-`services.tree_show` prints the root row as `budget=<max>/<per>ms`. When a
-worker's budget is spent, the supervisor does not restart again: it escalates,
-failing its own task on the one `TaskFailure` rail (D-CONC-FAIL1=A), stopping
-the tree, and returning a typed `ServiceError`. Supervision reads no outcome
-strings and keeps no second restart counter.
-
-`send_durable` remains the bounded in-memory tree path and returns
-`Unit ? ServiceError`. Durable delivery uses the explicit `ServiceRuntime`
-authority selected by `D-SERVICE-AUTHORITY1`. Its append-only store commits
-before returning a typed receipt, and reopening the same store reconstructs
-idempotency, retention, retry, and dead-letter state.
+The shipped slice is the typed topology boundary. `service.tree(…)` takes one
+inline declaration block. Sema checks the block shape, worker names, and named
+handler values. TIR carries the checked declarations to the shared Prelude,
+which constructs the real `ServiceTree`; no user-visible string-keyed tree
+constructor remains.
 
 ```jet
-use core.services as services
+use core.service as service
+
+fn echo() { print("") }
 
 fn run() {
-    runtime := services.runtime("orders.log", retention: 24h)
-    receipt := runtime.send(order_endpoint, order, key: order.id)?
-    if receipt == {
-        .Enqueued(id) :> audit(id)
-        .Executed(_) :> continue
-        .Retained(_, until) :> schedule_retry(until)
-        .DeadLettered(_) :> report("dead letter")
-        .Rejected(reason) | .Unavailable(reason) | .Partitioned(reason)
-        | .Revoked(reason) | .Stale(reason) | .Expired(reason) :> report(reason)
-    }
+    handler :: echo
+    tree :: service.tree((root) :> {
+        root.worker("echo", handler)
+    })
+    print(service.tree_show(tree))
 }
 ```
 
-`ServiceRuntime` is the only durable authority. `send`, `retry`,
-`dead_letter`, `retain`, and `commit` use the same Prelude implementation in
-AOT and ambient execution; `commit(id)` durably acknowledges a delivered
-receipt and removes its pending copy. An uncommitted receipt can be recovered
-by `retry(id)` after a process restart. The ordinary tree remains the bounded
-local delivery path.
+This slice records the root topology and handler identity. `tree_show` exposes
+the declared `echo:handler` mapping, so the value crossed sema and TIR into the
+real Prelude tree. It does not start a worker or invoke its handler. The
+Prelude still supplies the ratified default policy row shown by `tree_show`:
+`OneForOne` with a bounded five-per-minute restart budget and `AtMostOnce`
+delivery metadata.
 
-Snapshot and EventLog state also require an explicit injected authority. The
-adapter receives a typed store authority plus its schema and version. The
-store is checked before the adapter starts and has the same meaning in AOT and
-ambient execution; no process-global path is consulted.
-
-```jet
-store := services.state_store("orders.state")?
-services.set_state_event_log(&tree, store, "orders", 1)?
-```
-
-Generation handoff writes a rollback copy of durable state before switching
-endpoints and returns a typed `ServiceUpgradeReceipt` through
-`services.upgrade_receipt(tree)`. The receipt binds the old and new generation,
-migration class, rollback availability, and pinned shards. Rollback verifies
-that receipt, restores the durable copy atomically, and refuses forward-only
-state. A stateless handoff records that no state rollback was needed.
-
-```jet
-use core.services as services
-
-fn run() {
-    tree :: services.tree("app")
-    echo :: services.worker(&tree, "echo", 8) ?? panic("worker")
-    services.start(&tree) ?? panic("start")
-    services.send(&tree, echo, "hi") ?? panic("send")
-}
-```
+The remaining D-SERVICE1 tree work is unstarted: nested groups, typed
+endpoints and mailboxes, send/receive backpressure, cancellation and drain,
+delivery/retry/idempotency, durable state, identity/discovery, authenticated
+clusters and partitions, placement, rolling handoff/rollback, and
+observability/chaos proof. The old `core.services` examples and runtime tests
+need migration to those typed successor slices; they are not compatibility
+consumers of this surface.
 
 ---
 
@@ -3873,7 +3874,7 @@ share that source-owned TIR path.
 | `examples/features/serde/serde_derive.jet` | `#Codable` encode + typed `decode<T>` with `#Rename` |
 | `examples/features/serde/csv_typed.jet` | `csv.decode<Row>` → struct → JSON (the typed CSV pipeline) |
 | `examples/features/serde/json_typed.jet` | Nested struct + list + optional round-trip with `#RenameAll(camel)` |
-| `examples/features/serde/decode_traced.jet` | `decode_traced<T>` → `DecodeResult<T>`/`MigrationStatus`, incl. a real v1→v2 migration at decode time |
+| `examples/features/serde/decode_migration.jet` | canonical typed `decode<T>` silently applies a real v1→v2 migration |
 | `examples/features/reflection/reflect-value.jet` | `reflect.of(x)` — `.type_name()`/`.path()`/`.display()`/`.fields()` |
 | `examples/features/syntax/maturity_tags.jet` | `#Meta(maturity: .Experimental / .Tested / .Hardened)` doc-only API metadata (D-MARK-META1=B) |
 

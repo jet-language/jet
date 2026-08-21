@@ -43,9 +43,10 @@ fn run() {
     print(shortest)
     longest :: words.max_by((w: String) :> w.len())
     print(longest)
-    // flat_map
+    // Concrete List flatten/flat_map are eager; `.lazy()` above opts into Iter.
     nested :: [[1, 2], [3, 4], [5, 6]]
-    flat :: nested.flat_map((xs: [Int]) :> xs).to_list()
+    print(nested.flatten())
+    flat :: nested.flat_map((xs: [Int]) :> xs)
     print(flat)
     // #1479: remaining Iter ledger surface
     // repeat / cycle — repeat(n) loops the whole sequence n times; cycle(n)
@@ -82,8 +83,10 @@ fn run() {
     print(nums.to_set().len())
 }
 
-#Bench("eager map/filter fusion") {
-    values :: [1, 2, 3, 4, 5, 6, 7, 8]
-    result :: values.map((n: Int) :> n * 2).filter((n: Int) :> n > 8)
-    require_eq(result.len(), 4)
+#Test("eager map/filter fusion") {
+    .measure {
+        values :: [1, 2, 3, 4, 5, 6, 7, 8]
+        result :: values.map((n: Int) :> n * 2).filter((n: Int) :> n > 8)
+        assert_eq(result.len(), 4)
+    }
 }

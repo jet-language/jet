@@ -9,7 +9,7 @@ struct PlaneFacts {
     approximate: F32
     shape: [Int#4]
     classified: #Audited Int
-    callable: fn(value: Int) :> Int
+    callable: fn(value: Int) Int
 }
 
 state Order { Draft, Confirmed }
@@ -18,7 +18,12 @@ struct Order {
     id: Int
 }
 
-fn send_report() :[IO]> {}
+fn send_report() {}
+
+fn sendability_for(cell: Cell<Int>) Bool {
+    @known :: cell.@sendability.known
+    return @known
+}
 
 @range :: Severity.@range
 
@@ -75,4 +80,6 @@ fn run() {
     print(@attribution.source)
     print(@track_origin.tracked)
     print(@view_provenance.mutable)
+    cell :: Cell.new(1)
+    print(sendability_for(cell))
 }

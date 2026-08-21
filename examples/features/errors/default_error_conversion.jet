@@ -11,8 +11,8 @@ impl StoreErr :> Err {
     return Err("store unavailable: missing user")
 }
 
-fn read_store() :> User ? StoreErr :: Err(StoreErr.Missing)
+fn read_store() User ? StoreErr :> Err(StoreErr.Missing)
 
-fn get_user() :> User ? :: Ok(read_store()?)
+fn get_user() User ? :> Ok(read_store()?)
 
 fn run() { get_user()? }

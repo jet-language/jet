@@ -1,0 +1,56 @@
+// D-CONFIG-ENV1: one declaration, one call, one typed config value.
+//
+// Capability             pydantic-settings                 Jet
+// prefix                 env_prefix="APP_"                 prefix: "APP_"
+// project .env           env_file=".env"                   file: ".env"
+// nested records         env_nested_delimiter="__"        APP_DB__URL
+// validation             typed field validation            __jet_Decode + env var/field path
+//
+// Jet also checks a closed record and every field type at compile time. Secret
+// fields use the law's redacted carrier, and env/json/toml/csv share one codec.
+use core.crypto as crypto
+use core.files as fs
+use core.sys as env
+
+#[Debug, Decode]
+struct DB {
+    url: String
+    #Redact password: crypto.Secret
+}
+
+#[Debug, Decode]
+struct Settings {
+    host: String
+    port: Int
+    debug: Bool
+    db: DB
+}
+
+fn run() {
+    path :: ".jet-app-config.env"
+    fs.write(path, "\n# project defaults\nAPP_HOST=\"from-dotenv\"\nAPP_PORT=8080 # inline comment\nAPP_DEBUG=false\nAPP_DB__URL=\"postgres://dotenv\"\nAPP_DB__PASSWORD='dotenv-secret'\n\n") ?? panic("write config")
+    env.unset("APP_PORT") ?? false
+    env.unset("APP_DEBUG") ?? false
+    env.unset("APP_DB__URL") ?? false
+    env.set("APP_HOST", "from-process")
+    env.set("APP_DB__PASSWORD", "process-secret")
+
+    settings :: env.decode<Settings>(prefix: "APP_", file: path, allow: ["APP_HOST", "APP_PORT", "APP_DEBUG", "APP_DB__URL", "APP_DB__PASSWORD"]) ?? panic("decode config")
+    print("host: {settings.host}")
+    print("port: {settings.port}")
+    print("debug: {settings.debug}")
+    print("db.url: {settings.db.url}")
+    print("config: {settings:Debug}")
+
+    env.set("APP_PORT", "not-an-int")
+    failed :: env.decode<Settings>(prefix: "APP_", file: path, allow: ["APP_HOST", "APP_PORT", "APP_DEBUG", "APP_DB__URL", "APP_DB__PASSWORD"])
+    if failed == {
+        .Ok(_) :> { print("invalid config unexpectedly accepted") }
+        .Err(errors) :> { print("failure: {errors}") }
+    }
+
+    env.unset("APP_HOST") ?? false
+    env.unset("APP_PORT") ?? false
+    env.unset("APP_DB__PASSWORD") ?? false
+    fs.remove(path) ?? panic("remove config")
+}

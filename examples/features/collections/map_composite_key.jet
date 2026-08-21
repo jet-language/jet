@@ -1,0 +1,24 @@
+// D-MAP-KEY1: tuples and structs with key-eligible fields are value-semantic
+// ordered map keys.
+struct CacheKey {
+    user: String
+    resource: String
+}
+
+fn run() {
+    grid := [(x: Int, y: Int):String]{}
+    print(grid.add((x: 2, y: 3), "tile") ?? "none")
+    print(grid.get((x: 2, y: 3)) ?? "missing")
+    print(grid.add((x: 2, y: 3), "updated") ?? "none")
+    print(grid.get((x: 2, y: 3)) ?? "missing")
+    print(grid.remove((x: 2, y: 3)) ?? "missing")
+    print(grid.len())
+
+    cache := [CacheKey:Int]{}
+    print(cache.add(CacheKey{user: "ada", resource: "profile"}, 7) ?? -1)
+    print(cache.get(CacheKey{user: "ada", resource: "profile"}) ?? -1)
+    print(cache.add(CacheKey{user: "ada", resource: "profile"}, 9) ?? -1)
+    print(cache.get(CacheKey{user: "ada", resource: "profile"}) ?? -1)
+    print(cache.remove(CacheKey{user: "ada", resource: "profile"}) ?? -1)
+    print(cache.len())
+}

@@ -3,7 +3,7 @@ use core.services as services
 use core.testing as testing
 use core.time as time
 
-fn receipt_id(receipt: ServiceReceipt) :> String {
+fn receipt_id(receipt: ServiceReceipt) String {
     if receipt == {
         .Enqueued(id) :> { return id }
         .Executed(id) :> { return id }
@@ -13,7 +13,7 @@ fn receipt_id(receipt: ServiceReceipt) :> String {
     return ""
 }
 
-fn receipt_kind(receipt: ServiceReceipt) :> String {
+fn receipt_kind(receipt: ServiceReceipt) String {
     if receipt == {
         .Enqueued(_) :> { return "enqueued" }
         .Executed(_) :> { return "executed" }
@@ -32,6 +32,7 @@ fn run() {
     runtime := services.runtime(store, retention: retention)
     tree := services.tree("orders")
     endpoint :: services.worker(&tree, "orders", 2) ?? panic("worker")
+    services.group(&tree, "orders-supervisor", ["orders"]) ?? panic("group")
     services.start(&tree) ?? panic("start")
 
     first :: runtime.send(endpoint, "order", key: "order-1") ?? panic("first")
@@ -45,6 +46,8 @@ fn run() {
     print("delivered:{delivered}")
     runtime.commit(id) ?? panic("commit")
     print("committed:ok")
+    services.fail_worker(&tree, endpoint) ?? panic("restart")
+    print("restarted:{services.restarts(tree, endpoint)}")
 
     duplicate :: recovered.send(endpoint, "order", key: "order-1") ?? panic("duplicate")
     print("duplicate:{receipt_kind(duplicate)}")

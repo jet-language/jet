@@ -1,0 +1,34 @@
+struct FetchError {
+    message: String
+}
+
+fn load_text(ok: Bool) String ? FetchError {
+    if ok :> return Ok("ready")
+    return Err(FetchError{message: "offline"})
+}
+
+fn recovered(ok: Bool) String {
+    value :: load_text(ok) ?? {
+        print("handled {err.message}")
+        return "recovered"
+    }
+    return value
+}
+
+fn chained(ok: Bool) Int ? FetchError {
+    value :: load_text(ok)? "chained fetch"
+    return Ok(value.len())
+}
+
+fn run() {
+    print(recovered(true))
+    print(recovered(false))
+
+    fallback :: load_text(false) ?? {
+        print("value fallback")
+        "fallback"
+    }
+    print(fallback)
+
+    print(chained(true) ?? 0)
+}

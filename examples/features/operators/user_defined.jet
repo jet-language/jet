@@ -13,15 +13,15 @@ struct Probe {
 }
 
 impl Vec2.Add {
-    fn add(self, rhs: Vec2) :> Vec2 { return Vec2{x: self.x + rhs.x, y: self.y + rhs.y} }
+    fn add(self, rhs: Vec2) Vec2 { return Vec2{x: self.x + rhs.x, y: self.y + rhs.y} }
 }
 
 impl Vec2.Equatable {
-    fn equal(self, rhs: Vec2) :> Bool :: self.x == rhs.x && self.y == rhs.y
+    fn equal(self, rhs: Vec2) Bool :> self.x == rhs.x && self.y == rhs.y
 }
 
 impl Vec2.Comparable {
-    fn compare(self, rhs: Vec2) :> Ordering {
+    fn compare(self, rhs: Vec2) Ordering {
         if self.x < rhs.x :> return Ordering.Less
         if self.x > rhs.x :> return Ordering.Greater
         return Ordering.Equal
@@ -29,7 +29,7 @@ impl Vec2.Comparable {
 }
 
 impl Probe.Comparable {
-    fn compare(self, rhs: Probe) :> Ordering {
+    fn compare(self, rhs: Probe) Ordering {
         if rhs.value == 99 {
             zero :: rhs.value - 99
             // `/%` is the whole-number division, so this still traps on a zero

@@ -140,9 +140,9 @@ fn parse_incident(line: String) :> String {
     return "id={matched.id} sev={matched.sev} reason={reason}"
 }
 
-// --- decode-time migration transparency: `decode_traced` ------------------
-// D-MIGRATE3=A: `decode_traced<T>` returns `{ value, migration }` so a
-// caller can ask whether a decoded record arrived as an old schema version.
+// --- decode-time migration: one canonical `decode<T>` result ---------------
+// D-VALIDATE-DECODE1=B: published-schema migrations run silently inside the
+// one `Result<T, [FieldError]>` decode contract.
 #[PublishedSchema, Codable]
 struct Account {
     id: Int
@@ -156,8 +156,8 @@ migration Account {
 }
 
 fn decode_account(raw: String) :> String {
-    r :: json.decode_traced<Account>(raw) ?? panic("bad account")
-    return "id={r.value.id} migrated={r.migration.migrated}"
+    account :: json.decode<Account>(raw) ?? panic("bad account")
+    return "id={account.id} verified={account.verified}"
 }
 
 // --- OS-target gating: `#Target(OS.Linux)` on impl ------------------------
@@ -186,26 +186,26 @@ impl LinuxBackend.Backend {
     .setup {
         base :: show_uninit()
     }
-    require_eq(base, 99)
+    assert_eq(base, 99)
 }
 
 #Test("expect_fail region must fail") {
     .expect_fail {
-        require((1 == 2), "one is not two")
+        assert((1 == 2), "one is not two")
     }
-    require_eq(twice(2), 4)
+    assert_eq(twice(2), 4)
 }
 
 #Test("timeout bounds a region") {
     .timeout(500ms) {
-        require_eq(square(5), 25)
+        assert_eq(square(5), 25)
     }
 }
 
 #Test("skip one region") {
-    require_eq(twice(3), 6)
+    assert_eq(twice(3), 6)
     .skip {
-        require(false)
+        assert(false)
     }
 }
 
@@ -266,6 +266,6 @@ fn run() {
     incident_line :: "  inc-4411 sev 3: disk full\n"
     print("cursor: {parse_incident(incident_line)}")
     // decode-time migration transparency
-    account_json :: "{{\"id\": 7, \"display_name\": \"Betty\", \"verified\": true}}"
+    account_json :: "{{\"id\": 7, \"name\": \"Betty\"}}"
     print("decode: {decode_account(account_json)}")
 }

@@ -34,4 +34,18 @@ fn run() ? {
     print(civil.time().to_string())
     print(civil.zone().name())
     print(civil.to_datetime().format_rfc3339())
+
+    ny :: time.zone("America/New_York") ?? return Err("zone")
+    start :: time.zoned_local(date.new(2024, 3, 9), time.time(20, 0, 0), ny)
+    eight :: Duration.hours(8) ?? return Err("duration")
+    dst_duration :: start.add_duration(eight)
+    print(dst_duration.to_string())
+    print(dst_duration.format("yyyy-MM-dd HH:mm:ss VV XXX"))
+    print(dst_duration.offset_seconds())
+    print(dst_duration.is_dst())
+    dst_period :: start.add_period(time.period_days(1))
+    print(dst_period.to_string())
+    print(dst_period.format("yyyy-MM-dd HH:mm:ss VV XXX"))
+    print(dst_period.offset_seconds())
+    print(dst_period.is_dst())
 }

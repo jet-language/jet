@@ -2,7 +2,7 @@
 
 This is the canonical inventory of broad public Jet claims. Every row has one
 stable claim ID and one reviewed entry in
-`docs/spec/feature-claim-manifest.json`. CLI commands and `core.*` modules
+`docs/spec/feature-claims.json`. CLI commands and `core.*` modules
 are inventoried independently from their source registries by the same gate.
 
 | Claim ID | Public claim |

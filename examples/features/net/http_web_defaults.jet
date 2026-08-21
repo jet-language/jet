@@ -15,7 +15,7 @@ struct Reading {
 
 // One typed read of the request body, one typed JSON answer. The content type
 // is set for you, and the body cap still frames the read.
-fn store_reading(req: HTTPRequest) :> HTTPResponse ? HTTPError {
+fn store_reading(req: HTTPRequest) HTTPResponse ? HTTPError {
     reading :: req.json<Reading>() ?? return Ok(http_server.json(400, Reading{city: "bad body", degrees: 0}))
     return Ok(http_server.json(201, Reading{city: reading.city, degrees: reading.degrees + 1}))
 }

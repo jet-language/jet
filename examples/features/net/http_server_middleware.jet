@@ -4,7 +4,7 @@ use core.http.server as http_server
 use core.tasks as tasks
 use core.time as time
 
-fn outer(next: HTTPHandler) :> HTTPHandler {
+fn outer(next: HTTPHandler) HTTPHandler {
     owned :: ~next
     return (req: HTTPRequest) :> {
         if owned.handle(req) == {
@@ -16,7 +16,7 @@ fn outer(next: HTTPHandler) :> HTTPHandler {
     }
 }
 
-fn inner(next: HTTPHandler) :> HTTPHandler {
+fn inner(next: HTTPHandler) HTTPHandler {
     owned :: ~next
     return (req: HTTPRequest) :> {
         if req.path() == "/blocked" :> return Ok(http_server.response(403, "blocked"))

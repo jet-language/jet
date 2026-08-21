@@ -3,7 +3,7 @@ use core.encoding as encoding
 use core.encoding.xml as xml
 use core.files as files
 
-fn xml_name(local: String) :> DataTree {
+fn xml_name(local: String) DataTree {
     return DataTree.Object([
         "raw": DataTree.Text(~local),
         "prefix": DataTree.Null,
@@ -12,7 +12,7 @@ fn xml_name(local: String) :> DataTree {
     ])
 }
 
-fn write_catalog(path: Path) :> Bool ? EncodingError | IOError {
+fn write_catalog(path: Path) Bool ? EncodingError | IOError {
     output :: files.create(path)?
     writer :: xml.writer(^output, encoding.EncodingLimits.safe())?
     writer.write(DataTree.Object(["$xml_event": DataTree.Text("document_start"), "encoding": DataTree.Null, "bom": DataTree.Array([])]))?
