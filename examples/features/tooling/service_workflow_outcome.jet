@@ -24,5 +24,15 @@ fn run() {
     print("result:{result}")
     print("outcome:{tree.workflow_outcome(run_id) ?? panic("outcome")}")
     print("history:{tree.workflow_history(run_id) ?? panic("history")}")
+    // A second body pass consumes the recorded activity, retry, and completion
+    // decisions instead of appending a duplicate branch.
+    replay_id :: tree.workflow_start("checkout", 1) ?? panic("replay start")
+    replay_scheduled :: tree.workflow_activity(replay_id, "charge", "charge-1", 2) ?? panic("replay schedule")
+    print("replay_scheduled:{replay_scheduled}")
+    replay_paused :: tree.workflow_activity_retry(replay_id, "charge-1", TaskOutcome.Panicked("timeout")) ?? panic("replay retry")
+    print("replay_retry:{replay_paused}")
+    replay_result :: tree.workflow_activity_complete(replay_id, "charge-1", TaskOutcome.Finished) ?? panic("replay complete")
+    print("replay_result:{replay_result}")
+    print("replay_history:{tree.workflow_history(replay_id) ?? panic("replay history")}")
     tree.stop() ?? panic("stop")
 }

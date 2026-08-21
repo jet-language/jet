@@ -1,11 +1,13 @@
-//! Focused failure-path checks for the production `core.services` Prelude.
+//! Focused failure-path checks for the production `core.service` Prelude.
 
 mod common;
 
 #[path = "tir_support/mod.rs"]
 mod tir_support;
 
-use tir_support::{build_and_run, have_rustc, run_default_multi};
+use tir_support::{
+    build_and_run, build_and_run_full, have_rustc, interpreter_run, run_default_multi,
+};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -13,10 +15,56 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 static RESTART_SEQ: AtomicU64 = AtomicU64::new(0);
 
+#[test]
+fn service_runtime_exports_typed_counters_on_all_tiers() {
+    if !have_rustc() {
+        return;
+    }
+    let source_path = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("examples/features/tooling/service_runtime.jet");
+    let source = fs::read_to_string(source_path).unwrap();
+    let expected = fs::read_to_string(
+        Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("examples/features/expected/tooling/service_runtime.out"),
+    )
+    .unwrap();
+    let (aot_code, aot_stdout, aot_stderr) =
+        build_and_run_full("services_observability", "service_runtime", &source);
+    assert_eq!(aot_code, 0, "AOT observability dogfood failed: {aot_stderr}");
+    assert_eq!(
+        aot_stdout, expected,
+        "AOT observability dogfood diverged from its golden"
+    );
+
+    let (jit_code, jit_stdout, jit_stderr) = run_default_multi(
+        "services_observability_jit",
+        "main.jet",
+        &[("main.jet", source.as_str())],
+    );
+    assert_eq!(jit_code, 0, "default observability dogfood failed: {jit_stderr}");
+    assert_eq!(
+        jit_stdout, expected,
+        "default observability dogfood diverged from AOT/golden\n{jit_stderr}"
+    );
+
+    let (interpreter_code, interpreter_stdout, interpreter_stderr) =
+        interpreter_run("services_observability_interpreter", &source);
+    assert_eq!(
+        interpreter_code, 0,
+        "interpreter observability dogfood failed: {interpreter_stderr}"
+    );
+    assert_eq!(
+        interpreter_stdout, expected,
+        "interpreter observability dogfood diverged from AOT/golden\n{interpreter_stderr}"
+    );
+}
+
 const AUTHORITY_SOURCE: &str = r#"
-use core.services as services
+use core.service as services
 use core.testing as testing
 use core.time as time
+
+fn orders_worker() {}
 
 fn receipt_id(receipt: ServiceReceipt) => String {
     if receipt == {
@@ -46,9 +94,9 @@ fn run() {
     retention :: Duration.seconds(86400) ?? panic("retention")
     runtime := services.runtime(store, retention: retention)
     tree := services.tree("orders")
-    endpoint :: services.worker(&tree, "orders", 2) ?? panic("worker")
-    services.group(&tree, "orders-supervisor", ["orders"]) ?? panic("group")
-    services.start(&tree) ?? panic("start")
+    endpoint :: tree.worker("orders", orders_worker, capacity: 2) ?? panic("worker")
+    tree.group("orders-supervisor", ["orders"]) ?? panic("group")
+    tree.start() ?? panic("start")
 
     first :: runtime.send(endpoint, "order", key: "order-1") ?? panic("first")
     id :: receipt_id(first)
@@ -57,12 +105,12 @@ fn run() {
     recovered := services.runtime(store, retention: retention)
     recovered_duplicate :: recovered.retry(id) ?? panic("recover")
     print("recovered:{receipt_kind(recovered_duplicate)}")
-    delivered :: services.receive(&tree, endpoint) ?? panic("deliver")
+    delivered :: tree.receive(endpoint) ?? panic("deliver")
     print("delivered:{delivered}")
     runtime.commit(id) ?? panic("commit")
     print("committed:ok")
-    services.fail_worker(&tree, endpoint) ?? panic("restart")
-    print("restarted:{services.restarts(tree, endpoint)}")
+    tree.fail_worker(endpoint) ?? panic("restart")
+    print("restarted:{tree.restarts(endpoint) ?? panic("restarts")}")
 
     duplicate :: recovered.send(endpoint, "order", key: "order-1") ?? panic("duplicate")
     print("duplicate:{receipt_kind(duplicate)}")
@@ -71,18 +119,18 @@ fn run() {
     print("retain:{receipt_kind(retained)}")
     retry :: recovered.retry(id) ?? panic("retry")
     print("retry:{receipt_kind(retry)}")
-    redelivered :: services.receive(&tree, endpoint) ?? panic("redeliver")
+    redelivered :: tree.receive(endpoint) ?? panic("redeliver")
     print("redelivered:{redelivered}")
     runtime.commit(id) ?? panic("redelivery commit")
     dead :: runtime.dead_letter(id) ?? panic("dead")
     print("dead:{receipt_kind(dead)}")
-    services.stop(&tree) ?? panic("stop")
+    tree.stop() ?? panic("stop")
     stopped := recovered.send(endpoint, "new-order", key: "order-2")
     if stopped == {
         .Ok(_) -> { print("stopped:accepted") }
         .Err(_) -> { print("stopped:rejected") }
     }
-    services.start(&tree) ?? panic("restart")
+    tree.start() ?? panic("restart")
     replay :: recovered.send(endpoint, "order", key: "order-1") ?? panic("replay")
     print("replay:{receipt_kind(replay)}")
 }
@@ -115,10 +163,22 @@ fn service_authority_receipts_match_default_run() {
     );
 }
 
+#[test]
+fn service_authority_receipts_match_interpreter() {
+    let (code, stdout, stderr) = interpreter_run("services_authority_interpreter", AUTHORITY_SOURCE);
+    assert_eq!(code, 0, "interpreter service authority run failed: {stderr}");
+    assert_eq!(
+        stdout,
+        "first:enqueued\nrecovered:enqueued\ndelivered:order\ncommitted:ok\nrestarted:1\nduplicate:executed\nretain:retained\nretry:retained\nredelivered:order\ndead:dead\nstopped:rejected\nreplay:dead\n"
+    );
+}
+
 const RESTART_SOURCE: &str = r#"
 use core.sys as env
-use core.services as services
+use core.service as services
 use core.time as time
+
+fn orders_worker() {}
 
 fn receipt_id(receipt: ServiceReceipt) => String {
     if receipt == {
@@ -148,19 +208,19 @@ fn run() {
     retention :: Duration.seconds(86400) ?? panic("retention")
     runtime := services.runtime(store, retention: retention)
     tree := services.tree("restart-orders")
-    endpoint :: services.worker(&tree, "orders", 2) ?? panic("worker")
-    services.group(&tree, "orders-supervisor", ["orders"]) ?? panic("group")
-    services.start(&tree) ?? panic("start")
+    endpoint :: tree.worker("orders", orders_worker, capacity: 2) ?? panic("worker")
+    tree.group("orders-supervisor", ["orders"]) ?? panic("group")
+    tree.start() ?? panic("start")
     if phase == "send" {
         receipt :: runtime.send(endpoint, "order", key: "order-restart") ?? panic("send")
         print(receipt_id(receipt))
     } else {
         id :: env.get("JET_SERVICE_AUTH_ID") ?? panic("id")
-        services.fail_worker(&tree, endpoint) ?? panic("restart")
-        print("restarted:{services.restarts(tree, endpoint)}")
+        tree.fail_worker(endpoint) ?? panic("restart")
+        print("restarted:{tree.restarts(endpoint) ?? panic("restarts")}")
         retry :: runtime.retry(id) ?? panic("retry")
         print(receipt_kind(retry))
-        message :: services.receive(&tree, endpoint) ?? panic("receive")
+        message :: tree.receive(endpoint) ?? panic("receive")
         print(message)
         runtime.commit(id) ?? panic("commit")
     }
@@ -271,11 +331,129 @@ fn service_authority_recovers_pending_delivery_across_process_restart() {
         run_restart_default_process(&dir, &aot_store, "recover", Some(id)),
         "restarted:1\nenqueued\norder\n"
     );
+
+    // A validly framed but altered receipt field must not become a restart
+    // alias. The receipt id is the existing length-framed SHA-256 identity
+    // for the authority, route, message, and key.
+    let corrupt_store = dir.join("authority-corrupt.log");
+    let corrupt_id = run_restart_process(&bin, &corrupt_store, "send", None);
+    let mut corrupt = fs::read(&corrupt_store).unwrap();
+    let pipes: Vec<usize> = corrupt
+        .iter()
+        .enumerate()
+        .filter_map(|(index, byte)| (*byte == b'|').then_some(index))
+        .collect();
+    assert!(pipes.len() >= 7, "receipt record did not contain its framed fields");
+    let message_end = pipes[6];
+    assert!(message_end > pipes[5] + 1, "receipt message field was empty");
+    let last_message_hex = message_end - 1;
+    corrupt[last_message_hex] = if corrupt[last_message_hex] == b'0' { b'1' } else { b'0' };
+    fs::write(&corrupt_store, corrupt).unwrap();
+    assert!(
+        !restart_status(&bin, &corrupt_store, "recover", corrupt_id.trim()).success(),
+        "a receipt with altered authority fields was accepted"
+    );
+}
+
+const ROLLOUT_RESTART_SOURCE: &str = r#"
+use core.sys as env
+use core.service as services
+
+fn rollout_worker() {}
+
+fn run() {
+    store_path :: env.get("JET_SERVICE_AUTH_STORE") ?? panic("store")
+    phase :: env.get("JET_SERVICE_AUTH_PHASE") ?? panic("phase")
+    tree := services.tree("rollout-restart")
+    store :: services.state_store(store_path) ?? panic("state store")
+    tree.set_state_event_log(store, "rollout-events", 1, "reversible") ?? panic("state")
+    endpoint :: tree.worker("api", rollout_worker, capacity: 1) ?? panic("worker")
+    tree.start() ?? panic("start")
+    if phase == "write" {
+        tree.directory_register("api", endpoint) ?? panic("directory")
+        tree.drain_worker(endpoint) ?? panic("drain")
+        print("handoff:{tree.handoff_generation() ?? panic("handoff")}")
+    } else {
+        current :: tree.directory_resolve("api") ?? panic("resolve")
+        print("generation:{tree.directory_generation()}")
+        print("current:{current.show()}")
+        print("receipt:{tree.upgrade_receipt() ?? panic("receipt")}")
+        stale :: tree.send(endpoint, "stale")
+        if stale == {
+            .Ok(_) -> { print("stale:accepted") }
+            .Err(_) -> { print("stale:rejected") }
+        }
+        current.send("after") ?? panic("after send")
+        print("after:{tree.receive(current) ?? panic("after receive")}")
+    }
+    tree.stop() ?? panic("stop")
+}
+"#;
+
+const ROLLOUT_RESTART_OUTPUT: &str =
+    "generation:2\ncurrent:Endpoint(rollout-restart/api@g2)\nreceipt:ServiceUpgradeReceipt(from=1, to=2, migration=reversible, rollback_available=true, pinned=)\nstale:rejected\nafter:after\n";
+
+#[test]
+fn rollout_identity_and_receipt_survive_process_restart() {
+    if !have_rustc() {
+        return;
+    }
+    let (dir, bin) = compile_restart_binary(ROLLOUT_RESTART_SOURCE);
+    let store = dir.join("rollout.log");
+    assert_eq!(run_restart_process(&bin, &store, "write", None), "handoff:2\n");
+    assert_eq!(run_restart_process(&bin, &store, "recover", None), ROLLOUT_RESTART_OUTPUT);
+
+    let default_store = dir.join("rollout-default.log");
+    assert_eq!(
+        run_restart_default_process(&dir, &default_store, "write", None),
+        "handoff:2\n"
+    );
+    assert_eq!(
+        run_restart_process(&bin, &default_store, "recover", None),
+        ROLLOUT_RESTART_OUTPUT
+    );
+
+    let aot_to_default_store = dir.join("rollout-aot-to-default.log");
+    assert_eq!(
+        run_restart_process(&bin, &aot_to_default_store, "write", None),
+        "handoff:2\n"
+    );
+    assert_eq!(
+        run_restart_default_process(&dir, &aot_to_default_store, "recover", None),
+        ROLLOUT_RESTART_OUTPUT
+    );
+}
+
+#[test]
+fn forged_rollout_generation_is_rejected_on_restart() {
+    if !have_rustc() {
+        return;
+    }
+    let (dir, bin) = compile_restart_binary(ROLLOUT_RESTART_SOURCE);
+    let store = dir.join("rollout-forged.log");
+    assert_eq!(run_restart_process(&bin, &store, "write", None), "handoff:2\n");
+
+    let rollout = PathBuf::from(format!("{}.rollout", store.display()));
+    let journal = fs::read_to_string(&rollout).unwrap();
+    let forged = journal
+        .replace("generation:2\n", "generation:99\n")
+        .replace("upgrade_to:2\n", "upgrade_to:99\n")
+        .replace("worker_generation:2\n", "worker_generation:99\n")
+        .replace("directory_generation:2\n", "directory_generation:99\n");
+    assert_ne!(journal, forged, "rollout journal fixture was not changed");
+    fs::write(&rollout, forged).unwrap();
+
+    assert!(
+        !restart_status(&bin, &store, "recover", "").success(),
+        "a coherently forged rollout generation was accepted"
+    );
 }
 
 const STATE_RESTART_SOURCE: &str = r#"
 use core.sys as env
-use core.services as services
+use core.service as services
+
+fn state_worker() {}
 
 fn run() {
     store_path :: env.get("JET_SERVICE_AUTH_STORE") ?? panic("store")
@@ -284,39 +462,39 @@ fn run() {
     tree := services.tree("state")
     store :: services.state_store(store_path) ?? panic("state store")
     if adapter == "snapshot" {
-        services.set_state_snapshot(&tree, store, "app-state", 1, "reversible") ?? panic("snapshot state")
+        tree.set_state_snapshot(store, "app-state", 1, "reversible") ?? panic("snapshot state")
     } else {
         if adapter == "schema-drift" {
-            services.set_state_event_log(&tree, store, "other-events", 1, "reversible") ?? panic("event state")
+            tree.set_state_event_log(store, "other-events", 1, "reversible") ?? panic("event state")
         } else {
             if adapter == "version-drift" {
-                services.set_state_event_log(&tree, store, "app-state", 2, "reversible") ?? panic("event state")
+                tree.set_state_event_log(store, "app-state", 2, "reversible") ?? panic("event state")
             } else {
-                services.set_state_event_log(&tree, store, "app-state", 1, "reversible") ?? panic("event state")
+                tree.set_state_event_log(store, "app-state", 1, "reversible") ?? panic("event state")
             }
         }
     }
-    services.worker(&tree, "worker", 1) ?? panic("worker")
-    services.start(&tree) ?? panic("start")
+    tree.worker("worker", state_worker, capacity: 1) ?? panic("worker")
+    tree.start() ?? panic("start")
     if adapter == "snapshot" {
         if phase == "write" {
-            services.commit_snapshot(&tree, "state-v1") ?? panic("commit")
-            print("wrote:{services.restore_snapshot(tree) ?? panic("restore")}")
+            tree.commit_snapshot("state-v1") ?? panic("commit")
+            print("wrote:{tree.restore_snapshot() ?? panic("restore")}")
         } else {
-            print("restored:{services.restore_snapshot(tree) ?? panic("restore")}")
-            services.commit_snapshot(&tree, "state-v2") ?? panic("recommit")
-            print("recommitted:{services.restore_snapshot(tree) ?? panic("restore")}")
+            print("restored:{tree.restore_snapshot() ?? panic("restore")}")
+            tree.commit_snapshot("state-v2") ?? panic("recommit")
+            print("recommitted:{tree.restore_snapshot() ?? panic("restore")}")
         }
     } else {
         if phase == "write" {
-            services.append_event(&tree, "first") ?? panic("first")
-            services.append_event(&tree, "second") ?? panic("second")
-            print("wrote:{services.event_count(tree)}")
+            tree.append_event("first") ?? panic("first")
+            tree.append_event("second") ?? panic("second")
+            print("wrote:{tree.event_count()}")
         } else {
-            print("count:{services.event_count(tree)}")
-            print("replay:{services.replay_events(tree)}")
-            services.append_event(&tree, "third") ?? panic("third")
-            print("appended:{services.replay_events(tree)}")
+            print("count:{tree.event_count()}")
+            print("replay:{tree.replay_events()}")
+            tree.append_event("third") ?? panic("third")
+            print("appended:{tree.replay_events()}")
         }
     }
 }
@@ -411,38 +589,40 @@ fn restart_status(bin: &Path, store: &Path, phase: &str, id: &str) -> std::proce
 
 const WORKFLOW_RESTART_SOURCE: &str = r#"
 use core.sys as env
-use core.services as services
+use core.service as services
+
+fn workflow_worker() {}
 
 fn run() {
     store_path :: env.get("JET_SERVICE_AUTH_STORE") ?? panic("store")
     phase :: env.get("JET_SERVICE_AUTH_PHASE") ?? panic("phase")
     tree := services.tree("workflows")
     store :: services.state_store(store_path) ?? panic("state store")
-    services.set_state_event_log(&tree, store, "wf-events", 1, "reversible") ?? panic("state")
-    services.worker(&tree, "worker", 1) ?? panic("worker")
-    services.start(&tree) ?? panic("start")
+    tree.set_state_event_log(store, "wf-events", 1, "reversible") ?? panic("state")
+    tree.worker("worker", workflow_worker, capacity: 1) ?? panic("worker")
+    tree.start() ?? panic("start")
     if phase == "write" {
-        run_id :: services.workflow_start(&tree, "checkout", 1) ?? panic("workflow start")
-        services.workflow_step(&tree, run_id, "charge") ?? panic("charge step")
-        services.workflow_step(&tree, run_id, "ship:express") ?? panic("ship step")
+        run_id :: tree.workflow_start("checkout", 1) ?? panic("workflow start")
+        tree.workflow_step(run_id, "charge") ?? panic("charge step")
+        tree.workflow_step(run_id, "ship:express") ?? panic("ship step")
         print("run:{run_id}")
     } else {
-        history :: services.workflow_history(tree, 1) ?? panic("history")
+        history :: tree.workflow_history(1) ?? panic("history")
         print("history:{history}")
-        replay :: services.workflow_start(&tree, "checkout", 1) ?? panic("replay")
+        replay :: tree.workflow_start("checkout", 1) ?? panic("replay")
         print("replay:{replay}")
-        versioned :: services.workflow_start(&tree, "checkout", 2)
+        versioned :: tree.workflow_start("checkout", 2)
         if versioned == {
             .Ok(_) -> { print("version:accepted") }
             .Err(_) -> { print("version:rejected") }
         }
         if phase == "extend" {
-            refund :: services.workflow_start(&tree, "refund", 1) ?? panic("refund")
-            services.workflow_step(&tree, refund, "credit") ?? panic("credit step")
+            refund :: tree.workflow_start("refund", 1) ?? panic("refund")
+            tree.workflow_step(refund, "credit") ?? panic("credit step")
             print("refund:{refund}")
         }
         if phase == "final" {
-            print("refund_history:{services.workflow_history(tree, 2) ?? panic("refund history")}")
+            print("refund_history:{tree.workflow_history(2) ?? panic("refund history")}")
         }
     }
 }
@@ -450,6 +630,51 @@ fn run() {
 
 const WORKFLOW_RESTART_HISTORY: &str =
     "history:start@v1|step:charge|step:ship:express\nreplay:1\nversion:rejected\n";
+
+const WORKFLOW_REPLAY_SOURCE: &str = r#"
+use core.sys as env
+use core.service as services
+
+fn replay_worker() {}
+
+fn run() {
+    store_path :: env.get("JET_SERVICE_AUTH_STORE") ?? panic("store")
+    phase :: env.get("JET_SERVICE_AUTH_PHASE") ?? panic("phase")
+    tree := services.tree("workflow-replay")
+    store :: services.state_store(store_path) ?? panic("state store")
+    tree.set_state_event_log(store, "workflow-events", 1, "reversible") ?? panic("state")
+    tree.worker("worker", replay_worker, capacity: 1) ?? panic("worker")
+    tree.start() ?? panic("start")
+    if phase == "mismatch" {
+        run_id :: tree.workflow_start("checkout", 1) ?? panic("workflow")
+        tree.workflow_step(run_id, "ship") ?? panic("replay mismatch accepted")
+    } else if phase == "activity-mismatch" {
+        run_id :: tree.workflow_start("checkout", 1) ?? panic("workflow")
+        tree.workflow_activity(run_id, "charge", "charge-1", 2) ?? panic("activity mismatch accepted")
+    } else if phase == "completion-mismatch" {
+        run_id :: tree.workflow_start("checkout", 1) ?? panic("workflow")
+        tree.workflow_activity_complete(run_id, "charge-1", TaskOutcome.Finished) ?? panic("completion mismatch accepted")
+    } else if phase == "write" {
+        run_id :: tree.workflow_start("checkout", 1) ?? panic("workflow")
+        tree.workflow_step(run_id, "charge") ?? panic("charge")
+        tree.workflow_step(run_id, "ship") ?? panic("ship")
+        tree.workflow_activity(run_id, "charge", "charge-1", 2) ?? panic("activity")
+        tree.workflow_activity_retry(run_id, "charge-1", TaskOutcome.Panicked("timeout")) ?? panic("retry")
+        tree.workflow_activity_complete(run_id, "charge-1", TaskOutcome.Finished) ?? panic("complete")
+        print("written:{tree.workflow_history(run_id) ?? panic("history")}")
+    } else {
+        run_id :: tree.workflow_start("checkout", 1) ?? panic("replay")
+        tree.workflow_step(run_id, "charge") ?? panic("charge replay")
+        tree.workflow_step(run_id, "ship") ?? panic("ship replay")
+        tree.workflow_activity(run_id, "charge", "charge-1", 2) ?? panic("activity replay")
+        tree.workflow_activity_retry(run_id, "charge-1", TaskOutcome.Panicked("timeout")) ?? panic("retry replay")
+        tree.workflow_activity_complete(run_id, "charge-1", TaskOutcome.Finished) ?? panic("complete replay")
+        print("replayed:{tree.workflow_history(run_id) ?? panic("history")}")
+    }
+}
+"#;
+
+const WORKFLOW_REPLAY_HISTORY: &str = "start@v1|step:charge|step:ship|activity:charge:charge-1@1/2|activity-retry:charge-1@2/2:Panicked(timeout)|activity-done:charge-1|activity-result:Finished\n";
 
 /// A versioned workflow history is only durable if a later process reads back
 /// the same runs, steps, and version conflicts the writer recorded.
@@ -527,36 +752,82 @@ fn workflow_history_survives_process_restart() {
     );
 }
 
+#[test]
+fn workflow_body_replay_reuses_recorded_steps() {
+    if !have_rustc() {
+        return;
+    }
+    let (dir, bin) = compile_restart_binary(WORKFLOW_REPLAY_SOURCE);
+    let store = dir.join("workflow-replay.log");
+    assert_eq!(
+        run_restart_process(&bin, &store, "write", None),
+        format!("written:{WORKFLOW_REPLAY_HISTORY}")
+    );
+    assert_eq!(
+        run_restart_process(&bin, &store, "read", None),
+        format!("replayed:{WORKFLOW_REPLAY_HISTORY}")
+    );
+
+    assert!(!restart_status(&bin, &store, "mismatch", "").success());
+    assert!(!restart_status(&bin, &store, "activity-mismatch", "").success());
+    assert!(!restart_status(&bin, &store, "completion-mismatch", "").success());
+
+    let default_store = dir.join("workflow-replay-default.log");
+    assert_eq!(
+        run_restart_default_process(&dir, &default_store, "write", None),
+        format!("written:{WORKFLOW_REPLAY_HISTORY}")
+    );
+    assert_eq!(
+        run_restart_default_process(&dir, &default_store, "read", None),
+        format!("replayed:{WORKFLOW_REPLAY_HISTORY}")
+    );
+
+    let crossed = dir.join("workflow-replay-crossed.log");
+    assert_eq!(
+        run_restart_process(&bin, &crossed, "write", None),
+        format!("written:{WORKFLOW_REPLAY_HISTORY}")
+    );
+    assert_eq!(
+        run_restart_default_process(&dir, &crossed, "read", None),
+        format!("replayed:{WORKFLOW_REPLAY_HISTORY}")
+    );
+}
+
 const WORKFLOW_OUTCOME_SOURCE: &str = r#"
 use core.sys as env
-use core.services as services
+use core.service as services
+
+fn outcome_worker() {}
 
 fn run() {
     store_path :: env.get("JET_SERVICE_AUTH_STORE") ?? panic("store")
     phase :: env.get("JET_SERVICE_AUTH_PHASE") ?? panic("phase")
     tree := services.tree("workflow-outcome")
     store :: services.state_store(store_path) ?? panic("state store")
-    services.set_state_event_log(&tree, store, "workflow-events", 1, "reversible") ?? panic("state")
-    services.worker(&tree, "activities", 1) ?? panic("worker")
-    services.start(&tree) ?? panic("start")
+    tree.set_state_event_log(store, "workflow-events", 1, "reversible") ?? panic("state")
+    tree.worker("activities", outcome_worker, capacity: 1) ?? panic("worker")
+    tree.start() ?? panic("start")
     if phase == "write" {
-        run_id :: services.workflow_start(&tree, "checkout", 1) ?? panic("workflow")
-        scheduled :: services.workflow_activity(&tree, run_id, "charge", "charge-1", 2) ?? panic("schedule")
+        run_id :: tree.workflow_start("checkout", 1) ?? panic("workflow")
+        scheduled :: tree.workflow_activity(run_id, "charge", "charge-1", 2) ?? panic("schedule")
         print("scheduled:{scheduled}")
-        paused :: services.workflow_activity_retry(&tree, run_id, "charge-1", TaskOutcome.Panicked("timeout")) ?? panic("retry")
+        paused :: tree.workflow_activity_retry(run_id, "charge-1", TaskOutcome.Panicked("timeout")) ?? panic("retry")
         print("retry:{paused}")
-        result :: services.workflow_activity_complete(&tree, run_id, "charge-1", TaskOutcome.Finished) ?? panic("complete")
+        result :: tree.workflow_activity_complete(run_id, "charge-1", TaskOutcome.Finished) ?? panic("complete")
         print("completed:{result}")
-        print("run:{services.workflow_outcome(tree, run_id) ?? panic("outcome")}")
-        print("observe:{services.observe(tree)}")
-        print("history:{services.workflow_history(tree, run_id) ?? panic("history")}")
+        print("run:{tree.workflow_outcome(run_id) ?? panic("outcome")}")
+        print("observe:{tree.observe()}")
+        print("history:{tree.workflow_history(run_id) ?? panic("history")}")
     } else {
-        result :: services.workflow_outcome(tree, 1) ?? panic("replay outcome")
+        result :: tree.workflow_outcome(1) ?? panic("replay outcome")
         print("replay:{result}")
-        print("observe:{services.observe(tree)}")
-        same :: services.workflow_activity_complete(&tree, 1, "charge-1", TaskOutcome.Finished) ?? panic("idempotent complete")
+        print("observe:{tree.observe()}")
+        same :: tree.workflow_activity_complete(1, "charge-1", TaskOutcome.Finished) ?? panic("idempotent complete")
         print("same:{same}")
-        print("history:{services.workflow_history(tree, 1) ?? panic("history")}")
+        versioned :: tree.workflow_start("checkout", 2) ?? panic("terminal version")
+        print("version_after_terminal:{versioned}")
+        print("version_history:{tree.workflow_history(versioned) ?? panic("version history")}")
+        print("history:{tree.workflow_history(1) ?? panic("history")}")
     }
 }
 "#;
@@ -581,7 +852,7 @@ fn workflow_activity_outcome_survives_process_restart() {
     );
     assert_eq!(
         run_restart_process(&bin, &store, "read", None),
-        format!("replay:Finished\nobserve:Observe(workers=1, started=true, generation=1, dead_letters=0, events=0, chaos=0, draining=0, partitions=0, rollback=false, workflows=1,statuses={{running:0,paused:1,cancel_requested:0}},outcomes={{pending:0,finished:1,panicked:0,cancelled:0,deadline_blown:0}})\nsame:Finished\nhistory:{WORKFLOW_OUTCOME_HISTORY}")
+        format!("replay:Finished\nobserve:Observe(workers=1, started=true, generation=1, dead_letters=0, events=0, chaos=0, draining=0, partitions=0, rollback=false, workflows=1,statuses={{running:0,paused:1,cancel_requested:0}},outcomes={{pending:0,finished:1,panicked:0,cancelled:0,deadline_blown:0}})\nsame:Finished\nversion_after_terminal:2\nversion_history:start@v2\nhistory:{WORKFLOW_OUTCOME_HISTORY}")
     );
 
     let default_store = dir.join("workflow-outcome-default.log");
@@ -593,41 +864,43 @@ fn workflow_activity_outcome_survives_process_restart() {
     );
     assert_eq!(
         run_restart_default_process(&dir, &default_store, "read", None),
-        format!("replay:Finished\nobserve:Observe(workers=1, started=true, generation=1, dead_letters=0, events=0, chaos=0, draining=0, partitions=0, rollback=false, workflows=1,statuses={{running:0,paused:1,cancel_requested:0}},outcomes={{pending:0,finished:1,panicked:0,cancelled:0,deadline_blown:0}})\nsame:Finished\nhistory:{WORKFLOW_OUTCOME_HISTORY}")
+        format!("replay:Finished\nobserve:Observe(workers=1, started=true, generation=1, dead_letters=0, events=0, chaos=0, draining=0, partitions=0, rollback=false, workflows=1,statuses={{running:0,paused:1,cancel_requested:0}},outcomes={{pending:0,finished:1,panicked:0,cancelled:0,deadline_blown:0}})\nsame:Finished\nversion_after_terminal:2\nversion_history:start@v2\nhistory:{WORKFLOW_OUTCOME_HISTORY}")
     );
 }
 
 const SOURCE: &str = r#"
-use core.services as services
+use core.service as services
 use core.testing as testing
+
+fn failure_worker() {}
 
 fn run() {
     tree := services.tree("delivery")
-    services.set_delivery(&tree, services.delivery_durable()) ?? panic("delivery")
+    tree.set_delivery(services.delivery_durable()) ?? panic("delivery")
     temp := testing.temp_dir("service-failure")
     store_path :: Path.from(temp).join("delivery.state").to_string()
     store :: services.state_store(store_path) ?? panic("state store")
-    services.set_state_event_log(&tree, store, "delivery-events", 1, "reversible") ?? panic("state")
-    worker :: services.worker(&tree, "worker", 1) ?? panic("worker")
-    services.start(&tree) ?? panic("start")
+    tree.set_state_event_log(store, "delivery-events", 1, "reversible") ?? panic("state")
+    worker :: tree.worker("worker", failure_worker, capacity: 1) ?? panic("worker")
+    tree.start() ?? panic("start")
 
-    services.send_durable(&tree, worker, "first", "k1") ?? panic("first")
-    services.send_durable(&tree, worker, "first", "k1") ?? panic("duplicate")
-    conflicting :: services.send_durable(&tree, worker, "different", "k1")
+    tree.send_durable(worker, "first", key: "k1") ?? panic("first")
+    tree.send_durable(worker, "first", key: "k1") ?? panic("duplicate")
+    conflicting :: tree.send_durable(worker, "different", key: "k1")
     if conflicting == {
         .Ok(_) -> { print("conflict:accepted") }
         .Err(_) -> { print("conflict:rejected") }
     }
-    full :: services.send_durable(&tree, worker, "second", "k2")
+    full :: tree.send_durable(worker, "second", key: "k2")
     if full == {
         .Ok(_) -> { print("full:accepted") }
         .Err(_) -> { print("full:rejected") }
     }
-    print("dead_letters:{services.dead_letter_count(tree)}")
+    print("dead_letters:{tree.dead_letter_count()}")
 
-    services.receive(&tree, worker) ?? panic("receive")
-    services.drain_worker(&tree, worker) ?? panic("drain")
-    stopped_receive :: services.receive(&tree, worker)
+    tree.receive(worker) ?? panic("receive")
+    tree.drain_worker(worker) ?? panic("drain")
+    stopped_receive :: tree.receive(worker)
     if stopped_receive == {
         .Ok(_) -> { print("drained_receive:accepted") }
         .Err(_) -> { print("drained_receive:rejected") }
@@ -652,72 +925,593 @@ fn services_failure_paths_match_default_run() {
     assert_eq!(stdout, "conflict:rejected\nfull:rejected\ndead_letters:1\ndrained_receive:rejected\n");
 }
 
-const STATE_AND_LIFECYCLE_SOURCE: &str = r#"
-use core.services as services
+const DRAIN_HANDOFF_SOURCE: &str = r#"
+use core.service as service
+
+fn worker() {}
+
+fn run() {
+    tree := service.tree("drain-handoff")
+    endpoint :: tree.worker("api", worker, capacity: 2) ?? panic("worker")
+    tree.start() ?? panic("start")
+    tree.send(endpoint, "queued") ?? panic("queued")
+    tree.directory_register("api", endpoint) ?? panic("directory")
+    tree.drain_worker(endpoint) ?? panic("drain")
+
+    late :: endpoint.send("late")
+    if late == {
+        .Ok(_) -> { print("late:accepted") }
+        .Err(_) -> { print("late:rejected") }
+    }
+    print("drained:{tree.receive(endpoint) ?? panic("receive")}")
+
+    tree.stop() ?? panic("restart stop")
+    tree.start() ?? panic("restart start")
+    tree.directory_register("api", endpoint) ?? panic("restart directory")
+    generation :: tree.handoff_generation() ?? panic("handoff")
+    current :: tree.directory_resolve("api") ?? panic("resolve")
+    current.send("after") ?? panic("after send")
+    print("handoff:{generation}:{current.show()}")
+    print("after:{tree.receive(current) ?? panic("after receive")}")
+    tree.stop() ?? panic("stop")
+}
+"#;
+
+const DRAIN_HANDOFF_OUTPUT: &str =
+    "late:rejected\ndrained:queued\nhandoff:2:Endpoint(drain-handoff/api@g2)\nafter:after\n";
+
+#[test]
+fn service_rollout_drain_handoff_orders_endpoint_gate_and_new_generation_aot() {
+    if !have_rustc() {
+        return;
+    }
+    let (code, stdout) = build_and_run("services_drain_handoff", DRAIN_HANDOFF_SOURCE);
+    assert_eq!(code, 0);
+    assert_eq!(stdout, DRAIN_HANDOFF_OUTPUT);
+}
+
+#[test]
+fn service_rollout_drain_handoff_orders_endpoint_gate_and_new_generation_default_run() {
+    let (code, stdout, stderr) = run_default_multi(
+        "services_drain_handoff_jit",
+        "main.jet",
+        &[("main.jet", DRAIN_HANDOFF_SOURCE)],
+    );
+    assert_eq!(code, 0, "default jet run failed: {stderr}");
+    assert_eq!(stdout, DRAIN_HANDOFF_OUTPUT);
+}
+
+#[test]
+fn service_rollout_drain_handoff_orders_endpoint_gate_and_new_generation_interpreter() {
+    let (code, stdout, stderr) = interpreter_run(
+        "services_drain_handoff_interpreter",
+        DRAIN_HANDOFF_SOURCE,
+    );
+    assert_eq!(code, 0, "interpreter run failed: {stderr}");
+    assert_eq!(stdout, DRAIN_HANDOFF_OUTPUT);
+}
+
+const DRAIN_DURABLE_SOURCE: &str = r#"
+use core.service as service
 use core.testing as testing
+use core.time as time
+
+fn worker() {}
+
+fn receipt_id(receipt: ServiceReceipt) => String {
+    if receipt == {
+        .Enqueued(id) -> { return id }
+        .Executed(id) -> { return id }
+        .Retained(id, _) -> { return id }
+        .DeadLettered(id) -> { return id }
+    }
+    return ""
+}
+
+fn run() {
+    temp := testing.temp_dir("drain-durable")
+    store :: Path.from(temp).join("authority.log").to_string()
+    retention :: Duration.seconds(86400) ?? panic("retention")
+    runtime := service.runtime(store, retention: retention)
+    tree := service.tree("drain-durable")
+    endpoint :: tree.worker("api", worker, capacity: 2) ?? panic("worker")
+    tree.start() ?? panic("start")
+    tree.send(endpoint, "before") ?? panic("before")
+    tree.drain_worker(endpoint) ?? panic("drain")
+    receipt :: runtime.send(endpoint, "after", key: "after") ?? panic("send")
+    id :: receipt_id(receipt)
+    if id == "" { panic("missing receipt") }
+    print("accepted")
+    print("first:{tree.receive(endpoint) ?? panic("first")}")
+    print("second:{tree.receive(endpoint) ?? panic("second")}")
+    runtime.commit(id) ?? panic("commit")
+    print("generation:{tree.handoff_generation() ?? panic("handoff")}")
+}
+"#;
+
+const DRAIN_DURABLE_OUTPUT: &str =
+    "accepted\nfirst:before\nsecond:after\ngeneration:2\n";
+
+#[test]
+fn service_drain_consumes_in_flight_durable_receipts_before_handoff_aot() {
+    if !have_rustc() {
+        return;
+    }
+    let (code, stdout) = build_and_run("services_drain_durable", DRAIN_DURABLE_SOURCE);
+    assert_eq!(code, 0);
+    assert_eq!(stdout, DRAIN_DURABLE_OUTPUT);
+}
+
+#[test]
+fn service_drain_consumes_in_flight_durable_receipts_before_handoff_default_run() {
+    let (code, stdout, stderr) = run_default_multi(
+        "services_drain_durable_jit",
+        "main.jet",
+        &[("main.jet", DRAIN_DURABLE_SOURCE)],
+    );
+    assert_eq!(code, 0, "default jet run failed: {stderr}");
+    assert_eq!(stdout, DRAIN_DURABLE_OUTPUT);
+}
+
+const RUNTIME_HANDOFF_PENDING_SOURCE: &str = r#"
+use core.service as service
+use core.testing as testing
+use core.time as time
+
+fn worker() {}
+
+fn receipt_id(receipt: ServiceReceipt) => String {
+    if receipt == {
+        .Enqueued(id) -> { return id }
+        .Executed(id) -> { return id }
+        .Retained(id, _) -> { return id }
+        .DeadLettered(id) -> { return id }
+    }
+    return ""
+}
+
+fn receipt_kind(receipt: ServiceReceipt) => String {
+    if receipt == {
+        .Enqueued(_) -> { return "enqueued" }
+        .Executed(_) -> { return "executed" }
+        .Retained(_, _) -> { return "retained" }
+        .DeadLettered(_) -> { return "dead" }
+        .Rejected(_) -> { return "rejected" }
+        .Unavailable(_) -> { return "unavailable" }
+    }
+    return "unknown"
+}
+
+fn run() {
+    temp := testing.temp_dir("runtime-handoff-pending")
+    store :: Path.from(temp).join("authority.log").to_string()
+    retention :: Duration.seconds(86400) ?? panic("retention")
+    runtime := service.runtime(store, retention: retention)
+    tree := service.tree("runtime-handoff-pending")
+    endpoint :: tree.worker("api", worker, capacity: 1) ?? panic("worker")
+    tree.start() ?? panic("start")
+
+    receipt :: runtime.send(endpoint, "pending", key: "pending") ?? panic("send")
+    id :: receipt_id(receipt)
+    print("sent:{receipt_kind(receipt)}")
+    print("handoff:{tree.handoff_generation() ?? panic("handoff")}")
+    print("receipt:{tree.upgrade_receipt() ?? panic("receipt")}")
+    print("received:{tree.receive(endpoint) ?? panic("receive")}")
+    runtime.commit(id) ?? panic("commit")
+    print("next:{tree.handoff_generation() ?? panic("next handoff")}")
+    tree.stop() ?? panic("stop")
+}
+"#;
+
+const RUNTIME_HANDOFF_PENDING_OUTPUT: &str =
+    "sent:enqueued\nhandoff:2\nreceipt:ServiceUpgradeReceipt(from=1, to=2, migration=none, rollback_available=false, pinned=api)\nreceived:pending\nnext:3\n";
+
+#[test]
+fn runtime_receipt_pins_pending_shard_across_handoff_aot() {
+    if !have_rustc() {
+        return;
+    }
+    let (code, stdout) = build_and_run(
+        "services_runtime_handoff_pending",
+        RUNTIME_HANDOFF_PENDING_SOURCE,
+    );
+    assert_eq!(code, 0);
+    assert_eq!(stdout, RUNTIME_HANDOFF_PENDING_OUTPUT);
+}
+
+#[test]
+fn runtime_receipt_pins_pending_shard_across_handoff_default_run() {
+    let (code, stdout, stderr) = run_default_multi(
+        "services_runtime_handoff_pending_jit",
+        "main.jet",
+        &[("main.jet", RUNTIME_HANDOFF_PENDING_SOURCE)],
+    );
+    assert_eq!(code, 0, "default jet run failed: {stderr}");
+    assert_eq!(stdout, RUNTIME_HANDOFF_PENDING_OUTPUT);
+}
+
+#[test]
+fn runtime_receipt_pins_pending_shard_across_handoff_interpreter() {
+    let (code, stdout, stderr) = interpreter_run(
+        "services_runtime_handoff_pending_interpreter",
+        RUNTIME_HANDOFF_PENDING_SOURCE,
+    );
+    assert_eq!(code, 0, "interpreter run failed: {stderr}");
+    assert_eq!(stdout, RUNTIME_HANDOFF_PENDING_OUTPUT);
+}
+
+const DRAIN_EMPTY_DURABLE_SOURCE: &str = r#"
+use core.service as service
+use core.testing as testing
+use core.time as time
+
+fn worker() {}
+
+fn receipt_id(receipt: ServiceReceipt) => String {
+    if receipt == {
+        .Enqueued(id) -> { return id }
+        .Executed(id) -> { return id }
+        .Retained(id, _) -> { return id }
+        .DeadLettered(id) -> { return id }
+    }
+    return ""
+}
+
+fn run() {
+    temp := testing.temp_dir("drain-empty-durable")
+    store :: Path.from(temp).join("authority.log").to_string()
+    retention :: Duration.seconds(86400) ?? panic("retention")
+    runtime := service.runtime(store, retention: retention)
+    tree := service.tree("drain-empty-durable")
+    endpoint :: tree.worker("api", worker, capacity: 1) ?? panic("worker")
+    tree.start() ?? panic("start")
+    tree.drain_worker(endpoint) ?? panic("drain")
+    receipt :: runtime.send(endpoint, "after", key: "after") ?? panic("send")
+    id :: receipt_id(receipt)
+    if id == "" { panic("missing receipt") }
+    print("accepted")
+    print("received:{tree.receive(endpoint) ?? panic("receive")}")
+    runtime.commit(id) ?? panic("commit")
+    print("committed")
+    tree.stop() ?? panic("stop")
+}
+"#;
+
+const DRAIN_EMPTY_DURABLE_OUTPUT: &str = "accepted\nreceived:after\ncommitted\n";
+
+#[test]
+fn service_empty_drain_preserves_durable_receipts_aot() {
+    if !have_rustc() {
+        return;
+    }
+    let (code, stdout) = build_and_run("services_drain_empty_durable", DRAIN_EMPTY_DURABLE_SOURCE);
+    assert_eq!(code, 0);
+    assert_eq!(stdout, DRAIN_EMPTY_DURABLE_OUTPUT);
+}
+
+#[test]
+fn service_empty_drain_preserves_durable_receipts_default_run() {
+    let (code, stdout, stderr) = run_default_multi(
+        "services_drain_empty_durable_jit",
+        "main.jet",
+        &[("main.jet", DRAIN_EMPTY_DURABLE_SOURCE)],
+    );
+    assert_eq!(code, 0, "default jet run failed: {stderr}");
+    assert_eq!(stdout, DRAIN_EMPTY_DURABLE_OUTPUT);
+}
+
+const DURABLE_RETRY_SOURCE: &str = r#"
+use core.service as service
+use core.testing as testing
+use core.time as time
+
+fn worker() {}
+
+fn receipt_id(receipt: ServiceReceipt) -> String {
+    if receipt == {
+        .Enqueued(id) -> { return id }
+        .Executed(id) -> { return id }
+        .Retained(id, _) -> { return id }
+        .DeadLettered(id) -> { return id }
+    }
+    return ""
+}
+
+fn run() {
+    temp := testing.temp_dir("durable-retry")
+    state_path :: Path.from(temp).join("state.log").to_string()
+    delivery_path :: Path.from(temp).join("state.log.delivery").to_string()
+    retention :: Duration.seconds(86400) ?? panic("retention")
+    runtime := service.runtime(delivery_path, retention: retention)
+    tree := service.tree("durable-retry")
+    tree.set_delivery(service.delivery_durable()) ?? panic("delivery")
+    state :: service.state_store(state_path) ?? panic("state")
+    tree.set_state_event_log(state, "events", 1, "reversible") ?? panic("state adapter")
+    endpoint :: tree.worker("api", worker, capacity: 1) ?? panic("worker")
+    tree.start() ?? panic("start")
+
+    receipt :: tree.send_durable(endpoint, "once", key: "once") ?? panic("send")
+    id :: receipt_id(receipt)
+    print("first:{tree.receive(endpoint) ?? panic("first")}")
+    duplicate :: tree.receive(endpoint)
+    if duplicate == {
+        .Ok(_) -> { print("duplicate:accepted") }
+        .Err(_) -> { print("duplicate:rejected") }
+    }
+    runtime.retry(id) ?? panic("retry")
+    print("retry:{tree.receive(endpoint) ?? panic("retry receive")}")
+    runtime.commit(id) ?? panic("commit")
+    tree.stop() ?? panic("stop")
+}
+"#;
+
+const DURABLE_RETRY_OUTPUT: &str = "first:once\nduplicate:rejected\nretry:once\n";
+
+#[test]
+fn durable_retry_is_the_only_explicit_redelivery_aot() {
+    if !have_rustc() {
+        return;
+    }
+    let (code, stdout) = build_and_run("services_durable_retry", DURABLE_RETRY_SOURCE);
+    assert_eq!(code, 0);
+    assert_eq!(stdout, DURABLE_RETRY_OUTPUT);
+}
+
+#[test]
+fn durable_retry_is_the_only_explicit_redelivery_default_run() {
+    let (code, stdout, stderr) = run_default_multi(
+        "services_durable_retry_jit",
+        "main.jet",
+        &[("main.jet", DURABLE_RETRY_SOURCE)],
+    );
+    assert_eq!(code, 0, "default jet run failed: {stderr}");
+    assert_eq!(stdout, DURABLE_RETRY_OUTPUT);
+}
+
+#[test]
+fn durable_retry_is_the_only_explicit_redelivery_interpreter() {
+    let (code, stdout, stderr) = interpreter_run(
+        "services_durable_retry_interpreter",
+        DURABLE_RETRY_SOURCE,
+    );
+    assert_eq!(code, 0, "interpreter run failed: {stderr}");
+    assert_eq!(stdout, DURABLE_RETRY_OUTPUT);
+}
+
+const TREE_DRAIN_REJECT_SOURCE: &str = r#"
+use core.service as service
+use core.testing as testing
+
+fn worker() {}
+
+fn run() {
+    temp := testing.temp_dir("tree-drain-reject")
+    store :: Path.from(temp).join("authority.log").to_string()
+    tree := service.tree("tree-drain-reject")
+    tree.set_delivery(service.delivery_durable()) ?? panic("delivery")
+    state :: service.state_store(store) ?? panic("state")
+    tree.set_state_event_log(state, "events", 1, "reversible") ?? panic("state adapter")
+    endpoint :: tree.worker("api", worker, capacity: 1) ?? panic("worker")
+    tree.start() ?? panic("start")
+    tree.directory_register("api", endpoint) ?? panic("directory")
+    tree.drain_worker(endpoint) ?? panic("drain")
+    rejected :: tree.send_durable(endpoint, "after", key: "after")
+    if rejected == {
+        .Ok(_) -> { print("direct:accepted") }
+        .Err(_) -> { print("direct:rejected") }
+    }
+    print("handoff:{tree.handoff_generation() ?? panic("handoff")}")
+    current :: tree.directory_resolve("api") ?? panic("resolve")
+    pending :: tree.receive(current)
+    if pending == {
+        .Ok(_) -> { print("pending:accepted") }
+        .Err(_) -> { print("pending:rejected") }
+    }
+    tree.stop() ?? panic("stop")
+}
+"#;
+
+const TREE_DRAIN_REJECT_OUTPUT: &str =
+    "direct:rejected\nhandoff:2\npending:rejected\n";
+
+#[test]
+fn tree_durable_send_during_drain_is_rejected_before_admission_aot() {
+    if !have_rustc() {
+        return;
+    }
+    let (code, stdout) = build_and_run("services_tree_drain_reject", TREE_DRAIN_REJECT_SOURCE);
+    assert_eq!(code, 0);
+    assert_eq!(stdout, TREE_DRAIN_REJECT_OUTPUT);
+}
+
+#[test]
+fn tree_durable_send_during_drain_is_rejected_before_admission_default_run() {
+    let (code, stdout, stderr) = run_default_multi(
+        "services_tree_drain_reject_jit",
+        "main.jet",
+        &[("main.jet", TREE_DRAIN_REJECT_SOURCE)],
+    );
+    assert_eq!(code, 0, "default jet run failed: {stderr}");
+    assert_eq!(stdout, TREE_DRAIN_REJECT_OUTPUT);
+}
+
+#[test]
+fn tree_durable_send_during_drain_is_rejected_before_admission_interpreter() {
+    let (code, stdout, stderr) = interpreter_run(
+        "services_tree_drain_reject_interpreter",
+        TREE_DRAIN_REJECT_SOURCE,
+    );
+    assert_eq!(code, 0, "interpreter run failed: {stderr}");
+    assert_eq!(stdout, TREE_DRAIN_REJECT_OUTPUT);
+}
+
+const ROLLOUT_ROLLBACK_SOURCE: &str = r#"
+use core.service as service
+use core.testing as testing
+
+fn worker() {}
+
+fn run() {
+    temp := testing.temp_dir("rollout-rollback")
+    path :: Path.from(temp).join("events.log").to_string()
+    tree := service.tree("rollback")
+    store :: service.state_store(path) ?? panic("store")
+    tree.set_state_event_log(store, "events", 1, "reversible") ?? panic("state")
+    endpoint :: tree.worker("api", worker, capacity: 1) ?? panic("worker")
+    tree.start() ?? panic("start")
+    tree.append_event("before") ?? panic("before")
+    tree.drain_worker(endpoint) ?? panic("drain")
+    tree.handoff_generation() ?? panic("handoff")
+    receipt :: tree.upgrade_receipt() ?? panic("receipt")
+    print("receipt:{receipt}")
+    tree.append_event("after") ?? panic("after")
+    rolled :: tree.rollback_generation()
+    if rolled == {
+        .Ok(generation) -> { print("rolled:{generation}:{tree.replay_events()}") }
+        .Err(_) -> { print("rolled:refused") }
+    }
+    tree.stop() ?? panic("stop")
+}
+"#;
+
+const ROLLOUT_ROLLBACK_OUTPUT: &str =
+    "receipt:ServiceUpgradeReceipt(from=1, to=2, migration=reversible, rollback_available=true, pinned=)\nrolled:1:before\n";
+
+#[test]
+fn service_rollout_rollback_restores_pre_handoff_state_aot() {
+    if !have_rustc() {
+        return;
+    }
+    let (code, stdout) = build_and_run("services_rollout_rollback", ROLLOUT_ROLLBACK_SOURCE);
+    assert_eq!(code, 0);
+    assert_eq!(stdout, ROLLOUT_ROLLBACK_OUTPUT);
+}
+
+#[test]
+fn service_rollout_rollback_restores_pre_handoff_state_default_run() {
+    let (code, stdout, stderr) = run_default_multi(
+        "services_rollout_rollback_jit",
+        "main.jet",
+        &[("main.jet", ROLLOUT_ROLLBACK_SOURCE)],
+    );
+    assert_eq!(code, 0, "default jet run failed: {stderr}");
+    assert_eq!(stdout, ROLLOUT_ROLLBACK_OUTPUT);
+}
+
+const ROLLOUT_PINNED_ROLLBACK_SOURCE: &str = r#"
+use core.service as service
+
+fn worker() {}
+
+fn run() {
+    tree := service.tree("pinned-rollback")
+    endpoint :: tree.worker("api", worker, capacity: 1) ?? panic("worker")
+    tree.start() ?? panic("start")
+    tree.send(endpoint, "queued") ?? panic("send")
+    tree.drain_worker(endpoint) ?? panic("drain")
+    generation :: tree.handoff_generation() ?? panic("handoff")
+    print("handoff:{generation}")
+    print("rolled:{tree.rollback_generation() ?? panic("rollback")}")
+    print("message:{tree.receive(endpoint) ?? panic("receive")}")
+    tree.stop() ?? panic("stop")
+}
+"#;
+
+const ROLLOUT_PINNED_ROLLBACK_OUTPUT: &str =
+    "handoff:2\nrolled:1\nmessage:queued\n";
+
+#[test]
+fn service_rollout_rollback_restores_pinned_shard_aot() {
+    if !have_rustc() {
+        return;
+    }
+    let (code, stdout) = build_and_run(
+        "services_rollout_pinned_rollback",
+        ROLLOUT_PINNED_ROLLBACK_SOURCE,
+    );
+    assert_eq!(code, 0);
+    assert_eq!(stdout, ROLLOUT_PINNED_ROLLBACK_OUTPUT);
+}
+
+#[test]
+fn service_rollout_rollback_restores_pinned_shard_default_run() {
+    let (code, stdout, stderr) = run_default_multi(
+        "services_rollout_pinned_rollback_jit",
+        "main.jet",
+        &[("main.jet", ROLLOUT_PINNED_ROLLBACK_SOURCE)],
+    );
+    assert_eq!(code, 0, "default jet run failed: {stderr}");
+    assert_eq!(stdout, ROLLOUT_PINNED_ROLLBACK_OUTPUT);
+}
+
+const STATE_AND_LIFECYCLE_SOURCE: &str = r#"
+use core.service as services
+use core.testing as testing
+
+fn lifecycle_worker() {}
 
 fn run() {
     temp := testing.temp_dir("service-state")
     snapshot := services.tree("snapshot")
     snapshot_store :: Path.from(temp).join("snapshot.state").to_string()
     snapshot_authority :: services.state_store(snapshot_store) ?? panic("snapshot store")
-    services.set_state_snapshot(&snapshot, snapshot_authority, "snapshot", 1, "reversible") ?? panic("snapshot state")
-    snapshot_worker :: services.worker(&snapshot, "worker", 2) ?? panic("snapshot worker")
-    services.start(&snapshot) ?? panic("snapshot start")
-    services.commit_snapshot(&snapshot, "state-v1") ?? panic("snapshot commit")
-    restored :: services.restore_snapshot(snapshot) ?? panic("snapshot restore")
+    snapshot.set_state_snapshot(snapshot_authority, "snapshot", 1, "reversible") ?? panic("snapshot state")
+    snapshot_worker :: snapshot.worker("worker", lifecycle_worker, capacity: 2) ?? panic("snapshot worker")
+    snapshot.start() ?? panic("snapshot start")
+    snapshot.commit_snapshot("state-v1") ?? panic("snapshot commit")
+    restored :: snapshot.restore_snapshot() ?? panic("snapshot restore")
     print("snapshot:{restored}")
-    services.stop(&snapshot) ?? panic("snapshot stop")
+    snapshot.stop() ?? panic("snapshot stop")
 
     events := services.tree("events")
     event_store :: Path.from(temp).join("events.state").to_string()
     event_authority :: services.state_store(event_store) ?? panic("event store")
-    services.set_state_event_log(&events, event_authority, "events", 1, "reversible") ?? panic("event state")
-    event_worker :: services.worker(&events, "worker", 2) ?? panic("event worker")
-    services.start(&events) ?? panic("event start")
-    services.append_event(&events, "first") ?? panic("event one")
-    services.append_event(&events, "second") ?? panic("event two")
-    print("events:{services.replay_events(events)}")
-    print("event_count:{services.event_count(events)}")
-    services.stop(&events) ?? panic("event stop")
+    events.set_state_event_log(event_authority, "events", 1, "reversible") ?? panic("event state")
+    event_worker :: events.worker("worker", lifecycle_worker, capacity: 2) ?? panic("event worker")
+    events.start() ?? panic("event start")
+    events.append_event("first") ?? panic("event one")
+    events.append_event("second") ?? panic("event two")
+    print("events:{events.replay_events()}")
+    print("event_count:{events.event_count()}")
+    events.stop() ?? panic("event stop")
 
     workflow := services.tree("workflow")
     workflow_store_path :: Path.from(temp).join("workflow.state").to_string()
     workflow_store :: services.state_store(workflow_store_path) ?? panic("workflow store")
-    services.set_state_event_log(&workflow, workflow_store, "workflow-events", 1, "reversible") ?? panic("workflow state")
-    workflow_worker :: services.worker(&workflow, "worker", 2) ?? panic("workflow worker")
-    services.start(&workflow) ?? panic("workflow start")
-    run_id :: services.workflow_start(&workflow, "checkout", 1) ?? panic("workflow id")
-    same_run :: services.workflow_start(&workflow, "checkout", 1) ?? panic("workflow duplicate")
-    services.workflow_step(&workflow, run_id, "charge") ?? panic("workflow step")
-    history :: services.workflow_history(workflow, run_id) ?? panic("workflow history")
+    workflow.set_state_event_log(workflow_store, "workflow-events", 1, "reversible") ?? panic("workflow state")
+    workflow_worker :: workflow.worker("worker", lifecycle_worker, capacity: 2) ?? panic("workflow worker")
+    workflow.start() ?? panic("workflow start")
+    run_id :: workflow.workflow_start("checkout", 1) ?? panic("workflow id")
+    same_run :: workflow.workflow_start("checkout", 1) ?? panic("workflow duplicate")
+    workflow.workflow_step(run_id, "charge") ?? panic("workflow step")
+    history :: workflow.workflow_history(run_id) ?? panic("workflow history")
     print("workflow:{run_id}:{same_run}:{history}")
-    versioned :: services.workflow_start(&workflow, "checkout", 2)
+    versioned :: workflow.workflow_start("checkout", 2)
     if versioned == {
         .Ok(_) -> { print("workflow_version:accepted") }
         .Err(_) -> { print("workflow_version:rejected") }
     }
-    services.stop(&workflow) ?? panic("workflow stop")
+    workflow.stop() ?? panic("workflow stop")
 
     cluster := services.tree("cluster")
-    endpoint :: services.worker(&cluster, "api", 2) ?? panic("cluster worker")
-    services.start(&cluster) ?? panic("cluster start")
-    services.directory_register(&cluster, "api", endpoint) ?? panic("directory register")
-    services.drain_worker(&cluster, endpoint) ?? panic("cluster drain")
-    handed :: services.handoff_generation(&cluster) ?? panic("handoff")
-    receipt :: services.upgrade_receipt(cluster) ?? panic("upgrade receipt")
-    current :: services.directory_resolve(cluster, "api") ?? panic("directory resolve")
-    print("generation:{handed}:{services.directory_generation(cluster)}:{services.endpoint_show(current)}:{receipt}")
-    stale :: services.send(&cluster, endpoint, "late")
+    endpoint :: cluster.worker("api", lifecycle_worker, capacity: 2) ?? panic("cluster worker")
+    cluster.start() ?? panic("cluster start")
+    cluster.directory_register("api", endpoint) ?? panic("directory register")
+    cluster.drain_worker(endpoint) ?? panic("cluster drain")
+    handed :: cluster.handoff_generation() ?? panic("handoff")
+    receipt :: cluster.upgrade_receipt() ?? panic("upgrade receipt")
+    current :: cluster.directory_resolve("api") ?? panic("directory resolve")
+    print("generation:{handed}:{cluster.directory_generation()}:{current.show()}:{receipt}")
+    stale :: cluster.send(endpoint, "late")
     if stale == {
         .Ok(_) -> { print("stale:accepted") }
         .Err(_) -> { print("stale:rejected") }
     }
-    rolled :: services.rollback_generation(&cluster) ?? panic("rollback")
-    print("rollback:{rolled}:{services.directory_generation(cluster)}")
-    services.chaos_fail(&cluster) ?? panic("chaos")
-    print(services.observe(cluster))
-    services.stop(&cluster) ?? panic("cluster stop")
+    rolled :: cluster.rollback_generation() ?? panic("rollback")
+    print("rollback:{rolled}:{cluster.directory_generation()}")
+    cluster.chaos_fail() ?? panic("chaos")
+    print(cluster.observe())
+    cluster.stop() ?? panic("cluster stop")
 }
 "#;
 
@@ -730,7 +1524,7 @@ fn services_state_workflow_identity_and_upgrade_are_real_aot_paths() {
     assert_eq!(code, 0);
     assert_eq!(
         stdout,
-        "snapshot:state-v1\nevents:first|second\nevent_count:2\nworkflow:1:1:start@v1|step:charge\nworkflow_version:rejected\ngeneration:2:2:Endpoint(cluster/api@g2):ServiceUpgradeReceipt(from=1, to=2, migration=none, rollback_available=false, pinned=)\nstale:rejected\nrollback:1:1\nObserve(workers=1, started=true, generation=1, dead_letters=0, chaos=1, draining=0, partitions=0, rollback=false, workflows=0,statuses={running:0,paused:0,cancel_requested:0},outcomes={pending:0,finished:0,panicked:0,cancelled:0,deadline_blown:0})\n"
+        "snapshot:state-v1\nevents:first|second\nevent_count:2\nworkflow:1:1:start@v1|step:charge\nworkflow_version:rejected\ngeneration:2:2:Endpoint(cluster/api@g2):ServiceUpgradeReceipt(from=1, to=2, migration=none, rollback_available=false, pinned=)\nstale:rejected\nrollback:1:1\nObserve(workers=1, started=true, generation=1, dead_letters=0, events=0, chaos=1, draining=0, partitions=0, rollback=false, workflows=0,statuses={running:0,paused:0,cancel_requested:0},outcomes={pending:0,finished:0,panicked:0,cancelled:0,deadline_blown:0})\n"
     );
 }
 
@@ -757,25 +1551,27 @@ fn services_state_workflow_identity_and_upgrade_match_default_run() {
 /// No existing check combined the two surfaces on one tree, so the collision
 /// only showed up in an example.
 const DURABLE_PLUS_EVENT_LOG_SOURCE: &str = r#"
-use core.services as services
+use core.service as services
 use core.testing as testing
+
+fn durable_worker() {}
 
 fn run() {
     tree := services.tree("app")
-    services.set_delivery(&tree, services.delivery_durable()) ?? panic("delivery")
+    tree.set_delivery(services.delivery_durable()) ?? panic("delivery")
     temp := testing.temp_dir("services-delivery-eventlog")
     store_path :: Path.from(temp).join("state.log").to_string()
     store :: services.state_store(store_path) ?? panic("state store")
-    services.set_state_event_log(&tree, store, "app-events", 1, "reversible") ?? panic("state")
-    worker :: services.worker(&tree, "a", 4) ?? panic("worker")
-    services.start(&tree) ?? panic("start")
+    tree.set_state_event_log(store, "app-events", 1, "reversible") ?? panic("state")
+    worker :: tree.worker("a", durable_worker, capacity: 4) ?? panic("worker")
+    tree.start() ?? panic("start")
 
-    services.send_durable(&tree, worker, "ping", "k1") ?? panic("durable send")
-    services.append_event(&tree, "after-durable-send") ?? panic("append after durable send")
-    services.send_durable(&tree, worker, "pong", "k2") ?? panic("second durable send")
-    services.append_event(&tree, "after-second-send") ?? panic("append after second send")
+    tree.send_durable(worker, "ping", key: "k1") ?? panic("durable send")
+    tree.append_event("after-durable-send") ?? panic("append after durable send")
+    tree.send_durable(worker, "pong", key: "k2") ?? panic("second durable send")
+    tree.append_event("after-second-send") ?? panic("append after second send")
 
-    print("events:{services.event_count(tree)}")
+    print("events:{tree.event_count()}")
 }
 "#;
 
@@ -806,8 +1602,10 @@ fn durable_delivery_does_not_corrupt_the_event_log_default_run() {
 /// typed error rather than a panic or a silently empty restore.
 const STATE_ADAPTER_SOURCE: &str = r#"
 use core.files as files
-use core.services as services
+use core.service as services
 use core.testing as testing
+
+fn adapter_worker() {}
 
 fn run() {
     temp := testing.temp_dir("services-state-adapters")
@@ -815,25 +1613,25 @@ fn run() {
     snapshot_path :: Path.from(temp).join("snapshot.log").to_string()
     snap_tree := services.tree("snap")
     snap_store :: services.state_store(snapshot_path) ?? panic("snapshot store")
-    services.set_state_snapshot(&snap_tree, snap_store, "app-state", 1, "reversible") ?? panic("snapshot adapter")
-    _snap_worker :: services.worker(&snap_tree, "a", 2) ?? panic("snapshot worker")
-    services.start(&snap_tree) ?? panic("snapshot start")
-    services.commit_snapshot(&snap_tree, "state-v1") ?? panic("commit")
-    print("restored:{services.restore_snapshot(snap_tree) ?? panic("restore")}")
+    snap_tree.set_state_snapshot(snap_store, "app-state", 1, "reversible") ?? panic("snapshot adapter")
+    _snap_worker :: snap_tree.worker("a", adapter_worker, capacity: 2) ?? panic("snapshot worker")
+    snap_tree.start() ?? panic("snapshot start")
+    snap_tree.commit_snapshot("state-v1") ?? panic("commit")
+    print("restored:{snap_tree.restore_snapshot() ?? panic("restore")}")
 
     event_path :: Path.from(temp).join("events.log").to_string()
     log_tree := services.tree("log")
     log_store :: services.state_store(event_path) ?? panic("event store")
-    services.set_state_event_log(&log_tree, log_store, "app-events", 1, "reversible") ?? panic("event adapter")
-    _log_worker :: services.worker(&log_tree, "a", 2) ?? panic("event worker")
-    services.start(&log_tree) ?? panic("event start")
-    services.append_event(&log_tree, "first") ?? panic("first event")
-    services.append_event(&log_tree, "second") ?? panic("second event")
-    print("replay:{services.replay_events(log_tree)}")
+    log_tree.set_state_event_log(log_store, "app-events", 1, "reversible") ?? panic("event adapter")
+    _log_worker :: log_tree.worker("a", adapter_worker, capacity: 2) ?? panic("event worker")
+    log_tree.start() ?? panic("event start")
+    log_tree.append_event("first") ?? panic("first event")
+    log_tree.append_event("second") ?? panic("second event")
+    print("replay:{log_tree.replay_events()}")
 
     // A store the runtime cannot trust must fail closed, not restore nothing.
     files.write(snapshot_path, "not a service state store") ?? panic("corrupt write")
-    corrupted :: services.restore_snapshot(snap_tree)
+    corrupted :: snap_tree.restore_snapshot()
     if corrupted == {
         .Ok(_) -> { print("corrupt:accepted") }
         .Err(_) -> { print("corrupt:rejected") }
@@ -875,32 +1673,34 @@ fn state_adapters_reopen_and_reject_corrupt_stores_default_run() {
 /// copies the store aside and the rollback reads it back.
 const ROLLBACK_WITH_STATE_SOURCE: &str = r#"
 use core.sys as env
-use core.services as services
+use core.service as services
+
+fn rollback_worker() {}
 
 fn run() {
     store_path :: env.get("JET_SERVICE_ROLLBACK_STORE") ?? panic("store")
     policy :: env.get("JET_SERVICE_ROLLBACK_POLICY") ?? panic("policy")
     tree := services.tree("cluster")
     store :: services.state_store(store_path) ?? panic("state store")
-    services.set_state_event_log(&tree, store, "cluster-events", 1, policy) ?? panic("state")
-    endpoint :: services.worker(&tree, "api", 1) ?? panic("worker")
-    services.start(&tree) ?? panic("start")
-    services.append_event(&tree, "before-upgrade") ?? panic("append")
-    services.directory_register(&tree, "api", endpoint) ?? panic("register")
-    services.drain_worker(&tree, endpoint) ?? panic("drain")
-    services.handoff_generation(&tree) ?? panic("handoff")
-    receipt :: services.upgrade_receipt(tree) ?? panic("receipt")
+    tree.set_state_event_log(store, "cluster-events", 1, policy) ?? panic("state")
+    endpoint :: tree.worker("api", rollback_worker, capacity: 1) ?? panic("worker")
+    tree.start() ?? panic("start")
+    tree.append_event("before-upgrade") ?? panic("append")
+    tree.directory_register("api", endpoint) ?? panic("register")
+    tree.drain_worker(endpoint) ?? panic("drain")
+    tree.handoff_generation() ?? panic("handoff")
+    receipt :: tree.upgrade_receipt() ?? panic("receipt")
     print("receipt:{receipt}")
-    services.append_event(&tree, "after-upgrade") ?? panic("append after")
-    rolled :: services.rollback_generation(&tree)
+    tree.append_event("after-upgrade") ?? panic("append after")
+    rolled :: tree.rollback_generation()
     if rolled == {
         .Ok(generation) -> {
-            events :: services.replay_events(tree)
+            events :: tree.replay_events()
             print("rolled:{generation}:{events}")
         }
         .Err(_) -> { print("rolled:refused") }
     }
-    services.stop(&tree) ?? panic("stop")
+    tree.stop() ?? panic("stop")
 }
 "#;
 
@@ -975,7 +1775,7 @@ fn grouped_durable_partition_reconciles_after_handoff() {
     assert_eq!(code, 0);
     assert_eq!(
         stdout,
-        "drained:ok\npartitioned:ok\nhandoff:2\nServiceUpgradeReceipt(from=1, to=2, migration=reversible, rollback_available=true, pinned=api)\nreconciled:g2\nServiceUpgradeReceipt(from=1, to=2, migration=reversible, rollback_available=true, pinned=)\n"
+        "foreign:rejected\ndrained:ok\nexpired:rejected\npartition_route:rejected\npartitioned:ok\nhandoff:2\nServiceUpgradeReceipt(from=1, to=2, migration=reversible, rollback_available=true, pinned=api)\nreconciled:g2\nServiceUpgradeReceipt(from=1, to=2, migration=reversible, rollback_available=true, pinned=)\nrejoined:rejoined\n"
     );
 }
 
@@ -989,7 +1789,20 @@ fn grouped_durable_partition_reconciles_under_default_run() {
     assert_eq!(code, 0, "default jet run failed: {stderr}");
     assert_eq!(
         stdout,
-        "drained:ok\npartitioned:ok\nhandoff:2\nServiceUpgradeReceipt(from=1, to=2, migration=reversible, rollback_available=true, pinned=api)\nreconciled:g2\nServiceUpgradeReceipt(from=1, to=2, migration=reversible, rollback_available=true, pinned=)\n"
+        "foreign:rejected\ndrained:ok\nexpired:rejected\npartition_route:rejected\npartitioned:ok\nhandoff:2\nServiceUpgradeReceipt(from=1, to=2, migration=reversible, rollback_available=true, pinned=api)\nreconciled:g2\nServiceUpgradeReceipt(from=1, to=2, migration=reversible, rollback_available=true, pinned=)\nrejoined:rejoined\n"
+    );
+}
+
+#[test]
+fn grouped_durable_partition_reconciles_in_interpreter() {
+    let (code, stdout, stderr) = interpreter_run(
+        "services_partition_reconcile_interpreter",
+        PARTITION_RECONCILE_SOURCE,
+    );
+    assert_eq!(code, 0, "interpreter service partition run failed: {stderr}");
+    assert_eq!(
+        stdout,
+        "foreign:rejected\ndrained:ok\nexpired:rejected\npartition_route:rejected\npartitioned:ok\nhandoff:2\nServiceUpgradeReceipt(from=1, to=2, migration=reversible, rollback_available=true, pinned=api)\nreconciled:g2\nServiceUpgradeReceipt(from=1, to=2, migration=reversible, rollback_available=true, pinned=)\nrejoined:rejoined\n"
     );
 }
 

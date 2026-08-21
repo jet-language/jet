@@ -71,3 +71,38 @@ fn jet_sha256_raw(data: &[u8]) -> [u8; 32] {
     }
     out
 }
+
+/// Vetted keyed-authentication primitive shared by token and service proofs.
+/// Keeping HMAC beside the one embedded SHA-256 implementation prevents each
+/// Prelude consumer from growing a private MAC variant.
+fn jet_hmac_sha256(key: &[u8], data: &[u8]) -> [u8; 32] {
+    const BLOCK: usize = 64;
+    let mut k = [0u8; BLOCK];
+    if key.len() > BLOCK {
+        k[..32].copy_from_slice(&jet_sha256_raw(key));
+    } else {
+        k[..key.len()].copy_from_slice(key);
+    }
+    let mut inner = Vec::with_capacity(BLOCK + data.len());
+    let mut outer = Vec::with_capacity(BLOCK + 32);
+    for byte in k {
+        inner.push(byte ^ 0x36);
+    }
+    inner.extend_from_slice(data);
+    for byte in k {
+        outer.push(byte ^ 0x5c);
+    }
+    outer.extend_from_slice(&jet_sha256_raw(&inner));
+    jet_sha256_raw(&outer)
+}
+
+fn jet_ct_eq(a: &[u8], b: &[u8]) -> bool {
+    let mut difference = 0u8;
+    difference |= u8::from(a.len() != b.len());
+    for index in 0..a.len().max(b.len()) {
+        let left = a.get(index).copied().unwrap_or(0);
+        let right = b.get(index).copied().unwrap_or(0);
+        difference |= left ^ right;
+    }
+    difference == 0
+}

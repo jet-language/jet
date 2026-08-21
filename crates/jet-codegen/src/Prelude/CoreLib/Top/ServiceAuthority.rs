@@ -458,6 +458,36 @@ fn service_authority_validate_endpoint(
     Ok(())
 }
 
+/// A crossed-tier endpoint may carry a valid-looking token, but only an
+/// endpoint already issued into this authority registry can be rehydrated or
+/// validate a directory proof.  This keeps issuance, revocation, rotation,
+/// and routing on the same substrate instead of letting a serialized value
+/// mint a registry entry.
+fn service_authority_require_registered_endpoint(
+    endpoint: &JetServiceEndpoint,
+) -> Result<(), JetServiceError> {
+    service_authority_validate_endpoint(endpoint)?;
+    let key = service_endpoint_key(&endpoint.authority, &endpoint.worker, endpoint.generation);
+    let registry = service_endpoint_registry()
+        .lock()
+        .map_err(|_| service_authority_error("service endpoint registry lock is poisoned"))?;
+    let state = registry.get(&key).ok_or_else(|| {
+        JetServiceError::Revoked(
+            "service endpoint authority was not issued in this process".to_string(),
+        )
+    })?;
+    if state.tree != endpoint.tree
+        || state.worker != endpoint.worker
+        || state.authority != endpoint.authority
+        || state.generation != endpoint.generation
+    {
+        return Err(JetServiceError::Revoked(
+            "service endpoint authority does not match its issued identity".to_string(),
+        ));
+    }
+    Ok(())
+}
+
 fn service_authority_validate_opaque_token(value: &str) -> Result<(), JetServiceError> {
     let token = value
         .strip_prefix(SERVICE_AUTHORITY_TOKEN_PREFIX)
@@ -585,6 +615,7 @@ fn service_authority_validate_directory(
             "service directory endpoint is outside its authority tree".to_string(),
         ));
     }
+    service_authority_require_registered_endpoint(endpoint)?;
     let supplied = service_authority_unhex(signature).ok_or_else(|| {
         JetServiceError::Revoked("service directory proof is malformed".to_string())
     })?;
@@ -633,13 +664,13 @@ pub fn jet_services_authority_endpoint(
     Ok(endpoint)
 }
 
-/// Hydrate a provider-issued endpoint into the process registry after a tree
-/// crosses a comptime or interpreter boundary. Construction validates only
-/// the endpoint shape; operations still require this explicit registration.
+/// Rebind an already-issued endpoint after a tree crosses a comptime or
+/// interpreter boundary. A serialized endpoint never creates authority.
 pub fn jet_services_authority_hydrate(
     endpoint: &JetServiceEndpoint,
     started: bool,
 ) -> Result<(), JetServiceError> {
+    service_authority_require_registered_endpoint(endpoint)?;
     service_authority_register(endpoint, started)
 }
 
@@ -1062,9 +1093,9 @@ fn service_authority_try_send(
         Err(JetServiceChannelError::Closed) => Err(JetServiceError::NotStarted(
             "service endpoint mailbox is closed".to_string(),
         )),
-        Err(JetServiceChannelError::Empty) => {
-            unreachable!("send cannot return an empty channel error")
-        }
+        Err(JetServiceChannelError::Empty) => Err(JetServiceError::Policy(
+            "service channel returned an invalid send result".to_string(),
+        )),
     }
 }
 
@@ -1093,7 +1124,9 @@ pub fn jet_services_endpoint_receive(
         Err(JetServiceChannelError::Closed) => Err(JetServiceError::NotStarted(
             "service endpoint mailbox is closed".to_string(),
         )),
-        Err(JetServiceChannelError::Full(_)) => unreachable!("receive cannot return a full channel error"),
+        Err(JetServiceChannelError::Full(_)) => Err(JetServiceError::Policy(
+            "service channel returned an invalid receive result".to_string(),
+        )),
     }
 }
 
@@ -1452,9 +1485,9 @@ pub fn jet_services_authority_take_pending(
         .lock()
         .map_err(|_| service_authority_error("service authority lock is poisoned"))?;
     let records = service_authority_read(&runtime)?;
-    let mut entries = service_authority_entries(&records)?;
+    let mut entries = service_authority_entries(&runtime, &records)?;
     if service_authority_cleanup_expired(&runtime, &entries, service_authority_now())? {
-        entries = service_authority_entries(&service_authority_read(&runtime)?)?;
+        entries = service_authority_entries(&runtime, &service_authority_read(&runtime)?)?;
     }
     let key = service_pending_key(&store, endpoint);
     let mut pending = service_pending_registry()
@@ -1532,13 +1565,15 @@ pub fn jet_services_authority_requeue_pending(
     let _authority_guard = service_authority_lock()
         .lock()
         .map_err(|_| service_authority_error("service authority lock is poisoned"))?;
-    let mut authority_entries = service_authority_entries(&service_authority_read(&runtime)?)?;
+    let mut authority_entries =
+        service_authority_entries(&runtime, &service_authority_read(&runtime)?)?;
     if service_authority_cleanup_expired(
         &runtime,
         &authority_entries,
         service_authority_now(),
     )? {
-        authority_entries = service_authority_entries(&service_authority_read(&runtime)?)?;
+        authority_entries =
+            service_authority_entries(&runtime, &service_authority_read(&runtime)?)?;
     }
     let mut normalized_entries = Vec::with_capacity(entries.len());
     for (id, message, entry_store) in entries {
@@ -1627,7 +1662,7 @@ pub fn jet_services_authority_mark_delivered(
     let _guard = service_authority_lock()
         .lock()
         .map_err(|_| service_authority_error("service authority lock is poisoned"))?;
-    let entries = service_authority_entries(&service_authority_read(&runtime)?)?;
+    let entries = service_authority_entries(&runtime, &service_authority_read(&runtime)?)?;
     let entry = entries
         .iter()
         .find(|entry| entry.id.as_str() == id)
@@ -1681,14 +1716,22 @@ pub fn jet_services_authority_has_uncommitted(
         store,
         retention_ms: 0,
     };
-    let entries = service_authority_entries(&service_authority_read(&runtime)?)?;
+    let entries = service_authority_entries(&runtime, &service_authority_read(&runtime)?)?;
+    let now = service_authority_now();
     Ok(entries.iter().any(|entry| {
         entry.tree == endpoint.tree
             && entry.worker == endpoint.worker
             && service_authority_entry_routes_to_endpoint(&runtime, entry, endpoint)
-            && entry.delivered_to_worker
+            // A handoff must pin the shard for every live durable receipt,
+            // including one still waiting in the authority queue. Rotating
+            // only after `delivered_to_worker` strands a receipt between the
+            // old pending queue and the new endpoint. Explicit retry remains
+            // the only redelivery operation; this predicate only preserves
+            // the receipt's current route.
             && !entry.delivered
             && !entry.dead
+            && entry.retained_until.is_none()
+            && !service_authority_entry_expired(entry, now)
     }))
 }
 
@@ -1913,6 +1956,7 @@ fn service_authority_id(
 }
 
 fn service_authority_entries(
+    runtime: &JetServiceRuntime,
     records: &[(char, Vec<String>)],
 ) -> Result<Vec<ServiceAuthorityEntry>, JetServiceError> {
     let mut entries: Vec<ServiceAuthorityEntry> = Vec::new();
@@ -1925,6 +1969,30 @@ fn service_authority_entries(
                 let expires = expires
                     .parse::<i64>()
                     .map_err(|_| service_authority_error("service send expiry is malformed"))?;
+                let endpoint = service_authority_endpoint_unchecked(
+                    tree.clone(),
+                    worker.clone(),
+                    generation,
+                    authority.clone(),
+                )?;
+                service_authority_validate_text(
+                    key,
+                    "service idempotency key",
+                    SERVICE_AUTH_MAX_KEY,
+                    false,
+                )?;
+                service_authority_validate_text(
+                    message,
+                    "service message",
+                    SERVICE_AUTH_MAX_MESSAGE,
+                    true,
+                )?;
+                let expected_id = service_authority_id(runtime, &endpoint, message, key);
+                if id != &expected_id {
+                    return Err(service_authority_error(
+                        "service receipt identity does not match its authority fields",
+                    ));
+                }
                 if let Some(previous) = entries
                     .iter_mut()
                     .find(|entry| entry.id.as_str() == id.as_str())
@@ -2052,10 +2120,10 @@ pub fn jet_services_runtime_send(
         .lock()
         .map_err(|_| service_authority_error("service authority lock is poisoned"))?;
     let records = service_authority_read(runtime)?;
-    let mut entries = service_authority_entries(&records)?;
+    let mut entries = service_authority_entries(runtime, &records)?;
     let now = service_authority_now();
     if service_authority_cleanup_expired(runtime, &entries, now)? {
-        entries = service_authority_entries(&service_authority_read(runtime)?)?;
+        entries = service_authority_entries(runtime, &service_authority_read(runtime)?)?;
     }
     if let Some(entry) = entries.iter().find(|entry| {
         entry.key.as_str() == key.as_str()
@@ -2125,10 +2193,10 @@ pub fn jet_services_runtime_retry(
         .lock()
         .map_err(|_| service_authority_error("service authority lock is poisoned"))?;
     let records = service_authority_read(runtime)?;
-    let mut entries = service_authority_entries(&records)?;
+    let mut entries = service_authority_entries(runtime, &records)?;
     let now = service_authority_now();
     if service_authority_cleanup_expired(runtime, &entries, now)? {
-        entries = service_authority_entries(&service_authority_read(runtime)?)?;
+        entries = service_authority_entries(runtime, &service_authority_read(runtime)?)?;
     }
     let entry = entries
         .iter()
@@ -2179,9 +2247,9 @@ pub fn jet_services_runtime_dead_letter(
     let _guard = service_authority_lock()
         .lock()
         .map_err(|_| service_authority_error("service authority lock is poisoned"))?;
-    let mut entries = service_authority_entries(&service_authority_read(runtime)?)?;
+    let mut entries = service_authority_entries(runtime, &service_authority_read(runtime)?)?;
     if service_authority_cleanup_expired(runtime, &entries, service_authority_now())? {
-        entries = service_authority_entries(&service_authority_read(runtime)?)?;
+        entries = service_authority_entries(runtime, &service_authority_read(runtime)?)?;
     }
     let Some(entry) = entries
         .iter()
@@ -2207,9 +2275,9 @@ pub fn jet_services_runtime_retain(
     let _guard = service_authority_lock()
         .lock()
         .map_err(|_| service_authority_error("service authority lock is poisoned"))?;
-    let mut entries = service_authority_entries(&service_authority_read(runtime)?)?;
+    let mut entries = service_authority_entries(runtime, &service_authority_read(runtime)?)?;
     if service_authority_cleanup_expired(runtime, &entries, service_authority_now())? {
-        entries = service_authority_entries(&service_authority_read(runtime)?)?;
+        entries = service_authority_entries(runtime, &service_authority_read(runtime)?)?;
     }
     let Some(entry) = entries
         .iter()
@@ -2242,14 +2310,14 @@ pub fn jet_services_runtime_commit(
     let _guard = service_authority_lock()
         .lock()
         .map_err(|_| service_authority_error("service authority lock is poisoned"))?;
-    let mut entries = service_authority_entries(&service_authority_read(runtime)?)?;
+    let mut entries = service_authority_entries(runtime, &service_authority_read(runtime)?)?;
     let now = service_authority_now();
     let target_expired = entries
         .iter()
         .find(|entry| entry.id.as_str() == id.as_str())
         .is_some_and(|entry| service_authority_entry_expired(entry, now));
     if service_authority_cleanup_expired(runtime, &entries, now)? {
-        entries = service_authority_entries(&service_authority_read(runtime)?)?;
+        entries = service_authority_entries(runtime, &service_authority_read(runtime)?)?;
     }
     let entry = entries
         .iter()

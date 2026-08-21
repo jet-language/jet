@@ -21,6 +21,7 @@ const MAX_SERVICE_STATE_RECORDS: usize = 100_000;
 const MAX_SERVICE_STATE_SCHEMA: usize = 256;
 const MAX_SERVICE_STATE_STORE: usize = 4096;
 const MAX_SERVICE_STATE_BYTES: usize = 128 * 1024 * 1024;
+const MAX_SERVICE_ROLLOUT_BYTES: usize = 4 * 1024 * 1024;
 const MAX_SERVICE_WORKFLOW_STEPS: usize = 100_000;
 const MAX_SERVICE_ACTIVITY_ATTEMPTS: i64 = 1_000;
 const MAX_SERVICE_MESSAGES: usize = 100_000;
@@ -375,6 +376,20 @@ pub struct JetServiceUpgradeReceipt {
     rollback_store: String,
     rollback_available: bool,
     pinned_shards: Vec<String>,
+}
+
+/// Rollout facts are deployment state, not application state. Keep them in a
+/// separate journal beside the injected state authority so a fresh process
+/// cannot silently fall back to generation one or reopen a drained shard.
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct JetServiceRolloutState {
+    generation: i64,
+    previous_generation: i64,
+    last_upgrade: Option<JetServiceUpgradeReceipt>,
+    workers: Vec<(String, i64)>,
+    draining: Vec<String>,
+    partitioned: Vec<String>,
+    directory: Vec<(String, String, i64)>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -1022,6 +1037,7 @@ fn jet_services_start(tree: &mut JetServiceTree) -> Result<(), JetServiceError> 
             "service tree is already started".to_string(),
         ));
     }
+    jet_services_restore_rollout_state(tree)?;
     jet_services_validate_tree(tree)?;
     if tree.name.trim().is_empty()
         || tree.name.chars().any(char::is_control)
@@ -1207,6 +1223,16 @@ fn jet_services_start(tree: &mut JetServiceTree) -> Result<(), JetServiceError> 
         activated.push(endpoint);
     }
     tree.started = true;
+    if let Err(error) = jet_services_rollout_store_write(tree) {
+        tree.started = false;
+        jet_services_close_runtime_groups(tree);
+        for worker in &mut tree.workers {
+            worker.running = false;
+            let _ = jet_services_authority_update(&worker.endpoint, false);
+            let _ = jet_services_authority_update_draining(&worker.endpoint, false);
+        }
+        return Err(error);
+    }
     Ok(())
 }
 
@@ -1968,8 +1994,8 @@ fn jet_services_receive(
                                     "service authority worker mailbox is closed".to_string(),
                                 )
                             }
-                            JetServiceChannelError::Empty => unreachable!(
-                                "send cannot return an empty channel error"
+                            JetServiceChannelError::Empty => JetServiceError::Policy(
+                                "service channel returned an invalid send result".to_string(),
                             ),
                         };
                         let rollback = jet_services_authority_requeue_pending(endpoint, remaining.clone());
@@ -2056,7 +2082,11 @@ fn jet_services_receive(
                     worker.name
                 )));
             }
-            Err(JetServiceChannelError::Full(_)) => unreachable!("receive cannot return a full channel error"),
+            Err(JetServiceChannelError::Full(_)) => {
+                return Err(JetServiceError::Policy(
+                    "service channel returned an invalid receive result".to_string(),
+                ));
+            }
         };
         let should_stop = worker.mailbox.channel.depth() == 0;
         (message, should_stop, mailbox_before)
@@ -2609,6 +2639,597 @@ fn jet_services_state_error(message: impl Into<String>) -> JetServiceError {
         "{}; repair or replace the state store before retrying",
         message.into()
     ))
+}
+
+fn jet_services_rollout_scalar(
+    lines: &mut Vec<u8>,
+    label: &str,
+    value: impl std::fmt::Display,
+) {
+    lines.extend_from_slice(label.as_bytes());
+    lines.push(b':');
+    lines.extend_from_slice(value.to_string().as_bytes());
+    lines.push(b'\n');
+}
+
+fn jet_services_rollout_frame(
+    lines: &mut Vec<u8>,
+    label: &str,
+    value: &str,
+) -> Result<(), JetServiceError> {
+    if value.len() > MAX_SERVICE_MESSAGE || value.chars().any(char::is_control) {
+        return Err(jet_services_state_error(format!(
+            "rollout journal {label} contains invalid text"
+        )));
+    }
+    lines.extend_from_slice(label.as_bytes());
+    lines.push(b':');
+    lines.extend_from_slice(&jet_services_state_frame(value));
+    lines.push(b'\n');
+    Ok(())
+}
+
+fn jet_services_rollout_read_line(
+    lines: &mut std::str::Lines<'_>,
+    label: &str,
+) -> Result<String, JetServiceError> {
+    let line = lines.next().ok_or_else(|| {
+        jet_services_state_error(format!("rollout journal {label} is truncated"))
+    })?;
+    line.strip_prefix(&format!("{label}:"))
+        .map(ToString::to_string)
+        .ok_or_else(|| jet_services_state_error(format!("rollout journal {label} is invalid")))
+}
+
+fn jet_services_rollout_read_scalar(
+    lines: &mut std::str::Lines<'_>,
+    label: &str,
+) -> Result<i64, JetServiceError> {
+    jet_services_rollout_read_line(lines, label)?
+        .parse::<i64>()
+        .map_err(|_| jet_services_state_error(format!("rollout journal {label} is invalid")))
+}
+
+fn jet_services_rollout_read_count(
+    lines: &mut std::str::Lines<'_>,
+    label: &str,
+) -> Result<usize, JetServiceError> {
+    let count = jet_services_rollout_read_line(lines, label)?
+        .parse::<usize>()
+        .map_err(|_| jet_services_state_error(format!("rollout journal {label} is invalid")))?;
+    if count > MAX_SERVICE_WORKERS {
+        return Err(jet_services_state_error(format!(
+            "rollout journal {label} exceeds the worker limit"
+        )));
+    }
+    Ok(count)
+}
+
+fn jet_services_rollout_read_bool(
+    lines: &mut std::str::Lines<'_>,
+    label: &str,
+) -> Result<bool, JetServiceError> {
+    match jet_services_rollout_read_line(lines, label)?.as_str() {
+        "0" => Ok(false),
+        "1" => Ok(true),
+        _ => Err(jet_services_state_error(format!(
+            "rollout journal {label} is invalid"
+        ))),
+    }
+}
+
+fn jet_services_rollout_read_frame(
+    lines: &mut std::str::Lines<'_>,
+    label: &str,
+) -> Result<String, JetServiceError> {
+    let value = jet_services_rollout_read_line(lines, label)?;
+    let (length, payload) = value.split_once(':').ok_or_else(|| {
+        jet_services_state_error(format!("rollout journal {label} length is missing"))
+    })?;
+    let length = length.parse::<usize>().map_err(|_| {
+        jet_services_state_error(format!("rollout journal {label} length is invalid"))
+    })?;
+    if length != payload.len()
+        || length > MAX_SERVICE_MESSAGE
+        || payload.chars().any(char::is_control)
+    {
+        return Err(jet_services_state_error(format!(
+            "rollout journal {label} frame is invalid"
+        )));
+    }
+    Ok(payload.to_string())
+}
+
+fn jet_services_rollout_name(value: &str, label: &str) -> Result<(), JetServiceError> {
+    if value.trim().is_empty()
+        || value.chars().any(char::is_control)
+        || value.len() > MAX_SERVICE_NAME
+    {
+        return Err(jet_services_state_error(format!(
+            "rollout journal {label} is not a valid service name"
+        )));
+    }
+    Ok(())
+}
+
+fn jet_services_rollout_snapshot(tree: &JetServiceTree) -> JetServiceRolloutState {
+    JetServiceRolloutState {
+        generation: tree.generation,
+        previous_generation: tree.previous_generation,
+        last_upgrade: tree.last_upgrade.clone(),
+        workers: tree
+            .workers
+            .iter()
+            .map(|worker| (worker.name.clone(), worker.endpoint.generation))
+            .collect(),
+        draining: tree.draining.clone(),
+        partitioned: tree.partitioned.clone(),
+        directory: tree
+            .directory
+            .iter()
+            .map(|(name, endpoint, _)| {
+                (name.clone(), endpoint.worker.clone(), endpoint.generation)
+            })
+            .collect(),
+    }
+}
+
+fn jet_services_rollout_encode(
+    tree_name: &str,
+    state: &JetServiceRolloutState,
+) -> Result<Vec<u8>, JetServiceError> {
+    let mut bytes = b"JET-SERVICE-ROLLOUT/1\n".to_vec();
+    jet_services_rollout_frame(&mut bytes, "tree", tree_name)?;
+    jet_services_rollout_scalar(&mut bytes, "generation", state.generation);
+    jet_services_rollout_scalar(&mut bytes, "previous", state.previous_generation);
+    match &state.last_upgrade {
+        None => jet_services_rollout_scalar(&mut bytes, "upgrade", "none"),
+        Some(receipt) => {
+            jet_services_rollout_scalar(&mut bytes, "upgrade", "present");
+            jet_services_rollout_scalar(&mut bytes, "upgrade_from", receipt.from_generation);
+            jet_services_rollout_scalar(&mut bytes, "upgrade_to", receipt.to_generation);
+            jet_services_rollout_frame(&mut bytes, "upgrade_migration", &receipt.migration)?;
+            jet_services_rollout_frame(&mut bytes, "upgrade_store", &receipt.rollback_store)?;
+            jet_services_rollout_scalar(
+                &mut bytes,
+                "upgrade_available",
+                if receipt.rollback_available { 1 } else { 0 },
+            );
+            jet_services_rollout_scalar(&mut bytes, "pinned_count", receipt.pinned_shards.len());
+            for name in &receipt.pinned_shards {
+                jet_services_rollout_frame(&mut bytes, "pinned", name)?;
+            }
+        }
+    }
+    jet_services_rollout_scalar(&mut bytes, "worker_count", state.workers.len());
+    for (name, generation) in &state.workers {
+        jet_services_rollout_frame(&mut bytes, "worker", name)?;
+        jet_services_rollout_scalar(&mut bytes, "worker_generation", generation);
+    }
+    jet_services_rollout_scalar(&mut bytes, "draining_count", state.draining.len());
+    for name in &state.draining {
+        jet_services_rollout_frame(&mut bytes, "draining", name)?;
+    }
+    jet_services_rollout_scalar(&mut bytes, "partitioned_count", state.partitioned.len());
+    for name in &state.partitioned {
+        jet_services_rollout_frame(&mut bytes, "partitioned", name)?;
+    }
+    jet_services_rollout_scalar(&mut bytes, "directory_count", state.directory.len());
+    for (name, worker, generation) in &state.directory {
+        jet_services_rollout_frame(&mut bytes, "directory_name", name)?;
+        jet_services_rollout_frame(&mut bytes, "directory_worker", worker)?;
+        jet_services_rollout_scalar(&mut bytes, "directory_generation", generation);
+    }
+    let digest = jet_sha256_raw(&bytes);
+    bytes.extend_from_slice(b"checksum:");
+    bytes.extend_from_slice(service_authority_hex(&digest).as_bytes());
+    bytes.push(b'\n');
+    if bytes.len() > MAX_SERVICE_ROLLOUT_BYTES {
+        return Err(jet_services_state_error(
+            "rollout journal exceeds its byte limit",
+        ));
+    }
+    Ok(bytes)
+}
+
+fn jet_services_rollout_decode(
+    tree_name: &str,
+    bytes: &[u8],
+) -> Result<JetServiceRolloutState, JetServiceError> {
+    if bytes.len() > MAX_SERVICE_ROLLOUT_BYTES || bytes.last() != Some(&b'\n') {
+        return Err(jet_services_state_error(
+            "rollout journal exceeds its byte limit or is not newline terminated",
+        ));
+    }
+    let marker = b"\nchecksum:";
+    let marker_start = bytes
+        .windows(marker.len())
+        .rposition(|window| window == marker)
+        .ok_or_else(|| jet_services_state_error("rollout journal checksum is missing"))?;
+    let checksum_start = marker_start + 1 + b"checksum:".len();
+    let checksum_end = bytes.len() - 1;
+    let checksum = std::str::from_utf8(&bytes[checksum_start..checksum_end])
+        .map_err(|_| jet_services_state_error("rollout journal checksum is not valid UTF-8"))?;
+    if checksum.len() != 64 || !checksum.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+        return Err(jet_services_state_error(
+            "rollout journal checksum is invalid",
+        ));
+    }
+    let expected = service_authority_hex(&jet_sha256_raw(&bytes[..marker_start + 1]));
+    if checksum != expected {
+        return Err(jet_services_state_error(
+            "rollout journal checksum does not match its contents",
+        ));
+    }
+    let text = std::str::from_utf8(&bytes[..marker_start + 1])
+        .map_err(|_| jet_services_state_error("rollout journal is not valid UTF-8"))?;
+    let mut lines = text.lines();
+    if lines.next() != Some("JET-SERVICE-ROLLOUT/1") {
+        return Err(jet_services_state_error("rollout journal magic is invalid"));
+    }
+    if jet_services_rollout_read_frame(&mut lines, "tree")? != tree_name {
+        return Err(jet_services_state_error(
+            "rollout journal belongs to a different service tree",
+        ));
+    }
+    let generation = jet_services_rollout_read_scalar(&mut lines, "generation")?;
+    let previous_generation = jet_services_rollout_read_scalar(&mut lines, "previous")?;
+    if generation < 1 || previous_generation < 0 || previous_generation >= generation {
+        return Err(jet_services_state_error(
+            "rollout journal generation order is invalid",
+        ));
+    }
+    let last_upgrade = match jet_services_rollout_read_line(&mut lines, "upgrade")?.as_str() {
+        "none" => None,
+        "present" => {
+            let from_generation = jet_services_rollout_read_scalar(&mut lines, "upgrade_from")?;
+            let to_generation = jet_services_rollout_read_scalar(&mut lines, "upgrade_to")?;
+            let migration = jet_services_rollout_read_frame(&mut lines, "upgrade_migration")?;
+            let rollback_store = jet_services_rollout_read_frame(&mut lines, "upgrade_store")?;
+            let rollback_available =
+                jet_services_rollout_read_bool(&mut lines, "upgrade_available")?;
+            let pinned_count = jet_services_rollout_read_count(&mut lines, "pinned_count")?;
+            let mut pinned_shards = Vec::with_capacity(pinned_count);
+            for _ in 0..pinned_count {
+                let name = jet_services_rollout_read_frame(&mut lines, "pinned")?;
+                jet_services_rollout_name(&name, "pinned shard")?;
+                if pinned_shards.iter().any(|seen| seen == &name) {
+                    return Err(jet_services_state_error(
+                        "rollout journal contains a duplicate pinned shard",
+                    ));
+                }
+                pinned_shards.push(name);
+            }
+            if from_generation < 1
+                || to_generation <= from_generation
+                || to_generation != generation
+                || from_generation != previous_generation
+            {
+                return Err(jet_services_state_error(
+                    "rollout journal receipt generations do not match the active generation",
+                ));
+            }
+            let _ = jet_services_migration_from_name(&migration)?;
+            if rollback_available != !rollback_store.is_empty() {
+                return Err(jet_services_state_error(
+                    "rollout journal rollback availability is inconsistent",
+                ));
+            }
+            Some(JetServiceUpgradeReceipt {
+                from_generation,
+                to_generation,
+                migration,
+                rollback_store,
+                rollback_available,
+                pinned_shards,
+            })
+        }
+        _ => {
+            return Err(jet_services_state_error(
+                "rollout journal upgrade marker is invalid",
+            ))
+        }
+    };
+    if last_upgrade.is_none() && previous_generation != 0 {
+        return Err(jet_services_state_error(
+            "rollout journal has a previous generation without a receipt",
+        ));
+    }
+    let worker_count = jet_services_rollout_read_count(&mut lines, "worker_count")?;
+    let mut workers = Vec::with_capacity(worker_count);
+    for _ in 0..worker_count {
+        let name = jet_services_rollout_read_frame(&mut lines, "worker")?;
+        jet_services_rollout_name(&name, "worker")?;
+        let worker_generation =
+            jet_services_rollout_read_scalar(&mut lines, "worker_generation")?;
+        if worker_generation < 1
+            || (worker_generation != generation
+                && last_upgrade
+                    .as_ref()
+                    .is_none_or(|receipt| worker_generation != receipt.from_generation))
+        {
+            return Err(jet_services_state_error(
+                "rollout journal worker generation is not allowed",
+            ));
+        }
+        if workers.iter().any(|(seen, _)| seen == &name) {
+            return Err(jet_services_state_error(
+                "rollout journal contains a duplicate worker",
+            ));
+        }
+        workers.push((name, worker_generation));
+    }
+    let draining_count = jet_services_rollout_read_count(&mut lines, "draining_count")?;
+    let mut draining = Vec::with_capacity(draining_count);
+    for _ in 0..draining_count {
+        let name = jet_services_rollout_read_frame(&mut lines, "draining")?;
+        jet_services_rollout_name(&name, "draining worker")?;
+        if draining.iter().any(|seen| seen == &name) {
+            return Err(jet_services_state_error(
+                "rollout journal contains a duplicate draining worker",
+            ));
+        }
+        draining.push(name);
+    }
+    let partitioned_count = jet_services_rollout_read_count(&mut lines, "partitioned_count")?;
+    let mut partitioned = Vec::with_capacity(partitioned_count);
+    for _ in 0..partitioned_count {
+        let name = jet_services_rollout_read_frame(&mut lines, "partitioned")?;
+        jet_services_rollout_name(&name, "partitioned worker")?;
+        if partitioned.iter().any(|seen| seen == &name)
+            || draining.iter().any(|seen| seen == &name)
+        {
+            return Err(jet_services_state_error(
+                "rollout journal has overlapping or duplicate worker state",
+            ));
+        }
+        partitioned.push(name);
+    }
+    let directory_count = jet_services_rollout_read_count(&mut lines, "directory_count")?;
+    let mut directory = Vec::with_capacity(directory_count);
+    for _ in 0..directory_count {
+        let name = jet_services_rollout_read_frame(&mut lines, "directory_name")?;
+        let worker = jet_services_rollout_read_frame(&mut lines, "directory_worker")?;
+        jet_services_rollout_name(&name, "directory name")?;
+        jet_services_rollout_name(&worker, "directory worker")?;
+        let worker_generation =
+            jet_services_rollout_read_scalar(&mut lines, "directory_generation")?;
+        if worker_generation < 1 || directory.iter().any(|(seen, _, _)| seen == &name) {
+            return Err(jet_services_state_error(
+                "rollout journal directory entry is invalid",
+            ));
+        }
+        directory.push((name, worker, worker_generation));
+    }
+    if lines.next().is_some() {
+        return Err(jet_services_state_error(
+            "rollout journal has trailing records",
+        ));
+    }
+    Ok(JetServiceRolloutState {
+        generation,
+        previous_generation,
+        last_upgrade,
+        workers,
+        draining,
+        partitioned,
+        directory,
+    })
+}
+
+fn jet_services_rollout_path(
+    authority: &JetServiceStateAuthority,
+) -> Result<String, JetServiceError> {
+    let path = format!("{}.rollout", authority.store);
+    service_authority_validate_text(
+        &path,
+        "service rollout journal",
+        MAX_SERVICE_STATE_STORE,
+        false,
+    )?;
+    jet_services_state_validate_path(std::path::Path::new(&path))?;
+    Ok(path)
+}
+
+fn jet_services_rollout_store_load(
+    tree: &JetServiceTree,
+) -> Result<Option<JetServiceRolloutState>, JetServiceError> {
+    let Some(authority) = tree.state_authority.as_ref() else {
+        return Ok(None);
+    };
+    let path = jet_services_rollout_path(authority)?;
+    let _guard = service_authority_lock()
+        .lock()
+        .map_err(|_| jet_services_state_error("service rollout lock is poisoned"))?;
+    let _file_lock = service_authority_file_lock(&path, "rollout")?;
+    let rollout_path = std::path::Path::new(&path);
+    if !rollout_path.exists() {
+        return Ok(None);
+    }
+    let metadata = std::fs::metadata(rollout_path).map_err(|error| {
+        jet_services_state_error(format!("cannot inspect service rollout journal: {error}"))
+    })?;
+    if metadata.len() > MAX_SERVICE_ROLLOUT_BYTES as u64 {
+        return Err(jet_services_state_error(
+            "service rollout journal exceeds its byte limit",
+        ));
+    }
+    let mut file = std::fs::File::open(rollout_path).map_err(|error| {
+        jet_services_state_error(format!("cannot open service rollout journal: {error}"))
+    })?;
+    let mut bytes = Vec::new();
+    std::io::Read::read_to_end(&mut file, &mut bytes).map_err(|error| {
+        jet_services_state_error(format!("cannot read service rollout journal: {error}"))
+    })?;
+    jet_services_rollout_decode(&tree.name, &bytes).map(Some)
+}
+
+fn jet_services_rollout_store_write(tree: &JetServiceTree) -> Result<(), JetServiceError> {
+    let Some(authority) = tree.state_authority.as_ref() else {
+        return Ok(());
+    };
+    let path = jet_services_rollout_path(authority)?;
+    let bytes = jet_services_rollout_encode(&tree.name, &jet_services_rollout_snapshot(tree))?;
+    let _guard = service_authority_lock()
+        .lock()
+        .map_err(|_| jet_services_state_error("service rollout lock is poisoned"))?;
+    let _file_lock = service_authority_file_lock(&path, "rollout")?;
+    let rollout_path = std::path::Path::new(&path);
+    if let Some(parent) = rollout_path
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+    {
+        std::fs::create_dir_all(parent).map_err(|error| {
+            jet_services_state_error(format!("cannot create service rollout directory: {error}"))
+        })?;
+    }
+    jet_services_state_validate_path(rollout_path)?;
+    let temporary = std::path::PathBuf::from(format!(
+        "{}.jet-rollout-{}-{}-{}",
+        path,
+        std::process::id(),
+        service_authority_now(),
+        service_state_temp_sequence(),
+    ));
+    let result = (|| {
+        let mut options = std::fs::OpenOptions::new();
+        options.write(true).create_new(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            options.mode(0o600);
+        }
+        let mut file = options.open(&temporary).map_err(|error| {
+            jet_services_state_error(format!("cannot create temporary rollout journal: {error}"))
+        })?;
+        std::io::Write::write_all(&mut file, &bytes).map_err(|error| {
+            jet_services_state_error(format!("cannot write service rollout journal: {error}"))
+        })?;
+        std::io::Write::flush(&mut file).map_err(|error| {
+            jet_services_state_error(format!("cannot flush service rollout journal: {error}"))
+        })?;
+        file.sync_all().map_err(|error| {
+            jet_services_state_error(format!("cannot sync service rollout journal: {error}"))
+        })?;
+        std::fs::rename(&temporary, rollout_path).map_err(|error| {
+            jet_services_state_error(format!("cannot publish service rollout journal: {error}"))
+        })?;
+        Ok(())
+    })();
+    if result.is_err() {
+        let _ = std::fs::remove_file(&temporary);
+    }
+    result
+}
+
+fn jet_services_restore_rollout_state(tree: &mut JetServiceTree) -> Result<(), JetServiceError> {
+    let Some(state) = jet_services_rollout_store_load(tree)? else {
+        return Ok(());
+    };
+    if state.workers.len() != tree.workers.len() {
+        return Err(jet_services_state_error(
+            "rollout journal worker topology does not match the service declaration",
+        ));
+    }
+    let receipt = state.last_upgrade.clone();
+    if let Some(receipt) = &receipt {
+        if receipt.rollback_available {
+            let authority = tree.state_authority.as_ref().ok_or_else(|| {
+                jet_services_state_error("rollout receipt has no state authority")
+            })?;
+            jet_services_state_validate_path(std::path::Path::new(&receipt.rollback_store))?;
+            if !std::path::Path::new(&receipt.rollback_store).is_file() {
+                return Err(jet_services_state_error(
+                    "rollout receipt names a missing rollback store",
+                ));
+            }
+            let rollback_authority = JetServiceStateAuthority {
+                store: receipt.rollback_store.clone(),
+                ..authority.clone()
+            };
+            let _ = jet_services_state_store_load(&rollback_authority, &tree.state_adapter)?;
+        }
+    }
+    let mut worker_generations = Vec::with_capacity(tree.workers.len());
+    for worker in &tree.workers {
+        let (_, generation) = state
+            .workers
+            .iter()
+            .find(|(name, _)| name == &worker.name)
+            .ok_or_else(|| {
+                jet_services_state_error(format!(
+                    "rollout journal is missing worker {}",
+                    worker.name
+                ))
+            })?;
+        worker_generations.push(*generation);
+    }
+    let mut restored_directory = Vec::with_capacity(state.directory.len());
+    for (name, worker_name, generation) in &state.directory {
+        let worker_generation = state
+            .workers
+            .iter()
+            .find(|(candidate, _)| candidate == worker_name)
+            .map(|(_, generation)| *generation)
+            .ok_or_else(|| {
+                jet_services_state_error(format!(
+                    "rollout journal directory entry {} names an unknown worker",
+                    name
+                ))
+            })?;
+        if worker_generation != *generation {
+            return Err(jet_services_state_error(
+                "rollout journal directory generation is inconsistent",
+            ));
+        }
+        let _worker = tree
+            .workers
+            .iter()
+            .find(|worker| &worker.name == worker_name)
+            .ok_or_else(|| {
+                jet_services_state_error(format!(
+                    "rollout journal directory entry {} names an unknown worker",
+                    name
+                ))
+            })?;
+        restored_directory.push((name.clone(), worker_name.clone(), *generation));
+    }
+    tree.generation = state.generation;
+    tree.previous_generation = state.previous_generation;
+    tree.last_upgrade = receipt;
+    tree.draining = state.draining;
+    tree.partitioned = state.partitioned;
+    for (worker, generation) in tree.workers.iter_mut().zip(worker_generations) {
+        worker.endpoint.generation = generation;
+        worker.mailbox.endpoint = worker.endpoint.clone();
+        service_authority_register(&worker.endpoint, false)?;
+        jet_services_authority_update_partitioned(
+            &worker.endpoint,
+            tree.partitioned.iter().any(|name| name == &worker.name),
+        )?;
+        jet_services_authority_update_draining(
+            &worker.endpoint,
+            tree.draining.iter().any(|name| name == &worker.name),
+        )?;
+    }
+    tree.directory.clear();
+    for (name, worker_name, generation) in restored_directory {
+        let worker = tree
+            .workers
+            .iter()
+            .find(|worker| worker.name == worker_name)
+            .ok_or_else(|| JetServiceError::Unknown("restored directory worker disappeared".to_string()))?;
+        if worker.endpoint.generation != generation {
+            return Err(jet_services_state_error(
+                "rollout journal directory generation does not match its worker",
+            ));
+        }
+        let endpoint = worker.endpoint.clone();
+        let signature =
+            service_authority_sign_directory(&tree.authority, &tree.name, &name, &endpoint)?;
+        tree.directory.push((name, endpoint, signature));
+    }
+    Ok(())
 }
 
 fn jet_services_state_read_line(
@@ -4173,8 +4794,20 @@ fn jet_services_directory_register(
         ));
     }
     let signature = jet_services_directory_signature(tree, &name, &endpoint)?;
+    let previous = tree
+        .directory
+        .iter()
+        .find(|(entry, _, _)| entry == &name)
+        .cloned();
     tree.directory.retain(|(n, _, _)| n != &name);
-    tree.directory.push((name, endpoint, signature));
+    tree.directory.push((name.clone(), endpoint, signature));
+    if let Err(error) = jet_services_rollout_store_write(tree) {
+        tree.directory.retain(|(entry, _, _)| entry != &name);
+        if let Some(previous) = previous {
+            tree.directory.push(previous);
+        }
+        return Err(error);
+    }
     Ok(())
 }
 
@@ -4279,8 +4912,9 @@ fn jet_services_drain_worker(
         if let Some(worker) = tree.workers.iter_mut().find(|worker| worker.name == name) {
             worker.running = false;
         }
-        if let Err(error) = jet_services_discharge_task(task) {
-            let recovery = jet_services_authority_update(&worker_endpoint, true)
+        if let Err(error) = jet_services_discharge_task(task.clone()) {
+            let recovery = jet_services_task_start(&task)
+                .and_then(|()| jet_services_authority_update(&worker_endpoint, true))
                 .and_then(|()| jet_services_authority_update_draining(&worker_endpoint, false));
             if let Some(worker) = tree.workers.iter_mut().find(|worker| worker.name == name) {
                 worker.running = recovery.is_ok();
@@ -4295,7 +4929,28 @@ fn jet_services_drain_worker(
             });
         }
     }
-    tree.draining.push(name);
+    tree.draining.push(name.clone());
+    if let Err(error) = jet_services_rollout_store_write(tree) {
+        tree.draining.retain(|draining| draining != &name);
+        let recovery = if empty {
+            jet_services_task_start(&task)
+                .and_then(|()| jet_services_authority_update(&worker_endpoint, true))
+                .and_then(|()| jet_services_authority_update_draining(&worker_endpoint, false))
+        } else {
+            jet_services_authority_update_draining(&worker_endpoint, false)
+        };
+        if let Some(worker) = tree.workers.iter_mut().find(|worker| worker.name == name) {
+            worker.running = if empty { recovery.is_ok() } else { worker.running };
+        }
+        return Err(match recovery {
+            Ok(()) => error,
+            Err(recovery_error) => JetServiceError::Policy(format!(
+                "{}; drain journal recovery failed: {}",
+                error.jet_show(),
+                recovery_error.jet_show()
+            )),
+        });
+    }
     Ok(())
 }
 
@@ -4353,7 +5008,7 @@ fn jet_services_partition_worker(
         return Err(error);
     }
     if was_running {
-        if let Err(error) = jet_services_discharge_task(task) {
+        if let Err(error) = jet_services_discharge_task(task.clone()) {
             let recovery = jet_services_authority_update_partitioned(&worker_endpoint, false)
                 .and_then(|()| jet_services_authority_update(&worker_endpoint, true));
             tree.partitioned.retain(|existing| existing != &name);
@@ -4373,6 +5028,33 @@ fn jet_services_partition_worker(
                 )),
             });
         }
+    }
+    if let Err(error) = jet_services_rollout_store_write(tree) {
+        tree.partitioned.retain(|existing| existing != &name);
+        let recovery = jet_services_authority_update_partitioned(&worker_endpoint, false)
+            .and_then(|()| {
+                if was_running {
+                    jet_services_task_start(&task)
+                        .and_then(|()| jet_services_authority_update(&worker_endpoint, true))
+                } else {
+                    Ok(())
+                }
+            });
+        if let Some(worker) = tree.workers.iter_mut().find(|worker| worker.name == name) {
+            worker.running = if was_running {
+                recovery.is_ok()
+            } else {
+                false
+            };
+        }
+        return Err(match recovery {
+            Ok(()) => error,
+            Err(recovery_error) => JetServiceError::Policy(format!(
+                "{}; partition journal recovery failed: {}",
+                error.jet_show(),
+                recovery_error.jet_show()
+            )),
+        });
     }
     Ok(())
 }
@@ -4454,6 +5136,7 @@ fn jet_services_reconcile_worker(
         }
         return Err(error);
     }
+    jet_services_rollout_store_write(tree)?;
     Ok(())
 }
 
@@ -4574,10 +5257,7 @@ fn jet_services_promote_worker_generation(
             worker.task.clone(),
         )
     };
-    if tree.delivery == JetServiceDelivery::DurableAtLeastOnce
-        && tree.state_authority.is_some()
-        && jet_services_authority_has_uncommitted(&old_endpoint)?
-    {
+    if jet_services_authority_has_uncommitted(&old_endpoint)? {
         return Ok(false);
     }
     // Promotion is also reached from endpoint-driven drain completion. Own
@@ -4654,6 +5334,7 @@ fn jet_services_promote_worker_generation(
         receipt.pinned_shards.retain(|name| name != worker_name);
     }
     tree.draining.retain(|name| name != worker_name);
+    jet_services_rollout_store_write(tree)?;
     Ok(true)
 }
 
@@ -4742,9 +5423,7 @@ fn jet_services_handoff_generation(tree: &mut JetServiceTree) -> Result<i64, Jet
         .ok_or_else(|| JetServiceError::Policy("service generation exhausted".to_string()))?;
     let mut pinned_shards = Vec::new();
     for worker in &tree.workers {
-        let has_uncommitted = tree.delivery == JetServiceDelivery::DurableAtLeastOnce
-            && tree.state_authority.is_some()
-            && jet_services_authority_has_uncommitted(&worker.endpoint)?;
+        let has_uncommitted = jet_services_authority_has_uncommitted(&worker.endpoint)?;
         if tree.partitioned.iter().any(|name| name == &worker.name)
             || (tree.draining.iter().any(|name| name == &worker.name)
                 && worker.mailbox.channel.depth() > 0)
@@ -4889,6 +5568,7 @@ fn jet_services_handoff_generation(tree: &mut JetServiceTree) -> Result<i64, Jet
     });
     tree.draining
         .retain(|name| pinned_shards.iter().any(|pinned| pinned == name));
+    jet_services_rollout_store_write(tree)?;
     Ok(tree.generation)
 }
 
@@ -5082,6 +5762,7 @@ fn jet_services_rollback_generation(tree: &mut JetServiceTree) -> Result<i64, Je
     }
     tree.draining = rollback_draining;
     tree.last_upgrade = None;
+    jet_services_rollout_store_write(tree)?;
     Ok(tree.generation)
 }
 

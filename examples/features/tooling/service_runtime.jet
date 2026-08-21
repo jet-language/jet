@@ -1,5 +1,7 @@
 // D-SERVICE1 + delivery/state/workflow/identity/upgrade (#1148–#1153).
 use core.service as service
+use core.files as files
+use core.log as log
 use core.testing as testing
 
 fn worker_a() {}
@@ -25,6 +27,24 @@ fn outcome_label(outcome: TaskOutcome) String {
     return "unknown"
 }
 
+fn status_is_paused(status: TaskStatus) Bool {
+    if status == {
+        .Paused :> { return true }
+    }
+    return false
+}
+
+fn outcome_is_finished(outcome: TaskOutcome) Bool {
+    if outcome == {
+        .Finished :> { return true }
+    }
+    return false
+}
+
+fn telemetry_has_service_counters(text: String) Bool {
+    return text.contains("\"observation\":\"Observe(workers=2") && text.contains("\"metric.counter.dead_letters\":0") && text.contains("\"metric.counter.events\":1") && text.contains("\"metric.counter.restarts\":1") && text.contains("\"metric.counter.chaos_failures\":1")
+}
+
 // D-CONC-JOIN1: the dogfood service task is consumed, not dropped.
 fn service_probe() String {
     probe := service.tree("probe")
@@ -41,6 +61,7 @@ fn run() {
     tree.set_delivery(service.delivery_durable()) ?? panic("delivery")
     temp := testing.temp_dir("service-runtime")
     state_store :: Path.from(temp).join("state.log").to_string()
+    telemetry_path :: Path.from(temp).join("service.jsonl").to_string()
     store :: service.state_store(state_store) ?? panic("state store")
     tree.set_state_event_log(store, "app-events", 1, "reversible") ?? panic("state")
     a :: tree.worker("a", worker_a, capacity: 2) ?? panic("a")
@@ -61,25 +82,51 @@ fn run() {
     scheduled :: tree.workflow_activity(run_id, "charge", "charge-1", 2) ?? panic("activity")
     print("activity:{status_label(scheduled)}")
     retried :: tree.workflow_activity_retry(run_id, "charge-1", TaskOutcome.Panicked("timeout")) ?? panic("retry")
+    if !status_is_paused(retried) :> panic("typed retry status")
     print("retry:{status_label(retried)}")
     completed :: tree.workflow_activity_complete(run_id, "charge-1", TaskOutcome.Finished) ?? panic("complete")
+    if !outcome_is_finished(completed) :> panic("typed completion outcome")
     print("completed:{outcome_label(completed)}")
-    print("outcome:{outcome_label(tree.workflow_outcome(run_id) ?? panic("outcome"))}")
+    workflow_outcome :: tree.workflow_outcome(run_id) ?? panic("outcome")
+    if !outcome_is_finished(workflow_outcome) :> panic("typed workflow outcome")
+    print("outcome:{outcome_label(workflow_outcome)}")
     tree.directory_register("front", a) ?? panic("dir")
     resolved :: tree.directory_resolve("front") ?? panic("resolve")
     print(resolved.show())
-
     tree.drain_worker(a) ?? panic("drain")
+    late :: a.send("late")
+    if late == {
+        .Ok(_) :> { print("drain_send:accepted") }
+        .Err(_) :> { print("drain_send:rejected") }
+    }
     gen :: tree.handoff_generation() ?? panic("handoff")
     print("gen:{gen}")
     print(tree.upgrade_receipt() ?? panic("upgrade receipt"))
+    stale :: a.send("stale")
+    if stale == {
+        .Ok(_) :> { print("stale_send:accepted") }
+        .Err(_) :> { print("stale_send:rejected") }
+    }
     blocked :: tree.receive(a)
     if blocked == {
-        .Ok(_) -> { print("handoff_receive:accepted") }
-        .Err(_) -> { print("handoff_receive:rejected") }
+        .Ok(_) :> { print("handoff_receive:accepted") }
+        .Err(_) :> { print("handoff_receive:rejected") }
     }
     print("handoff_depth:{tree.mailbox_depth(a) ?? panic("handoff depth")}")
-    tree.chaos_fail() ?? panic("chaos")
-    print(tree.observe())
+    chaos :: tree.chaos_fail() ?? panic("chaos")
+    observation :: tree.observe()
+    print(observation)
+    restart_count :: tree.restarts(a) ?? panic("restarts")
+    log.set_sink("jsonl", telemetry_path)
+    log.info_fields("service.observe", [
+        log.field("observation", observation),
+        log.counter("dead_letters", tree.dead_letter_count()),
+        log.counter("events", tree.event_count()),
+        log.counter("restarts", restart_count),
+        log.counter("chaos_failures", chaos)
+    ])
+    log.flush()
+    telemetry :: files.read(telemetry_path) ?? panic("telemetry read")
+    print("telemetry:{telemetry_has_service_counters(telemetry)}")
     tree.stop() ?? panic("stop")
 }

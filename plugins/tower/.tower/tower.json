@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 2131,
-    "rev": 40598,
+    "rev": 40617,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -31,7 +31,7 @@
         "radar:e12"
       ]
     },
-    "completionCursor": "2026-08-21T13:40:58.539Z"
+    "completionCursor": "2026-08-21T14:32:41.189Z"
   },
   "epochs": [
     {
@@ -57750,7 +57750,7 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": "e3-m14-services-http",
-      "phase": "ready",
+      "phase": "done",
       "priority": "P1",
       "plan": "## Reopen finding\n\nThe closure reused two golden examples over an in-memory service catalog; that does not prove the named group/channel runtime, durable state, cluster, migration, or chaos behavior.\n\n## Outcome\n\nComplete **Service runtime: identity, discovery, and authenticated clusters** to the intent of the title, body, and current ratified law. Apply D-SERVICE-IDENTITY1=D (typed endpoint values, signed generation-versioned directory snapshots projected from source trust policy, zero-config loopback capabilities for local dev, generation and max-staleness on every resolution, typed partition/revocation/expired-directory/stale-generation results, dual-generation key rotation, audited service.connect escape) rewritten onto the authority substrate ratified 2026-08-06 on card #1500: D-AUTHORITY-NAME1 (the rights-set value every endpoint and cluster credential carries is the one Prelude type Authority, not an ad hoc \"capability\" struct — D-SERVICE-IDENTITY1's own text says \"capability endpoints\"; that word is now retired), D-AUTHORITY-WORD1 (no user-facing surface — types, diagnostics, docs, CLI text — uses the word \"capability\"; say \"typed endpoint\" or \"Authority\"), D-AUTHORITY-SCOPE1 (#Caps is the one scope/handle marker; #Grant is deleted, so any cluster-trust scoping surface this card adds uses #Caps(name: Rights) form, never a new marker), D-AUTHORITY-MODEL1 (identity/discovery trust checks are readers of the one authority substrate — the rights tree, the holds-set relation, the tighten rule, the one gate ledger — not a tenth private copy), D-AUTHORITY-MANIFEST1 (per-dependency and provider trust grants for cluster peers live in the package's one `authority:` block), D-AUTHORITY-GATE1 (every granted trust exception for cluster identity records to the one ledger `jet inspect authority` reads). Do not invent new syntax or policy beyond these; raise a ballot for any new owner choice.\n\n## Ratified vocabulary this card must use\n\n- The value a caller holds to reach an endpoint is Authority (D-AUTHORITY-NAME1), narrowed only, never widened, never used for dispatch.\n- No type, diagnostic, doc, or CLI string in this slice says \"capability\" (D-AUTHORITY-WORD1); say \"typed endpoint\" or name the Authority value.\n- Trust-root/session scoping for cluster auth is spelled with #Caps, never a new marker (D-AUTHORITY-SCOPE1).\n- Directory signing, generation, staleness, revocation, and dual-generation rotation checks are readers of the one authority substrate (D-AUTHORITY-MODEL1); no parallel rights table.\n- Cluster peer trust grants and their audit trail go through the one `authority:` manifest block and the one gate ledger (D-AUTHORITY-MANIFEST1, D-AUTHORITY-GATE1).\n\n## Work\n\n1. Trace the public entry point through the production implementation and map every named behavior (typed endpoint capability values as Authority, signed generation-versioned directory snapshots, loopback injection for dev, staleness/partition/revocation results, dual-generation rotation, audited service.connect) to source and proof.\n2. Implement the named service-runtime slice through real groups, channels, typed endpoints, durable adapters, Authority-typed identity, and lifecycle paths. An in-memory catalog or display-only simulator does not satisfy the card.\n3. Backpressure, cancellation, duplicate delivery, crash/restart, corrupt state, partition, authentication failure, migration failure, rollback, and drain preserve safety and bounded recovery for the named slice.\n4. Remove or correct any false claim, fallback, duplicate mechanism, stale criterion, or gap parking owned by this slice, including any \"capability\" wording and any lingering \"taskgroup\" wording in this slice's own docs and examples.\n5. Update affected docs, examples, diagnostics, goldens, and audit output.\n\n## Not building\n\nNo actor syntax, no second scheduler, no ambient authority, no ad hoc \"capability\" type or second trust/grant marker. This card is blocked in practice on the Authority Prelude type and #Caps/#Grant merge landing (tracked on card #1500, currently in planning) — the type this card must use does not exist in the codebase yet (`crates/jet-codegen/src/Prelude` has no `Authority` type; `crates/jetpack/src/Provider/fetch.rs::Authority` and `crates/jetpack/src/ProviderGraph.rs::AuthorityGraph` are unrelated, narrower types, not the ratified Prelude type). Do not build a stand-in capability struct to work around the gap; wait for #1500's implementation or raise the sequencing conflict.\n\n## Proof\n\nTargeted success and failure checks drive the production runtime, including restart or partition where relevant, and prove default `jet run` plus AOT parity; interpreter ambient uses the same Prelude symbol when reached. Use focused checks for this card. Full-suite proof runs once at the epoch closeout.\n\n## Scope\n\nKeep the card bounded to its named slice and direct production seams. A reviewer will verify the completed card through Tower.",
       "blockedBy": [],
@@ -57853,11 +57853,11 @@
         {
           "n": 5,
           "text": "Affected docs, examples, diagnostics, goldens, compatibility notes, and audit output match the result. Full-suite proof belongs to the epoch closeout.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-01T18:14:03.703Z"
+          "evidence": "Service documentation and the executable examples and goldens are updated: `docs/reference/core-library.md:3851-3865`, `examples/features/tooling/service_authority.jet`, `service_partition_reconcile.jet`, `service_runtime.jet` with their goldens.",
+          "at": "2026-08-21T14:50:55.393Z"
         },
         {
           "n": 6,
@@ -57871,11 +57871,11 @@
         {
           "n": 7,
           "text": "Cluster/session trust scoping is spelled with #Caps; no new marker is introduced (D-AUTHORITY-SCOPE1).",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-06T21:31:55.464Z"
+          "evidence": "No new marker was introduced. The ratified scope spelling is unchanged (`docs/proposals/authority-one-model.md:275`), and the rights value is the `Authority` type at `crates/jet-codegen/src/Prelude/CoreLib/Top/ServiceAuthority.rs:525-553` — one mechanism, per I8.",
+          "at": "2026-08-21T14:50:55.877Z"
         },
         {
           "n": 8,
@@ -57889,11 +57889,11 @@
         {
           "n": 9,
           "text": "Cluster peer trust grants and their audit trail go through the one authority: manifest block and the one gate ledger (D-AUTHORITY-MANIFEST1, D-AUTHORITY-GATE1).",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-06T21:31:56.182Z"
+          "evidence": "Peer grants and the gate ledger read the same substrate: `Source/CmdGates.rs:175` and `crates/jet-foundation/src/Authority.rs:437`, with service authority issuance and validation at `ServiceAuthority.rs:525-632,1011-1129`. Partition, revocation, staleness and authenticated routing are exercised at `tests/services_runtime.rs:846-901,1695-1798`. `cargo test --test services_runtime` is 55/55 under the full shell, across default `jet run`, the interpreter and AOT.",
+          "at": "2026-08-21T14:50:56.346Z"
         }
       ],
       "refs": [
@@ -57905,12 +57905,13 @@
       ],
       "needsAcceptance": false,
       "created": "2026-07-26T10:49:21.219Z",
-      "updated": "2026-08-21T14:01:11.252Z",
+      "updated": "2026-08-21T14:51:03.908Z",
       "updatedBy": "orchestrator",
       "tags": [
         "service-runtime"
       ],
-      "parentId": null
+      "parentId": null,
+      "completedAt": "2026-08-21T14:51:03.908Z"
     },
     {
       "id": "c082569u",
@@ -57921,7 +57922,7 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": "e3-m14-services-http",
-      "phase": "ready",
+      "phase": "done",
       "priority": "P1",
       "plan": "## Reopen finding\n\nThe closure reused two golden examples over an in-memory service catalog; that does not prove the named group/channel runtime, durable state, cluster, migration, or chaos behavior.\n\n## Outcome\n\nComplete **Service runtime: rolling handoff, migration, rollback, and drain** to the intent of the title, body, and current ratified law. Apply D-SERVICE-UPGRADE1=D (shard-scoped atomic handoff, classified `.Reversible`/`.DualWrite`/`.ForwardOnly` migrate functions, typed `on_exceed` drain-overrun policy — `.PinShard` or `.Cancel`, never a silent kill — partition reconciliation on rejoin through the ratified fleet rollout object D-JOS-FLEETROLLOUT1) on top of the concurrency substrate ratified 2026-08-06: D-CONC-GROUP1 (shard/rollout scopes are Group, not TaskGroup), D-CONC-JOIN1 (every in-flight task handle a drain touches is joined, awaited, or explicitly detached — the `.PinShard`/`.Cancel` choice is the explicit decision D-CONC-JOIN1 already requires; a dropped handle is a compile error, not a runtime concern), D-CONC-STREAM1 (draining a live stream during handoff follows the one task-cancel law: drop-close cancels, the producer unwinds at its next wait point). Do not invent new syntax or policy beyond these; raise a ballot for any new owner choice.\n\n## Ratified vocabulary this card must use\n\n- Shard-scoped rollout and drain scopes are Group (D-CONC-GROUP1), passed as a borrow, never stored.\n- Drain-overrun handling is the typed `.PinShard`/`.Cancel` policy from D-SERVICE-UPGRADE1, implemented so every touched task handle is joined or detached — never silently dropped (D-CONC-JOIN1).\n- A live stream cut short by handoff or rollback is cancelled through the one D-CONC-STREAM1 law, not a bespoke abort path.\n\n## Work\n\n1. Trace the public entry point through the production implementation and map every named behavior (start-validate-drain-switch per shard, migration classification and its rollback proof requirement, typed on_exceed policy, partitioned-shard reconciliation) to source and proof.\n2. Implement the named service-runtime slice through real groups, channels, typed endpoints, durable adapters, and lifecycle paths. An in-memory catalog or display-only simulator does not satisfy the card.\n3. Backpressure, cancellation, duplicate delivery, crash/restart, corrupt state, partition, authentication failure, migration failure, rollback, and drain preserve safety and bounded recovery for the named slice.\n4. Remove or correct any false claim, fallback, duplicate mechanism, stale criterion, or gap parking owned by this slice, including any lingering \"taskgroup\" wording or silent-drop drain paths in this slice's own docs and examples.\n5. Update affected docs, examples, diagnostics, goldens, and audit output.\n\n## Not building\n\nNo actor syntax, no second scheduler, no rollback without reversible/dual-write/snapshot proof, no silent kill on drain overrun. No parallel handle-tracking mechanism outside the D-CONC-JOIN1 join/detach obligation.\n\n## Proof\n\nTargeted success and failure checks drive the production runtime, including restart or partition where relevant, and prove default `jet run` plus AOT parity; interpreter ambient uses the same Prelude symbol when reached. Use focused checks for this card. Full-suite proof runs once at the epoch closeout.\n\n## Scope\n\nKeep the card bounded to its named slice and direct production seams. A reviewer will verify the completed card through Tower.",
       "blockedBy": [],
@@ -57983,74 +57984,74 @@
         {
           "n": 1,
           "text": "Every behavior named by “Service runtime: rolling handoff, migration, rollback, and drain”, its body, and ratified decisions works through the production path; no demo, label, stub, or sibling claim substitutes.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-01T18:14:03.982Z"
+          "evidence": "Rollout, drain, rollback, partition, identity and receipt state persist through a bounded atomic journal: `crates/jet-codegen/src/Prelude/CoreLib/Top/Services.rs:3006,3097`.",
+          "at": "2026-08-21T14:50:56.836Z"
         },
         {
           "n": 2,
           "text": "Topology, supervision, delivery, state, histories, identity, discovery, rollout, observability, and receipts preserve the card's declared meaning under concurrency and restart.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-01T18:14:03.982Z"
+          "evidence": "Same journal carries migration and generation state; restart hydration reads it rather than reconstructing state.",
+          "at": "2026-08-21T14:50:57.414Z"
         },
         {
           "n": 3,
           "text": "Backpressure, cancellation, duplicate delivery, crash/restart, corrupt state, partition, authentication failure, migration failure, rollback, and drain preserve safety and bounded recovery for the named slice.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-01T18:14:03.982Z"
+          "evidence": "The ordering hazard this card was opened for is closed: a drain that races a handoff can no longer lose in-flight messages, because drain and rollout verify cancel and join explicitly at `Services.rs:1329` instead of being best-effort.",
+          "at": "2026-08-21T14:50:57.894Z"
         },
         {
           "n": 4,
           "text": "Targeted success and failure checks drive the production runtime, including restart or partition where relevant, and prove default `jet run` plus AOT parity; interpreter ambient uses the same Prelude symbol when reached.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-01T18:14:03.982Z"
+          "evidence": "`cargo test --test services_runtime` is 55/55 under the full shell, across default `jet run`, the interpreter and AOT.",
+          "at": "2026-08-21T14:50:58.353Z"
         },
         {
           "n": 5,
           "text": "Affected docs, examples, diagnostics, goldens, compatibility notes, and audit output match the result. Full-suite proof belongs to the epoch closeout.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-01T18:14:03.982Z"
+          "evidence": "Restart and recovery behaviour documented at `docs/reference/core-library.md:3863`. No new syntax was introduced.",
+          "at": "2026-08-21T14:50:58.822Z"
         },
         {
           "n": 6,
           "text": "Shard-scoped rollout and drain scopes are Group, not TaskGroup (D-CONC-GROUP1).",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-06T21:31:56.915Z"
+          "evidence": "Shard scope stays the typed `Group` handle, per D-CONC-GROUP1=A: `Services.rs:919`.",
+          "at": "2026-08-21T14:50:59.297Z"
         },
         {
           "n": 7,
           "text": "Every in-flight task handle touched by a drain is joined, awaited, or explicitly detached under the typed .PinShard/.Cancel policy; none is dropped silently (D-CONC-JOIN1).",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-06T21:31:57.269Z"
+          "evidence": "Drain and rollout use explicit cancel and join verification: `Services.rs:1329`.",
+          "at": "2026-08-21T14:50:59.763Z"
         },
         {
           "n": 8,
           "text": "A live stream cut short by handoff or rollback is cancelled through the one stream/task cancel law, not a bespoke abort path (D-CONC-STREAM1).",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-06T21:31:57.622Z"
+          "evidence": "Handoff and rollback ride the shared stream cancel/join rail rather than a second mechanism: `Services.rs:1357`. A defect was fixed on the way: impossible channel-result branches used `unreachable!`, which is an I2 panic on reachable input; they now return typed `Policy` errors at `ServiceAuthority.rs:1093`.",
+          "at": "2026-08-21T14:51:00.236Z"
         }
       ],
       "refs": [
@@ -58062,12 +58063,13 @@
       ],
       "needsAcceptance": false,
       "created": "2026-07-26T10:49:21.723Z",
-      "updated": "2026-08-21T06:37:42.284Z",
-      "updatedBy": "fable-e3-burndown",
+      "updated": "2026-08-21T14:51:04.907Z",
+      "updatedBy": "orchestrator",
       "tags": [
         "service-runtime"
       ],
-      "parentId": null
+      "parentId": null,
+      "completedAt": "2026-08-21T14:51:04.907Z"
     },
     {
       "id": "c0gqalzc",
@@ -58078,7 +58080,7 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": "e3-m14-services-http",
-      "phase": "ready",
+      "phase": "done",
       "priority": "P1",
       "plan": "## Reopen finding\n\nThe closure reused two golden examples over an in-memory service catalog; that does not prove the named group/channel runtime, durable state, cluster, migration, or chaos behavior.\n\n## Outcome\n\nComplete **Service runtime: observability, chaos, dogfood, and closeout** to the intent of the title, body, and current ratified law. Apply D-SERVICE1=D and its five siblings' observability/chaos obligations on top of the concurrency substrate ratified 2026-08-06: D-CONC-OUTCOME1 (every dashboard, receipt, and dogfood assertion reads the typed TaskOutcome/TaskStatus enums; `trace()`/`exception()` are deleted, not aliased, so no observability code may reintroduce them), D-CONC-CROSS1 (chaos fault injection at worker/partition boundaries reports through the one crossing-safety error family — \"what cannot cross, which boundary, the fix\" — not five separate error voices), D-CONC-JOIN1 (dogfood examples and chaos harnesses must not drop a task handle silently; every spawned handle is joined, used, or detached). This card is also the closeout gate: it must confirm the whole e3-ul4-services milestone (cards #444, #1148, #1149, #1150, #1151, #1152, and this card) carries zero stale \"taskgroup\", \"capability\", or string-outcome mentions in its own docs, examples, and goldens. Do not invent new syntax or policy beyond these; raise a ballot for any new owner choice.\n\n## Ratified vocabulary this card must use\n\n- Observability surfaces (dashboards, receipts, logs) and dogfood assertions read TaskOutcome/TaskStatus (D-CONC-OUTCOME1), never string outcome/exception checks.\n- Chaos fault injection and its diagnostics use the one crossing-safety error family (D-CONC-CROSS1) at every worker/partition boundary.\n- Dogfood examples join, use, or detach every task handle they spawn (D-CONC-JOIN1); none are dropped silently.\n\n## Work\n\n1. Trace the public entry point through the production implementation and map every named behavior (structured observability across the tree, chaos proof for restart/partition/migration/rollback, a real dogfood application, milestone closeout audit) to source and proof.\n2. Implement the named service-runtime slice through real groups, channels, typed endpoints, durable adapters, and lifecycle paths. An in-memory catalog or display-only simulator does not satisfy the card.\n3. Backpressure, cancellation, duplicate delivery, crash/restart, corrupt state, partition, authentication failure, migration failure, rollback, and drain preserve safety and bounded recovery for the named slice.\n4. Remove or correct any false claim, fallback, duplicate mechanism, stale criterion, or gap parking owned by this slice, including any lingering \"taskgroup\", \"capability\", or string-outcome wording anywhere in the e3-ul4-services milestone's docs and examples.\n5. Update affected docs, examples, diagnostics, goldens, and audit output. Closeout confirms sibling cards #444/#1150/#1151/#1152 closed clean against the same ratified vocabulary before this card closes.\n\n## Not building\n\nNo actor syntax, no second scheduler, no string-keyed outcome/exception reporting, no bespoke chaos error taxonomy outside the one crossing-safety family.\n\n## Proof\n\nTargeted success and failure checks drive the production runtime, including restart or partition where relevant, and prove default `jet run` plus AOT parity; interpreter ambient uses the same Prelude symbol when reached. Use focused checks for this card. Full-suite proof runs once at the epoch closeout.\n\n## Scope\n\nKeep the card bounded to its named slice and direct production seams. A reviewer will verify the completed card through Tower.",
       "blockedBy": [],
@@ -58190,38 +58192,38 @@
         {
           "n": 6,
           "text": "Observability surfaces and dogfood assertions read TaskOutcome/TaskStatus, never string outcome/exception checks (D-CONC-OUTCOME1).",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-06T21:31:58.412Z"
+          "evidence": "Observation reports the typed `JetTaskStatus`/`JetTaskOutcome` values rather than trace strings: `Services.rs:5122`, with typed assertions in the dogfood example at `examples/features/tooling/service_runtime.jet:30`.",
+          "at": "2026-08-21T14:51:00.690Z"
         },
         {
           "n": 7,
           "text": "Chaos fault injection and its diagnostics use the one crossing-safety error family at every worker/partition boundary (D-CONC-CROSS1).",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-06T21:31:58.774Z"
+          "evidence": "Chaos reports a typed `Partitioned` outcome at `Services.rs:5103`; boundary-crossing diagnostics remain the registered E1101/E1102 family (`docs/spec/diagnostics.md:1135`) rather than a new code.",
+          "at": "2026-08-21T14:51:01.157Z"
         },
         {
           "n": 8,
           "text": "Dogfood examples join, use, or detach every task handle they spawn; none is dropped silently (D-CONC-JOIN1).",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-06T21:31:59.136Z"
+          "evidence": "The spawned service task is joined, so the dogfood example leaks no task: `examples/features/tooling/service_runtime.jet:72-73`.",
+          "at": "2026-08-21T14:51:01.622Z"
         },
         {
           "n": 9,
           "text": "Closeout confirms sibling cards #444, #1150, #1151, #1152 carry zero stale taskgroup/capability/string-outcome mentions before this card closes.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-06T21:31:59.482Z"
+          "evidence": "No stale public claim survives on the sibling service surfaces — no retired taskgroup spelling, no retired capability wording, no string-outcome vocabulary. Decision ledger updated. `cargo test --test services_runtime` is 55/55 under the full shell, across default `jet run`, the interpreter and AOT.",
+          "at": "2026-08-21T14:51:02.546Z"
         }
       ],
       "refs": [
@@ -58233,12 +58235,13 @@
       ],
       "needsAcceptance": false,
       "created": "2026-07-26T10:49:22.248Z",
-      "updated": "2026-08-21T14:01:14.977Z",
+      "updated": "2026-08-21T14:51:06.249Z",
       "updatedBy": "orchestrator",
       "tags": [
         "service-runtime"
       ],
-      "parentId": null
+      "parentId": null,
+      "completedAt": "2026-08-21T14:51:06.249Z"
     },
     {
       "id": "c0u1r7eg",
@@ -186768,6 +186771,139 @@
   ],
   "events": [
     {
+      "at": "2026-08-21T14:51:06.249Z",
+      "by": "orchestrator",
+      "action": "card.update",
+      "ref": "c0gqalzc",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-21T14:51:04.907Z",
+      "by": "orchestrator",
+      "action": "card.update",
+      "ref": "c082569u",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-21T14:51:03.908Z",
+      "by": "orchestrator",
+      "action": "card.update",
+      "ref": "c0zpske1",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-21T14:51:02.547Z",
+      "by": "orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0gqalzc",
+      "note": "#9"
+    },
+    {
+      "at": "2026-08-21T14:51:01.622Z",
+      "by": "orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0gqalzc",
+      "note": "#8"
+    },
+    {
+      "at": "2026-08-21T14:51:01.158Z",
+      "by": "orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0gqalzc",
+      "note": "#7"
+    },
+    {
+      "at": "2026-08-21T14:51:00.690Z",
+      "by": "orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0gqalzc",
+      "note": "#6"
+    },
+    {
+      "at": "2026-08-21T14:51:00.237Z",
+      "by": "orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c082569u",
+      "note": "#8"
+    },
+    {
+      "at": "2026-08-21T14:50:59.763Z",
+      "by": "orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c082569u",
+      "note": "#7"
+    },
+    {
+      "at": "2026-08-21T14:50:59.298Z",
+      "by": "orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c082569u",
+      "note": "#6"
+    },
+    {
+      "at": "2026-08-21T14:50:58.822Z",
+      "by": "orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c082569u",
+      "note": "#5"
+    },
+    {
+      "at": "2026-08-21T14:50:58.363Z",
+      "by": "orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c082569u",
+      "note": "#4"
+    },
+    {
+      "at": "2026-08-21T14:50:57.894Z",
+      "by": "orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c082569u",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-21T14:50:57.414Z",
+      "by": "orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c082569u",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-21T14:50:56.836Z",
+      "by": "orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c082569u",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-21T14:50:56.346Z",
+      "by": "orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0zpske1",
+      "note": "#9"
+    },
+    {
+      "at": "2026-08-21T14:50:55.877Z",
+      "by": "orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0zpske1",
+      "note": "#7"
+    },
+    {
+      "at": "2026-08-21T14:50:55.393Z",
+      "by": "orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0zpske1",
+      "note": "#5"
+    },
+    {
+      "at": "2026-08-21T14:32:41.189Z",
+      "by": "owner",
+      "action": "done.clear",
+      "ref": null,
+      "note": "2026-08-21T14:32:41.189Z"
+    },
+    {
       "at": "2026-08-21T14:01:16.294Z",
       "by": "orchestrator",
       "action": "card.update",
@@ -190133,139 +190269,6 @@
       "action": "decision.ratify",
       "ref": "D-ERRSIGIL1",
       "note": "A"
-    },
-    {
-      "at": "2026-08-21T00:18:34.177Z",
-      "by": "owner",
-      "action": "done.clear",
-      "ref": null,
-      "note": "2026-08-21T00:18:34.177Z"
-    },
-    {
-      "at": "2026-08-21T00:14:54.695Z",
-      "by": "fable-e3-burndown",
-      "action": "decision.add",
-      "ref": "D-ERRSIGIL1",
-      "note": "`?` for absence, `!` for error"
-    },
-    {
-      "at": "2026-08-21T00:14:20.462Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-add",
-      "ref": "c0uyc9is",
-      "note": "#4 Tier parity: AOT, default jet run and the interpreter agree "
-    },
-    {
-      "at": "2026-08-21T00:14:19.981Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-add",
-      "ref": "c0uyc9is",
-      "note": "#3 jet fmt rewrites every affected site in the corpus"
-    },
-    {
-      "at": "2026-08-21T00:14:19.522Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-add",
-      "ref": "c0uyc9is",
-      "note": "#2 The chosen spelling parses, and the retired one teaches it w"
-    },
-    {
-      "at": "2026-08-21T00:14:19.022Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-add",
-      "ref": "c0uyc9is",
-      "note": "#1 D-ERRSIGIL1 is ratified and recorded in docs/spec/syntax-dec"
-    },
-    {
-      "at": "2026-08-21T00:14:17.986Z",
-      "by": "fable-e3-burndown",
-      "action": "card.add",
-      "ref": "c0uyc9is",
-      "note": "Ballot: `?` for absence, `!` for error"
-    },
-    {
-      "at": "2026-08-21T00:14:17.534Z",
-      "by": "fable-e3-burndown",
-      "action": "card.update",
-      "ref": "c0nswvx3",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-08-21T00:14:16.877Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0nswvx3",
-      "note": "#3"
-    },
-    {
-      "at": "2026-08-21T00:14:16.397Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0nswvx3",
-      "note": "#2"
-    },
-    {
-      "at": "2026-08-21T00:14:15.917Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0nswvx3",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-21T00:03:40.872Z",
-      "by": "owner",
-      "action": "done.clear",
-      "ref": null,
-      "note": "2026-08-21T00:03:40.872Z"
-    },
-    {
-      "at": "2026-08-21T00:02:03.005Z",
-      "by": "fable-e3-burndown",
-      "action": "card.update",
-      "ref": "c0todzv8",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-21T00:02:02.541Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c08h3xqu",
-      "note": "#11"
-    },
-    {
-      "at": "2026-08-21T00:02:02.059Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c04yd90c",
-      "note": "#4"
-    },
-    {
-      "at": "2026-08-21T00:02:01.572Z",
-      "by": "fable-e3-burndown",
-      "action": "card.update",
-      "ref": "c0gyn86h",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-08-21T00:02:00.638Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0gyn86h",
-      "note": "#10"
-    },
-    {
-      "at": "2026-08-21T00:01:59.868Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0gyn86h",
-      "note": "#9"
-    },
-    {
-      "at": "2026-08-21T00:01:59.066Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0gyn86h",
-      "note": "#8"
     }
   ],
   "nextNum": 368,

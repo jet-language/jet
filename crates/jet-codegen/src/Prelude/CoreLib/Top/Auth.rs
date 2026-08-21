@@ -93,34 +93,6 @@ fn jet_auth_b64url_decode(text: &str) -> Result<Vec<u8>, String> {
     jet_auth_b64_decode_inner(&s)
 }
 
-fn jet_hmac_sha256(key: &[u8], data: &[u8]) -> [u8; 32] {
-    const BLOCK: usize = 64;
-    let mut k = [0u8; BLOCK];
-    if key.len() > BLOCK {
-        k[..32].copy_from_slice(&jet_sha256_raw(key));
-    } else {
-        k[..key.len()].copy_from_slice(key);
-    }
-    let mut inner = Vec::with_capacity(BLOCK + data.len());
-    let mut outer = Vec::with_capacity(BLOCK + 32);
-    for byte in k { inner.push(byte ^ 0x36); }
-    inner.extend_from_slice(data);
-    for byte in k { outer.push(byte ^ 0x5c); }
-    outer.extend_from_slice(&jet_sha256_raw(&inner));
-    jet_sha256_raw(&outer)
-}
-
-fn jet_auth_ct_eq(a: &[u8], b: &[u8]) -> bool {
-    let mut difference = 0u8;
-    difference |= u8::from(a.len() != b.len());
-    for index in 0..a.len().max(b.len()) {
-        let left = a.get(index).copied().unwrap_or(0);
-        let right = b.get(index).copied().unwrap_or(0);
-        difference |= left ^ right;
-    }
-    difference == 0
-}
-
 fn jet_auth_object(text: &str) -> Result<JetAuthFields, JetAuthError> {
     match jet_std::parse_json_strict(text) {
         Ok(jet_std::JSON::Object(fields)) => Ok(fields),
@@ -570,7 +542,7 @@ fn jet_auth_verify_jwt_impl(
     }
     let signature = jet_auth_b64url_decode(parts[2]).map_err(|_| JetAuthError::InvalidSignature)?;
     let expected = jet_hmac_sha256(key, format!("{}.{}", parts[0], parts[1]).as_bytes());
-    if !jet_auth_ct_eq(&expected, &signature) { return Err(JetAuthError::InvalidSignature); }
+    if !jet_ct_eq(&expected, &signature) { return Err(JetAuthError::InvalidSignature); }
     let payload = jet_auth_b64url_decode(parts[1]).map_err(JetAuthError::DecodeError)?;
     jet_auth_claims(&payload, audience, issuer.map(String::as_str), clock_skew_ns)
 }
@@ -626,7 +598,7 @@ where
     let token_footer = if let Some(encoded) = parts.get(3) {
         jet_auth_b64url_decode(encoded).map_err(JetAuthError::DecodeError)?
     } else { Vec::new() };
-    if !jet_auth_ct_eq(&token_footer, footer) { return Err(JetAuthError::InvalidSignature); }
+    if !jet_ct_eq(&token_footer, footer) { return Err(JetAuthError::InvalidSignature); }
     let split = body.len() - 64;
     let message = body[..split].to_vec();
     let signature = body[split..].to_vec();

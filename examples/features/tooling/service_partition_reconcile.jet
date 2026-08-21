@@ -17,15 +17,40 @@ fn run() {
     tree.group("api-group", ["api", "drained"]) ?? panic("group")
     tree.start() ?? panic("start")
     tree.append_event("before-partition") ?? panic("event")
+    tree.directory_register("api", api) ?? panic("api directory")
+    tree.directory_register("drained", drained) ?? panic("drained directory")
+
+    foreign := service.tree("outside")
+    foreign_api :: foreign.worker("api", worker, capacity: 1) ?? panic("foreign worker")
+    foreign.start() ?? panic("foreign start")
+    foreign_route := tree.send(foreign_api, "intrude")
+    if foreign_route == {
+        .Ok(_) :> { print("foreign:accepted") }
+        .Err(_) :> { print("foreign:rejected") }
+    }
+    foreign.stop() ?? panic("foreign stop")
 
     tree.drain_worker(drained) ?? panic("drain")
     print("drained:ok")
+    expired := tree.directory_resolve("drained")
+    if expired == {
+        .Ok(_) :> { print("expired:accepted") }
+        .Err(_) :> { print("expired:rejected") }
+    }
     tree.partition_worker(api) ?? panic("partition")
+    partition_route := api.send("intrude")
+    if partition_route == {
+        .Ok(_) :> { print("partition_route:accepted") }
+        .Err(_) :> { print("partition_route:rejected") }
+    }
     print("partitioned:ok")
     print("handoff:{tree.handoff_generation() ?? panic("handoff")}")
     print(tree.upgrade_receipt() ?? panic("receipt"))
     tree.reconcile_worker(api) ?? panic("reconcile")
     print("reconciled:g{tree.directory_generation()}")
     print(tree.upgrade_receipt() ?? panic("reconciled receipt"))
+    current :: tree.directory_resolve("api") ?? panic("current api")
+    current.send("rejoined") ?? panic("rejoined send")
+    print("rejoined:{tree.receive(current) ?? panic("rejoined receive")}")
     tree.stop() ?? panic("stop")
 }
