@@ -37,6 +37,8 @@ end, then one comprehensive fix pass. This file is the batch.
 | B14 | Stale typed-decode caller | `Prelude/CoreLib/Top/DataFlow.rs:493-495` destructures decode as `(v, _)` while the canonical signature returns `Result<Self, Vec<FieldError>>` | Open, #1161 c7 |
 | B15 | `wasip2` websockets | `TargetSurface.rs:6-27` passes the target; `WsClient.rs:547-560` refuses at runtime | Open, #1914 c3/c7 |
 | B16 | `tests/taskgroup_parameter_tiers.rs` never runs | Absent from `tests/suites.txt` | Open, #1564 c5 |
+| B17 | `symbol_rename` codemod misses call references | `tests/agent_workloads/inputs/repository-edit` renames `prepare`; the rule declares 2 matches and gets 1. The definition at `main.jet:1` is found, the call at `main.jet:6` is not. `Source/CmdCodemod.rs:479-489` keeps a reference only when `r.target` anchors to the definition, so the semindex is producing a call reference with no resolved target. Predates this session: `definition_anchor` at `:1587` keys on semantic identity, not on the signature text this session changed | Open, fails `cargo test -p jet --test agent_workloads` |
+| B18 | 466 retired dotted literals in fixtures | `[T].{…}` and `Type.{…}` across 281 `.jet` fixtures, retired by D-LIT-DOT1. Migrated in this pass; the leading-dot record form `field: .{ … }` in manifests is a different construct and stays | Fixed |
 
 ## C. Owner gates
 
