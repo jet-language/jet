@@ -32,7 +32,7 @@ Vocabulary: [Jet vocabulary](../../spec/vocabulary.md).
 - **effect tier** — how much world a compile-time construct may touch:
   Tier 0 pure, Tier 1 reproducible + lock-recorded, Tier 2 ambient + gated
   (D-CTEFFECT1).
-- **capability** — an explicit handle to a slice of the world (a read root, a
+- **authority handle** — an explicit handle to a slice of the world (a read root, a
   pinned URL, an env var), granted to build code instead of ambient authority.
 - **generated item** — a typed Jet item template whose holes are filled during
   expansion and whose result enters ordinary sema like hand-written code
@@ -125,7 +125,7 @@ Four powers, in ratification order:
 2. **Generate.** Emit whole modules as real Jet source (§6).
 3. **Observe + enforce.** Read the checked program, reject builds with
    first-class diagnostics (§7 — the D-METADEPTH2 vote).
-4. **Effects under capabilities.** Touch the world only through declared,
+4. **Effects under authority handles.** Touch the world only through declared,
    tiered, recorded handles (§5).
 
 Entry spelling (`fn build` by name vs `#Build` marker vs manifest pointer) is
@@ -133,7 +133,7 @@ Entry spelling (`fn build` by name vs `#Build` marker vs manifest pointer) is
 (`jet <verb>` → `fn <verb>()`) is an open proposal, not ratified; the
 recommendation stands without it.
 
-## 5. Effects and capabilities — declare / permit / cap
+## 5. Effects and rights — declare / permit / cap
 
 D-CTEFFECT1 (ratified) gives the tiers:
 
@@ -162,7 +162,7 @@ script's `fn build` carries its own declaration and gets a per-invocation
 grant. The permit layer makes it a package. The cap layer makes it an
 enterprise. Same fn, unchanged, at every rung.
 
-Tier-2 capabilities are exact handles, deny-by-default:
+Tier-2 rights are exact handles, deny-by-default:
 
 - fs: declared read/write roots; no implicit `$HOME`
 - network: fixed-output fetch by default; ambient only to allowlisted domains
@@ -170,8 +170,8 @@ Tier-2 capabilities are exact handles, deny-by-default:
 - exec: command allowlist, argv captured, tool digest recorded; no shell
   strings by default
 - time/random: deterministic injected clock/RNG by default
-- secrets: never visible to dependency build code; if supported, named
-  capabilities, never ambient env reads
+- secrets: never visible to dependency build code; if supported, named rights,
+  never ambient env reads
 
 ## 6. Generated items — materialized, additive, addressed
 
@@ -307,12 +307,12 @@ authority explicit, enforceable, machine-readable.
 
 | Jai power | Jet path |
 |---|---|
-| `#run` arbitrary fn at compile time | rungs 1–2 (pure/whitelisted values) or `fn build` (capability-gated) |
+| `#run` arbitrary fn at compile time | rungs 1–2 (pure/whitelisted values) or `fn build` (authority-gated) |
 | `#insert` strings into bodies | `fn build` generates whole modules, materialized (§6) |
 | macros / `#expand` | rejected forever — derives + generation cover the jobs |
 | message-loop mutation of user code | rejected — additive generation + read-only enforce |
 | whole-program checks via message loop | §7 observe/enforce, no mutation |
-| build script side effects | tiers + capabilities + policy (§5) |
+| build script side effects | tiers + rights + policy (§5) |
 | build profiles / metaprogram build files | D-BUILDPROFILE1 (shipped) + `fn build` |
 
 The expert loses nothing they need — every Jai showcase (custom
@@ -337,7 +337,7 @@ ballots ratified the graph shape:
   `b.add_publish`; each returns a typed handle.
 - **D-BUILDACTION1=A / #220:** `b.action(name, inputs, outputs, run, caps)`;
   outputless command targets are explicit, visible, uncached, and
-  capability-gated.
+  authority-gated.
 - **D-BUILDTOOLCHAIN1=A / #221:** default host toolchain is inferred;
   non-default builds use typed toolchain handles with recorded host/target
   triples, SDKs, signing identities, and tool digests.
@@ -722,7 +722,7 @@ audited `#Impure("reason")` gate in source **and** permission at build time
 (CLI flag/prompt, or project/org policy). `BuildContext` is the only authority
 path — a step has exactly its granted handles, never "a machine." Dependencies
 get **no** Tier 2 even when the root grants itself Tier 2, unless policy names
-that dependency. Every granted capability is recorded in lock/provenance.
+that dependency. Every granted right is recorded in lock/provenance.
 
 **API surface (Jet).**
 ```jet
@@ -747,13 +747,13 @@ D-CTEFFECT1/E3411; the build-grant spelling is balloted as D-BUILDFLAGS1);
   already exists; reuse it.
 - Grant resolution: new `crates/jet-driver/src/Jetpack/BuildPolicy.rs` — merges
   CLI flag/prompt + package.jet `build:` + workspace `policy:` into an effective
-  capability set handed to the interpreter run.
+  rights set handed to the interpreter run.
 - Provenance: extend `Lock.rs` with the selected entry, its declared effects,
   executed `#Impure` regions (+ reason text), and allowed external tool
   invocations (argv + tool digest). `jet inspect audit-effects` reads statically in
   `Source/CmdDevTools.rs`.
 
-**I6 guard.** `exec`/network capabilities that need real OS/network work use the
+**I6 guard.** `exec`/network rights that need real OS/network work use the
 **FFI bridge posture** (stdlib bridge template text, hash-pinned), never a new
 crate in `Source/`/`crates/jet-*` compiler code. Unpinned network is Tier 2 by
 construction; pinned `fetch` (Tier 1) is the D-NETDEP1 backend.
@@ -983,7 +983,7 @@ blessed; the two golden variants pass.
   runs only sandboxed under dependency defaults when that dependency is itself
   built (§15.5, D-BUILDPOLICY1). Test (c) in §15.2 and the root-only test in
   §15.6 are the regression guards.
-- **I6 — zero compiler deps.** Tier-2 OS/network capabilities use the FFI
+- **I6 — zero compiler deps.** Tier-2 OS/network rights use the FFI
   bridge posture (stdlib bridge template text, hash-pinned), never a new crate
   in compiler code. Pinned `fetch` is the D-NETDEP1 backend.
 - **I8 — one mechanism.** `fn build` is the single whole-program build path;

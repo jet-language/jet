@@ -129,7 +129,7 @@ false rhyme / absent.
 | `struct`/`enum`/`alias`/`distinct` | D04,D05 | — | Type intro | teaches well |
 | `trait`/`impl` / `fn Type.method` | D06–D08 | — | Contract plus orphan extension | teaches well |
 | `module` / generic modules | D09,M8 | X03 | Namespace unit; optional comptime args | teaches well |
-| `#Test`/`#Bench` | D14 | — | Verification decls | teaches well |
+| `#Test`/`.measure` | D14 | — | Verification decls | teaches well |
 | `extern` / `#FFI` / `#Bindgen` | D13 | X09 | Foreign | teaches well |
 | `protocol` / `state` / `migration` / `validate` | D16,D19,D22 | — | Contextual declaration family | teaches well |
 | `#` applied rules / `#[A,B]` | P09 | X19 | One metadata mechanism | teaches well (plane) |

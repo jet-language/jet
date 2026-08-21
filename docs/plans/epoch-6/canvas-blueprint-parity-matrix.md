@@ -29,7 +29,7 @@ excluded the staged-node work in #388, menu and branch work in #389, data-wire
 work in #488, selection and copy work in #489, and large-graph work in #382.
 Rows that had only projection or grep proof moved back to `planned`.
 
-| Area | UE 5.8 Blueprint capability | Canvas target | Status | Ratchet |
+| Area | UE 5.8 Blueprint affordance | Canvas target | Status | Ratchet |
 |---|---|---|---|---|
 | Workbench | Right-click action menu | Context menu opens source-backed node actions from graph facts. | shipped | interaction:tests/canvas_scenarios.rs::palette_insert_flow_variable_project_core; interaction:tests/canvas_scenarios.rs::no_dead_end_ad_hoc_insert |
 | Workbench | Drag-off-pin action menu | Compatible action menu filtered by sema expected-type facts. | shipped | interaction:tests/canvas_scenarios.rs::palette_insert_core_fn; interaction:tests/canvas_scenarios.rs::fallible_context; interaction:tests/canvas_scenarios.rs::no_dead_end_ad_hoc_insert |
@@ -55,7 +55,7 @@ Rows that had only projection or grep proof moved back to `planned`.
 | Node model | Large graph virtualization and LOD | Canvas renders visible graph regions and low-zoom title-bar nodes for large projections. | planned | downgraded 2026-07-10 — no LOD scenario and no measured frame-time evidence; verify under #382's performance ratchet |
 | Node model | Math Expression node | Expression text stays ordinary Jet expression source, not a separate formula language. | shipped | interaction:tests/canvas_scenarios.rs::math_expression_keyboard_edit |
 | Pins and wires | Exec pins and data pins | Separate control/data rails over Jet semantics. | shipped | interaction:tests/canvas_scenarios.rs::palette_insert_catalog_sweep; interaction:tests/canvas_scenarios.rs::exec_rewire_reorders_statements |
-| Pins and wires | Typed colored wires | Pin type, capability, fallibility, effect facts, and source spans render distinctly. | shipped | interaction:tests/canvas_scenarios.rs::exec_rewire_reorders_statements; projection:#274/#278, tests/canvas.rs |
+| Pins and wires | Typed colored wires | Pin type, access, fallibility, effect facts, and source spans render distinctly. | shipped | interaction:tests/canvas_scenarios.rs::exec_rewire_reorders_statements; projection:#274/#278, tests/canvas.rs |
 | Pins and wires | Incompatible refusal (exec) | Wrong exec wires are impossible or fail with Jet diagnostics. | shipped | interaction:tests/canvas_scenarios.rs::exec_rewire_refuses_cross_block; interaction:tests/canvas_scenarios.rs::exec_rewire_binding_order_diagnostic |
 | Pins and wires | Incompatible refusal (data) | An incompatible data-wire drop refuses in-UI before sema, with the reason shown. | planned | projection-only today; open bugs — data rewire to a fn symbol yields fn-value-where-Int (`crates/jet-canvas/src/js/inspector-connections.js::completeConnection`), inline editors accept wrong-type input then sema rejects (`crates/jet-canvas/src/js/inspector-connections.js::updateDetails`) |
 | Pins and wires | Auto-cast insertion | Ratified visible conversion node/call writes source. | shipped | interaction:tests/canvas_scenarios.rs::conversion_keyboard_gesture; D-CANVAS-CONVERT1 |

@@ -452,7 +452,7 @@ enum Code { First = @BASE + 1 }         // settled
 ```
 
 The evaluator already exists. Two parsers refuse to call it. This is a
-capability gained by deleting code.
+power gained by deleting code.
 
 ### S8 — One effect model for compile-time code (D-META-EFFECT1=A; amends D-CTCORE1)
 

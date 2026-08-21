@@ -90,7 +90,7 @@ What to look at: the same commands as the problem section, after the law. No new
 
 ```text
 $ jet build
-built: build/run · capabilities: none · effects: IO        # 34 s — cold, honest work
+built: build/run · authority: none · effects: IO          # 34 s — cold, honest work
 
 $ jet build                                                 # proposed warm behavior
 ok: build/run current (closure a1b2c3, receipt 9f41)        # <0.1 s — the receipt IS the answer

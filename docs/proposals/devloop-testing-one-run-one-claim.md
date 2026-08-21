@@ -188,7 +188,7 @@ Options: **A** — `.measure` member; the former marker and command retire; `jet
 
 ### The claim grammar — one construct, one extension axis
 
-This is the surface pass: what the one construct looks like on the page, and the rule that keeps it modular forever. The rule: **`#Test` is the only marker, and every capability is a D-DOTSCOPE1 member.** Members compose, complete after a typed `.`, and teach their vocabulary on a typo — that grammar is already ratified and shipped. Nothing in this area ever needs a new marker, keyword, or sigil again; growth is API rows in one table.
+This is the surface pass: what the one construct looks like on the page, and the rule that keeps it modular forever. The rule: **`#Test` is the only marker, and every extension is a D-DOTSCOPE1 member.** Members compose, complete after a typed `.`, and teach their vocabulary on a typo — that grammar is already ratified and shipped. Nothing in this area ever needs a new marker, keyword, or sigil again; growth is API rows in one table.
 
 The full member vocabulary under this proposal — four shipped, two proposed:
 
@@ -282,7 +282,7 @@ Options: **A** — adopt the session model: keys in `jet dev`, repl/debug attach
 
 ### The recorder — ballot D-RUN-RECORD1, the Epoch 6 on-ramp
 
-Time travel is deferred to Epoch 6 (D-TIMETRAVEL1=C) behind two named prerequisites: the D-REPLAY1 runtime replay harness (shipped — `#Replayable`, E0725) and a mature `jet debug` (carded, #12). The model shows what the on-ramp is: recording is just one more observer, and Jet's capability-gated effects make it cheap — log the capability chokepoint, not syscalls. The artifact is the ratified `.jetproof-replay`; no second format, and the ratified capture preflight stays: programs that reach FFI, tasks, FS, Env, or Exec still refuse capture (E3625), and sensitive sources still need the interactive consent phrase (E3627). The on-ramp's first users are the runs the law already accepts — tests, property shrinks, and replayable programs.
+Time travel is deferred to Epoch 6 (D-TIMETRAVEL1=C) behind two named prerequisites: the D-REPLAY1 runtime replay harness (shipped — `#Replayable`, E0725) and a mature `jet debug` (carded, #12). The model shows what the on-ramp is: recording is just one more observer, and Jet's authority-gated effects make it cheap — log the authority chokepoint, not syscalls. The artifact is the ratified `.jetproof-replay`; no second format, and the ratified capture preflight stays: programs that reach FFI, tasks, FS, Env, or Exec still refuse capture (E3625), and sensitive sources still need the interactive consent phrase (E3627). The on-ramp's first users are the runs the law already accepts — tests, property shrinks, and replayable programs.
 
 ```
 $ jet test app.jet --record=flaky              (proposed; new producer flag on a user verb)

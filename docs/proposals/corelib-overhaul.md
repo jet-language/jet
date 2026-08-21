@@ -178,7 +178,7 @@ force; the table at the end of Part A shows what each new rule extends.
   duplication is the measured cost of skipping this. (Lauded R20, A4.)
 - **E2 — Absorb the gap-fillers on day one.** A billion-download third-party
   library in a peer ecosystem is a measured stdlib gap; Core ships that
-  capability with the wrapper's ergonomics, not the plumbing it wrapped.
+  support with the wrapper's ergonomics, not the plumbing it wrapped.
   Current absorbed list: humane formatting, terminal color, declarative args,
   uuid, structured logging, assertions with rich diffs. (Frequency
   cross-cutting §2.)
@@ -476,7 +476,7 @@ with a count.
 - `core.auth` — verify_jwt/paseto, register_user, password_login,
   session_*, magic_link_*, oauth_*
 - `core.uuid` — v4, v7
-- `task`, `task.all`, `task.race`, `task.any`, `task.group`; `core.tasks` — channel, after, interval
+- `task`, `task.all`, `task.race`, `task.any`, `task.group`; `core.tasks` — after, interval
 - `core.sync` — text_*/counter_*/map_*/list_*/policy_*
 - `core.event` — new, with_policy, hook, decision_hook, scope, …
 - `core.reactive` — signal, derived, computed, effect; `.loadable.*`
@@ -498,7 +498,7 @@ with a count.
 - `core.perf` — Perf, fidelity*
 - `core.plugin` — load
 - `core.compiler` — lex, parse, check, source_map
-- `core.lang` — ABI, Capability, FfiLanguage, … *(15 enums)*
+- `core.lang` — ABI, Abilities, FfiLanguage, … *(15 enums)*
 - `core.binary` — Reader
 
 Notable overlaps: `print`/`input` (prelude vs io); `args` (argv vs

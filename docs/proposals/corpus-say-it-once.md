@@ -47,7 +47,7 @@ The eighteen machines. Every row verified at file:line in the audit evidence; th
 | 11 | Render help for a command | 7 paths | `jet build --help` is error E2102; the guard against it is hand-copied 21 times; compiled Jet programs get `--help` free via `#CLI` |
 | 12 | Keep a closed list of legal names | 8 registries | `Syntax.rs:77` forbids a second marker table; `STDLIB_DSL_BLOCK_MARKERS` is that second table, and sema branches on it |
 | 13 | Retire a spelling | 0 mechanisms | `run.jet` (ratified default): 0 files. `main.jet` ("compatibility fallback"): 94. Both accepted silently |
-| 14 | Grant a type a capability | 4 spellings, 3 generators | One generator emits raw Rust with no sema re-check (I3) |
+| 14 | Grant a type a trait | 4 spellings, 3 generators | One generator emits raw Rust with no sema re-check (I3) |
 | 15 | Track what is not done | 6 ledgers | `jit_gaps.txt` holds 48 named parity holes; AGENTS.md forbids parking work there; the truthfulness suite is red and frozen |
 | 16 | Record a ratified decision | 2 ledgers | 927 decision IDs cited in the spec; 675 have no Tower record; the drift linter scans neither |
 | 17 | Keep untrusted text from a sink | 3 mechanisms | A propagated tag and a typed literal do the same job with hand-listed sink sets |
@@ -203,7 +203,7 @@ The mechanism's own ladder, since it touches user files: see it — every rewrit
 | Word | Meanings today | Proposed disposition |
 |---|---|---|
 | `stream` | generator `Stream<T>`; codec reader/writer mode; file-line iteration; `Event<T>` "occurrence stream"; future `core.data` streams; two schedulers' internals | `Stream<T>` keeps the word. Codec mode is spelled `reader`/`writer` (it already is — the *prose* stops calling it streaming). Events are events. One spec page: "what Jet means by stream" **[B4]** |
-| `derive` | request a capability (body line, D-USERDERIVE1); request it (marker form); *define* a provider (`derive T.Trait {}`, D-METADERIVE1) | the marker form `#Comparable` is the one request spelling; the body line retires (element 5's mechanism, amending D-USERDERIVE1); the keyword keeps only D-METADERIVE1's meaning: *define a provider* **[B5]** |
+| `derive` | request a trait (body line, D-USERDERIVE1); request it (marker form); *define* a provider (`derive T.Trait {}`, D-METADERIVE1) | the marker form `#Comparable` is the one request spelling; the body line retires (element 5's mechanism, amending D-USERDERIVE1); the keyword keeps only D-METADERIVE1's meaning: *define a provider* **[B5]** |
 | `grant` | `#Caps` — scoped compile-time effect scope; `jet trust grant` — durable on-disk authorization | already settled: D-AUTHORITY-SCOPE1 makes `#Caps` carry both block forms, and D-AUTHORITY-WORD1 retires "capability" from user-facing rights terminology. Keep `grant` only for durable trust authorization. **[ratified, finish]** |
 | `yield` | the suspension keyword; "collecting loop" prose for eager `->` comprehensions | the prose changes; comprehensions are "collecting loops." Zero code changes **[B4]** |
 | `wasm` | `#Target(Wasm)` browser compute bucket; `target: plugin` sandbox kind | rename the plugin kind's user word to `sandbox` (it is about isolation, not the ISA) **[B6]** |

@@ -47,7 +47,7 @@ Verified in the tree, not assumed.
 - Jet already ships a **sandboxed package mechanism**: `target: sandbox` compiles
   to a WebAssembly component (D-PLUGIN1=B, D-DEP-WASM1=A, D-PLUGIN-EXPORT1=A,
   card c81). Its exported surface is the entry module's `pub` items, frozen by
-  `Sema::ApiFreeze`. A plugin runs with **zero host capabilities**, and E1258
+  `Sema::ApiFreeze`. A plugin runs with **zero host rights**, and E1258
   states there is no gate to widen that.
 - The FFI direction that works today is **inbound**: Jet consumes C, Python,
   Dart, and Rust libraries through generated bridges

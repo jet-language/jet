@@ -3,7 +3,7 @@
 Audit date: 2026-07-16. This file freezes the exact 63-card Epoch 4 audit set:
 historical completion claims, reopened #6/#330, and this stop-line card (#418).
 A `done` card proves only its narrow row below. It never
-proves the broader package-manager capability owned by a named successor.
+proves the broader package-manager surface owned by a named successor.
 
 Classes:
 
@@ -87,7 +87,7 @@ rejects unknown classes, and requires non-live rows to name an active successor.
 
 - Cache/index envelopes, trust facts, semantic-lock models, provider metadata,
   and offline fixtures cannot appear in release claims as live protocols.
-- Sandbox capability detection cannot appear as confinement. Until #398 lands,
+- Sandbox detection cannot appear as confinement. Until #398 lands,
   every build is reported as fallback/unsandboxed.
 - Installed-Nix compatibility cannot appear as native Nix interoperability.
 - Active cards #393–#434 are completion owners. Legacy cards stay historical

@@ -50,7 +50,7 @@ Read the classes exactly (`classify_corpus_stem`,
 
 | decision | example stem | class | what that licenses here |
 |---|---|---|---|
-| D-BINPAT1 | `parsing/binary_pattern`, `parsing/binary-reader` | resident_jit | AOT + resident Cranelift agree. The interpreter leg is NOT covered: the TIR evaluator refuses `BinMatchScan` (`Codegen/TIR/eval/exprs.rs:8199-8223` → E0956 → E2201), and the gate waives that refusal. |
+| D-BINPAT1 | `parsing/binary_pattern`, `parsing/binary-reader` | resident_jit | Observed AOT, resident Cranelift, and forced interpreter runs agree. The TIR evaluator now marshals `BinMatchScan` through the shared matcher (`Codegen/TIR/eval/exprs.rs:7773-7811`). |
 | D-STM1 | `memory/shared_transact` | deopt_interp | AOT and the interpreter agree; `#Transact` over `Shared` never executes on the resident Cranelift tier. `errors/transact` is resident_jit. |
 | D-AUTH1 | `crypto/auth_sessions`, `crypto/auth_tokens` | resident_jit | AOT + resident Cranelift agree for the session and token examples. `verify_jwt`/`verify_paseto` have no comptime implementation at all (`Comptime/AuthLite.rs` includes `AuthSession.rs` only). |
 | D-SYNC1 | `tooling/sync_crdt` | resident_jit | AOT + resident Cranelift agree. |

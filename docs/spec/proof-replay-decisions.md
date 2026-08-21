@@ -3,7 +3,7 @@
 This is the durable normative law for card #240. Later specialized decisions override umbrella or provisional examples: D-PROVE-SEM1 owns command semantics, D-JPROOF1 owns proof artifacts, D-JREPLAY1 owns replay artifacts, D-PROVE-SOLVER1 owns solver execution, and D-PROVE-LENS1 owns lens selection. Ratification does not claim implementation.
 
 Current umbrella: `jet prove TARGET` runs the complete non-solver proof producer
-set; `--replay ARTIFACT` consumes a validated capability-bound `.jetproof-replay`;
+set; `--replay ARTIFACT` consumes a validated authority-bound `.jetproof-replay`;
 `--lens solver` opts into the deterministic certificate-checked Presburger
 backend. Every other selected-A lens is presentation-only and never changes the
 complete ProofReport, execution, result, exit, report identity, or `.jetproof`.
@@ -238,7 +238,7 @@ Composition law where repetition is allowed: `--lens A --lens B` is set union; d
 
 ### Selected option: User-facing evidence facets
 
-Values are `all`, `refinements`, `effects`, `taint`, `contracts`, `tests`, `budgets`, `replay`, and `solver`; repetition unions them in that order. `refinements` owns range/refinement and bounds-discharge facts; `effects` owns inferred/declared effect and capability-bound facts; `taint` owns taint introduction, propagation, sanitizer, and sink facts; `contracts` owns `#Pre`/`#Post` declaration and observation evidence; `tests` owns unit, property, doctest, generated-case, shrink, and caught-assertion evidence; `budgets` owns deterministic and statistical budget evidence; `replay` owns replayability, artifact consumption, divergence, and parity evidence. Front-end compilation/type evidence and diagnostics have facet `all`; facet `all` is automatically included in every selected set and every machine filter, while `--lens all` remains the selection sentinel for the complete human view. Every lens except `solver` is presentation-only; naming `solver` additionally enables its producer. Recommended: names match what users are proving while preserving one full execution/report path.
+Values are `all`, `refinements`, `effects`, `taint`, `contracts`, `tests`, `budgets`, `replay`, and `solver`; repetition unions them in that order. `refinements` owns range/refinement and bounds-discharge facts; `effects` owns inferred/declared effect and authority-bound facts; `taint` owns taint introduction, propagation, sanitizer, and sink facts; `contracts` owns `#Pre`/`#Post` declaration and observation evidence; `tests` owns unit, property, doctest, generated-case, shrink, and caught-assertion evidence; `budgets` owns deterministic and statistical budget evidence; `replay` owns replayability, artifact consumption, divergence, and parity evidence. Front-end compilation/type evidence and diagnostics have facet `all`; facet `all` is automatically included in every selected set and every machine filter, while `--lens all` remains the selection sentinel for the complete human view. Every lens except `solver` is presentation-only; naming `solver` additionally enables its producer. Recommended: names match what users are proving while preserving one full execution/report path.
 
 ```jet
 $ jet prove src/payments.jet --lens tests --lens budgets

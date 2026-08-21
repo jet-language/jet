@@ -10,17 +10,17 @@ ratified decisions remain law unless a ballot below explicitly amends one.
 
 ## Exit claim
 
-Epoch 4 exits when Jetpack has functional Nix package-manager capability,
+Epoch 4 exits when Jetpack has functional Nix package-manager support,
 native Nix-package interoperability without an installed `nix` binary, and the
 best compatible features from leading language and build package managers.
 Per `D-JPK-EPOCHBOUNDARY1=B`, Epoch 4 proves the 20 functional lanes below and
 reports the actual sandbox class. Epoch 8 card #398 alone owns hostile
 Linux/macOS/Windows confinement and the full Nix-replacement claim.
 
-The product may claim functional package-manager capability only when all Epoch
+The product may claim functional package-manager support only when all Epoch
 4 acceptance lanes below pass against live stores, registries, caches,
 builders, packages, and independent machines. Fixture-only tests support
-development; they never close a capability card. Full parity remains reserved
+development; they never close a product-claim card. Full parity remains reserved
 until #398 also passes its hostile cross-platform lane.
 
 ## Current truth
@@ -67,7 +67,7 @@ JP0 stop-line now enforces three truth boundaries:
   member into generation-owned paths, and rewrites absolute store symlinks
   before lease drop; no `/proc/self/fd`, lease path, or source-store dependency
   enters the durable generation. Sandbox
-  capability detection stays fallback until a child actually enters a jail.
+  sandbox detection stays fallback until a child actually enters a jail.
 
 Production blockers after that stop-line:
 
@@ -232,7 +232,7 @@ live acceptance, and documentation. Work order is binding.
   there is no unrooted transitional state.
 - Stop reporting “strong sandbox” unless the child enters the jail.
 - Inventory every E4 `done` claim as live, model-only, schema-only, fixture-only,
-  or compatibility-only; reopen incomplete capability cards.
+  or compatibility-only; reopen incomplete product-claim cards.
 - Exit: deletion/tamper never returns cached; hostile child never gets a
   sandboxed label; truth matrix is test-enforced.
 
@@ -258,7 +258,7 @@ live acceptance, and documentation. Work order is binding.
   source, and legacy wrappers into one executable BuildPlan.
 - Key includes the canonical plan, all imported/generated sources, dependency
   outputs, target/profile, build-host-target roles, exact toolchain/SDK/linker,
-  environment allowlist, policy/capabilities, and helper versions.
+  environment allowlist, policy/rights, and helper versions.
 - Exact source bytes remain inputs wherever docs, doctests, diagnostics, line
   maps, embedded source, debug info, or publication can observe them. Compile,
   documentation, debug, and source-archive actions have distinct identities.
@@ -313,20 +313,20 @@ live acceptance, and documentation. Work order is binding.
 - Apply JP6A to live registry, cache, remote execution, locks, and offline
   bundles after JP5 and JP12 exist.
 - SLSA provenance binds action digest, closure, output digest, platform,
-  sandbox proof, toolchain, worker capabilities, and builder identity.
+  sandbox proof, toolchain, worker facts, and builder identity.
 - Compromise, freeze, rollback, fast-forward, mix-and-match, first-root
   replacement, threshold-minus-one, and privacy-mode simulations.
 
 ### E4-JP7 — remote builders and execution
 
-- Builder capabilities: platform, features, resource pools, concurrency,
+- Builder facts: platform, features, resource pools, concurrency,
   priority, trust domain, cache access.
 - Send missing CAS inputs, execute exact action, retrieve verified outputs.
 - Cancellation, retry/failover, worker loss, duplicate result agreement,
   deterministic logs, metrics, and malicious-worker rejection.
 - Remote cache and execution remain separate grants.
 - Result statement binds action digest, named output digests, platform/worker
-  capabilities, policy/sandbox class, stdout/stderr digests, exit status,
+  rights, policy/sandbox class, stdout/stderr digests, exit status,
   provenance signer, and immutable execution identity.
 
 ### E4-JP8 — Nix derivation compatibility
@@ -352,13 +352,13 @@ live acceptance, and documentation. Work order is binding.
   Windows local sockets, and DNS; alias-based `extern crate std` escapes must
   fail that lane. Native linking and dynamic loading require forbidden unsafe
   code or a denied dependency. Filesystem authority is limited to the explicit
-  project-root import capability below; time authority remains outside this
+  project-root import authority below; time authority remains outside this
   stage. Jetpack's integration remains private, exposes no
   evaluation entry point, and partial-stage permits are minted inside seam
   tests only.
 - Lazy thunks, attrsets, functions, string contexts, bounded project-relative
   path values, and read-only imports are now shipped in the native evaluator.
-  Imports receive an explicit private project-root capability from Jetpack;
+  Imports receive explicit private project-root authority from Jetpack;
   absolute paths, URI paths, escapes, symlink escapes, missing files, cycles,
   and over-budget sources fail closed. Windows has no pathname-based import
   fallback; imports remain unsupported there until handle-relative authority
@@ -469,7 +469,7 @@ live acceptance, and documentation. Work order is binding.
 
 - Metadata probing never executes upstream code.
 - Hook approval binds package identity, exact script/recipe digest, requested
-  capabilities, and provider authority.
+  rights, and provider authority.
 - Wrong-source mapping, transitive Git/tarball injection, credential leaks, and
   trust-evidence downgrade are rejected.
 

@@ -48,37 +48,38 @@ The design is deliberately deep at one seam:
 
 The ratified surface already says that `compute.gradient` has two arities:
 the direct function-plus-values form and the function-only form that returns a
-derivative function (`docs/spec/syntax-decisions.md:5536-5547`). VJP already
+derivative function (`docs/spec/syntax-decisions.md:5624-5635`). VJP already
 returns callable `.pull` and `.grads` continuations
-(`docs/spec/syntax-decisions.md:5549-5553`). The missing capability is not a
+(`docs/spec/syntax-decisions.md:5637-5641`). The missing piece is not a
 new spelling. It is the lifetime of the returned callable after the host frame
 that made it.
 
 The existing Prelude already has the semantic center. `Compute.rs` documents
 that engines marshal callable arguments and typed results while one transform
 dispatcher owns transform selection, scalar seeding, value detachment, and
-lazy VJP state (`crates/jet-codegen/src/Prelude/CoreLib/Top/Compute.rs:2949-2993`).
+lazy VJP state (`crates/jet-codegen/src/Prelude/CoreLib/Top/Compute.rs:2954-2998`).
 The design extends that center to the returned callable instead of making each
 engine manufacture a private closure convention.
 
 ## Current seams and the honest refusal
 
-The current source has four relevant paths. The line numbers below are from
-the working tree used for this design; the card's older line references moved
-in the meantime.
+The current source has four relevant seams. The line numbers below match the
+current working tree.
 
 | Seam | Current evidence | Design consequence |
 |---|---|---|
-| Resident admission | `crates/jet-jit/src/jit/safety.rs:45-80` admits compute transforms through `args.len() >= 2`, then checks the value count. There is no separate source-arity-one branch. | Add an explicit curried transform shape in the implementation diff. The resident predicate must accept exactly the lowered `[function, targets]` form and still reject a malformed shape. |
-| AOT emit | `crates/jet-codegen/src/Codegen/TIR/emit/core_calls.rs:214-249` owns the `args.len() < 2` admission and defines `args.len() == 2` as `transform`. The later branch currently renders an inline Rust closure (`:341-407`) when this TIR shape reaches it. | Keep direct calls and curried calls distinct. The curried arm must create the Prelude handle and call the shared entry, not make AOT's `Rc` closure the semantic convention. |
-| TIR lowering and JIT lowering | `crates/jet-codegen/src/Codegen/TIR/lower/method_calls.rs:232-318` routes the four compute methods and appends the implicit `List<Int>` target at `:280-304`. The card's older lowering guard is now the module/method guard at `:241-244`; the concrete resident arity refusal is `crates/jet-jit/src/jit/lower_ctx.rs:13659-13706`, especially `:13664-13666`. | The same implementation diff must make the lowering arm produce the curried handle shape, narrow the resident guard, and update the AOT arm. No tier may accept a new shape alone. |
-| Interpreter callable model | `crates/jet-codegen/src/Codegen/TIR/eval/compute_calls.rs:281-326` already stores `EvalCallable::ComputeTransform` for `args.len() == 2`. `EvalCallable::ComputePull` and `ComputeGrads` carry output/anchor/targets/gradient type (`eval/mod.rs:1189-1239`). `call_callable` snapshots those records before dispatching (`eval/mod.rs:3337-3439`). | This is the semantic model to reproduce in the shared handle. The interpreter's current callable arena is evidence of the required lifetime, not a private compute implementation to preserve. |
-| Current JIT convention | `crates/jet-jit/src/Compute.rs:397-414` stores VJP states in JIT `ComputeState`; `:968-1026` turns a curried transform into an arity-specific factory function and an env record. | Move the curried plan/tape ownership to the Prelude handle. Leave ordinary collection and system callback slots alone. `Compute.rs` becomes an i64/list/result adapter around the shared operation. |
+| Resident admission | `crates/jet-jit/src/jit/safety.rs:45-80` admits the lowered `[function, targets]` shape through `args.len() >= 2`, then checks the value count. For that valid shape, `value_count == 0` and `expected_values == 0`, so the predicate does not currently refuse it; it has no source-arity-one fact. | Replace the broad admission with an explicit curried shape check. Keep malformed shapes out. Do not treat the guard as the closure lifetime mechanism. |
+| AOT emit | `crates/jet-codegen/src/Codegen/TIR/emit/core_calls.rs:212-223` rejects fewer than two TIR arguments and defines `args.len() == 2` as `transform`; `:339-405` emits the returned `Rc` closure. | The curried arm must create and call the Prelude handle. The `Rc` closure may remain only as a marshalling adapter, if needed. |
+| TIR and resident JIT lowering | `crates/jet-codegen/src/Codegen/TIR/lower/method_calls.rs:308-393` appends the implicit `List<Int>` target, producing `[base, targets]` for the curried source form. `crates/jet-jit/src/jit/lower_ctx.rs:13792-13827` accepts that shape, passes zero as the input-list handle, and calls the private transform factory path. | Change source/TIR lowering, the resident guard, AOT emit, and JIT marshalling in one implementation diff. The JIT must stop manufacturing a second transform convention. |
+| Interpreter and current JIT callable models | `crates/jet-codegen/src/Codegen/TIR/eval/compute_calls.rs:281-326` stores `EvalCallable::ComputeTransform` for `args.len() == 2`; `eval/mod.rs:1218-1265,3452-3550` snapshots and dispatches it. The JIT stores compute state in `ComputeState` (`crates/jet-jit/src/Compute.rs:551-567`), runs direct transform policy in `:866-1021`, and creates arity-specific factories in `:1023-1098,1122-1180`. | Move plan, tape, transform selection, and continuation lifetime to the Prelude. Both engines become adapters over the same handle and call operation. |
 
-This is an honest refusal today, not a tier divergence. The interpreter can
-represent and execute the curried value; resident JIT admission and the native
-lowering path do not have a cross-frame representation with shared ownership.
-The design therefore fixes the seam, not just one guard.
+This is an I9 divergence, not only an admission refusal. The card's wording
+that the resident arity guard refuses the curried form is stale: the current
+predicate admits the valid lowered shape. AOT uses an inline `Rc` transform
+closure, resident JIT uses an arity-specific factory plus an environment
+record, and the interpreter uses compute-specific callable records. Each can
+represent the value, but no one representation owns the closure across all
+host seams. The design fixes that split instead of adding a fourth convention.
 
 ## Same program: before and after
 
@@ -104,10 +105,10 @@ fn run() {
 }
 ```
 
-Before this design, `d_loss` is an interpreter callable snapshot when the
-interpreter path is used. The resident path has no shared persistent compute
-handle: the native shape is refused or falls through to the interpreter. The
-program still has a meaning, but its default execution is not resident.
+Before this design, `d_loss` is an interpreter callable snapshot on the
+interpreter path, an inline `Rc` closure in AOT, and an arity-specific factory
+in resident JIT. The program has a meaning, but its tiers do not share one
+persistent compute handle.
 
 After the implementation cards, `compute.gradient(loss)` creates one
 Prelude-owned curried handle. `d_loss(~w, ~x)` marshals that handle and the two
@@ -334,15 +335,15 @@ domains into compute.
 
 | Precedent | What it proves | What the compute handle subsumes or leaves alone |
 |---|---|---|
-| Collection callbacks | `functions_compile::lower_collection_callable_lambda` says the collection operation stays in the shared Prelude while the JIT supplies callback ABI and opaque captures (`crates/jet-jit/src/jit/functions_compile.rs:701-727`). `lower_collection_callback` binds `fn_ptr/env` and `sync_collection_captures` publishes mutable captures (`crates/jet-jit/src/jit/lower_ctx.rs:28697-28777`). | Reuse: an opaque retained environment, no stack capture, and explicit write-back. Subsumes only the idea of a durable callback adapter. It does not replace collection capture synchronization or collection operation symbols. |
-| JIT spawn-site callbacks | `TCoreClosureKind::Spawn` and `OnInterrupt` carry explicit callback sites and engine adapters (`crates/jet-codegen/src/Codegen/TIR/mod.rs:4536-4553`); `first_spawn_site` locates the authoritative TIR site (`crates/jet-jit/src/jit/safety.rs:5915-5931`). | Reuse: TIR owns the site fact and the engine marshals it. Leave as-is: spawn, interrupt, reactive, and UI callbacks have event/thread/lifecycle contracts outside pure compute. |
-| ParaMap and ParaFilter | `TClosureOp::ParaMap` is lowered through the existing native iterator adapter (`crates/jet-jit/src/jit/lower_ctx.rs:28834-28843`) and AOT emits the shared list operation (`crates/jet-codegen/src/Codegen/TIR/emit/expressions.rs:3873-3877`). | Leave as-is. ParaMap's ordered/parallel scheduling and callback shape are collection semantics. The compute handle may use the same opaque callback discipline, but it must not inherit ParaMap's scheduling or private host policy. |
-| Interpreter callable snapshots | `EvalCallable::ComputeTransform`, `ComputePull`, and `ComputeGrads` are cloned before invocation (`crates/jet-codegen/src/Codegen/TIR/eval/mod.rs:1189-1239`, `:3337-3439`). | Subsumes the compute-specific records and their escape behavior into the Prelude handle. Generic lambda capture snapshots and scope write-back remain the interpreter's general callable machinery. |
+| Collection callbacks | `functions_compile::lower_collection_callable_lambda` says the collection operation stays in the shared Prelude while the JIT supplies callback ABI and opaque captures (`crates/jet-jit/src/jit/functions_compile.rs:701-727`). `lower_collection_callback` binds `fn_ptr/env` and `sync_collection_captures` publishes mutable captures (`crates/jet-jit/src/jit/lower_ctx.rs:28910-28975`). | Reuse: an opaque retained environment, no stack capture, and explicit write-back. Subsumes only the idea of a durable callback adapter. It does not replace collection capture synchronization or collection operation symbols. |
+| JIT spawn-site callbacks | `TCoreClosureKind::Spawn` and `OnInterrupt` carry explicit callback sites and engine adapters (`crates/jet-codegen/src/Codegen/TIR/mod.rs:4542-4555`); `first_spawn_site` locates the authoritative TIR site (`crates/jet-jit/src/jit/safety.rs:5962-5970`). | Reuse: TIR owns the site fact and the engine marshals it. Leave as-is: spawn, interrupt, reactive, and UI callbacks have event/thread/lifecycle contracts outside pure compute. |
+| ParaMap and ParaFilter | `TClosureOp::ParaMap` is lowered through the existing native iterator adapter (`crates/jet-jit/src/jit/lower_ctx.rs:29047-29052`) and AOT emits the shared list operation (`crates/jet-codegen/src/Codegen/TIR/emit/expressions.rs:3920-3922`). | Leave as-is. ParaMap's ordered/parallel scheduling and callback shape are collection semantics. The compute handle may use the same opaque callback discipline, but it must not inherit ParaMap's scheduling or private host policy. |
+| Interpreter callable snapshots | `EvalCallable::ComputeTransform`, `ComputePull`, and `ComputeGrads` are cloned before invocation (`crates/jet-codegen/src/Codegen/TIR/eval/mod.rs:1218-1265`, `:3452-3553`). | Subsumes the compute-specific records and their escape behavior into the Prelude handle. Generic lambda capture snapshots and scope write-back remain the interpreter's general callable machinery. |
 
 The current JIT callable slot is a useful adapter shape: it is an opaque
 `fn_ptr` plus `env` (`crates/jet-jit/src/jit/runtime_host.rs:230-239`) and its
 binding checks the function address before handing it to generated code
-(`runtime_host.rs:3083-3117`). It is not the semantic owner of a compute tape.
+(`runtime_host.rs:3091-3125`). It is not the semantic owner of a compute tape.
 The implementation must not copy that table into a second compute table with
 different lifetime rules.
 
@@ -351,21 +352,21 @@ different lifetime rules.
 The implementation card for lowering must make the admission and lowering
 change inseparable. The intended diff shape is:
 
-1. `crates/jet-codegen/src/Codegen/TIR/lower/method_calls.rs` keeps the one
-   `core.compute` transform lowering path and makes its source-arity-one case
-   explicit. It appends the target list exactly once. The resulting TIR shape
-   is `[base, targets]` for a curried transform and `[base, values..., targets]`
-   for a direct transform.
+1. `crates/jet-codegen/src/Codegen/TIR/lower/method_calls.rs:308-393` keeps the
+   one `core.compute` transform lowering path and makes its source-arity-one
+   case explicit. It appends the target list exactly once. The resulting TIR
+   shape is `[base, targets]` for a curried transform and
+   `[base, values..., targets]` for a direct transform.
 2. `crates/jet-jit/src/jit/safety.rs:50-53` narrows the native predicate to
    accept the valid `[base, targets]` case with zero value arguments, plus the
    existing direct value cases. It does not turn `args.len() >= 2` into a
    blanket acceptance rule.
-3. `crates/jet-codegen/src/Codegen/TIR/emit/core_calls.rs:220-223` changes in
+3. `crates/jet-codegen/src/Codegen/TIR/emit/core_calls.rs:218-223` changes in
    the same patch. Its `args.len() == 2` branch calls
    `jet_compute_curried_new` and emits a function value backed by the returned
    handle; the direct branch continues to marshal values through the Prelude.
    The old AOT-only inline transform closure is removed as the semantic path.
-4. `crates/jet-jit/src/jit/lower_ctx.rs:13664-13679` changes in that same
+4. `crates/jet-jit/src/jit/lower_ctx.rs:13792-13827` changes in that same
    patch. It branches on the canonical TIR shape, passes an explicit empty
    input pack for a curried plan, and calls the new `jet_compute_*` entry. It
    must not keep a separate `base_arity`-indexed factory convention for the
@@ -399,9 +400,10 @@ not a reduced direct-call-only fixture. The proof plan is:
    fragments, while `tests/tir_support/mod.rs:160-190` has the full forced
    interpreter/AOT comparison helper. The follow-up must assert the resident
    trace and compare the complete golden across all three tiers.
-6. Remove `tests/jit_gaps.txt:405` for `tooling/compute_autodiff` and move its
-   current `tests/jit_corpus_gate.txt:533` classification out of the deopt
-   list. A green output comparison with an interpreter fallback is not
+6. The current tree has no `tests/jit_gaps.txt`. Move
+   `tooling/compute_autodiff` at `tests/jit_corpus_gate.txt:534` out of the
+   `deopt_interp` list only after the no-deopt proof. Do not invent a gap-file
+   deletion. A green output comparison with an interpreter fallback is not
    criterion 3.
 
 The evidence is byte identity plus a no-deopt trace, not only equal numerical
@@ -414,73 +416,51 @@ card remains open.
 The following are ready-to-mint Tower payloads. They are not written to Tower
 in this working session because the task rules explicitly prohibit board
 writes, commits, and edits under `plugins/tower/**`. Each card must reference
-#2028, and #2028 must receive the reciprocal `refs` after Tower assigns the
-card IDs. The criteria are copied verbatim from #2028 so that implementation
-work cannot silently narrow the design.
+#2028, and #2028 must receive reciprocal `refs` after Tower assigns card IDs.
+The parent criteria are split by owner so each follow-up has one proof owner.
 
 ### Follow-up A — Prelude compute handle
 
-Scope: implement the handle table, callback descriptor, clone/drop lifetime,
-reentrant invocation, and `jet_compute_curried_new` /
-`jet_compute_call_curried` in `Prelude/CoreLib/Top/Compute.rs`; convert AOT/JIT/
-interpreter callers to thin adapters. This card owns the mechanism, not the
-resident guard or final corpus proof.
+Scope: implement the Prelude handle table, callback descriptor, clone/drop
+lifetime, reentrant invocation, and `jet_compute_curried_new` /
+`jet_compute_call_curried` in `Prelude/CoreLib/Top/Compute.rs`. Define the
+adapter contract. Do not edit lowering, engine admission, or corpus state.
 
-Copied criteria:
-
-1. One mechanism carries a Jet closure across the host boundary, owned by the
-   Prelude, with AOT, the Cranelift hosts and the interpreter ambient all
-   marshalling to it rather than each holding a convention.
-2. `compute.gradient(f)` in its curried single-argument form lowers natively,
-   and the arity guard that currently refuses it is narrowed in the same diff
-   as the lowering arm that handles it.
-3. `compute_autodiff` runs on default `jet run` without deopting to the
-   interpreter, with output byte-identical to AOT and to the interpreter.
+Exit evidence: the handle and call operation own plan state, tape state,
+transform selection, continuation lifetime, and error meaning. A separate
+test or proof must cover repeated calls, escaped calls, and reentrant calls.
 
 ### Follow-up B — lowering and guard narrowing
 
-Scope: implement the one-diff shape in the criterion-2 section: source/TIR
-curried lowering, resident safety admission, AOT emit, and Cranelift call
-marshalling to the Prelude handle. This card may depend on Follow-up A but may
-not create a second callable convention.
+Scope: depend on Follow-up A. In one diff, implement source/TIR curried
+lowering, resident safety admission, AOT emit, Cranelift marshalling, and
+interpreter ambient marshalling. Use only the Prelude handle interface. Do not
+create a second callable convention.
 
-Copied criteria:
+Exit criteria:
 
 1. One mechanism carries a Jet closure across the host boundary, owned by the
-   Prelude, with AOT, the Cranelift hosts and the interpreter ambient all
-   marshalling to it rather than each holding a convention.
+   Prelude, with AOT, the Cranelift hosts, and the interpreter ambient all
+   marshalling to it.
 2. `compute.gradient(f)` in its curried single-argument form lowers natively,
-   and the arity guard that currently refuses it is narrowed in the same diff
-   as the lowering arm that handles it.
-3. `compute_autodiff` runs on default `jet run` without deopting to the
-   interpreter, with output byte-identical to AOT and to the interpreter.
+   and the arity guard narrows in the same diff as the lowering arm.
 
 ### Follow-up C — tri-tier proof and gap retirement
 
-Scope: add the resident trace/no-deopt proof, full AOT/default/interpreter
-byte comparison, higher-order/VJP escape coverage, and remove the durable
-`compute_autodiff` gap classification. This card closes only after the
-mechanism and lowering cards are integrated.
+Scope: depend on Follow-ups A and B. Add the resident trace/no-deopt proof,
+full AOT/default/interpreter byte comparison, higher-order and VJP escape
+coverage, and move the `compute_autodiff` corpus row after proof.
 
-Copied criteria:
-
-1. One mechanism carries a Jet closure across the host boundary, owned by the
-   Prelude, with AOT, the Cranelift hosts and the interpreter ambient all
-   marshalling to it rather than each holding a convention.
-2. `compute.gradient(f)` in its curried single-argument form lowers natively,
-   and the arity guard that currently refuses it is narrowed in the same diff
-   as the lowering arm that handles it.
-3. `compute_autodiff` runs on default `jet run` without deopting to the
-   interpreter, with output byte-identical to AOT and to the interpreter.
+Exit criterion: `compute_autodiff` runs on default `jet run` without deopting
+to the interpreter, with output byte-identical to AOT and to the interpreter.
 
 ## Criterion status for #2028
 
 This design makes the decision and records the proof shape. It does not claim
 implementation evidence:
 
-1. **Open — design decided, implementation absent.** The chosen mechanism and
-   tier marshalling table are above; no Prelude entry points have been added.
-2. **Open — implementation absent.** The same-diff guard/lowering shape is
-   specified above; no guard or lowering arm has been changed.
-3. **Open — implementation absent.** The resident, byte-identical proof plan
-   is specified above; `compute_autodiff` remains an implementation follow-up.
+1. **Design done; implementation open.** The selected mechanism is recorded
+   above. Follow-up B owns the parent implementation criterion.
+2. **Open; re-homed to Follow-up B.** No guard or lowering arm changed.
+3. **Open; re-homed to Follow-up C.** `compute_autodiff` remains in
+   `tests/jit_corpus_gate.txt:534` until the resident proof passes.

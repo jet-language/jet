@@ -111,7 +111,7 @@ Input and file access are explicit. Queue `Ada` in the browser's **Input**
 control, then run this cell:
 
 ```jet
-#Caps(abilities: IO, FS) {
+#Abilities(abilities: IO, FS) {
     name :: input("name: ") ?? "world"
     assert(name == "Ada")
     write_file("notes.txt", name) ?? panic("write failed")
@@ -121,7 +121,7 @@ control, then run this cell:
 }
 ```
 
-The grant is the cell's explicit authority. `input`, `write_file`,
+The block is the cell's explicit ability boundary. `input`, `write_file`,
 `file_exists`, and `read_file` are the same Prelude ambients used by the
 terminal REPL; the relative file stays inside the notebook directory. The
 `Path.from` call also shows the expert form used when a Core file operation

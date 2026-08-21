@@ -507,11 +507,11 @@ renumbered, and no new `W` code may be allocated.
 | E0704 | jet   | foreign crate fetch/build failed (cargo detail indented) |
 | E0705 | jet   | `= "rust::path"` doesn't match the Jet signature |
 | E0740 | sema  | a function's inferred effects exceed its declared `:[…]>` bound (D-EFF1) |
-| E0741 | sema  | retired duplicate of the unified `#Caps` ability check (D-AUTHORITY-SCOPE1) |
+| E0741 | sema  | retired duplicate of the unified `#Abilities` ability check (D-AUTHORITY-SCOPE1) |
 | E0742 | sema  | a trait-method impl uses effects beyond the trait method's declared bound (D-EFF3) |
 | E0743 | sema  | dynamic trait dispatch has no declared effect bound under an enclosing effect ceiling (D-EFF3) |
-| E0711 | sema  | the `Authority` handle bound by a named `#Caps(…)` region escapes its scope — returned, stored, or captured (D-AUTHORITY-SCOPE1) |
-| E0712 | sema  | an effect used inside a `#Caps(…)` region has no ability — it isn't in the ability list (D-AUTHORITY-SCOPE1) |
+| E0711 | sema  | the `Abilities` handle bound by a named `#Abilities(…)` region escapes its scope — returned, stored, or captured (D-AUTHORITY-SCOPE1) |
+| E0712 | sema  | an effect used inside a `#Abilities(…)` region has no ability — it isn't in the ability list (D-AUTHORITY-SCOPE1) |
 | E0721 | sema  | a tagged value reaches a destination denied by that tag declaration (D-TAG-SURFACE1) |
 | E0722 | sema  | a `#Credential` value reaches a log, display, or serialization destination (D-TAG-SURFACE1) |
 | E0725 | sema  | a `#Replayable` function reaches ambient `Time`/`Rand`/`Net`/`IO` (D-REPLAY1) |
@@ -943,7 +943,7 @@ D-LOOPEVAL1, D-LOOPSTATE1, and D-COMPREHENSION1.
 | E0074 | This collecting loop produces incompatible item types. | One collecting loop builds one `[T]`, so every contributed item must have the same type. | Convert the items to one type, or split the operations into separate loops. |
 | E0075 | This collecting loop cannot use a break payload. | Its result is already the accumulated `[T]`. A second payload would give the same exit two result channels. | Write `break` to return the accumulated list, or return one final value from an ordinary loop. |
 | E0076 | This result loop has a missing or incompatible break payload. | An ordinary loop used as a value has one final result type. Every exit that targets it must provide that type. | Add the missing payload and make every payload the same type, or target an inner effect-only loop. |
-| E0077 | The `#Grant` scope marker is retired. | `#Caps` now narrows a block and binds an `Abilities` handle when its head has a name. | Write `#Caps(abilities: FS, Net) { ... }`. |
+| E0077 | The `#Grant` scope marker is retired. | `#Abilities` now narrows a block and binds an `Abilities` handle when its head has a name. | Write `#Abilities(abilities: FS, Net) { ... }`. |
 | E0078 | This finite value loop needs a written exhaustion route, or cannot use an immediate `?? next`/`?? break` route. | A finite source can end without a matching `break`; `next` and `break` after the closing brace would control the loop that just closed instead of naming a target. | Add `?? fallback` after the closing `}`, or write a labeled search such as `found :: loop { ... break(found, value) }`. |
 | E0079 | This effect-only loop uses a result exit. | A break payload makes an effect-only loop a value expression. | Bind the loop with `::`, or remove the payload. |
 | E0986 | This callable marker is detached from its declaration head. | Layout must keep `:>`, `:[Effects]>`, `::`, or the opening brace attached to the function head so the declaration boundary is unambiguous. | Move the marker or opening brace onto the same logical line as the closing `)`. |
@@ -1156,7 +1156,7 @@ CLI.
 | *retired; duplicate markers use E0003* | One function has one explicit kernel mode. | Keep one `#Kernel(.parallel)` marker. |
 | L1101 | A bound `Task` still owes `join` (D-CONC-JOIN1, D-FACT-WORD1=A). | The program may end before that task finishes; a task's duty is discharged by joining it or using its result. | Join it with `.join()`, use its result, or write `.detach()` to let it go free. |
 | E0040 | `async` or `await` was written. | Jet uses blocking tasks and channels rather than async syntax. | Write `task work()` or use `task.all { work_a(), work_b() }`. |
-| E0041 (`Mutex`/`RwLock`/`mutex`/`lock`) | `` `<name>` is not in Jet; share data through channels `` | Jet avoids shared mutable state: tasks communicate by sending messages, not sharing memory. | Import `core.tasks as tasks`, create a channel, and use `sender.send`/`channel.receive`. |
+| E0041 (`Mutex`/`RwLock`/`mutex`/`lock`) | `` `<name>` is not in Jet; share data through channels `` | Jet avoids shared mutable state: tasks communicate by sending messages, not sharing memory. | Create `channel<T>()`, and use `sender.send`/`loop value, receiver :> ...`. |
 | E0041 (`Semaphore`/`semaphore`) | `` `<name>` is not in Jet; use a bounded channel as a token pool `` | each received token admits one worker until that worker sends the token back | create `channel<Int>(capacity: N)`, seed N tokens, receive one before work, and send it back afterward |
 
 ## Tier-2 reference diagnostics (E2-M5, D-DYNARRAY1 `View<T>`, D-MEM1 S5 string views)
@@ -1608,12 +1608,12 @@ so these are compile-time-only diagnostics. An unknown effect name in a
 | Code | What | Why | Fix |
 |------|------|-----|-----|
 | E0740 | `{fn}` uses the effect `{effect}`, which its signature doesn't allow. | A `:[…]>` list is an upper bound on what the body may do; the inferred effects must be a subset. An effect the body reaches that the bound omits breaks that contract. | Add the named effect to the `:[…]>` list, or stop using it (drop the Core call that introduces it, or move it out of this function). |
-| E0741 | *Retired by D-AUTHORITY-SCOPE1.* | The unified `#Caps` subset check reports E0712 for bare and named regions. | Fix the E0712 diagnostic, then add the effect to the `#Caps(…)` list or move the work outside the region. |
+| E0741 | *Retired by D-AUTHORITY-SCOPE1.* | The unified `#Abilities` subset check reports E0712 for bare and named regions. | Fix the E0712 diagnostic, then add the effect to the `#Abilities(…)` list or move the work outside the region. |
 | E0742 | This `{method}` impl uses the effect `{effect}`, which the trait doesn't allow. | A trait method may declare an effect upper bound (`fn hash(self) =[]=>`, `fn render(self) =[GPU]=>`); every implementation's inferred effects must fit inside it, so the bound holds for all impls (D-EFF3). | Remove the offending work from the impl, or widen the bound on the trait method. |
 | E0743 | Dynamic call `{trait}::{method}` has no effect bound. | A trait value can select any implementation at runtime, so an enclosing effect ceiling needs the trait method's declared upper bound (D-EFF3). | Declare an effect row on the trait method, such as `=[]=>` for pure dispatch, or move the dynamic call outside the bounded function. |
 | E0745 | *Retired by D-SHAPE8=A.* | This code diagnosed the former contradiction between `#Pure fn` and a non-empty `#(…)` effect list. Both spellings are now rejected earlier by E0066. | Use one canonical effect arrow: `=[]=>` for an empty row or `=[Effects]=>` for a bounded row. |
-| E0711 | The `Authority` handle `{handle}` can't escape its `#Caps` block. | `#Caps(…)` revokes the `Authority` at scope end (RAII); returning, storing, or capturing the handle would let revoked rights outlive the scope. | Use the handle only inside the `#Caps` block, or perform the work that needs it there. |
-| E0712 | This `#Caps` region uses the effect `{effect}`, which it has no ability for. | `#Caps(…)` allows exactly the listed effects; an effect reached inside — even transitively through a call — that the list omits has no ability backing it. | Add the named effect to the `#Caps(…)` list, or move that work outside the region. |
+| E0711 | The `Abilities` handle `{handle}` can't escape its `#Abilities` block. | `#Abilities(…)` revokes the `Abilities` at scope end (RAII); returning, storing, or capturing the handle would let revoked rights outlive the scope. | Use the handle only inside the `#Abilities` block, or perform the work that needs it there. |
+| E0712 | This `#Abilities` region uses the effect `{effect}`, which it has no ability for. | `#Abilities(…)` allows exactly the listed effects; an effect reached inside — even transitively through a call — that the list omits has no ability backing it. | Add the named effect to the `#Abilities(…)` list, or move that work outside the region. |
 | E0721 | A `{tag}` value is denied at `{api}`. | The declaration for `{tag}` lists a destination that covers `{api}`. The tag spreads with derived data until an exact-tag scrubber removes it. | Remove the destination use, change the declaration if its policy is wrong, or pass the value through `#Scrub({tag})`. |
 | E0722 | A `Credential` value is denied at `{sink}`. | The Prelude `Credential` tag denies logging, display, and serialization destinations because they would leak a secret. | Log a non-secret field, or pass the value through a matching `#Scrub(Credential)` function. |
 | E0725 | `{fn}` is `#Replayable` but reaches `{effect}`. | `#Replayable` code must replay from explicit inputs; ambient time, randomness, network, or console IO would make the same replay diverge. | Inject a deterministic clock/RNG or mockable input, pass recorded data in, or move the ambient effect outside the replayable function. |
@@ -1796,7 +1796,7 @@ REPL step number in place of a file span (`<repl:N>`).
 |------|------|-----|-----|
 | E1801 | This snippet ran more than `{N}` interpreter steps without finishing. | The REPL interpreter caps each input to avoid hanging your session; this almost always means a loop that never ends. | Check any loops for a condition that never becomes false. Use `:run` to allow unbounded execution (compiles and runs instead of interpreting). |
 | E1802 | The REPL interpreter can't run `{feature}`. | The REPL is an interpreter for learning Jet; some features — FFI, tasks/channels, `#Unsafe`, and OS-level APIs — require the real compiler. | Run `jet run <file.jet>` or `jet build <file.jet>` to use the full compiler. |
-| E1803 | `{Root}.{Operation}` for `{resource}` was denied. | REPL host effects require both an enclosing `#Caps` and runtime invocation ability; denied operations stop before touching host state. | Approve the exact operation interactively, or restart with the matching `jet repl --allow-{root}` flag. `--deny-{root}` always wins. |
+| E1803 | `{Root}.{Operation}` for `{resource}` was denied. | REPL host effects require both an enclosing `#Abilities` and runtime invocation ability; denied operations stop before touching host state. | Approve the exact operation interactively, or restart with the matching `jet repl --allow-{root}` flag. `--deny-{root}` always wins. |
 
 ## CLI diagnostics (E2-M3 developer command UX)
 

@@ -172,7 +172,7 @@ fn verify_release() ? {
 }
 ```
 
-Plural intents run every matching Output: `jet test` runs every Check. Singular intents (`run`, `enter`, `publish`, and activation) use one ordered rule: explicit address; unchanged function-only `fn run`; sole capable Output; checked `defaults:` entry for that capability; otherwise a sorted candidate error. Adding a second singular-capability Output never silently changes automation because a formerly unique command becomes an error until `defaults:` is set.
+Plural intents run every matching Output: `jet test` runs every Check. Singular intents (`run`, `enter`, `publish`, and activation) use one ordered rule: explicit address; unchanged function-only `fn run`; sole eligible Output; checked `defaults:` entry for that selection; otherwise a sorted candidate error. Adding a second singular-selection Output never silently changes automation because a formerly unique command becomes an error until `defaults:` is set.
 
 ### Lock, receipts, Hangar, and roots
 
@@ -251,12 +251,12 @@ plan -> build -> verify -> canary -> activate -> observe -> rollback
 | `config.jet` versus unified root | **Root discovery.** `package.jet` supplies Systems and Fleets; `host@root` loads the named Package, not a second OS file model. |
 | Native JetOS versus hidden NixOS backend | **Migration-only oracle.** Native JetOS never builds through NixOS. The hidden NixOS realizer is relabeled explicit migration/A-B proof tooling and cannot close native acceptance. |
 | Freeze wording | **Epoch-scoped freeze.** D-JETOS-FREEZE1 constrained Epoch 4 implementation. Epoch 7 ratifications reopened System and Fleet work; it is not a global syntax ban. |
-| Studio status conflict | **Capability labels.** Compatibility projection is shipped; full source transaction, provenance, proof dashboard, and activation handoff remain separate capabilities until each live path passes. |
+| Studio status conflict | **Claim labels.** Compatibility projection is shipped; full source transaction, provenance, proof dashboard, and activation handoff remain separate claims until each live path passes. |
 | Reality labels vary by document | **Proof-class status.** Every package/JetOS claim is labeled model, fixture, compatibility, live, or hostile-proofed; only the last applicable class closes replacement claims. |
 | Lock name overload | **Index plus receipts.** `.jet/lock` owns graph and merge authority; immutable receipt objects hold per-action and per-generation evidence by digest. |
 | One graph versus L1/L2/L3 seams | **Semantic unity, layered execution.** L1 owns canonical facts, L2 derives pure plans, and L3 realizes them. All share one versioned graph/receipt contract. |
 | No-installed-Nix work duplicated by Jetpack and JetOS | **Single substrate owner.** Jetpack owns native Nix compatibility and package realization; JetOS only consumes its outputs. |
-| Vision outruns frozen scope | **Target versus shipped labels.** This proposal is final-shape target law. Roadmaps and help expose only capabilities with matching live evidence. |
+| Vision outruns frozen scope | **Target versus shipped labels.** This proposal is final-shape target law. Roadmaps and help expose only features with matching live evidence. |
 
 ## Ladder
 

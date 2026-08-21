@@ -35,7 +35,7 @@ The rule is fixed:
 
 > Ordinary `?` propagation never implies rollback.
 
-A checked region is therefore a separate, expert-only capability. A function
+A checked region is therefore a separate, expert-only rollback region. A function
 outside a region keeps its writes when `?` returns an error.
 
 Jet already has the `#Transact` rail. `D-CONC-STM1=A` gives its shared-value

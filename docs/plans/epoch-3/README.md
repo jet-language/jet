@@ -12,7 +12,7 @@ This directory keeps only durable cross-card law:
 - [universal-language-core.md](universal-language-core.md) — binding
   truth-repair and product-parity acceptance.
 
-Dated syntax/marker matrices and capability dumps live in
+Dated syntax/marker matrices and claim dumps live in
 [`docs/archive/`](../../archive/). Regenerate with
 `.agents/skills/spec-compliance-audit/`.
 

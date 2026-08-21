@@ -6,6 +6,14 @@ outcomes ratified 2026-08-06. The delivery map is recorded in
 `docs/spec/syntax-decisions.md` (card #1500). The forms below are ratified
 targets; implementation cards still own migration to shipped code.
 
+## Documentation boundary
+
+Current Jet documentation uses `Ability`/`Abilities`, `Authority`, rights, and
+access. The retired word remains only in this proposal's ballot/history text,
+ratified decision history, external protocol names, and prior-art or archived
+evidence. Those occurrences describe the design tradition; they are not current
+Jet surface vocabulary.
+
 ## Executive summary
 
 Jet answers one question in at least nine different places: **who may do what,

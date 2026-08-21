@@ -211,7 +211,7 @@ are 57% of Rust metaprogramming sites. These are ordinary production surfaces.
 Testing reaches 87% of projects, with a p90 density of 19.53 against a median of 4.40: projects
 either test seriously or barely.
 
-Jet's expert opt-ins line up. `taskgroup`, `tasks.channel`, `#Known`, markers, and trait bounds all
+Jet's expert opt-ins line up. `taskgroup`, builtin `channel<T>()`, `#Known`, markers, and trait bounds all
 have shipped examples. No measured expert surface is missing from Jet.
 
 ## Jet recommendations

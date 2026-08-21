@@ -2671,7 +2671,8 @@ fn run() {
         sender.send(42)
     }
     handle.join() ?? panic("task failed")
-    print(ch.receive() ?? panic("channel closed"))
+    sender.close()
+    loop value, ch :> print(value)
 }
 ```
 
@@ -2702,7 +2703,7 @@ there's no combined channel value).
 | `~sender` | `Sender<T>` | Create another send half with the copy sigil |
 | `sender.send(value)` | nothing | Move one value into the channel |
 | `sender.close()` | nothing | Close the send half explicitly |
-| `receiver.receive()` | `T ? Closed` | Block for a value, or return `Closed` when senders are gone |
+| `receiver.receive()` | `T ? Closed` | Block for one value, or return `Closed` when senders are gone; use `loop value, receiver` to drain until close |
 | `receiver.close()` | nothing | Close the receive half explicitly |
 
 Values crossing a task body or `send` must be sendable: no `View<T>` or string-view
@@ -2781,7 +2782,7 @@ loop computes and drops inside its body.
   value that dies inside a unit-returning body.
 
 Force lazy resources and feed each iteration's value to the approved identity
-sink, `keep(value)`, after D-BENCH-KEEP1 is ratified. This catalog describes
+sink, `keep(value)`, under D-BENCH-KEEP1=A. This catalog describes
 measured regions. D-CLAIM-BENCH1 moves measurement to `.measure` with
 `jet test --measure`; there is no separate benchmark runner.
 
@@ -3804,9 +3805,11 @@ with a bounded mailbox, then operate on that worker through its typed endpoint:
 ```jet
 use core.service as service
 
+fn api_handler() {}
+
 fn run() {
     tree := service.tree("app")
-    api :: tree.worker("api", capacity: 2) ?? panic("worker")
+    api :: tree.worker("api", api_handler, capacity: 2) ?? panic("worker")
     tree.start() ?? panic("start")
     api.send("ping") ?? panic("send")
     print(api.receive() ?? panic("receive"))

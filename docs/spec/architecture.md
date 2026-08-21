@@ -274,7 +274,7 @@ reads that pin (FS) so later launch cards resolve a deterministic binary.
 `BrowserProfile` pins a client command contract; it is not a claim about a
 server version. The runtime gates raw commands against that contract. A
 connection checks `session.status`, then creates the session with
-`session.new`; only that command's matched capability map enables optional
+`session.new`; only that command's matched feature map enables optional
 protocols such as CDP. `Browser.context()` creates an isolated BiDi user
 context. `context.page()` and `context.tab()` both create a BiDi tab under
 that context; the context owns its pages. `page.main_frame()` and
@@ -298,7 +298,7 @@ Page cookie APIs (`set_cookie`, `cookie`, `clear_cookies`) speak the BiDi
 `script.callFunction`. `page.screenshot` and `page.pdf` return base64 PNG/PDF
 bytes to the caller (never into the trace). Locators upload files with
 `set_files` (`input.setFiles`). The expert path
-exposes raw BiDi and capability-checked CDP commands through
+exposes raw BiDi and explicitly checked CDP commands through
 `Browser.protocol`.
 
 CDP is an explicit expert supplement (#1192), not a silent BiDi fallback.
@@ -400,7 +400,7 @@ checks conservatively revalidate their module closure. Warm-session timings are
 reported as observations; deterministic query/item counters and retained-byte
 totals are the regression gates. The server records cancellation concurrently
 with request execution and replaces a cancelled in-flight result with JSON-RPC
-`-32800`. D-LSP2 requires every advertised LSP capability to have named coverage
+`-32800`. D-LSP2 requires every advertised LSP feature to have named coverage
 in `tests/lsp.rs`; the server must not advertise speculative features.
 
 The code-action engine uses the same semantic index. It ships unique workspace
@@ -454,7 +454,7 @@ every response and remains the only semantic authority (I2/I3).
 - **Not:** PATH-discovered `jet-*` helpers (D-DX5 in `Source/main.rs`), and
   not `target: sandbox` / `core.plugin` application loaders.
 - **V1 stage:** `typed` only. Later parse/codegen observation extends the same
-  capability-negotiated protocol (I8 — one mechanism).
+  feature-negotiated protocol (I8 — one mechanism).
 
 ### Protocol / schema (exact)
 
@@ -466,7 +466,7 @@ JSON with lexicographic key order and no insignificant whitespace
 
 | Field | Meaning |
 |-------|---------|
-| `capabilities` | Negotiated subset of `read_types`, `read_symbols`, `read_effects`, `read_spans`, `read_provenance`, `emit_finding`, `propose_edit` |
+| `abilities` | Negotiated subset of `read_types`, `read_symbols`, `read_effects`, `read_spans`, `read_provenance`, `emit_finding`, `propose_edit` |
 | `limits` | `max_fuel`, `max_memory_bytes`, `max_table_elements`, `max_findings`, `max_edits`, `max_response_bytes`, `timeout_ms` |
 | `types` | `{id, repr}` |
 | `symbols` | `{id, name, kind, type_id, span_id, effects, provenance}` |

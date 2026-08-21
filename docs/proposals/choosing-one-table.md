@@ -196,8 +196,8 @@ Python's for-else, with the else spelled by the same `??` as every other miss in
 
 ```jet
 if {
-    job, jobs    -> handle(job)
-    msg, control -> obey(msg)
+    job, jobs    :> handle(job)
+    msg, control :> obey(msg)
     after 100ms  -> retry()
 }
 ```

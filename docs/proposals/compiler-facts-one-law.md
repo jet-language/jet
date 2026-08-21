@@ -101,7 +101,7 @@ The four rethinks each cleaned their quadrant. Rows 2–9 are the seams between 
 
 - **The borrow checker is a prover, not a plane.** Alias and flow analysis over places is real program analysis; it cannot be a fold of per-operation algebra rules, and pretending otherwise would wreck it. The *facts it publishes* — sendability, view provenance, moved-ness — register like any others. The engine stays its own. (Ballot OWN1 makes this a wall instead of an accident.)
 - **Availability is not a fact about safety.** Runtime-layer ceilings and target partitions answer "can this exist here"; they keep their own mechanism (authority already ruled this).
-- **Facts classify and erase; they never dispatch** (D-FACTMODEL1). The law adds nothing at runtime, so it can never become a dynamic capability system.
+- **Facts classify and erase; they never dispatch** (D-FACTMODEL1). The law adds nothing at runtime, so it can never become a dynamic authority system.
 - **S26 stands.** Facts are values, never types; comptime reads facts and never mints a type from one.
 
 ## The surface

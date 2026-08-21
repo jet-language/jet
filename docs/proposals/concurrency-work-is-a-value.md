@@ -34,8 +34,8 @@ code.
 | One background task | imported spawn helper plus a lambda | `task work()` |
 | Task failure | string state and trace helpers | `h.join() ?? fallback` — the normal `?` rail |
 | Bounded worker pool | 49 lines of hand-made channel tokens | `task.group g(limit: 4) { … }` |
-| Drain a channel | a loop with a manual receive fallback | `loop v, rx { … }` |
-| Wait on two channels | a group-owned readiness builder | `if { v, a -> …  v, b -> …  after 100ms -> … }` (D-CONC-CHAN2=D) |
+| Drain a channel | repeated receive calls | `loop v, rx :> …` |
+| Wait on two channels | a group-owned readiness builder | `if { v, a :> …  v, b :> …  after 100ms :> … }` (D-CONC-CHAN2=D) |
 | Read shared state | `config.read(c => c.name)` | `config.name` |
 | Change shared state | `config.edit(c => { c.hits += 1 })` | `config.hits += 1` |
 
@@ -70,7 +70,7 @@ replaced by the ratified forms. Each decision names the earlier law it amends.
   error up, `??` for fallbacks, arm tables to tell errors apart.
 - **Typestate** — compile-time tracking of a value's current state, with
   operations gated by state.
-- **Arm table** — Jet's one branching shape: `{ head -> body }` (S68).
+- **Arm table** — Jet's one branching shape: `{ head :> body }` (S68).
 
 ## The one idea
 
@@ -200,7 +200,7 @@ D-CONC-CHAN1=A.
 ```jet
 (tx, rx) :: channel<Int>(capacity: 8)
 
-loop job, rx { handle(job) }             // receive until the channel closes
+loop job, rx :> handle(job)               // receive until the channel closes
 
 if {
     job, jobs    :> handle(job)          // arm binding mirrors `loop v, source`
@@ -356,7 +356,7 @@ Settled answers:
   knows how to handle a task failure.
 - **Worker pools are one line.** `task.group g(limit: 4)` replaces the 49-line
   token pattern the pragmatism audit flagged.
-- **Channel services are two lines.** `loop job, rx` plus a readiness `if`
+- **Channel services are two lines.** `loop job, rx :>` plus a readiness `if`
   table covers the
   most common concurrency shape in real code.
 - **Shared state loses its closure tax.** Counters and config are field

@@ -18,10 +18,10 @@ profile, test, package, deploy, and operate representative production systems
 without a hidden mock, transcript, fixture, schema-only path, unsupported
 lowering, silent omission, or unverified platform claim.
 
-An API name is not a capability. A parser path is not execution. A generated
+An API name is not proof. A parser path is not execution. A generated
 schema is not a package manager. A fake DOM is not browser proof. A three-frame
 transcript is not a game runtime. A validated TIR followed by AST emission is
-not R12. A fallback is a capability only when its observable contract is the
+not R12. A fallback counts only when its observable contract is the
 same, its limitations are explicit, and its acceptance lane proves them.
 
 The milestone closes only when every attached card is done, every acceptance
@@ -108,7 +108,7 @@ These are source-backed defects, not roadmap speculation:
 
 ## Evidence classes
 
-Every capability row and Tower closeout uses exactly one class:
+Every claim row and Tower closeout uses exactly one class:
 
 1. **Reserved** — syntax, type, command, or schema is recognized but not run.
 2. **Facade** — public shape exists over a mock, deterministic transcript,
@@ -119,7 +119,7 @@ Every capability row and Tower closeout uses exactly one class:
 5. **Proven** — implemented behavior passes cross-tier, cross-platform, live,
    hostile, scale, recovery, and dogfood lanes applicable to its claim.
 
-Only **Proven** closes a capability card. Partial paths are useful and remain
+Only **Proven** closes a product-claim card. Partial paths are useful and remain
 shippable when truthfully labeled; they never close a broader claim.
 
 ## Product laws
@@ -209,13 +209,13 @@ package/environment/CLI program.
 
 ### UL0 — truth ledger and claim stop-line
 
-- Generate a checked capability ledger from source, tests, target matrix, and
+- Generate a checked claim ledger from source, tests, target matrix, and
   Tower evidence using the five evidence classes above.
-- Reclassify every E3 `done` capability; reopen any card closed by a facade,
+- Reclassify every E3 `done` claim; reopen any card closed by a facade,
   subset, fixture, ignored test, fallback, static schema, or plan-only proof.
 - CI rejects broad claims unsupported by live evidence and rejects code/docs/
   Tower drift.
-- Exit: every advertised language/Core/tool capability points to an executable
+- Exit: every advertised language/Core/tool claim points to an executable
   proof; deletion of that proof fails CI.
 
 ### UL1 — P0 semantic and security stop-line
@@ -463,7 +463,7 @@ UL14 capstones                 after all above plus E4, E6, E7, E8
 
 ## Binding acceptance lanes
 
-1. **Truth:** delete or corrupt the implementation/proof; claimed capability
+1. **Truth:** delete or corrupt the implementation/proof; claimed feature
    becomes impossible to report.
 2. **Tier parity:** AOT/JIT/comptime/REPL/web agree on output, failures, effects,
    ownership, panic, and diagnostics for every supported construct.

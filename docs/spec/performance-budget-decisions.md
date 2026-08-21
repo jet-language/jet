@@ -235,7 +235,16 @@ Providers are resolved deterministically from the compiler-owned registry, never
 
 ## D-PERFBUDGET-INTEGRATION1=A — Intent-owned refresh with compatible reuse
 
-Every build runs deterministic Fail gates. Bench owns `BenchMeasurement`; dev owns explicitly requested startup, service, and scene probes. These commands refresh evidence when the relevant digest changes. Read-only dossier, Canvas, and LSP views never measure. CI runs `jet budget check`. Prove never measures and adds no parallel flags or report types: it translates compatible budget results into the existing proof Evidence model. Exact compatible slices may satisfy matching facts but never stand in for the whole policy. Missing, stale, mismatched, unavailable, inconclusive, warning, and failure states remain visible under REPORT1/OUTPUT1; failures fail. Every surface reads the same `BudgetReport` and shared evaluator.
+Every build runs deterministic Fail gates. `jet test --measure` owns
+`BenchMeasurement`; dev owns explicitly requested startup, service, and scene
+probes. These commands refresh evidence when the relevant digest changes.
+Read-only dossier, Canvas, and LSP views never measure. CI runs `jet budget
+check`. Prove never measures and adds no parallel flags or report types: it
+translates compatible budget results into the existing proof Evidence model.
+Exact compatible slices may satisfy matching facts but never stand in for the
+whole policy. Missing, stale, mismatched, unavailable, inconclusive, warning,
+and failure states remain visible under REPORT1/OUTPUT1; failures fail. Every
+surface reads the same `BudgetReport` and shared evaluator.
 
 ## Reconciliation and precedence
 

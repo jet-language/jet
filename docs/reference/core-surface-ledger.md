@@ -29,7 +29,7 @@ Generated on: 2026-08-17
   ledger and stay counted, but they are recorded rather than scored.
 - A gap merges by domain, so one name can still recur across domains, and
   that has two different answers. `clone` on a List and on a Map is one
-  capability asked twice, so its witnesses pool across domains before the
+  operation asked twice, so its witnesses pool across domains before the
   two-witness threshold; scoring each domain alone can hold a real gap at
   one witness forever. `close` on a byte buffer and on a database handle
   are different operations sharing a spelling, so they keep the per-domain

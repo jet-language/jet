@@ -2,7 +2,7 @@
 
 **Status:** active Jetpack plan. The 2026-07-09 production audit found the
 existing implementation useful but below Nix package-manager parity; schema,
-fixture, and policy-model completion no longer count as shipped capability.
+fixture, and policy-model completion no longer count as shipped support.
 This folder owns the package-manager/environment substrate that JetOS later
 consumes.
 

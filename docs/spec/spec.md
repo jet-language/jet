@@ -2460,12 +2460,13 @@ way out is never replaced by it. A generator's completion notification is
 therefore still delivered while its producer is being cancelled.
 
 `channel<T>() => (Sender<T>, Receiver<T>)` (D-CONC-CHAN1) creates a
-linked send/receive pair, destructured at the call site: `(tx, rx) :=
+linked send/receive pair, destructured at the call site: `(tx, rx) ::
 channel<T>()`. A second sender is `~tx` — there's no combined
 "channel" value to fetch one off of. `sender.send(value)` moves a `T` into the
 channel (ownership semantics for non-copy values), and
 `receiver.receive() => T ? Closed` blocks until a value arrives or all senders
-are gone. Channel payloads
+are gone. Close the sender, then `loop value, receiver :> ...` drains until
+the channel closes. Channel payloads
 must be sendable (**E1102**).
 
 `channel<T>(capacity: N)` creates the same pair with a bounded buffer.
@@ -2667,8 +2668,8 @@ Combinators are nested selectors, not methods on a group handle:
   whose arm heads are a binding and a source (D-CONC-CHAN2=D; amends
   D-CONCSELECT1=A's fluent builder and D-CONC-CHAN1's spelling of it). The
   comma head marks the wait; a Bool head in the same table is a registered
-  diagnostic. `after` takes a Time delta and fires when no source is ready by
-  that deadline; an optional `else` arm makes the wait non-blocking. The whole
+  diagnostic. `after` takes a Duration literal and fires when no source is ready by
+  that Duration deadline; an optional `else` arm makes the wait non-blocking. The whole
   table compiles to one wait, so there is no test-then-read race:
 
 ```jet
@@ -3137,7 +3138,7 @@ The package view merges its declarations with loaded dependency and Prelude
 declarations. After a root has any declared leaves, dotted uses under that root
 must match a declaration exactly. Bare roots remain valid, and a root with no
 declared leaves remains open. The same check applies to function effect rows,
-`#Caps` and package effect budgets. Declarations have no runtime
+`#Abilities` and package effect budgets. Declarations have no runtime
 representation.
 
 | Effect  | Carried by |
@@ -3267,21 +3268,21 @@ purity violation (reported as **E3401**, the established purity diagnostic).
 Effects are erased: `=[FS]=>`, `=[]=>`, and an unannotated function with the same
 body all generate byte-identical Rust.
 
-### Restricting a region — `#Caps(…) { … }`
+### Restricting a region — `#Abilities(…) { … }`
 
-Where `=[…]=>` bounds a whole function, `#Caps(…) { … }` restricts a **block**.
+Where `=[…]=>` bounds a whole function, `#Abilities(…) { … }` restricts a **block**.
 Inside the region, the only effects allowed — directly or through any call it
 reaches — are the ones listed; anything else is **E0712**. It is a hard local
 ceiling, not a grant: the effects still happen and still count toward the
 enclosing function's set.
 
 ```ebnf
-caps_region = "#Caps" "(" effect { "," effect } ")" block ;
+caps_region = "#Abilities" "(" effect { "," effect } ")" block ;
 ```
 
 ```jet
 fn run() {
-    #Caps(FS, IO) {
+    #Abilities(FS, IO) {
         text :: core.files.read("x") ?? "";   // FS — allowed
         print(text);                            // IO — allowed
     }
@@ -3290,7 +3291,7 @@ fn run() {
 
 A call inside the region that transitively touches `Net` would be E0712 even
 though no `Net` call appears literally in the block. Like every effect
-construct, `#Caps` is a plain lexical block in codegen — it erases.
+construct, `#Abilities` is a plain lexical block in codegen — it erases.
 
 ### Higher-order effects — transparent flow-through (D-EFF2)
 
@@ -3406,7 +3407,7 @@ Lists, maps, options, results, structs, enums, and closures are not rebuilt
 from display text; explicit binding annotations remain available to `:type`.
 
 Pure Core calls run directly. Ambient Core calls use normal Jet authority:
-the call must be inside `#Caps(root)`, and the REPL must authorize the exact
+the call must be inside `#Abilities(root)`, and the REPL must authorize the exact
 operation and resource before it touches host state. A TTY prompts for once,
 session, or deny. A session allowance is an exact tuple and offers continue
 or revoke on reuse. `--allow-fs`, `--allow-env`, `--allow-exec`,

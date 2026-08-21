@@ -470,7 +470,7 @@ declaration modifiers (ontology P09), tooling metadata, or control transfer
 (C18) — not facts about values:
 
 - `#Unsafe` (audit gate — its power is *not* being composable or passable),
-  `#Test`/`#Bench`, `#Meta`/`#Doc`, `#Off`/`#DebugOnly`, `#Inline`,
+  `#Test`/`.measure`, `#Meta`/`#Doc`, `#Off`/`#DebugOnly`, `#Inline`,
   `#Persist`/`#Track`, `#PubFile`/`#NoPrelude`, `#Target`.
 - `defer close(^r)`, `break`/`next`/`return`, loop labels.
 - The `#Policy` scope ladder (config, not classification) — though its

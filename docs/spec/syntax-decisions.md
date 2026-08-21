@@ -73,7 +73,7 @@ return colon gets the existing `=>` edit. These words never enter the grammar;
 ordinary dead-value cases keep E0003's existing wording.
 
 **D-CASING1 — Casing law + "Core"** *(with D-MARKER-CANON1, D-CONTRACTCASE1)*:
-every `#` applied rule is PascalCase (`#Test`, `#Unsafe`, `#Caps`, `#Pre`);
+every `#` applied rule is PascalCase (`#Test`, `#Unsafe`, `#Abilities`, `#Pre`);
 lowercase `#[allow(...)]` is the registered lint-policy exception. Traits are
 PascalCase. The standard library is
 **"Core"** — never "std"/"stdlib" — in docs, identifiers, and error copy.
@@ -439,11 +439,18 @@ is retired with teaching diagnostic E0376; prefer `loop i, 0..<n` or a range ste
 
 A finite source loop in value position may use `-> expression` or `-> { ... }`.
 Each accepted iteration yields one non-unit item. The result is an eager
-`List<T>` in iteration order. A header guard filters items. Multiple source
-clauses nest left to right and yield one flat List. An inner collecting loop
-preserves nesting. `next` omits the current item. Maps, Sets, and lazy
-iteration use ordinary Map construction, `Set.from(...)`, and the existing
-iterator adapters.
+`List<T>` in iteration order. A header guard filters items.
+
+```jet
+names :: loop u, users if u.active :> u.name
+names :: loop users if .active :> .name   // bindingless subject, D-LOOP-SUBJECT1
+```
+
+Multiple source clauses nest left to right and yield one flat List. An inner
+collecting loop preserves nesting. `next` omits the current item. Maps, Sets,
+and lazy iteration use ordinary Map construction, `Set.from(...)`, and the
+existing iterator adapters.
+
 Every statement-position loop header may use `-> statement`; the statement's
 value is discarded. A finite loop in value position keeps the collection arrow.
 
@@ -1911,7 +1918,7 @@ package scope. The nearest declaration of a key wins, unmentioned keys inherit,
 and `jet explain` reports the effective value plus every declaration it
 overrode. A compiler-owned applicability matrix decides which levels each
 setting may use and whether it may tighten, override, or merge. Site-specific
-proof and authority stay site-bound: `#Unsafe` authorization, `#Caps`,
+proof and authority stay site-bound: `#Unsafe` authorization, `#Abilities`,
 direct fact tags, `#Scrub(Tag)`, and field wire attributes do not widen through this
 ladder. At package scope, each setting uses the coherent Package `policy:`
 surface owned by its policy decision; the common ladder does not mint a second
@@ -1922,7 +1929,7 @@ it returns one effective value and the complete outer-to-inner declaration
 chain. The registry keeps only non-memory policy settings: `gc: true`,
 `explicit_units: true`, `copies: .Explicit`, and `sentries: .Off`. Memory
 floors are effect-row prohibitions, not policy fields. Site-bound
-`#Unsafe`, `#Caps`, direct fact tags, `#Scrub(Tag)`, wire, and authority rows have
+`#Unsafe`, `#Abilities`, direct fact tags, `#Scrub(Tag)`, wire, and authority rows have
 explicit applicability but never inherit.
 The concrete terminal view uses the ratified existing route:
 `jet explain marker Source/sensor.jet:9` reports the effect-row denial.
@@ -1978,8 +1985,9 @@ discard meaning.
 **D-DOTSCOPE1 — Scope members**: inside an applied-rule block body, a
 statement-position `.name { … }` / `.name(args) { … }` resolves against that
 marker's declared scope members (`#Test`: `.expect_fail`, `.setup`,
-`.timeout`, `.skip`); this is the ONLY spelling for scope vocabulary (I8 —
-no nested per-scope markers, no block-valued args for the same job). Unknown
+`.timeout`, `.skip`, `.measure`, `.cases`; `.measure` rides
+D-CLAIM-BENCH1=A); this is the ONLY spelling for scope vocabulary (I8 — no
+nested per-scope markers, no block-valued args for the same job). Unknown
 member is a teaching error listing the scope's vocabulary. Typing `.` in
 statement position inside a marker block completes members. Disambiguation:
 the required trailing block separates it from leading-dot enum values
@@ -2350,7 +2358,7 @@ D-CONC-OUTCOME1=A; conversion uses D-FAIL-CONV1.
 **D-CONC-CHAN2=D — the readiness wait rides subjectless `if`** *(ratified
 2026-08-07, card #1505; amends D-IFGUARD1, D-CONCSELECT1, and the wait
 spelling in D-CONC-CHAN1)*: a subjectless `if` table whose every arm head is a
-binding/source pair is one atomic readiness wait. `after` takes a Time delta;
+binding/source pair is one atomic readiness wait. `after` takes a Duration literal;
 an optional `else` arm makes the wait non-blocking; mixed readiness and Bool
 heads are a registered diagnostic; a closed source stops matching. Expression
 form follows the `if` value-table law. `select` stays a free identifier
@@ -2373,7 +2381,7 @@ exits — deadline first, then cancel.
 
 **D-EFF1 — Effect system**: inferred per-fn effect sets (Koka-style rows),
 erased in codegen. Assert or restrict via `:[Net, DB]>` on a signature and
-`#Caps(Net) { … }` regions.
+`#Abilities(Net) { … }` regions.
 
 **D-SHAPE8=A — Effects inside the arrow** *(ratified 2026-07-14,
 owner-amended by D-ARROW-CONTROL1 on 2026-07-26 and D-ARROW-UNIFY1 on
@@ -2399,12 +2407,12 @@ D-EFFTREE1 and D-AUTHORITY-ROOTS1: a root may be dotted into an open leaf path
 are retired. `effect <Name>` user declarations remain reserved, unminted.
 
 **D-EFFTREE1 — Effect tree** *(ratified 2026-07-03, card #181)*: the
-D-EFF4/5 names are tree roots; a signature/`#Caps`/`=[!…]=>` entry may
+D-EFF4/5 names are tree roots; a signature/`#Abilities`/`=[!…]=>` entry may
 be a dotted path rooted at one (`FS.Read`, `Net.HTTP.Get`) — root closed
 (E0119), leaf open/user-chosen, no fixed vocabulary or depth limit. Ancestor
 matching is subsumption, the same rule as D-TAG1's tag-tree subtree matching
 learned once and reused: `=[FS]=>` accepts any `FS.*` callee; `=[FS.Read]=>`
-rejects a sibling `FS.Write` callee; `#Caps(FS.Read)` doesn't authorize
+rejects a sibling `FS.Write` callee; `#Abilities(FS.Read)` doesn't authorize
 `FS.Write`; `=[!FS]=>` prohibits the whole `FS.*` subtree. Reverses E0740 for
 the ancestor case, keeps it for out-of-tree/sibling cases. Flat names stay
 valid for the ten non-FFI roots — Core stdlib calls are still tagged with a
@@ -2414,7 +2422,7 @@ bare root; leaf precision is a user-declared-contract concept.
 card #1299)*: `effect FS.Read` is a compile-time package declaration. A package
 view contains its own declarations, declarations from loaded dependencies, and
 Prelude leaves. Once a root has one declared leaf, every dotted use under that
-root in effect rows, `#Caps`, and package budgets must name a declared
+root in effect rows, `#Abilities`, and package budgets must name a declared
 leaf exactly; E0750 suggests the nearest declaration. Bare roots stay valid.
 A root with no declared leaves stays open for gradual adoption. Declarations
 erase before TIR.
@@ -2454,7 +2462,7 @@ trait Renderer { fn render(self) =[GPU]=> Image }
 callee must not use the effect (E0749).
 
 **D-SCAP1 — Scoped capabilities** *(amended by D-ARROW-CONTROL1)*:
-`#Caps(caps: FS) { … }` authorizes effects in a lexical scope and binds an
+`#Abilities(abilities: FS) { … }` authorizes effects in a lexical scope and binds an
 erased first-class handle in the marker head. An effect
 without backing grant E0712; handle escape E0711.
 
@@ -3165,7 +3173,7 @@ npm interop = typed first-party stub packages, no `.d.ts` parsing
 (D-NPMTYPE1); Swift interop waits on native-UI/C-ABI work (D-JSWIFTFFI1).
 
 **D-REPLCOREEFFECT1=A (ratified 2026-07-11)**: `jet repl` uses the existing
-effect model for ambient Core calls. An enclosing `#Caps(root)` supplies
+effect model for ambient Core calls. An enclosing `#Abilities(root)` supplies
 lexical authority. Interactive sessions then authorize the exact
 `(root, operation, resource)` tuple once or for the in-memory session;
 reusing session authority offers continue or revoke before execution.
@@ -3173,7 +3181,7 @@ reusing session authority offers continue or revoke before execution.
 Non-TTY and transcript sessions never prompt and deny effects without the
 matching allow flag. Filesystem operations stay within the REPL project root
 and reject absolute paths, parent traversal, and symlinks. `Exec.Exit` always
-gets its own consequence prompt interactively and needs both `#Caps(Exec)`
+gets its own consequence prompt interactively and needs both `#Abilities(Exec)`
 and `--allow-exec` outside a TTY.
 
 **D-FE-REPL-HISTORY1=A (ratified 2026-07-11)**: `jet repl` persists the
@@ -6651,10 +6659,10 @@ widening is written and audited.
   process, plugin and session boundaries; `ProcessAuthority` becomes
   `Authority`, while `ProcessPlan` and `ProcessReceipt` stay. Implementation:
   #1569.
-- **D-AUTHORITY-SCOPE1=A**: `#Caps` is the one block marker. A bare list
-  narrows (`#Caps(FS, Net)`); a name-before-list head binds the handle
-  (`#Caps(g: FS, Net)`). The retired marker spelling is deleted, and its error
-  points to `#Caps`. This amends D-EFF1, D-SCAP1 and D-ARROW-CONTROL1. Implementation:
+- **D-AUTHORITY-SCOPE1=A**: `#Abilities` is the one block marker. A bare list
+  narrows (`#Abilities(FS, Net)`); a name-before-list head binds the handle
+  (`#Abilities(g: FS, Net)`). The retired marker spellings are deleted, and their error
+  points to `#Abilities`. This amends D-EFF1, D-SCAP1 and D-ARROW-CONTROL1. Implementation:
   #1573.
 - **D-AUTHORITY-MANIFEST1=A**: one `authority:` block holds package bounds,
   dependency grants, trust defaults and provider bounds; replaced keys are
@@ -6669,7 +6677,7 @@ widening is written and audited.
 - **D-AUTHORITY-WORD2=E** *(ratified 2026-08-17, amendment to
   D-AUTHORITY-NAME1, D-AUTHORITY-SCOPE1, and D-AUTHORITY-WORD1; #1572)*:
   Jet uses `Ability` for the fact menu, `Abilities` for the carried rights
-  value, and `#Caps` for the block marker. The browser reader is
+  value, and `#Abilities` for the block marker. The browser reader is
   `BrowserAbilities` with `.abilities()`, and the CLI flag is
   `--abilities-json`. The retired spellings are deleted with no aliases.
   `capabilities` remains only where it is the WebDriver wire-protocol word.
@@ -7038,7 +7046,7 @@ The named instances, as rows of the one table
 Marker law zero is the instance with no meaningful direction. A rule on written
 code says what a writer may attach and where; it holds no fact that moves, so
 every marker row states `none` and names no gate. The moving facts a marker
-*writes* belong to the row that holds them — `#Caps` is a gate word on the
+*writes* belong to the row that holds them — `#Abilities` is a gate word on the
 `Rights` row, not a direction of its own. That is stated once, for every marker
 row at once, so no row can drift from it.
 
@@ -7326,7 +7334,7 @@ fallible result, add facts, or stay undenied. The row is compile-time only and
 does not add a runtime effect mechanism or an execution-tier exception.
 
 **2026-08-20 — D-PANICROOT1=A** *(card #1567)*. `Panic` stays in the effect
-vocabulary only as a deny-only row: no positive signature, `#Caps`, or grant
+  vocabulary only as a deny-only row: no positive signature, `#Abilities`, or grant
 may name it. Positive naming is E0751 (`Panic can't be granted, only denied`);
 `:[!Panic]>`, manifest denial, E0749, and `#Pre`/refinement discharge remain
 valid. `check_panic_call` contributes the existing reachability sentinel, and

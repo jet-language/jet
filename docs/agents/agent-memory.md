@@ -1061,7 +1061,7 @@ audited gate. Proposal: `docs/proposals/authority-one-model.md` (committed).
   its new rules: surface-is-the-product (before/after pairs), greenfield
   breaks welcome, merit-only "what stays", simple prose.
 - Card **#1500** (e2) carries eight full-profile ballots awaiting owner:
-  SCOPE1 (merge #Caps into #Caps; optional handle head) plus:
+  SCOPE1 (merge #Abilities into #Abilities; optional handle head) plus:
   D-AUTHORITY-MODEL1 (one substrate), ROOTS1 (13 closed roots, FFI langs as
   leaves), MEM1 (Mem.* floors on one ladder; unsafe stays a gate, NOT a
   right), NAME1 (nameable authority value; PascalCase `Authority.workspace()`;
@@ -1301,7 +1301,7 @@ Concurrency rethink (2026-08-06): proposal at `docs/proposals/concurrency-work-i
 
 The one idea: a unit of concurrent work is an ordinary value carrying three facts the compiler already tracks — state (typestate), duty (`#SingleUse` obligation), reach (crossing knowledge). Key evidence: unjoined-task lint L1101 is a byte-for-byte copy of the E0140 `#SingleUse` pass (CheckerOwnership.rs:4141/:4173); `protocol` already compiles to `#SingleUse`+`state`+`#Transition`; sendability is a stray bool missing from the type-system-v2 plane inventory ([[type-system-v2-2026-08-06]]).
 
-I9 defects found (fix regardless of ballots, post-unfreeze): `g.select()` unsupported on interpreter tier (TIR/eval/exprs.rs:5139), `.read` select arm silently dropped on every tier, generator lifecycle drift (card #1392). Spec drift: D-STM1 says "retried on conflict", runtime ships ordered multi-lock (D-CONC-STM1 resolves).
+I9 defects found (fix regardless of ballots, post-unfreeze): readiness-table interpreter support and the retired `.read` arm were tracked here; card #1560 closes that channel slice. Generator lifecycle drift remains (card #1392). Spec drift: D-STM1 says "retried on conflict", runtime ships ordered multi-lock (D-CONC-STM1 resolves).
 
 **STATUS 2026-08-06 (e3 audit):** Ten D-CONC-* ratified, but ratified JOIN1/SCHED1 cite D-CONC-SPAWN1 which was never balloted (proposal v2 swapped GROUP1/OUTCOME1 for SPAWN1/FAIL1). The e3 audit minted both ballots on #1505 (rec A each); #1505 sits in decide blocked on them. Impl cards #1557-#1565 minted, all blocked on #1505. The S53 design-only freeze is stale — no live freeze found. See [[e3-audit-2026-08-06]].
 

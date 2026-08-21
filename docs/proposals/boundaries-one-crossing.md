@@ -14,7 +14,7 @@ The law: **nothing foreign becomes Jet silently — every crossing names its sch
 
 What the ballots ask, in one breath: finish the typed-head row (URL, Path, DateTime — D-BOUND-HEAD1), let heads own their escapes so `Regex.{"\d+"}` works (D-BOUND-RAW1), let users declare heads so a sink is just a parameter type (D-BOUND-SINK1), let `jet inspect bind` eat data schemas the way it already eats C++ headers (D-BOUND-BIND1), make a successful decode the act that clears origin taint (D-BOUND-TAINT1), make `#Transact` refuse a foreign call with no undo contract (D-BOUND-UNDO1), give `#PublishedSchema` types protobuf-grade unknown-field preservation (D-BOUND-EVOLVE1), and give provenance a readable surface with a sane default (D-BOUND-PROV1). D-BOUND-LAW1 adopts the law itself, so every future boundary feature must land in a named cell instead of minting a sixth world.
 
-What does not change: `DataTree` stays the one dynamic tree (D-SERDE-ACCESS=B). `Type.{"…"}` stays the one literal spelling (D-UNIFYLIT1=A). The fact ledger stays the one ledger (D-FACT-LAW1=B). The declined String surface stays declined (D-STR-DECLINE1=C). No invisible imports return (D-NAME-FILES1=C — `jet inspect bind` writes a file you can read). **Zero new mechanisms.** Every element is an instance of a rail the owner already ratified; the score is mechanisms deleted (sink registration as a concept, the FFI/data-schema divide, six hand-rolled JSON escapers, a duplicate JSON parser) and capabilities gained.
+What does not change: `DataTree` stays the one dynamic tree (D-SERDE-ACCESS=B). `Type.{"…"}` stays the one literal spelling (D-UNIFYLIT1=A). The fact ledger stays the one ledger (D-FACT-LAW1=B). The declined String surface stays declined (D-STR-DECLINE1=C). No invisible imports return (D-NAME-FILES1=C — `jet inspect bind` writes a file you can read). **Zero new mechanisms.** Every element is an instance of a rail the owner already ratified; the score is mechanisms deleted (sink registration as a concept, the FFI/data-schema divide, six hand-rolled JSON escapers, a duplicate JSON parser) and coverage gained.
 
 Below the surface, the audit also found the compiler not eating its own law: at least eight hand-written JSON escapers (two produce invalid or mangled JSON), a second full JSON parser in `jet-pkg-model`, the reader/writer format enum hand-copied into the JIT instead of `include!`d, and the Codable derive built by `format!`-ing source text. Those are defect cards, not ballots — they fall out of the law for free.
 
@@ -108,7 +108,7 @@ digits :: Regex.{"\d+"}
 win    :: Path.{"C:\logs\app"}     // with HEAD1
 ```
 
-Plain `"…"` strings keep the 4-entry table unchanged — beginners see no difference anywhere. This also gives Jet the raw-string capability it currently lacks without minting an `r"…"` spelling: raw text is what a head body always was.
+Plain `"…"` strings keep the 4-entry table unchanged — beginners see no difference anywhere. This also gives Jet raw-string support without minting an `r"…"` spelling: raw text is what a head body always was.
 
 ### 4. Users declare heads; sinks are just types — D-BOUND-SINK1 *(new surface on the ratified D-META marker rail; implements the half deferred by the 2026-07-28 type-unification audit F9)*
 
