@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 2131,
-    "rev": 40517,
+    "rev": 40519,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -137996,7 +137996,13 @@
       "plan": "## Outcome\nEvery unambiguous did-you-mean suggestion carries a typed fix_edit in jet.report/v1.\n\n## Work\n1. Find where E0107 builds its did-you-mean fix text; attach the replacement span edit at construction (same pattern #1877 shipped).\n2. Sweep all suggestion sites (did-you-mean constructors) — each either emits a typed edit or has a one-line reason it cannot (ambiguous candidates).\n3. Snapshot: E0107 JSON fixture shows fix_edits with the replacement; UI snapshot unchanged.\n\n## Exit criteria\n- jet check --json on a one-letter identifier typo emits fix_edits with the exact replacement span.\n- Suggestion-site sweep recorded on the card: every site emits an edit or names the ambiguity.\n- Diagnostic snapshot fixtures updated; jet fix applies the edit and the recheck is clean.",
       "blockedBy": [],
       "assignee": null,
-      "log": [],
+      "log": [
+        {
+          "at": "2026-08-21",
+          "by": "fable-e3-burndown",
+          "text": "c4 exception, recorded as the criterion requires. E2420 at crates/jet-sema/src/Sema/CheckerCoreLib/core_call.rs:152-164 cannot emit a typed replacement edit today. analytics_sql_literal (:30-54) flattens SQL StrParts into a String and analytics_sql_columns (:56-93) returns only column names, so the checker holds no source byte offset for the misspelled column; query.span() is the whole SQL literal, and replacing that span would erase the query. A safe edit requires preserving SQL token spans in the AST, or re-lexing with source offsets, then targeting only that identifier. This is a genuine no-span case, not an omitted implementation. One further shape is also spanless: folded dotted paths at CheckerInfer/expr.rs:3187-3197 pass variant_span=None because fold_enum_variant_path returns names only; direct Type.Variant and leading-dot paths do carry exact spans and now ship edits."
+        }
+      ],
       "criteria": [
         {
           "n": 1,
@@ -138028,11 +138034,11 @@
         {
           "n": 4,
           "text": "The suggestion-to-edit path covers the other suggestion families that already name a replacement (unknown member, unknown import, unknown flag) or the card records why a family cannot",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-20T12:49:00.496Z"
+          "evidence": "The no-span exception is now recorded on this card body: E2420 loses SQL token offsets in analytics_sql_literal/columns, and folded dotted enum paths lose the variant token in fold_enum_variant_path. Both name what would have to change for a span to exist",
+          "at": "2026-08-21T06:46:32.648Z"
         }
       ],
       "refs": [
@@ -138047,7 +138053,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-20T11:27:23.149Z",
-      "updated": "2026-08-21T00:42:02.096Z",
+      "updated": "2026-08-21T06:46:32.648Z",
       "updatedBy": "fable-e3-burndown"
     },
     {
@@ -186731,6 +186737,20 @@
   ],
   "events": [
     {
+      "at": "2026-08-21T06:46:32.648Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0xoi09n",
+      "note": "#4"
+    },
+    {
+      "at": "2026-08-21T06:46:31.907Z",
+      "by": "fable-e3-burndown",
+      "action": "card.update",
+      "ref": "c0xoi09n",
+      "note": "logEntry"
+    },
+    {
       "at": "2026-08-21T06:42:33.245Z",
       "by": "fable-e3-burndown",
       "action": "card.update",
@@ -190215,20 +190235,6 @@
       "action": "card.criteria-meet",
       "ref": "c03pfb56",
       "note": "#3"
-    },
-    {
-      "at": "2026-08-20T21:51:01.695Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c03pfb56",
-      "note": "#2"
-    },
-    {
-      "at": "2026-08-20T21:51:01.206Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c03pfb56",
-      "note": "#1"
     }
   ],
   "nextNum": 368,

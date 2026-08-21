@@ -1,6 +1,6 @@
 //! Card #1895: cross-run runtime-witness ledger and conservative repairs.
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::BTreeMap;
 use std::io::IsTerminal;
 use std::path::{Path, PathBuf};
 use std::process::exit;

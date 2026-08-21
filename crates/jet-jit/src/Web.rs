@@ -2,8 +2,14 @@
 //! Thin opaque-handle adapters over Prelude/App.rs + DevServer.rs.
 //! `core.web.on` / `core.web.value` are native no-ops (match AOT emit).
 
+// This module includes shared Prelude source that several hosts compile,
+// each using a different subset, so dead-code reports here are about the
+// other hosts' usage, not about this one. Scoped to the module, never the crate.
+#![allow(dead_code)]
+
 use super::Concurrency;
 use cranelift_codegen::ir::{types, AbiParam, Signature};
+use cranelift_module::Module;
 
 #[allow(dead_code, unused_imports)]
 pub(crate) mod web_rt {

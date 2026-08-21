@@ -299,11 +299,11 @@ fn jvkw_export_to_recipients<T: JetVaultKey>(
     let mut recipients: Vec<[u8; 32]> = recipients.iter().map(|recipient| recipient.0).collect();
     recipients.sort();
     if recipients.windows(2).any(|pair| pair[0] == pair[1]) { return Err(JetVaultKeyWrapError::InvalidEncoding); }
-    let mut backup_key = jvkw_random::<32>()?;
-    let mut payload_nonce = jvkw_random::<24>()?;
-    let mut export_id = jvkw_random::<16>()?;
-    let mut ephemeral_secret = jvkw_random::<32>()?;
-    let mut salt = jvkw_random::<16>()?;
+    let backup_key = jvkw_random::<32>()?;
+    let payload_nonce = jvkw_random::<24>()?;
+    let export_id = jvkw_random::<16>()?;
+    let ephemeral_secret = jvkw_random::<32>()?;
+    let salt = jvkw_random::<16>()?;
     if backup_key.0 == [0; 32] || export_id.0 == [0; 16] { return Err(JetVaultKeyWrapError::Internal { incident_id: "jvkw-zero-random" }); }
     let ephemeral_public = x25519_dalek::x25519(ephemeral_secret.0, x25519_dalek::X25519_BASEPOINT_BYTES);
     let common_len = 122usize.checked_add(origin.name.len()).ok_or(JetVaultKeyWrapError::InvalidLength)?;
@@ -315,13 +315,13 @@ fn jvkw_export_to_recipients<T: JetVaultKey>(
     header.extend_from_slice(&salt.0);
     let stanza_prefix = header.clone();
     for recipient in recipients {
-        let mut shared = Zeroizing(x25519_checked(ephemeral_secret.0, recipient).map_err(|_| JetVaultKeyWrapError::OpenFailed)?);
+        let shared = Zeroizing(x25519_checked(ephemeral_secret.0, recipient).map_err(|_| JetVaultKeyWrapError::OpenFailed)?);
         let mut key_info = b"JVKW1 recipient key".to_vec();
         key_info.extend_from_slice(&export_id.0); key_info.extend_from_slice(&ephemeral_public); key_info.extend_from_slice(&recipient);
         let mut nonce_info = b"JVKW1 recipient nonce".to_vec();
         nonce_info.extend_from_slice(&export_id.0); nonce_info.extend_from_slice(&ephemeral_public); nonce_info.extend_from_slice(&recipient);
-        let mut kek = Zeroizing(hkdf32(&shared.0, &salt.0, &key_info).map_err(|_| JetVaultKeyWrapError::Internal { incident_id: "jvkw-recipient-kdf" })?);
-        let mut nonce = Zeroizing(hkdf24(&shared.0, &salt.0, &nonce_info).map_err(|_| JetVaultKeyWrapError::Internal { incident_id: "jvkw-recipient-kdf" })?);
+        let kek = Zeroizing(hkdf32(&shared.0, &salt.0, &key_info).map_err(|_| JetVaultKeyWrapError::Internal { incident_id: "jvkw-recipient-kdf" })?);
+        let nonce = Zeroizing(hkdf24(&shared.0, &salt.0, &nonce_info).map_err(|_| JetVaultKeyWrapError::Internal { incident_id: "jvkw-recipient-kdf" })?);
         let mut aad = b"JVKW1 recipient aad".to_vec(); aad.extend_from_slice(&stanza_prefix); aad.extend_from_slice(&recipient);
         let wrapped = XChaCha20Poly1305::new_from_slice(&kek.0).map_err(|_| JetVaultKeyWrapError::Internal { incident_id: "jvkw-recipient-key" })?
             .encrypt(XNonce::from_slice(&nonce.0), Payload { msg: &backup_key.0, aad: &aad })
@@ -378,11 +378,11 @@ fn jvkw_export_to_passphrase<T: JetVaultKey>(
     wait_enter:fn(),
     wait_leave:fn(),
 ) -> Result<JetWrappedVaultKey, JetVaultKeyWrapError> {
-    let mut salt = jvkw_random::<16>()?;
-    let mut payload_nonce = jvkw_random::<24>()?;
-    let mut export_id = jvkw_random::<16>()?;
+    let salt = jvkw_random::<16>()?;
+    let payload_nonce = jvkw_random::<24>()?;
+    let export_id = jvkw_random::<16>()?;
     if export_id.0 == [0; 16] { return Err(JetVaultKeyWrapError::Internal { incident_id: "jvkw-zero-random" }); }
-    let mut backup_key = jvkw_argon(passphrase, &salt.0, cancelled, cancel_outcome,wait_enter,wait_leave)?;
+    let backup_key = jvkw_argon(passphrase, &salt.0, cancelled, cancel_outcome,wait_enter,wait_leave)?;
     let header_len = 122usize.checked_add(origin.name.len()).and_then(|value| value.checked_add(28)).ok_or(JetVaultKeyWrapError::InvalidLength)?;
     let mut header = jvkw_fixed(JetVaultKeyWrapMode::Passphrase, T::TAG, header_len)?;
     jvkw_common(&mut header, origin.repo_uuid, &origin.name, origin.generation, origin.opaque_id, origin.record_hash, created_unix_ms, &export_id.0, &payload_nonce.0)?;
@@ -404,13 +404,13 @@ fn jvkw_open_recipient(parsed: &JvkwParsed, bytes: &[u8], identity: &JetX25519Se
     let recipient_public: [u8; 32] = bytes[stanza_at..stanza_at + 32].try_into().unwrap();
     #[cfg(test)] JVKW_RECIPIENT_OPEN_COUNT.with(|slot| slot.set(slot.get() + 1));
     #[cfg(test)] JVKW_X25519_COUNT.with(|slot| slot.set(slot.get() + 1));
-    let mut shared = Zeroizing(x25519_checked(private.0, ephemeral).map_err(|_| JetVaultKeyWrapError::OpenFailed)?);
+    let shared = Zeroizing(x25519_checked(private.0, ephemeral).map_err(|_| JetVaultKeyWrapError::OpenFailed)?);
     let mut key_info = b"JVKW1 recipient key".to_vec(); key_info.extend_from_slice(&parsed.export_id); key_info.extend_from_slice(&ephemeral); key_info.extend_from_slice(&recipient_public);
     let mut nonce_info = b"JVKW1 recipient nonce".to_vec(); nonce_info.extend_from_slice(&parsed.export_id); nonce_info.extend_from_slice(&ephemeral); nonce_info.extend_from_slice(&recipient_public);
     #[cfg(test)] JVKW_HKDF_COUNT.with(|slot| slot.set(slot.get() + 1));
-    let mut kek = Zeroizing(hkdf32(&shared.0, &salt, &key_info).map_err(|_| JetVaultKeyWrapError::OpenFailed)?);
+    let kek = Zeroizing(hkdf32(&shared.0, &salt, &key_info).map_err(|_| JetVaultKeyWrapError::OpenFailed)?);
     #[cfg(test)] JVKW_HKDF_COUNT.with(|slot| slot.set(slot.get() + 1));
-    let mut nonce = Zeroizing(hkdf24(&shared.0, &salt, &nonce_info).map_err(|_| JetVaultKeyWrapError::OpenFailed)?);
+    let nonce = Zeroizing(hkdf24(&shared.0, &salt, &nonce_info).map_err(|_| JetVaultKeyWrapError::OpenFailed)?);
     let mut aad = b"JVKW1 recipient aad".to_vec(); aad.extend_from_slice(&bytes[..stanzas_at]); aad.extend_from_slice(&recipient_public);
     #[cfg(test)] JVKW_AEAD_COUNT.with(|slot| slot.set(slot.get() + 1));
     let opened = XChaCha20Poly1305::new_from_slice(&kek.0).map_err(|_| JetVaultKeyWrapError::OpenFailed)?
@@ -424,7 +424,7 @@ fn jvkw_open_recipient(parsed: &JvkwParsed, bytes: &[u8], identity: &JetX25519Se
 
 fn jvkw_open<T: JetVaultKey>(wrapped: &JetWrappedVaultKey, unlock: JetVaultKeyUnlock<'_>, cancelled: fn() -> bool, cancel_outcome: fn(),wait_enter:fn(),wait_leave:fn()) -> Result<(JvkwParsed, Zeroizing<Vec<u8>>, [u8; 32]), JetVaultKeyWrapError> {
     let parsed = jvkw_parse(&wrapped.bytes)?;
-    let mut backup_key = match (parsed.mode, unlock) {
+    let backup_key = match (parsed.mode, unlock) {
         (JetVaultKeyWrapMode::Recipient, JetVaultKeyUnlock::Recipient(identity)) => jvkw_open_recipient(&parsed, &wrapped.bytes, identity)?,
         (JetVaultKeyWrapMode::Passphrase, JetVaultKeyUnlock::Passphrase(passphrase)) => {
             let JvkwModeHeader::Passphrase { salt } = parsed.mode_header else { return Err(JetVaultKeyWrapError::OpenFailed); };
@@ -437,7 +437,7 @@ fn jvkw_open<T: JetVaultKey>(wrapped: &JetWrappedVaultKey, unlock: JetVaultKeyUn
     let plaintext = XChaCha20Poly1305::new_from_slice(&backup_key.0).map_err(|_| JetVaultKeyWrapError::OpenFailed)?
         .decrypt(XNonce::from_slice(&parsed.payload_nonce), Payload { msg: &wrapped.bytes[parsed.header_end..], aad: &aad })
         .map_err(|_| JetVaultKeyWrapError::OpenFailed)?;
-    let mut plaintext = Zeroizing(plaintext);
+    let plaintext = Zeroizing(plaintext);
     if plaintext.0.len() != 64 || parsed.key_type != T::TAG { return Err(JetVaultKeyWrapError::OpenFailed); }
     let public: [u8; 32] = plaintext.0[32..].try_into().map_err(|_| JetVaultKeyWrapError::OpenFailed)?;
     let key = Zeroizing(plaintext.0[..32].to_vec());

@@ -1366,10 +1366,6 @@ fn collect_capture_pattern(
         | jet::AST::Pattern::Range { .. }
         | jet::AST::Pattern::StrMatch { .. }
         | jet::AST::Pattern::BinMatch { .. } => {}
-        _ => sites.push(CaptureSite {
-            operation: "unsupported pattern boundary".to_string(),
-            effect: None,
-        }),
     }
 }
 
@@ -1764,7 +1760,7 @@ fn configure_child_process_group(command: &mut Command) {
             extern "C" {
                 fn setpgid(pid: i32, pgid: i32) -> i32;
             }
-            if unsafe { setpgid(0, 0) } == 0 {
+            if setpgid(0, 0) == 0 {
                 Ok(())
             } else {
                 Err(std::io::Error::last_os_error())

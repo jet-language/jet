@@ -1,10 +1,14 @@
 //! `core.archive.gzip` / `zstd` host shims (#729).
 //! Calls the canonical FFI runtime via `include!` — no third algorithm.
 
+// This module includes shared Prelude source that several hosts compile,
+// each using a different subset, so dead-code reports here are about the
+// other hosts' usage, not about this one. Scoped to the module, never the crate.
+#![allow(dead_code)]
+
 use crate::Marshal::{clone_bytes, alloc_byte_list, result_ok, result_err_msg};
 
 mod runtime {
-    #![allow(dead_code, unused_imports)]
     include!("../../jet-pkg-model/src/Prelude/Compress.rs");
 }
 

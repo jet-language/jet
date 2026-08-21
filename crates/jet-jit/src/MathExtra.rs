@@ -1,11 +1,16 @@
 //! Extra `core.math` hosts (#1464 / I9). Algorithms from Prelude `MathLibPure`
 //! via build.rs extract — marshalling only.
 
+// This module includes shared Prelude source that several hosts compile,
+// each using a different subset, so dead-code reports here are about the
+// other hosts' usage, not about this one. Scoped to the module, never the crate.
+#![allow(dead_code)]
+
 use super::Concurrency;
 use cranelift_codegen::ir::{types, AbiParam, Signature};
+use cranelift_module::Module;
 
 pub(crate) mod math_rt {
-    #![allow(dead_code, unused_imports)]
     #[allow(unused_imports)]
     pub use jet_foundation::Outcome::*;
     include!(concat!(env!("OUT_DIR"), "/math_rt.rs"));

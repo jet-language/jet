@@ -264,7 +264,7 @@ pub(crate) fn core_type_known(name: &str) -> bool {
         // D-SERVICE1=D: structured service tree handles.
         | "ServiceTree" | "ServiceEndpoint" | "ServiceError" | "ServiceRestart"
         | "ServiceDelivery" | "ServiceRuntime" | "ServiceStateStore" | "ServiceReceipt"
-        | "ServiceUpgradeReceipt"
+        | "ServiceUpgradeReceipt" | "TaskOutcome" | "TaskStatus"
         | "HTTPRequest" | "HTTPResponse" | "HTTPRouter" | "HTTPClient" | "HTTPClientType"
         // D-CRYPTO-API1=A: purpose-bound crypto values. Secret-bearing values
         // are opaque and receive no structural/collection capabilities.

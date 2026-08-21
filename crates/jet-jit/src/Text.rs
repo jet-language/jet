@@ -1,13 +1,18 @@
 //! `core.text` hosts (#729). `include!` canonical UnicodeTables + UnicodeString +
 //! Top/Text.rs — no third algorithm.
 
+// This module includes shared Prelude source that several hosts compile,
+// each using a different subset, so dead-code reports here are about the
+// other hosts' usage, not about this one. Scoped to the module, never the crate.
+#![allow(dead_code)]
+
 use super::Concurrency;
 use cranelift_codegen::ir::{types, AbiParam, Signature};
+use cranelift_module::Module;
 use crate::Marshal::{clone_string, alloc_string, result_err_msg};
 
 /// Canonical text/unicode runtime — types stubbed, algorithm via include!
 pub(crate) mod text_rt {
-    #![allow(dead_code, unused_imports)]
     mod jet_regex_syntax {
         include!("../../jet-foundation/src/RegexSyntax.rs");
     }

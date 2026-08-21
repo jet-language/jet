@@ -1,12 +1,17 @@
 //! `core.time` / civil-time marshalling hosts for the shared Prelude kernel.
 
+// This module includes shared Prelude source that several hosts compile,
+// each using a different subset, so dead-code reports here are about the
+// other hosts' usage, not about this one. Scoped to the module, never the crate.
+#![allow(dead_code)]
+
 use super::Concurrency;
 use jet_codegen::AST::CtValue;
 use cranelift_codegen::ir::{types, AbiParam, Signature};
+use cranelift_module::Module;
 use crate::Marshal::{alloc_string, clone_string, result_err_msg, result_ok};
 
 pub(crate) mod time_rt {
-    #![allow(dead_code, unused_imports)]
     include!("../../jet-codegen/src/Prelude/Core/TimeMonotonic.rs");
     include!("../../jet-codegen/src/Prelude/Core/Time.rs");
 }

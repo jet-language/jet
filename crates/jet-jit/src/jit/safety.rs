@@ -6430,7 +6430,7 @@ fn resident_safe_handle_op(op: &THandleOp, recv: &TExpr, args: &[TExpr]) -> bool
                                     | "is_zero",
                                 0
                             )
-                    ))
+                    )) 
         }
         THandleOp::CivilTimeMethod { kind, method } => {
             // Civil date/time/zoned methods are host-backed; arity is checked in lower.

@@ -204,7 +204,12 @@ fn process_leaf_feature(module: &str, item: &str) -> Option<&'static str> {
         // Run by the shared evaluator itself: `process.argv` reads the argv
         // installed for this run, and `process.exit` / `sys.atexit` /
         // `sys.stop` drive its own exit and cleanup path.
-        ("core.process", "argv" | "exit") | ("core.sys", "atexit" | "stop") => None,
+        // `process.run` is marshalled by the interpreter ambient through the
+        // same Process Prelude as AOT and Cranelift. The authority argument
+        // is ordinary data at this boundary; sema has already checked it is
+        // the named `Abilities` carrier.
+        ("core.process", "argv" | "exit" | "run")
+        | ("core.sys", "atexit" | "stop") => None,
         // #2003: the interpreter ambient marshals these three through the one
         // CoreHost accessor over Jet's logical environment table — the same
         // owner AOT and the resident JIT read (`jet-jit` `ambient_interp`

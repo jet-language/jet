@@ -2,6 +2,11 @@
 //! The zero-argument `jet_jit_cli_main` trampoline decodes argv and calls user
 //! `run(args)`.
 
+// This module includes shared Prelude source that several hosts compile,
+// each using a different subset, so dead-code reports here are about the
+// other hosts' usage, not about this one. Scoped to the module, never the crate.
+#![allow(dead_code)]
+
 use super::Concurrency;
 use jet_foundation::AST::{CtValue, Item, ProgramBundle, StructDef, Type};
 use jet_foundation::CLISchema::{
@@ -153,7 +158,6 @@ use runtime::{
 };
 
 mod inline_range_semantics {
-    #![allow(dead_code, unused_imports)]
     include!("../../jet-codegen/src/Prelude/Core/InlineRange.rs");
 }
 

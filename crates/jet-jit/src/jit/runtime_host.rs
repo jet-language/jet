@@ -1,3 +1,8 @@
+// This module includes shared Prelude source that several hosts compile,
+// each using a different subset, so dead-code reports here are about the
+// other hosts' usage, not about this one. Scoped to the module, never the crate.
+#![allow(dead_code)]
+
 use cranelift_codegen::ir::{types, AbiParam, Signature};
 use cranelift_jit::{JITBuilder, JITModule};
 use cranelift_module::{FuncId, Module};
@@ -17,28 +22,23 @@ use super::{
 };
 
 pub(crate) mod duration_kernel {
-    #![allow(dead_code, unused_imports)]
     include!("../../../jet-codegen/src/Prelude/Core/Duration.rs");
 }
 
 mod measurement_kernel {
-    #![allow(dead_code, unused_imports)]
     include!("../../../jet-codegen/src/Prelude/Core/Measurement.rs");
 }
 
 pub(crate) mod contract_kernel {
-    #![allow(dead_code, unused_imports)]
     use jet_foundation::Outcome::{jet_render_runtime_stop, JetRuntimeDiagnostic};
     include!("../../../jet-codegen/src/Prelude/Core/Contracts.rs");
 }
 
 pub(crate) mod service_prelude {
-    #![allow(dead_code, unused_imports)]
     include!("../../../jet-codegen/src/Prelude/Service.rs");
 }
 
 mod inline_range_kernel {
-    #![allow(dead_code, unused_imports)]
     include!("../../../jet-codegen/src/Prelude/Core/InlineRange.rs");
 }
 

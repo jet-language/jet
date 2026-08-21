@@ -1,25 +1,32 @@
 //! `core.db` hosts (#729). `include!` canonical SQLite runtime + wire codec —
 //! no third algorithm.
 
+// This module includes shared Prelude source that several hosts compile,
+// each using a different subset, so dead-code reports here are about the
+// other hosts' usage, not about this one. Scoped to the module, never the crate.
+#![allow(dead_code)]
+
 use super::Concurrency;
 use cranelift_codegen::ir::{types, AbiParam, Signature};
+use cranelift_module::Module;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 use crate::Marshal::{clone_string, result_ok, result_err_msg};
-#[allow(dead_code, unused_imports)]
-mod display_traits {
-    pub(crate) trait JetShow {
-        fn jet_show(&self) -> String;
-    }
-    pub(crate) trait JetDebug {
-        fn jet_debug(&self) -> String;
-    }
-    pub(crate) trait JetDisplay {
-        fn jet_display(&self) -> String;
-    }
+
+trait JetShow {
+    fn jet_show(&self) -> String;
 }
-#[allow(unused_imports)]
-pub(crate) use display_traits::{JetDebug, JetDisplay, JetShow};
+
+trait JetDebug {
+    fn jet_debug(&self) -> String;
+}
+
+
+/// D-FAIL-CONV2=A: included error fragments render failure text through this seam.
+trait JetDisplay {
+    fn jet_display(&self) -> String;
+}
+
 // The shared DB wire fragment receives the host's row carrier through this
 // name. AOT supplies its JetMap; JIT keeps rows in the native map until heap
 // marshalling.
@@ -27,7 +34,6 @@ type JetMap<K, V> = std::collections::BTreeMap<K, V>;
 
 /// Canonical `core.db` FFI runtime (rusqlite).
 mod runtime {
-    #![allow(dead_code, unused_imports)]
     include!("../../jet-pkg-model/src/Prelude/DB.rs");
 }
 
@@ -35,7 +41,6 @@ mod runtime {
 /// closed row-policy language (`RowPolicy.rs`) it compiles through — the same
 /// two fragments AOT splices into `mod jet_std` (I9).
 mod wire {
-    #![allow(dead_code, unused_imports)]
     #[allow(unused_imports)]
     pub use jet_foundation::Outcome::*;
     include!("../../jet-codegen/src/Prelude/CoreLib/JetStd/RowPolicy.rs");

@@ -2,6 +2,7 @@
 
 use crate::Concurrency;
 use cranelift_codegen::ir::{types, AbiParam, Signature};
+use cranelift_module::Module;
 use jet_codegen::local_cell::{
     JetCell, JetCellEditGuard, JetCellGetOrSet, JetCellReadGuard,
 };

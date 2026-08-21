@@ -90,6 +90,26 @@ fn run() {
 }
 
 #[test]
+fn authority_process_boundary_runs_on_all_hosted_tiers() {
+    let source = r#"
+use core.process as process
+
+fn run() {
+    #Abilities(abilities: Exec, IO) {
+        result :: process.run(["echo", "boundary"], abilities)
+        print("boundary")
+    }
+}
+"#;
+    tir_support::assert_tiers_agree("authority_process_boundary", source, "boundary\n");
+}
+
+#[test]
+fn authority_example_runs_on_all_hosted_tiers() {
+    tir_support::assert_example_cli_tiers_agree("types/authority", "abilities\n");
+}
+
+#[test]
 fn authority_is_not_a_type_selection_or_dispatch_input() {
     let source = r#"
 fn run() {
@@ -164,7 +184,7 @@ fn authority_repl_accepts_the_same_value() {
 
 #[test]
 fn authority_web_accepts_the_same_value() {
-    let source = "#Target(Web)\nfn run() {\n    #Abilities(abilities: IO) {\n        value :: 1 + 1\n    }\n}\n";
+    let source = "#Target(Web)\nfn run() {\n    #Abilities(abilities: IO) {\n        narrowed :: abilities.with(\"IO\")\n        released :: narrowed.without(\"IO\")\n        value :: released\n    }\n}\n";
     let web = jet::compile_web_with_path(source, "tests/fixtures/authority_web.jet")
         .expect("web should accept Abilities")
         .web

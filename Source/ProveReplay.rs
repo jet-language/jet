@@ -1252,12 +1252,6 @@ fn extract_time_ms(bytes: &[u8]) -> Result<Vec<i64>, String> {
     Ok(values)
 }
 
-fn extract_first_time_ms(bytes: &[u8]) -> Result<i64, String> {
-    extract_time_ms(bytes)?
-        .into_iter()
-        .next()
-        .ok_or_else(|| "replay artifact contains no Time authority".into())
-}
 
 fn time_ms_from_payload(payload: &str) -> Result<i64, String> {
     let value = parse_json(payload).map_err(|_| "Time payload is not valid JSON".to_string())?;
@@ -1908,7 +1902,7 @@ mod tests {
         assert_eq!(header.get("schema").map(String::as_str), Some("jet.replay"));
         assert_eq!(header.get("run_outcome").map(String::as_str), Some("exit"));
         assert_eq!(header.get("run_status").map(String::as_str), Some("0"));
-        assert_eq!(extract_first_time_ms(&bytes).unwrap(), 1_234);
+        assert_eq!(extract_time_ms(&bytes).unwrap()[0], 1_234);
     }
 
     #[test]

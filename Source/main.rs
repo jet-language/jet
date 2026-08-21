@@ -1838,6 +1838,7 @@ fn main() {
                     run_key_backup(dest, registry);
                 }
                 Some(other) => {
+                    // No typed edit: this is an argv subcommand, not Jet source.
                     crate::cli_error!("E2101", "unknown `jet registry key` subcommand `{}` — did you mean `jet registry key backup`?", other);
                     exit(ExitCodes::USER_ERROR);
                 }

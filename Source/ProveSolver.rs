@@ -754,7 +754,6 @@ fn statement_is_flow_boundary(statement: &jet::AST::Stmt) -> bool {
         | jet::AST::Stmt::Continue(_)
         | jet::AST::Stmt::BreakLabel(..)
         | jet::AST::Stmt::ContinueLabel(..) => false,
-        _ => true,
     }
 }
 

@@ -1,3 +1,8 @@
+// This module includes shared Prelude source that several hosts compile,
+// each using a different subset, so dead-code reports here are about the
+// other hosts' usage, not about this one. Scoped to the module, never the crate.
+#![allow(dead_code)]
+
 use cranelift_codegen::ir::{types, AbiParam, Signature};
 use cranelift_jit::JITModule;
 use cranelift_module::Module;
@@ -79,9 +84,9 @@ static AUTH_ERROR_WRONG_AUDIENCE_PAYLOAD: LazyLock<Vec<Type>> =
 static AUTH_ERROR_WRONG_ISSUER_PAYLOAD: LazyLock<Vec<Type>> =
     LazyLock::new(|| vec![Type::String, Type::Option(Box::new(Type::String))]);
 
-// `TypeName → per-field #[Redact]` flags in declaration order (parallel to
-// `JitProgram.struct_fields`). Populated from the ProgramBundle before compile
-// so JetDebug can redact without extending `JitProgram` (#729 display_debug).
+/// `TypeName → per-field #[Redact]` flags in declaration order (parallel to
+/// `JitProgram.struct_fields`). Populated from the ProgramBundle before compile
+/// so JetDebug can redact without extending `JitProgram` (#729 display_debug).
 thread_local! {
     static STRUCT_REDACT: RefCell<HashMap<String, Vec<bool>>> = RefCell::new(HashMap::new());
 }

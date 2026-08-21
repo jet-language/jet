@@ -1,8 +1,14 @@
 //! D-RENDERTGT*: resident-JIT UI host — `include!` canonical Prelude/Ui.rs
 //! (+ UiGtk.rs) behind JetShow / jet_std stubs. Opaque handles only.
 
+// This module includes shared Prelude source that several hosts compile,
+// each using a different subset, so dead-code reports here are about the
+// other hosts' usage, not about this one. Scoped to the module, never the crate.
+#![allow(dead_code)]
+
 use super::Concurrency;
 use cranelift_codegen::ir::{types, AbiParam, Signature};
+use cranelift_module::Module;
 
 #[allow(dead_code, unused_imports)]
 pub(crate) mod ui_rt {

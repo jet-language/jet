@@ -1,5 +1,10 @@
 //! Native memory carriers for the resident Cranelift runtime.
 
+// This module includes shared Prelude source that several hosts compile,
+// each using a different subset, so dead-code reports here are about the
+// other hosts' usage, not about this one. Scoped to the module, never the crate.
+#![allow(dead_code)]
+
 use super::Concurrency;
 use std::sync::atomic::{AtomicI64, Ordering, compiler_fence};
 use std::sync::{Arc, Mutex};

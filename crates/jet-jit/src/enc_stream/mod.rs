@@ -1,6 +1,11 @@
 //! Encoding stream hosts (#729) — `include!` canonical EncodingStream + HostileIo.
 //! File create/open plus JSON/JSONL/CSV/CBOR/XML reader/writer handles.
 
+// This module includes shared Prelude source that several hosts compile,
+// each using a different subset, so dead-code reports here are about the
+// other hosts' usage, not about this one. Scoped to the module, never the crate.
+#![allow(dead_code)]
+
 #[allow(unused_imports)]
 pub use jet_foundation::Outcome::*;
 use super::Concurrency;

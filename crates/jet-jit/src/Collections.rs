@@ -1,18 +1,21 @@
 //! M5: list/map host shims for the Cranelift JIT (`JetArena` handles).
 
+// This module includes shared Prelude source that several hosts compile,
+// each using a different subset, so dead-code reports here are about the
+// other hosts' usage, not about this one. Scoped to the module, never the crate.
+#![allow(dead_code)]
+
 use super::Concurrency;
 use crate::runtime_host::{jit_callable_parts, JitCallableSlot};
 use std::collections::{BTreeSet, BinaryHeap, HashMap, HashSet, VecDeque};
 
 mod set_semantics {
-    #![allow(dead_code, unused_imports)]
     #[allow(unused_imports)]
     pub use jet_foundation::Outcome::*;
     include!("../../jet-codegen/src/Prelude/Core/SetAlgebra.rs");
 }
 
 mod range_semantics {
-    #![allow(dead_code, unused_imports)]
     use jet_foundation::StructuralDebug::jet_debug_range;
     #[allow(unused_imports)]
     pub use jet_foundation::Outcome::*;
@@ -20,14 +23,12 @@ mod range_semantics {
 }
 
 pub(crate) mod byte_buffer_semantics {
-    #![allow(dead_code, unused_imports)]
     #[allow(unused_imports)]
     pub use jet_foundation::Outcome::*;
     include!("../../jet-codegen/src/Prelude/Core/Bytes.rs");
 }
 
 mod disjoint_semantics {
-    #![allow(dead_code, unused_imports)]
     #[allow(unused_imports)]
     pub use jet_foundation::Outcome::*;
     include!("../../jet-codegen/src/Prelude/Core/Disjoint.rs");
@@ -48,7 +49,6 @@ mod disjoint_semantics {
 }
 
 mod authority_semantics {
-    #![allow(dead_code, unused_imports)]
     include!("../../jet-codegen/src/Prelude/Core/Authority.rs");
 }
 

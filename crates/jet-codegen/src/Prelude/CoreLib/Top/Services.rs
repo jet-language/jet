@@ -6,10 +6,10 @@
 // Supervision reuses the ratified concurrency substrate rather than restating
 // it: a supervisor is a task that owns a `JetTaskGroupRuntime` child group
 // (D-CONC-GROUP1/D-CONC-SCHED1), a restart rule is data on that group, and a
-// failure is the one `JetTaskFailure` rail from Prelude/TaskGroup.rs
-// (D-CONC-FAIL1=A, which retired D-CONC-OUTCOME1's separate TaskOutcome /
-// TaskStatus surface). No slice-local outcome enum, no outcome strings, and no
-// second restart-tracking mechanism.
+// failure is the one `JetTaskFailure` rail from Prelude/TaskGroup.rs.
+// Workflow activity attempts have their own recorded service result row:
+// `TaskOutcome` is the attempt/run result and `TaskStatus` is the wait state.
+// They are typed values at the API and replay boundary, never status strings.
 
 const MAX_SERVICE_NAME: usize = 256;
 const MAX_SERVICE_MESSAGE: usize = 1024 * 1024;
@@ -92,6 +92,26 @@ impl JetServiceRestartBudget {
 enum JetServiceDelivery {
     AtMostOnce,
     DurableAtLeastOnce,
+}
+
+/// D-SERVICE-WORKFLOW1=D / D-CONC-OUTCOME1: the closed result of a recorded
+/// activity attempt or workflow run.  The wire form is only a framed replay
+/// encoding; callers and the Prelude operate on this enum.
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum JetTaskOutcome {
+    Finished,
+    Panicked(String),
+    Cancelled,
+    DeadlineBlown,
+}
+
+/// D-SERVICE-WORKFLOW1=D / D-CONC-OUTCOME1: the non-terminal state of a
+/// workflow activity between recorded wait points.
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum JetTaskStatus {
+    Running,
+    Paused,
+    CancelRequested,
 }
 
 /// D-CONC-UNIT1=A: the supervised unit's lifecycle row. `Escalated` is the
@@ -323,6 +343,16 @@ enum JetServiceMigration {
     ForwardOnly,
 }
 
+/// D-SERVICE-UPGRADE1=D: a drain either keeps the shard on its current
+/// generation until it is empty or cancels it after the drain completes. The
+/// decision is typed so the lifecycle path cannot silently discard a worker
+/// handle while choosing a rollout outcome.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum JetServiceDrainDisposition {
+    PinShard,
+    Cancel,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct JetServiceStateStore {
     path: String,
@@ -354,6 +384,9 @@ struct JetServiceWorkflow {
     version: i64,
     steps: Vec<String>,
     history: Vec<String>,
+    status: JetTaskStatus,
+    activity_outcomes: Vec<(String, JetTaskOutcome)>,
+    outcome: Option<JetTaskOutcome>,
 }
 
 #[derive(Clone, Debug)]
@@ -406,6 +439,87 @@ impl JetShow for JetServiceDelivery {
             JetServiceDelivery::AtMostOnce => "AtMostOnce".to_string(),
             JetServiceDelivery::DurableAtLeastOnce => "DurableAtLeastOnce".to_string(),
         }
+    }
+}
+
+impl JetTaskOutcome {
+    fn wire(&self) -> String {
+        match self {
+            Self::Finished => "Finished".to_string(),
+            Self::Panicked(reason) => {
+                format!("Panicked:{}", jet_services_workflow_frame(reason))
+            }
+            Self::Cancelled => "Cancelled".to_string(),
+            Self::DeadlineBlown => "DeadlineBlown".to_string(),
+        }
+    }
+
+    fn from_wire(value: &str) -> Result<Self, JetServiceError> {
+        match value {
+            "Finished" => Ok(Self::Finished),
+            "Cancelled" => Ok(Self::Cancelled),
+            "DeadlineBlown" => Ok(Self::DeadlineBlown),
+            value => {
+                let reason = value
+                    .strip_prefix("Panicked:")
+                    .ok_or_else(|| jet_services_state_error("unknown task outcome"))?;
+                Ok(Self::Panicked(
+                    jet_services_workflow_field(reason, "panic reason")?.to_string(),
+                ))
+            }
+        }
+    }
+
+    fn is_retryable_failure(&self) -> bool {
+        !matches!(self, Self::Finished)
+    }
+}
+
+impl JetShow for JetTaskOutcome {
+    fn jet_show(&self) -> String {
+        match self {
+            Self::Finished => "Finished".to_string(),
+            Self::Panicked(reason) => format!("Panicked({reason})"),
+            Self::Cancelled => "Cancelled".to_string(),
+            Self::DeadlineBlown => "DeadlineBlown".to_string(),
+        }
+    }
+}
+
+impl JetDisplay for JetTaskOutcome {
+    fn jet_display(&self) -> String {
+        self.jet_show()
+    }
+}
+
+impl JetDebug for JetTaskOutcome {
+    fn jet_debug(&self) -> String {
+        match self {
+            Self::Panicked(reason) => format!("Panicked({reason:?})"),
+            _ => self.jet_show(),
+        }
+    }
+}
+
+impl JetShow for JetTaskStatus {
+    fn jet_show(&self) -> String {
+        match self {
+            Self::Running => "Running".to_string(),
+            Self::Paused => "Paused".to_string(),
+            Self::CancelRequested => "CancelRequested".to_string(),
+        }
+    }
+}
+
+impl JetDisplay for JetTaskStatus {
+    fn jet_display(&self) -> String {
+        self.jet_show()
+    }
+}
+
+impl JetDebug for JetTaskStatus {
+    fn jet_debug(&self) -> String {
+        self.jet_show()
     }
 }
 
@@ -1133,6 +1247,104 @@ fn jet_services_generation_is_pinned(tree: &JetServiceTree, worker: &str, genera
     })
 }
 
+/// D-CONC-JOIN1: use the existing service task cancel/join rail, then verify
+/// the handle was discharged. A poisoned state is an error, never an implicit
+/// detach or silent drop.
+fn jet_services_discharge_task(
+    task: std::sync::Arc<std::sync::Mutex<JetServiceSupervisorState>>,
+) -> Result<(), JetServiceError> {
+    jet_services_cancel_task(&task);
+    jet_services_join_task(task.clone());
+    let state = task.lock().map_err(|_| {
+        JetServiceError::Policy("service task state lock is poisoned during drain".to_string())
+    })?;
+    if !state.joined {
+        return Err(JetServiceError::Policy(
+            "service drain could not discharge its task handle".to_string(),
+        ));
+    }
+    Ok(())
+}
+
+fn jet_services_finish_drain(
+    tree: &mut JetServiceTree,
+    endpoint: &JetServiceEndpoint,
+) -> Result<(), JetServiceError> {
+    jet_services_validate_endpoint(tree, endpoint)?;
+    let worker_index = tree
+        .workers
+        .iter()
+        .position(|worker| {
+            worker.name == endpoint.worker
+                && worker.endpoint.tree == endpoint.tree
+                && worker.endpoint.authority == endpoint.authority
+                && worker.endpoint.generation == endpoint.generation
+        })
+        .ok_or_else(|| {
+            JetServiceError::Unknown(format!(
+                "endpoint {}/{} is not in this tree",
+                endpoint.tree, endpoint.worker
+            ))
+        })?;
+    let (worker_name, task, worker_endpoint, disposition) = {
+        let worker = &tree.workers[worker_index];
+        let disposition = if jet_services_generation_is_pinned(
+            tree,
+            &worker.name,
+            worker.endpoint.generation,
+        ) {
+            JetServiceDrainDisposition::PinShard
+        } else {
+            JetServiceDrainDisposition::Cancel
+        };
+        (
+            worker.name.clone(),
+            worker.task.clone(),
+            worker.endpoint.clone(),
+            disposition,
+        )
+    };
+
+    match disposition {
+        JetServiceDrainDisposition::PinShard => {
+            // The old shard is drained before promotion. Promotion starts the
+            // new generation task only after the old handle is discharged.
+            jet_services_discharge_task(task.clone())?;
+            match jet_services_promote_worker_generation(tree, &worker_name) {
+                Ok(true) => {}
+                Ok(false) => {
+                    let _ = jet_services_task_start(&task);
+                    return Err(JetServiceError::Unavailable(
+                        "drained shard has uncommitted durable delivery".to_string(),
+                    ));
+                }
+                Err(error) => {
+                    let _ = jet_services_task_start(&task);
+                    return Err(error);
+                }
+            }
+        }
+        JetServiceDrainDisposition::Cancel => {
+            jet_services_authority_update(&worker_endpoint, false)?;
+            if let Err(error) = jet_services_discharge_task(task.clone()) {
+                let recovery = jet_services_authority_update(&worker_endpoint, true);
+                return Err(match recovery {
+                    Ok(()) => error,
+                    Err(recovery_error) => JetServiceError::Policy(format!(
+                        "{}; drain authority recovery failed: {}",
+                        error.jet_show(),
+                        recovery_error.jet_show()
+                    )),
+                });
+            }
+            let worker = &mut tree.workers[worker_index];
+            worker.running = false;
+            tree.draining.retain(|name| name != &worker_name);
+        }
+    }
+    Ok(())
+}
+
 fn jet_services_worker_generation_allowed(tree: &JetServiceTree, worker: &JetServiceWorker) -> bool {
     worker.endpoint.generation == tree.generation
         || jet_services_generation_is_pinned(tree, &worker.name, worker.endpoint.generation)
@@ -1462,6 +1674,16 @@ fn jet_services_validate_tree(tree: &JetServiceTree) -> Result<(), JetServiceErr
                     || entry.chars().any(char::is_control)
                     || entry.len() > MAX_SERVICE_MESSAGE
             })
+            || workflow.activity_outcomes.len() > MAX_SERVICE_WORKFLOW_STEPS
+            || workflow.activity_outcomes.iter().any(|(key, outcome)| {
+                key.trim().is_empty()
+                    || key.len() > MAX_SERVICE_NAME
+                    || key.chars().any(char::is_control)
+                    || matches!(outcome, JetTaskOutcome::Panicked(reason)
+                        if reason.trim().is_empty()
+                            || reason.len() > MAX_SERVICE_MESSAGE
+                            || reason.chars().any(char::is_control))
+            })
             || workflow_ids.iter().any(|id| id == &workflow.id)
         {
             return Err(JetServiceError::Policy(
@@ -1725,15 +1947,7 @@ fn jet_services_receive(
         (message, should_stop)
     };
     if draining && should_stop {
-        if jet_services_generation_is_pinned(tree, &endpoint.worker, endpoint.generation) {
-            jet_services_promote_worker_generation(tree, &endpoint.worker)?;
-        } else {
-            let worker = jet_services_find_worker_mut(tree, endpoint)?;
-            let worker_endpoint = worker.endpoint.clone();
-            jet_services_authority_update(&worker_endpoint, false)?;
-            worker.running = false;
-            tree.draining.retain(|name| name != &endpoint.worker);
-        }
+        jet_services_finish_drain(tree, endpoint)?;
     }
     Ok(message)
 }
@@ -2945,6 +3159,41 @@ fn jet_services_workflow_activity_index(
         })
 }
 
+fn jet_services_workflow_activity_outcome<'a>(
+    workflow: &'a JetServiceWorkflow,
+    key: &str,
+) -> Option<&'a JetTaskOutcome> {
+    workflow
+        .activity_outcomes
+        .iter()
+        .find(|(existing_key, _)| existing_key == key)
+        .map(|(_, outcome)| outcome)
+}
+
+fn jet_services_workflow_refresh_outcome(workflow: &mut JetServiceWorkflow) {
+    let activities = workflow
+        .steps
+        .iter()
+        .filter_map(|step| jet_services_workflow_activity_parts(step).map(|(_, key, _, _)| key));
+    let keys: Vec<&str> = activities.collect();
+    if keys.is_empty() || keys.iter().any(|key| {
+        !workflow
+            .activity_outcomes
+            .iter()
+            .any(|(done_key, _)| done_key == key)
+    }) {
+        workflow.outcome = None;
+        return;
+    }
+    workflow.outcome = Some(
+        workflow
+            .activity_outcomes
+            .iter()
+            .find_map(|(_, outcome)| outcome.is_retryable_failure().then_some(outcome.clone()))
+            .unwrap_or(JetTaskOutcome::Finished),
+    );
+}
+
 fn jet_services_workflow_replay(
     authority: &JetServiceStateAuthority,
 ) -> Result<Vec<JetServiceWorkflow>, JetServiceError> {
@@ -3002,6 +3251,9 @@ fn jet_services_workflow_apply(
                 version,
                 steps: Vec::new(),
                 history: vec![format!("start@v{version}")],
+                status: JetTaskStatus::Running,
+                activity_outcomes: Vec::new(),
+                outcome: None,
             });
         } else if let Some(fields) = payload.strip_prefix("workflow-step:") {
             let (run_id_text, fields) = fields.split_once(':').ok_or_else(|| {
@@ -3064,6 +3316,11 @@ fn jet_services_workflow_apply(
                 .iter_mut()
                 .find(|workflow| workflow.run_id == run_id)
                 .ok_or_else(|| jet_services_state_error("workflow activity has no start record"))?;
+            if workflow.outcome.is_some() {
+                return Err(jet_services_state_error(
+                    "workflow activity follows a terminal workflow outcome",
+                ));
+            }
             if jet_services_workflow_activity_index(workflow, key).is_some() {
                 return Err(jet_services_state_error(
                     "workflow log contains a duplicate activity key",
@@ -3078,6 +3335,7 @@ fn jet_services_workflow_apply(
             workflow
                 .history
                 .push(format!("activity:{activity}:{key}@{attempt}/{max_attempts}"));
+            workflow.status = JetTaskStatus::Running;
         } else if let Some(fields) = payload.strip_prefix("workflow-activity-retry:") {
             let (run_id_text, fields) = fields.split_once(':').ok_or_else(|| {
                 jet_services_state_error("workflow activity retry run id is missing")
@@ -3092,10 +3350,14 @@ fn jet_services_workflow_apply(
                 jet_services_state_error("workflow activity retry attempt is invalid")
             })?;
             let (key, rest) = jet_services_workflow_take_field(fields, "idempotency key")?;
+            let (outcome_wire, rest) =
+                jet_services_workflow_take_field(rest, "activity attempt outcome")?;
+            let outcome = JetTaskOutcome::from_wire(outcome_wire)?;
             if run_id < 1
                 || attempt < 2
                 || attempt > MAX_SERVICE_ACTIVITY_ATTEMPTS
                 || !rest.is_empty()
+                || !outcome.is_retryable_failure()
                 || jet_services_workflow_token(key, "idempotency key", MAX_SERVICE_NAME).is_err()
             {
                 return Err(jet_services_state_error(
@@ -3106,6 +3368,13 @@ fn jet_services_workflow_apply(
                 .iter_mut()
                 .find(|workflow| workflow.run_id == run_id)
                 .ok_or_else(|| jet_services_state_error("workflow retry has no start record"))?;
+            if workflow.outcome.is_some()
+                || jet_services_workflow_activity_outcome(workflow, key).is_some()
+            {
+                return Err(jet_services_state_error(
+                    "workflow retry follows a terminal activity",
+                ));
+            }
             let (index, activity, current_attempt, max_attempts) =
                 jet_services_workflow_activity_index(workflow, key)
                     .ok_or_else(|| jet_services_state_error("workflow retry has no activity"))?;
@@ -3122,7 +3391,11 @@ fn jet_services_workflow_apply(
             );
             workflow
                 .history
-                .push(format!("activity-retry:{key}@{attempt}/{max_attempts}"));
+                .push(format!(
+                    "activity-retry:{key}@{attempt}/{max_attempts}:{}",
+                    outcome.jet_show()
+                ));
+            workflow.status = JetTaskStatus::Paused;
         } else if let Some(fields) = payload.strip_prefix("workflow-activity-done:") {
             let (run_id_text, fields) = fields.split_once(':').ok_or_else(|| {
                 jet_services_state_error("workflow activity completion run id is missing")
@@ -3131,9 +3404,9 @@ fn jet_services_workflow_apply(
                 jet_services_state_error("workflow activity completion run id is invalid")
             })?;
             let (key, rest) = jet_services_workflow_take_field(fields, "idempotency key")?;
-            let (outcome, rest) = jet_services_workflow_take_field(rest, "activity outcome")?;
+            let (outcome_wire, rest) = jet_services_workflow_take_field(rest, "activity outcome")?;
+            let outcome = JetTaskOutcome::from_wire(outcome_wire)?;
             if run_id < 1
-                || outcome.len() > MAX_SERVICE_MESSAGE
                 || !rest.is_empty()
                 || jet_services_workflow_token(key, "idempotency key", MAX_SERVICE_NAME).is_err()
             {
@@ -3150,14 +3423,20 @@ fn jet_services_workflow_apply(
                     "workflow completion has no activity record",
                 ));
             }
-            let marker = format!("activity-done:{key}");
-            if workflow.history.iter().any(|entry| entry == &marker) {
+            if jet_services_workflow_activity_outcome(workflow, key).is_some() {
                 return Err(jet_services_state_error(
                     "workflow log contains a duplicate activity completion",
                 ));
             }
+            let marker = format!("activity-done:{key}");
             workflow.history.push(marker);
-            workflow.history.push(format!("activity-result:{outcome}"));
+            workflow
+                .history
+                .push(format!("activity-result:{}", outcome.jet_show()));
+            workflow
+                .activity_outcomes
+                .push((key.to_string(), outcome));
+            jet_services_workflow_refresh_outcome(workflow);
         } else {
             return Err(jet_services_state_error(
                 "workflow log contains an unknown record",
@@ -3331,7 +3610,7 @@ fn jet_services_workflow_activity(
     activity: String,
     key: String,
     max_attempts: i64,
-) -> Result<String, JetServiceError> {
+) -> Result<JetTaskStatus, JetServiceError> {
     if !tree.started {
         return Err(JetServiceError::NotStarted(
             "service tree is not started".to_string(),
@@ -3350,7 +3629,7 @@ fn jet_services_workflow_activity(
         .position(|workflow| workflow.run_id == run_id)
         .ok_or_else(|| JetServiceError::Unknown(format!("workflow run {run_id} not found")))?;
     if jet_services_workflow_activity_index(&tree.workflows[workflow_index], &key).is_some() {
-        return Ok(format!("ActivityDuplicate({key})"));
+        return Ok(tree.workflows[workflow_index].status.clone());
     }
     jet_services_workflow_append(
         tree,
@@ -3360,14 +3639,15 @@ fn jet_services_workflow_activity(
             jet_services_workflow_frame(&key),
         ),
     )?;
-    Ok(format!("ActivityScheduled({key})"))
+    Ok(JetTaskStatus::Running)
 }
 
 fn jet_services_workflow_activity_retry(
     tree: &mut JetServiceTree,
     run_id: i64,
     key: String,
-) -> Result<String, JetServiceError> {
+    outcome: JetTaskOutcome,
+) -> Result<JetTaskStatus, JetServiceError> {
     if !tree.started {
         return Err(JetServiceError::NotStarted(
             "service tree is not started".to_string(),
@@ -3387,34 +3667,35 @@ fn jet_services_workflow_activity_retry(
             "workflow activity retry limit exhausted".to_string(),
         ));
     }
+    if !outcome.is_retryable_failure() {
+        return Err(JetServiceError::Policy(
+            "a finished activity cannot be retried".to_string(),
+        ));
+    }
     let next_attempt = attempt + 1;
     jet_services_workflow_append(
         tree,
         format!(
-            "workflow-activity-retry:{run_id}:{next_attempt}:{}",
-            jet_services_workflow_frame(&key)
+            "workflow-activity-retry:{run_id}:{next_attempt}:{}{}",
+            jet_services_workflow_frame(&key),
+            jet_services_workflow_frame(&outcome.wire()),
         ),
     )?;
-    Ok(format!("ActivityRetry({key}, attempt={next_attempt})"))
+    Ok(JetTaskStatus::Paused)
 }
 
 fn jet_services_workflow_activity_complete(
     tree: &mut JetServiceTree,
     run_id: i64,
     key: String,
-    outcome: String,
-) -> Result<(), JetServiceError> {
+    outcome: JetTaskOutcome,
+) -> Result<JetTaskOutcome, JetServiceError> {
     if !tree.started {
         return Err(JetServiceError::NotStarted(
             "service tree is not started".to_string(),
         ));
     }
     jet_services_workflow_token(&key, "idempotency key", MAX_SERVICE_NAME)?;
-    if outcome.len() > MAX_SERVICE_MESSAGE || outcome.chars().any(char::is_control) {
-        return Err(JetServiceError::Policy(
-            "workflow activity outcome is too long or contains control characters".to_string(),
-        ));
-    }
     let workflow_index = tree
         .workflows
         .iter()
@@ -3423,22 +3704,26 @@ fn jet_services_workflow_activity_complete(
     if jet_services_workflow_activity_index(&tree.workflows[workflow_index], &key).is_none() {
         return Err(JetServiceError::Unknown(format!("activity key `{key}` not found")));
     }
-    let marker = format!("activity-done:{key}");
-    if tree.workflows[workflow_index]
-        .history
-        .iter()
-        .any(|entry| entry == &marker)
-    {
-        return Ok(());
+    if let Some(existing) = jet_services_workflow_activity_outcome(
+        &tree.workflows[workflow_index],
+        &key,
+    ) {
+        if existing == &outcome {
+            return Ok(outcome);
+        }
+        return Err(JetServiceError::Policy(
+            "workflow activity completion conflicts with its recorded outcome".to_string(),
+        ));
     }
     jet_services_workflow_append(
         tree,
         format!(
             "workflow-activity-done:{run_id}:{}{}",
             jet_services_workflow_frame(&key),
-            jet_services_workflow_frame(&outcome),
+            jet_services_workflow_frame(&outcome.wire()),
         ),
-    )
+    )?;
+    Ok(outcome)
 }
 
 fn jet_services_workflow_history(
@@ -3450,6 +3735,21 @@ fn jet_services_workflow_history(
         .find(|w| w.run_id == run_id)
         .map(|w| w.history.join("|"))
         .ok_or_else(|| JetServiceError::Unknown(format!("workflow run {run_id} not found")))
+}
+
+fn jet_services_workflow_outcome(
+    tree: &JetServiceTree,
+    run_id: i64,
+) -> Result<JetTaskOutcome, JetServiceError> {
+    tree.workflows
+        .iter()
+        .find(|workflow| workflow.run_id == run_id)
+        .and_then(|workflow| workflow.outcome.clone())
+        .ok_or_else(|| {
+            JetServiceError::Policy(format!(
+                "workflow run {run_id} has no recorded terminal outcome"
+            ))
+        })
 }
 
 fn jet_services_directory_register(
@@ -3614,10 +3914,23 @@ fn jet_services_drain_worker(
         if let Ok(worker) = jet_services_find_worker_mut(tree, endpoint) {
             if worker.mailbox.channel.depth() == 0 {
                 let worker_endpoint = worker.endpoint.clone();
+                let task = worker.task.clone();
                 worker.running = false;
                 if let Err(error) = jet_services_authority_update(&worker_endpoint, false) {
                     worker.running = true;
                     return Err(error);
+                }
+                if let Err(error) = jet_services_discharge_task(task) {
+                    let recovery = jet_services_authority_update(&worker_endpoint, true);
+                    worker.running = recovery.is_ok();
+                    return Err(match recovery {
+                        Ok(()) => error,
+                        Err(recovery_error) => JetServiceError::Policy(format!(
+                            "{}; drain authority recovery failed: {}",
+                            error.jet_show(),
+                            recovery_error.jet_show()
+                        )),
+                    });
                 }
                 tree.draining.push(name);
                 return Ok(());
@@ -3876,6 +4189,13 @@ fn jet_services_promote_worker_generation(
         receipt.pinned_shards.retain(|name| name != worker_name);
     }
     tree.draining.retain(|name| name != worker_name);
+    let task = tree
+        .workers
+        .iter()
+        .find(|worker| worker.name == worker_name)
+        .map(|worker| worker.task.clone())
+        .ok_or_else(|| JetServiceError::Unknown(format!("worker `{worker_name}` disappeared")))?;
+    jet_services_task_start(&task)?;
     Ok(true)
 }
 
@@ -4071,6 +4391,7 @@ fn jet_services_handoff_generation(tree: &mut JetServiceTree) -> Result<i64, Jet
     }
     tree.previous_generation = from_generation;
     tree.generation = to_generation;
+    let mut drained_tasks_to_start = Vec::new();
     for (index, worker) in tree.workers.iter_mut().enumerate() {
         if pinned_shards.iter().any(|name| name == &worker.name) {
             if tree.partitioned.iter().any(|name| name == &worker.name) {
@@ -4078,9 +4399,17 @@ fn jet_services_handoff_generation(tree: &mut JetServiceTree) -> Result<i64, Jet
             }
             continue;
         }
+        let restart_drained_task = next_running[index]
+            && tree.draining.iter().any(|name| name == &worker.name);
         worker.running = next_running[index];
         worker.endpoint = next_endpoints[index].clone();
         worker.mailbox.endpoint = next_endpoints[index].clone();
+        if restart_drained_task {
+            drained_tasks_to_start.push(worker.task.clone());
+        }
+    }
+    for task in drained_tasks_to_start {
+        jet_services_task_start(&task)?;
     }
     tree.directory = next_directory;
     tree.idempotency_seen = next_idempotency;

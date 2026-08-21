@@ -1,7 +1,14 @@
 //! `core.data` host shims — same checked analytics rules as DataFlow.rs.
 
+// This module includes shared Prelude source that several hosts compile,
+// each using a different subset, so dead-code reports here are about the
+// other hosts' usage, not about this one. Scoped to the module, never the crate.
+#![allow(dead_code)]
+
 use super::Concurrency;
 use cranelift_codegen::ir::{types, AbiParam, Signature};
+use cranelift_jit::JITModule;
+use cranelift_module::{FuncId, Module};
 use std::collections::BTreeMap;
 
 #[allow(unused_imports)]
@@ -116,7 +123,6 @@ mod data_kernel {
 }
 
 mod data_plot_rt {
-    #![allow(dead_code, unused_imports)]
     #[allow(unused_imports)]
     pub use jet_foundation::Outcome::*;
     pub(crate) use super::data_kernel::jet_std;
@@ -642,14 +648,15 @@ static LAZY_RESOLVED: Mutex<BTreeMap<u32, usize>> = Mutex::new(BTreeMap::new());
 static LAZY_FN_TABLE: Mutex<Vec<usize>> = Mutex::new(Vec::new());
 static LAZY_FRAME_OPS: Mutex<BTreeMap<i64, Vec<(u8, u32)>>> = Mutex::new(BTreeMap::new());
 
-pub(crate) fn note_lazy_callable(func_id: cranelift_module::FuncId) {
+pub(crate) fn note_lazy_callable(func_id: FuncId) {
     let id = func_id.as_u32();
     if let Ok(mut pending) = LAZY_PENDING.lock() {
         pending.push(id);
     }
 }
 
-pub(crate) fn bind_lazy_callables(module: &cranelift_jit::JITModule) {
+pub(crate) fn bind_lazy_callables(module: &JITModule) {
+    
     let pending = LAZY_PENDING
         .lock()
         .map(|mut p| std::mem::take(&mut *p))
@@ -660,7 +667,7 @@ pub(crate) fn bind_lazy_callables(module: &cranelift_jit::JITModule) {
         if resolved.contains_key(&fid) {
             continue;
         }
-        let ptr = module.get_finalized_function(cranelift_module::FuncId::from_u32(fid));
+        let ptr = module.get_finalized_function(FuncId::from_u32(fid));
         let idx = table.len();
         table.push(ptr as usize);
         resolved.insert(fid, idx);
@@ -683,7 +690,7 @@ fn clone_frame_ops(src: i64, dst: i64) {
 }
 
 fn jet_jit_data_lazy_push_op(frame: i64, kind: i64, func_id: i64) -> i64 {
-    note_lazy_callable(cranelift_module::FuncId::from_u32(func_id as u32));
+    note_lazy_callable(FuncId::from_u32(func_id as u32));
     if let Ok(mut ops) = LAZY_FRAME_OPS.lock() {
         ops.entry(frame).or_default().push((kind as u8, func_id as u32));
     }

@@ -2,20 +2,24 @@
 //! Lane/matrix layouts match `MathTaskMem` (`[f32;4]` / column-major F64). Host
 //! ops live here so the include fragment's `JetShow`/`Shared` deps stay out.
 
+// This module includes shared Prelude source that several hosts compile,
+// each using a different subset, so dead-code reports here are about the
+// other hosts' usage, not about this one. Scoped to the module, never the crate.
+#![allow(dead_code)]
+
 use super::Concurrency;
 use cranelift_codegen::ir::{types, AbiParam, Signature};
+use cranelift_module::Module;
 use std::cell::RefCell;
 use crate::Marshal::{clone_string, alloc_string};
 
 mod typed_text_semantics {
-    #![allow(dead_code, unused_imports)]
     #[allow(unused_imports)]
     pub use jet_foundation::Outcome::*;
     include!("../../jet-codegen/src/Prelude/TypedText.rs");
 }
 
 mod string_concat_semantics {
-    #![allow(dead_code, unused_imports)]
     include!("../../jet-codegen/src/Prelude/Core/StringConcat.rs");
 }
 

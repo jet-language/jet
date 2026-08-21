@@ -1707,9 +1707,40 @@ pub(crate) fn emit_tir_core_call(
             arg(1),
             arg(2)
         ),
+        ("core.services", "workflow_activity") => format!(
+            "{}(&mut ({}), {}, ({}).clone(), ({}).clone(), {})",
+            helper("jet_services_workflow_activity"),
+            arg(0),
+            arg(1),
+            arg(2),
+            arg(3),
+            arg(4)
+        ),
+        ("core.services", "workflow_activity_retry") => format!(
+            "{}(&mut ({}), {}, ({}).clone(), ({}).clone())",
+            helper("jet_services_workflow_activity_retry"),
+            arg(0),
+            arg(1),
+            arg(2),
+            arg(3)
+        ),
+        ("core.services", "workflow_activity_complete") => format!(
+            "{}(&mut ({}), {}, ({}).clone(), ({}).clone())",
+            helper("jet_services_workflow_activity_complete"),
+            arg(0),
+            arg(1),
+            arg(2),
+            arg(3)
+        ),
         ("core.services", "workflow_history") => format!(
             "{}(&({}), {})",
             helper("jet_services_workflow_history"),
+            arg(0),
+            arg(1)
+        ),
+        ("core.services", "workflow_outcome") => format!(
+            "{}(&({}), {})",
+            helper("jet_services_workflow_outcome"),
             arg(0),
             arg(1)
         ),

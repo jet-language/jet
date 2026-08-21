@@ -1,6 +1,6 @@
 //! D-OPTGC1: bounded, durable automatic-promotion reports.
 
-use std::collections::{BTreeSet, HashMap};
+use std::collections::BTreeSet;
 use std::io::{IsTerminal, Read};
 use std::path::{Path, PathBuf};
 use std::process::exit;

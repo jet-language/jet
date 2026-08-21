@@ -2,13 +2,20 @@
 //!
 //! Algorithms come from the same source files emitted into AOT bridge crates.
 
+// This module includes shared Prelude source that several hosts compile,
+// each using a different subset, so dead-code reports here are about the
+// other hosts' usage, not about this one. Scoped to the module, never the crate.
+#![allow(dead_code)]
+
 use super::Concurrency;
 use cranelift_codegen::ir::{types, AbiParam, Signature};
+use cranelift_module::Module;
 use jet_foundation::AST::Type;
 use crate::Marshal::clone_string;
 
 pub(crate) mod runtime {
-    #![allow(dead_code, unused_imports)]
+    #[allow(unused_imports)]
+    pub use jet_foundation::Outcome::*;
     include!("../../jet-codegen/src/Prelude/CoreLib/Top/UnicodeTables.rs");
     #[allow(unused_imports)]
     pub use jet_foundation::Outcome::*;

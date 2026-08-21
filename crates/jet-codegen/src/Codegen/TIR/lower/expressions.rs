@@ -2028,6 +2028,59 @@ pub(crate) fn lower_debug_text(value: TExpr) -> TExpr {
     }
 }
 
+fn lower_positive_integer_literal(
+    expr: &Expr,
+    cx: &Cx,
+    env: &mut LowerEnv,
+) -> Option<TExpr> {
+    match expr {
+        Expr::Paren(inner, _) => lower_positive_integer_literal(inner, cx, env),
+        Expr::Int(..) => Some(lower_expr(expr, cx, env)),
+        _ => None,
+    }
+}
+
+fn integer_literal_is_zero(expr: &Expr) -> bool {
+    match expr {
+        Expr::Paren(inner, _) => integer_literal_is_zero(inner),
+        Expr::Int(value, _, _, raw) => {
+            let exact = raw
+                .as_deref()
+                .and_then(|raw| jet_foundation::Numeric::CtBigInt::from_literal(raw).ok())
+                .unwrap_or_else(|| jet_foundation::Numeric::CtBigInt::from_int(*value));
+            exact.is_zero()
+        }
+        _ => false,
+    }
+}
+
+fn lower_negative_power_exponent(
+    expr: &Expr,
+    cx: &Cx,
+    env: &mut LowerEnv,
+) -> Option<TExpr> {
+    match expr {
+        Expr::Paren(inner, _) => lower_negative_power_exponent(inner, cx, env),
+        Expr::Unary(crate::AST::UnOp::Neg, inner, _) => {
+            if integer_literal_is_zero(inner) {
+                return None;
+            }
+            lower_positive_integer_literal(inner, cx, env)
+        }
+        Expr::Int(value, _, _, raw) => {
+            let exact = raw
+                .as_deref()
+                .and_then(|raw| jet_foundation::Numeric::CtBigInt::from_literal(raw).ok())
+                .unwrap_or_else(|| jet_foundation::Numeric::CtBigInt::from_int(*value));
+            exact.negative.then(|| TExpr {
+                ty: Type::Int,
+                kind: TExprKind::CtLit(CtValue::BigInt(exact.abs())),
+            })
+        }
+        _ => None,
+    }
+}
+
 #[inline(never)]
 fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
     if let Expr::PatternTest {
@@ -2779,6 +2832,42 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                         ],
                     },
                 };
+                // D-EXPNEG1: a written negative exponent on the default
+                // exact Int lowers to `1 / (base ^ |exponent|)` in the
+                // Fraction Prelude carrier. Dynamic exponents stay on the
+                // trapping whole-number power path.
+                if *op == BinOp::Pow
+                    && lhs.ty == Type::Int
+                    && rhs.ty == Type::Int
+                {
+                    if let Some(exponent) = lower_negative_power_exponent(r, cx, env) {
+                        let line = crate::Diagnostics::span_line_col(&cx.src, span.start).0 as u32;
+                        let powered = TExpr {
+                            ty: Type::Int,
+                            kind: TExprKind::Binary {
+                                op: BinOp::Pow,
+                                overflow: true,
+                                line,
+                                lhs: Box::new(lhs),
+                                rhs: Box::new(exponent),
+                            },
+                        };
+                        return TExpr {
+                            ty: fraction_ty.clone(),
+                            kind: TExprKind::PreciseBuiltin {
+                                type_name: Syntax::TYPE_FRACTION.to_string(),
+                                func: "from_parts".to_string(),
+                                args: vec![
+                                    TExpr {
+                                        ty: Type::Int,
+                                        kind: TExprKind::IntLit(1, None),
+                                    },
+                                    powered,
+                                ],
+                            },
+                        };
+                    }
+                }
                 if matches!(
                     *op,
                     BinOp::Add

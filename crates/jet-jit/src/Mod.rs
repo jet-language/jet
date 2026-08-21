@@ -1,13 +1,12 @@
+// This module includes shared Prelude source that several hosts compile,
+// each using a different subset, so dead-code reports here are about the
+// other hosts' usage, not about this one. Scoped to the module, never the crate.
+#![allow(dead_code)]
+
 // D-LIB-CALLGRANT1=A: JIT uses the exact load/check/map Prelude source. This
 // module only translates heap-level handles into a resident table slot.
 const __JET_COMPILER_VERSION: &str = env!("CARGO_PKG_VERSION");
-
-#[allow(dead_code, unused_imports)]
-mod prelude {
-    use super::__JET_COMPILER_VERSION;
-    include!("../../jet-codegen/src/Prelude/CoreLib/Top/Mod.rs");
-}
-use prelude::{jet_mod_load, jet_mod_on_tick, JetMod, JetModGrant};
+include!("../../jet-codegen/src/Prelude/CoreLib/Top/Mod.rs");
 
 use std::cell::RefCell;
 

@@ -5,6 +5,11 @@
 //! `jet_std_process_*`) — thin std wrappers, not a third algorithm.
 //! parity: guard tests/dev_tier_parity.rs::io_cli_terminal_and_time_match_interpreter_jit_and_aot
 
+// This module includes shared Prelude source that several hosts compile,
+// each using a different subset, so dead-code reports here are about the
+// other hosts' usage, not about this one. Scoped to the module, never the crate.
+#![allow(dead_code)]
+
 use super::runtime_host::{contract_kernel, jit_result_parts};
 use super::Concurrency;
 use std::cell::{Cell, RefCell};
@@ -12,17 +17,14 @@ use crate::Marshal::{clone_string, clone_bytes, alloc_byte_list, result_ok, resu
 use std::sync::{mpsc, OnceLock};
 
 mod path_kernel {
-    #![allow(dead_code, unused_imports)]
     include!("../../jet-codegen/src/Prelude/Core/Path.rs");
 }
 
 mod fs_walk_kernel {
-    #![allow(dead_code, unused_imports)]
     include!("../../jet-codegen/src/Prelude/Core/FSWalk.rs");
 }
 
 mod keep_kernel {
-    #![allow(dead_code, unused_imports)]
     include!("../../jet-codegen/src/Prelude/Core/Keep.rs");
 }
 
@@ -95,7 +97,6 @@ mod os_rt {
     }
 
     mod prelude_impl {
-        #![allow(dead_code, unused_imports)]
         use super::{jet_std, jet_std_env_get, jet_std_process_exit};
 
         include!("../../jet-codegen/src/Prelude/CoreLib/Top/OsExtra.rs");

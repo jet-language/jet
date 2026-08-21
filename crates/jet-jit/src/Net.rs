@@ -1,19 +1,23 @@
 //! Native JIT adapters for `core.net.url` / `core.net.mime` / `core.web.browser` (and later
 //! net/http/email/ws). Algorithms come from the same prelude sources AOT emits.
 
+// This module includes shared Prelude source that several hosts compile,
+// each using a different subset, so dead-code reports here are about the
+// other hosts' usage, not about this one. Scoped to the module, never the crate.
+#![allow(dead_code)]
+
 #[allow(unused_imports)]
 pub use jet_foundation::Outcome::*;
 use super::Concurrency;
 use cranelift_codegen::ir::{types, AbiParam, Signature};
+use cranelift_module::Module;
 use crate::Marshal::{alloc_string, clone_string, result_err_msg, result_ok};
 
 pub(crate) mod runtime {
-    #![allow(dead_code, unused_imports)]
     use crate::Reactive::{jet_app_ws_register, jet_app_ws_unregister};
     use crate::{JetDebug, JetDisplay, JetShow};
 
     pub mod jet_std {
-        #![allow(dead_code, unused_imports)]
         #[derive(Clone, Debug)]
         pub struct JetURL {
             pub scheme: String,
@@ -60,6 +64,9 @@ pub(crate) mod runtime {
         include!("../../jet-codegen/src/Prelude/CoreLib/JetStd/JSONCodec.rs");
     }
 
+    fn jet_deadline_remaining_ms() -> Option<i64> {
+        None
+    }
 
     #[allow(unused_imports)]
     pub use jet_foundation::Outcome::*;

@@ -4,6 +4,11 @@
 //! copying, view bounds, and writes stay in the same Prelude source used by
 //! AOT and the interpreter (I9).
 
+// This module includes shared Prelude source that several hosts compile,
+// each using a different subset, so dead-code reports here are about the
+// other hosts' usage, not about this one. Scoped to the module, never the crate.
+#![allow(dead_code)]
+
 use crate::runtime_host::{jit_callable_parts, bind_jit_callable_handle, JitCallableSlot};
 use crate::JitRuntime;
 use crate::Marshal::{result_err_msg, result_ok};

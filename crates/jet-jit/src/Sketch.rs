@@ -1,13 +1,19 @@
 //! `core.data.sketch.*` marshalling hosts for the shared Prelude kernel.
 
+// This module includes shared Prelude source that several hosts compile,
+// each using a different subset, so dead-code reports here are about the
+// other hosts' usage, not about this one. Scoped to the module, never the crate.
+#![allow(dead_code)]
+
 use super::Concurrency;
 use cranelift_codegen::ir::{types, AbiParam, Signature};
+use cranelift_module::Module;
 use crate::Marshal::clone_string;
 
 pub(crate) mod sketch_rt {
-    #![allow(dead_code, unused_imports)]
     include!("../../jet-codegen/src/Prelude/Core/Sketch.rs");
 }
+
 #[derive(Clone)]
 pub(crate) enum SketchSlot {
     Hll(sketch_rt::JetHyperLogLog),

@@ -3,6 +3,11 @@
 //! Same bridge runtimes as Cranelift hosts; CtValue at the boundary. Installed
 //! only around `run_whole_interp` so comptime/REPL stay pure / native-denied.
 
+// This module includes shared Prelude source that several hosts compile,
+// each using a different subset, so dead-code reports here are about the
+// other hosts' usage, not about this one. Scoped to the module, never the crate.
+#![allow(dead_code)]
+
 use std::cell::RefCell;
 use std::collections::{BTreeMap, HashMap};
 use std::sync::atomic::{AtomicI64, Ordering};
@@ -18,41 +23,36 @@ use crate::IO;
 use jet_codegen::Comptime::ServicesLite as service_prelude;
 
 mod fs_walk_kernel {
-    #![allow(dead_code, unused_imports)]
     include!("../../jet-codegen/src/Prelude/Core/FSWalk.rs");
 }
 
 mod env_config_prelude {
-    #![allow(dead_code, unused_imports)]
     include!("../../jet-codegen/src/Prelude/Core/EnvConfig.rs");
 }
 
 mod keep_kernel {
-    #![allow(dead_code, unused_imports)]
     include!("../../jet-codegen/src/Prelude/Core/Keep.rs");
 }
 
-#[allow(dead_code, unused_imports)]
-mod display_traits {
-    pub(crate) trait JetShow {
-        fn jet_show(&self) -> String;
-    }
-    pub(crate) trait JetDebug {
-        fn jet_debug(&self) -> String;
-    }
-    pub(crate) trait JetDisplay {
-        fn jet_display(&self) -> String;
-    }
+trait JetShow {
+    fn jet_show(&self) -> String;
 }
-#[allow(unused_imports)]
-pub(crate) use display_traits::{JetDebug, JetDisplay, JetShow};
+trait JetDebug {
+    fn jet_debug(&self) -> String;
+}
+
+
+
+/// D-FAIL-CONV2=A: included error fragments render failure text through this seam.
+trait JetDisplay {
+    fn jet_display(&self) -> String;
+}
 
 // The shared DB wire fragment receives the host's row carrier through this
 // name. The interpreter uses its native map until converting to CtValue.
 type JetMap<K, V> = BTreeMap<K, V>;
 
 mod wire {
-    #![allow(dead_code, unused_imports)]
     #[allow(unused_imports)]
     pub use jet_foundation::Outcome::*;
     // D-DBPOLICY1=A: the one closed row-policy language, included beside the
@@ -3366,6 +3366,24 @@ pub fn ambient_core_call(
                 crate::net_http_rt::runtime_net_ready_writable(ready)
             };
             Some(Ok(value))
+        }
+        ("core.process", "run") => {
+            let Some(CtValue::List(items)) = args.first() else {
+                return Some(Err(unsupported("core.process.run arguments", span)));
+            };
+            let mut words = Vec::with_capacity(items.len());
+            for item in items {
+                let CtValue::Str(word) = item else {
+                    return Some(Err(unsupported(
+                        "core.process.run expects text command words",
+                        span,
+                    )));
+                };
+                words.push(word.clone());
+            }
+            Some(Ok(process_result_outcome(process_prelude::spec_run(
+                &process_prelude::spec_new(words),
+            ))))
         }
         ("core.process", "cmd") => {
             let Some(CtValue::List(items)) = args.into_iter().next() else {

@@ -125,6 +125,89 @@ fn ct_to_delivery(v: &CtValue, span: Span) -> Result<JetServiceDelivery, Diagnos
     }
 }
 
+fn task_outcome_to_ct(outcome: &JetTaskOutcome) -> CtValue {
+    match outcome {
+        JetTaskOutcome::Finished => CtValue::Enum {
+            type_name: "TaskOutcome".to_string(),
+            variant: "Finished".to_string(),
+            args: Vec::new(),
+        },
+        JetTaskOutcome::Panicked(reason) => CtValue::Enum {
+            type_name: "TaskOutcome".to_string(),
+            variant: "Panicked".to_string(),
+            args: vec![(None, CtValue::Str(reason.clone()))],
+        },
+        JetTaskOutcome::Cancelled => CtValue::Enum {
+            type_name: "TaskOutcome".to_string(),
+            variant: "Cancelled".to_string(),
+            args: Vec::new(),
+        },
+        JetTaskOutcome::DeadlineBlown => CtValue::Enum {
+            type_name: "TaskOutcome".to_string(),
+            variant: "DeadlineBlown".to_string(),
+            args: Vec::new(),
+        },
+    }
+}
+
+fn ct_to_task_outcome(value: &CtValue, span: Span) -> Result<JetTaskOutcome, Diagnostic> {
+    let CtValue::Enum {
+        type_name,
+        variant,
+        args,
+    } = value
+    else {
+        return Err(unsupported("TaskOutcome", span));
+    };
+    if type_name != "TaskOutcome" {
+        return Err(unsupported("TaskOutcome", span));
+    }
+    let outcome = match variant.as_str() {
+        "Finished" if args.is_empty() => JetTaskOutcome::Finished,
+        "Cancelled" if args.is_empty() => JetTaskOutcome::Cancelled,
+        "DeadlineBlown" if args.is_empty() => JetTaskOutcome::DeadlineBlown,
+        "Panicked" if args.len() == 1 => match &args[0].1 {
+            CtValue::Str(reason) => JetTaskOutcome::Panicked(reason.clone()),
+            _ => return Err(unsupported("TaskOutcome.Panicked reason", span)),
+        },
+        _ => return Err(unsupported("TaskOutcome variant", span)),
+    };
+    if !matches!(&outcome, JetTaskOutcome::Panicked(reason) if reason.is_empty()) {
+        Ok(outcome)
+    } else {
+        Err(unsupported("TaskOutcome panic reason", span))
+    }
+}
+
+fn task_status_to_ct(status: &JetTaskStatus) -> CtValue {
+    CtValue::Enum {
+        type_name: "TaskStatus".to_string(),
+        variant: match status {
+            JetTaskStatus::Running => "Running",
+            JetTaskStatus::Paused => "Paused",
+            JetTaskStatus::CancelRequested => "CancelRequested",
+        }
+        .to_string(),
+        args: Vec::new(),
+    }
+}
+
+fn ct_to_task_status(value: &CtValue, span: Span) -> Result<JetTaskStatus, Diagnostic> {
+    match value {
+        CtValue::Enum {
+            type_name,
+            variant,
+            args,
+        } if type_name == "TaskStatus" && args.is_empty() => match variant.as_str() {
+            "Running" => Ok(JetTaskStatus::Running),
+            "Paused" => Ok(JetTaskStatus::Paused),
+            "CancelRequested" => Ok(JetTaskStatus::CancelRequested),
+            _ => Err(unsupported("TaskStatus variant", span)),
+        },
+        _ => Err(unsupported("TaskStatus", span)),
+    }
+}
+
 fn endpoint_to_ct(e: &JetServiceEndpoint) -> CtValue {
     CtValue::Struct {
         type_name: "ServiceEndpoint".to_string(),
@@ -494,6 +577,29 @@ fn workflow_to_ct(w: &JetServiceWorkflow) -> CtValue {
                 "history".to_string(),
                 CtValue::List(w.history.iter().cloned().map(CtValue::Str).collect()),
             ),
+            ("status".to_string(), task_status_to_ct(&w.status)),
+            (
+                "activity_outcomes".to_string(),
+                CtValue::List(
+                    w.activity_outcomes
+                        .iter()
+                        .map(|(key, outcome)| CtValue::Struct {
+                            type_name: "ServiceActivityOutcome".to_string(),
+                            fields: vec![
+                                ("key".to_string(), CtValue::Str(key.clone())),
+                                ("outcome".to_string(), task_outcome_to_ct(outcome)),
+                            ],
+                        })
+                        .collect(),
+                ),
+            ),
+            (
+                "outcome".to_string(),
+                w.outcome.as_ref().map_or_else(
+                    || CtValue::absent(Type::Named("TaskOutcome".to_string())),
+                    |outcome| CtValue::Present(Box::new(task_outcome_to_ct(outcome))),
+                ),
+            ),
         ],
     }
 }
@@ -539,6 +645,46 @@ fn ct_to_workflow(v: &CtValue, span: Span) -> Result<JetServiceWorkflow, Diagnos
         },
         steps: str_list("steps")?,
         history: str_list("history")?,
+        status: ct_to_task_status(field("status")?, span)?,
+        activity_outcomes: match field("activity_outcomes")? {
+            CtValue::List(entries) => entries
+                .iter()
+                .map(|entry| {
+                    let CtValue::Struct { type_name, fields } = entry else {
+                        return Err(unsupported("ServiceActivityOutcome", span));
+                    };
+                    if type_name != "ServiceActivityOutcome" {
+                        return Err(unsupported("ServiceActivityOutcome", span));
+                    }
+                    let key = fields
+                        .iter()
+                        .find(|(name, _)| name == "key")
+                        .map(|(_, value)| value)
+                        .ok_or_else(|| unsupported("activity outcome key", span))
+                        .and_then(|value| {
+                            ct_to_service_string(
+                                value,
+                                MAX_SERVICE_NAME,
+                                "activity outcome key",
+                                span,
+                            )
+                        })?;
+                    let outcome = fields
+                        .iter()
+                        .find(|(name, _)| name == "outcome")
+                        .map(|(_, value)| value)
+                        .ok_or_else(|| unsupported("activity outcome value", span))
+                        .and_then(|value| ct_to_task_outcome(value, span))?;
+                    Ok((key, outcome))
+                })
+                .collect::<Result<Vec<_>, _>>()?,
+            _ => return Err(unsupported("activity outcomes", span)),
+        },
+        outcome: match field("outcome")? {
+            CtValue::Failed(CtReport::Clean(_)) => None,
+            CtValue::Present(value) => Some(ct_to_task_outcome(value, span)?),
+            _ => return Err(unsupported("workflow outcome", span)),
+        },
     })
 }
 
@@ -1527,6 +1673,76 @@ pub fn apply(method: &str, args: &[CtValue], span: Span) -> Result<CtValue, Diag
                 Err(e) => mutate_err(tree, map_err(e)),
             })
         }
+        "workflow_activity" => {
+            let mut tree = ct_to_tree(one(0)?, span)?;
+            let run_id = match one(1)? {
+                CtValue::Int(n) => *n,
+                _ => return Err(unsupported("run id", span)),
+            };
+            let activity = match one(2)? {
+                CtValue::Str(s) => s.clone(),
+                _ => return Err(unsupported("workflow activity", span)),
+            };
+            let key = match one(3)? {
+                CtValue::Str(s) => s.clone(),
+                _ => return Err(unsupported("activity idempotency key", span)),
+            };
+            let max_attempts = match one(4)? {
+                CtValue::Int(n) => *n,
+                _ => return Err(unsupported("activity retry limit", span)),
+            };
+            Ok(match jet_services_workflow_activity(
+                &mut tree,
+                run_id,
+                activity,
+                key,
+                max_attempts,
+            ) {
+                Ok(status) => CtValue::Present(Box::new(mutate_ok(
+                    tree,
+                    task_status_to_ct(&status),
+                ))),
+                Err(e) => mutate_err(tree, map_err(e)),
+            })
+        }
+        "workflow_activity_retry" => {
+            let mut tree = ct_to_tree(one(0)?, span)?;
+            let run_id = match one(1)? {
+                CtValue::Int(n) => *n,
+                _ => return Err(unsupported("run id", span)),
+            };
+            let key = match one(2)? {
+                CtValue::Str(s) => s.clone(),
+                _ => return Err(unsupported("activity idempotency key", span)),
+            };
+            let outcome = ct_to_task_outcome(one(3)?, span)?;
+            Ok(match jet_services_workflow_activity_retry(&mut tree, run_id, key, outcome) {
+                Ok(status) => CtValue::Present(Box::new(mutate_ok(
+                    tree,
+                    task_status_to_ct(&status),
+                ))),
+                Err(e) => mutate_err(tree, map_err(e)),
+            })
+        }
+        "workflow_activity_complete" => {
+            let mut tree = ct_to_tree(one(0)?, span)?;
+            let run_id = match one(1)? {
+                CtValue::Int(n) => *n,
+                _ => return Err(unsupported("run id", span)),
+            };
+            let key = match one(2)? {
+                CtValue::Str(s) => s.clone(),
+                _ => return Err(unsupported("activity idempotency key", span)),
+            };
+            let outcome = ct_to_task_outcome(one(3)?, span)?;
+            Ok(match jet_services_workflow_activity_complete(&mut tree, run_id, key, outcome) {
+                Ok(outcome) => CtValue::Present(Box::new(mutate_ok(
+                    tree,
+                    task_outcome_to_ct(&outcome),
+                ))),
+                Err(e) => mutate_err(tree, map_err(e)),
+            })
+        }
         "workflow_history" => {
             let tree = ct_to_tree(one(0)?, span)?;
             let run_id = match one(1)? {
@@ -1535,6 +1751,17 @@ pub fn apply(method: &str, args: &[CtValue], span: Span) -> Result<CtValue, Diag
             };
             Ok(match jet_services_workflow_history(&tree, run_id) {
                 Ok(s) => CtValue::Present(Box::new(CtValue::Str(s))),
+                Err(e) => CtValue::failed(Box::new(map_err(e))),
+            })
+        }
+        "workflow_outcome" => {
+            let tree = ct_to_tree(one(0)?, span)?;
+            let run_id = match one(1)? {
+                CtValue::Int(n) => *n,
+                _ => return Err(unsupported("run id", span)),
+            };
+            Ok(match jet_services_workflow_outcome(&tree, run_id) {
+                Ok(outcome) => CtValue::Present(Box::new(task_outcome_to_ct(&outcome))),
                 Err(e) => CtValue::failed(Box::new(map_err(e))),
             })
         }

@@ -1,10 +1,14 @@
 //! `core.text.fmt` host shims (#729). The formatting rules live in the shared
 //! Prelude kernel; this file only marshals JIT strings.
 
+// This module includes shared Prelude source that several hosts compile,
+// each using a different subset, so dead-code reports here are about the
+// other hosts' usage, not about this one. Scoped to the module, never the crate.
+#![allow(dead_code)]
+
 use crate::Marshal::{alloc_string, clone_string};
 
 mod fmt_rt {
-    #![allow(dead_code, unused_imports)]
     include!("../../jet-codegen/src/Prelude/Core/Fmt.rs");
 }
 

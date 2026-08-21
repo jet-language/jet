@@ -1,9 +1,13 @@
 //! D-SOLVER-LIB1: resident-JIT adapter for the shared finite-solver kernel.
 
+// This module includes shared Prelude source that several hosts compile,
+// each using a different subset, so dead-code reports here are about the
+// other hosts' usage, not about this one. Scoped to the module, never the crate.
+#![allow(dead_code)]
+
 use super::Concurrency;
 
 mod solver_kernel {
-    #![allow(dead_code, unused_imports)]
     pub(crate) mod jet_std {
         pub(crate) struct Solver {
             pub(crate) seed: i64,

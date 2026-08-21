@@ -37,7 +37,8 @@ fn diagnostic_codes(name: &str, src: &str) -> Vec<String> {
 }
 
 /// A power's inferred type is proved by the parameter it fits: `want_int`
-/// takes only a whole number, `want_float` only a Float.
+/// takes a whole number, and `want_float` a Float. The exact Fraction case
+/// is pinned through its `.numerator()` method.
 const WANT: &str = "fn want_int(n: Int) { print(n) }\nfn want_float(n: Float) { print(n) }\n";
 
 /// D-EXPSEM1=A: `^` groups to the right and binds tighter than a leading
@@ -62,8 +63,9 @@ fn run() {
     assert_eq!(out, "512\n64\n-9\n9\n18\n16\n", "{out}");
 }
 
-/// D-EXPSEM1=A: a whole number raised to a whole power stays exact; a written
-/// negative exponent gives a Float; any Float operand makes the result Float.
+/// D-EXPSEM1=A / D-EXPNEG1=A: a whole number raised to a whole power stays
+/// exact; a written negative exponent gives an exact Fraction. Any Float
+/// operand makes the result a Float.
 #[test]
 fn power_result_types_follow_the_operands() {
     // A whole base and a non-negative whole exponent stay exact.
@@ -71,11 +73,19 @@ fn power_result_types_follow_the_operands() {
         "int_pow",
         &format!("{WANT}fn run() {{\n    want_int(2 ^ 10)\n}}\n")
     ));
-    // A written negative exponent gives a fraction, so it is a Float.
+    // A written negative exponent gives an exact Fraction.
     assert!(accepts(
-        "neg_pow_float",
-        &format!("{WANT}fn run() {{\n    want_float(2 ^ -1)\n}}\n")
+        "neg_pow_fraction",
+        &format!("{WANT}fn run() {{\n    print((2 ^ -1).numerator())\n}}\n")
     ));
+    assert!(
+        !diagnostic_codes(
+            "neg_pow_float",
+            &format!("{WANT}fn run() {{\n    want_float(2 ^ -1)\n}}\n")
+        )
+        .is_empty(),
+        "a written negative exponent must not infer an approximate Float"
+    );
     assert!(
         !diagnostic_codes(
             "neg_pow_int",
@@ -84,15 +94,16 @@ fn power_result_types_follow_the_operands() {
         .is_empty(),
         "a negative exponent must not infer a whole number"
     );
-    // Any Float operand makes the whole power a Float.
+    // An explicit Float head makes the whole power a Float; an unheaded
+    // decimal literal is the exact Decimal carrier under D-TYPE2-DEFAULT1.
     assert!(accepts(
         "float_operand",
-        &format!("{WANT}fn run() {{\n    want_float(2.0 ^ 10)\n}}\n")
+        &format!("{WANT}fn run() {{\n    want_float(Float{{2.0}} ^ 10)\n}}\n")
     ));
     assert!(
         !diagnostic_codes(
             "float_operand_int",
-            &format!("{WANT}fn run() {{\n    want_int(2.0 ^ 10)\n}}\n")
+            &format!("{WANT}fn run() {{\n    want_int(Float{{2.0}} ^ 10)\n}}\n")
         )
         .is_empty(),
         "a Float operand must not infer a whole number"

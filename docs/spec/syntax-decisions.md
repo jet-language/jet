@@ -6342,10 +6342,10 @@ number to a power, and `^=` raises in place — the spelling mathematics, MATLAB
 Julia, R, and Excel all use. Power groups to the right (`2 ^ 3 ^ 2` is 512) and
 binds tighter than a leading minus (`-3 ^ 2` is -9), so it sits between the
 unary and postfix levels. A whole base with a non-negative whole exponent stays
-an exact whole number; a written negative exponent gives a Float; any Float
-operand makes the result a Float. An exponent whose sign the checker cannot
-read keeps the whole-number result and traps in the Prelude if it turns out
-negative. Bitwise exclusive-or gives up the caret and becomes infix `~|` with
+an exact whole number; a written negative exponent lands in exact Fraction;
+any Float operand makes the result a Float. An exponent whose sign the checker
+cannot read keeps the whole-number result and traps in the Prelude if it turns
+out negative. Bitwise exclusive-or gives up the caret and becomes infix `~|`
 compound `~|=` — the exclusive variant of `|` — in the precedence slot the old
 `^` held, under the same D-SG9 same-width rule. Prefix `^` (take, D-MEM1) and
 prefix `~` (copy, D-SHAPE-COPY1) are untouched; parser position tells each from

@@ -9,6 +9,11 @@
 //! compound assign, &&/|| short-circuit.
 //! M4: tasks/channels/spawn via scheduler host shims (D-ASYNCRT1=A).
 
+// This module includes shared Prelude source that several hosts compile,
+// each using a different subset, so dead-code reports here are about the
+// other hosts' usage, not about this one. Scoped to the module, never the crate.
+#![allow(dead_code)]
+
 #![allow(non_snake_case)]
 
 /// D-JOB-SUBCMD1=C: the JIT and interpreter import the same Prelude selector
@@ -39,7 +44,6 @@ fn with_program_allocator<R>(
     .0
 }
 pub mod Job {
-    #![allow(dead_code, unused_imports)]
     include!("../../jet-codegen/src/Prelude/Job.rs");
 }
 
@@ -233,7 +237,6 @@ mod Sketch;
 mod Solver;
 mod Text;
 mod testing_shared {
-    #![allow(dead_code, unused_imports)]
     #[allow(unused_imports)]
     pub use jet_foundation::Outcome::*;
     include!("../../jet-codegen/src/Prelude/CoreLib/Top/TestingShared.rs");

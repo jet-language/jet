@@ -2,9 +2,15 @@
 //! `Layout` — `include!`
 //! canonical `jet_layout` (Prelude/Layout.rs). No third algorithm.
 
+// This module includes shared Prelude source that several hosts compile,
+// each using a different subset, so dead-code reports here are about the
+// other hosts' usage, not about this one. Scoped to the module, never the crate.
+#![allow(dead_code)]
+
 use super::Concurrency;
 use crate::runtime_host::{alloc_jit_result, JitRuntime};
 use cranelift_codegen::ir::{types, AbiParam, Signature};
+use cranelift_module::Module;
 
 /// Canonical Cassowary-style layout solver (extracted from Prelude/Layout.rs).
 #[allow(dead_code, unused_imports)]

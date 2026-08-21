@@ -7862,7 +7862,7 @@ impl LowerCtx<'_, '_> {
                     };
                     // reuse typed json decode into list-of-struct via decode path
                     let text = &args[0];
-                    let tree_ty = Type::List(Box::new(elem.clone()));
+                    let _tree_ty = Type::List(Box::new(elem.clone()));
                     // lower_typed_json_decode expects ok_ty of the Result payload
                     self.lower_typed_json_decode(text, ok)
                 })

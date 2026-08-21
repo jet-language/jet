@@ -5,9 +5,10 @@
 // the Prelude's shared arithmetic stop carries the report code and wording.
 //
 // `^` on whole numbers is exact. A result outside the type's range traps the
-// way a multiplication does. A negative exponent has no whole-number answer,
-// so it traps too; make the base a Float to raise it to a negative power.
-// `^` on floats is the ordinary floating-point power.
+// way a multiplication does. A written negative exponent is lowered to the
+// exact Fraction carrier before this helper; a dynamic negative exponent has
+// no whole-number answer and traps. `^` on floats is the ordinary
+// floating-point power.
 //
 // The exponent arrives as an `i128` so an exponent of any integer width,
 // signed or unsigned, reaches here losslessly.

@@ -2,15 +2,18 @@
 //! Ambient and seeded draws call the shared Prelude kernels; this module only
 //! marshals Cranelift ABI values and runtime-heap handles.
 
+// This module includes shared Prelude source that several hosts compile,
+// each using a different subset, so dead-code reports here are about the
+// other hosts' usage, not about this one. Scoped to the module, never the crate.
+#![allow(dead_code)]
+
 use super::Concurrency;
 
 mod seeded_random_kernel {
-    #![allow(dead_code, unused_imports)]
     include!("../../jet-codegen/src/Prelude/Core/SeededRandom.rs");
 }
 
 mod fake_data_kernel {
-    #![allow(dead_code, unused_imports)]
     pub(crate) mod jet_std {
         #[derive(Clone, Debug, PartialEq)]
         pub(crate) struct Fake {
@@ -149,7 +152,7 @@ fn read_list<T>(list: i64, read: impl Fn(&jet_rt::JetArena, i64) -> Option<T>) -
     })
 }
 
-fn write_list<T>(values: Vec<T>, write: impl Fn(&mut jet_rt::JetArena, i64, T) -> Option<()>) {
+fn write_list<T>(_list: i64, values: Vec<T>, write: impl Fn(&mut jet_rt::JetArena, i64, T) -> Option<()>) {
     Concurrency::with_runtime_mut(|rt| {
         for (index, value) in values.into_iter().enumerate() {
             let _ = write(&mut rt.heap, index as i64, value);
@@ -219,14 +222,14 @@ fn jet_jit_random_shuffle(items: i64) {
         let mut values = read_list(items, |heap, index| heap.list_get_float(items, index))
             .unwrap_or_default();
         ambient_random_kernel::shuffle(&mut values);
-        write_list(values, |heap, index, value| {
+        write_list(items, values, |heap, index, value| {
             heap.list_set_float(items, index, value)
         });
     } else {
         let mut values = read_list(items, |heap, index| heap.list_get_int(items, index))
             .unwrap_or_default();
         ambient_random_kernel::shuffle(&mut values);
-        write_list(values, |heap, index, value| {
+        write_list(items, values, |heap, index, value| {
             heap.list_set_int(items, index, value)
         });
     }
@@ -393,7 +396,7 @@ fn jet_jit_rng_shuffle(handle: i64, items: i64) {
         with_rng(handle, |rng| {
             seeded_random_kernel::jet_seeded_rng_shuffle(&mut rng.state, &mut values)
         });
-        write_list(values, |heap, index, value| {
+        write_list(items, values, |heap, index, value| {
             heap.list_set_float(items, index, value)
         });
     } else {
@@ -402,7 +405,7 @@ fn jet_jit_rng_shuffle(handle: i64, items: i64) {
         with_rng(handle, |rng| {
             seeded_random_kernel::jet_seeded_rng_shuffle(&mut rng.state, &mut values)
         });
-        write_list(values, |heap, index, value| {
+        write_list(items, values, |heap, index, value| {
             heap.list_set_int(items, index, value)
         });
     }

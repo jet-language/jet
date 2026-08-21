@@ -1760,15 +1760,13 @@ impl<'a> Checker<'a> {
                     None
                 }
             }
-            // D-EXPSEM1=A: a whole-number base raised to a whole-number power
-            // stays exact. A written negative exponent gives a fraction, so
-            // both sides move to Float first. Any Float operand already made
-            // both sides Float in the numeric join above.
+            // D-EXPSEM1=A / D-EXPNEG1=A: a whole-number base with a
+            // written negative exponent leaves the exact whole-number world
+            // for the exact Fraction carrier. A dynamic exponent remains an
+            // Int and the shared Prelude reports a negative-power stop.
             BinOp::Pow => {
-                if lt == rt && lt.is_integer() && is_written_negative_int(rhs) {
-                    self.widen_numeric_expr(lhs, &lt, &Type::Float);
-                    self.widen_numeric_expr(rhs, &rt, &Type::Float);
-                    return Some(Type::Float);
+                if lt == Type::Int && rt == Type::Int && is_written_negative_int(rhs) {
+                    return Some(Type::Named(crate::Syntax::TYPE_FRACTION.to_string()));
                 }
                 if lt == rt && lt.is_numeric() {
                     Some(lt)

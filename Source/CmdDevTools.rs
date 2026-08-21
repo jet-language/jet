@@ -267,7 +267,6 @@ pub(crate) fn run_dev(
                     );
                 }
                 DevSessionAction::RestartFresh => {
-                    prev_bundle = None;
                     session = jet_devserver::SessionSnapshot {
                         generation: 0,
                         artifact_token: "gen-0".into(),
@@ -1933,6 +1932,7 @@ pub(crate) fn run_explain(
             if jet::Explain::is_syntax_query(code) {
                 let closest = jet::Explain::nearest_syntax(code)
                     .unwrap_or_else(|| "a registered syntax token".to_string());
+                // No typed edit: E2106 is an argv `explain` query, not a Jet source diagnostic.
                 crate::emit_cli_row(
                     "E2106",
                     &[("token", code), ("closest", closest.as_str())],

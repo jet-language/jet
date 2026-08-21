@@ -1416,7 +1416,7 @@ fn nonce24(prefix: &[u8; 16], index: u64) -> [u8; 24] {
 }
 
 #[cfg(target_os = "linux")]
-fn publish_temp(mut temp: JetcPublishTemp, parent: &JetcParent, _destination: &std::path::Path, operation: &'static str) -> Result<(), JetFileCryptoError> {
+fn publish_temp(temp: JetcPublishTemp, parent: &JetcParent, _destination: &std::path::Path, operation: &'static str) -> Result<(), JetFileCryptoError> {
     use std::os::fd::AsRawFd;
     unsafe extern "C" { fn linkat(olddirfd: i32, oldpath: *const i8, newdirfd: i32, newpath: *const i8, flags: i32) -> i32; }
     const AT_EMPTY_PATH: i32 = 0x1000;
@@ -1502,7 +1502,7 @@ fn seal_jetc_v2_from_snapshot(
     for recipient in &recipients {
         if bool::from(recipient.0.ct_eq(&[0; 32])) { return Err(JetFileCryptoError::SealFailed(JetCryptoError::NonContributoryKey)); }
         let id = recipient_id(&recipient.0);
-        let mut shared = Zeroizing(x25519_checked(*ephemeral_secret, recipient.0).map_err(JetFileCryptoError::SealFailed)?);
+        let shared = Zeroizing(x25519_checked(*ephemeral_secret, recipient.0).map_err(JetFileCryptoError::SealFailed)?);
         let mut key_info = b"JETC2 wrap key".to_vec(); key_info.extend_from_slice(&ephemeral_public); key_info.extend_from_slice(&recipient.0);
         let mut nonce_info = b"JETC2 wrap nonce".to_vec(); nonce_info.extend_from_slice(&ephemeral_public); nonce_info.extend_from_slice(&recipient.0);
         let kek = Zeroizing(hkdf32(shared.bytes(), file_id.bytes(), &key_info).map_err(JetFileCryptoError::SealFailed)?);

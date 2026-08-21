@@ -79,6 +79,8 @@ impl<'a> Checker<'a> {
         let result_endpoint = || service_result_ty(endpoint.clone());
         let result_string = || service_result_ty(Type::String);
         let result_int = || service_result_ty(Type::Int);
+        let task_outcome = || Type::Named("TaskOutcome".to_string());
+        let task_status = || Type::Named("TaskStatus".to_string());
 
         let ret = match method {
             "worker" => {
@@ -260,11 +262,62 @@ impl<'a> Checker<'a> {
                 }
                 result_unit()
             }
+            "workflow_activity" => {
+                if self.service_method_arity("ServiceTree.workflow_activity", args, 4, span) {
+                    self.expect_core_arg("ServiceTree.workflow_activity", 0, &Type::Int, &mut args[0]);
+                    self.expect_core_arg("ServiceTree.workflow_activity", 1, &Type::String, &mut args[1]);
+                    self.expect_core_arg("ServiceTree.workflow_activity", 2, &Type::String, &mut args[2]);
+                    self.expect_core_arg("ServiceTree.workflow_activity", 3, &Type::Int, &mut args[3]);
+                }
+                service_result_ty(task_status())
+            }
+            "workflow_activity_retry" => {
+                if self.service_method_arity(
+                    "ServiceTree.workflow_activity_retry",
+                    args,
+                    3,
+                    span,
+                ) {
+                    self.expect_core_arg("ServiceTree.workflow_activity_retry", 0, &Type::Int, &mut args[0]);
+                    self.expect_core_arg("ServiceTree.workflow_activity_retry", 1, &Type::String, &mut args[1]);
+                    self.expect_core_arg(
+                        "ServiceTree.workflow_activity_retry",
+                        2,
+                        &task_outcome(),
+                        &mut args[2],
+                    );
+                }
+                service_result_ty(task_status())
+            }
+            "workflow_activity_complete" => {
+                if self.service_method_arity(
+                    "ServiceTree.workflow_activity_complete",
+                    args,
+                    3,
+                    span,
+                ) {
+                    self.expect_core_arg("ServiceTree.workflow_activity_complete", 0, &Type::Int, &mut args[0]);
+                    self.expect_core_arg("ServiceTree.workflow_activity_complete", 1, &Type::String, &mut args[1]);
+                    self.expect_core_arg(
+                        "ServiceTree.workflow_activity_complete",
+                        2,
+                        &task_outcome(),
+                        &mut args[2],
+                    );
+                }
+                service_result_ty(task_outcome())
+            }
             "workflow_history" => {
                 if self.service_method_arity("ServiceTree.workflow_history", args, 1, span) {
                     self.expect_core_arg("ServiceTree.workflow_history", 0, &Type::Int, &mut args[0]);
                 }
                 result_string()
+            }
+            "workflow_outcome" => {
+                if self.service_method_arity("ServiceTree.workflow_outcome", args, 1, span) {
+                    self.expect_core_arg("ServiceTree.workflow_outcome", 0, &Type::Int, &mut args[0]);
+                }
+                service_result_ty(task_outcome())
             }
             "directory_register" => {
                 if self.service_method_arity("ServiceTree.directory_register", args, 2, span) {

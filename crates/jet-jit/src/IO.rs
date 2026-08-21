@@ -3,9 +3,15 @@
 //! ProgramOutput matches AOT under the process harness.
 //! parity: include path=crates/jet-codegen/src/Prelude/CoreLib/Top/IoLineStream.rs
 
+// This module includes shared Prelude source that several hosts compile,
+// each using a different subset, so dead-code reports here are about the
+// other hosts' usage, not about this one. Scoped to the module, never the crate.
+#![allow(dead_code)]
+
 use super::Concurrency;
 use super::CoreHost::{jit_env_value, jit_env_value_raw};
 use cranelift_codegen::ir::{types, AbiParam, Signature};
+use cranelift_module::Module;
 use std::io::BufRead;
 use std::collections::{HashMap, HashSet};
 use std::sync::{Mutex, OnceLock};
@@ -13,12 +19,10 @@ use crate::Marshal::{clone_string, result_err_msg, result_ok};
 use crate::runtime_host;
 
 pub(crate) mod term_prelude {
-    #![allow(dead_code, unused_imports)]
     include!("../../jet-codegen/src/Prelude/Term.rs");
 }
 
 mod progress_semantics {
-    #![allow(dead_code, unused_imports)]
     #[allow(unused_imports)]
     pub use jet_foundation::Outcome::*;
     include!("../../jet-codegen/src/Prelude/Core/Progress.rs");
@@ -30,7 +34,6 @@ mod progress_semantics {
 // nested `jet_std` mirrors only the IOError shape these functions construct
 // via `.other(...)`; it carries no behavior of its own.
 mod io_line_stream {
-    #![allow(dead_code, unused_imports)]
     use crate::fault_injection::jet_fault_should_fail;
 
     use super::term_prelude::{jet_term_read_stdin_line, jet_term_read_text, jet_term_write_stdout};

@@ -1416,12 +1416,59 @@ fn core_fixed_sig_impl(
                 Type::Named("ServiceError".to_string()),
             )),
         )),
+        ("core.services", "workflow_activity") => Some((
+            vec![
+                (AccessConvention::Write, Type::Named("ServiceTree".to_string())),
+                (read, Type::Int),
+                (read, Type::String),
+                (read, Type::String),
+                (read, Type::Int),
+            ],
+            Some(result_ty(
+                Type::Named("TaskStatus".into()),
+                Type::Named("ServiceError".to_string()),
+            )),
+        )),
+        ("core.services", "workflow_activity_retry") => Some((
+            vec![
+                (AccessConvention::Write, Type::Named("ServiceTree".to_string())),
+                (read, Type::Int),
+                (read, Type::String),
+                (read, Type::Named("TaskOutcome".to_string())),
+            ],
+            Some(result_ty(
+                Type::Named("TaskStatus".into()),
+                Type::Named("ServiceError".to_string()),
+            )),
+        )),
+        ("core.services", "workflow_activity_complete") => Some((
+            vec![
+                (AccessConvention::Write, Type::Named("ServiceTree".to_string())),
+                (read, Type::Int),
+                (read, Type::String),
+                (read, Type::Named("TaskOutcome".to_string())),
+            ],
+            Some(result_ty(
+                Type::Named("TaskOutcome".into()),
+                Type::Named("ServiceError".to_string()),
+            )),
+        )),
         ("core.services", "workflow_history") => Some((
             vec![
                 (read, Type::Named("ServiceTree".to_string())),
                 (read, Type::Int),
             ],
             Some(result_ty(Type::String, Type::Named("ServiceError".to_string()))),
+        )),
+        ("core.services", "workflow_outcome") => Some((
+            vec![
+                (read, Type::Named("ServiceTree".to_string())),
+                (read, Type::Int),
+            ],
+            Some(result_ty(
+                Type::Named("TaskOutcome".into()),
+                Type::Named("ServiceError".to_string()),
+            )),
         )),
         ("core.services", "directory_register") => Some((
             vec![

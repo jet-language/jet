@@ -1,7 +1,6 @@
 use std::path::PathBuf;
 
 fn main() {
-    println!("cargo:rustc-check-cfg=cfg(jet_release)");
     let manifest = PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").unwrap());
     write_yaml_std(&manifest);
     write_layout_rt(&manifest);
