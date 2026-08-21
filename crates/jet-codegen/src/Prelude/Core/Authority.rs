@@ -1,5 +1,5 @@
-/// D-AUTHORITY-NAME1=A: the one named rights value that crosses boundaries.
-/// Authority remains ordinary data; every engine calls
+/// D-AUTHORITY-WORD2=E: the one named Abilities value that crosses boundaries.
+/// Abilities remains ordinary data; every engine calls
 /// the helpers below instead of keeping a second policy implementation.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct JetAuthority {
@@ -37,7 +37,7 @@ pub(crate) fn jet_authority_with_right(
         Ok([requested.to_string()].into_iter().collect())
     } else {
         Err(format!(
-            "E0712: authority cannot narrow to `{requested}` outside its held rights"
+            "E0712: abilities cannot narrow to `{requested}` outside its held rights"
         ))
     }
 }

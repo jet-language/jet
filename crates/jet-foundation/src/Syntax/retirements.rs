@@ -37,6 +37,20 @@ use crate::Diagnostics::{Diagnostic, Span};
 const RETIRED_JET_TIME_NOW: &str = concat!("jet", ".time", ".now");
 const RETIRED_JET_TIME_FORMAT: &str = concat!("jet", ".time", ".format");
 
+macro_rules! retired_ffi_effect {
+    ($id:literal, $retired:literal, $canonical:literal) => {
+        Retirement {
+            id: $id,
+            retired: $retired,
+            canonical: $canonical,
+            kind: RetirementKind::Semantic,
+            decision: "D-AUTHORITY-ROOTS1=A",
+            since: "2026-08-06",
+            code: Some("E0119"),
+        }
+    };
+}
+
 /// How the compiler answers a file still written in the retired form.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RetirementKind {
@@ -69,6 +83,27 @@ pub struct Retirement {
 
 /// Every retirement the compiler knows about.
 pub const RETIREMENTS: &[Retirement] = &[
+    // D-AUTHORITY-ROOTS1=A: flat language roots are semantic retirements, not
+    // aliases. Their names remain here only for the D-ONCE-RETIRE1 ratchet.
+    retired_ffi_effect!("effect-flat-ffi-go", "Go", "FFI.Go"),
+    retired_ffi_effect!("effect-flat-ffi-java", "Java", "FFI.Java"),
+    retired_ffi_effect!("effect-flat-ffi-dotnet", "DotNet", "FFI.DotNet"),
+    retired_ffi_effect!("effect-flat-ffi-fortran", "Fortran", "FFI.Fortran"),
+    retired_ffi_effect!("effect-flat-ffi-cobol", "Cobol", "FFI.Cobol"),
+    retired_ffi_effect!("effect-flat-ffi-tcl", "Tcl", "FFI.Tcl"),
+    retired_ffi_effect!("effect-flat-ffi-lua", "Lua", "FFI.Lua"),
+    retired_ffi_effect!("effect-flat-ffi-ada", "Ada", "FFI.Ada"),
+    retired_ffi_effect!("effect-flat-ffi-pascal", "Pascal", "FFI.Pascal"),
+    retired_ffi_effect!("effect-flat-ffi-dart", "Dart", "FFI.Dart"),
+    retired_ffi_effect!("effect-flat-ffi-powershell", "PowerShell", "FFI.PowerShell"),
+    retired_ffi_effect!("effect-flat-ffi-perl", "Perl", "FFI.Perl"),
+    retired_ffi_effect!("effect-flat-ffi-ruby", "Ruby", "FFI.Ruby"),
+    retired_ffi_effect!("effect-flat-ffi-php", "Php", "FFI.Php"),
+    retired_ffi_effect!("effect-flat-ffi-r", "R", "FFI.R"),
+    retired_ffi_effect!("effect-flat-ffi-com", "Com", "FFI.Com"),
+    retired_ffi_effect!("effect-flat-ffi-cpp", "Cpp", "FFI.Cpp"),
+    retired_ffi_effect!("effect-flat-ffi-py", "Py", "FFI.Py"),
+    retired_ffi_effect!("effect-flat-ffi-octave", "Octave", "FFI.Octave"),
     Retirement {
         id: "entry-file",
         retired: LEGACY_ENTRY_FILE,
@@ -207,7 +242,7 @@ pub const RETIREMENTS: &[Retirement] = &[
     Retirement {
         id: "scope-marker-grant",
         retired: "#Grant",
-        canonical: "#Caps",
+        canonical: "#Abilities",
         kind: RetirementKind::Semantic,
         decision: "D-AUTHORITY-SCOPE1",
         since: "2026-08-06",

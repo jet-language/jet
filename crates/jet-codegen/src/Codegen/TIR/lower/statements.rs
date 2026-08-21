@@ -3645,7 +3645,7 @@ fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmt
                 );
             });
         }
-        // c109 Phase 26: a `#Caps(IO) { … }` effect-restriction region (D-EFF1). `emit_stmt`'s
+        // c109 Phase 26: a `#Abilities(IO) { … }` effect-restriction region (D-EFF1). `emit_stmt`'s
         // `Stmt::Caps` arm is byte-for-byte `Stmt::Region`; effects erase at codegen (I3).
         Stmt::Caps { body, .. } => {
             return in_own_frame(|| {
@@ -3656,7 +3656,7 @@ fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmt
                 );
             });
         }
-        // D-AUTHORITY-SCOPE1: a named `#Caps(abilities: FS) { … }` scope. The Authority handle
+        // D-AUTHORITY-SCOPE1: a named `#Abilities(abilities: FS) { … }` scope. The Authority handle
         // is a compile-time-only fact (authority to perform the granted effects),
         // erased here (I3); the body emits as a plain lexical `TStmt::Region`.
         // No runtime grant/revoke value, no `unsafe`.

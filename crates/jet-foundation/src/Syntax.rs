@@ -21,7 +21,7 @@
 // enter the grammar. Every row states its safe direction and its gate words
 // (D-FACT-LAW1=B); a prover may publish a read-only row (D-FACT-OWN1=A).
 // Marker-plane reconciliation anchors: MARKER_PUB_FILE, MARKER_NO_PRELUDE, MARKER_TARGET,
-// MARKER_LAYOUT, MARKER_CODABLE, Policy::APPLIED_RULES, Registry::rows, KW_CAPS (#Caps),
+// MARKER_LAYOUT, MARKER_CODABLE, Policy::APPLIED_RULES, Registry::rows, KW_CAPS (#Abilities),
 // KW_COMPTIME, KW_DERIVE, MARKER_TRACK, MARKER_LOCAL, MARKER_SHARED. Constants live in the private modules
 // below; keep this root file mentioning them so I7 audits can check one
 // canonical surface entrypoint.
@@ -192,10 +192,11 @@
 // grantable root table at thirteen and serves foreign-language leaves through
 // BUILTIN_EFFECT_LEAVES (`FFI.Go`, `FFI.Py`, `FFI.Octave`, and the other
 // supported binders). `Panic` and `Mem` are deny-only rows, not roots.
-// D-AUTHORITY-WORD1=A (ratified 2026-08-06, card #1572) retires the word
-// `capability` from user-facing language surfaces: borrow copy says `write
-// access`, the rights value is `Authority`, and product claims are feature
-// claims. Design-history prose may retain the term; this adds no syntax.
+// D-AUTHORITY-WORD2=E (ratified 2026-08-17, card #1572) amends the retired
+// wording: the fact menu is `Ability`, the carried rights value is `Abilities`,
+// and the block marker is `#Abilities`. Browser `.abilities()` and
+// `--abilities-json` use the same word; WebDriver wire `capabilities` remains
+// a protocol field. Old spellings have no aliases.
 // D-EACH1=C (ratified 2026-07-28, card #1239) mints SIGIL_FENCE_OPEN /
 // SIGIL_FENCE_CLOSE. D-FENCE-GLYPH1=A (card #1516) respells them
 // `@[ a, b ]@` and opens expression-position fences to expression entries:

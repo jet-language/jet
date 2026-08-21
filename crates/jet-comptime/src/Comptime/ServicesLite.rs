@@ -1265,11 +1265,14 @@ pub fn apply(method: &str, args: &[CtValue], span: Span) -> Result<CtValue, Diag
             let name = match one(1)? {
                 value => ct_to_service_string(value, MAX_SERVICE_NAME, "worker name", span)?,
             };
-            let capacity = match one(2)? {
+            let handler = match one(2)? {
+                value => ct_to_service_string(value, MAX_SERVICE_NAME, "worker handler", span)?,
+            };
+            let capacity = match one(3)? {
                 CtValue::Int(n) => *n,
                 _ => return Err(unsupported("capacity", span)),
             };
-            Ok(match jet_services_worker(&mut tree, name, capacity) {
+            Ok(match jet_services_worker(&mut tree, name, handler, capacity) {
                 Ok(ep) => CtValue::Present(Box::new(mutate_ok(tree, endpoint_to_ct(&ep)))),
                 Err(e) => mutate_err(tree, map_err(e)),
             })

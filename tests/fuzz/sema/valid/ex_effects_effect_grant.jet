@@ -1,4 +1,4 @@
-// A named `#Caps(abilities: FS) { … }` narrows and binds an Authority handle.
+// A named `#Abilities(abilities: FS) { … }` narrows and binds an Abilities handle.
 // The handle is RAII-revoked at scope end and cannot escape the block (E0711);
 // an effect outside the list has no authority backing it (E0712). The
 // ability fact is compile-time only; codegen erases it to a plain block (I3).
@@ -9,11 +9,11 @@ fn run() {
     // Filesystem + console authority is listed only for the extent of this
     // block. Every effect used inside (`FS` for the file work, `IO` for `print`)
     // must be in the list (E0712). The handle `caps` may not escape (E0711).
-    #Caps(abilities: FS, IO) {
+    #Abilities(abilities: FS, IO) {
         fs.write(path, "granted\nthen revoked") ?? panic("write failed")
         text :: fs.read(path) ?? panic("read failed")
         print(text.to_upper())
     }
-    // Outside the block the Authority value is revoked — ordinary code resumes.
+    // Outside the block the Abilities value is revoked — ordinary code resumes.
     print("done")
 }

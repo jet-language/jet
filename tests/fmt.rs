@@ -3460,8 +3460,8 @@ fn fmt_preserves_dotted_effect_paths() {
     // `Net.HTTP.Get`) — a leaf under one of the ten D-EFF4/5 roots. The name
     // is stored as one opaque string end to end, so fmt needs no new emission
     // logic; this pins that the dot survives every printer that touches an
-    // effect list (`#(…)` bounds, prohibitions, and `#Caps` regions).
-    let src = "fn load(path: String) =[FS.Read]=> String {\n    return path\n}\n\nfn archive(path: String) =[FS.Write]=> {\n    print(path)\n}\n\nfn read_only(path: String) =[FS.Read, !FS.Write]=> {\n    load(path)\n}\n\nfn boot() =[FS]=> {\n    load(\"app.conf\")\n    archive(\"out.tar\")\n    #Caps(Net.HTTP.Get) {\n        print(\"net\")\n    }\n    #Caps(caps: FS.Read) {\n        load(\"app.conf\")\n    }\n}\n";
+    // effect list (`#(…)` bounds, prohibitions, and `#Abilities` regions).
+    let src = "fn load(path: String) =[FS.Read]=> String {\n    return path\n}\n\nfn archive(path: String) =[FS.Write]=> {\n    print(path)\n}\n\nfn read_only(path: String) =[FS.Read, !FS.Write]=> {\n    load(path)\n}\n\nfn boot() =[FS]=> {\n    load(\"app.conf\")\n    archive(\"out.tar\")\n    #Abilities(Net.HTTP.Get) {\n        print(\"net\")\n    }\n    #Abilities(caps: FS.Read) {\n        load(\"app.conf\")\n    }\n}\n";
     assert_fmt_stable(src, "dotted effect paths (D-EFFTREE1)");
 }
 

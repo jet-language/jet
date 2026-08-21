@@ -1812,7 +1812,7 @@ mod tests {
         );
 
         // D-VERDICT-1455-1: the two ghost rows are gone for good.
-        assert!(super::applied_rule("Authority").is_none());
+        assert!(super::applied_rule("Abilities").is_none());
         assert!(super::applied_rule("Summarize").is_none());
         assert!(!super::DERIVE_RULES.contains(&"Summarize"));
     }

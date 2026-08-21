@@ -3529,6 +3529,12 @@ impl<'a> Checker<'a> {
         // the legacy `reaches_panic` fact and the deniable Panic row.
         // Panic is not an ordinary direct effect and cannot be granted.
         self.fx_edges.insert("__jet_panic__".to_string());
+        // The direct fact is recorded too, and it is not the same thing as the
+        // sentinel. `panic_sites_are_compute_failures` asks whether THIS
+        // function panics locally before it will trust the safe/unsafe
+        // discriminant set just below; with only the sentinel it saw no local
+        // panic, refused every differentiated function, and broke autodiff.
+        self.record_effect(Effect::Panic.name(), call.name_span);
         let safe_panic_context = self.autodiff_safe_panic_context;
         if safe_panic_context {
             self.fx_autodiff_safe_panic = true;

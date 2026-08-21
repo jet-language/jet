@@ -16,10 +16,11 @@ fn run() {
     t1.join() ?? panic("task 1 failed")
     t2.join() ?? panic("task 2 failed")
     t3.join() ?? panic("task 3 failed")
-    results := [Int].{}
-    results.push(ch.receive() ?? panic("channel closed"))
-    results.push(ch.receive() ?? panic("channel closed"))
-    results.push(ch.receive() ?? panic("channel closed"))
+    s1.close()
+    s2.close()
+    s3.close()
+    results := [Int]{}
+    loop value, ch -> results.push(value)
     results.sort()
     loop x, results -> print(x)
 }

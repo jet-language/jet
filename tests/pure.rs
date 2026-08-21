@@ -142,14 +142,14 @@ fn run() {
     );
 }
 
-/// D-AUTHORITY-SCOPE1 / I9: comptime uses the same named `#Caps` scope as
-/// runtime tiers. The Authority handle is sema-only and the comptime block
+/// D-AUTHORITY-SCOPE1 / I9: comptime uses the same named `#Abilities` scope as
+/// runtime tiers. The Abilities handle is sema-only and the comptime block
 /// still contributes no runtime scope machinery.
 #[test]
 fn comptime_named_caps_scope_is_plain_block() {
     let src = r#"
 @ {
-    #Caps(abilities: IO) {
+    #Abilities(abilities: IO) {
         @answer :: 42
     }
 }
@@ -157,7 +157,7 @@ fn run() {
     print("{@answer}");
 }
 "#;
-    let output = jet::compile(src).expect("comptime should accept named #Caps");
+    let output = jet::compile(src).expect("comptime should accept named #Abilities");
     assert!(output.rust.contains("42"), "comptime binding was not emitted");
     assert!(!output.rust.contains("Abilities"), "comptime handle leaked into codegen");
 }

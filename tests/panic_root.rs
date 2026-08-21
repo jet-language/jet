@@ -3,14 +3,14 @@ fn panic_is_not_required_by_positive_capability_bounds() {
     for source in [
         r#"
 fn run() {
-    #Caps(FS) {
+    #Abilities(FS) {
         panic("stop")
     }
 }
 "#,
         r#"
 fn run() {
-    #Caps(caps: FS) {
+    #Abilities(caps: FS) {
         panic("stop")
     }
 }

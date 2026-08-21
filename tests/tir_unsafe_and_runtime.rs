@@ -1082,8 +1082,7 @@ fn run() {
 /// c109 Phase 21 / D-TUPLE-DESTRUCT1: the full channel surface —
 /// `channel<T>()` producer returning `(Sender<T>, Receiver<T>)`,
 /// `sender.clone()` (a second sender), `Sender.send(v)` (inside a `task` body),
-/// `Task.join()`, and `Receiver.receive() ?? panic(..)`
-/// (`Result<T, Closed>` unwrap).
+/// `Task.join()`, and `loop value, receiver` draining until close.
 #[test]
 fn channel_send_receive() {
     if !have_rustc() {
@@ -1101,9 +1100,10 @@ fn run() {
     }
     t1.join() ?? panic("task failed")
     t2.join() ?? panic("task failed")
-    results := [Int].{}
-    results.push(ch.receive() ?? panic("channel closed"))
-    results.push(ch.receive() ?? panic("channel closed"))
+    s1.close()
+    s2.close()
+    results := [Int]{}
+    loop value, ch :> results.push(value)
     results.sort()
     loop x, results {
         print(x)

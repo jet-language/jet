@@ -1459,11 +1459,11 @@ pub(crate) struct Checker<'a> {
     fx_maximal: bool,
     /// First source span that forced the row maximal.
     fx_maximal_span: Option<Span>,
-    /// D-EFF1: stack of active `#Caps(…)` regions, innermost last. Every effect
+    /// D-EFF1: stack of active `#Abilities(…)` regions, innermost last. Every effect
     /// or edge recorded while one is open is also added to it (and all enclosing
     /// regions) so the region's own effect set can be checked against its caps.
     region_stack: Vec<RegionAccum>,
-    /// D-EFF1: completed `#Caps(…)` regions in this body, rolled into the
+    /// D-EFF1: completed `#Abilities(…)` regions in this body, rolled into the
     /// `EffectSummary` for the post-pass E0712 check.
     fx_regions: Vec<RegionSummary>,
     /// D-EFF2: callback-bound obligations recorded at higher-order call sites

@@ -155,14 +155,14 @@ pub(crate) fn is_text_error_type_name(name: &str) -> bool {
 /// etc.) is a fact vocabulary published for reflection, never a general type —
 /// no constructor exists outside `#Marker(param: Name.Variant)` position. Each
 /// fix names the real path: the living counterpart when one exists (only
-/// `Ability` has one — `Authority`/`[Right]`), otherwise the marker that
+/// `Ability` has one — `Abilities`/`[Right]`), otherwise the marker that
 /// legitimately writes the name. `Layout` is excluded: it is also a real
 /// dot-ctor value type (D-LAYOUT-CTOR1, see the `matches!` in
 /// `core_type_known`), so that name resolves before this ever runs.
 fn phantom_fact_menu_fix(name: &str) -> Option<&'static str> {
     Some(match name {
         "ABI" => "write it only inside `#ABI(name: system)`",
-        "Ability" => "take `Authority` (the rights value), or a rights list `[Right]`; inside a marker, write it in `#Caps(...)`",
+        "Ability" => "take `Abilities` (the rights value), or a rights list `[Right]`; inside a marker, write it in `#Abilities(...)`",
         "FfiLanguage" => "write it only inside `#FFI(language: c)`",
         "InlineMode" => "write it only inside `#Inline(mode: Always)`",
         "IntType" => "write it only inside `#Layout(tag: I32)`",

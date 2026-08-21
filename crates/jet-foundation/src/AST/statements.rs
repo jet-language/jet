@@ -289,9 +289,9 @@ pub enum Stmt {
         body: Vec<Stmt>,
         span: Span,
     },
-    /// D-EFF1 / D-AUTHORITY-SCOPE1: a `#Caps(Net, DB) { … }` effect-restriction
+    /// D-EFF1 / D-AUTHORITY-SCOPE1: a `#Abilities(Net, DB) { … }` effect-restriction
     /// region, optionally with a named authority handle:
-    /// `#Caps(auth: FS, Net) { … }`. Bare `#Caps` narrows; the named form also
+    /// `#Abilities(auth: FS, Net) { … }`. Bare `#Abilities` narrows; the named form also
     /// binds the handle for the block. The caps list is validated in sema and
     /// the lexical scope is emitted as a plain Rust block.
     Caps {

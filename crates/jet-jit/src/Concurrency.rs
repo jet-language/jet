@@ -692,6 +692,14 @@ fn jet_jit_sender_close(s: i64, failed: i64) {
         return;
     }
     with_runtime_mut(|rt| {
+        if let Some(sender) = rt.senders.get(s as usize).and_then(Option::as_ref) {
+            // Match the shared Prelude `JetSchedulerSender::close` used by
+            // AOT and the interpreter. Explicit close is a channel close, not
+            // only dropping this JIT handle; task-owned sender clones may
+            // still exist after their joins, and the receiver must drain the
+            // queued values before observing closed.
+            sender.close();
+        }
         if let Some(sender) = rt.senders.get_mut(s as usize) {
             *sender = None;
         }

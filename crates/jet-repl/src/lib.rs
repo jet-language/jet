@@ -190,14 +190,14 @@ impl ReplAuthorization<'_> {
         if request.root != "FS" { return Ok(()); }
         let relative = std::path::Path::new(&request.resource);
         if relative.is_absolute() || relative.components().any(|c| matches!(c, std::path::Component::ParentDir | std::path::Component::RootDir | std::path::Component::Prefix(_))) {
-            return Err(self.e1803(request, "filesystem authority is confined to the REPL project root and rejects absolute or parent paths", span));
+            return Err(self.e1803(request, "filesystem ability is confined to the REPL project root and rejects absolute or parent paths", span));
         }
         let mut cursor = self.policy.root.clone();
         for component in relative.components() {
             if let std::path::Component::Normal(part) = component {
                 cursor.push(part);
                 if std::fs::symlink_metadata(&cursor).is_ok_and(|m| m.file_type().is_symlink()) {
-                    return Err(self.e1803(request, "filesystem authority rejects symlink traversal", span));
+                    return Err(self.e1803(request, "filesystem ability rejects symlink traversal", span));
                 }
             }
         }
@@ -212,7 +212,7 @@ impl crate::Comptime::ReplAuthorizer for ReplAuthorization<'_> {
         if needs_handles && !self.policy.handles_available {
             return Err(self.e1803(
                 request,
-                "this platform cannot enforce descriptor-pinned, no-follow REPL confinement, so no runtime authority was offered",
+                "this platform cannot enforce descriptor-pinned, no-follow REPL confinement, so no runtime ability was offered",
                 span,
             ));
         }
@@ -251,10 +251,10 @@ impl crate::Comptime::ReplAuthorizer for ReplAuthorization<'_> {
                         self.policy.session.insert(request.clone());
                         Ok(())
                     }
-                    _ => Err(self.e1803(request, "session authority was revoked and the replacement request was denied", span)),
+                    _ => Err(self.e1803(request, "session ability was revoked and the replacement request was denied", span)),
                 }
             }
-            PromptChoice::Deny => Err(self.e1803(request, "interactive authority was denied", span)),
+            PromptChoice::Deny => Err(self.e1803(request, "interactive ability was denied", span)),
         }
     }
 
@@ -1109,7 +1109,7 @@ fn cmd_run_native(session: &Session, color: bool, out_sink: &mut impl Write) {
         let _ = writeln!(out_sink, "note: session is empty — nothing to run");
         return;
     }
-    if session.turns.iter().any(|turn| turn.input.contains("#Caps")) {
+    if session.turns.iter().any(|turn| turn.input.contains("#Abilities")) {
         let _ = writeln!(out_sink, "Error [E1803]: `:run` will not replay effectful turns");
         let _ = writeln!(out_sink, " Why: replay would repeat already-authorized host operations without an operation-by-operation prompt; nothing ran");
         let _ = writeln!(out_sink, " Fix: run each effectful turn in the REPL, or put the program in a file and use `jet run`");
@@ -1177,7 +1177,7 @@ fn cmd_run_transcript(session: &Session) -> String {
     if session.stmt_srcs.is_empty() && session.item_srcs.is_empty() {
         return "note: session is empty — nothing to run\n".to_string();
     }
-    if session.turns.iter().any(|turn| turn.input.contains("#Caps")) {
+    if session.turns.iter().any(|turn| turn.input.contains("#Abilities")) {
         return "Error [E1803]: `:run` will not replay effectful turns\n Why: replay would repeat already-authorized host operations without an operation-by-operation prompt; nothing ran\n Fix: run each effectful turn in the REPL, or put the program in a file and use `jet run`\n".to_string();
     }
 
@@ -3587,9 +3587,9 @@ mod tests {
             )
             .expect_err("unavailable confinement backend must fail closed");
             assert_eq!(error.code, "E1803");
-            assert!(error.why.contains("no runtime authority was offered"));
+            assert!(error.why.contains("no runtime ability was offered"));
         }
-        assert_eq!(prompt.0, 0, "platform denial must not ask for authority");
+        assert_eq!(prompt.0, 0, "platform denial must not ask for ability");
         assert!(!target.exists(), "platform denial executed filesystem operation");
         std::fs::remove_dir_all(root).ok();
     }

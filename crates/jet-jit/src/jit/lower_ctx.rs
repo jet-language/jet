@@ -13644,7 +13644,7 @@ impl LowerCtx<'_, '_> {
             ) => Some(0),
             ("core.services", "tree" | "state_store") => Some(1),
             ("core.services", "set_restart" | "set_delivery") => Some(2),
-            ("core.services", "worker") => Some(3),
+            ("core.services", "worker") => Some(4),
             ("core.services", "group") => Some(3),
             ("core.services", "start" | "stop") => Some(1),
             ("core.services", "send") => Some(3),

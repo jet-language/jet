@@ -77,8 +77,8 @@ use core.compiler.lang as lang
 fn helper() {}
 
 fn run() {
-    #Caps(lang.Ability.Net) {}
-    #Caps(caps: lang.Ability.Net) {}
+    #Abilities(lang.Ability.Net) {}
+    #Abilities(caps: lang.Ability.Net) {}
 }
 "#,
     );

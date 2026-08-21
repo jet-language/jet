@@ -2,8 +2,8 @@
   "meta": {
     "version": 4,
     "project": "Jet",
-    "nextNum": 2129,
-    "rev": 40370,
+    "nextNum": 2131,
+    "rev": 40384,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -271,7 +271,7 @@
           "at": "2026-08-12T01:45:18.211Z"
         }
       ],
-      "status": "open",
+      "status": "review-ready",
       "created": "2026-07-26T13:03:18.838Z",
       "archived": true
     },
@@ -97293,7 +97293,7 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": "e3-m09-types-numbers",
-      "phase": "ready",
+      "phase": "done",
       "priority": "P1",
       "plan": "Implements D-TYPE2-NUM1 — ratified 2026-08-06. Read each decision verbatim (tower brief on this card's parent proposal, or tower decision show) before building; the ratified outcome text is the law, this plan is the route. Every requirement is a discrete exit criterion below: meet each with targeted proof (tests, snapshots, examples with golden output), and keep I9 tier parity inside this card — AOT, default jet run (JIT), and the interpreter must agree on every surface this card ships before it closes. Delete every superseded form the decisions retire in the same change; do not leave compatibility shims or parallel spellings. Reference: docs/proposals/type-system-v2-carriers-and-knowledge.md.",
       "blockedBy": [],
@@ -97381,11 +97381,11 @@
         {
           "n": 9,
           "text": "Tier parity (I9) is proved inside this card: parser, sema, TIR, AOT, JIT/dev, comptime, REPL and web all show the same behavior, with one test per tier.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-06T21:34:57.943Z"
+          "evidence": "Full-shell AOT (jet-env full jet run --release examples/features/types/range_types.jet) matches the 12-line golden; jet build --target=web plus node app.js prints 42/3; parser, sema, TIR, JIT, dev, comptime and REPL rows at tests/gate_ledger.rs:545-660. The earlier skip was a missing rustc in the plain devshell, not a code gap",
+          "at": "2026-08-21T03:26:14.622Z"
         },
         {
           "n": 10,
@@ -97406,9 +97406,10 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-06T21:34:54.780Z",
-      "updated": "2026-08-21T00:41:11.463Z",
+      "updated": "2026-08-21T03:55:40.421Z",
       "updatedBy": "fable-e3-burndown",
-      "workOrder": 330
+      "workOrder": 330,
+      "completedAt": "2026-08-21T03:55:40.420Z"
     },
     {
       "id": "c04yd90c",
@@ -129172,7 +129173,7 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": "e3-ul3-core",
-      "phase": "ready",
+      "phase": "done",
       "priority": "P2",
       "plan": "## Outcome\nTuples and structs of already-key-eligible fields work as `[K:V]` map keys with deep value-semantic equality/ordering through the one JetMap Prelude path on every tier: a tuple key `(x, y)` and a struct-of-scalars key insert, look up, overwrite, and remove correctly, golden-proven on JIT and AOT; E0502 states the ratified key rule with what/why/fix and keeps a snapshot for rejected key types; no engine re-encodes the comparison.\n\n## Law\n- D-MEM1 / D-MEM-COPYSEM1 — value semantics make deep-key equality well defined for immutable contents (card body's premise).\n- E0502 is a registered diagnostic; copy changes are I4 snapshot work.\n- I9 — key equality/ordering lives in one Prelude path; JIT/interpreter marshal.\n- **Ballot needed: D-MAP-KEY1** — the eligible-key rule is a new user-facing type-system rule (criterion 2 literally says \"E0502 names the ratified key rule\"; no live decision states one). Proposed rule for the ballot: a map key is Int, String, Bool, Char, U8/IntN, a payload-free enum, or a tuple/struct whose fields are all themselves key-eligible, recursively. Float (no total order — NaN), views, Shared, functions, lists/maps/sets, and payload-carrying enums stay out.\n\n## Work\n1. Trace first: `crates/jet-foundation/src/Collections.rs` `is_map_key_type` (line 66) is syntactic and already passes any `Type::Named` — before editing, probe a struct-typed key through sema and find where non-enum Named keys are actually rejected today (the \"payload-free enum\" narrowing is NOT in this predicate; locate it so the new rule lands in one place, not two).\n2. Rule: extend the key predicate per ratified D-MAP-KEY1 — accept `Type::Tuple` when every field is eligible; accept Named structs via a checker-level recursive predicate that consults the TypeRegistry for field types (foundation's syntactic fn cannot see fields; either thread a field-resolver or add the recursive check at the two E0502 sites' shared helper). Both E0502 sites gate on it: `Sema/CheckerCore/type_assign.rs:548` and `Sema/CheckerInfer/expr.rs:4125`.\n3. E0502 copy (I4, criterion 2): new what/why/fix naming D-MAP-KEY1 at both sites; update `examples/features/collections/map_key.jet` + `examples/features/expected/collections/map_key.err.out` so the snapshot shows a still-rejected key (Float and `[Int]`) with the new copy.\n4. AOT: `JetMap` is `Arc<BTreeMap<K,V>>` with `K: Ord` (`Prelude/Core.rs:1323`) — composite keys need the generated Rust tuple/struct key types to carry `Ord + PartialOrd + Eq + PartialEq`. Trace codegen struct/tuple emission derives and add them for qualifying types. Structural Ord/Eq over fields IS the one deep-value Prelude path (criterion 3; note honestly in the card log: JetMap is ordered — \"hashing\" is realized as Ord/Eq, there is no second hash path to keep in sync).\n5. JIT: trace the jet-jit map host's key representation (currently scalar) and extend to composite keys by marshalling through the JIT's existing tuple/struct value comparison — same field order, no engine-side comparator policy (I9).\n6. Interpreter/comptime: extend the CtValue map key representation the same way.\n7. Golden (criterion 1): new `examples/features/collections/map_composite_key.jet` — grid map keyed by `(x, y)` tuple and cache keyed by a `struct Key { user: String, resource: String }`: insert, look up, overwrite, remove, len; add `expected/collections/map_composite_key.out`.\n8. Docs: `docs/reference/core-library.md` Map key-rule section. Spec slate row is the ballot owner's job on ratification.\n\n## Not building\n- Float, view, Shared, function, list/map/set, and payload-enum keys — they stay E0502.\n- Set element-rule widening (E0506 / `is_hashable_type`) — sibling scope, separate card if wanted.\n- User-defined Ord/Hash hooks; Map iteration-order changes (BTreeMap order simply extends to composite keys).\n\n## Proof\n- Criterion 1: `jet run examples/features/collections/map_composite_key.jet` matches golden on default run and `--release`.\n- Criterion 2: `map_key.err.out` snapshot re-blessed with rule-naming copy.\n- Criterion 3: grep receipt — ordering/equality only via JetMap/BTreeMap + derived structural Ord in generated code; JIT/interpreter call their generic value-compare marshalling, no map-specific comparator tables.\n\n## blockedBy\nD-MAP-KEY1 ballot — the eligible-key rule is the one new user-facing rule this card mints (card body authorizes raising it). Steps 1, 3-scaffolding, and 7-scaffolding can start now; the rule edit and E0502 copy land after ratification.",
       "blockedBy": [
@@ -129213,11 +129214,11 @@
         {
           "n": 3,
           "text": "Key hashing/equality is deep value semantics in one Prelude path; no engine re-encodes it",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-14T20:07:33.143Z"
+          "evidence": "One comparator at crates/jet-codegen/src/Prelude/Core/MapKey.rs:14-16,96-135; jet-foundation AST/comptime.rs:8-10 and jet-rt/src/lib.rs:6-9 include that same source, and AOT emits calls to crate::jet_map_key_cmp. The duplicate in foundation Prelude.rs is gone. Default and --interpret both match the 12-line golden",
+          "at": "2026-08-21T03:14:25.874Z"
         }
       ],
       "refs": [],
@@ -129225,8 +129226,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-14T20:07:21.362Z",
-      "updated": "2026-08-21T00:41:49.253Z",
-      "updatedBy": "fable-e3-burndown"
+      "updated": "2026-08-21T03:14:26.974Z",
+      "updatedBy": "fable-e3-burndown",
+      "completedAt": "2026-08-21T03:14:26.974Z"
     },
     {
       "id": "c0y7e4ru",
@@ -131595,6 +131597,11 @@
       "assignee": null,
       "log": [
         {
+          "at": "2026-08-21",
+          "by": "fable-e3-burndown",
+          "text": "c4 now has one real blocker, isolated. The battery was drowning in false timeouts: eight stems compile AOT concurrently against a fixed 30s budget measured on a warm cache, and the new runtime-cache prune leaves it cold. With JET_TIER_PARITY_TIMEOUT_SECS=300 the timeouts vanish and one true failure remains: JIT vs AOT divergence for memory/pool_stale_id. JIT reports the E3001 stale-id stop; AOT does not match. The old JetId ordering blocker is genuinely gone (MathTaskMem.rs:1146-1160)."
+        },
+        {
           "at": "2026-08-20",
           "by": "fable-e3-burndown",
           "text": "Criterion 4 is not met and now has a named blocker. Ran both named tests at HEAD: stream_pull_hostile_matrix_matches_interpreter_jit_and_aot passes; collections_memory_and_streams_match_interpreter_jit_and_aot FAILS with a JIT versus interpreter divergence for memory/shared_transact. Probed it directly: --interpret prints from=200/to=800/total=1000 matching the golden, while default jet run prints from=500/to=500 and then repeats Stop [E3012] stack overflow in transfer for 24 lines. So the default tier both loses the write and then blows the stack. Filed as #2123 (P0, i9). The battery also reported memory/arena_regions timing out after 30s, but that example runs clean standalone on both tiers in under a second, so that one looks like harness contention rather than a program defect."
@@ -131653,7 +131660,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-16T03:48:35.147Z",
-      "updated": "2026-08-21T00:41:54.947Z",
+      "updated": "2026-08-21T03:55:31.238Z",
       "updatedBy": "fable-e3-burndown"
     },
     {
@@ -134051,7 +134058,7 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": "e3-m08-surface-coherence",
-      "phase": "ready",
+      "phase": "done",
       "priority": "P2",
       "plan": "## Outcome\nCard #2042 ships the ratified call-argument regime \"positional when unambiguous, named to deconflict\" end to end: a precise deterministic-mapping rule written into the spec beside S61, a new I4-grade sema diagnostic E0772 for calls that match more than one callable body (with candidate list and labeled fix line), always-on call-site parameter-name inlay hints (ghost text) served by `jet lsp` from the semindex, and corpus examples with goldens proving every boundary of the rule. Ballot D-CALLPOS1 (raised on this card, full profile, rec A) carries the owner choice; criteria 1–3 are satisfied by the mapping definition below, the inlay-hint requirement, and the ready ballot.\n\n## Law\n- D-CALLPOS1 (this card's ballot, in decide) — the regime choice itself.\n- S61 / D-NARG1 / D-NARG2 / D-APILABEL1=A (docs/spec/syntax-decisions.md:293-318) — labels bind by name; `/` and `*` zones; E0763–E0769; fmt never adds nor strips labels. This card does not reopen zones.\n- D-CAP10 (syntax-decisions.md:62-64) — one definition per name, no user overloading (E0105). E0772 therefore fires only on multi-candidate interop surfaces.\n- S83 / D-CHOOSE-HEADS1=A — multi-head functions fold to one enum pattern table (crates/jet-sema/src/Sema/Bundle/Pipeline.rs:421-423); head dispatch is variant-driven, never call-site-ambiguous.\n- D-CPP (syntax-decisions.md:2930-2934) — imported C++ overloads collapse to argument labels; this is the ambiguity surface E0772 guards.\n- D-VARIADIC1 — final `...T` packs the bare tail.\n- D-REF3 (syntax-decisions.md:5056-5057) — inlay hints on by default; precedent for always-on ghost text.\n- I4 (registered code + what/why/fix + UI snapshot), I5 (executable example + golden), I9 (binder change lives in sema/Prelude-shared law, all tiers).\n\n## Work\n1. Gate: wait for the owner to ratify D-CALLPOS1; implement the ratified outcome exactly (steps below assume outcome A; other outcomes re-plan).\n2. Deterministic mapping — write the rule into docs/spec/syntax-decisions.md as the D-CALLPOS1 outcome block next to S61, and cross-link from docs/spec/spec.md:300-310. The rule, precisely: (a) bare arguments fill parameters left to right in declaration order; E0768 (bare after labeled) and E0769 (`*` zone) unchanged; (b) defaults fill unbound slots afterwards in declaration order; arity then must match exactly (E0766/E0104); (c) types check after binding and never reroute it (E0112) — a type mismatch is an error, not a rebinding trigger; (d) remaining bare tail packs into a final `...T`; (e) adjacent same-type parameters stay legal positionally — reader ambiguity is the editor's job, not the compiler's; (f) when one callee name resolves to N>1 callable bodies (collapsed C++ overload sets; any future overload-like surface), a bare or mixed call must bind exactly one candidate; two or more binders succeeding is E0772, names required to deconflict. Corpus examples per boundary: examples/features/basics/named_args.jet:26 + :73-75 (zones, skipped default), :44-47 + :88-89 (defaulted slot + variadic tail), :11 + :59 `Rect.new(width:, height:)` (adjacent same-type Float params — legal bare, ghost text carries the names), new ambiguity fixture in step 4 (multi-candidate).\n3. Trace first: crates/jet-sema/src/Sema/CallBinder.rs (the one binder — S61 requires all call forms bind through it), crates/jet-sema/src/Sema/CheckerInfer/calls/* (direct_calls.rs, helpers_call_values.rs, builtin_methods.rs), crates/jet-sema/src/Sema/Diagnostics.rs (E0764/E0766 wording to match), crates/jet-semindex/src/Build.rs:95-110 + :268-283 (SymbolDB.inlay, inlay_hints_for), crates/jet-cli/src/CLI.rs:286 HandlerKey::Lsp dispatch to the language-server loop.\n4. E0772 in sema: add a candidate-set path to CallBinder — bind the call against every candidate signature of the callee; one success proceeds; zero keeps today's errors; two or more emits E0772 listing each candidate signature and a fix line containing the fully labeled rewrite of the first candidate. Register E0772 in crates/jet-codegen/src/Prelude/Diagnostics.jet (next free after E0771, Diagnostics.jet:388) with real what/why/fix text, regenerate docs/spec/diagnostic-rows.md and docs/spec/diagnostics.md, and add the diagnostic UI snapshot test (I4). C++ overlay import status must be probed first; if the D-CPP collapse is not yet shipped, land the binder seam + E0772 against a synthetic multi-candidate callable contract in unit tests so the interop milestone plugs in without re-touching the binder.\n5. Inlay hints: in crates/jet-semindex/src/Build.rs, emit a `name:` InlayHint at each bare argument span during the call walk (skip arguments already written with a label, skip variadic tail members past the first). Serve through the `jet lsp` inlayHint request; on by default per D-REF3. No config knob is added; editors that hide hints hide them client-side.\n6. Examples + goldens (I5): extend examples/features/basics/named_args.jet with a bare-call section (`clamp`-style known API) and expected output; add the E0772 ambiguity fixture with expected-diagnostic snapshot; refresh goldens.\n7. Guidance: one line in the API style docs — do not force `*` zones on simple APIs; reserve them for load-bearing names (matches ballot tradeoff).\n8. I9: the binder and E0772 live entirely in sema, upstream of every tier; no engine host may re-encode candidate selection. Prove default `jet run` and `jet run --release` on the updated example golden.\n\n## Not building\n- No reopening of S61 zones, E0763–E0769 semantics, or label reordering law.\n- No user-space overloading (D-CAP10 stands); no change to S83 multi-head dispatch.\n- No fmt changes — fmt never adds nor strips labels (D-NARG2).\n- No arity-threshold or per-package strictness lints (rejected in the ballot's breadth pass); L2401 (pub Bool) stays as is.\n- The C++ overlay importer itself (D-CPP milestone) is sibling-owned; this card only lands the binder seam and diagnostic it will feed.\n\n## Proof\n- Criterion 1: spec block landed; `jet check` unit tests in jet-sema covering each mapping boundary (left-to-right fill, default skip requires label, E0768, E0769, variadic tail, adjacent same-type legal, E0772 on two candidates); corpus files cited in Work step 2 compile unchanged.\n- Criterion 2: semindex test asserting `inlay_hints_for` returns `value:`/`low:`/`high:`-style hints at bare argument spans of the example module; a `jet lsp` stdio probe returning those hints for named_args.jet; hints absent where the label is written.\n- Criterion 3: `node plugins/tower/tower.mjs decision show D-CALLPOS1` shows ballot-ready, full profile, five ordered review passes (beginner/expert covered in base pass); E0772 snapshot test shows registered code + what/why/fix + candidate list (I4).\n- Runtime parity: `jet run examples/features/basics/named_args.jet` matches its golden under default run and `--release` AOT (I9); the E0772 fixture rejects identically under both.\n- Full-suite proof stays at epoch closeout.\n\n## blockedBy\nD-CALLPOS1 — implementation steps 2–8 execute the ratified outcome; the ballot is raised and ready on this card.",
       "blockedBy": [],
@@ -134125,11 +134132,11 @@
         {
           "n": 7,
           "text": "snapshots re-blessed",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-19T16:42:54.879Z"
+          "evidence": "Snapshots blessed at tests/ui/ambiguous_call_e0772.stderr:1-9 and tests/ui/call_mapping_type_boundary.stderr:1-15; jet check confirms the coordinates and carets",
+          "at": "2026-08-21T03:26:15.085Z"
         }
       ],
       "refs": [],
@@ -134137,8 +134144,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-19T11:17:11.628Z",
-      "updated": "2026-08-21T02:09:40.512Z",
-      "updatedBy": "fable-e3-burndown"
+      "updated": "2026-08-21T03:55:41.093Z",
+      "updatedBy": "fable-e3-burndown",
+      "completedAt": "2026-08-21T03:55:41.092Z"
     },
     {
       "id": "c0te2a80",
@@ -139649,6 +139657,108 @@
       "updated": "2026-08-21T02:09:45.441Z",
       "updatedBy": "fable-e3-burndown",
       "completedAt": "2026-08-21T02:09:45.440Z"
+    },
+    {
+      "id": "c0bs6efw",
+      "num": 2129,
+      "title": "E0001 renders an unprintable character as nothing",
+      "body": "A literal NUL byte in a source file produces `Error [E0001]: the character `` doesn’t mean anything here (yet)` with an empty slot where the character should be, so the message names nothing and the caret is the only clue.\n\nFound on examples/features/concurrency/task_runtime_audit.jet:14, where a tool had written a NUL before `jet`. The file looked ASCII to every byte-level check because the NUL is invisible in a terminal and does not trip a non-ASCII scan.\n\nAn unprintable character is exactly the case where a diagnostic has to do the work for the reader: name the byte, do not paste it. Escape unprintables as `\\\\0`, `\\\\t`, or `U+XXXX` in the message, and say so in the Why.",
+      "kind": "bug",
+      "track": "epoch",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "ready",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "E0001 names an unprintable character by escape rather than pasting it: a NUL reads as `\\0`, a tab as `\\t`, anything else as U+XXXX",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-21T03:10:48.235Z"
+        },
+        {
+          "n": 2,
+          "text": "A UI fixture pins the escaped form for a NUL byte in source",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-21T03:10:50.016Z"
+        }
+      ],
+      "refs": [],
+      "tags": [
+        "diagnostics"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-08-21T03:10:46.873Z",
+      "updated": "2026-08-21T03:10:50.016Z",
+      "updatedBy": "fable-e3-burndown"
+    },
+    {
+      "id": "c0eiuboh",
+      "num": 2130,
+      "title": "Float-equality lint is unreachable after exact-by-default",
+      "body": "The float-equality lint no longer fires, and `tests/ui_lint/float_eq_warn.jet` fails with \"should emit at least one lint\".\n\nRoot cause is exact-by-default. The fixture compares `1.0 == 2.0`, and under D-TYPE2-DEFAULT1 a bare decimal literal is now an exact `Decimal`, so that comparison is exact and the lint is right to stay quiet.\n\nBut the lint does not fire for a genuine Float either. All of these are silent under `jet check`:\n\n    x :: Float{1.0}\n    y :: Float{2.0}\n    if x == y :> print(\"equal\")\n\n    fn approx(a: Float, b: Float) Bool :> a == b\n\n    x :: Float{1.0}\n    y :: x + Float{1.0}\n    if x == y :> print(\"equal\")\n\nSo the lint appears unreachable rather than merely narrowed. Either it lost its trigger when the numeric default moved, or it was only ever matching the literal shape that is now Decimal.\n\nDecide which is true and make the lint fire for approximate comparison, then restore the fixture to a shape that exercises it. Do not delete the lint to make the test pass: comparing two Floats for exact equality is the classic numeric bug this exists to catch, and exact-by-default makes the remaining Float cases the ones that most need warning.",
+      "kind": "bug",
+      "track": "epoch",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "ready",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "The lint fires for an approximate comparison, proven by a fixture that uses the Float carrier explicitly",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-21T04:38:11.377Z"
+        },
+        {
+          "n": 2,
+          "text": "The lint stays silent for an exact Decimal comparison, which is safe and must not warn",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-21T04:38:11.843Z"
+        },
+        {
+          "n": 3,
+          "text": "tests/ui_lint/float_eq_warn.jet passes, exercising the lint rather than asserting its absence",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-21T04:38:12.291Z"
+        }
+      ],
+      "refs": [],
+      "tags": [
+        "diagnostics",
+        "lint"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-08-21T04:38:10.907Z",
+      "updated": "2026-08-21T04:38:12.292Z",
+      "updatedBy": "fable-e3-burndown"
     }
   ],
   "decisions": [
@@ -186563,6 +186673,104 @@
   ],
   "events": [
     {
+      "at": "2026-08-21T04:38:12.292Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-add",
+      "ref": "c0eiuboh",
+      "note": "#3 tests/ui_lint/float_eq_warn.jet passes, exercising the lint "
+    },
+    {
+      "at": "2026-08-21T04:38:11.843Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-add",
+      "ref": "c0eiuboh",
+      "note": "#2 The lint stays silent for an exact Decimal comparison, which"
+    },
+    {
+      "at": "2026-08-21T04:38:11.377Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-add",
+      "ref": "c0eiuboh",
+      "note": "#1 The lint fires for an approximate comparison, proven by a fi"
+    },
+    {
+      "at": "2026-08-21T04:38:10.908Z",
+      "by": "fable-e3-burndown",
+      "action": "card.add",
+      "ref": "c0eiuboh",
+      "note": "Float-equality lint is unreachable after exact-by-default"
+    },
+    {
+      "at": "2026-08-21T03:55:41.093Z",
+      "by": "fable-e3-burndown",
+      "action": "card.update",
+      "ref": "c0e7kkuf",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-21T03:55:40.421Z",
+      "by": "fable-e3-burndown",
+      "action": "card.update",
+      "ref": "c0iylrhu",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-21T03:55:31.239Z",
+      "by": "fable-e3-burndown",
+      "action": "card.update",
+      "ref": "c0aps31f",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-08-21T03:26:15.086Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0e7kkuf",
+      "note": "#7"
+    },
+    {
+      "at": "2026-08-21T03:26:14.623Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0iylrhu",
+      "note": "#9"
+    },
+    {
+      "at": "2026-08-21T03:14:26.974Z",
+      "by": "fable-e3-burndown",
+      "action": "card.update",
+      "ref": "c0ivhxu2",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-21T03:14:25.874Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0ivhxu2",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-21T03:10:50.016Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-add",
+      "ref": "c0bs6efw",
+      "note": "#2 A UI fixture pins the escaped form for a NUL byte in source"
+    },
+    {
+      "at": "2026-08-21T03:10:48.235Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-add",
+      "ref": "c0bs6efw",
+      "note": "#1 E0001 names an unprintable character by escape rather than p"
+    },
+    {
+      "at": "2026-08-21T03:10:46.873Z",
+      "by": "fable-e3-burndown",
+      "action": "card.add",
+      "ref": "c0bs6efw",
+      "note": "E0001 renders an unprintable character as nothing"
+    },
+    {
       "at": "2026-08-21T02:09:45.441Z",
       "by": "fable-e3-burndown",
       "action": "card.update",
@@ -189963,104 +190171,6 @@
       "action": "card.criteria-meet",
       "ref": "c011y14n",
       "note": "#1"
-    },
-    {
-      "at": "2026-08-20T20:46:14.035Z",
-      "by": "fable-e3-burndown",
-      "action": "card.update",
-      "ref": "c0zfxd69",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-08-20T20:46:13.320Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0zfxd69",
-      "note": "#3"
-    },
-    {
-      "at": "2026-08-20T20:46:12.818Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0zfxd69",
-      "note": "#2"
-    },
-    {
-      "at": "2026-08-20T20:46:12.314Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0zfxd69",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-20T20:46:11.792Z",
-      "by": "fable-e3-burndown",
-      "action": "card.update",
-      "ref": "c05x4s3u",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-08-20T20:46:11.096Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c05x4s3u",
-      "note": "#3"
-    },
-    {
-      "at": "2026-08-20T20:46:10.603Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c05x4s3u",
-      "note": "#2"
-    },
-    {
-      "at": "2026-08-20T20:46:10.079Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c05x4s3u",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-20T20:46:09.522Z",
-      "by": "fable-e3-burndown",
-      "action": "card.update",
-      "ref": "c096hwxg",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-08-20T20:46:08.580Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c096hwxg",
-      "note": "#3"
-    },
-    {
-      "at": "2026-08-20T20:46:07.777Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c096hwxg",
-      "note": "#2"
-    },
-    {
-      "at": "2026-08-20T20:46:07.027Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c096hwxg",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-20T20:46:06.290Z",
-      "by": "fable-e3-burndown",
-      "action": "card.update",
-      "ref": "c0csb38y",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-08-20T20:46:05.362Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0csb38y",
-      "note": "#3"
     }
   ],
   "nextNum": 368,

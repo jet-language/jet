@@ -1182,7 +1182,7 @@ fn run() {
     assert_eq!(stdout, "ok\n");
 }
 
-/// D-AUTHORITY-SCOPE1: bare and named `#Caps` regions have one meaning on AOT,
+/// D-AUTHORITY-SCOPE1: bare and named `#Abilities` regions have one meaning on AOT,
 /// default `jet run`, and the forced interpreter. The named handle is sema-only
 /// and the body remains an ordinary lexical block on every tier.
 #[test]
@@ -1192,7 +1192,7 @@ fn announce(label: String, n: Int) =[IO]=> {
     print(\"{label}: {n}\")
 }
 fn run() {
-    #Caps(abilities: IO) {
+    #Abilities(abilities: IO) {
         announce(\"answer\", 42)
     }
 }

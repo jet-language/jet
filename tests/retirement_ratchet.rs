@@ -32,6 +32,25 @@ use jet::Syntax::{
 /// Files still written in the retired form, per row, as counted today. Lower a
 /// number when a migration lands; never raise one.
 const CEILINGS: &[(&str, usize)] = &[
+    ("effect-flat-ffi-go", 0),
+    ("effect-flat-ffi-java", 0),
+    ("effect-flat-ffi-dotnet", 0),
+    ("effect-flat-ffi-fortran", 0),
+    ("effect-flat-ffi-cobol", 0),
+    ("effect-flat-ffi-tcl", 0),
+    ("effect-flat-ffi-lua", 0),
+    ("effect-flat-ffi-ada", 0),
+    ("effect-flat-ffi-pascal", 0),
+    ("effect-flat-ffi-dart", 0),
+    ("effect-flat-ffi-powershell", 0),
+    ("effect-flat-ffi-perl", 0),
+    ("effect-flat-ffi-ruby", 0),
+    ("effect-flat-ffi-php", 0),
+    ("effect-flat-ffi-r", 0),
+    ("effect-flat-ffi-com", 0),
+    ("effect-flat-ffi-cpp", 0),
+    ("effect-flat-ffi-py", 0),
+    ("effect-flat-ffi-octave", 0),
     ("entry-file", 94),
     // The two corelib archives and the seven out-of-scope engine fixtures
     // remain until their owning migration slices land.
@@ -372,7 +391,40 @@ fn tally_print_family(retired_form: &str, canonical_form: &str) -> (usize, usize
                 retired + usize::from(text.contains(retired_form)),
                 canonical + usize::from(text.contains(canonical_form)),
             )
-        })
+    })
+}
+
+/// Detect an effect spelling in a source surface, rather than counting a
+/// language name in binder code or ordinary prose.
+fn writes_effect_spelling(text: &str, spelling: &str) -> bool {
+    for line in text.lines() {
+        let line = line.trim();
+        if let Some(name) = line
+            .strip_prefix("effect ")
+            .and_then(|tail| tail.split_whitespace().next())
+        {
+            if name == spelling {
+                return true;
+            }
+        }
+        for marker in [":[", "=[", "#(", "allow: [", "deny: ["] {
+            let mut rest = line;
+            while let Some(start) = rest.find(marker) {
+                let values = &rest[start + marker.len()..];
+                let Some(end) = values.find(']') else { break };
+                if values[..end]
+                    .split(',')
+                    .map(str::trim)
+                    .map(|value| value.strip_prefix('!').unwrap_or(value).trim())
+                    .any(|value| value == spelling)
+                {
+                    return true;
+                }
+                rest = &values[end + 1..];
+            }
+        }
+    }
+    false
 }
 
 /// Files on the retired form and files on the canonical form, for one row.
@@ -634,6 +686,22 @@ fn tally(row: &Retirement) -> (usize, usize) {
                     .count()
             };
             (count(row.retired), count(row.canonical))
+        }
+        id if id.starts_with("effect-flat-ffi-") => {
+            let mut retired = 0;
+            let mut canonical = 0;
+            for path in content_files() {
+                if path.ends_with("tests/effect_roots.rs") {
+                    continue;
+                }
+                let Some(text) = read(&path) else { continue };
+                if writes_effect_spelling(&text, row.retired) {
+                    retired += 1;
+                } else if writes_effect_spelling(&text, row.canonical) {
+                    canonical += 1;
+                }
+            }
+            (retired, canonical)
         }
         other => panic!("no way to count row `{other}`; teach `tally` how to count it"),
     }

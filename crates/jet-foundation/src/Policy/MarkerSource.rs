@@ -308,7 +308,7 @@ mod tests {
         let caps = rows
             .iter()
             .find(|row| row.name == Syntax::KW_CAPS)
-            .expect("#Caps");
+            .expect("#Abilities");
         assert_eq!(caps.signature.variadic, Some(RuleArgType::Ident));
         assert_eq!(caps.signature.variadic_source_type, Some("Ability"));
 
