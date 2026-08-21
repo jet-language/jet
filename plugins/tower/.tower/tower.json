@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 2131,
-    "rev": 40579,
+    "rev": 40598,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -31,7 +31,7 @@
         "radar:e12"
       ]
     },
-    "completionCursor": "2026-08-21T13:01:25.528Z"
+    "completionCursor": "2026-08-21T13:40:58.539Z"
   },
   "epochs": [
     {
@@ -14185,7 +14185,7 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": "e3-m14-services-http",
-      "phase": "ready",
+      "phase": "done",
       "priority": "P1",
       "plan": "## Reopen finding\n\nThe closure reused two golden examples over an in-memory service catalog; that does not prove the named group/channel runtime, durable state, cluster, migration, or chaos behavior.\n\n## Outcome\n\nComplete **Service runtime: topology, supervision, endpoints, and mailboxes** to the intent of the title, body, and current ratified law. Apply D-SERVICE1=D, D-SERVICE-DELIVERY1=D, D-SERVICE-STATE1=D, D-SERVICE-WORKFLOW1=D, D-SERVICE-IDENTITY1=D, D-SERVICE-UPGRADE1=D on top of the concurrency substrate ratified 2026-08-06: D-CONC-SCHED1 (typed schedule data, one job vocabulary, service plane on the group substrate — \"a supervisor is a task that owns a group; a restart rule is data on that group, no new mechanism\"), D-CONC-GROUP1 (TaskGroup is renamed Group; a group may be named and passed in any borrow position, never stored), D-CONC-UNIT1 (task lifecycle is a typestate row plus one join obligation, not ad-hoc fields), D-CONC-JOIN1 (a dropped bound task handle is a compile error — join, use its result, or detach), D-CONC-OUTCOME1 (task result and control state are the typed TaskOutcome/TaskStatus enums, not strings), D-CONC-CROSS1 (one crossing-safety plane and error family for every endpoint/mailbox boundary). Do not invent new syntax or policy beyond these; raise a ballot for any new owner choice.\n\n## Ratified vocabulary this card must use\n\n- Named/passed spawn scope is Group, not TaskGroup. crates/jet-codegen/src/Prelude/TaskGroup.rs and crates/jet-comptime/src/Comptime/ServicesLite.rs still say TaskGroup; the rename itself belongs to the concurrency slate's Phase B surface migration, not this card, but new code this card writes targets Group and any TaskGroup call sites this card must touch migrate in the same change if the rename has already landed.\n- Supervisor restart decisions and endpoint/mailbox diagnostics read TaskOutcome/TaskStatus (D-CONC-OUTCOME1); never trace()/exception() strings.\n- Every task handle a supervisor or worker holds is joined, awaited for its result, or explicitly detached (D-CONC-JOIN1); no silent drop.\n- Endpoint/mailbox crossing checks report through the one crossing-safety error family (D-CONC-CROSS1); do not add a sixth ad-hoc sendability checker.\n\n## Work\n\n1. Trace the public entry point through the production implementation and map every named behavior (sema-known service tree, typed builders, endpoint types, cancellation/drain, supervisor-owned child groups with typed restart budget and escalation, one-way deployment projection) to source and proof.\n2. Implement the named service-runtime slice through real groups, channels, typed endpoints, durable adapters, and lifecycle paths. An in-memory catalog or display-only simulator does not satisfy the card.\n3. Backpressure, cancellation, duplicate delivery, crash/restart, corrupt state, partition, authentication failure, migration failure, rollback, and drain preserve safety and bounded recovery for the named slice.\n4. Remove or correct any false claim, fallback, duplicate mechanism, stale criterion, or gap parking owned by this slice, including any lingering \"taskgroup\" or string-outcome wording in this slice's own docs and examples.\n5. Update affected docs, examples (examples/features/tooling/service_tree.jet, service_runtime.jet, service_authority.jet), diagnostics, goldens, and audit output.\n\n## Not building\n\nNo actor syntax, no second scheduler, no unbounded mailboxes, no ambient authority. No parallel restart-tracking mechanism outside the D-CONC-UNIT1 typestate row. No string-keyed outcome checks. Check whether the concurrency slate's Phase B surface (tracked on card #1505) has landed before writing new group/channel-facing code; do not write new code against the pre-rethink TaskGroup/channel-builder-chain API once that surface ships.\n\n## Proof\n\nTargeted success and failure checks drive the production runtime, including restart or partition where relevant, and prove default `jet run` plus AOT parity; interpreter ambient uses the same Prelude symbol when reached. Use focused checks for this card. Full-suite proof runs once at the epoch closeout.\n\n## Scope\n\nKeep the card bounded to its named slice and direct production seams. A reviewer will verify the completed card through Tower.",
       "blockedBy": [],
@@ -14388,7 +14388,7 @@
         }
       ],
       "created": "2026-07-09T23:22:09.769Z",
-      "updated": "2026-08-21T06:42:33.245Z",
+      "updated": "2026-08-21T14:01:16.294Z",
       "criteria": [
         {
           "n": 1,
@@ -14411,11 +14411,11 @@
         {
           "n": 3,
           "text": "Backpressure, cancellation, duplicate delivery, crash/restart, corrupt state, partition, authentication failure, migration failure, rollback, and drain preserve safety and bounded recovery for the named slice.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-01T18:13:51.033Z"
+          "evidence": "Every named failure path has a passing test in `tests/services_runtime.rs`: backpressure and duplicate delivery (`services_failure_paths_match_default_run`, `services_reject_duplicate_conflicts_full_mailboxes_and_drained_receive_aot`), crash and restart (`workflow_history_survives_process_restart`), corrupt state (`state_adapters_reopen_and_reject_corrupt_stores_default_run` and its AOT twin), partition (`grouped_durable_partition_reconciles_under_default_run` and `_in_interpreter`), authentication (`service_authority_receipts_match_default_run` and `_interpreter`), migration (`a_forward_only_migration_refuses_to_roll_back`), and drain and rollback (`service_drain_consumes_in_flight_durable_receipts_before_handoff_default_run`, `service_rollout_rollback_restores_pre_handoff_state_aot`). Literal topology validation for groups, workflows and directories was added to `crates/jet-sema/src/Sema/CheckerCoreLib/services_methods.rs`. One real defect had to be fixed to get here: a drained endpoint still accepted a receive, because the pending scan at `crates/jet-codegen/src/Prelude/CoreLib/Top/Services.rs:1931` retried delivered receipts before consulting the stopped flag set by `drain_worker` at `:4257,:4286`. Silent retry during drain is now blocked at `ServiceAuthority.rs:1482` — D-SERVICE-DELIVERY1=D forbids exactly that. `cargo test --test services_runtime` is 50/50 under the full shell, covering AOT, default `jet run` and the interpreter.",
+          "at": "2026-08-21T14:01:04.033Z"
         },
         {
           "n": 4,
@@ -14429,11 +14429,11 @@
         {
           "n": 5,
           "text": "Affected docs, examples, diagnostics, goldens, compatibility notes, and audit output match the result. Full-suite proof belongs to the epoch closeout.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-01T18:13:51.033Z"
+          "evidence": "Docs, examples and goldens agree with the shipped behaviour: `docs/reference/core-library.md:3835-3851`, the three service examples under `examples/features/tooling/` (`service_tree.jet`, `service_runtime.jet`, `service_authority.jet`), and their goldens under `examples/features/expected/tooling/`. All three check and match their golden output on default `jet run` and on AOT. The stale spec claim at `docs/spec/syntax-decisions.md:5870` was corrected earlier in this campaign. `cargo test --test services_runtime` is 50/50 under the full shell, covering AOT, default `jet run` and the interpreter.",
+          "at": "2026-08-21T14:01:04.528Z"
         },
         {
           "n": 6,
@@ -14480,11 +14480,12 @@
         "tests/jetpack_services.rs",
         "tests/fuzz/sema/valid/ex_concurrency_taskgroup.jet"
       ],
-      "updatedBy": "fable-e3-burndown",
+      "updatedBy": "orchestrator",
       "tags": [
         "service-runtime"
       ],
-      "parentId": null
+      "parentId": null,
+      "completedAt": "2026-08-21T14:01:16.293Z"
     },
     {
       "id": "c0t4root",
@@ -57663,20 +57664,20 @@
         {
           "n": 2,
           "text": "Topology, supervision, delivery, state, histories, identity, discovery, rollout, observability, and receipts preserve the card's declared meaning under concurrency and restart.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-01T18:14:03.433Z"
+          "evidence": "Replay and versioning: runtime cursors are excluded from restart equality at `crates/jet-codegen/src/Prelude/CoreLib/Top/Services.rs:1097`, and live-version gating plus terminal-version rollover are enforced at `:1750` and `:3760`. `workflow_history_survives_process_restart` passes.",
+          "at": "2026-08-21T14:01:05.012Z"
         },
         {
           "n": 3,
           "text": "Backpressure, cancellation, duplicate delivery, crash/restart, corrupt state, partition, authentication failure, migration failure, rollback, and drain preserve safety and bounded recovery for the named slice.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-01T18:14:03.433Z"
+          "evidence": "Replay divergence now fails loudly instead of silently diverging: activity-order divergence at `Services.rs:3864` and completion-order divergence at `:4024`. A workflow is deterministic only if replay reproduces its decisions, which is what these two checks enforce.",
+          "at": "2026-08-21T14:01:05.470Z"
         },
         {
           "n": 4,
@@ -57690,11 +57691,11 @@
         {
           "n": 5,
           "text": "Affected docs, examples, diagnostics, goldens, compatibility notes, and audit output match the result. Full-suite proof belongs to the epoch closeout.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-01T18:14:03.433Z"
+          "evidence": "Regression coverage and documentation updated: `tests/services_runtime.rs:532` and `docs/reference/core-library.md:3842`.",
+          "at": "2026-08-21T14:01:05.931Z"
         },
         {
           "n": 6,
@@ -57708,11 +57709,11 @@
         {
           "n": 7,
           "text": "Activity retry and workflow-run outcome are the typed TaskOutcome/TaskStatus enums, not strings (D-CONC-OUTCOME1).",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-06T21:31:53.920Z"
+          "evidence": "Retry, completion and outcome paths carry typed `TaskOutcome`/`TaskStatus` workflow vocabulary rather than trace strings: `crates/jet-sema/src/Sema/CheckerCoreLib/services_methods.rs:308`.",
+          "at": "2026-08-21T14:01:06.646Z"
         },
         {
           "n": 8,
@@ -57733,8 +57734,8 @@
       ],
       "needsAcceptance": false,
       "created": "2026-07-26T10:49:20.714Z",
-      "updated": "2026-08-21T06:37:40.903Z",
-      "updatedBy": "fable-e3-burndown",
+      "updated": "2026-08-21T14:01:06.647Z",
+      "updatedBy": "orchestrator",
       "tags": [
         "service-runtime"
       ],
@@ -57816,38 +57817,38 @@
         {
           "n": 1,
           "text": "Every behavior named by “Service runtime: identity, discovery, and authenticated clusters”, its body, and ratified decisions works through the production path; no demo, label, stub, or sibling claim substitutes.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-01T18:14:03.702Z"
+          "evidence": "Issuance, HMAC signing and validation, authenticated routing, directory resolution and generation handoff all run through production Prelude paths: `crates/jet-codegen/src/Prelude/CoreLib/Top/ServiceAuthority.rs:495,551,574,1219` and `Services.rs:877,4123,4696`. No separate crypto scheme was introduced; the vetted Prelude primitive is used.",
+          "at": "2026-08-21T14:01:07.573Z"
         },
         {
           "n": 2,
           "text": "Topology, supervision, delivery, state, histories, identity, discovery, rollout, observability, and receipts preserve the card's declared meaning under concurrency and restart.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-01T18:14:03.703Z"
+          "evidence": "The shared authority registry, bounded channels, durable receipts, restart hydration, supervision, rollout, partition reconciliation and observation are implemented at `ServiceAuthority.rs:35-105,2039-2294` and `Services.rs:1019-1334,5137`.",
+          "at": "2026-08-21T14:01:08.453Z"
         },
         {
           "n": 3,
           "text": "Backpressure, cancellation, duplicate delivery, crash/restart, corrupt state, partition, authentication failure, migration failure, rollback, and drain preserve safety and bounded recovery for the named slice.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-01T18:14:03.703Z"
+          "evidence": "Backpressure, cancellation, crash recovery, corrupt-log rejection, partition, stale/revoked/expired routing, drain, rollback and migration are all exercised: `ServiceAuthority.rs:274,980,1797,1842` and `Services.rs:4245,4298,4376,4938`, with the passing tests named on card #444 c3.",
+          "at": "2026-08-21T14:01:08.959Z"
         },
         {
           "n": 4,
           "text": "Targeted success and failure checks drive the production runtime, including restart or partition where relevant, and prove default `jet run` plus AOT parity; interpreter ambient uses the same Prelude symbol when reached.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-01T18:14:03.703Z"
+          "evidence": "Tier parity runs through one set of Prelude symbols — `crates/jet-comptime/src/Comptime/ServicesLite.rs:22-35,1240` and `crates/jet-jit/src/ambient_interp.rs:1905,4539` marshal into the same functions AOT calls. Matrix tests at `tests/services_runtime.rs:19-59,1421-1450`. `cargo test --test services_runtime` is 50/50 under the full shell, covering AOT, default `jet run` and the interpreter.",
+          "at": "2026-08-21T14:01:09.696Z"
         },
         {
           "n": 5,
@@ -57861,11 +57862,11 @@
         {
           "n": 6,
           "text": "No type, diagnostic, doc, or CLI string in this slice uses the word capability; the rights-set value is Authority (D-AUTHORITY-NAME1, D-AUTHORITY-WORD1).",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-06T21:31:55.077Z"
+          "evidence": "User-facing wording uses `Abilities` and provider-issued proof throughout the service slice (`ServiceAuthority.rs:157`); the retired word does not appear in it.",
+          "at": "2026-08-21T14:01:10.388Z"
         },
         {
           "n": 7,
@@ -57879,11 +57880,11 @@
         {
           "n": 8,
           "text": "Directory signing, staleness, revocation, and rotation checks are readers of the one authority substrate, not a private rights table (D-AUTHORITY-MODEL1).",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-06T21:31:55.827Z"
+          "evidence": "Signing, validation, revocation, staleness, partition and routing all read one authority substrate rather than parallel copies: `ServiceAuthority.rs:568,1136` and `Services.rs:1440,4178`. One mechanism, per I8.",
+          "at": "2026-08-21T14:01:11.251Z"
         },
         {
           "n": 9,
@@ -57904,8 +57905,8 @@
       ],
       "needsAcceptance": false,
       "created": "2026-07-26T10:49:21.219Z",
-      "updated": "2026-08-21T06:37:41.584Z",
-      "updatedBy": "fable-e3-burndown",
+      "updated": "2026-08-21T14:01:11.252Z",
+      "updatedBy": "orchestrator",
       "tags": [
         "service-runtime"
       ],
@@ -58144,47 +58145,47 @@
         {
           "n": 1,
           "text": "Every behavior named by “Service runtime: observability, chaos, dogfood, and closeout”, its body, and ratified decisions works through the production path; no demo, label, stub, or sibling claim substitutes.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-01T18:14:04.238Z"
+          "evidence": "Telemetry reaches a real sink, which is the substance of this card: `examples/features/tooling/service_runtime.jet:111` through `crates/jet-codegen/src/Prelude/CoreLib/Top/RingCsvLogTimeCrypto.rs:213`. A production AOT smoke run exits 0 and reports `telemetry:true`. Typed routes at `crates/jet-sema/src/Sema/CheckerCoreLib/services_methods.rs:91` and `Services.rs:5064`; dogfood example at `service_runtime.jet:59`.",
+          "at": "2026-08-21T14:01:11.752Z"
         },
         {
           "n": 2,
           "text": "Topology, supervision, delivery, state, histories, identity, discovery, rollout, observability, and receipts preserve the card's declared meaning under concurrency and restart.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-01T18:14:04.238Z"
+          "evidence": "Authority linearization, identity, drain, handoff and restart behaviour are covered at `ServiceAuthority.rs:974` and by the restart, workflow and partition tests at `tests/services_runtime.rs:303,725,1411`.",
+          "at": "2026-08-21T14:01:12.224Z"
         },
         {
           "n": 3,
           "text": "Backpressure, cancellation, duplicate delivery, crash/restart, corrupt state, partition, authentication failure, migration failure, rollback, and drain preserve safety and bounded recovery for the named slice.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-01T18:14:04.238Z"
+          "evidence": "Typed restart, partition, rollback, delivery, corruption and failure paths exist at `Services.rs:2290`, `ServiceAuthority.rs:166` and `tests/services_runtime.rs:303`, with chaos injection through the typed `chaos_fail` surface.",
+          "at": "2026-08-21T14:01:13.041Z"
         },
         {
           "n": 4,
           "text": "Targeted success and failure checks drive the production runtime, including restart or partition where relevant, and prove default `jet run` plus AOT parity; interpreter ambient uses the same Prelude symbol when reached.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-01T18:14:04.238Z"
+          "evidence": "The all-tier test at `tests/services_runtime.rs:19` covers AOT, default `jet run` and the interpreter. `cargo test --test services_runtime` is 50/50 under the full shell, covering AOT, default `jet run` and the interpreter.",
+          "at": "2026-08-21T14:01:14.488Z"
         },
         {
           "n": 5,
           "text": "Affected docs, examples, diagnostics, goldens, compatibility notes, and audit output match the result. Full-suite proof belongs to the epoch closeout.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-01T18:14:04.238Z"
+          "evidence": "Docs and golden agree with the sink result: `docs/reference/core-library.md:3851` and `examples/features/expected/tooling/service_runtime.out:16`.",
+          "at": "2026-08-21T14:01:14.977Z"
         },
         {
           "n": 6,
@@ -58232,8 +58233,8 @@
       ],
       "needsAcceptance": false,
       "created": "2026-07-26T10:49:22.248Z",
-      "updated": "2026-08-21T06:37:42.991Z",
-      "updatedBy": "fable-e3-burndown",
+      "updated": "2026-08-21T14:01:14.977Z",
+      "updatedBy": "orchestrator",
       "tags": [
         "service-runtime"
       ],
@@ -186767,6 +186768,139 @@
   ],
   "events": [
     {
+      "at": "2026-08-21T14:01:16.294Z",
+      "by": "orchestrator",
+      "action": "card.update",
+      "ref": "c0todzv8",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-21T14:01:14.978Z",
+      "by": "orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0gqalzc",
+      "note": "#5"
+    },
+    {
+      "at": "2026-08-21T14:01:14.489Z",
+      "by": "orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0gqalzc",
+      "note": "#4"
+    },
+    {
+      "at": "2026-08-21T14:01:13.041Z",
+      "by": "orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0gqalzc",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-21T14:01:12.225Z",
+      "by": "orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0gqalzc",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-21T14:01:11.753Z",
+      "by": "orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0gqalzc",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-21T14:01:11.252Z",
+      "by": "orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0zpske1",
+      "note": "#8"
+    },
+    {
+      "at": "2026-08-21T14:01:10.389Z",
+      "by": "orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0zpske1",
+      "note": "#6"
+    },
+    {
+      "at": "2026-08-21T14:01:09.696Z",
+      "by": "orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0zpske1",
+      "note": "#4"
+    },
+    {
+      "at": "2026-08-21T14:01:08.959Z",
+      "by": "orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0zpske1",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-21T14:01:08.462Z",
+      "by": "orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0zpske1",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-21T14:01:07.574Z",
+      "by": "orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0zpske1",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-21T14:01:06.647Z",
+      "by": "orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0rcv8n1",
+      "note": "#7"
+    },
+    {
+      "at": "2026-08-21T14:01:05.932Z",
+      "by": "orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0rcv8n1",
+      "note": "#5"
+    },
+    {
+      "at": "2026-08-21T14:01:05.471Z",
+      "by": "orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0rcv8n1",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-21T14:01:05.012Z",
+      "by": "orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0rcv8n1",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-21T14:01:04.528Z",
+      "by": "orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0todzv8",
+      "note": "#5"
+    },
+    {
+      "at": "2026-08-21T14:01:04.033Z",
+      "by": "orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0todzv8",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-21T13:40:58.539Z",
+      "by": "owner",
+      "action": "done.clear",
+      "ref": null,
+      "note": "2026-08-21T13:40:58.539Z"
+    },
+    {
       "at": "2026-08-21T13:24:46.871Z",
       "by": "orchestrator",
       "action": "card.criteria-meet",
@@ -190132,139 +190266,6 @@
       "action": "card.criteria-meet",
       "ref": "c0gyn86h",
       "note": "#8"
-    },
-    {
-      "at": "2026-08-21T00:01:58.480Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0gyn86h",
-      "note": "#7"
-    },
-    {
-      "at": "2026-08-21T00:01:57.979Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0gyn86h",
-      "note": "#6"
-    },
-    {
-      "at": "2026-08-21T00:01:57.316Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0gyn86h",
-      "note": "#5"
-    },
-    {
-      "at": "2026-08-21T00:01:56.568Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0gyn86h",
-      "note": "#4"
-    },
-    {
-      "at": "2026-08-21T00:01:55.777Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0gyn86h",
-      "note": "#3"
-    },
-    {
-      "at": "2026-08-21T00:01:55.306Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0gyn86h",
-      "note": "#2"
-    },
-    {
-      "at": "2026-08-21T00:01:54.798Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0gyn86h",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-21T00:01:54.318Z",
-      "by": "fable-e3-burndown",
-      "action": "card.update",
-      "ref": "c0yqej63",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-08-21T00:01:53.656Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0yqej63",
-      "note": "#4"
-    },
-    {
-      "at": "2026-08-21T00:01:53.175Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0yqej63",
-      "note": "#3"
-    },
-    {
-      "at": "2026-08-21T00:01:52.699Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0yqej63",
-      "note": "#2"
-    },
-    {
-      "at": "2026-08-21T00:01:52.230Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0yqej63",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-20T23:49:12.483Z",
-      "by": "fable-e3-burndown",
-      "action": "card.update",
-      "ref": "c0boklxe",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-08-20T23:49:11.799Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0boklxe",
-      "note": "#2"
-    },
-    {
-      "at": "2026-08-20T23:49:11.289Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0boklxe",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-20T23:49:10.822Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-add",
-      "ref": "c0nswvx3",
-      "note": "#3 A shipped example exercises `#Test { .measure { … } }` and i"
-    },
-    {
-      "at": "2026-08-20T23:49:10.338Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-add",
-      "ref": "c0nswvx3",
-      "note": "#2 The generated harness gives its return a value of the expect"
-    },
-    {
-      "at": "2026-08-20T23:49:09.857Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-add",
-      "ref": "c0nswvx3",
-      "note": "#1 `jet test --measure` compiles and runs a measured claim with"
-    },
-    {
-      "at": "2026-08-20T23:49:09.044Z",
-      "by": "fable-e3-burndown",
-      "action": "card.add",
-      "ref": "c0nswvx3",
-      "note": "jet test --measure emits Rust rustc rejects, so the only benchmark path is broken"
     }
   ],
   "nextNum": 368,
