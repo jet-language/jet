@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 2131,
-    "rev": 40553,
+    "rev": 40571,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -31,7 +31,7 @@
         "radar:e12"
       ]
     },
-    "completionCursor": "2026-08-21T07:12:28.425Z"
+    "completionCursor": "2026-08-21T13:01:25.528Z"
   },
   "epochs": [
     {
@@ -1905,7 +1905,7 @@
       "title": "M09 · Type system v2 and numbers",
       "goal": "One range spelling and interval prover, the number grid, exact-by-default, Time on the unit plane, one measure substrate, measured values, 4i literals, typed JSON numbers, matrix surface design, fallible allocation. Depends on M03.",
       "criteria": [],
-      "status": "open",
+      "status": "review-ready",
       "created": "2026-08-12T18:10:01.949Z"
     },
     {
@@ -1932,7 +1932,7 @@
       "title": "M12 · Authority and boundary law",
       "goal": "One rights tree, effect roots, the Authority value, manifest authority block, gate ledger and ladder, capability-word retirement, panic as a deniable effect row, and every crossing naming schema and leaving facts. Depends on M02.",
       "criteria": [],
-      "status": "open",
+      "status": "review-ready",
       "created": "2026-08-12T18:10:03.316Z"
     },
     {
@@ -97447,7 +97447,7 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": "e3-m09-types-numbers",
-      "phase": "ready",
+      "phase": "done",
       "priority": "P1",
       "plan": "Implements D-TYPE2-DEFAULT1 — ratified 2026-08-06. Read each decision verbatim (tower brief on this card's parent proposal, or tower decision show) before building; the ratified outcome text is the law, this plan is the route. Every requirement is a discrete exit criterion below: meet each with targeted proof (tests, snapshots, examples with golden output), and keep I9 tier parity inside this card — AOT, default jet run (JIT), and the interpreter must agree on every surface this card ships before it closes. Delete every superseded form the decisions retire in the same change; do not leave compatibility shims or parallel spellings. Reference: docs/proposals/type-system-v2-carriers-and-knowledge.md.",
       "blockedBy": [],
@@ -97572,11 +97572,11 @@
         {
           "n": 12,
           "text": "`scripts/agent/jet-env cargo test --test math_display_parity -- exact_default_numbers_match_all_tiers` and `scripts/agent/jet-env cargo test --test numeric_widening -- exact_and_approximate_widening_requires_approx_for_narrowing` pass.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-12T18:17:35.606Z"
+          "evidence": "Both named tests pass under the full shell. `cargo test --test math_display_parity -- exact_default_numbers_match_all_tiers` ok in 6.53s; `cargo test --test numeric_widening -- exact_and_approximate_widening_requires_approx_for_narrowing` ok in 12.73s. numeric_widening had been failing E0320 on 48 retired `Type.{…}` literals; the fixture migration to `Type{…}` under D-LIT-DOT1 cleared it.",
+          "at": "2026-08-21T11:43:06.851Z"
         }
       ],
       "refs": [
@@ -97588,9 +97588,10 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-06T21:34:58.286Z",
-      "updated": "2026-08-21T06:59:35.561Z",
-      "updatedBy": "fable-e3-burndown",
-      "workOrder": 600
+      "updated": "2026-08-21T11:43:07.910Z",
+      "updatedBy": "orchestrator",
+      "workOrder": 600,
+      "completedAt": "2026-08-21T11:43:07.909Z"
     },
     {
       "id": "c0p834bt",
@@ -99189,7 +99190,7 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": "e3-m11-concurrency",
-      "phase": "ready",
+      "phase": "done",
       "priority": "P1",
       "plan": "Implements D-CONC-GROUP1 — ratified 2026-08-06. Read each decision verbatim (tower brief on this card's parent proposal, or tower decision show) before building; the ratified outcome text is the law, this plan is the route. Every requirement is a discrete exit criterion below: meet each with targeted proof (tests, snapshots, examples with golden output), and keep I9 tier parity inside this card — AOT, default jet run (JIT), and the interpreter must agree on every surface this card ships before it closes. Delete every superseded form the decisions retire in the same change; do not leave compatibility shims or parallel spellings. Reference: docs/proposals/concurrency-work-is-a-value.md.",
       "blockedBy": [],
@@ -99266,11 +99267,11 @@
         {
           "n": 5,
           "text": "Tier parity (I9) is proved inside this card: parser, sema, TIR, AOT, JIT/dev, comptime, REPL and web all show the same behavior, with one test per tier.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-06T21:35:38.359Z"
+          "evidence": "`cargo test --test taskgroup_parameter_tiers` is 19/19 under the full shell. One tier proof per row: parser :38, TIR :53-74, AOT :77-84, JIT/dev :87-90, interpreter :92-98, comptime :100-104, REPL :106-118, web boundary :121-130. Two defects had to be fixed to get there. The REPL misclassified any source opening with a comment, because `looks_like_item` only inspected the trimmed start; it now skips comments before classifying (`crates/jet-repl/src/lib.rs:1381-1422`), and method dispatch carries `Group` methods through REPL evaluation. The test then hit a genuine stack overflow in TIR task-group evaluation on libtest's default stack, so the REPL row runs on an 8 MiB worker (`tests/taskgroup_parameter_tiers.rs:107-117`).",
+          "at": "2026-08-21T13:22:45.184Z"
         },
         {
           "n": 6,
@@ -99309,9 +99310,10 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-06T21:35:36.629Z",
-      "updated": "2026-08-21T06:24:15.029Z",
-      "updatedBy": "fable-e3-burndown",
-      "workOrder": 710
+      "updated": "2026-08-21T13:22:49.387Z",
+      "updatedBy": "orchestrator",
+      "workOrder": 710,
+      "completedAt": "2026-08-21T13:22:49.387Z"
     },
     {
       "id": "c0pb8211",
@@ -99546,7 +99548,7 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": "e3-m12-authority-boundary",
-      "phase": "ready",
+      "phase": "done",
       "priority": "P1",
       "plan": "Implements D-AUTHORITY-ROOTS1 — ratified 2026-08-06. Read each decision verbatim (tower brief on this card's parent proposal, or tower decision show) before building; the ratified outcome text is the law, this plan is the route. Every requirement is a discrete exit criterion below: meet each with targeted proof (tests, snapshots, examples with golden output), and keep I9 tier parity inside this card — AOT, default jet run (JIT), and the interpreter must agree on every surface this card ships before it closes. Delete every superseded form the decisions retire in the same change; do not leave compatibility shims or parallel spellings. Reference: docs/proposals/authority-one-model.md.",
       "blockedBy": [],
@@ -99731,11 +99733,11 @@
         {
           "n": 17,
           "text": "examples/features/effects/effect_grant.jet and lowlevel/polyglot_fortran both compile and run without naming Panic",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-16T11:08:38.371Z"
+          "evidence": "The interpreter no longer refuses extern calls. TExprKind::ExternCall now marshals through the ambient adapter at crates/jet-codegen/src/Codegen/TIR/eval/exprs.rs:9644, which calls the same generated jet_ffi_*_cabi bridge resident JIT uses (crates/jet-jit/src/Ffi.rs:292) and AOT wraps (TIR/emit/expressions.rs:6277) — one Prelude path, three marshalling adapters, per I9. Eligibility and interpreter binding at crates/jet-foundation/src/AST/ffi.rs:11, crates/jet-driver/src/InterpreterBoundary.rs:136, Source/Interpreter.rs:133. Proof: tests/run_interpret.rs c_extern_calls_match_aot_and_interpreter passes — release AOT, default jet run and forced --interpret all print 10 then 7. effect_grant.jet runs without naming Panic. polyglot_fortran stops at E3201 because gfortran is absent from this machine, which is the existing capability gate, not a tier gap.",
+          "at": "2026-08-21T12:33:55.954Z"
         },
         {
           "n": 18,
@@ -99757,9 +99759,10 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-06T21:35:44.281Z",
-      "updated": "2026-08-21T06:07:19.668Z",
-      "updatedBy": "fable-e3-burndown",
-      "workOrder": 1120
+      "updated": "2026-08-21T12:33:56.640Z",
+      "updatedBy": "orchestrator",
+      "workOrder": 1120,
+      "completedAt": "2026-08-21T12:33:56.639Z"
     },
     {
       "id": "c0pdzfiu",
@@ -99870,7 +99873,7 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": "e3-m12-authority-boundary",
-      "phase": "ready",
+      "phase": "done",
       "priority": "P1",
       "plan": "Implements D-AUTHORITY-NAME1 — ratified 2026-08-06. Read each decision verbatim (tower brief on this card's parent proposal, or tower decision show) before building; the ratified outcome text is the law, this plan is the route. Every requirement is a discrete exit criterion below: meet each with targeted proof (tests, snapshots, examples with golden output), and keep I9 tier parity inside this card — AOT, default jet run (JIT), and the interpreter must agree on every surface this card ships before it closes. Delete every superseded form the decisions retire in the same change; do not leave compatibility shims or parallel spellings. Reference: docs/proposals/authority-one-model.md.",
       "blockedBy": [],
@@ -99922,11 +99925,11 @@
         {
           "n": 5,
           "text": "The grant handle, process.run, plugin.load and session holders all take the Authority type",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-06T21:35:51.939Z"
+          "evidence": "`cargo test --test authority` is 26/26. The grant handle, `process.run`, `plugin.load` and the session holders all take the `Abilities` type: boundary and session-holder proof at `tests/authority.rs:72-94`, sema requiring the type at `crates/jet-sema/src/Sema/CheckerCoreLib/core_call.rs:5152-5185`, typed AOT boundary emission at `crates/jet-codegen/src/Codegen/TIR/emit/core_calls.rs:3134-3157`.",
+          "at": "2026-08-21T13:22:45.669Z"
         },
         {
           "n": 6,
@@ -99949,11 +99952,11 @@
         {
           "n": 8,
           "text": "Tier parity (I9) is proved inside this card: parser, sema, TIR, AOT, JIT/dev, comptime, REPL and web all show the same behavior, with one test per tier.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-06T21:35:52.967Z"
+          "evidence": "Tier parity proved row by row in `tests/authority.rs`: parser :130-135, sema/TIR/AOT/JIT/dev :137-167, comptime :169-174, REPL :176-188, web :192-202. Semantics stay in the Prelude at `crates/jet-codegen/src/Prelude/Core/Authority.rs:53-85`; every tier marshals into it. Two real defects were fixed on the way. Comptime `Abilities` values were mislowered as static calls and died E0956; receivers now resolve `@`-prefixed constants and stay Prelude-backed method calls (`crates/jet-codegen/src/Codegen/TIR/lower/method_calls.rs:5543-5580`). The web row was asserting on a stale export name and now checks the real one, `jet_export_run` (`tests/authority.rs:198`).",
+          "at": "2026-08-21T13:22:46.137Z"
         }
       ],
       "refs": [
@@ -99965,9 +99968,10 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-06T21:35:50.202Z",
-      "updated": "2026-08-21T05:19:42.351Z",
-      "updatedBy": "fable-e3-burndown",
-      "workOrder": 1130
+      "updated": "2026-08-21T13:22:50.283Z",
+      "updatedBy": "orchestrator",
+      "workOrder": 1130,
+      "completedAt": "2026-08-21T13:22:50.283Z"
     },
     {
       "id": "c0exxobe",
@@ -100252,7 +100256,7 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": "e3-m12-authority-boundary",
-      "phase": "ready",
+      "phase": "done",
       "priority": "P1",
       "plan": "Implements D-AUTHORITY-WORD1 — ratified 2026-08-06. Read each decision verbatim (tower brief on this card's parent proposal, or tower decision show) before building; the ratified outcome text is the law, this plan is the route. Every requirement is a discrete exit criterion below: meet each with targeted proof (tests, snapshots, examples with golden output), and keep I9 tier parity inside this card — AOT, default jet run (JIT), and the interpreter must agree on every surface this card ships before it closes. Delete every superseded form the decisions retire in the same change; do not leave compatibility shims or parallel spellings. Reference: docs/proposals/authority-one-model.md.",
       "blockedBy": [],
@@ -100355,11 +100359,11 @@
         {
           "n": 9,
           "text": "Tier parity (I9) is proved inside this card: parser, sema, TIR, AOT, JIT/dev, comptime, REPL and web all show the same behavior, with one test per tier.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-06T21:36:03.146Z"
+          "evidence": "`cargo test --test authority` is 26/26 including the web row at `tests/authority.rs:192-202`. The gap was never the rename: an `#Abilities` scope already lowers natively to a region plus `JetAuthority::from_rights` (`crates/jet-codegen/src/Codegen/TIR/lower/statements.rs:3665`), and web was the one tier that could not carry it because wasm had no support or emission arm for the sema-resolved `List<String>` rights literal. Both arms added in `crates/jet-codegen/src/Codegen/Web.rs` (`web_wasm_expr_supported`, `wasm_emit_expr`). No second interpretation of abilities was introduced, per I8 and I9.",
+          "at": "2026-08-21T13:22:46.596Z"
         },
         {
           "n": 10,
@@ -100416,9 +100420,10 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-06T21:35:59.251Z",
-      "updated": "2026-08-21T06:30:14.851Z",
-      "updatedBy": "fable-e3-burndown",
-      "workOrder": 1000
+      "updated": "2026-08-21T13:22:51.211Z",
+      "updatedBy": "orchestrator",
+      "workOrder": 1000,
+      "completedAt": "2026-08-21T13:22:51.210Z"
     },
     {
       "id": "c08h3xqu",
@@ -139599,7 +139604,7 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "planning",
+      "phase": "done",
       "priority": "P1",
       "plan": null,
       "checkSteps": null,
@@ -139615,38 +139620,38 @@
         {
           "n": 1,
           "text": "D-ERRSIGIL1 is ratified and recorded in docs/spec/syntax-decisions.md",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-21T00:14:19.022Z"
+          "evidence": "D-ERRSIGIL1 ratified A by the owner on 2026-08-21 and recorded in `docs/spec/syntax-decisions.md`. The rule: `?` means absence and nothing else; a fallible type is written `T ! E`, for example `Config ! IOError`. Call-site operators are unchanged. Option B, a second call-site sigil, was considered and rejected as too much new surface for the distinction it buys.",
+          "at": "2026-08-21T13:22:47.058Z"
         },
         {
           "n": 2,
           "text": "The chosen spelling parses, and the retired one teaches it with a registered diagnostic and a UI fixture",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-21T00:14:19.522Z"
+          "evidence": "The ratified spelling parses as a type wherever a type is accepted (`crates/jet-parser/src/Parser/Types.rs:891`, formatter at `crates/jet-parser/src/Formatter/Expressions.rs:687`), and the retired spelling teaches it through a registered diagnostic with a UI fixture: `docs/spec/diagnostic-rows.md:276`, `tests/ui/retired_fallible_type_sigil.jet:3`.",
+          "at": "2026-08-21T13:22:47.520Z"
         },
         {
           "n": 3,
           "text": "jet fmt rewrites every affected site in the corpus",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-21T00:14:19.981Z"
+          "evidence": "`jet fmt --check examples` is clean. Getting there exposed a formatter bug unrelated to this card and fixed alongside it: both loop-header printers wrote the implicit binding back as the keyword `it`, so every bindingless comprehension came out of `jet fmt` in a form the parser refuses (E0003), and the parser's own finite-source test still matched the retired `->` rather than `:>`. Fixed in `crates/jet-parser/src/Formatter/Expressions.rs:1614-1630`, `Formatter/Statements.rs:478-495`, `Formatter/mod.rs:1200-1208` and `Parser/Statements/control.rs:67-102`.",
+          "at": "2026-08-21T13:22:47.997Z"
         },
         {
           "n": 4,
           "text": "Tier parity: AOT, default jet run and the interpreter agree on an example using the new spelling",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-21T00:14:20.462Z"
+          "evidence": "Tier parity on `examples/features/errors/fallible_run.jet` with golden `examples/features/expected/errors/fallible_run.out`: release AOT, default `jet run` and the forced interpreter all print `port 8080` and exit 0. Tier test at `tests/tir_control_and_data.rs:205`.",
+          "at": "2026-08-21T13:22:48.463Z"
         }
       ],
       "refs": [],
@@ -139656,8 +139661,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-21T00:14:17.986Z",
-      "updated": "2026-08-21T11:05:45.213Z",
-      "updatedBy": "owner"
+      "updated": "2026-08-21T13:22:52.525Z",
+      "updatedBy": "orchestrator",
+      "completedAt": "2026-08-21T13:22:52.525Z"
     },
     {
       "id": "c01n3iu7",
@@ -186761,6 +186767,132 @@
   ],
   "events": [
     {
+      "at": "2026-08-21T13:22:52.525Z",
+      "by": "orchestrator",
+      "action": "card.update",
+      "ref": "c0uyc9is",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-21T13:22:51.211Z",
+      "by": "orchestrator",
+      "action": "card.update",
+      "ref": "c0575p3w",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-21T13:22:50.283Z",
+      "by": "orchestrator",
+      "action": "card.update",
+      "ref": "c0zjmtah",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-21T13:22:49.388Z",
+      "by": "orchestrator",
+      "action": "card.update",
+      "ref": "c0r2uq88",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-21T13:22:48.463Z",
+      "by": "orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0uyc9is",
+      "note": "#4"
+    },
+    {
+      "at": "2026-08-21T13:22:47.997Z",
+      "by": "orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0uyc9is",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-21T13:22:47.520Z",
+      "by": "orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0uyc9is",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-21T13:22:47.058Z",
+      "by": "orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0uyc9is",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-21T13:22:46.596Z",
+      "by": "orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0575p3w",
+      "note": "#9"
+    },
+    {
+      "at": "2026-08-21T13:22:46.138Z",
+      "by": "orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0zjmtah",
+      "note": "#8"
+    },
+    {
+      "at": "2026-08-21T13:22:45.669Z",
+      "by": "orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0zjmtah",
+      "note": "#5"
+    },
+    {
+      "at": "2026-08-21T13:22:45.184Z",
+      "by": "orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0r2uq88",
+      "note": "#5"
+    },
+    {
+      "at": "2026-08-21T13:01:25.528Z",
+      "by": "owner",
+      "action": "done.clear",
+      "ref": null,
+      "note": "2026-08-21T13:01:25.528Z"
+    },
+    {
+      "at": "2026-08-21T12:33:56.640Z",
+      "by": "orchestrator",
+      "action": "card.update",
+      "ref": "c09mc3y7",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-21T12:33:55.955Z",
+      "by": "orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c09mc3y7",
+      "note": "#17"
+    },
+    {
+      "at": "2026-08-21T12:03:08.522Z",
+      "by": "owner",
+      "action": "done.clear",
+      "ref": null,
+      "note": "2026-08-21T12:03:08.522Z"
+    },
+    {
+      "at": "2026-08-21T11:43:07.910Z",
+      "by": "orchestrator",
+      "action": "card.update",
+      "ref": "c04yd90c",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-21T11:43:06.852Z",
+      "by": "orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c04yd90c",
+      "note": "#12"
+    },
+    {
       "at": "2026-08-21T11:28:56.480Z",
       "by": "orchestrator",
       "action": "card.update",
@@ -190133,132 +190265,6 @@
       "action": "card.criteria-meet",
       "ref": "c0mopaxh",
       "note": "#4"
-    },
-    {
-      "at": "2026-08-20T22:58:50.974Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0mopaxh",
-      "note": "#3"
-    },
-    {
-      "at": "2026-08-20T22:58:50.137Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0mopaxh",
-      "note": "#2"
-    },
-    {
-      "at": "2026-08-20T22:58:49.316Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0mopaxh",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-20T22:58:48.834Z",
-      "by": "fable-e3-burndown",
-      "action": "card.update",
-      "ref": "c0jser1q",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-08-20T22:58:48.180Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0jser1q",
-      "note": "#6"
-    },
-    {
-      "at": "2026-08-20T22:58:47.710Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0jser1q",
-      "note": "#5"
-    },
-    {
-      "at": "2026-08-20T22:58:47.251Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0jser1q",
-      "note": "#4"
-    },
-    {
-      "at": "2026-08-20T22:58:46.767Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0jser1q",
-      "note": "#3"
-    },
-    {
-      "at": "2026-08-20T22:58:46.299Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0jser1q",
-      "note": "#2"
-    },
-    {
-      "at": "2026-08-20T22:58:45.833Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0jser1q",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-20T22:52:02.154Z",
-      "by": "owner",
-      "action": "done.clear",
-      "ref": null,
-      "note": "2026-08-20T22:52:02.154Z"
-    },
-    {
-      "at": "2026-08-20T22:19:33.562Z",
-      "by": "fable-e3-burndown",
-      "action": "card.update",
-      "ref": "c0w38v39",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-08-20T22:19:32.862Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0w38v39",
-      "note": "#7"
-    },
-    {
-      "at": "2026-08-20T22:19:32.301Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0w38v39",
-      "note": "#6"
-    },
-    {
-      "at": "2026-08-20T22:19:31.801Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0w38v39",
-      "note": "#5"
-    },
-    {
-      "at": "2026-08-20T22:19:31.138Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0w38v39",
-      "note": "#4"
-    },
-    {
-      "at": "2026-08-20T22:19:30.421Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0w38v39",
-      "note": "#3"
-    },
-    {
-      "at": "2026-08-20T22:19:29.695Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0w38v39",
-      "note": "#2"
     }
   ],
   "nextNum": 368,
