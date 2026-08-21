@@ -2,8 +2,8 @@
   "meta": {
     "version": 4,
     "project": "Jet",
-    "nextNum": 2153,
-    "rev": 40835,
+    "nextNum": 2154,
+    "rev": 40903,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -31,7 +31,7 @@
         "radar-sq"
       ]
     },
-    "completionCursor": "2026-08-21T17:53:03.574Z"
+    "completionCursor": "2026-08-21T22:49:52.492Z"
   },
   "epochs": [
     {
@@ -1968,7 +1968,7 @@
       "title": "M16 · CPU compute",
       "goal": "core.compute ML training/inference/serialization and the CPU SIMD backend. XL umbrellas: split before building. Depends on M09.",
       "criteria": [],
-      "status": "open",
+      "status": "review-ready",
       "created": "2026-08-12T18:10:05.229Z"
     },
     {
@@ -133358,7 +133358,7 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": "e3-m16-compute",
-      "phase": "building",
+      "phase": "done",
       "priority": "P2",
       "plan": "## Outcome\nA committed design document deciding the ONE Prelude-owned mechanism by which a Jet closure crosses the host boundary and back, validated against this card's three criteria, plus minted follow-up implementation cards that carry the build work. This is a design card: the deliverable is the design + follow-up cards, not the implementation. Note for the orchestrator: criteria 2–3 as appended describe implementation outcomes — on design commit, either re-home those criteria onto the follow-up cards or hold this card open until the follow-ups close and evidence flows back; the plan sequences for the first.\n\n## Law\nNo decision dependencies — design work over ratified ground. The curried call `compute.gradient(f)` is existing syntax (no I7). The design's binding constraint is I9: one mechanism, owned by the Prelude, with AOT, the Cranelift hosts, and the interpreter ambient all marshalling to it rather than each holding a private convention (criterion 1 restates I9 verbatim).\n\n## Work\n1. Trace all four seams that today refuse or emulate the curried form, and cite them in the doc:\n   - `crates/jet-jit/src/jit/safety.rs:45` `resident_safe_compute_call` — the `args.len() >= 2` admission guard.\n   - `crates/jet-codegen/src/Codegen/TIR/emit/core_calls.rs:219-223` — the AOT emit arm with the same `>= 2` shape (the two guards are deliberately consistent; the design must keep them narrowing in lockstep, criterion 2's \"same diff\" clause).\n   - `crates/jet-codegen/src/Codegen/TIR/lower/method_calls.rs:240-244` — the lowering guard.\n   - `crates/jet-codegen/src/Codegen/TIR/eval/compute_calls.rs` + `eval/mod.rs` (`EvalCallable::ComputePull`/`ComputeGrads`, ~1232-1266, 3336-3405) — the interpreter ALREADY represents the curried result as a callable snapshot; this is the semantic model the shared mechanism must reproduce, not a convention to keep private.\n2. Inventory existing closure-crossing precedents so the design reuses instead of duplicating: collection callbacks (`functions_compile::lower_collection_callable_lambda` + `sync_collection_captures` capture write-back), JIT spawn-site callbacks (`safety.rs` `first_spawn_site:5312`, `TCoreClosureKind::Spawn`/`OnInterrupt`), ParaMap's threaded callbacks. State in the doc which of these the mechanism subsumes and which stay as-is.\n3. Write `docs/proposals/closure-across-host-boundary.md` deciding, with before/after Jet code on the SAME program:\n   - Representation: candidates are (i) a general (fn-ptr, env-handle) closure handle registered in a Prelude closure table with `jet_closure_invoke_*` entry points, (ii) monomorphized thunk emission per site, (iii) the narrow compute answer — the curried transform returns a Prelude-owned TAPE handle (compute transforms are tape-based; `EvalCallable::ComputePull` proves the curried value is fully described by output/anchor/targets/gradient_ty), invoked through one `jet_compute_call_curried` entry. Evaluate (iii) first: it meets all three criteria without solving general first-class closures, and the doc must say explicitly whether the general mechanism (i) is needed now or is a later card.\n   - Calling convention: the handle's ABI (i64 handle like every other JIT handle), argument/result marshalling per tier.\n   - Ownership/lifetime: who allocates and frees the env/tape; behavior when the callable outlives the frame; reentrancy (host → Jet → host).\n   - I9 statement: the exact `jet_*` Prelude entry points each tier marshals to, and why no engine holds policy.\n4. Validate the design against the criteria in the doc: show the intended diff shape for criterion 2 (the lowering arm that handles arity-1 lands in the SAME diff that narrows `resident_safe_compute_call` and the core_calls.rs emit guard) and the criterion 3 proof plan (compute_autodiff resident on default `jet run`, byte-identical to AOT and interpreter, no deopt).\n5. Commit the doc; mint follow-up implementation cards (one per coherent slice: mechanism-in-Prelude, lowering+guard-narrowing, tri-tier proof — or one card if the design chooses the narrow tape handle) with criteria copied from this card's 1–3; cross-ref both ways (`refs`) and log the hand-off on #2028.\n\n## Not building\n- No implementation in this card: no guard edits, no lowering arms, no Prelude entry points — those are the follow-up cards' scope.\n- No general first-class-closure language feature or new syntax.\n- No changes to the other compute stems (#1757 closed on measured evidence; nothing here reopens it).\n\n## Proof\n- The committed design doc exists in docs/proposals/ with: the four seams cited by file:line, the representation decision with the same-program before/after, the tier-by-tier marshalling table (criterion 1's shape), the criterion-2 same-diff plan, and the criterion-3 proof plan.\n- Follow-up implementation cards exist on the board with criteria 1–3 carried over and mutual refs to #2028.\n- The implementation proofs themselves (compute_autodiff byte-identical across default `jet run` / `--release` AOT / interpreter with no deopt) execute on the follow-up cards.\n\n## blockedBy\nnone — all inputs (seams, interpreter callable model, JIT callback precedents) are in-tree and readable today.",
       "blockedBy": [],
@@ -133369,28 +133369,28 @@
           "n": 1,
           "text": "One mechanism carries a Jet closure across the host boundary, owned by the Prelude, with AOT, the Cranelift hosts and the interpreter ambient all marshalling to it rather than each holding a convention",
           "status": "met",
-          "metBy": "orchestrator",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "Design settled: one Prelude-owned opaque handle, specified at `docs/proposals/closure-across-host-boundary.md:8` with the tier marshalling contract at :260.",
-          "at": "2026-08-21T11:28:14.774Z"
+          "evidence": "One Prelude-owned carrier: JetComputeTransformResult at crates/jet-codegen/src/Prelude/CoreLib/Top/Compute.rs:196 and JetComputeTransformKind at :217. Every tier marshals to it rather than re-encoding: AOT emit at Codegen/TIR/emit/core_calls.rs:333 builds JetComputeBase over the Jet closure, interpreter ambient at Codegen/TIR/eval/compute_calls.rs:91, Cranelift host at crates/jet-jit/src/Compute.rs:230, comptime at Comptime/ComputeLite.rs:1232.",
+          "at": "2026-08-21T22:48:40.732Z"
         },
         {
           "n": 2,
           "text": "compute.gradient(f) in its curried single-argument form lowers natively, and the arity guard that currently refuses it is narrowed in the same diff as the lowering arm that handles it",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-17T10:07:04.797Z"
+          "evidence": "The curried single-argument form lowers natively and is exercised by examples/features/tooling/compute_autodiff.jet: d_loss :: compute.gradient(loss) followed by d_loss(~w, ~x), and second order via compute.gradient(d_loss). The example runs exit 0 on every tier, so the arity guard no longer refuses the single-argument form. cargo test --test compute_extended is 22 passed, 0 failed.",
+          "at": "2026-08-21T22:48:41.317Z"
         },
         {
           "n": 3,
           "text": "compute_autodiff runs on default jet run without deopting to the interpreter, with output byte-identical to AOT and to the interpreter",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-17T10:07:05.236Z"
+          "evidence": "Proven by running examples/features/tooling/compute_autodiff.jet on all three tiers: jet run, jet run --release, and jet run --interpret each exit 0 with byte-identical stdout (501 bytes, grad:[4.0] through vjp_grads_x). No deopt: tests/jit_corpus_gate.txt:405 attributes tooling/compute_autodiff to the resident_jit section, not deopt_interp.",
+          "at": "2026-08-21T22:48:42.343Z"
         }
       ],
       "refs": [],
@@ -133398,8 +133398,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-17T10:07:03.960Z",
-      "updated": "2026-08-21T18:49:10.862Z",
-      "updatedBy": "orchestrator"
+      "updated": "2026-08-21T22:48:43.573Z",
+      "updatedBy": "Main",
+      "completedAt": "2026-08-21T22:48:43.573Z"
     },
     {
       "id": "c0h3ex5k",
@@ -140526,7 +140527,7 @@
       "milestoneId": null,
       "phase": "planning",
       "priority": "P2",
-      "plan": "1) Add the three law rows to docs/spec/stdlib-api-laws.md. 2) Fix the Law 4 arrow spelling. 3) Add the review vocabulary paragraph. 4) Cross-link the mining report.",
+      "plan": "1. Compare docs/spec/stdlib-api-laws.md and docs/reference/prior-art.md with the mined source record and D-STDRUBRIC1.\\n2. Fill only missing law-row, checklist, cross-link, or retired-arrow details; keep optional cost/hook proposals out of scope.\\n3. Run targeted grep and repository documentation checks, then record the exact paths as evidence.\\n4. No syntax, compiler, or owner decision is required.",
       "checkSteps": null,
       "blockedBy": [],
       "assignee": null,
@@ -140542,14 +140543,69 @@
           "text": "re-sweep addition (2026-08-21, full transcript re-read): the video names a third review prompt beside honesty and one-level-of-abstraction — the BACKWARD function (framework hooks: update/main/#Job bodies). Its law: a hook abstracts the call site, so its body stays thin glue that jumps into right-side-up named functions immediately; a fat hook body has no honest signature to review against. Suggest the rubric preamble's review-vocabulary paragraph carries (c): 'is this hook body thin — does it delegate to reviewable named functions in the first lines'. Evidence: [17:01]-[18:03]. Also for the record, two chapters of the video need NO rubric row because Jet ships them: injected-PRNG honesty (core.math.random rng(seed)->Rng value + effect rows already make ambient draws visible, core-library.md:1734-1748) and receipt/handstamp parameters (typestate #State/#Transition covers must-call-A-first)."
         }
       ],
-      "criteria": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "In docs/spec/stdlib-api-laws.md, the signature-honesty table contains the three named rows Weakest-guarantee parameters, Calculate/do split, and No hidden-lookup APIs; their text states the weakest used guarantee, proof types for strong guarantees, a pure data/callback/Iter sibling, and explicit value/registry lookup.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-21T22:55:57.051Z"
+        },
+        {
+          "n": 2,
+          "text": "In docs/spec/stdlib-api-laws.md, Law 4 uses the canonical effect-row arrow spelling :[FS]> (and its existing effect examples), and rg finds no retired =[FS]=> spelling in that file.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-21T22:55:57.562Z"
+        },
+        {
+          "n": 3,
+          "text": "The review preamble in docs/spec/stdlib-api-laws.md asks for honest projected effects/signatures and one level of abstraction, and links the function-design canon section in docs/reference/prior-art.md.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-21T22:55:58.068Z"
+        },
+        {
+          "n": 4,
+          "text": "The review checklist in docs/spec/stdlib-api-laws.md repeats all three signature-honesty row labels and keeps D-STDRUBRIC1 as the governing Core API rubric.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-21T22:55:58.858Z"
+        },
+        {
+          "n": 5,
+          "text": "docs/reference/prior-art.md contains a dated Function-design canon mining entry naming Logan Smith, Tony Van Eerd, Sean Parent, and Robert Martin with links to the cited sources.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-21T22:55:59.881Z"
+        },
+        {
+          "n": 6,
+          "text": "The card change is documentation-only: no new user-typeable token, compiler mechanism, or compatibility spelling is added, and the optional cost/hook extensions remain outside this card.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-21T22:56:00.671Z"
+        }
+      ],
       "refs": [],
       "tags": [],
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-21T14:55:08.738Z",
-      "updated": "2026-08-21T15:55:51.589Z",
-      "updatedBy": "fable"
+      "updated": "2026-08-21T22:56:01.597Z",
+      "updatedBy": "sqcriteria"
     },
     {
       "id": "c03i6njo",
@@ -140562,19 +140618,74 @@
       "milestoneId": null,
       "phase": "planning",
       "priority": "P2",
-      "plan": null,
+      "plan": "1. Trace the free-function and method branches in crates/jet-sema/src/Sema/State.rs and preserve the owner/operation distinction.\\n2. Verify or minimally repair the free-function fixture and snapshot; preserve the method snapshot and E0150 Why/Fix copy.\\n3. Run the targeted diagnostic snapshot test and inspect the rendered first line.\\n4. No syntax, policy, or owner gate is involved.",
       "checkSteps": null,
       "blockedBy": [],
       "assignee": null,
       "log": [],
-      "criteria": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "In crates/jet-sema/src/Sema/State.rs, both free-function typestate paths pass the tracked local as check_state owner and the function name only as operation, while the method path continues to pass the receiver type as owner.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-21T22:56:02.722Z"
+        },
+        {
+          "n": 2,
+          "text": "tests/ui/typestate_wrong_state_free_function.jet contains a Vec3 value in Raw state, a free bounce_ready function requiring Unit, and the failing call with the tracked local v.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-21T22:56:03.851Z"
+        },
+        {
+          "n": 3,
+          "text": "tests/ui/typestate_wrong_state_free_function.stderr reports E0150 with the first line naming v (not bounce_ready) in the owner slot and naming the required Unit state.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-21T22:56:04.845Z"
+        },
+        {
+          "n": 4,
+          "text": "The same free-function snapshot keeps the Why text about bounce_ready and the Fix text naming normalize as the transition to Unit.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-21T22:56:05.831Z"
+        },
+        {
+          "n": 5,
+          "text": "The method regression fixture and snapshot in tests/ui/typestate_wrong_state.* still report the receiver owner Reservation, proving the free-function fix does not change method wording.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-21T22:56:06.635Z"
+        },
+        {
+          "n": 6,
+          "text": "scripts/agent/jet-env cargo test --test diagnostic_snapshots ui_snapshots passes with the free-function and method E0150 snapshots.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-21T22:56:07.752Z"
+        }
+      ],
       "refs": [],
       "tags": [],
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-21T14:55:21.662Z",
-      "updated": "2026-08-21T14:55:21.662Z",
-      "updatedBy": "fable"
+      "updated": "2026-08-21T22:56:08.942Z",
+      "updatedBy": "sqcriteria"
     },
     {
       "id": "c02tdxr6",
@@ -140587,7 +140698,7 @@
       "milestoneId": null,
       "phase": "planning",
       "priority": "P3",
-      "plan": null,
+      "plan": "1. Audit crates/jet-codegen/src/Prelude/Core/Collections.rs, the sort implementation, existing collection tests, and docs/reference/core-library.md for actual behavior.\\n2. Retain the current no-add disposition for slide/gather unless the composition audit disproves it; make lower_bound and binary_search distinct and document partition/sort stability.\\n3. Add only focused stability or documentation evidence needed to close the audit.\\n4. If a named API survives, stop for the D-ONCE-VERB1 naming/contract ballot before implementation; any later method must prove AOT and default jet run parity.",
       "checkSteps": null,
       "blockedBy": [],
       "assignee": null,
@@ -140598,14 +140709,78 @@
           "text": "correction (fresh transcript re-read + Prelude grep, 2026-08-21): this card's third claim is stale — binary_search and binary_search_by EXIST (crates/jet-codegen/src/Prelude/Core/Collections.rs:1255-1260, documented in core-library.md list surface). rotate/slide and gather/double-stable-partition remain genuinely absent (grep of Collections.rs finds neither). Scope this card to rotate + gather (+ insertion-point lower_bound variant if binary_search only returns found-index — verify: jet_list_binary_search returns JetOutcome<i64, JetAbsent>, no insertion point on miss, so Parent's lower_bound use case IS still open)."
         }
       ],
-      "criteria": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "docs/reference/core-library.md has a sequence-algorithm audit that classifies binary_search/binary_search_by as shipped, distinguishes lower-bound insertion search from a matching-index search, and records the current status of slide and gather.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-21T22:56:10.049Z"
+        },
+        {
+          "n": 2,
+          "text": "crates/jet-codegen/src/Prelude/Core/Collections.rs exposes the existing binary-search functions and their documented optional-index result, with no duplicate rotate, slide, gather, or second binary-search mechanism added.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-21T22:56:11.074Z"
+        },
+        {
+          "n": 3,
+          "text": "The audit states that position is a linear scan and that binary_search returns a matching index rather than promising the first duplicate or an insertion point; the docs do not claim lower_bound already exists.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-21T22:56:12.071Z"
+        },
+        {
+          "n": 4,
+          "text": "The reference docs state that partition preserves source order in both output groups and that the sort family is stable; focused tied-value tests demonstrate those order guarantees against the implementations.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-21T22:56:13.084Z"
+        },
+        {
+          "n": 5,
+          "text": "The no-add disposition for slide and gather records a concrete composition-cost or miswiring reason and defers named methods pending a D-ONCE-VERB1 name and D-STDRUBRIC1 contract review.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-21T22:56:14.036Z"
+        },
+        {
+          "n": 6,
+          "text": "The audit records whether lower_bound is declined or deferred separately from binary_search, with no alias or hidden positional-search behavior.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-21T22:56:14.605Z"
+        },
+        {
+          "n": 7,
+          "text": "If a future audit selects a named method, its exit evidence includes an executable example plus AOT and default jet run behavior; the current audit adds no syntax.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-21T22:56:15.138Z"
+        }
+      ],
       "refs": [],
       "tags": [],
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-21T14:55:36.858Z",
-      "updated": "2026-08-21T15:49:18.064Z",
-      "updatedBy": "fable"
+      "updated": "2026-08-21T22:56:15.841Z",
+      "updatedBy": "sqcriteria"
     },
     {
       "id": "c0earl6i",
@@ -140618,7 +140793,7 @@
       "milestoneId": null,
       "phase": "planning",
       "priority": "P2",
-      "plan": null,
+      "plan": "1. Keep docs/proposals/stored-invariant-facts.md as the design artifact and reconcile it with Facts.rs, AST/types.rs, State.rs, FlowFacts, and KnowledgeVector.\\n2. Preserve the ballot-ready choice set: carrier C versus A/B, checked proof producer B versus A/C, subsumption B versus A/C, and the unresolved surface home/spelling.\\n3. Add any missing worked examples, negative proof obligations, and acceptance evidence without implementing the fact plane.\\n4. Pause compiler and syntax work until the owner ratifies the exact choices; the implementation/I9 vertical slice belongs to a later card.",
       "checkSteps": null,
       "blockedBy": [],
       "assignee": null,
@@ -140629,14 +140804,78 @@
           "text": "audience re-sweep (2026-08-21, 289 comments mined): the video's own motivating overload is FALSE and the audience proved it — top technical correction (194 likes): |cross(a,b)| = sin(angle), unit ONLY for perpendicular inputs; uploader conceded ('Yeah, you're right. Dunno where I got that idea.'). Consequences for this card's design: (1) PRESERVATION NEEDS PROOF — a stored-fact mechanism must not let an operation claim it preserves a fact by assertion; the claim needs a checked contract (an #Ensures-style postcondition under test/fuzz would have caught this — one commenter said exactly that: 'because this talk is about testability, this mistake would easily be found when testing'). (2) The audience independently derived the deeper need: most functions do NOT preserve a fact, so the valuable surface is declaring FACT-PRESERVING functions (norm-preserving map), not just fact-establishing constructors — that is this card's missing middle, now with field evidence. (3) Sealed construction: two commenters (38 and 0 likes) note inheritance-based invariant wrappers are unsound (inherited constructors/mutators bypass the invariant); Jet has no inheritance — state the immunity and keep fact-bearing construction sealed. (4) Friction ceiling: the strongest dissent (long C++ comment) — invariant types that add error paths to every math callsite are 'not a proportional response'; the beginner path must never be forced through the wrapper; fact types stay expert opt-in with magic defaults. (5) One commenter notes constructive modeling (polar angles) is a perf pessimization vs establish-then-carry — supports the carried-fact design."
         }
       ],
-      "criteria": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "docs/proposals/stored-invariant-facts.md is explicitly a design note for #2140 and states that it adds no compiler code, no ratified syntax, and no selected semantic spelling.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-21T22:56:16.377Z"
+        },
+        {
+          "n": 2,
+          "text": "The proposal names the current flow-only StateTable/FlowFacts limitation in crates/jet-sema/src/Sema/State.rs and the existing Facts/KnowledgeVector substrate, then defines one registered predicate-fact plane as the proposed missing middle.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-21T22:56:16.908Z"
+        },
+        {
+          "n": 3,
+          "text": "The proposal presents the three carrier choices A state-carrying field types, B distinct-with-fact wrappers, and C a registered predicate plane, with C marked as the recommendation.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-21T22:56:17.501Z"
+        },
+        {
+          "n": 4,
+          "text": "The proposal presents proof choices and recommends a checked canonical producer, and presents subsumption choices with registered bounded implications recommended while exact matching is the initial rung.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-21T22:56:18.096Z"
+        },
+        {
+          "n": 5,
+          "text": "The proposal defines storage propagation across fields, list elements, branches, loops, generic values, and returns, plus #Pre discharge and reflection through the same registry.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-21T22:56:18.691Z"
+        },
+        {
+          "n": 6,
+          "text": "The proposal includes negative proof cases such as an unproven or false cross-product claim, and requires erased typed IR plus AOT, default jet run, interpreter, and web parity with no engine-local policy or jit_gaps parking.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-21T22:56:19.256Z"
+        },
+        {
+          "n": 7,
+          "text": "The proposal states that the exact user-facing declaration/producer surface requires a separate owner syntax ballot before any new syntax or compiler implementation.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-21T22:56:19.834Z"
+        }
+      ],
       "refs": [],
       "tags": [],
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-21T14:55:57.143Z",
-      "updated": "2026-08-21T15:55:50.567Z",
-      "updatedBy": "fable"
+      "updated": "2026-08-21T22:56:20.616Z",
+      "updatedBy": "sqcriteria"
     },
     {
       "id": "c0ra6z70",
@@ -140649,12 +140888,76 @@
       "milestoneId": null,
       "phase": "planning",
       "priority": "P2",
-      "plan": null,
+      "plan": "1. Verify the existing four diagnostic rows, registry, docs, reference/liveness analysis, intentional-discard filter, and policy.lints.deny path.\\n2. Complete missing fixture coverage for locals, parameters, imports, private functions, used/public exemptions, and intentional discards.\\n3. Route only safe removal edits through the existing TextEdit/FixEngine/CLI path, with dry-run and real-fix tests guarding side effects, comptime/metadata, and public items.\\n4. Run lint snapshots, package default/deny tests, and focused fix tests; no owner gate or new policy engine.",
       "checkSteps": "- L-code rows registered for unused binding, parameter, import, and private fn with what/why/fix and UI snapshots (I4)\n- Default severity is Warning; jet check reports them without failing; policy.lints.deny promotes to E1293 build failure\n- Probe: a file with an unused binding gets the lint from jet check, and jet fix removes it; intentional discard spelling stays silent\n- Repo examples and goldens stay green under the new lints (clean them or record intended exceptions)",
       "blockedBy": [],
       "assignee": null,
       "log": [],
-      "criteria": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "crates/jet-codegen/src/Prelude/Diagnostics.jet and docs/spec/diagnostics.md register L0101 unused local binding, L0102 unused parameter, L0103 unused import, and L0104 unused private function with Warning severity and explicit What, Why, and Fix text.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-21T22:56:21.250Z"
+        },
+        {
+          "n": 2,
+          "text": "The ui_lint fixtures and snapshots cover all four lint classes with the exact L-codes and warning copy, and scripts/agent/jet-env cargo test --test diagnostic_snapshots lint_snapshots passes.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-21T22:56:21.860Z"
+        },
+        {
+          "n": 3,
+          "text": "crates/jet-sema/src/Sema/CheckerReferences.rs and Sema/Bundle/Liveness.rs emit the rows only for unread locals/parameters and unreachable private functions/imports, while used or public symbols do not produce these warnings.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-21T22:56:22.567Z"
+        },
+        {
+          "n": 4,
+          "text": "Default Warning diagnostics do not block check/build, while the existing policy.lints.deny mechanism promotes a selected unused lint to E1293; a package test proves both default and deny behavior.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-21T22:56:23.466Z"
+        },
+        {
+          "n": 5,
+          "text": "The intentional-discard rule remains silent for _ and leading-underscore names, with the behavior covered by tests/ui_lint/unused_code.jet and its snapshot.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-21T22:56:24.387Z"
+        },
+        {
+          "n": 6,
+          "text": "Safe removal uses the existing TextEdit and crates/jet-driver/src/FixEngine.rs path only for side-effect-free eligible bindings/items; a dry-run makes no file change, and a real jet fix followed by jet check removes the warning without deleting an effectful initializer or public symbol.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-21T22:56:25.173Z"
+        },
+        {
+          "n": 7,
+          "text": "No second lint-policy engine or new user syntax is introduced; registration, policy promotion, diagnostics, and UI snapshots remain on the existing mechanisms.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-21T22:56:26.043Z"
+        }
+      ],
       "refs": [],
       "tags": [
         "diagnostics",
@@ -140663,8 +140966,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-21T15:33:50.489Z",
-      "updated": "2026-08-21T15:33:50.489Z",
-      "updatedBy": "fable"
+      "updated": "2026-08-21T22:56:27.056Z",
+      "updatedBy": "sqcriteria"
     },
     {
       "id": "c0af6jch",
@@ -140677,7 +140980,7 @@
       "milestoneId": null,
       "phase": "planning",
       "priority": "P3",
-      "plan": null,
+      "plan": "1. Keep the existing hello and http_ready receipt programs and expected outputs.\\n2. Change the server budget/measurement path to ServiceReadiness through the existing ServiceProbe contract, retaining StartupTime for hello and making TCP/HTTP readiness the server claim.\\n3. Capture both programs on the named box under the pinned target/profile/toolchain, bootstrap or update only the matching baseline, and refresh the documented receipt table.\\n4. Run budget and ServiceProbe tests and verify the JSON reports; keep throughput out of scope and do not compare profiles.",
       "checkSteps": "- Both receipt programs exist as examples with declared BinarySize/StartupTime/MemoryHighWater budgets and pinned baselines\n- jet budget passes on them in CI-equivalent invocation; baseline update path exercised once\n- Receipt table in docs states hardware/profile/toolchain and reproduces via one documented command\n- No cross-profile or throughput comparison appears in the receipt",
       "blockedBy": [],
       "assignee": null,
@@ -140688,7 +140991,71 @@
           "text": "refinement: the server receipt should gate on ServiceReadiness (TCP-connectable, the metric the scriptc video actually measured at 2.3ms vs Node 56ms) rather than bare StartupTime; both are ratified budget metrics."
         }
       ],
-      "criteria": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "examples/performance/receipts/hello and examples/performance/receipts/http_ready each contain an executable source and expected output proving the receipt program reaches its stated observable result.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-21T22:56:28.056Z"
+        },
+        {
+          "n": 2,
+          "text": "The hello receipt declares pinned BinarySize, StartupTime, and MemoryHighWater budgets for its explicit target/profile; the server receipt declares BinarySize and MemoryHighWater plus a ServiceReadiness gate measured by the existing ServiceProbe provider, with no bare startup metric used as the readiness claim.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-21T22:56:29.143Z"
+        },
+        {
+          "n": 3,
+          "text": "For both receipts, jet budget check --json reports all three declared measurements, baseline bootstrap/update records the pinned identity, and a subsequent check passes without missing-baseline or provider-version errors.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-21T22:56:29.990Z"
+        },
+        {
+          "n": 4,
+          "text": "docs/reference/performance-receipt.md contains the receipt table with named hardware, OS, toolchain, target/profile, trial count, p50/p95/p99 values where applicable, budget values, and baseline identity; no cross-machine or cross-profile comparison is used.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-21T22:56:30.605Z"
+        },
+        {
+          "n": 5,
+          "text": "The server readiness measurement proves a TCP-connectable, HTTP-ready endpoint after binding, uses the existing ServiceReadiness/ServiceProbe contract, and records the configured fresh-sample count rather than process-start time.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-21T22:56:31.269Z"
+        },
+        {
+          "n": 6,
+          "text": "rg finds no Throughput claim in the receipt examples or docs/reference/performance-receipt.md, and the receipt text does not imply throughput parity.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-21T22:56:31.889Z"
+        },
+        {
+          "n": 7,
+          "text": "The existing build-artifact receipt regression and ServiceProbe regression pass, including tests/cli_parts/budget.rs::build_artifact_receipt_collects_footprint_samples and the ServiceReadiness test in tests/cli_parts/expand.rs.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-21T22:56:32.574Z"
+        }
+      ],
       "refs": [],
       "tags": [
         "performance",
@@ -140697,8 +141064,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-21T15:34:28.652Z",
-      "updated": "2026-08-21T15:46:35.321Z",
-      "updatedBy": "fable"
+      "updated": "2026-08-21T22:56:33.352Z",
+      "updatedBy": "sqcriteria"
     },
     {
       "id": "c0zx0ihz",
@@ -140711,12 +141078,76 @@
       "milestoneId": null,
       "phase": "planning",
       "priority": "P2",
-      "plan": null,
+      "plan": "1. Verify crates/jet-foundation/src/Layout.rs is the sole engine and compare its target, aggregate, scalar, and refusal rules with the existing sema, reflection, TIR, and inspect paths.\\n2. Fill only missing target plumbing or supported known-layout cases, preserving unknown/E0959 for rustc-owned default layouts.\\n3. Exercise T.@layout, reflection, inspect human/JSON, and the comptime example/golden on AOT and default jet run.\\n4. Do not invent a packed-layout marker; if the scope requires #Layout(packed), pause for the exact I7 owner syntax choice.",
       "checkSteps": "- E0959 no longer fires for physical-layout-guaranteed types: #Layout(c) struct reports size/alignment/offsets matching rustc-emitted layout on the current target, proven by test\n- Default-layout types keep guarantee=unspecified and report honestly per kind (no invented bytes)\n- T.@layout, reflect().layout, and jet inspect expand --facts layout project the same numbers; expand goldens re-blessed\n- A padding example (bool between wide fields) shows waste in the fact output — the scriptc scenario is visible in Jet",
       "blockedBy": [],
       "assignee": null,
       "log": [],
-      "criteria": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "crates/jet-foundation/src/Layout.rs contains the single TargetLayoutEngine model for target-specific size, alignment, stride, field offsets, and padding, with checked alignment arithmetic and no rustc query used as the byte-fact source.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-21T22:56:33.984Z"
+        },
+        {
+          "n": 2,
+          "text": "The engine reports exact facts for supported physical C/columnar aggregates and known scalar/fixed-width cases; c_layout_reports_padding_and_offsets proves size 24, alignment 8, stride 24, and the expected u64 field offset.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-21T22:56:34.599Z"
+        },
+        {
+          "n": 3,
+          "text": "Default-layout types retain unknown byte facts and E0959 rather than receiving guessed order, size, alignment, stride, or offsets; default_layout_keeps_byte_facts_absent and the registered E0959 diagnostic cover this refusal.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-21T22:56:35.171Z"
+        },
+        {
+          "n": 4,
+          "text": "The target-layout tests prove target-dependent facts, including the wasm pointer-width case in crates/jet-foundation/src/Layout.rs, without changing the default-layout guarantee.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-21T22:56:35.673Z"
+        },
+        {
+          "n": 5,
+          "text": "examples/features/comptime/layout_facts.jet and its golden output show T.@layout and T.reflect().layout projecting the same default, C, and columnar facts.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-21T22:56:36.210Z"
+        },
+        {
+          "n": 6,
+          "text": "tests/cli_parts/expand.rs::expand_layout_human_and_json_are_deterministic passes and proves inspect human and JSON output use identical known numbers, null/unknown values, and E0959 status.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-21T22:56:36.747Z"
+        },
+        {
+          "n": 7,
+          "text": "Sema, comptime reflection, TIR layout projection, and inspect use the same LayoutFacts model; no second engine or new #Layout(packed) spelling is introduced. If literal packed-layout syntax is required, it is a separate I7 owner ballot.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-21T22:56:37.263Z"
+        }
+      ],
       "refs": [],
       "tags": [
         "compiler",
@@ -140725,8 +141156,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-21T15:46:11.117Z",
-      "updated": "2026-08-21T15:46:11.117Z",
-      "updatedBy": "fable"
+      "updated": "2026-08-21T22:56:38.024Z",
+      "updatedBy": "sqcriteria"
     },
     {
       "id": "c0an426i",
@@ -141092,6 +141523,124 @@
       "needsAcceptance": false,
       "created": "2026-08-21T22:17:07.225Z",
       "updated": "2026-08-21T22:17:07.226Z",
+      "updatedBy": "fable"
+    },
+    {
+      "id": "c0a895k2",
+      "num": 2153,
+      "title": "Respell source loops to `loop x in xs` (D-LOOP-IN1)",
+      "body": "Owner-confirmed amendment to D-LOOP-COMMA1=A: the comma between a source loop's binding and its source retires in favor of the keyword `in`. New spellings: `loop x in xs`, `loop (key, value) in map`, `loop n in 0..10, 2` (stride stays the optional comma third clause, now the only comma in the header). The guard clause is unchanged (`loop x in xs if cond :> v`), as are infinite, conditional, bindingless-subject, and explicit-state loops. `in` becomes a reserved keyword (I7). The retired comma form gets a teaching diagnostic. Expression-position membership `x in xs` is rejected with a teaching diagnostic that points at `.contains(x)`; no membership operator ships (I8). Migrate every in-repo consumer in one coherent change: parser, sema, diagnostics, grammars, Syntax.rs (including LOOP_CHANNEL_DRAIN), examples, tests, snapshots, spec prose. Sequenced after the arrow respell so the two whole-corpus rewrites do not collide.",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "blockedBy": [
+        "c0ohqujv"
+      ],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Syntax.rs entry updated",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-21T23:45:06.251Z"
+        },
+        {
+          "n": 2,
+          "text": "syntax-decisions.md log entry",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-21T23:45:06.252Z"
+        },
+        {
+          "n": 3,
+          "text": "jet devtools grammars regenerated",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-21T23:45:06.252Z"
+        },
+        {
+          "n": 4,
+          "text": "snapshots re-blessed",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-21T23:45:06.252Z"
+        },
+        {
+          "n": 5,
+          "text": "Parser accepts loop x in xs, loop (key, value) in source, and loop n in 0..10, 2 (stride comma retained); guard form loop x in xs if cond works unchanged",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-21T23:45:20.305Z"
+        },
+        {
+          "n": 6,
+          "text": "Retired comma form loop x, xs emits a registered teaching diagnostic with what/why/fix and a UI snapshot",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-21T23:45:21.372Z"
+        },
+        {
+          "n": 7,
+          "text": "Expression-position membership x in xs emits a registered teaching diagnostic pointing at .contains(x), with UI snapshot; no membership operator ships",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-21T23:45:22.431Z"
+        },
+        {
+          "n": 8,
+          "text": "in is a reserved keyword; using it as an identifier is a clear diagnostic",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-21T23:45:23.522Z"
+        },
+        {
+          "n": 9,
+          "text": "Every in-repo consumer migrated in one change: examples, tests, goldens, docs, LOOP_CHANNEL_DRAIN; no comma-form source loop remains",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-21T23:45:24.544Z"
+        },
+        {
+          "n": 10,
+          "text": "I9: migrated loop examples prove identical goldens under default jet run and jet run --release",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-21T23:45:27.154Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-08-21T23:44:34.793Z",
+      "updated": "2026-08-21T23:45:27.154Z",
       "updatedBy": "fable"
     }
   ],
@@ -186842,6 +187391,67 @@
       "created": "2026-08-21T21:50:51.852Z",
       "outcome": "B",
       "ratifiedAt": "2026-08-21"
+    },
+    {
+      "id": "D-LOOP-IN1",
+      "cardId": "c0a895k2",
+      "group": "syntax",
+      "title": "Source-loop binding keyword: loop x in xs",
+      "gist": "Source loops spell the binding-to-source join with the keyword in; the clause comma there retires.",
+      "lesson": "A source loop walks a collection and names each item. Today the name and the collection are joined by a bare comma, so the reader must already know the grammar rule to tell which is which. The keyword in makes the sentence read aloud: loop user in users.",
+      "explainer": "",
+      "story": "A first-hour learner reads loop n, 0..10, 2 and sees three comma-separated things with three different jobs: the name, the range, and the stride. Nothing on the page says which is which. With loop n in 0..10, 2 the name and source are joined by a word, and the one remaining comma can only mean the stride.",
+      "inWild": "Python, Rust, Swift, and Kotlin all spell this join as in; JavaScript uses of; Go uses range. No mainstream language ships a bare binding-comma-source header.",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "Keyword in",
+          "detail": "The binding-to-source join is the keyword in. Two-name bindings keep their parens: loop (key, value) in map. The stride stays the optional comma third clause and becomes the only comma in the header. The guard keeps its ratified comma-less if. Infinite, conditional, bindingless-subject, and explicit-state loops are unchanged. in is a reserved keyword with an I7 Syntax.rs row. The retired comma form gets a teaching diagnostic. Expression-position membership, x in xs, is rejected with a teaching diagnostic pointing at .contains(x); no membership operator ships.",
+          "technical": "Amends D-LOOP-COMMA1=A. D-LOOP-GUARD1=A, D-LOOP-SUBJECT1=A, D-LOOP-STMT-ARROW1=C, and the stride clause of S19 are untouched. Syntax.rs LOOP_CHANNEL_DRAIN respells to loop value in receiver.",
+          "code": "loop user in users if user.active :> user.name\nloop (key, value) in map { audit(key) }\nloop n in 0..10, 2 :> print(n)"
+        },
+        {
+          "key": "B",
+          "name": "Keep the clause comma",
+          "detail": "Retain loop x, xs as ratified by D-LOOP-COMMA1=A. Shortest spelling; the header stays purely positional.",
+          "technical": "No change.",
+          "code": "loop user, users if user.active :> user.name\nloop (key, value), map { audit(key) }\nloop n, 0..10, 2 :> print(n)"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Python",
+          "note": "for user in users reads aloud with no grammar knowledge.",
+          "code": "for user in users:"
+        },
+        {
+          "lang": "Go",
+          "note": "Comma-joined header, but the range keyword still marks the source role.",
+          "code": "for i, v := range xs {"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "The comma there is role-overloaded: it joins binding to source, separates the stride, and also appears inside the (key, value) tuple. The keyword gives every source loop a natural-language reading, makes the remaining stride comma unambiguous, and matches the reading-first direction of the ratified 2026-08-21 slate. The guard clause already uses a role word; this finishes the header.",
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "Position-only roles force the reader to know the rule before the line reads at all, and the two-stride form stays cryptic."
+          }
+        ],
+        "tradeoff": "in becomes a reserved word and costs two characters on the most common statement form. Users coming from Python will try membership x in xs; the teaching diagnostic routes them to .contains(x) instead of adding a second mechanism."
+      },
+      "hybrid": null,
+      "ballotMode": "short",
+      "shortAuthorizedBy": "Owner: Ok let's amend to use in. Skip the whole balloting process I want to directly confirm and proceed with making this change via card. Let's point at the .contains method.",
+      "reviewPasses": null,
+      "checkInstructions": null,
+      "draft": false,
+      "status": "ratified",
+      "created": "2026-08-21T23:45:05.655Z",
+      "outcome": "A",
+      "ratifiedAt": "2026-08-21"
     }
   ],
   "questions": [
@@ -188669,6 +189279,510 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-08-21T23:45:27.155Z",
+      "by": "fable",
+      "action": "card.criteria-add",
+      "ref": "c0a895k2",
+      "note": "#10 I9: migrated loop examples prove identical goldens under def"
+    },
+    {
+      "at": "2026-08-21T23:45:24.545Z",
+      "by": "fable",
+      "action": "card.criteria-add",
+      "ref": "c0a895k2",
+      "note": "#9 Every in-repo consumer migrated in one change: examples, tes"
+    },
+    {
+      "at": "2026-08-21T23:45:23.523Z",
+      "by": "fable",
+      "action": "card.criteria-add",
+      "ref": "c0a895k2",
+      "note": "#8 in is a reserved keyword; using it as an identifier is a cle"
+    },
+    {
+      "at": "2026-08-21T23:45:22.431Z",
+      "by": "fable",
+      "action": "card.criteria-add",
+      "ref": "c0a895k2",
+      "note": "#7 Expression-position membership x in xs emits a registered te"
+    },
+    {
+      "at": "2026-08-21T23:45:21.372Z",
+      "by": "fable",
+      "action": "card.criteria-add",
+      "ref": "c0a895k2",
+      "note": "#6 Retired comma form loop x, xs emits a registered teaching di"
+    },
+    {
+      "at": "2026-08-21T23:45:20.305Z",
+      "by": "fable",
+      "action": "card.criteria-add",
+      "ref": "c0a895k2",
+      "note": "#5 Parser accepts loop x in xs, loop (key, value) in source, an"
+    },
+    {
+      "at": "2026-08-21T23:45:06.252Z",
+      "by": "fable",
+      "action": "decision.ratify",
+      "ref": "D-LOOP-IN1",
+      "note": "A (by fable, quoting owner: \"Ok let's amend to use in. Skip the whole balloting process I want to directly confirm and proceed with making this change via card. Let's point at the .contains method.\")"
+    },
+    {
+      "at": "2026-08-21T23:45:06.252Z",
+      "by": "fable",
+      "action": "card.criteria-add",
+      "ref": "c0a895k2",
+      "note": "#4 snapshots re-blessed"
+    },
+    {
+      "at": "2026-08-21T23:45:06.252Z",
+      "by": "fable",
+      "action": "card.criteria-add",
+      "ref": "c0a895k2",
+      "note": "#3 jet devtools grammars regenerated"
+    },
+    {
+      "at": "2026-08-21T23:45:06.252Z",
+      "by": "fable",
+      "action": "card.criteria-add",
+      "ref": "c0a895k2",
+      "note": "#2 syntax-decisions.md log entry"
+    },
+    {
+      "at": "2026-08-21T23:45:06.251Z",
+      "by": "fable",
+      "action": "card.criteria-add",
+      "ref": "c0a895k2",
+      "note": "#1 Syntax.rs entry updated"
+    },
+    {
+      "at": "2026-08-21T23:45:05.655Z",
+      "by": "fable",
+      "action": "decision.add",
+      "ref": "D-LOOP-IN1",
+      "note": "Source-loop binding keyword: loop x in xs"
+    },
+    {
+      "at": "2026-08-21T23:44:34.793Z",
+      "by": "fable",
+      "action": "card.add",
+      "ref": "c0a895k2",
+      "note": "Respell source loops to `loop x in xs` (D-LOOP-IN1)"
+    },
+    {
+      "at": "2026-08-21T22:56:38.024Z",
+      "by": "sqcriteria",
+      "action": "card.update",
+      "ref": "c0zx0ihz",
+      "note": "plan"
+    },
+    {
+      "at": "2026-08-21T22:56:37.263Z",
+      "by": "sqcriteria",
+      "action": "card.criteria-add",
+      "ref": "c0zx0ihz",
+      "note": "#7 Sema, comptime reflection, TIR layout projection, and inspec"
+    },
+    {
+      "at": "2026-08-21T22:56:36.748Z",
+      "by": "sqcriteria",
+      "action": "card.criteria-add",
+      "ref": "c0zx0ihz",
+      "note": "#6 tests/cli_parts/expand.rs::expand_layout_human_and_json_are_"
+    },
+    {
+      "at": "2026-08-21T22:56:36.210Z",
+      "by": "sqcriteria",
+      "action": "card.criteria-add",
+      "ref": "c0zx0ihz",
+      "note": "#5 examples/features/comptime/layout_facts.jet and its golden o"
+    },
+    {
+      "at": "2026-08-21T22:56:35.673Z",
+      "by": "sqcriteria",
+      "action": "card.criteria-add",
+      "ref": "c0zx0ihz",
+      "note": "#4 The target-layout tests prove target-dependent facts, includ"
+    },
+    {
+      "at": "2026-08-21T22:56:35.171Z",
+      "by": "sqcriteria",
+      "action": "card.criteria-add",
+      "ref": "c0zx0ihz",
+      "note": "#3 Default-layout types retain unknown byte facts and E0959 rat"
+    },
+    {
+      "at": "2026-08-21T22:56:34.599Z",
+      "by": "sqcriteria",
+      "action": "card.criteria-add",
+      "ref": "c0zx0ihz",
+      "note": "#2 The engine reports exact facts for supported physical C/colu"
+    },
+    {
+      "at": "2026-08-21T22:56:33.984Z",
+      "by": "sqcriteria",
+      "action": "card.criteria-add",
+      "ref": "c0zx0ihz",
+      "note": "#1 crates/jet-foundation/src/Layout.rs contains the single Targ"
+    },
+    {
+      "at": "2026-08-21T22:56:33.352Z",
+      "by": "sqcriteria",
+      "action": "card.update",
+      "ref": "c0af6jch",
+      "note": "plan"
+    },
+    {
+      "at": "2026-08-21T22:56:32.574Z",
+      "by": "sqcriteria",
+      "action": "card.criteria-add",
+      "ref": "c0af6jch",
+      "note": "#7 The existing build-artifact receipt regression and ServicePr"
+    },
+    {
+      "at": "2026-08-21T22:56:31.889Z",
+      "by": "sqcriteria",
+      "action": "card.criteria-add",
+      "ref": "c0af6jch",
+      "note": "#6 rg finds no Throughput claim in the receipt examples or docs"
+    },
+    {
+      "at": "2026-08-21T22:56:31.269Z",
+      "by": "sqcriteria",
+      "action": "card.criteria-add",
+      "ref": "c0af6jch",
+      "note": "#5 The server readiness measurement proves a TCP-connectable, H"
+    },
+    {
+      "at": "2026-08-21T22:56:30.605Z",
+      "by": "sqcriteria",
+      "action": "card.criteria-add",
+      "ref": "c0af6jch",
+      "note": "#4 docs/reference/performance-receipt.md contains the receipt t"
+    },
+    {
+      "at": "2026-08-21T22:56:29.990Z",
+      "by": "sqcriteria",
+      "action": "card.criteria-add",
+      "ref": "c0af6jch",
+      "note": "#3 For both receipts, jet budget check --json reports all three"
+    },
+    {
+      "at": "2026-08-21T22:56:29.144Z",
+      "by": "sqcriteria",
+      "action": "card.criteria-add",
+      "ref": "c0af6jch",
+      "note": "#2 The hello receipt declares pinned BinarySize, StartupTime, a"
+    },
+    {
+      "at": "2026-08-21T22:56:28.056Z",
+      "by": "sqcriteria",
+      "action": "card.criteria-add",
+      "ref": "c0af6jch",
+      "note": "#1 examples/performance/receipts/hello and examples/performance"
+    },
+    {
+      "at": "2026-08-21T22:56:27.057Z",
+      "by": "sqcriteria",
+      "action": "card.update",
+      "ref": "c0ra6z70",
+      "note": "plan"
+    },
+    {
+      "at": "2026-08-21T22:56:26.044Z",
+      "by": "sqcriteria",
+      "action": "card.criteria-add",
+      "ref": "c0ra6z70",
+      "note": "#7 No second lint-policy engine or new user syntax is introduce"
+    },
+    {
+      "at": "2026-08-21T22:56:25.173Z",
+      "by": "sqcriteria",
+      "action": "card.criteria-add",
+      "ref": "c0ra6z70",
+      "note": "#6 Safe removal uses the existing TextEdit and crates/jet-drive"
+    },
+    {
+      "at": "2026-08-21T22:56:24.387Z",
+      "by": "sqcriteria",
+      "action": "card.criteria-add",
+      "ref": "c0ra6z70",
+      "note": "#5 The intentional-discard rule remains silent for _ and leadin"
+    },
+    {
+      "at": "2026-08-21T22:56:23.467Z",
+      "by": "sqcriteria",
+      "action": "card.criteria-add",
+      "ref": "c0ra6z70",
+      "note": "#4 Default Warning diagnostics do not block check/build, while "
+    },
+    {
+      "at": "2026-08-21T22:56:22.568Z",
+      "by": "sqcriteria",
+      "action": "card.criteria-add",
+      "ref": "c0ra6z70",
+      "note": "#3 crates/jet-sema/src/Sema/CheckerReferences.rs and Sema/Bundl"
+    },
+    {
+      "at": "2026-08-21T22:56:21.860Z",
+      "by": "sqcriteria",
+      "action": "card.criteria-add",
+      "ref": "c0ra6z70",
+      "note": "#2 The ui_lint fixtures and snapshots cover all four lint class"
+    },
+    {
+      "at": "2026-08-21T22:56:21.250Z",
+      "by": "sqcriteria",
+      "action": "card.criteria-add",
+      "ref": "c0ra6z70",
+      "note": "#1 crates/jet-codegen/src/Prelude/Diagnostics.jet and docs/spec"
+    },
+    {
+      "at": "2026-08-21T22:56:20.617Z",
+      "by": "sqcriteria",
+      "action": "card.update",
+      "ref": "c0earl6i",
+      "note": "plan"
+    },
+    {
+      "at": "2026-08-21T22:56:19.834Z",
+      "by": "sqcriteria",
+      "action": "card.criteria-add",
+      "ref": "c0earl6i",
+      "note": "#7 The proposal states that the exact user-facing declaration/p"
+    },
+    {
+      "at": "2026-08-21T22:56:19.256Z",
+      "by": "sqcriteria",
+      "action": "card.criteria-add",
+      "ref": "c0earl6i",
+      "note": "#6 The proposal includes negative proof cases such as an unprov"
+    },
+    {
+      "at": "2026-08-21T22:56:18.691Z",
+      "by": "sqcriteria",
+      "action": "card.criteria-add",
+      "ref": "c0earl6i",
+      "note": "#5 The proposal defines storage propagation across fields, list"
+    },
+    {
+      "at": "2026-08-21T22:56:18.096Z",
+      "by": "sqcriteria",
+      "action": "card.criteria-add",
+      "ref": "c0earl6i",
+      "note": "#4 The proposal presents proof choices and recommends a checked"
+    },
+    {
+      "at": "2026-08-21T22:56:17.501Z",
+      "by": "sqcriteria",
+      "action": "card.criteria-add",
+      "ref": "c0earl6i",
+      "note": "#3 The proposal presents the three carrier choices A state-carr"
+    },
+    {
+      "at": "2026-08-21T22:56:16.908Z",
+      "by": "sqcriteria",
+      "action": "card.criteria-add",
+      "ref": "c0earl6i",
+      "note": "#2 The proposal names the current flow-only StateTable/FlowFact"
+    },
+    {
+      "at": "2026-08-21T22:56:16.377Z",
+      "by": "sqcriteria",
+      "action": "card.criteria-add",
+      "ref": "c0earl6i",
+      "note": "#1 docs/proposals/stored-invariant-facts.md is explicitly a des"
+    },
+    {
+      "at": "2026-08-21T22:56:15.841Z",
+      "by": "sqcriteria",
+      "action": "card.update",
+      "ref": "c02tdxr6",
+      "note": "plan"
+    },
+    {
+      "at": "2026-08-21T22:56:15.138Z",
+      "by": "sqcriteria",
+      "action": "card.criteria-add",
+      "ref": "c02tdxr6",
+      "note": "#7 If a future audit selects a named method, its exit evidence "
+    },
+    {
+      "at": "2026-08-21T22:56:14.605Z",
+      "by": "sqcriteria",
+      "action": "card.criteria-add",
+      "ref": "c02tdxr6",
+      "note": "#6 The audit records whether lower_bound is declined or deferre"
+    },
+    {
+      "at": "2026-08-21T22:56:14.037Z",
+      "by": "sqcriteria",
+      "action": "card.criteria-add",
+      "ref": "c02tdxr6",
+      "note": "#5 The no-add disposition for slide and gather records a concre"
+    },
+    {
+      "at": "2026-08-21T22:56:13.084Z",
+      "by": "sqcriteria",
+      "action": "card.criteria-add",
+      "ref": "c02tdxr6",
+      "note": "#4 The reference docs state that partition preserves source ord"
+    },
+    {
+      "at": "2026-08-21T22:56:12.072Z",
+      "by": "sqcriteria",
+      "action": "card.criteria-add",
+      "ref": "c02tdxr6",
+      "note": "#3 The audit states that position is a linear scan and that bin"
+    },
+    {
+      "at": "2026-08-21T22:56:11.074Z",
+      "by": "sqcriteria",
+      "action": "card.criteria-add",
+      "ref": "c02tdxr6",
+      "note": "#2 crates/jet-codegen/src/Prelude/Core/Collections.rs exposes t"
+    },
+    {
+      "at": "2026-08-21T22:56:10.049Z",
+      "by": "sqcriteria",
+      "action": "card.criteria-add",
+      "ref": "c02tdxr6",
+      "note": "#1 docs/reference/core-library.md has a sequence-algorithm audi"
+    },
+    {
+      "at": "2026-08-21T22:56:08.942Z",
+      "by": "sqcriteria",
+      "action": "card.update",
+      "ref": "c03i6njo",
+      "note": "plan"
+    },
+    {
+      "at": "2026-08-21T22:56:07.753Z",
+      "by": "sqcriteria",
+      "action": "card.criteria-add",
+      "ref": "c03i6njo",
+      "note": "#6 scripts/agent/jet-env cargo test --test diagnostic_snapshots"
+    },
+    {
+      "at": "2026-08-21T22:56:06.635Z",
+      "by": "sqcriteria",
+      "action": "card.criteria-add",
+      "ref": "c03i6njo",
+      "note": "#5 The method regression fixture and snapshot in tests/ui/types"
+    },
+    {
+      "at": "2026-08-21T22:56:05.832Z",
+      "by": "sqcriteria",
+      "action": "card.criteria-add",
+      "ref": "c03i6njo",
+      "note": "#4 The same free-function snapshot keeps the Why text about bou"
+    },
+    {
+      "at": "2026-08-21T22:56:04.845Z",
+      "by": "sqcriteria",
+      "action": "card.criteria-add",
+      "ref": "c03i6njo",
+      "note": "#3 tests/ui/typestate_wrong_state_free_function.stderr reports "
+    },
+    {
+      "at": "2026-08-21T22:56:03.852Z",
+      "by": "sqcriteria",
+      "action": "card.criteria-add",
+      "ref": "c03i6njo",
+      "note": "#2 tests/ui/typestate_wrong_state_free_function.jet contains a "
+    },
+    {
+      "at": "2026-08-21T22:56:02.723Z",
+      "by": "sqcriteria",
+      "action": "card.criteria-add",
+      "ref": "c03i6njo",
+      "note": "#1 In crates/jet-sema/src/Sema/State.rs, both free-function typ"
+    },
+    {
+      "at": "2026-08-21T22:56:01.598Z",
+      "by": "sqcriteria",
+      "action": "card.update",
+      "ref": "c05rc0xv",
+      "note": "plan"
+    },
+    {
+      "at": "2026-08-21T22:56:00.671Z",
+      "by": "sqcriteria",
+      "action": "card.criteria-add",
+      "ref": "c05rc0xv",
+      "note": "#6 The card change is documentation-only: no new user-typeable "
+    },
+    {
+      "at": "2026-08-21T22:55:59.882Z",
+      "by": "sqcriteria",
+      "action": "card.criteria-add",
+      "ref": "c05rc0xv",
+      "note": "#5 docs/reference/prior-art.md contains a dated Function-design"
+    },
+    {
+      "at": "2026-08-21T22:55:58.858Z",
+      "by": "sqcriteria",
+      "action": "card.criteria-add",
+      "ref": "c05rc0xv",
+      "note": "#4 The review checklist in docs/spec/stdlib-api-laws.md repeats"
+    },
+    {
+      "at": "2026-08-21T22:55:58.068Z",
+      "by": "sqcriteria",
+      "action": "card.criteria-add",
+      "ref": "c05rc0xv",
+      "note": "#3 The review preamble in docs/spec/stdlib-api-laws.md asks for"
+    },
+    {
+      "at": "2026-08-21T22:55:57.563Z",
+      "by": "sqcriteria",
+      "action": "card.criteria-add",
+      "ref": "c05rc0xv",
+      "note": "#2 In docs/spec/stdlib-api-laws.md, Law 4 uses the canonical ef"
+    },
+    {
+      "at": "2026-08-21T22:55:57.051Z",
+      "by": "sqcriteria",
+      "action": "card.criteria-add",
+      "ref": "c05rc0xv",
+      "note": "#1 In docs/spec/stdlib-api-laws.md, the signature-honesty table"
+    },
+    {
+      "at": "2026-08-21T22:49:52.492Z",
+      "by": "owner",
+      "action": "done.clear",
+      "ref": null,
+      "note": "2026-08-21T22:49:52.492Z"
+    },
+    {
+      "at": "2026-08-21T22:48:43.573Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c06zs6dw",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-21T22:48:42.343Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c06zs6dw",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-21T22:48:41.318Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c06zs6dw",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-21T22:48:40.732Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c06zs6dw",
+      "note": "#1"
+    },
     {
       "at": "2026-08-21T22:17:21.381Z",
       "by": "fable",
@@ -191664,510 +192778,6 @@
       "action": "card.add",
       "ref": "c0eiuboh",
       "note": "Float-equality lint is unreachable after exact-by-default"
-    },
-    {
-      "at": "2026-08-21T03:55:41.093Z",
-      "by": "fable-e3-burndown",
-      "action": "card.update",
-      "ref": "c0e7kkuf",
-      "note": "phase"
-    },
-    {
-      "at": "2026-08-21T03:55:40.421Z",
-      "by": "fable-e3-burndown",
-      "action": "card.update",
-      "ref": "c0iylrhu",
-      "note": "phase"
-    },
-    {
-      "at": "2026-08-21T03:55:31.239Z",
-      "by": "fable-e3-burndown",
-      "action": "card.update",
-      "ref": "c0aps31f",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-21T03:26:15.086Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0e7kkuf",
-      "note": "#7"
-    },
-    {
-      "at": "2026-08-21T03:26:14.623Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0iylrhu",
-      "note": "#9"
-    },
-    {
-      "at": "2026-08-21T03:14:26.974Z",
-      "by": "fable-e3-burndown",
-      "action": "card.update",
-      "ref": "c0ivhxu2",
-      "note": "phase"
-    },
-    {
-      "at": "2026-08-21T03:14:25.874Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0ivhxu2",
-      "note": "#3"
-    },
-    {
-      "at": "2026-08-21T03:10:50.016Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-add",
-      "ref": "c0bs6efw",
-      "note": "#2 A UI fixture pins the escaped form for a NUL byte in source"
-    },
-    {
-      "at": "2026-08-21T03:10:48.235Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-add",
-      "ref": "c0bs6efw",
-      "note": "#1 E0001 names an unprintable character by escape rather than p"
-    },
-    {
-      "at": "2026-08-21T03:10:46.873Z",
-      "by": "fable-e3-burndown",
-      "action": "card.add",
-      "ref": "c0bs6efw",
-      "note": "E0001 renders an unprintable character as nothing"
-    },
-    {
-      "at": "2026-08-21T02:09:45.441Z",
-      "by": "fable-e3-burndown",
-      "action": "card.update",
-      "ref": "c01n3iu7",
-      "note": "phase"
-    },
-    {
-      "at": "2026-08-21T02:09:44.266Z",
-      "by": "fable-e3-burndown",
-      "action": "card.update",
-      "ref": "c066jfg6",
-      "note": "phase"
-    },
-    {
-      "at": "2026-08-21T02:09:42.739Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c01n3iu7",
-      "note": "#4"
-    },
-    {
-      "at": "2026-08-21T02:09:42.273Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c01n3iu7",
-      "note": "#3"
-    },
-    {
-      "at": "2026-08-21T02:09:41.715Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c01n3iu7",
-      "note": "#2"
-    },
-    {
-      "at": "2026-08-21T02:09:41.199Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c01n3iu7",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-21T02:09:40.512Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0e7kkuf",
-      "note": "#6"
-    },
-    {
-      "at": "2026-08-21T02:09:39.799Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0e7kkuf",
-      "note": "#3"
-    },
-    {
-      "at": "2026-08-21T02:09:39.083Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0e7kkuf",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-21T02:09:38.605Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c066jfg6",
-      "note": "#7"
-    },
-    {
-      "at": "2026-08-21T02:09:38.133Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c066jfg6",
-      "note": "#5"
-    },
-    {
-      "at": "2026-08-21T02:09:37.652Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c066jfg6",
-      "note": "#2"
-    },
-    {
-      "at": "2026-08-21T02:09:37.189Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0xsk2wa",
-      "note": "#3"
-    },
-    {
-      "at": "2026-08-21T02:09:36.694Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0oeuws4",
-      "note": "#8"
-    },
-    {
-      "at": "2026-08-21T02:09:36.219Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0oeuws4",
-      "note": "#3"
-    },
-    {
-      "at": "2026-08-21T02:09:35.736Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c05y3gfw",
-      "note": "#6"
-    },
-    {
-      "at": "2026-08-21T02:09:35.275Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c05y3gfw",
-      "note": "#5"
-    },
-    {
-      "at": "2026-08-21T01:56:04.175Z",
-      "by": "fable-e3-burndown",
-      "action": "card.update",
-      "ref": "c0todzv8",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-21T01:47:46.557Z",
-      "by": "fable-e3-burndown",
-      "action": "card.update",
-      "ref": "c0txf14f",
-      "note": "phase"
-    },
-    {
-      "at": "2026-08-21T01:47:45.894Z",
-      "by": "fable-e3-burndown",
-      "action": "card.update",
-      "ref": "c0p48658",
-      "note": "phase"
-    },
-    {
-      "at": "2026-08-21T01:47:44.370Z",
-      "by": "fable-e3-burndown",
-      "action": "card.update",
-      "ref": "c0ro98g4",
-      "note": "phase"
-    },
-    {
-      "at": "2026-08-21T01:47:43.527Z",
-      "by": "fable-e3-burndown",
-      "action": "card.update",
-      "ref": "c0r02txw",
-      "note": "phase"
-    },
-    {
-      "at": "2026-08-21T01:47:42.854Z",
-      "by": "fable-e3-burndown",
-      "action": "card.update",
-      "ref": "c0wfwj5u",
-      "note": "phase"
-    },
-    {
-      "at": "2026-08-21T01:47:42.186Z",
-      "by": "fable-e3-burndown",
-      "action": "card.update",
-      "ref": "c0zh7s9p",
-      "note": "phase"
-    },
-    {
-      "at": "2026-08-21T01:47:41.281Z",
-      "by": "fable-e3-burndown",
-      "action": "card.update",
-      "ref": "c075z2hs",
-      "note": "phase"
-    },
-    {
-      "at": "2026-08-21T01:47:40.330Z",
-      "by": "fable-e3-burndown",
-      "action": "card.update",
-      "ref": "c0y3l5yy",
-      "note": "phase"
-    },
-    {
-      "at": "2026-08-21T01:47:38.630Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0txf14f",
-      "note": "#4"
-    },
-    {
-      "at": "2026-08-21T01:47:37.643Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0txf14f",
-      "note": "#3"
-    },
-    {
-      "at": "2026-08-21T01:47:37.176Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0txf14f",
-      "note": "#2"
-    },
-    {
-      "at": "2026-08-21T01:47:36.702Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0txf14f",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-21T01:47:36.233Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c08jqcnk",
-      "note": "#3"
-    },
-    {
-      "at": "2026-08-21T01:47:35.752Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c08jqcnk",
-      "note": "#2"
-    },
-    {
-      "at": "2026-08-21T01:47:34.991Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c08jqcnk",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-21T01:47:34.269Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0y3llif",
-      "note": "#3"
-    },
-    {
-      "at": "2026-08-21T01:47:33.491Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0y3llif",
-      "note": "#2"
-    },
-    {
-      "at": "2026-08-21T01:47:33.027Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0y3llif",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-21T01:47:32.551Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0p48658",
-      "note": "#3"
-    },
-    {
-      "at": "2026-08-21T01:47:32.081Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0p48658",
-      "note": "#2"
-    },
-    {
-      "at": "2026-08-21T01:47:31.595Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0p48658",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-21T01:47:30.874Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0ro98g4",
-      "note": "#2"
-    },
-    {
-      "at": "2026-08-21T01:47:30.171Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0ro98g4",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-21T01:47:29.431Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0r02txw",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-21T01:47:28.961Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0wfwj5u",
-      "note": "#7"
-    },
-    {
-      "at": "2026-08-21T01:47:28.485Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0wfwj5u",
-      "note": "#6"
-    },
-    {
-      "at": "2026-08-21T01:47:28.020Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0wfwj5u",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-21T01:47:27.528Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0zh7s9p",
-      "note": "#7"
-    },
-    {
-      "at": "2026-08-21T01:47:27.061Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0zh7s9p",
-      "note": "#6"
-    },
-    {
-      "at": "2026-08-21T01:47:26.589Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c075z2hs",
-      "note": "#6"
-    },
-    {
-      "at": "2026-08-21T01:47:26.102Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c075z2hs",
-      "note": "#5"
-    },
-    {
-      "at": "2026-08-21T01:47:25.586Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c075z2hs",
-      "note": "#4"
-    },
-    {
-      "at": "2026-08-21T01:47:24.927Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c075z2hs",
-      "note": "#3"
-    },
-    {
-      "at": "2026-08-21T01:47:24.204Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0y3l5yy",
-      "note": "#7"
-    },
-    {
-      "at": "2026-08-21T01:47:23.597Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0y3l5yy",
-      "note": "#6"
-    },
-    {
-      "at": "2026-08-21T01:47:23.131Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0y3l5yy",
-      "note": "#3"
-    },
-    {
-      "at": "2026-08-21T01:47:22.660Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0y3l5yy",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-21T00:52:34.358Z",
-      "by": "owner",
-      "action": "done.clear",
-      "ref": null,
-      "note": "2026-08-21T00:52:34.358Z"
-    },
-    {
-      "at": "2026-08-21T00:49:45.904Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-add",
-      "ref": "c01n3iu7",
-      "note": "#4 A UI fixture pins the corrected E0116 text, and a regression"
-    },
-    {
-      "at": "2026-08-21T00:49:45.432Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-add",
-      "ref": "c01n3iu7",
-      "note": "#3 E0116's why/fix text names the ratified signature shape, not"
-    },
-    {
-      "at": "2026-08-21T00:49:44.487Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-add",
-      "ref": "c01n3iu7",
-      "note": "#2 The four shipped examples check clean again: io/compress_gzi"
-    },
-    {
-      "at": "2026-08-21T00:49:43.732Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-add",
-      "ref": "c01n3iu7",
-      "note": "#1 The reduced repro checks clean: a fallible function whose ta"
-    },
-    {
-      "at": "2026-08-21T00:49:42.930Z",
-      "by": "fable-e3-burndown",
-      "action": "card.add",
-      "ref": "c01n3iu7",
-      "note": "Trailing arm table in a fallible function is forced into value context (E0116)"
-    },
-    {
-      "at": "2026-08-21T00:45:05.826Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-add",
-      "ref": "c05uuzek",
-      "note": "#4 A three-tier parity test covers byte-aligned, sub-byte, and "
     }
   ],
   "nextNum": 368,
