@@ -1429,6 +1429,7 @@ struct EvalTaskJob<'a> {
     completion_order: Arc<OnceLock<u64>>,
     completion_wait: Arc<crate::scheduler::ParkSlot>,
     control: Arc<crate::scheduler::JetTaskControl>,
+    observe_id: usize,
     permit: Option<crate::task_group::JetTaskGroupPermit>,
 }
 
@@ -1807,6 +1808,7 @@ impl<'a> EvalCtx<'a> {
 
     fn run_eval_job(config: EvalTaskConfig<'a>, job: EvalTaskJob<'a>) {
         let _permit = job.permit;
+        crate::scheduler::jet_observe_task_enter(job.observe_id);
         crate::scheduler::jet_scheduler_set_task_control(Some(job.control.clone()));
         let _deadline = job
             .context_deadline
@@ -1913,6 +1915,7 @@ impl<'a> EvalCtx<'a> {
             },
         };
         crate::scheduler::jet_scheduler_set_task_control(None);
+        crate::scheduler::jet_observe_task_finish(job.observe_id);
         let order = config
             .runtime
             .lock()
@@ -2006,6 +2009,7 @@ impl<'a> EvalCtx<'a> {
             group.register(task);
         }
         drop(runtime);
+        let observe_id = crate::scheduler::jet_observe_task_register(&control);
         sender
             .send(EvalTaskJob {
                 lambda: lam,
@@ -2016,6 +2020,7 @@ impl<'a> EvalCtx<'a> {
                 completion_order,
                 completion_wait,
                 control,
+                observe_id,
                 permit,
             })
             .map_err(|_| unsupported("closed task group", self.span()))?;

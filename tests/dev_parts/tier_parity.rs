@@ -161,7 +161,7 @@ fn stream_producer_failure_matches_interpreter_jit_and_aot() {
     if skip_if_cranelift_host_unsupported() || !have_rustc() {
         return;
     }
-    let source = r#"fn failing() => Stream<Int> {
+    let source = r#"fn failing() Stream<Int> {
     yield 1
     if true {
         panic("producer failure")

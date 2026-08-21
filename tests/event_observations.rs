@@ -226,10 +226,14 @@ use core.event as event
 use core.tasks as tasks
 use core.time as time
 
+fn fail_async(n: Int) ! String {
+    return Err("ASYNC_FAILURE_SECRET")
+}
+
 fn run() {
     print("READY")
     drop_scope :: event.scope()
-    dropped :: event.async_result<Int, String>(AsyncPolicy.{ capacity: 1, overflow: .DropNewest }, .Collect) ?? panic("policy")
+    dropped :: event.async_result<Int, String>(AsyncPolicy{ capacity: 1, overflow: .DropNewest }, .Collect) ?? panic("policy")
     (started_tx, started_rx) :: channel<Int>()
     (release_tx, release_rx) :: channel<Int>()
     dropped.on_priority(drop_scope, 23, (n: Int) => {
@@ -243,17 +247,17 @@ fn run() {
     release_tx.send(1)
     started_second :: started_rx.receive() ?? panic("started second")
     release_tx.send(2)
-    first.join()
-    second.join()
-    newest.join()
+    first.join() ?? panic("first")
+    second.join() ?? panic("second")
+    newest.join() ?? panic("newest")
 
     fail_scope :: event.scope()
-    failing :: event.async_result<Int, String>(AsyncPolicy.{ capacity: 1, overflow: .Block }, .Collect) ?? panic("policy")
-    failing.on(fail_scope, (n: Int) => Err("ASYNC_FAILURE_SECRET"))
-    failing.emit_async(4).join()
+    failing :: event.async_result<Int, String>(AsyncPolicy{ capacity: 1, overflow: .Block }, .Collect) ?? panic("policy")
+    failing.on(fail_scope, (n: Int) => fail_async(n))
+    failing.emit_async(4).join() ?? panic("failing")
 
     close_scope :: event.scope()
-    closing :: event.async_result<Int, String>(AsyncPolicy.{ capacity: 1, overflow: .Block }, .Collect) ?? panic("policy")
+    closing :: event.async_result<Int, String>(AsyncPolicy{ capacity: 1, overflow: .Block }, .Collect) ?? panic("policy")
     (close_started_tx, close_started_rx) :: channel<Int>()
     (close_release_tx, close_release_rx) :: channel<Int>()
     closing.on(close_scope, (n: Int) => {
@@ -266,9 +270,9 @@ fn run() {
     close_blocked :: closing.emit_async(7)
     closing.close()
     close_scope.cancel()
-    close_running.join()
-    close_queued.join()
-    close_blocked.join()
+    close_running.join() ?? panic("close running")
+    close_queued.join() ?? panic("close queued")
+    close_blocked.join() ?? panic("close blocked")
 
     time.sleep(30000ms)
 }
@@ -338,13 +342,13 @@ use core.time as time
 fn run() {
     rejected_scope :: event.scope()
     rejected_scope.cancel()
-    rejected :: event.async_result<Int, String>(AsyncPolicy.{ capacity: 1, overflow: .Block }, .Collect) ?? panic("policy")
+    rejected :: event.async_result<Int, String>(AsyncPolicy{ capacity: 1, overflow: .Block }, .Collect) ?? panic("policy")
     rejected.on(rejected_scope, (n: Int) => {})
 
     once_scope :: event.scope()
-    once_event :: event.async_result<Int, String>(AsyncPolicy.{ capacity: 1, overflow: .Block }, .Collect) ?? panic("policy")
+    once_event :: event.async_result<Int, String>(AsyncPolicy{ capacity: 1, overflow: .Block }, .Collect) ?? panic("policy")
     once_sub :: once_event.once(once_scope, (n: Int) => {})
-    once_event.emit_async(1).join()
+    once_event.emit_async(1).join() ?? panic("join")
     once_sub.unsubscribe()
     once_scope.cancel()
 
@@ -417,7 +421,7 @@ use core.time as time
 
 fn run() {
     scope :: event.scope()
-    concurrent :: event.async_result<Int, String>(AsyncPolicy.{ capacity: 64, overflow: .DropNewest }, .Collect) ?? panic("policy")
+    concurrent :: event.async_result<Int, String>(AsyncPolicy{ capacity: 64, overflow: .DropNewest }, .Collect) ?? panic("policy")
     concurrent.on(scope, (n: Int) => { time.sleep(1ms) })
     loop i, 0..<400 { concurrent.emit_async(i) }
     time.sleep(1500ms)

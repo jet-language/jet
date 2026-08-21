@@ -193,6 +193,49 @@ fn jet_observe_event(mut event: JetObserveEvent) {
     events.push_back(event);
 }
 
+pub fn jet_observe_task_register(control: &JetTaskControl) -> usize {
+    use std::sync::atomic::Ordering;
+    let Some(registry) = jet_observe_registry() else {
+        control.observe_id.store(0, Ordering::Relaxed);
+        return 0;
+    };
+    let parent = JET_OBSERVE_TASK_ID.with(|current| current.get());
+    let id = registry.next_task.fetch_add(1, Ordering::Relaxed);
+    registry.tasks.lock().unwrap().insert(
+        id,
+        JetObserveTask {
+            parent,
+            state: "queued",
+            wait: String::new(),
+            deadline_ms: None,
+            cancelled: false,
+        },
+    );
+    control.observe_id.store(id, Ordering::Relaxed);
+    id
+}
+
+pub fn jet_observe_task_enter(id: usize) {
+    if id == 0 {
+        return;
+    }
+    JET_OBSERVE_TASK_ID.with(|current| current.set(id));
+    if let Some(registry) = jet_observe_registry() {
+        if let Some(task) = registry.tasks.lock().unwrap().get_mut(&id) {
+            task.state = "running";
+        }
+    }
+}
+
+pub fn jet_observe_task_finish(id: usize) {
+    if id == 0 {
+        return;
+    }
+    if let Some(registry) = jet_observe_registry() {
+        registry.tasks.lock().unwrap().remove(&id);
+    }
+}
+
 pub fn jet_observe_runtime_start() {
     let Some(registry) = jet_observe_registry().cloned() else { return };
     if JET_OBSERVE_STARTED.set(()).is_err() {

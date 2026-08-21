@@ -3046,38 +3046,14 @@ where F:FnOnce()->T+Send+'static,T:Send+'static,
 fn jet_scheduler_spawn_with_control_kind<F,T>(f:F,control:Arc<JetTaskControl>,blocking:bool)->JetSchedulerJoin<T>
 where F:FnOnce()->T+Send+'static,T:Send+'static,
 {
-    let parent = JET_OBSERVE_TASK_ID.with(|current| current.get());
-    let observe_id = jet_observe_registry()
-        .map(|registry| {
-            let id = registry.next_task.fetch_add(1, Ordering::Relaxed);
-            registry.tasks.lock().unwrap().insert(
-                id,
-                JetObserveTask {
-                    parent,
-                    state: "queued",
-                    wait: String::new(),
-                    deadline_ms: None,
-                    cancelled: false,
-                },
-            );
-            id
-        })
-        .unwrap_or(0);
-    control.observe_id.store(observe_id, Ordering::Relaxed);
+    let observe_id = jet_observe_task_register(&control);
     let (tx, rx) = std::sync::mpsc::sync_channel(1);
     let completion_order = Arc::new(OnceLock::new());
     let task_completion_order = completion_order.clone();
     let completion_wait = ParkSlot::new();
     let task_completion_wait = completion_wait.clone();
     scheduler().submit(Job{blocking,run:Box::new(move || {
-        if observe_id != 0 {
-            JET_OBSERVE_TASK_ID.with(|current| current.set(observe_id));
-            if let Some(registry) = jet_observe_registry() {
-                if let Some(task) = registry.tasks.lock().unwrap().get_mut(&observe_id) {
-                    task.state = "running";
-                }
-            }
-        }
+        jet_observe_task_enter(observe_id);
         jet_scheduler_set_task_control(Some(control.clone()));
         jet_scheduler_task_panic_enter();
         control.wait_while_paused();
@@ -3086,9 +3062,7 @@ where F:FnOnce()->T+Send+'static,T:Send+'static,
         if control.paused.load(Ordering::Relaxed) && control.cancelled.load(Ordering::Relaxed) {
             jet_scheduler_task_panic_leave();
             jet_scheduler_set_task_control(None);
-            if let Some(registry) = jet_observe_registry() {
-                registry.tasks.lock().unwrap().remove(&observe_id);
-            }
+            jet_observe_task_finish(observe_id);
             task_completion_order
                 .set(next_task_completion_order())
                 .expect("task completion recorded twice");
@@ -3118,9 +3092,7 @@ where F:FnOnce()->T+Send+'static,T:Send+'static,
             }
             Err(e) => JetSchedulerResult::Panicked(jet_scheduler_panic_message(&*e)),
         };
-        if let Some(registry) = jet_observe_registry() {
-            registry.tasks.lock().unwrap().remove(&observe_id);
-        }
+        jet_observe_task_finish(observe_id);
         task_completion_order
             .set(next_task_completion_order())
             .expect("task completion recorded twice");

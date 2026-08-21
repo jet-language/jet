@@ -185,6 +185,14 @@ static JET_OBSERVE_QUEUED: std::sync::atomic::AtomicUsize = std::sync::atomic::A
 
 fn jet_observe_registry() -> Option<&'static std::sync::Arc<JetObserveRegistry>> { None }
 fn jet_observe_task_update(_state: &'static str, _wait: &str, _deadline_ms: Option<i64>) {}
+// D-OBSERVE-LIVE1: the scheduler registers each task with the shared Observe
+// seam. This scope stubs that seam rather than including it, so the stubs must
+// track `Prelude/Observe.rs`'s signatures.
+fn jet_observe_task_register(_control: &JetTaskControl) -> usize {
+    0
+}
+fn jet_observe_task_enter(_id: usize) {}
+fn jet_observe_task_finish(_id: usize) {}
 
 struct LogField {
     key: String,

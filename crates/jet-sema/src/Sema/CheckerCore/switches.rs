@@ -999,7 +999,18 @@ impl<'a> Checker<'a> {
                     && paths.iter().all(|path| !path.reachable);
                 let mut fallthrough = outside_table.clone();
                 if all_arm_paths_exit {
-                    let complement = self.complement_condition_bindings(&original_conditions);
+                    // Keep the optional wrapper for a following explicit
+                    // `.Val(...)` test after an early `== .None` return. The
+                    // runtime value is still an Option; the payload-only flow
+                    // fact is useful for arithmetic, but it must not erase the
+                    // constructor spelling from the next condition.
+                    let early_absent_return = original_conditions.len() == 1
+                        && atomic_absent_optional_subject(&original_conditions[0]).is_some();
+                    let complement = if early_absent_return {
+                        HashMap::new()
+                    } else {
+                        self.complement_condition_bindings(&original_conditions)
+                    };
                     if !complement.is_empty() {
                         self.flow = fallthrough;
                         let fact_span = original_conditions

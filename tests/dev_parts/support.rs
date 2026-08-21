@@ -4955,7 +4955,7 @@ fn cranelift_trap_then_hot_swap_continues_inner() {
     }
 
     let panics = checked_bundle(
-        "fn run() {\n    xs :: [Int].{ 1, 2, 3 }\n    print(xs[99])\n}\n",
+        "fn run() {\n    xs :: [Int]{ 1, 2, 3 }\n    print(xs[99])\n}\n",
         "jit_trap_v1",
     );
     let recovers = checked_bundle("fn run() {\n    print(\"recovered\")\n}\n", "jit_trap_v2");
@@ -5029,7 +5029,7 @@ fn bundle_of(src: &str, tag: &str) -> jet::AST::ProgramBundle {
     jet::run_compiler_work(move || jet::Loader::load_entry(&path)).expect("bundle should load")
 }
 
-const STRUCT_OLD: &str = "struct P {\n    x: Int\n}\nfn f(p: P) => Int {\n    return p.x\n}\nfn run() {\n    print(f(P.{x: 1}))\n}\n";
+const STRUCT_OLD: &str = "struct P {\n    x: Int\n}\nfn f(p: P) Int {\n    return p.x\n}\nfn run() {\n    print(f(P{x: 1}))\n}\n";
 
 fn persist_binding_survives_hot_swap_and_resets_on_shape_change_inner() {
     fn load_checked(path: &std::path::Path) -> jet::AST::ProgramBundle {
