@@ -116,6 +116,28 @@ mechanism for each job and rejects Python's dynamic baggage.
   reject object-only JSON roots and direct file truncation as safe defaults.
   https://www.youtube.com/watch?v=4rmBOxn0PdI
 
+**Compiled-scripting and explicitness batch (3 videos, mined 2026-08-21).**
+A YouTube playlist mined together: the compiled-TypeScript moment, the
+hardware-cost optimization thesis, and Zig 0.16 explicitness pedagogy.
+Findings: unused-code lints card (#2141), footprint receipts card (#2142),
+coverage-scoreboard lesson on #1156, version-matched local docs evidence on
+#86, autovectorization expectation on #2059.
+
+- ThePrimeTime — I tried Compiled Typescript (vercel-labs/scriptc): footprint
+  and cold-start are the marketed axes; typed source becomes real structs;
+  audience caught naive field-order padding and RC-cycle risk; keep the
+  `coverage` remainder scoreboard idea, decline the RC default.
+  https://www.youtube.com/watch?v=2g63UXaynaA
+- dreadjordan — Why the HW Crisis forces Software to catch up: RAM ~4x cost
+  makes performance a software-first problem; AI writes correct-not-best code,
+  so perf must be a machine-checked verdict (Jet's budget law), not a habit.
+  https://www.youtube.com/watch?v=Kr9ai5zxAcY
+- tony — How to Actually Learn Zig (2027 Edition): Zig 0.16 writer-gate print
+  ceremony vs Jet's one-line `print`; view-store copy semantics make Zig's
+  dangling-slice `dupe` lesson unnecessary; `zig std` version-matched local
+  docs are the learning workflow; audience rejects unused-variable hard errors.
+  https://www.youtube.com/watch?v=dYGSPyp41vY
+
 **Jonathan Blow on Jai** (The Standup w/ ThePrimeagen, transcript) — closed-beta
 migration discipline; staged spelling migration through coexistence → warning →
 removal → changelog. https://podscripts.co/podcasts/the-standup-with-theprimeagen/legendary-game-dev-jonathan-blow

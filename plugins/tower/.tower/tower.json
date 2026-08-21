@@ -2,8 +2,8 @@
   "meta": {
     "version": 4,
     "project": "Jet",
-    "nextNum": 2141,
-    "rev": 40636,
+    "nextNum": 2143,
+    "rev": 40641,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -2333,6 +2333,11 @@
       "blockedBy": [],
       "log": [
         {
+          "at": "2026-08-21",
+          "by": "fable",
+          "text": "video-mine evidence (https://www.youtube.com/watch?v=dYGSPyp41vY, Zig 0.16 tutorial): 'zig std' serves the stdlib docs of the EXACT running toolchain version on localhost, and the entire 23-minute learning workflow is docs-first search (debug.print -> File -> writer -> ArrayList -> mem.sort), not LLM or blog guessing. Version-matched local serving is the load-bearing property — audience separately reports tutorials break across Zig minors, and version-exact docs are the antidote. jetdoc should treat 'docs of the binary you are running, served locally' as a requirement, not a nicety."
+        },
+        {
           "at": "2026-08-10",
           "by": "owner",
           "text": "Unfrozen."
@@ -2369,7 +2374,7 @@
         }
       ],
       "created": "2026-06-26T21:10:13.903Z",
-      "updated": "2026-08-19T13:33:26.016Z",
+      "updated": "2026-08-21T15:34:05.857Z",
       "criteria": [
         {
           "n": 1,
@@ -58355,6 +58360,11 @@
       "assignee": null,
       "log": [
         {
+          "at": "2026-08-21",
+          "by": "fable",
+          "text": "video-mine lesson (vercel-labs/scriptc README): its 'scriptc coverage' command prints statements analyzed, percent compiling statically, and one CODED diagnostic per dynamic/unsupported site — a quantified remainder scoreboard. jet import should ship the same: a coverage summary (constructs analyzed / converted / percent) above the per-site TODO provenance diagnostics this card already owns. Turns migration viability into one number an agent or enterprise can track across runs. scriptc also byte-compares Node vs compiled output over its corpus — same differential-proof discipline this card already requires."
+        },
+        {
           "at": "2026-08-19",
           "by": "fable",
           "text": "Absorbed #1155: contract + first importer are one deliverable. Slice criteria added below."
@@ -58462,7 +58472,7 @@
       ],
       "needsAcceptance": false,
       "created": "2026-07-26T10:49:24.076Z",
-      "updated": "2026-08-19T13:22:32.113Z",
+      "updated": "2026-08-21T15:34:08.248Z",
       "updatedBy": "fable",
       "tags": [],
       "parentId": null
@@ -135283,6 +135293,11 @@
       "assignee": null,
       "log": [
         {
+          "at": "2026-08-21",
+          "by": "fable",
+          "text": "video-mine evidence (https://www.youtube.com/watch?v=Kr9ai5zxAcY audience): baseline user expectation that 'most langs don't roll your code into sse2+ features' — autovectorization of ordinary code is table stakes for the performance-first positioning. #1143 covers explicit core.compute SIMD; this card's sema-fact-fed optimizer is where ordinary-code vectorization would land."
+        },
+        {
           "at": "2026-08-19",
           "by": "fable",
           "text": "Criteria repair (2026-08-19 alignment sweep): the original criterion rows were minted EMPTY (a tooling defect — text is blank). The appended row above is the real exit criterion. When closing, meet each blank row with evidence \"empty placeholder row — superseded by the appended criterion\"."
@@ -135349,7 +135364,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-19T11:45:41.694Z",
-      "updated": "2026-08-19T13:49:13.945Z",
+      "updated": "2026-08-21T15:34:07.019Z",
       "updatedBy": "fable"
     },
     {
@@ -140093,6 +140108,62 @@
       "needsAcceptance": false,
       "created": "2026-08-21T14:55:57.143Z",
       "updated": "2026-08-21T14:55:57.144Z",
+      "updatedBy": "fable"
+    },
+    {
+      "id": "c0ra6z70",
+      "num": 2141,
+      "title": "Unused-code lints: warn tier between Zig's hard error and Jet's silence",
+      "body": "Mining https://www.youtube.com/watch?v=dYGSPyp41vY (Zig 0.16 tutorial) surfaced both failure extremes of unused-code handling, and Jet currently sits at one of them.\n\nEvidence:\n- Zig treats unused variables and parameters as hard errors with no dial. Audience comment (4 likes): the language is \"actively hostile to developers\" while prototyping; the commenter left for Jai/Odin over this class of friction.\n- Live Jet probe (2026-08-21): a file with an unused local binding (`unused_thing :: 42`) passes `jet check` with \"ok\" — Jet has zero unused-binding/import/parameter/function diagnostics. Dead code accumulates silently. For agent loops this is a real verdict-fidelity hole: a computed-but-never-used result is a frequent agent bug shape that the oracle currently never names.\n\nDesign constraint (existing mechanism only, no new policy engine):\n- New L-code lint rows (unused local binding, unused parameter, unused import, unused private fn), each with registered code, severity, what/why/fix templates, and UI snapshot per I4 and docs/spec/diagnostics.md.\n- Default severity Warning. Never a bare error: prototyping stays unblocked (the Zig lesson).\n- Projects that want Zig-strictness promote via the existing `policy.lints.deny` surface (E1293, D-LINTPOLICY1). One mechanism, expert dial.\n- The intentional-discard spelling stays silent.\n- `jet fix` offers safe removal where removal is provably safe.",
+      "kind": "feature",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": "- L-code rows registered for unused binding, parameter, import, and private fn with what/why/fix and UI snapshots (I4)\n- Default severity is Warning; jet check reports them without failing; policy.lints.deny promotes to E1293 build failure\n- Probe: a file with an unused binding gets the lint from jet check, and jet fix removes it; intentional discard spelling stays silent\n- Repo examples and goldens stay green under the new lints (clean them or record intended exceptions)",
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [],
+      "refs": [],
+      "tags": [
+        "diagnostics",
+        "video-mine"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-08-21T15:33:50.489Z",
+      "updated": "2026-08-21T15:33:50.489Z",
+      "updatedBy": "fable"
+    },
+    {
+      "id": "c0af6jch",
+      "num": 2142,
+      "title": "Competitive footprint receipts: hello + minimal server RSS, startup, binary size under pinned budgets",
+      "body": "Mining https://www.youtube.com/watch?v=2g63UXaynaA (Prime on vercel-labs/scriptc, 120k views in 2 days) and https://www.youtube.com/watch?v=Kr9ai5zxAcY (hardware-cost crisis): memory footprint and cold-start are the competitive axes the market is watching right now (top comment, 870 likes: \"RAM x100 in cost and web devs finally discover compiled code\"). scriptc leads with 2.2MB min RSS vs Node 70MB and 2.3ms TCP-ready vs Node 56ms.\n\nLive Jet probe (2026-08-21, this machine): AOT hello = 509KB binary, 2.4MB max RSS, startup indistinguishable from an empty C binary at shell-loop resolution. Jet is already in the winning class — but the receipt exists only in one session transcript.\n\nDeliverable: a standing, honest receipt. Two programs (hello; minimal TCP/HTTP-ready server) carrying pinned perf budgets (BinarySize, StartupTime, MemoryHighWater) per D-PERFBUDGET-BASELINE1 baseline law, checked by jet budget, with one receipt table in docs. Measure per that law: same box, named hardware/profile/toolchain, percentiles, never cross-profile comparisons. No throughput claims (the video itself found throughput equal across runtimes on unconstrained hardware — footprint is the honest axis).",
+      "kind": "task",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P3",
+      "plan": null,
+      "checkSteps": "- Both receipt programs exist as examples with declared BinarySize/StartupTime/MemoryHighWater budgets and pinned baselines\n- jet budget passes on them in CI-equivalent invocation; baseline update path exercised once\n- Receipt table in docs states hardware/profile/toolchain and reproduces via one documented command\n- No cross-profile or throughput comparison appears in the receipt",
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [],
+      "refs": [],
+      "tags": [
+        "performance",
+        "video-mine"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-08-21T15:34:28.652Z",
+      "updated": "2026-08-21T15:34:28.652Z",
       "updatedBy": "fable"
     }
   ],
@@ -187027,6 +187098,41 @@
   ],
   "events": [
     {
+      "at": "2026-08-21T15:34:28.652Z",
+      "by": "fable",
+      "action": "card.add",
+      "ref": "c0af6jch",
+      "note": "Competitive footprint receipts: hello + minimal server RSS, startup, binary size under pinned budgets"
+    },
+    {
+      "at": "2026-08-21T15:34:08.248Z",
+      "by": "fable",
+      "action": "card.update",
+      "ref": "c0ayuct3",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-08-21T15:34:07.019Z",
+      "by": "fable",
+      "action": "card.update",
+      "ref": "c0zkd2j5",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-08-21T15:34:05.857Z",
+      "by": "fable",
+      "action": "card.update",
+      "ref": "c1eixac0",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-08-21T15:33:50.489Z",
+      "by": "fable",
+      "action": "card.add",
+      "ref": "c0ra6z70",
+      "note": "Unused-code lints: warn tier between Zig's hard error and Jet's silence"
+    },
+    {
       "at": "2026-08-21T14:56:13.853Z",
       "by": "fable",
       "action": "card.update",
@@ -190490,41 +190596,6 @@
       "action": "card.criteria-meet",
       "ref": "c0zh7s9p",
       "note": "#4"
-    },
-    {
-      "at": "2026-08-21T00:39:30.675Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0zh7s9p",
-      "note": "#3"
-    },
-    {
-      "at": "2026-08-21T00:39:29.931Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0zh7s9p",
-      "note": "#2"
-    },
-    {
-      "at": "2026-08-21T00:39:29.475Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0zh7s9p",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-21T00:39:29.005Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0pibmpe",
-      "note": "#4"
-    },
-    {
-      "at": "2026-08-21T00:39:28.520Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c075z2hs",
-      "note": "#8"
     }
   ],
   "nextNum": 368,
