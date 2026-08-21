@@ -2024,6 +2024,27 @@ fn lower_jit_program_on_stack(bundle: &ProgramBundle) -> Option<JitProgram> {
         ),
         vec![Type::String],
     );
+    // D-SERVICE-WORKFLOW1=D / D-CONC-OUTCOME1: workflow activity calls carry
+    // the service result/status enums even though their Prelude definitions
+    // are emitted only for programs that use the service surface.
+    enum_variants.insert(
+        "TaskOutcome".to_string(),
+        ["Finished", "Panicked", "Cancelled", "DeadlineBlown"]
+            .into_iter()
+            .map(str::to_string)
+            .collect(),
+    );
+    enum_variant_payload_types.insert(
+        "TaskOutcome::Panicked".to_string(),
+        vec![Type::String],
+    );
+    enum_variants.insert(
+        "TaskStatus".to_string(),
+        ["Running", "Paused", "CancelRequested"]
+            .into_iter()
+            .map(str::to_string)
+            .collect(),
+    );
     // stdlib-api-laws D4 (#2055): `WatchEvent.domain`/`.kind` are Prelude enums
     // reached only through `core.watcher` polling, never constructed in source —
     // register their packed JIT/AOT shape for the same reason as `TaskFailure`.

@@ -1863,6 +1863,36 @@ pub(crate) fn core_service_receipt_variants(
     )
 }
 
+/// D-SERVICE-WORKFLOW1=D / D-CONC-OUTCOME1: recorded workflow attempts use
+/// the same closed result and wait-state names on every execution tier.
+pub(crate) fn core_workflow_outcome_variants(
+    enum_name: &str,
+) -> Option<std::collections::HashMap<String, (crate::Diagnostics::Span, crate::AST::VariantPayload)>> {
+    use crate::AST::VariantPayload;
+    use crate::Diagnostics::Span;
+    let zero = Span::new(0, 0);
+    let variants = match enum_name {
+        "TaskOutcome" => vec![
+            ("Finished", VariantPayload::Unit),
+            ("Panicked", VariantPayload::Single(Type::String, zero)),
+            ("Cancelled", VariantPayload::Unit),
+            ("DeadlineBlown", VariantPayload::Unit),
+        ],
+        "TaskStatus" => vec![
+            ("Running", VariantPayload::Unit),
+            ("Paused", VariantPayload::Unit),
+            ("CancelRequested", VariantPayload::Unit),
+        ],
+        _ => return None,
+    };
+    Some(
+        variants
+            .into_iter()
+            .map(|(name, payload)| (name.to_string(), (zero, payload)))
+            .collect(),
+    )
+}
+
 /// D-SERVICE1=D: service failures remain a typed closed sum across AOT,
 /// ambient, and persisted/comptime boundaries.
 pub(crate) fn core_service_error_variants(

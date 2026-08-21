@@ -500,6 +500,8 @@ pub fn core_module_items(module: &str) -> Vec<String> {
             "ServiceReceipt",
             "ServiceStateStore",
             "ServiceUpgradeReceipt",
+            "TaskOutcome",
+            "TaskStatus",
         ],
         "core.tasks" => &[
             "yield_now",

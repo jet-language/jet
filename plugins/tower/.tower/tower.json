@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 2131,
-    "rev": 40519,
+    "rev": 40531,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -1978,7 +1978,7 @@
       "title": "M17 · Diagnostics and the agent loop",
       "goal": "Machine reports agents can consume, structured fixes at construction, truthful teaching text, coverage ratchets both ways, scalar inspector, panic-free examples corpus, LLM digest, accessibility. Depends on M02.",
       "criteria": [],
-      "status": "open",
+      "status": "review-ready",
       "created": "2026-08-12T18:10:05.660Z"
     },
     {
@@ -79875,7 +79875,7 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": "e3-m09-types-numbers",
-      "phase": "ready",
+      "phase": "done",
       "priority": "P1",
       "plan": "Scope: D-JSON-EXACTNUM1=A. DataTree keeps its ratified Int/Float meaning (crates/jet-codegen/src/Prelude/CoreLib/JetStd/JSONDataTree.rs, render_datatree_json line 17); a typed Decimal or BigInt decode target reads the original JSON number token text directly, before any Float conversion, so exact values never round-trip through binary64. One tokenizer feeds two destinations: the existing DataTree builder, and a typed visitor path for Decimal/BigInt fields. json.canonical(json.parse(text)?)? keeps its one-call D-JSONCANON1 contract unchanged (do not amend it, per option A vs B). Blocked on #1394 (edition-2027 DataTree/Codable split) -- #1394 owns creating the edition-2027 tokenizer entry point; do not build a second one against the frozen edition-2026 crates/jet-codegen/src/Prelude/CoreLib/JetStd/JSONCodec.rs (its JSONParser/JSON enum at lines 95-296 stay byte-frozen per #1394's own plan step 2).\n\nSEQUENCING AMENDMENT (this audit, 2026-08-06): D-TYPE2-NUM1=A (ratified) folds BigInt into Int -- \"the number tower: one grid, and BigInt folds into Int\" -- and #1436 (D-INTBIG1=A, also ratified) is the card that makes default Int arbitrary-precision. As of this audit, crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs:811 still defines a standalone JetBigInt struct and #1436's own criteria are all open (BigInt has not yet folded into Int in the tree). Building this card's typed-visitor path against JetBigInt today is correct FOR NOW, but becomes throwaway/rework once #1436 lands and JetBigInt retires. To avoid two homes for the same exact-integer decode work: block this card on #1436 in addition to #1394, and when both have landed, the \"BigInt decode target\" in every step below means the arbitrary-precision default Int, not a surviving JetBigInt type. If owner sequencing forces this card to ship before #1436, implement against JetBigInt as scoped below but file the Int retarget as a plain implementation follow-up (no new decision needed -- D-TYPE2-NUM1 already settled the direction).\n\nApproach (execute after #1394 AND #1436 land, per the amendment above):\n1. Confirm the exact-number gap first: crates/jet-codegen/src/Prelude/CoreLib/Top/EncodingTraits.rs 'impl user_Decode for jet_std::JetDecimal' (line ~202-210) currently only accepts DataTree::Text and DataTree::Int, erroring on DataTree::Float -- meaning a fractional JSON number decoded into a dynamic tree first cannot reach Decimal at all today. Locate #1394's edition-2027 equivalent decode path and confirm the same gap exists there before patching it.\n2. In #1394's edition-2027 tokenizer, add a typed visitor mode alongside the DataTree builder: when the destination field is JetDecimal (crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs) or the exact-integer destination (post-#1436: the default arbitrary-precision Int; pre-#1436: JetBigInt, CommonTypes.rs line ~800), the number token's raw text (mantissa, optional fraction, optional exponent) feeds JetDecimal::from_str / the integer parser directly -- never through DataTree::Float. Whole-value decode (json.decode<T>) and stream decode share the same tokenizer and visitor.\n3. Extend crates/jet-codegen/src/Prelude/CoreLib/Top/EncodingTraits.rs user_Decode impls for JetDecimal and the exact-integer destination to accept the typed-visitor projection path in addition to their current Text/Int cases.\n4. Define errors per the ballot: target mismatch (schema expects Decimal/exact-integer but token is non-numeric), overflow (only meaningful pre-#1436, since arbitrary-precision Int has no overflow per D-INTBIG1), non-finite input (NaN/Infinity are not valid JSON tokens -- confirm this is already rejected), unsupported canonical output (a Decimal/exact-integer value that cannot round-trip through json.canonical's existing Int/Float contract), and configured limits (digit count / exponent range) -- reuse the existing EncodingError kind vocabulary in crates/jet-codegen/src/Prelude/CoreLib/Top/EncodingTraits.rs rather than inventing a new error type.\n5. Hostile test coverage in tests/encoding_corpus.rs and tests/encoding_parity.rs: exponent forms (1e30, 1E-5), scale (12.340 keeps trailing zero, 100 stays whole), large integers beyond i64/i128, adjacent-precision values (0.1 vs 0.10 vs 1e-1), streaming decode, and whole-value decode. Add Python differential fixtures matching json.loads(payload, parse_float=Decimal, parse_int=int) per the ballot's Python comparison.\n6. Prove parity across comptime, interpreter, JIT, and AOT per I9 -- the typed visitor is Prelude-only logic (crates/jet-codegen/src/Prelude/**), so AOT emit, jet-jit, and jet-comptime must call the same Prelude decode symbol, not re-implement number parsing.\n7. docs/spec/encoding-decisions.md and docs/reference/core-library.md: document the exact-number model and its error kinds, naming Int (not BigInt) as the exact-integer destination if #1436 has landed by then.\n8. docs/spec/syntax-decisions.md or docs/spec/encoding-decisions.md decision log: append the dated D-JSON-EXACTNUM1=A entry, and cross-reference D-TYPE2-NUM1=A if the exact-integer destination was retargeted to Int.\nProof (post-#1394 and post-#1436, targeted, not full suite):\n- scripts/agent/jet-env cargo test --test encoding_corpus -- decimal bigint json\n- scripts/agent/jet-env cargo test --test encoding_parity -- json\n- scripts/agent/jet-env cargo test --test golden -- <new example name>\n- scripts/agent/jet-env jet run examples/features/<new-example>.jet (I9 parity across AOT/JIT/interpreter)\nOwned paths: crates/jet-codegen/src/Prelude/CoreLib/JetStd/JSONDataTree.rs, crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs, crates/jet-codegen/src/Prelude/CoreLib/Top/EncodingTraits.rs, tests/encoding_corpus.rs, tests/encoding_parity.rs, docs/spec/encoding-decisions.md, docs/reference/core-library.md, examples/features/**. Do not touch crates/jet-codegen/src/Prelude/CoreLib/JetStd/JSONCodec.rs (edition-2026 frozen).",
       "blockedBy": [],
@@ -79984,20 +79984,20 @@
         {
           "n": 8,
           "text": "`scripts/agent/jet-env cargo test --test encoding_corpus -- exact_typed_json_numbers` and `scripts/agent/jet-env cargo test --test encoding_parity -- exact_typed_json_numbers_match_aot_default_run_and_interpreter` pass; the tests pin exponent, scale, adjacent-precision, large-Int, limit, mismatch, and stream-versus-whole cases.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-12T18:17:17.443Z"
+          "evidence": "tests/encoding_corpus.rs and tests/encoding_parity.rs both pass; shared Number-to-exact path at TIR/eval/exprs.rs:1700-1718,3125-3167,3279-3294 with AOT JSONDataTree.rs:130-160 and EncodingTraits.rs:529-535",
+          "at": "2026-08-21T06:59:34.091Z"
         },
         {
           "n": 9,
           "text": "`examples/features/serde/json_typed.jet` and `examples/features/expected/serde/json_typed.out` contain the exact-number case; `jet run --release`, default `jet run`, and `jet run --interpret` on that example produce the expected file byte-for-byte.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-12T18:17:17.891Z"
+          "evidence": "examples/features/serde/json_typed.jet outputs the exact 15-line golden on default, --interpret and full-shell --release, including adjacent 9007199254740992/3, a 50-digit Int, 1e30, and the final fixed-width-rejected. That last line is right because BoundedNumbers.value is I64 and 2^63 falls outside signed I64",
+          "at": "2026-08-21T06:59:34.841Z"
         }
       ],
       "refs": [
@@ -80019,9 +80019,10 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-03T20:21:49.596Z",
-      "updated": "2026-08-21T02:09:35.736Z",
+      "updated": "2026-08-21T06:59:40.055Z",
       "updatedBy": "fable-e3-burndown",
-      "workOrder": 340
+      "workOrder": 340,
+      "completedAt": "2026-08-21T06:59:40.055Z"
     },
     {
       "id": "c0b4fyko",
@@ -97545,11 +97546,11 @@
         {
           "n": 9,
           "text": "Tier parity (I9) is proved inside this card: parser, sema, TIR, AOT, JIT/dev, comptime, REPL and web all show the same behavior, with one test per tier.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-06T21:35:01.353Z"
+          "evidence": "Exact-to-approximate crossing on every tier: sema core_call.rs:97-126,2750-2763 with the multi-argument family at :2791-2804; lowering method_calls.rs:1515-1520; evaluator exprs.rs:10703-10710; AOT MathRandomTime.rs:434-436; JIT Numeric.rs:573-576,713-714 and lower_ctx.rs:19632-19634,25108-25112,16757-16775,17008-17019. tests/exact_number_tiers.rs:49-240 probes parser, sema, TIR, AOT, JIT, interpreter, comptime, REPL and web. The written negative exponent now lands exact Fraction per the ratified amendment: sema binary.rs:1763-1777, lowering expressions.rs:2031-2085,2835-2870",
+          "at": "2026-08-21T06:59:35.551Z"
         },
         {
           "n": 10,
@@ -97588,7 +97589,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-06T21:34:58.286Z",
-      "updated": "2026-08-21T05:18:35.463Z",
+      "updated": "2026-08-21T06:59:35.561Z",
       "updatedBy": "fable-e3-burndown",
       "workOrder": 600
     },
@@ -97706,7 +97707,7 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": "e3-m09-types-numbers",
-      "phase": "ready",
+      "phase": "done",
       "priority": "P1",
       "plan": "Implements D-TYPE2-MEASURE1 — ratified 2026-08-06. Read each decision verbatim (tower brief on this card's parent proposal, or tower decision show) before building; the ratified outcome text is the law, this plan is the route. Every requirement is a discrete exit criterion below: meet each with targeted proof (tests, snapshots, examples with golden output), and keep I9 tier parity inside this card — AOT, default jet run (JIT), and the interpreter must agree on every surface this card ships before it closes. Delete every superseded form the decisions retire in the same change; do not leave compatibility shims or parallel spellings. Reference: docs/proposals/type-system-v2-carriers-and-knowledge.md.",
       "blockedBy": [],
@@ -97786,11 +97787,11 @@
         {
           "n": 7,
           "text": "Tier parity (I9) is proved inside this card: parser, sema, TIR, AOT, JIT/dev, comptime, REPL and web all show the same behavior, with one test per tier.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-06T21:35:06.880Z"
+          "evidence": "tests/fact_declaration_tiers.rs:197-289 covers parser, sema, TIR, AOT, JIT, interpreter, comptime, REPL and web, with tests/measure_symbolic_specialization.rs alongside",
+          "at": "2026-08-21T06:59:36.049Z"
         },
         {
           "n": 8,
@@ -97804,11 +97805,11 @@
         {
           "n": 9,
           "text": "`scripts/agent/jet-env cargo test --test fact_declaration_tiers -- measure_rows_share_one_registry_and_all_tiers` and `scripts/agent/jet-env cargo test --test compute_parity -- matrix_shape_measures_match_or_diagnose_inner_sides` pass.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-12T18:17:37.301Z"
+          "evidence": "fact_declaration_tiers measure_rows_share_one_registry_and_all_tiers passes 2/2; compute_parity matrix_shape_measures_match_or_diagnose_inner_sides passes 1/1",
+          "at": "2026-08-21T06:59:36.525Z"
         },
         {
           "n": 10,
@@ -97829,9 +97830,10 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-06T21:35:04.457Z",
-      "updated": "2026-08-21T05:18:37.138Z",
+      "updated": "2026-08-21T06:59:40.991Z",
       "updatedBy": "fable-e3-burndown",
-      "workOrder": 620
+      "workOrder": 620,
+      "completedAt": "2026-08-21T06:59:40.991Z"
     },
     {
       "id": "c08q9a90",
@@ -98021,7 +98023,7 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": "e3-m09-types-numbers",
-      "phase": "ready",
+      "phase": "done",
       "priority": "P1",
       "plan": "Implements D-TYPE2-UNCERT1 — ratified 2026-08-06. Read each decision verbatim (tower brief on this card's parent proposal, or tower decision show) before building; the ratified outcome text is the law, this plan is the route. Every requirement is a discrete exit criterion below: meet each with targeted proof (tests, snapshots, examples with golden output), and keep I9 tier parity inside this card — AOT, default jet run (JIT), and the interpreter must agree on every surface this card ships before it closes. Delete every superseded form the decisions retire in the same change; do not leave compatibility shims or parallel spellings. Reference: docs/proposals/type-system-v2-carriers-and-knowledge.md.",
       "blockedBy": [],
@@ -98115,11 +98117,11 @@
         {
           "n": 8,
           "text": "Tier parity (I9) is proved inside this card: parser, sema, TIR, AOT, JIT/dev, comptime, REPL and web all show the same behavior, with one test per tier.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-06T21:35:12.413Z"
+          "evidence": "tests/measurement_tiers.rs passes all 18, covering parser, sema, TIR, AOT, default JIT, interpreter, comptime, REPL and web; fixes at TIR/emit/expressions.rs measurement CtLit and fixed-int decode helpers, plus sema CoreUsage.rs",
+          "at": "2026-08-21T06:59:37.381Z"
         },
         {
           "n": 9,
@@ -98133,11 +98135,11 @@
         {
           "n": 10,
           "text": "`scripts/agent/jet-env cargo test --test comptime_core_one_home -- measurement_has_one_semantic_home` and `scripts/agent/jet-env cargo test --test math_display_parity -- measured_values_propagate_first_order_uncertainty` pass.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-12T18:17:41.527Z"
+          "evidence": "measurement_has_one_semantic_home passes 1/1 and measured_values_propagate_first_order_uncertainty passes 1/1",
+          "at": "2026-08-21T06:59:38.225Z"
         },
         {
           "n": 11,
@@ -98158,9 +98160,10 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-06T21:35:09.647Z",
-      "updated": "2026-08-21T00:41:23.121Z",
+      "updated": "2026-08-21T06:59:41.794Z",
       "updatedBy": "fable-e3-burndown",
-      "workOrder": 640
+      "workOrder": 640,
+      "completedAt": "2026-08-21T06:59:41.794Z"
     },
     {
       "id": "c0s536sj",
@@ -137991,7 +137994,7 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": "e3-m17-agent-diagnostics",
-      "phase": "ready",
+      "phase": "done",
       "priority": "P2",
       "plan": "## Outcome\nEvery unambiguous did-you-mean suggestion carries a typed fix_edit in jet.report/v1.\n\n## Work\n1. Find where E0107 builds its did-you-mean fix text; attach the replacement span edit at construction (same pattern #1877 shipped).\n2. Sweep all suggestion sites (did-you-mean constructors) — each either emits a typed edit or has a one-line reason it cannot (ambiguous candidates).\n3. Snapshot: E0107 JSON fixture shows fix_edits with the replacement; UI snapshot unchanged.\n\n## Exit criteria\n- jet check --json on a one-letter identifier typo emits fix_edits with the exact replacement span.\n- Suggestion-site sweep recorded on the card: every site emits an edit or names the ambiguity.\n- Diagnostic snapshot fixtures updated; jet fix applies the edit and the recheck is clean.",
       "blockedBy": [],
@@ -138007,11 +138010,11 @@
         {
           "n": 1,
           "text": "Every did-you-mean suggestion the compiler can spell carries a typed fix_edits entry in jet.report/v1 (E0107 name suggestions first), so a machine applies the edit without reading prose",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-20T12:48:58.368Z"
+          "evidence": "Expr::EnumLit carries an exact variant-token span (AST/expressions.rs:606-620); parser retains it for leading-dot, dotted and marker paths (binary_unary.rs:760-823, calls.rs:107-117, primary.rs:43-62); check_enum_lit attaches a TextEdit from the same candidate that renders the prose (CheckerItems.rs:2311-2318,2370-2389); E0304 is registered as suggested_source_edit|behavior-preserving at Prelude/Diagnostics.jet:189",
+          "at": "2026-08-21T06:59:38.922Z"
         },
         {
           "n": 2,
@@ -138053,8 +138056,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-20T11:27:23.149Z",
-      "updated": "2026-08-21T06:46:32.648Z",
-      "updatedBy": "fable-e3-burndown"
+      "updated": "2026-08-21T06:59:42.447Z",
+      "updatedBy": "fable-e3-burndown",
+      "completedAt": "2026-08-21T06:59:42.447Z"
     },
     {
       "id": "c02mdks0",
@@ -186737,6 +186741,90 @@
   ],
   "events": [
     {
+      "at": "2026-08-21T06:59:42.447Z",
+      "by": "fable-e3-burndown",
+      "action": "card.update",
+      "ref": "c0xoi09n",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-21T06:59:41.794Z",
+      "by": "fable-e3-burndown",
+      "action": "card.update",
+      "ref": "c0cu6duy",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-21T06:59:40.991Z",
+      "by": "fable-e3-burndown",
+      "action": "card.update",
+      "ref": "c0yzzaom",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-21T06:59:40.056Z",
+      "by": "fable-e3-burndown",
+      "action": "card.update",
+      "ref": "c05y3gfw",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-21T06:59:38.922Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0xoi09n",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-21T06:59:38.225Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0cu6duy",
+      "note": "#10"
+    },
+    {
+      "at": "2026-08-21T06:59:37.381Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0cu6duy",
+      "note": "#8"
+    },
+    {
+      "at": "2026-08-21T06:59:36.525Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0yzzaom",
+      "note": "#9"
+    },
+    {
+      "at": "2026-08-21T06:59:36.059Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0yzzaom",
+      "note": "#7"
+    },
+    {
+      "at": "2026-08-21T06:59:35.561Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c04yd90c",
+      "note": "#9"
+    },
+    {
+      "at": "2026-08-21T06:59:34.841Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c05y3gfw",
+      "note": "#9"
+    },
+    {
+      "at": "2026-08-21T06:59:34.091Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c05y3gfw",
+      "note": "#8"
+    },
+    {
       "at": "2026-08-21T06:46:32.648Z",
       "by": "fable-e3-burndown",
       "action": "card.criteria-meet",
@@ -190151,90 +190239,6 @@
       "action": "card.update",
       "ref": "c06s09om",
       "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-08-20T22:09:54.159Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c06s09om",
-      "note": "#7"
-    },
-    {
-      "at": "2026-08-20T22:09:53.672Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c06s09om",
-      "note": "#6"
-    },
-    {
-      "at": "2026-08-20T22:09:53.185Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c06s09om",
-      "note": "#5"
-    },
-    {
-      "at": "2026-08-20T22:09:52.716Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c06s09om",
-      "note": "#4"
-    },
-    {
-      "at": "2026-08-20T22:09:52.242Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c06s09om",
-      "note": "#3"
-    },
-    {
-      "at": "2026-08-20T22:09:51.771Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c06s09om",
-      "note": "#2"
-    },
-    {
-      "at": "2026-08-20T22:09:51.302Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c06s09om",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-20T21:53:31.617Z",
-      "by": "owner",
-      "action": "done.clear",
-      "ref": null,
-      "note": "2026-08-20T21:53:31.617Z"
-    },
-    {
-      "at": "2026-08-20T21:51:05.127Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0iylrhu",
-      "note": "#3"
-    },
-    {
-      "at": "2026-08-20T21:51:03.557Z",
-      "by": "fable-e3-burndown",
-      "action": "card.update",
-      "ref": "c03pfb56",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-08-20T21:51:02.630Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c03pfb56",
-      "note": "#4"
-    },
-    {
-      "at": "2026-08-20T21:51:02.165Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c03pfb56",
-      "note": "#3"
     }
   ],
   "nextNum": 368,

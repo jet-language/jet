@@ -743,6 +743,8 @@ pub(crate) fn service_handle_rust_type(name: &str) -> Option<&'static str> {
         "ServiceStateStore" => Some("JetServiceStateStore"),
         "ServiceUpgradeReceipt" => Some("JetServiceUpgradeReceipt"),
         "ServiceReceipt" => Some("JetServiceReceipt"),
+        "TaskOutcome" => Some("JetTaskOutcome"),
+        "TaskStatus" => Some("JetTaskStatus"),
         _ => None,
     }
 }
@@ -3638,6 +3640,30 @@ pub(crate) fn register_core_import_surfaces(cx: &mut Cx) {
         cx.enum_variants
             .insert("ServiceReceipt".to_string(), variants);
         cx.cloneable.insert("ServiceReceipt".to_string());
+        let workflow_outcomes = vec![
+            ("Finished".to_string(), VariantPayload::Unit),
+            ("Panicked".to_string(), VariantPayload::Single(Type::String, zero)),
+            ("Cancelled".to_string(), VariantPayload::Unit),
+            ("DeadlineBlown".to_string(), VariantPayload::Unit),
+        ];
+        for (variant, _) in &workflow_outcomes {
+            cx.variant_owner
+                .insert(variant.clone(), "TaskOutcome".to_string());
+        }
+        cx.enum_variants
+            .insert("TaskOutcome".to_string(), workflow_outcomes);
+        cx.cloneable.insert("TaskOutcome".to_string());
+        let workflow_statuses = ["Running", "Paused", "CancelRequested"]
+            .into_iter()
+            .map(|variant| (variant.to_string(), VariantPayload::Unit))
+            .collect::<Vec<_>>();
+        for (variant, _) in &workflow_statuses {
+            cx.variant_owner
+                .insert(variant.clone(), "TaskStatus".to_string());
+        }
+        cx.enum_variants
+            .insert("TaskStatus".to_string(), workflow_statuses);
+        cx.cloneable.insert("TaskStatus".to_string());
         let error_variants = [
             "Full",
             "Ambiguous",

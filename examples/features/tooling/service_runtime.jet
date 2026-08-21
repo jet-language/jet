@@ -3,7 +3,19 @@ use core.service as service
 use core.testing as testing
 
 fn worker_a() {}
+
 fn worker_b() {}
+
+// D-CONC-JOIN1: the dogfood service task is consumed, not dropped.
+fn service_probe() String {
+    probe := service.tree("probe")
+    endpoint :: probe.worker("echo", worker_a, capacity: 1) ?? panic("probe worker")
+    probe.start() ?? panic("probe start")
+    probe.send(endpoint, "probe") ?? panic("probe send")
+    message :: probe.receive(endpoint) ?? panic("probe receive")
+    probe.stop() ?? panic("probe stop")
+    return message
+}
 
 fn run() {
     tree := service.tree("app")
@@ -16,6 +28,9 @@ fn run() {
     b :: tree.worker("b", worker_b, capacity: 2) ?? panic("b")
     tree.set_restart(service.restart_rest_for_one()) ?? panic("restart")
     tree.start() ?? panic("start")
+
+    probe :: task service_probe()
+    print("probe:{probe.join() ?? panic("probe join")}")
 
     tree.send_durable(a, "ping", key: "k1") ?? panic("durable")
     tree.append_event("pinged") ?? panic("event")

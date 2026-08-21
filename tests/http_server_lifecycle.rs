@@ -225,6 +225,10 @@ pub use jet_foundation::Outcome::*;
 include!("../crates/jet-codegen/src/Prelude/CoreLib/Top/Ws.rs");
 #[allow(unused_imports)]
 pub use jet_foundation::Outcome::*;
+fn jet_std_time_duration_to_millis(duration: jet_std::Duration) -> i64 {
+    duration.as_millis()
+}
+
 include!("../crates/jet-codegen/src/Prelude/Scheduler.rs");
 
 mod http_server_tls_runtime {

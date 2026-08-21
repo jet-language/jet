@@ -3826,8 +3826,12 @@ string-keyed topology surface.
 The public tree fronts now cover worker creation, restart and delivery policy,
 start/stop, live and durable send, receive, mailbox/restart inspection, worker
 failure and drain, dead-letter/event counters, state adapters, snapshots and
-events, workflow start/step/history, directory register/resolve, generation
-handoff/rollback, upgrade receipts, chaos failure, observation, and display.
+events, workflow start/step/history, typed activity scheduling/retry/completion
+and run outcomes, directory register/resolve, generation handoff/rollback,
+upgrade receipts, chaos failure, observation, and display. Activity retry takes
+`TaskOutcome` and returns `TaskStatus`; completion and `workflow_outcome` return
+the same `TaskOutcome` enum. The durable workflow log frames the enum values
+and replays them before each append.
 `ServiceEndpoint` fronts send, receive, and display. Supervisor group storage,
 authority-runtime retry operations, and deployment remain private follow-up
 substrate.

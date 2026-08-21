@@ -463,15 +463,30 @@ impl JetTaskOutcome {
                 let reason = value
                     .strip_prefix("Panicked:")
                     .ok_or_else(|| jet_services_state_error("unknown task outcome"))?;
-                Ok(Self::Panicked(
+                let outcome = Self::Panicked(
                     jet_services_workflow_field(reason, "panic reason")?.to_string(),
-                ))
+                );
+                outcome
+                    .is_valid()
+                    .then_some(outcome)
+                    .ok_or_else(|| jet_services_state_error("invalid task outcome"))
             }
         }
     }
 
     fn is_retryable_failure(&self) -> bool {
         !matches!(self, Self::Finished)
+    }
+
+    fn is_valid(&self) -> bool {
+        match self {
+            Self::Panicked(reason) => {
+                !reason.trim().is_empty()
+                    && reason.len() <= MAX_SERVICE_MESSAGE
+                    && !reason.chars().any(char::is_control)
+            }
+            _ => true,
+        }
     }
 }
 
@@ -3672,6 +3687,11 @@ fn jet_services_workflow_activity_retry(
             "a finished activity cannot be retried".to_string(),
         ));
     }
+    if !outcome.is_valid() {
+        return Err(JetServiceError::Policy(
+            "workflow activity outcome is invalid".to_string(),
+        ));
+    }
     let next_attempt = attempt + 1;
     jet_services_workflow_append(
         tree,
@@ -3696,6 +3716,11 @@ fn jet_services_workflow_activity_complete(
         ));
     }
     jet_services_workflow_token(&key, "idempotency key", MAX_SERVICE_NAME)?;
+    if !outcome.is_valid() {
+        return Err(JetServiceError::Policy(
+            "workflow activity outcome is invalid".to_string(),
+        ));
+    }
     let workflow_index = tree
         .workflows
         .iter()

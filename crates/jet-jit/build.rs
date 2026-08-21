@@ -126,6 +126,8 @@ fn write_prelude_enum_meta(manifest: &PathBuf) {
         ("EventResult", "../jet-codegen/src/Prelude/Ui.rs", "JetEventResult"),
         ("DispatchState", "../jet-codegen/src/Prelude/CoreLib/JetStd/ReactiveEventWatch.rs", "JetDispatchState"),
         ("ServiceReceipt", "../jet-codegen/src/Prelude/CoreLib/Top/ServiceAuthority.rs", "JetServiceReceipt"),
+        ("TaskOutcome", "../jet-codegen/src/Prelude/CoreLib/Top/Services.rs", "JetTaskOutcome"),
+        ("TaskStatus", "../jet-codegen/src/Prelude/CoreLib/Top/Services.rs", "JetTaskStatus"),
         ("SMTPSecurity", "../jet-codegen/src/Prelude/CoreLib/Email.rs", "SMTPSecurity"),
         ("RecipientPolicy", "../jet-codegen/src/Prelude/CoreLib/Email.rs", "RecipientPolicy"),
         ("SMTPAuth", "../jet-codegen/src/Prelude/CoreLib/Email.rs", "SMTPAuth"),

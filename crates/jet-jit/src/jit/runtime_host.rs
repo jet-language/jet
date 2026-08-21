@@ -2301,6 +2301,7 @@ mod service_adapter {
         Slot,
         Restart,
         Delivery,
+        TaskOutcome,
         DurationNs,
     }
 
@@ -2376,8 +2377,22 @@ mod service_adapter {
                 "workflow_step" if index == 0 => Some(ArgKind::Slot),
                 "workflow_step" if index == 1 => Some(ArgKind::Int),
                 "workflow_step" if index == 2 => Some(ArgKind::String),
+                "workflow_activity" if index == 0 => Some(ArgKind::Slot),
+                "workflow_activity" if index == 1 => Some(ArgKind::Int),
+                "workflow_activity" if index == 2 || index == 3 => Some(ArgKind::String),
+                "workflow_activity" if index == 4 => Some(ArgKind::Int),
+                "workflow_activity_retry" if index == 0 => Some(ArgKind::Slot),
+                "workflow_activity_retry" if index == 1 => Some(ArgKind::Int),
+                "workflow_activity_retry" if index == 2 => Some(ArgKind::String),
+                "workflow_activity_retry" if index == 3 => Some(ArgKind::TaskOutcome),
+                "workflow_activity_complete" if index == 0 => Some(ArgKind::Slot),
+                "workflow_activity_complete" if index == 1 => Some(ArgKind::Int),
+                "workflow_activity_complete" if index == 2 => Some(ArgKind::String),
+                "workflow_activity_complete" if index == 3 => Some(ArgKind::TaskOutcome),
                 "workflow_history" if index == 0 => Some(ArgKind::Slot),
                 "workflow_history" if index == 1 => Some(ArgKind::Int),
+                "workflow_outcome" if index == 0 => Some(ArgKind::Slot),
+                "workflow_outcome" if index == 1 => Some(ArgKind::Int),
                 "directory_register" if index == 0 => Some(ArgKind::Slot),
                 "directory_register" if index == 1 => Some(ArgKind::String),
                 "directory_register" if index == 2 => Some(ArgKind::Slot),
@@ -2502,6 +2517,27 @@ mod service_adapter {
                 .to_string(),
                 args: Vec::new(),
             }),
+            ArgKind::TaskOutcome => {
+                let variant = match raw & 0xff {
+                    0 => "Finished",
+                    2 => "Cancelled",
+                    3 => "DeadlineBlown",
+                    1 => {
+                        let reason = rt.heap.clone_string(raw >> 8)?;
+                        return Some(CtValue::Enum {
+                            type_name: "TaskOutcome".to_string(),
+                            variant: "Panicked".to_string(),
+                            args: vec![(None, CtValue::Str(reason))],
+                        });
+                    }
+                    _ => return None,
+                };
+                Some(CtValue::Enum {
+                    type_name: "TaskOutcome".to_string(),
+                    variant: variant.to_string(),
+                    args: Vec::new(),
+                })
+            }
             ArgKind::DurationNs => Some(CtValue::Struct {
                 type_name: "Duration".to_string(),
                 fields: vec![("ns".to_string(), CtValue::Int(raw))],
@@ -2612,6 +2648,8 @@ mod service_adapter {
                 "Stale",
                 "Expired",
             ],
+            "TaskOutcome" => &["Finished", "Panicked", "Cancelled", "DeadlineBlown"],
+            "TaskStatus" => &["Running", "Paused", "CancelRequested"],
             "ServiceRestart" => &["OneForOne", "OneForAll", "RestForOne"],
             "ServiceDelivery" => &["AtMostOnce", "DurableAtLeastOnce"],
             "ServiceStateAdapter" => &["Empty", "Snapshot", "EventLog"],

@@ -900,6 +900,15 @@ impl<'a> JitMeta<'a> {
                 _ => EMPTY_PAYLOAD.as_slice(),
             });
         }
+        if enum_name == "TaskOutcome" {
+            return Some(match variant {
+                "Panicked" => HOOK_STR_PAYLOAD.as_slice(),
+                _ => EMPTY_PAYLOAD.as_slice(),
+            });
+        }
+        if enum_name == "TaskStatus" {
+            return Some(EMPTY_PAYLOAD.as_slice());
+        }
         if matches!(enum_name, "SMTPSecurity" | "RecipientPolicy" | "SMTPAuth" | "TLSTrust" | "EmailError") {
             return Some(email_payload(variant));
         }
@@ -1151,6 +1160,8 @@ impl<'a> JitMeta<'a> {
                 | "EventResult"
                 | "DispatchState"
                 | "ServiceReceipt"
+                | "TaskOutcome"
+                | "TaskStatus"
                 | "SMTPSecurity"
                 | "RecipientPolicy"
                 | "SMTPAuth"
