@@ -510,7 +510,7 @@ fn jet_jit_channel_new() -> i64 {
     })
 }
 
-/// `tasks.channel<T>(capacity)` — bounded buffer (D-TASKRUNTIME1).
+/// `channel<T>(capacity)` — bounded buffer (D-TASKRUNTIME1).
 fn jet_jit_channel_bounded(capacity: i64) -> i64 {
     with_runtime_mut(|rt| {
         let id = rt.channels.len() as i64;
@@ -1207,7 +1207,7 @@ fn jet_jit_task_any(task_list: i64) -> i64 {
     wait_task_result(|| jet_scheduler_any(entries), |_rt, value| value as u64)
 }
 
-/// D-CONCSELECT1=A: `g.select().recv(…).after(duration[, v]).wait()`.
+/// D-CONCSELECT1=A: the compiler-private readiness table builder.
 /// `after_list` is a canonical Duration-nanosecond flat list `[ns0, val0, …]`
 /// (even length). The shared Prelude owns the scheduler-ms projection.
 fn jet_jit_select_wait(recv_list: i64, after_list: i64) -> i64 {

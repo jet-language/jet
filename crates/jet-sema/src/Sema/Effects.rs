@@ -95,7 +95,7 @@ pub fn reject_positive_deny_only_effect(name: &str, span: Span) -> Option<Diagno
         Diagnostic::error(
             "E0751",
             "`Panic` can't be granted, only denied".to_string(),
-            "`Panic` is a deny-only effect row; no positive effect bound or capability can grant it"
+            "`Panic` is a deny-only effect row; no positive effect bound or ability can grant it"
                 .to_string(),
             "drop `Panic` from the list, or write `:[!Panic]>`".to_string(),
             Some(span),
@@ -758,7 +758,7 @@ pub struct CallbackObligation {
     pub span: Span,
 }
 
-/// D-EFF1: an open `#Abilities(…)` region's running accumulator while the checker
+    /// D-EFF1: an open `#Abilities(…)` region's running accumulator while the checker
 /// walks its body. Sealed into a `RegionSummary` when the region closes.
 #[derive(Debug, Clone)]
 pub struct RegionAccum {
@@ -1760,7 +1760,7 @@ pub fn e0712(over: &EffectSet, caps: &EffectSet, span: Span, marker: &str) -> Di
     Diagnostic::error(
         "E0712",
         format!(
-            "this `#{}` region uses the effect `{}`, which it has no authority for",
+            "this `#{}` region uses the effect `{}`, which it has no ability for",
             marker, over_list
         ),
         format!(
@@ -1775,16 +1775,16 @@ pub fn e0712(over: &EffectSet, caps: &EffectSet, span: Span, marker: &str) -> Di
     )
 }
 
-/// E0711 (D-AUTHORITY-SCOPE1): the `Authority` handle bound by a named `#Abilities(…)` region escapes
+/// E0711 (D-AUTHORITY-SCOPE1): the `Abilities` handle bound by a named `#Abilities(…)` region escapes
 /// its scope — returned, stored in an outer binding, or captured by an escaping
 /// value. The abilities are revoked at scope end (RAII, S63), so a reference
 /// that outlives the block would name revoked abilities.
 pub fn e0711(handle: &str, marker: &str, span: Span) -> Diagnostic {
     Diagnostic::error(
         "E0711",
-        format!("the `Authority` handle `{}` can't escape its `#{}` block", handle, marker),
+        format!("the `Abilities` handle `{}` can't escape its `#{}` block", handle, marker),
         format!(
-            "`#{}(…)` revokes the `Authority` at the end of its block (RAII); returning, storing, or sharing `{}` would let revoked authority outlive the scope",
+            "`#{}(…)` revokes the `Abilities` at the end of its block (RAII); returning, storing, or sharing `{}` would let revoked abilities outlive the scope",
             marker, handle
         ),
         format!("use `{}` only inside the `#{}` block, or perform the work there", handle, marker),

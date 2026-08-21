@@ -1347,11 +1347,7 @@ fn eval_expr_children(expr: &TExpr) -> Vec<&TExpr> {
             .chain(args.iter())
             .collect(),
         TExprKind::CoreClosureCall { kind } => eval_core_closure_children(kind),
-        TExprKind::SelectRecv { builder, channel }
-        | TExprKind::SelectRead {
-            builder,
-            stream: channel,
-        } => vec![builder.as_ref(), channel.as_ref()],
+        TExprKind::SelectRecv { builder, channel } => vec![builder.as_ref(), channel.as_ref()],
         TExprKind::SelectAfter {
             builder,
             duration,
@@ -9523,11 +9519,6 @@ impl<'a> EvalCtx<'a> {
                     .unwrap_or(CtValue::Unit);
                 self.eval_select_after(builder, duration_ns, value)
             }
-            TExprKind::SelectRead { builder, stream } => {
-                let builder = self.eval_expr_child(builder, scope)?;
-                let _ = self.eval_expr_child(stream, scope)?;
-                Ok(builder)
-            }
             TExprKind::SelectWait { builder } => {
                 let builder = self.eval_expr_child(builder, scope)?;
                 if matches!(&expr.ty, Type::Tuple(_)) {
@@ -10174,6 +10165,9 @@ impl<'a> EvalCtx<'a> {
             }
         }
         let Some(func) = func else {
+            if std::env::var_os("JET_DEBUG_TIR_CALLS").is_some() {
+                eprintln!("missing TIR call {name}; funcs={:?}", self.funcs.keys().collect::<Vec<_>>());
+            }
             return Err(unsupported(&format!("call `{name}`"), self.span()));
         };
         if matches!(

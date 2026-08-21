@@ -151,10 +151,7 @@ pub fn is_polymorphic_core_special(module: &str, name: &str) -> bool {
             // element type is inferred from the initial value / closure return — not in
             // `core_fixed_sig`, so codegen reads it from resolved_ret (I3).
             | ("core.reactive", "signal" | "derived")
-            // D-TUPLE-DESTRUCT1: `tasks.channel<T>()` returns `(Sender<T>, Receiver<T>)`,
-            // `T` read off the call-site turbofish — not in `core_fixed_sig`, so codegen
-            // reads the whole tuple type from resolved_ret (I3).
-            | ("core.tasks", "channel" | "after")
+            | ("core.tasks", "after")
             | (
                 "core.data",
                 "csv" | "json" | "csv_reader" | "json_reader" | "count" | "table" | "rows"
@@ -1222,21 +1219,10 @@ fn core_fixed_sig_impl(
         ("core.compute", "profile_f32_strict" | "profile_show") => {
             Some((vec![], Some(Type::String)))
         },
-        // D-SERVICE1=D (#444): the typed tree declaration is the public
-        // topology surface. Its callback is a declaration block over the
-        // compiler-owned builder, not an arbitrary runtime closure.
+        // D-SERVICE1=D (#444): the typed tree value is the public topology
+        // root. Workers and groups are ordinary checked methods on it.
         ("core.service", "tree") => Some((
-            vec![(
-                read,
-                Type::Fn {
-                    params: vec![Type::Named("ServiceTreeBuilder".to_string())],
-                    ret: Some(Box::new(unit.clone())),
-                    effect_bound: None,
-                    param_contract: None,
-                    call_metadata: None,
-                    return_view_provenance: None,
-                },
-            )],
+            vec![(read, Type::String)],
             Some(Type::Named("ServiceTree".to_string())),
         )),
         ("core.service", "tree_show") => Some((
@@ -1259,6 +1245,9 @@ fn core_fixed_sig_impl(
         )),
         ("core.service", "restart_one_for_one" | "restart_one_for_all" | "restart_rest_for_one") => {
             Some((vec![], Some(Type::Named("ServiceRestart".to_string()))))
+        }
+        ("core.service", "delivery_at_most_once" | "delivery_durable") => {
+            Some((vec![], Some(Type::Named("ServiceDelivery".to_string()))))
         }
         ("core.services", "delivery_at_most_once" | "delivery_durable") => {
             Some((vec![], Some(Type::Named("ServiceDelivery".to_string()))))

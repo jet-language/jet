@@ -339,12 +339,12 @@ fn manifest_capabilities(value: &str) -> Result<BTreeSet<BuildCapability>, Strin
     let value = value
         .strip_prefix('[')
         .and_then(|value| value.strip_suffix(']'))
-        .ok_or_else(|| "plugin manifest capabilities must be a list".to_string())?;
+        .ok_or_else(|| "plugin manifest abilities must be a list".to_string())?;
     let mut capabilities = BTreeSet::new();
     for item in value.split(',').map(str::trim).filter(|item| !item.is_empty()) {
-        let name = manifest_string(item, "capabilities")?;
+        let name = manifest_string(item, "abilities")?;
         let capability = BuildCapability::parse(&name)
-            .ok_or_else(|| format!("unknown build capability {name}"))?;
+            .ok_or_else(|| format!("unknown build ability {name}"))?;
         capabilities.insert(capability);
     }
     Ok(capabilities)
@@ -533,7 +533,7 @@ pub fn run_packaged_plugin(
 }
 
 /// Request bytes are deterministic and contain no host handles or mutable
-/// compiler state. Guests may inspect package identity/capabilities, but the
+/// compiler state. Guests may inspect package identity/abilities, but the
 /// host still validates every graph field on the return path.
 pub fn encode_build_plugin_request(spec: &WasmComponentPluginSpec) -> Vec<u8> {
     format!(
@@ -665,7 +665,7 @@ fn decode_packaged_action(value: &str) -> Result<PackagedPluginAction, String> {
         argv: wire_unlist(fields[3], "action argv")?,
         env: wire_unmap(fields[4], "action env")?,
         env_allowlist: wire_unlist(fields[5], "action env allowlist")?.into_iter().collect(),
-        caps: wire_unlist(fields[6], "action capabilities")?.into_iter().collect(),
+        caps: wire_unlist(fields[6], "action abilities")?.into_iter().collect(),
         cache: wire_unscalar(fields[7], "action cache")?,
         kind: wire_unscalar(fields[8], "action kind")?,
         toolchain: wire_optional(fields[9], "action toolchain")?,

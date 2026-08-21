@@ -742,7 +742,6 @@ pub fn jit_expr_tag(expr: &TExpr) -> &'static str {
         TExprKind::SelectStart => "SelectStart",
         TExprKind::SelectRecv { .. } => "SelectRecv",
         TExprKind::SelectAfter { .. } => "SelectAfter",
-        TExprKind::SelectRead { .. } => "SelectRead",
         TExprKind::SelectWait { .. } => "SelectWait",
         TExprKind::MethodCall { .. } => "MethodCall",
         TExprKind::Local(_) => "Local",

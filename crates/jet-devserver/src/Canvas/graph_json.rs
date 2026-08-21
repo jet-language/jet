@@ -45,7 +45,7 @@ pub(super) fn add_pin(
     name: &str,
     direction: &str,
     ty: &str,
-    capability: &str,
+    ability: &str,
     fallible: bool,
 ) -> String {
     let id = format!("{node_id}:{direction}:{name}");
@@ -63,7 +63,7 @@ pub(super) fn add_pin(
         ty: ty.to_string(),
         role: None,
         pattern_source: None,
-        capability: capability.to_string(),
+        ability: ability.to_string(),
         fallible,
         effect_grant_need: None,
         span,
@@ -91,7 +91,7 @@ pub(super) fn add_arm_pin(
             ty: "exec".to_string(),
             role: Some("arm".to_string()),
             pattern_source: Some(pattern_source.to_string()),
-            capability: "control".to_string(),
+            ability: "control".to_string(),
             fallible: false,
             effect_grant_need: None,
             span: pattern_span,
@@ -414,7 +414,7 @@ fn ensure_exec_pin(
             ty: "exec".to_string(),
             role: None,
             pattern_source: None,
-            capability: "control".to_string(),
+            ability: "control".to_string(),
             fallible: false,
             effect_grant_need: None,
             span,
@@ -572,7 +572,7 @@ fn function_metadata_json(src: &str, f: &AST::Func, visibility: &'static str) ->
                 .map(|expr| json_str(&snippet(src, expr.span())))
                 .unwrap_or_else(|| "null".to_string());
             format!(
-                "{{\"name\":{},\"type\":{},\"capability\":{},\"default\":{},\"default_source\":{},\"source_span\":{}}}",
+                "{{\"name\":{},\"type\":{},\"ability\":{},\"default\":{},\"default_source\":{},\"source_span\":{}}}",
                 json_str(&p.name),
                 json_str(&p.ty.name()),
                 json_str(p.convention.sigil()),
@@ -816,7 +816,7 @@ fn pin_json(p: &PinRec) -> String {
         .map(|n| n.to_string())
         .unwrap_or_else(|| "null".to_string());
     format!(
-        "{{\"pin_id\":{},\"node_id\":{},\"name\":{},\"direction\":{},\"type\":{},\"role\":{},\"pattern_source\":{},\"pattern_source_span\":{},\"append_op\":{},\"element_index\":{},\"capability\":{},\"fallible\":{},\"effect_grant_need\":{},\"source_span\":{}}}",
+        "{{\"pin_id\":{},\"node_id\":{},\"name\":{},\"direction\":{},\"type\":{},\"role\":{},\"pattern_source\":{},\"pattern_source_span\":{},\"append_op\":{},\"element_index\":{},\"ability\":{},\"fallible\":{},\"effect_grant_need\":{},\"source_span\":{}}}",
         json_str(&p.id),
         json_str(&p.node_id),
         json_str(&p.name),
@@ -827,7 +827,7 @@ fn pin_json(p: &PinRec) -> String {
         pattern_source_span,
         append_op,
         element_index,
-        json_str(&p.capability),
+        json_str(&p.ability),
         if p.fallible { "true" } else { "false" },
         grant,
         span_json(p.span)

@@ -421,7 +421,7 @@ mod scheduler_host_tests {
 
     #[test]
     fn zero_capacity_channel_clamps_to_a_buffer_of_one() {
-        // I9: `tasks.channel<T>(0)` must mean the same thing under the JIT as
+        // I9: `channel<T>(0)` must mean the same thing under the JIT as
         // under the shipped AOT prelude, whose `bounded()` clamps with
         // `capacity.max(1)`. Capacity is a memory/backpressure bound, not a
         // rendezvous handshake; no zero-capacity semantics are ratified.

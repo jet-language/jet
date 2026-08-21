@@ -1559,6 +1559,7 @@ fn check_func_body_bundle_scoped(
         concrete_unit_values: vec![HashMap::new()],
         suppress_partial_move_root_read: false,
         loop_depth: 0,
+        implicit_loop_subject_depth: 0,
         source_nesting: 0,
         loop_labels: Vec::new(),
         collect_item_types: Vec::new(),

@@ -1524,13 +1524,30 @@ pub(crate) fn emit_tir_core_call(
         
         
         
-        // D-SERVICE1=D: the typed builder has already become a validated
-        // Prelude payload in TIR; this is the one AOT boundary for it.
-        ("core.service", "tree") => format!(
+        // D-SERVICE1=D: typed builder operations all cross this one Prelude
+        // boundary. `core.services` names below are private compiler adapters,
+        // never a second user-facing topology surface.
+        ("core.service", "tree") => format!("{}(({}).clone())", helper("jet_services_tree"), arg(0)),
+        ("core.service", "state_store") => format!(
             "{}(({}).clone())",
-            helper("jet_services_tree_declared"),
+            helper("jet_services_state_store"),
             arg(0)
         ),
+        ("core.service", "restart_one_for_one") => {
+            format!("{}()", helper("jet_services_restart_one_for_one"))
+        }
+        ("core.service", "restart_one_for_all") => {
+            format!("{}()", helper("jet_services_restart_one_for_all"))
+        }
+        ("core.service", "restart_rest_for_one") => {
+            format!("{}()", helper("jet_services_restart_rest_for_one"))
+        }
+        ("core.service", "delivery_at_most_once") => {
+            format!("{}()", helper("jet_services_delivery_at_most_once"))
+        }
+        ("core.service", "delivery_durable") => {
+            format!("{}()", helper("jet_services_delivery_durable"))
+        }
         ("core.services", "runtime") => format!(
             "{}(({}).clone(), ({}).as_millis())",
             helper("jet_services_runtime"),
@@ -1596,6 +1613,29 @@ pub(crate) fn emit_tir_core_call(
             arg(0),
             arg(1)
         ),
+        ("core.services", "endpoint_send") => format!(
+            "{}(&({}), ({}).clone())",
+            helper("jet_services_endpoint_send"),
+            arg(0),
+            arg(1)
+        ),
+        ("core.services", "endpoint_receive") => format!(
+            "{}(&({}))",
+            helper("jet_services_endpoint_receive"),
+            arg(0)
+        ),
+        ("core.services", "mailbox_depth") => format!(
+            "{}(&({}), &({}))",
+            helper("jet_services_mailbox_depth"),
+            arg(0),
+            arg(1)
+        ),
+        ("core.services", "restarts") => format!(
+            "{}(&({}), &({}))",
+            helper("jet_services_restarts"),
+            arg(0),
+            arg(1)
+        ),
         
         ("core.services", "fail_worker") => format!(
             "{}(&mut ({}), &({}))",
@@ -1642,6 +1682,16 @@ pub(crate) fn emit_tir_core_call(
             arg(0),
             arg(1)
         ),
+        ("core.services", "restore_snapshot") => format!(
+            "{}(&({}))",
+            helper("jet_services_restore_snapshot"),
+            arg(0)
+        ),
+        ("core.services", "replay_events") => format!(
+            "{}(&({}))",
+            helper("jet_services_replay_events"),
+            arg(0)
+        ),
         ("core.services", "workflow_start") => format!(
             "{}(&mut ({}), ({}).clone(), {})",
             helper("jet_services_workflow_start"),
@@ -1656,6 +1706,12 @@ pub(crate) fn emit_tir_core_call(
             arg(1),
             arg(2)
         ),
+        ("core.services", "workflow_history") => format!(
+            "{}(&({}), {})",
+            helper("jet_services_workflow_history"),
+            arg(0),
+            arg(1)
+        ),
         
         ("core.services", "directory_register") => format!(
             "{}(&mut ({}), ({}).clone(), ({}).clone())",
@@ -1663,6 +1719,37 @@ pub(crate) fn emit_tir_core_call(
             arg(0),
             arg(1),
             arg(2)
+        ),
+        ("core.services", "directory_resolve") => format!(
+            "{}(&({}), ({}).clone())",
+            helper("jet_services_directory_resolve"),
+            arg(0),
+            arg(1)
+        ),
+        ("core.services", "directory_generation") => format!(
+            "{}(&({}))",
+            helper("jet_services_directory_generation"),
+            arg(0)
+        ),
+        ("core.services", "dead_letter_count") => format!(
+            "{}(&({}))",
+            helper("jet_services_dead_letter_count"),
+            arg(0)
+        ),
+        ("core.services", "event_count") => format!(
+            "{}(&({}))",
+            helper("jet_services_event_count"),
+            arg(0)
+        ),
+        ("core.services", "tree_show") => format!(
+            "{}(&({}))",
+            helper("jet_services_tree_show"),
+            arg(0)
+        ),
+        ("core.services", "endpoint_show") => format!(
+            "{}(&({}))",
+            helper("jet_services_endpoint_show"),
+            arg(0)
         ),
         
         
@@ -1686,6 +1773,16 @@ pub(crate) fn emit_tir_core_call(
         ("core.services", "chaos_fail") => {
             format!("{}(&mut ({}))", helper("jet_services_chaos_fail"), arg(0))
         }
+        ("core.services", "upgrade_receipt") => format!(
+            "{}(&({}))",
+            helper("jet_services_upgrade_receipt"),
+            arg(0)
+        ),
+        ("core.services", "observe") => format!(
+            "{}(&({}))",
+            helper("jet_services_observe"),
+            arg(0)
+        ),
         
         
         
@@ -2984,6 +3081,23 @@ pub(crate) fn emit_tir_core_call(
             arg(0),
             arg(1)
         ),
+        ("core.process", "run") if args.len() == 2 => {
+            format!(
+                "{}jet_std_process_run_with_authority(&({}), &({}))",
+                cx.root_prefix,
+                arg(0),
+                arg(1),
+            )
+        }
+        ("core.plugin", "load") if args.len() == 2 => {
+            format!(
+                "{{ let _authority = &({}); let _ = _authority; {root}JetPlugin {{ handle: {root}jet_std::jet_plugin_load_handle(&{}(&({}))) }} }}",
+                arg(1),
+                regex_fn("jet_plugin_load"),
+                arg(0),
+                root = cx.root_prefix,
+            )
+        }
         ("core.plugin", "load") => {
             format!(
                 "{root}JetPlugin {{ handle: {root}jet_std::jet_plugin_load_handle(&{}(&({}))) }}",

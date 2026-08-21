@@ -610,8 +610,26 @@ impl<'a> Checker<'a> {
                 && Syntax::DURATION_CONSTRUCTORS.contains(&method)
             {
                 for arg in args.iter_mut() {
+                    let typed_numeric_head = match &arg.expr {
+                        Expr::TypedLit {
+                            head: Some(Type::Float32),
+                            ..
+                        } => Some(Type::Float32),
+                        Expr::TypedLit {
+                            head: Some(Type::Float),
+                            ..
+                        } => Some(Type::Float),
+                        _ => None,
+                    };
                     let got = self.with_call_access(&mut call_access, |checker| {
-                        let inferred = checker.infer(&mut arg.expr);
+                        // A scalar typed literal carries its numeric target in
+                        // the head. Preserve that target through this special
+                        // constructor path, which has no ordinary parameter
+                        // signature to provide an expected type.
+                        let inferred = typed_numeric_head
+                            .as_ref()
+                            .map(|expected| checker.infer_with_expected(&mut arg.expr, expected))
+                            .unwrap_or_else(|| checker.infer(&mut arg.expr));
                         checker.check_call_argument_captures(&arg.expr);
                         inferred
                     });

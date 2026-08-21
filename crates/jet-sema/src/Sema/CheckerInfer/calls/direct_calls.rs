@@ -277,6 +277,87 @@ impl<'a> Checker<'a> {
             Some(ty)
         }
 
+        /// D-CONC-CHAN1=A: `channel` is the readable constructor. Its runtime
+        /// implementation remains the shared channel Prelude route.
+        fn check_channel(&mut self, call: &mut Call) -> Option<Type> {
+            if call.args.len() > 1 {
+                self.diags.push(Diagnostic::error(
+                    "E0104",
+                    format!(
+                        "`channel` takes an optional capacity, got {} arguments",
+                        call.args.len()
+                    ),
+                    "a channel may be unbounded or have one whole-number backpressure bound"
+                        .to_string(),
+                    "write `channel<T>()` or `channel<T>(capacity: 1)".to_string(),
+                    Some(call.name_span),
+                ));
+                for argument in &mut call.args {
+                    self.infer(&mut argument.expr);
+                }
+                return None;
+            }
+            if let Some(argument) = call.args.get_mut(0) {
+                if argument
+                    .label
+                    .as_ref()
+                    .is_some_and(|(label, _)| label != "capacity")
+                {
+                    self.diags.push(Diagnostic::error(
+                        "E0104",
+                        "`channel` has one labeled argument: `capacity`".to_string(),
+                        "the capacity label makes the backpressure bound explicit".to_string(),
+                        "write `channel<T>(capacity: 8)".to_string(),
+                        Some(argument.span),
+                    ));
+                }
+                let cap_ty = self.infer(&mut argument.expr)?;
+                if !(matches!(&cap_ty, Type::Int | Type::InlineRange { .. })
+                    || matches!(&cap_ty, Type::Named(name) if name == "Int" || name == "I64" || name == "I32"))
+                {
+                    self.diags.push(Diagnostic::error(
+                        "E0112",
+                        format!(
+                            "`channel<T>(capacity: …)` needs an integer capacity, not {}",
+                            cap_ty.show()
+                        ),
+                        "bounded channels use a whole-number memory/backpressure limit"
+                            .to_string(),
+                        "write `channel<T>(capacity: 1)".to_string(),
+                        Some(argument.expr.span()),
+                    ));
+                }
+            }
+            let Some(element) = call.type_args.first().cloned() else {
+                self.diags.push(Diagnostic::error(
+                    "E0904",
+                    "`channel` needs a type argument to infer the element type".to_string(),
+                    "the element type `T` cannot be guessed from an empty channel".to_string(),
+                    "call it with an explicit type argument: `channel<T>()`".to_string(),
+                    Some(call.name_span),
+                ));
+                return None;
+            };
+            let result = Type::Tuple(vec![
+                (
+                    "sender".to_string(),
+                    Box::new(Type::Apply {
+                        name: Syntax::TYPE_SENDER.to_string(),
+                        args: vec![element.clone()],
+                    }),
+                ),
+                (
+                    "receiver".to_string(),
+                    Box::new(Type::Apply {
+                        name: Syntax::TYPE_RECEIVER.to_string(),
+                        args: vec![element],
+                    }),
+                ),
+            ]);
+            call.resolved_ret = Some(result.clone());
+            Some(result)
+        }
+
         pub(crate) fn check_call(&mut self, call: &mut Call, _as_value: bool) -> Option<Option<Type>> {
             if call.name == "measurement"
                 && self.funcs.get(&call.name).is_none()
@@ -496,10 +577,10 @@ impl<'a> Checker<'a> {
                             .to_string()
                     },
                     if semaphore {
-                        "create `tasks.channel<Int>(capacity: N)`, seed N tokens, receive one before work, and send it back afterward"
+                        "create `channel<Int>(capacity: N)`, seed N tokens, receive one before work, and send it back afterward"
                             .to_string()
                     } else {
-                        "import `core.tasks as tasks`, create a channel, and use `sender.send`/`channel.receive`"
+                        "create a channel, and use `sender.send`/`channel.receive`"
                             .to_string()
                     },
                     Some(call.name_span),
@@ -538,6 +619,13 @@ impl<'a> Checker<'a> {
                     self.infer(&mut arg.expr);
                 }
                 return Some(None);
+            }
+
+            if call.name == Syntax::BUILTIN_CHANNEL
+                && self.funcs.get(&call.name).is_none()
+                && self.lookup(&call.name).is_none()
+            {
+                return Some(self.check_channel(call));
             }
     
             if call.name == Syntax::BUILTIN_PRINT

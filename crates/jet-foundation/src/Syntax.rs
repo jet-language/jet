@@ -168,6 +168,9 @@
 // such as extern bindings.
 // D-LOOP-COMMA1=A (ratified 2026-07-30, card #1336) uses commas between loop
 // clauses and `(key, value)` for a two-name source binding.
+// D-LOOP-GUARD1=A (ratified 2026-08-20, card #1416) keeps yielding-loop
+// guards comma-less: `loop name, source if condition :> value`; `, if` is
+// E0379, never a stride.
 // D-LOOPSTATE1 owns break/next target arguments, and
 // D-COMPREHENSION1 fixes yielding-loop results to eager List.
 // D-IFGUARD1=A adds no spelling: subjectless statement/value guard tables

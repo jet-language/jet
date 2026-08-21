@@ -2956,7 +2956,6 @@ fn resident_safe_expr_recursive(expr: &TExpr, callees: &HashSet<String>) -> bool
                     matches!(&v.ty, Type::Int) && resident_safe_expr(v, callees)
                 })
         }
-        TExprKind::SelectRead { builder, .. } => resident_safe_expr(builder, callees),
         TExprKind::SelectWait { builder } => {
             jit_value_type(&expr.ty) && resident_safe_select_wait(builder, callees)
         }
@@ -5340,7 +5339,6 @@ fn expr_kind_name(kind: &TExprKind) -> &'static str {
         TExprKind::SelectStart => "SelectStart",
         TExprKind::SelectRecv { .. } => "SelectRecv",
         TExprKind::SelectAfter { .. } => "SelectAfter",
-        TExprKind::SelectRead { .. } => "SelectRead",
         TExprKind::SelectWait { .. } => "SelectWait",
         TExprKind::FnValue { .. } => "FnValue",
         TExprKind::ModuleCall { .. } => "ModuleCall",
@@ -6098,9 +6096,6 @@ pub(crate) fn collect_select_arms_jit<'a>(
                 value,
             } => {
                 afters.push((duration.as_ref(), value.as_deref()));
-                cur = inner;
-            }
-            TExprKind::SelectRead { builder: inner, .. } => {
                 cur = inner;
             }
             _ => break,

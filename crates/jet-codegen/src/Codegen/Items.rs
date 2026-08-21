@@ -22,6 +22,48 @@ fn field_self_read(f: &Field) -> String {
     }
 }
 
+/// D-MAP-KEY1: generated composite keys delegate equality and ordering to the
+/// one codegen Prelude comparator.
+fn emit_map_key_comparison_impls(rust_name: &str, out: &mut String) {
+    out.push_str(&format!(
+        "impl PartialEq for {rust_name} {{\n    fn eq(&self, rhs: &Self) -> bool {{\n        crate::jet_map_key_cmp(\n            &crate::JetMapKeyEncode::jet_map_key(self),\n            &crate::JetMapKeyEncode::jet_map_key(rhs),\n        ) == std::cmp::Ordering::Equal\n    }}\n}}\n\n"
+    ));
+    out.push_str(&format!(
+        "impl Eq for {rust_name} {{}}\n\nimpl PartialOrd for {rust_name} {{\n    fn partial_cmp(&self, rhs: &Self) -> Option<std::cmp::Ordering> {{\n        Some(self.cmp(rhs))\n    }}\n}}\n\n"
+    ));
+    out.push_str(&format!(
+        "impl Ord for {rust_name} {{\n    fn cmp(&self, rhs: &Self) -> std::cmp::Ordering {{\n        crate::jet_map_key_cmp(\n            &crate::JetMapKeyEncode::jet_map_key(self),\n            &crate::JetMapKeyEncode::jet_map_key(rhs),\n        )\n    }}\n}}\n\n"
+    ));
+}
+
+/// D-MAP-KEY1: `fields` contains only stored field reads.
+pub(crate) fn emit_map_key_impls(rust_name: &str, fields: &[String], out: &mut String) {
+    out.push_str(&format!(
+        "impl crate::JetMapKeyEncode for {rust_name} {{\n    fn jet_map_key(&self) -> crate::JetMapKey {{\n        crate::JetMapKey::Record(vec![\n"
+    ));
+    for field in fields {
+        out.push_str(&format!(
+            "            crate::JetMapKeyEncode::jet_map_key(&{field}),\n"
+        ));
+    }
+    out.push_str("        ])\n    }\n}\n\n");
+    emit_map_key_comparison_impls(rust_name, out);
+}
+
+fn emit_enum_map_key_impls(rust_name: &str, variants: &[(String, i64)], out: &mut String) {
+    out.push_str(&format!(
+        "impl crate::JetMapKeyEncode for {rust_name} {{\n    fn jet_map_key(&self) -> crate::JetMapKey {{\n        match self {{\n"
+    ));
+    for (variant, discriminant) in variants {
+        out.push_str(&format!(
+            "            Self::{} => crate::JetMapKey::Int({discriminant}),\n",
+            mangle_path(variant)
+        ));
+    }
+    out.push_str("        }\n    }\n}\n\n");
+    emit_map_key_comparison_impls(rust_name, out);
+}
+
 fn cli_tuple_expr(variables: &[String]) -> String {
     if variables.is_empty() {
         "()".to_string()
@@ -298,6 +340,13 @@ pub(crate) fn emit_struct(cx: &Cx, s: &StructDef, out: &mut String) {
         .iter()
         .any(|f| cx.type_contains_shared_guard(&f.ty));
     let has_secret_field = cx.type_contains_secret(&Type::Named(s.name.clone()));
+    let map_key = s.type_params.is_empty()
+        && !has_view_field
+        && !s.is_published_schema
+        && s.fields
+            .iter()
+            .filter(|field| field.computed.is_none())
+            .all(|field| field_type_map_key(&field.ty, cx));
     // Backend representation derives only. Jet capability implementations are
     // expanded into parsed Jet items in Sema/Registration/Derives.rs; these
     // Rust attributes do not grant or validate a Jet capability.
@@ -316,10 +365,12 @@ pub(crate) fn emit_struct(cx: &Cx, s: &StructDef, out: &mut String) {
         // Eq/Hash are Rust storage traits for hash-backed collections. Keep
         // their required PartialEq representation derive separate from Jet's
         // Equatable implementation.
-        rust_derives.push("PartialEq");
-        rust_derives.push("Eq");
-        rust_derives.push("PartialOrd");
-        rust_derives.push("Ord");
+        if !map_key {
+            rust_derives.push("PartialEq");
+            rust_derives.push("Eq");
+            rust_derives.push("PartialOrd");
+            rust_derives.push("Ord");
+        }
         rust_derives.push("Hash");
     }
     // Visibility is enforced by sema (E0605); Rust-level `pub` everywhere
@@ -381,6 +432,15 @@ pub(crate) fn emit_struct(cx: &Cx, s: &StructDef, out: &mut String) {
         ));
     }
     out.push_str("}\n\n");
+    if map_key {
+        let fields: Vec<String> = s
+            .fields
+            .iter()
+            .filter(|field| field.computed.is_none())
+            .map(|field| format!("self.{}", mangle(&field.name)))
+            .collect();
+        emit_map_key_impls(&mangle_path(&s.name), &fields, out);
+    }
     if !s.type_params.is_empty() {
         let jetshow_extra = Generics::rust_extra_jetshow_bounds(&s.type_params);
         let mut impl_bounds = jetshow_extra.clone();
@@ -1841,6 +1901,11 @@ pub(crate) fn emit_enum(cx: &Cx, e: &EnumDef, out: &mut String) {
             .any(|field| cx.type_contains_shared_guard(&field.ty)),
     });
     let has_secret_payload = cx.type_contains_secret(&Type::Named(e.name.clone()));
+    let map_key = e.type_params.is_empty()
+        && !has_view_payload
+        && e.variants
+            .iter()
+            .all(|variant| matches!(&variant.payload, VariantPayload::Unit));
     // Debug/Clone are backend representation traits. Equality and ordering
     // are ordinary Jet impls produced by sema and are never Rust-derived here.
     let mut rust_derives = Vec::new();
@@ -1855,10 +1920,12 @@ pub(crate) fn emit_enum(cx: &Cx, e: &EnumDef, out: &mut String) {
         rust_derives.push("Clone");
     }
     if !has_shared_guard && !has_secret_payload && cx.hashable.contains(&e.name) {
-        rust_derives.push("PartialEq");
-        rust_derives.push("Eq");
-        rust_derives.push("PartialOrd");
-        rust_derives.push("Ord");
+        if !map_key {
+            rust_derives.push("PartialEq");
+            rust_derives.push("Eq");
+            rust_derives.push("PartialOrd");
+            rust_derives.push("Ord");
+        }
         rust_derives.push("Hash");
     }
     if let Some(tag) = e.c_layout_tag() {
@@ -1908,6 +1975,19 @@ pub(crate) fn emit_enum(cx: &Cx, e: &EnumDef, out: &mut String) {
         }
     }
     out.push_str("}\n\n");
+    if map_key {
+        let mut next_discriminant = 0;
+        let variants: Vec<(String, i64)> = e
+            .variants
+            .iter()
+            .map(|variant| {
+                let discriminant = variant.discriminant.unwrap_or(next_discriminant);
+                next_discriminant = discriminant + 1;
+                (variant.name.clone(), discriminant)
+            })
+            .collect();
+        emit_enum_map_key_impls(&rust_name, &variants, out);
+    }
     let impl_generic = if has_view_payload {
         jet_format!("<'{jet_prefix}view>")
     } else {

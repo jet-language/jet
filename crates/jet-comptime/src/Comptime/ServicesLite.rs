@@ -327,11 +327,17 @@ fn ct_to_worker(v: &CtValue, span: Span) -> Result<JetServiceWorker, Diagnostic>
         // not a second user-facing declaration form.
         Err(_) => name.clone(),
     };
+    let declared_endpoint = ct_to_endpoint(field("endpoint")?, span)?;
+    let mailbox = ct_to_mailbox(field("mailbox")?, span)?;
+    if declared_endpoint != mailbox.endpoint {
+        return Err(unsupported("worker endpoint/mailbox mismatch", span));
+    }
+    let endpoint = mailbox.endpoint.clone();
     Ok(JetServiceWorker {
         name,
         handler,
-        endpoint: ct_to_endpoint(field("endpoint")?, span)?,
-        mailbox: ct_to_mailbox(field("mailbox")?, span)?,
+        endpoint,
+        mailbox,
         restarts: match field("restarts")? {
             CtValue::List(xs) => {
                 if xs.len() as i64 > MAX_SERVICE_RESTART_BUDGET {
@@ -1211,40 +1217,16 @@ pub fn take_mut_ok(value: CtValue) -> Result<(CtValue, CtValue), CtValue> {
     }
 }
 
-/// Marshal the compiler-owned declaration payload for `core.service.tree`.
-/// The public source surface cannot construct this string; TIR creates it only
-/// after sema accepts the typed worker declaration block.
-pub fn apply_typed_tree(value: &CtValue, span: Span) -> Result<CtValue, Diagnostic> {
-    let CtValue::Str(payload) = value else {
-        return Err(unsupported(
-            "core.service.tree needs a compiler declaration payload",
-            span,
-        ));
-    };
-    if !payload.starts_with(SERVICE_TREE_PAYLOAD_PREFIX) {
-        return Err(unsupported(
-            "core.service.tree received an invalid declaration payload",
-            span,
-        ));
-    }
-    Ok(tree_to_ct(&jet_services_tree_declared(payload.clone())))
-}
-
 pub fn apply(method: &str, args: &[CtValue], span: Span) -> Result<CtValue, Diagnostic> {
     let one = |i: usize| {
         args.get(i)
             .ok_or_else(|| unsupported(&format!("core.services.{method} arg {i}"), span))
     };
     match method {
-        "tree" => match one(0)? {
-            CtValue::Str(payload) if payload.starts_with(SERVICE_TREE_PAYLOAD_PREFIX) => {
-                Ok(tree_to_ct(&jet_services_tree_declared(payload.clone())))
-            }
-            value => {
-                let name = ct_to_service_string(value, MAX_SERVICE_NAME, "tree name", span)?;
-                Ok(tree_to_ct(&jet_services_tree(name)))
-            }
-        },
+        "tree" => {
+            let name = ct_to_service_string(one(0)?, MAX_SERVICE_NAME, "tree name", span)?;
+            Ok(tree_to_ct(&jet_services_tree(name)))
+        }
         "restart_one_for_one" => Ok(restart_to_ct(jet_services_restart_one_for_one())),
         "restart_one_for_all" => Ok(restart_to_ct(jet_services_restart_one_for_all())),
         "restart_rest_for_one" => Ok(restart_to_ct(jet_services_restart_rest_for_one())),
@@ -1349,6 +1331,21 @@ pub fn apply(method: &str, args: &[CtValue], span: Span) -> Result<CtValue, Diag
             Ok(match jet_services_receive(&mut tree, &endpoint) {
                 Ok(msg) => CtValue::Present(Box::new(mutate_ok(tree, CtValue::Str(msg)))),
                 Err(e) => mutate_err(tree, map_err(e)),
+            })
+        }
+        "endpoint_send" => {
+            let endpoint = ct_to_endpoint(one(0)?, span)?;
+            let message = ct_to_service_string(one(1)?, MAX_SERVICE_MESSAGE, "message", span)?;
+            Ok(match jet_services_endpoint_send(&endpoint, message) {
+                Ok(()) => CtValue::Present(Box::new(CtValue::Unit)),
+                Err(error) => CtValue::failed(Box::new(map_err(error))),
+            })
+        }
+        "endpoint_receive" => {
+            let endpoint = ct_to_endpoint(one(0)?, span)?;
+            Ok(match jet_services_endpoint_receive(&endpoint) {
+                Ok(message) => CtValue::Present(Box::new(CtValue::Str(message))),
+                Err(error) => CtValue::failed(Box::new(map_err(error))),
             })
         }
         "mailbox_depth" => {

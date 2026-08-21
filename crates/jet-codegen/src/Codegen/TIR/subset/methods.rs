@@ -1462,7 +1462,7 @@ pub(crate) fn static_method_call_in_subset(
         ("Clock", "new", 1)
             | ("Clock", "system", 0)
             | ("Clock", "now", 0)
-            | ("Authority", "workspace", 0)
+            | (Syntax::TYPE_ABILITIES, "workspace", 0)
             | ("Date", "today", 0)
             | ("Path", "home", 0)
     ) {

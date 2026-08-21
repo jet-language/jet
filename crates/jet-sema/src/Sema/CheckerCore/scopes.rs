@@ -293,6 +293,11 @@ impl<'a> Checker<'a> {
             if name == "_" {
                 return;
             }
+            // D-LOOP-SUBJECT1=A: an inner bindingless loop cannot shadow its
+            // outer implicit subject; its diagnostic teaches named bindings.
+            if name == crate::Syntax::KW_IT && self.implicit_loop_subject_depth > 0 {
+                return;
+            }
             if self.lookup(&name).is_some()
                 || self.consts.contains_key(&name)
                 || self.loop_labels.iter().any(|label| label == &name)

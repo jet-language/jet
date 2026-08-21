@@ -1626,7 +1626,7 @@ fn task_method_return(args: &[Type], method: &str, nargs: usize) -> Option<Optio
 }
 
 /// D-TUPLE-DESTRUCT1: `Receiver<T>.receive()` — the receive half returned
-/// alongside `Sender<T>` by `tasks.channel<T>()`. No `.sender()` method here
+/// alongside `Sender<T>` by `channel<T>()`. No `.sender()` method here
 /// (there's no combined "Channel" handle to fetch a sender off of — a second
 /// sender comes from `tx.clone()`, same as any other `Sender<T>`).
 fn receiver_method_return(args: &[Type], method: &str, nargs: usize) -> Option<Option<Type>> {

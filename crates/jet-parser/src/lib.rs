@@ -162,6 +162,54 @@ mod compare_tests {
 }
 
 #[cfg(test)]
+mod loop_header_tests {
+    use super::{Lexer, Parser, AST};
+
+    #[test]
+    fn yielding_loop_keeps_numeric_stride_after_source() {
+        let source = "fn run() {\n    values :: loop i, 0..10, 2 :> i\n}\n";
+        let (tokens, lexer_diagnostics) = Lexer::lex(source);
+        assert!(lexer_diagnostics.is_empty(), "{lexer_diagnostics:?}");
+        let program = Parser::parse(&tokens).expect("genuine stride should parse");
+        let function = program
+            .items
+            .iter()
+            .find_map(|item| match item {
+                AST::Item::Func(function) if function.name == "run" => Some(function),
+                _ => None,
+            })
+            .expect("run function");
+        let binding = function
+            .body
+            .iter()
+            .find_map(|stmt| match stmt {
+                AST::Stmt::Val(binding) => Some(binding),
+                _ => None,
+            })
+            .expect("loop binding");
+        let AST::Expr::CallValue { callee, .. } = &binding.init else {
+            panic!("expected collecting loop call, got {:?}", binding.init);
+        };
+        let AST::Expr::Lambda(lambda) = callee.as_ref() else {
+            panic!("expected collecting loop lambda, got {callee:?}");
+        };
+        let AST::LambdaBody::Block(body) = &lambda.body else {
+            panic!("expected collecting loop block");
+        };
+        let Some(AST::Stmt::For { kind, .. }) = body.first() else {
+            panic!("expected one source loop, got {body:?}");
+        };
+        let AST::ForKind::Range { step, .. } = kind else {
+            panic!("expected range source, got {kind:?}");
+        };
+        let Some(AST::Expr::Int(value, ..)) = step.as_ref() else {
+            panic!("expected numeric stride, got {step:?}");
+        };
+        assert_eq!(*value, 2);
+    }
+}
+
+#[cfg(test)]
 mod raw_head_fmt_tests {
     use super::Formatter;
 

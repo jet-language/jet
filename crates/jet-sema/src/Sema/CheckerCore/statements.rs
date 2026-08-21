@@ -2043,6 +2043,16 @@ impl<'a> Checker<'a> {
                                 }
                             }
                             let coll_ty = self.infer(collection);
+                            let bindingless = var == Syntax::KW_IT && var2.is_none();
+                            let nested_bindingless =
+                                bindingless && self.implicit_loop_subject_depth > 0;
+                            if nested_bindingless {
+                                self.diags.push(Diagnostic::from_row(
+                                    "E0380",
+                                    &[],
+                                    Some(collection.span()),
+                                ));
+                            }
                             let borrowed = collection_root_name(collection);
                             // A collection iterated by value is consumed: each
                             // step hands you the element itself. Match codegen's
@@ -2252,16 +2262,26 @@ impl<'a> Checker<'a> {
                                     }
                                 }
                                 Some(other) => {
-                                    self.diags.push(Diagnostic::error(
-                                        "E0109",
-                                        format!(
-                                            "`for x in` needs a list or map, not {}",
-                                            other.show()
-                                        ),
-                                        "walk items with `loop item, items { }` or characters with `loop c, s.chars() { }`".to_string(),
-                                        "use a `List`, `Map`, or `s.chars()`".to_string(),
-                                        Some(collection.span()),
-                                    ));
+                                    if bindingless {
+                                        if !nested_bindingless {
+                                            self.diags.push(Diagnostic::from_row(
+                                                "E0380",
+                                                &[],
+                                                Some(collection.span()),
+                                            ));
+                                        }
+                                    } else {
+                                        self.diags.push(Diagnostic::error(
+                                            "E0109",
+                                            format!(
+                                                "`for x in` needs a list or map, not {}",
+                                                other.show()
+                                            ),
+                                            "walk items with `loop item, items { }` or characters with `loop c, s.chars() { }`".to_string(),
+                                            "use a `List`, `Map`, or `s.chars()`".to_string(),
+                                            Some(collection.span()),
+                                        ));
+                                    }
                                 }
                                 None => {}
                             }
@@ -2271,8 +2291,14 @@ impl<'a> Checker<'a> {
                             self.memory_control_multiplier = loop_multiplier;
                             let previous_arrow_loop_body = self.arrow_loop_body;
                             self.arrow_loop_body = *arrow_body;
+                            if bindingless && !nested_bindingless {
+                                self.implicit_loop_subject_depth += 1;
+                            }
                             for s in body.iter_mut() {
                                 self.check_stmt(s);
+                            }
+                            if bindingless && !nested_bindingless {
+                                self.implicit_loop_subject_depth -= 1;
                             }
                             self.arrow_loop_body = previous_arrow_loop_body;
                             if let Some(name) = &lending_var {
@@ -2747,9 +2773,9 @@ impl<'a> Checker<'a> {
                     }
                     self.pop_scope();
                 }
-                // D-EFF1 / D-AUTHORITY-SCOPE1: bare `#Abilities(Net, DB) { … }`
-                // restricts effects. A named `#Abilities(auth: FS, Net) { … }`
-                // also binds a scoped Authority handle and uses the same
+                // D-EFF1 / D-AUTHORITY-SCOPE1: bare `#Caps(Net, DB) { … }`
+                // restricts effects. A named `#Caps(auth: FS, Net) { … }`
+                // also binds a scoped Abilities handle and uses the same
                 // subset check for both forms.
                 Stmt::Caps {
                     caps,
@@ -2791,7 +2817,7 @@ impl<'a> Checker<'a> {
                         let binding_span = binding_span
                             .as_ref()
                             .copied()
-                            .expect("named #Abilities binding has a span");
+                            .expect("named #Caps binding has a span");
                         self.push_scope();
                         self.declare_loop_var(
                             binding.clone(),

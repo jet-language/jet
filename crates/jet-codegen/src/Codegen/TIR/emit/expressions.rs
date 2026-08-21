@@ -6101,8 +6101,7 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
         }
         TExprKind::SelectStart
         | TExprKind::SelectRecv { .. }
-        | TExprKind::SelectAfter { .. }
-        | TExprKind::SelectRead { .. } => {
+        | TExprKind::SelectAfter { .. } => {
             unreachable!("retired fluent select builder reached AOT emission")
         }
         TExprKind::SelectWait { builder } => {

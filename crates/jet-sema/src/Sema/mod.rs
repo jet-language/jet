@@ -1429,6 +1429,8 @@ pub(crate) struct Checker<'a> {
     /// partial-root move report there; the complete field place is checked first.
     suppress_partial_move_root_read: bool,
     loop_depth: usize,
+    /// D-LOOP-SUBJECT1=A: active bindingless collecting-loop subjects.
+    implicit_loop_subject_depth: usize,
     source_nesting: usize,
     /// D-LOOPLABEL3=A: stack of `name :: loop` names; scope, innermost last.
     loop_labels: Vec<String>,

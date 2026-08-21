@@ -934,7 +934,7 @@ fn struct_decode_body(s: &crate::AST::StructDef, span: Span) -> Vec<Stmt> {
             serde_default_expr(field).unwrap_or_else(|| serde_zero_expr(&field.ty, span))
         } else if has_marker(&field.serde_markers, crate::Syntax::MARKER_FLATTEN) {
             let result = format!("jet_serde_decode_{}", field.name);
-            let index = decoded.len();
+            let index = field_values.len();
             let slot = format!("jet_serde_field_value_{index}");
             let value = format!("jet_serde_decoded_value_{index}");
             let ok_value = format!("jet_serde_ok_value_{index}");
@@ -989,14 +989,19 @@ fn struct_decode_body(s: &crate::AST::StructDef, span: Span) -> Vec<Stmt> {
             } else {
                 or_fallback(method(ident("tree", span), "field", vec![string_expr(&key, span)], span), data_tree_null(span), span)
             };
-            let index = decoded.len();
+            let index = field_values.len();
             let result = format!("jet_serde_decode_{}", field.name);
             let slot = format!("jet_serde_field_value_{index}");
             let value = format!("jet_serde_decoded_value_{index}");
             let ok_value = format!("jet_serde_ok_value_{index}");
+            let optional = matches!(field.ty, Type::Option(_));
             body.push(binding(
                 &slot,
-                Some(Type::Option(Box::new(field.ty.clone()))),
+                Some(if optional {
+                    field.ty.clone()
+                } else {
+                    Type::Option(Box::new(field.ty.clone()))
+                }),
                 Expr::Absent(span),
                 true,
                 span,
@@ -1013,14 +1018,19 @@ fn struct_decode_body(s: &crate::AST::StructDef, span: Span) -> Vec<Stmt> {
                 span,
             ));
             let error_name = format!("jet_serde_field_errors_{index}");
-            body.push(result_switch(
-                ident(&result, span),
-                &ok_value,
+            let ok_body = if optional {
+                vec![assign_local(&slot, ident(&ok_value, span), span)]
+            } else {
                 vec![assign_local(
                     &slot,
                     Expr::Present(Box::new(ident(&ok_value, span)), span),
                     span,
-                )],
+                )]
+            };
+            body.push(result_switch(
+                ident(&result, span),
+                &ok_value,
+                ok_body,
                 &error_name,
                 serde_decode_error_body(
                     &error_name,
@@ -1030,8 +1040,12 @@ fn struct_decode_body(s: &crate::AST::StructDef, span: Span) -> Vec<Stmt> {
                 ),
                 span,
             ));
-            decoded.push((slot, value.clone(), missing, Some(key)));
-            ident(&value, span)
+            if optional {
+                ident(&slot, span)
+            } else {
+                decoded.push((slot, value.clone(), missing, Some(key)));
+                ident(&value, span)
+            }
         };
         field_values.push((field.name.clone(), value));
     }

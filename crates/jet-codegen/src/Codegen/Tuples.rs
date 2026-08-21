@@ -557,6 +557,9 @@ fn is_move_only_cell_guard(ty: &Type) -> bool {
 fn emit_tuple_struct(cx: &Cx, name: &str, fields: &[(String, Type)], out: &mut String) {
     // Tuples are structural types with no type-parameter scope of their own.
     let no_params: std::collections::HashSet<String> = std::collections::HashSet::new();
+    let map_key = fields
+        .iter()
+        .all(|(_, ty)| field_type_map_key(ty, cx));
     let mut derives = Vec::new();
     if fields
         .iter()
@@ -568,7 +571,7 @@ fn emit_tuple_struct(cx: &Cx, name: &str, fields: &[(String, Type)], out: &mut S
     {
         derives.push("Clone");
     }
-    if fields
+    if !map_key && fields
         .iter()
         .all(|(_, t)| {
             !cx.type_contains_shared_guard(t)
@@ -578,7 +581,7 @@ fn emit_tuple_struct(cx: &Cx, name: &str, fields: &[(String, Type)], out: &mut S
     {
         derives.push("PartialEq");
     }
-    if fields
+    if !map_key && fields
         .iter()
         .all(|(_, t)| {
             !cx.type_contains_shared_guard(t)
@@ -613,6 +616,13 @@ fn emit_tuple_struct(cx: &Cx, name: &str, fields: &[(String, Type)], out: &mut S
         ));
     }
     out.push_str("}\n\n");
+    if map_key {
+        let key_fields: Vec<String> = fields
+            .iter()
+            .map(|(field, _)| format!("self.{}", mangle(field)))
+            .collect();
+        emit_map_key_impls(name, &key_fields, out);
+    }
 }
 
 pub(crate) fn emit_tuple_structs(

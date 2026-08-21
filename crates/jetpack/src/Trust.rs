@@ -914,7 +914,7 @@ pub fn gate_build_identity(
         theme.error_coded(
             "E1255",
             "CI cannot bypass build-hook approval",
-            "a build hook must use its exact package, provider/source, staged source, platform, recipe, and capability identity",
+            "a build hook must use its exact package, provider/source, staged source, platform, recipe, and ability identity",
             &format!(
                 "add the exact repository grant: `jet trust grant build:{identity} --scope repo`."
             ),
@@ -941,7 +941,7 @@ pub fn gate_build_identity(
         theme.error_coded(
             "E1255",
             "this build hook is not approved for CI",
-            "CI accepts only an exact repository-scoped grant for the complete package, provider/source, staged source, platform, recipe, and capability identity",
+            "CI accepts only an exact repository-scoped grant for the complete package, provider/source, staged source, platform, recipe, and ability identity",
             &format!(
                 "add the exact repository grant: `jet trust grant build:{identity} --scope repo`."
             ),
@@ -952,7 +952,7 @@ pub fn gate_build_identity(
         theme.error_coded(
             "E1255",
             "this build hook is not trusted yet",
-            "the build action graph has a new source, recipe, platform, or capability identity and stdin is not a terminal to ask interactively",
+            "the build action graph has a new source, recipe, platform, or ability identity and stdin is not a terminal to ask interactively",
             "pass `--trust` for this build, or pre-authorize the exact build identity with `jet trust grant`.",
         );
         return Err(2);

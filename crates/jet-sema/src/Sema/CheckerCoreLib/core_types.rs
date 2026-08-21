@@ -155,14 +155,14 @@ pub(crate) fn is_text_error_type_name(name: &str) -> bool {
 /// etc.) is a fact vocabulary published for reflection, never a general type —
 /// no constructor exists outside `#Marker(param: Name.Variant)` position. Each
 /// fix names the real path: the living counterpart when one exists (only
-/// `Ability` has one — `Authority`/`[Right]`), otherwise the marker that
+/// `Ability` has one — `Abilities`/`[Right]`), otherwise the marker that
 /// legitimately writes the name. `Layout` is excluded: it is also a real
 /// dot-ctor value type (D-LAYOUT-CTOR1, see the `matches!` in
 /// `core_type_known`), so that name resolves before this ever runs.
 fn phantom_fact_menu_fix(name: &str) -> Option<&'static str> {
     Some(match name {
         "ABI" => "write it only inside `#ABI(name: system)`",
-        "Ability" => "take `Abilities` (the rights value), or a rights list `[Right]`; inside a marker, write it in `#Caps(...)`",
+        "Ability" => "take `Abilities` (the rights value), or a rights list `[Right]`; inside a marker, write it in `#Abilities(...)`",
         "FfiLanguage" => "write it only inside `#FFI(language: c)`",
         "InlineMode" => "write it only inside `#Inline(mode: Always)`",
         "IntType" => "write it only inside `#Layout(tag: I32)`",
@@ -261,9 +261,7 @@ pub(crate) fn core_type_known(name: &str) -> bool {
         // D-COMPUTE1=D / D-COMPUTE-TYPE1=D: ranked tensor owner + compute errors.
         | "Tensor" | "ComputeError" | "ComputeDevice" | "ComputeStream" | "VjpRun"
         | "SparseTensor"
-        // D-SERVICE1=D: structured service tree handles and its declaration
-        // builder. The builder is compiler-supplied and has no constructor.
-        | "ServiceTreeBuilder"
+        // D-SERVICE1=D: structured service tree handles.
         | "ServiceTree" | "ServiceEndpoint" | "ServiceError" | "ServiceRestart"
         | "ServiceDelivery" | "ServiceRuntime" | "ServiceStateStore" | "ServiceReceipt"
         | "ServiceUpgradeReceipt"
@@ -482,28 +480,6 @@ pub fn core_fact_kind_variants(
 }
 
 pub(crate) fn core_struct_field(type_name: &str, field: &str) -> Option<Type> {
-    if type_name == "ServiceTreeBuilder" && field == "worker" {
-        return Some(Type::Fn {
-            params: vec![
-                Type::String,
-                Type::Fn {
-                    params: Vec::new(),
-                    ret: None,
-                    effect_bound: None,
-                    param_contract: None,
-                    call_metadata: None,
-                    return_view_provenance: None,
-                },
-            ],
-            // A declaration statement does not expose an endpoint handle;
-            // endpoint values belong to the later delivery surface.
-            ret: None,
-            effect_bound: None,
-            param_contract: None,
-            call_metadata: None,
-            return_view_provenance: None,
-        });
-    }
     if type_name == Syntax::TYPE_MEMO_STATS {
         return match field {
             "hits" | "misses" | "size" => Some(Type::Int),

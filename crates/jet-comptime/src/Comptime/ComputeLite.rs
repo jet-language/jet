@@ -84,10 +84,10 @@ fn receipt_to_ct(receipt: &JetComputePlacementReceipt) -> CtValue {
             ("profile".to_string(), CtValue::Str(receipt.profile.clone())),
             ("cache".to_string(), CtValue::Str(receipt.cache.clone())),
             (
-                "capabilities".to_string(),
+                "abilities".to_string(),
                 CtValue::List(
                     receipt
-                        .capabilities
+                        .abilities
                         .iter()
                         .cloned()
                         .map(CtValue::Str)
@@ -119,17 +119,17 @@ fn ct_to_receipt(value: &CtValue, span: Span) -> Result<JetComputePlacementRecei
         CtValue::Str(s) if !s.is_empty() && !s.chars().any(char::is_control) => Ok(s.clone()),
         _ => Err(unsupported("ComputePlacement text field", span)),
     };
-    let capabilities = match field("capabilities")? {
+    let abilities = match field("abilities")? {
         CtValue::List(values) => values
             .iter()
             .map(|value| match value {
                 CtValue::Str(s) if !s.is_empty() && !s.chars().any(char::is_control) => {
                     Ok(s.clone())
                 }
-                _ => Err(unsupported("ComputePlacement capability", span)),
+                _ => Err(unsupported("ComputePlacement ability", span)),
             })
             .collect::<Result<Vec<_>, _>>()?,
-        _ => return Err(unsupported("ComputePlacement capabilities", span)),
+        _ => return Err(unsupported("ComputePlacement abilities", span)),
     };
     let reason = match field("reason")? {
         CtValue::Str(s) if !s.is_empty() && !s.chars().any(char::is_control) => s.clone(),
@@ -142,7 +142,7 @@ fn ct_to_receipt(value: &CtValue, span: Span) -> Result<JetComputePlacementRecei
         version: text("version")?,
         profile: text("profile")?,
         cache: text("cache")?,
-        capabilities,
+        abilities,
         reason,
     };
     jet_compute_validate_placement(receipt.selected, &receipt)

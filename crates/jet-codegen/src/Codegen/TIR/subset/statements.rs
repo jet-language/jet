@@ -405,8 +405,8 @@ fn stmt_in_subset_inner(s: &Stmt, cx: &Cx, locals: &mut HashSet<String>) -> bool
         // identical to `Stmt::Region` (`{ <body> }`). The cap set is enforced entirely
         // in sema (E0712); codegen is dumb (I3).
         Stmt::Caps { body, .. } => scoped_stmts_in_subset(body, cx, locals),
-        // D-SCAP1: a `#grant(FS) { caps -> … }` scoped-capability grant erases to a
-        // plain Rust block (the grant/revoke is a compile-time capability fact, I3).
+        // D-AUTHORITY-SCOPE1: a named `#Abilities(abilities: FS) { … }` scope erases to a
+        // plain Rust block (the grant/revoke is a compile-time ability fact, I3).
         // The capability handle is sema-only — it is NOT emitted, so the body lowers
         // exactly like a lexical `Stmt::Region`.
         // D-TERM1 (ratified 2026-06-22): `live { … }` lowers to a guarded Rust block.

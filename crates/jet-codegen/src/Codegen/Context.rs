@@ -5369,7 +5369,7 @@ pub(crate) fn field_type_rust_eq_compatible(
         // D-TUPLE-DESTRUCT1: `Task<T>`/`Sender<T>`/`Receiver<T>` wrap an opaque
         // runtime handle (`JetTask`/`JetSender`/`JetReceiver`) — none implement
         // `PartialEq`, regardless of whether their element type `T` does. Only
-        // surfaces once one of these lands as a tuple field (`tasks.channel<T>()`'s
+        // surfaces once one of these lands as a tuple field (`channel<T>`'s
         // `(Sender<T>, Receiver<T>)`); every other `Type::Apply` (Set/Tally/Queue/…)
         // is still checked structurally through its args below.
         Type::Apply { name, .. }
@@ -5490,6 +5490,46 @@ pub(crate) fn field_type_hashable(
         // (only ever reached as an `Apply` arg via the fallback above it).
         Type::Measure(_) => false,
     }
+}
+
+/// D-MAP-KEY1: the backend's key walk mirrors sema's ratified eligibility
+/// rule. It only supplies the fact needed to emit the shared key adapter;
+/// comparison itself remains in `Prelude/Core/MapKey.rs`.
+pub(crate) fn field_type_map_key(ty: &Type, cx: &Cx) -> bool {
+    fn visit(ty: &Type, cx: &Cx, active: &mut HashSet<String>) -> bool {
+        let ty = cx.expand_type_aliases(ty);
+        match &ty {
+            Type::Int | Type::Bool | Type::String | Type::Char | Type::IntN { .. } => true,
+            Type::Tagged { inner, .. } => visit(inner, cx, active),
+            Type::Tuple(fields) => fields
+                .iter()
+                .all(|(_, field)| visit(field, cx, active)),
+            Type::Named(name) => {
+                if let Some(numeric) = crate::AST::numeric_type_from_name(name) {
+                    return matches!(numeric, Type::Int | Type::IntN { .. });
+                }
+                if !active.insert(name.clone()) {
+                    return false;
+                }
+                let eligible = if let Some(fields) = cx.struct_fields.get(name) {
+                    fields
+                        .iter()
+                        .all(|(_, field)| visit(field, cx, active))
+                } else if let Some(variants) = cx.enum_variants.get(name) {
+                    variants
+                        .iter()
+                        .all(|(_, payload)| matches!(payload, VariantPayload::Unit))
+                } else {
+                    false
+                };
+                active.remove(name);
+                eligible
+            }
+            _ => false,
+        }
+    }
+
+    visit(ty, cx, &mut HashSet::new())
 }
 
 pub(crate) fn find_struct_box_edges(s: &StructDef, cx: &Cx) -> HashSet<(String, String)> {

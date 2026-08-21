@@ -512,7 +512,7 @@
         }
     }
 
-    /// D-TUPLE-DESTRUCT1: `tasks.channel<T>()` — mirrors Rust's `mpsc::channel()`:
+    /// D-TUPLE-DESTRUCT1: `channel<T>()` — mirrors Rust's `mpsc::channel()`:
     /// returns the `(Sender<T>, Receiver<T>)` pair directly (no combined "Channel"
     /// handle, and no `.sender()` method — a second sender is `tx.clone()`).
     pub fn channel<T: Send>() -> (JetSender<T>, JetReceiver<T>) {
@@ -576,10 +576,10 @@
         inner: super::JetSchedulerChannel<T>,
     }
     // D-TUPLE-DESTRUCT1: the tuple-destructure bind convention clones each
-    // extracted field (`(tx, rx) := tasks.channel<T>()` clones `rx` off the
+    // extracted field (`(tx, rx) :: channel<T>()` clones `rx` off the
     // synthesized `(Sender<T>, Receiver<T>)` struct, same as `Sender` below). The
     // underlying scheduler channel is `Arc`-backed and already supports concurrent
-    // receivers (the same substrate `g.select()` races multiple receive arms
+    // receivers (the same substrate races multiple receive arms
     // against), so cloning a `Receiver` is a cheap, sound pointer copy — not a
     // single-consumer `std::sync::mpsc::Receiver`.
     impl<T> Clone for JetReceiver<T> {
@@ -1149,6 +1149,16 @@
         }
     }
     impl<T> Eq for JetId<T> {}
+    impl<T> PartialOrd for JetId<T> {
+        fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+            Some(self.cmp(other))
+        }
+    }
+    impl<T> Ord for JetId<T> {
+        fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+            (self.index, self.generation).cmp(&(other.index, other.generation))
+        }
+    }
     impl<T> super::__jet_Equatable for JetId<T> {
         fn equal(&self, rhs: &Self) -> bool {
             self == rhs

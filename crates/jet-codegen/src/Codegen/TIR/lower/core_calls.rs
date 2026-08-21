@@ -15,7 +15,6 @@ use crate::Codegen::TIR::TCoreClosureKind;
 use crate::Codegen::TIR::TJitSpawnLambda;
 use crate::Codegen::TIR::TExpr;
 use crate::Codegen::TIR::TExprKind;
-use crate::Codegen::TIR::TStrPart;
 use crate::Codegen::TIR::unit_type;
 use crate::Diagnostics::Span;
 
@@ -161,31 +160,6 @@ pub(super) fn core_module_path_from_receiver(
     }
 }
 
-/// D-SERVICE1=D: lower the first typed service-tree builder slice to a
-/// compiler-owned declaration payload. The callback is sema-checked as a
-/// `ServiceTreeBuilder` function, but it is not an executable closure: only
-/// the static topology declarations are carried across the tier boundary.
-///
-/// The length-prefixed payload is private compiler data. It keeps worker names
-/// and handler identities intact without making a second runtime registry or
-/// pretending that arbitrary callback code is a service declaration.
-const SERVICE_TREE_PAYLOAD_PREFIX: &str = "\0jet.service.tree.v1\0";
-
-fn service_tree_payload(lambda: &Lambda) -> Option<String> {
-    let workers = jet_foundation::ServiceTree::worker_declarations(lambda)?;
-    let mut payload = format!("{SERVICE_TREE_PAYLOAD_PREFIX}{}|", workers.len());
-    for worker in workers {
-        payload.push_str(&format!(
-            "{}:{}{}:{}",
-            worker.name.len(),
-            worker.name,
-            worker.handler.len(),
-            worker.handler
-        ));
-    }
-    Some(payload)
-}
-
 pub(crate) fn lower_core_closure_call(
     module: &str,
     method: &str,
@@ -198,23 +172,6 @@ pub(crate) fn lower_core_closure_call(
         Some(Expr::Lambda(lam)) => Some(lam),
         _ => None,
     };
-    if module == "core.service" && method == "tree" {
-        let lambda = lam_at(0)?;
-        let payload = service_tree_payload(lambda)?;
-        return Some(TExpr {
-            ty: Type::Named("ServiceTree".to_string()),
-            kind: TExprKind::CoreCall {
-                module: module.to_string(),
-                method: method.to_string(),
-                args: vec![TExpr {
-                    ty: Type::String,
-                    kind: TExprKind::StrLit(vec![TStrPart::Lit(payload)]),
-                }],
-                source_span,
-                widen_to_vec: vec![false],
-            },
-        });
-    }
     if module == "core.tasks" && method == "spawn" {
         let lam = lam_at(0)?;
         let body_ty = spawn_body_result_ty(lam, cx, env);

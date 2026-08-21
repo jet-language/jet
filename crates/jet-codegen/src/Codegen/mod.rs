@@ -185,6 +185,7 @@ const PRELUDE_PARTS: &[&str] = &[
     include_str!("../Prelude/Core/Time.rs"),
     include_str!("../Prelude/Core/Sketch.rs"),
     include_str!("../Prelude/Core/Contracts.rs"),
+    include_str!("../Prelude/Core/MapKey.rs"),
     include_str!("../Prelude/Core/RuntimeStack.rs"),
     include_str!("../Prelude/Core/Authority.rs"),
     include_str!("../Prelude/Core.rs"),
@@ -2979,6 +2980,8 @@ mod tests {
         let sketch = std::fs::read_to_string(root.join("src/Prelude/Core/Sketch.rs")).unwrap();
         let contracts =
             std::fs::read_to_string(root.join("src/Prelude/Core/Contracts.rs")).unwrap();
+        let map_key =
+            std::fs::read_to_string(root.join("src/Prelude/Core/MapKey.rs")).unwrap();
         let core = std::fs::read_to_string(root.join("src/Prelude/Core.rs")).unwrap();
         let view_access =
             std::fs::read_to_string(root.join("src/Prelude/Core/ViewAccess.rs")).unwrap();
@@ -3049,6 +3052,7 @@ mod tests {
             ("src/Prelude/Core/Time.rs", time.as_str()),
             ("src/Prelude/Core/Sketch.rs", sketch.as_str()),
             ("src/Prelude/Core/Contracts.rs", contracts.as_str()),
+            ("src/Prelude/Core/MapKey.rs", map_key.as_str()),
             ("src/Prelude/Core.rs", core.as_str()),
             ("src/Prelude/Core/ViewAccess.rs", view_access.as_str()),
             ("src/Prelude/Core/Power.rs", power.as_str()),
@@ -3169,6 +3173,9 @@ mod tests {
         let contracts_pos = production_codegen
             .find("include_str!(\"../Prelude/Core/Contracts.rs\")")
             .unwrap();
+        let map_key_pos = production_codegen
+            .find("include_str!(\"../Prelude/Core/MapKey.rs\")")
+            .unwrap();
         let core_pos = production_codegen
             .find("include_str!(\"../Prelude/Core.rs\")")
             .unwrap();
@@ -3240,7 +3247,8 @@ mod tests {
                 && measurement_pos < time_pos
                 && time_pos < sketch_pos
                 && sketch_pos < contracts_pos
-                && contracts_pos < core_pos
+                && contracts_pos < map_key_pos
+                && map_key_pos < core_pos
                 && sketch_pos < core_pos
                 && core_pos < view_access_pos
                 && view_access_pos < collections_pos
@@ -3305,6 +3313,7 @@ mod tests {
                 time.as_str(),
                 sketch.as_str(),
                 contracts.as_str(),
+                map_key.as_str(),
                 core.as_str(),
                 view_access.as_str(),
                 power.as_str(),

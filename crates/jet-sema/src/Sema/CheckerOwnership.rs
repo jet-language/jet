@@ -4543,7 +4543,7 @@ impl<'a> Checker<'a> {
         closure_taken: bool,
     ) -> Option<SendabilityProblem> {
         let mut seen = HashSet::new();
-        self.sendability_problem_inner(ty, closure_taken, false, &mut seen)
+        self.sendability_problem_inner(ty, closure_taken, false, false, &mut seen)
     }
 
     /// D-CONC-CROSS1=A: every concurrent boundary asks the same ownership
@@ -4557,7 +4557,16 @@ impl<'a> Checker<'a> {
     ) -> Option<SendabilityProblem> {
         let mut seen = HashSet::new();
         let strict_callable = matches!(crossing, SendCrossing::ParallelWorker | SendCrossing::Kernel);
-        self.sendability_problem_inner(ty, closure_taken, strict_callable, &mut seen)
+        self.sendability_problem_inner(ty, closure_taken, strict_callable, false, &mut seen)
+    }
+
+    /// The `Shared<T>` constructor has one narrower crossing rule: reject local
+    /// cell state, while preserving the historical acceptance of other values
+    /// that are not themselves crossing boundaries. It still uses the same
+    /// recursive prover as every worker crossing.
+    pub(crate) fn shared_storage_problem(&self, ty: &Type) -> Option<SendabilityProblem> {
+        let mut seen = HashSet::new();
+        self.sendability_problem_inner(ty, true, false, true, &mut seen)
     }
 
     /// D-FACT-OWN1 / D-MEMPROVENANCE3 / D-DATARACE1: a crossing query includes
@@ -4602,10 +4611,6 @@ impl<'a> Checker<'a> {
         } else {
             problem
         }
-    }
-
-    pub(crate) fn type_contains_local_cell(&self, ty: &Type) -> bool {
-        self.type_contains_local_cell_inner(ty, &mut HashSet::new())
     }
 
     pub(crate) fn type_contains_cell_guard(&self, ty: &Type) -> bool {
@@ -4810,124 +4815,44 @@ impl<'a> Checker<'a> {
         found
     }
 
-    fn type_contains_local_cell_inner(
-        &self,
-        ty: &Type,
-        seen: &mut HashSet<String>,
-    ) -> bool {
-        match ty {
-            Type::Apply { name, .. }
-                if matches!(
-                    name.as_str(),
-                    "Cell" | "CellReadGuard" | "CellEditGuard"
-                ) =>
-            {
-                true
-            }
-            Type::List(inner) | Type::Shared(inner) | Type::Option(inner) => {
-                self.type_contains_local_cell_inner(inner, seen)
-            }
-            Type::Map { key, value, .. } | Type::Result { ok: key, err: value } => {
-                self.type_contains_local_cell_inner(key, seen)
-                    || self.type_contains_local_cell_inner(value, seen)
-            }
-            Type::Fn { params, ret, .. } => {
-                params
-                    .iter()
-                    .any(|param| self.type_contains_local_cell_inner(param, seen))
-                    || ret
-                        .as_deref()
-                        .is_some_and(|ret| self.type_contains_local_cell_inner(ret, seen))
-            }
-            Type::Tuple(fields) => fields
-                .iter()
-                .any(|(_, field)| self.type_contains_local_cell_inner(field, seen)),
-            Type::FixedList { elem, .. }
-            | Type::Tagged { inner: elem, .. }
-            | Type::InlineRange { base: elem, .. } => {
-                self.type_contains_local_cell_inner(elem, seen)
-            }
-            Type::Union(members) => members
-                .iter()
-                .any(|member| self.type_contains_local_cell_inner(member, seen)),
-            Type::Named(name) => self.named_type_contains_local_cell(name, &[], seen),
-            Type::Apply { name, args } => {
-                self.named_type_contains_local_cell(name, args, seen)
-            }
-            Type::Int
-            | Type::Float
-            | Type::Bool
-            | Type::String
-            | Type::Char
-            | Type::TraitObject(_)
-            | Type::IntN { .. }
-            | Type::Float32 => false,
-            Type::Quantity { .. } => false,
-            Type::Measure(_) => false,
-        }
-    }
-
-    fn named_type_contains_local_cell(
-        &self,
-        name: &str,
-        args: &[Type],
-        seen: &mut HashSet<String>,
-    ) -> bool {
-        if !seen.insert(name.to_string()) {
-            return false;
-        }
-        let subst = if args.is_empty() {
-            HashMap::new()
-        } else {
-            self.struct_subst(name, args)
-        };
-        let found = match self.registry.types.get(name) {
-            Some(TypeDef::Struct { fields, .. }) => fields.iter().any(|(_, _, ty)| {
-                let actual = self.trait_reg.instantiate_type(ty, &subst);
-                self.type_contains_local_cell_inner(&actual, seen)
-            }),
-            Some(TypeDef::Enum { variants, .. }) => variants.values().any(|(_, payload)| {
-                match payload {
-                    VariantPayload::Unit => false,
-                    VariantPayload::Single(ty, _) => {
-                        let actual = self.trait_reg.instantiate_type(ty, &subst);
-                        self.type_contains_local_cell_inner(&actual, seen)
-                    }
-                    VariantPayload::Named(fields) => fields.iter().any(|field| {
-                        let actual = self.trait_reg.instantiate_type(&field.ty, &subst);
-                        self.type_contains_local_cell_inner(&actual, seen)
-                    }),
-                }
-            }),
-            Some(TypeDef::Alias { target, .. }) => {
-                let actual = self.trait_reg.instantiate_type(target, &subst);
-                self.type_contains_local_cell_inner(&actual, seen)
-            }
-            Some(TypeDef::Distinct { .. }) | None => false,
-        };
-        seen.remove(name);
-        found
-    }
-
     pub(crate) fn sendability_problem_inner(
         &self,
         ty: &Type,
         closure_taken: bool,
         strict_callable: bool,
+        cell_only: bool,
         seen: &mut HashSet<String>,
     ) -> Option<SendabilityProblem> {
         match ty {
             Type::Int | Type::Float | Type::Bool | Type::String | Type::Char => None,
-            Type::IntN { .. } | Type::Float32 | Type::InlineRange { .. } => None,
+            Type::IntN { .. } | Type::Float32 => None,
+            Type::InlineRange { base, .. } if cell_only => {
+                self.sendability_problem_inner(base, true, strict_callable, cell_only, seen)
+            }
+            Type::InlineRange { .. } => None,
             Type::List(inner) | Type::Shared(inner) | Type::Option(inner) => {
-                self.sendability_problem_inner(inner, true, strict_callable, seen)
+                self.sendability_problem_inner(inner, true, strict_callable, cell_only, seen)
             }
             Type::Map { key, value, .. } => self
-                .sendability_problem_inner(key, true, strict_callable, seen)
-                .or_else(|| self.sendability_problem_inner(value, true, strict_callable, seen)),
+                .sendability_problem_inner(key, true, strict_callable, cell_only, seen)
+                .or_else(|| {
+                    self.sendability_problem_inner(value, true, strict_callable, cell_only, seen)
+                }),
             Type::Result { ok, err } => self
-                .sendability_problem_inner(ok, true, strict_callable, seen)
-                .or_else(|| self.sendability_problem_inner(err, true, strict_callable, seen)),
+                .sendability_problem_inner(ok, true, strict_callable, cell_only, seen)
+                .or_else(|| {
+                    self.sendability_problem_inner(err, true, strict_callable, cell_only, seen)
+                }),
+            Type::Fn { params, ret, .. } if cell_only => params
+                .iter()
+                .find_map(|param| {
+                    self.sendability_problem_inner(param, true, strict_callable, cell_only, seen)
+                })
+                .or_else(|| {
+                    ret.as_deref().and_then(|ret| {
+                        self.sendability_problem_inner(ret, true, strict_callable, cell_only, seen)
+                    })
+                }),
             Type::Fn { .. } => {
                 if closure_taken && !strict_callable {
                     None
@@ -4946,7 +4871,9 @@ impl<'a> Checker<'a> {
             // #648: allocator handles own interior-mutability and raw backing
             // storage. They are deliberately thread-confined; values allocated
             // from them may never race reset/close on another task.
-            Type::Named(name) if crate::Syntax::alloc_handle_rust_type(name).is_some() => {
+            Type::Named(name)
+                if !cell_only && crate::Syntax::alloc_handle_rust_type(name).is_some() =>
+            {
                 Some(SendabilityProblem {
                     root: None,
                     path: Vec::new(),
@@ -4956,16 +4883,17 @@ impl<'a> Checker<'a> {
             // D-BROWSER-AUTO1=A: Browser protocol objects retain one
             // Rc/RefCell-backed session and are deliberately thread-confined.
             Type::Named(name)
-                if matches!(
-                    name.as_str(),
-                    "Browser"
-                        | "BrowserContext"
-                        | "BrowserPage"
-                        | "BrowserFrame"
-                        | "BrowserLocator"
-                        | "BrowserIntercept"
-                        | "BrowserProtocol"
-                ) =>
+                if !cell_only
+                    && matches!(
+                        name.as_str(),
+                        "Browser"
+                            | "BrowserContext"
+                            | "BrowserPage"
+                            | "BrowserFrame"
+                            | "BrowserLocator"
+                            | "BrowserIntercept"
+                            | "BrowserProtocol"
+                    ) =>
             {
                 Some(SendabilityProblem {
                     root: None,
@@ -4973,9 +4901,16 @@ impl<'a> Checker<'a> {
                     kind: SendProblemKind::ThreadConfined(name.clone()),
                 })
             }
+            Type::Named(name) if cell_only => {
+                self.named_sendability_problem(name, &[], strict_callable, cell_only, seen)
+            }
             Type::Named(name) if is_type_var_name(name) || core_type_known(name) => None,
-            Type::Named(name) => self.named_sendability_problem(name, &[], strict_callable, seen),
-            Type::Apply { name, .. } if name == crate::Syntax::TYPE_SHARED_GUARD => {
+            Type::Named(name) => {
+                self.named_sendability_problem(name, &[], strict_callable, cell_only, seen)
+            }
+            Type::Apply { name, .. }
+                if !cell_only && name == crate::Syntax::TYPE_SHARED_GUARD =>
+            {
                 Some(SendabilityProblem {
                     root: None,
                     path: Vec::new(),
@@ -4985,10 +4920,12 @@ impl<'a> Checker<'a> {
                 })
             }
             Type::Apply { name, args }
-                if matches!(name.as_str(), "Task" | "Channel" | "Sender") =>
+                if !cell_only && matches!(name.as_str(), "Task" | "Receiver" | "Sender") =>
             {
                 args.iter()
-                    .find_map(|arg| self.sendability_problem_inner(arg, true, strict_callable, seen))
+                    .find_map(|arg| {
+                        self.sendability_problem_inner(arg, true, strict_callable, cell_only, seen)
+                    })
             }
             // D-LOCALCELL1=A: local cells and every guard derived from them retain
             // single-threaded runtime borrow state. They cannot cross any task,
@@ -5011,7 +4948,7 @@ impl<'a> Checker<'a> {
             // D-PIN1=A: a pin is a borrow into one owner's storage too, and the
             // no-move promise only holds inside the owner's thread.
             Type::Apply { name, .. }
-                if matches!(name.as_str(), "View" | "ViewMut" | Syntax::TYPE_PIN) =>
+                if !cell_only && matches!(name.as_str(), "View" | "ViewMut" | Syntax::TYPE_PIN) =>
             {
                 Some(SendabilityProblem {
                     root: None,
@@ -5020,28 +4957,34 @@ impl<'a> Checker<'a> {
                 })
             }
             Type::Apply { name, args } => {
-                self.named_sendability_problem(name, args, strict_callable, seen)
+                self.named_sendability_problem(name, args, strict_callable, cell_only, seen)
             }
-            Type::TraitObject(names) => Some(SendabilityProblem {
+            Type::TraitObject(names) if !cell_only => Some(SendabilityProblem {
                 root: None,
                 path: Vec::new(),
                 kind: SendProblemKind::TraitValue(names.join(" + ")),
             }),
+            Type::TraitObject(_) => None,
             Type::Tuple(fields) => fields
                 .iter()
-                .find_map(|(_, t)| self.sendability_problem_inner(t, true, strict_callable, seen)),
+                .find_map(|(_, t)| {
+                    self.sendability_problem_inner(t, true, strict_callable, cell_only, seen)
+                }),
             Type::FixedList { elem, .. } => {
-                self.sendability_problem_inner(elem, true, strict_callable, seen)
+                self.sendability_problem_inner(elem, true, strict_callable, cell_only, seen)
             }
             Type::Tagged { inner, .. } => {
-                self.sendability_problem_inner(inner, closure_taken, strict_callable, seen)
+                self.sendability_problem_inner(inner, closure_taken, strict_callable, cell_only, seen)
             }
             Type::Union(members) => members
                 .iter()
-                .find_map(|m| self.sendability_problem_inner(m, closure_taken, strict_callable, seen)),
-            Type::Quantity { base, .. } => {
-                self.sendability_problem_inner(base, closure_taken, strict_callable, seen)
+                .find_map(|m| {
+                    self.sendability_problem_inner(m, closure_taken, strict_callable, cell_only, seen)
+                }),
+            Type::Quantity { base, .. } if !cell_only => {
+                self.sendability_problem_inner(base, closure_taken, strict_callable, cell_only, seen)
             }
+            Type::Quantity { .. } => None,
             Type::Measure(_) => None,
         }
     }
@@ -5051,6 +4994,7 @@ impl<'a> Checker<'a> {
         name: &str,
         args: &[Type],
         strict_callable: bool,
+        cell_only: bool,
         seen: &mut HashSet<String>,
     ) -> Option<SendabilityProblem> {
         if !seen.insert(name.to_string()) {
@@ -5072,7 +5016,13 @@ impl<'a> Checker<'a> {
                 for (field_name, _, field_ty) in fields {
                     let actual_ty = self.trait_reg.instantiate_type(field_ty, &subst);
                     if let Some(problem) =
-                        self.sendability_problem_inner(&actual_ty, true, strict_callable, seen)
+                        self.sendability_problem_inner(
+                            &actual_ty,
+                            true,
+                            strict_callable,
+                            cell_only,
+                            seen,
+                        )
                     {
                         return Some(prepend_send_path(name, field_name, problem));
                     }
@@ -5085,12 +5035,24 @@ impl<'a> Checker<'a> {
                         VariantPayload::Unit => None,
                         VariantPayload::Single(ty, _) => {
                             let actual_ty = self.trait_reg.instantiate_type(ty, &subst);
-                            self.sendability_problem_inner(&actual_ty, true, strict_callable, seen)
+                            self.sendability_problem_inner(
+                                &actual_ty,
+                                true,
+                                strict_callable,
+                                cell_only,
+                                seen,
+                            )
                         }
                         VariantPayload::Named(fields) => fields.iter().find_map(|field| {
                             let actual_ty = self.trait_reg.instantiate_type(&field.ty, &subst);
-                            self.sendability_problem_inner(&actual_ty, true, strict_callable, seen)
-                                .map(|p| prepend_send_path(name, &field.name, p))
+                            self.sendability_problem_inner(
+                                &actual_ty,
+                                true,
+                                strict_callable,
+                                cell_only,
+                                seen,
+                            )
+                            .map(|p| prepend_send_path(name, &field.name, p))
                         }),
                     };
                     if let Some(problem) = problem {
@@ -5101,11 +5063,11 @@ impl<'a> Checker<'a> {
             }
             Some(TypeDef::Distinct { base, .. }) => {
                 let actual_ty = self.trait_reg.instantiate_type(base, &subst);
-                self.sendability_problem_inner(&actual_ty, true, strict_callable, seen)
+                self.sendability_problem_inner(&actual_ty, true, strict_callable, cell_only, seen)
             }
             Some(TypeDef::Alias { target, .. }) => {
                 let actual_ty = self.trait_reg.instantiate_type(target, &subst);
-                self.sendability_problem_inner(&actual_ty, true, strict_callable, seen)
+                self.sendability_problem_inner(&actual_ty, true, strict_callable, cell_only, seen)
             }
             None => None,
         };

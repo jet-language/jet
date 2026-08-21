@@ -482,21 +482,28 @@ pub fn core_module_items(module: &str) -> Vec<String> {
             "ComputeError",
             "ComputeDevice",
         ],
-        // D-SERVICE1=D: the typed tree is the one public service surface. The
-        // remaining runtime operations stay private until their typed builder
-        // forms land; exposing the old string-keyed calls would create a second
-        // topology mechanism beside the ratified tree.
+        // D-SERVICE1=D: typed builders are the one public service surface.
         "core.service" => &[
             "tree",
             "tree_show",
+            "state_store",
+            "restart_one_for_one",
+            "restart_one_for_all",
+            "restart_rest_for_one",
+            "delivery_at_most_once",
+            "delivery_durable",
             "ServiceTree",
             "ServiceEndpoint",
             "ServiceError",
+            "ServiceRestart",
+            "ServiceDelivery",
+            "ServiceReceipt",
+            "ServiceStateStore",
+            "ServiceUpgradeReceipt",
         ],
         "core.tasks" => &[
             "yield_now",
             "current_task",
-            "channel",
             "after",
             "interval",
         ],

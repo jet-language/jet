@@ -657,7 +657,7 @@ pub mod jet_email {
             let mut words = line.split_ascii_whitespace();
             let name = words.next().unwrap_or("");
             if name.is_empty() || !name.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-') {
-                return Err(protocol_error("EHLO capability name is invalid"));
+                return Err(protocol_error("EHLO feature name is invalid"));
             }
             let name = name.to_ascii_uppercase();
             if !names.contains(&name) {
@@ -700,7 +700,7 @@ pub mod jet_email {
         pub fn start_tls(&mut self, caps: &SMTPCapabilities) -> Result<(), Error> {
             if !self.ehlo || self.verified_tls || !caps.names.iter().any(|name| name == "STARTTLS") {
                 return Err(Error::TLS { operation: "starttls".to_string(), server: None, code: None,
-                    reason: "verified STARTTLS requires an advertised capability after EHLO".to_string() });
+                    reason: "verified STARTTLS requires an advertised feature after EHLO".to_string() });
             }
             self.ehlo = false; Ok(())
         }

@@ -172,6 +172,50 @@ fn first_string_literal_arg(args: &[crate::AST::CallArg]) -> Option<String> {
     }
 }
 
+fn service_method_route(handle: &str, method: &str) -> Option<(&'static str, bool)> {
+    let route = match (handle, method) {
+        ("ServiceTree", "worker") => ("worker", true),
+        ("ServiceTree", "set_restart") => ("set_restart", true),
+        ("ServiceTree", "set_delivery") => ("set_delivery", true),
+        ("ServiceTree", "start") => ("start", true),
+        ("ServiceTree", "stop") => ("stop", true),
+        ("ServiceTree", "send") => ("send", true),
+        ("ServiceTree", "send_durable") => ("send_durable", true),
+        ("ServiceTree", "receive") => ("receive", true),
+        ("ServiceTree", "mailbox_depth") => ("mailbox_depth", false),
+        ("ServiceTree", "restarts") => ("restarts", false),
+        ("ServiceTree", "fail_worker") => ("fail_worker", true),
+        ("ServiceTree", "drain_worker") => ("drain_worker", true),
+        ("ServiceTree", "dead_letter_count") => ("dead_letter_count", false),
+        ("ServiceTree", "drain_dead_letters") => ("drain_dead_letters", true),
+        ("ServiceTree", "event_count") => ("event_count", false),
+        ("ServiceTree", "directory_generation") => ("directory_generation", false),
+        ("ServiceTree", "set_state_empty") => ("set_state_empty", true),
+        ("ServiceTree", "set_state_snapshot") => ("set_state_snapshot", true),
+        ("ServiceTree", "set_state_event_log") => ("set_state_event_log", true),
+        ("ServiceTree", "commit_snapshot") => ("commit_snapshot", true),
+        ("ServiceTree", "restore_snapshot") => ("restore_snapshot", false),
+        ("ServiceTree", "append_event") => ("append_event", true),
+        ("ServiceTree", "replay_events") => ("replay_events", false),
+        ("ServiceTree", "workflow_start") => ("workflow_start", true),
+        ("ServiceTree", "workflow_step") => ("workflow_step", true),
+        ("ServiceTree", "workflow_history") => ("workflow_history", false),
+        ("ServiceTree", "directory_register") => ("directory_register", true),
+        ("ServiceTree", "directory_resolve") => ("directory_resolve", false),
+        ("ServiceTree", "handoff_generation") => ("handoff_generation", true),
+        ("ServiceTree", "rollback_generation") => ("rollback_generation", true),
+        ("ServiceTree", "upgrade_receipt") => ("upgrade_receipt", false),
+        ("ServiceTree", "chaos_fail") => ("chaos_fail", true),
+        ("ServiceTree", "observe") => ("observe", false),
+        ("ServiceTree", "show") => ("tree_show", false),
+        ("ServiceEndpoint", "send") => ("endpoint_send", false),
+        ("ServiceEndpoint", "receive") => ("endpoint_receive", false),
+        ("ServiceEndpoint", "show") => ("endpoint_show", false),
+        _ => return None,
+    };
+    Some(route)
+}
+
 pub(crate) fn is_checked_text_head_static(
     receiver: &Expr,
     resolved_ret: Option<&Type>,
@@ -1462,12 +1506,19 @@ fn lower_method_call_impl(
                 return lower_debug_text(lower_expr(expr, cx, env));
             }
 
-            if module == "core.math" && index == 0 && exact_rational_math_approx(method) {
+            // Both exact carriers cross here, matching the checker: it admits
+            // Fraction and Decimal wherever a math call leaves the exact world,
+            // so lowering must convert both or the tiers disagree with the type
+            // that was already accepted. The multi-argument family crosses at
+            // every argument, not only the first.
+            let crosses = module == "core.math"
+                && ((index == 0 && exact_rational_math_approx(method))
+                    || matches!(
+                        method,
+                        "atan2" | "hypot" | "lerp" | "copysign" | "log" | "fma"
+                    ));
+            if crosses {
                 let value = lower_expr(expr, cx, env);
-                // Both exact carriers cross here, matching the checker: the
-                // checker admits Fraction and Decimal at these irrational-result
-                // functions, so lowering must convert both or the tiers disagree
-                // with the type it already accepted.
                 let exact = match &value.ty {
                     Type::Named(type_name) if type_name == Syntax::TYPE_FRACTION => {
                         Some(Syntax::TYPE_FRACTION)
@@ -5196,6 +5247,24 @@ fn lower_method_call_impl(
                     );
                 });
             }
+        }
+        if let Some((core_method, _mutates)) = service_method_route(handle, method) {
+            return in_own_frame(|| {
+                let mut lowered_args = Vec::with_capacity(args.len() + 1);
+                lowered_args.push(lower_expr(receiver, cx, env));
+                lowered_args.extend(args.iter().map(|arg| lower_expr(&arg.expr, cx, env)));
+                let widen_to_vec = vec![false; lowered_args.len()];
+                TExpr {
+                    ty: resolved_ret.cloned().unwrap_or_else(unit_type),
+                    kind: TExprKind::CoreCall {
+                        module: "core.services".to_string(),
+                        method: core_method.to_string(),
+                        args: lowered_args,
+                        source_span: method_span,
+                        widen_to_vec,
+                    },
+                }
+            });
         }
         if let Some(mut op) = handle_method_op(handle, method, args.len()) {
             return in_own_frame(|| {

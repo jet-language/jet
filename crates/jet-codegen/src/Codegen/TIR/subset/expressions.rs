@@ -105,6 +105,21 @@ fn expr_in_subset_inner(e: &Expr, cx: &Cx, locals: &HashSet<String>) -> bool {
             operands.iter().all(|e| expr_in_subset(e, cx, locals))
         }
         Expr::Call(c) => {
+            // D-CONC-CHAN1=A: the readable `channel<T>()` constructor is a
+            // direct builtin call, not a `core.tasks.channel` import. Lowering
+            // normalizes it to the existing Prelude channel door below, so the
+            // coverage proof must admit the same zero/one-argument shape.
+            if c.name == Syntax::BUILTIN_CHANNEL
+                && !cx.sigs.contains_key(&c.name)
+                && !locals.contains(&c.name)
+            {
+                return c.args.len() <= 1
+                    && matches!(c.resolved_ret.as_ref(), Some(Type::Tuple(_)))
+                    && c.args.iter().all(|arg| {
+                    matches!(arg.label.as_ref().map(|(label, _)| label.as_str()), None | Some("capacity"))
+                        && expr_in_subset(&arg.expr, cx, locals)
+                });
+            }
             // D-CALLPOLICY1=E: `apply` replaces a callable's policy metadata;
             // policy expressions are compile-time typed values and have no
             // runtime TIR child. The final callable must still be covered.

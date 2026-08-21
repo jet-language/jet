@@ -2939,6 +2939,33 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
         }
         Expr::Call(call) => {
             in_own_frame(|| {
+                // D-CONC-CHAN1=A: `channel<T>()` is a readable builtin. Keep
+                // the source surface direct, then normalize to the one existing
+                // Core/Prelude channel route consumed by AOT, JIT, and TIR.
+                if call.name == Syntax::BUILTIN_CHANNEL
+                    && !cx.sigs.contains_key(&call.name)
+                    && !env.locals.contains_key(&call.name)
+                    && call.args.len() <= 1
+                {
+                    let args = call
+                        .args
+                        .iter()
+                        .map(|arg| lower_expr(&arg.expr, cx, env))
+                        .collect();
+                    return TExpr {
+                        ty: call
+                            .resolved_ret
+                            .clone()
+                            .unwrap_or_else(|| Type::Tuple(Vec::new())),
+                        kind: TExprKind::CoreCall {
+                            module: "core.tasks".to_string(),
+                            method: "channel".to_string(),
+                            args,
+                            source_span: call.name_span,
+                            widen_to_vec: vec![false; call.args.len()],
+                        },
+                    };
+                }
                 // D-CONC-FREEZE1=A: sema has proved the source is an owned,
                 // deeply snapshot-able value. Reuse the existing structural
                 // clone/materialization nodes so every execution tier consumes

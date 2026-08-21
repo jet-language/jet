@@ -24,12 +24,6 @@ const MAX_SERVICE_STATE_BYTES: usize = 128 * 1024 * 1024;
 const MAX_SERVICE_WORKFLOW_STEPS: usize = 100_000;
 const MAX_SERVICE_ACTIVITY_ATTEMPTS: i64 = 1_000;
 const MAX_SERVICE_MESSAGES: usize = 100_000;
-/// Private compiler payload for the first typed `service.tree` slice. It is
-/// not a user-facing string-keyed API: TIR emits it only after sema has typed
-/// each `worker(name, handler)` declaration.
-const SERVICE_TREE_PAYLOAD_PREFIX: &str = "\0jet.service.tree.v1\0";
-const SERVICE_TREE_DEFAULT_NAME: &str = "root";
-const SERVICE_TREE_DEFAULT_CAPACITY: i64 = 1;
 /// D-SERVICE1=D's ratified default restart policy: `OneForOne` with a bounded
 /// budget of five restarts per minute, escalating to the parent group when the
 /// budget is spent. These are the *default* values of a policy row a group
@@ -225,114 +219,28 @@ fn jet_services_join_supervisor(task: JetServiceSupervisorTask) {
     jet_services_join_task(task.state);
 }
 
-enum JetServiceChannelError<T> {
-    Full(T),
-    Empty,
-    Closed,
-}
-
-/// One bounded mailbox queue. The queue is the channel state; no second Vec
-/// mirrors it. `snapshot` exists only at the CtValue marshalling boundary, and
-/// `try_send` is the one place that compares depth to capacity.
-///
-/// This is deliberately not `JetSchedulerChannel` (Prelude/Scheduler.rs), and a
-/// future pass must not "unify" them without moving one of them first. The
-/// scheduler channel parks a task on `ParkSlot` and lives in `jet-codegen`;
-/// `Comptime/ServicesLite.rs` — the ambient/JIT/TIR tier that `include!`s this
-/// file — is in `jet-comptime`, which does not depend on `jet-codegen`. A
-/// mailbox also has no task parked on it on those tiers: it is part of a
-/// `ServiceTree` value that crosses the tier boundary. The shared, tier-portable
-/// concurrency Prelude is `Prelude/TaskGroup.rs`; if a second Prelude value ever
-/// needs a bounded queue, move this type there rather than writing a third one.
-struct JetServiceChannel<T> {
-    capacity: usize,
-    values: std::sync::Mutex<std::collections::VecDeque<T>>,
-    closed: std::sync::atomic::AtomicBool,
-    wake: std::sync::Condvar,
-}
-
-impl<T> JetServiceChannel<T> {
-    fn new(capacity: usize, values: impl IntoIterator<Item = T>) -> Result<Self, ()> {
-        if capacity == 0 {
-            return Err(());
-        }
-        let values = values.into_iter().collect::<std::collections::VecDeque<_>>();
-        if values.len() > capacity {
-            return Err(());
-        }
-        Ok(Self {
-            capacity,
-            values: std::sync::Mutex::new(values),
-            closed: std::sync::atomic::AtomicBool::new(false),
-            wake: std::sync::Condvar::new(),
-        })
-    }
-
-    fn try_send(&self, value: T) -> Result<(), JetServiceChannelError<T>> {
-        let mut values = self.values.lock().unwrap();
-        if self.closed.load(std::sync::atomic::Ordering::Acquire) {
-            return Err(JetServiceChannelError::Closed);
-        }
-        if values.len() >= self.capacity {
-            return Err(JetServiceChannelError::Full(value));
-        }
-        values.push_back(value);
-        self.wake.notify_one();
-        Ok(())
-    }
-
-    fn try_recv(&self) -> Result<T, JetServiceChannelError<T>> {
-        let mut values = self.values.lock().unwrap();
-        if let Some(value) = values.pop_front() {
-            return Ok(value);
-        }
-        if self.closed.load(std::sync::atomic::Ordering::Acquire) {
-            Err(JetServiceChannelError::Closed)
-        } else {
-            Err(JetServiceChannelError::Empty)
-        }
-    }
-
-    fn snapshot(&self) -> Vec<T>
-    where
-        T: Clone,
-    {
-        self.values.lock().unwrap().iter().cloned().collect()
-    }
-
-    fn depth(&self) -> usize {
-        self.values.lock().unwrap().len()
-    }
-
-    fn clear(&self) {
-        self.values.lock().unwrap().clear();
-    }
-
-    fn close(&self) {
-        let _values = self.values.lock().unwrap();
-        self.closed
-            .store(true, std::sync::atomic::Ordering::Release);
-        self.wake.notify_all();
-    }
-}
-
 struct JetServiceMailbox {
     endpoint: JetServiceEndpoint,
     capacity: i64,
-    channel: JetServiceChannel<String>,
+    channel: std::sync::Arc<JetServiceChannel<String>>,
 }
 
 impl Clone for JetServiceMailbox {
     fn clone(&self) -> Self {
         let messages = self.channel.snapshot();
-        Self {
-            endpoint: self.endpoint.clone(),
-            capacity: self.capacity,
-            channel: JetServiceChannel::new(
+        let channel = std::sync::Arc::new(
+            JetServiceChannel::new(
                 usize::try_from(self.capacity.max(1)).unwrap_or(1),
                 messages,
             )
             .expect("validated service mailbox must fit its bounded channel"),
+        );
+        let mut endpoint = self.endpoint.clone();
+        endpoint.channel = Some(channel.clone());
+        Self {
+            endpoint,
+            capacity: self.capacity,
+            channel,
         }
     }
 }
@@ -362,9 +270,11 @@ fn jet_services_new_mailbox(
             "mailbox messages exceed the bounded channel capacity".to_string(),
         ));
     }
-    let channel = JetServiceChannel::new(channel_capacity, messages).map_err(|_| {
+    let channel = std::sync::Arc::new(JetServiceChannel::new(channel_capacity, messages).map_err(|_| {
         JetServiceError::Policy("mailbox channel could not restore its queued messages".to_string())
-    })?;
+    })?);
+    let mut endpoint = endpoint;
+    endpoint.channel = Some(channel.clone());
     Ok(JetServiceMailbox {
         endpoint,
         capacity,
@@ -375,9 +285,8 @@ fn jet_services_new_mailbox(
 #[derive(Clone, Debug)]
 struct JetServiceWorker {
     name: String,
-    /// The ordinary Jet function promoted by the typed declaration. The
-    /// current slice records identity in the topology; invocation and
-    /// supervision remain unstarted.
+    /// The worker identity promoted by the typed declaration. Invocation and
+    /// supervision use the private runtime substrate behind the endpoint.
     handler: String,
     endpoint: JetServiceEndpoint,
     mailbox: JetServiceMailbox,
@@ -656,64 +565,6 @@ fn jet_services_tree(name: String) -> JetServiceTree {
     }
 }
 
-fn service_tree_payload_field<'a>(cursor: &mut &'a str) -> Option<&'a str> {
-    let separator = cursor.find(':')?;
-    let length = cursor[..separator].parse::<usize>().ok()?;
-    *cursor = &cursor[separator + 1..];
-    if length > cursor.len() || !cursor.is_char_boundary(length) {
-        return None;
-    }
-    let (field, rest) = cursor.split_at(length);
-    *cursor = rest;
-    Some(field)
-}
-
-fn service_tree_payload_entries(payload: &str) -> Option<Vec<(String, String)>> {
-    let mut cursor = payload.strip_prefix(SERVICE_TREE_PAYLOAD_PREFIX)?;
-    let separator = cursor.find('|')?;
-    let count = cursor[..separator].parse::<usize>().ok()?;
-    if count > MAX_SERVICE_WORKERS {
-        return None;
-    }
-    cursor = &cursor[separator + 1..];
-    let mut entries = Vec::with_capacity(count);
-    for _ in 0..count {
-        let name = service_tree_payload_field(&mut cursor)?;
-        let handler = service_tree_payload_field(&mut cursor)?;
-        if name.trim().is_empty()
-            || name.chars().any(char::is_control)
-            || name.len() > MAX_SERVICE_NAME
-            || handler.trim().is_empty()
-            || handler.chars().any(char::is_control)
-            || handler.len() > MAX_SERVICE_NAME
-            || entries.iter().any(|(known, _)| known == name)
-        {
-            return None;
-        }
-        entries.push((name.to_string(), handler.to_string()));
-    }
-    cursor.is_empty().then_some(entries)
-}
-
-/// Build the real Prelude service tree represented by the typed declaration.
-/// Invalid input is a compiler bug, not a user runtime case: the only caller
-/// is the compiler-emitted payload, so fail closed instead of returning an
-/// empty or otherwise fake tree.
-fn jet_services_tree_declared(payload: String) -> JetServiceTree {
-    let entries = service_tree_payload_entries(&payload)
-        .unwrap_or_else(|| panic!("invalid compiler service.tree payload"));
-    let mut tree = jet_services_tree(SERVICE_TREE_DEFAULT_NAME.to_string());
-    for (name, handler) in entries {
-        jet_services_worker(&mut tree, name, SERVICE_TREE_DEFAULT_CAPACITY)
-            .unwrap_or_else(|error| panic!("compiler service.tree worker rejected: {error:?}"));
-        tree.workers
-            .last_mut()
-            .expect("service.tree worker was just inserted")
-            .handler = handler;
-    }
-    tree
-}
-
 pub fn jet_services_state_store(path: String) -> Result<JetServiceStateStore, JetServiceError> {
     service_authority_validate_text(
         &path,
@@ -895,7 +746,8 @@ fn jet_services_worker(
         tree.generation,
         tree.authority.clone(),
     )?;
-    let mailbox = jet_services_new_mailbox(endpoint.clone(), capacity, Vec::new())?;
+    let mailbox = jet_services_new_mailbox(endpoint, capacity, Vec::new())?;
+    let endpoint = mailbox.endpoint.clone();
     // Build the local mailbox before publishing the endpoint.  A failed
     // channel allocation must not leave a ghost authority in the registry.
     service_authority_register(&endpoint, false)?;
@@ -1129,6 +981,7 @@ fn jet_services_start(tree: &mut JetServiceTree) -> Result<(), JetServiceError> 
             worker.mailbox.capacity,
             messages,
         )?;
+        worker.endpoint = worker.mailbox.endpoint.clone();
         jet_services_task_start(&worker.task)?;
     }
 
@@ -1262,6 +1115,7 @@ fn jet_services_restart_worker(
         messages,
     )
     .expect("validated service mailbox must restart with its bounded queue");
+    worker.endpoint = worker.mailbox.endpoint.clone();
     let _ = jet_services_task_restart(&worker.task);
 }
 
@@ -1695,6 +1549,7 @@ fn jet_services_restore_mailbox(
         worker.mailbox.capacity,
         messages,
     )?;
+    worker.endpoint = worker.mailbox.endpoint.clone();
     Ok(())
 }
 

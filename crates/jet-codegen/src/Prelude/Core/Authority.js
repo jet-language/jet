@@ -13,7 +13,7 @@ function jet_authority_with(authority, requested) {
   if (![...authority.rights].some(held => jet_authority_covers(held, right))) {
     jet_runtime_stop(
       "E0712",
-      "<abilities>",
+      "<authority>",
       0,
       `E0712: authority cannot narrow to \`${right}\` outside its held rights`,
     );

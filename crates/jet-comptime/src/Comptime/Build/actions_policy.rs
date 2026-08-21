@@ -192,7 +192,7 @@ fn apply_import_key(
         "cap" | "caps" => {
             for cap in parse_import_array(value) {
                 let Some(cap) = BuildCapability::parse(&cap) else {
-                    return Err(legacy_import_error(kind, format!("unknown capability `{cap}`")));
+                    return Err(legacy_import_error(kind, format!("unknown ability `{cap}`")));
                 };
                 import.caps.insert(cap);
             }

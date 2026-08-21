@@ -849,7 +849,7 @@ fn e1236_no_transport(url: &str) -> Diagnostic {
         "E1236",
         "a build step needs a remote source with no transport available".to_string(),
         format!(
-            "`{url}` is a remote URL; the build seam holds no network capability by itself \
+            "`{url}` is a remote URL; the build seam holds no network ability by itself \
              (zero-external-crate compiler)."
         ),
         "provide a `file://` mirror, or `jet registry vendor` the source so the build is offline."

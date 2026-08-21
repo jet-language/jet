@@ -11,7 +11,7 @@
 //! Runtime consumers read that projection; they never parse source suffixes.
 //!
 //! D-JPK-TASKRUN1 / D-CMD-OVERRIDE1=C also lives here: a `#Job fn` must not
-//! reuse the reserved lifecycle verbs `run`/`dev`/`build`/`test`/`bench` (E0928).
+//! reuse the reserved lifecycle verbs `run`/`dev`/`build`/`test` (E0928).
 //!
 //! I3: this module only decides; codegen never reads `Func::every` at all —
 //! a `#Job`/`#Every` function generates as an ordinary fn.
@@ -167,7 +167,7 @@ fn e0928_reserved_job_name(name: &str, span: Span) -> Diagnostic {
         "E0928",
         format!("`{name}` is a built-in lifecycle verb, not a job name"),
         format!(
-            "`run`, `dev`, `build`, `test`, and `bench` already name Jet's built-in entry points — \
+            "`run`, `dev`, `build`, and `test` already name Jet's built-in entry points — \
              a `#Job fn` picks a user-chosen verb beside them (D-JPK-TASKRUN1/D-CMD-OVERRIDE1=C)."
         ),
         format!(
@@ -193,7 +193,7 @@ fn e0928_job_collision(name: &str, scope: JobScope, span: Span) -> Diagnostic {
     )
 }
 
-/// D-JPK-TASKRUN1/D-CMD-OVERRIDE1=C: reject `#Job fn run|dev|build|test|bench`. Called alongside the
+/// D-JPK-TASKRUN1/D-CMD-OVERRIDE1=C: reject `#Job fn run|dev|build|test`. Called alongside the
 /// `#Every` value check during registration.
 pub(crate) fn check_job_marker(f: &Func) -> Vec<Diagnostic> {
     if !f.is_job {

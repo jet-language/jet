@@ -20,7 +20,7 @@ use crate::Sema::CheckerCoreLib::{
     process_child_method_return, process_spec_method_return, process_stdin_method_return,
     terminal_session_method_return,
     process_stream_method_return, reflect_method_return, regex_method_return, result_ty,
-    core_generic_struct_field, core_struct_field_type,
+    core_generic_struct_field,
     simd_reduce_markers, sketch_method_return, sketch_type_name,
     text_cursor_method_return, u8_ty, ui_backend_method_return, unit_ty, url_mime_method_return,
     wrong_core_arity,
@@ -1862,7 +1862,7 @@ impl<'a> Checker<'a> {
                         return None;
                     }
                     let elem_ty = self.infer(&mut args[0].expr).unwrap_or(Type::Int);
-                    if self.type_contains_local_cell(&elem_ty) {
+                    if self.shared_storage_problem(&elem_ty).is_some() {
                         self.diags.push(Diagnostic::error(
                             "E1102",
                             format!(
@@ -2641,6 +2641,45 @@ impl<'a> Checker<'a> {
                 }
                 if handle_ty == "DBScope" {
                     if let Some(ret) = self.check_db_scope_method(method, args, span) {
+                        *recv_type_out = Some(handle_ty.clone());
+                        return ret;
+                    }
+                }
+                if handle_ty == "ServiceTree" {
+                    if let Some(ret) = self.check_service_tree_method(method, args, span) {
+                        if matches!(
+                            method,
+                            "worker"
+                                | "set_restart"
+                                | "set_delivery"
+                                | "start"
+                                | "stop"
+                                | "send"
+                                | "send_durable"
+                                | "receive"
+                                | "fail_worker"
+                                | "drain_worker"
+                                | "drain_dead_letters"
+                                | "set_state_empty"
+                                | "set_state_snapshot"
+                                | "set_state_event_log"
+                                | "commit_snapshot"
+                                | "append_event"
+                                | "workflow_start"
+                                | "workflow_step"
+                                | "directory_register"
+                                | "handoff_generation"
+                                | "rollback_generation"
+                                | "chaos_fail"
+                        ) {
+                            self.check_mutating_method_receiver(receiver, method, span);
+                        }
+                        *recv_type_out = Some(handle_ty.clone());
+                        return ret;
+                    }
+                }
+                if handle_ty == "ServiceEndpoint" {
+                    if let Some(ret) = self.check_service_endpoint_method(method, args, span) {
                         *recv_type_out = Some(handle_ty.clone());
                         return ret;
                     }
@@ -4704,20 +4743,6 @@ impl<'a> Checker<'a> {
                         let call_span = Span::new(span.start, end);
                         return self.infer_call_value(&mut callee, args, call_span);
                     }
-                }
-            }
-            // D-SERVICE1=D: `ServiceTreeBuilder.worker` is a compiler-owned
-            // function field. It is not a constructable user record, so its
-            // shape lives in the Core field oracle beside the other reserved
-            // records instead of in the user struct registry.
-            if let Some(field_ty) = core_struct_field_type(&type_name, method, &[]) {
-                if matches!(field_ty, Type::Fn { .. }) {
-                    *recv_type_out = Some(dispatch_type_name.to_string());
-                    let mut callee =
-                        Box::new(Expr::Field(receiver.clone(), method.to_string(), span));
-                    let end = args.last().map(|a| a.expr.span().end).unwrap_or(span.end);
-                    let call_span = Span::new(span.start, end);
-                    return self.infer_call_value(&mut callee, args, call_span);
                 }
             }
             let Some((owner_mod, mut msig)) = self.resolve_method_sig(&type_name, method) else {

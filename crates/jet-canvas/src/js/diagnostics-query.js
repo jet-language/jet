@@ -288,7 +288,7 @@
 
   function pinRail(pin) {
     if (!pin) return "data";
-    if ((pin.type || "") === "exec" || pin.name === "exec" || pin.capability === "control") return "control";
+    if ((pin.type || "") === "exec" || pin.name === "exec" || pin.ability === "control") return "control";
     if (pin.fallible) return "fallible";
     if (pin.effect_grant_need) return "effect";
     return "data";

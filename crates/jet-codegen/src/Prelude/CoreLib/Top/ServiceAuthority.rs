@@ -18,6 +18,88 @@ const SERVICE_AUTHORITY_TOKEN_BYTES: usize = 32;
 const SERVICE_AUTH_LOCK_TIMEOUT_MS: i64 = 30_000;
 const SERVICE_AUTH_LOCK_STALE_MS: i64 = 120_000;
 
+enum JetServiceChannelError<T> {
+    Full(T),
+    Empty,
+    Closed,
+}
+
+/// One bounded FIFO shared by a typed endpoint and its owning tree mailbox.
+/// Keeping it in the authority fragment lets endpoint methods and tree methods
+/// use the same queue on AOT and ambient tiers.
+#[derive(Debug)]
+struct JetServiceChannel<T> {
+    capacity: usize,
+    values: std::sync::Mutex<std::collections::VecDeque<T>>,
+    closed: std::sync::atomic::AtomicBool,
+    wake: std::sync::Condvar,
+}
+
+impl<T> JetServiceChannel<T> {
+    fn new(capacity: usize, values: impl IntoIterator<Item = T>) -> Result<Self, ()> {
+        if capacity == 0 {
+            return Err(());
+        }
+        let values = values.into_iter().collect::<std::collections::VecDeque<_>>();
+        if values.len() > capacity {
+            return Err(());
+        }
+        Ok(Self {
+            capacity,
+            values: std::sync::Mutex::new(values),
+            closed: std::sync::atomic::AtomicBool::new(false),
+            wake: std::sync::Condvar::new(),
+        })
+    }
+
+    fn try_send(&self, value: T) -> Result<(), JetServiceChannelError<T>> {
+        let mut values = self.values.lock().unwrap();
+        if self.closed.load(std::sync::atomic::Ordering::Acquire) {
+            return Err(JetServiceChannelError::Closed);
+        }
+        if values.len() >= self.capacity {
+            return Err(JetServiceChannelError::Full(value));
+        }
+        values.push_back(value);
+        self.wake.notify_one();
+        Ok(())
+    }
+
+    fn try_recv(&self) -> Result<T, JetServiceChannelError<T>> {
+        let mut values = self.values.lock().unwrap();
+        if let Some(value) = values.pop_front() {
+            return Ok(value);
+        }
+        if self.closed.load(std::sync::atomic::Ordering::Acquire) {
+            Err(JetServiceChannelError::Closed)
+        } else {
+            Err(JetServiceChannelError::Empty)
+        }
+    }
+
+    fn snapshot(&self) -> Vec<T>
+    where
+        T: Clone,
+    {
+        self.values.lock().unwrap().iter().cloned().collect()
+    }
+
+    fn depth(&self) -> usize {
+        self.values.lock().unwrap().len()
+    }
+
+    fn clear(&self) {
+        self.values.lock().unwrap().clear();
+    }
+
+    fn close(&self) {
+        let _values = self.values.lock().unwrap();
+        self.closed
+            .store(true, std::sync::atomic::Ordering::Release);
+        self.wake.notify_all();
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct JetServiceRuntime {
     pub store: String,
@@ -34,7 +116,41 @@ pub enum JetServiceReceipt {
     Unavailable(String),
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+impl Clone for JetServiceEndpoint {
+    fn clone(&self) -> Self {
+        Self {
+            tree: self.tree.clone(),
+            worker: self.worker.clone(),
+            generation: self.generation,
+            authority: self.authority.clone(),
+            channel: self.channel.clone(),
+        }
+    }
+}
+
+impl std::fmt::Debug for JetServiceEndpoint {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("JetServiceEndpoint")
+            .field("tree", &self.tree)
+            .field("worker", &self.worker)
+            .field("generation", &self.generation)
+            .field("authority", &self.authority)
+            .finish()
+    }
+}
+
+impl PartialEq for JetServiceEndpoint {
+    fn eq(&self, other: &Self) -> bool {
+        self.tree == other.tree
+            && self.worker == other.worker
+            && self.generation == other.generation
+            && self.authority == other.authority
+    }
+}
+
+impl Eq for JetServiceEndpoint {}
+
 pub struct JetServiceEndpoint {
     pub tree: String,
     pub worker: String,
@@ -42,6 +158,7 @@ pub struct JetServiceEndpoint {
     /// Opaque authority capability. It is carried by the endpoint value but
     /// never exposed as a user-selectable field.
     pub authority: String,
+    channel: Option<std::sync::Arc<JetServiceChannel<String>>>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -88,6 +205,7 @@ struct ServiceAuthorityEndpointState {
     generation: i64,
     started: bool,
     store: Option<(String, i64)>,
+    channel: Option<std::sync::Arc<JetServiceChannel<String>>>,
 }
 
 static SERVICE_AUTHORITY_LOCK: std::sync::OnceLock<std::sync::Mutex<()>> =
@@ -379,6 +497,7 @@ fn service_authority_endpoint_unchecked(
         worker,
         generation,
         authority,
+        channel: None,
     };
     service_authority_validate_endpoint(&endpoint)?;
     Ok(endpoint)
@@ -390,7 +509,13 @@ pub fn jet_services_authority_endpoint(
     generation: i64,
     authority: String,
 ) -> Result<JetServiceEndpoint, JetServiceError> {
-    service_authority_endpoint_unchecked(tree, worker, generation, authority)
+    let mut endpoint = service_authority_endpoint_unchecked(tree, worker, generation, authority)?;
+    let key = service_endpoint_key(&endpoint.authority, &endpoint.worker, endpoint.generation);
+    endpoint.channel = service_endpoint_registry()
+        .lock()
+        .ok()
+        .and_then(|registry| registry.get(&key).and_then(|state| state.channel.clone()));
+    Ok(endpoint)
 }
 
 /// Hydrate a provider-issued endpoint into the process registry after a tree
@@ -423,6 +548,9 @@ fn service_authority_register(
         }
         state.generation = endpoint.generation;
         state.started = started;
+        if endpoint.channel.is_some() {
+            state.channel = endpoint.channel.clone();
+        }
         return Ok(());
     }
     registry.insert(
@@ -434,6 +562,7 @@ fn service_authority_register(
             generation: endpoint.generation,
             started,
             store: None,
+            channel: endpoint.channel.clone(),
         },
     );
     Ok(())
@@ -461,7 +590,83 @@ pub fn jet_services_authority_update(
     }
     state.generation = endpoint.generation;
     state.started = started;
+    if endpoint.channel.is_some() {
+        state.channel = endpoint.channel.clone();
+    }
     Ok(())
+}
+
+fn service_authority_channel(
+    endpoint: &JetServiceEndpoint,
+) -> Result<(bool, std::sync::Arc<JetServiceChannel<String>>), JetServiceError> {
+    let key = service_endpoint_key(&endpoint.authority, &endpoint.worker, endpoint.generation);
+    let registry = service_endpoint_registry()
+        .lock()
+        .map_err(|_| service_authority_error("service endpoint registry lock is poisoned"))?;
+    let state = registry.get(&key).ok_or_else(|| {
+        JetServiceError::Partitioned("service endpoint authority is not registered".to_string())
+    })?;
+    if state.tree != endpoint.tree || state.worker != endpoint.worker {
+        return Err(JetServiceError::Revoked(
+            "service endpoint authority does not match its tree".to_string(),
+        ));
+    }
+    let channel = state
+        .channel
+        .clone()
+        .or_else(|| endpoint.channel.clone())
+        .ok_or_else(|| JetServiceError::Partitioned("service endpoint mailbox is not connected".to_string()))?;
+    Ok((state.started, channel))
+}
+
+pub fn jet_services_endpoint_send(
+    endpoint: &JetServiceEndpoint,
+    message: String,
+) -> Result<(), JetServiceError> {
+    service_authority_validate_endpoint(endpoint)?;
+    if message.len() > SERVICE_AUTH_MAX_MESSAGE || message.chars().any(char::is_control) {
+        return Err(JetServiceError::Policy(
+            "service message exceeds the 1 MiB limit".to_string(),
+        ));
+    }
+    let (started, channel) = service_authority_channel(endpoint)?;
+    if !started {
+        return Err(JetServiceError::NotStarted(
+            "service worker is not running".to_string(),
+        ));
+    }
+    match channel.try_send(message) {
+        Ok(()) => Ok(()),
+        Err(JetServiceChannelError::Full(_)) => Err(JetServiceError::Full(
+            "service endpoint mailbox is full".to_string(),
+        )),
+        Err(JetServiceChannelError::Closed) => Err(JetServiceError::NotStarted(
+            "service endpoint mailbox is closed".to_string(),
+        )),
+        Err(JetServiceChannelError::Empty) => unreachable!("send cannot return an empty channel error"),
+    }
+}
+
+pub fn jet_services_endpoint_receive(
+    endpoint: &JetServiceEndpoint,
+) -> Result<String, JetServiceError> {
+    service_authority_validate_endpoint(endpoint)?;
+    let (started, channel) = service_authority_channel(endpoint)?;
+    if !started {
+        return Err(JetServiceError::NotStarted(
+            "service worker is not running".to_string(),
+        ));
+    }
+    match channel.try_recv() {
+        Ok(message) => Ok(message),
+        Err(JetServiceChannelError::Empty) => Err(JetServiceError::Ambiguous(
+            "service endpoint mailbox is empty".to_string(),
+        )),
+        Err(JetServiceChannelError::Closed) => Err(JetServiceError::NotStarted(
+            "service endpoint mailbox is closed".to_string(),
+        )),
+        Err(JetServiceChannelError::Full(_)) => unreachable!("receive cannot return a full channel error"),
+    }
 }
 
 fn service_authority_current_endpoint(

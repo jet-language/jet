@@ -64,9 +64,9 @@ mod semantics {
                 jet_compute_tensor_from_shape(shape, 0.0, JetComputeDevice::Cpu).unwrap();
             tensor.data = std::sync::Arc::new(values.into_iter().map(f64::from).collect());
             tensor.last_placement.profile = CPU_ORACLE_F32_PROFILE.to_string();
-            tensor.last_placement.capabilities = CPU_ORACLE_F32_CAPABILITIES
+            tensor.last_placement.abilities = CPU_ORACLE_F32_CAPABILITIES
                 .iter()
-                .map(|capability| (*capability).to_string())
+                .map(|ability| (*ability).to_string())
                 .collect();
             jet_compute_validate_tensor(&tensor).unwrap();
             tensor

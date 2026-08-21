@@ -140,7 +140,8 @@ pub const KW_FACT: &str = "fact"; // D-FACTDECL1
 /// "from no prior state". Reuses the existing `_` wildcard glyph.
 pub const STATE_ENTRY: &str = "_";
 
-/// D-AUTHORITY-SCOPE1=A (ratified 2026-08-06, card #1500; implementation
+/// D-AUTHORITY-SCOPE1=A / D-AUTHORITY-WORD2=E (ratified 2026-08-06/17;
+/// implementation #1572):
 /// #1573): one scope marker serves both narrowed blocks and named handles.
 /// Bare `#Caps(Net, DB) { … }` narrows the block; `#Caps(g: FS, Net) { … }`
 /// binds `g` for the block. The retired Grant marker remains only as a parser
@@ -150,11 +151,11 @@ pub const KW_CAPS: &str = "Caps";
 /// D-AUTHORITY-SCOPE1: parser tombstone for the retired Grant marker.
 pub const RETIRED_MARKER_GRANT: &str = "Grant";
 
-/// D-AUTHORITY-SCOPE1 / D-AUTHORITY-NAME1=A: the type of a scoped Authority
-/// handle bound by `#Caps(authority: FS, Net) { … }`. It is an ordinary value type;
-/// the block still erases in codegen, but a named handle can cross its checked
-/// boundary only where the surrounding API accepts Authority.
-pub const CAP_HANDLE_TYPE: &str = "Authority";
+/// D-AUTHORITY-SCOPE1 / D-AUTHORITY-WORD2=E: the type of a scoped Abilities
+/// handle bound by `#Caps(abilities: FS, Net) { … }`. It is an ordinary
+/// value type; the block still erases in codegen, but the handle can cross only
+/// where the surrounding API accepts Abilities.
+pub const CAP_HANDLE_TYPE: &str = "Abilities";
 
 /// D-CONC-SPAWN1=D: parser-only receiver used while lowering `task` sugar.
 pub const INTERNAL_TASK_RECEIVER: &str = "\0jet.task";

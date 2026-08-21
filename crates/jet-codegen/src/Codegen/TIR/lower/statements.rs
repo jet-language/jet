@@ -3656,7 +3656,7 @@ fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmt
                 );
             });
         }
-        // D-SCAP1: a `#grant(FS) { caps -> … }` grant region. The capability handle
+        // D-AUTHORITY-SCOPE1: a named `#Abilities(abilities: FS) { … }` scope. The Abilities handle
         // is a compile-time-only fact (authority to perform the granted effects),
         // erased here (I3); the body emits as a plain lexical `TStmt::Region`.
         // No runtime grant/revoke value, no `unsafe`.

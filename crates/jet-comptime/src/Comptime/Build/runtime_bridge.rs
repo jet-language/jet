@@ -810,7 +810,7 @@ fn validate_legacy_import_contract(
     }
     if declared.caps != imported.caps {
         return Err(build_diag(
-            "legacy wrapper capabilities must exactly match its canonical project-file import",
+            "legacy wrapper abilities must exactly match its canonical project-file import",
             span,
         ));
     }

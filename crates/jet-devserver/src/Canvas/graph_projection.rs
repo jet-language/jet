@@ -358,7 +358,7 @@ fn task_flow_facts(src: &str) -> Vec<String> {
         ("task.race", "task_race"),
         ("task.any", "task_any"),
         (".join(", "join_task"),
-        ("tasks.channel", "channel_create"),
+        ("channel", "channel_create"),
         (".send(", "channel_send"),
         (".receive(", "channel_receive"),
         ("#Context", "deadline_context"),
@@ -422,7 +422,7 @@ fn project_func(
             ty,
             role: None,
             pattern_source: None,
-            capability: p.convention.sigil().to_string(),
+            ability: p.convention.sigil().to_string(),
             fallible: false,
             effect_grant_need: None,
             span: p.name_span.into(),
@@ -1446,7 +1446,7 @@ fn project_expr_node(
             // gone. `recv_type` survives that rewrite: sema always tags the
             // dispatch with `INTERNAL_TASK_SURFACE_TYPE` (detached) or
             // `INTERNAL_TASK_GROUP_SURFACE_TYPE` (lexical group), never
-            // `TYPE_TASKGROUP` (a real `TaskGroup` value, e.g. `g.select()`,
+            // `TYPE_TASKGROUP` (a real `TaskGroup` value, e.g. a retired wait-builder call,
             // which keeps its ordinary `.method` title). Show the surface
             // spelling the author actually wrote instead of the internal
             // dispatch method name (`spawn`) or the hidden receiver.

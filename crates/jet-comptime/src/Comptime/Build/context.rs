@@ -592,7 +592,7 @@ impl BuildContext {
                     .map(|cap_name| {
                         BuildCapability::parse(cap_name).ok_or_else(|| {
                             BuildError::PackagedPlugin(format!(
-                                "action {name} declares unknown capability {cap_name}"
+                                "action {name} declares unknown ability {cap_name}"
                             ))
                         })
                     })
@@ -792,7 +792,7 @@ impl BuildContext {
             if !grants.contains(cap) {
                 return Err(BuildError::PolicyDenied(PolicyExplanation::denied(
                     format!("wasm build plugin {}", spec.name),
-                    format!("missing capability grant {}", cap_name(cap)),
+                    format!("missing ability grant {}", cap_name(cap)),
                     spec.requested_caps.iter().cloned().collect(),
                 )));
             }
@@ -812,12 +812,12 @@ impl BuildContext {
                 if !spec.requested_caps.contains(cap) || !grants.contains(cap) {
                     let reason = if !spec.requested_caps.contains(cap) {
                         format!(
-                            "contributed action uses capability {} not declared by the plugin manifest",
+                            "contributed action uses ability {} not declared by the plugin manifest",
                             cap_name(cap)
                         )
                     } else {
                         format!(
-                            "contributed action uses ungranted capability {}",
+                            "contributed action uses ungranted ability {}",
                             cap_name(cap)
                         )
                     };

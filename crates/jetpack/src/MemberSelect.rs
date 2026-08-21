@@ -420,6 +420,8 @@ fn e1231_unknown_member(query: &str, plan: &WorkspacePlan) -> Diagnostic {
 }
 
 fn e1292_bad_ref(query: &str, suggestions: &[String], why_detail: &str) -> Diagnostic {
+    // No typed edit: `--affected-since` names an argv/git ref and suggestions
+    // can contain several refs, not one Jet source span.
     let fix = if suggestions.is_empty() {
         format!("pass a valid git ref (branch, tag, or commit); {why_detail}")
     } else {

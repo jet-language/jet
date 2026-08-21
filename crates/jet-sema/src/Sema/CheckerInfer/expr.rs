@@ -52,10 +52,16 @@ fn bare_member_chain_text(expr: &Expr) -> String {
 }
 
 fn replace_bare_member_subject(expr: &mut Expr) {
+    replace_bare_member_subject_with(expr, BARE_MEMBER_SUBJECT);
+}
+
+fn replace_bare_member_subject_with(expr: &mut Expr, subject: &str) {
     match expr {
-        Expr::Ident(name, _) if name.is_empty() => *name = BARE_MEMBER_SUBJECT.to_string(),
-        Expr::Field(inner, ..) => replace_bare_member_subject(inner),
-        Expr::MethodCall { receiver, .. } => replace_bare_member_subject(receiver),
+        Expr::Ident(name, _) if name.is_empty() => *name = subject.to_string(),
+        Expr::Field(inner, ..) => replace_bare_member_subject_with(inner, subject),
+        Expr::MethodCall { receiver, .. } => {
+            replace_bare_member_subject_with(receiver, subject)
+        }
         _ => {}
     }
 }
@@ -1735,6 +1741,48 @@ impl<'a> Checker<'a> {
 
     pub(crate) fn infer_inner(&mut self, e: &mut Expr) -> Option<Type> {
         self.normalize_contextual_expr(e);
+        if self.implicit_loop_subject_depth > 0 {
+            // A leading `.method(args)` is parsed as a call through the
+            // leading-dot field. In an implicit-subject loop it is the
+            // ordinary method call on that subject; lower it to the same
+            // MethodCall node used by an explicit receiver.
+            let method_call = match e {
+                Expr::CallValue { callee, .. } => match callee.as_ref() {
+                    Expr::Field(inner, method, method_span)
+                        if matches!(inner.as_ref(), Expr::Ident(name, _) if name.is_empty()) =>
+                    {
+                        Some((method.clone(), *method_span, inner.span()))
+                    }
+                    _ => None,
+                },
+                _ => None,
+            };
+            if let Some((method, method_span, receiver_span)) = method_call {
+                let span = e.span();
+                let Expr::CallValue { args, .. } =
+                    std::mem::replace(e, Expr::Absent(span))
+                else {
+                    unreachable!("matched an implicit-subject call value");
+                };
+                *e = Expr::MethodCall {
+                    receiver: Box::new(Expr::Ident(
+                        Syntax::KW_IT.to_string(),
+                        receiver_span,
+                    )),
+                    method,
+                    method_span,
+                    owner_type_args: Vec::new(),
+                    type_args: Vec::new(),
+                    args,
+                    recv_type: None,
+                    resolved_ret: None,
+                    checked_widen: false,
+                };
+            }
+        }
+        if self.implicit_loop_subject_depth > 0 && is_bare_member_chain(e) {
+            replace_bare_member_subject_with(e, Syntax::KW_IT);
+        }
 
         // D-SUBJECT-CALL1=A: resolve the parser's empty-receiver member chain
         // only when the surrounding call has one concrete callable parameter.

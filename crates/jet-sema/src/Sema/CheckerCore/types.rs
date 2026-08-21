@@ -98,6 +98,13 @@ impl<'a> Checker<'a> {
 
         pub(crate) fn resolve_type(&self, ty: Type) -> Type {
             match ty {
+                // D-NUMOPS1: typed numeric heads such as `Float{…}` are
+                // source spellings for primitive carriers, not nominal types.
+                // Resolve them before ordinary nominal lookup so call seams
+                // see `Type::Float` (and the matching fixed-width primitive).
+                Type::Named(n) if crate::AST::numeric_type_from_name(&n).is_some() => {
+                    crate::AST::numeric_type_from_name(&n).expect("numeric head was checked")
+                }
                 // D-ENC-DYN1=A+: `JSON`/`TOML`/`YAML`/`CSV` are type aliases over the one
                 // dynamic `Data` value — canonicalize every alias to `Data` so they unify.
                 Type::Named(n) if crate::Syntax::is_data_type_name(&n) => {

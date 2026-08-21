@@ -1,5 +1,5 @@
 
-// Canvas capability markers, initial UI setup, endpoint binding, and graph load.
+// Canvas ability markers, initial UI setup, endpoint binding, and graph load.
   window.__jetCanvasPinAuthoring = true;
   window.__jetCanvasDebugOverlay = true;
   window.__jetCanvasFrontendFamily = {

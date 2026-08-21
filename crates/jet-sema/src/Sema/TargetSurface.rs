@@ -17,12 +17,14 @@ const SOCKET_SURFACES: &[&str] = &[
 /// the selected target has no socket runtime that the Prelude can use.
 pub fn check_target_surface(bundle: &ProgramBundle, target: &str) -> Vec<Diagnostic> {
     let socket_target = socket_target_supported(target);
+    let wasip2_ws_unsupported = target == Syntax::BUILD_TARGET_WASI_SERVER
+        && has_reachable_surface(bundle, "core.net.ws");
     let wasip2_unsupported = if target == Syntax::BUILD_TARGET_WASI_SERVER {
         wasip2_unsupported_operations(bundle)
     } else {
         BTreeSet::new()
     };
-    if socket_target && wasip2_unsupported.is_empty() {
+    if socket_target && wasip2_unsupported.is_empty() && !wasip2_ws_unsupported {
         return Vec::new();
     }
 
@@ -49,6 +51,21 @@ pub fn check_target_surface(bundle: &ProgramBundle, target: &str) -> Vec<Diagnos
                         Some(span),
                     ));
                 }
+                if surface == "core.net.ws" && wasip2_ws_unsupported {
+                    let operation_key = (
+                        module.display.clone(),
+                        span.start,
+                        span.end,
+                        "E3305:core.net.ws".to_string(),
+                    );
+                    if seen.insert(operation_key) {
+                        diagnostics.push(Diagnostic::from_row(
+                            "E3305",
+                            &[("operation", "core.net.ws"), ("target", target)],
+                            Some(span),
+                        ));
+                    }
+                }
                 if surface == "core.net" {
                     for operation in &wasip2_unsupported {
                         let operation_key = (
@@ -70,6 +87,19 @@ pub fn check_target_surface(bundle: &ProgramBundle, target: &str) -> Vec<Diagnos
         }
     }
     diagnostics
+}
+
+fn has_reachable_surface(bundle: &ProgramBundle, expected: &str) -> bool {
+    bundle.modules.iter().any(|module| {
+        walk_imports(module).into_iter().any(|(_, import)| {
+            import
+                .walk_bindings()
+                .into_iter()
+                .any(|binding| {
+                    socket_surface(&binding.path()).is_some_and(|surface| surface == expected)
+                })
+        })
+    })
 }
 
 fn socket_surface(path: &str) -> Option<&'static str> {

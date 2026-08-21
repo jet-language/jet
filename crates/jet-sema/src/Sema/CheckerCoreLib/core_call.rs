@@ -978,7 +978,7 @@ impl<'a> Checker<'a> {
                         Some(span),
                     ));
                 }
-                if args.len() != 1 {
+                if !matches!(args.len(), 1 | 2) {
                     self.diags.push(wrong_core_arity(name, 1, args.len(), span));
                 }
                 if let Some(arg) = args.get_mut(0) {
@@ -995,7 +995,7 @@ impl<'a> Checker<'a> {
             // infers its argument and returns that exact type; no engine gets
             // a second signature or value policy.
             if module == "core.prelude" && name == "keep" {
-                if args.len() != 1 {
+                if !matches!(args.len(), 1 | 2) {
                     self.diags.push(wrong_core_arity(name, 1, args.len(), span));
                 }
                 let value_type = args
@@ -1006,33 +1006,47 @@ impl<'a> Checker<'a> {
                 }
                 return value_type;
             }
-            // D-SERVICE1=D: the first service slice is a declaration language,
-            // not an executable callback. Type the callback normally, then
-            // require the one worker-only shape that TIR can carry to the
-            // shared Prelude without inventing a second runtime mechanism.
+            if module == "core.tasks" && name == "channel" {
+                self.diags.push(Diagnostic::error(
+                    "E0102",
+                    "`tasks.channel` is retired".to_string(),
+                    "channels are a readable builtin and need no module import".to_string(),
+                    "write `channel<T>()` or `channel<T>(capacity: 8)".to_string(),
+                    Some(span),
+                ));
+                for argument in args {
+                    self.infer(&mut argument.expr);
+                }
+                return None;
+            }
+            // D-SERVICE1=D: a tree value is the typed topology root. Workers
+            // and groups are added through its checked methods; no callback or
+            // string-keyed procedural tree builder exists beside it.
             if module == "core.service" && name == "tree" {
                 if args.len() != 1 {
                     self.diags.push(wrong_core_arity(name, 1, args.len(), span));
                 }
-                let builder = Type::Fn {
-                    params: vec![Type::Named("ServiceTreeBuilder".to_string())],
-                    ret: Some(Box::new(Type::Named("Unit".to_string()))),
-                    effect_bound: None,
-                    param_contract: None,
-                    call_metadata: None,
-                    return_view_provenance: None,
-                };
                 if let Some(arg) = args.get_mut(0) {
-                    self.expect_core_arg(name, 0, &builder, arg);
-                    if let Expr::Lambda(lambda) = &arg.expr {
-                        if jet_foundation::ServiceTree::worker_declarations(lambda).is_none() {
-                            self.diags.push(Diagnostic::error(
-                                "E0112",
-                                "`service.tree` needs an inline named-worker declaration block".to_string(),
-                                "this slice carries only statically declared `root.worker(\"name\", handler)` topology to the service Prelude".to_string(),
-                                "write `service.tree((root) :> { root.worker(\"name\", handler) })`".to_string(),
-                                Some(arg.expr.span()),
-                            ));
+                    self.expect_core_arg(name, 0, &Type::String, arg);
+                    if let Expr::Str(parts, _) = &arg.expr {
+                        let literal = parts
+                            .iter()
+                            .map(|part| match part {
+                                crate::AST::StrPart::Lit(value) => Some(value.as_str()),
+                                crate::AST::StrPart::Interp(..) => None,
+                            })
+                            .collect::<Option<Vec<_>>>()
+                            .map(|parts| parts.concat());
+                        if let Some(value) = literal {
+                            if !jet_foundation::ServiceTree::valid_name(&value) {
+                                self.diags.push(Diagnostic::error(
+                                    "E0112",
+                                    "service tree name is outside the checked builder shape".to_string(),
+                                    "service topology names must be non-empty and visible before runtime construction".to_string(),
+                                    "use a non-empty visible tree name of at most 256 bytes".to_string(),
+                                    Some(arg.expr.span()),
+                                ));
+                            }
                         }
                     }
                 }
@@ -2778,12 +2792,22 @@ impl<'a> Checker<'a> {
                     if args.len() != wanted {
                         self.diags.push(wrong_core_arity(name, wanted, args.len(), span));
                     }
+                    // D-TYPE2-DEFAULT1: these leave the exact world too, so an
+                    // exact carrier crosses here exactly as it does at the
+                    // one-argument functions above. Admitting `sqrt(0.5)` while
+                    // rejecting `log(0.5, 2)` would be one boundary with two
+                    // rules again.
+                    let exact_crosses = |ty: &Type| {
+                        matches!(ty, Type::Named(name)
+                            if name == Syntax::TYPE_FRACTION || name == Syntax::TYPE_DECIMAL)
+                    };
                     let Some(first) = args.get_mut(0).and_then(|a| self.infer(&mut a.expr)) else {
                         for a in args.iter_mut().skip(1) {
                             self.infer(&mut a.expr);
                         }
                         return Some(Type::Float);
                     };
+                    let first = if exact_crosses(&first) { Type::Float } else { first };
                     if !matches!(first, Type::Float | Type::Float32) {
                         self.diags.push(Diagnostic::error(
                             "E0112",
@@ -2796,6 +2820,7 @@ impl<'a> Checker<'a> {
                     }
                     for i in 1..args.len() {
                         if let Some(got) = args.get_mut(i).and_then(|a| self.infer(&mut a.expr)) {
+                            let got = if exact_crosses(&got) { Type::Float } else { got };
                             if got != first {
                                 self.diags.push(Diagnostic::error(
                                     "E0112",
@@ -3503,75 +3528,6 @@ impl<'a> Checker<'a> {
                         name: "Receiver".to_string(),
                         args: vec![Type::Int],
                     });
-                }
-                // D-TUPLE-DESTRUCT1: `tasks.channel<T>()` returns the `(Sender<T>,
-                // Receiver<T>)` pair directly — mirrors the turbofish `decode<T>` pattern
-                // above (the element type `T` comes from the explicit call-site type
-                // argument, not a binding annotation; there's no combined "Channel" value
-                // to infer against anymore).
-                ("core.tasks", "channel") => {
-                    if args.len() > 1 {
-                        self.diags.push(Diagnostic::error(
-                            "E0104",
-                            format!(
-                                "`tasks.channel` takes an optional capacity, got {} arguments",
-                                args.len()
-                            ),
-                            "a channel may be unbounded or have one whole-number backpressure bound"
-                                .to_string(),
-                            "write `tasks.channel<T>()` or `tasks.channel<T>(capacity: 1)`".to_string(),
-                            Some(span),
-                        ));
-                        for a in args.iter_mut() {
-                            self.infer(&mut a.expr);
-                        }
-                        return None;
-                    }
-                    if let Some(cap) = args.get_mut(0) {
-                        let cap_ty = self.infer(&mut cap.expr)?;
-                        if !(matches!(&cap_ty, Type::Int | Type::InlineRange { .. })
-                            || matches!(&cap_ty, Type::Named(ref n) if n == "Int" || n == "I64" || n == "I32"))
-                        {
-                            self.diags.push(Diagnostic::error(
-                                "E0112",
-                                format!(
-                                    "`tasks.channel<T>(capacity: …)` needs an integer capacity, not {}",
-                                    cap_ty.show()
-                                ),
-                                "bounded channels use a whole-number memory/backpressure limit"
-                                    .to_string(),
-                                "write `tasks.channel<T>(capacity: 1)`".to_string(),
-                                Some(cap.expr.span()),
-                            ));
-                        }
-                    }
-                    let Some(t) = type_args.first().cloned() else {
-                        self.diags.push(Diagnostic::error(
-                            "E0904",
-                            "`tasks.channel` needs a type argument to infer the element type"
-                                .to_string(),
-                            "the element type `T` can't be guessed without `<T>`".to_string(),
-                            "call it with an explicit type argument: `tasks.channel<T>()`".to_string(),
-                            Some(span),
-                        ));
-                        return None;
-                    };
-                    return Some(Type::Tuple(vec![
-                        (
-                            "sender".to_string(),
-                            Box::new(Type::Apply {
-                                name: "Sender".to_string(),
-                                args: vec![t.clone()],
-                            }),
-                        ),
-                        (
-                            "receiver".to_string(),
-                            Box::new(Type::Apply {
-                                name: "Receiver".to_string(),
-                                args: vec![t],
-                            }),
-                        ),
-                    ]));
                 }
                 // D-ROUTE1=A: jet.http.router() → HTTPRouter.
                 ("core.http", "router") => {
@@ -5162,7 +5118,7 @@ impl<'a> Checker<'a> {
             // Bare `"…"` is `String` and E0149 — no silent typed-text rewrite.
             if module == "core.process" && name == "run" {
                 let Some((_, ret)) = sig else { unreachable!() };
-                if args.len() != 1 {
+                if !matches!(args.len(), 1 | 2) {
                     self.diags.push(wrong_core_arity(name, 1, args.len(), span));
                 }
                 if let Some(arg) = args.get_mut(0) {
@@ -5192,10 +5148,43 @@ impl<'a> Checker<'a> {
                         }
                     }
                 }
-                for arg in args.iter_mut().skip(1) {
+                if args.len() == 2 {
+                    self.expect_core_arg(
+                        name,
+                        1,
+                        &Type::Named(crate::Syntax::CAP_HANDLE_TYPE.to_string()),
+                        &mut args[1],
+                    );
+                }
+                for arg in args.iter_mut().skip(2) {
                     self.infer(&mut arg.expr);
                 }
                 return ret;
+            }
+
+            // D-AUTHORITY-WORD2=E: plugin construction accepts the same
+            // Abilities boundary value as process execution. The one-argument
+            // loader remains the existing sandboxed convenience form; the
+            // two-argument form carries the explicit authority value.
+            if module == "core.plugin" && name == "load" {
+                if !matches!(args.len(), 1 | 2) {
+                    self.diags.push(wrong_core_arity(name, 1, args.len(), span));
+                }
+                if let Some(arg) = args.get_mut(0) {
+                    self.expect_core_arg(name, 0, &Type::String, arg);
+                }
+                if args.len() == 2 {
+                    self.expect_core_arg(
+                        name,
+                        1,
+                        &Type::Named(crate::Syntax::CAP_HANDLE_TYPE.to_string()),
+                        &mut args[1],
+                    );
+                }
+                for arg in args.iter_mut().skip(2) {
+                    self.infer(&mut arg.expr);
+                }
+                return Some(Type::Named("Plugin".to_string()));
             }
 
             let compute_alias_ret = if module == "core.compute" {

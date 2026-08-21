@@ -3,7 +3,10 @@
 use std::collections::BTreeMap;
 
 /// The arena only marshals resident values into the shared Prelude carrier.
-pub use jet_foundation::Prelude::JetMapKey;
+mod map_key_semantics {
+    include!("../../jet-codegen/src/Prelude/Core/MapKey.rs");
+}
+pub use map_key_semantics::{jet_map_key_cmp, JetMapKey, JetMapKeyEncode};
 
 #[allow(dead_code)]
 mod uninit_semantics {

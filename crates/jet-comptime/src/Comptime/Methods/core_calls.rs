@@ -2239,10 +2239,28 @@ pub fn apply_core_call_with_type(
         }
         // D-COMPUTE1=D / I9: same Prelude as AOT (`ComputeLite` includes Compute.rs).
         ("core.compute", method) => super::super::ComputeLite::apply(method, &args, span),
-        // D-SERVICE1=D / I9: typed `core.service.tree` has no string-keyed
-        // fallback. The old procedural rows are private migration machinery.
+        // D-SERVICE1=D / I9: typed `core.service` constructors use the same
+        // Prelude adapter as tree methods; only the public module path differs.
         ("core.service", "tree") => {
-            super::super::ServicesLite::apply_typed_tree(one(0)?, span)
+            super::super::ServicesLite::apply("tree", &args, span)
+        }
+        ("core.service", "state_store") => {
+            super::super::ServicesLite::apply("state_store", &args, span)
+        }
+        ("core.service", "restart_one_for_one") => {
+            super::super::ServicesLite::apply("restart_one_for_one", &args, span)
+        }
+        ("core.service", "restart_one_for_all") => {
+            super::super::ServicesLite::apply("restart_one_for_all", &args, span)
+        }
+        ("core.service", "restart_rest_for_one") => {
+            super::super::ServicesLite::apply("restart_rest_for_one", &args, span)
+        }
+        ("core.service", "delivery_at_most_once") => {
+            super::super::ServicesLite::apply("delivery_at_most_once", &args, span)
+        }
+        ("core.service", "delivery_durable") => {
+            super::super::ServicesLite::apply("delivery_durable", &args, span)
         }
         ("core.services", method) => {
             super::super::ServicesLite::apply(method, &args, span)

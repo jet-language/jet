@@ -1,6 +1,6 @@
 // ── D-COMPUTE1=D / D-COMPUTE-TYPE1=D / D-COMPUTE-PLACE1=D (#443) ─────────────
 // One Core compute family. `Tensor` owns ranked multidimensional storage on the
-// explicit CPU-oracle capability; views retain the backing allocation and its
+// explicit CPU-oracle ability; views retain the backing allocation and its
 // strides. Mutable access requires the sema-proved exclusive ViewMut path;
 // shared writes fail closed instead of copying or pretending to update an alias.
 // Explicit Tensor copies materialize logical values into fresh backing storage.
@@ -36,7 +36,7 @@ const CPU_ORACLE_F32_CAPABILITIES: &[&str] = &[
     "differential-oracle",
 ];
 
-fn jet_compute_registered_capabilities(profile: &str) -> Option<&'static [&'static str]> {
+fn jet_compute_registered_abilities(profile: &str) -> Option<&'static [&'static str]> {
     match profile {
         CPU_ORACLE_F64_PROFILE => Some(CPU_ORACLE_F64_CAPABILITIES),
         CPU_ORACLE_F32_PROFILE => Some(CPU_ORACLE_F32_CAPABILITIES),
@@ -44,7 +44,7 @@ fn jet_compute_registered_capabilities(profile: &str) -> Option<&'static [&'stat
     }
 }
 
-fn jet_compute_capabilities_match(actual: &[String], expected: &[&str]) -> bool {
+fn jet_compute_abilities_match(actual: &[String], expected: &[&str]) -> bool {
     actual.len() == expected.len()
         && actual
             .iter()
@@ -60,7 +60,7 @@ struct JetComputePlacementReceipt {
     version: String,
     profile: String,
     cache: String,
-    capabilities: Vec<String>,
+    abilities: Vec<String>,
     reason: String,
 }
 
@@ -479,14 +479,14 @@ impl JetShow for JetComputeDevice {
 impl JetShow for JetComputePlacementReceipt {
     fn jet_show(&self) -> String {
         format!(
-            "Placement(requested={}, selected={}, backend={}, version={}, profile={}, cache={}, capabilities={:?}, reason={})",
+            "Placement(requested={}, selected={}, backend={}, version={}, profile={}, cache={}, abilities={:?}, reason={})",
             self.requested.jet_show(),
             self.selected.jet_show(),
             self.backend,
             self.version,
             self.profile,
             self.cache,
-            self.capabilities,
+            self.abilities,
             self.reason
         )
     }
@@ -705,9 +705,9 @@ fn jet_compute_validate_placement(
             "a Tensor must record the concrete backend selected by Auto placement".to_string(),
         ));
     }
-    let Some(expected_capabilities) = jet_compute_registered_capabilities(&receipt.profile) else {
+    let Some(expected_abilities) = jet_compute_registered_abilities(&receipt.profile) else {
         return Err(JetComputeError::Unsupported(format!(
-            "compute profile `{}` is not registered by a backend capability",
+            "compute profile `{}` is not registered by a backend ability",
             receipt.profile
         )));
     };
@@ -722,10 +722,10 @@ fn jet_compute_validate_placement(
         || receipt.cache != CPU_ORACLE_CACHE
         || receipt.reason.is_empty()
         || receipt.reason.chars().any(char::is_control)
-        || !jet_compute_capabilities_match(&receipt.capabilities, expected_capabilities)
+        || !jet_compute_abilities_match(&receipt.abilities, expected_abilities)
     {
         return Err(JetComputeError::Device(
-            "Tensor placement receipt does not match a registered backend capability".to_string(),
+            "Tensor placement receipt does not match a registered backend ability".to_string(),
         ));
     }
     Ok(())
@@ -787,12 +787,12 @@ fn jet_compute_validate_tensor(tensor: &JetTensor) -> Result<(), JetComputeError
 fn jet_compute_place(
     requested: JetComputeDevice,
 ) -> Result<JetComputePlacementReceipt, JetComputeError> {
-    // Epoch 3 registers one CPU capability. Auto selects that capability and
+    // Epoch 3 registers one CPU ability. Auto selects that ability and
     // records the choice; it never fabricates an accelerator or silently
     // changes precision. Experts can still pin CPU explicitly.
-    let capabilities = CPU_ORACLE_F64_CAPABILITIES
+    let abilities = CPU_ORACLE_F64_CAPABILITIES
         .iter()
-        .map(|capability| (*capability).to_string())
+        .map(|ability| (*ability).to_string())
         .collect();
     let selected = JetComputeDevice::Cpu;
     Ok(JetComputePlacementReceipt {
@@ -802,11 +802,11 @@ fn jet_compute_place(
         version: CPU_ORACLE_VERSION.to_string(),
         profile: CPU_ORACLE_F64_PROFILE.to_string(),
         cache: CPU_ORACLE_CACHE.to_string(),
-        capabilities,
+        abilities,
         reason: if requested == JetComputeDevice::Auto {
-            "policy=auto; selected=cpu; capability=cpu-oracle.f64".to_string()
+            "policy=auto; selected=cpu; ability=cpu-oracle.f64".to_string()
         } else {
-            "policy=explicit; selected=cpu; capability=cpu-oracle.f64".to_string()
+            "policy=explicit; selected=cpu; ability=cpu-oracle.f64".to_string()
         },
     })
 }
@@ -1585,14 +1585,14 @@ fn jet_compute_on_device(
     let mut receipt = jet_compute_place(device)?;
     if tensor.last_placement.profile == CPU_ORACLE_F32_PROFILE {
         receipt.profile = CPU_ORACLE_F32_PROFILE.to_string();
-        receipt.capabilities = CPU_ORACLE_F32_CAPABILITIES
+        receipt.abilities = CPU_ORACLE_F32_CAPABILITIES
             .iter()
-            .map(|capability| (*capability).to_string())
+            .map(|ability| (*ability).to_string())
             .collect();
         receipt.reason = if device == JetComputeDevice::Auto {
-            "policy=auto; selected=cpu; capability=cpu-oracle.f32".to_string()
+            "policy=auto; selected=cpu; ability=cpu-oracle.f32".to_string()
         } else {
-            "policy=explicit; selected=cpu; capability=cpu-oracle.f32".to_string()
+            "policy=explicit; selected=cpu; ability=cpu-oracle.f32".to_string()
         };
     }
     Ok(JetTensor {
@@ -3251,9 +3251,9 @@ fn jet_compute_f32_projection(tensor: &JetTensor) -> Result<JetTensor, JetComput
     )?;
     projected.data = std::sync::Arc::new(values.into_iter().map(f64::from).collect());
     projected.last_placement.profile = CPU_ORACLE_F32_PROFILE.to_string();
-    projected.last_placement.capabilities = CPU_ORACLE_F32_CAPABILITIES
+    projected.last_placement.abilities = CPU_ORACLE_F32_CAPABILITIES
         .iter()
-        .map(|capability| (*capability).to_string())
+        .map(|ability| (*ability).to_string())
         .collect();
     projected.last_placement.reason = "autodiff f32 projection".to_string();
     jet_compute_validate_tensor(&projected)?;
@@ -3894,7 +3894,7 @@ fn jet_compute_deserialize(payload: &String) -> Result<JetTensor, JetComputeErro
             .collect::<Result<Vec<_>, _>>()?
     };
     let profile = profile_part.strip_prefix("profile=").unwrap_or("");
-    let Some(capabilities) = jet_compute_registered_capabilities(profile) else {
+    let Some(abilities) = jet_compute_registered_abilities(profile) else {
         return Err(JetComputeError::Serialization(format!(
             "unsupported Tensor precision profile `{profile}`"
         )));
@@ -3926,9 +3926,9 @@ fn jet_compute_deserialize(payload: &String) -> Result<JetTensor, JetComputeErro
     let mut tensor = jet_compute_tensor_from_shape(shape, 0.0, JetComputeDevice::Cpu)?;
     tensor.data = std::sync::Arc::new(data);
     tensor.last_placement.profile = profile.to_string();
-    tensor.last_placement.capabilities = capabilities
+    tensor.last_placement.abilities = abilities
         .iter()
-        .map(|capability| (*capability).to_string())
+        .map(|ability| (*ability).to_string())
         .collect();
     tensor.last_placement.reason = "deserialized canonical Tensor".to_string();
     jet_compute_validate_tensor(&tensor)?;
@@ -4365,9 +4365,9 @@ fn jet_compute_matmul_f32_tile(a: &JetTensor, b: &JetTensor) -> Result<JetTensor
     )?;
     out.data = std::sync::Arc::new(output);
     out.last_placement.profile = CPU_ORACLE_F32_PROFILE.to_string();
-    out.last_placement.capabilities = CPU_ORACLE_F32_CAPABILITIES
+    out.last_placement.abilities = CPU_ORACLE_F32_CAPABILITIES
         .iter()
-        .map(|capability| (*capability).to_string())
+        .map(|ability| (*ability).to_string())
         .collect();
     out.last_placement.reason = format!(
         "algorithm=blocked-matmul; tile={TILE}; arithmetic=f32; reduction=ordered; dispatch={}; vector_width={}; tail=scalar",

@@ -265,9 +265,6 @@ pub(super) fn collect_select_arms(builder: &TExpr, cx: &Cx) -> (Vec<String>, Vec
                 afters.push(format!("({ms}, {value})"));
                 cur = inner;
             }
-            TExprKind::SelectRead { builder: inner, .. } => {
-                cur = inner;
-            }
             _ => break,
         }
     }
@@ -282,8 +279,7 @@ pub(super) fn collect_select_after_durations(builder: &TExpr, cx: &Cx) -> Vec<St
     loop {
         match &cur.kind {
             TExprKind::SelectStart => break,
-            TExprKind::SelectRecv { builder: inner, .. }
-            | TExprKind::SelectRead { builder: inner, .. } => cur = inner,
+            TExprKind::SelectRecv { builder: inner, .. } => cur = inner,
             TExprKind::SelectAfter {
                 builder: inner,
                 duration,

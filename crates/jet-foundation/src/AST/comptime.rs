@@ -4,6 +4,11 @@ use crate::Names::{mangle, mangle_path};
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 
+#[allow(dead_code)]
+mod map_key_semantics {
+    include!("../../../jet-codegen/src/Prelude/Core/MapKey.rs");
+}
+
 /// D-MEM-VIEWRET1=B: compiler-inferred public owner of a returned/stored view.
 /// Parameter positions are stable across renames and generic instantiation.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -741,23 +746,65 @@ impl PartialEq for ClosureData {
 }
 
 /// Orderable map key (S38: maps are `BTreeMap`, so keys must be `Ord`).
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Clone, Debug)]
 pub enum CtKey {
     Int(i64),
     Str(String),
     Bool(bool),
     Char(char),
-    /// D-MAP-KEY1: tuple keys retain their named, canonical fields so the
-    /// interpreter compares the same deep value that AOT stores in `JetMap`.
+    /// D-MAP-KEY1: tuple keys retain their named fields for value round-trips;
+    /// comparison delegates to the shared Prelude carrier below.
     Tuple(Vec<(String, CtKey)>),
-    /// D-MAP-KEY1: a struct key is ordered by nominal type, field name, then
-    /// recursively by field value.
+    /// D-MAP-KEY1: struct metadata is retained for value round-trips;
+    /// comparison uses the recursively encoded field values.
     Struct {
         type_name: String,
         fields: Vec<(String, CtKey)>,
     },
     /// D-MAP-KEY1: payload-free enum variants are already complete values.
     Enum { type_name: String, variant: String },
+}
+
+impl CtKey {
+    fn map_key(&self) -> map_key_semantics::JetMapKey {
+        match self {
+            CtKey::Int(value) => map_key_semantics::JetMapKey::Int(*value),
+            CtKey::Str(value) => map_key_semantics::JetMapKey::String(value.clone()),
+            CtKey::Bool(value) => map_key_semantics::JetMapKey::Bool(*value),
+            CtKey::Char(value) => map_key_semantics::JetMapKey::Char(*value),
+            CtKey::Tuple(fields) | CtKey::Struct { fields, .. } => {
+                map_key_semantics::JetMapKey::Record(
+                    fields.iter().map(|(_, value)| value.map_key()).collect(),
+                )
+            }
+            // The map type fixes the enum, so the variant is the complete
+            // value-bearing part of this key adapter.
+            CtKey::Enum { variant, .. } => {
+                map_key_semantics::JetMapKey::String(variant.clone())
+            }
+        }
+    }
+}
+
+impl PartialEq for CtKey {
+    fn eq(&self, other: &Self) -> bool {
+        map_key_semantics::jet_map_key_cmp(&self.map_key(), &other.map_key())
+            == std::cmp::Ordering::Equal
+    }
+}
+
+impl Eq for CtKey {}
+
+impl PartialOrd for CtKey {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for CtKey {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        map_key_semantics::jet_map_key_cmp(&self.map_key(), &other.map_key())
+    }
 }
 
 impl CtKey {

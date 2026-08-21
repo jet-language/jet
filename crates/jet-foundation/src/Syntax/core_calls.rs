@@ -937,10 +937,9 @@ pub const CORE_CALLS: &[CoreCallRecord] = &[
     CoreCallRecord::new("core.compute", "matmul_f32_tile", "jet_compute_matmul_f32_tile", true, &[true, true]),
     CoreCallRecord::new("core.compute", "profile_f32_strict", "jet_compute_profile_f32_strict", true, &[]),
     CoreCallRecord::new("core.compute", "profile_show", "jet_compute_profile_show", true, &[]),
-    // D-SERVICE1=D (#444): the typed declaration is a plain erased string
-    // payload at the engine boundary; the payload itself is produced only by
-    // the typed TIR lowering, and the Prelude owns its decoding.
-    CoreCallRecord::new("core.service", "tree", "jet_services_tree_declared", true, &[true]),
+    // D-SERVICE1=D (#444): the typed tree constructor carries its name into
+    // the shared Prelude; worker/group topology stays on typed methods.
+    CoreCallRecord::new("core.service", "tree", "jet_services_tree", true, &[false]),
     CoreCallRecord::new("core.service", "tree_show", "jet_services_tree_show", true, &[true]),
     CoreCallRecord::new("core.services", "restart_one_for_one", "jet_services_restart_one_for_one", true, &[]),
     CoreCallRecord::new("core.services", "restart_one_for_all", "jet_services_restart_one_for_all", true, &[]),
@@ -1711,7 +1710,13 @@ pub fn core_call_projection_in<'a>(
     if !row.coverage.contains(projection) {
         return Err(CoreCallProjectionError::Uncovered { projection });
     }
-    if !row.accepts_arity(actual_arity) {
+    // D-AUTHORITY-WORD2=E: boundary calls may carry one extra ordinary
+    // Abilities value. Keep the original one-argument convenience form for
+    // existing process/plugin calls; sema validates the added value's type.
+    let authority_boundary_form = actual_arity == row.signature.arity + 1
+        && ((module == "core.process" && member == "run")
+            || (module == "core.plugin" && member == "load"));
+    if !row.accepts_arity(actual_arity) && !authority_boundary_form {
         return Err(CoreCallProjectionError::Arity {
             expected: row.signature.arity,
             actual: actual_arity,

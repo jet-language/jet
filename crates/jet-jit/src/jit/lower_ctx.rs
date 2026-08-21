@@ -18140,7 +18140,6 @@ impl LowerCtx<'_, '_> {
                     self.lower_expr(duration)
                 })
             }
-            TExprKind::SelectRead { builder, .. } => self.lower_expr(builder),
             TExprKind::SelectWait { builder } => {
                 in_own_frame(|| -> Result<Value, String> {
                     let (recvs, afters) = collect_select_arms_jit(builder);

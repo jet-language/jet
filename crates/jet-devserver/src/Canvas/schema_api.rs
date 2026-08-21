@@ -124,7 +124,7 @@ pub(super) struct PinRec {
     pub(super) ty: String,
     pub(super) role: Option<String>,
     pub(super) pattern_source: Option<String>,
-    pub(super) capability: String,
+    pub(super) ability: String,
     pub(super) fallible: bool,
     pub(super) effect_grant_need: Option<String>,
     pub(super) span: SourceSpan,

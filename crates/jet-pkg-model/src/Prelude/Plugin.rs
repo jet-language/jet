@@ -64,7 +64,7 @@ pub fn jet_plugin_load(path: &str) -> String {
         Ok(i) => i,
         Err(e) => {
             return format!(
-                "E:plugin `{path}` couldn't be instantiated (it may require a host capability, which sandboxed plugins never get): {e}"
+                "E:plugin `{path}` couldn't be instantiated (it may require a host ability, which sandboxed plugins never get): {e}"
             );
         }
     };

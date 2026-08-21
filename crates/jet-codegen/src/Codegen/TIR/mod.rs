@@ -1556,7 +1556,11 @@ fn lower_jit_program_on_stack(bundle: &ProgramBundle) -> Option<JitProgram> {
                 if f.inline_foreign.is_some() {
                     continue;
                 }
-                if !f.type_params.is_empty() || !tir_covers(f, &cx) {
+                let covered = tir_covers(f, &cx);
+                if std::env::var_os("JET_DEBUG_TIR_CALLS").is_some() && !covered {
+                    eprintln!("skip TIR fn {}: {}", f.name, subset::refusal::describe(&cx));
+                }
+                if !f.type_params.is_empty() || !covered {
                     continue;
                 }
                 let lowered = lower_func(f, &cx);
@@ -4461,11 +4465,6 @@ pub enum TExprKind {
         builder: Box<TExpr>,
         duration: Box<TExpr>,
         value: Option<Box<TExpr>>,
-    },
-    /// D-CONCSELECT1=A: `.read(stream)` on a select builder.
-    SelectRead {
-        builder: Box<TExpr>,
-        stream: Box<TExpr>,
     },
     /// D-SELECT-GENERIC1=A: `.wait()` returns the selected arm's `T` payload.
     SelectWait {

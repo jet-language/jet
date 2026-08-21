@@ -491,7 +491,6 @@ fn jet_data_stream_decode_csv_row<T: __jet_Decode>(
         })
         .collect();
     T::jet_decode(&jet_std::DataTree::Object(obj))
-        .map(|(v, _)| v)
         .map_err(|errors| {
             let mut error = jet_data_error(
                 jet_std::DataErrorKind::Decode,

@@ -64,11 +64,17 @@ impl<'a> Parser<'a> {
                 span: Span::new(start.start, end),
             });
         }
+        let bindingless_source = matches!(self.peek().kind, TokKind::Ident(_))
+            && matches!(self.peek2().kind, TokKind::Arrow | TokKind::KwIf);
         let finite_header = matches!(self.peek().kind, TokKind::LParen)
             || (matches!(self.peek().kind, TokKind::Ident(_))
                 && matches!(
                     self.peek2().kind,
-                    TokKind::ColonEq | TokKind::Semi | TokKind::Comma
+                    TokKind::ColonEq
+                        | TokKind::Semi
+                        | TokKind::Comma
+                        | TokKind::Arrow
+                        | TokKind::KwIf
                 ));
         if !finite_header {
             return Err(Diagnostic::error(
@@ -113,6 +119,18 @@ impl<'a> Parser<'a> {
                 None
             };
             counted = Some((init, cond, step));
+        } else if bindingless_source {
+            let collection = self.expr_no_struct_lit()?;
+            let source_span = collection.span();
+            clauses.push((
+                Syntax::KW_IT.to_string(),
+                source_span,
+                None,
+                ForKind::In {
+                    collection,
+                    step: None,
+                },
+            ));
         } else {
             loop {
                 let (var, var_span, var2) = self.loop_source_binding()?;

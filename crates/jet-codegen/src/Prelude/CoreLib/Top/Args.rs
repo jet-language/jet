@@ -883,6 +883,8 @@ fn jet_args_store_option(
 }
 
 fn jet_args_unknown(name: &str, spec: &JetArgsSpec) -> String {
+    // No typed edit: this parser validates runtime argv, not Jet source, so it
+    // has no source file/span for `jet.report/v1` to project into `fix_edits`.
     let known: Vec<String> = jet_args_all_entries(spec).filter_map(|e| match e {
         JetArgKind::Flag { name, .. } | JetArgKind::Option { name, .. } => Some(name.clone()),
         _ => None,
