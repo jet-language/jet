@@ -1,5 +1,31 @@
 mod common;
-include!("cli_parts/support.rs");
+use std::fs;
+use std::path::PathBuf;
+use std::process::Command;
+
+fn jet() -> PathBuf {
+    PathBuf::from(env!("CARGO_BIN_EXE_jet"))
+}
+
+fn cli_dir() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/cli")
+}
+
+fn check_snapshot(name: &str, actual: &str) {
+    let path = cli_dir().join(name);
+    if std::env::var("UPDATE_EXPECT").is_ok() {
+        fs::create_dir_all(cli_dir()).unwrap();
+        fs::write(&path, actual).unwrap();
+        return;
+    }
+    let expected = fs::read_to_string(&path).unwrap_or_else(|_| {
+        panic!(
+            "missing snapshot {}; run UPDATE_EXPECT=1 cargo test",
+            path.display()
+        )
+    });
+    assert_eq!(actual, expected, "snapshot mismatch for {}", name);
+}
 
 #[test]
 fn explain_syntax_dictionary_golden() {

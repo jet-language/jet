@@ -4,6 +4,7 @@
 use crate::Marshal::{clone_bytes, alloc_byte_list, result_ok, result_err_msg};
 
 mod runtime {
+    #![allow(dead_code, unused_imports)]
     include!("../../jet-pkg-model/src/Prelude/Compress.rs");
 }
 
@@ -36,7 +37,7 @@ host_fns! {
     register: register_compress_symbols;
     declare: declare_compress_host_fns(module) {
         use cranelift_codegen::ir::{types, AbiParam, Signature};
-        use cranelift_module::{Linkage, Module};
+        use cranelift_module::Module;
         let cc = module.target_config().default_call_conv;
         let mut sig_unary = Signature::new(cc);
         sig_unary.params.push(AbiParam::new(types::I64));

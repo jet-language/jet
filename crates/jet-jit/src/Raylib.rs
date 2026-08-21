@@ -140,7 +140,7 @@ host_fns! {
     register: register_raylib_symbols;
     declare: declare_raylib_host_fns(module) {
         use cranelift_codegen::ir::{types, AbiParam, Signature};
-        use cranelift_module::{Linkage, Module};
+        use cranelift_module::Module;
         let cc = module.target_config().default_call_conv;
 
         let mut sig = |n_params: usize, ret: Option<cranelift_codegen::ir::Type>| {

@@ -15,18 +15,22 @@ use crate::Marshal::{clone_string, clone_bytes, alloc_byte_list, result_ok, resu
 use crate::Time::TimeValue;
 
 mod encoding_base_rt {
+    #![allow(dead_code, unused_imports)]
     include!("../../jet-codegen/src/Prelude/Core/EncodingBase.rs");
 }
 
 mod encoding_error_rt {
+    #![allow(dead_code, unused_imports)]
     include!("../../jet-codegen/src/Prelude/Core/EncodingError.rs");
 }
 
 mod field_error_rt {
+    #![allow(dead_code, unused_imports)]
     include!("../../jet-codegen/src/Prelude/Core/FieldError.rs");
 }
 
 mod inline_range_rt {
+    #![allow(dead_code, unused_imports)]
     include!("../../jet-codegen/src/Prelude/Core/InlineRange.rs");
 }
 
@@ -34,10 +38,12 @@ mod inline_range_rt {
 // generated AOT programs and the whole-program interpreter. This module only
 // supplies the resident heap adapter below.
 mod env_config_rt {
+    #![allow(dead_code, unused_imports)]
     include!("../../jet-codegen/src/Prelude/Core/EnvConfig.rs");
 }
 
 mod codec_rt {
+    #![allow(dead_code, unused_imports)]
     pub(crate) mod jet_std {
         pub(crate) type JetDecimal = jet_foundation::Numeric::CtDecimal;
     }
@@ -53,6 +59,7 @@ pub(crate) const CODEC_KIND_DECIMAL: i64 = 5;
 
 /// Canonical `jet_std` JSON/DataTree runtime — adapter types, shared algorithm via include!
 pub(crate) mod json_rt {
+    #![allow(dead_code, unused_imports)]
     #[derive(Clone, Debug, PartialEq)]
     pub struct JSONError {
         pub line: i64,
@@ -2182,7 +2189,7 @@ host_fns! {
     register: register_encoding_symbols;
     declare: declare_encoding_host_fns(module) {
         use cranelift_codegen::ir::{types, AbiParam, Signature};
-        use cranelift_module::{Linkage, Module};
+        use cranelift_module::Module;
         let cc = module.target_config().default_call_conv;
         let mut sig_unary = Signature::new(cc);
         sig_unary.params.push(AbiParam::new(types::I64));

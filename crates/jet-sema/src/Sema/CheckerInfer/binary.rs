@@ -1098,6 +1098,7 @@ impl<'a> Checker<'a> {
                                 Box::new(Expr::EnumLit {
                                     type_name: crate::Syntax::TYPE_ORDERING.to_string(),
                                     variant: "Equal".to_string(),
+                                    variant_span: None,
                                     args: Vec::new(),
                                     leading_dot: false,
                                     span,
@@ -1119,6 +1120,7 @@ impl<'a> Checker<'a> {
                                     Box::new(Expr::EnumLit {
                                         type_name: crate::Syntax::TYPE_ORDERING.to_string(),
                                         variant: variant.to_string(),
+                                        variant_span: None,
                                         args: Vec::new(),
                                         leading_dot: false,
                                         span,

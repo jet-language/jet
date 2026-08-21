@@ -4,7 +4,7 @@ use std::process::{Command, Stdio};
 use std::thread;
 use std::time::{Duration, Instant};
 
-use common::{build_and_run, fixture_matches, normalize_fixture_selector, strip_vetted_prelude_modules};
+use common::{build_and_run, fixture_matches, normalize_fixture_selector};
 
 const DEFAULT_DEV_CASE_DEADLINE: Duration = Duration::from_secs(120);
 

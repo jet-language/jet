@@ -2,14 +2,12 @@
 
 use super::Concurrency;
 use cranelift_codegen::ir::{types, AbiParam, Signature};
-use cranelift_jit::{JITBuilder, JITModule};
-use cranelift_module::{FuncId, Linkage, Module};
 use crate::Marshal::clone_string;
 
 pub(crate) mod sketch_rt {
+    #![allow(dead_code, unused_imports)]
     include!("../../jet-codegen/src/Prelude/Core/Sketch.rs");
 }
-
 #[derive(Clone)]
 pub(crate) enum SketchSlot {
     Hll(sketch_rt::JetHyperLogLog),

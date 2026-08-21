@@ -1,5 +1,5 @@
 use jet_codegen::Codegen::TIR::{self, TEnumPayload, TExpr, TExprKind, TIfCond, TStmt, TStrPart};
-use jet_foundation::{JitBackend::RunOutcome, AST::{ProgramBundle, Type}};
+use jet_foundation::{JitBackend::RunOutcome, AST::ProgramBundle};
 use std::collections::HashSet;
 
 use super::gap::{entry_run_name, JitGap};

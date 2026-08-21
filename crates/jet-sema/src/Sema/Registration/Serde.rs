@@ -1439,6 +1439,7 @@ fn enum_constructor_unit(type_name: &str, variant: &crate::AST::Variant, span: S
     Expr::EnumLit {
         type_name: type_name.to_string(),
         variant: variant.name.clone(),
+        variant_span: None,
         args: Vec::new(),
         leading_dot: false,
         span,
@@ -1456,6 +1457,7 @@ fn enum_constructor_from_binding(
         VariantPayload::Single(..) => Expr::EnumLit {
             type_name: type_name.to_string(),
             variant: variant.name.clone(),
+            variant_span: None,
             args: vec![EnumLitArg::Positional(ident(binding, span))],
             leading_dot: false,
             span,
@@ -1473,6 +1475,7 @@ fn enum_constructor_named(
     Expr::EnumLit {
         type_name: type_name.to_string(),
         variant: variant.name.clone(),
+        variant_span: None,
         args: fields
             .into_iter()
             .map(|(label, expr)| EnumLitArg::Named { label, expr })
@@ -1945,6 +1948,7 @@ fn serde_ct_expr(value: &CtValue, span: Span) -> Option<Expr> {
         CtValue::Struct { type_name, fields } => struct_literal(type_name.clone(), Vec::new(), fields.iter().map(|(name, value)| Some((name.clone(), serde_ct_expr(value, span)?))).collect::<Option<Vec<_>>>()?, span),
         CtValue::Enum { type_name, variant, args } => Expr::EnumLit {
             type_name: type_name.clone(), variant: variant.clone(),
+            variant_span: None,
             args: args.iter().map(|(label, value)| Some(match label {
                 Some(label) => EnumLitArg::Named { label: label.clone(), expr: serde_ct_expr(value, span)? },
                 None => EnumLitArg::Positional(serde_ct_expr(value, span)?),

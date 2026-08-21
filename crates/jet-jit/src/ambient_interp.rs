@@ -18,36 +18,41 @@ use crate::IO;
 use jet_codegen::Comptime::ServicesLite as service_prelude;
 
 mod fs_walk_kernel {
+    #![allow(dead_code, unused_imports)]
     include!("../../jet-codegen/src/Prelude/Core/FSWalk.rs");
 }
 
 mod env_config_prelude {
+    #![allow(dead_code, unused_imports)]
     include!("../../jet-codegen/src/Prelude/Core/EnvConfig.rs");
 }
 
 mod keep_kernel {
+    #![allow(dead_code, unused_imports)]
     include!("../../jet-codegen/src/Prelude/Core/Keep.rs");
 }
 
-trait JetShow {
-    fn jet_show(&self) -> String;
+#[allow(dead_code, unused_imports)]
+mod display_traits {
+    pub(crate) trait JetShow {
+        fn jet_show(&self) -> String;
+    }
+    pub(crate) trait JetDebug {
+        fn jet_debug(&self) -> String;
+    }
+    pub(crate) trait JetDisplay {
+        fn jet_display(&self) -> String;
+    }
 }
-trait JetDebug {
-    fn jet_debug(&self) -> String;
-}
-
-
-
-/// D-FAIL-CONV2=A: included error fragments render failure text through this seam.
-trait JetDisplay {
-    fn jet_display(&self) -> String;
-}
+#[allow(unused_imports)]
+pub(crate) use display_traits::{JetDebug, JetDisplay, JetShow};
 
 // The shared DB wire fragment receives the host's row carrier through this
 // name. The interpreter uses its native map until converting to CtValue.
 type JetMap<K, V> = BTreeMap<K, V>;
 
 mod wire {
+    #![allow(dead_code, unused_imports)]
     #[allow(unused_imports)]
     pub use jet_foundation::Outcome::*;
     // D-DBPOLICY1=A: the one closed row-policy language, included beside the
@@ -625,7 +630,7 @@ pub(crate) mod process_prelude {
 
     pub(crate) use jet_std::{
         Duration, IOError, IOContext, IOOperation, ProcessChild, ProcessReader, ProcessResult,
-        ProcessSpec, ProcessStdin, ProcessStreamMode, TerminalMode, TerminalPolicy,
+        ProcessSpec, ProcessStreamMode, TerminalMode, TerminalPolicy,
         TerminalSession, TerminalSize,
     };
 

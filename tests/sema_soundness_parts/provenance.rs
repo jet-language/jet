@@ -1,3 +1,5 @@
+use common::strip_vetted_prelude_modules;
+
 #[test]
 fn valid_corpus_reaches_rustc() {
     // FEATURE_CLAIM: claim.native-language / valid-native-execution

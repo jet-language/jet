@@ -3,6 +3,7 @@
 use super::Concurrency;
 
 mod solver_kernel {
+    #![allow(dead_code, unused_imports)]
     pub(crate) mod jet_std {
         pub(crate) struct Solver {
             pub(crate) seed: i64,
@@ -59,7 +60,7 @@ host_fns! {
     register: register_solver_symbols;
     declare: declare_solver_host_fns(module) {
         use cranelift_codegen::ir::{types, AbiParam, Signature};
-        use cranelift_module::{Linkage, Module};
+        use cranelift_module::Module;
         let cc = module.target_config().default_call_conv;
         let mut unary = Signature::new(cc);
         unary.params.push(AbiParam::new(types::I64));

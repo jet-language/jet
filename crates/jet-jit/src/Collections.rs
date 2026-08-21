@@ -5,12 +5,14 @@ use crate::runtime_host::{jit_callable_parts, JitCallableSlot};
 use std::collections::{BTreeSet, BinaryHeap, HashMap, HashSet, VecDeque};
 
 mod set_semantics {
+    #![allow(dead_code, unused_imports)]
     #[allow(unused_imports)]
     pub use jet_foundation::Outcome::*;
     include!("../../jet-codegen/src/Prelude/Core/SetAlgebra.rs");
 }
 
 mod range_semantics {
+    #![allow(dead_code, unused_imports)]
     use jet_foundation::StructuralDebug::jet_debug_range;
     #[allow(unused_imports)]
     pub use jet_foundation::Outcome::*;
@@ -18,12 +20,14 @@ mod range_semantics {
 }
 
 pub(crate) mod byte_buffer_semantics {
+    #![allow(dead_code, unused_imports)]
     #[allow(unused_imports)]
     pub use jet_foundation::Outcome::*;
     include!("../../jet-codegen/src/Prelude/Core/Bytes.rs");
 }
 
 mod disjoint_semantics {
+    #![allow(dead_code, unused_imports)]
     #[allow(unused_imports)]
     pub use jet_foundation::Outcome::*;
     include!("../../jet-codegen/src/Prelude/Core/Disjoint.rs");
@@ -44,6 +48,7 @@ mod disjoint_semantics {
 }
 
 mod authority_semantics {
+    #![allow(dead_code, unused_imports)]
     include!("../../jet-codegen/src/Prelude/Core/Authority.rs");
 }
 
@@ -5247,7 +5252,7 @@ host_fns! {
     register: register_collections_symbols;
     declare: declare_collections_host_fns(module) {
         use cranelift_codegen::ir::{types, AbiParam, Signature};
-        use cranelift_module::{Linkage, Module};
+        use cranelift_module::Module;
         let cc = module.target_config().default_call_conv;
         let mut sig_new = Signature::new(cc);
         sig_new.returns.push(AbiParam::new(types::I64));

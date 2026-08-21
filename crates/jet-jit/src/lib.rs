@@ -39,6 +39,7 @@ fn with_program_allocator<R>(
     .0
 }
 pub mod Job {
+    #![allow(dead_code, unused_imports)]
     include!("../../jet-codegen/src/Prelude/Job.rs");
 }
 
@@ -156,7 +157,6 @@ macro_rules! host_fns {
         }
     };
 }
-pub(crate) use host_fns;
 
 /// #1633 criterion #3 backstop: `JITModule::new`'s eager symbol resolution
 /// (cranelift-jit 0.112.3, `backend.rs` `declare_function` for
@@ -233,6 +233,7 @@ mod Sketch;
 mod Solver;
 mod Text;
 mod testing_shared {
+    #![allow(dead_code, unused_imports)]
     #[allow(unused_imports)]
     pub use jet_foundation::Outcome::*;
     include!("../../jet-codegen/src/Prelude/CoreLib/Top/TestingShared.rs");

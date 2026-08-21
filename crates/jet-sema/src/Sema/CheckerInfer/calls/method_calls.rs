@@ -1036,7 +1036,7 @@ impl<'a> Checker<'a> {
                                 .collect();
                             let mut enum_args: Vec<EnumLitArg> =
                                 saved.into_iter().map(EnumLitArg::Positional).collect();
-                            let ty = self.check_enum_lit("DataEvent", method, &mut enum_args, span);
+                            let ty = self.check_enum_lit("DataEvent", method, &mut enum_args, span, Some(span));
                             for (arg, enum_arg) in args.iter_mut().zip(enum_args) {
                                 if let EnumLitArg::Positional(expr) = enum_arg { arg.expr = expr; }
                             }
@@ -1389,7 +1389,7 @@ impl<'a> Checker<'a> {
                             .collect();
                         let mut enum_args: Vec<EnumLitArg> =
                             saved.into_iter().map(EnumLitArg::Positional).collect();
-                        let ty = self.check_enum_lit(type_name, method, &mut enum_args, span);
+                        let ty = self.check_enum_lit(type_name, method, &mut enum_args, span, Some(span));
                         for (a, ea) in args.iter_mut().zip(enum_args) {
                             if let EnumLitArg::Positional(e) = ea {
                                 a.expr = e;

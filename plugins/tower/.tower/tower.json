@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 2131,
-    "rev": 40500,
+    "rev": 40517,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -14196,6 +14196,16 @@
         {
           "at": "2026-08-21",
           "by": "fable-e3-burndown",
+          "text": "Two criteria remain open with precise gaps. c3: services_methods.rs:49-128,159-289 validates arity, labels, argument types, endpoint types, names, capacity and the mutating receiver, but no service-specific effect, cycle or lifetime validation exists anywhere under jet-sema, and D-SERVICE1=D names all three. c5: the typed send and durable fronts are real and bounded-Full plus durable idempotency are proven, but `send` takes no deadline argument and there is no observable post-send Ambiguous route, so D-SERVICE-DELIVERY1=D is only partly honoured. Also corrected: docs/spec/syntax-decisions.md:5870 claimed D-SERVICE1 still had no typed builder, contradicting the reaffirmation at :7637-7640 and the shipped surface."
+        },
+        {
+          "at": "2026-08-21",
+          "by": "fable-e3-burndown",
+          "text": "Substrate landed (44951b249). Typed method allowlist at Codegen/TIR/lower/method_calls.rs:176-215 covers worker, set_restart, set_delivery, start, stop, send, send_durable, receive, mailbox_depth, restarts, fail, drain, dead-letter, event, state, snapshot, events, workflow, directory, handoff, rollback, upgrade, chaos, observe, show, plus endpoint send/receive/show. Sema mirrors it at CheckerCoreLib/services_methods.rs:67-319; codegen routes through the Prelude at emit/core_calls.rs:1527-1530; public registry at module_items.rs:485-503. service_tree, service_runtime and service_authority all check, and their stdout matches goldens on default AND AOT."
+        },
+        {
+          "at": "2026-08-21",
+          "by": "fable-e3-burndown",
           "text": "Correction: this card is NOT owner-gated. A prior lane stopped believing the typed endpoint and mailbox surface needed new user-typeable syntax and therefore an I7 ruling. D-SERVICE1=D (syntax-decisions.md:5649-5656) already ratifies typed builders that promote ordinary functions into named workers and groups, with sema validating topology, endpoint types, effects, cycles and lifetimes. Adding typed methods to a Core value is ordinary API work; I7 gates keywords and sigils in Syntax.rs, not methods on a type. Delivery semantics are likewise already ruled by D-SERVICE-DELIVERY1=D. Unblocking and dispatching."
         },
         {
@@ -14379,25 +14389,25 @@
         }
       ],
       "created": "2026-07-09T23:22:09.769Z",
-      "updated": "2026-08-21T01:56:04.175Z",
+      "updated": "2026-08-21T06:42:33.245Z",
       "criteria": [
         {
           "n": 1,
           "text": "Every behavior named by “Service runtime: topology, supervision, endpoints, and mailboxes”, its body, and ratified decisions works through the production path; no demo, label, stub, or sibling claim substitutes.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-01T18:13:51.033Z"
+          "evidence": "Typed core.service surface at CheckerCoreLib/module_items.rs:485-503 with fixed_sigs.rs:1222-1250 and core_types.rs:264-267",
+          "at": "2026-08-21T06:42:28.201Z"
         },
         {
           "n": 2,
           "text": "Topology, supervision, delivery, state, histories, identity, discovery, rollout, observability, and receipts preserve the card's declared meaning under concurrency and restart.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-01T18:13:51.033Z"
+          "evidence": "services_methods.rs:83-132 checks handler, name and capacity; Prelude/CoreLib/Top/Services.rs:703-772 builds the bounded worker mailbox and endpoint; examples/features/tooling/service_tree.jet:4-12 promotes an ordinary function",
+          "at": "2026-08-21T06:42:29.257Z"
         },
         {
           "n": 3,
@@ -14411,11 +14421,11 @@
         {
           "n": 4,
           "text": "Targeted success and failure checks drive the production runtime, including restart or partition where relevant, and prove default `jet run` plus AOT parity; interpreter ambient uses the same Prelude symbol when reached.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-01T18:13:51.033Z"
+          "evidence": "Prelude/CoreLib/Top/Services.rs:27-36 defaults to OneForOne 5/60000, :833-887 builds supervisor-owned child groups, :1100-1126 applies the bounded restart",
+          "at": "2026-08-21T06:42:29.723Z"
         },
         {
           "n": 5,
@@ -14429,38 +14439,38 @@
         {
           "n": 6,
           "text": "Named/passed spawn scopes in this slice use Group; no new code targets TaskGroup once the concurrency slate group rename has landed (D-CONC-GROUP1).",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-06T21:31:51.752Z"
+          "evidence": "services_methods.rs:217-247 with Prelude Services.rs:2148-2245,2738+; service_runtime.jet:10-22 exercises the state adapter and event append/count",
+          "at": "2026-08-21T06:42:30.193Z"
         },
         {
           "n": 7,
           "text": "Supervisor restart and endpoint/mailbox diagnostics read TaskOutcome/TaskStatus, never trace()/exception() strings (D-CONC-OUTCOME1).",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-06T21:31:52.135Z"
+          "evidence": "services_methods.rs:249-268 with the TIR route at lower/method_calls.rs:201-203 and Prelude Services.rs:3220-3452; service_runtime.jet:24-26 runs workflow start, step and history",
+          "at": "2026-08-21T06:42:31.183Z"
         },
         {
           "n": 8,
           "text": "No task handle held by a supervisor or worker is dropped unjoined and undetached (D-CONC-JOIN1).",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-06T21:31:52.486Z"
+          "evidence": "services_methods.rs:269-289 with TIR routes :204-210; Prelude directory :3455-3598, handoff and upgrade :3915-4170, chaos and observe :4272-4305",
+          "at": "2026-08-21T06:42:31.987Z"
         },
         {
           "n": 9,
           "text": "Endpoint/mailbox crossing violations report through the one crossing-safety error family, not a slice-local checker (D-CONC-CROSS1).",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-06T21:31:52.826Z"
+          "evidence": "Default and AOT stdout match all three goldens exactly for service_tree, service_runtime and service_authority; shared boundary at TIR/emit/core_calls.rs:1527-1530 and comptime includes the same Prelude via ServicesLite.rs:1-35",
+          "at": "2026-08-21T06:42:32.743Z"
         }
       ],
       "needsAcceptance": false,
@@ -57571,12 +57581,15 @@
       "phase": "ready",
       "priority": "P1",
       "plan": "## Reopen finding\n\nThe closure reused two golden examples over an in-memory service catalog; that does not prove the named group/channel runtime, durable state, cluster, migration, or chaos behavior.\n\n## Outcome\n\nComplete **Service runtime: deterministic workflows and versioned histories** to the intent of the title, body, and current ratified law. Apply D-SERVICE-WORKFLOW1=D (effect-checked deterministic workflows, versioned bounded histories, w.now/w.random/w.activity/w.sleep/w.all as the recorded-equivalent wait points, version markers gating branch changes, w.continue_as for history truncation) on top of the concurrency substrate ratified 2026-08-06: D-CONC-STREAM1 (one lifecycle law for streams and tasks — a workflow wait point is a task wait point; drop-close cancels; the producer unwinds at its next wait point running its cleanups, exactly as any cancelled task), D-CONC-UNIT1 (task/activity lifecycle is a typestate row), D-CONC-OUTCOME1 (activity retry and workflow-run outcome are the typed TaskOutcome/TaskStatus enums, not strings), D-CONC-CHAN1 (if a workflow or activity body needs a raw channel, it is the builtin channel<T>(), loop v, rx to drain, and arm-table select — never the deleted builder chain). Do not invent new syntax or policy beyond these; raise a ballot for any new owner choice.\n\n## Ratified vocabulary this card must use\n\n- Workflow determinism checking treats w.sleep/w.activity/w.all as task wait points under the one D-CONC-STREAM1 cancellation law, not a separate ad hoc generator-shutdown path.\n- Activity retry/backoff decisions and workflow-run results read TaskOutcome/TaskStatus (D-CONC-OUTCOME1); no string status codes.\n- Any channel surface reachable from workflow or activity code is the builtin channel<T>(), loop v, rx and arm-table select (D-CONC-CHAN1); no fluent select builder.\n- Named/passed spawn scopes for activity fan-out are Group, not TaskGroup (D-CONC-GROUP1).\n\n## Work\n\n1. Trace the public entry point through the production implementation and map every named behavior (deterministic replay checking through the ratified effect tree, activity idempotency key and retry policy, history identity as workflow id plus run id, version markers, w.continue_as) to source and proof.\n2. Implement the named service-runtime slice through real groups, channels, typed endpoints, durable adapters, and lifecycle paths. An in-memory catalog or display-only simulator does not satisfy the card.\n3. Backpressure, cancellation, duplicate delivery, crash/restart, corrupt state, partition, authentication failure, migration failure, rollback, and drain preserve safety and bounded recovery for the named slice.\n4. Remove or correct any false claim, fallback, duplicate mechanism, stale criterion, or gap parking owned by this slice, including any lingering \"taskgroup\" or string-outcome wording in this slice's own docs and examples.\n5. Update affected docs, examples, diagnostics, goldens, and audit output. The test runtime must replay histories under a deterministic clock, per D-SERVICE-WORKFLOW1.\n\n## Not building\n\nNo actor syntax, no second scheduler, no ambient time/randomness/I/O inside a workflow body — deterministic-replay diagnostics reject them and name the recorded equivalent. No separate shutdown/cancellation wording for workflow wait points outside the one task-cancel law. No string-keyed activity outcome checks. This card depends on #444 (topology, supervision, endpoints, mailboxes) landing first — the service tree it builds workflows on — and on the concurrency slate's Phase A/B (tracked on card #1505); do not write new code against pre-rethink TaskGroup/channel-builder APIs once that surface ships.\n\n## Proof\n\nTargeted success and failure checks drive the production runtime, including restart or partition where relevant, and prove default `jet run` plus AOT parity; interpreter ambient uses the same Prelude symbol when reached. Use focused checks for this card. Full-suite proof runs once at the epoch closeout.\n\n## Scope\n\nKeep the card bounded to its named slice and direct production seams. A reviewer will verify the completed card through Tower.",
-      "blockedBy": [
-        "c0todzv8"
-      ],
+      "blockedBy": [],
       "workOrder": 440,
       "assignee": null,
       "log": [
+        {
+          "at": "2026-08-21",
+          "by": "fable-e3-burndown",
+          "text": "UNBLOCKED. The workflow typed front exists: services_methods.rs:249-268 with Prelude Services.rs:3220-3452, exercised at service_runtime.jet:24-26. Still private: workflow activities, the effect surface, and the timer scheduler."
+        },
         {
           "at": "2026-08-19",
           "by": "fable",
@@ -57721,8 +57734,8 @@
       ],
       "needsAcceptance": false,
       "created": "2026-07-26T10:49:20.714Z",
-      "updated": "2026-08-19T13:32:02.908Z",
-      "updatedBy": "fable",
+      "updated": "2026-08-21T06:37:40.903Z",
+      "updatedBy": "fable-e3-burndown",
       "tags": [
         "service-runtime"
       ],
@@ -57740,13 +57753,15 @@
       "phase": "ready",
       "priority": "P1",
       "plan": "## Reopen finding\n\nThe closure reused two golden examples over an in-memory service catalog; that does not prove the named group/channel runtime, durable state, cluster, migration, or chaos behavior.\n\n## Outcome\n\nComplete **Service runtime: identity, discovery, and authenticated clusters** to the intent of the title, body, and current ratified law. Apply D-SERVICE-IDENTITY1=D (typed endpoint values, signed generation-versioned directory snapshots projected from source trust policy, zero-config loopback capabilities for local dev, generation and max-staleness on every resolution, typed partition/revocation/expired-directory/stale-generation results, dual-generation key rotation, audited service.connect escape) rewritten onto the authority substrate ratified 2026-08-06 on card #1500: D-AUTHORITY-NAME1 (the rights-set value every endpoint and cluster credential carries is the one Prelude type Authority, not an ad hoc \"capability\" struct — D-SERVICE-IDENTITY1's own text says \"capability endpoints\"; that word is now retired), D-AUTHORITY-WORD1 (no user-facing surface — types, diagnostics, docs, CLI text — uses the word \"capability\"; say \"typed endpoint\" or \"Authority\"), D-AUTHORITY-SCOPE1 (#Caps is the one scope/handle marker; #Grant is deleted, so any cluster-trust scoping surface this card adds uses #Caps(name: Rights) form, never a new marker), D-AUTHORITY-MODEL1 (identity/discovery trust checks are readers of the one authority substrate — the rights tree, the holds-set relation, the tighten rule, the one gate ledger — not a tenth private copy), D-AUTHORITY-MANIFEST1 (per-dependency and provider trust grants for cluster peers live in the package's one `authority:` block), D-AUTHORITY-GATE1 (every granted trust exception for cluster identity records to the one ledger `jet inspect authority` reads). Do not invent new syntax or policy beyond these; raise a ballot for any new owner choice.\n\n## Ratified vocabulary this card must use\n\n- The value a caller holds to reach an endpoint is Authority (D-AUTHORITY-NAME1), narrowed only, never widened, never used for dispatch.\n- No type, diagnostic, doc, or CLI string in this slice says \"capability\" (D-AUTHORITY-WORD1); say \"typed endpoint\" or name the Authority value.\n- Trust-root/session scoping for cluster auth is spelled with #Caps, never a new marker (D-AUTHORITY-SCOPE1).\n- Directory signing, generation, staleness, revocation, and dual-generation rotation checks are readers of the one authority substrate (D-AUTHORITY-MODEL1); no parallel rights table.\n- Cluster peer trust grants and their audit trail go through the one `authority:` manifest block and the one gate ledger (D-AUTHORITY-MANIFEST1, D-AUTHORITY-GATE1).\n\n## Work\n\n1. Trace the public entry point through the production implementation and map every named behavior (typed endpoint capability values as Authority, signed generation-versioned directory snapshots, loopback injection for dev, staleness/partition/revocation results, dual-generation rotation, audited service.connect) to source and proof.\n2. Implement the named service-runtime slice through real groups, channels, typed endpoints, durable adapters, Authority-typed identity, and lifecycle paths. An in-memory catalog or display-only simulator does not satisfy the card.\n3. Backpressure, cancellation, duplicate delivery, crash/restart, corrupt state, partition, authentication failure, migration failure, rollback, and drain preserve safety and bounded recovery for the named slice.\n4. Remove or correct any false claim, fallback, duplicate mechanism, stale criterion, or gap parking owned by this slice, including any \"capability\" wording and any lingering \"taskgroup\" wording in this slice's own docs and examples.\n5. Update affected docs, examples, diagnostics, goldens, and audit output.\n\n## Not building\n\nNo actor syntax, no second scheduler, no ambient authority, no ad hoc \"capability\" type or second trust/grant marker. This card is blocked in practice on the Authority Prelude type and #Caps/#Grant merge landing (tracked on card #1500, currently in planning) — the type this card must use does not exist in the codebase yet (`crates/jet-codegen/src/Prelude` has no `Authority` type; `crates/jetpack/src/Provider/fetch.rs::Authority` and `crates/jetpack/src/ProviderGraph.rs::AuthorityGraph` are unrelated, narrower types, not the ratified Prelude type). Do not build a stand-in capability struct to work around the gap; wait for #1500's implementation or raise the sequencing conflict.\n\n## Proof\n\nTargeted success and failure checks drive the production runtime, including restart or partition where relevant, and prove default `jet run` plus AOT parity; interpreter ambient uses the same Prelude symbol when reached. Use focused checks for this card. Full-suite proof runs once at the epoch closeout.\n\n## Scope\n\nKeep the card bounded to its named slice and direct production seams. A reviewer will verify the completed card through Tower.",
-      "blockedBy": [
-        "c0rcv8n1",
-        "c0pp8jfr"
-      ],
+      "blockedBy": [],
       "workOrder": 1030,
       "assignee": null,
       "log": [
+        {
+          "at": "2026-08-21",
+          "by": "fable-e3-burndown",
+          "text": "UNBLOCKED. Directory register/resolve and generation are typed: services_methods.rs:269-285 with Prelude Services.rs:3455-3598. Still private: authority issue/validate/signature, partition, revocation and auth."
+        },
         {
           "at": "2026-08-19",
           "by": "fable",
@@ -57890,8 +57905,8 @@
       ],
       "needsAcceptance": false,
       "created": "2026-07-26T10:49:21.219Z",
-      "updated": "2026-08-19T13:32:03.579Z",
-      "updatedBy": "fable",
+      "updated": "2026-08-21T06:37:41.584Z",
+      "updatedBy": "fable-e3-burndown",
       "tags": [
         "service-runtime"
       ],
@@ -57909,12 +57924,15 @@
       "phase": "ready",
       "priority": "P1",
       "plan": "## Reopen finding\n\nThe closure reused two golden examples over an in-memory service catalog; that does not prove the named group/channel runtime, durable state, cluster, migration, or chaos behavior.\n\n## Outcome\n\nComplete **Service runtime: rolling handoff, migration, rollback, and drain** to the intent of the title, body, and current ratified law. Apply D-SERVICE-UPGRADE1=D (shard-scoped atomic handoff, classified `.Reversible`/`.DualWrite`/`.ForwardOnly` migrate functions, typed `on_exceed` drain-overrun policy — `.PinShard` or `.Cancel`, never a silent kill — partition reconciliation on rejoin through the ratified fleet rollout object D-JOS-FLEETROLLOUT1) on top of the concurrency substrate ratified 2026-08-06: D-CONC-GROUP1 (shard/rollout scopes are Group, not TaskGroup), D-CONC-JOIN1 (every in-flight task handle a drain touches is joined, awaited, or explicitly detached — the `.PinShard`/`.Cancel` choice is the explicit decision D-CONC-JOIN1 already requires; a dropped handle is a compile error, not a runtime concern), D-CONC-STREAM1 (draining a live stream during handoff follows the one task-cancel law: drop-close cancels, the producer unwinds at its next wait point). Do not invent new syntax or policy beyond these; raise a ballot for any new owner choice.\n\n## Ratified vocabulary this card must use\n\n- Shard-scoped rollout and drain scopes are Group (D-CONC-GROUP1), passed as a borrow, never stored.\n- Drain-overrun handling is the typed `.PinShard`/`.Cancel` policy from D-SERVICE-UPGRADE1, implemented so every touched task handle is joined or detached — never silently dropped (D-CONC-JOIN1).\n- A live stream cut short by handoff or rollback is cancelled through the one D-CONC-STREAM1 law, not a bespoke abort path.\n\n## Work\n\n1. Trace the public entry point through the production implementation and map every named behavior (start-validate-drain-switch per shard, migration classification and its rollback proof requirement, typed on_exceed policy, partitioned-shard reconciliation) to source and proof.\n2. Implement the named service-runtime slice through real groups, channels, typed endpoints, durable adapters, and lifecycle paths. An in-memory catalog or display-only simulator does not satisfy the card.\n3. Backpressure, cancellation, duplicate delivery, crash/restart, corrupt state, partition, authentication failure, migration failure, rollback, and drain preserve safety and bounded recovery for the named slice.\n4. Remove or correct any false claim, fallback, duplicate mechanism, stale criterion, or gap parking owned by this slice, including any lingering \"taskgroup\" wording or silent-drop drain paths in this slice's own docs and examples.\n5. Update affected docs, examples, diagnostics, goldens, and audit output.\n\n## Not building\n\nNo actor syntax, no second scheduler, no rollback without reversible/dual-write/snapshot proof, no silent kill on drain overrun. No parallel handle-tracking mechanism outside the D-CONC-JOIN1 join/detach obligation.\n\n## Proof\n\nTargeted success and failure checks drive the production runtime, including restart or partition where relevant, and prove default `jet run` plus AOT parity; interpreter ambient uses the same Prelude symbol when reached. Use focused checks for this card. Full-suite proof runs once at the epoch closeout.\n\n## Scope\n\nKeep the card bounded to its named slice and direct production seams. A reviewer will verify the completed card through Tower.",
-      "blockedBy": [
-        "c0zpske1"
-      ],
+      "blockedBy": [],
       "workOrder": 250,
       "assignee": null,
       "log": [
+        {
+          "at": "2026-08-21",
+          "by": "fable-e3-burndown",
+          "text": "UNBLOCKED. Handoff, rollback, upgrade and drain are typed: services_methods.rs:203-215,282-288 with Prelude Services.rs:3600+,3915-4170. Still private: deployment and shard rollout orchestration."
+        },
         {
           "at": "2026-08-19",
           "by": "fable",
@@ -58044,8 +58062,8 @@
       ],
       "needsAcceptance": false,
       "created": "2026-07-26T10:49:21.723Z",
-      "updated": "2026-08-19T13:32:04.183Z",
-      "updatedBy": "fable",
+      "updated": "2026-08-21T06:37:42.284Z",
+      "updatedBy": "fable-e3-burndown",
       "tags": [
         "service-runtime"
       ],
@@ -58063,12 +58081,15 @@
       "phase": "ready",
       "priority": "P1",
       "plan": "## Reopen finding\n\nThe closure reused two golden examples over an in-memory service catalog; that does not prove the named group/channel runtime, durable state, cluster, migration, or chaos behavior.\n\n## Outcome\n\nComplete **Service runtime: observability, chaos, dogfood, and closeout** to the intent of the title, body, and current ratified law. Apply D-SERVICE1=D and its five siblings' observability/chaos obligations on top of the concurrency substrate ratified 2026-08-06: D-CONC-OUTCOME1 (every dashboard, receipt, and dogfood assertion reads the typed TaskOutcome/TaskStatus enums; `trace()`/`exception()` are deleted, not aliased, so no observability code may reintroduce them), D-CONC-CROSS1 (chaos fault injection at worker/partition boundaries reports through the one crossing-safety error family — \"what cannot cross, which boundary, the fix\" — not five separate error voices), D-CONC-JOIN1 (dogfood examples and chaos harnesses must not drop a task handle silently; every spawned handle is joined, used, or detached). This card is also the closeout gate: it must confirm the whole e3-ul4-services milestone (cards #444, #1148, #1149, #1150, #1151, #1152, and this card) carries zero stale \"taskgroup\", \"capability\", or string-outcome mentions in its own docs, examples, and goldens. Do not invent new syntax or policy beyond these; raise a ballot for any new owner choice.\n\n## Ratified vocabulary this card must use\n\n- Observability surfaces (dashboards, receipts, logs) and dogfood assertions read TaskOutcome/TaskStatus (D-CONC-OUTCOME1), never string outcome/exception checks.\n- Chaos fault injection and its diagnostics use the one crossing-safety error family (D-CONC-CROSS1) at every worker/partition boundary.\n- Dogfood examples join, use, or detach every task handle they spawn (D-CONC-JOIN1); none are dropped silently.\n\n## Work\n\n1. Trace the public entry point through the production implementation and map every named behavior (structured observability across the tree, chaos proof for restart/partition/migration/rollback, a real dogfood application, milestone closeout audit) to source and proof.\n2. Implement the named service-runtime slice through real groups, channels, typed endpoints, durable adapters, and lifecycle paths. An in-memory catalog or display-only simulator does not satisfy the card.\n3. Backpressure, cancellation, duplicate delivery, crash/restart, corrupt state, partition, authentication failure, migration failure, rollback, and drain preserve safety and bounded recovery for the named slice.\n4. Remove or correct any false claim, fallback, duplicate mechanism, stale criterion, or gap parking owned by this slice, including any lingering \"taskgroup\", \"capability\", or string-outcome wording anywhere in the e3-ul4-services milestone's docs and examples.\n5. Update affected docs, examples, diagnostics, goldens, and audit output. Closeout confirms sibling cards #444/#1150/#1151/#1152 closed clean against the same ratified vocabulary before this card closes.\n\n## Not building\n\nNo actor syntax, no second scheduler, no string-keyed outcome/exception reporting, no bespoke chaos error taxonomy outside the one crossing-safety family.\n\n## Proof\n\nTargeted success and failure checks drive the production runtime, including restart or partition where relevant, and prove default `jet run` plus AOT parity; interpreter ambient uses the same Prelude symbol when reached. Use focused checks for this card. Full-suite proof runs once at the epoch closeout.\n\n## Scope\n\nKeep the card bounded to its named slice and direct production seams. A reviewer will verify the completed card through Tower.",
-      "blockedBy": [
-        "c082569u"
-      ],
+      "blockedBy": [],
       "workOrder": 260,
       "assignee": null,
       "log": [
+        {
+          "at": "2026-08-21",
+          "by": "fable-e3-burndown",
+          "text": "UNBLOCKED. Chaos and observe are typed: services_methods.rs:282-289 with Prelude Services.rs:4272-4305, exercised at service_runtime.jet:32-36. Still private: telemetry sinks and dogfood integration."
+        },
         {
           "at": "2026-08-19",
           "by": "fable",
@@ -58212,8 +58233,8 @@
       ],
       "needsAcceptance": false,
       "created": "2026-07-26T10:49:22.248Z",
-      "updated": "2026-08-19T13:32:04.786Z",
-      "updatedBy": "fable",
+      "updated": "2026-08-21T06:37:42.991Z",
+      "updatedBy": "fable-e3-burndown",
       "tags": [
         "service-runtime"
       ],
@@ -186710,6 +186731,125 @@
   ],
   "events": [
     {
+      "at": "2026-08-21T06:42:33.245Z",
+      "by": "fable-e3-burndown",
+      "action": "card.update",
+      "ref": "c0todzv8",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-08-21T06:42:32.743Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0todzv8",
+      "note": "#9"
+    },
+    {
+      "at": "2026-08-21T06:42:31.988Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0todzv8",
+      "note": "#8"
+    },
+    {
+      "at": "2026-08-21T06:42:31.184Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0todzv8",
+      "note": "#7"
+    },
+    {
+      "at": "2026-08-21T06:42:30.194Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0todzv8",
+      "note": "#6"
+    },
+    {
+      "at": "2026-08-21T06:42:29.724Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0todzv8",
+      "note": "#4"
+    },
+    {
+      "at": "2026-08-21T06:42:29.258Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0todzv8",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-21T06:42:28.201Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0todzv8",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-21T06:37:42.991Z",
+      "by": "fable-e3-burndown",
+      "action": "card.update",
+      "ref": "c0gqalzc",
+      "note": "blockedBy"
+    },
+    {
+      "at": "2026-08-21T06:37:42.284Z",
+      "by": "fable-e3-burndown",
+      "action": "card.update",
+      "ref": "c082569u",
+      "note": "blockedBy"
+    },
+    {
+      "at": "2026-08-21T06:37:41.584Z",
+      "by": "fable-e3-burndown",
+      "action": "card.update",
+      "ref": "c0zpske1",
+      "note": "blockedBy"
+    },
+    {
+      "at": "2026-08-21T06:37:40.903Z",
+      "by": "fable-e3-burndown",
+      "action": "card.update",
+      "ref": "c0rcv8n1",
+      "note": "blockedBy"
+    },
+    {
+      "at": "2026-08-21T06:37:40.204Z",
+      "by": "fable-e3-burndown",
+      "action": "card.update",
+      "ref": "c0gqalzc",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-08-21T06:37:39.709Z",
+      "by": "fable-e3-burndown",
+      "action": "card.update",
+      "ref": "c082569u",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-08-21T06:37:39.169Z",
+      "by": "fable-e3-burndown",
+      "action": "card.update",
+      "ref": "c0zpske1",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-08-21T06:37:38.656Z",
+      "by": "fable-e3-burndown",
+      "action": "card.update",
+      "ref": "c0rcv8n1",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-08-21T06:37:38.132Z",
+      "by": "fable-e3-burndown",
+      "action": "card.update",
+      "ref": "c0todzv8",
+      "note": "logEntry"
+    },
+    {
       "at": "2026-08-21T06:30:14.852Z",
       "by": "fable-e3-burndown",
       "action": "card.update",
@@ -190088,125 +190228,6 @@
       "by": "fable-e3-burndown",
       "action": "card.criteria-meet",
       "ref": "c03pfb56",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-20T21:51:00.746Z",
-      "by": "fable-e3-burndown",
-      "action": "card.update",
-      "ref": "c0ksllx4",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-08-20T21:50:59.832Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0ksllx4",
-      "note": "#4"
-    },
-    {
-      "at": "2026-08-20T21:50:59.189Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0ksllx4",
-      "note": "#3"
-    },
-    {
-      "at": "2026-08-20T21:50:58.518Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0ksllx4",
-      "note": "#2"
-    },
-    {
-      "at": "2026-08-20T21:50:58.044Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0ksllx4",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-20T21:50:57.573Z",
-      "by": "fable-e3-burndown",
-      "action": "card.update",
-      "ref": "c0zx7020",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-08-20T21:50:56.895Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0zx7020",
-      "note": "#5"
-    },
-    {
-      "at": "2026-08-20T21:50:56.420Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0zx7020",
-      "note": "#4"
-    },
-    {
-      "at": "2026-08-20T21:50:55.954Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0zx7020",
-      "note": "#3"
-    },
-    {
-      "at": "2026-08-20T21:50:55.497Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0zx7020",
-      "note": "#2"
-    },
-    {
-      "at": "2026-08-20T21:50:55.012Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0zx7020",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-20T21:43:53.446Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0xsk2wa",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-20T21:43:52.769Z",
-      "by": "fable-e3-burndown",
-      "action": "card.update",
-      "ref": "c0hipgvn",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-08-20T21:43:52.081Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0hipgvn",
-      "note": "#4"
-    },
-    {
-      "at": "2026-08-20T21:43:51.558Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0hipgvn",
-      "note": "#3"
-    },
-    {
-      "at": "2026-08-20T21:43:51.087Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0hipgvn",
-      "note": "#2"
-    },
-    {
-      "at": "2026-08-20T21:43:50.617Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0hipgvn",
       "note": "#1"
     }
   ],

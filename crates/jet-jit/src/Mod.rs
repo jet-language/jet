@@ -1,7 +1,13 @@
 // D-LIB-CALLGRANT1=A: JIT uses the exact load/check/map Prelude source. This
 // module only translates heap-level handles into a resident table slot.
 const __JET_COMPILER_VERSION: &str = env!("CARGO_PKG_VERSION");
-include!("../../jet-codegen/src/Prelude/CoreLib/Top/Mod.rs");
+
+#[allow(dead_code, unused_imports)]
+mod prelude {
+    use super::__JET_COMPILER_VERSION;
+    include!("../../jet-codegen/src/Prelude/CoreLib/Top/Mod.rs");
+}
+use prelude::{jet_mod_load, jet_mod_on_tick, JetMod, JetModGrant};
 
 use std::cell::RefCell;
 

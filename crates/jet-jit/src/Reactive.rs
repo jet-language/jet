@@ -5,11 +5,10 @@
 
 use super::Concurrency;
 use cranelift_codegen::ir::{types, AbiParam, Signature};
-use cranelift_jit::{JITBuilder, JITModule};
-use cranelift_module::{FuncId, Linkage, Module};
 use std::sync::Arc;
 
 mod loadable_kernel {
+    #![allow(dead_code, unused_imports)]
     include!("../../jet-codegen/src/Prelude/Core/Loadable.rs");
 }
 

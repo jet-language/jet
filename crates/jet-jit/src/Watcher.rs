@@ -3,8 +3,6 @@
 
 use super::Concurrency;
 use cranelift_codegen::ir::{types, AbiParam, Signature};
-use cranelift_jit::{JITBuilder, JITModule};
-use cranelift_module::{FuncId, Linkage, Module};
 use std::cell::{Cell, RefCell};
 use std::collections::BTreeMap;
 use std::rc::Rc;

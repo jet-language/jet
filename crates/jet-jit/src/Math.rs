@@ -4,18 +4,18 @@
 
 use super::Concurrency;
 use cranelift_codegen::ir::{types, AbiParam, Signature};
-use cranelift_jit::{JITBuilder, JITModule};
-use cranelift_module::{FuncId, Linkage, Module};
 use std::cell::RefCell;
 use crate::Marshal::{clone_string, alloc_string};
 
 mod typed_text_semantics {
+    #![allow(dead_code, unused_imports)]
     #[allow(unused_imports)]
     pub use jet_foundation::Outcome::*;
     include!("../../jet-codegen/src/Prelude/TypedText.rs");
 }
 
 mod string_concat_semantics {
+    #![allow(dead_code, unused_imports)]
     include!("../../jet-codegen/src/Prelude/Core/StringConcat.rs");
 }
 

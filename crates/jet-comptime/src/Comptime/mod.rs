@@ -824,6 +824,7 @@ fn build_fact_expr(
         } if args.is_empty() => crate::AST::Expr::EnumLit {
             type_name: type_name.clone(),
             variant: variant.clone(),
+            variant_span: None,
             args: Vec::new(),
             leading_dot: false,
             span,

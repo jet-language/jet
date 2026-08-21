@@ -17,23 +17,28 @@ use super::{
 };
 
 pub(crate) mod duration_kernel {
+    #![allow(dead_code, unused_imports)]
     include!("../../../jet-codegen/src/Prelude/Core/Duration.rs");
 }
 
 mod measurement_kernel {
+    #![allow(dead_code, unused_imports)]
     include!("../../../jet-codegen/src/Prelude/Core/Measurement.rs");
 }
 
 pub(crate) mod contract_kernel {
+    #![allow(dead_code, unused_imports)]
     use jet_foundation::Outcome::{jet_render_runtime_stop, JetRuntimeDiagnostic};
     include!("../../../jet-codegen/src/Prelude/Core/Contracts.rs");
 }
 
 pub(crate) mod service_prelude {
+    #![allow(dead_code, unused_imports)]
     include!("../../../jet-codegen/src/Prelude/Service.rs");
 }
 
 mod inline_range_kernel {
+    #![allow(dead_code, unused_imports)]
     include!("../../../jet-codegen/src/Prelude/Core/InlineRange.rs");
 }
 

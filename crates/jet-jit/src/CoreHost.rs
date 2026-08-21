@@ -12,14 +12,17 @@ use crate::Marshal::{clone_string, clone_bytes, alloc_byte_list, result_ok, resu
 use std::sync::{mpsc, OnceLock};
 
 mod path_kernel {
+    #![allow(dead_code, unused_imports)]
     include!("../../jet-codegen/src/Prelude/Core/Path.rs");
 }
 
 mod fs_walk_kernel {
+    #![allow(dead_code, unused_imports)]
     include!("../../jet-codegen/src/Prelude/Core/FSWalk.rs");
 }
 
 mod keep_kernel {
+    #![allow(dead_code, unused_imports)]
     include!("../../jet-codegen/src/Prelude/Core/Keep.rs");
 }
 
@@ -92,6 +95,7 @@ mod os_rt {
     }
 
     mod prelude_impl {
+        #![allow(dead_code, unused_imports)]
         use super::{jet_std, jet_std_env_get, jet_std_process_exit};
 
         include!("../../jet-codegen/src/Prelude/CoreLib/Top/OsExtra.rs");
@@ -2003,7 +2007,7 @@ host_fns! {
     register: register_core_host_symbols;
     declare: declare_core_host_fns(module) {
         use cranelift_codegen::ir::{types, AbiParam, Signature};
-        use cranelift_module::{Linkage, Module};
+        use cranelift_module::Module;
         let cc = module.target_config().default_call_conv;
         let mut sig_str = Signature::new(cc);
         sig_str.returns.push(AbiParam::new(types::I64));

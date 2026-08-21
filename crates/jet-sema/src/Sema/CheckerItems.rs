@@ -2314,6 +2314,7 @@ impl<'a> Checker<'a> {
         variant: &str,
         args: &mut [EnumLitArg],
         span: Span,
+        variant_span: Option<Span>,
     ) -> Type {
         let contextual_ty = self.expected_type.clone().filter(|ty| {
             matches!(ty, Type::Apply { name, .. } if name == type_name)
@@ -2366,19 +2367,26 @@ impl<'a> Checker<'a> {
                 }
                 return ty;
             }
-            // No typed edit here: `EnumLit` retains the whole literal span, not
-            // the variant token. Replacing it would erase the type or payload.
-            let mut fix = "check the variant name".to_string();
-            if let Some(s) = suggest_field(variant, &variants.keys().cloned().collect::<Vec<_>>()) {
-                fix = format!("did you mean `{}`?", s);
-            }
-            self.diags.push(Diagnostic::error(
+            let suggestion =
+                suggest_field(variant, &variants.keys().cloned().collect::<Vec<_>>());
+            let fix = suggestion.as_ref().map_or_else(
+                || "check the variant name".to_string(),
+                |s| format!("did you mean `{s}`?"),
+            );
+            let mut diagnostic = Diagnostic::error(
                 "E0304",
                 format!("`{}` has no variant `{}`", display_type_name, variant),
                 "enum literals must name a variant on the type".to_string(),
                 fix,
                 Some(span),
-            ));
+            );
+            if let (Some(candidate), Some(variant_span)) = (suggestion, variant_span) {
+                diagnostic = diagnostic.with_edit(TextEdit {
+                    span: variant_span,
+                    new_text: candidate,
+                });
+            }
+            self.diags.push(diagnostic);
             for a in args.iter_mut() {
                 match a {
                     EnumLitArg::Positional(e) | EnumLitArg::Named { expr: e, .. } => {

@@ -4,6 +4,7 @@
 use crate::Marshal::{alloc_string, clone_string};
 
 mod fmt_rt {
+    #![allow(dead_code, unused_imports)]
     include!("../../jet-codegen/src/Prelude/Core/Fmt.rs");
 }
 
@@ -65,7 +66,7 @@ host_fns! {
     register: register_fmt_symbols;
     declare: declare_fmt_host_fns(module) {
         use cranelift_codegen::ir::{types, AbiParam, Signature};
-        use cranelift_module::{Linkage, Module};
+        use cranelift_module::Module;
         let cc = module.target_config().default_call_conv;
         let mut sig_i64 = Signature::new(cc);
         sig_i64.params.push(AbiParam::new(types::I64));

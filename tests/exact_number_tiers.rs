@@ -134,12 +134,12 @@ fn run() {
 
 #[test]
 fn exact_numbers_repl_matches_the_known_result() {
-    let (tokens, _) = jet::Lexer::lex("fn run() { fast :: Float{19.99} }");
-    eprintln!("parsed: {:?}", jet::Parser::parse(&tokens));
     let transcript = jet::REPL::run_transcript(
         &[
-            "fast :: Float{19.99}",
-            "fast",
+            "1 / 3",
+            "(1 / 3) * 3 == 1",
+            "0.1 + 0.2 == 0.3",
+            "Float{19.99}",
         ],
         None,
     );

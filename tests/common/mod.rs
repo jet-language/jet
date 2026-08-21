@@ -1109,6 +1109,7 @@ pub fn strip_vetted_prelude_modules(rust_code: &str) -> String {
                     State::BlockComment(mut nested) => {
                         if bytes[i] == b'/' && bytes.get(i + 1) == Some(&b'*') {
                             nested += 1;
+                            state = State::BlockComment(nested);
                             i += 2;
                         } else if bytes[i] == b'*' && bytes.get(i + 1) == Some(&b'/') {
                             nested -= 1;
@@ -1362,6 +1363,7 @@ pub fn strip_vetted_prelude_modules(rust_code: &str) -> String {
                 State::BlockComment(mut nested) => {
                     if bytes[i] == b'/' && bytes.get(i + 1) == Some(&b'*') {
                         nested += 1;
+                        state = State::BlockComment(nested);
                         i += 2;
                     } else if bytes[i] == b'*' && bytes.get(i + 1) == Some(&b'/') {
                         nested -= 1;
@@ -1648,6 +1650,20 @@ fn user() { unsafe { user_pointer() } }
 "##;
     let stripped = strip_vetted_prelude_modules(generated);
     assert!(!stripped.contains("ffi()"));
+    assert!(stripped.contains("unsafe { user_pointer() }"));
+}
+
+#[test]
+fn vetted_module_stripping_tracks_nested_block_comments() {
+    let generated = r#"
+mod jet_mem {
+    /* outer comment /* nested comment with } */ still outer */
+    const VALUE: i32 = 1;
+}
+unsafe { user_pointer() }
+"#;
+    let stripped = strip_vetted_prelude_modules(generated);
+    assert!(!stripped.contains("mod jet_mem"));
     assert!(stripped.contains("unsafe { user_pointer() }"));
 }
 

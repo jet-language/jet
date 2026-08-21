@@ -5,15 +5,15 @@
 pub use jet_foundation::Outcome::*;
 use super::Concurrency;
 use cranelift_codegen::ir::{types, AbiParam, Signature};
-use cranelift_jit::{JITBuilder, JITModule};
-use cranelift_module::{FuncId, Linkage, Module};
 use crate::Marshal::{alloc_string, clone_string, result_err_msg, result_ok};
 
 pub(crate) mod runtime {
+    #![allow(dead_code, unused_imports)]
     use crate::Reactive::{jet_app_ws_register, jet_app_ws_unregister};
     use crate::{JetDebug, JetDisplay, JetShow};
 
     pub mod jet_std {
+        #![allow(dead_code, unused_imports)]
         #[derive(Clone, Debug)]
         pub struct JetURL {
             pub scheme: String,
@@ -60,9 +60,6 @@ pub(crate) mod runtime {
         include!("../../jet-codegen/src/Prelude/CoreLib/JetStd/JSONCodec.rs");
     }
 
-    fn jet_deadline_remaining_ms() -> Option<i64> {
-        None
-    }
 
     #[allow(unused_imports)]
     pub use jet_foundation::Outcome::*;

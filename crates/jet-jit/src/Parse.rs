@@ -5,8 +5,6 @@
 
 use super::Concurrency;
 use cranelift_codegen::ir::{types, AbiParam, Signature};
-use cranelift_jit::{JITBuilder, JITModule};
-use cranelift_module::{FuncId, Linkage, Module};
 use jet_foundation::AST::{BinMatchPart, StrMatchPart, Type};
 use jet_foundation::MatchScan::{
     bin_match_consumed, bin_match_scan, str_match_consumed, str_match_scan, BinBind,

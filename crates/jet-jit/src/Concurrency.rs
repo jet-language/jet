@@ -1422,7 +1422,7 @@ host_fns! {
     register: register_concurrency_symbols;
     declare: declare_concurrency_host_fns(module) {
         use cranelift_codegen::ir::{types, AbiParam, Signature};
-        use cranelift_module::{Linkage, Module};
+        use cranelift_module::Module;
         let cc = module.target_config().default_call_conv;
         let mut sig_channel_new = Signature::new(cc);
         sig_channel_new.returns.push(AbiParam::new(types::I64));

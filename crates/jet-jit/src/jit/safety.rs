@@ -6411,7 +6411,7 @@ fn resident_safe_handle_op(op: &THandleOp, recv: &TExpr, args: &[TExpr]) -> bool
                 )
         }
         THandleOp::PreciseMethod { type_name, method } => {
-            ((type_name == "Decimal"
+            (type_name == "Decimal"
                     && recv.ty == Type::Named("Decimal".into())
                     && matches!(
                         (method.as_str(), args.len()),
@@ -6430,7 +6430,7 @@ fn resident_safe_handle_op(op: &THandleOp, recv: &TExpr, args: &[TExpr]) -> bool
                                     | "is_zero",
                                 0
                             )
-                    )))
+                    ))
         }
         THandleOp::CivilTimeMethod { kind, method } => {
             // Civil date/time/zoned methods are host-backed; arity is checked in lower.

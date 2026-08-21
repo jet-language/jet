@@ -1024,7 +1024,6 @@ impl<'a> EvalCtx<'a> {
             }),
             TStmt::TupleDestructure { init, binds, .. } => {
                 let v = self.eval_expr(init, scope)?;
-                eprintln!("CARD1560 tuple binds={binds:?} value={v:?} before={:?}", scope.keys().collect::<Vec<_>>());
                 match v {
                     CtValue::List(items) => {
                         for (i, (local, _)) in binds.iter().enumerate() {

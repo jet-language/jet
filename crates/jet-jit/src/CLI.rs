@@ -153,6 +153,7 @@ use runtime::{
 };
 
 mod inline_range_semantics {
+    #![allow(dead_code, unused_imports)]
     include!("../../jet-codegen/src/Prelude/Core/InlineRange.rs");
 }
 

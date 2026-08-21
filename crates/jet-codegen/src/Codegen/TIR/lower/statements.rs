@@ -1886,6 +1886,7 @@ fn normalize_eval_fragment_return(expr: &Expr, expected: Option<&Type>) -> Optio
         args,
         leading_dot,
         span,
+        ..
     } = expr
     else {
         return None;

@@ -5,8 +5,6 @@
 use super::Concurrency;
 use crate::runtime_host::{alloc_jit_result, JitRuntime};
 use cranelift_codegen::ir::{types, AbiParam, Signature};
-use cranelift_jit::{JITBuilder, JITModule};
-use cranelift_module::{FuncId, Linkage, Module};
 
 /// Canonical Cassowary-style layout solver (extracted from Prelude/Layout.rs).
 #[allow(dead_code, unused_imports)]

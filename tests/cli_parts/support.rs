@@ -1,10 +1,9 @@
 use std::fs;
-use std::io::{self, Read, Write};
+use std::io;
 use std::path::{Path, PathBuf};
-use std::process::{Child, Command, Output, Stdio};
+use std::process::{Child, Command, Output};
 use std::time::Duration;
 
-use jet_foundation::JSON::parse_json;
 use jet_foundation::PerformanceBudget::CanonicalJson;
 
 fn jet() -> PathBuf {

@@ -773,7 +773,7 @@ impl<'a> Parser<'a> {
                         let (seg, seg_span) =
                             self.expect_ident("after `.` in a leading-dot enum variant")?;
                         variant = format!("{variant}.{seg}");
-                        variant_span = seg_span;
+                        variant_span = Span::new(variant_span.start, seg_span.end);
                     }
                     // D-LIT-DOT1: enum payload fields touch the variant name.
                     let (args, end) = if allow_struct_lit && matches!(self.peek().kind, TokKind::LBrace) {
@@ -816,6 +816,7 @@ impl<'a> Parser<'a> {
                     Ok(Expr::EnumLit {
                         type_name: String::new(),
                         variant,
+                        variant_span: Some(variant_span),
                         args,
                         leading_dot: true,
                         span: Span::new(dot_start, end),
@@ -876,6 +877,7 @@ impl<'a> Parser<'a> {
                     Ok(Expr::EnumLit {
                         type_name: String::new(),
                         variant,
+                        variant_span: Some(variant_span),
                         args,
                         leading_dot: true,
                         span: Span::new(dot_start, end),

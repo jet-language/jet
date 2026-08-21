@@ -3,11 +3,10 @@
 use super::Concurrency;
 use jet_codegen::AST::CtValue;
 use cranelift_codegen::ir::{types, AbiParam, Signature};
-use cranelift_jit::{JITBuilder, JITModule};
-use cranelift_module::{FuncId, Linkage, Module};
 use crate::Marshal::{alloc_string, clone_string, result_err_msg, result_ok};
 
 pub(crate) mod time_rt {
+    #![allow(dead_code, unused_imports)]
     include!("../../jet-codegen/src/Prelude/Core/TimeMonotonic.rs");
     include!("../../jet-codegen/src/Prelude/Core/Time.rs");
 }

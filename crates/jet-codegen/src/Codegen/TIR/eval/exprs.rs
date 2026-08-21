@@ -5667,7 +5667,6 @@ impl<'a> EvalCtx<'a> {
                     .or_else(|| scope.get(&local.name).cloned())
                     .or_else(|| self.globals.get(&local.name).cloned())
                     .ok_or_else(|| {
-                        eprintln!("CARD1560 local={} scope={:?}", local.name, scope.keys().collect::<Vec<_>>());
                         unsupported(&format!("unbound `{}`", local.name), self.span())
                     })?;
                 if local.deref {

@@ -420,7 +420,7 @@ host_fns! {
     register: register_game_symbols;
     declare: declare_game_host_fns(module) {
         use cranelift_codegen::ir::{types, AbiParam, Signature};
-        use cranelift_module::{Linkage, Module};
+        use cranelift_module::Module;
         let cc = module.target_config().default_call_conv;
 
         let mut sig_i64 = Signature::new(cc);

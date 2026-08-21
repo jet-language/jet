@@ -3,12 +3,11 @@
 
 use super::Concurrency;
 use cranelift_codegen::ir::{types, AbiParam, Signature};
-use cranelift_jit::{JITBuilder, JITModule};
-use cranelift_module::{FuncId, Linkage, Module};
 use crate::Marshal::{clone_string, alloc_string, result_err_msg};
 
 /// Canonical text/unicode runtime — types stubbed, algorithm via include!
 pub(crate) mod text_rt {
+    #![allow(dead_code, unused_imports)]
     mod jet_regex_syntax {
         include!("../../jet-foundation/src/RegexSyntax.rs");
     }

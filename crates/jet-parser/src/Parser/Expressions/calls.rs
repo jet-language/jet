@@ -110,6 +110,7 @@ impl<'a> Parser<'a> {
                 Expr::EnumLit {
                     type_name: String::new(),
                     variant,
+                    variant_span: Some(variant_span),
                     args: Vec::new(),
                     leading_dot: true,
                     span: Span::new(start, variant_span.end),

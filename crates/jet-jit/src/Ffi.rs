@@ -3,8 +3,6 @@
 
 use super::Concurrency;
 use cranelift_codegen::ir::{types, AbiParam, Signature};
-use cranelift_jit::{JITBuilder, JITModule};
-use cranelift_module::{FuncId, Linkage, Module};
 use jet_foundation::AST::{ProgramBundle, Type};
 use std::collections::HashMap;
 use std::ffi::{CStr, CString};

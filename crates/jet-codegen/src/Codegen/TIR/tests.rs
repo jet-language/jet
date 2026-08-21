@@ -130,6 +130,7 @@
         let user_value = Expr::EnumLit {
             type_name: "Maturity".to_string(),
             variant: "Experimental".to_string(),
+            variant_span: None,
             args: Vec::new(),
             leading_dot: false,
             span,

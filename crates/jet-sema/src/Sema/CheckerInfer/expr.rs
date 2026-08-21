@@ -1674,6 +1674,7 @@ impl<'a> Checker<'a> {
                     args,
                     leading_dot,
                     span,
+                    variant_span: _,
                 },
                 expected,
             ) if type_name.is_empty() => {
@@ -3186,10 +3187,11 @@ impl<'a> Checker<'a> {
                 // `Enum.Variant` keeps its existing Field route (unchanged Rust).
                 if let Some((type_name, variant)) = self.fold_enum_variant_path(e) {
                     if variant.contains('.') {
-                        let ty = self.check_enum_lit(&type_name, &variant, &mut [], span);
+                        let ty = self.check_enum_lit(&type_name, &variant, &mut [], span, None);
                         *e = Expr::EnumLit {
                             type_name,
                             variant,
+                            variant_span: None,
                             args: Vec::new(),
                             leading_dot: false,
                             span,
@@ -3369,10 +3371,12 @@ impl<'a> Checker<'a> {
                             .drain(..)
                             .map(|a| EnumLitArg::Positional(a.expr))
                             .collect();
-                        let ty = self.check_enum_lit(&type_name, &variant, &mut enum_args, span);
+                        let ty =
+                            self.check_enum_lit(&type_name, &variant, &mut enum_args, span, None);
                         *e = Expr::EnumLit {
                             type_name,
                             variant,
+                            variant_span: None,
                             args: enum_args,
                             leading_dot: false,
                             span,
@@ -3456,6 +3460,7 @@ impl<'a> Checker<'a> {
                             let enum_lit = Expr::EnumLit {
                                 type_name: enum_name.to_string(),
                                 variant: variant.to_string(),
+                                variant_span: None,
                                 args,
                                 leading_dot: false,
                                 span: *span,
@@ -3533,6 +3538,7 @@ impl<'a> Checker<'a> {
             Expr::EnumLit {
                 type_name,
                 variant,
+                variant_span,
                 args,
                 span,
                 ..
@@ -3575,7 +3581,13 @@ impl<'a> Checker<'a> {
                 }
                 // D-MEM1/S7 (D-NOALLOC-SEM1=A): an enum literal for a type
                 // that owns heap data (directly or transitively) allocates.
-                Some(self.check_enum_lit(type_name, variant, args, *span))
+                Some(self.check_enum_lit(
+                    type_name,
+                    variant,
+                    args,
+                    *span,
+                    *variant_span,
+                ))
             }
             // D-TAINT1: `#Tainted expr` — the value-fact tag is type-transparent.
             // Its type is exactly the inner's type; taint propagation + the E0721
@@ -4851,7 +4863,7 @@ impl<'a> Checker<'a> {
                     let enum_name = leaf.clone();
                     **inner = Expr::Ident(enum_name.clone(), span);
                     let mut empty = Vec::new();
-                    return Some(self.check_enum_lit(&enum_name, member, &mut empty, span));
+                    return Some(self.check_enum_lit(&enum_name, member, &mut empty, span, Some(span)));
                 }
                 if self.core_imports.get(alias).map(String::as_str) == Some("core.encoding") {
                     let enum_name = match leaf.as_str() {
@@ -4863,7 +4875,7 @@ impl<'a> Checker<'a> {
                     if let Some(enum_name) = enum_name {
                         **inner = Expr::Ident(enum_name.to_string(), span);
                         let mut empty = Vec::new();
-                        return Some(self.check_enum_lit(enum_name, member, &mut empty, span));
+                        return Some(self.check_enum_lit(enum_name, member, &mut empty, span, Some(span)));
                     }
                 }
                 if leaf == "State" {
@@ -4963,7 +4975,7 @@ impl<'a> Checker<'a> {
             }
             if self.is_known_enum(type_name) {
                 let mut empty = Vec::new();
-                return Some(self.check_enum_lit(type_name, member, &mut empty, span));
+                return Some(self.check_enum_lit(type_name, member, &mut empty, span, Some(span)));
             }
             if let Some(owner_mod) = self.struct_owner_module(type_name, None) {
                 let is_declared_state = self

@@ -44,6 +44,7 @@ impl<'a> Parser<'a> {
                     Ok(Expr::EnumLit {
                         type_name: String::new(),
                         variant: Syntax::LIT_VALUE.to_string(),
+                        variant_span: Some(span),
                         args: vec![EnumLitArg::Positional(inner)],
                         leading_dot: false,
                         span: full,
@@ -54,6 +55,7 @@ impl<'a> Parser<'a> {
                     return Ok(Expr::EnumLit {
                         type_name: String::new(),
                         variant: Syntax::LIT_NULL.to_string(),
+                        variant_span: Some(span),
                         args: Vec::new(),
                         leading_dot: false,
                         span,

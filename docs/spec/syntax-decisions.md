@@ -5867,10 +5867,11 @@ run|dev|build|test` (E0928); `jet run <entry> -- <name>` dispatches an
 args reuse D-CLIFLAG1 once the job is selected. The one dispatch table keeps
 the selected function's source name, so a sibling's plain-call dependency
 (ballot: dependency = plain function call) does not die with E0102.
-D-SERVICE1 still has no typed builder/worker/group to carry a schedule into a
-service runtime. D-TYPE2-TIME1 now supplies the ordinary typed `Duration` and
-Instant carriers; the service path remains a future slice and must not
-reinterpret raw extras as `#Every` or add a second scheduler.
+D-SERVICE1's typed builder has since shipped: `service.tree(…)` promotes ordinary
+functions into named workers and groups, so a schedule now has somewhere to go.
+D-TYPE2-TIME1 supplies the ordinary typed `Duration` and Instant carriers, and
+the service path consumes them directly. It must still not reinterpret raw
+extras as `#Every` or add a second scheduler.
 
 *Implementation log 2026-08-20 (card c0a5nr50)*: D-JOB-SUBCMD1=C is wired
 through one Prelude job-scope selector. `jet run <entry> -- <name>` and built

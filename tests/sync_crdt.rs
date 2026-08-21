@@ -102,8 +102,11 @@ fn sync_laws_hold_on_aot_path() {
     assert_eq!(code, 0);
     assert_eq!(
         stdout,
+        concat!(
         "text_commutes:true\ntext_merged:SyncText(hello, world!)\ntext_associates:true\ntext_idempotent:true\ntext_all_edits:SyncText(goodbye, world!)\ntext_clock:LamportClock(r1=12,r2=12,r3=18)\nmid_low:SyncText(aZb)\nmid_high:SyncText(aZb)\ntext_collision:SyncError(invalid SyncText)\nmap_converges:true\nlist_converges:true\ncounter_idempotent:5\ninvalid_policy:rejected\nowner_allowed:true\nowner_denied:false\npublic_allowed:true\ninvalid_text:SyncError(invalid SyncText)\nSyncOver(session=sync-laws, generation=1, doc=SyncMap(k=right))\nSyncOver(session=sync-laws, generation=1, doc=SyncMap(k=right))\nSyncOver(session=sync-merge-laws, generation=1, doc=SyncMap(a=1))\nSyncOver(session=sync-merge-laws, generation=2, doc=SyncMap(a=1,b=2))\nSyncOver(session=sync-merge-laws, generation=2, doc=SyncMap(a=1,b=2))\nSyncError(document is not a canonical CRDT value)\n"
+        ,
         "text_commutes:true\ntext_merged:SyncText(hello, world!)\ntext_associates:true\ntext_idempotent:true\ntext_all_edits:SyncText(goodbye, world!)\ntext_clock:LamportClock(r1=12,r2=12,r3=18)\nmid_low:SyncText(aZb)\nmid_high:SyncText(aZb)\ntext_collision:SyncError(invalid SyncText)\nmap_converges:true\nlist_converges:true\ncounter_idempotent:5\ninvalid_policy:rejected\nowner_allowed:true\nowner_denied:false\npublic_allowed:true\ninvalid_text:SyncError(invalid SyncText)\nSyncOver(session=sync-laws, generation=1, doc=SyncMap(k=right))\nSyncOver(session=sync-laws, generation=1, doc=SyncMap(k=right))\nSyncOver(session=sync-merge-laws, generation=1, doc=SyncMap(a=1))\nSyncOver(session=sync-merge-laws, generation=2, doc=SyncMap(a=1,b=2))\nSyncOver(session=sync-merge-laws, generation=2, doc=SyncMap(a=1,b=2))\nSyncError(document is not a canonical CRDT value)\nSyncOver(session=sync-conflict-laws, generation=1, doc=SyncMap(k=left))\nSyncError(document merge denied)\nSyncOver(session=sync-conflict-laws, generation=1, doc=SyncMap(k=left))\n"
+        )
     );
 }
 
@@ -113,7 +116,10 @@ fn sync_laws_hold_on_default_run() {
     assert_eq!(code, 0, "default jet run failed: {stderr}");
     assert_eq!(
         stdout,
+        concat!(
         "text_commutes:true\ntext_merged:SyncText(hello, world!)\ntext_associates:true\ntext_idempotent:true\ntext_all_edits:SyncText(goodbye, world!)\ntext_clock:LamportClock(r1=12,r2=12,r3=18)\nmid_low:SyncText(aZb)\nmid_high:SyncText(aZb)\ntext_collision:SyncError(invalid SyncText)\nmap_converges:true\nlist_converges:true\ncounter_idempotent:5\ninvalid_policy:rejected\nowner_allowed:true\nowner_denied:false\npublic_allowed:true\ninvalid_text:SyncError(invalid SyncText)\nSyncOver(session=sync-laws, generation=1, doc=SyncMap(k=right))\nSyncOver(session=sync-laws, generation=1, doc=SyncMap(k=right))\nSyncOver(session=sync-merge-laws, generation=1, doc=SyncMap(a=1))\nSyncOver(session=sync-merge-laws, generation=2, doc=SyncMap(a=1,b=2))\nSyncOver(session=sync-merge-laws, generation=2, doc=SyncMap(a=1,b=2))\nSyncError(document is not a canonical CRDT value)\n"
+        ,
         "text_commutes:true\ntext_merged:SyncText(hello, world!)\ntext_associates:true\ntext_idempotent:true\ntext_all_edits:SyncText(goodbye, world!)\ntext_clock:LamportClock(r1=12,r2=12,r3=18)\nmid_low:SyncText(aZb)\nmid_high:SyncText(aZb)\ntext_collision:SyncError(invalid SyncText)\nmap_converges:true\nlist_converges:true\ncounter_idempotent:5\ninvalid_policy:rejected\nowner_allowed:true\nowner_denied:false\npublic_allowed:true\ninvalid_text:SyncError(invalid SyncText)\nSyncOver(session=sync-laws, generation=1, doc=SyncMap(k=right))\nSyncOver(session=sync-laws, generation=1, doc=SyncMap(k=right))\nSyncOver(session=sync-merge-laws, generation=1, doc=SyncMap(a=1))\nSyncOver(session=sync-merge-laws, generation=2, doc=SyncMap(a=1,b=2))\nSyncOver(session=sync-merge-laws, generation=2, doc=SyncMap(a=1,b=2))\nSyncError(document is not a canonical CRDT value)\nSyncOver(session=sync-conflict-laws, generation=1, doc=SyncMap(k=left))\nSyncError(document merge denied)\nSyncOver(session=sync-conflict-laws, generation=1, doc=SyncMap(k=left))\n"
+        )
     );
 }

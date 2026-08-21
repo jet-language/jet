@@ -607,6 +607,10 @@ pub enum Expr {
     EnumLit {
         type_name: String,
         variant: String,
+        /// Span of the source variant token, excluding the type/payload. `None`
+        /// is reserved for compiler-synthesized literals or folded paths whose
+        /// parser shape does not retain one exact token span.
+        variant_span: Option<Span>,
         args: Vec<EnumLitArg>,
         /// D-ENUMDOT2: whether source used the contextual leading-dot form.
         /// Canonical `Val`/`None` literals use the same generic node with this

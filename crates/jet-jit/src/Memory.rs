@@ -1492,7 +1492,7 @@ host_fns! {
     register: register_memory_symbols;
     declare: declare_memory_host_fns(module) {
         use cranelift_codegen::ir::{types, AbiParam, Signature};
-        use cranelift_module::{Linkage, Module};
+        use cranelift_module::Module;
         let cc = module.target_config().default_call_conv;
         let mut noarg_i64 = Signature::new(cc);
         noarg_i64.returns.push(AbiParam::new(types::I64));

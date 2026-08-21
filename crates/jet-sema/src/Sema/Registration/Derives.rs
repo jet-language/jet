@@ -636,6 +636,7 @@ fn ordering(variant: &str, span: Span) -> Expr {
     Expr::EnumLit {
         type_name: crate::Syntax::TYPE_ORDERING.to_string(),
         variant: variant.to_string(),
+        variant_span: None,
         args: Vec::new(),
         leading_dot: false,
         span,

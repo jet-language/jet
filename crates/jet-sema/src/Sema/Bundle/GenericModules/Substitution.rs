@@ -13,6 +13,7 @@ fn ct_value_expr(value: &crate::AST::CtValue, span: crate::Diagnostics::Span) ->
         } if args.is_empty() => Expr::EnumLit {
             type_name: type_name.clone(),
             variant: variant.clone(),
+            variant_span: None,
             args: Vec::new(),
             leading_dot: false,
             span,
