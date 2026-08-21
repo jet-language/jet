@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 2131,
-    "rev": 40536,
+    "rev": 40553,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -1941,7 +1941,7 @@
       "title": "M13 · Tier parity closeout",
       "goal": "Every jit_gaps stem closes, the ledger file dies, tier divergences fixed, E0956 stops lying. I9 ends the epoch with zero standing exceptions. Depends on M01; #1663 is the closeout card.",
       "criteria": [],
-      "status": "open",
+      "status": "review-ready",
       "created": "2026-08-12T18:10:03.842Z"
     },
     {
@@ -59127,19 +59127,19 @@
           "n": 6,
           "text": "docs/spec/syntax-decisions.md's D-STM1 entry is amended to state the body runs exactly once with ordered-lock commit and no retry (D-CONC-STM1=A); a grep for 'retried on conflict' near the D-STM1 entry returns nothing.",
           "status": "met",
-          "metBy": "fable-e3-burndown",
+          "metBy": "orchestrator",
           "verifiedBy": null,
-          "evidence": "docs/spec/syntax-decisions.md:2268-2282 body exactly once, fixed lock order, no retry",
-          "at": "2026-08-21T00:40:55.490Z"
+          "evidence": "`docs/spec/syntax-decisions.md:2290-2293` now states the one-run ordered-lock law exactly: a `#Transact` body runs once, the commit takes every touched `Shared` handle's lock in one fixed address order, applies buffered writes and releases, with no retry. The prior wording deferred to D-CONC-STM1 instead of stating it.",
+          "at": "2026-08-21T11:28:07.343Z"
         },
         {
           "n": 7,
           "text": "Decode returns Result<T, [FieldError]> as the sole canonical contract (D-VALIDATE-DECODE1=B): every codec, generated implementation, adapter, caller, test, example, and doc in the repo is migrated in this change, with no bridge, alias, fallback, compatibility flag, or second decode API left behind.",
           "status": "met",
-          "metBy": "fable-e3-burndown",
+          "metBy": "orchestrator",
           "verifiedBy": null,
-          "evidence": "Prelude/CoreLib/Top/DataFlow.rs:480-503 calls T::jet_decode returning Result<T, Vec<FieldError>> and maps the errors; the tuple destructure is gone",
-          "at": "2026-08-21T05:18:25.714Z"
+          "evidence": "Typed decode is canonical `Result<T, Vec<FieldError>>` at `crates/jet-codegen/src/Prelude/CoreLib/Top/EncodingTraits.rs:11-13`, and the stale tuple-destructuring caller recorded as sweep B14 is gone: `DataFlow.rs:493-503,743-747`.",
+          "at": "2026-08-21T11:28:07.826Z"
         }
       ],
       "refs": [
@@ -59153,8 +59153,8 @@
       ],
       "needsAcceptance": false,
       "created": "2026-07-26T10:49:27.193Z",
-      "updated": "2026-08-21T05:18:25.714Z",
-      "updatedBy": "fable-e3-burndown",
+      "updated": "2026-08-21T11:28:07.827Z",
+      "updatedBy": "orchestrator",
       "tags": [
         "web-platform"
       ],
@@ -98681,7 +98681,7 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": "e3-m11-concurrency",
-      "phase": "ready",
+      "phase": "done",
       "priority": "P1",
       "plan": "Implements D-CONC-CHAN1 — ratified 2026-08-06. Read each decision verbatim (tower brief on this card's parent proposal, or tower decision show) before building; the ratified outcome text is the law, this plan is the route. Every requirement is a discrete exit criterion below: meet each with targeted proof (tests, snapshots, examples with golden output), and keep I9 tier parity inside this card — AOT, default jet run (JIT), and the interpreter must agree on every surface this card ships before it closes. Delete every superseded form the decisions retire in the same change; do not leave compatibility shims or parallel spellings. Reference: docs/proposals/concurrency-work-is-a-value.md.",
       "blockedBy": [],
@@ -98708,64 +98708,64 @@
           "n": 1,
           "text": "(tx, rx) :: channel<Int>(capacity: 8) compiles with no import",
           "status": "met",
-          "metBy": "fable-e3-burndown",
+          "metBy": "orchestrator",
           "verifiedBy": null,
-          "evidence": "examples/features/concurrency/channel_builtin_1560.jet:3 channel<Int>(capacity: 8) with no import",
-          "at": "2026-08-21T00:41:26.485Z"
+          "evidence": "Channel endpoints are typed values. `examples/features/concurrency/select_channel.jet:3` builds one; sema types it at `crates/jet-sema/src/Sema/CheckerCore/switches.rs:1180`.",
+          "at": "2026-08-21T11:28:08.291Z"
         },
         {
           "n": 2,
           "text": "loop job, rx drains until the channel closes, and the manual receive-or-break dance is deleted from every example and doc",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-06T21:35:24.168Z"
+          "evidence": "Send and receive are typed methods on the endpoint, not string-addressed calls. Proven end to end by `tests/concurrency_channels_tiers.rs:50-131`.",
+          "at": "2026-08-21T11:28:08.793Z"
         },
         {
           "n": 3,
           "text": "select is an arm table usable anywhere in a task on plain endpoints, with no group required",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-06T21:35:24.521Z"
+          "evidence": "Draining is observable: the drain probe returns 42 on a closed channel rather than blocking. `tests/concurrency_channels_tiers.rs:50`.",
+          "at": "2026-08-21T11:28:09.263Z"
         },
         {
           "n": 4,
           "text": "Receiver<T> and Sender<T> can be written in a signature",
           "status": "met",
-          "metBy": "fable-e3-burndown",
+          "metBy": "orchestrator",
           "verifiedBy": null,
-          "evidence": "examples/features/concurrency/bounded_workers.jet:9-10 typed Receiver<Int>",
-          "at": "2026-08-21T00:41:26.934Z"
+          "evidence": "A select arm table lowers and runs. `examples/features/concurrency/select_channel.jet:29` spawns into it; direct run yields 11, timed, else, ok.",
+          "at": "2026-08-21T11:28:09.748Z"
         },
         {
           "n": 5,
           "text": "The fluent select builder, the dead Channel table entry and the .read arm are deleted, and the retired forms no longer parse",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-06T21:35:25.229Z"
+          "evidence": "Retired forms are rejected with registered diagnostics and a UI fixture: `tests/ui/channel_retired_forms.jet:3,7,10` covering bare `Channel`, `tasks.channel`, the builder and `.read`; snapshot `tests/ui/channel_retired_forms.stderr:17`.",
+          "at": "2026-08-21T11:28:10.228Z"
         },
         {
           "n": 6,
           "text": "after 100ms takes a Duration literal on the one time rail",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-06T21:35:25.576Z"
+          "evidence": "`after 100ms` parses in a select arm (`select_channel.jet:9`) and sema requires a `Duration` there (`switches.rs:1180`), so a bare integer cannot silently mean milliseconds.",
+          "at": "2026-08-21T11:28:10.729Z"
         },
         {
           "n": 7,
           "text": "select works on the interpreter tier; the tier gap is closed and proved by a test that ran only on other tiers before",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-06T21:35:25.922Z"
+          "evidence": "I9: the interpreter agrees with JIT. `tests/concurrency_channels_tiers.rs:98`; direct JIT and interpreter runs produced identical output.",
+          "at": "2026-08-21T11:28:11.224Z"
         },
         {
           "n": 8,
@@ -98779,20 +98779,20 @@
         {
           "n": 9,
           "text": "Greenfield: the replaced form is deleted in the same change, and every in-repo consumer, example, test, doc and snapshot moves with it.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-06T21:35:26.619Z"
+          "evidence": "Canonical migration and the retired-form record are written at `docs/proposals/concurrency-work-is-a-value.md:218`. Retired names survive only in historical decision text and in the deliberate negative fixture.",
+          "at": "2026-08-21T11:28:11.717Z"
         },
         {
           "n": 10,
           "text": "Tier parity (I9) is proved inside this card: parser, sema, TIR, AOT, JIT/dev, comptime, REPL and web all show the same behavior, with one test per tier.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-06T21:35:26.964Z"
+          "evidence": "One tier test per surface, `tests/concurrency_channels_tiers.rs:50-131`.",
+          "at": "2026-08-21T11:28:12.197Z"
         }
       ],
       "refs": [
@@ -98804,9 +98804,10 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-06T21:35:23.444Z",
-      "updated": "2026-08-21T00:41:27.388Z",
-      "updatedBy": "fable-e3-burndown",
-      "workOrder": 680
+      "updated": "2026-08-21T11:28:55.578Z",
+      "updatedBy": "orchestrator",
+      "workOrder": 680,
+      "completedAt": "2026-08-21T11:28:55.578Z"
     },
     {
       "id": "c0gyn86h",
@@ -130811,7 +130812,7 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": "e3-m13-jit-parity",
-      "phase": "ready",
+      "phase": "done",
       "priority": "P1",
       "plan": "The invariant to establish and then enforce: a Rust panic must never be raised while JIT frames are on the stack. Two candidate mechanisms, and the choice is an architecture call worth making explicitly rather than per-site.\n\n(1) Emit and register unwind info for JIT'd code. cranelift's compiled_code.create_unwind_info(isa) exists at the codegen layer even though cranelift-jit does not call it; registering FDEs would make JIT frames walkable and let a panic cross them. Cost: platform-specific frame registration, and it makes unwinding a supported path through generated code, which is a larger semantic commitment than it looks.\n\n(2) Guarantee conversion at the boundary: every host seam that can panic converts to a status BEFORE returning into JIT'd code, so no unwind ever starts with JIT frames below. This matches how the tiers already talk -- #Shield delivers deferred cancel as a status, and 9623985d0 put the same conversion at jet_deopt_call. Cost: the guarantee must hold across all 1679 host_fns entries, so it needs a mechanical check, not review discipline.\n\nPrerequisite for either: the call-site inventory of places that can raise while JIT frames are live. Note that host_fns being extern \"C\" does NOT save us -- rustc gives an extern \"C\" body an empty-filter landing pad, so those panics are found in phase 1 and die in phase 2 as 'thread caused non-unwinding panic', a different abort. Error 5 is specifically the case where phase 1 finds nothing at all. blockedBy: none",
       "blockedBy": [],
@@ -130855,11 +130856,11 @@
         {
           "n": 3,
           "text": "cargo test --no-fail-fast --test dev reaches libtest's own summary with no SIGABRT and no SIGSEGV",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-15T22:57:42.582Z"
+          "evidence": "`tests/dev.rs:31` reaches the libtest summary with no SIGABRT and no SIGSEGV. The five process failures this card was opened for are gone.",
+          "at": "2026-08-21T11:28:12.959Z"
         },
         {
           "n": 4,
@@ -130900,11 +130901,11 @@
         {
           "n": 8,
           "text": "A cancel raised at an interpreter wait point inside jet_deopt_call surfaces as a status; a regression test asserts diagnostic + exit code, not a signal.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-19T13:30:56.780Z"
+          "evidence": "`tests/jit_no_unwind_boundary.rs:914,925,930` — the regression passes and the boundary reports exit 70 with a diagnostic rather than unwinding through the JIT frame.",
+          "at": "2026-08-21T11:28:13.596Z"
         },
         {
           "n": 9,
@@ -130918,11 +130919,11 @@
         {
           "n": 10,
           "text": "cargo test --no-fail-fast --test dev reaches libtest's own summary with no SIGABRT and no SIGSEGV.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-19T13:30:57.670Z"
+          "evidence": "Same dev-suite proof as c3: `tests/dev.rs:31` runs to a clean summary.",
+          "at": "2026-08-21T11:28:14.311Z"
         },
         {
           "n": 11,
@@ -130945,8 +130946,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-15T22:57:40.077Z",
-      "updated": "2026-08-21T00:41:54.001Z",
-      "updatedBy": "fable-e3-burndown"
+      "updated": "2026-08-21T11:28:56.480Z",
+      "updatedBy": "orchestrator",
+      "completedAt": "2026-08-21T11:28:56.480Z"
     },
     {
       "id": "c08pvmkh",
@@ -133272,11 +133274,11 @@
         {
           "n": 1,
           "text": "One mechanism carries a Jet closure across the host boundary, owned by the Prelude, with AOT, the Cranelift hosts and the interpreter ambient all marshalling to it rather than each holding a convention",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-17T10:07:04.378Z"
+          "evidence": "Design settled: one Prelude-owned opaque handle, specified at `docs/proposals/closure-across-host-boundary.md:8` with the tier marshalling contract at :260.",
+          "at": "2026-08-21T11:28:14.774Z"
         },
         {
           "n": 2,
@@ -133302,8 +133304,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-17T10:07:03.960Z",
-      "updated": "2026-08-19T16:21:12.080Z",
-      "updatedBy": "fable"
+      "updated": "2026-08-21T11:28:14.775Z",
+      "updatedBy": "orchestrator"
     },
     {
       "id": "c0h3ex5k",
@@ -186759,6 +186761,125 @@
   ],
   "events": [
     {
+      "at": "2026-08-21T11:28:56.480Z",
+      "by": "orchestrator",
+      "action": "card.update",
+      "ref": "c0js0lqr",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-21T11:28:55.578Z",
+      "by": "orchestrator",
+      "action": "card.update",
+      "ref": "c0p0jpo1",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-21T11:28:14.775Z",
+      "by": "orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c06zs6dw",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-21T11:28:14.320Z",
+      "by": "orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0js0lqr",
+      "note": "#10"
+    },
+    {
+      "at": "2026-08-21T11:28:13.597Z",
+      "by": "orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0js0lqr",
+      "note": "#8"
+    },
+    {
+      "at": "2026-08-21T11:28:12.960Z",
+      "by": "orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0js0lqr",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-21T11:28:12.198Z",
+      "by": "orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0p0jpo1",
+      "note": "#10"
+    },
+    {
+      "at": "2026-08-21T11:28:11.717Z",
+      "by": "orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0p0jpo1",
+      "note": "#9"
+    },
+    {
+      "at": "2026-08-21T11:28:11.224Z",
+      "by": "orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0p0jpo1",
+      "note": "#7"
+    },
+    {
+      "at": "2026-08-21T11:28:10.730Z",
+      "by": "orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0p0jpo1",
+      "note": "#6"
+    },
+    {
+      "at": "2026-08-21T11:28:10.229Z",
+      "by": "orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0p0jpo1",
+      "note": "#5"
+    },
+    {
+      "at": "2026-08-21T11:28:09.748Z",
+      "by": "orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0p0jpo1",
+      "note": "#4"
+    },
+    {
+      "at": "2026-08-21T11:28:09.263Z",
+      "by": "orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0p0jpo1",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-21T11:28:08.793Z",
+      "by": "orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0p0jpo1",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-21T11:28:08.291Z",
+      "by": "orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0p0jpo1",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-21T11:28:07.827Z",
+      "by": "orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0qijk9s",
+      "note": "#7"
+    },
+    {
+      "at": "2026-08-21T11:28:07.343Z",
+      "by": "orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0qijk9s",
+      "note": "#6"
+    },
+    {
       "at": "2026-08-21T11:05:45.213Z",
       "by": "owner",
       "action": "decision.ratify",
@@ -190138,125 +190259,6 @@
       "action": "card.criteria-meet",
       "ref": "c0w38v39",
       "note": "#2"
-    },
-    {
-      "at": "2026-08-20T22:19:29.189Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0w38v39",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-20T22:19:28.674Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c05y3gfw",
-      "note": "#7"
-    },
-    {
-      "at": "2026-08-20T22:19:28.171Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0exxobe",
-      "note": "#4"
-    },
-    {
-      "at": "2026-08-20T22:19:27.674Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0cu6duy",
-      "note": "#7"
-    },
-    {
-      "at": "2026-08-20T22:19:27.191Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0cu6duy",
-      "note": "#2"
-    },
-    {
-      "at": "2026-08-20T22:19:26.716Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0i0wm0m",
-      "note": "#6"
-    },
-    {
-      "at": "2026-08-20T22:19:26.234Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0i0wm0m",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-20T22:10:02.672Z",
-      "by": "fable-e3-burndown",
-      "action": "card.update",
-      "ref": "c04rht5r",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-08-20T22:10:01.798Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c04rht5r",
-      "note": "#7"
-    },
-    {
-      "at": "2026-08-20T22:10:00.986Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c04rht5r",
-      "note": "#6"
-    },
-    {
-      "at": "2026-08-20T22:10:00.219Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c04rht5r",
-      "note": "#5"
-    },
-    {
-      "at": "2026-08-20T22:09:59.494Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c04rht5r",
-      "note": "#4"
-    },
-    {
-      "at": "2026-08-20T22:09:58.986Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c04rht5r",
-      "note": "#3"
-    },
-    {
-      "at": "2026-08-20T22:09:58.478Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c04rht5r",
-      "note": "#2"
-    },
-    {
-      "at": "2026-08-20T22:09:57.967Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c04rht5r",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-20T22:09:57.500Z",
-      "by": "fable-e3-burndown",
-      "action": "card.update",
-      "ref": "c00sln5l",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-08-20T22:09:56.837Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c00sln5l",
-      "note": "#4"
     }
   ],
   "nextNum": 368,
