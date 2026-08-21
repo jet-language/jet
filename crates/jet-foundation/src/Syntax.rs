@@ -144,9 +144,13 @@
 // shapes. D-SHAPE-CASE2=A exempts foreign names inside FFI binding modules.
 // D-ARROW-UNIFY1=B (ratified 2026-08-19): OP_UNIFIED_ARROW (`:>`) defines
 // callable results and control arms/bodies in every position.
-// D-FAIL-UNIT1=A (ratified 2026-08-06, card #1534) adds no token: a
-// unit-fallible function writes `? E` or bare `?` directly after its parameters;
-// value-returning fallible functions keep OP_UNIFIED_ARROW.
+// D-ERRSIGIL1=A (ratified 2026-08-21) gives fallible types the dedicated
+// TYPE_FALLIBLE_SEP (`!`); `?` remains the optional suffix. Unit-fallible
+// functions use the same separator after their parameters.
+// D-STRUCT-PLANE1=A and D-STRUCT-LIVE1=A add no spelling: structure facts use
+// the existing fact registry, and liveness uses the existing `_name` ladder
+// (D-NAME-SIGIL1). D-STRUCT-ONCE1=A adds no spelling: it extends the existing
+// `@loop` reach and keeps its existing compile-time mark.
 // D-ENTRY-VALUE1=B (card #1446) adds no token: `fn run` is the one entry, and
 // its return value is the program. A returned App is served at the runtime
 // edge; there is no hidden app-name convention or synthesized run overlay.
@@ -224,7 +228,7 @@
 // Mutable locals, fields, indexes, aliases, and calls stay `T?`; bind with
 // `x == Val(v)` instead. Facts reach the right side of `&&` only, not `||`.
 // D-UNIONTYPE1=A reuses the existing `|` token (TokKind::Pipe / BitOr) in type
-// position as TYPE_UNION_SEP. `T ? E1 | E2` parses as `T ? (E1 | E2)`.
+// position as TYPE_UNION_SEP. `T ! E1 | E2` parses as `T ! (E1 | E2)`.
 // D-REGEX-LIT1=D adds no punctuation. Regex patterns use the universal
 // `Type{ body }` / inferred `{ body }` form from D-LIT-DOT1.
 // D-RANGE-VALUE1=A makes `a..b` and `a..<b` construct one nominal Range

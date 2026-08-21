@@ -169,7 +169,7 @@ type.
 
 **S12 — Entry point** *(amended by D-FAIL-EXIT1/D-FAIL-UNIT1)*: `fn run()`;
 no `pub` required; it is fallible by default. An expert may pin
-`fn run() ? E`. **D-CLIFLAG1** (implemented, c7cliflag): a
+`fn run() ! E`. **D-CLIFLAG1** (implemented, c7cliflag): a
 typed entry parameter optionally opts into CLI parsing — `fn run(args: ServeArgs)`
 derives `--flag` names/defaults/help from the struct's fields
 (`#CLI`/field-level `#Doc("...")` markers, bracket form matching `#Codable`).
@@ -316,7 +316,7 @@ constructors, generic calls, variadics, and function values all bind through
 the one binder. fmt never adds nor strips labels.
 
 ```jet
-fn connect(host: String, /, *, timeout seconds: Int = 30, tls: Bool = true) => Client ? ConnectError
+fn connect(host: String, /, *, timeout seconds: Int = 30, tls: Bool = true) => Client ! ConnectError
 client :: connect("db.internal", tls: true, timeout: 5)?
 ```
 
@@ -377,7 +377,7 @@ No top type; general `Any` rejected.
 
 **D-UNIONTYPE1=A — Anonymous union types** *(ratified 2026-07-24, card #744)*:
 `A | B` is closed structural enum sugar. Nested unions flatten, duplicates
-disappear, and identity is order-insensitive. `T ? E1 | E2` places the union on
+disappear, and identity is order-insensitive. `T ! E1 | E2` places the union on
 the error side. Members widen into the union only at binding, argument, return,
 Codable field, and `?` error boundaries. Match arms name member types; Codable
 decode rejects ambiguous wire shapes (E2415). Named enums remain the documenting
@@ -678,7 +678,7 @@ of `<`/`<=`/`>`/`>=` only; mixed direction is a compile error (E0333);
 **S71 / S35 — Optional chaining & fallback**: `?.` chains fields and methods
 (`user?.address?.city`, `user?.display_name()`) yielding `T?`,
 short-circuiting on None; non-optional left side E0047. `??` is the single
-fallback for both `T?` and `T ? E`: `x ?? default`, `x ?? return`,
+fallback for both `T?` and `T ! E`: `x ?? default`, `x ?? return`,
 `x ?? panic("…")`. `or` is not an operator.
 
 **S75 — Fan-out: REMOVED** (D-VERDICT-1324-1, owner ruling 2026-07-30).
@@ -705,7 +705,7 @@ linalg types; user structs use methods.
 F64` for experts/FFI. `Int` uses a machine-word fast path and spills only when
 the value needs it.
 Conversions are destination-owned named methods only (`Float.from_int(n)`,
-`U8.from_int(n)?` for fallible narrowing, `Int.parse(s) => Int ? ParseError`);
+`U8.from_int(n)?` for fallible narrowing, `Int.parse(s) => Int ! ParseError`);
 no `as`, cast punctuation, or source-owned `to_*` aliases.
 **D-NUMOPS1/2**: plain arithmetic on a fixed-width integer **traps on
 overflow**; exact default `Int` arithmetic does not overflow. Fixed-width
@@ -754,12 +754,12 @@ parsed :: Int.parse(text) ?? return
 
 **S32 / D-OPT-SPELL1 / D-SHAPE3b — Optional and Result variants** *(D-SHAPE3b
 ratified 2026-07-14 with owner substitution `Val`, not `Some`)*: `T?` uses
-`Val(expr)` / `None`; `T ? E` uses `Ok(expr)` / `Err(expr)`. When the wrapper
+`Val(expr)` / `None`; `T ! E` uses `Ok(expr)` / `Err(expr)`. When the wrapper
 type is known, `.Val` / `.None` / `.Ok` / `.Err` are the contextual forms,
 including patterns. `Some` is never a spelling or alias. Old lowercase result
 forms and foreign optional spellings receive ordinary current name/parse
 errors; E0020's teaching path is retired. **D-RESULT-OPTION-CANON1**: `T?`
-always means Optional; fallible is spaced `T ? E` / `T ?` (S34).
+always means Optional; fallible is `T ! E` / `T !` (S34, D-ERRSIGIL1).
 
 **S33 — Generic type arguments**: `Type<Args>` angle brackets; `[]` is
 reserved for collections/indexing/shorthands. Calls infer type arguments by
@@ -1290,7 +1290,7 @@ Jai `shift` idiom lands as a core cursor surface, not an operator (option C —
 `r >> U32` punctuation — rejected). `Reader.over(bytes)` wraps a `[U8]` with a
 position: `read_u8`/`read_u16_le|be`/`read_u32_le|be`/`read_u64_le|be`,
 `take(n: Int)`, `remaining()`, `is_at_end()`; every read advances and is
-fallible (`T ? String`) — a bounds miss is an ordinary error value.
+fallible (`T ! String`) — a bounds miss is an ordinary error value.
 **D-BINREAD-LEN1=A** narrowly extends the `take` length slot to accept
 `U8`/`U16`/`U32`, which widen internally to `Int`; `U64` remains an explicit
 conversion, and S42 sized-int separation is unchanged everywhere else.
@@ -1307,19 +1307,19 @@ user type of the same name shadows the core surface entirely.
 
 **S7 — Propagation**: postfix `?` on a fallible call.
 
-**S34 — Failure-returning return**: `T ? E`; bare `T ?` means `T ? Err`. A `? E`
+**S34 — Failure-returning return**: `T ! E`; bare `T !` means `T ! Err`. A `! E`
 clause after a parameter list is a full unit-fallible return annotation per
-D-FAIL-UNIT1; value-returning signatures keep `=> T ? E`. Lowers to Rust
+D-FAIL-UNIT1; value-returning signatures keep `=> T ! E`. Lowers to Rust
 `Result` (not surface syntax).
 
 **S80 — Default error value** *(D-ERR2, D-S80-RUN1 and D-FAIL-ERROR1=A,
 amended by D-FAIL-EXIT1, 2026-08-06, card #1528)*: `Err` is both the default
 error type and its constructor. `Err("msg")`, `Err("msg", code: "CFG404")`, and
 `Err("msg", cause: e)` build one Prelude-owned value with readable `message`,
-`code`, and `cause` fields. `Error` is deleted, not aliased. Bare `T ?` means
-`T ? Err`; `T ? Err` is the explicit form. An `Err(e)` in a result-arm context
+`code`, and `cause` fields. `Error` is deleted, not aliased. Bare `T !` means
+`T ! Err`; `T ! Err` is the explicit form. An `Err(e)` in a result-arm context
 still wraps the typed error value `e`. Argument shape distinguishes the two
-readings. `fn run()` is fallible by default; an expert may pin `fn run() ? E`.
+readings. `fn run()` is fallible by default; an expert may pin `fn run() ! E`.
 Returned default errors print one report frame and exit non-zero. Cross-type
 `?` conversion uses declared `impl Source => Target`; the retired
 default-conversion trait, helper, and compiler arm are deleted by D-FAIL-CONV1.
@@ -1342,7 +1342,7 @@ value route. I2 and exit 101 remain substrate attribution. S36 owns the
 process-edge conversion. D-VALIDATE1's three layers are the attribution split.
 
 **D-FAIL-CARRIER1=A — one outcome carrier** *(ratified 2026-08-06, card
-#1527)*: `T?` and `T ? E` are two views of one carrier, not two types. The
+card #1527)*: `T?` and `T ! E` are two views of one carrier, not two types. The
 two type spellings are unchanged (D-RESULT-OPTION-CANON1 stands). An outcome
 has three facts: a payload, a verdict, and the reports it collected. Three
 methods reach those facts, and no new grammar is added.
@@ -1377,7 +1377,7 @@ so every tier names one type. Examples:
 **D-FAIL-ERROR1=A — `Err` is the default error value** *(ratified 2026-08-06,
 card #1528)*: `Err("msg")` builds the default error. Labels add `code` and
 `cause`, and programs read `.message`, `.code`, and `.cause`. The default
-error type is `Err`; bare `T ?` implies it. This amends S80's builder spelling
+error type is `Err`; bare `T !` implies it. This amends S80's builder spelling
 and deletes `Error` as a type name, not an alias.
 
 **D-FAIL-CONV1=A — one conversion rail** *(ratified 2026-08-06, card #1529)*:
@@ -1391,16 +1391,16 @@ follow it.
 **D-FAIL-CONV2=A — the standard library declares the conversion for its own
 error family** *(ratified 2026-08-17, card #2018)*: the standard library ships
 one `impl <CoreError> => Err` for each member of its own error family, on
-D-FAIL-CONV1's single rail. A program can write `fn run() ?` and pass a
+D-FAIL-CONV1's single rail. A program can write `fn run() !` and pass a
 library failure up with `?` and declare nothing. `Prelude/Errors.jet` holds the
 declarations; sema injects only the conversions a module's `?` operators
 actually exercise, so unused members never enter the module. Family membership
 is derived: the Prelude registers the type printable, a Core signature returns
-it in the error position of a `T ? E` result, and showing it is not prohibited.
+it in the error position of a `T ! E` result, and showing it is not prohibited.
 `CryptoError` and `TaskFailure` are outside the family. This amends
 D-FAIL-CONV1 for the library's own types only; a program's own error type still
 needs its own declaration, and naming the failure
-(`fn run() ? JSONError`) stays correct. The accepted cost is that one conversion
+(`fn run() ! JSONError`) stays correct. The accepted cost is that one conversion
 is invisible in the program text.
 
 **D-FAIL-CTX1=A — notes ride `?` and the journey is automatic** *(ratified
@@ -2287,10 +2287,10 @@ decision amends their prover and diagnostic implementation only.
 writes to `Shared` values inside a `#Transact` block form one atomic commit —
 either every touched value's change lands or none does. No new marker (I8);
 E0746 keeps rejecting irreversible effects inside, and the single-task
-local-rollback behavior (D-TXN1–4) is unchanged. The body runs exactly once and
-the commit takes every touched handle's lock in one fixed order with no retry:
-D-CONC-STM1=A below is the operative statement of that law, and this entry does
-not restate its mechanics.
+local-rollback behavior (D-TXN1–4) is unchanged. The `#Transact` block body runs
+exactly once; the commit takes every touched `Shared` handle's lock in one fixed
+address order, applies the buffered writes, and releases -- no retry. D-CONC-STM1=A
+below is the operative statement of that law.
 
 **D-CONC-STM1=A — one-run, ordered transaction commit** *(ratified
 2026-08-06, card #1505; amends D-STM1)*: a transaction body runs exactly once.
@@ -2348,11 +2348,14 @@ spelling for the spawn surface.
 
 **D-CONC-FAIL1=A — task failure uses the one `?` rail** *(ratified
 2026-08-06, card #1505; amends D-COROUTINE1 and retires D-CONC-OUTCOME1)*:
-`join()` returns `T ? TaskFailure`. `TaskFailure` is a normal enum with
+`join()` returns `T ! TaskFailure`. `TaskFailure` is a normal enum with
 `.Cancelled`, `.DeadlineBlown`, and `.Panicked(reason)`. `task.all` returns
 its tuple on the same rail. A joined child panic becomes `.Panicked(reason)`;
 it does not kill the process. `trace()`, `exception()`, `TaskOutcome`, and
-`TaskStatus` are deleted. It amends D-COROUTINE1 and retires
+`TaskStatus` are deleted from the task-handle surface. D-SERVICE1 retains
+`TaskOutcome` and `TaskStatus` as typed service-workflow facts; that domain API
+is not `TaskHandle.outcome()` or `TaskHandle.status()` and does not restore
+`trace()` or `exception()`. It amends D-COROUTINE1 and retires
 D-CONC-OUTCOME1=A; conversion uses D-FAIL-CONV1.
 
 **D-CONC-CHAN2=D — the readiness wait rides subjectless `if`** *(ratified
@@ -2556,7 +2559,8 @@ compiled runtime must agree bit-for-bit. **Rejected forever**: token/AST/
 attribute macros, custom syntax, comptime types, const generics in v1.
 
 **S57 — Compile-time demand** *(as amended by D-META-STAGE1=B and
-D-ONCE-AT1=D, ratified 2026-08-06, card #1537)*: ordinary foldable expressions
+D-ONCE-AT1=D; the `@if` branch is reaffirmed by D-STRUCT-ONCE1=A; ratified
+2026-08-06, card #1537)*: ordinary foldable expressions
 fold implicitly. Compile time has one mark, `@`, and **the mark belongs to the
 name**, so it is written at every mention:
 
@@ -2580,6 +2584,10 @@ the Jai `#run` analog) and precedes the compile-time verbs `@if` and
 a marked name can never denote the same binding, and codegen keeps them apart:
 a marked name spells `__jet_ct_<name>` in generated Rust where a plain name
 spells `__jet_<name>`.
+
+The `@if` branch is the earlier D-WHEN1 surface owned by S57. D-STRUCT-ONCE1=A
+reverses the intervening same-day ruling that erased `@if` in favor of plain
+`if`; this paragraph is the reverse amendment link, and `@if` remains current.
 
 Because the name is the same name inside and outside a compile-time block,
 there is nothing to carry out. **D-CTMARKER1 retires outright** — the splice
@@ -2792,7 +2800,7 @@ task/join boundary, and `reset()` is rejected while any allocation view lives.
 `List.try_new`, `List.try_with_capacity`, `try_push`, `try_reserve`,
 `Map.try_insert`, `String.try_push`, and
 `mem.Arena.try_alloc`/`mem.Bump.try_alloc`/`mem.Pool.try_alloc`/
-`mem.Fixed.try_alloc` return `T ? AllocError`. `AllocError` is a Core value
+`mem.Fixed.try_alloc` return `T ! AllocError`. `AllocError` is a Core value
 with `requested_bytes: Int` and `allocator: String`; a failed allocation is
 an ordinary error value and never calls the hosted abort hook. One Prelude
 implementation owns the fallible allocation semantics for AOT, JIT, and
@@ -3016,7 +3024,7 @@ functions on top — beginners meet only the named functions.
 `cpp.*` binds at full depth via a clang-based binder emitting a generated,
 cached C shim archive per library. Classes become opaque `#SingleUse` owned
 handles with consuming cleanup (S63); methods become ordinary Jet methods;
-exceptions are caught at the shim and surface as `T ? CppError` (fallible
+exceptions are caught at the shim and surface as `T ! CppError` (fallible
 at every call site); templates instantiate on demand (`cpp.vector<Int>`);
 overloads collapse to argument labels (S61); operator overloads become
 named methods. The overlay tier corrects wrong guesses. Internal staging
@@ -3035,7 +3043,7 @@ the D-FFI-PY1 precedent):**
 - **D-FFI-JVM1=A**: `java.*` (Kotlin/Scala ride the same bytecode
   surface) — embedded JVM via the JNI invocation API, created lazily on
   first `java.*` call; classes are opaque handles; checked exceptions
-  surface as `T ? JavaError`; JVM provisioned by jetpack (I6). Its effect
+  surface as `T ! JavaError`; JVM provisioned by jetpack (I6). Its effect
   clause is `:[FFI.Java]>`.
 - **D-FFI-DOTNET1=A**: `cs.*` (C#/F#) — hostfxr/hostpolicy embed; .NET
   Tasks bridge to Jet's concurrency runtime at the boundary; NuGet as jetpack
@@ -3338,7 +3346,7 @@ previously referenced entry-file-local paths).
 **D-SERDE13 = B / D-SERDE14 = A / D-SERDE15 = A** *(ratified 2026-07-11, card
 #131)*: the value tree's one user-facing name is **`DataTree`** — the retired `Data`
 spelling becomes a teaching error pointing at `DataTree` (no alias,
-I8); tree accessors (`.field`/`.at`/`.int`/`.text`/…) return `T ? [FieldError]`
+I8); tree accessors (`.field`/`.at`/`.int`/`.text`/…) return `T ! [FieldError]`
 everywhere. `.field` and `.at` fill `path` from the segment they read; scalar
 accessors leave it empty and a containing decoder uses `FieldError.under`, so
 `?` chains inside a hand `decode` remain direct; hand-built object
@@ -3383,8 +3391,8 @@ index, not a substitute for that law.
   `fn run(args: T)` derives an `ArgsSpec`; library/tooling code may build the
   same spec dynamically for subcommands, env fallbacks, completions, and tests.
 - **D-ENV-MUTATE1=A**: `core.env` uses one process-global, raw-preserving
-  logical environment. `unset(name) => Bool ? EnvError` removes a key and
-  `vars() => [String] ? EnvError` returns a deterministic, owned names-only
+  logical environment. `unset(name) => Bool ! EnvError` removes a key and
+  `vars() => [String] ! EnvError` returns a deterministic, owned names-only
   snapshot. Unix identity and ordering use exact bytes; Windows identity uses
   `CompareStringOrdinal` ignoring case while preserving the last spelling and
   exact UTF-16 value. `get`, `home_dir`, mutations, and child launches share
@@ -3393,7 +3401,7 @@ index, not a substitute for that law.
   mutate libc `environ` or the Windows process environment block. Invalid
   names and values fail without revealing inputs; `vars` fails as a whole on
   any non-Unicode entry. Existing editions keep `set => ()` and report
-  invalid input through E3001; its fallible `() ? EnvError` signature waits
+  invalid input through E3001; its fallible `() ! EnvError` signature waits
   for a major release plus edition opt-in.
 - **D-PROCESS-SESSION1=A**: terminal-backed children use the existing
   `core.process` mechanism. `ProcessSpec.terminal()` is an explicit opt-in;
@@ -3838,7 +3846,7 @@ or `Float` becomes a duration only through the type-owned closed family
 `Duration.milliseconds/seconds/minutes/hours(value)?`. Scaling rejects overflow
 and non-finite floats; fractional milliseconds truncate toward zero. Whole-unit
 reads use only `duration.in(.Milliseconds/.Seconds/.Minutes/.Hours)?`, return
-`Int ? RangeError`, and truncate toward zero. The former `core.time` free
+`Int ! RangeError`, and truncate toward zero. The former `core.time` free
 constructors and per-unit readers leave the surface without aliases. D-TYPE2-TIME1
 amends the static literal rule: `ns`, `us`, `ms`, `s`, `min`, `h`, and `d` resolve
 through the canonical `core.units::Time` family and produce the checked
@@ -5662,6 +5670,9 @@ group — D-CONC-GROUP1=A later settled the public handle name as `Group`, so th
 is a bounded OneForOne restart budget with parent escalation, carried as data on
 the group (D-CONC-SCHED1=A).
 Deployment may place/scale the declared graph but never invent children.
+Service observations read the typed workflow `TaskStatus` and `TaskOutcome`
+facts and export through the existing structured `core.log` sink; they do not
+parse string outcomes or exceptions and add no second telemetry mechanism.
 
 **D-SERVICE-DELIVERY1=D — at-most-once default, proved durable retry**: live
 calls are at-most-once with per-sender FIFO. Full mailboxes wait under deadline
@@ -5684,7 +5695,7 @@ Version markers gate branch changes; incompatible deployment is refused against
 the affected live histories.
 
 **D-SERVICE-IDENTITY1=D — signed generational directories**: callers receive
-typed endpoint capabilities from signed, generation-versioned directory
+typed endpoints from signed, generation-versioned directory
 snapshots projected from source trust policy. Resolution carries generation and
 staleness bounds; partitions, revocation, and expiry are typed results with no
 ambient DNS fallback. Rotation overlaps generations. Explicit outside-graph
@@ -6201,7 +6212,7 @@ proof-free. Implemented on card #746.
 **2026-07-25 — D-UNIONTYPE1=A**: `A | B` is closed structural enum sugar, not a
 second sum mechanism. Nested unions flatten, duplicates drop, and identity is
 order-insensitive with a deterministic canonical spelling and codegen enum.
-`T ? E1 | E2` parses as `T ? (E1 | E2)`. A member widens into its union only at
+`T ! E1 | E2` parses as `T ! (E1 | E2)`. A member widens into its union only at
 binding, argument, return, Codable field, and `?` error-propagation boundaries.
 Match arms name member types (`.Int(n)`, `.String(s)`). Codable decode dispatches
 by primary wire shape and rejects ambiguous shapes (E2415). Named enums stay the
@@ -7136,7 +7147,7 @@ refusal), #1623 (the `$` read surface), #1571 (the gate ledger), #1624 (the one
 law voice). No per-plane card in #1517–#1579 closes before its substrate
 prerequisite closes.
 
-**2026-08-06 — D-CONC-SPAWN1 = D / D-CONC-FAIL1 = A / D-CONC-JOIN1** *(card #1685)*. The spawn surface has one reserved word: `task`. A plain `task f()` or `task { … }` starts one child. Nested selectors stay free identifiers: `task.all { … }` waits for every branch and fail-fast cancels siblings, `task.race { … }` returns the first successful branch and cancels losers, and `task.any { … }` returns the first completed branch and cancels the rest. `task.group g { … }` owns a lexical scope; `task.group g(limit: n) { … }` bounds active children and the group joins at close. `Group` parameters reuse the caller's lexical group. `join()` is the fallible `T ? TaskFailure` rail with `.Cancelled`, `.DeadlineBlown`, and `.Panicked(reason)`. `TaskOutcome`, `TaskStatus`, `trace()`, and `exception()` are retired. The old `taskgroup`, `g.task =>`, `g.all([…])`, `g.race([…])`, `g.any([…])`, `tasks.spawn`, `tasks.spawn_group`, `tasks.join_all`, and `tasks.wait_any` spellings have no compatibility path.
+**2026-08-06 — D-CONC-SPAWN1 = D / D-CONC-FAIL1 = A / D-CONC-JOIN1** *(card #1685)*. The spawn surface has one reserved word: `task`. A plain `task f()` or `task { … }` starts one child. Nested selectors stay free identifiers: `task.all { … }` waits for every branch and fail-fast cancels siblings, `task.race { … }` returns the first successful branch and cancels losers, and `task.any { … }` returns the first completed branch and cancels the rest. `task.group g { … }` owns a lexical scope; `task.group g(limit: n) { … }` bounds active children and the group joins at close. `Group` parameters reuse the caller's lexical group. `join()` is the fallible `T ! TaskFailure` rail with `.Cancelled`, `.DeadlineBlown`, and `.Panicked(reason)`. `TaskOutcome`, `TaskStatus`, `trace()`, and `exception()` are retired. The old `taskgroup`, `g.task =>`, `g.all([…])`, `g.race([…])`, `g.any([…])`, `tasks.spawn`, `tasks.spawn_group`, `tasks.join_all`, and `tasks.wait_any` spellings have no compatibility path.
 **2026-08-08 — D-LIB-EXPORT1=C / D-LIB-DYNTRUST1=A / D-LIB-NAME1=A /
 D-LIB-CALLGRANT1=A** *(card #1421)*: `Library` keeps one output kind. Its
 `loadable: true` field requests a `.jetlib` artifact. `Mod.load(path,
@@ -7328,7 +7339,7 @@ the same operation labels. Unknown roots reuse E0119 with a UI snapshot.
 row. A function or package may deny it with `:[!Panic]>` or
 `effects: { deny: [Panic] }`; the existing prohibition and manifest-budget
 machinery enforce the denial across the whole reachable dependency graph.
-Expected failure returns `T ? E`. A programmer-error stop is admissible only
+Expected failure returns `T ! E`. A programmer-error stop is admissible only
 when callers carry a `#Pre` or refinement fact that proves the stop unreachable.
 The diagnostic names the panic site and gives the three exits: return a
 fallible result, add facts, or stay undenied. The row is compile-time only and
@@ -7694,6 +7705,56 @@ a return type, 34 carried an effect ceiling, 641 declared nothing, 230 functions
 used the `::` body, and 387 arm, lambda and control sites already read `:>` as
 the body marker. The migration is 461 signatures and 230 bodies, performed by
 `jet fmt`.
+
+**2026-08-19 — D-STRUCT-PLANE1=A** *(card #2052; ratified 2026-08-19)*:
+Structure is a fact plane: liveness, lifecycle, and import-edge rows join the
+one fact registry, use one gate ledger, and erase before runtime; `jet inspect
+structure` reads that ledger through the structure lens. It adds no spelling,
+separate lint plane, or external analyzer; it amends no prior decision and
+retires no separate mechanism.
+
+**2026-08-19 — D-STRUCT-LIVE1=A** *(card #2052; ratified 2026-08-19)*:
+Unused imports, bindings, private functions, and unreachable `pub(package)` or
+application-target exports are warning verdicts under D-LINTPOLICY1, with
+delete-or-rename-to-`_name` (D-NAME-SIGIL1) as the repair and library `pub`
+exempt. It adds no spelling or new suppression mechanism, and amends or retires
+none.
+
+**2026-08-19 — D-STRUCT-LIFE1=A** *(card #2052; ratified 2026-08-19)*:
+The lifecycle ladder is `_name`, `pub _name`, `pub`, `#Deprecated(since:,
+use:, removed_in:)`, then a named removed delta; any package may mark a `pub`
+item, with `removed_in` dormant until editions exist. It opens the Core-only
+E2001/E2002/L2001 area to all packages and retires the two duplicate Core
+tables into ordinary markers.
+
+**2026-08-19 — D-STRUCT-EDGE1=A** *(card #2052; ratified 2026-08-19)*:
+Packages may write `boundaries: { deny: [{ from: "...", to: "..." }] }` for
+their own import edges, with one trailing `*` subtree wildcard per side;
+resolution names violating edges and zero-match rules warn. It adds the
+manifest key `boundaries`, keeps the policy narrowing law, and does not merge
+with the existing effect vocabulary; it amends no prior source decision.
+
+**2026-08-19 — D-STRUCT-POLICY1=A** *(card #2052; ratified 2026-08-19)*:
+Users may declare nominal package-scoped settings through checked bodies,
+`pub policy audit(topic: String) { wrap(call) { ... } }`, which observe typed
+arguments/results and visible effects without editing the wrapped signature.
+It extends D-CALLPOLICY1's setting vocabulary while preserving the `#Policy(...)`
+and `apply(...)` spellings; `policy` and `wrap` are the new declaration words,
+and no prior wrapper spelling is retired.
+
+**2026-08-19 — D-STRUCT-ONCE1=A** *(card #2052; ratified 2026-08-19)*:
+The existing `@loop` may expand marker bodies, top-level impl items, and
+test/bench blocks from closed literal or comptime-pure tables, including the
+closed type-list and interpolated declaration-name amendments. It amends
+D-GENMOD-VALUE1 and D-META-CODE1, reverses the intervening same-day ruling
+that erased `@if` in favor of plain `if`, and is linked back from the earlier
+S57/D-WHEN1 entry above.
+
+**2026-08-21 — D-ERRSIGIL1=A** *(card #2127; ratified 2026-08-21)*: `?` has
+one meaning: `T?` means a value might be absent, while a fallible type uses
+`T ! E` (or `T !` for the default `Err`); call-site `?` propagation and `??`
+keep their current meanings. Option B's `!!` operator and the overloaded `T ? E`
+spelling are rejected.
 
 ## Ratified decision index
 
@@ -8317,3 +8378,53 @@ user-typeable syntax; a row here with no prose above it is still binding.
 | `D-ZIPPAD1` | E | `c0a2mcjv` |
 
 <!-- END GENERATED RATIFIED INDEX -->
+
+## Operative structure slate — D-STRUCT-* (ratified 2026-08-19, card #2052)
+
+The six A outcomes below are the operative record for the structure-program-is-a-value slate.
+They are ratified law; implementation follows on separate cards.
+
+- **D-STRUCT-PLANE1=A — structure is a fact plane.** Liveness, lifecycle, and
+  import-edge facts enter the one registry under D-FACT-LAW1. Their safe
+  directions and gates are recorded once: referenced / `_name`, fewer promises
+  or more warnings honored / policy allow, and fewer edges / an on-record
+  manifest rule edit. A row without both a direction and a gate fails the
+  compiler guard; `jet inspect structure` reads the same gate ledger, and all
+  rows erase before runtime.
+- **D-STRUCT-LIVE1=A — four liveness verdicts.** Unused imports, unused
+  bindings, unused private functions, and unreachable `pub(package)` or
+  application-target exports warn under D-LINTPOLICY1 and never fail by
+  default. Delete the name or rename it to the existing `_name` form; library
+  `pub` remains exempt, the first three checks are file-local, and export
+  reachability uses the package's explicit import graph.
+- **D-STRUCT-LIFE1=A — one lifecycle ladder.** `_name` is internal, `pub _name`
+  is soft-public, `pub` is stable, `#Deprecated(since: "1.2", use: "parse")`
+  is retiring, and removal is a named delta; `removed_in:` waits for editions
+  and is warn-only before then. The consumer warning carries the replacement,
+  `jet fix` handles a plain rename, and the duplicated Core-only deprecation
+  rows in `jet-pkg-model/Manifest.rs` and `Sema/Edition.rs` are replaced by
+  ordinary markers using the existing L2001/E2002 path.
+- **D-STRUCT-EDGE1=A — manifest-owned import boundaries.** A package may write
+  `boundaries: { deny: [{ from: "app.ui", to: "app.db" }] }`; each side may
+  have one trailing `*` subtree wildcard. Rules govern the declaring package's
+  own modules, are checked at import resolution, narrow rather than widen,
+  and do nothing at runtime; an absent key preserves today's behavior and a
+  zero-match rule is a liveness warning.
+- **D-STRUCT-POLICY1=A — users may author settings.** The declaration form is
+  `pub policy audit(topic: String) { wrap(call) { ... } }`; parameters are
+  typed/defaulted, the wrapper body receives the callable, observes its
+  arguments/results, and adds visible effects without changing its signature.
+  The setting is nominal and package-scoped, unknown names identify their
+  declaring package, and the body has no AST, macro, or signature-edit power.
+  This extends D-CALLPOLICY1's vocabulary; `#Policy(...)` and `apply(...)` do
+  not change.
+- **D-STRUCT-ONCE1=A — `@loop` reaches program declarations.** Existing
+  `@loop` may appear in marker bodies, top-level impl-item position, and test
+  or bench declarations, over literal or comptime-pure closed tables, with
+  each generated declaration checked as if written. The ruling amends
+  D-GENMOD-VALUE1 for closed type-list bindings and D-META-CODE1 for
+  interpolated declaration names; it creates no type at a use site, keeps the
+  impl set closed, and exposes expansion through `jet inspect expand`.
+  It also reverses the intervening same-day plain-`if` ruling: the earlier
+  S57/D-WHEN1 entry points back to this decision, and `@if` remains the live
+  compile-time branch spelling.

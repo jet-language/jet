@@ -6,7 +6,7 @@ formatting, semantic tokens (full/range/delta), inlay hints, navigation,
 rename, document links, run/test code lenses, call hierarchy, and type
 hierarchy.
 
-## Language-server capabilities
+## Language-server features
 
 | Area | Jet LSP 3.17 behavior |
 |---|---|
@@ -17,7 +17,7 @@ hierarchy.
 | Semantics | Semantic tokens full/range/delta, inlay hints, call hierarchy, trait/type hierarchy |
 | Workspace | Multiple roots with folder add/remove notifications; `jet.impact` and `jet.budgetReports` commands |
 
-Every advertised capability maps to a named non-vacuous test in `tests/lsp.rs`.
+Every advertised feature maps to a named non-vacuous test in `tests/lsp.rs`.
 
 ## Setup
 

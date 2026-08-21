@@ -96,5 +96,9 @@ pub const MARKER_UNDO: &str = "Undo"; // D-BOUND-UNDO1
 /// `crates/jet-foundation/src/Numeric.rs`.
 pub const MARKER_ALLOW: &str = "allow"; // D-LINTPOLICY1
 
+/// D-STRUCT-LIFE1=A (ratified 2026-08-19): any package may mark a public item
+/// as retiring with `#Deprecated(since: ..., use: ...)`.
+pub const MARKER_DEPRECATED: &str = "Deprecated";
+
 // D-MARKSIG1=A: marker rows live in `Policy::APPLIED_RULES`. Keep marker
 // spelling constants here; do not add a second name/site/signature table.

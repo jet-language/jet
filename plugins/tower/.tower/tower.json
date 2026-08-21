@@ -2,8 +2,8 @@
   "meta": {
     "version": 4,
     "project": "Jet",
-    "nextNum": 2131,
-    "rev": 40617,
+    "nextNum": 2137,
+    "rev": 40630,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -1896,7 +1896,7 @@
       "title": "M08 · Language surface coherence",
       "goal": "The one body rule (:: one-liners), loop arrows, alias ::, .call, map spacing, fmt simplify, test-bind, three-way compare, Int overflow model, sandbox rename, acronym lexicon, defer-close statement, vocabulary page.",
       "criteria": [],
-      "status": "open",
+      "status": "review-ready",
       "created": "2026-08-12T18:10:01.512Z"
     },
     {
@@ -134811,7 +134811,7 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": "e3-m08-surface-coherence",
-      "phase": "ready",
+      "phase": "done",
       "priority": "P2",
       "plan": "## Outcome\nCriteria 4-8 of this card are closed: all six ratified outcomes (D-STRUCT-PLANE1=A, LIVE1=A, LIFE1=A, EDGE1=A, POLICY1=A, ONCE1=A, ratified 2026-08-19) are recorded as an operative slate section in docs/spec/syntax-decisions.md; one implementation card per outcome is minted with I4/I5/I7/I9 build gates; the Syntax.rs I7 registry carries the new-surface entries; the syntax-decisions log entry exists; jet devtools grammars are regenerated and snapshots re-blessed for the surface the recording itself changes. Criteria 1-3 are already met — do not re-litigate the ballots.\n\n## Law\n- The six ratified decisions on this card, verbatim from `card show '#2052'`: D-STRUCT-PLANE1=A (structure facts join the fact registry; rows: liveness/lifecycle/edge, each with safe direction + gate word; `jet inspect structure`), D-STRUCT-LIVE1=A (four verdicts: unused_import/unused_binding/unused_fn/unreachable_export; `_name` suppression; export tier scoped to pub(package) + application targets; library pub exempt), D-STRUCT-LIFE1=A (#Deprecated(since:, use:, removed_in:?) marker for every package; BOTH Core table copies deleted — jet-pkg-model Manifest.rs:110-141 canonical + Sema/Edition.rs:34 mirror; cbor.encode/decode become ordinary markers; warning rides the live L2001/E2002 path re-reading the marker registry; removed_in dormant until editions), D-STRUCT-EDGE1=A (boundaries: manifest key, effect-budget shape, deny rows {from,to} with one trailing-* subtree wildcard per side, resolution-time check, error names edge+rule index+two fixes, zero-match rule = liveness warning), D-STRUCT-POLICY1=A (user-declared policy settings via checked marker-body machinery D-META-USER1=A; `pub policy name(params) { wrap(call) { … } }`; preserved-contract invariant of D-CALLPOLICY2; nominal, package-scoped; #Policy/apply spelling untouched), D-STRUCT-ONCE1=A (@loop legal in marker bodies, top-level impl-item position, test/bench blocks; sources are written literal tables/comptime-pure values; TWO NAMED AMENDMENTS: closed-type-list comptime binding kind beyond D-GENMOD-VALUE1, and interpolated declaration names in marker bodies).\n- Owner ratification comment on D-STRUCT-ONCE1 (binding): \"With this decision, we need to reverse the decision made earlier today to erase @if and collapse to if.\" The reversal is part of criterion 4's recording work.\n- Anchors the slate composes with: D-FACT-LAW1=B, D-LINTPOLICY1, D-NAME-SIGIL1, D-EFFBUDGET1, D-PACKAGE-POLICY-SCOPE1, D-CALLPOLICY1=E/D-CALLPOLICY2=C (shipped), D-META-USER1=A, D-META-CODE1=A, D-ONCE-LAW1, greenfield law, D-VERDICT-1455-1 (markers exist iff registered).\n- House rule (memory://root, #1889 lesson): the spec slate section is the operative wording; ballot texts are historical.\n\n## Work\n1. Resolve the @if reversal FIRST, since the ONCE1 spec entry depends on it: the erase-@if/collapse-to-if decision is NOT in the Tower decision store as of this plan (searched: no decision, no verdict row mentions it). It is being drafted/recorded today on the isomorphic-ontology ballot cards (#2039-#2043 lineage — D-VERDICT-2039-1 is that slate's first ratified row). Locate it via `jq` over .tower/tower.json decisions + `card show` on #2040-#2043, and ask Main/Ballot204xb over hub if absent. Then record the reversal where the original lives (reopen/amend that decision per owner comment, quoting it) and make the D-STRUCT-ONCE1 spec entry state plainly: `@if` survives as the comptime conditional beside `@loop`. If the original truly was never recorded, log that finding on #2052 and record the owner comment itself as the operative ruling in the slate entry.\n2. Criterion 4a + 6 — write the slate section at the END of docs/spec/syntax-decisions.md (match the existing end-of-file slate style, e.g. the D-MEM slate): one entry per decision carrying the operative wording distilled from the ratified option-A technical text (the Law section above is the checklist), each naming its amendments explicitly — LIFE1 opens the Core-only E2001/E2002/L2001 area to every package; ONCE1 carries its two template-law amendments and the @if reversal note. Cite docs/proposals/structure-program-is-a-value.md as the source proposal and card #2052.\n3. Criterion 4b — mint six implementation cards (`card add`, epoch e3, refs = proposal + decision ID, `--by <You>`), each with observable exit criteria and gates:\n   - **PLANE1 card** (substrate): structure fact rows (liveness/lifecycle/edge kinds) in the fact registry with stated safe direction + gate word; `jet inspect structure` lens; drift guard (a row with no direction/gate fails the compiler's own build); I3 runtime erasure. Natural host: the name ledger / D-NAME-TREE1 resolver work (proposal \"Implementation shape A\"). Other cards block on this one.\n   - **LIVE1 card**: four registered diagnostics (I4: code + what/why/fix + UI snapshot each), `_name` suppression honored, policy names unused_import/unused_binding/unused_fn/unreachable_export deny/allow-able; the package-wide reference pass for the export tier (pub(package) + application targets only; library pub exempt); `jet fix` remove-or-underscore repair; I5 example + golden; I9 same verdicts on every tier (facts are compile-time — state the trivially-satisfied tier story in the card). Note the proposal's escape hatch: if the reference pass proves expensive, file-local ships and the export tier gets its own criterion evidence.\n   - **LIFE1 card**: #Deprecated registered in Prelude/Markers.jet (D-VERDICT-1455-1: registry row or it does not exist); L2001/E2002 emission rewired from the hardcoded table (CheckerCoreLib/core_call.rs) to the marker registry; BOTH table copies deleted in the same change (greenfield); cbor.encode/decode migrated to markers; `jet fix` applies plain-rename replacements; removed_in: optional + warn-only until editions; policy name deprecated_use.\n   - **EDGE1 card**: `boundaries:` key parsed in jet-pkg-model (sibling of the effects: block, Package/Blocks.rs), registered diagnostic naming edge + rule index + both fixes (I4), check at import resolution, zero-runtime presence, zero-match rule surfaces as a liveness warning (ties to LIVE1), I5 example.\n   - **POLICY1 card**: `pub policy name(params) { wrap(call) { … } }` declaration riding D-META-USER1 marker-body machinery; wrap body is ordinary checked Jet; effects join the wrapped row visibly; signature edits forbidden (D-CALLPOLICY2 preserved-contract invariant); unknown setting stays an error naming the declaring package; I7: new user-typeable syntax → Syntax.rs rows + grammar + snapshots on that card.\n   - **ONCE1 card**: @loop reaches marker bodies / impl-item position / test+bench blocks; the two amendments implemented exactly as named; orphan rule at expansion site; `jet inspect expand` coverage; dogfood migration = acceptance test: Units.jet 24-row prefix blocks (~700 lines), Errors.jet 13 impls, the 4x3x2 bench matrix — deletions land with the feature per greenfield.\n   Wire blockedBy: LIVE1/LIFE1/EDGE1 cards → PLANE1 card; POLICY1 and ONCE1 are independent. Commit the board immediately after minting (tracked-store lesson).\n4. Criterion 5 — Syntax.rs (crates/jet-foundation/src/Syntax.rs): add the I7 entries the slate creates: MARKER_DEPRECATED (LIFE1), the boundaries: manifest field constant (package_files module, EDGE1), the `policy` declaration word (POLICY1), and the @loop position extension note + @if reversal note (ONCE1); PLANE1/LIVE1 add no token — record them as \"adds no token\" doc lines, the file's established pattern. Constants without shipped parser support are legal there (see the D-CONC block precedent, Syntax.rs:230-232: rows land now, parsing lands on the implementation cards).\n5. Criteria 7 + 8 — regenerate the editor grammars (the devtools grammar regen path named by D-VERDICT-1455-1's CI guards; find the command via `jet devtools --help` / the grammar-generation test) and re-bless the affected snapshots (`cargo test --test diagnostic_snapshots` bless flow) — scoped to what steps 2-4 actually change (doc + registry rows). If grammar output is byte-identical because no marker row shipped yet (rows may land with the POLICY1/ONCE1 impl cards instead — decide by whether step 4 adds registry rows or doc-only lines), record that as the criterion evidence rather than forcing a diff.\n6. Meet criteria 4-8 with concrete evidence (spec section anchor + commit, six card numbers AND Tower ids — numbers are reusable, ids are not — Syntax.rs diff, grammar/snapshot command output). Commit source + board together.\n\n## Not building\n- No implementation of any element — verdicts, marker rewiring, boundaries parsing, policy declarations, template reach all belong to the six minted cards.\n- No re-opening of ballot content; the six outcomes are ratified =A and the review passes stand.\n- The drift-bug cards #2053/#2054/#2055 are separate and untouched.\n- The @if reversal is recorded, not implemented: if the collapse shipped code today, reverting that code belongs to a card named in step 1's finding, not to this pass.\n\n## Proof\n- Criterion 4: spec slate section committed (quote heading + commit hash); `card list` shows the six impl cards with criteria and refs; blockedBy edges present.\n- Criterion 5: Syntax.rs diff showing the entries; the file's own I7 header rule satisfied (every entry maps to a D-STRUCT id now in docs/spec/syntax-decisions.md).\n- Criterion 6: the syntax-decisions log entry (the file's changelog convention) in the same commit.\n- Criteria 7/8: grammar-regen command output + re-blessed snapshot test run (`cargo test --test diagnostic_snapshots ui_snapshots` green), or the recorded byte-identical no-op rationale.\n- Recording changes no runtime behavior → no jet run/--release parity probe; full-suite proof stays at epoch closeout.\n\n## blockedBy\nnone — all six decisions are ratified (clearance: 6/6 on this card); the only sequencing risk is the @if-collapse record living on a sibling's in-flight card, handled by step 1's hub coordination rather than a blocker edge.",
       "blockedBy": [],
@@ -134854,47 +134854,47 @@
         {
           "n": 4,
           "text": "Ratified outcomes recorded in docs/spec and implementation cards minted per outcome",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-19T11:43:20.674Z"
+          "evidence": "All six ratified outcomes recorded as proper slate entries in `docs/spec/syntax-decisions.md:7709`, not merely as generated index rows. The amendment trap was handled explicitly: D-STRUCT-ONCE1 reverses an earlier same-day ruling that erased `@if`, and the relationship is now written in both directions at `:2561` and `:2588`, so the slate cannot silently contradict a live entry.",
+          "at": "2026-08-21T14:52:53.661Z"
         },
         {
           "n": 5,
           "text": "Syntax.rs entry updated",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-19T12:29:08.951Z"
+          "evidence": "Syntax registered with decision ids per I7: `crates/jet-foundation/src/Syntax.rs:150` marks the decisions that introduce no new spelling, `core_surface.rs:351` carries `policy` and `wrap`, `markers.rs:99` carries `#Deprecated`, and `jetpack_config.rs:637` carries `boundaries`.",
+          "at": "2026-08-21T14:52:54.137Z"
         },
         {
           "n": 6,
           "text": "syntax-decisions.md log entry",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-19T12:29:08.951Z"
+          "evidence": "Operative slate section appended at `docs/spec/syntax-decisions.md:8382`, following the shape of the earlier slate sections rather than inventing a layout.",
+          "at": "2026-08-21T14:52:54.915Z"
         },
         {
           "n": 7,
           "text": "jet devtools grammars regenerated",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-19T12:29:08.951Z"
+          "evidence": "Editor grammars regenerated; `cargo test --test grammar` passes 29/29.",
+          "at": "2026-08-21T14:52:55.665Z"
         },
         {
           "n": 8,
           "text": "snapshots re-blessed",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-19T12:29:08.951Z"
+          "evidence": "The `@if`, callable-policy and deprecation snapshots pass unchanged, so nothing needed blessing and nothing was blessed. One unrelated drift was found and deliberately left alone: `tests/ui/genmod_value_not_comptime.jet` shows new `E0065` `::`-body drift that has nothing to do with this slate, and blessing it would have recorded an unexamined change.",
+          "at": "2026-08-21T14:52:56.433Z"
         }
       ],
       "refs": [
@@ -134908,8 +134908,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-19T11:43:07.845Z",
-      "updated": "2026-08-19T16:21:19.362Z",
-      "updatedBy": "fable"
+      "updated": "2026-08-21T14:52:57.521Z",
+      "updatedBy": "orchestrator",
+      "completedAt": "2026-08-21T14:52:57.521Z"
     },
     {
       "id": "c0tcvfkk",
@@ -139838,6 +139839,156 @@
       "updated": "2026-08-21T05:18:53.954Z",
       "updatedBy": "fable-e3-burndown",
       "completedAt": "2026-08-21T05:18:53.953Z"
+    },
+    {
+      "id": "c05xx3y0",
+      "num": 2131,
+      "title": "D-STRUCT-PLANE1: wire the structure fact plane",
+      "body": "Ratified 2026-08-19 on card #2052, recorded at docs/spec/syntax-decisions.md:7709. Wire structure facts, gates, inspection and runtime erasure so that liveness, lifecycle and edges are all facts under one law rather than three ad-hoc mechanisms.\n\nExit criteria are the decision's own terms; read the slate entry before planning.",
+      "kind": "feature",
+      "track": "epoch",
+      "epoch": "e4",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [],
+      "refs": [],
+      "tags": [],
+      "parentId": "c0b6kkbv",
+      "needsAcceptance": false,
+      "created": "2026-08-21T14:53:06.849Z",
+      "updated": "2026-08-21T14:53:06.849Z",
+      "updatedBy": "orchestrator"
+    },
+    {
+      "id": "c0ec460v",
+      "num": 2132,
+      "title": "D-STRUCT-LIVE1: four liveness verdicts",
+      "body": "Ratified 2026-08-19 on card #2052. Implement unused imports, unused bindings, unused functions and unreachable exports as liveness verdicts, with policy handling.\n\nContext worth knowing: Jet currently has no unused-import, unused-binding or unused-function diagnostic at all — `jet check` prints ok over all three. This card is what changes that.",
+      "kind": "feature",
+      "track": "epoch",
+      "epoch": "e4",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [],
+      "refs": [],
+      "tags": [],
+      "parentId": "c0b6kkbv",
+      "needsAcceptance": false,
+      "created": "2026-08-21T14:53:07.357Z",
+      "updated": "2026-08-21T14:53:07.357Z",
+      "updatedBy": "orchestrator"
+    },
+    {
+      "id": "c0lzs7ou",
+      "num": 2133,
+      "title": "D-STRUCT-LIFE1: one lifecycle ladder",
+      "body": "Ratified 2026-08-19 on card #2052. Implement user-facing #Deprecated and end the Core-only deprecation table.\n\nThat table is currently duplicated — jet-pkg-model Manifest.rs is canonical and Sema/Edition.rs mirrors it — and lives only for cbor.encode/decode. One mechanism, per I8.",
+      "kind": "feature",
+      "track": "epoch",
+      "epoch": "e4",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [],
+      "refs": [],
+      "tags": [],
+      "parentId": "c0b6kkbv",
+      "needsAcceptance": false,
+      "created": "2026-08-21T14:53:07.820Z",
+      "updated": "2026-08-21T14:53:07.820Z",
+      "updatedBy": "orchestrator"
+    },
+    {
+      "id": "c0tw88ts",
+      "num": 2134,
+      "title": "D-STRUCT-EDGE1: import edges as manifest policy",
+      "body": "Ratified 2026-08-19 on card #2052. Parse and enforce import boundaries declared in the manifest, using the `boundaries` spelling registered at crates/jet-foundation/src/Syntax/jetpack_config.rs:637.",
+      "kind": "feature",
+      "track": "epoch",
+      "epoch": "e4",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [],
+      "refs": [],
+      "tags": [],
+      "parentId": "c0b6kkbv",
+      "needsAcceptance": false,
+      "created": "2026-08-21T14:53:08.297Z",
+      "updated": "2026-08-21T14:53:08.298Z",
+      "updatedBy": "orchestrator"
+    },
+    {
+      "id": "c02582xi",
+      "num": 2135,
+      "title": "D-STRUCT-POLICY1: who may mint a policy setting",
+      "body": "Ratified 2026-08-19 on card #2052. Implement user-declared checked policy wrappers, using the `policy` and `wrap` spellings registered at crates/jet-foundation/src/Syntax/core_surface.rs:351.\n\nCross-cutting policy already ships as #Policy(retry(3), trace(...)) with apply() preserving the full checked contract (D-CALLPOLICY1=E, card #1396). PolicySetting is currently a Core-closed table; this card opens authorship.",
+      "kind": "feature",
+      "track": "epoch",
+      "epoch": "e4",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [],
+      "refs": [],
+      "tags": [],
+      "parentId": "c0b6kkbv",
+      "needsAcceptance": false,
+      "created": "2026-08-21T14:53:08.796Z",
+      "updated": "2026-08-21T14:53:08.796Z",
+      "updatedBy": "orchestrator"
+    },
+    {
+      "id": "c09w33e1",
+      "num": 2136,
+      "title": "D-STRUCT-ONCE1: @loop reaches marker bodies, impl items and test blocks",
+      "body": "Ratified 2026-08-19 on card #2052. Extend @loop to marker bodies, impl items and test blocks.\n\nCarries two named amendments plus the restoration of @if: the owner's ratification comment states this decision reverses an earlier same-day ruling that erased @if in favour of if. The amendment links are recorded at docs/spec/syntax-decisions.md:2561 and :2588 — honour both.",
+      "kind": "feature",
+      "track": "epoch",
+      "epoch": "e4",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [],
+      "refs": [],
+      "tags": [],
+      "parentId": "c0b6kkbv",
+      "needsAcceptance": false,
+      "created": "2026-08-21T14:53:09.265Z",
+      "updated": "2026-08-21T14:53:09.265Z",
+      "updatedBy": "orchestrator"
     }
   ],
   "decisions": [
@@ -186771,6 +186922,90 @@
   ],
   "events": [
     {
+      "at": "2026-08-21T14:53:09.265Z",
+      "by": "orchestrator",
+      "action": "card.add",
+      "ref": "c09w33e1",
+      "note": "D-STRUCT-ONCE1: @loop reaches marker bodies, impl items and test blocks"
+    },
+    {
+      "at": "2026-08-21T14:53:08.796Z",
+      "by": "orchestrator",
+      "action": "card.add",
+      "ref": "c02582xi",
+      "note": "D-STRUCT-POLICY1: who may mint a policy setting"
+    },
+    {
+      "at": "2026-08-21T14:53:08.298Z",
+      "by": "orchestrator",
+      "action": "card.add",
+      "ref": "c0tw88ts",
+      "note": "D-STRUCT-EDGE1: import edges as manifest policy"
+    },
+    {
+      "at": "2026-08-21T14:53:07.820Z",
+      "by": "orchestrator",
+      "action": "card.add",
+      "ref": "c0lzs7ou",
+      "note": "D-STRUCT-LIFE1: one lifecycle ladder"
+    },
+    {
+      "at": "2026-08-21T14:53:07.357Z",
+      "by": "orchestrator",
+      "action": "card.add",
+      "ref": "c0ec460v",
+      "note": "D-STRUCT-LIVE1: four liveness verdicts"
+    },
+    {
+      "at": "2026-08-21T14:53:06.849Z",
+      "by": "orchestrator",
+      "action": "card.add",
+      "ref": "c05xx3y0",
+      "note": "D-STRUCT-PLANE1: wire the structure fact plane"
+    },
+    {
+      "at": "2026-08-21T14:52:57.522Z",
+      "by": "orchestrator",
+      "action": "card.update",
+      "ref": "c0b6kkbv",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-21T14:52:56.434Z",
+      "by": "orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0b6kkbv",
+      "note": "#8"
+    },
+    {
+      "at": "2026-08-21T14:52:55.666Z",
+      "by": "orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0b6kkbv",
+      "note": "#7"
+    },
+    {
+      "at": "2026-08-21T14:52:54.915Z",
+      "by": "orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0b6kkbv",
+      "note": "#6"
+    },
+    {
+      "at": "2026-08-21T14:52:54.138Z",
+      "by": "orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0b6kkbv",
+      "note": "#5"
+    },
+    {
+      "at": "2026-08-21T14:52:53.661Z",
+      "by": "orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0b6kkbv",
+      "note": "#4"
+    },
+    {
       "at": "2026-08-21T14:51:06.249Z",
       "by": "orchestrator",
       "action": "card.update",
@@ -190185,90 +190420,6 @@
       "action": "card.criteria-meet",
       "ref": "c0oeuws4",
       "note": "#9"
-    },
-    {
-      "at": "2026-08-21T00:39:24.374Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0oeuws4",
-      "note": "#6"
-    },
-    {
-      "at": "2026-08-21T00:39:23.531Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0oeuws4",
-      "note": "#4"
-    },
-    {
-      "at": "2026-08-21T00:39:22.722Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c05y3gfw",
-      "note": "#7"
-    },
-    {
-      "at": "2026-08-21T00:39:21.985Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c05y3gfw",
-      "note": "#4"
-    },
-    {
-      "at": "2026-08-21T00:39:21.483Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c05y3gfw",
-      "note": "#3"
-    },
-    {
-      "at": "2026-08-21T00:39:21.004Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c05y3gfw",
-      "note": "#2"
-    },
-    {
-      "at": "2026-08-21T00:39:20.518Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c05y3gfw",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-21T00:39:20.046Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0qijk9s",
-      "note": "#6"
-    },
-    {
-      "at": "2026-08-21T00:39:19.572Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0y3l5yy",
-      "note": "#5"
-    },
-    {
-      "at": "2026-08-21T00:39:19.102Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0y3l5yy",
-      "note": "#4"
-    },
-    {
-      "at": "2026-08-21T00:39:18.622Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0y3l5yy",
-      "note": "#2"
-    },
-    {
-      "at": "2026-08-21T00:22:20.046Z",
-      "by": "owner",
-      "action": "decision.ratify",
-      "ref": "D-ERRSIGIL1",
-      "note": "A"
     }
   ],
   "nextNum": 368,

@@ -948,6 +948,8 @@ pub const CORE_CALLS: &[CoreCallRecord] = &[
     // the shared Prelude; worker/group topology stays on typed methods.
     CoreCallRecord::new("core.service", "tree", "jet_services_tree", true, &[false]),
     CoreCallRecord::new("core.service", "tree_show", "jet_services_tree_show", true, &[true]),
+    CoreCallRecord::new("core.service", "runtime", "jet_services_runtime", true, &[false, false])
+        .without_direct_aot(),
     CoreCallRecord::new("core.services", "restart_one_for_one", "jet_services_restart_one_for_one", true, &[]),
     CoreCallRecord::new("core.services", "restart_one_for_all", "jet_services_restart_one_for_all", true, &[]),
     CoreCallRecord::new("core.services", "restart_rest_for_one", "jet_services_restart_rest_for_one", true, &[]),

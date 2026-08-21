@@ -30,7 +30,7 @@
 (generic_type base: (type_identifier) @type)
 (capability_sigil) @operator
 
-; Applied rules (#Test, #[Codable], #Caps(...), #Grant, ...)
+; Applied rules (#Test, #[Codable], #Abilities(...), ...)
 (marker_name) @attribute
 (attribute (marker_name) @attribute)
 (attribute_list (marker_name) @attribute)
@@ -69,9 +69,8 @@
   "task"
 ] @keyword.control
 
-; keyword.declaration: Bench Context Impure Reactive Scrub State Test Todo Transact Transition Unsafe add alias as change client derive distinct effect enum extern fn impl marker migration module priv protocol pub remove rename rust server state struct tag trait use validate via
+; keyword.declaration: Context Impure Reactive Scrub State Test Todo Transact Transition Unsafe add alias as change client derive distinct effect enum extern fn impl marker migration module policy priv protocol pub remove rename rust server state struct tag trait use validate via wrap
 [
-  "Bench"
   "Test"
   "add"
   "alias"
@@ -134,7 +133,7 @@
   "check"
 ] @function.builtin
 
-; marker.rule: ABI Bench Bindgen CLI Caps Codable CodableAsBase Comparable Context Debug DebugOnly Decode DenyUnknownFields Discriminant Doc Encode Env Equatable Every Extern FFI Flag Flatten Grant HTML Impure Inline Job Kernel Layout Live Local Memo Meta MustUse NoPrelude Nondeterministic Numeric Off Patchable Persist Policy Post Pre Printable PubFile PublishedSchema Reactive Redact Region Rename RenameAll Replayable Root SQL Scrub Shared Shield Short SingleUse Skip State Static Target Test Todo Track Transact Transition Undo UnitFamily Unsafe Untagged WasmExport allow wire
+; marker.rule: ABI Abilities Bindgen CLI Codable CodableAsBase Comparable Context Debug DebugOnly Decode DenyUnknownFields Discriminant Doc Encode Env Equatable Every Extern FFI Flag Flatten HTML Impure Inline Job Kernel Layout Live Local Memo Meta MustUse NoPrelude Nondeterministic Numeric Off Patchable Persist Policy Post Pre Printable PubFile PublishedSchema Reactive Redact Region Rename RenameAll Replayable Root SQL Scrub Shared Shield Short SingleUse Skip State Static Target Test Todo Track Transact Transition Undo UnitFamily Unsafe Untagged WasmExport allow wire
 ; sigil: # & ... :: := @ @[ ]@ ^ ~
 ; operator: ! != % %% %%= %= && &= * *= + ++ += - -- -= .. ..< .[ / /% /%= /= :> < << <<= <= <=> == > >= >> >>= ? ?. ?? ^= { | |= || ~| ~|=
 ; END GENERATED JET SYNTAX HIGHLIGHTS

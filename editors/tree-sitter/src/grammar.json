@@ -459,10 +459,6 @@
         },
         {
           "type": "SYMBOL",
-          "name": "bench_block"
-        },
-        {
-          "type": "SYMBOL",
           "name": "derive_stmt"
         },
         {
@@ -3026,19 +3022,6 @@
         }
       ]
     },
-    "bench_block": {
-      "type": "SEQ",
-      "members": [
-        {
-          "type": "SYMBOL",
-          "name": "bench_marker"
-        },
-        {
-          "type": "SYMBOL",
-          "name": "block"
-        }
-      ]
-    },
     "test_marker": {
       "type": "SEQ",
       "members": [
@@ -3049,31 +3032,6 @@
         {
           "type": "STRING",
           "value": "Test"
-        },
-        {
-          "type": "CHOICE",
-          "members": [
-            {
-              "type": "SYMBOL",
-              "name": "marker_args"
-            },
-            {
-              "type": "BLANK"
-            }
-          ]
-        }
-      ]
-    },
-    "bench_marker": {
-      "type": "SEQ",
-      "members": [
-        {
-          "type": "STRING",
-          "value": "#"
-        },
-        {
-          "type": "STRING",
-          "value": "Bench"
         },
         {
           "type": "CHOICE",
@@ -5774,6 +5732,94 @@
         }
       ]
     },
+    "typed_head_string": {
+      "type": "SEQ",
+      "members": [
+        {
+          "type": "STRING",
+          "value": "\""
+        },
+        {
+          "type": "REPEAT",
+          "content": {
+            "type": "CHOICE",
+            "members": [
+              {
+                "type": "SYMBOL",
+                "name": "typed_head_brace"
+              },
+              {
+                "type": "SYMBOL",
+                "name": "typed_head_slash"
+              },
+              {
+                "type": "SYMBOL",
+                "name": "string_interpolation"
+              },
+              {
+                "type": "SYMBOL",
+                "name": "_string_content"
+              }
+            ]
+          }
+        },
+        {
+          "type": "STRING",
+          "value": "\""
+        }
+      ]
+    },
+    "typed_head_multiline": {
+      "type": "SEQ",
+      "members": [
+        {
+          "type": "STRING",
+          "value": "\"\"\""
+        },
+        {
+          "type": "REPEAT",
+          "content": {
+            "type": "CHOICE",
+            "members": [
+              {
+                "type": "SYMBOL",
+                "name": "typed_head_brace"
+              },
+              {
+                "type": "SYMBOL",
+                "name": "typed_head_slash"
+              },
+              {
+                "type": "SYMBOL",
+                "name": "string_interpolation"
+              },
+              {
+                "type": "SYMBOL",
+                "name": "_ml_string_content"
+              }
+            ]
+          }
+        },
+        {
+          "type": "STRING",
+          "value": "\"\"\""
+        }
+      ]
+    },
+    "typed_head_slash": {
+      "type": "IMMEDIATE_TOKEN",
+      "content": {
+        "type": "PATTERN",
+        "value": "\\\\."
+      }
+    },
+    "typed_head_brace": {
+      "type": "IMMEDIATE_TOKEN",
+      "content": {
+        "type": "PATTERN",
+        "value": "\\{\\{|\\}\\}"
+      }
+    },
     "multiline_string": {
       "type": "SEQ",
       "members": [
@@ -6457,11 +6503,11 @@
                   "members": [
                     {
                       "type": "SYMBOL",
-                      "name": "string_literal"
+                      "name": "typed_head_string"
                     },
                     {
                       "type": "SYMBOL",
-                      "name": "multiline_string"
+                      "name": "typed_head_multiline"
                     },
                     {
                       "type": "SEQ",
@@ -8129,6 +8175,14 @@
     [
       "module_path",
       "module_def"
+    ],
+    [
+      "string_literal",
+      "typed_head_string"
+    ],
+    [
+      "multiline_string",
+      "typed_head_multiline"
     ],
     [
       "_marker",

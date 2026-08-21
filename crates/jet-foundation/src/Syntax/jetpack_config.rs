@@ -634,6 +634,10 @@ pub const MANIFEST_BLOCK_OUTPUTS: &str = "outputs";
 pub const MANIFEST_BLOCK_SETTINGS: &str = "settings";
 pub const MANIFEST_BLOCK_MEMBERS: &str = "members";
 
+/// D-STRUCT-EDGE1=A (ratified 2026-08-19): package-owned import boundaries
+/// live under `boundaries: { deny: [ ... ] }`.
+pub const MANIFEST_BLOCK_BOUNDARIES: &str = "boundaries";
+
 /// U10 (ratified 2026-06-16): the block listing a payload's packages —
 /// `packages: { name: kind }`. Each `name` is a top-level `module` (the package),
 /// discovered by name in the tree; the old `exports: [module …]` folds into this.

@@ -314,6 +314,10 @@ pub const KW_ALIAS: &str = "alias";
 /// S32 (ratified M3): optional type suffix — `Int?` is “maybe an Int”.
 pub const TYPE_OPTION_SUFFIX: &str = "?";
 
+/// D-ERRSIGIL1=A (ratified 2026-08-21): fallible type separator — `T ! E`.
+/// The bang is a type-position separator; expression `!` keeps its prefix use.
+pub const TYPE_FALLIBLE_SEP: &str = "!";
+
 /// D-UNIONTYPE1=A: anonymous closed structural sum — `Int | String`.
 /// Order-insensitive; nested unions flatten; duplicates disappear. Underneath
 /// it is compiler-generated enum sugar; named enums stay the documenting form.
@@ -343,6 +347,12 @@ pub const KW_IMPL: &str = "impl";
 /// only for E0325 teaching diagnostics.
 pub const EXTERNAL_METHOD_CONNECTOR: &str = ".";
 pub const EXTERNAL_METHOD_CONNECTOR_RETIRED: &str = "~~";
+
+/// D-STRUCT-POLICY1=A (ratified 2026-08-19): user-declared policy settings use
+/// `pub policy name(...) { wrap(call) { ... } }`.
+pub const KW_POLICY: &str = "policy";
+/// D-STRUCT-POLICY1=A: the checked body that wraps the declared callable.
+pub const KW_WRAP: &str = "wrap";
 
 /// D-CONST-RETIRE1: retired module binding keyword. Lexer still emits `KwConst`
 /// so the parser can teach `comptime` (S57). Not in `JET_KEYWORD_LIST`.

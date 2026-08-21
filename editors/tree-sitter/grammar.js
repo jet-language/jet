@@ -13,13 +13,13 @@
 
 // BEGIN GENERATED JET SYNTAX HIGHLIGHTS
 const JET_HIGHLIGHT_KEYWORD_CONTROL = ["after", "break", "defer", "else", "if", "loop", "return", "task", "task.all", "task.any", "task.group", "task.race"];
-const JET_HIGHLIGHT_KEYWORD_DECLARATION = ["Bench", "Context", "Impure", "Reactive", "Scrub", "State", "Test", "Todo", "Transact", "Transition", "Unsafe", "add", "alias", "as", "change", "client", "derive", "distinct", "effect", "enum", "extern", "fn", "impl", "marker", "migration", "module", "priv", "protocol", "pub", "remove", "rename", "rust", "server", "state", "struct", "tag", "trait", "use", "validate", "via"];
+const JET_HIGHLIGHT_KEYWORD_DECLARATION = ["Context", "Impure", "Reactive", "Scrub", "State", "Test", "Todo", "Transact", "Transition", "Unsafe", "add", "alias", "as", "change", "client", "derive", "distinct", "effect", "enum", "extern", "fn", "impl", "marker", "migration", "module", "policy", "priv", "protocol", "pub", "remove", "rename", "rust", "server", "state", "struct", "tag", "trait", "use", "validate", "via", "wrap"];
 const JET_HIGHLIGHT_KEYWORD_OWNERSHIP = ["uninit"];
 const JET_HIGHLIGHT_KEYWORD_OTHER = ["it", "self", "shared"];
 const JET_HIGHLIGHT_LITERAL = ["Cancelled", "DeadlineBlown", "None", "Panicked", "Val", "false", "true"];
 const JET_HIGHLIGHT_TYPE_BUILTIN = ["()", "BTreeMap", "Bits", "Bool", "Budget", "BudgetApplies", "Bytes", "CSV", "Cache", "Char", "Complex", "Computed", "Condition", "DBValue", "DataTree", "Decimal", "Derived", "Duration", "Effect", "Err", "Event", "EventPolicy", "EventScope", "EventTrace", "F32", "F64", "Float", "HashMap", "Hook", "I16", "I32", "I64", "I8", "IOError", "Instant", "Int", "Iter", "JSON", "JSONError", "Key", "Measurement", "MemoStats", "PriorityQueue", "Ptr", "Queue", "Rank", "Receiver", "Sender", "Set", "Shared", "Shared.Weak", "SharedGuard", "Signal", "Stream", "String", "Subscription", "TOML", "Task", "TaskFailure", "U16", "U32", "U64", "U8", "UTF8Error", "WatchEvent", "WatchHandle", "WatchSet", "YAML"];
 const JET_HIGHLIGHT_BUILTIN = ["assert", "assert_eq", "channel", "check", "freeze", "input", "join", "print"];
-const JET_HIGHLIGHT_MARKER_RULE = ["ABI", "Bench", "Bindgen", "CLI", "Caps", "Codable", "CodableAsBase", "Comparable", "Context", "Debug", "DebugOnly", "Decode", "DenyUnknownFields", "Discriminant", "Doc", "Encode", "Env", "Equatable", "Every", "Extern", "FFI", "Flag", "Flatten", "Grant", "HTML", "Impure", "Inline", "Job", "Kernel", "Layout", "Live", "Local", "Memo", "Meta", "MustUse", "NoPrelude", "Nondeterministic", "Numeric", "Off", "Patchable", "Persist", "Policy", "Post", "Pre", "Printable", "PubFile", "PublishedSchema", "Reactive", "Redact", "Region", "Rename", "RenameAll", "Replayable", "Root", "SQL", "Scrub", "Shared", "Shield", "Short", "SingleUse", "Skip", "State", "Static", "Target", "Test", "Todo", "Track", "Transact", "Transition", "Undo", "UnitFamily", "Unsafe", "Untagged", "WasmExport", "allow", "wire"];
+const JET_HIGHLIGHT_MARKER_RULE = ["ABI", "Abilities", "Bindgen", "CLI", "Codable", "CodableAsBase", "Comparable", "Context", "Debug", "DebugOnly", "Decode", "DenyUnknownFields", "Discriminant", "Doc", "Encode", "Env", "Equatable", "Every", "Extern", "FFI", "Flag", "Flatten", "HTML", "Impure", "Inline", "Job", "Kernel", "Layout", "Live", "Local", "Memo", "Meta", "MustUse", "NoPrelude", "Nondeterministic", "Numeric", "Off", "Patchable", "Persist", "Policy", "Post", "Pre", "Printable", "PubFile", "PublishedSchema", "Reactive", "Redact", "Region", "Rename", "RenameAll", "Replayable", "Root", "SQL", "Scrub", "Shared", "Shield", "Short", "SingleUse", "Skip", "State", "Static", "Target", "Test", "Todo", "Track", "Transact", "Transition", "Undo", "UnitFamily", "Unsafe", "Untagged", "WasmExport", "allow", "wire"];
 const JET_HIGHLIGHT_SIGIL = ["#", "&", "...", "::", ":=", "@", "@[", "]@", "^", "~"];
 const JET_HIGHLIGHT_OPERATOR = ["!", "!=", "%", "%%", "%%=", "%=", "&&", "&=", "*", "*=", "+", "++", "+=", "-", "--", "-=", "..", "..<", ".[", "/", "/%", "/%=", "/=", ":>", "<", "<<", "<<=", "<=", "<=>", "==", ">", ">=", ">>", ">>=", "?", "?.", "??", "^=", "{", "|", "|=", "||", "~|", "~|="];
 // END GENERATED JET SYNTAX HIGHLIGHTS
@@ -51,6 +51,10 @@ module.exports = grammar({
     [$.extern_fn, $.function_def],
     [$.extern_fn],
     [$.module_path, $.module_def],
+    // Typed-literal heads and ordinary strings share empty/simple bodies;
+    // the enclosing `Type.{ … }` head resolves the intended surface.
+    [$.string_literal, $.typed_head_string],
+    [$.multiline_string, $.typed_head_multiline],
     [$._marker, $.marked_expr],
   ],
 
@@ -116,7 +120,6 @@ module.exports = grammar({
     _item: ($) =>
       choice(
         $.test_block,
-        $.bench_block,
         $.derive_stmt,
         $.function_def,
         $.struct_def,
@@ -566,7 +569,7 @@ module.exports = grammar({
         field("target", $._type),
       ),
 
-    // ── Test / Bench blocks (S43, D-BENCH1, D-CASING1) ─────────────────────
+    // ── Test blocks (S43, D-CLAIM-BENCH1, D-CASING1) ───────────────────────
     // D-TESTFAULT1=A: the generic marker reader already owns
     // `#Test(faults: [Fs.Write])`; this production only gives the editor the
     // two test declaration tails (`{ … }` and `fn name(…) { … }`).
@@ -584,9 +587,7 @@ module.exports = grammar({
           $.block,
         ),
       ),
-    bench_block: ($) => seq($.bench_marker, $.block),
     test_marker: ($) => seq("#", "Test", optional($.marker_args)),
-    bench_marker: ($) => seq("#", "Bench", optional($.marker_args)),
 
     // ── Type params / generics ─────────────────────────────────────────────
     // `<T>`, `<T, U>`, ordinary trait bounds, and the ratified physical-unit
@@ -766,8 +767,8 @@ module.exports = grammar({
         $.expr_stmt,
       ),
 
-    // A rule-introduced block: `#Caps(IO) { … }` (D-EFF1),
-    // `#Grant(caps: FS) { … }` (D-SCAP1), `#Transact(order) { … }` (D-TXN4).
+    // A rule-introduced block: `#Abilities(IO) { … }` (D-EFF1),
+    // named `#Abilities(abilities: FS) { … }` (D-AUTHORITY-SCOPE1), `#Transact(order) { … }` (D-TXN4).
     marker_block_stmt: ($) =>
       seq(choice($.attribute, $._lower_marker), $.scoped_block),
 
