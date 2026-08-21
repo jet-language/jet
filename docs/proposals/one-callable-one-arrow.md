@@ -12,7 +12,7 @@ The glyph itself is on the table. `:>` was picked for typing comfort; on the pag
 
 Three smaller reasoning hazards ride along, each probed live in the binary: a dispatch arm head that mixes distributed atoms with a guard (`48 | 45 && ready`) desugars invisibly and silently routes values to `else`; the subject shorthand accepts method-head chains in loops but rejects them in call slots (`.map(.len())` is two errors while `loop words if .len() > 1` runs); and parameter defaults use a shape (`name: Type = value`) that never appears in local bindings. The first two get tightening ballots. The third turns out to be lawful under the already-ratified "`::` defines, `=` fills" rule — the proposal teaches it and offers the respell anyway so the owner decides with the full picture.
 
-What the ballots ask: pick the arrow glyph (D-ARROW-RESPELL1), adopt the one-callable shape (D-CALLABLE-ONE1), unfuse the effect row (D-EFFECT-ROW2), give lambdas full interface parity (D-LAMBDA-IFACE1), fence the mixed arm head (D-ARMHEAD-PAREN1), reconcile the subject shorthand (D-SUBJECT-COHERE1), and settle the default-value shape (D-DEFAULT-SHAPE1). Each ballot stands alone; any subset can be adopted. What does not change: arm tables, one-line forms, `::`/`:=` bindings, the memory sigils, `?`/`!`/`??`, trailing-value blocks, and L0507.
+What the ballots ask: pick the arrow glyph (D-ARROW-RESPELL1), adopt the one-callable shape (D-CALLABLE-ONE1), unfuse the effect row (D-EFFECT-ROW2), give lambdas full interface parity (D-LAMBDA-IFACE1), respell the failure surface as suffixes (D-ERRSUFFIX1: `Entry? StoreError!`, which also fills a probed hole — `Int? ! E` cannot be written today at all), fence the mixed arm head (D-ARMHEAD-PAREN1), reconcile the subject shorthand (D-SUBJECT-COHERE1), and settle the default-value shape (D-DEFAULT-SHAPE1). Each ballot stands alone; any subset can be adopted. What does not change: arm tables, one-line forms, `::`/`:=` bindings, the memory sigils, `?`-as-absence and `??`, trailing-value blocks, and L0507.
 
 ## The problem, briefly
 
@@ -72,6 +72,7 @@ One production covers every callable. Square brackets mark what each rung may om
 
 ```
 [fn name] ( params ) [Return] [! Error] [:[Effects]] -> body
+   (if D-ERRSUFFIX1 adopts suffixes, the return zone reads [Success?] [Error!]* instead of [Return] [! Error])
 arrow rule: present exactly when a non-unit success Return is declared, or the callable is a lambda
 body = expression | { statements … trailing-value }
 ```
@@ -220,6 +221,32 @@ parse :: (raw: String) Int ! ParseError -> {     // rung 2: stored lambda, no sl
 
 Rule: annotations are *allowed* everywhere, *required* only where no expected type exists (exactly today's inference law, D-LAMBDA-INFER1). No upper rung changes what the lowest rung does.
 
+### The failure surface as suffixes *(proposed — D-ERRSUFFIX1, amends D-ERRSIGIL1=A, D-UNIONTYPE1=A, D-FAIL-UNIT1=A)*
+
+`?` is already a suffix (`Int?` — maybe absent), but `!` is an infix separator (`Int ! ParseError`). Two grammars for two sibling facts, and the combination has no spelling at all — probed today:
+
+```jet
+fn find(flag: Bool) Int? ! ParseError { … }
+// Error [E0003]: expected `{` to open the function body, found `!`
+```
+
+The owner's direction makes both marks suffixes with one reading — every type in the return zone wears its own role:
+
+```jet
+fn get(key: String) Entry? StoreError! {        // proposed: absent AND fallible, finally spellable
+    row :: db.fetch(key)? "fetching {key}"
+    row
+}
+fn pick(n: Int) Int DbError! TimeoutError! {    // proposed: anonymous error union by repetition
+    load(n)? "loading"
+}
+fn save(path: String) IOError! { … }            // proposed: unit-fallible, error suffix alone
+fn run() ! { … }                                // unchanged: default-error shorthand
+alias Fetched :: Entry? StoreError!             // proposed: same spelling in every type position
+```
+
+The ballot carries the grouped-union alternative (`(DbError | TimeoutError)!`) and the keep-infix-fix-the-hole option. Under the one-callable shape the return zone reads `[Success?] [Error!]* [:[Effects]]`, then the arrow when a success value is declared.
+
 ### Choice is already right — keep it, fence one trap *(D-ARMHEAD-PAREN1 proposed; everything else stays)*
 
 The owner's instinct — a table beats an `else if` ladder — is confirmed from three directions: the surface-frequency audit (branching is 45–95% of real code; tables keep arms scannable), the nesting study (275 participants, less nesting = measurably faster comprehension), and Go's one-construct philosophy. L0507, the one-line forms, guard tables, and dispatch tables all stay.
@@ -344,7 +371,7 @@ The grammar the reader carries after this slate, whole, in one table:
 - **Arm tables, guard tables, one-line `if`/`loop` forms, L0507** — confirmed by frequency and nesting evidence; the owner's table instinct is the ratified design.
 - **`::` / `:=` / bare bindings (D-BIND-BARE1=A)** — locals not repeating slot-known types is the right economy; prior art (Rust closures) agrees.
 - **Memory sigils `^ & ~` (D-MEM1)** — visible ownership at both ends is reasoning-first brevity; the sweep's strongest keep.
-- **`?` / `!` / `??` failure surface (D-ERRSIGIL1=A, D-ERR-DECON1=A)** — recently ratified, reasoning-honest; only its docs gain the context rules the sweep flagged.
+- **`?`-as-absence, call-site `?`, and `??` (D-ERRSIGIL1=A's split, D-ERR-DECON1=A)** — the one-meaning-per-mark split stays; D-ERRSUFFIX1 only moves where the fallible mark sits, never what `?` means.
 - **Trailing-value blocks (D-BODY-LAST1=B)** — the signature states the type, so the tail is checked, not guessed.
 - **Explicit code arguments (D-TRAILBLOCK2=A), no general pipe (D-SHAPE-PIPE1=C), no `match` keyword (I8)** — all reasoning-first walls, kept on purpose.
 
@@ -357,6 +384,7 @@ The grammar the reader carries after this slate, whole, in one table:
 | D-EFFECT-ROW2 | Unfuse `:[E]` from the arrow? | unfuse / keep fused | D-SHAPE8=A |
 | D-LAMBDA-IFACE1 | Lambdas may write return type + error + effects? | adopt / params-only status quo | S46/S47 |
 | D-ARMHEAD-PAREN1 | Parens required when atoms mix with `&&`/`||`? | require / keep + document | D-IFDIST1=A |
+| D-ERRSUFFIX1 | Failure surface as suffixes: `Entry? StoreError!`? | role suffixes + union by repetition / grouped `(E1 \| E2)!` / keep infix + fix the `Int? ! E` hole | D-ERRSIGIL1=A, D-UNIONTYPE1=A, D-FAIL-UNIT1=A |
 | D-SUBJECT-COHERE1 | Method-head chains in call slots + nesting lint? | widen + lint / narrow loops / keep split | D-SUBJECT-CALL1=A, D-LOOP-SUBJECT1=A |
 | D-DEFAULT-SHAPE1 | Default-value shape | keep + teach fill law / `:=` defaults / annotated locals | D-APILABEL1=A or D-BIND-BARE1=A |
 

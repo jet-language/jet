@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 2146,
-    "rev": 40808,
+    "rev": 40816,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -140731,7 +140731,7 @@
       "id": "c0an426i",
       "num": 2144,
       "title": "Reading-first callable and arrow slate (one callable, one arrow)",
-      "body": "First-principles audit of the lambda/function/control-flow surface under the owner's new priority order: reason > read > write. Proposal: docs/proposals/one-callable-one-arrow.md. Research evidence: target-fpa-read/L1-L5 (gitignored). Seven ballots cover the arrow glyph respell, the one-callable shape, effect-row unfusing, lambda interface parity, dispatch arm-head parens, subject-shorthand coherence, and the default-value shape. Probes against the running binary ground the arm-head and subject-shorthand findings.",
+      "body": "First-principles audit of the lambda/function/control-flow surface under the owner's new priority order: reason > read > write. Proposal: docs/proposals/one-callable-one-arrow.md. Research evidence: target-fpa-read/L1-L5 (gitignored). Eight ballots cover the arrow glyph respell, the one-callable shape, effect-row unfusing, lambda interface parity, the failure surface as suffixes (Entry? StoreError!), dispatch arm-head parens, subject-shorthand coherence, and the default-value shape. Probes against the running binary ground the arm-head, subject-shorthand, and optional-plus-fallible findings (Int? ! E is E0003 today).",
       "kind": "task",
       "track": "epoch",
       "epoch": "e3",
@@ -140743,6 +140743,11 @@
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-08-21",
+          "by": "fable",
+          "text": "Owner added the failure-surface direction: ? and ! both as clean type suffixes, combinable (fn myFn() Int? IOError!), with anonymous multi-error unions. Minted D-ERRSUFFIX1 (rec: role suffixes, unions by repetition; alternatives: grouped (E1|E2)! and keep-infix-fix-the-hole). Probe confirmed the combined form is unspellable today. Proposal doc updated: new section, grammar conditional, decisions row, keep-list clarification."
+        },
         {
           "at": "2026-08-21",
           "by": "fable",
@@ -140785,6 +140790,51 @@
           "verifiedBy": null,
           "evidence": "Drift cleanup card #2145 minted with exact file:line inventory",
           "at": "2026-08-21T21:34:36.908Z"
+        },
+        {
+          "n": 5,
+          "text": "Syntax.rs entry updated",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-21T21:36:54.603Z"
+        },
+        {
+          "n": 6,
+          "text": "syntax-decisions.md log entry",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-21T21:36:54.603Z"
+        },
+        {
+          "n": 7,
+          "text": "jet devtools grammars regenerated",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-21T21:36:54.603Z"
+        },
+        {
+          "n": 8,
+          "text": "snapshots re-blessed",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-21T21:36:54.603Z"
+        },
+        {
+          "n": 9,
+          "text": "D-ERRSUFFIX1 is a complete full-profile ballot on this card, rendered on the ratified baseline, naming D-ERRSIGIL1=A, D-UNIONTYPE1=A, D-FAIL-UNIT1=A as amended spellings",
+          "status": "met",
+          "metBy": "fable",
+          "verifiedBy": null,
+          "evidence": "Ballot D-ERRSUFFIX1 live after validator pass. Probe: fn find() Int? ! ParseError fails E0003 today (optional+fallible unspellable); Int ! A | B and bare ! parse fine",
+          "at": "2026-08-21T21:52:34.335Z"
         }
       ],
       "refs": [],
@@ -140792,7 +140842,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-21T21:13:45.933Z",
-      "updated": "2026-08-21T21:34:47.502Z",
+      "updated": "2026-08-21T21:52:34.335Z",
       "updatedBy": "fable"
     },
     {
@@ -186014,8 +186064,10 @@
       },
       "checkInstructions": null,
       "draft": false,
-      "status": "open",
-      "created": "2026-08-21T21:19:05.966Z"
+      "status": "ratified",
+      "created": "2026-08-21T21:19:05.966Z",
+      "outcome": "A",
+      "ratifiedAt": "2026-08-21"
     },
     {
       "id": "D-CALLABLE-ONE1",
@@ -186166,8 +186218,10 @@
       },
       "checkInstructions": null,
       "draft": false,
-      "status": "open",
-      "created": "2026-08-21T21:19:06.924Z"
+      "status": "ratified",
+      "created": "2026-08-21T21:19:06.924Z",
+      "outcome": "B",
+      "ratifiedAt": "2026-08-21"
     },
     {
       "id": "D-LAMBDA-IFACE1",
@@ -186318,8 +186372,10 @@
       },
       "checkInstructions": null,
       "draft": false,
-      "status": "open",
-      "created": "2026-08-21T21:19:07.882Z"
+      "status": "ratified",
+      "created": "2026-08-21T21:19:07.882Z",
+      "outcome": "A",
+      "ratifiedAt": "2026-08-21"
     },
     {
       "id": "D-SUBJECT-COHERE1",
@@ -186472,6 +186528,87 @@
       "draft": false,
       "status": "open",
       "created": "2026-08-21T21:19:15.204Z"
+    },
+    {
+      "id": "D-ERRSUFFIX1",
+      "cardId": "c0an426i",
+      "group": "syntax",
+      "title": "Failure surface as suffixes: Success? Error! in signatures",
+      "gist": "Spell the return facts as type suffixes: `?` for maybe-absent, `!` on each error type.",
+      "lesson": "Today `?` is a suffix (`Int?` means maybe absent) but `!` is an infix separator: `Int ! ParseError`, with unions grouped as `T ! (E1 | E2)` (D-ERRSIGIL1=A, D-UNIONTYPE1=A). The two marks read differently, and the combination cannot be written at all: `fn find() Int? ! E` is a parse error today (probed: E0003). This ballot makes both marks suffixes with one reading: each type in the return zone declares its own role. `Int?` — a value, maybe absent. `IOError!` — a possible failure.",
+      "explainer": "",
+      "story": "Dana writes a cache lookup that can miss (absent) and can also fail (backend down). Today the signature cannot say both; she smuggles the miss into an error variant and callers lose the distinction. She wants to write what she means: `fn get(key: String) Entry? StoreError! { … }`.",
+      "inWild": "// Probed today:\nfn find(flag: Bool) Int? ! ParseError { … }\n// Error [E0003]: expected `{` to open the function body, found `!`\n// The optional-and-fallible signature has no legal spelling.",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "Role suffixes; unions by repetition",
+          "detail": "The return zone is a sequence of suffixed types. One optional success (`Entry?` or plain `Entry`), then any number of error types, each marked `!`. Repetition is the anonymous union: `DbError! TimeoutError!` means either failure. Unit-fallible drops the success type: `fn save(path: String) IOError! { … }`. Bare `!` stays the default-error shorthand. Every fact reads left to right with its role on its own type.",
+          "technical": "Amends three spellings. D-ERRSIGIL1=A: the fallible mark moves from infix separator to error-type suffix. D-UNIONTYPE1=A: error unions respell as suffix repetition, while `|` keeps its arm-alternative and pattern roles. D-FAIL-UNIT1=A: unit-fallible becomes `Error!` alone, and bare `!` remains the default-error row. Grammar: return zone = `[Type[?]] [Type!]*`. Works in every type position: aliases, fields, fn types (`fn(String) Entry? StoreError!`). Under D-CALLABLE-ONE1 the arrow follows the last suffix. Shown on the ratified braced baseline.",
+          "code": "fn get(key: String) Entry? StoreError! {          // absent and failure, both visible\n    row :: db.fetch(key)? \"fetching {key}\"\n    row\n}\nfn pick(n: Int) Int DbError! TimeoutError! {       // anonymous union by repetition\n    load(n)? \"loading\"\n}\nfn save(path: String) IOError! {                   // unit-fallible: error suffix alone\n    write(path)? \"saving\"\n}\nfn run() ! { … }                                   // default-error shorthand, unchanged\nalias Fetched :: Entry? StoreError!                // same spelling in any type position"
+        },
+        {
+          "key": "B",
+          "name": "Suffix with one `!` on a union group",
+          "detail": "Same suffix reading, but multiple errors stay a `|` union with one mark: `Entry? (DbError | TimeoutError)!`. Keeps the ratified union spelling and a single failure mark per signature. The parentheses are the price: the common two-error case gains a bracket pair that option A does not need.",
+          "technical": "Amends D-ERRSIGIL1=A and D-FAIL-UNIT1=A as in option A. D-UNIONTYPE1=A survives with explicit parens: `(E1 | E2)!`; a bare `E1 | E2!` is rejected to keep grouping visible (consistent with D-ARMHEAD-PAREN1's reading law). Grammar: return zone = `[Type[?]] [UnionOrType!]`.",
+          "code": "fn get(key: String) Entry? StoreError! { … }\nfn pick(n: Int) Int (DbError | TimeoutError)! {    // one mark, explicit group\n    load(n)? \"loading\"\n}\nfn save(path: String) IOError! { … }"
+        },
+        {
+          "key": "C",
+          "name": "Keep the infix separator, fix the hole",
+          "detail": "`T ! E` stays as ratified yesterday; the grammar gains the missing combination `T? ! E`. Cheapest change, but the two marks keep two different grammars — one suffix, one separator — and the combined form reads as three disconnected marks in a row.",
+          "technical": "D-ERRSIGIL1=A and D-UNIONTYPE1=A stand. The signature grammar accepts an optional-suffixed success type before `!`; today's E0003 at that position becomes legal syntax.",
+          "code": "fn get(key: String) Entry? ! StoreError { … }      // now legal, three marks in a row\nfn pick(n: Int) Int ! DbError | TimeoutError { … }\nfn save(path: String) ! IOError { … }"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Zig",
+          "note": "Error unions use `!` with the error side BEFORE the mark and success after: `anyerror!u32`. Jet's suffix keeps success first, which matches how signatures are read: what you get, then how it fails.",
+          "code": "fn get(key: []const u8) StoreError!?Entry { ... }"
+        },
+        {
+          "lang": "Rust",
+          "note": "The combined case is spelled by nesting: `Result<Option<Entry>, StoreError>`. It works and is famously noisy; the suffix form states the same three facts in three marks.",
+          "code": "fn get(key: &str) -> Result<Option<Entry>, StoreError> { ... }"
+        },
+        {
+          "lang": "Swift",
+          "note": "Typed throws separates the channels: `func get(key: String) throws(StoreError) -> Entry?`. A keyword for one channel, a suffix for the other — evidence both channels deserve first-class spelling.",
+          "code": "func get(key: String) throws(StoreError) -> Entry? { ... }"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "One reading covers every case: each type in the return zone wears its role. It fills the probed hole (`Entry? StoreError!`), makes multi-error signatures flat, and turns yesterday's two grammars into one suffix rule.",
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "Same reading, but the common multi-error case pays a bracket pair for a grouping repetition already makes unambiguous — there is nothing in the group to misread."
+          },
+          {
+            "key": "C",
+            "reason": "Fixes the hole while keeping two grammars for two sibling facts, and the combined spelling `Entry? ! StoreError` reads as punctuation soup."
+          }
+        ],
+        "tradeoff": "Yesterday's D-ERRSIGIL1=A infix spelling migrates again, one day after ratification. Accepted: the corpus on `T ! E` is hours old, and the suffix form is the one the infix ballot never had on its menu."
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "reviewPasses": {
+        "base": "The first draft proposed role suffixes with union-by-repetition, against a grouped-union suffix and the ratified infix separator.",
+        "boilOcean": "The breadth review tested keyword channels (`throws`, `fails`), a `Result`-style generic, and Zig's error-first order. Keywords and generics re-add the ceremony D-ERRSIGIL1 removed; error-first reads backwards against Jet's signature order.",
+        "hybrid": "A hybrid allowing both repetition and one grouped `!` was tested and rejected: two spellings of one union (I8).",
+        "cooperative": "Option B was steelmanned: one mark per signature is a real scanning aid. Option C was steelmanned: it is the smallest diff that fills the hole and touches no ratified spelling.",
+        "adversarial": "Attacks tested the bang suffix against expression negation, its parsing inside generics and fn types, and the cost of re-respelling a day-old law. Type and expression positions stay disjoint, the sequence parses with one token of lookahead, and the infix corpus is hours old."
+      },
+      "checkInstructions": null,
+      "draft": false,
+      "status": "open",
+      "created": "2026-08-21T21:50:51.852Z"
     }
   ],
   "questions": [
@@ -188299,6 +188436,90 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-08-21T21:52:34.335Z",
+      "by": "fable",
+      "action": "card.criteria-meet",
+      "ref": "c0an426i",
+      "note": "#9"
+    },
+    {
+      "at": "2026-08-21T21:52:16.213Z",
+      "by": "fable",
+      "action": "card.update",
+      "ref": "c0an426i",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-08-21T21:52:15.666Z",
+      "by": "fable",
+      "action": "card.criteria-add",
+      "ref": "c0an426i",
+      "note": "#9 D-ERRSUFFIX1 is a complete full-profile ballot on this card,"
+    },
+    {
+      "at": "2026-08-21T21:52:14.978Z",
+      "by": "fable",
+      "action": "card.update",
+      "ref": "c0an426i",
+      "note": "body"
+    },
+    {
+      "at": "2026-08-21T21:50:51.852Z",
+      "by": "fable",
+      "action": "decision.add",
+      "ref": "D-ERRSUFFIX1",
+      "note": "Failure surface as suffixes: Success? Error! in signatures"
+    },
+    {
+      "at": "2026-08-21T21:50:26.164Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-ARMHEAD-PAREN1",
+      "note": "A"
+    },
+    {
+      "at": "2026-08-21T21:49:01.457Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-EFFECT-ROW2",
+      "note": "B"
+    },
+    {
+      "at": "2026-08-21T21:36:54.604Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-ARROW-RESPELL1",
+      "note": "A"
+    },
+    {
+      "at": "2026-08-21T21:36:54.603Z",
+      "by": "owner",
+      "action": "card.criteria-add",
+      "ref": "c0an426i",
+      "note": "#8 snapshots re-blessed"
+    },
+    {
+      "at": "2026-08-21T21:36:54.603Z",
+      "by": "owner",
+      "action": "card.criteria-add",
+      "ref": "c0an426i",
+      "note": "#7 jet devtools grammars regenerated"
+    },
+    {
+      "at": "2026-08-21T21:36:54.603Z",
+      "by": "owner",
+      "action": "card.criteria-add",
+      "ref": "c0an426i",
+      "note": "#6 syntax-decisions.md log entry"
+    },
+    {
+      "at": "2026-08-21T21:36:54.603Z",
+      "by": "owner",
+      "action": "card.criteria-add",
+      "ref": "c0an426i",
+      "note": "#5 Syntax.rs entry updated"
+    },
     {
       "at": "2026-08-21T21:34:47.502Z",
       "by": "fable",
@@ -191713,90 +191934,6 @@
       "by": "fable-e3-burndown",
       "action": "card.criteria-meet",
       "ref": "c0xoi09n",
-      "note": "#3"
-    },
-    {
-      "at": "2026-08-21T00:42:01.281Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0xoi09n",
-      "note": "#2"
-    },
-    {
-      "at": "2026-08-21T00:42:00.541Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0mantyc",
-      "note": "#3"
-    },
-    {
-      "at": "2026-08-21T00:42:00.084Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0mantyc",
-      "note": "#2"
-    },
-    {
-      "at": "2026-08-21T00:41:59.633Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0e7kkuf",
-      "note": "#5"
-    },
-    {
-      "at": "2026-08-21T00:41:59.175Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0e7kkuf",
-      "note": "#4"
-    },
-    {
-      "at": "2026-08-21T00:41:58.694Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0e7kkuf",
-      "note": "#2"
-    },
-    {
-      "at": "2026-08-21T00:41:58.225Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0vvnebk",
-      "note": "#5"
-    },
-    {
-      "at": "2026-08-21T00:41:57.768Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0vvnebk",
-      "note": "#4"
-    },
-    {
-      "at": "2026-08-21T00:41:57.311Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0vvnebk",
-      "note": "#3"
-    },
-    {
-      "at": "2026-08-21T00:41:56.818Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0vvnebk",
-      "note": "#2"
-    },
-    {
-      "at": "2026-08-21T00:41:56.363Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0vvnebk",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-21T00:41:55.892Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0r02txw",
       "note": "#3"
     }
   ],
