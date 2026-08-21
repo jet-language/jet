@@ -2659,6 +2659,8 @@ impl<'a> Checker<'a> {
                                 | "receive"
                                 | "fail_worker"
                                 | "drain_worker"
+                                | "partition_worker"
+                                | "reconcile_worker"
                                 | "drain_dead_letters"
                                 | "set_state_empty"
                                 | "set_state_snapshot"

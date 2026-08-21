@@ -795,10 +795,18 @@ pub const CORE_CALLS: &[CoreCallRecord] = &[
     CoreCallRecord::new("core.sys", "close_fd", "jet_std_os_close_fd", true, &[false]),
     CoreCallRecord::new("core.sys", "mkfifo", "jet_std_os_mkfifo", true, &[true, false]),
     CoreCallRecord::new("core.process", "exit", "jet_std_process_exit", true, &[false]),
-    CoreCallRecord::new("core.process", "run", "jet_std_process_run", true, &[true]),
+    // D-AUTHORITY-NAME1=A: the explicit authority form uses the typed emitter
+    // and host adapter below; do not let the one-argument row erase its value.
+    CoreCallRecord::new("core.process", "run", "jet_std_process_run", true, &[true])
+        .without_direct_aot(),
     CoreCallRecord::new("core.process", "cmd", "jet_std_process_cmd", true, &[true]),
     CoreCallRecord::new("core.process", "pipeline", "jet_std_process_pipeline", true, &[true]),
     CoreCallRecord::new("core.process", "argv", "jet_std_io_args", true, &[]),
+    // D-AUTHORITY-NAME1=A: the plugin loader carries the same named value as
+    // process.run and is emitted through its typed FFI boundary.
+    CoreCallRecord::new("core.plugin", "load", "jet_plugin_load", true, &[true])
+        .without_direct_aot()
+        .without_direct_jit(),
     // D-LIB-CALLGRANT1=A: the loader is a Prelude symbol; sema owns the
     // typed `ModGrant` contract and every engine only marshals into this row.
     CoreCallRecord::new("core.mod", "load", "jet_mod_load", true, &[true, true]),

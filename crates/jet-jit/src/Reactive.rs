@@ -119,7 +119,7 @@ pub(crate) struct ReactiveState {
     pub(crate) event_traces: Vec<reactive_rt::JetEventTrace>,
     pub(crate) async_events: Vec<AsyncEventSlot>,
     pub(crate) dispatch_reports: Vec<DispatchReportSlot>,
-    pub(crate) live_queries: Vec<Option<JetLiveQuery>>,
+    live_queries: Vec<Option<JetLiveQuery>>,
 }
 
 fn live_index(handle: i64) -> Option<usize> {

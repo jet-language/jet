@@ -1,19 +1,21 @@
 use std::fs;
-use std::io::{self, Read, Write};
+use std::io;
 use std::path::{Path, PathBuf};
-use std::process::{Child, Command, Output, Stdio};
+use std::process::{Child, Command, Output};
 use std::time::Duration;
 
-use jet_foundation::JSON::parse_json;
+pub use std::io::{Read, Write};
+pub use std::process::Stdio;
+pub use jet_foundation::JSON::parse_json;
 use jet_foundation::PerformanceBudget::CanonicalJson;
 
-fn jet() -> PathBuf {
+pub fn jet() -> PathBuf {
     PathBuf::from(env!("CARGO_BIN_EXE_jet"))
 }
 
 /// Explicit profile keeps `jet run` on the native AOT path; debug avoids the
 /// optimized release codegen cost for behavior-only assertions.
-fn run_debug_aot(file: &str) -> Command {
+pub fn run_debug_aot(file: &str) -> Command {
     let mut command = Command::new(jet());
     command.args(["run", "--profile=debug", file]);
     command
@@ -49,7 +51,7 @@ fn run_debug_aot(file: &str) -> Command {
 //
 // Everything else in the cli targets is behavior, and pays debug.
 
-fn output_with_retry(cmd: &mut Command) -> Output {
+pub fn output_with_retry(cmd: &mut Command) -> Output {
     let mut last = None;
     for attempt in 0..8 {
         if attempt > 0 {
@@ -64,7 +66,7 @@ fn output_with_retry(cmd: &mut Command) -> Output {
     panic!("CLI command stayed busy: {}", last.unwrap());
 }
 
-fn spawn_with_retry(cmd: &mut Command) -> Child {
+pub fn spawn_with_retry(cmd: &mut Command) -> Child {
     let mut last = None;
     for attempt in 0..8 {
         if attempt > 0 {
@@ -87,12 +89,12 @@ fn spawn_with_retry(cmd: &mut Command) -> Child {
 
 
 
-fn cli_dir() -> PathBuf {
+pub fn cli_dir() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/cli")
 }
 
 /// Compare `actual` against `tests/cli/<name>`; bless on `UPDATE_EXPECT=1`.
-fn check_snapshot(name: &str, actual: &str) {
+pub fn check_snapshot(name: &str, actual: &str) {
     let path = cli_dir().join(name);
     if std::env::var("UPDATE_EXPECT").is_ok() {
         fs::create_dir_all(cli_dir()).unwrap();
@@ -112,7 +114,7 @@ fn check_snapshot(name: &str, actual: &str) {
 /// file in its own authority root: concurrent tests creating sibling files
 /// directly under the shared temp directory would change that root while
 /// `jet` is checking its authority snapshot.
-fn bad_file(tag: &str) -> PathBuf {
+pub fn bad_file(tag: &str) -> PathBuf {
     let dir = isolated_cwd(&format!("bad_{tag}"));
     let p = dir.join("bad.jet");
     fs::write(&p, "fn run() {\n    pirnt(\"hi\");\n}\n").unwrap();
@@ -129,7 +131,7 @@ fn bad_file(tag: &str) -> PathBuf {
 /// `BAD.jet` convention every other fixture in this suite uses, and the test
 /// read as a failure in the compiler rather than in the scrubber. This target
 /// sits outside every routine set (#2025), so nobody saw it.
-fn scrub(s: &str, file: &Path) -> String {
+pub fn scrub(s: &str, file: &Path) -> String {
     let mut scrubbed = s.replace(&file.display().to_string(), "BAD.jet");
     let temp_dir = std::env::temp_dir();
     if let Some(temp_root) = temp_dir.parent() {
@@ -152,7 +154,7 @@ fn scrub(s: &str, file: &Path) -> String {
 /// `main.jet` fixtures) race on that shared `build/` path if both inherit the
 /// test harness's cwd (the repo root). Giving each such test its own cwd
 /// removes the shared namespace entirely, regardless of stem.
-fn isolated_cwd(tag: &str) -> PathBuf {
+pub fn isolated_cwd(tag: &str) -> PathBuf {
     static NEXT_FIXTURE: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
     loop {
@@ -177,7 +179,7 @@ fn isolated_cwd(tag: &str) -> PathBuf {
 // `main.jet` is never a discovery fallback (jet-pkg-model
 // `resolve_run_entry_checked`). A bare `jet budget` in these
 // fixtures resolves its entry, so the entry must carry the canonical name.
-fn budget_project(tag: &str, limit: u64) -> PathBuf {
+pub fn budget_project(tag: &str, limit: u64) -> PathBuf {
     let dir = isolated_cwd(tag);
     fs::create_dir_all(dir.join("src")).unwrap();
     fs::write(
@@ -202,13 +204,13 @@ fn run() {{}}
     dir
 }
 
-fn compile_latency_budget_project(tag: &str) -> PathBuf {
+pub fn compile_latency_budget_project(tag: &str) -> PathBuf {
     let dir = isolated_cwd(tag);
     copy_dir_all(&PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/compile_latency"), &dir);
     dir
 }
 
-fn artifact_budget_project(tag: &str, limit: u64) -> PathBuf {
+pub fn artifact_budget_project(tag: &str, limit: u64) -> PathBuf {
     let dir = isolated_cwd(tag);
     fs::create_dir_all(dir.join("src")).unwrap();
     fs::write(
@@ -234,7 +236,7 @@ fn run() {{
     dir
 }
 
-fn mixed_budget_project(tag: &str) -> PathBuf {
+pub fn mixed_budget_project(tag: &str) -> PathBuf {
     let dir = isolated_cwd(tag);
     fs::create_dir_all(dir.join("src")).unwrap();
     fs::write(
@@ -269,7 +271,7 @@ fn run() {}
     dir
 }
 
-fn benchmark_budget_project(tag: &str) -> PathBuf {
+pub fn benchmark_budget_project(tag: &str) -> PathBuf {
     let dir = isolated_cwd(tag);
     fs::create_dir_all(dir.join("src")).unwrap();
     fs::write(dir.join("package.jet"), "name: \"app\"\nversion: \"0.1.0\"\n").unwrap();
@@ -294,7 +296,7 @@ fn run() {}
     dir
 }
 
-fn allocation_budget_project(tag: &str) -> PathBuf {
+pub fn allocation_budget_project(tag: &str) -> PathBuf {
     let dir = isolated_cwd(tag);
     fs::create_dir_all(dir.join("src")).unwrap();
     fs::write(dir.join("package.jet"), "name: \"app\"\nversion: \"0.1.0\"\n").unwrap();
@@ -340,7 +342,7 @@ fn run() {}
 
 
 
-fn age_budget_baseline(dir: &Path, baseline: &str) -> (String, String) {
+pub fn age_budget_baseline(dir: &Path, baseline: &str) -> (String, String) {
     use jet_foundation::PerformanceBudget::{stable_id, CanonicalJson};
     let path = dir.join(format!(".jet/perf/baselines/names/{baseline}.json"));
     let mut manifest = CanonicalJson::parse_canonical(&fs::read(&path).unwrap()).unwrap();
@@ -378,7 +380,7 @@ fn age_budget_baseline(dir: &Path, baseline: &str) -> (String, String) {
 
 
 #[cfg(unix)]
-fn run_budget_update_pty(dir: &Path, answer: &[u8]) -> (i32, String) {
+pub fn run_budget_update_pty(dir: &Path, answer: &[u8]) -> (i32, String) {
     use std::fs::File;
     use std::io::{Read, Write};
     use std::os::fd::FromRawFd;
@@ -455,7 +457,7 @@ fn run_budget_update_pty(dir: &Path, answer: &[u8]) -> (i32, String) {
 
 
 
-fn is_code(s: &str) -> bool {
+pub fn is_code(s: &str) -> bool {
     let b = s.as_bytes();
     b.len() == 5 && (b[0] == b'E' || b[0] == b'L') && b[1..].iter().all(|c| c.is_ascii_digit())
 }
@@ -531,7 +533,7 @@ fn is_code(s: &str) -> bool {
 // ── D-CLI1: `--` separator passthrough (c11) ──────────────────────────────
 
 /// Write a Jet fixture that prints its argument count via `process.argv()`.
-fn args_fixture(tag: &str) -> std::path::PathBuf {
+pub fn args_fixture(tag: &str) -> std::path::PathBuf {
     let p = std::env::temp_dir().join(format!("jet_cli_args_{tag}.jet"));
     fs::write(
         &p,
@@ -555,23 +557,23 @@ fn args_fixture(tag: &str) -> std::path::PathBuf {
 
 /// Fixture exercising the `inline` lens: an `#Inline` fn and an
 /// `#Inline(Always)` method.
-fn expand_fixture() -> PathBuf {
+pub fn expand_fixture() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/expand_facts.jet")
 }
 
 /// Replace the fixture's machine-specific absolute path with a stable token.
-fn scrub_fixture(s: &str, fixture: &Path) -> String {
+pub fn scrub_fixture(s: &str, fixture: &Path) -> String {
     s.replace(&fixture.display().to_string(), "FIXTURE.jet")
 }
 
 
 
-fn expand_layout_fixture() -> PathBuf {
+pub fn expand_layout_fixture() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/expand_layout_facts.jet")
 }
 
 
-fn expand_effects_layout_fixture() -> PathBuf {
+pub fn expand_effects_layout_fixture() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("tests/fixtures/expand_effects_layout.jet")
 }
@@ -607,7 +609,7 @@ fn expand_effects_layout_fixture() -> PathBuf {
 /// Recursively copy a directory tree — sandboxes the shipped monorepo
 /// fixture into an isolated cwd so `jet run`'s `build/` output never lands in
 /// the checked-in example and concurrent test runs never collide.
-fn copy_dir_all(src: &Path, dst: &Path) {
+pub fn copy_dir_all(src: &Path, dst: &Path) {
     fs::create_dir_all(dst).unwrap();
     for entry in fs::read_dir(src).unwrap() {
         let entry = entry.unwrap();
@@ -623,7 +625,7 @@ fn copy_dir_all(src: &Path, dst: &Path) {
 
 
 
-fn scene_probe_project(tag: &str, budget: &str) -> PathBuf {
+pub fn scene_probe_project(tag: &str, budget: &str) -> PathBuf {
     let dir = isolated_cwd(tag);
     fs::create_dir_all(dir.join("src")).unwrap();
     fs::write(dir.join("package.jet"), "name: \"app\"\nversion: \"0.1.0\"\n").unwrap();
@@ -650,7 +652,7 @@ fn run() {
     dir
 }
 
-fn scene_probe_run(dir: &Path) -> Output {
+pub fn scene_probe_run(dir: &Path) -> Output {
     Command::new(jet())
         .args(["self", "devtools", "probe", "src/main.jet"])
         .current_dir(dir)
@@ -658,7 +660,7 @@ fn scene_probe_run(dir: &Path) -> Output {
         .unwrap()
 }
 
-fn scene_probe_once(tag: &str, budget: &str) -> (PathBuf, CanonicalJson) {
+pub fn scene_probe_once(tag: &str, budget: &str) -> (PathBuf, CanonicalJson) {
     let dir = scene_probe_project(tag, budget);
     let output = scene_probe_run(&dir);
     assert_eq!(
@@ -679,7 +681,7 @@ fn scene_probe_once(tag: &str, budget: &str) -> (PathBuf, CanonicalJson) {
     (dir, CanonicalJson::parse_canonical(&bytes).unwrap())
 }
 
-fn assert_scene_probe_measurement(report: &CanonicalJson, expected_metric: &str) {
+pub fn assert_scene_probe_measurement(report: &CanonicalJson, expected_metric: &str) {
     let CanonicalJson::Object(report) = report else { panic!("report") };
     let CanonicalJson::Object(content) = &report["content"] else { panic!("content") };
     let CanonicalJson::Array(measurements) = &content["measurements"] else { panic!("measurements") };

@@ -660,7 +660,6 @@
             });
         };
         let bytes = body.as_bytes();
-        let mut pos = 0usize;
         let Some(colon) = bytes.iter().position(|b| *b == b':') else {
             return Err(DBError {
                 message: "database result is missing its row-count delimiter".to_string(),
@@ -679,7 +678,7 @@
                 message: "database row count exceeds the wire limit".to_string(),
             });
         }
-        pos = colon + 1;
+        let mut pos = colon + 1;
         let mut rows = Vec::with_capacity(row_count);
         for _ in 0..row_count {
             let row_start = pos;

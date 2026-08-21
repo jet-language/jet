@@ -1,3 +1,6 @@
+use std::process::Stdio;
+use jet_foundation::JetTrace::verify_jettrace;
+
 #[test]
 fn perf_attach_uses_compiler_browser_map_after_source_changes() {
     let _guard = SELF_ATTACH_LOCK.lock().unwrap();

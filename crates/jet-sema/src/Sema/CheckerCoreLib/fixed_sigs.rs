@@ -1338,7 +1338,10 @@ fn core_fixed_sig_impl(
             ],
             Some(result_ty(Type::Int, Type::Named("ServiceError".to_string()))),
         )),
-        ("core.services", "fail_worker" | "drain_worker") => Some((
+        (
+            "core.services",
+            "fail_worker" | "drain_worker" | "partition_worker" | "reconcile_worker",
+        ) => Some((
             vec![
                 (AccessConvention::Write, Type::Named("ServiceTree".to_string())),
                 (read, Type::Named("ServiceEndpoint".to_string())),

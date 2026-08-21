@@ -4544,7 +4544,7 @@ fn resident_safe_builtin_op(
         | TBuiltinOp::StringIsNumeric
         | TBuiltinOp::StringIsWhitespace
         | TBuiltinOp::StringIsAscii => matches!(recv_ty, Type::String) && args.is_empty(),
-        TBuiltinOp::StringSplitOnce { .. } | TBuiltinOp::Split => {
+        TBuiltinOp::StringSplitOnce { .. } => {
             matches!(recv_ty, Type::String)
                 && args.len() == 1
                 && matches!(&args[0].ty, Type::String)
@@ -5940,11 +5940,6 @@ fn count_spawn_sites_expr(expr: &TExpr, n: &mut SpawnSiteTally) {
             }
         }
         TExprKind::OrFallback { value, .. } => count_spawn_sites_expr(value, n),
-        TExprKind::ListLit(elems) => {
-            for elem in elems {
-                count_spawn_sites_expr(elem, n);
-            }
-        }
         TExprKind::TaskGroupAll { tasks }
         | TExprKind::TaskGroupRace { tasks }
         | TExprKind::TaskGroupAny { tasks } => count_spawn_sites_expr(tasks, n),
@@ -6531,11 +6526,6 @@ fn resident_safe_handle_op(op: &THandleOp, recv: &TExpr, args: &[TExpr]) -> bool
         | THandleOp::RngBool
         | THandleOp::RngFloat
         | THandleOp::RngSplit => args.is_empty(),
-        THandleOp::FakeName
-        | THandleOp::FakeEmail
-        | THandleOp::FakeHost
-        | THandleOp::FakeAddress => args.is_empty(),
-        THandleOp::FakeLocale => args.len() == 1,
         THandleOp::RngInt => args.len() == 2,
         THandleOp::RngFloatRange
         | THandleOp::RngNormal
@@ -6745,7 +6735,6 @@ fn resident_safe_handle_op(op: &THandleOp, recv: &TExpr, args: &[TExpr]) -> bool
         THandleOp::ReactiveGet => args.is_empty(),
         THandleOp::ReactiveSet => args.len() == 1,
         THandleOp::ReactiveEffectMethod { .. } => args.is_empty(),
-        THandleOp::EventMethod { .. } => true,
         THandleOp::LayoutMethod { .. } => true,
         THandleOp::LoadableMethod { .. } => true,
         THandleOp::UiBackendMethod { .. } => true,
@@ -6809,53 +6798,6 @@ fn resident_safe_handle_op(op: &THandleOp, recv: &TExpr, args: &[TExpr]) -> bool
         }
         THandleOp::TLSClientIdentityFromPem
         | THandleOp::TLSClientConfigWithVersionBounds if args.len() == 2 => true,
-        THandleOp::HTTPClientMethod { kind, method } => match (kind.as_str(), method.as_str()) {
-            ("HTTPResponse", "status" | "body" | "cookies") if args.is_empty() => true,
-            ("HTTPResponse", "header") if args.len() == 1 => true,
-            ("HTTPResponse", "json") if args.len() <= 1 => true,
-            ("HTTPBody", "text" | "json" | "bytes") if args.len() == 1 => true,
-            ("HTTPBody", "copy_to") if args.len() == 2 => true,
-            ("HTTPRequest", "body") if args.len() == 1 => true,
-            ("HTTPRequest", "form" | "cookie" | "header") if args.len() == 2 => true,
-            ("HTTPRequest", "redirects" | "connect_timeout" | "read_timeout")
-                if args.len() == 1 =>
-            {
-                true
-            }
-            ("HTTPRequest", "send") if args.is_empty() => true,
-            _ => false,
-        },
-        THandleOp::HTTPServerMethod { kind, method } => match (kind.as_str(), method.as_str()) {
-            ("HTTPMux", m)
-                if matches!(
-                    m,
-                    "get" | "post" | "put" | "delete" | "patch" | "head" | "options"
-                ) && args.len() == 2 =>
-            {
-                true
-            }
-            ("HTTPMux", "middleware") if args.len() == 1 => true,
-            ("HTTPHandler", "handle") if args.len() == 1 => true,
-            ("HTTPRequest", "body" | "method" | "path" | "trailers" | "body_len" | "json")
-                if args.is_empty() =>
-            {
-                true
-            }
-            ("HTTPRequest", "param" | "header" | "under_limit") if args.len() == 1 => true,
-            ("HTTPBody", "text" | "json" | "bytes") if args.len() == 1 => true,
-            ("HTTPBody", "copy_to") if args.len() == 2 => true,
-            ("HTTPResponse", "status" | "body") if args.is_empty() => true,
-            ("HTTPResponse", "trailers") if args.len() == 1 => true,
-            ("HTTPServer", "local_addr" | "serve") if args.is_empty() => true,
-            ("HTTPServer", "shutdown") if args.len() == 1 => true,
-            ("WsConn", "recv") if args.is_empty() => true,
-            ("WsConn", "send_text") if args.len() == 1 => true,
-            ("WsConn", "close") if args.len() == 2 => true,
-            ("WsMessage", "is_text" | "text") if args.is_empty() => true,
-            _ => false,
-        },
-        THandleOp::HTTPReqTrailers => args.is_empty(),
-        THandleOp::HTTPRespTrailers => args.len() == 1,
         THandleOp::MathMethod { .. } => true,
         _ => false,
     }

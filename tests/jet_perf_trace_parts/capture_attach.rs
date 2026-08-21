@@ -1,3 +1,6 @@
+use std::io::{BufRead, BufReader};
+use std::process::Stdio;
+
 #[test]
 fn perf_attach_captures_wall_and_alloc_with_jet_symbol_from_observe() {
     if !common::have_rustc() {

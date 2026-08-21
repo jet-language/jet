@@ -4,9 +4,9 @@ use std::process::{Command, Stdio};
 use std::thread;
 use std::time::{Duration, Instant};
 
-use common::{build_and_run, fixture_matches, normalize_fixture_selector};
+use common::{fixture_matches, normalize_fixture_selector};
 
-const DEFAULT_DEV_CASE_DEADLINE: Duration = Duration::from_secs(120);
+pub const DEFAULT_DEV_CASE_DEADLINE: Duration = Duration::from_secs(120);
 
 /// Fixtures allowed to emit a *gated* `unsafe { … }` / `unsafe fn` block —
 /// the same stems golden.rs treats as intentionally exercising the audited
@@ -15,7 +15,7 @@ const DEFAULT_DEV_CASE_DEADLINE: Duration = Duration::from_secs(120);
 /// `examples/features/<dir>/<name>.jet` are named `ex_<dir>_<name>.jet`
 /// (see `original_example_stem`); every other naming scheme (the `ui_*`
 /// reuse from tests/ui, and the handwritten seeds) is never gated.
-const GATED_UNSAFE_STEMS: &[&str] = &[
+pub const GATED_UNSAFE_STEMS: &[&str] = &[
     "lowlevel/lowlevel",
     "lowlevel/pointer_cast_deref",
     "memory/rawptr",
@@ -29,7 +29,7 @@ const GATED_UNSAFE_STEMS: &[&str] = &[
 /// `examples/features` is a single path segment with no underscore, so
 /// splitting on the first `_` is exact). Returns `None` for any other
 /// naming scheme (never gated).
-fn original_example_stem(file_stem: &str) -> Option<String> {
+pub fn original_example_stem(file_stem: &str) -> Option<String> {
     let rest = file_stem.strip_prefix("ex_")?;
     let (dir, name) = rest.split_once('_')?;
     Some(format!("{dir}/{name}"))
@@ -74,7 +74,7 @@ fn selected_cases(kind: &str, filter: Option<&str>) -> Vec<PathBuf> {
         .collect()
 }
 
-fn require_lane_selection(lane: &str, filter: Option<&str>, selected: usize) {
+pub fn require_lane_selection(lane: &str, filter: Option<&str>, selected: usize) {
     match filter {
         Some(filter) => assert_eq!(
             selected, 1,
@@ -84,7 +84,7 @@ fn require_lane_selection(lane: &str, filter: Option<&str>, selected: usize) {
     }
 }
 
-fn replay(path: &Path, test: &str) {
+pub fn replay(path: &Path, test: &str) {
     eprintln!(
         "replay: SEMA_SOUNDNESS_CASE={} cargo test --test {} {} -- --exact --nocapture",
         relative(path),
@@ -93,14 +93,14 @@ fn replay(path: &Path, test: &str) {
     );
 }
 
-fn require_rustc() {
+pub fn require_rustc() {
     assert!(
         common::have_rustc(),
         "rustc unavailable; refusing to skip sema soundness"
     );
 }
 
-fn expected_code(path: &Path) -> &str {
+pub fn expected_code(path: &Path) -> &str {
     path.file_stem()
         .and_then(|s| s.to_str())
         .and_then(|s| s.rsplit_once('.'))
@@ -108,7 +108,7 @@ fn expected_code(path: &Path) -> &str {
         .unwrap_or_else(|| panic!("invalid fixture must end in .E####.jet: {}", path.display()))
 }
 
-fn default_dev_with_deadline(path: &Path) -> Result<(i32, String, String), String> {
+pub fn default_dev_with_deadline(path: &Path) -> Result<(i32, String, String), String> {
     let shown = path.to_string_lossy().into_owned();
     let mut child = Command::new(env!("CARGO_BIN_EXE_jet"))
         .args(["run", &shown])
@@ -152,7 +152,7 @@ fn default_dev_with_deadline(path: &Path) -> Result<(i32, String, String), Strin
 /// failure) so one full pass reports every broken fixture instead of the
 /// first. The default panic hook is silenced for the duration so per-case
 /// panics don't spam stderr; it is always restored before returning.
-fn run_all_collecting_failures(
+pub fn run_all_collecting_failures(
     paths: Vec<PathBuf>,
     mut body: impl FnMut(&Path) -> Result<(), String>,
 ) -> Vec<String> {

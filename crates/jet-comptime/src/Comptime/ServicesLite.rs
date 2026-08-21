@@ -1791,10 +1791,15 @@ pub fn apply(method: &str, args: &[CtValue], span: Span) -> Result<CtValue, Diag
         "directory_generation" => Ok(CtValue::Int(jet_services_directory_generation(
             &ct_to_tree(one(0)?, span)?,
         ))),
-        "drain_worker" => {
+        "drain_worker" | "partition_worker" | "reconcile_worker" => {
             let mut tree = ct_to_tree(one(0)?, span)?;
             let endpoint = ct_to_endpoint(one(1)?, span)?;
-            Ok(match jet_services_drain_worker(&mut tree, &endpoint) {
+            let result = match method {
+                "drain_worker" => jet_services_drain_worker(&mut tree, &endpoint),
+                "partition_worker" => jet_services_partition_worker(&mut tree, &endpoint),
+                _ => jet_services_reconcile_worker(&mut tree, &endpoint),
+            };
+            Ok(match result {
                 Ok(()) => CtValue::Present(Box::new(mutate_ok(tree, CtValue::Unit))),
                 Err(e) => mutate_err(tree, map_err(e)),
             })

@@ -223,12 +223,11 @@ fn read_tagged(bytes: &[u8], pos: &mut usize) -> Option<(char, String)> {
 fn decode_params(wire: &str) -> Vec<rusqlite::types::Value> {
     use rusqlite::types::Value;
     let bytes = wire.as_bytes();
-    let mut pos = 0usize;
     let Some(colon) = bytes.iter().position(|b| *b == b':') else { return Vec::new() };
     let Ok(count) = std::str::from_utf8(&bytes[..colon]).unwrap_or("0").parse::<usize>() else {
         return Vec::new();
     };
-    pos = colon + 1;
+    let mut pos = colon + 1;
     let mut out = Vec::with_capacity(count);
     for _ in 0..count {
         let Some((tag, payload)) = read_tagged(bytes, &mut pos) else { break };

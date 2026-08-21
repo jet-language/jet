@@ -435,14 +435,23 @@ pub(crate) fn collect_core_stmts(
                 subject,
                 arms,
                 else_body,
-                ..
+                span,
             }
             | Stmt::ComptimeSwitch {
                 subject,
                 arms,
                 else_body,
-                ..
+                span,
             } => {
+                // D-CONC-CHAN2=D: a subjectless readiness table is compiler-owned
+                // scheduler syntax, so its plain endpoints still pull in the
+                // embedded Prelude even without a Core import or task expression.
+                if arms
+                    .iter()
+                    .any(|arm| crate::AST::readiness_head(&arm.cond).is_some())
+                {
+                    note_core_usage(used, spans, "core.concurrency::select", Some(*span));
+                }
                 collect_core_expr(subject, imports, used, spans, ffi_cb);
                 for arm in arms {
                     collect_core_expr(&arm.cond, imports, used, spans, ffi_cb);

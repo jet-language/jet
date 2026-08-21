@@ -6199,7 +6199,13 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
             } else {
                 "jet_select_wait_tagged"
             };
-            format!("{}jet_std::{door}({}, {})", cx.root_prefix, recv_list, after_list)
+            // An after-only table has no receiver element to infer the
+            // scheduler's payload type from. Its timer payload is Unit.
+            let type_arg = if recvs.is_empty() { "::<()>" } else { "" };
+            format!(
+                "{}jet_std::{door}{type_arg}({}, {})",
+                cx.root_prefix, recv_list, after_list
+            )
         }
         // c109 Phase 13: a fn-typed value. A bare fn-name value echoes the
         // already-rendered `Box::new(move |…| …) as <fn-type>` wrapper; a call through

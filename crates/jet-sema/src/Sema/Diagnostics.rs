@@ -1342,6 +1342,8 @@ pub(crate) fn is_core_shown_type(name: &str) -> bool {
             | "Fraction"
             | "Mime"
             | "ServiceUpgradeReceipt"
+            | "TaskOutcome"
+            | "TaskStatus"
             | "Complex"
             | "Url"
             | "Path"

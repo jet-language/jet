@@ -1,4 +1,4 @@
-use common::strip_vetted_prelude_modules;
+use common::{build_and_run, strip_vetted_prelude_modules};
 
 #[test]
 fn valid_corpus_reaches_rustc() {

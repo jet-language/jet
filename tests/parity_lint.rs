@@ -98,7 +98,7 @@ fn comment_blocks(source: &str) -> Vec<(usize, String)> {
     let mut current_start = None;
     let mut current = String::new();
 
-    let mut finish = |blocks: &mut Vec<(usize, String)>, start: &mut Option<usize>, text: &mut String| {
+    let finish = |blocks: &mut Vec<(usize, String)>, start: &mut Option<usize>, text: &mut String| {
         if let Some(line) = start.take() {
             blocks.push((line, std::mem::take(text)));
         }

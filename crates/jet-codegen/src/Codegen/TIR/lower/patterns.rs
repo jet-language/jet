@@ -808,6 +808,12 @@ pub(crate) fn tir_enum_rust_path(cx: &Cx, type_name: &str) -> (String, bool) {
     if type_name == "ServiceReceipt" {
         return at_root("JetServiceReceipt");
     }
+    if type_name == "TaskOutcome" {
+        return at_root("JetTaskOutcome");
+    }
+    if type_name == "TaskStatus" {
+        return at_root("JetTaskStatus");
+    }
     if type_name == "ServiceError" {
         return at_root("JetServiceError");
     }

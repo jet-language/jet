@@ -7,16 +7,7 @@ mod runtime {
     pub use jet_crypto_entropy::{jet_crypto_entropy_fill, JetCryptoEntropyError};
 }
 
-use runtime::{
-    jet_crypto_entropy_bytes, jet_crypto_entropy_clear_test_provider,
-    jet_crypto_entropy_fill, jet_crypto_entropy_fill_with, jet_crypto_entropy_set_test_provider,
-    jet_crypto_entropy_clear_zeroize_test_observer,
-    jet_crypto_entropy_clear_wasi_attempt_test_observer,
-    jet_crypto_entropy_set_zeroize_test_observer, JetCryptoEntropyError,
-    jet_crypto_entropy_set_wasi_attempt_test_observer,
-    jet_crypto_entropy_unsupported_for_test, jet_crypto_entropy_wasi_with_for_test,
-    JetCryptoEntropyStep, JetCryptoWasiAttemptEvent,
-};
+pub(crate) use runtime::*;
 use jet::Interpreter::{dev_iteration, RunOutcome};
 use jet_foundation::JitBackend::JitBackend;
 use jet_jit::CraneliftBackend;

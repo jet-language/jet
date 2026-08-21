@@ -13673,7 +13673,16 @@ impl LowerCtx<'_, '_> {
             ("core.services", "group") => Some(3),
             ("core.services", "start" | "stop") => Some(1),
             ("core.services", "send") => Some(3),
-            ("core.services", "receive" | "mailbox_depth" | "restarts" | "fail_worker") => {
+            (
+                "core.services",
+                "receive"
+                    | "mailbox_depth"
+                    | "restarts"
+                    | "fail_worker"
+                    | "drain_worker"
+                    | "partition_worker"
+                    | "reconcile_worker",
+            ) => {
                 Some(2)
             }
             (
@@ -13706,7 +13715,6 @@ impl LowerCtx<'_, '_> {
             ("core.services", "workflow_outcome") => Some(2),
             ("core.services", "directory_register") => Some(3),
             ("core.services", "directory_resolve") => Some(2),
-            ("core.services", "drain_worker") => Some(2),
             ("core.sync", "text_new") => Some(2),
             ("core.sync", "text_set") => Some(3),
             ("core.sync", "text_merge") => Some(2),
@@ -20840,7 +20848,6 @@ impl LowerCtx<'_, '_> {
             self.b.seal_block(then_block);
             let arm_resource_mark = self.compute_resources.len();
             let mut bound_place = None;
-            let mut bound_allocator_view = false;
             let mut prior_allocator_view = false;
             if binding != "_" {
                 let payload = self.result_payload(handle, &payload_ty)?;
@@ -20849,7 +20856,7 @@ impl LowerCtx<'_, '_> {
                 let var = self.fresh_var(clif);
                 self.b.def_var(var, payload);
                 self.track_compute_value(payload, &payload_ty)?;
-                bound_allocator_view = payload_ty.is_allocator_view();
+                let bound_allocator_view = payload_ty.is_allocator_view();
                 prior_allocator_view = self.allocator_view_names.contains(&place);
                 self.vars.insert(place.clone(), var);
                 self.var_tys.insert(place.clone(), payload_ty);
@@ -21571,9 +21578,7 @@ impl LowerCtx<'_, '_> {
                 })
             }
             TBuiltinOp::ExtendList
-            | TBuiltinOp::ConcatList
-            | TBuiltinOp::OrderingThen
-            | TBuiltinOp::OrderingReverse => Err(Self::BUILTIN_UNSUPPORTED.to_string()),
+            | TBuiltinOp::ConcatList => Err(Self::BUILTIN_UNSUPPORTED.to_string()),
             TBuiltinOp::GetMap => {
                 in_own_frame(|| -> Result<Value, String> {
                     if matches!(

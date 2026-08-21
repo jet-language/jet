@@ -1,13 +1,11 @@
 use std::fs;
-use std::io::{BufRead, BufReader, Read, Write};
+use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::path::{Path, PathBuf};
-use std::process::{Child, Command, Stdio};
+use std::process::{Child, Command};
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
-use jet_foundation::JetTrace::{jettrace_artifact, trace_id, verify_jettrace};
-use jet_foundation::PerformanceBudget::CanonicalJson;
 
 static SELF_ATTACH_LOCK: Mutex<()> = Mutex::new(());
 
@@ -93,7 +91,7 @@ fn json_u64_after(haystack: &str, key: &str) -> Option<u64> {
     digits.parse().ok()
 }
 
-fn json_string_after<'a>(haystack: &'a str, key: &str) -> Option<&'a str> {
+pub fn json_string_after<'a>(haystack: &'a str, key: &str) -> Option<&'a str> {
     let needle = format!("\"{key}\":\"");
     haystack.split_once(&needle)?.1.split_once('"').map(|(value, _)| value)
 }
@@ -128,7 +126,7 @@ fn assert_completed_io_bound_to_tasks(text: &str) {
 }
 
 /// Fail if capture invented 1ns wall or recorded a zero-alloc scrape-success.
-fn assert_honest_wall_and_alloc(text: &str) {
+pub fn assert_honest_wall_and_alloc(text: &str) {
     let wall_at = text
         .find("\"domain\":\"wall\"")
         .unwrap_or_else(|| panic!("missing wall sample: {text}"));
@@ -161,7 +159,7 @@ fn assert_honest_wall_and_alloc(text: &str) {
 }
 
 /// Fail if tasks are empty, missing root, or missing a spawned child parent link.
-fn assert_honest_tasks(text: &str) {
+pub fn assert_honest_tasks(text: &str) {
     let tasks_at = text
         .find("\"tasks\":[{")
         .unwrap_or_else(|| panic!("missing non-empty tasks array: {text}"));
@@ -188,7 +186,7 @@ fn assert_honest_tasks(text: &str) {
 }
 
 /// Fail if locks empty, not channel, or missing real waiters (idle scrape).
-fn assert_honest_locks(text: &str) {
+pub fn assert_honest_locks(text: &str) {
     let locks_at = text
         .find("\"locks\":[{")
         .unwrap_or_else(|| panic!("missing non-empty locks array: {text}"));
@@ -252,7 +250,7 @@ fn assert_honest_io(text: &str) {
     );
 }
 
-fn assert_honest_native(text: &str, expect_elapsed: bool, expect_cpu_work: bool) {
+pub fn assert_honest_native(text: &str, expect_elapsed: bool, expect_cpu_work: bool) {
     let native_at = text
         .find("\"native\":[{")
         .unwrap_or_else(|| panic!("missing native timing: {text}"));
@@ -292,7 +290,7 @@ fn assert_honest_native(text: &str, expect_elapsed: bool, expect_cpu_work: bool)
     assert!(text.contains("\"native_rows_truncated\":false"), "{text}");
 }
 
-fn assert_honest_spans(text: &str, expect_captured: bool) {
+pub fn assert_honest_spans(text: &str, expect_captured: bool) {
     let spans = text
         .split_once("\"spans\":[")
         .and_then(|(_, tail)| tail.split_once("],\"tasks\""))

@@ -229,26 +229,26 @@ pub(crate) mod runtime {
             pub(crate) line: i64,
             pub(crate) column: i64,
             pub(crate) lookahead: Option<u8>,
-            pub(crate) frames: Vec<super::JetJSONReadFrame>,
+            pub(super) frames: Vec<super::JetJSONReadFrame>,
             pub(crate) root_started: bool,
             pub(crate) root_done: bool,
             pub(crate) terminal: Option<EncodingError>,
             pub(crate) eof: bool,
             pub(crate) record_mode: bool,
             pub(crate) typed_numbers: bool,
-            pub(crate) allocation_budget: Option<super::JetEncodingAllocationBudget>,
+            pub(super) allocation_budget: Option<super::JetEncodingAllocationBudget>,
             pub(crate) output_heap: usize,
         }
         pub struct JSONWriter {
             pub(crate) output: super::JetFileWriter,
             pub(crate) limits: EncodingLimits,
-            pub(crate) frames: Vec<super::JetJSONWriteFrame>,
+            pub(super) frames: Vec<super::JetJSONWriteFrame>,
             pub(crate) root_written: bool,
             pub(crate) finished: bool,
             pub(crate) terminal: Option<EncodingError>,
             pub(crate) total: i64,
             pub(crate) canonical: bool,
-            pub(crate) canonical_frames: Vec<super::JetJSONCanonicalFrame>,
+            pub(super) canonical_frames: Vec<super::JetJSONCanonicalFrame>,
             pub(crate) canonical_retained: usize,
         }
         pub struct JSONLReader {
@@ -290,7 +290,7 @@ pub(crate) mod runtime {
             pub(crate) terminal: Option<EncodingError>,
             pub(crate) total: i64,
             pub(crate) eof: bool,
-            pub(crate) allocation: super::JetEncodingAllocationBudget,
+            pub(super) allocation: super::JetEncodingAllocationBudget,
         }
         pub struct XMLWriter {
             pub(crate) output: super::JetFileWriter,
@@ -300,7 +300,7 @@ pub(crate) mod runtime {
             pub(crate) terminal: Option<EncodingError>,
             pub(crate) total: i64,
             pub(crate) finished: bool,
-            pub(crate) allocation: super::JetEncodingAllocationBudget,
+            pub(super) allocation: super::JetEncodingAllocationBudget,
         }
         pub struct CBORReader {
             pub(crate) input: super::JetFileReader,
@@ -310,22 +310,22 @@ pub(crate) mod runtime {
             pub(crate) eof: bool,
             pub(crate) root_done: bool,
             pub(crate) lookahead: Option<u8>,
-            pub(crate) frames: Vec<super::JetCBORReadFrame>,
+            pub(super) frames: Vec<super::JetCBORReadFrame>,
             pub(crate) retained: usize,
             pub(crate) workspace: usize,
-            pub(crate) allocation: super::JetEncodingAllocationBudget,
+            pub(super) allocation: super::JetEncodingAllocationBudget,
         }
         pub struct CBORWriter {
             pub(crate) output: super::JetFileWriter,
             pub(crate) limits: EncodingLimits,
             pub(crate) terminal: Option<EncodingError>,
             pub(crate) total: i64,
-            pub(crate) frames: Vec<super::JetCBORWriteFrame>,
+            pub(super) frames: Vec<super::JetCBORWriteFrame>,
             pub(crate) root_written: bool,
             pub(crate) finished: bool,
             pub(crate) retained: usize,
             pub(crate) workspace: usize,
-            pub(crate) allocation: super::JetEncodingAllocationBudget,
+            pub(super) allocation: super::JetEncodingAllocationBudget,
         }
     }
 

@@ -1,8 +1,10 @@
 use super::alloc_ptrs::result_ty;
-use crate::AST::{Expr, StrPart, Type};
-use crate::Diagnostics::{Diagnostic, Span};
-use crate::Sema::Checker;
 use super::serde_diags::wrong_core_arity;
+use crate::AST::{Expr, Item, ProgramBundle, StrPart, Type};
+use crate::Diagnostics::{Diagnostic, Span};
+use crate::Sema::Effects::{EffectSet, EffectSummary};
+use crate::Sema::Checker;
+use std::collections::{HashMap, HashSet};
 
 fn service_error_ty() -> Type {
     Type::Named("ServiceError".to_string())
@@ -109,6 +111,19 @@ impl<'a> Checker<'a> {
                             "pass an ordinary named function value",
                             args[1].expr.span(),
                         );
+                    } else if let Expr::Ident(handler, handler_span) = &args[1].expr {
+                        // A service owns the handler after this builder call. A
+                        // local binding could carry a stack lifetime, so only
+                        // a registered top-level function may cross the
+                        // topology boundary.
+                        if self.lookup(handler).is_some() || !self.funcs.contains_key(handler) {
+                            invalid_service_value(
+                                self,
+                                "worker handler lifetime",
+                                "pass a top-level function, not a local or captured function value",
+                                *handler_span,
+                            );
+                        }
                     }
                     self.expect_core_arg("ServiceTree.worker", 2, &Type::Int, &mut args[2]);
                     if let Some(name) = literal_string(&args[0].expr) {
@@ -120,6 +135,13 @@ impl<'a> Checker<'a> {
                                 args[0].expr.span(),
                             );
                         }
+                    } else {
+                        invalid_service_value(
+                            self,
+                            "worker name",
+                            "use a literal visible worker name of at most 256 bytes",
+                            args[0].expr.span(),
+                        );
                     }
                     if literal_int(&args[2].expr).is_some_and(|capacity| capacity <= 0) {
                         invalid_service_value(
@@ -202,7 +224,7 @@ impl<'a> Checker<'a> {
                 }
                 result_int()
             }
-            "fail_worker" | "drain_worker" => {
+            "fail_worker" | "drain_worker" | "partition_worker" | "reconcile_worker" => {
                 if self.service_method_arity(&format!("ServiceTree.{method}"), args, 1, span) {
                     self.expect_core_arg(&format!("ServiceTree.{method}"), 0, &endpoint, &mut args[0]);
                 }
@@ -464,4 +486,193 @@ pub fn service_runtime_method_return_ty(method: &str) -> Option<Type> {
         )),
         _ => None,
     }
+}
+
+/// D-SERVICE1=D: validate the facts that need the complete checked function
+/// graph. The method checker owns local shape and type checks; this pass owns
+/// the service-wide effect, lifetime, and cycle proof before lowering.
+pub(crate) fn validate_service_handlers(
+    bundle: &mut ProgramBundle,
+    summaries: &HashMap<String, EffectSummary>,
+    solved: &HashMap<String, EffectSet>,
+    diags: &mut Vec<Diagnostic>,
+) {
+    let mut workers = Vec::new();
+    for module in &mut bundle.modules {
+        let module_alias = module.alias.clone();
+        for item in &mut module.items {
+            let Item::Func(function) = item else { continue };
+            for statement in &mut function.body {
+                statement.for_each_expr_mut(|expression| {
+                    let Expr::MethodCall { method, args, .. } = expression else {
+                        return;
+                    };
+                    if method != "worker" || args.len() < 2 {
+                        return;
+                    }
+                    let Expr::Ident(handler, _) = &args[1].expr else {
+                        return;
+                    };
+                    let Some(summary_key) =
+                        service_summary_key(&module_alias, handler, summaries)
+                    else {
+                        // The local method check reports non-top-level values;
+                        // this catches extern/unknown names whose body cannot
+                        // supply a closed effect graph to the supervisor.
+                        diags.push(Diagnostic::error(
+                            "E0112",
+                            format!("service worker `{handler}` has no checked handler body"),
+                            "a service worker must have a sema-known function body for effects and lifetime checking"
+                                .to_string(),
+                            "pass a top-level Jet function with a checked body".to_string(),
+                            Some(args[1].expr.span()),
+                        ));
+                        return;
+                    };
+                    workers.push(ServiceWorker {
+                        key: summary_key,
+                        handler: handler.clone(),
+                        span: expression.span(),
+                    });
+                });
+            }
+        }
+    }
+
+    let canonical_summaries = summaries
+        .iter()
+        .filter(|(key, _)| key.contains("::"))
+        .map(|(key, summary)| (key.clone(), summary))
+        .collect::<HashMap<_, _>>();
+
+    let mut graph = HashMap::<String, Vec<String>>::new();
+    for (key, summary) in &canonical_summaries {
+        let mut edges = Vec::new();
+        for edge in &summary.edges {
+            let Some(target) = service_edge_key(key, edge, &canonical_summaries) else {
+                continue;
+            };
+            if !edges.contains(&target) {
+                edges.push(target);
+            }
+        }
+        graph.insert(key.clone(), edges);
+    }
+
+    let mut reported_effects = HashSet::new();
+    for worker in &workers {
+        let Some(summary) = canonical_summaries.get(&worker.key) else {
+            continue;
+        };
+        let effect_projection_missing =
+            !summary.direct.is_empty() && !solved.contains_key(&worker.key);
+        if (summary.maximal || effect_projection_missing)
+            && reported_effects.insert(worker.key.clone())
+        {
+            diags.push(Diagnostic::error(
+                "E0112",
+                format!("service worker `{}` has an open effect row", worker.handler),
+                "a supervisor must know every effect a promoted worker can reach".to_string(),
+                "close the function's effects with a checked body or keep it out of the service tree"
+                    .to_string(),
+                Some(worker.span),
+            ));
+        }
+    }
+
+    let mut reported_cycles = HashSet::new();
+    for worker in &workers {
+        if reported_cycles.contains(&worker.key) {
+            continue;
+        }
+        let Some(summary) = canonical_summaries.get(&worker.key) else {
+            continue;
+        };
+        if worker_reaches_worker(&worker.key, &worker.key, summary, &graph) {
+            reported_cycles.insert(worker.key.clone());
+            diags.push(Diagnostic::error(
+                "E0112",
+                format!("service worker `{}` is part of a handler cycle", worker.handler),
+                "a promoted worker graph must have an acyclic handler topology".to_string(),
+                "remove the recursive worker dependency or keep the functions outside this service tree"
+                    .to_string(),
+                Some(worker.span),
+            ));
+        }
+    }
+}
+
+struct ServiceWorker {
+    key: String,
+    handler: String,
+    span: Span,
+}
+
+fn service_summary_key(
+    module_alias: &str,
+    handler: &str,
+    summaries: &HashMap<String, EffectSummary>,
+) -> Option<String> {
+    let local = format!("{module_alias}::{handler}");
+    if summaries.contains_key(&local) {
+        return Some(local);
+    }
+    let suffix = format!("::{handler}");
+    let matches = summaries
+        .keys()
+        .filter(|key| key.ends_with(&suffix))
+        .filter(|key| key.contains("::"))
+        .cloned()
+        .collect::<Vec<_>>();
+    (matches.len() == 1).then(|| matches.into_iter().next().unwrap())
+}
+
+fn service_edge_key(
+    current: &str,
+    edge: &str,
+    summaries: &HashMap<String, &EffectSummary>,
+) -> Option<String> {
+    if edge == "__jet_panic__" {
+        return None;
+    }
+    if summaries.contains_key(edge) {
+        return Some(edge.to_string());
+    }
+    let module = current.split_once("::")?.0;
+    let local = format!("{module}::{edge}");
+    if summaries.contains_key(&local) {
+        return Some(local);
+    }
+    let suffix = format!("::{edge}");
+    let matches = summaries
+        .keys()
+        .filter(|key| key.ends_with(&suffix))
+        .cloned()
+        .collect::<Vec<_>>();
+    (matches.len() == 1).then(|| matches.into_iter().next().unwrap())
+}
+
+fn worker_reaches_worker(
+    start: &str,
+    target: &str,
+    start_summary: &EffectSummary,
+    graph: &HashMap<String, Vec<String>>,
+) -> bool {
+    let mut pending = graph
+        .get(start)
+        .cloned()
+        .unwrap_or_else(|| start_summary.edges.iter().cloned().collect());
+    let mut visited = HashSet::new();
+    while let Some(node) = pending.pop() {
+        if node == target {
+            return true;
+        }
+        if !visited.insert(node.clone()) {
+            continue;
+        }
+        if let Some(edges) = graph.get(&node) {
+            pending.extend(edges.iter().cloned());
+        }
+    }
+    false
 }

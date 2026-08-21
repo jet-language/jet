@@ -2329,7 +2329,15 @@ mod service_adapter {
                 "send" if index == 0 => Some(ArgKind::Slot),
                 "send" if index == 1 => Some(ArgKind::Slot),
                 "send" if index == 2 => Some(ArgKind::String),
-                "receive" | "mailbox_depth" | "restarts" | "fail_worker" if index < 2 => {
+                "receive"
+                | "mailbox_depth"
+                | "restarts"
+                | "fail_worker"
+                | "drain_worker"
+                | "partition_worker"
+                | "reconcile_worker"
+                    if index < 2 =>
+                {
                     Some(ArgKind::Slot)
                 }
                 "endpoint_show"
@@ -2398,7 +2406,6 @@ mod service_adapter {
                 "directory_register" if index == 2 => Some(ArgKind::Slot),
                 "directory_resolve" if index == 0 => Some(ArgKind::Slot),
                 "directory_resolve" if index == 1 => Some(ArgKind::String),
-                "drain_worker" if index < 2 => Some(ArgKind::Slot),
                 _ => None,
             },
             SERVICE_AUTHORITY_MODULE => match method {

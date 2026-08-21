@@ -9,6 +9,7 @@ mod arg_expect;
 mod db_methods;
 mod services_methods;
 pub use services_methods::*;
+pub(crate) use services_methods::validate_service_handlers;
 mod db_returns;
 pub use db_returns::*;
 mod plugin_checks;

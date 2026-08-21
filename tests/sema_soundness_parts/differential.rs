@@ -1,3 +1,5 @@
+use common::build_and_run;
+
 #[test]
 fn executable_corpus_matches_aot_and_default_dev() {
     // FEATURE_CLAIM: claim.native-language / accepted-native-semantics

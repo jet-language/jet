@@ -102,7 +102,7 @@ mod native {
     extern "C" {
         fn dlopen(path: *const c_char, flags: i32) -> *mut c_void;
         fn dlsym(handle: *mut c_void, name: *const c_char) -> *mut c_void;
-        fn dlerror() -> *const c_char;
+        fn dlerror() -> *mut c_char;
     }
 
     const RTLD_NOW: i32 = 2;

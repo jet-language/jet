@@ -38,6 +38,8 @@ fn jet_runtime_stop(code: &'static str, _file: &str, line: u32, message: &str) -
 
 type JetDataTree = crate::Encoding::json_rt::DataTree;
 
+// Keep the generated Rust codec trait spelling stable; Codegen emits `__jet_Encode`.
+#[allow(non_camel_case_types)]
 trait __jet_Encode {
     fn jet_encode(&self) -> JetDataTree;
 }
@@ -46,6 +48,8 @@ impl __jet_Encode for i64 {
         JetDataTree::Int(*self)
     }
 }
+// Keep the generated Rust codec trait spelling stable; Codegen emits `__jet_Decode`.
+#[allow(non_camel_case_types)]
 trait __jet_Decode: Sized {
     fn jet_decode(tree: &JetDataTree) -> Result<Self, Vec<jet_std::FieldError>>;
 }

@@ -1934,7 +1934,7 @@ fn jet_services_receive(
             }
         }
     }
-    let (message, should_stop) = {
+    let (message, should_stop, mailbox_before) = {
         let worker = jet_services_find_worker_mut(tree, endpoint)?;
         if !worker.running && (!draining || worker.mailbox.channel.depth() == 0) {
             return Err(JetServiceError::NotStarted(format!(
@@ -1942,6 +1942,7 @@ fn jet_services_receive(
                 worker.name
             )));
         }
+        let mailbox_before = worker.mailbox.channel.snapshot();
         let message = match worker.mailbox.channel.try_recv() {
             Ok(message) => message,
             Err(JetServiceChannelError::Empty) => {
@@ -1959,10 +1960,30 @@ fn jet_services_receive(
             Err(JetServiceChannelError::Full(_)) => unreachable!("receive cannot return a full channel error"),
         };
         let should_stop = worker.mailbox.channel.depth() == 0;
-        (message, should_stop)
+        (message, should_stop, mailbox_before)
     };
     if draining && should_stop {
-        jet_services_finish_drain(tree, endpoint)?;
+        if let Err(error) = jet_services_finish_drain(tree, endpoint) {
+            let restore = tree
+                .workers
+                .iter_mut()
+                .find(|worker| worker.endpoint == *endpoint)
+                .ok_or_else(|| {
+                    JetServiceError::Unknown(format!(
+                        "endpoint {}/{} disappeared while restoring a drained mailbox",
+                        endpoint.tree, endpoint.worker
+                    ))
+                })
+                .and_then(|worker| jet_services_restore_mailbox(worker, mailbox_before));
+            return Err(match restore {
+                Ok(()) => error,
+                Err(restore_error) => JetServiceError::Policy(format!(
+                    "{}; drained mailbox restore failed: {}",
+                    error.jet_show(),
+                    restore_error.jet_show()
+                )),
+            });
+        }
     }
     Ok(message)
 }
@@ -3975,11 +3996,16 @@ fn jet_services_partition_worker(
             "service tree is not started".to_string(),
         ));
     }
-    let (name, was_running) = {
+    let (name, was_running, task, worker_endpoint) = {
         let worker = jet_services_find_worker_mut(tree, endpoint)?;
         let was_running = worker.running;
         worker.running = false;
-        (worker.name.clone(), was_running)
+        (
+            worker.name.clone(),
+            was_running,
+            worker.task.clone(),
+            worker.endpoint.clone(),
+        )
     };
     let added_partition = if !tree.partitioned.iter().any(|existing| existing == &name) {
         if tree.partitioned.len() >= MAX_SERVICE_WORKERS {
@@ -3994,20 +4020,16 @@ fn jet_services_partition_worker(
                 "service partition limit exceeded".to_string(),
             ));
         }
-        tree.partitioned.push(name);
+        // The rollback below removes this same entry by name, so the push
+        // cannot consume it.
+        tree.partitioned.push(name.clone());
         true
     } else {
         false
     };
-    let worker = tree
-        .workers
-        .iter()
-        .find(|worker| worker.name == endpoint.worker)
-        .ok_or_else(|| JetServiceError::Unknown("partitioned worker disappeared".to_string()))?;
-    let worker_endpoint = worker.endpoint.clone();
     if let Err(error) = jet_services_authority_update(&worker_endpoint, false) {
         if added_partition {
-            tree.partitioned.retain(|existing| existing != &endpoint.worker);
+            tree.partitioned.retain(|existing| existing != &name);
         }
         if let Some(worker) = tree
             .workers
@@ -4017,6 +4039,27 @@ fn jet_services_partition_worker(
             worker.running = was_running;
         }
         return Err(error);
+    }
+    if was_running {
+        if let Err(error) = jet_services_discharge_task(task) {
+            let recovery = jet_services_authority_update(&worker_endpoint, true);
+            tree.partitioned.retain(|existing| existing != &name);
+            if let Some(worker) = tree
+                .workers
+                .iter_mut()
+                .find(|worker| worker.name == name)
+            {
+                worker.running = recovery.is_ok();
+            }
+            return Err(match recovery {
+                Ok(()) => error,
+                Err(recovery_error) => JetServiceError::Policy(format!(
+                    "{}; partition authority recovery failed: {}",
+                    error.jet_show(),
+                    recovery_error.jet_show()
+                )),
+            });
+        }
     }
     Ok(())
 }
@@ -4044,7 +4087,7 @@ fn jet_services_reconcile_worker(
             endpoint.worker
         )));
     };
-    let (old_generation, worker_endpoint) = {
+    let (old_generation, worker_endpoint, task) = {
         let worker = tree
             .workers
             .iter_mut()
@@ -4055,9 +4098,23 @@ fn jet_services_reconcile_worker(
                     && worker.endpoint.generation == endpoint.generation
             })
             .ok_or_else(|| JetServiceError::Unknown("reconciled worker disappeared".to_string()))?;
-        worker.running = true;
-        (worker.endpoint.generation, worker.endpoint.clone())
+        (
+            worker.endpoint.generation,
+            worker.endpoint.clone(),
+            worker.task.clone(),
+        )
     };
+    // A partitioned worker may have been persisted across a restart before the
+    // partition path could discharge its task. Reconciliation always consumes
+    // that old handle before promoting or restarting the shard.
+    jet_services_discharge_task(task.clone())?;
+    if let Some(worker) = tree
+        .workers
+        .iter_mut()
+        .find(|worker| worker.name == endpoint.worker)
+    {
+        worker.running = true;
+    }
     let partitioned_name = tree.partitioned.remove(index);
     let result = if old_generation != tree.generation {
         match jet_services_promote_worker_generation(tree, &endpoint.worker) {
@@ -4069,6 +4126,7 @@ fn jet_services_reconcile_worker(
         }
     } else {
         jet_services_authority_update(&worker_endpoint, true)
+            .and_then(|()| jet_services_task_start(&task))
     };
     if let Err(error) = result {
         tree.partitioned.insert(index, partitioned_name);
@@ -4647,9 +4705,38 @@ fn jet_services_chaos_fail(tree: &mut JetServiceTree) -> Result<i64, JetServiceE
     Ok(tree.chaos_fails)
 }
 
+fn jet_services_workflow_observation(workflows: &[JetServiceWorkflow]) -> String {
+    let mut running = 0;
+    let mut paused = 0;
+    let mut cancel_requested = 0;
+    let mut pending = 0;
+    let mut finished = 0;
+    let mut panicked = 0;
+    let mut cancelled = 0;
+    let mut deadline_blown = 0;
+    for workflow in workflows {
+        match &workflow.status {
+            JetTaskStatus::Running => running += 1,
+            JetTaskStatus::Paused => paused += 1,
+            JetTaskStatus::CancelRequested => cancel_requested += 1,
+        }
+        match workflow.outcome.as_ref() {
+            None => pending += 1,
+            Some(JetTaskOutcome::Finished) => finished += 1,
+            Some(JetTaskOutcome::Panicked(_)) => panicked += 1,
+            Some(JetTaskOutcome::Cancelled) => cancelled += 1,
+            Some(JetTaskOutcome::DeadlineBlown) => deadline_blown += 1,
+        }
+    }
+    format!(
+        "workflows={},statuses={{running:{running},paused:{paused},cancel_requested:{cancel_requested}}},outcomes={{pending:{pending},finished:{finished},panicked:{panicked},cancelled:{cancelled},deadline_blown:{deadline_blown}}}",
+        workflows.len()
+    )
+}
+
 fn jet_services_observe(tree: &JetServiceTree) -> String {
     format!(
-        "Observe(workers={}, started={}, generation={}, dead_letters={}, events={}, chaos={}, draining={}, partitions={}, rollback={})",
+        "Observe(workers={}, started={}, generation={}, dead_letters={}, events={}, chaos={}, draining={}, partitions={}, rollback={}, {})",
         tree.workers.len(),
         tree.started,
         tree.generation,
@@ -4660,6 +4747,7 @@ fn jet_services_observe(tree: &JetServiceTree) -> String {
         tree.partitioned.len(),
         tree.last_upgrade
             .as_ref()
-            .is_some_and(|receipt| receipt.rollback_available)
+            .is_some_and(|receipt| receipt.rollback_available),
+        jet_services_workflow_observation(&tree.workflows)
     )
 }

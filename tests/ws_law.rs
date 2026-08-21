@@ -211,6 +211,10 @@ pub use jet_foundation::Outcome::*;
 include!("../crates/jet-codegen/src/Prelude/CoreLib/Top/Ws.rs");
 #[allow(unused_imports)]
 pub use jet_foundation::Outcome::*;
+fn jet_std_time_duration_to_millis(ns: i64) -> i64 {
+    ns
+}
+
 include!("../crates/jet-codegen/src/Prelude/Scheduler.rs");
 
 /// D-LIVEQUERY1/D-WS1: the native transport is the shared Prelude seam. A
@@ -595,7 +599,7 @@ fn client_and_server_echo_text_over_live_sockets() {
         let (mut stream, _) = listener.accept().unwrap();
         let mux = jet_http_mux_new();
         mux.add("GET", "/live", |req| {
-            let mut sock = jet_ws_upgrade(&req).expect("upgrade");
+            let sock = jet_ws_upgrade(&req).expect("upgrade");
             let message = jet_ws_recv(&sock).expect("recv");
             let text = jet_ws_message_text(&message).expect("text");
             jet_ws_send_text(&sock, &format!("echo:{text}")).expect("send");
@@ -660,7 +664,7 @@ fn ambient_deadline_cancels_recv() {
         let (mut stream, _) = listener.accept().unwrap();
         let mux = jet_http_mux_new();
         mux.add("GET", "/live", |req| {
-            let mut sock = jet_ws_upgrade(&req).expect("upgrade");
+            let sock = jet_ws_upgrade(&req).expect("upgrade");
             TEST_DEADLINE_EXCEEDED.with(|deadline| deadline.set(true));
             let err = jet_ws_recv(&sock).expect_err("cancelled");
             assert!(matches!(err, JetWsError::Cancelled));

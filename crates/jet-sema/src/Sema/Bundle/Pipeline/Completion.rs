@@ -332,6 +332,12 @@ pub(super) fn complete_bundle_check(
                 .map(|effects| (key.clone(), effects.clone()))
         })
         .collect();
+    super::super::super::CheckerCoreLib::validate_service_handlers(
+        bundle,
+        &public_summaries,
+        &public_solved,
+        &mut diags,
+    );
     if let Some(row) = public_reachability.row("taint") {
         for (key, tags) in row {
             if !tags.is_empty() {

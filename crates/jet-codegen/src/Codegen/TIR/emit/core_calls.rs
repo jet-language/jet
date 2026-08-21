@@ -1791,6 +1791,18 @@ pub(crate) fn emit_tir_core_call(
             arg(0),
             arg(1)
         ),
+        ("core.services", "partition_worker") => format!(
+            "{}(&mut ({}), &({}))",
+            helper("jet_services_partition_worker"),
+            arg(0),
+            arg(1)
+        ),
+        ("core.services", "reconcile_worker") => format!(
+            "{}(&mut ({}), &({}))",
+            helper("jet_services_reconcile_worker"),
+            arg(0),
+            arg(1)
+        ),
         ("core.services", "handoff_generation") => format!(
             "{}(&mut ({}))",
             helper("jet_services_handoff_generation"),

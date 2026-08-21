@@ -527,6 +527,76 @@ fn workflow_history_survives_process_restart() {
     );
 }
 
+const WORKFLOW_OUTCOME_SOURCE: &str = r#"
+use core.sys as env
+use core.services as services
+
+fn run() {
+    store_path :: env.get("JET_SERVICE_AUTH_STORE") ?? panic("store")
+    phase :: env.get("JET_SERVICE_AUTH_PHASE") ?? panic("phase")
+    tree := services.tree("workflow-outcome")
+    store :: services.state_store(store_path) ?? panic("state store")
+    services.set_state_event_log(&tree, store, "workflow-events", 1, "reversible") ?? panic("state")
+    services.worker(&tree, "activities", 1) ?? panic("worker")
+    services.start(&tree) ?? panic("start")
+    if phase == "write" {
+        run_id :: services.workflow_start(&tree, "checkout", 1) ?? panic("workflow")
+        scheduled :: services.workflow_activity(&tree, run_id, "charge", "charge-1", 2) ?? panic("schedule")
+        print("scheduled:{scheduled}")
+        paused :: services.workflow_activity_retry(&tree, run_id, "charge-1", TaskOutcome.Panicked("timeout")) ?? panic("retry")
+        print("retry:{paused}")
+        result :: services.workflow_activity_complete(&tree, run_id, "charge-1", TaskOutcome.Finished) ?? panic("complete")
+        print("completed:{result}")
+        print("run:{services.workflow_outcome(tree, run_id) ?? panic("outcome")}")
+        print("observe:{services.observe(tree)}")
+        print("history:{services.workflow_history(tree, run_id) ?? panic("history")}")
+    } else {
+        result :: services.workflow_outcome(tree, 1) ?? panic("replay outcome")
+        print("replay:{result}")
+        print("observe:{services.observe(tree)}")
+        same :: services.workflow_activity_complete(&tree, 1, "charge-1", TaskOutcome.Finished) ?? panic("idempotent complete")
+        print("same:{same}")
+        print("history:{services.workflow_history(tree, 1) ?? panic("history")}")
+    }
+}
+"#;
+
+const WORKFLOW_OUTCOME_HISTORY: &str =
+    "start@v1|activity:charge:charge-1@1/2|activity-retry:charge-1@2/2:Panicked(timeout)|activity-done:charge-1|activity-result:Finished\n";
+
+/// Activity retry and terminal workflow results must remain typed after a
+/// process restart, including an AOT/default cross-tier replay.
+#[test]
+fn workflow_activity_outcome_survives_process_restart() {
+    if !have_rustc() {
+        return;
+    }
+    let (dir, bin) = compile_restart_binary(WORKFLOW_OUTCOME_SOURCE);
+    let store = dir.join("workflow-outcome.log");
+    assert_eq!(
+        run_restart_process(&bin, &store, "write", None),
+        format!(
+            "scheduled:Running\nretry:Paused\ncompleted:Finished\nrun:Finished\nobserve:Observe(workers=1, started=true, generation=1, dead_letters=0, events=0, chaos=0, draining=0, partitions=0, rollback=false, workflows=1,statuses={{running:0,paused:1,cancel_requested:0}},outcomes={{pending:0,finished:1,panicked:0,cancelled:0,deadline_blown:0}})\nhistory:{WORKFLOW_OUTCOME_HISTORY}"
+        )
+    );
+    assert_eq!(
+        run_restart_process(&bin, &store, "read", None),
+        format!("replay:Finished\nobserve:Observe(workers=1, started=true, generation=1, dead_letters=0, events=0, chaos=0, draining=0, partitions=0, rollback=false, workflows=1,statuses={{running:0,paused:1,cancel_requested:0}},outcomes={{pending:0,finished:1,panicked:0,cancelled:0,deadline_blown:0}})\nsame:Finished\nhistory:{WORKFLOW_OUTCOME_HISTORY}")
+    );
+
+    let default_store = dir.join("workflow-outcome-default.log");
+    assert_eq!(
+        run_restart_default_process(&dir, &default_store, "write", None),
+        format!(
+            "scheduled:Running\nretry:Paused\ncompleted:Finished\nrun:Finished\nobserve:Observe(workers=1, started=true, generation=1, dead_letters=0, events=0, chaos=0, draining=0, partitions=0, rollback=false, workflows=1,statuses={{running:0,paused:1,cancel_requested:0}},outcomes={{pending:0,finished:1,panicked:0,cancelled:0,deadline_blown:0}})\nhistory:{WORKFLOW_OUTCOME_HISTORY}"
+        )
+    );
+    assert_eq!(
+        run_restart_default_process(&dir, &default_store, "read", None),
+        format!("replay:Finished\nobserve:Observe(workers=1, started=true, generation=1, dead_letters=0, events=0, chaos=0, draining=0, partitions=0, rollback=false, workflows=1,statuses={{running:0,paused:1,cancel_requested:0}},outcomes={{pending:0,finished:1,panicked:0,cancelled:0,deadline_blown:0}})\nsame:Finished\nhistory:{WORKFLOW_OUTCOME_HISTORY}")
+    );
+}
+
 const SOURCE: &str = r#"
 use core.services as services
 use core.testing as testing
@@ -660,7 +730,7 @@ fn services_state_workflow_identity_and_upgrade_are_real_aot_paths() {
     assert_eq!(code, 0);
     assert_eq!(
         stdout,
-        "snapshot:state-v1\nevents:first|second\nevent_count:2\nworkflow:1:1:start@v1|step:charge\nworkflow_version:rejected\ngeneration:2:2:Endpoint(cluster/api@g2):ServiceUpgradeReceipt(from=1, to=2, migration=none, rollback_available=false, pinned=)\nstale:rejected\nrollback:1:1\nObserve(workers=1, started=true, generation=1, dead_letters=0, events=0, chaos=1, draining=0, partitions=0, rollback=false)\n"
+        "snapshot:state-v1\nevents:first|second\nevent_count:2\nworkflow:1:1:start@v1|step:charge\nworkflow_version:rejected\ngeneration:2:2:Endpoint(cluster/api@g2):ServiceUpgradeReceipt(from=1, to=2, migration=none, rollback_available=false, pinned=)\nstale:rejected\nrollback:1:1\nObserve(workers=1, started=true, generation=1, dead_letters=0, chaos=1, draining=0, partitions=0, rollback=false, workflows=0,statuses={running:0,paused:0,cancel_requested:0},outcomes={pending:0,finished:0,panicked:0,cancelled:0,deadline_blown:0})\n"
     );
 }
 
@@ -674,7 +744,7 @@ fn services_state_workflow_identity_and_upgrade_match_default_run() {
     assert_eq!(code, 0, "default jet run failed: {stderr}");
     assert_eq!(
         stdout,
-        "snapshot:state-v1\nevents:first|second\nevent_count:2\nworkflow:1:1:start@v1|step:charge\nworkflow_version:rejected\ngeneration:2:2:Endpoint(cluster/api@g2):ServiceUpgradeReceipt(from=1, to=2, migration=none, rollback_available=false, pinned=)\nstale:rejected\nrollback:1:1\nObserve(workers=1, started=true, generation=1, dead_letters=0, events=0, chaos=1, draining=0, partitions=0, rollback=false)\n"
+        "snapshot:state-v1\nevents:first|second\nevent_count:2\nworkflow:1:1:start@v1|step:charge\nworkflow_version:rejected\ngeneration:2:2:Endpoint(cluster/api@g2):ServiceUpgradeReceipt(from=1, to=2, migration=none, rollback_available=false, pinned=)\nstale:rejected\nrollback:1:1\nObserve(workers=1, started=true, generation=1, dead_letters=0, events=0, chaos=1, draining=0, partitions=0, rollback=false, workflows=0,statuses={running:0,paused:0,cancel_requested:0},outcomes={pending:0,finished:0,panicked:0,cancelled:0,deadline_blown:0})\n"
     );
 }
 
@@ -890,6 +960,36 @@ fn a_forward_only_migration_refuses_to_roll_back() {
     assert!(
         stdout.contains("rollback_available=false"),
         "a forward-only migration must not offer a rollback: {stdout}"
+    );
+}
+
+const PARTITION_RECONCILE_SOURCE: &str =
+    include_str!("../examples/features/tooling/service_partition_reconcile.jet");
+
+#[test]
+fn grouped_durable_partition_reconciles_after_handoff() {
+    if !have_rustc() {
+        return;
+    }
+    let (code, stdout) = build_and_run("services_partition_reconcile", PARTITION_RECONCILE_SOURCE);
+    assert_eq!(code, 0);
+    assert_eq!(
+        stdout,
+        "partitioned:ok\nhandoff:2\nServiceUpgradeReceipt(from=1, to=2, migration=reversible, rollback_available=true, pinned=api)\nreconciled:g2\nServiceUpgradeReceipt(from=1, to=2, migration=reversible, rollback_available=true, pinned=)\n"
+    );
+}
+
+#[test]
+fn grouped_durable_partition_reconciles_under_default_run() {
+    let (code, stdout, stderr) = run_default_multi(
+        "services_partition_reconcile_jit",
+        "main.jet",
+        &[("main.jet", PARTITION_RECONCILE_SOURCE)],
+    );
+    assert_eq!(code, 0, "default jet run failed: {stderr}");
+    assert_eq!(
+        stdout,
+        "partitioned:ok\nhandoff:2\nServiceUpgradeReceipt(from=1, to=2, migration=reversible, rollback_available=true, pinned=api)\nreconciled:g2\nServiceUpgradeReceipt(from=1, to=2, migration=reversible, rollback_available=true, pinned=)\n"
     );
 }
 
