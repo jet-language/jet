@@ -2,8 +2,8 @@
   "meta": {
     "version": 4,
     "project": "Jet",
-    "nextNum": 2128,
-    "rev": 40305,
+    "nextNum": 2129,
+    "rev": 40352,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -17,21 +17,19 @@
         "epoch:e5",
         "radar-cards",
         "radar-remaining",
-        "radar-frozen",
         "board-ideas",
         "radar:e5",
-        "radar:e4",
         "radar:e6",
-        "radar:e7",
         "radar:e8",
         "radar:e9",
         "radar:e10",
         "radar:e11",
         "radar:e12",
-        "radar-sq"
+        "radar-sq",
+        "radar:e7"
       ]
     },
-    "completionCursor": "2026-08-21T00:18:34.177Z"
+    "completionCursor": "2026-08-21T00:52:34.358Z"
   },
   "epochs": [
     {
@@ -56774,7 +56772,7 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": "e3-m16-compute",
-      "phase": "ready",
+      "phase": "done",
       "priority": "P1",
       "plan": "## Reopen finding\n\nThe closure relied on golden examples while several named behaviors are label-only or narrow special cases: device placement, race/barrier proof, raw kernels, general autodiff, ML serialization, and CPU SIMD lack production-strength proof.\n\n## Outcome\n\nComplete **core.compute backend: CPU SIMD** to the intent of the title, body, and current ratified law. Do not invent new syntax or policy; raise a ballot for any new owner choice.\n\n## Work\n\n1. Trace the public entry point through the production implementation and map every named behavior to source and proof.\n2. Complete the named core.compute slice on one tensor/storage/operation model. Implement real device, kernel, autodiff, ML, serialization, or CPU backend behavior as named; labels and hard-coded demo operations do not count.\n3. Shape, alias, bounds, race, barrier, precision, device loss, transfer, gradient, corrupt-model, and unsupported-operation failures are checked at the owning layer and cannot silently fabricate fallback success.\n4. Remove or correct any false claim, fallback, duplicate mechanism, stale criterion, or gap parking owned by this slice.\n5. Update affected docs, examples, diagnostics, goldens, and audit output.\n\n## Proof\n\nFocused algebraic, edge, hostile, and CPU-differential checks exercise the real implementation, include negative proof for safety claims, and prove default `jet run` plus AOT parity. Use focused checks for this card. Full-suite proof runs once at the epoch closeout.\n\n## Scope\n\nKeep the card bounded to its named slice and direct production seams. A reviewer will verify the completed card through Tower.",
       "blockedBy": [],
@@ -56831,11 +56829,11 @@
         {
           "n": 1,
           "text": "Every behavior named by “core.compute backend: CPU SIMD”, its body, and ratified decisions works through the production path; no demo, label, stub, or sibling claim substitutes.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-01T18:14:02.358Z"
+          "evidence": "Prelude/CoreLib/Top/Compute.rs:4113-4290 production AVX2/SSE2/scalar dispatch; JET_VETTED_UNSAFE is the sanctioned mechanism with 14 distinct labels",
+          "at": "2026-08-21T01:47:22.659Z"
         },
         {
           "n": 2,
@@ -56849,11 +56847,11 @@
         {
           "n": 3,
           "text": "Shape, alias, bounds, race, barrier, precision, device loss, transfer, gradient, corrupt-model, and unsupported-operation failures are checked at the owning layer and cannot silently fabricate fallback success.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-01T18:14:02.358Z"
+          "evidence": "tests/compute_extended.rs:44-224 and tests/compute_parity.rs:1-127 cover autodiff, placement, kernel proof, hostile shapes, precision, overflow",
+          "at": "2026-08-21T01:47:23.130Z"
         },
         {
           "n": 4,
@@ -56876,20 +56874,20 @@
         {
           "n": 6,
           "text": "The ufunc/kernel set that must lower to SIMD is named on the card; a scalar-vs-SIMD differential test proves byte-equal results for each.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-19T13:32:05.228Z"
+          "evidence": "crates/jet-jit/src/Compute.rs:102-151 compares AVX2/SSE2 against scalar bit-for-bit including tails",
+          "at": "2026-08-21T01:47:23.596Z"
         },
         {
           "n": 7,
           "text": "Runtime dispatch is proven across AVX2 and SSE2 paths via jet_compute_simd_backend; a measured speedup vs the scalar path is asserted and recorded.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-19T13:32:05.677Z"
+          "evidence": "crates/jet-jit/src/Compute.rs:85-183 asserts AVX2 to SSE2 to scalar dispatch and logs measured speedup",
+          "at": "2026-08-21T01:47:24.204Z"
         }
       ],
       "refs": [
@@ -56901,12 +56899,13 @@
       ],
       "needsAcceptance": false,
       "created": "2026-07-26T10:49:16.768Z",
-      "updated": "2026-08-21T00:40:55.032Z",
+      "updated": "2026-08-21T01:47:40.330Z",
       "updatedBy": "fable-e3-burndown",
       "tags": [
         "compute"
       ],
-      "parentId": null
+      "parentId": null,
+      "completedAt": "2026-08-21T01:47:40.330Z"
     },
     {
       "id": "c07dnjkm",
@@ -82089,7 +82088,7 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": "e3-m08-surface-coherence",
-      "phase": "ready",
+      "phase": "done",
       "priority": "P2",
       "plan": "## Grounded plan (D-SUBJECT-CALL1=A: member chains as call-argument shorthand)\n\nIndependent of #1416/#1417's loop-head work — this owns the call-site half\nonly (`users.filter(.active).map(.name)`), per the decision's own scope note\n(\"this ballot owns the call-site half on its own\"). Not blocked, but shares\nthe same underlying \"leading lowercase `.member`\" grammar gap documented in\n#1417 step 6 — implement whichever card lands first, then have the other\nreuse the same primary-expression/desugar path (I8: one mechanism).\n\nCanonical forms:\n```\nnames :: users.filter(.active).map(.name)\nshouting :: users.map(.name.to_upper())\noldest :: users.max_by(.age)\n\ntotal :: orders.fold(0, fn (sum: Int, o: Order) => Int = sum + o.total)\n// two-parameter callable: shorthand never applies, full lambda required\n```\n\nCurrent state (verified live): `nums.map(.to_string())` today errors\n`Error [E0003]: expected a value, found '.'` — no grammar accepts a leading\nlowercase `.member` anywhere, confirming zero prior art beyond\n`leading_dot_variant` (crates/jet-parser/src/Parser/Expressions/binary_unary.rs:34-42),\nwhich only matches uppercase idents/`null` (D-SHAPE3a).\n\nWhere the rule must fire: at a call argument position where the callee's\nexpected parameter type is a known one-parameter callable (`fn (T) => R`).\nThis is expected-type-driven, not purely syntactic — the same class of\ninference D-SHAPE3a's `.new(...)` and `.Variant` already use. Ground this in\nreal code:\n1. Find where D-SHAPE3a's expected-type dot-shorthand is resolved (search\n   crates/jet-sema/src/Sema/CheckerInfer/expr.rs and\n   crates/jet-sema/src/Sema/CheckerCore*.rs for \"expected_type\" /\n   \"leading_dot_variant\" call sites) — this is the existing precedent for\n   \"the parser accepts a bare-dot token stream, sema resolves it once the\n   expected type is known.\" Reuse that same expected-type threading for\n   call arguments, do not invent a second inference pass.\n2. Grammar: allow a bare `.member[.method(args)]*` chain to parse as an\n   expression at any argument position (same primary-expression extension\n   #1417 step 6/7 needs) — reuse whichever implementation lands first.\n3. Sema: when the parameter's declared/inferred type is a one-parameter\n   callable (`fn (T) => R`) and the argument parsed as a bare member chain,\n   desugar to `fn (__subject: T) => R = __subject<chain>` — literally\n   synthesize the same lambda a user would have written by hand, so TIR,\n   AOT, JIT, and interpreter all see an ordinary lambda AST and need zero\n   new runtime support (I9 auto-satisfied by construction).\n4. Exclusions (write the lambda instead, per the ratified option): operators\n   (`!.active`), literals, and any callable with more than one parameter.\n   Sema rejects a bare chain against a non-callable or multi-parameter\n   expected type with a diagnostic teaching the full lambda — reuse or\n   extend the diagnostic already covering unresolved bare-dot expected types\n   if one exists (search for D-SHAPE3a's \"unknown expected type\" error),\n   otherwise reserve a new E-code (grep docs/spec/diagnostics.md for the\n   current max/gaps first).\n5. Precedence: bare `.member` under a non-callable expected type still means\n   D-SHAPE3a static/variant shorthand; under a one-parameter-callable\n   expected type it means this lambda shorthand. The two contexts cannot\n   overlap per the ratified rec (\"function types have no static members\") —\n   state this as one ordered rule in sema, not two competing lookups.\n6. Generic/inference edge case flagged by the ballot's adversarial pass: a\n   generic adapter mid-inference may not yet know the parameter type: fire\n   the shorthand only once the expected type is concretely known; otherwise\n   emit the \"write the lambda\" diagnostic rather than guessing.\n\nSyntax.rs / decisions log (I7):\n- Syntax.rs comment-only line citing D-SUBJECT-CALL1=A (\"adds no token,\n  reuses the existing bare-member atom and dot punctuation\") near the\n  D-SHAPE3a note (~line 56).\n- docs/spec/syntax-decisions.md: one log entry for D-SUBJECT-CALL1=A.\n- `jet devtools grammars`: run, confirm empty diff.\n\nExamples/tests (I5, I9 — pure desugar to an ordinary lambda AST, so parity\nacross tiers is proved, not re-implemented, by running one example through\nall of them):\n- Add examples/features/basics/method_chain.jet (existing file) a\n  bare-member-shorthand section, or add a new\n  examples/features/basics/member_shorthand.jet — check which fits the\n  file's existing scope before choosing; golden updated/added to match.\n- tests/ui pair for a bare chain against a non-callable or multi-parameter\n  expected type, teaching the full lambda.\n- Forced-interpreter test modeled on\n  tests/tir_collections_and_methods.rs::list_surface_forced_interpreter\n  against the new/updated example.\n\nExact test commands:\n- `scripts/agent/jet-env cargo test --test golden`\n- `scripts/agent/jet-env cargo test --test diagnostic_snapshots`\n- `scripts/agent/jet-env cargo test --test tir_collections_and_methods` (or\n  wherever the new forced-interpreter test lands)",
       "blockedBy": [],
@@ -82128,38 +82127,38 @@
         {
           "n": 3,
           "text": "jet devtools grammars regenerated",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-04T19:07:56.662Z"
+          "evidence": "Source/CmdDevTools.rs:974-998 regenerates all four grammar targets; editors/tree-sitter/grammar.js:14-25",
+          "at": "2026-08-21T01:47:24.927Z"
         },
         {
           "n": 4,
           "text": "snapshots re-blessed",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-04T19:07:56.662Z"
+          "evidence": "tests/ui/bare_member_callable_arity.stderr:1-7 and tests/ui/bare_member_value_argument.stderr:1-7",
+          "at": "2026-08-21T01:47:25.585Z"
         },
         {
           "n": 5,
           "text": "'users.filter(.active).map(.name)' compiles and its output prints identically under AOT build, default 'jet run', and forced-interpreter dev_iteration(path, false, true), proved against the new/updated example golden.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-07T00:58:52.467Z"
+          "evidence": "CheckerInfer/expr.rs:1739-1761 desugars to ordinary lambdas; examples/features/basics/method_chain.jet:18-27 with golden :1-4",
+          "at": "2026-08-21T01:47:26.102Z"
         },
         {
           "n": 6,
           "text": "A method chain past the first member ('users.map(.name.to_upper())') is accepted end to end, not just the single-member case.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-07T00:58:53.001Z"
+          "evidence": "examples/features/basics/method_chain.jet:23-27 uses users.map(.name.to_upper()); golden line 4 shows [ADA, GRACE]",
+          "at": "2026-08-21T01:47:26.589Z"
         },
         {
           "n": 7,
@@ -82191,8 +82190,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-04T18:57:44.733Z",
-      "updated": "2026-08-21T00:41:03.011Z",
-      "updatedBy": "fable-e3-burndown"
+      "updated": "2026-08-21T01:47:41.280Z",
+      "updatedBy": "fable-e3-burndown",
+      "completedAt": "2026-08-21T01:47:41.280Z"
     },
     {
       "id": "c0pibmpe",
@@ -97046,7 +97046,7 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": "e3-m09-types-numbers",
-      "phase": "ready",
+      "phase": "done",
       "priority": "P1",
       "plan": "Implements D-TYPE2-REFINE1 — ratified 2026-08-06. Read each decision verbatim (tower brief on this card's parent proposal, or tower decision show) before building; the ratified outcome text is the law, this plan is the route. Every requirement is a discrete exit criterion below: meet each with targeted proof (tests, snapshots, examples with golden output), and keep I9 tier parity inside this card — AOT, default jet run (JIT), and the interpreter must agree on every surface this card ships before it closes. Delete every superseded form the decisions retire in the same change; do not leave compatibility shims or parallel spellings. Reference: docs/proposals/type-system-v2-carriers-and-knowledge.md.",
       "blockedBy": [],
@@ -97107,20 +97107,20 @@
         {
           "n": 6,
           "text": "Greenfield: the replaced form is deleted in the same change, and every in-repo consumer, example, test, doc and snapshot moves with it.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-06T21:34:51.317Z"
+          "evidence": "Active range consumer is examples/features/types/refinements.jet:3-16; only the retirement fixture keeps #Invariant (tests/ui/marker_retired_invariant.jet:1-5)",
+          "at": "2026-08-21T01:47:27.060Z"
         },
         {
           "n": 7,
           "text": "Tier parity (I9) is proved inside this card: parser, sema, TIR, AOT, JIT/dev, comptime, REPL and web all show the same behavior, with one test per tier.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-06T21:34:51.662Z"
+          "evidence": "tests/inline_range_tiers.rs:148-271 covers parser, sema, TIR, AOT, JIT, interpreter, comptime, REPL and web over crates/jet-codegen/src/Prelude/Core/InlineRange.rs:1-9",
+          "at": "2026-08-21T01:47:27.528Z"
         },
         {
           "n": 8,
@@ -97141,9 +97141,10 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-06T21:34:49.248Z",
-      "updated": "2026-08-21T00:41:06.752Z",
+      "updated": "2026-08-21T01:47:42.186Z",
       "updatedBy": "fable-e3-burndown",
-      "workOrder": 580
+      "workOrder": 580,
+      "completedAt": "2026-08-21T01:47:42.186Z"
     },
     {
       "id": "c092irzw",
@@ -128962,7 +128963,7 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": "e3-m17-agent-diagnostics",
-      "phase": "ready",
+      "phase": "done",
       "priority": "P2",
       "plan": "## Outcome\n`{value:Pretty}` renders any nested value expanded — indented, one field/element per line, deterministic and width-independent — per ratified D-FMT-PRETTY1=A, backed by ONE Prelude formatter that `core.text.fmt.pretty(value) => String` also exposes. The probe Org/Team nest ships as an executable example with golden output proven on JIT and AOT (I5/I9); E0914's valid-set text and snapshots include `Pretty` (I4/I7); Syntax.rs row, syntax-decisions.md log entry, regenerated grammars, and re-blessed snapshots complete the surface.\n\n## Law\n- D-FMT-PRETTY1=A (ratified 2026-08-14, this card): `:Pretty` selector on the existing rail; lowers to one shared Prelude formatter; same text exposed as core.text.fmt.pretty. NOTE: not yet logged in docs/spec/syntax-decisions.md (verified by search 2026-08-19) — criterion 5 writes that entry.\n- D-FMT-INTERP1=A / D-QUANTITY-PRINT1 (closed selector rail: Debug/Fixed/Unit), D-ATTR4=A (`:Debug`), D-FMT-INTERP2=A (`{x=}` composes with selectors — `:Pretty` must compose too).\n- I9 (one formatter in Prelude/Foundation, engines marshal), I5 (example + golden), I4 (E0914 text/snapshots), I7 (Syntax.rs row).\n\n## Work\n1. Registry row (criteria 3, 4): crates/jet-foundation/src/Syntax/effects_surface.rs — add `Pretty` to `InterpolationSelectorKind` (~:257) and `INTERPOLATION_SELECTORS` (~:277-296, arguments: None). E0914's producer (crates/jet-foundation/src/Generics.rs ~:502-545) already renders the valid set from this registry — confirm the wording picks up `:Pretty` and extend it if the sentence hardcodes three selectors.\n2. One formatter (criterion 2): implement the expansion once in the Prelude, beside the existing fmt kernels (crates/jet-codegen/src/Prelude/Core/Fmt.rs). Simplest single-mechanism shape: `jet_fmt_pretty` re-renders the canonical one-line Debug text (`jet_debug`/StructuralDebug record/list/map shapes, crates/jet-foundation/src/StructuralDebug.rs) into the indented form from the ballot's Option-A sample: 2 spaces per level, one field/element per line, stable across runs, no width dependence. That gives every Debug-capable type expanded output with zero per-type impls and zero engine copies. JIT/comptime reach it the way they reach EncodingBase kernels (`include!` adapters — see crates/jet-jit/src/Encoding.rs:17 and crates/jet-comptime/src/Comptime/Methods/core_calls.rs:117 for the pattern). Do NOT re-encode indentation logic in any engine (I9).\n3. Selector plumbing: trace how `:Fixed` flows — sema typing in crates/jet-sema/src/Sema/CheckerInfer/expr.rs (~:2266 shows the Fixed arm), AOT emit in crates/jet-codegen/src/Codegen (interpolation lowering), TIR eval in Codegen/TIR/eval/exprs.rs. Add the `Pretty` arm in each tier as a thin call to the one formatter over the value's Debug text. `{x=:Pretty}` must compose per D-FMT-INTERP2.\n4. Expert function: expose `pretty` on core.text.fmt — add to CheckerCoreLib/module_items.rs (`\"core.text.fmt\"` list ~:669) and a signature arm (fixed_sigs.rs ~:1515 region; pretty takes any Debug-capable value → String, so follow whatever seam core_call.rs uses for generic-value core calls rather than the Int/Float fixed sigs). It calls the same `jet_fmt_pretty`.\n5. Example + golden (criterion 1): new examples/features file (strings/ or serde/ family, follow neighbors) with the ballot's Org/Team nest printed via `{org:Pretty}`; golden output committed; must pass under default `jet run` AND `jet run --release`.\n6. Criterion 5: append the D-FMT-PRETTY1=A entry to docs/spec/syntax-decisions.md in the house decision-log format (outcome A, ratified 2026-08-14, card #1966).\n7. Criterion 6: regenerate editor grammars (`jet self devtools` generator over Syntax/highlights.rs renderers) and commit any diff — selector names may not appear in highlight tokens; a no-op regeneration run recorded in the card log also satisfies the criterion.\n8. Criterion 7: re-bless only the snapshots this change moves (E0914 valid-set fixtures) with the scoped form: JET_UI_FILTER=<fixture> UPDATE_EXPECT=<fixture>; blanket bless requires UPDATE_EXPECT_REASON and would trip the shrink gate.\n\n## Not building\n- No change to default `print(value)` one-line behavior (ballot Option D explicitly rejected — no golden churn).\n- No `print_pretty` verb (Option B rejected).\n- No width-aware/terminal-adaptive output (folded away in review — nondeterministic).\n- No new JetPretty trait plumbed through every JetDebug impl if the debug-text expander meets the spec; only fall back to a trait if expansion over canonical Debug text cannot round-trip strings containing braces (test with a member string like \"a{b}c\" before committing to the approach).\n- Runtime error report shape (#2044) untouched.\n\n## Proof\n- Criterion 1: golden example passes `scripts/agent/jet-env cargo test --test golden -- examples_compile_and_run` (targeted) AND live `./target/debug/jet run <example>` vs `jet run --release` byte-identical output (I9 parity).\n- Criterion 2: single-definition check — the indent algorithm exists in exactly one file; two consecutive runs of the example diff clean (determinism); output identical with COLUMNS=40 vs 200 (width independence).\n- Criteria 3+7: `scripts/agent/jet-env cargo test --test diagnostic_snapshots` with JET_UI_FILTER on the E0914 fixtures showing `:Pretty` in the valid set.\n- Criterion 4: Syntax.rs diff shows the selector row; the existing interpolation_selector_tests extended for Pretty.\n- Criterion 5: syntax-decisions.md diff. Criterion 6: devtools generator run output in card log.\n\n## blockedBy\nnone — D-FMT-PRETTY1 is ratified with outcome A; every seam is live in-tree.",
       "blockedBy": [],
@@ -128972,11 +128973,11 @@
         {
           "n": 1,
           "text": "The ratified D-FMT-PRETTY1 spelling renders the probe Org/Team nest expanded, proven by an example with golden output on JIT and AOT (I5, I9)",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-14T19:53:33.855Z"
+          "evidence": "examples/features/text/pretty_interpolation.jet:15-27 with golden expected/text/pretty_interpolation.out:1-60; AOT lowering at TIR/lower/expressions.rs:2134-2148",
+          "at": "2026-08-21T01:47:28.020Z"
         },
         {
           "n": 2,
@@ -129017,20 +129018,20 @@
         {
           "n": 6,
           "text": "jet devtools grammars regenerated",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-14T20:04:05.614Z"
+          "evidence": "Source/CmdDevTools.rs:974-998 regenerates all four grammar targets; editors/tree-sitter/grammar.js:14-25",
+          "at": "2026-08-21T01:47:28.485Z"
         },
         {
           "n": 7,
           "text": "snapshots re-blessed",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-14T20:04:05.614Z"
+          "evidence": "tests/ui/debug_unknown_selector.stderr:1-7 carries Pretty in the E0914 valid set",
+          "at": "2026-08-21T01:47:28.961Z"
         }
       ],
       "refs": [],
@@ -129038,8 +129039,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-14T19:52:05.757Z",
-      "updated": "2026-08-21T00:41:48.337Z",
-      "updatedBy": "fable-e3-burndown"
+      "updated": "2026-08-21T01:47:42.854Z",
+      "updatedBy": "fable-e3-burndown",
+      "completedAt": "2026-08-21T01:47:42.854Z"
     },
     {
       "id": "c0ptp3kp",
@@ -133509,7 +133511,7 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": "e3-m14-services-http",
-      "phase": "ready",
+      "phase": "done",
       "priority": "P2",
       "plan": "## Outcome\n`env.decode<Settings>()` — one call that composes the process environment plus the project `.env` into a typed record through the existing `__jet_Decode`/`FieldError` codec, with prefix stripping (`APP_`), `DOUBLE__UNDERSCORE` → nested-record mapping, scalar coercion identical to csv/toml decode (I8: no second validation plane), decode errors naming both the offending env var and the field path, and `Secret` fields redacted by law. A flagship executable example with golden proves the whole pydantic-settings demo loop (declare once → one call → typed value) on default `jet run` and `--release` AOT, and its doc header carries the side-by-side table naming Jet's compile-time wins.\n\n## Law\n- D-ENV-LIFECYCLE2 / E1333 — `Dotenv.{file, allow, secrets}` is the ratified dotenv vocabulary; dotenv paths stay project-relative; expert allowlists make secret handling explicit. The runtime surface reuses these names, it does not invent a second dotenv vocabulary.\n- D-CONF-KEY1=A — build-plane `settings:` is a separate ratified plane; this card is the runtime plane and must not collide with or duplicate it.\n- D-EMAIL-SMTP-CONFIG1=A — the existing move-only, redacted `Secret` is the secret carrier precedent; config secrets use it.\n- D-SERDE5 (E2410 missing field), D-SERDE8 (E2412 unknown field with `#DenyUnknownFields`), D-MIGRATE3/4 — the one decode law; env decode is one more wire source over it.\n- I8 (one mechanism — reuse the codec, no parallel validator), I9 (semantics in Prelude only), I4 (any new diagnostic registered with what/why/fix + UI snapshot), I5 (executable example + golden).\n\n## Work\n1. Trace the seams first: `crates/jet-codegen/src/Prelude/CoreLib/Top/FSIoEnvOsTesting.rs` (env snapshot lock + `jet_env_value_raw`/`jet_std_env_get`, lines ~858–901), `Top/DataFmt.rs` `jet_enc_csv_decode_traced` (lines 98–142 — the proof that `DataTree::Text` leaves coerce to typed scalars through the one codec), `JetStd/EncodingTraits.rs` (`__jet_Decode`), `JetStd/DataTree.rs` (`FieldError::{at, under_errors}` path framing).\n2. Implement `jet_env_decode<T: __jet_Decode>` in `FSIoEnvOsTesting.rs` (Prelude — every tier marshals to it): snapshot env under the one env lock; parse the project-relative `.env` (default `./.env`, overridable via the `Dotenv.file` name) with a small std-only KEY=VALUE parser (comments, quotes, blank lines); source order matches pydantic-settings: process env wins over `.env`; filter to the prefix (expert arg, default none), strip it, split remaining keys on `__` into nested `DataTree::Object` paths, case-insensitively matched to field names (document the fold rule in the fn doc); leaves stay `DataTree::Text`; call `T::jet_decode_traced` — scalar coercion, defaults, optionals, unknown-field law all come from the existing codec.\n3. Error mapping: on decode failure, invert the key mapping to translate each `FieldError.path` back to the originating env var name and frame the reason as `env var APP_DB__PORT → db.port: <reason>`. Register the runtime config-decode diagnostic in `Prelude/Diagnostics.jet` (I4: what/why/fix) next to the E2410/E2412 family.\n4. `Secret` fields: ensure `Secret` implements `__jet_Decode` (Text → `Secret.from_text`, the TIR helper `__secret_from_text` already exists per `Codegen/TIR/lower/method_calls.rs:1643`); confirm show/render stays redacted (never the plaintext) and that a decoded config record prints the redaction marker.\n5. Surface wiring: expose `env.decode<T>()` beginner form and expert args (`prefix:`, `file:`, `allow:` — mirroring the ratified `Dotenv` names) through the same registration/arity tables `csv.decode<T>` uses; AOT, the Cranelift hosts, and the interpreter ambient marshal to the one Prelude fn — zero policy in engines (I9).\n6. Flagship example `examples/features/io/app_config.jet` + `examples/features/expected/io/app_config.out`: writes a temp `.env`, sets process env vars, decodes `Settings { host, port: Int, debug: Bool, db: Db { url, password: Secret } }` with `APP_` prefix and `APP_DB__URL` nesting, prints typed values and the redacted secret, then shows one failing decode whose error names the env var and field path. Header comment carries the side-by-side vs pydantic-settings table: prefix / .env / nested / validation each matched, plus the compile-time wins (closed typed record, field types checked at compile time, `Secret` redaction by law, one codec shared with json/toml/csv).\n7. UI snapshots (criterion 2): `tests/ui/` pair for the failure shape (env var + field path in the rendered error) and one asserting the `Secret` field renders redacted.\n\n## Not building\n- Build-plane settings (D-CONF-KEY1) — untouched; no bridge between the planes.\n- The jetpack environment-plane Dotenv lifecycle (E1333 checks) — already ratified and owned elsewhere; this card only reuses its vocabulary at runtime.\n- No new validation plane, constraint DSL, or field-validator callbacks — the codec is the validator (I8).\n- No TOML/YAML/JSON config-file loading (existing decoders already cover files) and no secrets-manager/vault integration.\n\n## Proof\n- Criterion 1: `jet run examples/features/io/app_config.jet` matches the golden; identical output under `jet run --release` (AOT).\n- Criterion 2: `tests/ui` snapshots show (a) decode error naming env var + field path, (b) `Secret` never printing; diagnostic registered in Diagnostics.jet.\n- Criterion 3: side-by-side table in the example doc covers every capability in the video demo (prefix, .env, nested, validation) with the compile-time wins named; verified against the card body's capability list.\n- Focused checks only: the one example, the ui snapshot pair, any new Prelude unit tests. Full suite stays at epoch closeout.\n\n## blockedBy\nnone — env lock, dotenv law, codec machinery, and `Secret` all exist and are ratified; this is composition plus one new Prelude fn.",
       "blockedBy": [],
@@ -133525,11 +133527,11 @@
         {
           "n": 1,
           "text": "One-call env+.env decode into a typed record with prefix stripping and nested-key mapping, proven by an executable example on default jet run and AOT",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-17T13:19:15.848Z"
+          "evidence": "AOT emits Prelude jet_std_env_decode (Codegen/TIR/emit/core_calls.rs:1384-1389); examples/features/io/app_config.jet:29-49 matches examples/features/expected/io/app_config.out:1-5",
+          "at": "2026-08-21T01:47:29.431Z"
         },
         {
           "n": 2,
@@ -133555,8 +133557,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-17T13:19:00.348Z",
-      "updated": "2026-08-21T00:41:55.892Z",
-      "updatedBy": "fable-e3-burndown"
+      "updated": "2026-08-21T01:47:43.527Z",
+      "updatedBy": "fable-e3-burndown",
+      "completedAt": "2026-08-21T01:47:43.526Z"
     },
     {
       "id": "c00pxltq",
@@ -134678,7 +134681,7 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": "e3-m18-devloop-testing",
-      "phase": "ready",
+      "phase": "done",
       "priority": "P3",
       "plan": "## Outcome\n`examples/features/devloop/persist.jet` stops being an inert print of the initial value and teaches the real hot-reload journey — mutate state at runtime, hot-swap code, `#Persist` state survives, shape change resets — while its golden stays deterministic under plain `jet run`; the dev-tier survival claim is proven by a scripted `jet dev` test that drives this exact example file.\n\n## Law\n- D-PERSIST1 — `#Persist` module binding survives `jet dev` hot reload (identity = module path + binding name + compatible shape); release/run semantics identical with or without the marker (persist.jet:1-10; shipped by #765).\n- I5 — features ship executable examples with goldens; golden output must stay deterministic.\n- I9 — dev-tier carry-across lives in the shared `jet_foundation::Persist` store consulted by both interpreter and Cranelift tiers (persist.jet:8-10); this card must not add engine-side persist logic.\n- No decision dependencies beyond the shipped D-PERSIST1 — mechanical example/teaching work.\n\n## Work\n1. Read the shipped proof first: `tests/dev.rs::persist_binding_survives_hot_swap_and_resets_on_shape_change` — copy its session-driving mechanics (how it starts `jet dev`, swaps source, reads output) rather than inventing new harness plumbing.\n2. Rework `examples/features/devloop/persist.jet` into a journey program: `#Persist counter := 0`, and `run()` MUTATES the state before printing (e.g. `counter += 1; print(\"{counter}\")`). Under plain `jet run` this prints exactly `1` every time — deterministic golden. Under `jet dev`, each hot swap re-runs `run()` against the SURVIVING counter, so the printed number climbs — the on-the-fly-test loop made visible.\n3. Rewrite the example's comment narration to teach the journey explicitly: what you see on first run, what you see after editing an unrelated line and saving (counter keeps counting — survival), what you see after changing the binding's shape (reset), and why plain `jet run` always prints 1. Keep the `// --- expected output ---` golden block in the corpus's exact format.\n4. Add (or extend beside) a dev test in tests/dev.rs that drives THIS example file: start a scripted `jet dev` session on `examples/features/devloop/persist.jet`, observe first output `1`, apply a hot swap that touches code but not the binding shape (e.g. edit the print label), observe the next output proves the counter survived (`2`), then a shape-change swap and observe reset to `1`. Reuse the existing test's swap/reset assertions; the new value is that the teaching corpus file itself is the fixture.\n5. If the corpus harness or `jet dev` cannot target an examples/ path directly, have the test copy persist.jet into its tempdir verbatim (byte-identical fixture) so the example is still the thing proven; note which route was taken in the card log.\n6. Sweep sibling teaching surfaces that quote persist.jet's old inert output (grep docs/ and examples index for the example) and update the quoted text.\n\n## Not building\n- Equality/auto-derive teaching — probed 2026-08-19: `==` and struct auto-derive are covered by examples/features/types/auto_derive_policy/main.jet; explicitly no new work (card body).\n- Changes to the persist store, hot-swap machinery, or `#Persist` semantics (shipped by #765).\n- A separate journey doc if the reworked example + comments carry the teaching alone; a paired doc is the fallback, not the default.\n- Interactive/animated demos; goldens stay plain text.\n\n## Proof\n- Criterion 1: the reworked example shows runtime mutation + hot reload + survival — evidenced by the file diff plus the scripted dev-session test output (survival step asserts a value that can only exist if state crossed the swap).\n- Criterion 2: corpus golden harness passes on persist.jet under default `jet run` AND `jet run --release` (identical `1` — I9/release-inertness of `#Persist` proven at both tiers); the new tests/dev.rs case passes (`cargo test --test dev persist` focused run in the builder worktree); existing persist test stays green.\n- Full suite at epoch closeout.\n\n## blockedBy\nnone — D-PERSIST1 machinery and the dev-test harness both ship today; this is example + test work on existing seams.",
       "blockedBy": [],
@@ -134694,20 +134697,20 @@
         {
           "n": 1,
           "text": "persist.jet (or a paired devloop journey) demonstrates runtime mutation + hot reload + value survival, not just the inert initial print",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-19T11:19:59.165Z"
+          "evidence": "examples/features/devloop/persist.jet:17-21 mutates a #Persist counter; tests/dev_parts/routine.rs:993-1048 drives jet dev --swap and asserts count=2 then shape reset",
+          "at": "2026-08-21T01:47:30.170Z"
         },
         {
           "n": 2,
           "text": "Golden output stays deterministic; dev-tier behavior proven by test or scripted jet dev session",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-19T11:19:59.642Z"
+          "evidence": "examples/features/expected/devloop/persist.out:1; routine.rs:1036-1048 asserts first run, count=2, count=1.0",
+          "at": "2026-08-21T01:47:30.873Z"
         }
       ],
       "refs": [
@@ -134717,8 +134720,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-19T11:19:49.171Z",
-      "updated": "2026-08-20T14:50:32.959Z",
-      "updatedBy": "fable-e3-burndown"
+      "updated": "2026-08-21T01:47:44.369Z",
+      "updatedBy": "fable-e3-burndown",
+      "completedAt": "2026-08-21T01:47:44.369Z"
     },
     {
       "id": "c0b6kkbv",
@@ -135048,7 +135052,7 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": "e3-m16-compute",
-      "phase": "ready",
+      "phase": "done",
       "priority": "P3",
       "plan": "## Outcome\ncore.files gains a parallel walk/scan path implementing the video-proven shared-queue-of-directories architecture (workers pop a directory, enumerate it, push subdirectories, process that directory's files sequentially, with batched result writes), plus a grep-style flagship example whose golden output equals the sequential walk result set, and a measured 200k-file-fixture throughput number recorded on the card.\n\n## Law\nNo decision dependencies — mechanical/performance work extending the existing `fs.walk` contract; binding constraints are structural: I9 (traversal semantics in Prelude only; engines marshal), I5 (flagship example + golden), greenfield (no duplicate walk semantics — one traversal contract, two schedules).\n\n## Work\n1. Trace the baseline: `crates/jet-codegen/src/Prelude/CoreLib/Top/FSIoEnvOsTesting.rs` `walk_dir:161-195` — single-threaded recursion, per-directory sort, root-relative shown paths, its depth/symlink/error policy. That contract is the semantic oracle: the parallel path must produce the SAME result set (order normalized by one final sort).\n2. Implement `jet_std_fs_walk_parallel` next to `walk_dir` (Prelude, std-only): a `Mutex<VecDeque<PathBuf>>` shared directory queue with an active-worker count + condvar for termination (queue empty AND no worker mid-directory ends the walk); `std::thread::available_parallelism()` workers; each worker pops one directory, reads its entries once, pushes discovered subdirectories, and handles that directory's files sequentially; per-directory result batches append to a locked sink in one lock take (the video's write-batching lesson); one final sort yields deterministic output identical to the sequential contract.\n3. Explicitly NOT io_uring and NOT mmap — the card body records both as losing architectures (queue exhaustion/complexity; page-fault cost on sequential scans). Plain `read` + threads is the design.\n4. Surface: keep beginner `fs.walk` untouched; expose the parallel path through the same registration/arity tables as the existing fs verbs (as the walk's parallel sibling — same row shape, same error type). AOT, Cranelift hosts, and interpreter ambient all marshal to the one Prelude fn; zero traversal logic in engines (I9).\n5. Grep-style flagship: `examples/features/io/grep_scan.jet` + `examples/features/expected/io/grep_scan.out` — builds a small fixture tree under a temp dir, walks it with the parallel path, scans files with core.regex (the #2056 engine) for a pattern, prints a sorted match summary AND an in-example equality check against sequential `fs.walk`'s result set (prints `walks agree: true`), so the golden itself proves criterion 4's set-equality clause.\n6. Throughput measurement: script-generated 200k-file fixture in a temp dir (recipe recorded in the card log, fixture not committed); measure parallel vs sequential walk wall time on it and record the numbers on the card via `card update --log` (criterion 4 requires the measurement ON the card).\n7. Blank criterion rows 1–3: per the card log, close them with evidence \"empty placeholder row — superseded by the appended criterion\".\n\n## Not building\n- io_uring, mmap, or splice-based zero-copy sinks — the card body defers sink-aware zero-copy explicitly (\"expert notes for later, not this card\").\n- No changes to `fs.glob` or the sequential `fs.walk` semantics (per-directory sort, shown paths, error policy stay).\n- No general thread-pool/executor abstraction — one queue, one function; TaskGroup/scheduler planes untouched.\n- No matcher work — the regex engine is #2056's scope.\n\n## Proof\n- Criterion 4: `jet run examples/features/io/grep_scan.jet` matches its golden (which embeds the parallel-vs-sequential set-equality check) on default `jet run` AND `jet run --release` (AOT); measured 200k-file fixture throughput (parallel vs sequential, wall seconds) logged on the card.\n- Regression: `examples/features/io/files_depth.jet` golden unchanged (sequential walk untouched).\n- Determinism: two consecutive parallel runs produce byte-identical output (the final sort is the determinism guarantee).\n- Focused checks only; full suite at epoch closeout.\n\n## blockedBy\nc0615ffl (#2056) — the flagship's matcher is the rewritten regex engine; with today's quadratic engine the grep-scan example cannot finish. The parallel walk itself (steps 2–4) has no dependency and can be built while #2056 lands.",
       "blockedBy": [
@@ -135066,26 +135070,29 @@
         {
           "n": 1,
           "text": "",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": ""
+          "evidence": "Row is an empty placeholder superseded by criterion 4, per the card's own log",
+          "at": "2026-08-21T01:47:31.594Z"
         },
         {
           "n": 2,
           "text": "",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": ""
+          "evidence": "Row is an empty placeholder superseded by criterion 4, per the card's own log",
+          "at": "2026-08-21T01:47:32.081Z"
         },
         {
           "n": 3,
           "text": "",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": ""
+          "evidence": "Row is an empty placeholder superseded by criterion 4, per the card's own log",
+          "at": "2026-08-21T01:47:32.551Z"
         },
         {
           "n": 4,
@@ -135105,8 +135112,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-19T11:45:08.410Z",
-      "updated": "2026-08-20T14:14:07.732Z",
-      "updatedBy": "fable-e3-burndown"
+      "updated": "2026-08-21T01:47:45.893Z",
+      "updatedBy": "fable-e3-burndown",
+      "completedAt": "2026-08-21T01:47:45.893Z"
     },
     {
       "id": "c0y3llif",
@@ -135133,26 +135141,29 @@
         {
           "n": 1,
           "text": "",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": ""
+          "evidence": "Row is an empty placeholder superseded by criterion 4, per the card's own log",
+          "at": "2026-08-21T01:47:33.027Z"
         },
         {
           "n": 2,
           "text": "",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": ""
+          "evidence": "Row is an empty placeholder superseded by criterion 4, per the card's own log",
+          "at": "2026-08-21T01:47:33.490Z"
         },
         {
           "n": 3,
           "text": "",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": ""
+          "evidence": "Row is an empty placeholder superseded by criterion 4, per the card's own log",
+          "at": "2026-08-21T01:47:34.269Z"
         },
         {
           "n": 4,
@@ -135172,8 +135183,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-19T11:45:08.953Z",
-      "updated": "2026-08-19T16:21:23.037Z",
-      "updatedBy": "fable"
+      "updated": "2026-08-21T01:47:34.269Z",
+      "updatedBy": "fable-e3-burndown"
     },
     {
       "id": "c0zkd2j5",
@@ -135297,26 +135308,29 @@
         {
           "n": 1,
           "text": "",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": ""
+          "evidence": "Row is an empty placeholder superseded by criterion 4, per the card's own log",
+          "at": "2026-08-21T01:47:34.990Z"
         },
         {
           "n": 2,
           "text": "",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": ""
+          "evidence": "Row is an empty placeholder superseded by criterion 4, per the card's own log",
+          "at": "2026-08-21T01:47:35.751Z"
         },
         {
           "n": 3,
           "text": "",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": ""
+          "evidence": "Row is an empty placeholder superseded by criterion 4, per the card's own log",
+          "at": "2026-08-21T01:47:36.233Z"
         },
         {
           "n": 4,
@@ -135335,8 +135349,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-19T11:45:42.237Z",
-      "updated": "2026-08-19T16:48:31.634Z",
-      "updatedBy": "owner"
+      "updated": "2026-08-21T01:47:36.233Z",
+      "updatedBy": "fable-e3-burndown"
     },
     {
       "id": "c0hipgvn",
@@ -136708,7 +136722,7 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "planning",
+      "phase": "done",
       "priority": "P2",
       "plan": null,
       "blockedBy": [],
@@ -136718,38 +136732,38 @@
         {
           "n": 1,
           "text": "The runtime rlib cache prunes itself: a bound exists, it is enforced on write, and the bound is documented where the cache is configured",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-21T00:45:02.605Z"
+          "evidence": "Source/RuntimeCache.rs:34-36 documents the 512 MiB bound; :373-380 prunes after publish",
+          "at": "2026-08-21T01:47:36.702Z"
         },
         {
           "n": 2,
           "text": "Eviction picks victims by a stated policy rather than at random, and a cache entry still in use by a live build is never evicted",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-21T00:45:03.073Z"
+          "evidence": "Source/RuntimeCache.rs:661-706 evicts oldest-first and skips entries held by a live BuildLock",
+          "at": "2026-08-21T01:47:37.176Z"
         },
         {
           "n": 3,
           "text": "A test proves the bound holds: seed the cache past its limit, run a build, assert the footprint fell and the build still succeeded",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-21T00:45:03.537Z"
+          "evidence": "Source/RuntimeCache.rs:1480-1524 seeds the cache oversized, prunes, and asserts the build still succeeds",
+          "at": "2026-08-21T01:47:37.643Z"
         },
         {
           "n": 4,
           "text": "jet reports its cache footprint to the user through an existing command rather than a new one, and the number matches what is on disk",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-21T00:45:04.010Z"
+          "evidence": "Source/Doctor.rs:154-160,211-219 reports cache_footprint and the configured limit through the existing doctor command",
+          "at": "2026-08-21T01:47:38.629Z"
         }
       ],
       "refs": [],
@@ -136757,8 +136771,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-19T22:22:30.413Z",
-      "updated": "2026-08-21T00:45:04.010Z",
-      "updatedBy": "fable-e3-burndown"
+      "updated": "2026-08-21T01:47:46.557Z",
+      "updatedBy": "fable-e3-burndown",
+      "completedAt": "2026-08-21T01:47:46.557Z"
     },
     {
       "id": "c06tdv16",
@@ -139562,6 +139577,71 @@
       "created": "2026-08-21T00:14:17.986Z",
       "updated": "2026-08-21T00:22:20.046Z",
       "updatedBy": "owner"
+    },
+    {
+      "id": "c01n3iu7",
+      "num": 2128,
+      "title": "Trailing arm table in a fallible function is forced into value context (E0116)",
+      "body": "A trailing arm table in a fallible function is checked in value context, so\nUnit-producing arms are rejected with E0116. Four shipped examples fail on it:\nio/compress_gzip.jet, io/compress_zstd.jet, serde/csv_typed.jet, text/hex_base64.jet.\n\nReduced repro, fails:\n\n    fn run() ? {\n        n :: 3\n        if n == {\n            3 :> print(\"a\")\n            else :> print(\"b\")\n        }\n    }\n\n    Error [E0116]: `print` doesn't hand back a value\n\nThe same arm table is accepted when the function returns Unit instead of `?`,\nand a plain `print(\"x\")` tail is accepted in a `?` function. So the void-like\nguard in Registration.rs:202 is working for a bare call and not for an arm table.\n\n`fn run() ?` parses to Result { ok: Unit, err } via Types.rs:147-167, and\nis_void_like_return (Registration.rs:36-39) matches that, so the D-BODY-LAST1\nrewrite to Stmt::Return is correctly skipped. Something later still supplies an\nexpected type to the trailing arm table. That is the thing to find.\n\nSecondary defect in the same diagnostic: E0116's Why text says \"only calls that\ndeclare `=> Type` can be used as a value\" (CheckerInfer/expr.rs:2760). `=> Type`\nis retired; D-SIG-SHAPE1=B puts the return type bare after the parameter list.\nThe Fix text is also unfollowable inside an arm: you cannot \"call print on its\nown line\" there.",
+      "kind": "bug",
+      "track": "epoch",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "ready",
+      "priority": "P1",
+      "plan": null,
+      "checkSteps": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "The reduced repro checks clean: a fallible function whose tail is an arm table with Unit arms is accepted",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-21T00:49:43.732Z"
+        },
+        {
+          "n": 2,
+          "text": "The four shipped examples check clean again: io/compress_gzip, io/compress_zstd, serde/csv_typed, text/hex_base64",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-21T00:49:44.487Z"
+        },
+        {
+          "n": 3,
+          "text": "E0116's why/fix text names the ratified signature shape, not the retired `=> Type`, and its fix is followable from inside an arm",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-21T00:49:45.432Z"
+        },
+        {
+          "n": 4,
+          "text": "A UI fixture pins the corrected E0116 text, and a regression fixture pins the accepted arm-table tail",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-21T00:49:45.904Z"
+        }
+      ],
+      "refs": [],
+      "tags": [
+        "compiler",
+        "diagnostics"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-08-21T00:49:42.930Z",
+      "updated": "2026-08-21T00:49:45.904Z",
+      "updatedBy": "fable-e3-burndown"
     }
   ],
   "decisions": [
@@ -186476,6 +186556,307 @@
   ],
   "events": [
     {
+      "at": "2026-08-21T01:47:46.557Z",
+      "by": "fable-e3-burndown",
+      "action": "card.update",
+      "ref": "c0txf14f",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-21T01:47:45.894Z",
+      "by": "fable-e3-burndown",
+      "action": "card.update",
+      "ref": "c0p48658",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-21T01:47:44.370Z",
+      "by": "fable-e3-burndown",
+      "action": "card.update",
+      "ref": "c0ro98g4",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-21T01:47:43.527Z",
+      "by": "fable-e3-burndown",
+      "action": "card.update",
+      "ref": "c0r02txw",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-21T01:47:42.854Z",
+      "by": "fable-e3-burndown",
+      "action": "card.update",
+      "ref": "c0wfwj5u",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-21T01:47:42.186Z",
+      "by": "fable-e3-burndown",
+      "action": "card.update",
+      "ref": "c0zh7s9p",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-21T01:47:41.281Z",
+      "by": "fable-e3-burndown",
+      "action": "card.update",
+      "ref": "c075z2hs",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-21T01:47:40.330Z",
+      "by": "fable-e3-burndown",
+      "action": "card.update",
+      "ref": "c0y3l5yy",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-21T01:47:38.630Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0txf14f",
+      "note": "#4"
+    },
+    {
+      "at": "2026-08-21T01:47:37.643Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0txf14f",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-21T01:47:37.176Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0txf14f",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-21T01:47:36.702Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0txf14f",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-21T01:47:36.233Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c08jqcnk",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-21T01:47:35.752Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c08jqcnk",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-21T01:47:34.991Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c08jqcnk",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-21T01:47:34.269Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0y3llif",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-21T01:47:33.491Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0y3llif",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-21T01:47:33.027Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0y3llif",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-21T01:47:32.551Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0p48658",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-21T01:47:32.081Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0p48658",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-21T01:47:31.595Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0p48658",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-21T01:47:30.874Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0ro98g4",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-21T01:47:30.171Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0ro98g4",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-21T01:47:29.431Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0r02txw",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-21T01:47:28.961Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0wfwj5u",
+      "note": "#7"
+    },
+    {
+      "at": "2026-08-21T01:47:28.485Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0wfwj5u",
+      "note": "#6"
+    },
+    {
+      "at": "2026-08-21T01:47:28.020Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0wfwj5u",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-21T01:47:27.528Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0zh7s9p",
+      "note": "#7"
+    },
+    {
+      "at": "2026-08-21T01:47:27.061Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0zh7s9p",
+      "note": "#6"
+    },
+    {
+      "at": "2026-08-21T01:47:26.589Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c075z2hs",
+      "note": "#6"
+    },
+    {
+      "at": "2026-08-21T01:47:26.102Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c075z2hs",
+      "note": "#5"
+    },
+    {
+      "at": "2026-08-21T01:47:25.586Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c075z2hs",
+      "note": "#4"
+    },
+    {
+      "at": "2026-08-21T01:47:24.927Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c075z2hs",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-21T01:47:24.204Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0y3l5yy",
+      "note": "#7"
+    },
+    {
+      "at": "2026-08-21T01:47:23.597Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0y3l5yy",
+      "note": "#6"
+    },
+    {
+      "at": "2026-08-21T01:47:23.131Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0y3l5yy",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-21T01:47:22.660Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0y3l5yy",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-21T00:52:34.358Z",
+      "by": "owner",
+      "action": "done.clear",
+      "ref": null,
+      "note": "2026-08-21T00:52:34.358Z"
+    },
+    {
+      "at": "2026-08-21T00:49:45.904Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-add",
+      "ref": "c01n3iu7",
+      "note": "#4 A UI fixture pins the corrected E0116 text, and a regression"
+    },
+    {
+      "at": "2026-08-21T00:49:45.432Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-add",
+      "ref": "c01n3iu7",
+      "note": "#3 E0116's why/fix text names the ratified signature shape, not"
+    },
+    {
+      "at": "2026-08-21T00:49:44.487Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-add",
+      "ref": "c01n3iu7",
+      "note": "#2 The four shipped examples check clean again: io/compress_gzi"
+    },
+    {
+      "at": "2026-08-21T00:49:43.732Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-add",
+      "ref": "c01n3iu7",
+      "note": "#1 The reduced repro checks clean: a fallible function whose ta"
+    },
+    {
+      "at": "2026-08-21T00:49:42.930Z",
+      "by": "fable-e3-burndown",
+      "action": "card.add",
+      "ref": "c01n3iu7",
+      "note": "Trailing arm table in a fallible function is forced into value context (E0116)"
+    },
+    {
       "at": "2026-08-21T00:45:05.826Z",
       "by": "fable-e3-burndown",
       "action": "card.criteria-add",
@@ -189673,307 +190054,6 @@
       "action": "card.criteria-meet",
       "ref": "c089xrdz",
       "note": "#3"
-    },
-    {
-      "at": "2026-08-20T20:26:53.851Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c089xrdz",
-      "note": "#2"
-    },
-    {
-      "at": "2026-08-20T20:26:53.385Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c089xrdz",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-20T20:26:52.924Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-add",
-      "ref": "c089xrdz",
-      "note": "#3 The wider comment-level citation backlog is measured and tra"
-    },
-    {
-      "at": "2026-08-20T20:26:52.460Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-add",
-      "ref": "c089xrdz",
-      "note": "#2 Every touched diagnostic keeps its registered code and has i"
-    },
-    {
-      "at": "2026-08-20T20:26:51.978Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-add",
-      "ref": "c089xrdz",
-      "note": "#1 No shipped diagnostic quotes a decision id that resolves to "
-    },
-    {
-      "at": "2026-08-20T20:26:26.017Z",
-      "by": "fable-e3-burndown",
-      "action": "card.update",
-      "ref": "c05po1ng",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-08-20T20:26:25.053Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c05po1ng",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-20T20:26:24.384Z",
-      "by": "fable-e3-burndown",
-      "action": "card.update",
-      "ref": "c00pxltq",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-08-20T20:26:23.469Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c00pxltq",
-      "note": "#3"
-    },
-    {
-      "at": "2026-08-20T20:26:22.996Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c00pxltq",
-      "note": "#2"
-    },
-    {
-      "at": "2026-08-20T20:26:22.515Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c00pxltq",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-20T20:26:22.033Z",
-      "by": "fable-e3-burndown",
-      "action": "card.update",
-      "ref": "c00q0c08",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-08-20T20:26:21.186Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c00q0c08",
-      "note": "#3"
-    },
-    {
-      "at": "2026-08-20T20:26:19.856Z",
-      "by": "fable-e3-burndown",
-      "action": "card.update",
-      "ref": "c0d0v4v2",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-08-20T20:26:19.189Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0d0v4v2",
-      "note": "#4"
-    },
-    {
-      "at": "2026-08-20T20:26:18.512Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0d0v4v2",
-      "note": "#3"
-    },
-    {
-      "at": "2026-08-20T20:26:17.739Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0d0v4v2",
-      "note": "#2"
-    },
-    {
-      "at": "2026-08-20T20:26:17.019Z",
-      "by": "fable-e3-burndown",
-      "action": "card.update",
-      "ref": "c0beea95",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-08-20T20:26:16.381Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0beea95",
-      "note": "#2"
-    },
-    {
-      "at": "2026-08-20T20:26:15.878Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0beea95",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-20T20:26:15.403Z",
-      "by": "fable-e3-burndown",
-      "action": "card.update",
-      "ref": "c0sbsdkf",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-08-20T20:26:14.729Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0sbsdkf",
-      "note": "#2"
-    },
-    {
-      "at": "2026-08-20T20:26:14.245Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0sbsdkf",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-20T20:26:13.764Z",
-      "by": "fable-e3-burndown",
-      "action": "card.update",
-      "ref": "c0jb1b32",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-08-20T20:26:13.123Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0jb1b32",
-      "note": "#2"
-    },
-    {
-      "at": "2026-08-20T20:26:12.660Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0jb1b32",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-20T20:26:12.218Z",
-      "by": "fable-e3-burndown",
-      "action": "card.update",
-      "ref": "c0n4n1pz",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-08-20T20:26:11.556Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0n4n1pz",
-      "note": "#2"
-    },
-    {
-      "at": "2026-08-20T20:26:11.055Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0n4n1pz",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-20T20:24:40.226Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-add",
-      "ref": "c0mopaxh",
-      "note": "#6 Tier parity: AOT, default jet run and the interpreter agree "
-    },
-    {
-      "at": "2026-08-20T20:24:39.754Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-add",
-      "ref": "c0mopaxh",
-      "note": "#5 Arms, control bodies and lambdas are unchanged: a pattern ta"
-    },
-    {
-      "at": "2026-08-20T20:24:39.263Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-add",
-      "ref": "c0mopaxh",
-      "note": "#4 jet fmt rewrites every signature and body in the corpus, and"
-    },
-    {
-      "at": "2026-08-20T20:24:38.803Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-add",
-      "ref": "c0mopaxh",
-      "note": "#3 The effect ceiling has one ratified position and a shipped e"
-    },
-    {
-      "at": "2026-08-20T20:24:38.338Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-add",
-      "ref": "c0mopaxh",
-      "note": "#2 The chosen signature shape parses, and the retired shape tea"
-    },
-    {
-      "at": "2026-08-20T20:24:37.876Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-add",
-      "ref": "c0mopaxh",
-      "note": "#1 D-SIG-SHAPE1 is ratified and recorded in docs/spec/syntax-de"
-    },
-    {
-      "at": "2026-08-20T20:24:37.390Z",
-      "by": "fable-e3-burndown",
-      "action": "decision.add",
-      "ref": "D-SIG-SHAPE1",
-      "note": "Where the return type sits, and what `:>` means"
-    },
-    {
-      "at": "2026-08-20T20:23:54.919Z",
-      "by": "fable-e3-burndown",
-      "action": "card.add",
-      "ref": "c0mopaxh",
-      "note": "Ballot: where the return type sits, and what `:>` means"
-    },
-    {
-      "at": "2026-08-20T20:22:24.182Z",
-      "by": "fable-e3-burndown",
-      "action": "decision.ratify",
-      "ref": "D-BODY-LAST1",
-      "note": "B (by fable-e3-burndown, quoting owner: \"I want last expression returns ratified but then I want to discuss the syntax stuff separately.\")"
-    },
-    {
-      "at": "2026-08-20T20:12:39.089Z",
-      "by": "fable-e3-burndown",
-      "action": "decision.add",
-      "ref": "D-BODY-LAST1",
-      "note": "Last expression returns; the `::` function body retires"
-    },
-    {
-      "at": "2026-08-20T20:10:47.202Z",
-      "by": "owner",
-      "action": "done.clear",
-      "ref": null,
-      "note": "2026-08-20T20:10:47.202Z"
-    },
-    {
-      "at": "2026-08-20T20:09:18.798Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-add",
-      "ref": "c0jser1q",
-      "note": "#6 Tier parity: AOT, default jet run and the interpreter agree "
-    },
-    {
-      "at": "2026-08-20T20:09:18.323Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-add",
-      "ref": "c0jser1q",
-      "note": "#5 Arms, control bodies and lambdas are unchanged: a pattern ta"
-    },
-    {
-      "at": "2026-08-20T20:09:17.851Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-add",
-      "ref": "c0jser1q",
-      "note": "#4 jet fmt rewrites every site in the corpus and keeps a one-li"
     }
   ],
   "nextNum": 368,
