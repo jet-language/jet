@@ -2773,8 +2773,8 @@ impl<'a> Checker<'a> {
                     }
                     self.pop_scope();
                 }
-                // D-EFF1 / D-AUTHORITY-SCOPE1: bare `#Caps(Net, DB) { … }`
-                // restricts effects. A named `#Caps(auth: FS, Net) { … }`
+                // D-EFF1 / D-AUTHORITY-SCOPE1: bare `#Abilities(Net, DB) { … }`
+                // restricts effects. A named `#Abilities(auth: FS, Net) { … }`
                 // also binds a scoped Abilities handle and uses the same
                 // subset check for both forms.
                 Stmt::Caps {
@@ -2817,7 +2817,7 @@ impl<'a> Checker<'a> {
                         let binding_span = binding_span
                             .as_ref()
                             .copied()
-                            .expect("named #Caps binding has a span");
+                            .expect("named #Abilities binding has a span");
                         self.push_scope();
                         self.declare_loop_var(
                             binding.clone(),

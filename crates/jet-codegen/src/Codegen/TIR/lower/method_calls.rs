@@ -172,7 +172,7 @@ fn first_string_literal_arg(args: &[crate::AST::CallArg]) -> Option<String> {
     }
 }
 
-fn service_method_route(handle: &str, method: &str) -> Option<(&'static str, bool)> {
+pub(crate) fn service_method_route(handle: &str, method: &str) -> Option<(&'static str, bool)> {
     let route = match (handle, method) {
         ("ServiceTree", "worker") => ("worker", true),
         ("ServiceTree", "set_restart") => ("set_restart", true),

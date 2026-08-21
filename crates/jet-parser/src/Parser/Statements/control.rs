@@ -1253,7 +1253,7 @@ impl<'a> Parser<'a> {
         })
     }
 
-    /// D-EFF1 / D-QUAL1: parse a `#Caps(Net, DB) { … }` effect-restriction region
+    /// D-EFF1 / D-QUAL1: parse a `#Abilities(Net, DB) { … }` effect-restriction region
     /// in statement position. Cursor is on the `#` token. Effect names are bare
     /// idents; sema validates them against the known effect vocabulary (E0119).
     pub(super) fn at_caps_stmt(&mut self) -> Result<Stmt, Diagnostic> {
@@ -1264,7 +1264,7 @@ impl<'a> Parser<'a> {
             let start = self.bump().span; // `#`
             let marker_name_span = self.peek().span;
             self.expect_ident(&format!("`#{}`", Syntax::KW_CAPS))?;
-            self.expect(TokKind::LParen, "after `#Caps`")?;
+            self.expect(TokKind::LParen, "after `#Abilities`")?;
             let (binding, binding_span) = self.expect_ident("as the scoped Abilities handle")?;
             self.expect(TokKind::Colon, "after the scoped Abilities handle")?;
             let mut caps = Vec::new();
@@ -1280,7 +1280,7 @@ impl<'a> Parser<'a> {
                 self.expect(TokKind::Comma, "between capped effects")?;
             }
             let caps_start = caps.first().map_or(binding_span.end, |(_, span)| span.start);
-            self.expect(TokKind::RParen, "to close `#Caps`")?;
+            self.expect(TokKind::RParen, "to close `#Abilities`")?;
             let caps_end = self.toks[self.pos - 1].span.end;
             self.record_rule_fact(
                 crate::AST::Marker {
@@ -1295,7 +1295,7 @@ impl<'a> Parser<'a> {
                 None,
                 crate::Policy::RuleSite::Block,
             );
-            self.expect(TokKind::LBrace, "after `#Caps(abilities: Effects)`")?;
+            self.expect(TokKind::LBrace, "after `#Abilities(abilities: Effects)`")?;
             let body = self.block_stmts();
             let end = self.toks[self.pos - 1].span.end;
             self.bind_rule_fact(
@@ -1345,9 +1345,9 @@ impl<'a> Parser<'a> {
         Err(Diagnostic::error(
             "E0077",
             "the `#Grant` scope marker is retired".to_string(),
-            "`#Caps` now narrows a block and binds an Abilities handle when its head has a name"
+            "`#Abilities` now narrows a block and binds an Abilities handle when its head has a name"
                 .to_string(),
-            "write `#Caps(abilities: FS, Net) { ... }`".to_string(),
+            "write `#Abilities(abilities: FS, Net) { ... }`".to_string(),
             Some(marker.span),
         ))
     }
@@ -2572,7 +2572,7 @@ impl<'a> Parser<'a> {
                 if matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::MARKER_NONDETERMINISTIC) {
                     return self.at_nondeterministic_stmt();
                 }
-                // D-EFF1 / D-QUAL1: `#Caps(Net, DB) { … }` effect-restriction region.
+                // D-EFF1 / D-QUAL1: `#Abilities(Net, DB) { … }` effect-restriction region.
                 if matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::KW_CAPS) {
                     return self.at_caps_stmt();
                 }

@@ -43,6 +43,7 @@ use crate::Codegen::TIR::http_client_static_op;
 use crate::Codegen::TIR::THandleOp;
 use crate::Codegen::TIR::lambda_in_subset;
 use crate::Codegen::TIR::router_register_in_subset;
+use crate::Codegen::TIR::service_method_route;
 use crate::Codegen::TIR::solve_new_type;
 use crate::Codegen::TIR::subset::core_call_args_in_subset;
 use crate::Syntax;
@@ -379,6 +380,19 @@ pub(crate) fn method_call_in_subset(
     }
     if recv_type.as_deref() == Some(Syntax::TYPE_CONDITION) {
         return matches!(method, "notify_one" | "notify_all") && args.is_empty();
+    }
+    // D-SERVICE1=D: typed tree/endpoint methods lower to the same Prelude
+    // core-call adapter as their private runtime names. Keep this coverage
+    // proof beside the route table so `jet run` cannot reject a checked service
+    // example after sema accepts it.
+    if recv_type
+        .as_deref()
+        .is_some_and(|handle| service_method_route(handle, method).is_some())
+    {
+        return expr_in_subset(receiver, cx, locals)
+            && args
+                .iter()
+                .all(|arg| expr_in_subset(&arg.expr, cx, locals));
     }
     if matches!(
         recv_type.as_deref(),

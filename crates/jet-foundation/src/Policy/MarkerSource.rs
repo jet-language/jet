@@ -291,6 +291,7 @@ fn leak_slice<T>(items: Vec<T>) -> &'static [T] {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::Syntax;
 
     /// The reader has to read what the file actually says, not just parse it.
     #[test]
@@ -307,7 +308,7 @@ mod tests {
         let caps = rows
             .iter()
             .find(|row| row.name == Syntax::KW_CAPS)
-            .expect("#Caps");
+            .expect("#Abilities");
         assert_eq!(caps.signature.variadic, Some(RuleArgType::Ident));
         assert_eq!(caps.signature.variadic_source_type, Some("Ability"));
 

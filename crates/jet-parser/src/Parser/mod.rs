@@ -1382,7 +1382,7 @@ fn notify(ready: Bool) :[Net]> {
     task.group group {
         task fetch()
     }
-    #Caps(caps: FS, Net) {
+    #Abilities(caps: FS, Net) {
         use_caps(caps)
     }
 }
@@ -1396,7 +1396,7 @@ fn notify(ready: Bool) :[Net]> {
         assert!(once.contains("loop item, items :> audit(item)"), "{once}");
         assert!(once.contains("next(outer)"), "{once}");
         assert!(once.contains("task fetch()"), "{once}");
-        assert!(once.contains("#Caps(caps: FS, Net)"), "{once}");
+        assert!(once.contains("#Abilities(caps: FS, Net)"), "{once}");
         let twice = format_source(&once).expect("canonical arrow/control syntax reformats");
         assert_eq!(once, twice);
     }
@@ -1476,7 +1476,7 @@ fn notify(ready: Bool) :[Net]> {
                     .find(|diagnostic| diagnostic.code == code)
                     .expect("E0077");
                 assert!(diagnostic.what.contains("#Grant"), "{diagnostic:?}");
-                assert!(diagnostic.fix.contains("#Caps"), "{diagnostic:?}");
+                assert!(diagnostic.fix.contains("#Abilities"), "{diagnostic:?}");
             }
         }
     }

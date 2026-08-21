@@ -896,7 +896,21 @@ pub(crate) fn lower_switch<'a>(
         return lower_mixed_switch(subject, arms, else_body, class, cx, env);
     }
     // Shape A: exhaustive enum match (`emit_pattern_match_switch`).
-    lower_enum_match(subject, arms, else_body, cx, env)
+    //
+    // This is the fallthrough, so nothing above has proved these arms are
+    // variant patterns — and `lower_enum_match` asserts exactly that, with a
+    // message claiming a gate that does not exist. An arm table matching none
+    // of the shapes above therefore panicked the compiler, which is an I2
+    // violation: rustc and codegen never surface as a user-facing crash.
+    // Check the claim here, and let the general mixed chain take anything that
+    // does not hold.
+    if arms
+        .iter()
+        .all(|a| arm_variant_pattern(cx, &a.cond, subject).is_some())
+    {
+        return lower_enum_match(subject, arms, else_body, cx, env);
+    }
+    lower_mixed_switch(subject, arms, else_body, class, cx, env)
 }
 
 fn readiness_result_local(result_name: &str, result_ty: &Type) -> TExpr {

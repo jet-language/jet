@@ -179,7 +179,7 @@ pub(super) struct Interp<'a> {
     /// E2-M18 / c133: true only in `run_repl_step` — enables REPL-specific
     /// diagnostics for native-only Core modules (E1802-style wording).
     pub(super) repl_mode: bool,
-    /// Active lexical `#Caps` effect names in REPL mode. Sema proves the
+    /// Active lexical `#Abilities` effect names in REPL mode. Sema proves the
     /// region statically; this copy gates host authorization dynamically.
     pub(super) repl_grants: Vec<String>,
     /// Host invocation policy callback. Called after concrete arguments are
@@ -338,7 +338,7 @@ impl<'a> Interp<'a> {
         if stmts.is_empty() {
             return Ok(Flow::Normal);
         }
-        // TIR intentionally erases `#Caps` to a plain Region. Keep REPL
+        // TIR intentionally erases `#Abilities` to a plain Region. Keep REPL
         // grant scope in this host frame before the bridge evaluates a body.
         if self.repl_mode
             && stmts

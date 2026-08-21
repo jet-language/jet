@@ -923,7 +923,9 @@ impl<'a> Fmt<'a> {
                 } else {
                     f.emit_leading(arm.span.start);
                 }
-                f.fmt_expr(&arm.cond, Prec::OrFallback);
+                if !f.fmt_readiness_head(&arm.cond) {
+                    f.fmt_expr(&arm.cond, Prec::OrFallback);
+                }
                 f.write(" ");
                 f.write(Syntax::OP_UNIFIED_ARROW);
                 f.fmt_arm_body(&arm.body, false);
@@ -947,6 +949,28 @@ impl<'a> Fmt<'a> {
             }
         });
         self.end_block();
+    }
+
+    /// D-CONC-CHAN2=D: the parser stores a readiness head in a private
+    /// one-field tuple so the existing arm IR can carry it through sema/TIR.
+    /// That carrier is not user syntax; always print its canonical arm-table
+    /// spelling instead of leaking the tuple or its sentinel field.
+    fn fmt_readiness_head(&mut self, cond: &Expr) -> bool {
+        match crate::AST::readiness_head(cond) {
+            Some(crate::AST::ReadinessHead::Receive { binding, source }) => {
+                self.write(binding);
+                self.write(", ");
+                self.fmt_expr(source, Prec::OrFallback);
+                true
+            }
+            Some(crate::AST::ReadinessHead::After { duration }) => {
+                self.write(Syntax::READINESS_AFTER);
+                self.write(" ");
+                self.fmt_expr(duration, Prec::OrFallback);
+                true
+            }
+            None => false,
+        }
     }
 
     fn switch_was_classic_if(&self, arms: &[SwitchArm], span: Span) -> bool {

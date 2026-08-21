@@ -261,7 +261,9 @@ impl<'a> Fmt<'a> {
                 else {
                     unreachable!()
                 };
-                f.fmt_expr(cond, Prec::OrFallback);
+                if !f.fmt_readiness_head(cond) {
+                    f.fmt_expr(cond, Prec::OrFallback);
+                }
                 f.write(" ");
                 f.write(Syntax::OP_UNIFIED_ARROW);
                 f.write(" ");

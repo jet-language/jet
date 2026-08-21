@@ -199,10 +199,10 @@ pub fn apply_repl_authorized_core_call_with_type(
                 "{}.{} for `{}` has no REPL runtime authority",
                 request.root, request.operation, request.resource
             ),
-            "REPL host effects require both lexical `#Caps` access and invocation policy; no host operation ran"
+            "REPL host effects require both lexical `#Abilities` access and invocation policy; no host operation ran"
                 .to_string(),
             format!(
-                "wrap this operation in `#Caps(abilities: {}) {{ ... }}`; interactive sessions then prompt, while non-TTY sessions also need `--allow-{}`",
+                "wrap this operation in `#Abilities(abilities: {}) {{ ... }}`; interactive sessions then prompt, while non-TTY sessions also need `--allow-{}`",
                 request.root,
                 request.root.to_ascii_lowercase()
             ),

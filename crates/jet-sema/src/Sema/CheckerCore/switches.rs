@@ -1087,7 +1087,20 @@ impl<'a> Checker<'a> {
                 match head {
                     crate::AST::ReadinessHead::Receive { binding, source } => {
                         has_receive = true;
-                        let source_ty = self.infer(&mut source.clone());
+                        // `readiness_head` borrows the compiler-private tuple carrier. Infer
+                        // a private copy, then put the elaborated expression back into the
+                        // carrier. In particular, `100ms` must become the checked Duration
+                        // constructor before TIR coverage is decided; leaving the raw
+                        // `UnitLit` behind makes every task containing a timer arm disappear
+                        // from the interpreter program and makes AOT report an I2 ICE.
+                        let mut source_expr = source.clone();
+                        let source_ty = self.infer(&mut source_expr);
+                        let source_span = source_expr.span();
+                        if let crate::AST::Expr::TupleLit(fields, ..) = &mut arm.cond {
+                            if let Some((_, value)) = fields.first_mut() {
+                                *value = source_expr;
+                            }
+                        }
                         let payload = match source_ty {
                             Some(Type::Apply { name, args })
                                 if name == Syntax::TYPE_RECEIVER && args.len() == 1 =>
@@ -1100,7 +1113,7 @@ impl<'a> Checker<'a> {
                                     format!("a readiness receive arm needs Receiver<T>, not {}", other.show()),
                                     "a receive arm waits on one plain channel endpoint".to_string(),
                                     "use the receiver returned by `channel<T>()`".to_string(),
-                                    Some(source.span()),
+                                    Some(source_span),
                                 ));
                                 Type::Named("Unit".to_string())
                             }
@@ -1117,7 +1130,7 @@ impl<'a> Checker<'a> {
                                     ),
                                     "one readiness table returns one receive payload type".to_string(),
                                     "use receivers with the same T, or split the table".to_string(),
-                                    Some(source.span()),
+                                    Some(source_span),
                                 ));
                             }
                         } else {
@@ -1138,7 +1151,14 @@ impl<'a> Checker<'a> {
                     }
                     crate::AST::ReadinessHead::After { duration } => {
                         has_after = true;
-                        let duration_ty = self.infer(&mut duration.clone());
+                        let mut duration_expr = duration.clone();
+                        let duration_ty = self.infer(&mut duration_expr);
+                        let duration_span = duration_expr.span();
+                        if let crate::AST::Expr::TupleLit(fields, ..) = &mut arm.cond {
+                            if let Some((_, value)) = fields.first_mut() {
+                                *value = duration_expr;
+                            }
+                        }
                         if !matches!(duration_ty, Some(Type::Named(ref name)) if name == Syntax::DURATION_TYPE) {
                             let shown = duration_ty
                                 .as_ref()
@@ -1149,7 +1169,7 @@ impl<'a> Checker<'a> {
                                 format!("`after` needs a Duration, not {shown}"),
                                 "a readiness timeout is one canonical Duration delta".to_string(),
                                 "write `after 100ms` or pass a Duration binding".to_string(),
-                                Some(duration.span()),
+                                Some(duration_span),
                             ));
                         }
                         self.record_effect(crate::Sema::Effects::Effect::Time.name(), arm.cond.span());
