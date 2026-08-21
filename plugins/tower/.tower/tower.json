@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 2146,
-    "rev": 40821,
+    "rev": 40825,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -27,7 +27,8 @@
         "radar:e10",
         "radar:e11",
         "radar:e12",
-        "radar:e4"
+        "radar:e4",
+        "radar-sq"
       ]
     },
     "completionCursor": "2026-08-21T17:53:03.574Z"
@@ -140736,13 +140737,22 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "deciding",
+      "phase": "planning",
       "priority": "P2",
       "plan": null,
       "checkSteps": null,
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-08-21",
+          "by": "fable",
+          "text": "D-DEFAULT-SHAPE1 ratified B (owner, direct, in chat): the default rides the type as name: Type{value}. All eight slate decisions are now ratified: ARROW-RESPELL1=A (->), CALLABLE-ONE1=A (arrow iff non-unit success value), EFFECT-ROW2=B with acceptance term -[Effect]>, LAMBDA-IFACE1=A, ARMHEAD-PAREN1=A, SUBJECT-COHERE1=A (widen + nesting lint), ERRSUFFIX1=B (Success? (E1 | E2)! grouped suffix), DEFAULT-SHAPE1=B. Next: record all eight outcomes in docs/spec/syntax-decisions.md, update Syntax.rs rows, regenerate grammars, re-bless snapshots (criteria 3, 5-8), and mint implementation cards per outcome."
+        },
+        {
+          "at": "2026-08-21",
+          "text": "All decisions ratified; advanced out of deciding."
+        },
         {
           "at": "2026-08-21",
           "by": "fable",
@@ -140847,7 +140857,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-21T21:13:45.933Z",
-      "updated": "2026-08-21T22:06:17.803Z",
+      "updated": "2026-08-21T22:15:32.352Z",
       "updatedBy": "fable"
     },
     {
@@ -186468,77 +186478,80 @@
       "id": "D-DEFAULT-SHAPE1",
       "cardId": "c0an426i",
       "group": "syntax",
-      "title": "Default values: keep the fill law or unify the shapes",
-      "gist": "Decide whether parameter and field defaults keep `name: Type = value` or adopt a binding-style shape.",
-      "lesson": "Locals bind with the type riding the value: `version :: Float{0.1}` (D-BIND-BARE1=A). Parameters and fields annotate and fill: `timeout seconds: Int = 30` (D-APILABEL1=A). Two shapes for one job. The audit found the split is lawful: the ratified fill law (D-CHOOSE-FNBODY1=A) says `::`/`:=` define a new thing and `=` fills an existing slot. A parameter default is a fill. The question is whether that law carries the weight or one shape should win anyway.",
+      "title": "Default values: the default rides the type",
+      "gist": "Decide how parameter and field defaults are spelled.",
+      "lesson": "Locals bind with one typed-value atom: `version :: Float{0.1}` (D-BIND-BARE1=A). Parameters and fields declare a slot and dangle the default after `=`: `timeout: Int = 30` (D-APILABEL1=A). That is the only place Jet writes type here, `=`, value there. The owner asked for a binding-consistent shape without keywords or a split sigil, covering every edge. Probes fixed the constraint: optional and capability defaults are live today, and neither has a binding-glyph spelling because suffixed and marked type heads do not exist in expression position.",
       "explainer": "",
-      "story": "Sam learns `version :: Float{0.1}` in chapter one. In chapter three he meets `timeout: Int = 30` and asks why the type moved and the glyph changed. The honest answer — 'an interface declares a slot, a local defines a value' — exists, but nothing in the language ever told him.",
-      "inWild": "version :: Float{0.1}                       // local: type rides the value\nn := 100                                     // mutable local\nfn connect(host: String, /, *, timeout seconds: Int = 30, tls: Bool = true) String {\n    return \"{host} t={seconds} tls={tls}\"    // parameter slots filled by `=`\n}\nstruct Server { port: Int = 3000 }           // field fill, same shape",
+      "story": "Sam learns `version :: Float{0.1}` in chapter one: the typed value is one atom. In chapter three he meets `timeout: Int = 30` and asks why the atom split. The slot plane needs the type first — but nothing stops the value from riding the type the same way it rides in a binding.",
+      "inWild": "// Probed today:\nfn maybe(x: Int? = None) Int { x ?? -1 }        // runs\nfn take(first: ^Int, second: ^Int = first) Int   // live corpus shape (named_args.jet:44)\nv :: Int?{None}                                  // E0003: no expression head for suffixed types\n// So any respell must work in SLOT grammar, where the parser already expects a type.",
       "detail": "",
       "options": [
         {
           "key": "A",
-          "name": "Keep both, teach the fill law",
-          "detail": "No spelling changes. The fill law gets stated where beginners meet it: one glossary line in the book's first chapter, and the E-codes around bindings and defaults name it (`::` defines, `:=` defines mutable, `=` fills). The split stops being a mystery and starts being information: see `=`, an existing slot gets a value.",
-          "technical": "No grammar change. Doc and diagnostic-text additions only; touched snapshots re-bless.",
-          "code": "version :: Float{0.1}          // defines\nfn connect(*, timeout: Int = 30) String -> { … }   // fills a declared slot\nn = 200                         // refills a := slot — the same `=`"
+          "name": "Keep `name: Type = value`, teach the fill law",
+          "detail": "No spelling changes. The fill law gets stated where beginners meet it: `::` defines, `:=` defines mutable, `=` fills an existing slot. Familiar to every Swift, TypeScript, and Python reader. The cost: the one place in the language where a typed value is written as two separated pieces stays.",
+          "technical": "No grammar change. Doc and diagnostic-text additions only.",
+          "code": "fn connect(host: String, /, *, timeout seconds: Int = 30, tls: Bool = true) String { … }\nstruct Server { port: Int = 3000 }"
         },
         {
           "key": "B",
-          "name": "Defaults adopt the binding glyph",
-          "detail": "Parameters and fields spell defaults with `:=`: `timeout: Int := 30`. One glyph family for 'name gets value' — but the rhyme lies: a parameter default is neither mutable nor a local definition, and `=` would remain for reassignment anyway. The glyph count stays; the meanings blur.",
-          "technical": "Amends D-APILABEL1=A and field grammar: default slots take `:=`. `=` remains as statement reassignment. Retires the `=` fill in signatures only.",
-          "code": "fn connect(*, timeout seconds: Int := 30, tls: Bool := true) String -> { … }\nstruct Server { port: Int := 3000 }"
+          "name": "The default rides the type: `name: Type{value}`",
+          "detail": "The default fuses into the annotation using the same `Type{value}` atom bindings already use. One law: `name :: Int{3}` — the name owns the typed value; `name: Int{3}` — the slot ships holding it, caller may override; `name: Int` — the slot ships empty, caller must fill. Sigil never splits, type stated once, `=` retires from the declaration plane (reassign and extern fill remain). Every edge closes: `Int?{None}` and `^Int{first}` parse in slot grammar because the annotation position already reads a type.",
+          "technical": "Amends D-APILABEL1=A (parameter default spelling) and the field-default row including D-CLI-GLOBAL1=E's `=` binding form; narrows D-CHOOSE-FNBODY1=A's fill scope to reassignment and extern slots. Slot grammar: `name ':' [cap-mark] Type [suffix] [ '{' default-expr '}' ]`. Evaluation unchanged: the default is constructed per call when the argument is omitted; references stay left-to-right. Labels, zones, variadics, fn types, trait signatures, uninit law: untouched. Call-site and literal fills keep the use-side colon (`f(force: true)`, `Rect{width: 3}`).",
+          "code": "fn connect(host: String, /, *, timeout seconds: Int{30}, tls: Bool{true}) String { … }\nstruct Server { port: Int{3000} }\nfn maybe(x: Int?{None}) Int { x ?? -1 }          // optional default: closes the probed hole\nfn take(first: ^Int, second: ^Int{first}) Int    // capability mark stays in the annotation\nfn retry(n: Int{default_retries()}) Int { … }    // computed default, type visible once"
         },
         {
           "key": "C",
-          "name": "Locals adopt the interface shape — clean cutover",
-          "detail": "The interface shape becomes the only local shape: every local writes `name: Type :: value` or `name: Type := value`, and the bare form is retired. One declaration grammar everywhere — and every local now states a type its value usually already shows. This reverses ratified D-BIND-BARE1=A as a named amendment, migrates every local in the corpus, and taxes the most common statement in the language.",
-          "technical": "Amends (reverses) D-BIND-BARE1=A as a clean cutover: annotated locals become mandatory, the bare form becomes a teaching diagnostic, fmt migrates the corpus. No optional second shape exists (I8).",
-          "code": "port: Int :: 3000            // every local now carries its type\nversion: Float :: Float{0.1} // stated twice when the value already shows it\ncount: Int := 0"
+          "name": "Binding-glyph defaults: `name :: Type{value}`",
+          "detail": "A defaulted parameter becomes a `::` binding the caller may override, and required params keep `name: Type` — required versus optional shows at the glyph. Honest holes, probed: optional and capability defaults have no expression spelling. `Int?{None}` is E0003 as an expression, and the `^` mark has no home there. So this option needs new expression grammar, or it keeps the `=` form for exactly those edges — two spellings of one fact.",
+          "technical": "Would amend D-APILABEL1=A and mint new expression heads for suffixed and marked types, or carve out annotation-form defaults for optional and capability cases (I8 pressure either way).",
+          "code": "fn connect(host: String, /, *, timeout seconds :: Int{30}, tls :: true) String { … }\n// fn maybe(x :: Int?{None})   // no expression spelling today — the probed hole\n// fn take(second :: ^Int{first})   // same hole for capability marks"
         }
       ],
       "comparisons": [
         {
-          "lang": "Swift",
-          "note": "Same split as Jet today: locals infer (`let x = 3`), parameter defaults annotate and fill (`timeout: Int = 30`). Nobody reads it as inconsistency because 'interfaces declare, locals infer' is taught early.",
-          "code": "func connect(timeout: Int = 30) -> String { … }\nlet version = 0.1"
+          "lang": "Swift / TypeScript",
+          "note": "Both spell defaults `name: Type = value`. Familiar, and both live with the split atom; neither has a typed-value literal form to fuse into.",
+          "code": "func connect(timeout: Int = 30) -> String { ... }"
         },
         {
-          "lang": "Python",
-          "note": "One `=` fills defaults and binds locals; the resulting mutable-default trap is a famous footgun. Evidence that merging the define and fill planes can cost more than the second shape.",
-          "code": "def connect(timeout=30): ..."
+          "lang": "Jet bindings",
+          "note": "The language already owns the fused atom: `version :: Float{0.1}`. Option B extends the atom to the slot plane instead of importing a foreign shape.",
+          "code": "version :: Float{0.1}\nport: Int{3000}   // same atom, slot plane (proposed)"
         }
       ],
-      "rec": "A",
+      "rec": "B",
       "recommendation": {
-        "why": "The split carries real information once the law is stated, and stating it costs a glossary line instead of a migration. This is the one place the audit found the current design already reasoning-first.",
+        "why": "One typed-value atom (`Type{value}`) now covers both planes, the sigil never splits, and `=` leaves the declaration plane. The probed optional and capability edges close inside existing slot grammar — no new expression heads, no keywords.",
         "whyNot": [
           {
-            "key": "B",
-            "reason": "Makes `:=` mean two unrelated things — mutable local definition and immutable slot fill — trading a taught distinction for a false rhyme."
+            "key": "A",
+            "reason": "Keeps the only two-piece typed value in the language and the extra `=` role, purely for arrival familiarity."
           },
           {
             "key": "C",
-            "reason": "Buys one grammar by taxing every local with a type the value already shows; the most common statement in the language pays for the rarest confusion."
+            "reason": "Fails closure: the probed optional and capability defaults need new expression grammar or a second retained spelling — overhaul or duplication, not streamlining."
           }
         ],
-        "tradeoff": "Two shapes remain in the language and must be taught. Accepted: the shapes mark a real semantic boundary (define vs fill), and the teaching surface is one sentence."
+        "tradeoff": "Braces replace the bare `= literal`, so `Int{30}` reads as construction to Swift and TypeScript eyes, and default-bearing snapshots re-bless once. Accepted: a default is a construction, and the atom is already Jet's native spelling."
       },
       "hybrid": null,
       "ballotMode": "full",
       "shortAuthorizedBy": null,
       "reviewPasses": {
-        "base": "The first draft framed the split under the ratified fill law. It recommended keep-and-teach over both unification directions.",
-        "boilOcean": "The breadth review tested fused value-riding defaults and a `default` keyword. The fusion hides which part is the type; the keyword is ceremony with no reader gain.",
-        "hybrid": "Keep-and-teach plus `Type{value}` on the right of a default `=` was tested. That form is already legal, so it becomes doc text, not law.",
-        "cooperative": "Option B was steelmanned: scanning for `:=` finds every value entry. Option C was steelmanned as the real clean cutover; its price is a type on every local.",
-        "adversarial": "The attack asked whether teaching is a shrug and whether C was a strawman. The fill law is total (`n = 200` is also a fill), and C now states the honest cutover with its full migration price."
+        "base": "The first draft compared keep, binding-glyph defaults, and default-rides-type after probing the optional and capability edges. It recommended rides-the-type for closure without new grammar.",
+        "boilOcean": "The breadth review tested a keyword form, `:=` in slots, and fused value-riding on the binding glyph. Keywords add ceremony, `:=` lies about mutability, and the binding glyph fails the probed edges.",
+        "hybrid": "A hybrid keeping `= value` for literals and `Type{value}` for edges was tested and rejected as two spellings of one fact (I8).",
+        "cooperative": "Option A was steelmanned on arrival familiarity, the strongest real argument against B. Option C was steelmanned as the required-versus-optional scan win at the glyph.",
+        "adversarial": "Attacks tested slot-grammar parsing for suffixed and marked heads, literal-fill confusion at use sites, and evaluation order. The annotation position already reads a type, use-side fills keep their own colon, and per-call construction is unchanged."
       },
       "checkInstructions": null,
       "draft": false,
-      "status": "open",
-      "created": "2026-08-21T21:19:15.204Z"
+      "status": "ratified",
+      "created": "2026-08-21T21:19:15.204Z",
+      "outcome": "B",
+      "comment": "Owner picked default-rides-type in chat after the full binding-map review and directed direct ratification. Defaults fuse into the annotation as the Type{value} atom: name: Int{30}; optional Int?{None} and capability ^Int{first} close in slot grammar; = retires from the declaration plane (reassign and extern fill remain); field defaults including D-CLI-GLOBAL1 CLI flags respell the same way.",
+      "ratifiedAt": "2026-08-21"
     },
     {
       "id": "D-ERRSUFFIX1",
@@ -188449,6 +188462,27 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-08-21T22:15:32.352Z",
+      "by": "fable",
+      "action": "card.update",
+      "ref": "c0an426i",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-08-21T22:15:22.104Z",
+      "by": "fable",
+      "action": "decision.ratify",
+      "ref": "D-DEFAULT-SHAPE1",
+      "note": "B (by fable, quoting owner: \"Excellent, I like the rides the type. Please ratify for me directly\")"
+    },
+    {
+      "at": "2026-08-21T22:15:12.487Z",
+      "by": "fable",
+      "action": "decision.update",
+      "ref": "D-DEFAULT-SHAPE1",
+      "note": ""
+    },
     {
       "at": "2026-08-21T22:06:17.803Z",
       "by": "fable",
@@ -191927,27 +191961,6 @@
       "action": "card.update",
       "ref": "c01g2ptl",
       "note": "logEntry"
-    },
-    {
-      "at": "2026-08-21T00:44:48.248Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c01g2ptl",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-21T00:44:47.789Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-add",
-      "ref": "c01g2ptl",
-      "note": "#1 The public handle spelling is settled in the ratified record"
-    },
-    {
-      "at": "2026-08-21T00:42:18.999Z",
-      "by": "fable-e3-burndown",
-      "action": "card.update",
-      "ref": "c0vvnebk",
-      "note": "phase"
     }
   ],
   "nextNum": 368,
