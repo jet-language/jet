@@ -1,7 +1,7 @@
-Error [E0003]: the compile-time prefix `$` is retired
+Error [E0003]: `$NAME` is an environment read for config surfaces only
   --> tests/ui/comptime_prefix_dollar_retired.jet:3:11
     |
   3 |     print($old)
     |           ^
- Why: D-ONCE-AT1=D gives `@` one prefix mark for compile-time names and fact reads; infix `@` package refs stay unchanged
- Fix: write `@name`, `@if <condition> { … }`, or `T.@layout`
+ Why: D-ONCE-DOLLAR1=B reserves `$NAME` for typed environment access in `env.jet` and deploy/config files; ordinary program code does not read the environment with `$`
+ Fix: move the read to `env.jet` or a deploy/config file, or use an explicit program API for runtime environment access

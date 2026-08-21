@@ -49,12 +49,27 @@ impl NativeBoundary {
         self.manifest.product_ready()
     }
 
+    pub(in crate::NixEval) fn pinned_inventory(
+        &self,
+    ) -> &'static [jet_nix_eval::InventoryEntry] {
+        jet_nix_eval::pinned_inventory()
+    }
+
     pub(in crate::NixEval) fn evaluate_devshell(
         &self,
         source: &str,
         system: &str,
     ) -> Result<DevShellEvaluation, BoundaryError> {
-        jet_nix_eval::evaluate_devshell(source, system)
+        self.evaluate_devshell_output(source, system, "default")
+    }
+
+    pub(in crate::NixEval) fn evaluate_devshell_output(
+        &self,
+        source: &str,
+        system: &str,
+        output: &str,
+    ) -> Result<DevShellEvaluation, BoundaryError> {
+        jet_nix_eval::evaluate_devshell_output(source, system, output)
             .map_err(|error| BoundaryError::Evaluation(error.to_string()))
     }
 
@@ -64,9 +79,25 @@ impl NativeBoundary {
         system: &str,
         import_authority: Option<Rc<dyn Fn(&str) -> Result<String, String>>>,
     ) -> Result<DevShellEvaluation, BoundaryError> {
-        jet_nix_eval::evaluate_devshell_with_import_authority(
+        self.evaluate_devshell_output_with_import_authority(
             source,
             system,
+            "default",
+            import_authority,
+        )
+    }
+
+    pub(in crate::NixEval) fn evaluate_devshell_output_with_import_authority(
+        &self,
+        source: &str,
+        system: &str,
+        output: &str,
+        import_authority: Option<Rc<dyn Fn(&str) -> Result<String, String>>>,
+    ) -> Result<DevShellEvaluation, BoundaryError> {
+        jet_nix_eval::evaluate_devshell_output_with_import_authority(
+            source,
+            system,
+            output,
             import_authority,
         )
         .map_err(|error| BoundaryError::Evaluation(error.to_string()))
@@ -83,6 +114,22 @@ impl NativeBoundary {
             .map_err(|error| BoundaryError::Evaluation(error.to_string()))
     }
 
+    pub(in crate::NixEval) fn evaluate_derivation_with_import_authority(
+        &self,
+        source: &str,
+        system: &str,
+        import_authority: Option<Rc<dyn Fn(&str) -> Result<String, String>>>,
+    ) -> Result<NativeDerivationEvaluation, BoundaryError> {
+        let evaluation = jet_nix_eval::evaluate_derivation_with_import_authority(
+            source,
+            system,
+            import_authority,
+        )
+        .map_err(|error| BoundaryError::Evaluation(error.to_string()))?;
+        materialize_derivation(&evaluation)
+            .map_err(|error| BoundaryError::Evaluation(error.to_string()))
+    }
+
     pub(in crate::NixEval) fn evaluate_derivation_output(
         &self,
         source: &str,
@@ -91,6 +138,24 @@ impl NativeBoundary {
     ) -> Result<NativeDerivationEvaluation, BoundaryError> {
         let evaluation = jet_nix_eval::evaluate_derivation_output(source, system, attribute)
             .map_err(|error| BoundaryError::Evaluation(error.to_string()))?;
+        materialize_derivation(&evaluation)
+            .map_err(|error| BoundaryError::Evaluation(error.to_string()))
+    }
+
+    pub(in crate::NixEval) fn evaluate_derivation_output_with_import_authority(
+        &self,
+        source: &str,
+        system: &str,
+        attribute: &str,
+        import_authority: Option<Rc<dyn Fn(&str) -> Result<String, String>>>,
+    ) -> Result<NativeDerivationEvaluation, BoundaryError> {
+        let evaluation = jet_nix_eval::evaluate_derivation_output_with_import_authority(
+            source,
+            system,
+            attribute,
+            import_authority,
+        )
+        .map_err(|error| BoundaryError::Evaluation(error.to_string()))?;
         materialize_derivation(&evaluation)
             .map_err(|error| BoundaryError::Evaluation(error.to_string()))
     }

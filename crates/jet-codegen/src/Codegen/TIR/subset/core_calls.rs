@@ -107,7 +107,7 @@ pub(crate) fn core_call_covered(module: &str, method: &str) -> bool {
     }
     // D-TEXTWIDTH1=B: `text.display_width` used to be claimed here by name.
     // It is now registered in `is_polymorphic_core_special` (its return type
-    // is arity-dependent: `Int` for 1 arg, `Int ? TextError` for the `policy:`
+    // is arity-dependent: `Int` for 1 arg, `Int ! TextError` for the `policy:`
     // form), so the check above already covers it and sema carries the
     // resolved type on `resolved_ret`. One coverage mechanism, not two (I8).
     // c109 Phase 29: qualified `io.input(prompt)`. NOT in `core_fixed_sig` — its return

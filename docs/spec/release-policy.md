@@ -47,7 +47,7 @@ narrow safety exception to the normal compatibility promise: mutating a
 process-global host environment while foreign threads may read it cannot meet
 Jet's memory-safety guarantee. Pass changed values to foreign APIs explicitly.
 Existing editions keep `core.sys.set => ()`; its fallible
-`() ? EnvError` signature requires a future major release and edition opt-in.
+`() ! EnvError` signature requires a future major release and edition opt-in.
 
 ## Deprecation policy + migration window
 
@@ -56,11 +56,10 @@ Existing editions keep `core.sys.set => ()`; its fallible
    item still compiles and emits **L2001** (a lint) suggesting `jet fix`.
 2. The item is **removed** in a later edition (the end of the window). Using it
    then is **E2002**, which names the replacement.
-3. The registry of deprecations lives in the compiler (`Source/Manifest.rs`,
-   `DEPRECATIONS`). It is empty pre-1.0 by design — nothing post-1.0 has been
-   deprecated yet — so E2002/L2001 are registered and snapshotted but not yet
-   user-triggerable. The first real deprecation makes them reachable with no
-   change to the diagnostic plumbing.
+3. A public declaration carries its lifecycle metadata in the ordinary
+   `#Deprecated(since:, use:, removed_in:)` marker. Core declarations without
+   Jet source use the same marker payload. `removed_in:` stays dormant until
+   editions own removal; without it, the item is warn-only.
 
 ## Migration authority (D-REL5)
 

@@ -5,6 +5,54 @@ mod InlineImports;
 use Completion::complete_bundle_check;
 use InlineImports::resolve_inline_module_imports;
 
+/// D-STRUCT-ONCE1=A: expand root declaration loops through the same typed
+/// comptime body used by derives and marker declarations. The expansion is
+/// deliberately before registration, so every generated impl, conversion,
+/// and test is an ordinary item for the rest of sema.
+fn expand_item_template_loops(
+    items: &mut Vec<Item>,
+    base_dir: &std::path::Path,
+    diags: &mut Vec<Diagnostic>,
+) {
+    if !items
+        .iter()
+        .any(|item| matches!(item, Item::TemplateLoop(_)))
+    {
+        return;
+    }
+    let (funcs_owned, _externs, globals) =
+        super::super::Registration::comptime_context_from_items(items);
+    let funcs = funcs_owned
+        .iter()
+        .map(|(name, function)| (name.clone(), function))
+        .collect::<HashMap<_, _>>();
+    let source_items = std::mem::take(items);
+    let mut expanded_items = Vec::with_capacity(source_items.len());
+    for item in source_items {
+        let Item::TemplateLoop(loop_item) = item else {
+            expanded_items.push(item);
+            continue;
+        };
+        let template = crate::AST::DeriveBodyItem::Loop {
+            var: loop_item.var,
+            var_span: loop_item.var_span,
+            source: loop_item.source,
+            body: loop_item.body,
+            span: loop_item.span,
+        };
+        match crate::Comptime::expand_template_body(
+            std::slice::from_ref(&template),
+            &globals,
+            &funcs,
+            base_dir,
+        ) {
+            Ok(generated) => expanded_items.extend(generated),
+            Err(diagnostic) => diags.push(diagnostic),
+        }
+    }
+    *items = expanded_items;
+}
+
 fn register_generated_union_enums(
     items: &[Item],
     state: &mut crate::Sema::ModuleState,
@@ -343,9 +391,9 @@ pub(super) fn check_bundle_opts_for_output_with_context(
             allow_compiler_api,
         );
     }
-    let (ambient_core_call, ambient_handle) = crate::Comptime::ambient_hooks();
+    let (ambient_core_call, ambient_handle, ambient_extern_call) = crate::Comptime::ambient_hooks();
     jet_foundation::CompilerStack::run_on_compiler_stack(move || {
-        crate::Comptime::with_ambient(ambient_core_call, ambient_handle, || {
+        crate::Comptime::with_ambient(ambient_core_call, ambient_handle, ambient_extern_call, || {
             check_bundle_opts_for_output_on_stack(
                 bundle,
                 mode,
@@ -438,12 +486,81 @@ fn check_bundle_opts_for_output_inner(
     // module expansion, but before registration/TIR. Assertions are checked and
     // erased here so no generated or untaken body bypasses the policy.
     diags.extend(super::super::UnsafeObligations::check_and_strip_with_gates(bundle, gates));
+    // D-STRUCT-POLICY1=A: collect the one package-local setting vocabulary
+    // before any function signature or body is checked. Built-in callable
+    // names remain owned by `CallablePolicyChain`; user names are nominal and
+    // duplicate declarations are rejected at the declaration boundary. The
+    // package scope is part of the key: dependency packages may independently
+    // own the same setting name.
+    let mut callable_policy_declarations =
+        std::collections::BTreeMap::<
+            (String, String),
+            (usize, crate::AST::UserPolicyDecl),
+        >::new();
+    for (module_idx, module) in bundle.modules.iter().enumerate() {
+        let package_scope = jet_foundation::Names::package_scope_for(
+            &module.path,
+            &bundle.project_root,
+        );
+        for declaration in &module.user_policy_declarations {
+            if crate::AST::CallablePolicyChain::is_builtin(&declaration.name) {
+                diags.push(Diagnostic::error(
+                    "E0105",
+                    format!(
+                        "policy setting `{}` redeclares a compiler-owned setting",
+                        declaration.name
+                    ),
+                    "built-in callable policies and package settings share one nominal vocabulary"
+                        .to_string(),
+                    "choose a different policy setting name".to_string(),
+                    Some(declaration.name_span),
+                ));
+                continue;
+            }
+            let key = (package_scope.clone(), declaration.name.clone());
+            if let Some((first_module, first)) = callable_policy_declarations
+                .insert(key.clone(), (module_idx, declaration.clone()))
+            {
+                // Restore the first declaration as the lookup winner. The
+                // duplicate still gets reported exactly once.
+                callable_policy_declarations
+                    .insert(key, (first_module, first.clone()));
+                diags.push(
+                    Diagnostic::error(
+                        "E0105",
+                        format!(
+                            "policy setting `{}` is declared twice (spans {}..{} and {}..{})",
+                            declaration.name,
+                            first.name_span.start,
+                            first.name_span.end,
+                            declaration.name_span.start,
+                            declaration.name_span.end,
+                        ),
+                        "one package-owned policy name must resolve to one checked wrapper"
+                            .to_string(),
+                        "rename or remove one of the policy declarations".to_string(),
+                        Some(declaration.name_span),
+                    )
+                    .with_detail(format!(
+                        "first declaration: module {first_module}, span {}..{}\nsecond declaration: module {module_idx}, span {}..{}",
+                        first.span.start,
+                        first.span.end,
+                        declaration.span.start,
+                        declaration.span.end,
+                    )));
+            }
+        }
+    }
     let mut states: Vec<ModuleState> = bundle
         .modules
         .iter()
         .enumerate()
         .map(|(module_idx, m)| ModuleState {
             module_path: m.display.clone(),
+            package_scope: jet_foundation::Names::package_scope_for(
+                &m.path,
+                &bundle.project_root,
+            ),
             module_alias: m.alias.clone(),
             items: m.items.clone(),
             build_facts: bundle.build_facts.clone(),
@@ -474,6 +591,7 @@ fn check_bundle_opts_for_output_inner(
                 })
                 .collect(),
             policy_declarations: m.policy_declarations.clone(),
+            callable_policy_declarations: callable_policy_declarations.clone(),
             rule_facts: m.rule_facts.clone(),
             code_modules: HashMap::new(),
             code_module_identities: HashMap::new(),
@@ -719,6 +837,10 @@ fn check_bundle_opts_for_output_inner(
             &bundle.build_facts,
             Some(&mut top_level_embed_inputs),
         );
+        expand_item_template_loops(&mut module.items, &base, &mut diags);
+        // Checker references use the state snapshot; refresh it after root
+        // expansion so generated nominal declarations are visible there too.
+        states[idx].items = module.items.clone();
         register_text_head_contracts(&mut states[idx], module, &ct_core_imports[idx]);
         super::super::Registration::resolve_comptime_declaration_values(
             &mut module.items,
@@ -961,6 +1083,8 @@ fn check_bundle_opts_for_output_inner(
                 Item::ProtocolDecl(_) => {}
                 // D-METADERIVE1=A: user-authored derive blocks are expanded below; skip here.
                 Item::UserDerive(_) => {}
+                // D-STRUCT-ONCE1=A: root loops are expanded before registration.
+                Item::TemplateLoop(_) => {}
                 // D-META-USER1=A: declaration rows were consumed by the
                 // bundle-local marker registry before ordinary registration.
                 Item::EffectDecl(_)
@@ -1090,10 +1214,15 @@ fn check_bundle_opts_for_output_inner(
                         let type_path = name_ledger
                             .canonical_path(idx, &s.name)
                             .expect("derive target missing from the name ledger");
-                        let type_info = crate::Comptime::build_struct_type_info_with_path(
+                        let layout_engine = jet_foundation::Layout::TargetLayoutEngine::host(
+                            module.items.iter(),
+                        );
+                        let type_info = crate::Comptime::build_struct_type_info_with_path_and_vocabulary_and_engine(
                             s,
                             &states,
                             &type_path,
+                            None,
+                            &layout_engine,
                         );
 
                         match crate::Comptime::expand_derive_body(
@@ -1264,11 +1393,15 @@ fn check_bundle_opts_for_output_inner(
                 let type_path = name_ledger
                     .canonical_path(idx, &target.name)
                     .expect("declared rule target missing from the name ledger");
-                let type_info = crate::Comptime::build_struct_type_info_with_path_and_vocabulary(
+                let layout_engine = jet_foundation::Layout::TargetLayoutEngine::host(
+                    module.items.iter(),
+                );
+                let type_info = crate::Comptime::build_struct_type_info_with_path_and_vocabulary_and_engine(
                     &target,
                     &states,
                     &type_path,
                     Some(&marker_vocabulary),
+                    &layout_engine,
                 );
                 match crate::Comptime::expand_derive_body(
                     body,

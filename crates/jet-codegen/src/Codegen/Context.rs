@@ -735,6 +735,7 @@ pub(crate) fn compute_handle_rust_type(name: &str) -> Option<&'static str> {
 pub(crate) fn service_handle_rust_type(name: &str) -> Option<&'static str> {
     match name {
         "ServiceTree" => Some("JetServiceTree"),
+        "ServiceWorkflow" => Some("JetWorkflowHandle"),
         "ServiceEndpoint" => Some("JetServiceEndpoint"),
         "ServiceError" => Some("JetServiceError"),
         "ServiceRestart" => Some("JetServiceRestart"),
@@ -1837,7 +1838,7 @@ impl Cx {
                 self.root_prefix,
                 self.rust_type(inner)
             ),
-            // D-FAIL-CARRIER1=A: `T?` and `T ? E` are two views of one carrier.
+            // D-FAIL-CARRIER1=A: `T?` and `T ! E` are two views of one carrier.
             // The optional view's report is `JetAbsent` — absence is clean.
             Type::Option(inner) => format!(
                 "{0}JetOutcome<{1}, {0}JetAbsent>",
@@ -4695,6 +4696,7 @@ pub(crate) fn build_cx_items(
             | Item::StateDecl(_) // D-STATE-DECL: erases
             | Item::ProtocolDecl(_) // D-PROTO1/D-PROTO2: erases
             | Item::UserDerive(_) // D-METADERIVE1=A: erase (expanded in sema)
+            | Item::TemplateLoop(_) // D-STRUCT-ONCE1=A: expanded before codegen
             | Item::GenericModule(_) // D-CONF-GENSPELL1=A: template — erases
             | Item::ModuleAlias(_) => {} // D-CONF-GENSPELL1=A: alias — erases after expansion
             Item::TypeAlias(a) => {

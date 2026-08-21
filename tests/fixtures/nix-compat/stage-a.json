@@ -66,6 +66,30 @@
       },
       "jet_packages": ["fd", "ripgrep"],
       "jet_unsupported": ["shellHook"]
+    },
+    {
+      "name": "overlay_and_unknown_field_projection",
+      "system": "x86_64-linux",
+      "source": "let overlay = final: prev: { custom = prev.fd; }; in { devShells.x86_64-linux.default = (import pkgs { overlays = [ overlay ]; }).mkShell { packages = [ (import pkgs { overlays = [ overlay ]; }).custom ]; inputsFrom = []; }; }",
+      "nix_expression": "let pkgs = { fd = \"fd\"; }; overlay = final: prev: { custom = prev.fd; }; in { packages = [ (overlay pkgs pkgs).custom ]; inputsFrom = []; }",
+      "nix_value": {
+        "inputsFrom": [],
+        "packages": ["fd"]
+      },
+      "jet_packages": ["fd"],
+      "jet_unsupported": ["inputsFrom"]
+    },
+    {
+      "name": "named_devshell_projection",
+      "system": "x86_64-linux",
+      "output": "debug",
+      "source": "{ outputs = { devShells.x86_64-linux.debug = pkgs.mkShell { packages = [ pkgs.ripgrep ]; }; }; }",
+      "nix_expression": "let pkgs = { ripgrep = \"ripgrep\"; }; in { packages = [ pkgs.ripgrep ]; }",
+      "nix_value": {
+        "packages": ["ripgrep"]
+      },
+      "jet_packages": ["ripgrep"],
+      "jet_unsupported": []
     }
   ],
   "errors": [

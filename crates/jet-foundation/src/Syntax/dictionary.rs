@@ -41,7 +41,9 @@ pub fn lookup(query: &str) -> Option<&'static SyntaxDictionaryRow> {
         row.token.eq_ignore_ascii_case(query)
             || display(row).eq_ignore_ascii_case(query)
             || row.kind == SyntaxDictionaryKind::Marker
-                && row.token.eq_ignore_ascii_case(query.strip_prefix('#').unwrap_or(query))
+                && row
+                    .token
+                    .eq_ignore_ascii_case(query.strip_prefix('#').unwrap_or(query))
     })
 }
 
@@ -67,9 +69,9 @@ pub fn looks_like_query(query: &str) -> bool {
         || query.starts_with('#')
         || query.starts_with("::")
         || query.starts_with(":=")
-        || query.chars().any(|ch| {
-            !ch.is_ascii_alphanumeric() && !matches!(ch, '_' | '.' | '-' | '/' | '@')
-        })
+        || query
+            .chars()
+            .any(|ch| !ch.is_ascii_alphanumeric() && !matches!(ch, '_' | '.' | '-' | '/' | '@'))
 }
 
 fn is_package_ref(query: &str) -> bool {
@@ -79,9 +81,9 @@ fn is_package_ref(query: &str) -> bool {
     query.split_once(':').is_some_and(|(prefix, suffix)| {
         !prefix.is_empty()
             && !suffix.is_empty()
-            && prefix.chars().all(|ch| {
-                ch.is_ascii_alphanumeric() || matches!(ch, '_' | '-' | '.' | '/')
-            })
+            && prefix
+                .chars()
+                .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '_' | '-' | '.' | '/'))
             && suffix.chars().any(|ch| ch.is_ascii_alphanumeric())
     })
 }
@@ -91,7 +93,11 @@ fn build_rows() -> Vec<SyntaxDictionaryRow> {
     let acronym_decision = source_header_decision(include_str!("acronyms.rs"));
     let mut rows = Vec::new();
     let mut tokens = highlighted_tokens_sorted();
-    for text in [super::MARKER_REGION, super::MARKER_LIVE, super::MARKER_NONDETERMINISTIC] {
+    for text in [
+        super::MARKER_REGION,
+        super::MARKER_LIVE,
+        super::MARKER_NONDETERMINISTIC,
+    ] {
         if !tokens.iter().any(|token| token.text == text) {
             tokens.push(HighlightToken {
                 text,
@@ -119,16 +125,14 @@ fn build_rows() -> Vec<SyntaxDictionaryRow> {
         }
     }
     for token in tokens {
-        if rows.iter().any(|row: &SyntaxDictionaryRow| row.token == token.text) {
+        if rows
+            .iter()
+            .any(|row: &SyntaxDictionaryRow| row.token == token.text)
+        {
             continue;
         }
         let kind = kind(token.class);
-        let (name, decision) = metadata(
-            &decisions,
-            token.text,
-            kind,
-            acronym_decision.as_deref(),
-        );
+        let (name, decision) = metadata(&decisions, token.text, kind, acronym_decision.as_deref());
         rows.push(SyntaxDictionaryRow {
             token: token.text.to_string(),
             name,
@@ -155,9 +159,7 @@ fn metadata(
         .or_else(|| {
             decisions
                 .iter()
-                .find(|(value, (_, decision))| {
-                    value.as_str() == token && decision != "Syntax.rs"
-                })
+                .find(|(value, (_, decision))| value.as_str() == token && decision != "Syntax.rs")
         });
     if let Some((_, metadata)) = candidate {
         return metadata.clone();
@@ -193,7 +195,11 @@ fn constant_matches_kind(name: &str, kind: SyntaxDictionaryKind) -> bool {
 }
 
 fn source_header_decision(source: &str) -> Option<String> {
-    source.lines().take(24).find_map(decision_id).map(str::to_string)
+    source
+        .lines()
+        .take(24)
+        .find_map(decision_id)
+        .map(str::to_string)
 }
 
 fn is_acronym(token: &str) -> bool {
@@ -291,7 +297,9 @@ fn source_decisions() -> Vec<(String, (String, String))> {
                 comments.clear();
                 continue;
             };
-            let Some(value) = rhs.split_once("= \"").and_then(|(_, rest)| rest.split_once('"'))
+            let Some(value) = rhs
+                .split_once("= \"")
+                .and_then(|(_, rest)| rest.split_once('"'))
             else {
                 comments.clear();
                 continue;
@@ -304,10 +312,7 @@ fn source_decisions() -> Vec<(String, (String, String))> {
             if !comments.is_empty() {
                 inherited_comments.clone_from(&comments);
             }
-            out.push((
-                value.0.to_string(),
-                (name.trim().to_string(), decision),
-            ));
+            out.push((value.0.to_string(), (name.trim().to_string(), decision)));
             comments.clear();
         }
     }
@@ -351,7 +356,11 @@ mod tests {
     #[test]
     fn dictionary_covers_highlights_and_keywords_without_foreign_words() {
         for token in crate::Syntax::JET_HIGHLIGHT_TOKENS {
-            assert!(lookup(token.text).is_some(), "missing highlight token `{}`", token.text);
+            assert!(
+                lookup(token.text).is_some(),
+                "missing highlight token `{}`",
+                token.text
+            );
         }
         for token in JET_KEYWORD_LIST {
             assert!(lookup(token).is_some(), "missing keyword `{token}`");
@@ -365,8 +374,16 @@ mod tests {
                 "dictionary token `{}` is not a Syntax constant or registry marker",
                 row.token
             );
-            assert_ne!(row.decision, "Syntax.rs", "missing decision ID for `{}`", row.token);
-            assert!(!row.example.is_empty(), "missing example for `{}`", row.token);
+            assert_ne!(
+                row.decision, "Syntax.rs",
+                "missing decision ID for `{}`",
+                row.token
+            );
+            assert!(
+                !row.example.is_empty(),
+                "missing example for `{}`",
+                row.token
+            );
         }
     }
 }

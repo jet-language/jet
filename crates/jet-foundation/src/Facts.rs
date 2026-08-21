@@ -250,7 +250,9 @@ impl FactRegistry {
     }
 
     pub fn iter_kind(&self, kind: FactKind) -> impl Iterator<Item = &FactDeclaration> {
-        self.declarations.values().filter(move |declaration| declaration.kind == kind)
+        self.declarations
+            .values()
+            .filter(move |declaration| declaration.kind == kind)
     }
 
     pub fn member(&self, kind: FactKind, declaration: &str, member: &str) -> bool {
@@ -334,13 +336,14 @@ impl ReachabilityResult {
                     .cloned()
                 {
                     let mut alias_path = path;
-                    if alias_path.first().is_some_and(|node| node.as_str() == target) {
+                    if alias_path
+                        .first()
+                        .is_some_and(|node| node.as_str() == target)
+                    {
                         alias_path[0] = alias.to_string();
                     }
-                    self.proofs.insert(
-                        (row_name.clone(), alias.to_string(), fact),
-                        alias_path,
-                    );
+                    self.proofs
+                        .insert((row_name.clone(), alias.to_string(), fact), alias_path);
                 }
             }
         }
@@ -430,12 +433,7 @@ pub fn project_reachability(
                         .unwrap_or_else(|| vec![callee.clone()]);
                     path.insert(0, caller.clone());
                     proofs.insert((row.name.clone(), caller.clone(), fact), path);
-                    for predecessor in predecessors
-                        .get(&caller)
-                        .into_iter()
-                        .flatten()
-                        .cloned()
-                    {
+                    for predecessor in predecessors.get(&caller).into_iter().flatten().cloned() {
                         if queued.insert(predecessor.clone()) {
                             queue.push_back(predecessor);
                         }
@@ -445,7 +443,10 @@ pub fn project_reachability(
         }
     }
 
-    ReachabilityResult { rows: values, proofs }
+    ReachabilityResult {
+        rows: values,
+        proofs,
+    }
 }
 
 #[cfg(test)]
@@ -473,7 +474,10 @@ mod tests {
             std::iter::empty(),
         );
 
-        assert_eq!(facts.get(FactKind::Effect, "Secret").unwrap().kind, FactKind::Effect);
+        assert_eq!(
+            facts.get(FactKind::Effect, "Secret").unwrap().kind,
+            FactKind::Effect
+        );
         assert_eq!(facts.get(FactKind::Tag, "Secret").unwrap().deny.len(), 1);
         assert_eq!(facts.iter().count(), 2);
     }
@@ -494,17 +498,11 @@ mod tests {
                 ),
                 ReachabilityRow::new(
                     "panic",
-                    BTreeMap::from([(
-                        "leaf".to_string(),
-                        BTreeSet::from(["panic".to_string()]),
-                    )]),
+                    BTreeMap::from([("leaf".to_string(), BTreeSet::from(["panic".to_string()]))]),
                 ),
                 ReachabilityRow::new(
                     "calls-exec",
-                    BTreeMap::from([(
-                        "leaf".to_string(),
-                        BTreeSet::from(["Exec".to_string()]),
-                    )]),
+                    BTreeMap::from([("leaf".to_string(), BTreeSet::from(["Exec".to_string()]))]),
                 ),
             ],
         );

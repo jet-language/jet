@@ -319,8 +319,18 @@ pub fn with_interpreter_ambient<R>(body: impl FnOnce() -> R) -> R {
     jet_codegen::Comptime::with_ambient(
         Some(ambient_interp::ambient_core_call),
         Some(ambient_interp::ambient_handle),
+        Some(ambient_interp::ambient_extern_call),
         body,
     )
+}
+
+/// Bind the prepared bridge for the explicit tier-0 interpreter. The caller
+/// runs the boundary scan first, so capability diagnostics keep their normal
+/// source-level code before the runtime bridge is attempted.
+pub fn bind_interpreter_ffi(
+    bundle: &jet_foundation::AST::ProgramBundle,
+) -> Result<(), Vec<jet_foundation::Diagnostics::Diagnostic>> {
+    Ffi::bind_bundle_ffi_for_interpreter(bundle)
 }
 
 pub(crate) fn program_args() -> Vec<String> {
@@ -377,7 +387,8 @@ pub fn on_compiler_stack<R: Send>(work: impl FnOnce() -> R + Send) -> R {
     if jet_foundation::CompilerStack::on_compiler_worker() {
         return work();
     }
-    let (ambient_core_call, ambient_handle) = jet_codegen::Comptime::ambient_hooks();
+    let (ambient_core_call, ambient_handle, ambient_extern_call) =
+        jet_codegen::Comptime::ambient_hooks();
     let argv = program_args();
     let trace_tiers = tiers::trace_tiers_enabled();
     let fidelity = runtime_host::perf_fidelity_bits();
@@ -387,16 +398,21 @@ pub fn on_compiler_stack<R: Send>(work: impl FnOnce() -> R + Send) -> R {
             tiers::set_trace_tiers(trace_tiers);
             runtime_host::set_perf_fidelity_bits(fidelity);
             let out = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                jet_codegen::Comptime::with_ambient(ambient_core_call, ambient_handle, || {
-                    // Empty means the caller installed none: reinstalling an
-                    // empty argv is not the same as leaving it unset, because
-                    // `with_program_args` also publishes `core.process.argv`.
-                    if argv.is_empty() {
-                        work()
-                    } else {
-                        with_program_args(&argv, work)
-                    }
-                })
+                jet_codegen::Comptime::with_ambient(
+                    ambient_core_call,
+                    ambient_handle,
+                    ambient_extern_call.or(Some(ambient_interp::ambient_extern_call)),
+                    || {
+                        // Empty means the caller installed none: reinstalling an
+                        // empty argv is not the same as leaving it unset, because
+                        // `with_program_args` also publishes `core.process.argv`.
+                        if argv.is_empty() {
+                            work()
+                        } else {
+                            with_program_args(&argv, work)
+                        }
+                    },
+                )
             }));
             (
                 out,

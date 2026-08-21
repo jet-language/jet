@@ -79,10 +79,16 @@ impl LegacyWrapperKind {
 
     fn default_argv(self) -> Vec<String> {
         match self {
-            LegacyWrapperKind::CMake => vec!["cmake".to_string(), "--build".to_string(), "build".to_string()],
+            LegacyWrapperKind::CMake => vec![
+                "cmake".to_string(),
+                "--build".to_string(),
+                "build".to_string(),
+            ],
             LegacyWrapperKind::Make => vec!["make".to_string()],
             LegacyWrapperKind::Gradle => vec!["gradle".to_string(), "build".to_string()],
-            LegacyWrapperKind::Npm => vec!["npm".to_string(), "run".to_string(), "build".to_string()],
+            LegacyWrapperKind::Npm => {
+                vec!["npm".to_string(), "run".to_string(), "build".to_string()]
+            }
             LegacyWrapperKind::Cargo => vec!["cargo".to_string(), "build".to_string()],
         }
     }
@@ -104,11 +110,7 @@ struct LegacyProjectImport {
 }
 
 fn legacy_import_error(kind: LegacyWrapperKind, detail: impl Into<String>) -> BuildError {
-    BuildError::LegacyProjectFileInvalid(format!(
-        "{}: {}",
-        kind.project_file(),
-        detail.into()
-    ))
+    BuildError::LegacyProjectFileInvalid(format!("{}: {}", kind.project_file(), detail.into()))
 }
 
 fn push_unique(values: &mut Vec<String>, value: impl Into<String>) {
@@ -182,7 +184,10 @@ fn apply_import_key(
         "output" | "outputs" => {
             let paths = parse_import_array(value);
             if paths.is_empty() {
-                return Err(legacy_import_error(kind, "output declarations cannot be empty"));
+                return Err(legacy_import_error(
+                    kind,
+                    "output declarations cannot be empty",
+                ));
             }
             import.outputs_explicit = true;
             for path in paths {
@@ -192,7 +197,10 @@ fn apply_import_key(
         "cap" | "caps" => {
             for cap in parse_import_array(value) {
                 let Some(cap) = BuildCapability::parse(&cap) else {
-                    return Err(legacy_import_error(kind, format!("unknown ability `{cap}`")));
+                    return Err(legacy_import_error(
+                        kind,
+                        format!("unknown ability `{cap}`"),
+                    ));
                 };
                 import.caps.insert(cap);
             }
@@ -200,10 +208,16 @@ fn apply_import_key(
         "env" => {
             for entry in parse_import_array(value) {
                 let Some((name, value)) = entry.split_once('=') else {
-                    return Err(legacy_import_error(kind, "environment entries must use KEY=VALUE"));
+                    return Err(legacy_import_error(
+                        kind,
+                        "environment entries must use KEY=VALUE",
+                    ));
                 };
                 if name.trim().is_empty() {
-                    return Err(legacy_import_error(kind, "environment names cannot be empty"));
+                    return Err(legacy_import_error(
+                        kind,
+                        "environment names cannot be empty",
+                    ));
                 }
                 import.env.insert(name.to_string(), value.to_string());
             }
@@ -227,7 +241,10 @@ fn apply_import_key(
             let value = scalar_import_value(value);
             import.action_kind = import_action_kind(&value);
             if import.action_kind.is_none() {
-                return Err(legacy_import_error(kind, format!("unknown action kind `{value}`")));
+                return Err(legacy_import_error(
+                    kind,
+                    format!("unknown action kind `{value}`"),
+                ));
             }
         }
         key if key.starts_with("label.") => {
@@ -261,11 +278,17 @@ fn apply_import_directives(
             .or_else(|| line.strip_prefix("//"))
             .map(str::trim)
             .unwrap_or(line);
-        let Some(line) = line.strip_prefix("jet:").or_else(|| line.strip_prefix("jet.")) else {
+        let Some(line) = line
+            .strip_prefix("jet:")
+            .or_else(|| line.strip_prefix("jet."))
+        else {
             continue;
         };
         let Some((key, value)) = line.split_once('=') else {
-            return Err(legacy_import_error(kind, "Jet import directives must use key=value"));
+            return Err(legacy_import_error(
+                kind,
+                "Jet import directives must use key=value",
+            ));
         };
         apply_import_key(kind, key.trim(), value.trim(), import)?;
     }
@@ -299,40 +322,46 @@ fn collect_legacy_project_inputs(
     ) -> Result<(), BuildError> {
         let directory = root.join(relative);
         let mut entries = fs::read_dir(&directory)
-            .map_err(|_| legacy_import_error(kind, format!("cannot read `{}`", relative.display())))?
+            .map_err(|_| {
+                legacy_import_error(kind, format!("cannot read `{}`", relative.display()))
+            })?
             .collect::<Result<Vec<_>, _>>()
-            .map_err(|_| legacy_import_error(kind, format!("cannot read `{}`", relative.display())))?;
+            .map_err(|_| {
+                legacy_import_error(kind, format!("cannot read `{}`", relative.display()))
+            })?;
         entries.sort_by_key(|entry| entry.file_name());
         for entry in entries {
             let name = entry.file_name();
             let child_relative = relative.join(&name);
             let metadata = fs::symlink_metadata(entry.path()).map_err(|_| {
-                legacy_import_error(kind, format!("cannot inspect `{}`", child_relative.display()))
+                legacy_import_error(
+                    kind,
+                    format!("cannot inspect `{}`", child_relative.display()),
+                )
             })?;
             if metadata.file_type().is_symlink() {
                 return Err(legacy_import_error(
                     kind,
-                    format!("source closure cannot contain symlink `{}`", child_relative.display()),
+                    format!(
+                        "source closure cannot contain symlink `{}`",
+                        child_relative.display()
+                    ),
                 ));
             }
             if metadata.is_dir() {
                 if legacy_generated_directory(kind, name.to_string_lossy().as_ref()) {
                     continue;
                 }
-                walk(
-                    root,
-                    &child_relative,
-                    kind,
-                    import,
-                    file_count,
-                    byte_count,
-                )?;
+                walk(root, &child_relative, kind, import, file_count, byte_count)?;
                 continue;
             }
             if !metadata.is_file() {
                 return Err(legacy_import_error(
                     kind,
-                    format!("source closure contains non-file `{}`", child_relative.display()),
+                    format!(
+                        "source closure contains non-file `{}`",
+                        child_relative.display()
+                    ),
                 ));
             }
             let child_path = child_relative.to_string_lossy();
@@ -345,7 +374,10 @@ fn collect_legacy_project_inputs(
             }
             // Jet build sources belong to the host project, not to the
             // imported legacy tool's source closure.
-            if child_relative.extension().is_some_and(|extension| extension == "jet") {
+            if child_relative
+                .extension()
+                .is_some_and(|extension| extension == "jet")
+            {
                 continue;
             }
             *file_count += 1;
@@ -497,9 +529,11 @@ fn parse_cmake_import(source: &str, import: &mut LegacyProjectImport) -> Result<
     }
     let mut targets = Vec::new();
     for command in ["add_executable", "add_library", "add_custom_target"] {
-        targets.extend(cmake_commands(source, command).into_iter().map(|args| {
-            (command.to_string(), args)
-        }));
+        targets.extend(
+            cmake_commands(source, command)
+                .into_iter()
+                .map(|args| (command.to_string(), args)),
+        );
     }
     if targets.len() != 1 {
         return Err(legacy_import_error(
@@ -675,9 +709,7 @@ fn parse_make_import(source: &str, import: &mut LegacyProjectImport) -> Result<(
     if phony_targets.contains(&target) {
         import.cache = Some(ActionCache::UncachedPhony);
     }
-    import
-        .labels
-        .insert("legacy.target".to_string(), target);
+    import.labels.insert("legacy.target".to_string(), target);
     Ok(())
 }
 
@@ -760,7 +792,10 @@ fn parse_gradle_import(source: &str, import: &mut LegacyProjectImport) -> Result
                     "rootProject.name must assign one quoted literal",
                 ));
             }
-            if project.replace(value[1..value.len() - 1].to_string()).is_some() {
+            if project
+                .replace(value[1..value.len() - 1].to_string())
+                .is_some()
+            {
                 return Err(legacy_import_error(
                     LegacyWrapperKind::Gradle,
                     "rootProject.name must be declared once",
@@ -797,9 +832,7 @@ fn parse_gradle_import(source: &str, import: &mut LegacyProjectImport) -> Result
         ));
     }
     import.argv = Some(vec!["gradle".to_string(), task.clone()]);
-    import
-        .labels
-        .insert("legacy.task".to_string(), task);
+    import.labels.insert("legacy.task".to_string(), task);
     Ok(())
 }
 
@@ -887,11 +920,12 @@ fn parse_cargo_import(
                         | "exclude"
                         | "include"
                         | "publish"
-                ) => {
-                    import
-                        .labels
-                        .insert(format!("legacy.package.{key}"), raw.trim().to_string());
-                }
+                ) =>
+            {
+                import
+                    .labels
+                    .insert(format!("legacy.package.{key}"), raw.trim().to_string());
+            }
             "package" => {
                 return Err(legacy_import_error(
                     LegacyWrapperKind::Cargo,
@@ -983,10 +1017,9 @@ fn parse_cargo_import(
                 format!("dependency `{dependency}` uses an unsupported non-registry source"),
             ));
         }
-        import.labels.insert(
-            format!("legacy.dependency.{dependency}"),
-            requirement,
-        );
+        import
+            .labels
+            .insert(format!("legacy.dependency.{dependency}"), requirement);
     }
     if let Some(version) = version {
         import.labels.insert("legacy.version".to_string(), version);
@@ -1019,8 +1052,9 @@ fn parse_npm_import(
     source: &str,
     import: &mut LegacyProjectImport,
 ) -> Result<(), BuildError> {
-    let value = jet_foundation::JSON::parse_json(source)
-        .map_err(|_| legacy_import_error(LegacyWrapperKind::Npm, "package.json is not valid JSON"))?;
+    let value = jet_foundation::JSON::parse_json(source).map_err(|_| {
+        legacy_import_error(LegacyWrapperKind::Npm, "package.json is not valid JSON")
+    })?;
     let jet_foundation::JSON::JSONValue::Object(object) = &value else {
         return Err(legacy_import_error(
             LegacyWrapperKind::Npm,
@@ -1054,7 +1088,9 @@ fn parse_npm_import(
         ));
     }
     if let Some(name) = json_string(object.get("name")) {
-        import.labels.insert("legacy.package".to_string(), name.clone());
+        import
+            .labels
+            .insert("legacy.package".to_string(), name.clone());
     }
     if object.contains_key("version") && json_string(object.get("version")).is_none() {
         return Err(legacy_import_error(
@@ -1065,12 +1101,18 @@ fn parse_npm_import(
     if let Some(version) = json_string(object.get("version")) {
         import.labels.insert("legacy.version".to_string(), version);
     }
-    let scripts = object.get("scripts").and_then(|value| match value {
-        jet_foundation::JSON::JSONValue::Object(value) => Some(value),
-        _ => None,
-    }).ok_or_else(|| {
-        legacy_import_error(LegacyWrapperKind::Npm, "package.json needs a scripts object")
-    })?;
+    let scripts = object
+        .get("scripts")
+        .and_then(|value| match value {
+            jet_foundation::JSON::JSONValue::Object(value) => Some(value),
+            _ => None,
+        })
+        .ok_or_else(|| {
+            legacy_import_error(
+                LegacyWrapperKind::Npm,
+                "package.json needs a scripts object",
+            )
+        })?;
     let mut script_names = Vec::new();
     for (name, value) in scripts {
         let Some(command) = json_string(Some(value)) else {
@@ -1118,10 +1160,9 @@ fn parse_npm_import(
                         format!("package dependency `{name}` in {section} must be a string"),
                     ));
                 };
-                import.labels.insert(
-                    format!("legacy.dependency.{section}.{name}"),
-                    requirement,
-                );
+                import
+                    .labels
+                    .insert(format!("legacy.dependency.{section}.{name}"), requirement);
             }
         }
     }
@@ -1212,10 +1253,13 @@ fn parse_legacy_project(
     source: &str,
 ) -> Result<LegacyProjectImport, BuildError> {
     let mut import = LegacyProjectImport::default();
-    import.caps.extend([BuildCapability::Exec, BuildCapability::FS]);
     import
-        .labels
-        .insert("legacy.import.parser".to_string(), kind.as_str().to_string());
+        .caps
+        .extend([BuildCapability::Exec, BuildCapability::FS]);
+    import.labels.insert(
+        "legacy.import.parser".to_string(),
+        kind.as_str().to_string(),
+    );
     match kind {
         LegacyWrapperKind::CMake => parse_cmake_import(source, &mut import)?,
         LegacyWrapperKind::Make => parse_make_import(source, &mut import)?,
@@ -1275,10 +1319,7 @@ impl ActionKind {
     pub fn observes_exact_source(self) -> bool {
         matches!(
             self,
-            ActionKind::Compile
-                | ActionKind::Docs
-                | ActionKind::Debug
-                | ActionKind::SourceArchive
+            ActionKind::Compile | ActionKind::Docs | ActionKind::Debug | ActionKind::SourceArchive
         )
     }
 }
@@ -1377,8 +1418,7 @@ impl ActionSpec {
         I: IntoIterator<Item = S>,
         S: Into<String>,
     {
-        self.env_allowlist
-            .extend(keys.into_iter().map(Into::into));
+        self.env_allowlist.extend(keys.into_iter().map(Into::into));
         self
     }
 
@@ -1646,12 +1686,14 @@ impl LegacyWrapperSpec {
         let root_meta = fs::symlink_metadata(root)
             .map_err(|_| BuildError::LegacyProjectFileInvalid(root.display().to_string()))?;
         if root_meta.file_type().is_symlink() || !root_meta.is_dir() {
-            return Err(BuildError::LegacyProjectFileInvalid(root.display().to_string()));
+            return Err(BuildError::LegacyProjectFileInvalid(
+                root.display().to_string(),
+            ));
         }
         let relative = kind.project_file();
         let path = root.join(relative);
-        let metadata = fs::symlink_metadata(&path)
-            .map_err(|_| BuildError::LegacyProjectFileMissing(kind))?;
+        let metadata =
+            fs::symlink_metadata(&path).map_err(|_| BuildError::LegacyProjectFileMissing(kind))?;
         if metadata.file_type().is_symlink() || !metadata.is_file() {
             return Err(BuildError::LegacyProjectFileInvalid(relative.to_string()));
         }
@@ -1775,8 +1817,7 @@ impl LegacyWrapperSpec {
         }
         self.labels
             .insert("legacy.import".to_string(), "project-file".to_string());
-        self.labels
-            .insert("legacy.project-file".to_string(), path);
+        self.labels.insert("legacy.project-file".to_string(), path);
         self
     }
 

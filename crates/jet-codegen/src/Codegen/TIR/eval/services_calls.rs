@@ -9,6 +9,25 @@ use crate::Codegen::TIR::TExpr;
 
 use super::EvalCtx;
 
+fn workflow_wait(nanos: i64) -> crate::Comptime::ServicesLite::JetServiceWorkflowWait<()> {
+    match crate::scheduler::jet_scheduler_wait_without_unwind(|| {
+        crate::scheduler::jet_std_time_sleep_duration_ns(nanos)
+    }) {
+        crate::scheduler::JetSchedulerWait::Ready(()) => {
+            crate::Comptime::ServicesLite::JetServiceWorkflowWait::Ready(())
+        }
+        crate::scheduler::JetSchedulerWait::Cancelled => {
+            crate::Comptime::ServicesLite::JetServiceWorkflowWait::Cancelled
+        }
+        crate::scheduler::JetSchedulerWait::Deadline(reason) => {
+            crate::Comptime::ServicesLite::JetServiceWorkflowWait::Deadline(reason)
+        }
+        crate::scheduler::JetSchedulerWait::Panicked(reason) => {
+            crate::Comptime::ServicesLite::JetServiceWorkflowWait::Panicked(reason)
+        }
+    }
+}
+
 impl<'a> EvalCtx<'a> {
     pub(super) fn eval_core_services_call(
         &mut self,
@@ -22,7 +41,7 @@ impl<'a> EvalCtx<'a> {
         for a in args {
             argv.push(self.eval_expr(a, scope)?);
         }
-        if module == "core.services" && method == "runtime" {
+        if matches!(module, "core.service" | "core.services") && method == "runtime" {
             if let Some(result) = crate::Comptime::try_ambient_core_call(
                 module,
                 method,
@@ -31,49 +50,17 @@ impl<'a> EvalCtx<'a> {
             ) {
                 return result;
             }
-            let store = match argv.first() {
-                Some(CtValue::Str(store)) => store.clone(),
-                _ => return Err(crate::Sema::Diagnostics::render_registered(
-                    "E0956",
-                    "core.services.runtime expects a store path".to_string(),
-                    "pass a text path and a Duration retention window".to_string(),
-                    "provide both runtime arguments".to_string(),
-                    Some(source_span),
-                )),
-            };
-            let retention_ms = match argv.get(1) {
-                // The `Duration` carrier's one field is `ns` (eval/handles.rs
-                // `duration_new`); this call wants milliseconds, so convert.
-                Some(CtValue::Struct { type_name, fields }) if type_name == "Duration" => fields
-                    .iter()
-                    .find_map(|(name, value)| match (name.as_str(), value) {
-                        ("ns", CtValue::Int(ns)) => Some(*ns / 1_000_000),
-                        _ => None,
-                    })
-                    .ok_or_else(|| crate::Sema::Diagnostics::render_registered(
-                        "E0956",
-                        "core.services.runtime received an invalid Duration".to_string(),
-                        "pass a checked Duration value".to_string(),
-                        "construct the retention window with core.time".to_string(),
-                        Some(source_span),
-                    ))?,
-                _ => return Err(crate::Sema::Diagnostics::render_registered(
-                    "E0956",
-                    "core.services.runtime expects a Duration".to_string(),
-                    "pass a checked Duration retention window".to_string(),
-                    "construct the retention window with core.time".to_string(),
-                    Some(source_span),
-                )),
-            };
-            return Ok(CtValue::Struct {
-                type_name: "ServiceRuntime".to_string(),
-                fields: vec![
-                    ("store".to_string(), CtValue::Str(store)),
-                    ("retention_ms".to_string(), CtValue::Int(retention_ms)),
-                ],
+            return crate::Comptime::ServicesLite::with_workflow_wait(workflow_wait, || {
+                crate::Comptime::ServicesLite::apply("runtime", &argv, source_span)
             });
         }
-        let result = apply_core_call(module, method, argv, source_span, self.repl_mode)?;
+        let result = if matches!(module, "core.service" | "core.services") {
+            crate::Comptime::ServicesLite::with_workflow_wait(workflow_wait, || {
+                apply_core_call(module, method, argv, source_span, self.repl_mode)
+            })?
+        } else {
+            apply_core_call(module, method, argv, source_span, self.repl_mode)?
+        };
         // Any `mutate_ok` carrier must write the updated tree back (I9). The
         // early allowlist only covered the #444 tree slice and missed
         // delivery/workflow/handoff mutators (#1148–#1153).

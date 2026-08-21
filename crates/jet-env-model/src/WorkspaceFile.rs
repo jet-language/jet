@@ -12,8 +12,8 @@
 //! names read from checked canonical `package.jet` manifests and relative
 //! paths.
 //!
-//! This replaces the `[packages]` table in `jetpack.toml` (D-WORKSPACE1=B
-//! clean break: one canonical declaration is the sole index).
+//! This replaces the retired `[packages]` table in the old TOML config plane
+//! (D-WORKSPACE1=B clean break: one canonical declaration is the sole index).
 //!
 //! Diagnostics:
 //!   E0995 — the file has no `module workspace { … }` body

@@ -1,9 +1,9 @@
 //! D-SERVICE1=D / I9: the typed `core.service` slice includes Prelude
 //! `Services.rs`; older procedural helpers remain private migration machinery.
 
-use crate::AST::{CtReport, CtValue, Type};
-use crate::Diagnostics::{Diagnostic, Span};
 use super::Diagnostics::unsupported;
+use crate::Diagnostics::{Diagnostic, Span};
+use crate::AST::{CtReport, CtValue, Type};
 
 trait JetShow {
     fn jet_show(&self) -> String;
@@ -15,6 +15,40 @@ trait JetDisplay {
 
 trait JetDebug {
     fn jet_debug(&self) -> String;
+}
+
+pub type WorkflowWaitHook = fn(i64) -> JetServiceWorkflowWait<()>;
+
+thread_local! {
+    static WORKFLOW_WAIT_HOOK: std::cell::Cell<Option<WorkflowWaitHook>> =
+        const { std::cell::Cell::new(None) };
+}
+
+struct WorkflowWaitHookGuard(Option<WorkflowWaitHook>);
+
+impl Drop for WorkflowWaitHookGuard {
+    fn drop(&mut self) {
+        WORKFLOW_WAIT_HOOK.with(|hook| hook.set(self.0.take()));
+    }
+}
+
+/// Install the resident engine's scheduler adapter around one canonical
+/// ServicesLite call. Direct Comptime use falls back to a blocking timer.
+pub fn with_workflow_wait<F, R>(wait: WorkflowWaitHook, f: F) -> R
+where
+    F: FnOnce() -> R,
+{
+    let previous = WORKFLOW_WAIT_HOOK.with(|hook| hook.replace(Some(wait)));
+    let _guard = WorkflowWaitHookGuard(previous);
+    f()
+}
+
+fn jet_services_workflow_sleep_wait(nanos: i64) -> JetServiceWorkflowWait<()> {
+    if let Some(wait) = WORKFLOW_WAIT_HOOK.with(|hook| hook.get()) {
+        return wait(nanos);
+    }
+    std::thread::sleep(std::time::Duration::from_nanos(nanos.max(0) as u64));
+    JetServiceWorkflowWait::Ready(())
 }
 
 #[allow(unused_imports)]
@@ -32,6 +66,7 @@ pub use jet_foundation::Outcome::*;
 include!("../../../jet-codegen/src/Prelude/CoreLib/Top/ServiceAuthority.rs");
 #[allow(unused_imports)]
 pub use jet_foundation::Outcome::*;
+include!("../../../jet-codegen/src/Prelude/WorkflowWait.rs");
 include!("../../../jet-codegen/src/Prelude/CoreLib/Top/Services.rs");
 
 fn restart_to_ct(r: JetServiceRestart) -> CtValue {
@@ -49,9 +84,7 @@ fn restart_to_ct(r: JetServiceRestart) -> CtValue {
 fn ct_to_restart(v: &CtValue, span: Span) -> Result<JetServiceRestart, Diagnostic> {
     match v {
         CtValue::Enum {
-            type_name,
-            variant,
-            ..
+            type_name, variant, ..
         } if type_name == "ServiceRestart" => match variant.as_str() {
             "OneForOne" => Ok(JetServiceRestart::OneForOne),
             "OneForAll" => Ok(JetServiceRestart::OneForAll),
@@ -75,10 +108,7 @@ fn restart_budget_to_ct(b: &JetServiceRestartBudget) -> CtValue {
     }
 }
 
-fn ct_to_restart_budget(
-    v: &CtValue,
-    span: Span,
-) -> Result<JetServiceRestartBudget, Diagnostic> {
+fn ct_to_restart_budget(v: &CtValue, span: Span) -> Result<JetServiceRestartBudget, Diagnostic> {
     let CtValue::Struct { type_name, fields } = v else {
         return Err(unsupported("ServiceRestartBudget", span));
     };
@@ -113,9 +143,7 @@ fn delivery_to_ct(d: JetServiceDelivery) -> CtValue {
 fn ct_to_delivery(v: &CtValue, span: Span) -> Result<JetServiceDelivery, Diagnostic> {
     match v {
         CtValue::Enum {
-            type_name,
-            variant,
-            ..
+            type_name, variant, ..
         } if type_name == "ServiceDelivery" => match variant.as_str() {
             "AtMostOnce" => Ok(JetServiceDelivery::AtMostOnce),
             "DurableAtLeastOnce" => Ok(JetServiceDelivery::DurableAtLeastOnce),
@@ -220,15 +248,6 @@ fn endpoint_to_ct(e: &JetServiceEndpoint) -> CtValue {
     }
 }
 
-fn bytes_to_ct(bytes: &[u8]) -> CtValue {
-    CtValue::List(
-        bytes
-            .iter()
-            .map(|byte| CtValue::Int(i64::from(*byte)))
-            .collect(),
-    )
-}
-
 fn ct_to_service_string(
     value: &CtValue,
     max_len: usize,
@@ -242,22 +261,6 @@ fn ct_to_service_string(
         return Err(unsupported(label, span));
     }
     Ok(value.clone())
-}
-
-fn ct_to_bytes(value: &CtValue, span: Span) -> Result<Vec<u8>, Diagnostic> {
-    let CtValue::List(values) = value else {
-        return Err(unsupported("service directory key", span));
-    };
-    if values.len() > 32 {
-        return Err(unsupported("service directory key length", span));
-    }
-    values
-        .iter()
-        .map(|value| match value {
-            CtValue::Int(byte) if (0..=255).contains(byte) => Ok(*byte as u8),
-            _ => Err(unsupported("service directory key byte", span)),
-        })
-        .collect()
 }
 
 fn ct_to_endpoint(v: &CtValue, span: Span) -> Result<JetServiceEndpoint, Diagnostic> {
@@ -308,18 +311,20 @@ fn ct_to_endpoint(v: &CtValue, span: Span) -> Result<JetServiceEndpoint, Diagnos
 }
 
 fn mailbox_to_ct(m: &JetServiceMailbox) -> CtValue {
+    // The tree Prelude mutates this mailbox directly, including rollback after
+    // a failed receive. Keep that post-call local snapshot here. `ct_to_mailbox`
+    // rehydrates from the authority channel before the next call when an
+    // endpoint operation changed the queue outside this tree value.
+    let messages = m.channel.snapshot();
     CtValue::Struct {
         type_name: "ServiceMailbox".to_string(),
         fields: vec![
             ("endpoint".to_string(), endpoint_to_ct(&m.endpoint)),
             ("capacity".to_string(), CtValue::Int(m.capacity)),
-            (
-                "depth".to_string(),
-                CtValue::Int(m.channel.depth() as i64),
-            ),
+            ("depth".to_string(), CtValue::Int(messages.len() as i64)),
             (
                 "messages".to_string(),
-                CtValue::List(m.channel.snapshot().into_iter().map(CtValue::Str).collect()),
+                CtValue::List(messages.into_iter().map(CtValue::Str).collect()),
             ),
         ],
     }
@@ -359,9 +364,18 @@ fn ct_to_mailbox(v: &CtValue, span: Span) -> Result<JetServiceMailbox, Diagnosti
         _ => return Err(unsupported("mailbox depth", span)),
     };
     let endpoint = ct_to_endpoint(field("endpoint")?, span)?;
+    // An endpoint method may enqueue through the authority between two
+    // interpreter calls while the tree value itself is not the receiver.
+    // Rehydrate from that one authority channel when it exists, or from the
+    // serialized mailbox after a real process restart.
+    let authoritative_messages = service_authority_channel(&endpoint)
+        .ok()
+        .map(|(_, _, channel)| channel.snapshot());
+    let has_authority_channel = authoritative_messages.is_some();
+    let messages = authoritative_messages.unwrap_or(messages);
     let mailbox = jet_services_new_mailbox(endpoint, capacity, messages)
         .map_err(|_| unsupported("ServiceMailbox channel", span))?;
-    if depth < 0 || mailbox.channel.depth() as i64 != depth {
+    if depth < 0 || (!has_authority_channel && mailbox.channel.depth() as i64 != depth) {
         return Err(unsupported("mailbox depth", span));
     }
     Ok(mailbox)
@@ -461,9 +475,7 @@ fn state_adapter_to_ct(a: JetServiceStateAdapter) -> CtValue {
 fn ct_to_state_adapter(v: &CtValue, span: Span) -> Result<JetServiceStateAdapter, Diagnostic> {
     match v {
         CtValue::Enum {
-            type_name,
-            variant,
-            ..
+            type_name, variant, ..
         } if type_name == "ServiceStateAdapter" => match variant.as_str() {
             "Empty" => Ok(JetServiceStateAdapter::Empty),
             "Snapshot" => Ok(JetServiceStateAdapter::Snapshot),
@@ -577,6 +589,10 @@ fn workflow_to_ct(w: &JetServiceWorkflow) -> CtValue {
                 "history".to_string(),
                 CtValue::List(w.history.iter().cloned().map(CtValue::Str).collect()),
             ),
+            (
+                "replay_cursor".to_string(),
+                CtValue::Int(w.replay_cursor as i64),
+            ),
             ("status".to_string(), task_status_to_ct(&w.status)),
             (
                 "activity_outcomes".to_string(),
@@ -604,6 +620,71 @@ fn workflow_to_ct(w: &JetServiceWorkflow) -> CtValue {
     }
 }
 
+fn workflow_handle_to_ct(handle: &JetWorkflowHandle, span: Span) -> Result<CtValue, Diagnostic> {
+    let workflow = handle
+        .state
+        .lock()
+        .map_err(|_| unsupported("workflow handle state", span))?
+        .clone();
+    let CtValue::Struct {
+        type_name,
+        mut fields,
+    } = workflow_to_ct(&workflow)
+    else {
+        return Err(unsupported("workflow handle state", span));
+    };
+    fields.push((
+        "authority".to_string(),
+        state_authority_to_ct(&handle.authority),
+    ));
+    Ok(CtValue::Struct { type_name, fields })
+}
+
+fn ct_to_workflow_handle(value: &CtValue, span: Span) -> Result<JetWorkflowHandle, Diagnostic> {
+    let CtValue::Struct { type_name, fields } = value else {
+        return Err(unsupported("ServiceWorkflow", span));
+    };
+    if type_name != "ServiceWorkflow" {
+        return Err(unsupported("ServiceWorkflow", span));
+    }
+    let authority = fields
+        .iter()
+        .find(|(name, _)| name == "authority")
+        .map(|(_, value)| value)
+        .ok_or_else(|| unsupported("workflow handle authority", span))
+        .and_then(|value| ct_to_state_authority(value, span))?;
+    let workflow = ct_to_workflow(
+        &CtValue::Struct {
+            type_name: type_name.clone(),
+            fields: fields
+                .iter()
+                .filter(|(name, _)| name != "authority")
+                .cloned()
+                .collect(),
+        },
+        span,
+    )?;
+    Ok(JetWorkflowHandle {
+        authority,
+        state: std::sync::Arc::new(std::sync::Mutex::new(workflow)),
+    })
+}
+
+fn ct_to_workflow_run_id(value: &CtValue, span: Span) -> Result<i64, Diagnostic> {
+    match value {
+        CtValue::Int(run_id) => Ok(*run_id),
+        CtValue::Struct { type_name, fields } if type_name == "ServiceWorkflow" => fields
+            .iter()
+            .find(|(name, _)| name == "run_id")
+            .and_then(|(_, value)| match value {
+                CtValue::Int(run_id) => Some(*run_id),
+                _ => None,
+            })
+            .ok_or_else(|| unsupported("workflow run id", span)),
+        _ => Err(unsupported("workflow run id", span)),
+    }
+}
+
 fn ct_to_workflow(v: &CtValue, span: Span) -> Result<JetServiceWorkflow, Diagnostic> {
     let CtValue::Struct { type_name, fields } = v else {
         return Err(unsupported("ServiceWorkflow", span));
@@ -625,9 +706,7 @@ fn ct_to_workflow(v: &CtValue, span: Span) -> Result<JetServiceWorkflow, Diagnos
                     return Err(unsupported("workflow string limit", span));
                 }
                 xs.iter()
-                    .map(|x| {
-                        ct_to_service_string(x, MAX_SERVICE_MESSAGE, "workflow string", span)
-                    })
+                    .map(|x| ct_to_service_string(x, MAX_SERVICE_MESSAGE, "workflow string", span))
                     .collect()
             }
             _ => Err(unsupported("workflow string list", span)),
@@ -645,6 +724,12 @@ fn ct_to_workflow(v: &CtValue, span: Span) -> Result<JetServiceWorkflow, Diagnos
         },
         steps: str_list("steps")?,
         history: str_list("history")?,
+        replay_cursor: match field("replay_cursor")? {
+            CtValue::Int(n) if *n >= 0 => {
+                usize::try_from(*n).map_err(|_| unsupported("workflow replay cursor", span))?
+            }
+            _ => return Err(unsupported("workflow replay cursor", span)),
+        },
         status: ct_to_task_status(field("status")?, span)?,
         activity_outcomes: match field("activity_outcomes")? {
             CtValue::List(entries) => entries
@@ -692,14 +777,36 @@ fn upgrade_receipt_to_ct(receipt: &JetServiceUpgradeReceipt) -> CtValue {
     CtValue::Struct {
         type_name: "ServiceUpgradeReceipt".to_string(),
         fields: vec![
-            ("from_generation".to_string(), CtValue::Int(receipt.from_generation)),
-            ("to_generation".to_string(), CtValue::Int(receipt.to_generation)),
-            ("migration".to_string(), CtValue::Str(receipt.migration.clone())),
-            ("rollback_store".to_string(), CtValue::Str(receipt.rollback_store.clone())),
-            ("rollback_available".to_string(), CtValue::Bool(receipt.rollback_available)),
+            (
+                "from_generation".to_string(),
+                CtValue::Int(receipt.from_generation),
+            ),
+            (
+                "to_generation".to_string(),
+                CtValue::Int(receipt.to_generation),
+            ),
+            (
+                "migration".to_string(),
+                CtValue::Str(receipt.migration.clone()),
+            ),
+            (
+                "rollback_store".to_string(),
+                CtValue::Str(receipt.rollback_store.clone()),
+            ),
+            (
+                "rollback_available".to_string(),
+                CtValue::Bool(receipt.rollback_available),
+            ),
             (
                 "pinned_shards".to_string(),
-                CtValue::List(receipt.pinned_shards.iter().cloned().map(CtValue::Str).collect()),
+                CtValue::List(
+                    receipt
+                        .pinned_shards
+                        .iter()
+                        .cloned()
+                        .map(CtValue::Str)
+                        .collect(),
+                ),
             ),
         ],
     }
@@ -713,15 +820,32 @@ fn ct_to_upgrade_receipt(v: &CtValue, span: Span) -> Result<JetServiceUpgradeRec
         return Err(unsupported("ServiceUpgradeReceipt", span));
     }
     let field = |name: &str| {
-        fields.iter().find(|(n, _)| n == name).map(|(_, v)| v)
+        fields
+            .iter()
+            .find(|(n, _)| n == name)
+            .map(|(_, v)| v)
             .ok_or_else(|| unsupported("ServiceUpgradeReceipt field", span))
     };
     Ok(JetServiceUpgradeReceipt {
-        from_generation: match field("from_generation")? { CtValue::Int(n) => *n, _ => return Err(unsupported("upgrade from generation", span)) },
-        to_generation: match field("to_generation")? { CtValue::Int(n) => *n, _ => return Err(unsupported("upgrade to generation", span)) },
+        from_generation: match field("from_generation")? {
+            CtValue::Int(n) => *n,
+            _ => return Err(unsupported("upgrade from generation", span)),
+        },
+        to_generation: match field("to_generation")? {
+            CtValue::Int(n) => *n,
+            _ => return Err(unsupported("upgrade to generation", span)),
+        },
         migration: ct_to_service_string(field("migration")?, 32, "upgrade migration", span)?,
-        rollback_store: ct_to_service_string(field("rollback_store")?, MAX_SERVICE_STATE_STORE, "upgrade rollback store", span)?,
-        rollback_available: match field("rollback_available")? { CtValue::Bool(v) => *v, _ => return Err(unsupported("upgrade rollback availability", span)) },
+        rollback_store: ct_to_service_string(
+            field("rollback_store")?,
+            MAX_SERVICE_STATE_STORE,
+            "upgrade rollback store",
+            span,
+        )?,
+        rollback_available: match field("rollback_available")? {
+            CtValue::Bool(v) => *v,
+            _ => return Err(unsupported("upgrade rollback availability", span)),
+        },
         pinned_shards: ct_str_list(field("pinned_shards")?, span)?,
     })
 }
@@ -731,9 +855,15 @@ fn tree_to_ct(tree: &JetServiceTree) -> CtValue {
         type_name: "ServiceTree".to_string(),
         fields: vec![
             ("name".to_string(), CtValue::Str(tree.name.clone())),
-            ("authority".to_string(), CtValue::Str(tree.authority.clone())),
+            (
+                "authority".to_string(),
+                CtValue::Str(tree.authority.clone()),
+            ),
             ("generation".to_string(), CtValue::Int(tree.generation)),
-            ("delivery".to_string(), delivery_to_ct(tree.delivery.clone())),
+            (
+                "delivery".to_string(),
+                delivery_to_ct(tree.delivery.clone()),
+            ),
             ("restart".to_string(), restart_to_ct(tree.restart.clone())),
             (
                 "restart_budget".to_string(),
@@ -748,24 +878,19 @@ fn tree_to_ct(tree: &JetServiceTree) -> CtValue {
                 CtValue::List(
                     tree.groups
                         .iter()
-                        .map(|g| {
-                            CtValue::Struct {
-                                type_name: "ServiceGroup".to_string(),
-                                fields: vec![
-                                    ("name".to_string(), CtValue::Str(g.name.clone())),
-                                    ("restart".to_string(), restart_to_ct(g.restart.clone())),
-                                    (
-                                        "budget".to_string(),
-                                        restart_budget_to_ct(&g.budget),
+                        .map(|g| CtValue::Struct {
+                            type_name: "ServiceGroup".to_string(),
+                            fields: vec![
+                                ("name".to_string(), CtValue::Str(g.name.clone())),
+                                ("restart".to_string(), restart_to_ct(g.restart.clone())),
+                                ("budget".to_string(), restart_budget_to_ct(&g.budget)),
+                                (
+                                    "workers".to_string(),
+                                    CtValue::List(
+                                        g.workers.iter().cloned().map(CtValue::Str).collect(),
                                     ),
-                                    (
-                                        "workers".to_string(),
-                                        CtValue::List(
-                                            g.workers.iter().cloned().map(CtValue::Str).collect(),
-                                        ),
-                                    ),
-                                ],
-                            }
+                                ),
+                            ],
                         })
                         .collect(),
                 ),
@@ -795,7 +920,13 @@ fn tree_to_ct(tree: &JetServiceTree) -> CtValue {
             ),
             (
                 "dead_letters".to_string(),
-                CtValue::List(tree.dead_letters.iter().cloned().map(CtValue::Str).collect()),
+                CtValue::List(
+                    tree.dead_letters
+                        .iter()
+                        .cloned()
+                        .map(CtValue::Str)
+                        .collect(),
+                ),
             ),
             (
                 "idempotency_seen".to_string(),
@@ -818,15 +949,13 @@ fn tree_to_ct(tree: &JetServiceTree) -> CtValue {
                 CtValue::List(
                     tree.directory
                         .iter()
-                        .map(|(n, ep, signature)| {
-                            CtValue::Struct {
-                                type_name: "ServiceDirectoryEntry".to_string(),
-                                fields: vec![
-                                    ("name".to_string(), CtValue::Str(n.clone())),
-                                    ("endpoint".to_string(), endpoint_to_ct(ep)),
-                                    ("signature".to_string(), CtValue::Str(signature.clone())),
-                                ],
-                            }
+                        .map(|(n, ep, signature)| CtValue::Struct {
+                            type_name: "ServiceDirectoryEntry".to_string(),
+                            fields: vec![
+                                ("name".to_string(), CtValue::Str(n.clone())),
+                                ("endpoint".to_string(), endpoint_to_ct(ep)),
+                                ("signature".to_string(), CtValue::Str(signature.clone())),
+                            ],
                         })
                         .collect(),
                 ),
@@ -855,7 +984,6 @@ fn tree_to_ct(tree: &JetServiceTree) -> CtValue {
                     |receipt| CtValue::Present(Box::new(upgrade_receipt_to_ct(receipt))),
                 ),
             ),
-            ("directory_key".to_string(), bytes_to_ct(&tree.directory_key)),
         ],
     }
 }
@@ -868,7 +996,11 @@ fn ct_str_list(v: &CtValue, span: Span) -> Result<Vec<String>, Diagnostic> {
             }
             xs.iter()
                 .map(|x| match x {
-                    CtValue::Str(s) if s.len() <= MAX_SERVICE_MESSAGE && !s.chars().any(char::is_control) => Ok(s.clone()),
+                    CtValue::Str(s)
+                        if s.len() <= MAX_SERVICE_MESSAGE && !s.chars().any(char::is_control) =>
+                    {
+                        Ok(s.clone())
+                    }
                     _ => Err(unsupported("string list", span)),
                 })
                 .collect()
@@ -909,55 +1041,50 @@ fn ct_to_tree(v: &CtValue, span: Span) -> Result<JetServiceTree, Diagnostic> {
             }
             xs.iter()
                 .map(|x| {
-                let CtValue::Struct { type_name, fields } = x else {
-                    return Err(unsupported("ServiceGroup", span));
-                };
-                if type_name != "ServiceGroup" {
-                    return Err(unsupported("ServiceGroup", span));
-                }
-                let name = fields
-                    .iter()
-                    .find(|(n, _)| n == "name")
-                    .map(|(_, value)| value)
-                    .ok_or_else(|| unsupported("group name", span))
-                    .and_then(|value| {
-                        ct_to_service_string(value, MAX_SERVICE_NAME, "group name", span)
-                    })?;
-                let restart = fields
-                    .iter()
-                    .find(|(n, _)| n == "restart")
-                    .map(|(_, v)| ct_to_restart(v, span))
-                    .ok_or_else(|| unsupported("group restart", span))??;
-                let budget = fields
-                    .iter()
-                    .find(|(n, _)| n == "budget")
-                    .map(|(_, v)| ct_to_restart_budget(v, span))
-                    .ok_or_else(|| unsupported("group restart budget", span))??;
-                let workers = match fields.iter().find(|(n, _)| n == "workers") {
-                    Some((_, CtValue::List(xs))) => {
-                        if xs.len() > MAX_SERVICE_WORKERS {
-                            return Err(unsupported("group worker limit", span));
-                        }
-                        xs.iter()
-                            .map(|x| {
-                                ct_to_service_string(
-                                    x,
-                                    MAX_SERVICE_NAME,
-                                    "group worker",
-                                    span,
-                                )
-                            })
-                            .collect::<Result<Vec<_>, _>>()?
+                    let CtValue::Struct { type_name, fields } = x else {
+                        return Err(unsupported("ServiceGroup", span));
+                    };
+                    if type_name != "ServiceGroup" {
+                        return Err(unsupported("ServiceGroup", span));
                     }
-                    Some(_) => return Err(unsupported("group workers", span)),
-                    None => return Err(unsupported("group workers", span)),
-                };
-                Ok(JetServiceGroup {
-                    name,
-                    restart,
-                    budget,
-                    workers,
-                })
+                    let name = fields
+                        .iter()
+                        .find(|(n, _)| n == "name")
+                        .map(|(_, value)| value)
+                        .ok_or_else(|| unsupported("group name", span))
+                        .and_then(|value| {
+                            ct_to_service_string(value, MAX_SERVICE_NAME, "group name", span)
+                        })?;
+                    let restart = fields
+                        .iter()
+                        .find(|(n, _)| n == "restart")
+                        .map(|(_, v)| ct_to_restart(v, span))
+                        .ok_or_else(|| unsupported("group restart", span))??;
+                    let budget = fields
+                        .iter()
+                        .find(|(n, _)| n == "budget")
+                        .map(|(_, v)| ct_to_restart_budget(v, span))
+                        .ok_or_else(|| unsupported("group restart budget", span))??;
+                    let workers = match fields.iter().find(|(n, _)| n == "workers") {
+                        Some((_, CtValue::List(xs))) => {
+                            if xs.len() > MAX_SERVICE_WORKERS {
+                                return Err(unsupported("group worker limit", span));
+                            }
+                            xs.iter()
+                                .map(|x| {
+                                    ct_to_service_string(x, MAX_SERVICE_NAME, "group worker", span)
+                                })
+                                .collect::<Result<Vec<_>, _>>()?
+                        }
+                        Some(_) => return Err(unsupported("group workers", span)),
+                        None => return Err(unsupported("group workers", span)),
+                    };
+                    Ok(JetServiceGroup {
+                        name,
+                        restart,
+                        budget,
+                        workers,
+                    })
                 })
                 .collect::<Result<Vec<_>, _>>()?
         }
@@ -970,33 +1097,33 @@ fn ct_to_tree(v: &CtValue, span: Span) -> Result<JetServiceTree, Diagnostic> {
             }
             xs.iter()
                 .map(|x| {
-                let CtValue::Struct { type_name, fields } = x else {
-                    return Err(unsupported("directory entry", span));
-                };
-                if type_name != "ServiceDirectoryEntry" {
-                    return Err(unsupported("directory entry", span));
-                }
-                let name = fields
-                    .iter()
-                    .find(|(n, _)| n == "name")
-                    .map(|(_, value)| value)
-                    .ok_or_else(|| unsupported("directory name", span))
-                    .and_then(|value| {
-                        ct_to_service_string(value, MAX_SERVICE_NAME, "directory name", span)
-                    })?;
-                let endpoint = fields
-                    .iter()
-                    .find(|(n, _)| n == "endpoint")
-                    .ok_or_else(|| unsupported("directory endpoint", span))?;
-                let signature = fields
-                    .iter()
-                    .find(|(n, _)| n == "signature")
-                    .map(|(_, value)| value)
-                    .ok_or_else(|| unsupported("directory signature", span))
-                    .and_then(|value| {
-                        ct_to_service_string(value, 64, "directory signature", span)
-                    })?;
-                Ok((name, ct_to_endpoint(&endpoint.1, span)?, signature))
+                    let CtValue::Struct { type_name, fields } = x else {
+                        return Err(unsupported("directory entry", span));
+                    };
+                    if type_name != "ServiceDirectoryEntry" {
+                        return Err(unsupported("directory entry", span));
+                    }
+                    let name = fields
+                        .iter()
+                        .find(|(n, _)| n == "name")
+                        .map(|(_, value)| value)
+                        .ok_or_else(|| unsupported("directory name", span))
+                        .and_then(|value| {
+                            ct_to_service_string(value, MAX_SERVICE_NAME, "directory name", span)
+                        })?;
+                    let endpoint = fields
+                        .iter()
+                        .find(|(n, _)| n == "endpoint")
+                        .ok_or_else(|| unsupported("directory endpoint", span))?;
+                    let signature = fields
+                        .iter()
+                        .find(|(n, _)| n == "signature")
+                        .map(|(_, value)| value)
+                        .ok_or_else(|| unsupported("directory signature", span))
+                        .and_then(|value| {
+                            ct_to_service_string(value, 64, "directory signature", span)
+                        })?;
+                    Ok((name, ct_to_endpoint(&endpoint.1, span)?, signature))
                 })
                 .collect::<Result<Vec<_>, _>>()?
         }
@@ -1041,33 +1168,33 @@ fn ct_to_tree(v: &CtValue, span: Span) -> Result<JetServiceTree, Diagnostic> {
             entries
                 .iter()
                 .map(|entry| {
-                let CtValue::Struct { type_name, fields } = entry else {
-                    return Err(unsupported("idempotency entry", span));
-                };
-                if type_name != "ServiceIdempotencyEntry" {
-                    return Err(unsupported("idempotency entry", span));
-                }
-                let field = |name: &str| {
-                    fields
-                        .iter()
-                        .find(|(n, _)| n == name)
-                        .map(|(_, value)| value)
-                        .ok_or_else(|| unsupported("idempotency field", span))
-                };
-                let key = ct_to_service_string(
-                    field("key")?,
-                    MAX_SERVICE_NAME,
-                    "idempotency key",
-                    span,
-                )?;
-                let endpoint = ct_to_endpoint(field("endpoint")?, span)?;
-                let message = ct_to_service_string(
-                    field("message")?,
-                    MAX_SERVICE_MESSAGE,
-                    "idempotency message",
-                    span,
-                )?;
-                Ok((key, endpoint, message))
+                    let CtValue::Struct { type_name, fields } = entry else {
+                        return Err(unsupported("idempotency entry", span));
+                    };
+                    if type_name != "ServiceIdempotencyEntry" {
+                        return Err(unsupported("idempotency entry", span));
+                    }
+                    let field = |name: &str| {
+                        fields
+                            .iter()
+                            .find(|(n, _)| n == name)
+                            .map(|(_, value)| value)
+                            .ok_or_else(|| unsupported("idempotency field", span))
+                    };
+                    let key = ct_to_service_string(
+                        field("key")?,
+                        MAX_SERVICE_NAME,
+                        "idempotency key",
+                        span,
+                    )?;
+                    let endpoint = ct_to_endpoint(field("endpoint")?, span)?;
+                    let message = ct_to_service_string(
+                        field("message")?,
+                        MAX_SERVICE_MESSAGE,
+                        "idempotency message",
+                        span,
+                    )?;
+                    Ok((key, endpoint, message))
                 })
                 .collect::<Result<Vec<_>, _>>()?
         }
@@ -1101,7 +1228,6 @@ fn ct_to_tree(v: &CtValue, span: Span) -> Result<JetServiceTree, Diagnostic> {
         dead_letters: ct_str_list(field("dead_letters")?, span)?,
         idempotency_seen,
         directory,
-        directory_key: ct_to_bytes(field("directory_key")?, span)?,
         draining: ct_str_list(field("draining")?, span)?,
         partitioned,
         workflows,
@@ -1117,12 +1243,22 @@ fn ct_to_tree(v: &CtValue, span: Span) -> Result<JetServiceTree, Diagnostic> {
         },
         last_upgrade,
     };
-    jet_services_validate_tree(&tree)
-        .map_err(|error| unsupported(&error.jet_show(), span))?;
+    jet_services_validate_tree(&tree).map_err(|error| unsupported(&error.jet_show(), span))?;
     for worker in &tree.workers {
-        jet_services_authority_hydrate(&worker.endpoint, tree.started && worker.running)
+        let draining = tree.draining.iter().any(|name| name == &worker.name);
+        let partitioned = tree.partitioned.iter().any(|name| name == &worker.name);
+        let started = tree.started && !partitioned && (worker.running || draining);
+        jet_services_authority_hydrate(&worker.endpoint, started)
             .map_err(|error| unsupported(&error.jet_show(), span))?;
-        if tree.started && worker.running {
+        if partitioned {
+            jet_services_authority_update_partitioned(&worker.endpoint, true)
+                .map_err(|error| unsupported(&error.jet_show(), span))?;
+        }
+        if tree.started {
+            jet_services_authority_update_draining(&worker.endpoint, draining)
+                .map_err(|error| unsupported(&error.jet_show(), span))?;
+        }
+        if started {
             jet_services_bind_delivery_endpoint(
                 &tree.delivery,
                 tree.state_authority.as_ref(),
@@ -1221,6 +1357,19 @@ fn ct_to_runtime(value: &CtValue, span: Span) -> Result<JetServiceRuntime, Diagn
     Ok(jet_services_runtime(store, retention_ms))
 }
 
+fn runtime_to_ct(runtime: &JetServiceRuntime) -> CtValue {
+    CtValue::Struct {
+        type_name: "ServiceRuntime".to_string(),
+        fields: vec![
+            ("store".to_string(), CtValue::Str(runtime.store.clone())),
+            (
+                "retention_ms".to_string(),
+                CtValue::Int(runtime.retention_ms),
+            ),
+        ],
+    }
+}
+
 /// Apply a `ServiceRuntime` handle method through the same Prelude authority
 /// functions used by AOT and the runtime ambient adapter. The TIR evaluator is
 /// only responsible for CtValue conversion at this boundary.
@@ -1250,10 +1399,12 @@ pub fn apply_runtime_method(
                 "ServiceRuntime.send key",
                 span,
             )?;
-            Ok(match jet_services_runtime_send(&runtime, &endpoint, &message, &key) {
-                Ok(receipt) => CtValue::Present(Box::new(receipt_to_ct(receipt))),
-                Err(error) => CtValue::failed(Box::new(map_err(error))),
-            })
+            Ok(
+                match jet_services_runtime_send(&runtime, &endpoint, &message, &key) {
+                    Ok(receipt) => CtValue::Present(Box::new(receipt_to_ct(receipt))),
+                    Err(error) => CtValue::failed(Box::new(map_err(error))),
+                },
+            )
         }
         "retry" | "dead_letter" | "retain" => {
             let id = ct_to_service_string(
@@ -1307,6 +1458,34 @@ fn mutate_err(tree: JetServiceTree, error: CtValue) -> CtValue {
             ("error".to_string(), error),
         ],
     }))
+}
+
+fn mutate_handle_ok(
+    handle: &JetWorkflowHandle,
+    value: CtValue,
+    span: Span,
+) -> Result<CtValue, Diagnostic> {
+    Ok(CtValue::Struct {
+        type_name: "__JetServiceMut".to_string(),
+        fields: vec![
+            ("tree".to_string(), workflow_handle_to_ct(handle, span)?),
+            ("value".to_string(), value),
+        ],
+    })
+}
+
+fn mutate_handle_err(
+    handle: &JetWorkflowHandle,
+    error: CtValue,
+    span: Span,
+) -> Result<CtValue, Diagnostic> {
+    Ok(CtValue::failed(Box::new(CtValue::Struct {
+        type_name: "__JetServiceMutErr".to_string(),
+        fields: vec![
+            ("tree".to_string(), workflow_handle_to_ct(handle, span)?),
+            ("error".to_string(), error),
+        ],
+    })))
 }
 
 pub fn take_mut_ok(value: CtValue) -> Result<(CtValue, CtValue), CtValue> {
@@ -1373,6 +1552,25 @@ pub fn apply(method: &str, args: &[CtValue], span: Span) -> Result<CtValue, Diag
             let name = ct_to_service_string(one(0)?, MAX_SERVICE_NAME, "tree name", span)?;
             Ok(tree_to_ct(&jet_services_tree(name)))
         }
+        "runtime" => {
+            let store = ct_to_service_string(
+                one(0)?,
+                SERVICE_AUTH_MAX_STORE,
+                "ServiceRuntime.store",
+                span,
+            )?;
+            let retention_ms = match one(1)? {
+                CtValue::Struct { type_name, fields } if type_name == "Duration" => fields
+                    .iter()
+                    .find_map(|(name, value)| match (name.as_str(), value) {
+                        ("ns", CtValue::Int(ns)) => Some(*ns / 1_000_000),
+                        _ => None,
+                    })
+                    .ok_or_else(|| unsupported("ServiceRuntime.retention_ms", span))?,
+                _ => return Err(unsupported("ServiceRuntime.retention_ms", span)),
+            };
+            Ok(runtime_to_ct(&jet_services_runtime(store, retention_ms)))
+        }
         "restart_one_for_one" => Ok(restart_to_ct(jet_services_restart_one_for_one())),
         "restart_one_for_all" => Ok(restart_to_ct(jet_services_restart_one_for_all())),
         "restart_rest_for_one" => Ok(restart_to_ct(jet_services_restart_rest_for_one())),
@@ -1418,10 +1616,12 @@ pub fn apply(method: &str, args: &[CtValue], span: Span) -> Result<CtValue, Diag
                 CtValue::Int(n) => *n,
                 _ => return Err(unsupported("capacity", span)),
             };
-            Ok(match jet_services_worker(&mut tree, name, handler, capacity) {
-                Ok(ep) => CtValue::Present(Box::new(mutate_ok(tree, endpoint_to_ct(&ep)))),
-                Err(e) => mutate_err(tree, map_err(e)),
-            })
+            Ok(
+                match jet_services_worker(&mut tree, name, handler, capacity) {
+                    Ok(ep) => CtValue::Present(Box::new(mutate_ok(tree, endpoint_to_ct(&ep)))),
+                    Err(e) => mutate_err(tree, map_err(e)),
+                },
+            )
         }
         "group" => {
             let mut tree = ct_to_tree(one(0)?, span)?;
@@ -1434,14 +1634,7 @@ pub fn apply(method: &str, args: &[CtValue], span: Span) -> Result<CtValue, Diag
                         return Err(unsupported("group worker limit", span));
                     }
                     xs.iter()
-                        .map(|x| {
-                            ct_to_service_string(
-                                x,
-                                MAX_SERVICE_NAME,
-                                "group worker",
-                                span,
-                            )
-                        })
+                        .map(|x| ct_to_service_string(x, MAX_SERVICE_NAME, "group worker", span))
                         .collect::<Result<Vec<_>, _>>()?
                 }
                 _ => return Err(unsupported("group workers", span)),
@@ -1540,10 +1733,14 @@ pub fn apply(method: &str, args: &[CtValue], span: Span) -> Result<CtValue, Diag
                 CtValue::Str(s) => s.clone(),
                 _ => return Err(unsupported("idempotency key", span)),
             };
-            Ok(match jet_services_send_durable(&mut tree, &endpoint, message, key) {
-                Ok(receipt) => CtValue::Present(Box::new(mutate_ok(tree, receipt_to_ct(receipt)))),
-                Err(e) => mutate_err(tree, map_err(e)),
-            })
+            Ok(
+                match jet_services_send_durable(&mut tree, &endpoint, message, key) {
+                    Ok(receipt) => {
+                        CtValue::Present(Box::new(mutate_ok(tree, receipt_to_ct(receipt))))
+                    }
+                    Err(e) => mutate_err(tree, map_err(e)),
+                },
+            )
         }
         "dead_letter_count" => Ok(CtValue::Int(jet_services_dead_letter_count(&ct_to_tree(
             one(0)?,
@@ -1654,16 +1851,76 @@ pub fn apply(method: &str, args: &[CtValue], span: Span) -> Result<CtValue, Diag
                 _ => return Err(unsupported("workflow version", span)),
             };
             Ok(match jet_services_workflow_start(&mut tree, id, version) {
-                Ok(run_id) => CtValue::Present(Box::new(mutate_ok(tree, CtValue::Int(run_id)))),
+                Ok(handle) => CtValue::Present(Box::new(mutate_ok(
+                    tree,
+                    workflow_handle_to_ct(&handle, span)?,
+                ))),
                 Err(e) => mutate_err(tree, map_err(e)),
+            })
+        }
+        "workflow_sleep" => {
+            let handle = ct_to_workflow_handle(one(0)?, span)?;
+            let nanos = match one(1)? {
+                CtValue::Struct { type_name, fields } if type_name == "Duration" => fields
+                    .iter()
+                    .find_map(|(name, value)| match (name.as_str(), value) {
+                        ("ns", CtValue::Int(ns)) => Some(*ns),
+                        _ => None,
+                    })
+                    .ok_or_else(|| unsupported("workflow sleep duration", span))?,
+                _ => return Err(unsupported("workflow sleep duration", span)),
+            };
+            Ok(match jet_services_workflow_sleep(&handle, nanos) {
+                Ok(()) => {
+                    CtValue::Present(Box::new(mutate_handle_ok(&handle, CtValue::Unit, span)?))
+                }
+                Err(e) => mutate_handle_err(&handle, map_err(e), span)?,
+            })
+        }
+        "workflow_activity_wait" => {
+            let handle = ct_to_workflow_handle(one(0)?, span)?;
+            let activity =
+                ct_to_service_string(one(1)?, MAX_SERVICE_NAME, "workflow activity", span)?;
+            let argument = ct_to_service_string(
+                one(2)?,
+                MAX_SERVICE_MESSAGE,
+                "workflow activity argument",
+                span,
+            )?;
+            Ok(
+                match jet_services_workflow_activity_wait(&handle, activity, argument) {
+                    Ok(value) => CtValue::Present(Box::new(mutate_handle_ok(
+                        &handle,
+                        CtValue::Str(value),
+                        span,
+                    )?)),
+                    Err(e) => mutate_handle_err(&handle, map_err(e), span)?,
+                },
+            )
+        }
+        "workflow_all" => {
+            let handle = ct_to_workflow_handle(one(0)?, span)?;
+            let values = match one(1)? {
+                CtValue::List(values) => values
+                    .iter()
+                    .map(|value| {
+                        ct_to_service_string(value, MAX_SERVICE_MESSAGE, "workflow all value", span)
+                    })
+                    .collect::<Result<Vec<_>, _>>()?,
+                _ => return Err(unsupported("workflow all values", span)),
+            };
+            Ok(match jet_services_workflow_all(&handle, values) {
+                Ok(values) => CtValue::Present(Box::new(mutate_handle_ok(
+                    &handle,
+                    CtValue::List(values.into_iter().map(CtValue::Str).collect()),
+                    span,
+                )?)),
+                Err(e) => mutate_handle_err(&handle, map_err(e), span)?,
             })
         }
         "workflow_step" => {
             let mut tree = ct_to_tree(one(0)?, span)?;
-            let run_id = match one(1)? {
-                CtValue::Int(n) => *n,
-                _ => return Err(unsupported("run id", span)),
-            };
+            let run_id = ct_to_workflow_run_id(one(1)?, span)?;
             let step = match one(2)? {
                 CtValue::Str(s) => s.clone(),
                 _ => return Err(unsupported("step", span)),
@@ -1675,10 +1932,7 @@ pub fn apply(method: &str, args: &[CtValue], span: Span) -> Result<CtValue, Diag
         }
         "workflow_activity" => {
             let mut tree = ct_to_tree(one(0)?, span)?;
-            let run_id = match one(1)? {
-                CtValue::Int(n) => *n,
-                _ => return Err(unsupported("run id", span)),
-            };
+            let run_id = ct_to_workflow_run_id(one(1)?, span)?;
             let activity = match one(2)? {
                 CtValue::Str(s) => s.clone(),
                 _ => return Err(unsupported("workflow activity", span)),
@@ -1691,64 +1945,53 @@ pub fn apply(method: &str, args: &[CtValue], span: Span) -> Result<CtValue, Diag
                 CtValue::Int(n) => *n,
                 _ => return Err(unsupported("activity retry limit", span)),
             };
-            Ok(match jet_services_workflow_activity(
-                &mut tree,
-                run_id,
-                activity,
-                key,
-                max_attempts,
-            ) {
-                Ok(status) => CtValue::Present(Box::new(mutate_ok(
-                    tree,
-                    task_status_to_ct(&status),
-                ))),
-                Err(e) => mutate_err(tree, map_err(e)),
-            })
+            Ok(
+                match jet_services_workflow_activity(&mut tree, run_id, activity, key, max_attempts)
+                {
+                    Ok(status) => {
+                        CtValue::Present(Box::new(mutate_ok(tree, task_status_to_ct(&status))))
+                    }
+                    Err(e) => mutate_err(tree, map_err(e)),
+                },
+            )
         }
         "workflow_activity_retry" => {
             let mut tree = ct_to_tree(one(0)?, span)?;
-            let run_id = match one(1)? {
-                CtValue::Int(n) => *n,
-                _ => return Err(unsupported("run id", span)),
-            };
+            let run_id = ct_to_workflow_run_id(one(1)?, span)?;
             let key = match one(2)? {
                 CtValue::Str(s) => s.clone(),
                 _ => return Err(unsupported("activity idempotency key", span)),
             };
             let outcome = ct_to_task_outcome(one(3)?, span)?;
-            Ok(match jet_services_workflow_activity_retry(&mut tree, run_id, key, outcome) {
-                Ok(status) => CtValue::Present(Box::new(mutate_ok(
-                    tree,
-                    task_status_to_ct(&status),
-                ))),
-                Err(e) => mutate_err(tree, map_err(e)),
-            })
+            Ok(
+                match jet_services_workflow_activity_retry(&mut tree, run_id, key, outcome) {
+                    Ok(status) => {
+                        CtValue::Present(Box::new(mutate_ok(tree, task_status_to_ct(&status))))
+                    }
+                    Err(e) => mutate_err(tree, map_err(e)),
+                },
+            )
         }
         "workflow_activity_complete" => {
             let mut tree = ct_to_tree(one(0)?, span)?;
-            let run_id = match one(1)? {
-                CtValue::Int(n) => *n,
-                _ => return Err(unsupported("run id", span)),
-            };
+            let run_id = ct_to_workflow_run_id(one(1)?, span)?;
             let key = match one(2)? {
                 CtValue::Str(s) => s.clone(),
                 _ => return Err(unsupported("activity idempotency key", span)),
             };
             let outcome = ct_to_task_outcome(one(3)?, span)?;
-            Ok(match jet_services_workflow_activity_complete(&mut tree, run_id, key, outcome) {
-                Ok(outcome) => CtValue::Present(Box::new(mutate_ok(
-                    tree,
-                    task_outcome_to_ct(&outcome),
-                ))),
-                Err(e) => mutate_err(tree, map_err(e)),
-            })
+            Ok(
+                match jet_services_workflow_activity_complete(&mut tree, run_id, key, outcome) {
+                    Ok(outcome) => {
+                        CtValue::Present(Box::new(mutate_ok(tree, task_outcome_to_ct(&outcome))))
+                    }
+                    Err(e) => mutate_err(tree, map_err(e)),
+                },
+            )
         }
         "workflow_history" => {
             let tree = ct_to_tree(one(0)?, span)?;
-            let run_id = match one(1)? {
-                CtValue::Int(n) => *n,
-                _ => return Err(unsupported("run id", span)),
-            };
+            let run_id = ct_to_workflow_run_id(one(1)?, span)?;
             Ok(match jet_services_workflow_history(&tree, run_id) {
                 Ok(s) => CtValue::Present(Box::new(CtValue::Str(s))),
                 Err(e) => CtValue::failed(Box::new(map_err(e))),
@@ -1756,10 +1999,7 @@ pub fn apply(method: &str, args: &[CtValue], span: Span) -> Result<CtValue, Diag
         }
         "workflow_outcome" => {
             let tree = ct_to_tree(one(0)?, span)?;
-            let run_id = match one(1)? {
-                CtValue::Int(n) => *n,
-                _ => return Err(unsupported("run id", span)),
-            };
+            let run_id = ct_to_workflow_run_id(one(1)?, span)?;
             Ok(match jet_services_workflow_outcome(&tree, run_id) {
                 Ok(outcome) => CtValue::Present(Box::new(task_outcome_to_ct(&outcome))),
                 Err(e) => CtValue::failed(Box::new(map_err(e))),
@@ -1772,10 +2012,12 @@ pub fn apply(method: &str, args: &[CtValue], span: Span) -> Result<CtValue, Diag
                 _ => return Err(unsupported("directory name", span)),
             };
             let endpoint = ct_to_endpoint(one(2)?, span)?;
-            Ok(match jet_services_directory_register(&mut tree, name, endpoint) {
-                Ok(()) => CtValue::Present(Box::new(mutate_ok(tree, CtValue::Unit))),
-                Err(e) => mutate_err(tree, map_err(e)),
-            })
+            Ok(
+                match jet_services_directory_register(&mut tree, name, endpoint) {
+                    Ok(()) => CtValue::Present(Box::new(mutate_ok(tree, CtValue::Unit))),
+                    Err(e) => mutate_err(tree, map_err(e)),
+                },
+            )
         }
         "directory_resolve" => {
             let tree = ct_to_tree(one(0)?, span)?;
@@ -1816,18 +2058,17 @@ pub fn apply(method: &str, args: &[CtValue], span: Span) -> Result<CtValue, Diag
                 Err(e) => mutate_err(tree, map_err(e)),
             })
         }
-        "upgrade_receipt" => Ok(match jet_services_upgrade_receipt(&ct_to_tree(one(0)?, span)?) {
-            Ok(receipt) => CtValue::Present(Box::new(upgrade_receipt_to_ct(&receipt))),
-            Err(error) => CtValue::failed(Box::new(map_err(error))),
-        }),
+        "upgrade_receipt" => Ok(
+            match jet_services_upgrade_receipt(&ct_to_tree(one(0)?, span)?) {
+                Ok(receipt) => CtValue::Present(Box::new(upgrade_receipt_to_ct(&receipt))),
+                Err(error) => CtValue::failed(Box::new(map_err(error))),
+            },
+        ),
         "observe" => Ok(CtValue::Str(jet_services_observe(&ct_to_tree(
             one(0)?,
             span,
         )?))),
-        _ => Err(unsupported(
-            &format!("`core.services.{method}()`"),
-            span,
-        )),
+        _ => Err(unsupported(&format!("`core.services.{method}()`"), span)),
     }
 }
 

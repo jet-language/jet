@@ -2303,6 +2303,7 @@ mod service_adapter {
         Delivery,
         TaskOutcome,
         DurationNs,
+        WorkflowId,
     }
 
     fn arg_kind(module: i64, method: &str, index: usize) -> Option<ArgKind> {
@@ -2382,25 +2383,33 @@ mod service_adapter {
                 "workflow_start" if index == 0 => Some(ArgKind::Slot),
                 "workflow_start" if index == 1 => Some(ArgKind::String),
                 "workflow_start" if index == 2 => Some(ArgKind::Int),
+                "workflow_sleep" if index == 0 => Some(ArgKind::Slot),
+                "workflow_sleep" if index == 1 => Some(ArgKind::DurationNs),
+                "workflow_activity_wait" if index == 0 => Some(ArgKind::Slot),
+                "workflow_activity_wait" if index == 1 || index == 2 => {
+                    Some(ArgKind::String)
+                }
+                "workflow_all" if index == 0 => Some(ArgKind::Slot),
+                "workflow_all" if index == 1 => Some(ArgKind::StringList),
                 "workflow_step" if index == 0 => Some(ArgKind::Slot),
-                "workflow_step" if index == 1 => Some(ArgKind::Int),
+                "workflow_step" if index == 1 => Some(ArgKind::WorkflowId),
                 "workflow_step" if index == 2 => Some(ArgKind::String),
                 "workflow_activity" if index == 0 => Some(ArgKind::Slot),
-                "workflow_activity" if index == 1 => Some(ArgKind::Int),
+                "workflow_activity" if index == 1 => Some(ArgKind::WorkflowId),
                 "workflow_activity" if index == 2 || index == 3 => Some(ArgKind::String),
                 "workflow_activity" if index == 4 => Some(ArgKind::Int),
                 "workflow_activity_retry" if index == 0 => Some(ArgKind::Slot),
-                "workflow_activity_retry" if index == 1 => Some(ArgKind::Int),
+                "workflow_activity_retry" if index == 1 => Some(ArgKind::WorkflowId),
                 "workflow_activity_retry" if index == 2 => Some(ArgKind::String),
                 "workflow_activity_retry" if index == 3 => Some(ArgKind::TaskOutcome),
                 "workflow_activity_complete" if index == 0 => Some(ArgKind::Slot),
-                "workflow_activity_complete" if index == 1 => Some(ArgKind::Int),
+                "workflow_activity_complete" if index == 1 => Some(ArgKind::WorkflowId),
                 "workflow_activity_complete" if index == 2 => Some(ArgKind::String),
                 "workflow_activity_complete" if index == 3 => Some(ArgKind::TaskOutcome),
                 "workflow_history" if index == 0 => Some(ArgKind::Slot),
-                "workflow_history" if index == 1 => Some(ArgKind::Int),
+                "workflow_history" if index == 1 => Some(ArgKind::WorkflowId),
                 "workflow_outcome" if index == 0 => Some(ArgKind::Slot),
-                "workflow_outcome" if index == 1 => Some(ArgKind::Int),
+                "workflow_outcome" if index == 1 => Some(ArgKind::WorkflowId),
                 "directory_register" if index == 0 => Some(ArgKind::Slot),
                 "directory_register" if index == 1 => Some(ArgKind::String),
                 "directory_register" if index == 2 => Some(ArgKind::Slot),
@@ -2490,6 +2499,12 @@ mod service_adapter {
         match kind {
             ArgKind::String => rt.heap.clone_string(raw).map(CtValue::Str),
             ArgKind::Int => Some(CtValue::Int(raw)),
+            ArgKind::WorkflowId => service_value(rt, raw).filter(|value| {
+                matches!(
+                    value,
+                    CtValue::Struct { type_name, .. } if type_name == "ServiceWorkflow"
+                )
+            }).or_else(|| Some(CtValue::Int(raw))),
             ArgKind::StringList => {
                 let length = rt.heap.list_len(raw)?;
                 if length < 0 {

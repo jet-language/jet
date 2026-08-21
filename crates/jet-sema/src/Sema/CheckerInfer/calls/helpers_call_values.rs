@@ -56,7 +56,7 @@ impl<'a> Checker<'a> {
                 _ => None,
             }
         }
-    
+
         pub(crate) fn infer_call_value(
             &mut self,
             callee: &mut Box<Expr>,
@@ -117,6 +117,9 @@ impl<'a> Checker<'a> {
             };
             if let Expr::Ident(name, _) = callee.as_ref() {
                 if let Some(sig) = self.funcs.get(name).cloned() {
+                    if let Some(dep) = sig.deprecation.as_ref() {
+                        self.check_deprecation(name, dep, span);
+                    }
                     self.check_foreign_transaction_call(&sig, name, span);
                 }
             }
@@ -212,6 +215,7 @@ impl<'a> Checker<'a> {
                         .collect(),
                     root_param: false,
                     return_type: ret.as_deref().cloned(),
+                    deprecation: None,
                     return_view_provenance: crate::AST::ViewProvenanceCell::new(),
                     is_extern: false,
                     is_unsafe: false,

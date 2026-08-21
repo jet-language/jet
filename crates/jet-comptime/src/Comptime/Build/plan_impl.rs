@@ -1,5 +1,7 @@
 use super::actions_policy::{ActionCache, BuildAction, BuildCapability, BuildResourcePoolSpec};
-use super::cache_cas::{ActionCacheStatus, ActionInputSnapshot, ActionKey, ActionOutcome, ContentDigest};
+use super::cache_cas::{
+    ActionCacheStatus, ActionInputSnapshot, ActionKey, ActionOutcome, ContentDigest,
+};
 use super::errors_keys::{
     canonical_action_key, canonical_effective_action_key, stalled_cycle, target_cycle_error,
     BuildError,
@@ -8,7 +10,7 @@ use super::execution_helpers::{
     action_pools, cache_status_reason, collect_target_actions, default_resource_pools,
     execution_metrics, execution_stages,
 };
-use super::execution_runtime::{BuildProbeFact, read_last_rebuild_record};
+use super::execution_runtime::{read_last_rebuild_record, BuildProbeFact};
 use super::handles::{
     ActionHandle, ActionId, ProbeHandle, ProbeId, SigningIdentityHandle, TargetId, TargetRef,
     ToolchainHandle, ToolchainId,
@@ -73,14 +75,22 @@ impl BuildPlan {
             });
             return Ok(selected);
         }
-        let mut paths = self.selected_sources()?.into_iter()
+        let mut paths = self
+            .selected_sources()?
+            .into_iter()
             .map(|path| path.as_str().to_string())
             .collect::<BTreeSet<_>>();
         let actions = self.selected_action_ids()?;
-        for action in self.actions.iter().filter(|action| actions.contains(&action.id)) {
+        for action in self
+            .actions
+            .iter()
+            .filter(|action| actions.contains(&action.id))
+        {
             paths.extend(action.outputs.iter().map(|path| path.as_str().to_string()));
         }
-        let mut selected = self.generated_modules.iter()
+        let mut selected = self
+            .generated_modules
+            .iter()
             .filter(|module| paths.contains(module.path.as_str()))
             .collect::<Vec<_>>();
         selected.sort_by(|left, right| {
@@ -128,7 +138,10 @@ impl BuildPlan {
                 return Err(target_cycle_error(plan, visiting, id));
             }
             visiting.push(id);
-            let target = plan.targets.get(id.0).ok_or(BuildError::UnknownTarget(id))?;
+            let target = plan
+                .targets
+                .get(id.0)
+                .ok_or(BuildError::UnknownTarget(id))?;
             for source in &target.sources {
                 if seen.insert(source.as_str().to_string()) {
                     out.push(source.clone());
@@ -165,7 +178,9 @@ impl BuildPlan {
             fn visit(plan: &BuildPlan, id: TargetId, out: &mut BTreeSet<TargetId>) {
                 if out.insert(id) {
                     if let Some(target) = plan.targets.get(id.0) {
-                        for dep in &target.deps { visit(plan, dep.id, out); }
+                        for dep in &target.deps {
+                            visit(plan, dep.id, out);
+                        }
                     }
                 }
             }
@@ -174,7 +189,11 @@ impl BuildPlan {
         } else {
             self.targets.iter().map(|target| target.id).collect()
         };
-        for target in self.targets.iter().filter(|target| selected_targets.contains(&target.id)) {
+        for target in self
+            .targets
+            .iter()
+            .filter(|target| selected_targets.contains(&target.id))
+        {
             probes.extend(target.probes.iter().map(|probe| probe.id));
         }
         Ok(probes)
@@ -261,7 +280,11 @@ impl BuildPlan {
             output_by_package.insert(package.name.clone(), output);
             dependencies_by_package.insert(
                 package.name.clone(),
-                package.dependencies.iter().cloned().collect::<BTreeSet<_>>(),
+                package
+                    .dependencies
+                    .iter()
+                    .cloned()
+                    .collect::<BTreeSet<_>>(),
             );
         }
 
@@ -279,7 +302,10 @@ impl BuildPlan {
                     dependency: package.name.clone(),
                 })?;
             if let Some(existing) = self.actions.iter().find(|action| {
-                action.outputs.iter().any(|existing_output| existing_output == &output)
+                action
+                    .outputs
+                    .iter()
+                    .any(|existing_output| existing_output == &output)
             }) {
                 return Err(BuildError::DuplicateBuildOutput {
                     output: output.as_str().to_string(),
@@ -287,7 +313,11 @@ impl BuildPlan {
                     second_action: action_name,
                 });
             }
-            if let Some(module) = self.generated_modules.iter().find(|module| module.path == output) {
+            if let Some(module) = self
+                .generated_modules
+                .iter()
+                .find(|module| module.path == output)
+            {
                 return Err(BuildError::GeneratedModuleCycle {
                     module: module.name.clone(),
                     path: output.as_str().to_string(),
@@ -306,7 +336,10 @@ impl BuildPlan {
             }
         }
 
-        let mut remaining = dependencies_by_package.keys().cloned().collect::<BTreeSet<_>>();
+        let mut remaining = dependencies_by_package
+            .keys()
+            .cloned()
+            .collect::<BTreeSet<_>>();
         while !remaining.is_empty() {
             let ready = remaining
                 .iter()
@@ -365,10 +398,7 @@ impl BuildPlan {
                 "compiler.source-digest".to_string(),
                 package.source_digest.as_str().to_string(),
             );
-            labels.insert(
-                "compiler.identity".to_string(),
-                compiler_identity.clone(),
-            );
+            labels.insert("compiler.identity".to_string(), compiler_identity.clone());
             labels.insert("compiler.target".to_string(), target.clone());
             labels.insert("compiler.profile".to_string(), profile.clone());
             self.actions.push(BuildAction {
@@ -428,10 +458,7 @@ impl BuildPlan {
             bytes.extend_from_slice(key.as_bytes());
             bytes.push(0);
         }
-        Ok(format!(
-            "plan-sha256:{}",
-            crate::SHA256::sha256_hex(&bytes)
-        ))
+        Ok(format!("plan-sha256:{}", crate::SHA256::sha256_hex(&bytes)))
     }
 
     pub fn action_key_with_inputs(
@@ -458,7 +485,9 @@ impl BuildPlan {
         executable_digest: &ContentDigest,
         probe_facts: &[BuildProbeFact],
     ) -> Result<ActionKey, BuildError> {
-        let action_ref = self.action(action).ok_or(BuildError::UnknownAction(action.id))?;
+        let action_ref = self
+            .action(action)
+            .ok_or(BuildError::UnknownAction(action.id))?;
         Ok(canonical_effective_action_key(
             self,
             action_ref,
@@ -613,7 +642,10 @@ impl BuildPlan {
 
     pub fn explain_target_named(&self, name: &str) -> Option<BuildExplanation> {
         let target = self.targets.iter().find(|target| target.name == name)?;
-        self.explain_target(TargetRef { id: target.id, context: self.context })
+        self.explain_target(TargetRef {
+            id: target.id,
+            context: self.context,
+        })
     }
 
     pub fn explain_action(&self, action: ActionHandle) -> Option<BuildExplanation> {
@@ -639,7 +671,10 @@ impl BuildPlan {
 
     pub fn explain_action_named(&self, name: &str) -> Option<BuildExplanation> {
         let action = self.actions.iter().find(|action| action.name == name)?;
-        self.explain_action(ActionHandle { id: action.id, context: self.context })
+        self.explain_action(ActionHandle {
+            id: action.id,
+            context: self.context,
+        })
     }
 
     pub fn explain_file(&self, path: impl AsRef<str>) -> BuildExplanation {
@@ -692,23 +727,30 @@ impl BuildPlan {
         project_root: &Path,
         action_name: &str,
     ) -> io::Result<Option<RebuildExplanation>> {
-        let Some(action) = self.actions.iter().find(|action| action.name == action_name) else {
+        let Some(action) = self
+            .actions
+            .iter()
+            .find(|action| action.name == action_name)
+        else {
             return Ok(None);
         };
         let Some(record) = read_last_rebuild_record(project_root, action.id, action_name)? else {
             return Ok(None);
         };
-        let mut explanation = self.why_rebuilt(
-            ActionHandle {
-                id: action.id,
-                context: self.context,
-            },
-            record.status,
-        )
-        .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, format!("{error:?}")))?;
+        let mut explanation = self
+            .why_rebuilt(
+                ActionHandle {
+                    id: action.id,
+                    context: self.context,
+                },
+                record.status,
+            )
+            .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, format!("{error:?}")))?;
         if let Some(code) = record.failed_exit_code {
-            explanation.reason =
-                format!("action failed with exit code {code} after {}", explanation.reason);
+            explanation.reason = format!(
+                "action failed with exit code {code} after {}",
+                explanation.reason
+            );
         }
         Ok(Some(explanation))
     }
@@ -742,14 +784,24 @@ impl BuildPlan {
                     })
             })
             .collect();
-        let selected_actions = self.actions.iter().filter(|action| selected.contains(&action.id)).cloned().collect::<Vec<_>>();
+        let selected_actions = self
+            .actions
+            .iter()
+            .filter(|action| selected.contains(&action.id))
+            .cloned()
+            .collect::<Vec<_>>();
         let metrics = execution_metrics(&selected_actions, &stages);
         Ok(BuildExecutionModel {
             pools: self.resource_pools(),
             nodes,
             stages,
             events,
-            console_order: self.actions.iter().filter(|action| selected.contains(&action.id)).map(|action| action.id).collect(),
+            console_order: self
+                .actions
+                .iter()
+                .filter(|action| selected.contains(&action.id))
+                .map(|action| action.id)
+                .collect(),
             metrics,
         })
     }
@@ -772,7 +824,12 @@ impl BuildPlan {
         let mut failed = BTreeSet::new();
         let mut finished = BTreeSet::new();
         let mut events = Vec::new();
-        let selected_actions = self.actions.iter().filter(|action| selected.contains(&action.id)).cloned().collect::<Vec<_>>();
+        let selected_actions = self
+            .actions
+            .iter()
+            .filter(|action| selected.contains(&action.id))
+            .cloned()
+            .collect::<Vec<_>>();
         let mut metrics = execution_metrics(&selected_actions, &stages);
         for stage in &stages {
             for action in &stage.actions {
@@ -940,7 +997,12 @@ impl BuildPlan {
             .into_iter()
             .filter(|(action, _)| selected.contains(action))
             .map(|(action, deps)| {
-                (action, deps.into_iter().filter(|dep| selected.contains(dep)).collect())
+                (
+                    action,
+                    deps.into_iter()
+                        .filter(|dep| selected.contains(dep))
+                        .collect(),
+                )
             })
             .collect())
     }

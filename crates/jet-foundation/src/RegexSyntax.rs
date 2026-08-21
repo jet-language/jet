@@ -167,9 +167,7 @@ impl Parser {
                 self.parse_unicode_class()?;
                 Ok(false)
             }
-            Some('P') => {
-                self.error("negated Unicode classes belong outside `[]` today")
-            }
+            Some('P') => self.error("negated Unicode classes belong outside `[]` today"),
             Some(_) => Ok(true),
             None => self.error("missing escape"),
         }

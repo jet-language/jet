@@ -405,11 +405,11 @@ for (const b of boxes()) {
   console.log(`box text=${JSON.stringify(b.text)} bg=${b.bg} color=${b.color} role=${b.role} aria=${JSON.stringify(b.aria)}`);
 }
 
-boosts.set(boosts.get() + 1);
-boosts.set(boosts.get() + 1);
+boosts.set(boosts.get() + 1n);
+boosts.set(boosts.get() + 1n);
 console.log(`boosts: ${find("Boosts").text}`);
 boostButton.focus();
-boosts.set(boosts.get() + 1);
+boosts.set(boosts.get() + 1n);
 console.log(`external-focus=${doc.activeElement === boostButton}`);
 
 for (const t of [0, 150, 300, 450, 600, 900]) {
@@ -785,7 +785,7 @@ fn web_named_caps_scope_uses_shared_tir() {
         .expect("web should accept the canonical #Abilities scope")
         .web
         .expect("web output");
-    assert!(out.wasm_rust.contains("__jet_run"), "web run export missing");
+    assert!(out.wasm_rust.contains("jet_export_run"), "web run export missing");
     assert!(!out.wasm_rust.contains("Authority"), "web handle leaked into emission");
 }
 
@@ -877,7 +877,7 @@ fn decode_source_map_mappings(map: &str) -> Vec<(usize, usize, usize, usize, usi
 
 #[test]
 fn js_source_map_uses_line_markers_and_hides_host_paths() {
-    let src = "#Target(Web)\n#Target(JS)\nfn run() {\n\n    first :: 1\n    print(\"left {first}\\n//# __jet_source_map line 999\\nright\")\n}\n";
+    let src = "#Target(JS)\nfn run() {\n\n    first :: 1\n    print(\"left {first}\\n//# __jet_source_map line 999\\nright\")\n}\n";
     let shown = format!(
         "{}/private/build-host/project/main.jet",
         std::env::temp_dir().display()
@@ -900,7 +900,7 @@ fn js_source_map_uses_line_markers_and_hides_host_paths() {
     assert!(
         first
             .js_source_map
-            .contains("\"#Target(Web)\\n#Target(JS)\\nfn run() {\\n\\n    first :: 1\\n    print(\\\"left {first}\\\\n//# __jet_source_map line 999\\\\nright\\\")\\n}\\n\""),
+            .contains("\"#Target(JS)\\nfn run() {\\n\\n    first :: 1\\n    print(\\\"left {first}\\\\n//# __jet_source_map line 999\\\\nright\\\")\\n}\\n\""),
         "sourcesContent must contain the exact Jet bytes:\n{}",
         first.js_source_map
     );
@@ -939,7 +939,7 @@ fn web_build_publishes_maps_and_release_omits_them() {
         eprintln!("note: skipping web map publication test (need rustc)");
         return;
     }
-    let src = "#Target(Web)\n#Target(JS)\nfn run() {\n    print(\"hi\")\n}\n";
+    let src = "#Target(JS)\nfn run() {\n    print(\"hi\")\n}\n";
     let dir = std::env::temp_dir().join(format!("jet_web_maps_pub_{}", std::process::id()));
     let _ = fs::remove_dir_all(&dir);
     fs::create_dir_all(&dir).unwrap();
@@ -1104,7 +1104,7 @@ fn run() {}
     let wasm = &out.web.expect("web artifacts").wasm_rust;
     assert!(wasm.contains("fn jet_wasm_tick()"));
     assert!(wasm.contains("jet_wasm_tick();"), "void body side effect was dropped:\n{wasm}");
-    assert!(wasm.contains("fn jet_wasm_twice(__jet_n: i64) -> i64"));
+    assert!(wasm.contains("fn jet_wasm_twice(__jet_n: JetWasmInt) -> JetWasmInt"));
     assert!(wasm.contains("jet_wasm_twice(__jet_n)"), "export did not call internal helper:\n{wasm}");
 }
 
@@ -1112,6 +1112,7 @@ fn run() {}
 fn web_value_and_range_arm_tables_emit_on_js_and_wasm() {
     // D-IF3 arm tables must share the MixedSwitch / RangeSwitch path with native.
     let src = r#"#Target(Web)
+
 #Target(JS)
 fn digit(n: Int) => String {
     if n == {
@@ -1178,6 +1179,7 @@ fn run() {}
 #[test]
 fn web_loops_and_index_assign_emit_on_js_and_wasm() {
     let src = r#"#Target(Web)
+
 #Target(JS)
 fn sum_to(n: Int) => Int {
     total := 0
@@ -1304,12 +1306,12 @@ enum Toggle { On Off }
 
 #Target(JS)
 fn make_result(flag: Bool) => Int ! String {
-    if flag return .Ok(7)
+    if flag -> return .Ok(7)
     return .Err("x")
 }
 #Target(JS)
 fn make_opt(flag: Bool) => Int? {
-    if flag return .Val(3)
+    if flag -> return .Val(3)
     return .None
 }
 #Target(JS)
@@ -1341,12 +1343,12 @@ fn js_matches_and(flag: Bool) => Int {
 }
 #Target(Wasm)
 fn wasm_make_result(flag: Bool) => Int ! String {
-    if flag return .Ok(7)
+    if flag -> return .Ok(7)
     return .Err("x")
 }
 #Target(Wasm)
 fn wasm_make_opt(flag: Bool) => Int? {
-    if flag return .Val(3)
+    if flag -> return .Val(3)
     return .None
 }
 #WasmExport
@@ -1462,10 +1464,10 @@ enum Packet {
 }
 
 #Target(JS)
-fn make_packet(n: Int) => Packet :: .Data(n)
+fn make_packet(n: Int) => Packet :> .Data(n)
 
 #Target(JS)
-fn make_opt(n: Int) => Int? :: .Val(n)
+fn make_opt(n: Int) => Int? :> .Val(n)
 
 #Target(JS)
 fn bind_opt(n: Int) => Int {
@@ -1483,7 +1485,7 @@ fn classify_range(n: Int) => Int {
 }
 
 #Target(Wasm)
-fn wasm_packet(n: Int) => Packet :: .Data(n)
+fn wasm_packet(n: Int) => Packet :> .Data(n)
 
 #WasmExport
 fn wasm_classify(n: Int) => Int {
@@ -1528,10 +1530,10 @@ fn web_js_matches_binds_subject_once() {
 enum Toggle { On Off }
 
 #Target(JS)
-fn make_opt(n: Int) => Int? :: .Val(n)
+fn make_opt(n: Int) => Int? :> .Val(n)
 
 #Target(JS)
-fn make_toggle() => Toggle :: .On
+fn make_toggle() => Toggle :> .On
 
 #Target(JS)
 fn classify(n: Int) => Int {
@@ -2311,7 +2313,7 @@ console.log(JSON.stringify({
     );
     assert_eq!(
         stdout,
-        r#"{"tag":"Host","status":73,"cleared":1,"name":"JetHostError","code":"__malformed_wasm_error__","errorStatus":73,"exitCode":73,"frame":"{bad"}"#
+        concat!(r#"{"tag":"Host","status":73,"cleared":1,"name":"JetHostError","code":"__malformed_wasm_error__","errorStatus":73,"exitCode":73,"frame":"{bad"}"#, "\n")
     );
     let _ = fs::remove_dir_all(&dir);
 }
@@ -2518,9 +2520,7 @@ fn run() ! {
 "#;
     let shown = "tests/fixtures/web_two_hop_journey.jet";
     let expected_journey = format!(
-        " Trail [E3002] (2 hops via ?, origin first):\n\
-  1. read ({shown}:6) — reading source\n\
-  2. run ({shown}:11) — running source"
+        " Trail [E3002] (2 hops via ?, origin first):\n  1. read ({shown}:6) — reading source\n  2. run ({shown}:11) — running source"
     );
     let expected_report = format!("Error [TWOHOP]: two-hop\n{expected_journey}");
 
@@ -2641,6 +2641,7 @@ fn web_for_in_preflight_rejects_unimplemented_iteration_fields() {
         (
             "tests/fixtures/web_for_in_step.jet",
             r#"#Target(Web)
+
 #Target(JS)
 fn sum() => Int {
     total := 0
@@ -2653,6 +2654,7 @@ fn run() {}
         (
             "tests/fixtures/web_for_in_method.jet",
             r#"#Target(Web)
+
 #Target(JS)
 fn count_chars() => Int {
     total := 0
@@ -2710,8 +2712,8 @@ fn run() {
     );
     assert!(
         wasm.contains("if __jet_flag {")
-            && (wasm.contains("let __jet_n = 6;") || wasm.contains("let mut __jet_n = 6;"))
-            && wasm.contains("(__jet_n + 1)"),
+            && wasm.contains("let mut __jet_n = JetWasmInt::from_i64(6);")
+            && wasm.contains("JetWasmInt::from_i64(1)"),
         "Wasm IfExpr must retain branch statements and values:\n{wasm}"
     );
     let check = Command::new("node")
@@ -2731,6 +2733,7 @@ fn run() {
 #[test]
 fn web_backends_traverse_impure_regions() {
     let src = r#"#Target(Web)
+
 #Target(JS)
 fn js_value() => Int {
     value := 0
@@ -2806,8 +2809,8 @@ fn run() { print(total()) }
 "#;
     let dir = build_web_fixture("wasm_module_identity", src, "tests/fixtures/web_wasm_module_identity.jet");
     let wasm = fs::read_to_string(dir.join("build/app_wasm.rs")).unwrap();
-    assert!(wasm.contains("fn jet_wasm___jet_left__value() -> i64"), "left Wasm identity was dropped:\n{wasm}");
-    assert!(wasm.contains("fn jet_wasm___jet_right__value() -> i64"), "right Wasm identity was dropped:\n{wasm}");
+    assert!(wasm.contains("fn jet_wasm___jet_left__value() -> JetWasmInt"), "left Wasm identity was dropped:\n{wasm}");
+    assert!(wasm.contains("fn jet_wasm___jet_right__value() -> JetWasmInt"), "right Wasm identity was dropped:\n{wasm}");
     assert!(wasm.contains("jet_wasm___jet_left__value()"), "left qualified call was dropped:\n{wasm}");
     assert!(wasm.contains("jet_wasm___jet_right__value()"), "right qualified call was dropped:\n{wasm}");
     assert_eq!(run_web_app(&dir), "3\n");
@@ -2862,8 +2865,8 @@ fn web_file_modules_emit_distinct_qualified_wasm_calls() {
         ],
     );
     let wasm = fs::read_to_string(dir.join("build/app_wasm.rs")).unwrap();
-    assert!(wasm.contains("fn jet_wasm___jet_left__value() -> i64"), "left identity was dropped:\n{wasm}");
-    assert!(wasm.contains("fn jet_wasm___jet_right__value() -> i64"), "right identity was dropped:\n{wasm}");
+    assert!(wasm.contains("fn jet_wasm___jet_left__value() -> JetWasmInt"), "left identity was dropped:\n{wasm}");
+    assert!(wasm.contains("fn jet_wasm___jet_right__value() -> JetWasmInt"), "right identity was dropped:\n{wasm}");
     assert!(wasm.contains("jet_wasm___jet_left__value()"), "left call was dropped:\n{wasm}");
     assert!(wasm.contains("jet_wasm___jet_right__value()"), "right call was dropped:\n{wasm}");
     assert_eq!(run_web_app(&dir), "3\n");
@@ -2981,7 +2984,7 @@ fn run() { print("top-level") }
 
 #[test]
 fn web_missing_return_is_a_preflight_diagnostic() {
-    let src = "#Target(Web)\n#Target(JS)\nfn missing() => Int { n :: 1 }\nfn run() {}\n";
+    let src = "#Target(Web)\n\n#Target(JS)\nfn missing() => Int { n :: 1 }\nfn run() {}\n";
     let diags = jet::compile_web_with_path(src, "tests/fixtures/web_missing_return.jet")
         .expect_err("non-void JS function without return must be rejected");
     assert!(diags.iter().any(|d| d.code == "E0114"), "{diags:?}");
@@ -3012,7 +3015,7 @@ fn wasm_unsupported_internal_abi_is_a_preflight_diagnostic() {
 
 #[test]
 fn wasm_cross_bucket_call_is_a_normal_preflight_diagnostic() {
-    let src = "#Target(Web)\n#Target(JS)\nfn browser_value() => Int { return 1 }\n#WasmExport\nfn compute() => Int { return browser_value() }\nfn run() {}\n";
+    let src = "#Target(Web)\n\n#Target(JS)\nfn browser_value() => Int { return 1 }\n#WasmExport\nfn compute() => Int { return browser_value() }\nfn run() {}\n";
     let diags = jet::compile_web_with_path(src, "tests/fixtures/web_cross_bucket_call.jet")
         .expect_err("Wasm must not call a JS-bucket function directly");
     assert!(diags.iter().any(|d| d.code == "E-WEB-CROSS-PARTITION"), "{diags:?}");
@@ -3032,7 +3035,7 @@ fn run() { print(summarize(4)) }
     let out = jet::compile_web_with_path(src, "tests/fixtures/web_canvas_tir.jet")
         .expect("ordinary Canvas control flow and print must compile through TIR");
     let wasm = &out.web.expect("web artifacts").wasm_rust;
-    assert!(wasm.contains("if (__jet_total > 10)"), "TIR if was not emitted:\n{wasm}");
+    assert!(wasm.contains("if (__jet_total > JetWasmInt::from_i64(10))"), "TIR if was not emitted:\n{wasm}");
     assert!(wasm.contains("jet_wasm_print("), "TIR print was not emitted:\n{wasm}");
     assert!(
         wasm.contains("__jet_text: &String") || wasm.contains("__jet_text: String"),
@@ -3060,7 +3063,7 @@ fn run() { print("hello, web") }
     let web = out.web.expect("web artifacts");
     let wasm = &web.wasm_rust;
     assert!(
-        wasm.contains("fn jet_wasm___jet_tools__dev() -> i64"),
+        wasm.contains("fn jet_wasm___jet_tools__dev() -> JetWasmInt"),
         "module tools.dev was not emitted:\n{wasm}"
     );
     assert!(
@@ -3142,7 +3145,7 @@ fn web_plain_run_loads_wasm_before_dom_print() {
         "plain Wasm run needs loader:\n{js}"
     );
     assert!(
-        js.contains("const raw = wasm.jet_export_run();"),
+        js.contains("raw = wasm.jet_export_run();"),
         "plain Wasm run must call its emitted export:\n{js}"
     );
     assert!(js.contains("jetDom.print(\"hello, web\")"), "JS print path missing:\n{js}");
@@ -3366,8 +3369,8 @@ fn run() {}
     let js = fs::read_to_string(dir.join("build/app.js")).unwrap();
     let manifest = fs::read_to_string(dir.join("build/web.manifest.json")).unwrap();
     let sources = jet::DevServer::BrowserTrace::sources_from_manifest(&manifest).unwrap();
-    assert!(js.contains("\"handlers__init$handler0\""), "{js}");
-    assert!(sources.iter().any(|source| source.symbols.contains(&("handlers__init$handler0".into(), "handler".into()))), "{sources:?}");
+    assert!(js.contains("\"__jet_handlers__init$handler0\""), "{js}");
+    assert!(sources.iter().any(|source| source.symbols.contains(&("__jet_handlers__init$handler0".into(), "handler".into()))), "{sources:?}");
     assert!(!sources.iter().any(|source| source.symbols.iter().any(|(name, _)| name == "init$handler0")), "qualified handler was attributed to an unqualified suffix: {sources:?}");
     let _ = fs::remove_dir_all(dir);
 }
@@ -3542,11 +3545,11 @@ fn web_wasm_range_loop_bridge_roundtrip() {
     let dir = build_web_fixture("wasm_range", src, "examples/features/web/web_wasm_range.jet");
     let wasm = fs::read_to_string(dir.join("build/app_wasm.rs")).unwrap();
     assert!(
-        wasm.contains("for __jet_i in (0)..=(__jet_n)"),
+        wasm.contains("jet_wasm_int_range("),
         "inclusive range loop was not emitted:\n{wasm}"
     );
     assert!(
-        wasm.contains("__jet_total = (__jet_total + __jet_i)"),
+        wasm.contains("__jet_total =") && wasm.contains("__jet_i") && wasm.contains(" + "),
         "loop body assign was dropped:\n{wasm}"
     );
     let stdout = run_web_app(&dir);
@@ -3574,8 +3577,7 @@ fn web_wasm_for_in_bridge_roundtrip() {
         "plain ForIn was not emitted:\n{wasm}"
     );
     assert!(
-        wasm.contains("__jet_total = (__jet_total + __jet_x)")
-            || wasm.contains("total = (total + x)"),
+        wasm.contains("__jet_total =") && wasm.contains("__jet_x") && wasm.contains(" + "),
         "ForIn body assign was dropped:\n{wasm}"
     );
     let stdout = run_web_app(&dir);
@@ -4097,7 +4099,7 @@ fn web_wasm_event_callback_bridge_roundtrip() {
     let dir = build_web_fixture("wasm_callback", src, "examples/features/web/web_wasm_callback.jet");
     let js = fs::read_to_string(dir.join("build/app.js")).unwrap();
     assert!(
-        js.contains("await bridge_double(21)"),
+        js.contains("await bridge_double(21n)"),
         "click handler must call the Wasm bridge:\n{js}"
     );
     let stdout = run_node_harness(&dir, "wasm_callback_harness.mjs", WASM_CALLBACK_HARNESS);

@@ -30,6 +30,7 @@ pub use jet_pkg_model::Store::{
 };
 
 use crate::SHA256;
+use crate::TrustRoot::{cache_builder_identity, is_cache_builder_revoked};
 use ed25519_dalek::{Signature, Verifier, VerifyingKey};
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::fs;
@@ -42,7 +43,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 mod Producer;
 pub use Producer::*;
 pub(crate) use Producer::{
-    bind_adapter_hook_identity, canonical_producer, refresh_nix_lock_digest,
+    bind_adapter_hook_identity, cache_action_identity, canonical_producer, refresh_nix_lock_digest,
     validate_cached_adapter_hook,
 };
 mod Cache;
@@ -53,6 +54,10 @@ mod Nar;
 pub use Nar::*;
 mod Broker;
 pub use Broker::*;
+mod Reproducibility;
+pub(crate) use Reproducibility::{
+    certify_registration_unlocked, reproducibility_blocked,
+};
 
 fn list_unlocked(roots: &Roots) -> Vec<StoreEntry> {
     jet_pkg_model::Store::list(roots)
@@ -425,6 +430,15 @@ fn record_verified_mode(
         let dir = roots.hangar_dir().join(&id);
         let now = now_secs();
         let realized_at = read_meta(&dir).and_then(|m| m.realized_at).unwrap_or(now);
+        let mut producer = ProducerRecord::decode(&canonical_producer(
+            "store-record",
+            &format!("cas:{}", cache_identity.source_fingerprint),
+            &envelope.output_hash,
+            cache_identity,
+            BTreeMap::from([("reference".into(), reference.to_string())]),
+        )?)
+        .map_err(std::io::Error::other)?;
+        producer.bind_cache_provenance(reference, &envelope.output_hash, cache_identity);
         let entry = StoreEntry {
             id: id.clone(),
             name: name.to_string(),
@@ -438,13 +452,7 @@ fn record_verified_mode(
             references: Vec::new(),
             named_outputs: BTreeMap::new(),
             platform_artifact_kind: String::new(),
-            producer_record: canonical_producer(
-                "store-record",
-                &format!("cas:{}", cache_identity.source_fingerprint),
-                &envelope.output_hash,
-                cache_identity,
-                BTreeMap::from([("reference".into(), reference.to_string())]),
-            )?,
+            producer_record: producer.encode(),
             realized_at,
             last_used_at: now,
         };
@@ -496,6 +504,12 @@ pub(crate) fn record_realized_mode(
         let dir = roots.hangar_dir().join(&id);
         let now = now_secs();
         let realized_at = read_meta(&dir).and_then(|meta| meta.realized_at).unwrap_or(now);
+        let mut producer = realized.producer.clone();
+        producer.bind_cache_provenance(
+            &realized.reference,
+            &realized.envelope.output_hash,
+            &realized.cache_identity,
+        );
         let entry = StoreEntry {
             id,
             name: realized.name.clone(),
@@ -509,7 +523,7 @@ pub(crate) fn record_realized_mode(
             references: realized.references.clone(),
             named_outputs,
             platform_artifact_kind: String::new(),
-            producer_record: realized.producer.encode(),
+            producer_record: producer.encode(),
             realized_at,
             last_used_at: now,
         };
@@ -802,7 +816,8 @@ fn verify_cache_entry_with_graph(
     let policy = entry.reference == expected_reference
         && !entry.envelope.provenance.is_empty()
         && !expectation.identity.policy_fingerprint.is_empty()
-        && entry.cache_identity.policy_fingerprint == expectation.identity.policy_fingerprint;
+        && entry.cache_identity.policy_fingerprint == expectation.identity.policy_fingerprint
+        && producer_authority_verified(roots, entry, expectation);
     let signature_verified = !entry.envelope.signature.is_empty()
         && verify_configured_signature(roots, entry, expectation);
     let canonical_local = Path::new(&entry.out)
@@ -831,6 +846,148 @@ fn verify_cache_entry_with_graph(
         unsigned_local_allowed,
         closure,
     }
+}
+
+fn producer_authority_verified(
+    roots: &Roots,
+    entry: &StoreEntry,
+    expectation: &CacheExpectation,
+) -> bool {
+    if reproducibility_blocked(roots, &entry_action_key(entry)).unwrap_or(true) {
+        return false;
+    }
+    let Ok(producer) = ProducerRecord::decode(&entry.producer_record) else {
+        return false;
+    };
+    if producer.provider.trim().is_empty()
+        || producer.immutable_source.trim().is_empty()
+        || producer.source_digest.trim().is_empty()
+        || producer.facts.get("action.recipe").map(String::as_str)
+            != Some(expectation.identity.recipe_fingerprint.as_str())
+        || producer.policy_facts
+            != format!(
+                "policy={}\nplatform={}",
+                expectation.identity.policy_fingerprint, expectation.identity.platform
+            )
+    {
+        return false;
+    }
+    let Some(attestation) = producer.facts.get("cache.reproducibility") else {
+        return false;
+    };
+    if !(attestation == "attested-v1" || attestation.starts_with("independent-agreeing-v1:")) {
+        return false;
+    }
+    let provenance = crate::TrustRoot::CacheProvenance {
+        reference: producer
+            .facts
+            .get("cache.reference")
+            .cloned()
+            .unwrap_or_default(),
+        source: producer
+            .facts
+            .get("cache.source")
+            .cloned()
+            .unwrap_or_default(),
+        builder: producer
+            .facts
+            .get("cache.builder")
+            .cloned()
+            .unwrap_or_default(),
+        action: producer
+            .facts
+            .get("cache.action")
+            .cloned()
+            .unwrap_or_default(),
+        output: producer
+            .facts
+            .get("cache.output")
+            .cloned()
+            .unwrap_or_default(),
+        platform: producer
+            .facts
+            .get("cache.platform")
+            .cloned()
+            .unwrap_or_default(),
+        sandbox: producer
+            .facts
+            .get("cache.sandbox")
+            .cloned()
+            .unwrap_or_default(),
+        policy: producer
+            .facts
+            .get("cache.policy")
+            .cloned()
+            .unwrap_or_default(),
+    };
+    let builder = cache_builder_identity(
+        &producer.provider,
+        &producer.immutable_source,
+        &producer.source_digest,
+    );
+    provenance.validate().is_ok()
+        && provenance.reference == entry.reference
+        && provenance.source == producer.immutable_source
+        && provenance.builder == builder
+        && provenance.action == cache_action_identity(&producer, &entry.reference, &entry.cache_identity)
+        && provenance.output == entry.envelope.output_hash
+        && provenance.platform == expectation.identity.platform
+        && provenance.sandbox == "sandbox:policy-bound"
+        && provenance.policy == expectation.identity.policy_fingerprint
+        && !is_cache_builder_revoked(&roots.root, &builder).unwrap_or(true)
+}
+
+fn enforce_manifest_provenance_floor(
+    project: Option<&Path>,
+    package: &str,
+) -> Result<(), RealizeError> {
+    let Some(project) = project else {
+        return Ok(());
+    };
+    let Some(manifest) = crate::Package::PackageFacts::load(project) else {
+        return Ok(());
+    };
+    let manifest = match manifest {
+        Ok(manifest) => manifest,
+        Err(error) => {
+            return Err(RealizeError::Store(std::io::Error::other(format!(
+                "package trust manifest could not be loaded: {error:?}"
+            ))));
+        }
+    };
+    let Some(requirement) = manifest
+        .authority
+        .trust
+        .as_ref()
+        .and_then(|trust| trust.require)
+    else {
+        return Ok(());
+    };
+    let Some(lock) = crate::Lock::load(project) else {
+        return Err(RealizeError::Integrity(IntegrityFailure {
+            package: package.to_string(),
+            version: String::new(),
+            expected: format!("{} provenance", requirement.label()),
+            actual: format!("{} is missing", lock_path(project).display()),
+            reason: format!("the package trust policy requires {} provenance", requirement.label()),
+            disposition: "Jetpack rejected the package before provider, cache, or remote bytes became usable."
+                .to_string(),
+            fix: "Refresh `.jet/lock` with the required provenance, then retry.".to_string(),
+        }));
+    };
+    if let Err(detail) = crate::Lock::enforce_provenance_requirement(&lock, requirement) {
+        return Err(RealizeError::Integrity(IntegrityFailure {
+            package: package.to_string(),
+            version: String::new(),
+            expected: format!("{} provenance", requirement.label()),
+            actual: detail,
+            reason: format!("the package trust policy requires {} provenance", requirement.label()),
+            disposition: "Jetpack rejected the package before provider, cache, or remote bytes became usable."
+                .to_string(),
+            fix: "Refresh `.jet/lock` with the required provenance, then retry.".to_string(),
+        }));
+    }
+    Ok(())
 }
 
 pub struct VerifiedCacheHit {
@@ -1543,6 +1700,9 @@ pub fn realize_verified(
     ctx: &super::Provider::Ctx<'_>,
     request: RealizeRequest<'_>,
 ) -> Result<VerifiedRealization, RealizeError> {
+    if let RealizeRequest::Package { spec, .. } = &request {
+        enforce_manifest_provenance_floor(ctx.project_dir, &spec.package)?;
+    }
     // WAL is authority. Recover package projections before cache verification;
     // selected-candidate proofs run below so invalid bytes can be quarantined.
     Closure::closure_graph_structure(roots).map_err(RealizeError::Store)?;
@@ -1900,11 +2060,6 @@ pub(crate) struct PreparedProfileGenerationRoot {
     witness: Lifecycle::RootWitness,
 }
 
-// Reachable today only from the `#[cfg(test)]` module beside it, so the
-// non-test build reads it as dead. It is product surface, not scaffolding:
-// it prepares a profile generation root for the atomic switch. The consuming path lands with the atomic switch, history and rollback slice, card #931; the
-// allow is scoped to this item so genuinely dead code elsewhere still fails
-// the crate's `deny(warnings)`.
 #[allow(dead_code)]
 pub(crate) fn prepare_profile_generation_root(
     roots: &Roots,

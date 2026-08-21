@@ -11,7 +11,7 @@
 //!      `value.<field>` — reuses `CheckerFieldPolicy::rewrite_field_refs`,
 //!      the exact substitution D-FIELDPOL1 computed fields use for
 //!      `self.<field>`, with the receiver renamed to `value`;
-//!   3. synthesize `fn validate(value: Self) => Self ? [FieldError] { … }`
+//!   3. synthesize `fn validate(value: Self) => Self ! [FieldError] { … }`
 //!      as a plain (non-trait) `impl Type { }` block appended to the
 //!      module, `is_pure: true` — the existing `pure fn` purity pass
 //!      (S60/E3401) then enforces "a rule may reference only fields and
@@ -23,17 +23,18 @@
 //! `[FieldError]` result contract.
 
 use super::*;
-use crate::AST::{
-    AccessConvention, Binding, CallArg, CallArgFlags, Expr, Func, ImplDef, Item, Param, Stmt,
-    StrPart, StructDef, SwitchArm, Type,
-};
 use crate::Diagnostics::{Diagnostic, Span};
 use crate::Syntax;
+use crate::AST::{
+    AccessConvention, Binding, CallArg, CallArgFlags, Expr, Field, Func, ImplDef, Item, Param,
+    Stmt, StrPart, StructDef, SwitchArm, Type, TypeParam,
+};
 use std::collections::HashSet;
 
 /// Entry point, called once per module before registration (same timing as
 /// `process_computed_fields`/`inject_patchable_types`).
 pub(crate) fn process_validate_blocks(items: &mut Vec<Item>, diags: &mut Vec<Diagnostic>) {
+    let needs_over = contains_validate_over(items);
     let mut generated = Vec::new();
     for item in items.iter() {
         let Item::Struct(s) = item else { continue };
@@ -44,7 +45,73 @@ pub(crate) fn process_validate_blocks(items: &mut Vec<Item>, diags: &mut Vec<Dia
             generated.push(Item::Impl(imp));
         }
     }
+    if needs_over {
+        let span = first_item_span(items).unwrap_or_else(|| Span::new(0, 0));
+        generated.push(Item::Struct(build_validate_builder_struct(span)));
+        generated.push(Item::Impl(build_validate_builder_impl(span)));
+    }
     items.extend(generated);
+}
+
+fn first_item_span(items: &[Item]) -> Option<Span> {
+    items.iter().find_map(|item| match item {
+        Item::Func(f) => Some(f.span),
+        Item::Struct(s) => Some(s.span),
+        Item::Enum(e) => Some(e.span),
+        Item::Impl(i) => Some(i.span),
+        Item::CodeModule(m) => Some(m.name_span),
+        Item::Test(t) => Some(t.span),
+        _ => None,
+    })
+}
+
+fn contains_validate_over(items: &mut [Item]) -> bool {
+    fn body_contains(body: &mut [Stmt]) -> bool {
+        let mut found = false;
+        for stmt in body {
+            stmt.for_each_expr_mut(|expr| {
+                if matches!(
+                    expr,
+                    Expr::MethodCall {
+                        receiver,
+                        method,
+                        ..
+                    } if method == "over"
+                        && matches!(receiver.as_ref(), Expr::Ident(name, _) if name == Syntax::TYPE_VALIDATE)
+                ) {
+                    found = true;
+                }
+            });
+        }
+        found
+    }
+
+    fn item_contains(item: &mut Item) -> bool {
+        match item {
+            Item::Func(f) => body_contains(&mut f.body),
+            Item::Struct(s) => {
+                s.methods.iter_mut().any(|f| body_contains(&mut f.body))
+                    || s.trait_impls
+                        .iter_mut()
+                        .any(|i| i.methods.iter_mut().any(|f| body_contains(&mut f.body)))
+            }
+            Item::Enum(e) => {
+                e.methods.iter_mut().any(|f| body_contains(&mut f.body))
+                    || e.trait_impls
+                        .iter_mut()
+                        .any(|i| i.methods.iter_mut().any(|f| body_contains(&mut f.body)))
+            }
+            Item::Impl(i) => i.methods.iter_mut().any(|f| body_contains(&mut f.body)),
+            Item::Test(t) => body_contains(&mut t.body),
+            Item::CodeModule(m) => m
+                .body
+                .as_mut()
+                .is_some_and(|body| contains_validate_over(body)),
+            _ => false,
+        }
+    }
+
+    items.iter_mut().any(item_contains)
 }
 
 /// One accepted `check(cond, at: field, "msg")` rule.
@@ -77,7 +144,10 @@ fn synthesize_validate_impl(s: &StructDef, diags: &mut Vec<Diagnostic>) -> Optio
     Some(build_validate_impl(s, &rules, span))
 }
 
-fn extract_check_rule(stmt: &Stmt, field_names: &HashSet<String>) -> Result<ValidateRule, Diagnostic> {
+fn extract_check_rule(
+    stmt: &Stmt,
+    field_names: &HashSet<String>,
+) -> Result<ValidateRule, Diagnostic> {
     let bad_shape = |span: Span| e0353_bad_validate_rule(span);
     let Stmt::Expr(Expr::Call(call)) = stmt else {
         return Err(bad_shape(stmt.span()));
@@ -116,7 +186,7 @@ fn extract_check_rule(stmt: &Stmt, field_names: &HashSet<String>) -> Result<Vali
     })
 }
 
-fn e0353_bad_validate_rule(span: Span) -> Diagnostic {
+pub(crate) fn e0353_bad_validate_rule(span: Span) -> Diagnostic {
     Diagnostic::error(
         "E0353",
         "a `validate` rule must be `check(condition, at: field, \"message\")`".to_string(),
@@ -126,7 +196,7 @@ fn e0353_bad_validate_rule(span: Span) -> Diagnostic {
     )
 }
 
-fn e0354_unknown_validate_field(name: &str, span: Span) -> Diagnostic {
+pub(crate) fn e0354_unknown_validate_field(name: &str, span: Span) -> Diagnostic {
     Diagnostic::error(
         "E0354",
         format!("`at: {name}` doesn't name a field on this struct"),
@@ -172,14 +242,14 @@ fn method_call(receiver: Expr, method: &str, args: Vec<CallArg>, span: Span) -> 
 const ERRORS_VAR: &str = "__errors";
 const VALUE_VAR: &str = "value";
 
-/// `fn validate(value: Self) => Self ? [FieldError] { … }`.
+/// `fn validate(value: Self) => Self ! [FieldError] { … }`.
 fn build_validate_impl(s: &StructDef, rules: &[ValidateRule], span: Span) -> ImplDef {
     let field_names: HashSet<String> = s.fields.iter().map(|f| f.name.clone()).collect();
 
     let errors_binding = Stmt::Val(Binding {
         mutable: true,
         markers: Vec::new(),
-                reactive_upgrade: false,
+        reactive_upgrade: false,
         meta: None,
         name: ERRORS_VAR.to_string(),
         name_span: span,
@@ -192,9 +262,9 @@ fn build_validate_impl(s: &StructDef, rules: &[ValidateRule], span: Span) -> Imp
         ct: None,
         uninit: false,
         arena_view: false,
-                string_view: false,
-                gc_promotion: None,
-                gc_transferred: false,
+        string_view: false,
+        gc_promotion: None,
+        gc_transferred: false,
     });
 
     let mut body = vec![errors_binding];
@@ -237,7 +307,12 @@ fn build_validate_impl(s: &StructDef, rules: &[ValidateRule], span: Span) -> Imp
 
     let has_errors = Expr::Unary(
         crate::AST::UnOp::Not,
-        Box::new(method_call(ident(ERRORS_VAR, span), "is_empty", Vec::new(), span)),
+        Box::new(method_call(
+            ident(ERRORS_VAR, span),
+            "is_empty",
+            Vec::new(),
+            span,
+        )),
         span,
     );
     let return_err = Stmt::Return(
@@ -274,7 +349,10 @@ fn build_validate_impl(s: &StructDef, rules: &[ValidateRule], span: Span) -> Imp
         ty_span: span,
         default: None,
         variadic: false,
-        variadic_bound_list: None, declared_view_from_names: None, public_label: None, zone: crate::AST::ParamZone::Either,
+        variadic_bound_list: None,
+        declared_view_from_names: None,
+        public_label: None,
+        zone: crate::AST::ParamZone::Either,
     };
 
     let validate_func = Func {
@@ -295,8 +373,8 @@ fn build_validate_impl(s: &StructDef, rules: &[ValidateRule], span: Span) -> Imp
         return_type_span: Some(span),
         return_view_provenance: None,
         declared_return_view_provenance: None,
-            gc_return: false,
-            gc_scope: false,
+        gc_return: false,
+        gc_scope: false,
         is_unsafe: false,
         unsafe_reason: None,
         unsafe_span: None,
@@ -304,7 +382,7 @@ fn build_validate_impl(s: &StructDef, rules: &[ValidateRule], span: Span) -> Imp
         // and pure calls" for the whole synthesized body, no separate pass.
         is_pure: true,
         is_reactive: false,
-                reactive_upgrades: Vec::new(),
+        reactive_upgrades: Vec::new(),
         is_replayable: false,
         replayable_span: None,
         is_job: false,
@@ -342,6 +420,256 @@ fn build_validate_impl(s: &StructDef, rules: &[ValidateRule], span: Span) -> Imp
         trait_name: None,
         trait_span: None,
         methods: vec![validate_func],
+        delegation_field: None,
+        assoc_type_impls: Vec::new(),
+        is_generated_serde: false,
+        os_target: None,
+    }
+}
+
+fn generated_field(name: &str, ty: Type, span: Span) -> Field {
+    Field {
+        is_pub: false,
+        is_package_pub: false,
+        name: name.to_string(),
+        name_span: span,
+        ty,
+        ty_span: span,
+        serde_markers: Vec::new(),
+        redact: false,
+        computed: None,
+        default: None,
+        default_ct: None,
+    }
+}
+
+fn generated_param(name: &str, convention: AccessConvention, ty: Type, span: Span) -> Param {
+    Param {
+        convention,
+        root: false,
+        name: name.to_string(),
+        name_span: span,
+        ty,
+        ty_span: span,
+        default: None,
+        variadic: false,
+        variadic_bound_list: None,
+        declared_view_from_names: None,
+        public_label: None,
+        zone: crate::AST::ParamZone::Either,
+    }
+}
+
+fn generated_method(
+    name: &str,
+    params: Vec<Param>,
+    return_type: Type,
+    body: Vec<Stmt>,
+    span: Span,
+) -> Func {
+    let mut function = Func::implicit_run(body, span);
+    function.name = name.to_string();
+    function.name_span = span;
+    function.params = params;
+    function.return_type = Some(return_type);
+    function.return_type_span = Some(span);
+    function.compiler_generated = true;
+    function
+}
+
+fn builder_type() -> Type {
+    Type::Apply {
+        name: Syntax::TYPE_VALIDATE_BUILDER.to_string(),
+        args: vec![Type::Named("T".to_string())],
+    }
+}
+
+fn builder_field(base: &str, field: &str, span: Span) -> Expr {
+    Expr::Field(Box::new(ident(base, span)), field.to_string(), span)
+}
+
+fn build_validate_builder_struct(span: Span) -> StructDef {
+    StructDef {
+        span,
+        is_pub: false,
+        is_package_pub: false,
+        name: Syntax::TYPE_VALIDATE_BUILDER.to_string(),
+        name_span: span,
+        type_params: vec![TypeParam {
+            name: "T".to_string(),
+            name_span: span,
+            bounds: Vec::new(),
+        }],
+        fields: vec![
+            generated_field("value", Type::Named("T".to_string()), span),
+            generated_field("errors", Type::List(Box::new(field_error_ty())), span),
+        ],
+        methods: Vec::new(),
+        cli_bindings: Vec::new(),
+        trait_impls: Vec::new(),
+        derives: Vec::new(),
+        auto_derive_default: false,
+        is_published_schema: false,
+        published_schema_span: None,
+        is_single_use: false,
+        single_use_span: None,
+        is_must_use: false,
+        must_use_span: None,
+        layout: None,
+        layout_span: None,
+        serde_markers: Vec::new(),
+        type_markers: Vec::new(),
+        validate_block: Vec::new(),
+        validate_span: None,
+    }
+}
+
+fn build_validate_builder_impl(span: Span) -> ImplDef {
+    let self_param = generated_param(
+        Syntax::KW_SELF,
+        AccessConvention::Move,
+        Type::Named(String::new()),
+        span,
+    );
+    let condition_param = generated_param("condition", AccessConvention::Read, Type::Bool, span);
+    let at_param = generated_param("at", AccessConvention::Read, Type::String, span);
+    let reason_param = generated_param("reason", AccessConvention::Read, Type::String, span);
+
+    let error = Expr::StructLit {
+        type_name: "FieldError".to_string(),
+        type_args: Vec::new(),
+        import_ns: None,
+        as_trait: None,
+        fields: vec![
+            ("path".to_string(), span, ident("at", span)),
+            ("reason".to_string(), span, ident("reason", span)),
+        ],
+        inferred: false,
+        span,
+    };
+    let errors_binding = Binding {
+        mutable: true,
+        markers: Vec::new(),
+        reactive_upgrade: false,
+        meta: None,
+        name: ERRORS_VAR.to_string(),
+        name_span: span,
+        sigil_span: None,
+        pattern: None,
+        ty: Some(Type::List(Box::new(field_error_ty()))),
+        ty_span: Some(span),
+        init: Expr::Copy(Box::new(builder_field("self", "errors", span)), span),
+        is_comptime: false,
+        ct: None,
+        uninit: false,
+        arena_view: false,
+        string_view: false,
+        gc_promotion: None,
+        gc_transferred: false,
+    };
+    let append_error = Stmt::Expr(method_call(
+        ident(ERRORS_VAR, span),
+        "push",
+        vec![call_arg(error, span)],
+        span,
+    ));
+    let rebuilt = Expr::StructLit {
+        type_name: Syntax::TYPE_VALIDATE_BUILDER.to_string(),
+        type_args: vec![Type::Named("T".to_string())],
+        import_ns: None,
+        as_trait: None,
+        fields: vec![
+            (
+                "value".to_string(),
+                span,
+                builder_field("self", "value", span),
+            ),
+            ("errors".to_string(), span, ident(ERRORS_VAR, span)),
+        ],
+        inferred: false,
+        span,
+    };
+    let check_body = vec![
+        Stmt::Switch {
+            subject: Expr::Bool(true, span),
+            arms: vec![SwitchArm {
+                span,
+                cond: Expr::Unary(
+                    crate::AST::UnOp::Not,
+                    Box::new(ident("condition", span)),
+                    span,
+                ),
+                body: vec![
+                    Stmt::Val(errors_binding),
+                    append_error,
+                    Stmt::Return(Some(rebuilt), span),
+                ],
+            }],
+            else_body: None,
+            span,
+        },
+        Stmt::Return(Some(ident(Syntax::KW_SELF, span)), span),
+    ];
+
+    let check = generated_method(
+        "check",
+        vec![self_param.clone(), condition_param, at_param, reason_param],
+        builder_type(),
+        check_body,
+        span,
+    );
+    let has_errors = Expr::Unary(
+        crate::AST::UnOp::Not,
+        Box::new(method_call(
+            builder_field(Syntax::KW_SELF, "errors", span),
+            "is_empty",
+            Vec::new(),
+            span,
+        )),
+        span,
+    );
+    let finish = generated_method(
+        "finish",
+        vec![self_param],
+        Type::Result {
+            ok: Box::new(Type::Named("T".to_string())),
+            err: Box::new(Type::List(Box::new(field_error_ty()))),
+        },
+        vec![
+            Stmt::Switch {
+                subject: Expr::Bool(true, span),
+                arms: vec![SwitchArm {
+                    span,
+                    cond: has_errors,
+                    body: vec![Stmt::Return(
+                        Some(Expr::Err(
+                            Box::new(builder_field(Syntax::KW_SELF, "errors", span)),
+                            span,
+                        )),
+                        span,
+                    )],
+                }],
+                else_body: None,
+                span,
+            },
+            Stmt::Return(
+                Some(Expr::Ok(
+                    Box::new(builder_field(Syntax::KW_SELF, "value", span)),
+                    span,
+                )),
+                span,
+            ),
+        ],
+        span,
+    );
+
+    ImplDef {
+        span,
+        type_name: Syntax::TYPE_VALIDATE_BUILDER.to_string(),
+        type_span: span,
+        trait_name: None,
+        trait_span: None,
+        methods: vec![check, finish],
         delegation_field: None,
         assoc_type_impls: Vec::new(),
         is_generated_serde: false,

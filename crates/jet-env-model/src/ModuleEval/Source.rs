@@ -11,13 +11,13 @@ use crate::Syntax;
 use crate::AST::{Expr, Item, Namespace, StrPart};
 
 use super::super::Merge;
-use super::super::RefSpec::{self, ProviderKind, SourceTable};
+use super::super::RefSpec::{self, ProviderKind, Source, SourceTable};
 use super::Diagnostics::{
     bad_import_directive, bad_source_ref, discovered_module_imports, find_dir_missing,
     fleet_unknown_system, image_from_unknown_system, merge_error_to_diagnostic,
     oci_from_non_executable,
 };
-use super::Eval::{evaluate_modules, merge_all, parse_program, pkg_ref};
+use super::Eval::{environment_reads, evaluate_modules, merge_all, parse_program, pkg_ref};
 use super::Environment::{
     qualified_call_name, EnvironmentIntegration, EnvironmentLifecycle, IntegrationFactProjection,
     IntegrationKind, LanguagePackCatalog, LanguageSpec, ManagedFile, PackageProfileFact,
@@ -27,6 +27,7 @@ use super::Types::{
     AdapterPlan, EnvPlan, FleetPlan, ImageKind, ImagePlan, PromptPathMode, PromptStripMode,
     SystemPlan,
 };
+use jet_pkg_model::ProviderFacts::{ProviderFactValue, ProviderFacts};
 
 /// True when `src` uses the typed `module { … }` surface (U3/U8) rather than
 /// the Phase-1 `pkg.*` directive surface. The CLI routes loading on this: a
@@ -41,7 +42,7 @@ pub fn is_module_surface(src: &str) -> bool {
     if !diags.is_empty() {
         return has_module;
     }
-    match crate::Parser::parse(&toks) {
+    match crate::Parser::parse_config(&toks) {
         Ok(program) => program
             .items
             .iter()
@@ -129,15 +130,89 @@ pub fn evaluate_package_profile(
             .map(|(_, source)| source)
             .unwrap_or_else(|| spec.source.label())
             .to_string();
-        packages.push(PackageProfileFact {
+        let provider = profile_provider_label(&spec.source, &source, &env.table);
+        let upstream = env.table.upstream(&source).map(str::to_string);
+        let mut facts = ProviderFacts::for_reference(&provider, &package.raw);
+        facts.set_profile(&resolved.name, &package.declared_by.join(","));
+        facts.add_fact(
+            "package.target",
+            ProviderFactValue::Text(target.to_string()),
+            "profile.declaration",
+        );
+        facts.add_fact(
+            "package.source",
+            ProviderFactValue::Text(source.clone()),
+            "profile.declaration",
+        );
+        if let Some(channel) = channel.as_ref() {
+            facts.add_fact(
+                "package.channel",
+                ProviderFactValue::Text(channel.as_str().to_string()),
+                "profile.declaration",
+            );
+        }
+        match &upstream {
+            Some(upstream) => {
+                facts.set_resolved_source(upstream);
+                facts.add_fact(
+                    "provider.upstream",
+                    ProviderFactValue::Text(upstream.clone()),
+                    "env.source",
+                );
+                if is_external_provider(&provider)
+                    && !ProviderFacts::for_reference(&provider, upstream)
+                        .selector
+                        .is_exact()
+                {
+                    facts.add_loss(
+                        "provider.upstream",
+                        &format!(
+                            "ambiguous provider fact: unresolved inference for source `{source}` from `{upstream}`"
+                        ),
+                        "env.source",
+                    );
+                }
+            }
+            None => facts.set_resolved_source(&source),
+        }
+        if !facts.is_lossless() {
+            let ambiguous = facts
+                .losses
+                .iter()
+                .any(|loss| loss.reason.contains("ambiguous provider fact"));
+            let details = facts
+                .losses
+                .iter()
+                .map(|loss| loss.reason.as_str())
+                .chain(facts.conflicts.iter().map(|conflict| conflict.right.as_str()))
+                .collect::<Vec<_>>()
+                .join("; ");
+            let message = if ambiguous {
+                format!("package generation `{name}` has ambiguous provider fact: {details}")
+            } else {
+                format!(
+                    "package generation `{name}` has lossy or conflicting provider fact: {details}"
+                )
+            };
+            return Err(Diagnostic::error(
+                "E1335",
+                message,
+                "provider identity, selector, and native meaning must remain explicit across planning and locking".to_string(),
+                "pin the provider with an exact version, revision, or digest, or declare a lossless built-in source".to_string(),
+                None,
+            ));
+        }
+        let fact = PackageProfileFact {
             raw: package.raw.clone(),
             target: target.to_string(),
             source: source.clone(),
-            upstream: env.table.upstream(&source).map(str::to_string),
-            provider: env.table.provider(&source).label().to_string(),
+            upstream,
+            provider,
             channel: channel.map(|value| value.as_str().to_string()),
             declared_by: package.declared_by.clone(),
-        });
+            provider_facts: facts.clone(),
+        };
+        packages.push(fact);
     }
     Ok(PackageProfilePlan {
         name: resolved.name,
@@ -146,7 +221,52 @@ pub fn evaluate_package_profile(
         packages,
         collisions: resolved.collisions,
         sources: resolved.sources,
-    })
+        fingerprint: String::new(),
+        provider_facts: BTreeMap::new(),
+    }
+    .finalize())
+}
+
+fn profile_provider_label(source: &Source, source_name: &str, table: &SourceTable) -> String {
+    match source {
+        Source::Nixpkgs => "nix".to_string(),
+        Source::Github => "github".to_string(),
+        Source::Path => "core".to_string(),
+        Source::Cran => "cran".to_string(),
+        Source::LuaRocks => "luarocks".to_string(),
+        Source::RubyGems => "ruby".to_string(),
+        Source::Cpan => "perl".to_string(),
+        Source::Packagist => "php".to_string(),
+        Source::Named(_) => table
+            .upstream(source_name)
+            .and_then(|upstream| upstream.rsplit_once('@').map(|(_, provider)| provider))
+            .filter(|provider| !provider.is_empty())
+            .map(str::to_string)
+            .unwrap_or_else(|| table.provider(source_name).label().to_string()),
+    }
+}
+
+fn is_external_provider(provider: &str) -> bool {
+    matches!(
+        provider,
+        "jet-registry"
+            | "npm"
+            | "pypi"
+            | "cargo"
+            | "swiftpm"
+            | "maven"
+            | "nuget"
+            | "conan"
+            | "vcpkg"
+            | "github"
+            | "homebrew"
+            | "binary"
+            | "cran"
+            | "luarocks"
+            | "ruby"
+            | "perl"
+            | "php"
+    )
 }
 
 fn classify_profile_ref(
@@ -228,6 +348,17 @@ pub fn evaluate_env_with_selections(
                 })
         })
         .collect::<Vec<_>>();
+    let mut env_reads = Vec::new();
+    for unit in &units {
+        for read in environment_reads(&unit.src)? {
+            if !env_reads
+                .iter()
+                .any(|seen: &super::Types::EnvironmentRead| seen.name == read.name)
+            {
+                env_reads.push(read);
+            }
+        }
+    }
 
     let table = build_source_table(&units)?;
 
@@ -613,6 +744,7 @@ pub fn evaluate_env_with_selections(
     Ok(EnvPlan {
         table,
         source_files,
+        environment_reads: env_reads,
         package_refs,
         adapters,
         prompt,

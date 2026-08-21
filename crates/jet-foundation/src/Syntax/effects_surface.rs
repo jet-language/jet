@@ -28,34 +28,33 @@ pub const KW_EFFECT_DECL: &str = "effect";
 /// Prelude effect leaves. These make the supported FFI language names
 /// typo-checked without declarations in user code. The parent `FFI` root still
 /// covers every leaf through D-EFFTREE1 ancestor subsumption.
-pub const BUILTIN_EFFECT_LEAVES: &[&str] =
-    &[
-        "DB.Read",
-        "DB.Write",
-        "FS.Read",
-        "FS.Write",
-        "Rand.Draw",
-        "Exec.Exit",
-        "FFI.Go",
-        "FFI.Java",
-        "FFI.DotNet",
-        "FFI.Fortran",
-        "FFI.Cobol",
-        "FFI.Tcl",
-        "FFI.Lua",
-        "FFI.Ada",
-        "FFI.Pascal",
-        "FFI.Dart",
-        "FFI.PowerShell",
-        "FFI.Perl",
-        "FFI.Ruby",
-        "FFI.Php",
-        "FFI.R",
-        "FFI.Com",
-        "FFI.Cpp",
-        "FFI.Py",
-        "FFI.Octave",
-    ];
+pub const BUILTIN_EFFECT_LEAVES: &[&str] = &[
+    "DB.Read",
+    "DB.Write",
+    "FS.Read",
+    "FS.Write",
+    "Rand.Draw",
+    "Exec.Exit",
+    "FFI.Go",
+    "FFI.Java",
+    "FFI.DotNet",
+    "FFI.Fortran",
+    "FFI.Cobol",
+    "FFI.Tcl",
+    "FFI.Lua",
+    "FFI.Ada",
+    "FFI.Pascal",
+    "FFI.Dart",
+    "FFI.PowerShell",
+    "FFI.Perl",
+    "FFI.Ruby",
+    "FFI.Php",
+    "FFI.R",
+    "FFI.Com",
+    "FFI.Cpp",
+    "FFI.Py",
+    "FFI.Octave",
+];
 
 /// Retired D-TAINT1 spelling. D-TAG-SURFACE1=A uses direct declared tags such
 /// as `#Input value` and `#Credential value`.

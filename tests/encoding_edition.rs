@@ -126,3 +126,36 @@ fn edition_2027_cbor_encode_emits_l2001() {
         jet::render_diagnostics(path.to_str().unwrap(), "", &diags)
     );
 }
+
+#[test]
+fn user_deprecated_marker_emits_l2001_for_a_consumer() {
+    let root = scratch("user_deprecated");
+    let path = write_project(
+        &root,
+        "2027",
+        "#Deprecated(since: \"1.2\", use: \"parse\")\npub fn decode() {}\n\nfn run() {\n    decode()\n}\n",
+    );
+    let diags = jet::check_with_path(path.to_str().unwrap());
+    assert!(
+        diags
+            .iter()
+            .any(|diagnostic| diagnostic.code == "L2001" && diagnostic.what.contains("`decode`")),
+        "expected L2001 for a user #Deprecated function, got: {}",
+        jet::render_diagnostics(path.to_str().unwrap(), "", &diags)
+    );
+
+    let removed_root = scratch("user_removed");
+    let removed_path = write_project(
+        &removed_root,
+        "2028",
+        "#Deprecated(since: \"2027\", use: \"parse\", removed_in: \"2028\")\npub fn decode() {}\n\nfn run() {\n    decode()\n}\n",
+    );
+    let removed_diags = jet::check_with_path(removed_path.to_str().unwrap());
+    assert!(
+        removed_diags
+            .iter()
+            .any(|diagnostic| diagnostic.code == "E2002" && diagnostic.what.contains("`decode`")),
+        "expected E2002 after the user marker removal edition, got: {}",
+        jet::render_diagnostics(removed_path.to_str().unwrap(), "", &removed_diags)
+    );
+}

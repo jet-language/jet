@@ -17,11 +17,11 @@ fn make() => Err {
     return Err("bad input", code: "E_BAD", cause: Err("root cause"))
 }
 
-fn typed(value: Err) ? Err {
+fn typed(value: Err) ! Err {
     return Err(value)
 }
 
-fn run() ? Err {
+fn run() ! Err {
     return typed(make())
 }
 "#;
@@ -35,7 +35,7 @@ fn run() ? Err {
 #[test]
 fn default_err_value_runs_on_the_default_jit_edge() {
     let src = r#"
-fn run() ? Err {
+fn run() ! Err {
     return Err("unhandled", code: "E_RUN", cause: Err("root"))
 }
 "#;
@@ -80,11 +80,11 @@ fn run() {
 #[test]
 fn typed_error_union_widening_runs_on_jit_and_interpreter() {
     let src = r#"
-fn narrow() => Int ? String {
+fn narrow() => Int ! String {
     return Err("narrow")
 }
 
-fn widen() => Int ? String | Bool {
+fn widen() => Int ! String | Bool {
     return narrow()?
 }
 
@@ -199,6 +199,16 @@ fn body_rules_example_matches_all_execution_tiers() {
     tir_support::assert_example_cli_tiers_agree(
         "basics/body_rules",
         include_str!("../examples/features/expected/basics/body_rules.out"),
+    );
+}
+
+/// D-ERRSIGIL1=A / I9: the fallible type spelling produces one output on
+/// release AOT, default `jet run`, and the forced interpreter.
+#[test]
+fn fallible_type_spelling_example_matches_all_execution_tiers() {
+    tir_support::assert_example_cli_tiers_agree(
+        "errors/fallible_run",
+        include_str!("../examples/features/expected/errors/fallible_run.out"),
     );
 }
 

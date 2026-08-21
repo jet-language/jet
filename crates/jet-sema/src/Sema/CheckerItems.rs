@@ -448,6 +448,9 @@ impl<'a> Checker<'a> {
         {
             self.diags.push(soft_public_use(method, span));
         }
+        if let Some(dep) = msig.deprecation.as_ref() {
+            self.check_deprecation(&method_name, dep, span);
+        }
         let (_, dispatch_type_name) = self.struct_type_name_parts(type_name);
         let declared = if owner_mod == self.module_idx {
             self.trait_reg
@@ -886,6 +889,7 @@ impl<'a> Checker<'a> {
             params: sig.params[self_offset..].to_vec(),
             root_param: false,
             return_type: sig.return_type.clone(),
+            deprecation: None,
             return_view_provenance: crate::AST::ViewProvenanceCell::new(),
             is_extern: false,
             is_unsafe: false,
@@ -1103,6 +1107,7 @@ impl<'a> Checker<'a> {
                     .collect(),
                 root_param: false,
                 return_type: sig.return_type.clone(),
+                deprecation: None,
                 return_view_provenance: crate::AST::ViewProvenanceCell::new(),
                 is_extern: false,
                 is_unsafe: false,
@@ -1847,6 +1852,9 @@ impl<'a> Checker<'a> {
         };
         let import_ns = import_ns.or(qualified_namespace);
         let type_name = leaf_name;
+        let deprecation_name = import_ns
+            .map_or_else(|| type_name.to_string(), |namespace| format!("{namespace}.{type_name}"));
+        self.warn_deprecated_type_name(&deprecation_name, span);
         let display_type_name = self.display_type_name(type_name, None);
         // D-HTTP-CORE2=A: shared HTTP messages enforce typed headers and a
         // single-use byte Body. The old public-field literals cannot preserve
@@ -2319,6 +2327,7 @@ impl<'a> Checker<'a> {
         span: Span,
         variant_span: Option<Span>,
     ) -> Type {
+        self.warn_deprecated_type_name(type_name, span);
         let contextual_ty = self.expected_type.clone().filter(|ty| {
             matches!(ty, Type::Apply { name, .. } if name == type_name)
         });
@@ -3146,7 +3155,10 @@ impl<'a> Checker<'a> {
                 result
             }
             (
-                Type::Named(enum_name),
+                Type::Named(enum_name)
+                | Type::Apply {
+                    name: enum_name, ..
+                },
                 Pattern::Variant {
                     variant, bindings, ..
                 },
@@ -3406,7 +3418,7 @@ impl<'a> Checker<'a> {
                         subject_ty.name()
                     ),
                     format!(
-                        "use `== {}(...)` or `== {}(...)` on `T ? E`",
+                        "use `== {}(...)` or `== {}(...)` on `T ! E`",
                         Syntax::LIT_OK,
                         Syntax::LIT_ERR
                     ),
@@ -3540,6 +3552,7 @@ impl<'a> Checker<'a> {
         // the legacy `reaches_panic` fact and the deniable Panic row.
         // Panic is not an ordinary direct effect and cannot be granted.
         self.fx_edges.insert("__jet_panic__".to_string());
+        self.record_effect(Effect::Panic.name(), call.name_span);
         // Keep local panic provenance in the dedicated autodiff flags below;
         // the reachability sentinel is the only effect-graph edge.
         let safe_panic_context = self.autodiff_safe_panic_context;

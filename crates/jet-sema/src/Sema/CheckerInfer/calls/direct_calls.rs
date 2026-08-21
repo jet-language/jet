@@ -110,6 +110,9 @@ impl<'a> Checker<'a> {
                     return None;
                 }
             };
+            if !self.validate_callable_policy_values(&policy_exprs, call.name_span) {
+                return None;
+            }
             for argument in policy_args {
                 if let Expr::Call(policy_call) = &mut argument.expr {
                     for value in &mut policy_call.args {
@@ -917,6 +920,7 @@ impl<'a> Checker<'a> {
                     .cloned();
                 // D-MOD3: check unqualified inline-module imports (e.g. `use math.clamp`).
                 if let Some(mangled) = inline_mangled.or_else(|| self.unqualified.get(&call.name).cloned()) {
+                    self.record_import_alias_reference(&call.name, call.name_span);
                     let alias = mangled.split("__").next().unwrap_or(&mangled).to_string();
                     let result = self.infer_code_module_call(
                         &alias,
@@ -939,6 +943,7 @@ impl<'a> Checker<'a> {
                     .cloned();
                 // D-MOD3: check unqualified file-module imports (e.g. `use math.clamp` for a file module).
                 if let Some((fn_name, mod_idx)) = inline_file.or_else(|| self.unqualified_file.get(&call.name).cloned()) {
+                    self.record_import_alias_reference(&call.name, call.name_span);
                     let result = self.infer_import_call(
                         mod_idx,
                         &fn_name,
@@ -1207,6 +1212,10 @@ impl<'a> Checker<'a> {
                 return None;
             };
             self.record_current_function_reference(&call.name, call.name_span);
+
+            if let Some(dep) = sig.deprecation.as_ref() {
+                self.check_deprecation(&call.name, dep, call.name_span);
+            }
 
             self.check_foreign_transaction_call(&sig, &call.name, call.name_span);
 

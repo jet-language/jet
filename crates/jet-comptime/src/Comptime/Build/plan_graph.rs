@@ -1,4 +1,6 @@
-use super::actions_policy::{BuildAction, BuildCapability, BuildResourcePool, BuildResourcePoolSpec, LegacyWrapperKind};
+use super::actions_policy::{
+    BuildAction, BuildCapability, BuildResourcePool, BuildResourcePoolSpec, LegacyWrapperKind,
+};
 use super::cache_cas::{ActionCacheStatus, ActionOutcome, ContentDigest};
 use super::handles::{ActionId, PluginId, TargetId, TargetRef};
 use super::plugins_modules::{BuildGeneratedModule, BuildPlugin};

@@ -1055,7 +1055,7 @@ fn mutate_second(value: Int) => Int {
 fn undo_first(value: Int) { print("first") }
 fn undo_second(value: Int) { print("second") }
 
-fn change() => Int ? Failed {
+fn change() => Int ! Failed {
     #Transact(tx) {
         #Unsafe("call the audited inline C contract") {
             mutate_first(1)
@@ -1385,7 +1385,7 @@ fn run() {
 fn transact_auto_snapshot_mutated_value() {
     let src = r#"
 enum Fail { Bad }
-fn transfer(from: &Int, to: &Int, amount: Int) => Int ? Fail {
+fn transfer(from: &Int, to: &Int, amount: Int) => Int ! Fail {
     #Transact(tx) {
         from -= amount;
         to += amount;
@@ -1426,7 +1426,7 @@ fn run() {
 fn transact_auto_snapshot_unsafe_only_in_prelude() {
     let src = r#"
 enum Fail { Bad }
-fn bump(x: &Int) => Int ? Fail {
+fn bump(x: &Int) => Int ! Fail {
     #Transact(tx) {
         x += 1;
         return Err(Fail.Bad);

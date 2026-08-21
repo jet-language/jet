@@ -404,6 +404,7 @@ fn run_whole_interp_configured(bundle: &ProgramBundle, plan: &TierPlan) -> RunOu
     let outcome = jet_codegen::Comptime::with_ambient(
         Some(crate::ambient_interp::ambient_core_call),
         Some(crate::ambient_interp::ambient_handle),
+        Some(crate::ambient_interp::ambient_extern_call),
         || match Comptime::TirBridge::run_bundle_at_stage(
             bundle,
             &mut sink,
@@ -678,6 +679,7 @@ pub(crate) fn jet_deopt_call(
                     jet_codegen::Comptime::with_ambient(
                         Some(crate::ambient_interp::ambient_core_call),
                         Some(crate::ambient_interp::ambient_handle),
+                        Some(crate::ambient_interp::ambient_extern_call),
                         || {
                             TIR::run_named_func_with_memos(
                                 program, &func_name, args, &mut sink, memos,

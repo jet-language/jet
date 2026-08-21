@@ -2,7 +2,7 @@ use super::alloc_ptrs::result_ty;
 use super::serde_diags::wrong_core_arity;
 use crate::AST::{Expr, Item, ProgramBundle, StrPart, Type};
 use crate::Diagnostics::{Diagnostic, Span};
-use crate::Sema::Effects::{EffectSet, EffectSummary};
+use crate::Sema::Effects::{Effect, EffectSet, EffectSummary};
 use crate::Sema::Checker;
 use std::collections::{HashMap, HashSet};
 
@@ -37,6 +37,13 @@ fn literal_int(expr: &Expr) -> Option<i64> {
     }
 }
 
+fn literal_string_list(expr: &Expr) -> Option<Vec<String>> {
+    let Expr::ListLit(items, _) = expr else {
+        return None;
+    };
+    items.iter().map(literal_string).collect()
+}
+
 fn invalid_service_value(checker: &mut Checker<'_>, what: &str, fix: &str, span: Span) {
     checker.diags.push(Diagnostic::error(
         "E0112",
@@ -45,6 +52,18 @@ fn invalid_service_value(checker: &mut Checker<'_>, what: &str, fix: &str, span:
         fix.to_string(),
         Some(span),
     ));
+}
+
+fn require_service_name(checker: &mut Checker<'_>, what: &str, expr: &Expr) {
+    match literal_string(expr) {
+        Some(value) if jet_foundation::ServiceTree::valid_name(&value) => {}
+        Some(_) | None => invalid_service_value(
+            checker,
+            what,
+            "use a literal non-empty visible topology name of at most 256 bytes",
+            expr.span(),
+        ),
+    }
 }
 
 impl<'a> Checker<'a> {
@@ -81,6 +100,13 @@ impl<'a> Checker<'a> {
         let result_endpoint = || service_result_ty(endpoint.clone());
         let result_string = || service_result_ty(Type::String);
         let result_int = || service_result_ty(Type::Int);
+        let workflow = || Type::Named("ServiceWorkflow".to_string());
+        let workflow_id = || {
+            Type::Union(vec![
+                Type::Int,
+                Type::Named("ServiceWorkflow".to_string()),
+            ])
+        };
         let task_outcome = || Type::Named("TaskOutcome".to_string());
         let task_status = || Type::Named("TaskStatus".to_string());
 
@@ -163,6 +189,20 @@ impl<'a> Checker<'a> {
                         &Type::List(Box::new(Type::String)),
                         &mut args[1],
                     );
+                    require_service_name(self, "group name", &args[0].expr);
+                    match literal_string_list(&args[1].expr) {
+                        Some(workers)
+                            if !workers.is_empty()
+                                && workers.iter().all(|name| {
+                                    jet_foundation::ServiceTree::valid_name(name)
+                                }) => {}
+                        Some(_) | None => invalid_service_value(
+                            self,
+                            "group worker topology",
+                            "use a non-empty literal list of visible worker names",
+                            args[1].expr.span(),
+                        ),
+                    }
                 }
                 result_unit()
             }
@@ -286,19 +326,28 @@ impl<'a> Checker<'a> {
                 if self.service_method_arity("ServiceTree.workflow_start", args, 2, span) {
                     self.expect_core_arg("ServiceTree.workflow_start", 0, &Type::String, &mut args[0]);
                     self.expect_core_arg("ServiceTree.workflow_start", 1, &Type::Int, &mut args[1]);
+                    require_service_name(self, "workflow name", &args[0].expr);
+                    if literal_int(&args[1].expr).is_some_and(|version| version <= 0) {
+                        invalid_service_value(
+                            self,
+                            "workflow version",
+                            "use a positive workflow version",
+                            args[1].expr.span(),
+                        );
+                    }
                 }
-                result_int()
+                service_result_ty(workflow())
             }
             "workflow_step" => {
                 if self.service_method_arity("ServiceTree.workflow_step", args, 2, span) {
-                    self.expect_core_arg("ServiceTree.workflow_step", 0, &Type::Int, &mut args[0]);
+                    self.expect_core_arg("ServiceTree.workflow_step", 0, &workflow_id(), &mut args[0]);
                     self.expect_core_arg("ServiceTree.workflow_step", 1, &Type::String, &mut args[1]);
                 }
                 result_unit()
             }
             "workflow_activity" => {
                 if self.service_method_arity("ServiceTree.workflow_activity", args, 4, span) {
-                    self.expect_core_arg("ServiceTree.workflow_activity", 0, &Type::Int, &mut args[0]);
+                    self.expect_core_arg("ServiceTree.workflow_activity", 0, &workflow_id(), &mut args[0]);
                     self.expect_core_arg("ServiceTree.workflow_activity", 1, &Type::String, &mut args[1]);
                     self.expect_core_arg("ServiceTree.workflow_activity", 2, &Type::String, &mut args[2]);
                     self.expect_core_arg("ServiceTree.workflow_activity", 3, &Type::Int, &mut args[3]);
@@ -312,7 +361,7 @@ impl<'a> Checker<'a> {
                     3,
                     span,
                 ) {
-                    self.expect_core_arg("ServiceTree.workflow_activity_retry", 0, &Type::Int, &mut args[0]);
+                    self.expect_core_arg("ServiceTree.workflow_activity_retry", 0, &workflow_id(), &mut args[0]);
                     self.expect_core_arg("ServiceTree.workflow_activity_retry", 1, &Type::String, &mut args[1]);
                     self.expect_core_arg(
                         "ServiceTree.workflow_activity_retry",
@@ -330,7 +379,7 @@ impl<'a> Checker<'a> {
                     3,
                     span,
                 ) {
-                    self.expect_core_arg("ServiceTree.workflow_activity_complete", 0, &Type::Int, &mut args[0]);
+                    self.expect_core_arg("ServiceTree.workflow_activity_complete", 0, &workflow_id(), &mut args[0]);
                     self.expect_core_arg("ServiceTree.workflow_activity_complete", 1, &Type::String, &mut args[1]);
                     self.expect_core_arg(
                         "ServiceTree.workflow_activity_complete",
@@ -343,13 +392,13 @@ impl<'a> Checker<'a> {
             }
             "workflow_history" => {
                 if self.service_method_arity("ServiceTree.workflow_history", args, 1, span) {
-                    self.expect_core_arg("ServiceTree.workflow_history", 0, &Type::Int, &mut args[0]);
+                    self.expect_core_arg("ServiceTree.workflow_history", 0, &workflow_id(), &mut args[0]);
                 }
                 result_string()
             }
             "workflow_outcome" => {
                 if self.service_method_arity("ServiceTree.workflow_outcome", args, 1, span) {
-                    self.expect_core_arg("ServiceTree.workflow_outcome", 0, &Type::Int, &mut args[0]);
+                    self.expect_core_arg("ServiceTree.workflow_outcome", 0, &workflow_id(), &mut args[0]);
                 }
                 service_result_ty(task_outcome())
             }
@@ -357,12 +406,14 @@ impl<'a> Checker<'a> {
                 if self.service_method_arity("ServiceTree.directory_register", args, 2, span) {
                     self.expect_core_arg("ServiceTree.directory_register", 0, &Type::String, &mut args[0]);
                     self.expect_core_arg("ServiceTree.directory_register", 1, &endpoint, &mut args[1]);
+                    require_service_name(self, "directory name", &args[0].expr);
                 }
                 result_unit()
             }
             "directory_resolve" => {
                 if self.service_method_arity("ServiceTree.directory_resolve", args, 1, span) {
                     self.expect_core_arg("ServiceTree.directory_resolve", 0, &Type::String, &mut args[0]);
+                    require_service_name(self, "directory name", &args[0].expr);
                 }
                 result_endpoint()
             }
@@ -376,6 +427,62 @@ impl<'a> Checker<'a> {
             }
             _ => return None,
         };
+        Some(Some(ret))
+    }
+
+    /// D-SERVICE-WORKFLOW1=D: the workflow handle owns the three recorded
+    /// wait points. Their ordinary typed signatures keep the effect boundary
+    /// visible to sema; the Prelude owns replay and cancellation behavior.
+    pub(crate) fn check_service_workflow_method(
+        &mut self,
+        method: &str,
+        args: &mut Vec<crate::AST::CallArg>,
+        span: Span,
+    ) -> Option<Option<Type>> {
+        let result_string = || service_result_ty(Type::String);
+        let result_strings = || service_result_ty(Type::List(Box::new(Type::String)));
+        let ret = match method {
+            "sleep" => {
+                if self.service_method_arity("ServiceWorkflow.sleep", args, 1, span) {
+                    self.expect_core_arg(
+                        "ServiceWorkflow.sleep",
+                        0,
+                        &Type::Named("Duration".to_string()),
+                        &mut args[0],
+                    );
+                }
+                service_result_ty(Type::Named("Unit".to_string()))
+            }
+            "activity" => {
+                if self.service_method_arity("ServiceWorkflow.activity", args, 2, span) {
+                    self.expect_core_arg("ServiceWorkflow.activity", 0, &Type::String, &mut args[0]);
+                    self.expect_core_arg("ServiceWorkflow.activity", 1, &Type::String, &mut args[1]);
+                }
+                result_string()
+            }
+            "all" => {
+                if self.service_method_arity("ServiceWorkflow.all", args, 1, span) {
+                    self.expect_core_arg(
+                        "ServiceWorkflow.all",
+                        0,
+                        &Type::List(Box::new(Type::String)),
+                        &mut args[0],
+                    );
+                }
+                result_strings()
+            }
+            _ => return None,
+        };
+        // D-SERVICE-WORKFLOW1=D: recorded waits are still effects at the
+        // function boundary. Keep this fact in sema, beside the typed method
+        // contract, so purity and effect-row checks do not inspect workflow
+        // source text or duplicate the Prelude's replay policy.
+        let effect = match method {
+            "sleep" => Effect::Time,
+            "activity" | "all" => Effect::IO,
+            _ => unreachable!("unknown workflow method reached effect check"),
+        };
+        self.record_effect(effect.name(), span);
         Some(Some(ret))
     }
 

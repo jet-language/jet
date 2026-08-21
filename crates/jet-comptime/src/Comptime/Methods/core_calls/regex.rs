@@ -1,11 +1,11 @@
 //! `core.regex` evaluator, kept separate from the Core call registry.
 
-use crate::AST::CtValue;
 use crate::Diagnostics::{Diagnostic, Span};
+use crate::AST::CtValue;
 
-use super::as_string;
 use super::super::super::Builtins::as_int;
 use super::super::super::Diagnostics::unsupported;
+use super::as_string;
 
 pub(in super::super::super) fn apply_regex_method(
     recv: &CtValue,
@@ -52,8 +52,9 @@ pub fn eval_regex_replace_all_with(
     Some((|| {
         let re = regex_pattern(std::slice::from_ref(recv), span)?;
         let text = as_string(
-            args.first()
-                .ok_or_else(|| unsupported("regex.replace_all_with: missing text argument", span))?,
+            args.first().ok_or_else(|| {
+                unsupported("regex.replace_all_with: missing text argument", span)
+            })?,
             span,
         )?;
         let callback = args.get(1).ok_or_else(|| {
@@ -108,9 +109,20 @@ pub(super) fn regex_escape(args: Vec<CtValue>, span: Span) -> Result<CtValue, Di
 fn escape_regex_text(text: &str) -> String {
     let mut out = String::with_capacity(text.len());
     for ch in text.chars() {
-        let meta = ch == '\\' || ch == '.' || ch == '+' || ch == '*' || ch == '?'
-            || ch == '(' || ch == ')' || ch == '[' || ch == ']' || ch == '{' || ch == '}'
-            || ch == '^' || ch == '\u{24}' || ch == '\u{7c}';
+        let meta = ch == '\\'
+            || ch == '.'
+            || ch == '+'
+            || ch == '*'
+            || ch == '?'
+            || ch == '('
+            || ch == ')'
+            || ch == '['
+            || ch == ']'
+            || ch == '{'
+            || ch == '}'
+            || ch == '^'
+            || ch == '\u{24}'
+            || ch == '\u{7c}';
         if meta {
             out.push('\\');
         }
@@ -280,9 +292,7 @@ pub(super) fn regex_match_value(
                     ],
                 }))
             })
-            .unwrap_or_else(|| {
-                CtValue::absent(crate::AST::Type::Named("__RegexSpan".to_string()))
-            })
+            .unwrap_or_else(|| CtValue::absent(crate::AST::Type::Named("__RegexSpan".to_string())))
         })
         .collect();
     let names = found

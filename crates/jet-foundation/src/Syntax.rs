@@ -405,7 +405,9 @@ pub fn validate_http_route_pattern(pattern: &str) -> Result<(), String> {
         if *segment == "*" {
             return Err("write a named catch-all such as `*wildcard`".to_string());
         }
-        let name = segment.strip_prefix(':').or_else(|| segment.strip_prefix('*'));
+        let name = segment
+            .strip_prefix(':')
+            .or_else(|| segment.strip_prefix('*'));
         if let Some(name) = name {
             if segment.starts_with('*') && index + 1 != raw_segments.len() {
                 return Err("`*name` catch-all must be final".to_string());
@@ -413,7 +415,11 @@ pub fn validate_http_route_pattern(pattern: &str) -> Result<(), String> {
             if !valid_name(name) {
                 return Err(format!(
                     "{} names must match `[A-Za-z_][A-Za-z0-9_]*`",
-                    if segment.starts_with('*') { "catch-all" } else { "parameter" }
+                    if segment.starts_with('*') {
+                        "catch-all"
+                    } else {
+                        "parameter"
+                    }
                 ));
             }
             if !names.insert(name) {
@@ -544,23 +550,35 @@ pub const NAME_CASE_CATEGORIES: &[(&str, NameCase)] = &[
 ];
 
 pub fn name_case_for_category(category: &str) -> Option<NameCase> {
-    NAME_CASE_CATEGORIES.iter().find_map(|(name, case)| (*name == category).then_some(*case))
+    NAME_CASE_CATEGORIES
+        .iter()
+        .find_map(|(name, case)| (*name == category).then_some(*case))
 }
 
 pub fn name_has_case(name: &str, case: NameCase) -> bool {
-    if name == "_" { return true; }
+    if name == "_" {
+        return true;
+    }
     // D-META-STAGE1=B: the compile-time mark is part of the name; case policy
     // reads the name under the mark.
     let name = name.strip_prefix(COMPTIME_MARK).unwrap_or(name);
     let name = name.strip_prefix('_').unwrap_or(name);
-    if name.is_empty() || name.starts_with('_') || name.ends_with('_') || name.contains("__") { return false; }
+    if name.is_empty() || name.starts_with('_') || name.ends_with('_') || name.contains("__") {
+        return false;
+    }
     let mut chars = name.chars();
-    let Some(first) = chars.next() else { return false; };
+    let Some(first) = chars.next() else {
+        return false;
+    };
     match case {
-        NameCase::Pascal => (first.is_uppercase() || first.is_alphabetic() && !first.is_lowercase())
-            && chars.all(char::is_alphanumeric),
-        NameCase::Snake => (first.is_lowercase() || first.is_alphabetic() && !first.is_uppercase())
-            && chars.all(|c| c == '_' || c.is_alphanumeric() && !c.is_uppercase()),
+        NameCase::Pascal => {
+            (first.is_uppercase() || first.is_alphabetic() && !first.is_lowercase())
+                && chars.all(char::is_alphanumeric)
+        }
+        NameCase::Snake => {
+            (first.is_lowercase() || first.is_alphabetic() && !first.is_uppercase())
+                && chars.all(|c| c == '_' || c.is_alphanumeric() && !c.is_uppercase())
+        }
     }
 }
 
@@ -572,18 +590,34 @@ pub fn canonical_name_case(name: &str, case: NameCase) -> String {
     match case {
         NameCase::Pascal => {
             let leading = name.starts_with('_');
-            let out: String = name.trim_start_matches('_').split('_').filter(|s| !s.is_empty()).map(|s| {
-            let mut chars = s.chars();
-            chars.next().map(|c| c.to_uppercase().collect::<String>() + chars.as_str()).unwrap_or_default()
-            }).collect();
-            if leading { format!("_{out}") } else { out }
+            let out: String = name
+                .trim_start_matches('_')
+                .split('_')
+                .filter(|s| !s.is_empty())
+                .map(|s| {
+                    let mut chars = s.chars();
+                    chars
+                        .next()
+                        .map(|c| c.to_uppercase().collect::<String>() + chars.as_str())
+                        .unwrap_or_default()
+                })
+                .collect();
+            if leading {
+                format!("_{out}")
+            } else {
+                out
+            }
         }
         // D-ACRO-CASE1=A: snake conversion uses the mechanical acronym split.
         NameCase::Snake => {
             let leading = name.starts_with('_');
             let body = name.trim_start_matches('_');
             let out = to_snake_acronym(body);
-            if leading { format!("_{out}") } else { out }
+            if leading {
+                format!("_{out}")
+            } else {
+                out
+            }
         }
     }
 }
@@ -610,7 +644,10 @@ mod casing_tests {
 
     #[test]
     fn acronym_pascal_to_snake() {
-        assert_eq!(canonical_name_case("HTTPHeader", NameCase::Snake), "http_header");
+        assert_eq!(
+            canonical_name_case("HTTPHeader", NameCase::Snake),
+            "http_header"
+        );
         assert_eq!(canonical_name_case("HTTP_API", NameCase::Snake), "http_api");
         assert_eq!(canonical_name_case("MacOS", NameCase::Snake), "mac_os");
     }

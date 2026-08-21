@@ -1,5 +1,5 @@
 // D-FAIL-CARRIER1=A / D-FAIL-MODEL1=A (ratified 2026-08-06) — the one outcome
-// carrier under `T?` and `T ? E`.
+// carrier under `T?` and `T ! E`.
 //
 // An outcome has three independent facts:
 //
@@ -14,7 +14,7 @@
 //
 //   * `T?`     is `JetOutcome<T, JetAbsent>` — absence is clean, so the report
 //              is `JetAbsent`, which carries nothing.
-//   * `T ? E`  is `JetOutcome<T, E>` — the report matters, so `E` is the report.
+//   * `T ! E`  is `JetOutcome<T, E>` — the report matters, so `E` is the report.
 //
 // Happy-path erasure: `JetAbsent` is zero-sized, so `JetOutcome<T, JetAbsent>`
 // has the same layout, the same niche and the same two branches as a bare
@@ -93,7 +93,11 @@ pub fn jet_err_code(error: &JetErr) -> JetOutcome<String, JetAbsent> {
 }
 
 pub fn jet_err_cause(error: &JetErr) -> JetOutcome<JetErr, JetAbsent> {
-    error.cause.as_ref().map(|cause| (**cause).clone()).map_err(|_| JetAbsent)
+    error
+        .cause
+        .as_ref()
+        .map(|cause| (**cause).clone())
+        .map_err(|_| JetAbsent)
 }
 
 // D-FAIL-CTX1: shared development journey state and rendering. Each `?`
@@ -158,8 +162,7 @@ pub fn jet_journey_take() -> String {
 }
 
 fn jet_journey_take_styled(style: JetReportStyle) -> String {
-    JET_JOURNEY_HOPS
-        .with(|hops| jet_journey_trail(&std::mem::take(&mut *hops.borrow_mut()), style))
+    JET_JOURNEY_HOPS.with(|hops| jet_journey_trail(&std::mem::take(&mut *hops.borrow_mut()), style))
 }
 
 /// The hops a run has accumulated so far, moved off this thread.
@@ -192,7 +195,10 @@ pub fn jet_journey_adopt(carried: JetJourneyHops) {
         let mut hops = hops.borrow_mut();
         for hop in carried.0 {
             let collapsed = hops.last_mut().is_some_and(|last| {
-                if last.site.same_site(&hop.site.file, hop.site.line, &hop.site.fn_name) {
+                if last
+                    .site
+                    .same_site(&hop.site.file, hop.site.line, &hop.site.fn_name)
+                {
                     last.hops += hop.hops;
                     return true;
                 }
@@ -369,11 +375,7 @@ fn jet_journey_path_budget(hops: &[JourneyHop], width: usize) -> usize {
 /// address of the code to open, and nothing sheds it. What sheds, in order:
 /// leading path segments, then the note's tail. So a narrow terminal loses
 /// commentary, never a location, and never the root failure above.
-fn jet_journey_hop_line(
-    number: usize,
-    hop: &JourneyHop,
-    layout: Option<(usize, usize)>,
-) -> String {
+fn jet_journey_hop_line(number: usize, hop: &JourneyHop, layout: Option<(usize, usize)>) -> String {
     let Some((width, path_budget)) = layout else {
         return jet_journey_hop_text(number, hop, &hop.site.file, &hop.note);
     };
@@ -394,7 +396,10 @@ fn jet_journey_hop_line(
 }
 
 fn jet_journey_hop_text(number: usize, hop: &JourneyHop, file: &str, note: &str) -> String {
-    let mut line = format!("  {number}. {} ({file}:{})", hop.site.fn_name, hop.site.line);
+    let mut line = format!(
+        "  {number}. {} ({file}:{})",
+        hop.site.fn_name, hop.site.line
+    );
     if hop.hops > 1 {
         line.push_str(&format!(" ×{}", hop.hops));
     }
@@ -532,9 +537,7 @@ mod err_tests {
             jet_render_err(&error),
             "Error [CFG404]: parse failed\n  cause: unexpected token at line 3"
         );
-
     }
-
 }
 
 #[cfg(test)]
@@ -549,7 +552,9 @@ mod journey_tests {
 
     fn three_real_hops() {
         jet_journey_reset();
-        jet_journey_frame(EXAMPLE, 7, "parse_config", || "reading raw config".to_string());
+        jet_journey_frame(EXAMPLE, 7, "parse_config", || {
+            "reading raw config".to_string()
+        });
         jet_journey_frame(EXAMPLE, 12, "load_config", || {
             "loading config app.toml".to_string()
         });
@@ -559,8 +564,12 @@ mod journey_tests {
     #[test]
     fn report_leads_with_the_failure_and_puts_the_trail_under_it() {
         jet_journey_reset();
-        jet_journey_frame("app.jet", 7, "parse_config", || "reading raw config".to_string());
-        jet_journey_frame("app.jet", 12, "load_config", || "loading config".to_string());
+        jet_journey_frame("app.jet", 7, "parse_config", || {
+            "reading raw config".to_string()
+        });
+        jet_journey_frame("app.jet", 12, "load_config", || {
+            "loading config".to_string()
+        });
         jet_journey_frame("app.jet", 16, "run", String::new);
 
         assert_eq!(
@@ -812,7 +821,7 @@ impl<T> JetOptionalView<T> for JetOutcome<T, JetAbsent> {
     }
 }
 
-/// Build a present payload. `T?` and `T ? E` build the same carrier.
+/// Build a present payload. `T?` and `T ! E` build the same carrier.
 pub fn jet_present<T, E>(value: T) -> JetOutcome<T, E> {
     Ok(value)
 }
@@ -1127,11 +1136,7 @@ pub fn jet_render_runtime_stop_from_row(
         rendered.push_str(&format!("{line_s} | {src_line}\n"));
         let col_offset = col.saturating_sub(1) as usize;
         let caret = "^".repeat(caret_len.max(1) as usize);
-        rendered.push_str(&format!(
-            "   {pad}| {}{}\n",
-            " ".repeat(col_offset),
-            caret
-        ));
+        rendered.push_str(&format!("   {pad}| {}{}\n", " ".repeat(col_offset), caret));
     }
     if show_context && !locals.is_empty() {
         rendered.push_str(&format!("locals: {locals}\n"));
@@ -1219,7 +1224,9 @@ pub fn jet_render_runtime_sentry(
     };
     let mut rendered = format!("Runtime fault [{code}]: {what}\n");
     if !file.is_empty() {
-        rendered.push_str(&format!("  --> {file}:{line}, in #Unsafe gate {file}:{line}\n"));
+        rendered.push_str(&format!(
+            "  --> {file}:{line}, in #Unsafe gate {file}:{line}\n"
+        ));
     }
     rendered.push_str(&format!(" Why: {why}\n Fix: {fix}\n"));
     JetRuntimeDiagnostic {

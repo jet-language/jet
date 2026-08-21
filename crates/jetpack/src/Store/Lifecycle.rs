@@ -10,9 +10,9 @@ use super::{
 };
 use crate::SHA256;
 use std::collections::{BTreeMap, BTreeSet};
-use std::fs;
 use std::error::Error;
 use std::fmt;
+use std::fs;
 use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -35,6 +35,48 @@ const MAX_ROOTS: usize = 4096;
 const MAX_TARGETS_PER_ROOT: usize = 4096;
 const MAX_TOTAL_TARGETS: usize = 65_536;
 const MAX_RECOVERY_WORK: usize = 1_000_000;
+
+fn node_metadata(path: &Path) -> io::Result<Option<fs::Metadata>> {
+    match fs::symlink_metadata(path) {
+        Ok(metadata) => Ok(Some(metadata)),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(None),
+        Err(error) => Err(error),
+    }
+}
+
+fn existing_hangar_destination(path: &Path) -> io::Result<bool> {
+    let Some(metadata) = node_metadata(path)? else {
+        return Ok(false);
+    };
+    if metadata.file_type().is_symlink() {
+        return Err(io::Error::other(format!(
+            "native Hangar path `{}` is a symlink",
+            path.display()
+        )));
+    }
+    if !metadata.is_dir() {
+        return Err(io::Error::other(format!(
+            "native Hangar path `{}` is not a directory",
+            path.display()
+        )));
+    }
+    Ok(true)
+}
+
+fn find_legacy_source(legacy_source: &Path) -> io::Result<Option<PathBuf>> {
+    let mut sources = vec![
+        legacy_source.to_path_buf(),
+        PathBuf::from(crate::Syntax::HANGAR_DIR),
+    ];
+    sources.dedup();
+    for candidate in sources {
+        if node_metadata(&candidate)?.is_some() {
+            return Ok(Some(candidate));
+        }
+    }
+    Ok(None)
+}
+
 /// Move a pre-D-ECO-HANGARPATH1 user Hangar into the native per-user data
 /// path. The old tree stays in place, so an operator can roll back by removing
 /// the new tree and restoring the old resolver. A staging tree makes a crash
@@ -44,19 +86,7 @@ pub fn migrate_legacy_hangar(roots: &Roots) -> std::io::Result<bool> {
         return Ok(false);
     }
     let destination = roots.hangar_dir();
-    if fs::symlink_metadata(&destination).is_ok() {
-        return Ok(false);
-    }
-    let legacy_source = legacy_user_hangar_dir();
-    let mut sources = vec![legacy_source.clone(), PathBuf::from(crate::Syntax::HANGAR_DIR)];
-    sources.dedup();
-    let Some(source) = sources
-        .into_iter()
-        .find(|candidate| fs::symlink_metadata(candidate).is_ok())
-    else {
-        return Ok(false);
-    };
-    if source == destination {
+    if existing_hangar_destination(&destination)? {
         return Ok(false);
     }
     let parent = destination
@@ -69,30 +99,56 @@ pub fn migrate_legacy_hangar(roots: &Roots) -> std::io::Result<bool> {
             .and_then(|name| name.to_str())
             .unwrap_or("hangar")
     ));
+    if node_metadata(&stage)?.is_some() {
+        return Err(std::io::Error::other(format!(
+            "incomplete Hangar migration remains at `{}`; inspect or remove it before retrying",
+            stage.display()
+        )));
+    }
+    let legacy_source = legacy_user_hangar_dir();
+    let Some(source) = find_legacy_source(&legacy_source)? else {
+        return Ok(false);
+    };
+    if source == destination {
+        return Ok(false);
+    }
     let migrate_unlocked = || {
-        if fs::symlink_metadata(&destination).is_ok() {
+        if existing_hangar_destination(&destination)? {
             return Ok(false);
         }
-        if fs::symlink_metadata(&stage).is_ok() {
+        if node_metadata(&stage)?.is_some() {
             return Err(std::io::Error::other(format!(
                 "incomplete Hangar migration remains at `{}`; inspect or remove it before retrying",
                 stage.display()
             )));
         }
+        let Some(source_metadata) = node_metadata(&source)? else {
+            return Err(io::Error::new(
+                io::ErrorKind::NotFound,
+                format!("legacy Hangar source `{}` disappeared", source.display()),
+            ));
+        };
+        if source_metadata.file_type().is_symlink() || !source_metadata.is_dir() {
+            return Err(io::Error::other(format!(
+                "legacy Hangar source `{}` is not a directory",
+                source.display()
+            )));
+        }
         fs::create_dir_all(parent)?;
         copy_migration_tree(&source, &stage, &source)?;
-        super::sync_store_directory(&stage)?;
+        super::fsync_tree(&stage)?;
         fs::rename(&stage, &destination)?;
         super::sync_store_directory(parent)?;
         Ok(true)
     };
-    super::super::RuntimePolicy::with_lock(&roots.root, "hangar-migration", || {
+    super::super::RuntimePolicy::with_lock(&roots.root, "hangar", || {
         if source == legacy_source {
-            super::super::RuntimePolicy::with_lock(
-                &legacy_user_root(),
-                "hangar-migration-source",
-                migrate_unlocked,
-            )
+            let source_root = legacy_user_root();
+            if source_root.as_path() == roots.root.as_path() {
+                migrate_unlocked()
+            } else {
+                super::super::RuntimePolicy::with_lock(&source_root, "hangar", migrate_unlocked)
+            }
         } else {
             migrate_unlocked()
         }
@@ -104,7 +160,7 @@ fn copy_migration_tree(source: &Path, destination: &Path, root: &Path) -> std::i
     if metadata.file_type().is_symlink() {
         let target = fs::read_link(source)?;
         if target.is_absolute() {
-            if !target.starts_with("/nix/store") {
+            if !absolute_target_stays_in_nix_store(&target) {
                 return Err(std::io::Error::other(format!(
                     "legacy Hangar symlink `{}` escapes the approved compatibility root",
                     source.display()
@@ -159,10 +215,49 @@ fn relative_target_stays_in_root(link: &Path, target: &Path, root: &Path) -> boo
             _ => return false,
         }
     }
-    true
+    let canonical_root = match fs::canonicalize(root) {
+        Ok(root) => root,
+        Err(_) => return false,
+    };
+    match fs::canonicalize(parent.join(target)) {
+        Ok(target) => target.starts_with(canonical_root),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => true,
+        Err(_) => false,
+    }
 }
 
-fn create_migration_symlink(target: &Path, destination: &Path, source: &Path) -> std::io::Result<()> {
+fn absolute_target_stays_in_nix_store(target: &Path) -> bool {
+    let compatibility_root = Path::new("/nix/store");
+    let Ok(relative) = target.strip_prefix(compatibility_root) else {
+        return false;
+    };
+    let mut normalized = compatibility_root.to_path_buf();
+    for component in relative.components() {
+        match component {
+            std::path::Component::CurDir => {}
+            std::path::Component::Normal(name) => normalized.push(name),
+            std::path::Component::ParentDir => {
+                if normalized == compatibility_root || !normalized.pop() {
+                    return false;
+                }
+            }
+            _ => return false,
+        }
+    }
+    match fs::canonicalize(target) {
+        Ok(target) => target.starts_with(compatibility_root),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {
+            normalized.starts_with(compatibility_root)
+        }
+        Err(_) => false,
+    }
+}
+
+fn create_migration_symlink(
+    target: &Path,
+    destination: &Path,
+    source: &Path,
+) -> std::io::Result<()> {
     #[cfg(unix)]
     {
         // `source` only tells Windows whether to make a dir or file symlink.
@@ -611,102 +706,139 @@ pub(crate) fn atomic_update(
         .as_deref()
         .map(RootEtag::parse)
         .transpose()?;
-    crate::RuntimePolicy::with_lock(&roots.root, "hangar", || {
-        recover_unlocked(roots)?;
-        let (known, closure_head) = Closure::lifecycle_inputs_unlocked(roots)?;
-        let proposed = checked_targets(update.targets.clone(), &known)?;
-        let mut state = load_state(roots, &known)?;
-        let current = state.get(&update.identity.id).cloned();
+    with_lifecycle_lock(roots, |known, closure_head| {
+        atomic_update_unlocked(roots, update, expected, known, closure_head)
+    })
+}
 
-        let (identity, revision, protected) = match current.as_ref() {
-            Some(root) if root.phase == RootPhase::Prepared => {
-                if !same_request(root, &update, &proposed) {
-                    return Err(cas_conflict(expected, Some(root.etag())));
-                }
-                let current_etag = root.etag();
-                let previous_etag = previous_etag(root);
-                if expected.is_some_and(|value| {
-                    value != current_etag && Some(value) != previous_etag
-                }) {
-                    return Err(cas_conflict(expected, Some(current_etag)));
-                }
-                (
-                    root.identity.clone(),
-                    root.revision,
-                    root.protected_targets.clone(),
-                )
+fn atomic_update_unlocked(
+    roots: &Roots,
+    update: RootUpdate,
+    expected: Option<RootEtag>,
+    known: &BTreeSet<String>,
+    closure_head: String,
+) -> io::Result<LifecycleSnapshot> {
+    let proposed = checked_targets(update.targets.clone(), known)?;
+    let mut state = load_state(roots, known)?;
+    let current = state.get(&update.identity.id).cloned();
+
+    let (identity, revision, protected) = match current.as_ref() {
+        Some(root) if root.phase == RootPhase::Prepared => {
+            if !same_request(root, &update, &proposed) {
+                return Err(cas_conflict(expected, Some(root.etag())));
             }
-            Some(root) => {
-                let current_etag = root.etag();
-                let same = root.phase == RootPhase::Committed && same_request(root, &update, &proposed);
-                let previous_etag = previous_etag(root);
-                if expected.is_some_and(|value| {
-                    value != current_etag && !(same && Some(value) == previous_etag)
-                }) {
-                    return Err(cas_conflict(expected, Some(current_etag)));
-                }
-                if same {
-                    return snapshot_from_state(state, closure_head);
-                }
-                if root.phase != RootPhase::Tombstoned && expected != Some(current_etag) {
-                    return Err(cas_conflict(expected, Some(current_etag)));
-                }
-                if root.identity.kind != update.identity.kind
-                    || root.identity.producer != update.identity.producer
-                {
-                    return Err(invalid("lifecycle root identity changed kind or producer"));
-                }
-                let next = RootEtag::next_after(root)?;
-                let identity = RootIdentity::new(
+            let current_etag = root.etag();
+            let previous_etag = previous_etag(root);
+            if expected.is_some_and(|value| {
+                value != current_etag && Some(value) != previous_etag
+            }) {
+                return Err(cas_conflict(expected, Some(current_etag)));
+            }
+            (
+                root.identity.clone(),
+                root.revision,
+                root.protected_targets.clone(),
+            )
+        }
+        Some(root) => {
+            let current_etag = root.etag();
+            let same = root.phase == RootPhase::Committed
+                && same_request(root, &update, &proposed);
+            let previous_etag = previous_etag(root);
+            if expected.is_some_and(|value| {
+                value != current_etag && !(same && Some(value) == previous_etag)
+            }) {
+                return Err(cas_conflict(expected, Some(current_etag)));
+            }
+            if same {
+                return snapshot_from_state(state, closure_head);
+            }
+            if root.phase != RootPhase::Tombstoned && expected != Some(current_etag) {
+                return Err(cas_conflict(expected, Some(current_etag)));
+            }
+            if root.identity.kind != update.identity.kind
+                || root.identity.producer != update.identity.producer
+            {
+                return Err(invalid("lifecycle root identity changed kind or producer"));
+            }
+            let next = RootEtag::next_after(root)?;
+            let identity = RootIdentity::new(
+                update.identity.kind,
+                update.identity.id.clone(),
+                update.identity.producer.clone(),
+                Incarnation::new(next.incarnation)?,
+                update.identity.witness.clone(),
+            );
+            let mut protected = proposed.clone();
+            protected.extend(root.protected_targets.iter().cloned());
+            (identity, next.revision, protected)
+        }
+        None => {
+            if expected.is_some() {
+                return Err(cas_conflict(expected, None));
+            }
+            (
+                RootIdentity::new(
                     update.identity.kind,
                     update.identity.id.clone(),
                     update.identity.producer.clone(),
-                    Incarnation::new(next.incarnation)?,
+                    Incarnation::new(1)?,
                     update.identity.witness.clone(),
-                );
-                let mut protected = proposed.clone();
-                protected.extend(root.protected_targets.iter().cloned());
-                (identity, next.revision, protected)
-            }
-            None => {
-                if expected.is_some() {
-                    return Err(cas_conflict(expected, None));
-                }
-                (
-                    RootIdentity::new(
-                        update.identity.kind,
-                        update.identity.id.clone(),
-                        update.identity.producer.clone(),
-                        Incarnation::new(1)?,
-                        update.identity.witness.clone(),
-                    ),
-                    1,
-                    proposed.clone(),
-                )
-            }
-        };
-        let prepare = JournalEntry::Prepare {
-            identity: identity.clone(),
-            proposed,
-            protected,
-            metadata: update.metadata,
-            revision,
-            at: update.at,
-        };
-        if !entry_already_applied(&state, &prepare) {
-            apply_entry(&mut state, prepare.clone())?;
-            persist_entry(roots, &prepare, &state, WriteControl::none())?;
+                ),
+                1,
+                proposed.clone(),
+            )
         }
-        let commit = JournalEntry::Commit {
-            id: identity.id.clone(),
-            incarnation: identity.incarnation,
-            witness: identity.witness.clone(),
-            at: update.at,
-        };
-        if !entry_already_applied(&state, &commit) {
-            apply_entry(&mut state, commit.clone())?;
-            persist_entry(roots, &commit, &state, WriteControl::none())?;
+    };
+    let prepare = JournalEntry::Prepare {
+        identity: identity.clone(),
+        proposed,
+        protected,
+        metadata: update.metadata,
+        revision,
+        at: update.at,
+    };
+    if !entry_already_applied(&state, &prepare) {
+        apply_entry(&mut state, prepare.clone())?;
+        persist_entry(roots, &prepare, &state, WriteControl::none())?;
+    }
+    let commit = JournalEntry::Commit {
+        id: identity.id.clone(),
+        incarnation: identity.incarnation,
+        witness: identity.witness.clone(),
+        at: update.at,
+    };
+    if !entry_already_applied(&state, &commit) {
+        apply_entry(&mut state, commit.clone())?;
+        persist_entry(roots, &commit, &state, WriteControl::none())?;
+    }
+    snapshot_from_state(state, closure_head)
+}
+
+/// Prepare an immutable root only if its stable identity is absent. The
+/// existence check and journal append share one lock; callers cannot observe
+/// an absent root and then race a different producer into its key.
+pub(crate) fn prepare_if_absent(
+    roots: &Roots,
+    identity: RootIdentity,
+    targets: Vec<String>,
+    at: LifecycleTimestamp,
+) -> io::Result<LifecycleSnapshot> {
+    with_lifecycle_lock(roots, |known, closure_head| {
+        let proposed = checked_targets(targets.clone(), known)?;
+        let state = load_state(roots, known)?;
+        if let Some(root) = state.get(&identity.id) {
+            if root.phase == RootPhase::Tombstoned
+                || root.identity != identity
+                || root.targets != proposed
+                || root.metadata != RootMetadata::default()
+            {
+                return Err(invalid("lifecycle root disagrees with immutable metadata"));
+            }
+            return snapshot_from_state(state, closure_head);
         }
+        prepare_unlocked(roots, identity, targets, at, known)?;
+        let state = load_state(roots, known)?;
         snapshot_from_state(state, closure_head)
     })
 }
@@ -2215,26 +2347,52 @@ fn manual_root_witness(
     ))
 }
 
+fn external_root_targets_unlocked(
+    roots: &Roots,
+    reference: &str,
+    graph: &Closure::ClosureGraph,
+) -> std::io::Result<Vec<String>> {
+    let entry = super::list_unlocked(roots)
+        .into_iter()
+        .find(|entry| entry.reference == reference)
+        .ok_or_else(|| {
+            std::io::Error::new(
+                std::io::ErrorKind::NotFound,
+                format!("no Hangar entry matches `{reference}`"),
+            )
+        })?;
+    let mut targets = graph.closure(&entry.envelope.output_hash);
+    targets.sort();
+    targets.dedup();
+    if targets.is_empty() {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            format!("Hangar entry `{reference}` has no closure objects"),
+        ));
+    }
+    Ok(targets)
+}
+
 fn external_root_targets(
     roots: &Roots,
     reference: &str,
 ) -> Result<Vec<String>, ExternalRootError> {
-    let entry = super::list_checked(roots)
-        .map_err(ExternalRootError::Store)?
-        .into_iter()
-        .find(|entry| entry.reference == reference)
-        .ok_or_else(|| ExternalRootError::ReferenceNotFound(reference.to_string()))?;
-    let mut targets = Closure::closure_of(roots, &entry.envelope.output_hash)
-        .map_err(ExternalRootError::Store)?;
-    targets.sort();
-    targets.dedup();
-    if targets.is_empty() {
-        return Err(ExternalRootError::Store(std::io::Error::new(
-            std::io::ErrorKind::InvalidData,
-            format!("Hangar entry `{reference}` has no closure objects"),
-        )));
-    }
-    Ok(targets)
+    let result = with_lifecycle_lock(roots, |_, _| {
+        let graph = Closure::lifecycle_closure_graph_unlocked(roots)?;
+        external_root_targets_unlocked(roots, reference, &graph)
+    });
+    result.map_err(|error| {
+        if is_missing_external_reference(&error, reference) {
+            ExternalRootError::ReferenceNotFound(reference.to_string())
+        } else {
+            ExternalRootError::Store(error)
+        }
+    })
+}
+
+fn is_missing_external_reference(error: &std::io::Error, reference: &str) -> bool {
+    error.kind() == std::io::ErrorKind::NotFound
+        && error.to_string() == format!("no Hangar entry matches `{reference}`")
 }
 
 pub(crate) fn external_root_closure_size(
@@ -2304,24 +2462,36 @@ pub(crate) fn register_external_root_at(
     )
     .map_err(ExternalRootError::Store)?;
     let id = manual_root_id(&producer, label).map_err(ExternalRootError::Store)?;
-    let mut targets = external_root_targets(roots, reference)?;
-    let witness = manual_root_witness(&producer, label, reference, &targets)
+    let expected = expected_etag
+        .map(RootEtag::parse)
+        .transpose()
         .map_err(ExternalRootError::Store)?;
-    let update = RootUpdate {
-        identity: RootIdentity::new(
-            RootKind::Manual,
-            id.clone(),
-            producer,
-            Incarnation::new(1).map_err(ExternalRootError::Store)?,
-            witness,
-        ),
-        targets: std::mem::take(&mut targets),
-        metadata,
-        expected_etag: expected_etag.map(str::to_string),
-        at: LifecycleTimestamp::from_unix_seconds(at),
-    };
-    let snapshot = atomic_update(roots, update)
-        .map_err(|error| map_external_root_error(label, error))?;
+    let snapshot = with_lifecycle_lock(roots, |known, closure_head| {
+        let graph = Closure::lifecycle_closure_graph_unlocked(roots)?;
+        let targets = external_root_targets_unlocked(roots, reference, &graph)?;
+        let witness = manual_root_witness(&producer, label, reference, &targets)?;
+        let update = RootUpdate {
+            identity: RootIdentity::new(
+                RootKind::Manual,
+                id.clone(),
+                producer,
+                Incarnation::new(1)?,
+                witness,
+            ),
+            targets,
+            metadata,
+            expected_etag: expected_etag.map(str::to_string),
+            at: LifecycleTimestamp::from_unix_seconds(at),
+        };
+        atomic_update_unlocked(roots, update, expected, known, closure_head)
+    })
+    .map_err(|error| {
+        if is_missing_external_reference(&error, reference) {
+            ExternalRootError::ReferenceNotFound(reference.to_string())
+        } else {
+            map_external_root_error(label, error)
+        }
+    })?;
     let root = snapshot.roots.get(&id).ok_or_else(|| {
         ExternalRootError::Store(std::io::Error::new(
             std::io::ErrorKind::InvalidData,
@@ -2401,38 +2571,34 @@ pub(crate) fn reconcile_profile_generation_root(
     let id = RootId::new(format!(
         "profile-generation:{owner}:{profile}:{generation}"
     ))?;
-    let expected_targets = targets.iter().cloned().collect::<BTreeSet<_>>();
-    if let Some(root) = snapshot(roots)?.roots.get(&id) {
-        if root.identity.kind != RootKind::ProfileGeneration
-            || root.identity.producer.as_str() != "jetpack-profile-generation"
-            || root.identity.incarnation.get() != 1
-            || root.identity.witness.as_str() != witness
-            || root.targets != expected_targets
-            || root.phase == RootPhase::Tombstoned
-        {
-            return Err(std::io::Error::other(
-                "generation root disagrees with immutable metadata",
-            ));
-        }
-        if root.phase == RootPhase::Committed {
-            return Ok(None);
-        }
-        return Ok(Some(PreparedProfileGenerationRoot {
-            id,
-            incarnation: Incarnation::new(1)?,
-            witness: RootWitness::new(witness)?,
-        }));
-    }
-    let prepared = super::prepare_profile_generation_root(
+    let incarnation = Incarnation::new(1)?;
+    let witness = RootWitness::new(witness)?;
+    let identity = RootIdentity::new(
+        RootKind::ProfileGeneration,
+        id.clone(),
+        ProducerId::new("jetpack-profile-generation")?,
+        incarnation,
+        witness.clone(),
+    );
+    let snapshot = prepare_if_absent(
         roots,
-        owner,
-        profile,
-        generation,
-        witness,
+        identity,
         targets,
-        at,
+        LifecycleTimestamp::from_unix_seconds(at),
     )?;
-    Ok(Some(prepared))
+    let root = snapshot
+        .roots
+        .get(&id)
+        .ok_or_else(|| std::io::Error::other("generation root disappeared after prepare"))?;
+    if root.phase == RootPhase::Committed {
+        Ok(None)
+    } else {
+        Ok(Some(PreparedProfileGenerationRoot {
+            id,
+            incarnation,
+            witness,
+        }))
+    }
 }
 
 

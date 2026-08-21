@@ -20,8 +20,7 @@ pub fn is_nondeterministic_core(module: &str, method: &str) -> bool {
         (
             "core.time",
             "now" | "now_utc" | "today" | "instant" | "sleep" | "start"
-        )
-            | ("core.task", "timeout")
+        ) | ("core.task", "timeout")
             | (
                 "core.math.random",
                 "int"
@@ -104,8 +103,15 @@ fn core_effect_legacy(module: &str, method: &str) -> Option<Effect> {
         ("core.term", "style_force")
             | (
                 "core.net",
-                "ip_addr" | "ip_to_string" | "ip_is_ipv4" | "ip" | "ipv4" | "ipv6" | "parse_ip"
-                    | "is_ipv4" | "is_ipv6"
+                "ip_addr"
+                    | "ip_to_string"
+                    | "ip_is_ipv4"
+                    | "ip"
+                    | "ipv4"
+                    | "ipv6"
+                    | "parse_ip"
+                    | "is_ipv4"
+                    | "is_ipv6"
             )
             | (
                 "core.net",
@@ -176,7 +182,11 @@ fn core_effect_legacy(module: &str, method: &str) -> Option<Effect> {
         "core.compute" if method != "device_cpu" => Effect::GPU,
         "core.files" => Effect::FS,
         // D-BROWSER-AUTO1=A: browser automation is a versioned network protocol.
-        "core.net" | "core.net.tls" | "core.http.client" | "core.http.server" | "core.http.middleware" => Effect::Net,
+        "core.net"
+        | "core.net.tls"
+        | "core.http.client"
+        | "core.http.server"
+        | "core.http.middleware" => Effect::Net,
         // D-RAYLIB1=A: windowing/drawing/input/audio bridge.
         "core.game.raylib" => Effect::GPU,
         "core.time" => Effect::Time,
@@ -213,15 +223,38 @@ fn core_effect_legacy(module: &str, method: &str) -> Option<Effect> {
         // U13 (D-JPK-SECRETCRYPTO1): only `core.crypto.vault.get` reads the encrypted
         // store. D-CORE-SECRETS1=A also places pure in-memory lifecycle helpers
         // in this module; those do not acquire the ambient Secret effect.
-        "core.crypto.vault" if matches!(method,
-            "get" | "current" | "versions" | "load" | "status"
-            | "prepare_generate" | "prepare_store" | "prepare_rotate" | "prepare_retire" | "prepare_revoke"
-            | "authorize_write" | "commit_generate" | "commit_store" | "commit_rotate" | "commit_retire" | "commit_revoke"
-            | "export_to_recipients" | "export_to_passphrase" | "prepare_import_wrapped"
-            | "authorize_wrapped_import" | "commit_import_wrapped"
-            | "prepare_import_signing" | "prepare_import_x25519"
-            | "commit_import_signing" | "commit_import_x25519"
-        ) => Effect::Secret,
+        "core.crypto.vault"
+            if matches!(
+                method,
+                "get"
+                    | "current"
+                    | "versions"
+                    | "load"
+                    | "status"
+                    | "prepare_generate"
+                    | "prepare_store"
+                    | "prepare_rotate"
+                    | "prepare_retire"
+                    | "prepare_revoke"
+                    | "authorize_write"
+                    | "commit_generate"
+                    | "commit_store"
+                    | "commit_rotate"
+                    | "commit_retire"
+                    | "commit_revoke"
+                    | "export_to_recipients"
+                    | "export_to_passphrase"
+                    | "prepare_import_wrapped"
+                    | "authorize_wrapped_import"
+                    | "commit_import_wrapped"
+                    | "prepare_import_signing"
+                    | "prepare_import_x25519"
+                    | "commit_import_signing"
+                    | "commit_import_x25519"
+            ) =>
+        {
+            Effect::Secret
+        }
         _ => return None,
     })
 }

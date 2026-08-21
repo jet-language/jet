@@ -40,6 +40,7 @@ fn check_at(src: &str, root: &str) -> (ProgramBundle, Vec<Diagnostic>) {
             default_target: program.default_target,
             html_path: program.html_path,
             policy_declarations: program.policy_declarations.clone(),
+            user_policy_declarations: program.user_policy_declarations.clone(),
             rule_facts: std::mem::take(&mut program.rule_facts),
         }],
         parse_teaching: Vec::new(),
@@ -93,6 +94,7 @@ fn check_modules(sources: &[(&str, &str, &[(&str, usize)])]) -> (ProgramBundle, 
             default_target: program.default_target,
             html_path: program.html_path,
             policy_declarations: program.policy_declarations.clone(),
+            user_policy_declarations: program.user_policy_declarations.clone(),
             rule_facts: std::mem::take(&mut program.rule_facts),
         });
     }

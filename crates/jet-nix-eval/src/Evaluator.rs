@@ -21,6 +21,8 @@ const MAX_IMPORTS: usize = super::EVALUATOR_IMPORT_LIMIT;
 const MAX_PATH_BYTES: usize = 4_096;
 const MAX_STRING_PARTS: usize = 256;
 const MAX_STRING_BYTES: usize = super::EVALUATOR_STRING_BYTES;
+const TOKEN_MEMORY_ESTIMATE_BYTES: usize = 192;
+const MAX_OVERLAYS: usize = 64;
 const MAX_DERIVATION_ARGS: usize = 256;
 const MAX_DERIVATION_ENV: usize = 256;
 const MAX_DERIVATION_INPUTS: usize = 256;
@@ -167,6 +169,21 @@ impl<'a> Lexer<'a> {
     }
 
     fn push(&mut self, token: Token) -> Result<(), Error> {
+        let estimated_memory = self
+            .source
+            .len()
+            .saturating_mul(4)
+            .saturating_add(
+                self.tokens
+                    .len()
+                    .saturating_add(1)
+                    .saturating_mul(TOKEN_MEMORY_ESTIMATE_BYTES),
+            );
+        if estimated_memory > super::EVALUATOR_MEMORY_BYTES {
+            return Err(Error::ResourceLimit(
+                "foreign flake evaluator memory budget exceeded".into(),
+            ));
+        }
         if self.tokens.len() >= MAX_TOKENS {
             return Err(Error::ResourceLimit(format!(
                 "foreign flake has more than {MAX_TOKENS} tokens"
@@ -1088,6 +1105,7 @@ struct EvaluationArena {
     import_authority: Option<Rc<ImportAuthority>>,
     imports: Cell<usize>,
     active_imports: RefCell<Vec<String>>,
+    active_flakes: RefCell<Vec<String>>,
 }
 
 type ImportAuthority = dyn Fn(&str) -> Result<String, String>;
@@ -1100,6 +1118,7 @@ impl EvaluationArena {
             import_authority,
             imports: Cell::new(0),
             active_imports: RefCell::new(Vec::new()),
+            active_flakes: RefCell::new(Vec::new()),
         })
     }
 
@@ -1132,11 +1151,17 @@ impl EnvironmentFrame {
             let mut frame = environment.borrow_mut();
             let _ = frame.bindings.insert(
                 "pkgs".into(),
-                Thunk::value(Value::PackageNamespace(String::new())),
+                Thunk::value(Value::PackageNamespace {
+                    prefix: String::new(),
+                    authority: arena.import_authority.clone(),
+                }),
             );
             let _ = frame.bindings.insert(
                 "legacyPackages".into(),
-                Thunk::value(Value::PackageNamespace(String::new())),
+                Thunk::value(Value::PackageNamespace {
+                    prefix: String::new(),
+                    authority: arena.import_authority.clone(),
+                }),
             );
             let _ = frame.bindings.insert(
                 "system".into(),
@@ -1188,8 +1213,19 @@ enum Value {
     StringContext { value: String, contexts: Vec<String> },
     Path(String),
     Package(String),
-    PackageNamespace(String),
-    PackageOverlay(String, Rc<RefCell<BTreeMap<String, Thunk>>>),
+    PackageNamespace {
+        prefix: String,
+        authority: Option<Rc<ImportAuthority>>,
+    },
+    PackageOverlay {
+        prefix: String,
+        fields: Rc<RefCell<BTreeMap<String, Thunk>>>,
+        authority: Option<Rc<ImportAuthority>>,
+    },
+    CrossPackageNamespace {
+        prefix: String,
+        authority: Option<Rc<ImportAuthority>>,
+    },
     BuiltinsNamespace(String),
     LibraryNamespace,
     List(Vec<Thunk>),
@@ -1218,7 +1254,8 @@ enum NativeFunction {
     Import,
     ImportPackage(Box<Value>),
     ExtendPackage(Box<Value>),
-    Unsupported(&'static str),
+    Fetch(&'static str),
+    GetFlake,
     ToString,
     HasContext,
     Builtin(Builtin),
@@ -1277,6 +1314,7 @@ enum NativeOperation {
 pub(super) fn evaluate_devshell(
     source: &str,
     system: &str,
+    output: &str,
     import_authority: Option<Rc<ImportAuthority>>,
 ) -> Result<DevShellEvaluation, EvaluationError> {
     let tokens = Lexer::new(source).tokenize().map_err(Error::public)?;
@@ -1284,17 +1322,18 @@ pub(super) fn evaluate_devshell(
     let arena = EvaluationArena::new(system, import_authority);
     let environment = EnvironmentFrame::root(&arena, "");
     let root = evaluate_expr(&expression, &environment, 0, &arena).map_err(Error::public)?;
-    let shell = resolve_shell(root.clone(), system, &arena).map_err(Error::public)?;
+    let shell = resolve_shell(root.clone(), system, output, &arena).map_err(Error::public)?;
     project_shell(shell, system).map_err(Error::public)
 }
 
 pub(super) fn evaluate_derivation(
     source: &str,
     system: &str,
+    import_authority: Option<Rc<ImportAuthority>>,
 ) -> Result<DerivationEvaluation, EvaluationError> {
     let tokens = Lexer::new(source).tokenize().map_err(Error::public)?;
     let expression = Parser::new(tokens).parse().map_err(Error::public)?;
-    let arena = EvaluationArena::new(system, None);
+    let arena = EvaluationArena::new(system, import_authority);
     let environment = EnvironmentFrame::root(&arena, "");
     let root = evaluate_expr(&expression, &environment, 0, &arena).map_err(Error::public)?;
     derivation_evaluation(root).map_err(Error::public)
@@ -1304,10 +1343,11 @@ pub(super) fn evaluate_derivation_output(
     source: &str,
     system: &str,
     attribute: &str,
+    import_authority: Option<Rc<ImportAuthority>>,
 ) -> Result<DerivationEvaluation, EvaluationError> {
     let tokens = Lexer::new(source).tokenize().map_err(Error::public)?;
     let expression = Parser::new(tokens).parse().map_err(Error::public)?;
-    let arena = EvaluationArena::new(system, None);
+    let arena = EvaluationArena::new(system, import_authority);
     let environment = EnvironmentFrame::root(&arena, "");
     let root = evaluate_expr(&expression, &environment, 0, &arena).map_err(Error::public)?;
     let path = vec![
@@ -1578,18 +1618,29 @@ fn evaluate_import(path: &str, arena: &Rc<EvaluationArena>) -> Result<Value, Err
             "foreign flake imports exceed {MAX_IMPORTS} files"
         )));
     }
+    let scope = arena
+        .active_flakes
+        .borrow()
+        .last()
+        .map_or_else(String::new, |flake| format!("{flake}:"));
+    let active_path = format!("{scope}{path}");
     if arena
         .active_imports
         .borrow()
         .iter()
-        .any(|active| active == path)
+        .any(|active| active == &active_path)
     {
         return Err(Error::Cycle);
     }
     arena.imports.set(imports + 1);
-    arena.active_imports.borrow_mut().push(path.to_string());
+    arena.active_imports.borrow_mut().push(active_path);
     let result = (|| {
-        let source = authority(path).map_err(|reason| {
+        let request = arena
+            .active_flakes
+            .borrow()
+            .last()
+            .map_or_else(|| path.to_string(), |flake| format!("@flake-import:{flake}\n{path}"));
+        let source = authority(&request).map_err(|reason| {
             Error::Invalid(format!("could not import `{path}`: {reason}"))
         })?;
         if source.len() > MAX_STRING_BYTES {
@@ -1609,29 +1660,42 @@ fn evaluate_import(path: &str, arena: &Rc<EvaluationArena>) -> Result<Value, Err
 fn resolve_shell(
     root: Value,
     system: &str,
+    output: &str,
     arena: &Rc<EvaluationArena>,
 ) -> Result<Value, Error> {
-    let path = [
-        "outputs".to_string(),
-        "devShells".to_string(),
-        system.to_string(),
-        "default".to_string(),
-    ];
-    match resolve_path(root.clone(), &path, system, arena) {
-        Ok(value) => Ok(value),
-        Err(Error::Missing(_)) => match resolve_path(
-            root,
-            &["devShells".into(), system.to_string(), "default".into()],
-            system,
-            arena,
-        ) {
-            Err(Error::Missing(_)) => Err(Error::Unsupported(
-                "no supported `devShell` or `mkShell` output was found".into(),
-            )),
-            result => result,
-        },
-        Err(error) => Err(error),
+    let output_path = output
+        .split('.')
+        .map(|segment| {
+            if segment.is_empty() {
+                Err(Error::Invalid(
+                    "devShell output selector must be a non-empty attribute path".into(),
+                ))
+            } else {
+                Ok(segment.to_string())
+            }
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    let mut candidates = Vec::new();
+    for prefix in [
+        vec!["outputs", "devShells", system],
+        vec!["devShells", system],
+        vec!["outputs", "devShells"],
+        vec!["devShells"],
+    ] {
+        let mut path = prefix.into_iter().map(str::to_string).collect::<Vec<_>>();
+        path.extend(output_path.iter().cloned());
+        candidates.push(path);
     }
+    for path in candidates {
+        match resolve_path(root.clone(), &path, system, arena) {
+            Ok(value) => return Ok(value),
+            Err(Error::Missing(_)) => continue,
+            Err(error) => return Err(error),
+        }
+    }
+    Err(Error::Unsupported(format!(
+        "no supported `devShell` or `mkShell` output `{output}` was found"
+    )))
 }
 
 fn resolve_path(
@@ -1642,7 +1706,7 @@ fn resolve_path(
 ) -> Result<Value, Error> {
     for field in path {
         if matches!(value, Value::Function(_)) {
-            value = apply(value, Thunk::value(flake_arguments(system)), arena)?;
+            value = apply(value, Thunk::value(flake_arguments(system, arena)), arena)?;
         }
         value = select(value, field)?.force()?;
     }
@@ -1650,7 +1714,17 @@ fn resolve_path(
 }
 
 fn project_shell(shell: Value, system: &str) -> Result<DevShellEvaluation, Error> {
+    let shell_fields = match &shell {
+        Value::AttrSet(fields) => fields.keys().cloned().collect::<Vec<_>>(),
+        value => {
+            return Err(Error::Unsupported(format!(
+                "devShell output must be an attribute set, got {}",
+                value_name(value)
+            )))
+        }
+    };
     let mut packages = Vec::new();
+    let mut cross_packages = Vec::new();
     for field in ["packages", "buildInputs", "nativeBuildInputs"] {
         let Some(value) = try_select(shell.clone(), field)? else {
             continue;
@@ -1670,19 +1744,29 @@ fn project_shell(shell: Value, system: &str) -> Result<DevShellEvaluation, Error
             )));
         };
         for item in values {
-            if packages.len() >= MAX_DEV_SHELL_PACKAGES {
+            if packages.len() + cross_packages.len() >= MAX_DEV_SHELL_PACKAGES {
                 return Err(Error::ResourceLimit(format!(
                     "devShell has more than {MAX_DEV_SHELL_PACKAGES} packages"
                 )));
             }
             let item = item.force()?;
             let name = match item {
-                Value::Package(name) | Value::String(name) => package_name(&name)?,
+                Value::Package(name) | Value::String(name) => {
+                    if let Some(cross) = cross_package_name(&name) {
+                        cross_packages.push(cross);
+                        continue;
+                    }
+                    package_name(&name)?
+                }
                 Value::StringContext { value, contexts } => {
                     if contexts.iter().any(|context| context.starts_with("path:")) {
                         return Err(Error::Unsupported(
                             "path string contexts are not devShell packages".into(),
                         ));
+                    }
+                    if let Some(cross) = cross_package_name(&value) {
+                        cross_packages.push(cross);
+                        continue;
                     }
                     package_name(&value)?
                 }
@@ -1698,8 +1782,18 @@ fn project_shell(shell: Value, system: &str) -> Result<DevShellEvaluation, Error
     }
     packages.sort();
     packages.dedup();
+    cross_packages.sort();
+    cross_packages.dedup();
 
     let mut unsupported = Vec::new();
+    for field in &shell_fields {
+        let field = field.split('.').next().unwrap_or(field);
+        if !matches!(field, "packages" | "buildInputs" | "nativeBuildInputs" | "shellHook")
+            && !unsupported.iter().any(|existing| existing == field)
+        {
+            unsupported.push(field.to_string());
+        }
+    }
     if let Some(hook) = try_select(shell, "shellHook")? {
         match hook.force()? {
             Value::String(value) if value.trim().is_empty() => {}
@@ -1710,9 +1804,12 @@ fn project_shell(shell: Value, system: &str) -> Result<DevShellEvaluation, Error
             _ => unsupported.push("shellHook".into()),
         }
     }
+    unsupported.sort();
+    unsupported.dedup();
     Ok(DevShellEvaluation {
         system: system.to_string(),
         packages,
+        cross_packages,
         unsupported,
     })
 }
@@ -1726,6 +1823,13 @@ fn package_name(raw: &str) -> Result<String, Error> {
         return Err(Error::Unsupported(format!("invalid package name `{raw}`")));
     }
     Ok(name.to_string())
+}
+
+fn cross_package_name(raw: &str) -> Option<String> {
+    let identity = raw.strip_prefix("cross:")?;
+    let (target, package) = identity.split_once(':')?;
+    let package = package.rsplit(['.', '/', ':']).next().unwrap_or(package);
+    (!target.is_empty() && !package.is_empty()).then(|| format!("{target}/{package}"))
 }
 
 fn lookup(environment: &Environment, name: &str) -> Result<Thunk, Error> {
@@ -1760,6 +1864,7 @@ fn package_field(
     prefix: &str,
     overrides: Option<&BTreeMap<String, Thunk>>,
     field: &str,
+    authority: Option<&Rc<ImportAuthority>>,
 ) -> Result<Option<Thunk>, Error> {
     if let Some(overrides) = overrides {
         if let Some(value) = overrides.get(field) {
@@ -1767,9 +1872,15 @@ fn package_field(
         }
     }
     if matches!(field, "pkgsCross" | "crossSystem") {
-        return Err(Error::Unsupported(
-            "cross-system packages require an explicit target and provider authority".into(),
-        ));
+        if field == "crossSystem" {
+            return Err(Error::Unsupported(
+                "cross-system packages require an explicit target and provider authority".into(),
+            ));
+        }
+        return Ok(Some(Thunk::value(Value::CrossPackageNamespace {
+            prefix: prefix.to_string(),
+            authority: authority.cloned(),
+        })));
     }
     if field == "lib" {
         Ok(Some(Thunk::value(Value::LibraryNamespace)))
@@ -1777,11 +1888,15 @@ fn package_field(
         Ok(Some(Thunk::value(Value::Native(NativeFunction::MkShell))))
     } else if field == "extend" {
         let base = match overrides {
-            Some(fields) => Value::PackageOverlay(
-                prefix.to_string(),
-                Rc::new(RefCell::new(fields.clone())),
-            ),
-            None => Value::PackageNamespace(prefix.to_string()),
+            Some(fields) => Value::PackageOverlay {
+                prefix: prefix.to_string(),
+                fields: Rc::new(RefCell::new(fields.clone())),
+                authority: authority.cloned(),
+            },
+            None => Value::PackageNamespace {
+                prefix: prefix.to_string(),
+                authority: authority.cloned(),
+            },
         };
         Ok(Some(Thunk::value(Value::Native(
             NativeFunction::ExtendPackage(Box::new(base)),
@@ -1789,6 +1904,8 @@ fn package_field(
     } else {
         let name = if prefix.is_empty() {
             field.to_string()
+        } else if prefix.starts_with("cross:") {
+            format!("{prefix}:{field}")
         } else {
             format!("{prefix}.{field}")
         };
@@ -1799,10 +1916,43 @@ fn package_field(
 fn try_select(value: Value, field: &str) -> Result<Option<Thunk>, Error> {
     match value {
         Value::AttrSet(fields) => Ok(attr_field(&fields, field)),
-        Value::PackageNamespace(prefix) => package_field(&prefix, None, field),
-        Value::PackageOverlay(prefix, fields) => {
+        Value::PackageNamespace { prefix, authority } => {
+            package_field(&prefix, None, field, authority.as_ref())
+        }
+        Value::PackageOverlay {
+            prefix,
+            fields,
+            authority,
+        } => {
             let fields = fields.borrow();
-            package_field(&prefix, Some(&fields), field)
+            package_field(&prefix, Some(&fields), field, authority.as_ref())
+        }
+        Value::CrossPackageNamespace { prefix, authority } => {
+            let Some(authority) = authority else {
+                return Err(Error::Unsupported(
+                    "cross-system packages require an explicit target and provider authority"
+                        .into(),
+                ));
+            };
+            let target = authority(&format!("@target:{field}")).map_err(|reason| {
+                Error::Unsupported(format!(
+                    "cross target {field} is not authorized: {reason}"
+                ))
+            })?;
+            if !super::REQUIRED_SYSTEMS.contains(&target.as_str()) {
+                return Err(Error::Unsupported(format!(
+                    "cross target authority returned unsupported system {target}"
+                )));
+            }
+            let prefix = if prefix.is_empty() {
+                format!("cross:{target}")
+            } else {
+                format!("cross:{target}:{prefix}")
+            };
+            Ok(Some(Thunk::value(Value::PackageNamespace {
+                prefix,
+                authority: Some(authority),
+            })))
         }
         Value::Package(prefix) => Ok(Some(Thunk::value(Value::Package(format!(
             "{prefix}.{field}"
@@ -1896,14 +2046,11 @@ fn try_select(value: Value, field: &str) -> Result<Option<Thunk>, Error> {
                 "fromJSON" => Some(NativeFunction::Builtin(Builtin::FromJSON)),
                 "storePath" => Some(NativeFunction::Builtin(Builtin::StorePath)),
                 "throw" => Some(NativeFunction::Builtin(Builtin::Throw)),
-                "fetchurl" | "fetchTarball" | "fetchTree" | "fetchGit" => Some(
-                    NativeFunction::Unsupported(
-                        "fixed-output fetchers require explicit fetch authority and verified bytes",
-                    ),
-                ),
-                "getFlake" => Some(NativeFunction::Unsupported(
-                    "external flakes require explicit provider authority",
-                )),
+                "fetchurl" => Some(NativeFunction::Fetch("fetchurl")),
+                "fetchTarball" => Some(NativeFunction::Fetch("fetchTarball")),
+                "fetchTree" => Some(NativeFunction::Fetch("fetchTree")),
+                "fetchGit" => Some(NativeFunction::Fetch("fetchGit")),
+                "getFlake" => Some(NativeFunction::GetFlake),
                 "currentSystem" => return Ok(Some(Thunk::value(Value::String(
                     system,
                 )))),
@@ -1986,7 +2133,8 @@ fn apply(function: Value, argument: Thunk, arena: &Rc<EvaluationArena>) -> Resul
             let value = argument.force()?;
             match value {
                 Value::Path(path) => evaluate_import(&path, arena),
-                Value::PackageNamespace(_) | Value::PackageOverlay(_, _) => Ok(Value::Native(
+                Value::PackageNamespace { .. }
+                | Value::PackageOverlay { .. } => Ok(Value::Native(
                     NativeFunction::ImportPackage(Box::new(value)),
                 )),
                 value => Err(Error::Type {
@@ -2013,6 +2161,11 @@ fn apply(function: Value, argument: Thunk, arena: &Rc<EvaluationArena>) -> Resul
                     actual: "non-list overlays",
                 });
             };
+            if overlays.len() > MAX_OVERLAYS {
+                return Err(Error::ResourceLimit(format!(
+                    "package overlay list exceeds {MAX_OVERLAYS} overlays"
+                )));
+            }
             apply_overlays(base, overlays, arena)
         }
         Value::Native(NativeFunction::ExtendPackage(base)) => {
@@ -2020,8 +2173,11 @@ fn apply(function: Value, argument: Thunk, arena: &Rc<EvaluationArena>) -> Resul
             let overlay = argument.force()?;
             apply_overlay(base, overlay, arena)
         }
-        Value::Native(NativeFunction::Unsupported(reason)) => {
-            Err(Error::Unsupported(reason.into()))
+        Value::Native(NativeFunction::Fetch(kind)) => {
+            apply_fetch(kind, argument.force()?, arena)
+        }
+        Value::Native(NativeFunction::GetFlake) => {
+            apply_external_flake(argument.force()?, arena)
         }
         Value::Native(NativeFunction::ToString) => {
             let value = argument.force()?;
@@ -2057,6 +2213,169 @@ fn apply(function: Value, argument: Thunk, arena: &Rc<EvaluationArena>) -> Resul
     }
 }
 
+fn apply_fetch(
+    kind: &'static str,
+    argument: Value,
+    arena: &Rc<EvaluationArena>,
+) -> Result<Value, Error> {
+    let Value::AttrSet(fields) = argument else {
+        return Err(Error::Type {
+            expected: "fixed-output fetcher attribute set",
+            actual: value_name(&argument),
+        });
+    };
+    let url = match field_value(&fields, "url")? {
+        Some(value) => plain_string(value)?,
+        None => field_value(&fields, "uri")?
+            .map(plain_string)
+            .transpose()?
+            .ok_or_else(|| Error::Missing("url".into()))?,
+    };
+    let mut hash = None;
+    for field in ["hash", "sha256", "narHash"] {
+        if let Some(value) = field_value(&fields, field)? {
+            hash = Some(plain_string(value)?);
+            break;
+        }
+    }
+    let hash = hash.ok_or_else(|| {
+        Error::Unsupported("fixed-output fetchers require a declared hash".into())
+    })?;
+    let name = field_value(&fields, "name")?
+        .map(plain_string)
+        .transpose()?
+        .unwrap_or_else(|| fetch_name(&url));
+    let revision = match field_value(&fields, "rev")? {
+        Some(value) => plain_string(value)?,
+        None => field_value(&fields, "ref")?
+            .map(plain_string)
+            .transpose()?
+            .unwrap_or_default(),
+    };
+    for value in [&url, &hash, &name, &revision] {
+        if value.len() > MAX_PATH_BYTES || value.contains('\0') || value.contains('\n') {
+            return Err(Error::ResourceLimit(
+                "fixed-output fetcher authority request is too large".into(),
+            ));
+        }
+    }
+    let Some(authority) = arena.import_authority.clone() else {
+        return Err(Error::Unsupported(
+            "fixed-output fetchers require explicit fetch authority and verified bytes".into(),
+        ));
+    };
+    let request = format!("@fetch:{kind}\n{url}\n{hash}\n{name}\n{revision}");
+    let path = authority(&request).map_err(|reason| {
+        Error::Unsupported(format!(
+            "fixed-output fetcher {kind} was denied by explicit fetch authority: {reason}"
+        ))
+    })?;
+    if !is_store_path(&path) {
+        return Err(Error::Invalid(
+            "fixed-output fetch authority returned a non-store path".into(),
+        ));
+    }
+    Ok(Value::StringContext {
+        value: path.clone(),
+        contexts: vec![format!("path:{path}")],
+    })
+}
+
+fn fetch_name(url: &str) -> String {
+    let base = url.split_once('?').map_or(url, |(value, _)| value);
+    let base = base.split_once('#').map_or(base, |(value, _)| value);
+    base.rsplit('/')
+        .find(|value| !value.is_empty())
+        .unwrap_or("source")
+        .to_string()
+}
+
+fn apply_external_flake(argument: Value, arena: &Rc<EvaluationArena>) -> Result<Value, Error> {
+    let reference = plain_string(argument)?;
+    if reference.is_empty()
+        || reference.len() > MAX_PATH_BYTES
+        || reference.contains('\0')
+        || reference.contains('\n')
+    {
+        return Err(Error::Invalid("external flake reference is invalid".into()));
+    }
+    let Some(authority) = arena.import_authority.clone() else {
+        return Err(Error::Unsupported(
+            "external flakes require explicit provider authority".into(),
+        ));
+    };
+    if arena
+        .active_flakes
+        .borrow()
+        .iter()
+        .any(|active| active == &reference)
+    {
+        return Err(Error::Cycle);
+    }
+    let imports = arena.imports.get();
+    if imports >= MAX_IMPORTS {
+        return Err(Error::ResourceLimit(format!(
+            "external flake sources exceed {MAX_IMPORTS} files"
+        )));
+    }
+    arena.imports.set(imports + 1);
+    arena.active_flakes.borrow_mut().push(reference.clone());
+    let result = (|| {
+        let source = authority(&format!("@flake:{reference}")).map_err(|reason| {
+            Error::Unsupported(format!(
+                "external flake {reference} was denied by explicit provider authority: {reason}"
+            ))
+        })?;
+        if source.len() > MAX_STRING_BYTES {
+            return Err(Error::ResourceLimit(format!(
+                "external flake {reference} exceeds {MAX_STRING_BYTES} bytes"
+            )));
+        }
+        let tokens = Lexer::new(&source).tokenize()?;
+        let expression = Parser::new(tokens).parse()?;
+        let environment = EnvironmentFrame::root(arena, "");
+        let root = evaluate_expr(&expression, &environment, 0, arena)?;
+        project_external_flake(root, arena)
+    })();
+    arena.active_flakes.borrow_mut().pop();
+    result
+}
+
+fn project_external_flake(root: Value, arena: &Rc<EvaluationArena>) -> Result<Value, Error> {
+    let Value::AttrSet(fields) = root.clone() else {
+        return if matches!(root, Value::Function(_)) {
+            apply(
+                root,
+                Thunk::value(flake_arguments(&arena.system, arena)),
+                arena,
+            )
+        } else {
+            Err(Error::Type {
+                expected: "external flake attribute set",
+                actual: value_name(&root),
+            })
+        };
+    };
+    let Some(outputs) = attr_field(&fields, "outputs") else {
+        return Ok(Value::AttrSet(fields));
+    };
+    let outputs = outputs.force()?;
+    let outputs = if matches!(outputs, Value::Function(_) | Value::Native(_)) {
+        apply(
+            outputs,
+            Thunk::value(flake_arguments(&arena.system, arena)),
+            arena,
+        )?
+    } else {
+        outputs
+    };
+    if matches!(outputs, Value::AttrSet(_)) {
+        Ok(outputs)
+    } else {
+        Ok(Value::AttrSet(fields))
+    }
+}
+
 /// Apply one bounded Nix overlay. The evaluator keeps the package namespace
 /// lazy: the overlay only replaces explicitly named attributes, while every
 /// untouched package still resolves through the canonical namespace.
@@ -2065,9 +2384,13 @@ fn apply_overlay(
     overlay: Value,
     arena: &Rc<EvaluationArena>,
 ) -> Result<Value, Error> {
-    let (prefix, previous) = package_parts(&base)?;
+    let (prefix, previous, authority) = package_parts(&base)?;
     let final_fields = Rc::new(RefCell::new(previous));
-    let final_view = Value::PackageOverlay(prefix.clone(), final_fields.clone());
+    let final_view = Value::PackageOverlay {
+        prefix: prefix.clone(),
+        fields: final_fields.clone(),
+        authority: authority.clone(),
+    };
     let first = apply(overlay, Thunk::value(final_view), arena)?;
     let result = apply(first, Thunk::value(base), arena)?;
     let Value::AttrSet(fields) = result else {
@@ -2078,7 +2401,11 @@ fn apply_overlay(
     };
     final_fields.borrow_mut().extend(fields);
     let snapshot = final_fields.borrow().clone();
-    Ok(Value::PackageOverlay(prefix, Rc::new(RefCell::new(snapshot))))
+    Ok(Value::PackageOverlay {
+        prefix,
+        fields: Rc::new(RefCell::new(snapshot)),
+        authority,
+    })
 }
 
 fn apply_overlays(
@@ -2086,11 +2413,15 @@ fn apply_overlays(
     overlays: Vec<Thunk>,
     arena: &Rc<EvaluationArena>,
 ) -> Result<Value, Error> {
-    let (prefix, previous) = package_parts(&base)?;
+    let (prefix, previous, authority) = package_parts(&base)?;
     let final_fields = Rc::new(RefCell::new(previous));
     let mut current = base;
     for overlay in overlays {
-        let final_view = Value::PackageOverlay(prefix.clone(), final_fields.clone());
+        let final_view = Value::PackageOverlay {
+            prefix: prefix.clone(),
+            fields: final_fields.clone(),
+            authority: authority.clone(),
+        };
         let first = apply(overlay.force()?, Thunk::value(final_view), arena)?;
         let result = apply(first, Thunk::value(current.clone()), arena)?;
         let Value::AttrSet(fields) = result else {
@@ -2101,18 +2432,27 @@ fn apply_overlays(
         };
         final_fields.borrow_mut().extend(fields);
         let snapshot = final_fields.borrow().clone();
-        current = Value::PackageOverlay(
-            prefix.clone(),
-            Rc::new(RefCell::new(snapshot)),
-        );
+        current = Value::PackageOverlay {
+            prefix: prefix.clone(),
+            fields: Rc::new(RefCell::new(snapshot)),
+            authority: authority.clone(),
+        };
     }
     Ok(current)
 }
 
-fn package_parts(value: &Value) -> Result<(String, BTreeMap<String, Thunk>), Error> {
+fn package_parts(
+    value: &Value,
+) -> Result<(String, BTreeMap<String, Thunk>, Option<Rc<ImportAuthority>>), Error> {
     match value {
-        Value::PackageNamespace(prefix) => Ok((prefix.clone(), BTreeMap::new())),
-        Value::PackageOverlay(prefix, fields) => Ok((prefix.clone(), fields.borrow().clone())),
+        Value::PackageNamespace { prefix, authority } => {
+            Ok((prefix.clone(), BTreeMap::new(), authority.clone()))
+        }
+        Value::PackageOverlay {
+            prefix,
+            fields,
+            authority,
+        } => Ok((prefix.clone(), fields.borrow().clone(), authority.clone())),
         value => Err(Error::Type {
             expected: "package namespace",
             actual: value_name(value),
@@ -2447,7 +2787,10 @@ fn apply_builtin(
         })),
         Builtin::IsAttrs => Ok(Value::Bool(matches!(
             argument,
-            Value::AttrSet(_) | Value::PackageNamespace(_) | Value::PackageOverlay(_, _)
+            Value::AttrSet(_)
+                | Value::PackageNamespace { .. }
+                | Value::PackageOverlay { .. }
+                | Value::CrossPackageNamespace { .. }
         ))),
         Builtin::IsBool => Ok(Value::Bool(matches!(argument, Value::Bool(_)))),
         Builtin::IsFunction => Ok(Value::Bool(matches!(
@@ -2552,7 +2895,13 @@ fn apply_builtin(
         Builtin::ToJSON => Ok(Value::String(encode_json(&value_to_json(&argument, 0)?)?)),
         Builtin::FromJSON => {
             let text = plain_string(argument)?;
-            let json = JSON::parse(&text).map_err(Error::Invalid)?;
+            let json = JSON::parse(&text).map_err(|reason| {
+                if reason == "JSON value is too deeply nested" {
+                    Error::ResourceLimit(reason)
+                } else {
+                    Error::Invalid(reason)
+                }
+            })?;
             json_to_value(json, 0)
         }
         Builtin::StorePath => {
@@ -2793,8 +3142,9 @@ fn value_to_json(value: &Value, depth: usize) -> Result<JSONValue, Error> {
             }
             Ok(JSONValue::Object(output))
         }
-        Value::PackageNamespace(_)
-        | Value::PackageOverlay(_, _)
+        Value::PackageNamespace { .. }
+        | Value::PackageOverlay { .. }
+        | Value::CrossPackageNamespace { .. }
         | Value::BuiltinsNamespace(_)
         | Value::LibraryNamespace
         | Value::Derivation(_)
@@ -2894,7 +3244,11 @@ fn encode_json_string(value: &str) -> String {
 }
 
 fn merge(left: Value, right: Value) -> Result<Value, Error> {
-    if matches!(&left, Value::PackageNamespace(_) | Value::PackageOverlay(_, _)) {
+    if matches!(
+        &left,
+        Value::PackageNamespace { .. }
+            | Value::PackageOverlay { .. }
+    ) {
         let Value::AttrSet(fields) = right else {
             return Err(Error::Type {
                 expected: "package overlay attribute set",
@@ -2902,13 +3256,22 @@ fn merge(left: Value, right: Value) -> Result<Value, Error> {
             });
         };
         return match left {
-            Value::PackageNamespace(prefix) => Ok(Value::PackageOverlay(
+            Value::PackageNamespace { prefix, authority } => Ok(Value::PackageOverlay {
                 prefix,
-                Rc::new(RefCell::new(fields)),
-            )),
-            Value::PackageOverlay(prefix, previous) => {
+                fields: Rc::new(RefCell::new(fields)),
+                authority,
+            }),
+            Value::PackageOverlay {
+                prefix,
+                fields: previous,
+                authority,
+            } => {
                 previous.borrow_mut().extend(fields);
-                Ok(Value::PackageOverlay(prefix, previous))
+                Ok(Value::PackageOverlay {
+                    prefix,
+                    fields: previous,
+                    authority,
+                })
             }
             _ => unreachable!(),
         };
@@ -2954,8 +3317,9 @@ fn value_name(value: &Value) -> &'static str {
         Value::String(_) | Value::StringContext { .. } => "string",
         Value::Path(_) => "path",
         Value::Package(_) => "package",
-        Value::PackageNamespace(_) => "package namespace",
-        Value::PackageOverlay(_, _) => "package namespace",
+        Value::PackageNamespace { .. }
+        | Value::PackageOverlay { .. }
+        | Value::CrossPackageNamespace { .. } => "package namespace",
         Value::BuiltinsNamespace(_) => "builtins namespace",
         Value::LibraryNamespace => "library namespace",
         Value::List(_) => "list",
@@ -2965,7 +3329,7 @@ fn value_name(value: &Value) -> &'static str {
     }
 }
 
-fn flake_arguments(system: &str) -> Value {
+fn flake_arguments(system: &str, arena: &Rc<EvaluationArena>) -> Value {
     let mut fields = BTreeMap::new();
     let _ = fields.insert(
         "self".into(),
@@ -2973,11 +3337,17 @@ fn flake_arguments(system: &str) -> Value {
     );
     let _ = fields.insert(
         "nixpkgs".into(),
-        Thunk::value(Value::PackageNamespace("".into())),
+        Thunk::value(Value::PackageNamespace {
+            prefix: "".into(),
+            authority: arena.import_authority.clone(),
+        }),
     );
     let _ = fields.insert(
         "legacyPackages".into(),
-        Thunk::value(Value::PackageNamespace("".into())),
+        Thunk::value(Value::PackageNamespace {
+            prefix: "".into(),
+            authority: arena.import_authority.clone(),
+        }),
     );
     let _ = fields.insert("system".into(), Thunk::value(Value::String(system.to_string())));
     Value::AttrSet(fields)

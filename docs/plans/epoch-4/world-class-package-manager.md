@@ -40,13 +40,14 @@ Strong foundations already exist:
 JP0 stop-line now enforces three truth boundaries:
 
 - cache reuse verifies output existence, current canonical digest, platform,
-  exact normalized source/manifest/recipe/toolchain policy, signature policy,
-  and canonical closure reachability through one realization boundary used by
-  CLI and JetOS. Invalid Jet-owned candidates are quarantined and E2604 stops
-  the command; repair is never silent. Unsigned reuse is limited to an exact
-  Hangar-owned local output. Signed imports fail closed until an immutable
-  in-process verifier ships. Nix compatibility outputs always re-enter Nix;
-  Jetpack does not claim an early cache hit from spelling-only identity;
+  exact normalized source/manifest/recipe/toolchain policy, signed producer
+  provenance, signature policy, and canonical closure reachability through one
+  realization boundary used by CLI and JetOS. Shared cache roles pin their
+  signing key, allowlist the provenance-bound builder, and reject revoked or
+  changed identities. Invalid Jet-owned candidates are quarantined and E2604
+  stops the command; repair is never silent. Unsigned reuse is limited to an
+  exact Hangar-owned local output. Nix compatibility outputs always re-enter
+  Nix; Jetpack does not claim an early cache hit from spelling-only identity;
 - every existing Nix compatibility output recorded in Hangar gets a durable
   `nix-store --add-root --indirect` root protecting its transitive closure;
 - canonical output archives hash node type, mode, bytes, symlink target, empty
@@ -73,17 +74,21 @@ Production blockers after that stop-line:
 
 - recipes still execute as ordinary host processes; every platform reports
   fallback/unsandboxed until JP3 supplies an enforced jail;
-- native HTTP substitution/push, NAR/narinfo, mirrors, repair, remote builders,
-  and remote execution do not exist;
-- registry dependencies still stop at E1207; package authoring/publish metadata
-  exists without complete consumer delivery;
+- remote builders and remote execution do not exist. The native binary-cache
+  slice now provides signed NAR/narinfo publication, ordered host-owned mirror
+  lookup, verified substitution, and resumable local/file transfer; cache
+  repair remains a separate closure operation;
+- registry dependencies have sparse signed metadata, checkpoint, and inclusion
+  verification on the fetch path; complete consumer delivery still stops at
+  E1207;
 - the current package graph and semantic lock layers contain substantial data
   models, but several are not one live resolver/build/store path;
 - user package profiles/generations do not exist;
 - Nix package realization and direct foreign-shell entry still require
   installed Nix; the bounded literal devShell bridge is native;
-- current Git-index + author-TOFU trust does not defend first use, rollback,
-  freeze, mix-and-match, or a compromised cache builder;
+- optional package-author TOFU remains separate from registry/cache authority;
+  cache roles now fail closed on first-use key changes, rollback/freeze
+  evidence, mix-and-match provenance, and revoked builders;
 - the documented AST-only build-cache key is not a complete action identity.
 
 These are integrity and isolation defects. They precede ecosystem breadth.
@@ -363,12 +368,12 @@ live acceptance, and documentation. Work order is binding.
   and over-budget sources fail closed. Windows has no pathname-based import
   fallback; imports remain unsupported there until handle-relative authority
   is available. The bounded derivation primitive now accepts one input-addressed
-  or fixed-output out result, records only canonical store-path inputs, and
-  materializes its drvPath/outPath through Jetpack's existing NixDrv seam.
-  Dynamic and multi-output derivations remain on their own cards.
+  or fixed-output result, records only canonical store-path inputs, and
+  materializes its drvPath and every declared output path through Jetpack's
+  existing NixDrv seam. Dynamic derivations remain on their own card.
 - Required pure helpers now include attribute inspection, type predicates,
   bounded list/string operations, JSON conversion, currentSystem/storeDir, and
-  storePath. Unsupported authority, fetchers, dynamic derivations, and
+  storePath. Remote or unverified fetch authority, dynamic derivations, and
   non-canonical hashes fail closed; no helper shells out to Nix.
 - Pure/restricted default, explicit URI/path authority, dirty-tree identity,
   native-code/plugin rejection, evaluator resource limits, and ballot-selected
@@ -380,8 +385,10 @@ live acceptance, and documentation. Work order is binding.
   hooks as explicit loss records, evaluates only bounded pure lazy expressions
   plus explicitly authorized project imports, records the native evaluator
   identity in `.jet/lock`, and grants no process, network, or derivation
-  authority. Other evaluator stages remain private until their own differential
-  proof lands.
+  authority. Named devShell outputs use the same typed projection, package
+  overlays are bounded and lazy, and every declared non-fixed derivation output
+  keeps its exact lock identity. Unsupported evaluator stages remain private
+  and are recorded as explicit inventory skips.
 - Stage A flake projection consumes the locked input graph through the same
   semantic-lock path. It preserves every `flake.lock` node, including
   transitive input edges and array-shaped follows references, and records
@@ -391,7 +398,8 @@ live acceptance, and documentation. Work order is binding.
 - `tests/fixtures/nix-compat/stage-a.json` records the pinned literal,
   lazy-binding, function, and attrset projections, native rejection,
   normalized lock, and four output identities. Real nixpkgs derivation
-  bit-match remains the later differential-proof slice.
+  bit-match remains a separate derivation proof; the broader mutation corpus
+  and evaluator budget proof belong to E4-JP10.
   Regenerate and verify it with the exact oracle executable:
   `JET_NIX_BIN=/nix/store/<pinned-nix-output>/bin/nix node
   scripts/agent/verify-nix-eval-fixture.js`. The authority corpus is checked
@@ -407,9 +415,29 @@ live acceptance, and documentation. Work order is binding.
 - A pinned Nix version, nixpkgs commit, tier-platform attribute inventory,
   expected evaluable/buildable/skipped counts, and named reason for every skip.
 - Full pinned inventory, overlays, dev shells, multi-output packages,
-  fixed-output fetchers, cross packages, selected external flakes.
-- Differential fuzzing and pinned memory/latency budgets.
-- No silent path divergence: mismatch is a hard internal compatibility failure.
+  fixed-output fetchers, cross packages, selected external flakes. The latter
+  three use one explicit read-only authority callback: verified local `file:`
+  fetches, pinned target selection, and bounded local `path:` flake sources;
+  remote provider access remains unsupported.
+- The pinned inventory is committed in
+  `tests/fixtures/nix-compat/pinned-inventory.json` and checked against the
+  dependency-free evaluator table. A native `jetpack bridge flake` run writes
+  one `flake-evaluator-inventory:<surface>` record for every row into the
+  existing semantic lock. Covered rows record their evaluable/buildable class;
+  skipped rows record `status=skipped` and their explicit authority or
+  compatibility reason. The ledger is produced without an installed Nix
+  executable and is discarded with the lock transaction when evaluation
+  exceeds its input/resource budget.
+- `tests/fixtures/nix-compat/breadth.json` records exact values and errors for
+  the covered evaluator surface, including authority-backed cross, fetch, and
+  local-flake cases, with seven fixed syntax-preserving seeds.
+- `scripts/agent/verify-nix-eval-breadth.js` runs every seed against the exact
+  Nix 2.34.8 oracle. A value mismatch is a hard proof failure.
+- The native evaluator enforces pinned input, token, expression, import,
+  string, memory, and JSON-depth limits. The host proof keeps a 1 second
+  latency budget for the bounded corpus.
+- No silent path divergence: the production bridge uses the same native seam
+  with Nix absent and `PATH` empty.
 
 ### E4-JP11 — permanent no-installed-Nix product gate
 
@@ -454,6 +482,11 @@ live acceptance, and documentation. Work order is binding.
   `user.<name>`/`jetos user` law. No second hidden per-user mechanism.
 - Atomic generation switch, history, rollback, collision policy, clean env.
 - Dev shells are exact generated profiles, not host PATH overlays.
+- Profiles lower through the shared provider-fact carrier. Raw refs, provider
+  identity, provenance, native documents, stable fingerprints, and explicit
+  loss/conflict reports survive plan, lock, explain, and generated output.
+- Unsupported, lossy, ambiguous, or conflicting provider facts fail with an
+  explicit diagnostic; planning never supplies a silent provider default.
 - Power-loss tests permit old or new only; GC protects retained generations.
 
 ### E4-JP15 — typed variants and cross compilation
@@ -489,6 +522,10 @@ live acceptance, and documentation. Work order is binding.
 - Structured output diff names the first differing path and producer action.
 - Unreproducible outputs never enter shared trusted cache. If ratified, they may
   use a visibly untrusted namespace that cannot satisfy trusted policy.
+- The shared closure-registration gate reuses the canonical Hangar digest and
+  action key. A divergent registration writes deterministic evidence to
+  `private/unreproducible/<action-key>.json` and does not commit a closure fact;
+  trusted cache publication, verification, and substitution reject that action.
 
 ### E4-JP19 — explain and store-operation parity-plus
 

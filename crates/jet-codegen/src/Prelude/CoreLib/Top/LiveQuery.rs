@@ -370,7 +370,7 @@ fn jet_app_invalidate(footprint: String) -> i64 {
             query.dirty = true;
             hit = hit.saturating_add(1);
             if let Some(rerun) = query.rerun.clone() {
-                reruns.push((*id, query.generation, query.footprint.clone(), rerun, query.sink.clone()));
+                reruns.push((*id, query.generation, rerun));
             }
         }
     }
@@ -379,7 +379,7 @@ fn jet_app_invalidate(footprint: String) -> i64 {
 
     // A query body may itself touch the live registry. Never execute user
     // callbacks while holding the registry mutex.
-    for (id, generation, _footprint, rerun, sink) in reruns {
+    for (id, generation, rerun) in reruns {
         match rerun() {
             Ok(value) => match jet_live_payload(value) {
                 Ok(value) => {
@@ -400,7 +400,11 @@ fn jet_app_invalidate(footprint: String) -> i64 {
                         publish = updated;
                     }
                     if let Some(updated) = publish {
-                        if let Some(sink) = sink {
+                        // Select the sink at commit time. A query may be
+                        // rebound while its rerunner is outside the lock;
+                        // delivery must follow the canonical current sink,
+                        // not the invalidation-time snapshot.
+                        if let Some(sink) = updated.sink.clone() {
                             sink(value.clone());
                         }
                         jet_live_publish_ws(

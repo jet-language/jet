@@ -8,10 +8,7 @@ pub const JSON_NUMBER_MAX_DIGITS: usize = 1_000_000;
 pub const JSON_NUMBER_MAX_EXPONENT: i64 = 1_000_000;
 
 pub fn validate_json_number(text: &str) -> Result<(), String> {
-    let digits = text
-        .bytes()
-        .filter(|byte| byte.is_ascii_digit())
-        .count();
+    let digits = text.bytes().filter(|byte| byte.is_ascii_digit()).count();
     if digits > JSON_NUMBER_MAX_DIGITS {
         return Err(format!(
             "JSON number exceeds the {JSON_NUMBER_MAX_DIGITS}-digit limit"
@@ -89,8 +86,8 @@ pub fn json_decimal_lexeme(s: &str) -> Result<(bool, Vec<u8>, u32), String> {
         digits.push(0);
     }
     if scale < 0 {
-        let zeros = usize::try_from(-scale)
-            .map_err(|_| "decimal scale is out of range".to_string())?;
+        let zeros =
+            usize::try_from(-scale).map_err(|_| "decimal scale is out of range".to_string())?;
         let total = digits
             .len()
             .checked_add(zeros)
@@ -109,8 +106,8 @@ pub fn json_decimal_lexeme(s: &str) -> Result<(bool, Vec<u8>, u32), String> {
     } else {
         digits.truncate(1);
     }
-    let scale = u32::try_from(scale.max(0))
-        .map_err(|_| "decimal scale is out of range".to_string())?;
+    let scale =
+        u32::try_from(scale.max(0)).map_err(|_| "decimal scale is out of range".to_string())?;
     let negative = negative && digits.iter().any(|digit| *digit != 0);
     Ok((negative, digits, scale))
 }
@@ -153,10 +150,7 @@ mod tests {
             json_decimal_lexeme("12.340").unwrap(),
             (false, vec![1, 2, 3, 4, 0], 3)
         );
-        assert_eq!(
-            json_decimal_lexeme("1E-5").unwrap(),
-            (false, vec![1], 5)
-        );
+        assert_eq!(json_decimal_lexeme("1E-5").unwrap(), (false, vec![1], 5));
         assert_eq!(
             json_exact_integer_text("9007199254740993").unwrap(),
             "9007199254740993"

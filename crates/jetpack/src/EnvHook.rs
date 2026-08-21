@@ -98,7 +98,7 @@ pub fn definition_fingerprint_with_selections(
         // The activation path still rejects the malformed plan below.
         collect_definition_files(root, root, &mut entries);
     }
-    for relative in [Syntax::UNIFIED_LOCK_FILE, "package.jet", "pkg.jet", "jetpack.toml"] {
+    for relative in [Syntax::UNIFIED_LOCK_FILE, "package.jet", "pkg.jet"] {
         add_input(root, relative, "project", &mut entries);
     }
     entries.push((

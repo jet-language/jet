@@ -130,6 +130,9 @@ pub fn run_checked(bundle: &ProgramBundle, try_anyway: bool) -> RunOutcome {
             return RunOutcome::Problems(vec![diagnostic]);
         }
     }
+    if let Err(diagnostics) = jet_jit::bind_interpreter_ffi(bundle) {
+        return RunOutcome::Problems(diagnostics);
+    }
     let mut sink = crate::Comptime::DevSink::new();
     // Per-run buffer, cleared like the sink: the E3002 journey now drains at the
     // report edge, so a recovered failure must not leak into a later run.

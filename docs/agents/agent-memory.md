@@ -1917,9 +1917,10 @@ File-structure canon (U10 as revised 2026-06-18 + D-WORKSPACE1/2, in
 - **`workspace.jet`** — monorepo index at repo root: `module workspace
   { members: find("./packages") }` (D-WORKSPACE1=B fully computable,
   D-WORKSPACE2; implemented). This, not pkg.jet, is the monorepo surface.
-- **`jetpack.toml`** — residual root TOML: `[repo]` metadata + `[sources]`
-  defaults only (`[packages]` moved to workspace.jet).
-- **`env.jet`** — dev shell only, never a package index; owner rejected retiring it.
+- **`jetpack.toml`** — retired root TOML. E1225 rejects it; move `[repo]`
+  identity to `package.jet` and `[sources]` defaults to `env.jet`.
+- **`env.jet`** — Jet-grammar environment and named-source plane; never a
+  package index.
 - **`.jet/lock`** — single lockfile incl. `[[workspace_member]]` +
   `[[comptime_inputs]]` hashes.
 - U9 provider inference probes for `pkg.jet`.

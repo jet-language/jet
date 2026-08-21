@@ -126,9 +126,14 @@ fn decode_quanta(
 ) -> Result<Vec<u8>, String> {
     let sym_len = scanned.symbols.len();
     let pad = scanned.pad_count;
-    let eof = scanned
-        .pad_start
-        .unwrap_or_else(|| scanned.origins.last().copied().unwrap_or(0).saturating_add(1));
+    let eof = scanned.pad_start.unwrap_or_else(|| {
+        scanned
+            .origins
+            .last()
+            .copied()
+            .unwrap_or(0)
+            .saturating_add(1)
+    });
     if sym_len == 0 && pad == 0 {
         return Ok(Vec::new());
     }
@@ -138,10 +143,18 @@ fn decode_quanta(
     if rem == 1 || (!allow_missing_padding && rem != 0) {
         if pad == 0 && allow_missing_padding && matches!(rem, 0 | 2 | 3 | 5 | 7) && radix == 64 {
             // allowed unpadded remainder for base64
-        } else if pad == 0 && allow_missing_padding && matches!(rem, 0 | 2 | 4 | 5 | 7) && radix == 32 {
+        } else if pad == 0
+            && allow_missing_padding
+            && matches!(rem, 0 | 2 | 4 | 5 | 7)
+            && radix == 32
+        {
             // allowed unpadded remainder for base32
         } else if rem == 1 {
-            return Err(err(kind, eof, "encoded length cannot represent whole bytes"));
+            return Err(err(
+                kind,
+                eof,
+                "encoded length cannot represent whole bytes",
+            ));
         } else if !allow_missing_padding {
             return Err(err(
                 kind,
@@ -154,12 +167,16 @@ fn decode_quanta(
         let expected = match (radix, sym_len % quantum) {
             (64, 2) => 2,
             (64, 3) => 1,
-            (64, 0) if pad > 0 => return Err(err(kind, scanned.pad_start.unwrap(), "unexpected padding")),
+            (64, 0) if pad > 0 => {
+                return Err(err(kind, scanned.pad_start.unwrap(), "unexpected padding"))
+            }
             (32, 2) => 6,
             (32, 4) => 4,
             (32, 5) => 3,
             (32, 7) => 1,
-            (32, 0) if pad > 0 => return Err(err(kind, scanned.pad_start.unwrap(), "unexpected padding")),
+            (32, 0) if pad > 0 => {
+                return Err(err(kind, scanned.pad_start.unwrap(), "unexpected padding"))
+            }
             _ => {
                 return Err(err(
                     kind,
@@ -182,15 +199,41 @@ fn decode_quanta(
     } else if !allow_missing_padding {
         let need = match sym_len % quantum {
             0 => 0,
-            2 => if radix == 64 { 2 } else { 6 },
+            2 => {
+                if radix == 64 {
+                    2
+                } else {
+                    6
+                }
+            }
             3 => 1,
-            4 => if radix == 32 { 4 } else { return Err(err(kind, eof, "encoded length cannot represent whole bytes")) },
+            4 => {
+                if radix == 32 {
+                    4
+                } else {
+                    return Err(err(
+                        kind,
+                        eof,
+                        "encoded length cannot represent whole bytes",
+                    ));
+                }
+            }
             5 => 3,
             7 => 1,
-            _ => return Err(err(kind, eof, "encoded length cannot represent whole bytes")),
+            _ => {
+                return Err(err(
+                    kind,
+                    eof,
+                    "encoded length cannot represent whole bytes",
+                ))
+            }
         };
         if need > 0 {
-            return Err(err(kind, eof, format!("expected {need} padding characters")));
+            return Err(err(
+                kind,
+                eof,
+                format!("expected {need} padding characters"),
+            ));
         }
     }
     let mut out = Vec::new();

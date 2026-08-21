@@ -33,6 +33,9 @@ pub const RESERVED_TYPES: &[&str] = &[
     Syntax::DURATION_RANGE_ERROR_TYPE,
     Syntax::EXPIRING_VALUE_TYPE,
     Syntax::TYPE_ABILITIES,
+    // D-VALIDATE1: the `Validate.over(s)` namespace is compiler-owned; it is
+    // not a user-defined data type that can shadow the validation surface.
+    Syntax::TYPE_VALIDATE,
     // D-SOLVER-LIB1=A: `Solver` is the Core finite-solver handle. Reserving it
     // prevents a user type from being mistaken for the runtime solver handle.
     Syntax::SOLVER_TYPE,
@@ -261,9 +264,8 @@ pub fn builtin_method_names(recv_ty: &Type) -> Vec<String> {
     BUILTIN_METHOD_VOCABULARY
         .split_whitespace()
         .filter(|method| {
-            (0..=8).any(|arg_count| {
-                builtin_method_return(recv_ty, method, arg_count, false).is_some()
-            })
+            (0..=8)
+                .any(|arg_count| builtin_method_return(recv_ty, method, arg_count, false).is_some())
         })
         .map(str::to_owned)
         .collect()
@@ -295,15 +297,13 @@ pub fn builtin_method_return(
         // D-AUTHORITY-NAME1=A / D-AUTHORITY-WORD2=E: one ordinary rights value;
         // both operations return another narrowed value of the same type.
         Type::Named(n) if n == Syntax::TYPE_ABILITIES => match (method, arg_count) {
-            ("with" | "without", 1) => Some(Some(Type::Named(
-                Syntax::TYPE_ABILITIES.to_string(),
-            ))),
+            ("with" | "without", 1) => Some(Some(Type::Named(Syntax::TYPE_ABILITIES.to_string()))),
             _ => None,
         },
         Type::Named(n) if n == Syntax::TYPE_ORDERING => match (method, arg_count) {
-            ("then", 1) | ("reverse", 0) => Some(Some(Type::Named(
-                Syntax::TYPE_ORDERING.to_string(),
-            ))),
+            ("then", 1) | ("reverse", 0) => {
+                Some(Some(Type::Named(Syntax::TYPE_ORDERING.to_string())))
+            }
             _ => None,
         },
         Type::Named(n) if n == "Stopwatch" => stopwatch_method_return(method, arg_count),
@@ -356,22 +356,36 @@ pub fn builtin_method_return(
         },
         Type::Named(n) if n == "CompilerLexed" => match (method, arg_count) {
             ("source", 0) => Some(Some(Type::String)),
-            ("tokens", 0) => Some(Some(Type::List(Box::new(Type::Named("CompilerToken".to_string()))))),
-            ("diagnostics", 0) => Some(Some(Type::List(Box::new(Type::Named("CompilerDiagnostic".to_string()))))),
+            ("tokens", 0) => Some(Some(Type::List(Box::new(Type::Named(
+                "CompilerToken".to_string(),
+            ))))),
+            ("diagnostics", 0) => Some(Some(Type::List(Box::new(Type::Named(
+                "CompilerDiagnostic".to_string(),
+            ))))),
             _ => None,
         },
         Type::Named(n) if n == "CompilerSyntaxTree" => match (method, arg_count) {
             ("source", 0) => Some(Some(Type::String)),
-            ("items", 0) => Some(Some(Type::List(Box::new(Type::Named("CompilerNode".to_string()))))),
-            ("diagnostics", 0) => Some(Some(Type::List(Box::new(Type::Named("CompilerDiagnostic".to_string()))))),
+            ("items", 0) => Some(Some(Type::List(Box::new(Type::Named(
+                "CompilerNode".to_string(),
+            ))))),
+            ("diagnostics", 0) => Some(Some(Type::List(Box::new(Type::Named(
+                "CompilerDiagnostic".to_string(),
+            ))))),
             _ => None,
         },
         Type::Named(n) if n == "CompilerChecked" => match (method, arg_count) {
             ("source", 0) => Some(Some(Type::String)),
             ("syntax", 0) => Some(Some(Type::Named("CompilerSyntaxTree".to_string()))),
-            ("functions", 0) => Some(Some(Type::List(Box::new(Type::Named("FunctionInfo".to_string()))))),
-            ("effects", 0) => Some(Some(Type::List(Box::new(Type::Named("EffectInfo".to_string()))))),
-            ("diagnostics", 0) => Some(Some(Type::List(Box::new(Type::Named("CompilerDiagnostic".to_string()))))),
+            ("functions", 0) => Some(Some(Type::List(Box::new(Type::Named(
+                "FunctionInfo".to_string(),
+            ))))),
+            ("effects", 0) => Some(Some(Type::List(Box::new(Type::Named(
+                "EffectInfo".to_string(),
+            ))))),
+            ("diagnostics", 0) => Some(Some(Type::List(Box::new(Type::Named(
+                "CompilerDiagnostic".to_string(),
+            ))))),
             ("semantic_index", 0) => Some(Some(Type::Option(Box::new(Type::Named(
                 "CompilerSemanticIndex".to_string(),
             ))))),
@@ -379,7 +393,9 @@ pub fn builtin_method_return(
         },
         Type::Named(n) if n == "CompilerSourceMap" => match (method, arg_count) {
             ("sources", 0) => Some(Some(Type::List(Box::new(Type::String)))),
-            ("generated_lines", 0) => Some(Some(Type::List(Box::new(Type::Named("CompilerGeneratedLine".to_string()))))),
+            ("generated_lines", 0) => Some(Some(Type::List(Box::new(Type::Named(
+                "CompilerGeneratedLine".to_string(),
+            ))))),
             _ => None,
         },
         Type::Named(n) if n == "FunctionInfo" => match (method, arg_count) {
@@ -404,9 +420,7 @@ pub fn builtin_method_return(
         // recompute it from the receiver's real element type.
         Type::Apply { name, args } if name == "Pool" => pool_method_return(args, method, arg_count),
         // D-LOCALCELL1=A: one-thread cell and dynamic guard surface.
-        Type::Apply { name, args } if name == "Cell" => {
-            cell_method_return(args, method, arg_count)
-        }
+        Type::Apply { name, args } if name == "Cell" => cell_method_return(args, method, arg_count),
         Type::Apply { name, args } if name == "CellReadGuard" => {
             cell_guard_method_return(args, method, arg_count, false)
         }
@@ -417,14 +431,10 @@ pub fn builtin_method_return(
         // placeholder-gate note as `Pool` above — `finish_shared_read`/
         // `finish_shared_edit` compute the real (closure-derived) return type.
         Type::Shared(inner) => shared_method_return(inner, method, arg_count),
-        Type::Apply { name, args }
-            if name == Syntax::TYPE_SHARED_WEAK && args.len() == 1 =>
-        {
+        Type::Apply { name, args } if name == Syntax::TYPE_SHARED_WEAK && args.len() == 1 => {
             shared_weak_method_return(&args[0], method, arg_count)
         }
-        Type::Apply { name, args }
-            if name == Syntax::TYPE_SHARED_GUARD && args.len() == 1 =>
-        {
+        Type::Apply { name, args } if name == Syntax::TYPE_SHARED_GUARD && args.len() == 1 => {
             shared_guard_method_return(&args[0], method, arg_count)
         }
         Type::Named(name) if name == Syntax::TYPE_CONDITION => {
@@ -499,17 +509,49 @@ pub fn builtin_method_return(
             deque_method_return(args.first().unwrap_or(&Type::Int), method, arg_count)
         }
         Type::Named(n) if n == Syntax::TYPE_BITS => bit_set_method_return(method, arg_count),
-        Type::Named(n) if n == Syntax::TYPE_BYTES => {
-            byte_buffer_method_return(method, arg_count)
+        Type::Named(n) if n == Syntax::TYPE_BYTES => byte_buffer_method_return(method, arg_count),
+        Type::Named(n) if n == "SigningKey" && method == "public_key" && arg_count == 0 => {
+            Some(Some(Type::Named("VerifyKey".into())))
         }
-        Type::Named(n) if n == "SigningKey" && method == "public_key" && arg_count == 0 => Some(Some(Type::Named("VerifyKey".into()))),
-        Type::Named(n) if n == "X25519SecretKey" && method == "public_key" && arg_count == 0 => Some(Some(Type::Named("X25519PublicKey".into()))),
-        Type::Named(n) if matches!(n.as_str(), "VerifyKey" | "X25519PublicKey" | "Signature" | "Sealed" | "WrappedKey" | "WrappedVaultKey" | "Digest256" | "Digest512") && method == "bytes" && arg_count == 0 => Some(Some(Type::List(Box::new(Type::IntN { signed: false, bits: 8 })))),
-        Type::Named(n) if matches!(n.as_str(), "Digest256" | "Digest512") && method == "hex" && arg_count == 0 => Some(Some(Type::String)),
+        Type::Named(n) if n == "X25519SecretKey" && method == "public_key" && arg_count == 0 => {
+            Some(Some(Type::Named("X25519PublicKey".into())))
+        }
+        Type::Named(n)
+            if matches!(
+                n.as_str(),
+                "VerifyKey"
+                    | "X25519PublicKey"
+                    | "Signature"
+                    | "Sealed"
+                    | "WrappedKey"
+                    | "WrappedVaultKey"
+                    | "Digest256"
+                    | "Digest512"
+            ) && method == "bytes"
+                && arg_count == 0 =>
+        {
+            Some(Some(Type::List(Box::new(Type::IntN {
+                signed: false,
+                bits: 8,
+            }))))
+        }
+        Type::Named(n)
+            if matches!(n.as_str(), "Digest256" | "Digest512")
+                && method == "hex"
+                && arg_count == 0 =>
+        {
+            Some(Some(Type::String))
+        }
         Type::Named(n) if n == "Hasher" && method == "update" && arg_count == 1 => Some(None),
-        Type::Named(n) if n == "Hasher" && method == "digest" && arg_count == 0 => Some(Some(Type::String)),
-        Type::Named(n) if n == "X25519PublicKey" && method == "text" && arg_count == 0 => Some(Some(Type::String)),
-        Type::Named(n) if n == "PasswordHash" && method == "text" && arg_count == 0 => Some(Some(Type::String)),
+        Type::Named(n) if n == "Hasher" && method == "digest" && arg_count == 0 => {
+            Some(Some(Type::String))
+        }
+        Type::Named(n) if n == "X25519PublicKey" && method == "text" && arg_count == 0 => {
+            Some(Some(Type::String))
+        }
+        Type::Named(n) if n == "PasswordHash" && method == "text" && arg_count == 0 => {
+            Some(Some(Type::String))
+        }
         // D-DYNARRAY1: `View<T>` — read-only method surface on a zero-copy window.
         Type::Apply { name, args } if matches!(name.as_str(), "View" | "ViewMut") => {
             view_method_return(args.first().unwrap_or(&Type::Int), method, arg_count)
@@ -531,9 +573,7 @@ pub fn builtin_method_return(
         | Type::Char
         | Type::IntN { .. }
         | Type::Float32
-        | Type::InlineRange { .. } => {
-            numeric_method_return(recv_ty, method, arg_count)
-        }
+        | Type::InlineRange { .. } => numeric_method_return(recv_ty, method, arg_count),
         _ => None,
     }
 }
@@ -561,12 +601,15 @@ fn build_context_method_return(method: &str, arg_count: usize) -> Option<Option<
             ok: Box::new(Type::Named(Syntax::INTERNAL_UNIT_TYPE.to_string())),
             err: Box::new(Type::Named(Syntax::TYPE_ERR.to_string())),
         })),
-        ("action", 5 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14 | 15) => build_result(Syntax::TYPE_BUILD_ACTION),
-        ("legacy", 6..=17) => build_result(Syntax::TYPE_BUILD_ACTION),
-        ("add_executable" | "add_library" | "add_test" | "add_asset_bundle"
-        | "add_doc" | "add_install" | "add_package" | "add_publish", 3 | 4 | 5 | 6 | 7) => {
-            build_result(Syntax::TYPE_BUILD_TARGET)
+        ("action", 5 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14 | 15) => {
+            build_result(Syntax::TYPE_BUILD_ACTION)
         }
+        ("legacy", 6..=17) => build_result(Syntax::TYPE_BUILD_ACTION),
+        (
+            "add_executable" | "add_library" | "add_test" | "add_asset_bundle" | "add_doc"
+            | "add_install" | "add_package" | "add_publish",
+            3 | 4 | 5 | 6 | 7,
+        ) => build_result(Syntax::TYPE_BUILD_TARGET),
         ("toolchain", 2 | 3 | 4 | 5 | 6) => build_result(Syntax::TYPE_BUILD_TOOLCHAIN),
         ("signing", 2) => build_result("BuildSigningIdentity"),
         ("probe", 3..=6) => build_result(Syntax::TYPE_BUILD_PROBE),
@@ -597,51 +640,128 @@ pub fn build_context_method_arg_types(method: &str, arg_count: usize) -> Option<
         // comptime bridge, so only the fact-name slot is fixed here.
         ("contribute", 2) => Some(vec![Type::String]),
         ("action", 5) => Some(vec![
-            Type::String, strings(), strings(), strings(), strings(),
+            Type::String,
+            strings(),
+            strings(),
+            strings(),
+            strings(),
         ]),
         ("action", 7) => Some(vec![
-            Type::String, strings(), strings(), strings(), strings(),
-            Type::Named(Syntax::TYPE_BUILD_TOOLCHAIN.to_string()), probes(),
+            Type::String,
+            strings(),
+            strings(),
+            strings(),
+            strings(),
+            Type::Named(Syntax::TYPE_BUILD_TOOLCHAIN.to_string()),
+            probes(),
         ]),
         ("action", 8) => Some(vec![
-            Type::String, strings(), strings(), strings(), strings(),
-            Type::Named(Syntax::TYPE_BUILD_TOOLCHAIN.to_string()), probes(),
+            Type::String,
+            strings(),
+            strings(),
+            strings(),
+            strings(),
+            Type::Named(Syntax::TYPE_BUILD_TOOLCHAIN.to_string()),
+            probes(),
             Type::Named("BuildSigningIdentity".to_string()),
         ]),
         ("action", 9) => Some(vec![
-            Type::String, strings(), strings(), strings(), strings(),
-            Type::Named(Syntax::TYPE_BUILD_TOOLCHAIN.to_string()), probes(),
-            Type::Named("BuildSigningIdentity".to_string()), Type::String,
+            Type::String,
+            strings(),
+            strings(),
+            strings(),
+            strings(),
+            Type::Named(Syntax::TYPE_BUILD_TOOLCHAIN.to_string()),
+            probes(),
+            Type::Named("BuildSigningIdentity".to_string()),
+            Type::String,
         ]),
         ("action", 10) => Some(vec![
-            Type::String, strings(), strings(), strings(), strings(),
-            Type::Named(Syntax::TYPE_BUILD_TOOLCHAIN.to_string()), probes(),
-            Type::Named("BuildSigningIdentity".to_string()), Type::String, strings(),
+            Type::String,
+            strings(),
+            strings(),
+            strings(),
+            strings(),
+            Type::Named(Syntax::TYPE_BUILD_TOOLCHAIN.to_string()),
+            probes(),
+            Type::Named("BuildSigningIdentity".to_string()),
+            Type::String,
+            strings(),
         ]),
         ("action", 11) => Some(vec![
-            Type::String, strings(), strings(), strings(), strings(),
-            Type::Named(Syntax::TYPE_BUILD_TOOLCHAIN.to_string()), probes(),
-            Type::Named("BuildSigningIdentity".to_string()), Type::String, strings(), strings(),
+            Type::String,
+            strings(),
+            strings(),
+            strings(),
+            strings(),
+            Type::Named(Syntax::TYPE_BUILD_TOOLCHAIN.to_string()),
+            probes(),
+            Type::Named("BuildSigningIdentity".to_string()),
+            Type::String,
+            strings(),
+            strings(),
         ]),
         ("action", 12) => Some(vec![
-            Type::String, strings(), strings(), strings(), strings(),
-            Type::Named(Syntax::TYPE_BUILD_TOOLCHAIN.to_string()), probes(),
-            Type::Named("BuildSigningIdentity".to_string()), Type::String, strings(), strings(), strings(),
+            Type::String,
+            strings(),
+            strings(),
+            strings(),
+            strings(),
+            Type::Named(Syntax::TYPE_BUILD_TOOLCHAIN.to_string()),
+            probes(),
+            Type::Named("BuildSigningIdentity".to_string()),
+            Type::String,
+            strings(),
+            strings(),
+            strings(),
         ]),
         ("action", 13) => Some(vec![
-            Type::String, strings(), strings(), strings(), strings(),
-            Type::Named(Syntax::TYPE_BUILD_TOOLCHAIN.to_string()), probes(),
-            Type::Named("BuildSigningIdentity".to_string()), Type::String, strings(), strings(), strings(), strings(),
+            Type::String,
+            strings(),
+            strings(),
+            strings(),
+            strings(),
+            Type::Named(Syntax::TYPE_BUILD_TOOLCHAIN.to_string()),
+            probes(),
+            Type::Named("BuildSigningIdentity".to_string()),
+            Type::String,
+            strings(),
+            strings(),
+            strings(),
+            strings(),
         ]),
         ("action", 14) => Some(vec![
-            Type::String, strings(), strings(), strings(), strings(),
-            Type::Named(Syntax::TYPE_BUILD_TOOLCHAIN.to_string()), probes(),
-            Type::Named("BuildSigningIdentity".to_string()), Type::String, strings(), strings(), strings(), strings(), strings(),
+            Type::String,
+            strings(),
+            strings(),
+            strings(),
+            strings(),
+            Type::Named(Syntax::TYPE_BUILD_TOOLCHAIN.to_string()),
+            probes(),
+            Type::Named("BuildSigningIdentity".to_string()),
+            Type::String,
+            strings(),
+            strings(),
+            strings(),
+            strings(),
+            strings(),
         ]),
         ("action", 15) => Some(vec![
-            Type::String, strings(), strings(), strings(), strings(),
-            Type::Named(Syntax::TYPE_BUILD_TOOLCHAIN.to_string()), probes(),
-            Type::Named("BuildSigningIdentity".to_string()), Type::String, strings(), strings(), strings(), strings(), strings(), Type::String,
+            Type::String,
+            strings(),
+            strings(),
+            strings(),
+            strings(),
+            Type::Named(Syntax::TYPE_BUILD_TOOLCHAIN.to_string()),
+            probes(),
+            Type::Named("BuildSigningIdentity".to_string()),
+            Type::String,
+            strings(),
+            strings(),
+            strings(),
+            strings(),
+            strings(),
+            Type::String,
         ]),
         ("legacy", 6..=17) => {
             let mut args = vec![
@@ -687,33 +807,52 @@ pub fn build_context_method_arg_types(method: &str, arg_count: usize) -> Option<
             }
             Some(args)
         }
-        ("add_executable" | "add_library" | "add_test"
-        | "add_asset_bundle" | "add_doc" | "add_install" | "add_package" | "add_publish", 3) => {
-            Some(vec![Type::String, strings(), actions()])
-        }
-        ("add_executable" | "add_library" | "add_test"
-        | "add_asset_bundle" | "add_doc" | "add_install" | "add_package" | "add_publish", 4) => {
-            Some(vec![Type::String, strings(), actions(), targets()])
-        }
-        ("add_executable" | "add_library" | "add_test"
-        | "add_asset_bundle" | "add_doc" | "add_install" | "add_package" | "add_publish", 5) => {
-            Some(vec![Type::String, strings(), actions(), targets(), probes()])
-        }
-        ("add_executable" | "add_library" | "add_test"
-        | "add_asset_bundle" | "add_doc" | "add_install" | "add_package" | "add_publish", 6) => {
-            Some(vec![
-                Type::String, strings(), actions(), targets(), probes(),
-                Type::Named(Syntax::TYPE_BUILD_TOOLCHAIN.to_string()),
-            ])
-        }
-        ("add_executable" | "add_library" | "add_test"
-        | "add_asset_bundle" | "add_doc" | "add_install" | "add_package" | "add_publish", 7) => {
-            Some(vec![
-                Type::String, strings(), actions(), targets(), probes(),
-                Type::Named(Syntax::TYPE_BUILD_TOOLCHAIN.to_string()),
-                Type::Named("BuildSigningIdentity".to_string()),
-            ])
-        }
+        (
+            "add_executable" | "add_library" | "add_test" | "add_asset_bundle" | "add_doc"
+            | "add_install" | "add_package" | "add_publish",
+            3,
+        ) => Some(vec![Type::String, strings(), actions()]),
+        (
+            "add_executable" | "add_library" | "add_test" | "add_asset_bundle" | "add_doc"
+            | "add_install" | "add_package" | "add_publish",
+            4,
+        ) => Some(vec![Type::String, strings(), actions(), targets()]),
+        (
+            "add_executable" | "add_library" | "add_test" | "add_asset_bundle" | "add_doc"
+            | "add_install" | "add_package" | "add_publish",
+            5,
+        ) => Some(vec![
+            Type::String,
+            strings(),
+            actions(),
+            targets(),
+            probes(),
+        ]),
+        (
+            "add_executable" | "add_library" | "add_test" | "add_asset_bundle" | "add_doc"
+            | "add_install" | "add_package" | "add_publish",
+            6,
+        ) => Some(vec![
+            Type::String,
+            strings(),
+            actions(),
+            targets(),
+            probes(),
+            Type::Named(Syntax::TYPE_BUILD_TOOLCHAIN.to_string()),
+        ]),
+        (
+            "add_executable" | "add_library" | "add_test" | "add_asset_bundle" | "add_doc"
+            | "add_install" | "add_package" | "add_publish",
+            7,
+        ) => Some(vec![
+            Type::String,
+            strings(),
+            actions(),
+            targets(),
+            probes(),
+            Type::Named(Syntax::TYPE_BUILD_TOOLCHAIN.to_string()),
+            Type::Named("BuildSigningIdentity".to_string()),
+        ]),
         ("toolchain", 2) => Some(vec![Type::String, Type::String]),
         ("toolchain", 3..=6) => {
             let mut args = vec![Type::String, Type::String];
@@ -753,8 +892,11 @@ pub fn build_context_method_arg_types(method: &str, arg_count: usize) -> Option<
             Type::Named(Syntax::TYPE_BUILD_TOOLCHAIN.to_string()),
         ]),
         ("error", 5) => Some(vec![
-            Type::Named(Syntax::TYPE_SOURCE_SPAN.to_string()), Type::String,
-            Type::String, Type::String, Type::String,
+            Type::Named(Syntax::TYPE_SOURCE_SPAN.to_string()),
+            Type::String,
+            Type::String,
+            Type::String,
+            Type::String,
         ]),
         ("plan", 0) => Some(Vec::new()),
         ("plan", 1) => Some(vec![Type::Named(Syntax::TYPE_BUILD_TARGET.to_string())]),
@@ -782,7 +924,7 @@ fn int_kind(ty: &Type) -> Option<(bool, u8)> {
 
 /// D-NUMOPS1: an integer width conversion is *widening* (infallible) when the
 /// target range fully contains the source range; otherwise *narrowing*
-/// (fallible — returns `T ? String`, with no silent truncation).
+/// (fallible — returns `T ! String`, with no silent truncation).
 fn int_conv_widening(src: (bool, u8), dst: (bool, u8)) -> bool {
     let (slo, shi) = crate::AST::int_range(src.0, src.1);
     let (dlo, dhi) = crate::AST::int_range(dst.0, dst.1);
@@ -850,7 +992,11 @@ fn numeric_method_return(ty: &Type, method: &str, nargs: usize) -> Option<Option
 }
 
 /// D-SHAPE-CONVERT1=A: `Target.from_source(value)` numeric conversions.
-pub fn numeric_conversion_return(target: &Type, method: &str, nargs: usize) -> Option<Option<Type>> {
+pub fn numeric_conversion_return(
+    target: &Type,
+    method: &str,
+    nargs: usize,
+) -> Option<Option<Type>> {
     if nargs != 1 || !target.is_numeric() {
         return None;
     }
@@ -873,7 +1019,7 @@ pub fn numeric_conversion_return(target: &Type, method: &str, nargs: usize) -> O
     }
     // D-SHAPE-CONVERT1=A: a float source can carry NaN, an infinity, or a
     // magnitude no integer names, so *every* float→integer conversion is
-    // checked narrowing and answers `T ? String`. `int_kind` reports no width
+    // checked narrowing and answers `T ! String`. `int_kind` reports no width
     // for exact `Int` (D-INTBIG1), so the width table below cannot see this
     // crossing; naming it here is what keeps the checking layer agreeing with
     // the AOT emitter, the JIT host, the comptime tier, and the web tier, all
@@ -953,12 +1099,8 @@ fn builtin_static_return(ty: &Type, method: &str, nargs: usize) -> Option<Option
         (Type::Named(n), "workspace", 0) if n == crate::Syntax::TYPE_ABILITIES => {
             Some(Some(Type::Named(crate::Syntax::TYPE_ABILITIES.to_string())))
         }
-        (Type::Named(n), "today", 0) if n == "Date" => {
-            Some(Some(Type::Named("Date".to_string())))
-        }
-        (Type::Named(n), "home", 0) if n == "Path" => {
-            Some(Some(Type::Named("Path".to_string())))
-        }
+        (Type::Named(n), "today", 0) if n == "Date" => Some(Some(Type::Named("Date".to_string()))),
+        (Type::Named(n), "home", 0) if n == "Path" => Some(Some(Type::Named("Path".to_string()))),
         (Type::Named(n), method, 1)
             if n == crate::Syntax::DURATION_TYPE
                 && crate::Syntax::DURATION_CONSTRUCTORS.contains(&method) =>
@@ -970,15 +1112,49 @@ fn builtin_static_return(ty: &Type, method: &str, nargs: usize) -> Option<Option
                 )),
             }))
         }
-        (Type::Named(n), "from_text", 1) if n == "Secret" => Some(Some(Type::Named("Secret".into()))),
-        (Type::Named(n), "from_bytes", 1) if n == "Secret" => Some(Some(Type::Named("Secret".into()))),
-        (Type::Named(n), "new_random", 0) if matches!(n.as_str(), "SigningKey" | "X25519SecretKey") => Some(Some(Type::Result { ok: Box::new(Type::Named(n.clone())), err: Box::new(Type::Named("CryptoError".into())) })),
-        (Type::Named(n), "from_bytes", 1) if matches!(n.as_str(), "VerifyKey" | "X25519PublicKey" | "Signature" | "Sealed" | "WrappedKey") => Some(Some(Type::Result { ok: Box::new(Type::Named(n.clone())), err: Box::new(Type::Named("CryptoError".into())) })),
-        (Type::Named(n), "from_bytes", 1) if n == "WrappedVaultKey" => Some(Some(Type::Result { ok: Box::new(Type::Named(n.clone())), err: Box::new(Type::Named("KeyWrapError".into())) })),
-        (Type::Named(n), "Recipient", 1) if n == "KeyUnlock" => Some(Some(Type::Named("KeyUnlock".into()))),
-        (Type::Named(n), "Passphrase", 1) if n == "KeyUnlock" => Some(Some(Type::Named("KeyUnlock".into()))),
-        (Type::Named(n), "from_text", 1) if n == "X25519PublicKey" => Some(Some(Type::Result { ok: Box::new(Type::Named(n.clone())), err: Box::new(Type::Named("CryptoError".into())) })),
-        (Type::Named(n), "parse", 1) if n == "PasswordHash" => Some(Some(Type::Result { ok: Box::new(Type::Named("PasswordHash".into())), err: Box::new(Type::Named("CryptoError".into())) })),
+        (Type::Named(n), "from_text", 1) if n == "Secret" => {
+            Some(Some(Type::Named("Secret".into())))
+        }
+        (Type::Named(n), "from_bytes", 1) if n == "Secret" => {
+            Some(Some(Type::Named("Secret".into())))
+        }
+        (Type::Named(n), "new_random", 0)
+            if matches!(n.as_str(), "SigningKey" | "X25519SecretKey") =>
+        {
+            Some(Some(Type::Result {
+                ok: Box::new(Type::Named(n.clone())),
+                err: Box::new(Type::Named("CryptoError".into())),
+            }))
+        }
+        (Type::Named(n), "from_bytes", 1)
+            if matches!(
+                n.as_str(),
+                "VerifyKey" | "X25519PublicKey" | "Signature" | "Sealed" | "WrappedKey"
+            ) =>
+        {
+            Some(Some(Type::Result {
+                ok: Box::new(Type::Named(n.clone())),
+                err: Box::new(Type::Named("CryptoError".into())),
+            }))
+        }
+        (Type::Named(n), "from_bytes", 1) if n == "WrappedVaultKey" => Some(Some(Type::Result {
+            ok: Box::new(Type::Named(n.clone())),
+            err: Box::new(Type::Named("KeyWrapError".into())),
+        })),
+        (Type::Named(n), "Recipient", 1) if n == "KeyUnlock" => {
+            Some(Some(Type::Named("KeyUnlock".into())))
+        }
+        (Type::Named(n), "Passphrase", 1) if n == "KeyUnlock" => {
+            Some(Some(Type::Named("KeyUnlock".into())))
+        }
+        (Type::Named(n), "from_text", 1) if n == "X25519PublicKey" => Some(Some(Type::Result {
+            ok: Box::new(Type::Named(n.clone())),
+            err: Box::new(Type::Named("CryptoError".into())),
+        })),
+        (Type::Named(n), "parse", 1) if n == "PasswordHash" => Some(Some(Type::Result {
+            ok: Box::new(Type::Named("PasswordHash".into())),
+            err: Box::new(Type::Named("CryptoError".into())),
+        })),
         (Type::Named(n), "new", 0) if n == crate::Syntax::TYPE_BYTES => {
             Some(Some(Type::Named(crate::Syntax::TYPE_BYTES.to_string())))
         }
@@ -1105,8 +1281,14 @@ fn list_method_return(inner: &Type, method: &str, nargs: usize) -> Option<Option
             args: vec![inner.clone()],
         })),
         ("split", 1) => Some(Some(Type::Tuple(vec![
-            ("left".to_string(), Box::new(Type::List(Box::new(inner.clone())))),
-            ("right".to_string(), Box::new(Type::List(Box::new(inner.clone())))),
+            (
+                "left".to_string(),
+                Box::new(Type::List(Box::new(inner.clone()))),
+            ),
+            (
+                "right".to_string(),
+                Box::new(Type::List(Box::new(inner.clone()))),
+            ),
         ]))),
         ("shuffle", 0) => Some(Some(iter_ty(inner.clone()))),
         ("chunk_while", 1) => Some(Some(iter_ty(Type::List(Box::new(inner.clone()))))),
@@ -1269,9 +1451,7 @@ fn iter_method_return(inner: &Type, method: &str, nargs: usize) -> Option<Option
         ("intersperse", 1) => Some(Some(iter_ty(inner.clone()))),
         ("indexed", 0) => Some(Some(iter_ty(indexed_elem_ty(inner)))),
         ("indexes", 0) => Some(Some(iter_ty(Type::Int))),
-        ("zip" | "zip_short" | "zip_pad", _) => {
-            Some(Some(iter_ty(zip_elem_ty(inner, &Type::Int))))
-        }
+        ("zip" | "zip_short" | "zip_pad", _) => Some(Some(iter_ty(zip_elem_ty(inner, &Type::Int)))),
         ("unzip", 0) => list_method_return(inner, "unzip", 0),
         ("partition", 1) => Some(Some(partition_ret_ty(inner))),
         ("take_while" | "skip_while", 1) => Some(Some(iter_ty(inner.clone()))),
@@ -1312,8 +1492,14 @@ fn iter_method_return(inner: &Type, method: &str, nargs: usize) -> Option<Option
         })),
         ("compare", 1) => Some(Some(Type::Int)),
         ("split", 1) => Some(Some(Type::Tuple(vec![
-            ("left".to_string(), Box::new(Type::List(Box::new(inner.clone())))),
-            ("right".to_string(), Box::new(Type::List(Box::new(inner.clone())))),
+            (
+                "left".to_string(),
+                Box::new(Type::List(Box::new(inner.clone()))),
+            ),
+            (
+                "right".to_string(),
+                Box::new(Type::List(Box::new(inner.clone()))),
+            ),
         ]))),
         ("shuffle", 0) => Some(Some(iter_ty(inner.clone()))),
         ("chunk_while", 1) => Some(Some(iter_ty(Type::List(Box::new(inner.clone()))))),
@@ -1442,9 +1628,10 @@ fn string_method_return(method: &str, nargs: usize) -> Option<Option<Type>> {
             err: Box::new(Type::Named(Syntax::TYPE_ALLOC_ERROR.to_string())),
         })),
         ("contains" | "starts_with" | "ends_with", 1) => Some(Some(Type::Bool)),
-        ("trim" | "trim_start" | "trim_end" | "to_upper" | "to_lower" | "to_title" | "to_string", 0) => {
-            Some(Some(Type::String))
-        }
+        (
+            "trim" | "trim_start" | "trim_end" | "to_upper" | "to_lower" | "to_title" | "to_string",
+            0,
+        ) => Some(Some(Type::String)),
         ("is_alphabetic" | "is_numeric" | "is_whitespace" | "is_ascii", 0) => {
             Some(Some(Type::Bool))
         }
@@ -1475,7 +1662,7 @@ fn string_method_return(method: &str, nargs: usize) -> Option<Option<Type>> {
         ("lines", 0) => Some(Some(Type::List(Box::new(Type::String)))),
         ("chars", 0) => Some(Some(Type::List(Box::new(Type::Char)))),
         ("repeat", 1) => Some(Some(Type::String)),
-        // c97/D-STRPARSE1: fallible integer parse. Same `Int ? ParseError` result
+        // c97/D-STRPARSE1: fallible integer parse. Same `Int ! ParseError` result
         // `Int.parse(s)` returns, so one error type covers text→int.
         // D-STR-DECLINE1=C: `to_int`/`to_float` are direct String spellings of
         // the one parse mechanism `Int.parse`/`Float.parse` already run —
@@ -1865,7 +2052,9 @@ fn async_event_method_return(args: &[Type], method: &str, nargs: usize) -> Optio
             }],
         })),
         ("close", 0) => Some(None),
-        ("listener_count" | "queued_count" | "running_count" | "blocked_count", 0) => Some(Some(Type::Int)),
+        ("listener_count" | "queued_count" | "running_count" | "blocked_count", 0) => {
+            Some(Some(Type::Int))
+        }
         _ => None,
     }
 }
@@ -1924,17 +2113,25 @@ fn event_trace_method_return(method: &str, nargs: usize) -> Option<Option<Type>>
     }
 }
 
-fn dispatch_report_method_return(args: &[Type], method: &str, nargs: usize) -> Option<Option<Type>> {
+fn dispatch_report_method_return(
+    args: &[Type],
+    method: &str,
+    nargs: usize,
+) -> Option<Option<Type>> {
     let error = args.first().cloned().unwrap_or(Type::String);
     match (method, nargs) {
         ("accepted", 0) => Some(Some(Type::Bool)),
         ("delivered_handlers", 0) => Some(Some(Type::Int)),
-        ("state", 0) => Some(Some(Type::Named(crate::Syntax::TYPE_DISPATCH_STATE.to_string()))),
+        ("state", 0) => Some(Some(Type::Named(
+            crate::Syntax::TYPE_DISPATCH_STATE.to_string(),
+        ))),
         ("failures", 0) => Some(Some(Type::List(Box::new(Type::Apply {
             name: crate::Syntax::TYPE_DISPATCH_FAILURE.to_string(),
             args: vec![error],
         })))),
-        ("trace", 0) => Some(Some(Type::Named(crate::Syntax::TYPE_EVENT_TRACE.to_string()))),
+        ("trace", 0) => Some(Some(Type::Named(
+            crate::Syntax::TYPE_EVENT_TRACE.to_string(),
+        ))),
         _ => None,
     }
 }
@@ -1978,9 +2175,7 @@ fn set_method_return(elem: &Type, method: &str, nargs: usize) -> Option<Option<T
         ("remove" | "clear", _) => Some(None),
         ("has", 1) => Some(Some(Type::Bool)),
         ("union", 1) => Some(Some(set_of_elem())),
-        ("intersection" | "difference" | "symmetric_difference", 1) => {
-            Some(Some(set_of_elem()))
-        }
+        ("intersection" | "difference" | "symmetric_difference", 1) => Some(Some(set_of_elem())),
         ("is_subset" | "is_superset" | "is_disjoint", 1) => Some(Some(Type::Bool)),
         ("to_list", 0) => Some(Some(Type::List(Box::new(elem.clone())))),
         // #1478: remaining Set surface (non-closure).
@@ -2029,9 +2224,7 @@ fn sorted_set_method_return(elem: &Type, method: &str, nargs: usize) -> Option<O
         ("remove" | "clear", _) => Some(None),
         ("has", 1) => Some(Some(Type::Bool)),
         ("union", 1) => Some(Some(set_of_elem())),
-        ("intersection" | "difference" | "symmetric_difference", 1) => {
-            Some(Some(set_of_elem()))
-        }
+        ("intersection" | "difference" | "symmetric_difference", 1) => Some(Some(set_of_elem())),
         ("is_subset" | "is_superset" | "is_disjoint", 1) => Some(Some(Type::Bool)),
         ("to_list", 0) => Some(Some(Type::List(Box::new(elem.clone())))),
         ("first" | "last", 0) => Some(Some(Type::Option(Box::new(elem.clone())))),
@@ -2092,8 +2285,11 @@ fn byte_buffer_method_return(method: &str, nargs: usize) -> Option<Option<Type>>
         ("clear" | "rewind" | "flush" | "close" | "shutdown", 0) => Some(None),
         ("to_bytes" | "get_buffer" | "buffer", 0) => Some(Some(bytes())),
         ("to_string" | "string", 0) => Some(Some(Type::String)),
-        ("trim" | "trim_start" | "trim_end" | "to_lower" | "to_upper" | "to_title" | "title"
-        | "clone" | "copy", 0) => Some(Some(buf())),
+        (
+            "trim" | "trim_start" | "trim_end" | "to_lower" | "to_upper" | "to_title" | "title"
+            | "clone" | "copy",
+            0,
+        ) => Some(Some(buf())),
         ("lines", 0) => Some(Some(Type::List(Box::new(Type::String)))),
         ("first" | "next" | "read_byte", 0) => Some(Some(Type::Option(Box::new(u8t())))),
         ("read", 0) => Some(Some(Type::Option(Box::new(bytes())))),
@@ -2289,9 +2485,7 @@ pub fn builtin_method_arg_types(recv_ty: &Type, method: &str) -> Option<Vec<Type
         return builtin_method_arg_types(inner, method);
     }
     if recv_ty.is_numeric() {
-        if matches!(recv_ty, Type::IntN { .. })
-            && numeric_overflow_method(method, 1).is_some()
-        {
+        if matches!(recv_ty, Type::IntN { .. }) && numeric_overflow_method(method, 1).is_some() {
             return Some(vec![recv_ty.clone()]);
         }
         if let Some(source) = crate::Syntax::numeric_conversion_source(method)
@@ -2309,34 +2503,75 @@ pub fn builtin_method_arg_types(recv_ty: &Type, method: &str) -> Option<Vec<Type
             "reverse" => Some(vec![]),
             _ => None,
         },
-        Type::Named(n) if n == Syntax::TYPE_RANGE && method == "contains" => {
-            Some(vec![Type::Int])
-        }
+        Type::Named(n) if n == Syntax::TYPE_RANGE && method == "contains" => Some(vec![Type::Int]),
         Type::Named(n) if n == "Secret" && method == "from_text" => Some(vec![Type::String]),
-        Type::Named(n) if matches!(n.as_str(), "Secret" | "VerifyKey" | "X25519PublicKey" | "Signature" | "Sealed" | "WrappedKey" | "WrappedVaultKey") && method == "from_bytes" => Some(vec![Type::List(Box::new(Type::IntN { signed: false, bits: 8 }))]),
-        Type::Named(n) if n == "KeyUnlock" && method == "Recipient" => Some(vec![Type::Named("X25519SecretKey".into())]),
-        Type::Named(n) if n == "KeyUnlock" && method == "Passphrase" => Some(vec![Type::Named("Secret".into())]),
+        Type::Named(n)
+            if matches!(
+                n.as_str(),
+                "Secret"
+                    | "VerifyKey"
+                    | "X25519PublicKey"
+                    | "Signature"
+                    | "Sealed"
+                    | "WrappedKey"
+                    | "WrappedVaultKey"
+            ) && method == "from_bytes" =>
+        {
+            Some(vec![Type::List(Box::new(Type::IntN {
+                signed: false,
+                bits: 8,
+            }))])
+        }
+        Type::Named(n) if n == "KeyUnlock" && method == "Recipient" => {
+            Some(vec![Type::Named("X25519SecretKey".into())])
+        }
+        Type::Named(n) if n == "KeyUnlock" && method == "Passphrase" => {
+            Some(vec![Type::Named("Secret".into())])
+        }
         Type::Named(n) if n == "PasswordHash" && method == "parse" => Some(vec![Type::String]),
         Type::Named(n) if n == "Hasher" && method == "update" => {
-            Some(vec![Type::List(Box::new(Type::IntN { signed: false, bits: 8 }))])
+            Some(vec![Type::List(Box::new(Type::IntN {
+                signed: false,
+                bits: 8,
+            }))])
         }
         Type::Named(n) if n == "Hasher" && method == "digest" => Some(vec![]),
         Type::Named(n)
-            if n == crate::Syntax::DURATION_TYPE
-                && method == crate::Syntax::METHOD_DURATION_IN =>
+            if n == crate::Syntax::DURATION_TYPE && method == crate::Syntax::METHOD_DURATION_IN =>
         {
             Some(vec![Type::Named(
                 crate::Syntax::DURATION_UNIT_TYPE.to_string(),
             )])
         }
-        Type::Named(n)
-            if n == crate::Syntax::DURATION_TYPE && method == "difference" =>
-        {
+        Type::Named(n) if n == crate::Syntax::DURATION_TYPE && method == "difference" => {
             Some(vec![Type::Named(crate::Syntax::DURATION_TYPE.to_string())])
         }
-        Type::Named(n) if n == "X25519PublicKey" && method == "from_text" => Some(vec![Type::String]),
-        Type::Named(n) if matches!(n.as_str(), "SigningKey" | "X25519SecretKey") && method == "new_random" => Some(vec![]),
-        Type::Named(n) if matches!(n.as_str(), "SigningKey" | "X25519SecretKey" | "VerifyKey" | "X25519PublicKey" | "Signature" | "Sealed" | "WrappedKey" | "WrappedVaultKey" | "Digest256" | "Digest512" | "PasswordHash") => Some(vec![]),
+        Type::Named(n) if n == "X25519PublicKey" && method == "from_text" => {
+            Some(vec![Type::String])
+        }
+        Type::Named(n)
+            if matches!(n.as_str(), "SigningKey" | "X25519SecretKey") && method == "new_random" =>
+        {
+            Some(vec![])
+        }
+        Type::Named(n)
+            if matches!(
+                n.as_str(),
+                "SigningKey"
+                    | "X25519SecretKey"
+                    | "VerifyKey"
+                    | "X25519PublicKey"
+                    | "Signature"
+                    | "Sealed"
+                    | "WrappedKey"
+                    | "WrappedVaultKey"
+                    | "Digest256"
+                    | "Digest512"
+                    | "PasswordHash"
+            ) =>
+        {
+            Some(vec![])
+        }
         Type::Named(n) if n == Syntax::TYPE_BUILD_CONTEXT => match method {
             // D-META-BODY1=A: the typed item block is AST metadata, not a value arg.
             "generate" => Some(vec![Type::String]),
@@ -2360,9 +2595,8 @@ pub fn builtin_method_arg_types(recv_ty: &Type, method: &str) -> Option<Vec<Type
                 Type::List(Box::new(Type::String)),
                 Type::List(Box::new(Type::String)),
             ]),
-            "add_executable" | "add_library" | "add_test"
-            | "add_asset_bundle" | "add_doc" | "add_install" | "add_package"
-            | "add_publish" => Some(vec![
+            "add_executable" | "add_library" | "add_test" | "add_asset_bundle" | "add_doc"
+            | "add_install" | "add_package" | "add_publish" => Some(vec![
                 Type::String,
                 Type::List(Box::new(Type::String)),
                 Type::List(Box::new(Type::Named(Syntax::TYPE_BUILD_ACTION.to_string()))),
@@ -2380,16 +2614,48 @@ pub fn builtin_method_arg_types(recv_ty: &Type, method: &str) -> Option<Vec<Type
             _ => None,
         },
         Type::Named(n) if n == Syntax::TYPE_PROGRAM_INFO => Some(vec![]),
-        Type::Named(n) if n == Syntax::TYPE_TYPE_INFO && matches!(method, "implements" | "has_method") => Some(vec![Type::String]),
-        Type::Named(n) if n == "CompilerLexed" && matches!(method, "source" | "tokens" | "diagnostics") => Some(vec![]),
-        Type::Named(n) if n == "CompilerSyntaxTree" && matches!(method, "source" | "items" | "diagnostics") => Some(vec![]),
-        Type::Named(n) if n == "CompilerChecked" && matches!(method, "source" | "syntax" | "functions" | "effects" | "diagnostics" | "semantic_index") => Some(vec![]),
-        Type::Named(n) if n == "CompilerSourceMap" && matches!(method, "sources" | "generated_lines") => Some(vec![]),
+        Type::Named(n)
+            if n == Syntax::TYPE_TYPE_INFO && matches!(method, "implements" | "has_method") =>
+        {
+            Some(vec![Type::String])
+        }
+        Type::Named(n)
+            if n == "CompilerLexed" && matches!(method, "source" | "tokens" | "diagnostics") =>
+        {
+            Some(vec![])
+        }
+        Type::Named(n)
+            if n == "CompilerSyntaxTree"
+                && matches!(method, "source" | "items" | "diagnostics") =>
+        {
+            Some(vec![])
+        }
+        Type::Named(n)
+            if n == "CompilerChecked"
+                && matches!(
+                    method,
+                    "source"
+                        | "syntax"
+                        | "functions"
+                        | "effects"
+                        | "diagnostics"
+                        | "semantic_index"
+                ) =>
+        {
+            Some(vec![])
+        }
+        Type::Named(n)
+            if n == "CompilerSourceMap" && matches!(method, "sources" | "generated_lines") =>
+        {
+            Some(vec![])
+        }
         Type::Named(n) if n == "FunctionInfo" && method == "reaches_panic" => Some(vec![]),
         Type::Named(n) if n == "EffectInfo" && method == "has" => Some(vec![Type::String]),
         // D-ITERTOOLS1=A: Iter shares list adapter arg types; materializers take none.
         Type::Apply { name, args }
-            if name == Syntax::TYPE_ITER && args.len() == 1 && matches!(method, "to_list" | "collect") =>
+            if name == Syntax::TYPE_ITER
+                && args.len() == 1
+                && matches!(method, "to_list" | "collect") =>
         {
             Some(vec![])
         }
@@ -2618,13 +2884,14 @@ pub fn builtin_method_arg_types(recv_ty: &Type, method: &str) -> Option<Vec<Type
                     effect_bound: None,
                     return_view_provenance: None,
                     param_contract: None,
-                call_metadata: None,
+                    call_metadata: None,
                 },
             ]),
             "each" => Some(vec![Type::Fn {
                 params: vec![(**key).clone(), (**value).clone()],
                 ret: None,
-                effect_bound: None, return_view_provenance: None,
+                effect_bound: None,
+                return_view_provenance: None,
                 param_contract: None,
                 call_metadata: None,
             }]),
@@ -2654,7 +2921,8 @@ pub fn builtin_method_arg_types(recv_ty: &Type, method: &str) -> Option<Vec<Type
             "map" => Some(vec![Type::Fn {
                 params: vec![(**inner).clone()],
                 ret: None, // sema refines R from the closure's actual return
-                effect_bound: None, return_view_provenance: None,
+                effect_bound: None,
+                return_view_provenance: None,
                 param_contract: None,
                 call_metadata: None,
             }]),
@@ -2679,7 +2947,7 @@ pub fn builtin_method_arg_types(recv_ty: &Type, method: &str) -> Option<Vec<Type
                         ret: Some(Box::new(value)),
                         effect_bound: None,
                         param_contract: None,
-                call_metadata: None,
+                        call_metadata: None,
                         return_view_provenance: None,
                     }])
                 }
@@ -2688,7 +2956,7 @@ pub fn builtin_method_arg_types(recv_ty: &Type, method: &str) -> Option<Vec<Type
                     ret: None,
                     effect_bound: None,
                     param_contract: None,
-                call_metadata: None,
+                    call_metadata: None,
                     return_view_provenance: None,
                 }]),
                 _ => Some(vec![]),
@@ -2705,7 +2973,7 @@ pub fn builtin_method_arg_types(recv_ty: &Type, method: &str) -> Option<Vec<Type
                     ret: None,
                     effect_bound: None,
                     param_contract: None,
-                call_metadata: None,
+                    call_metadata: None,
                     return_view_provenance: None,
                 }]),
                 "split" => Some(vec![
@@ -2714,7 +2982,7 @@ pub fn builtin_method_arg_types(recv_ty: &Type, method: &str) -> Option<Vec<Type
                         ret: None,
                         effect_bound: None,
                         param_contract: None,
-                call_metadata: None,
+                        call_metadata: None,
                         return_view_provenance: None,
                     },
                     Type::Fn {
@@ -2722,7 +2990,7 @@ pub fn builtin_method_arg_types(recv_ty: &Type, method: &str) -> Option<Vec<Type
                         ret: None,
                         effect_bound: None,
                         param_contract: None,
-                call_metadata: None,
+                        call_metadata: None,
                         return_view_provenance: None,
                     },
                 ]),
@@ -2795,9 +3063,10 @@ pub fn builtin_method_arg_types(recv_ty: &Type, method: &str) -> Option<Vec<Type
                     Type::Fn {
                         params: vec![payload],
                         ret: None,
-                        effect_bound: None, return_view_provenance: None,
+                        effect_bound: None,
+                        return_view_provenance: None,
                         param_contract: None,
-                call_metadata: None,
+                        call_metadata: None,
                     },
                 ]),
                 "on_priority" => Some(vec![
@@ -2806,9 +3075,10 @@ pub fn builtin_method_arg_types(recv_ty: &Type, method: &str) -> Option<Vec<Type
                     Type::Fn {
                         params: vec![payload],
                         ret: None,
-                        effect_bound: None, return_view_provenance: None,
+                        effect_bound: None,
+                        return_view_provenance: None,
                         param_contract: None,
-                call_metadata: None,
+                        call_metadata: None,
                     },
                 ]),
                 "emit" => Some(vec![payload]),
@@ -2825,14 +3095,26 @@ pub fn builtin_method_arg_types(recv_ty: &Type, method: &str) -> Option<Vec<Type
             match method {
                 "on" | "once" => Some(vec![
                     Type::Named(crate::Syntax::TYPE_EVENT_SCOPE.to_string()),
-                    Type::Fn { params: vec![payload], ret: Some(Box::new(handler_ret)), effect_bound: None, param_contract: None,
-                call_metadata: None, return_view_provenance: None },
+                    Type::Fn {
+                        params: vec![payload],
+                        ret: Some(Box::new(handler_ret)),
+                        effect_bound: None,
+                        param_contract: None,
+                        call_metadata: None,
+                        return_view_provenance: None,
+                    },
                 ]),
                 "on_priority" => Some(vec![
                     Type::Named(crate::Syntax::TYPE_EVENT_SCOPE.to_string()),
                     Type::Int,
-                    Type::Fn { params: vec![payload], ret: Some(Box::new(handler_ret)), effect_bound: None, param_contract: None,
-                call_metadata: None, return_view_provenance: None },
+                    Type::Fn {
+                        params: vec![payload],
+                        ret: Some(Box::new(handler_ret)),
+                        effect_bound: None,
+                        param_contract: None,
+                        call_metadata: None,
+                        return_view_provenance: None,
+                    },
                 ]),
                 "emit_async" => Some(vec![payload]),
                 _ => Some(vec![]),
@@ -2847,9 +3129,10 @@ pub fn builtin_method_arg_types(recv_ty: &Type, method: &str) -> Option<Vec<Type
                     Type::Fn {
                         params: vec![payload],
                         ret: Some(Box::new(result)),
-                        effect_bound: None, return_view_provenance: None,
+                        effect_bound: None,
+                        return_view_provenance: None,
                         param_contract: None,
-                call_metadata: None,
+                        call_metadata: None,
                     },
                 ]),
                 "on_priority" => Some(vec![
@@ -2858,9 +3141,10 @@ pub fn builtin_method_arg_types(recv_ty: &Type, method: &str) -> Option<Vec<Type
                     Type::Fn {
                         params: vec![payload],
                         ret: Some(Box::new(result)),
-                        effect_bound: None, return_view_provenance: None,
+                        effect_bound: None,
+                        return_view_provenance: None,
                         param_contract: None,
-                call_metadata: None,
+                        call_metadata: None,
                     },
                 ]),
                 "run" => Some(vec![payload, result]),
@@ -2880,9 +3164,10 @@ pub fn builtin_method_arg_types(recv_ty: &Type, method: &str) -> Option<Vec<Type
                     Type::Fn {
                         params: vec![payload],
                         ret: Some(Box::new(decision)),
-                        effect_bound: None, return_view_provenance: None,
+                        effect_bound: None,
+                        return_view_provenance: None,
                         param_contract: None,
-                call_metadata: None,
+                        call_metadata: None,
                     },
                 ]),
                 "on_priority" => Some(vec![
@@ -2891,9 +3176,10 @@ pub fn builtin_method_arg_types(recv_ty: &Type, method: &str) -> Option<Vec<Type
                     Type::Fn {
                         params: vec![payload],
                         ret: Some(Box::new(decision)),
-                        effect_bound: None, return_view_provenance: None,
+                        effect_bound: None,
+                        return_view_provenance: None,
                         param_contract: None,
-                call_metadata: None,
+                        call_metadata: None,
                     },
                 ]),
                 "run" => Some(vec![payload]),
@@ -2914,9 +3200,10 @@ pub fn builtin_method_arg_types(recv_ty: &Type, method: &str) -> Option<Vec<Type
                 Type::Fn {
                     params: vec![Type::Named(crate::Syntax::TYPE_WATCH_EVENT.to_string())],
                     ret: None,
-                    effect_bound: None, return_view_provenance: None,
+                    effect_bound: None,
+                    return_view_provenance: None,
                     param_contract: None,
-                call_metadata: None,
+                    call_metadata: None,
                 },
             ]),
             _ => Some(vec![]),
@@ -2936,8 +3223,13 @@ pub fn builtin_method_arg_types(recv_ty: &Type, method: &str) -> Option<Vec<Type
                     name: "Set".to_string(),
                     args: vec![elem.clone()],
                 }]),
-                "union" | "intersection" | "difference" | "symmetric_difference"
-                | "is_subset" | "is_superset" | "is_disjoint" => Some(vec![Type::Apply {
+                "union"
+                | "intersection"
+                | "difference"
+                | "symmetric_difference"
+                | "is_subset"
+                | "is_superset"
+                | "is_disjoint" => Some(vec![Type::Apply {
                     name: "Set".to_string(),
                     args: vec![elem.clone()],
                 }]),
@@ -2948,7 +3240,7 @@ pub fn builtin_method_arg_types(recv_ty: &Type, method: &str) -> Option<Vec<Type
                     effect_bound: None,
                     return_view_provenance: None,
                     param_contract: None,
-                call_metadata: None,
+                    call_metadata: None,
                 }]),
                 "each" => Some(vec![Type::Fn {
                     params: vec![elem.clone()],
@@ -2956,7 +3248,7 @@ pub fn builtin_method_arg_types(recv_ty: &Type, method: &str) -> Option<Vec<Type
                     effect_bound: None,
                     return_view_provenance: None,
                     param_contract: None,
-                call_metadata: None,
+                    call_metadata: None,
                 }]),
                 "map" | "flat_map" => Some(vec![Type::Fn {
                     params: vec![elem],
@@ -2964,7 +3256,7 @@ pub fn builtin_method_arg_types(recv_ty: &Type, method: &str) -> Option<Vec<Type
                     effect_bound: None,
                     return_view_provenance: None,
                     param_contract: None,
-                call_metadata: None,
+                    call_metadata: None,
                 }]),
                 "fold" => Some(vec![
                     Type::Int, // init — sema refines
@@ -2974,7 +3266,7 @@ pub fn builtin_method_arg_types(recv_ty: &Type, method: &str) -> Option<Vec<Type
                         effect_bound: None,
                         return_view_provenance: None,
                         param_contract: None,
-                call_metadata: None,
+                        call_metadata: None,
                     },
                 ]),
                 _ => Some(vec![]),
@@ -2984,8 +3276,13 @@ pub fn builtin_method_arg_types(recv_ty: &Type, method: &str) -> Option<Vec<Type
             let elem = args.first().cloned().unwrap_or(Type::Int);
             match method {
                 "add" | "has" | "remove" => Some(vec![elem.clone()]),
-                "union" | "intersection" | "difference" | "symmetric_difference"
-                | "is_subset" | "is_superset" | "is_disjoint" => Some(vec![Type::Apply {
+                "union"
+                | "intersection"
+                | "difference"
+                | "symmetric_difference"
+                | "is_subset"
+                | "is_superset"
+                | "is_disjoint" => Some(vec![Type::Apply {
                     name: Syntax::TYPE_RANK.to_string(),
                     args: vec![elem],
                 }]),
@@ -3000,9 +3297,10 @@ pub fn builtin_method_arg_types(recv_ty: &Type, method: &str) -> Option<Vec<Type
                 "any" => Some(vec![Type::Fn {
                     params: vec![elem],
                     ret: Some(Box::new(Type::Bool)),
-                    effect_bound: None, return_view_provenance: None,
+                    effect_bound: None,
+                    return_view_provenance: None,
                     param_contract: None,
-                call_metadata: None,
+                    call_metadata: None,
                 }]),
                 _ => Some(vec![]),
             }
@@ -3028,17 +3326,19 @@ pub fn builtin_method_arg_types(recv_ty: &Type, method: &str) -> Option<Vec<Type
                     Type::Fn {
                         params: vec![Type::Int, elem],
                         ret: Some(Box::new(Type::Int)),
-                        effect_bound: None, return_view_provenance: None,
+                        effect_bound: None,
+                        return_view_provenance: None,
                         param_contract: None,
-                call_metadata: None,
+                        call_metadata: None,
                     },
                 ]),
                 "map" => Some(vec![Type::Fn {
                     params: vec![elem],
                     ret: None, // sema refines R from the closure's actual return
-                    effect_bound: None, return_view_provenance: None,
+                    effect_bound: None,
+                    return_view_provenance: None,
                     param_contract: None,
-                call_metadata: None,
+                    call_metadata: None,
                 }]),
                 _ => Some(vec![]),
             }
@@ -3096,7 +3396,10 @@ pub fn builtin_receiver_borrow(recv_ty: &Type, method: &str) -> BuiltinReceiverB
     } else if !builtin_method_mutates(recv_ty, method) {
         BuiltinReceiverBorrow::Read
     } else if (matches!(recv_ty, Type::List(_))
-        && matches!(method, "remove" | "sort_by" | "sort_desc" | "sort_by_desc" | "edit_disjoint"))
+        && matches!(
+            method,
+            "remove" | "sort_by" | "sort_desc" | "sort_by_desc" | "edit_disjoint"
+        ))
         || matches!(
             recv_ty,
             Type::Named(name)

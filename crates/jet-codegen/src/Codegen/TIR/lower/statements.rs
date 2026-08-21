@@ -2439,12 +2439,12 @@ fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmt
                     let mut init =
                         moved_view.unwrap_or_else(|| lower_owned_expr(&b.init, cx, env));
                     // D-ALLOCFAIL1=A: a fallible allocator result carries a live view
-                    // even though the source surface names only `T ? AllocError`.
+                    // even though the source surface names only `T ! AllocError`.
                     // Keep that internal carrier through TIR so every tier returns and
                     // binds the same reference, rather than materializing a copy.
                     let allocator_carrier = init.ty.is_allocator_view() || init.ty.is_allocator_result();
                     // D-CONC-SPAWN1: a fallible task body's closure returns the
-                    // internal carrier `Task<T ? E>` (`spawn_body_result_ty`),
+                    // internal carrier `Task<T ! E>` (`spawn_body_result_ty`),
                     // while sema's surface binding type stays `Task<T>`. Keep
                     // the carrier through TIR — bind and annotate with the
                     // lowered spawn type so the Rust `let` matches its init —

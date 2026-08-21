@@ -76,9 +76,7 @@ pub fn retired_acronym_spelling(name: &str) -> Option<String> {
 pub fn respell_acronym_name(name: &str) -> String {
     for (from, to) in ACRONYM_RESPILLS {
         if let Some(rest) = name.strip_prefix(from) {
-            if rest.is_empty()
-                || rest.starts_with(|c: char| c.is_uppercase() || c == '_')
-            {
+            if rest.is_empty() || rest.starts_with(|c: char| c.is_uppercase() || c == '_') {
                 return format!("{to}{rest}");
             }
         }
@@ -204,7 +202,6 @@ pub fn to_camel_acronym(name: &str) -> String {
     }
     out
 }
-
 
 /// Convert to screaming snake via the acronym split rule.
 pub fn to_shouty_acronym(name: &str) -> String {

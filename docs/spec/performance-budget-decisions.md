@@ -233,6 +233,16 @@ measured frames, viewport, and settings in canonical provider/context identity.
 
 Providers are resolved deterministically from the compiler-owned registry, never from `PATH`. A `ProviderRequest` fixes schema/version, request id, provider/context/budget hashes, ordered metrics, workload, and policy. Canonical sorting and hashing use REPORT1 bytes. Providers emit a contiguous ordered stream of typed `Sample`, `Unavailable`, then one final `Complete`; providers collect evidence only, while the shared engine owns policy and outcomes. Limits are 1,000,000 samples, 16 MiB total bytes, 4,096 specs, and 512 scalars of detail. Valid unavailability or too few samples is E2906; malformed streams, panic, or timeout are E2908; unsupported pairs are E2903; unresolved providers are E2905. Provider identity and context remain part of every fact.
 
+The built-in `BuildArtifact(target)` provider measures `BinarySize` and
+`ArtifactSize` as one selected-artifact byte count. For target-scoped
+`StartupTime` and `MemoryHighWater`, it runs twenty fresh child processes. A
+startup sample is the elapsed nanoseconds from spawn to the first stdout line;
+the target program owns that line as its readiness declaration. A memory sample
+is Linux `ru_maxrss` in bytes, with live `/proc/<pid>/status` `VmHWM` as the
+same-process observation. A request containing both statistical metrics shares
+one twenty-trial process family. The provider version and isolation fields pin
+this rule into the baseline context; no throughput measurement is implied.
+
 ## D-PERFBUDGET-INTEGRATION1=A — Intent-owned refresh with compatible reuse
 
 Every build runs deterministic Fail gates. `jet test --measure` owns

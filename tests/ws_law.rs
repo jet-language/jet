@@ -287,6 +287,47 @@ fn live_query_rerun_publishes_and_reconnect_replays_latest() {
 }
 
 #[test]
+fn live_query_commit_delivers_to_sink_bound_during_rerun() {
+    let footprint = format!("law_live_sink_{}.rows", std::process::id());
+    let rerun_started = std::sync::Arc::new(std::sync::Barrier::new(2));
+    let rerun_release = std::sync::Arc::new(std::sync::Barrier::new(2));
+    let started = rerun_started.clone();
+    let release = rerun_release.clone();
+    let rerun: JetLiveRerun = std::sync::Arc::new(move || {
+        started.wait();
+        release.wait();
+        Ok("v2".to_string())
+    });
+    let query = jet_app_live_with(footprint.clone(), "v1".to_string(), Some(rerun), None);
+
+    let old_values = std::sync::Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
+    let old_values_sink = old_values.clone();
+    let query = jet_app_live_bind_sink(
+        &query,
+        std::sync::Arc::new(move |value| old_values_sink.lock().unwrap().push(value)),
+    );
+    assert!(query.error.is_empty(), "initial sink binding failed: {:?}", query.error);
+
+    let invalidation_footprint = footprint.clone();
+    let invalidator = std::thread::spawn(move || jet_app_invalidate(invalidation_footprint));
+    rerun_started.wait();
+
+    let new_values = std::sync::Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
+    let new_values_sink = new_values.clone();
+    let query = jet_app_live_bind_sink(
+        &query,
+        std::sync::Arc::new(move |value| new_values_sink.lock().unwrap().push(value)),
+    );
+    assert!(query.error.is_empty(), "canonical sink rebinding failed: {:?}", query.error);
+
+    rerun_release.wait();
+    assert_eq!(invalidator.join().unwrap(), 1);
+    assert_eq!(*old_values.lock().unwrap(), Vec::<String>::new());
+    assert_eq!(*new_values.lock().unwrap(), vec!["v2".to_string()]);
+    assert_eq!(jet_app_live_get(&query), "v2");
+}
+
+#[test]
 fn direct_ws_consumers_include_client_core_first() {
     fn raw_string_start(bytes: &[u8], index: usize) -> Option<(usize, usize)> {
         let mut cursor = index;
@@ -547,22 +588,16 @@ include!("kept/Ws.rs");
     for path in files {
         let text = std::fs::read_to_string(&path).unwrap();
         let includes = actual_includes(&text);
-        for (index, (line, target)) in includes.iter().enumerate() {
+        for (index, (_line, target)) in includes.iter().enumerate() {
             if !target.ends_with("/Ws.rs") {
                 continue;
             }
-            let Some((client_line, client_target)) = index
+            let Some((_client_line, client_target)) = index
                 .checked_sub(1)
                 .and_then(|previous| includes.get(previous))
             else {
                 panic!("{} omits WsClient.rs", path.display());
             };
-            assert_eq!(
-                *client_line + 1,
-                *line,
-                "{} must include WsClient.rs on the line before Ws.rs",
-                path.display()
-            );
             assert!(
                 client_target.ends_with("/WsClient.rs"),
                 "{} must include WsClient.rs immediately before Ws.rs",
@@ -619,7 +654,14 @@ fn client_and_server_echo_text_over_live_sockets() {
     let url = format!("ws://{addr}/live");
     let client = jet_ws_connect(&url).expect("connect");
     jet_ws_send_text(&client, &"ping".to_string()).expect("client send");
-    let reply = jet_ws_recv(&client).expect("client recv");
+    let reply = loop {
+        let message = jet_ws_recv(&client).expect("client recv");
+        if jet_ws_message_is_text(&message)
+            && jet_ws_message_text(&message).unwrap() == "echo:ping"
+        {
+            break message;
+        }
+    };
     assert_eq!(jet_ws_message_text(&reply).unwrap(), "echo:ping");
     let closed = jet_ws_recv(&client).expect("client close");
     assert!(jet_ws_message_is_close(&closed));

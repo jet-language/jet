@@ -289,7 +289,12 @@ fn pad16(buf: &mut Vec<u8>) {
     }
 }
 
-fn chacha20poly1305_seal(key: &[u8; 32], nonce: &[u8; 12], plaintext: &[u8], aad: &[u8]) -> Vec<u8> {
+fn chacha20poly1305_seal(
+    key: &[u8; 32],
+    nonce: &[u8; 12],
+    plaintext: &[u8],
+    aad: &[u8],
+) -> Vec<u8> {
     let mut poly_key = [0u8; 32];
     poly_key.copy_from_slice(&chacha20_block(key, 0, nonce)[..32]);
     let ciphertext = chacha20_xor(key, nonce, 1, plaintext);

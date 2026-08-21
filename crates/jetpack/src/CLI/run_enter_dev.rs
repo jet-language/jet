@@ -955,7 +955,7 @@ fn task_cache_key(
     for (name, upstream, provider) in table.declarations() {
         identity.push_str(&format!("source={name}:{upstream}:{}\n", provider.label()));
     }
-    for relative in [Syntax::ENV_FILE, "jetpack.toml", Syntax::UNIFIED_LOCK_FILE] {
+    for relative in [Syntax::ENV_FILE, Syntax::UNIFIED_LOCK_FILE] {
         let path = project_dir.join(relative);
         if path.is_file() {
             identity.push_str(&format!("project-input={relative}:{}\n", crate::SHA256::sha256_file_hex(&path).map_err(|error| format!("couldn't hash `{relative}`: {error}"))?));

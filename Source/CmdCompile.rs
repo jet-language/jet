@@ -1700,7 +1700,7 @@ fn rewrite_json_canonical_calls(src: &str) -> String {
 }
 
 /// D-JSONCANON1 migration: is the function enclosing byte offset `at` in
-/// `src` fallible (S34 `-> T ? E` / bare `T ?`)? Walks outward through
+/// `src` fallible (S34 `-> T ! E` / bare `T ?`)? Walks outward through
 /// nested `{ }` scopes — `if`/`for`/`match`/struct-literal bodies aren't
 /// functions — until a scope's header text parses as a `fn` signature, or
 /// there is no enclosing scope (top-level, e.g. a `$` initializer:

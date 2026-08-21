@@ -2,11 +2,11 @@
 //! inspection. The entry parameter type remains source truth; consumers never
 //! reconstruct shell names, requiredness, defaults, or help independently.
 
-use crate::AST::{
-    CtFloat, CtValue, Expr, Field, Func, Item, Marker, Param, ProgramBundle, StrPart,
-    StructDef, Type,
-};
 use crate::Syntax;
+use crate::AST::{
+    CtFloat, CtValue, Expr, Field, Func, Item, Marker, Param, ProgramBundle, StrPart, StructDef,
+    Type,
+};
 
 const RECORD_MAGIC: &[u8; 8] = b"JETCMD\0\0";
 /// D-CLI-DOCS1=A bumps the record so #Doc-derived descriptions are part of
@@ -125,9 +125,7 @@ impl CLIInputSchema {
 
     pub fn default_display(&self) -> Option<String> {
         match &self.shape {
-            CLIInputShape::Value { default, .. } => {
-                default.as_ref().map(CLIDefault::display)
-            }
+            CLIInputShape::Value { default, .. } => default.as_ref().map(CLIDefault::display),
             CLIInputShape::Flag => Some("false".to_string()),
         }
     }
@@ -199,16 +197,13 @@ pub fn command_target(
     items: &[Item],
     function_owner: &str,
 ) -> Option<CLICommandTarget> {
-    let method = structure
-        .methods
-        .iter()
-        .find(|method| {
-            method.name.to_lowercase() == command.name
-                && !structure
-                    .fields
-                    .iter()
-                    .any(|field| field.name == method.name && field.computed.is_some())
-        });
+    let method = structure.methods.iter().find(|method| {
+        method.name.to_lowercase() == command.name
+            && !structure
+                .fields
+                .iter()
+                .any(|field| field.name == method.name && field.computed.is_some())
+    });
 
     let (function, is_binding) = if let Some(method) = method {
         (method.clone(), false)
@@ -265,43 +260,52 @@ pub fn executable_schema(bundle: &ProgramBundle) -> CLICommandSchema {
 }
 
 fn selected_entry_type(items: &[Item]) -> Option<&str> {
-    items.iter().find_map(|item| {
-        let Item::Const(value) = item else { return None };
-        let output = value.resolved_output.as_ref()?;
-        if !output.selected
-            || output.kind != crate::AST::OutputKind::Executable
-            || output.params.len() != 1
-        {
-            return None;
-        }
-        match &output.params[0].1 {
-            Type::Named(name) => Some(name.as_str()),
-            _ => None,
-        }
-    }).or_else(|| {
-        items.iter().find_map(|item| {
-            let Item::Func(function) = item else { return None };
-            if function.name != "run" {
+    items
+        .iter()
+        .find_map(|item| {
+            let Item::Const(value) = item else {
+                return None;
+            };
+            let output = value.resolved_output.as_ref()?;
+            if !output.selected
+                || output.kind != crate::AST::OutputKind::Executable
+                || output.params.len() != 1
+            {
                 return None;
             }
-            if function.params.len() == 1 {
-                if let Type::Named(name) = &function.params[0].ty {
-                    let is_local_type = items
-                        .iter()
-                        .any(|item| matches!(item, Item::Struct(s) if s.name == name.as_str()));
-                    if is_local_type || name.contains('.') {
-                        return Some(name.as_str());
+            match &output.params[0].1 {
+                Type::Named(name) => Some(name.as_str()),
+                _ => None,
+            }
+        })
+        .or_else(|| {
+            items.iter().find_map(|item| {
+                let Item::Func(function) = item else {
+                    return None;
+                };
+                if function.name != "run" {
+                    return None;
+                }
+                if function.params.len() == 1 {
+                    if let Type::Named(name) = &function.params[0].ty {
+                        let is_local_type = items
+                            .iter()
+                            .any(|item| matches!(item, Item::Struct(s) if s.name == name.as_str()));
+                        if is_local_type || name.contains('.') {
+                            return Some(name.as_str());
+                        }
                     }
                 }
-            }
-            direct_run_function(items).is_some().then_some("run")
+                direct_run_function(items).is_some().then_some("run")
+            })
         })
-    })
 }
 
 fn direct_run_function(items: &[Item]) -> Option<&Func> {
     items.iter().find_map(|item| {
-        let Item::Func(function) = item else { return None };
+        let Item::Func(function) = item else {
+            return None;
+        };
         if function.name != "run"
             || function.params.is_empty()
             || function_inputs(function).is_none()
@@ -338,7 +342,9 @@ pub fn is_direct_run_entry(items: &[Item]) -> bool {
 fn selected_entry_type_source(bundle: &ProgramBundle) -> Option<(usize, &str)> {
     let entry = &bundle.modules[bundle.entry];
     if let Some(selected) = entry.items.iter().find_map(|item| {
-        let Item::Const(value) = item else { return None };
+        let Item::Const(value) = item else {
+            return None;
+        };
         let output = value.resolved_output.as_ref()?;
         if !output.selected
             || output.kind != crate::AST::OutputKind::Executable
@@ -354,7 +360,9 @@ fn selected_entry_type_source(bundle: &ProgramBundle) -> Option<(usize, &str)> {
         return Some(selected);
     }
     entry.items.iter().find_map(|item| {
-        let Item::Func(function) = item else { return None };
+        let Item::Func(function) = item else {
+            return None;
+        };
         if function.name != "run" {
             return None;
         }
@@ -391,9 +399,10 @@ pub fn entry_type_module(bundle: &ProgramBundle) -> Option<usize> {
     let (source, name) = selected_entry_type_source(bundle)?;
     let entry = &bundle.modules[source];
     if name == "run"
-        && entry.items.iter().any(|item| {
-            matches!(item, Item::Func(function) if function.name == "run")
-        })
+        && entry
+            .items
+            .iter()
+            .any(|item| matches!(item, Item::Func(function) if function.name == "run"))
     {
         return Some(source);
     }
@@ -408,16 +417,20 @@ pub fn entry_type_module(bundle: &ProgramBundle) -> Option<usize> {
     {
         return Some(source);
     }
-    entry.imports.iter().filter_map(|import| {
-        if wanted_alias.is_some_and(|alias| import.import_alias() != alias) {
-            return None;
-        }
-        let target = bundle.name_ledger.import_target(source, import.span)?;
-        bundle
-            .name_ledger
-            .visible(source, target, leaf)
-            .then_some(target)
-    }).last()
+    entry
+        .imports
+        .iter()
+        .filter_map(|import| {
+            if wanted_alias.is_some_and(|alias| import.import_alias() != alias) {
+                return None;
+            }
+            let target = bundle.name_ledger.import_target(source, import.span)?;
+            bundle
+                .name_ledger
+                .visible(source, target, leaf)
+                .then_some(target)
+        })
+        .last()
 }
 
 /// Checked schema for a typed `fn run`, including a CLI type declared in a
@@ -473,7 +486,9 @@ pub fn encode_record(schema: &CLICommandSchema) -> Vec<u8> {
         put_string(&mut payload, &command.name);
         put_optional_string(&mut payload, command.description.as_deref());
         put_u32(&mut payload, command.inputs.len() as u32);
-        for input in &command.inputs { encode_input(&mut payload, input); }
+        for input in &command.inputs {
+            encode_input(&mut payload, input);
+        }
     }
     let mut record = Vec::with_capacity(46 + payload.len());
     record.extend_from_slice(RECORD_MAGIC);
@@ -496,11 +511,20 @@ pub enum MetadataError {
 impl std::fmt::Display for MetadataError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            MetadataError::UnknownFormat => write!(f, "the file is not an ELF, PE, Mach-O, or Wasm executable"),
+            MetadataError::UnknownFormat => {
+                write!(f, "the file is not an ELF, PE, Mach-O, or Wasm executable")
+            }
             MetadataError::Missing => write!(f, "the executable has no JetCommandSchema metadata"),
-            MetadataError::Duplicate => write!(f, "the executable contains more than one JetCommandSchema record"),
-            MetadataError::Malformed(why) => write!(f, "the JetCommandSchema record is malformed ({why})"),
-            MetadataError::UnsupportedVersion(version) => write!(f, "JetCommandSchema version {version} is not supported"),
+            MetadataError::Duplicate => write!(
+                f,
+                "the executable contains more than one JetCommandSchema record"
+            ),
+            MetadataError::Malformed(why) => {
+                write!(f, "the JetCommandSchema record is malformed ({why})")
+            }
+            MetadataError::UnsupportedVersion(version) => {
+                write!(f, "JetCommandSchema version {version} is not supported")
+            }
         }
     }
 }
@@ -517,8 +541,12 @@ pub fn read_executable(bytes: &[u8]) -> Result<CLICommandSchema, MetadataError> 
     } else {
         return Err(MetadataError::UnknownFormat);
     };
-    if sections.is_empty() { return Err(MetadataError::Missing); }
-    if sections.len() != 1 { return Err(MetadataError::Duplicate); }
+    if sections.is_empty() {
+        return Err(MetadataError::Missing);
+    }
+    if sections.len() != 1 {
+        return Err(MetadataError::Duplicate);
+    }
     decode_record(sections[0])
 }
 
@@ -527,7 +555,9 @@ pub fn decode_record(record: &[u8]) -> Result<CLICommandSchema, MetadataError> {
         return Err(MetadataError::Malformed("bad record header"));
     }
     let version = u16::from_le_bytes([record[8], record[9]]);
-    if version != RECORD_VERSION { return Err(MetadataError::UnsupportedVersion(version)); }
+    if version != RECORD_VERSION {
+        return Err(MetadataError::UnsupportedVersion(version));
+    }
     let len = u32::from_le_bytes(record[10..14].try_into().unwrap()) as usize;
     if len > MAX_RECORD_BYTES || 46usize.checked_add(len) != Some(record.len()) {
         return Err(MetadataError::Malformed("invalid record length"));
@@ -546,24 +576,38 @@ pub fn decode_record(record: &[u8]) -> Result<CLICommandSchema, MetadataError> {
     };
     let version = cursor.optional_string()?;
     let count = cursor.u32()? as usize;
-    if count > MAX_INPUTS { return Err(MetadataError::Malformed("too many inputs")); }
+    if count > MAX_INPUTS {
+        return Err(MetadataError::Malformed("too many inputs"));
+    }
     let mut inputs = Vec::with_capacity(count);
     for _ in 0..count {
         inputs.push(decode_input(&mut cursor)?);
     }
     let command_count = cursor.u32()? as usize;
-    if command_count > MAX_INPUTS { return Err(MetadataError::Malformed("too many commands")); }
+    if command_count > MAX_INPUTS {
+        return Err(MetadataError::Malformed("too many commands"));
+    }
     let mut commands = Vec::with_capacity(command_count);
     for _ in 0..command_count {
         let name = cursor.string()?;
         let description = cursor.optional_string()?;
         let input_count = cursor.u32()? as usize;
-        if input_count > MAX_INPUTS { return Err(MetadataError::Malformed("too many command inputs")); }
+        if input_count > MAX_INPUTS {
+            return Err(MetadataError::Malformed("too many command inputs"));
+        }
         let mut command_inputs = Vec::with_capacity(input_count);
-        for _ in 0..input_count { command_inputs.push(decode_input(&mut cursor)?); }
-        commands.push(CLISubcommandSchema { name, description, inputs: command_inputs });
+        for _ in 0..input_count {
+            command_inputs.push(decode_input(&mut cursor)?);
+        }
+        commands.push(CLISubcommandSchema {
+            name,
+            description,
+            inputs: command_inputs,
+        });
     }
-    if !cursor.done() { return Err(MetadataError::Malformed("trailing payload bytes")); }
+    if !cursor.done() {
+        return Err(MetadataError::Malformed("trailing payload bytes"));
+    }
     Ok(CLICommandSchema {
         entry_type,
         description,
@@ -583,14 +627,27 @@ fn encode_input(payload: &mut Vec<u8>, input: &CLIInputSchema) {
     put_optional_string(payload, input.metavar.as_deref());
     match &input.shape {
         CLIInputShape::Flag => payload.push(0),
-        CLIInputShape::Value { kind, optional, default } => {
+        CLIInputShape::Value {
+            kind,
+            optional,
+            default,
+        } => {
             payload.push(1);
-            payload.push(match kind { CLIValueKind::Bool => 0, CLIValueKind::Int => 1, CLIValueKind::Float => 2, CLIValueKind::String => 3, CLIValueKind::Path => 4 });
+            payload.push(match kind {
+                CLIValueKind::Bool => 0,
+                CLIValueKind::Int => 1,
+                CLIValueKind::Float => 2,
+                CLIValueKind::String => 3,
+                CLIValueKind::Path => 4,
+            });
             payload.push(u8::from(*optional));
             match default {
                 None => payload.push(0),
                 Some(CLIDefault::TypeDefault) => payload.push(1),
-                Some(value) => { payload.push(2); put_string(payload, &value.display()); }
+                Some(value) => {
+                    payload.push(2);
+                    put_string(payload, &value.display());
+                }
             }
         }
     }
@@ -605,87 +662,143 @@ fn encode_input(payload: &mut Vec<u8>, input: &CLIInputSchema) {
 }
 
 fn decode_input(cursor: &mut Cursor<'_>) -> Result<CLIInputSchema, MetadataError> {
-        let field = cursor.string()?;
-        let flag = cursor.string()?;
-        let short = cursor.optional_string()?;
-        let env = cursor.optional_string()?;
-        let help = cursor.string()?;
-        let metavar = cursor.optional_string()?;
-        let shape = match cursor.byte()? {
-            0 => CLIInputShape::Flag,
-            1 => {
-                let kind = match cursor.byte()? {
-                    0 => CLIValueKind::Bool, 1 => CLIValueKind::Int,
-                    2 => CLIValueKind::Float, 3 => CLIValueKind::String,
-                    4 => CLIValueKind::Path,
-                    _ => return Err(MetadataError::Malformed("unknown input kind")),
-                };
-                let optional = match cursor.byte()? { 0 => false, 1 => true, _ => return Err(MetadataError::Malformed("invalid optional bit")) };
-                let default = match cursor.byte()? {
-                    0 => None,
-                    1 => Some(CLIDefault::TypeDefault),
-                    2 => Some(CLIDefault::Recorded(cursor.string()?)),
-                    _ => return Err(MetadataError::Malformed("unknown default kind")),
-                };
-                CLIInputShape::Value { kind, optional, default }
+    let field = cursor.string()?;
+    let flag = cursor.string()?;
+    let short = cursor.optional_string()?;
+    let env = cursor.optional_string()?;
+    let help = cursor.string()?;
+    let metavar = cursor.optional_string()?;
+    let shape = match cursor.byte()? {
+        0 => CLIInputShape::Flag,
+        1 => {
+            let kind = match cursor.byte()? {
+                0 => CLIValueKind::Bool,
+                1 => CLIValueKind::Int,
+                2 => CLIValueKind::Float,
+                3 => CLIValueKind::String,
+                4 => CLIValueKind::Path,
+                _ => return Err(MetadataError::Malformed("unknown input kind")),
+            };
+            let optional = match cursor.byte()? {
+                0 => false,
+                1 => true,
+                _ => return Err(MetadataError::Malformed("invalid optional bit")),
+            };
+            let default = match cursor.byte()? {
+                0 => None,
+                1 => Some(CLIDefault::TypeDefault),
+                2 => Some(CLIDefault::Recorded(cursor.string()?)),
+                _ => return Err(MetadataError::Malformed("unknown default kind")),
+            };
+            CLIInputShape::Value {
+                kind,
+                optional,
+                default,
             }
-            _ => return Err(MetadataError::Malformed("unknown input shape")),
-        };
-        let positional = match cursor.byte()? {
-            0 => None,
-            1 => {
-                let order = cursor.u32()?;
-                if order > u16::MAX as u32 {
-                    return Err(MetadataError::Malformed("positional order out of range"));
-                }
-                Some(order as u16)
+        }
+        _ => return Err(MetadataError::Malformed("unknown input shape")),
+    };
+    let positional = match cursor.byte()? {
+        0 => None,
+        1 => {
+            let order = cursor.u32()?;
+            if order > u16::MAX as u32 {
+                return Err(MetadataError::Malformed("positional order out of range"));
             }
-            _ => return Err(MetadataError::Malformed("invalid positional bit")),
-        };
-    Ok(CLIInputSchema { field, flag, short, env, help, metavar, shape, positional })
+            Some(order as u16)
+        }
+        _ => return Err(MetadataError::Malformed("invalid positional bit")),
+    };
+    Ok(CLIInputSchema {
+        field,
+        flag,
+        short,
+        env,
+        help,
+        metavar,
+        shape,
+        positional,
+    })
 }
 
-fn put_u32(out: &mut Vec<u8>, value: u32) { out.extend_from_slice(&value.to_le_bytes()); }
+fn put_u32(out: &mut Vec<u8>, value: u32) {
+    out.extend_from_slice(&value.to_le_bytes());
+}
 fn put_string(out: &mut Vec<u8>, value: &str) {
     put_u32(out, value.len() as u32);
     out.extend_from_slice(value.as_bytes());
 }
 fn put_optional_string(out: &mut Vec<u8>, value: Option<&str>) {
     out.push(u8::from(value.is_some()));
-    if let Some(value) = value { put_string(out, value); }
+    if let Some(value) = value {
+        put_string(out, value);
+    }
 }
 
-struct Cursor<'a> { bytes: &'a [u8], at: usize }
+struct Cursor<'a> {
+    bytes: &'a [u8],
+    at: usize,
+}
 impl<'a> Cursor<'a> {
-    fn new(bytes: &'a [u8]) -> Self { Self { bytes, at: 0 } }
+    fn new(bytes: &'a [u8]) -> Self {
+        Self { bytes, at: 0 }
+    }
     fn byte(&mut self) -> Result<u8, MetadataError> {
-        let value = *self.bytes.get(self.at).ok_or(MetadataError::Malformed("truncated payload"))?;
+        let value = *self
+            .bytes
+            .get(self.at)
+            .ok_or(MetadataError::Malformed("truncated payload"))?;
         self.at += 1;
         Ok(value)
     }
     fn u32(&mut self) -> Result<u32, MetadataError> {
-        let end = self.at.checked_add(4).ok_or(MetadataError::Malformed("length overflow"))?;
-        let bytes = self.bytes.get(self.at..end).ok_or(MetadataError::Malformed("truncated payload"))?;
+        let end = self
+            .at
+            .checked_add(4)
+            .ok_or(MetadataError::Malformed("length overflow"))?;
+        let bytes = self
+            .bytes
+            .get(self.at..end)
+            .ok_or(MetadataError::Malformed("truncated payload"))?;
         self.at = end;
         Ok(u32::from_le_bytes(bytes.try_into().unwrap()))
     }
     fn string(&mut self) -> Result<String, MetadataError> {
         let len = self.u32()? as usize;
-        if len > MAX_STRING_BYTES { return Err(MetadataError::Malformed("string too long")); }
-        let end = self.at.checked_add(len).ok_or(MetadataError::Malformed("length overflow"))?;
-        let bytes = self.bytes.get(self.at..end).ok_or(MetadataError::Malformed("truncated string"))?;
+        if len > MAX_STRING_BYTES {
+            return Err(MetadataError::Malformed("string too long"));
+        }
+        let end = self
+            .at
+            .checked_add(len)
+            .ok_or(MetadataError::Malformed("length overflow"))?;
+        let bytes = self
+            .bytes
+            .get(self.at..end)
+            .ok_or(MetadataError::Malformed("truncated string"))?;
         self.at = end;
-        String::from_utf8(bytes.to_vec()).map_err(|_| MetadataError::Malformed("string is not UTF-8"))
+        String::from_utf8(bytes.to_vec())
+            .map_err(|_| MetadataError::Malformed("string is not UTF-8"))
     }
     fn optional_string(&mut self) -> Result<Option<String>, MetadataError> {
-        match self.byte()? { 0 => Ok(None), 1 => self.string().map(Some), _ => Err(MetadataError::Malformed("invalid optional string bit")) }
+        match self.byte()? {
+            0 => Ok(None),
+            1 => self.string().map(Some),
+            _ => Err(MetadataError::Malformed("invalid optional string bit")),
+        }
     }
-    fn done(&self) -> bool { self.at == self.bytes.len() }
+    fn done(&self) -> bool {
+        self.at == self.bytes.len()
+    }
 }
 
 fn bounds(bytes: &[u8], at: usize, len: usize) -> Result<&[u8], MetadataError> {
-    let end = at.checked_add(len).ok_or(MetadataError::Malformed("section range overflow"))?;
-    bytes.get(at..end).ok_or(MetadataError::Malformed("section outside file"))
+    let end = at
+        .checked_add(len)
+        .ok_or(MetadataError::Malformed("section range overflow"))?;
+    bytes
+        .get(at..end)
+        .ok_or(MetadataError::Malformed("section outside file"))
 }
 
 fn read_num(bytes: &[u8], at: usize, width: usize, little: bool) -> Result<u64, MetadataError> {
@@ -706,14 +819,34 @@ fn usize_num(value: u64) -> Result<usize, MetadataError> {
 }
 
 fn c_name(bytes: &[u8]) -> Result<&str, MetadataError> {
-    let end = bytes.iter().position(|byte| *byte == 0).unwrap_or(bytes.len());
-    std::str::from_utf8(&bytes[..end]).map_err(|_| MetadataError::Malformed("section name is not UTF-8"))
+    let end = bytes
+        .iter()
+        .position(|byte| *byte == 0)
+        .unwrap_or(bytes.len());
+    std::str::from_utf8(&bytes[..end])
+        .map_err(|_| MetadataError::Malformed("section name is not UTF-8"))
 }
 
 fn elf_sections(bytes: &[u8]) -> Result<Vec<&[u8]>, MetadataError> {
-    let class = *bytes.get(4).ok_or(MetadataError::Malformed("truncated ELF header"))?;
-    let little = match bytes.get(5) { Some(1) => true, Some(2) => false, _ => return Err(MetadataError::Malformed("invalid ELF byte order")) };
-    let (header, shoff_at, shentsize_at, shnum_at, shstr_at, shoff_width, sh_offset_at, sh_size_at, value_width) = match class {
+    let class = *bytes
+        .get(4)
+        .ok_or(MetadataError::Malformed("truncated ELF header"))?;
+    let little = match bytes.get(5) {
+        Some(1) => true,
+        Some(2) => false,
+        _ => return Err(MetadataError::Malformed("invalid ELF byte order")),
+    };
+    let (
+        header,
+        shoff_at,
+        shentsize_at,
+        shnum_at,
+        shstr_at,
+        shoff_width,
+        sh_offset_at,
+        sh_size_at,
+        value_width,
+    ) = match class {
         1 => (52, 32, 46, 48, 50, 4, 16, 20, 4),
         2 => (64, 40, 58, 60, 62, 8, 24, 32, 8),
         _ => return Err(MetadataError::Malformed("unsupported ELF class")),
@@ -726,9 +859,21 @@ fn elf_sections(bytes: &[u8]) -> Result<Vec<&[u8]>, MetadataError> {
     if count == 0 || entsize < sh_size_at + value_width || names_index >= count {
         return Err(MetadataError::Malformed("invalid ELF section table"));
     }
-    bounds(bytes, shoff, entsize.checked_mul(count).ok_or(MetadataError::Malformed("ELF section count overflow"))?)?;
+    bounds(
+        bytes,
+        shoff,
+        entsize
+            .checked_mul(count)
+            .ok_or(MetadataError::Malformed("ELF section count overflow"))?,
+    )?;
     let section = |index: usize| -> Result<(usize, usize, usize), MetadataError> {
-        let base = shoff.checked_add(index.checked_mul(entsize).ok_or(MetadataError::Malformed("ELF section offset overflow"))?).ok_or(MetadataError::Malformed("ELF section offset overflow"))?;
+        let base = shoff
+            .checked_add(
+                index
+                    .checked_mul(entsize)
+                    .ok_or(MetadataError::Malformed("ELF section offset overflow"))?,
+            )
+            .ok_or(MetadataError::Malformed("ELF section offset overflow"))?;
         let name = usize_num(read_num(bytes, base, 4, little)?)?;
         let offset = usize_num(read_num(bytes, base + sh_offset_at, value_width, little)?)?;
         let size = usize_num(read_num(bytes, base + sh_size_at, value_width, little)?)?;
@@ -739,19 +884,34 @@ fn elf_sections(bytes: &[u8]) -> Result<Vec<&[u8]>, MetadataError> {
     let mut found = Vec::new();
     for index in 0..count {
         let (name_at, offset, size) = section(index)?;
-        let tail = names.get(name_at..).ok_or(MetadataError::Malformed("ELF section name outside string table"))?;
-        if c_name(tail)? == ELF_SECTION { found.push(bounds(bytes, offset, size)?); }
+        let tail = names.get(name_at..).ok_or(MetadataError::Malformed(
+            "ELF section name outside string table",
+        ))?;
+        if c_name(tail)? == ELF_SECTION {
+            found.push(bounds(bytes, offset, size)?);
+        }
     }
     Ok(found)
 }
 
 fn pe_sections(bytes: &[u8]) -> Result<Vec<&[u8]>, MetadataError> {
     let pe = usize_num(read_num(bytes, 0x3c, 4, true)?)?;
-    if bounds(bytes, pe, 4)? != b"PE\0\0" { return Err(MetadataError::Malformed("bad PE signature")); }
+    if bounds(bytes, pe, 4)? != b"PE\0\0" {
+        return Err(MetadataError::Malformed("bad PE signature"));
+    }
     let count = usize_num(read_num(bytes, pe + 6, 2, true)?)?;
     let optional = usize_num(read_num(bytes, pe + 20, 2, true)?)?;
-    let table = pe.checked_add(24).and_then(|v| v.checked_add(optional)).ok_or(MetadataError::Malformed("PE section table overflow"))?;
-    bounds(bytes, table, count.checked_mul(40).ok_or(MetadataError::Malformed("PE section count overflow"))?)?;
+    let table = pe
+        .checked_add(24)
+        .and_then(|v| v.checked_add(optional))
+        .ok_or(MetadataError::Malformed("PE section table overflow"))?;
+    bounds(
+        bytes,
+        table,
+        count
+            .checked_mul(40)
+            .ok_or(MetadataError::Malformed("PE section count overflow"))?,
+    )?;
     let mut found = Vec::new();
     for index in 0..count {
         let base = table + index * 40;
@@ -761,13 +921,21 @@ fn pe_sections(bytes: &[u8]) -> Result<Vec<&[u8]>, MetadataError> {
             let raw = bounds(bytes, offset, size)?;
             // PE section raw sizes are file-aligned. The canonical record's
             // own length trims only zero alignment padding, then validates.
-            if raw.len() < 14 { return Err(MetadataError::Malformed("truncated PE metadata section")); }
-            let record_len = 46usize.checked_add(u32::from_le_bytes(raw[10..14].try_into().unwrap()) as usize).ok_or(MetadataError::Malformed("record length overflow"))?;
+            if raw.len() < 14 {
+                return Err(MetadataError::Malformed("truncated PE metadata section"));
+            }
+            let record_len = 46usize
+                .checked_add(u32::from_le_bytes(raw[10..14].try_into().unwrap()) as usize)
+                .ok_or(MetadataError::Malformed("record length overflow"))?;
             let record = bounds(raw, 0, record_len)?;
             let trailing = &raw[record_len..];
-            if trailing.starts_with(RECORD_MAGIC) { return Err(MetadataError::Duplicate); }
+            if trailing.starts_with(RECORD_MAGIC) {
+                return Err(MetadataError::Duplicate);
+            }
             if trailing.iter().any(|byte| *byte != 0) {
-                return Err(MetadataError::Malformed("nonzero bytes after PE metadata record"));
+                return Err(MetadataError::Malformed(
+                    "nonzero bytes after PE metadata record",
+                ));
             }
             found.push(record);
         }
@@ -776,16 +944,25 @@ fn pe_sections(bytes: &[u8]) -> Result<Vec<&[u8]>, MetadataError> {
 }
 
 fn is_mach(bytes: &[u8]) -> bool {
-    matches!(bytes.get(..4),
-        Some([0xce, 0xfa, 0xed, 0xfe]) | Some([0xcf, 0xfa, 0xed, 0xfe]) |
-        Some([0xca, 0xfe, 0xba, 0xbe]) | Some([0xca, 0xfe, 0xba, 0xbf]) |
-        Some([0xbe, 0xba, 0xfe, 0xca]) | Some([0xbf, 0xba, 0xfe, 0xca]))
+    matches!(
+        bytes.get(..4),
+        Some([0xce, 0xfa, 0xed, 0xfe])
+            | Some([0xcf, 0xfa, 0xed, 0xfe])
+            | Some([0xca, 0xfe, 0xba, 0xbe])
+            | Some([0xca, 0xfe, 0xba, 0xbf])
+            | Some([0xbe, 0xba, 0xfe, 0xca])
+            | Some([0xbf, 0xba, 0xfe, 0xca])
+    )
 }
 
 fn is_fat_mach(bytes: &[u8]) -> bool {
-    matches!(bytes.get(..4),
-        Some([0xca, 0xfe, 0xba, 0xbe]) | Some([0xca, 0xfe, 0xba, 0xbf]) |
-        Some([0xbe, 0xba, 0xfe, 0xca]) | Some([0xbf, 0xba, 0xfe, 0xca]))
+    matches!(
+        bytes.get(..4),
+        Some([0xca, 0xfe, 0xba, 0xbe])
+            | Some([0xca, 0xfe, 0xba, 0xbf])
+            | Some([0xbe, 0xba, 0xfe, 0xca])
+            | Some([0xbf, 0xba, 0xfe, 0xca])
+    )
 }
 
 fn mach_sections(bytes: &[u8]) -> Result<Vec<&[u8]>, MetadataError> {
@@ -801,28 +978,54 @@ fn mach_sections(bytes: &[u8]) -> Result<Vec<&[u8]>, MetadataError> {
     for _ in 0..count {
         let kind = read_num(bytes, command, 4, true)? as u32;
         let size = usize_num(read_num(bytes, command + 4, 4, true)?)?;
-        if size < 8 { return Err(MetadataError::Malformed("invalid Mach-O load command size")); }
+        if size < 8 {
+            return Err(MetadataError::Malformed("invalid Mach-O load command size"));
+        }
         bounds(bytes, command, size)?;
         let segment_kind = if is_64 { 0x19 } else { 0x1 };
         if kind == segment_kind {
-            let (nsects_at, sections_at, section_size, file_offset_at, section_len_at, section_len_width): (usize, usize, usize, usize, usize, usize) = if is_64 {
+            let (
+                nsects_at,
+                sections_at,
+                section_size,
+                file_offset_at,
+                section_len_at,
+                section_len_width,
+            ): (usize, usize, usize, usize, usize, usize) = if is_64 {
                 (64, 72, 80, 48, 40, 8)
             } else {
                 (48, 56, 68, 40, 36, 4)
             };
             let nsects = usize_num(read_num(bytes, command + nsects_at, 4, true)?)?;
-            let needed = sections_at.checked_add(nsects.checked_mul(section_size).ok_or(MetadataError::Malformed("Mach-O section count overflow"))?).ok_or(MetadataError::Malformed("Mach-O section count overflow"))?;
-            if needed > size { return Err(MetadataError::Malformed("Mach-O sections outside load command")); }
+            let needed = sections_at
+                .checked_add(
+                    nsects
+                        .checked_mul(section_size)
+                        .ok_or(MetadataError::Malformed("Mach-O section count overflow"))?,
+                )
+                .ok_or(MetadataError::Malformed("Mach-O section count overflow"))?;
+            if needed > size {
+                return Err(MetadataError::Malformed(
+                    "Mach-O sections outside load command",
+                ));
+            }
             for index in 0..nsects {
                 let section = command + sections_at + index * section_size;
                 if c_name(bounds(bytes, section, 16)?)? == MACH_SECTION {
                     let offset = usize_num(read_num(bytes, section + file_offset_at, 4, true)?)?;
-                    let len = usize_num(read_num(bytes, section + section_len_at, section_len_width, true)?)?;
+                    let len = usize_num(read_num(
+                        bytes,
+                        section + section_len_at,
+                        section_len_width,
+                        true,
+                    )?)?;
                     found.push(bounds(bytes, offset, len)?);
                 }
             }
         }
-        command = command.checked_add(size).ok_or(MetadataError::Malformed("Mach-O load command overflow"))?;
+        command = command
+            .checked_add(size)
+            .ok_or(MetadataError::Malformed("Mach-O load command overflow"))?;
     }
     Ok(found)
 }
@@ -832,9 +1035,19 @@ fn fat_mach_sections(bytes: &[u8]) -> Result<Vec<&[u8]>, MetadataError> {
     let little = matches!(magic, [0xbe, 0xba, 0xfe, 0xca] | [0xbf, 0xba, 0xfe, 0xca]);
     let is_64 = matches!(magic, [0xca, 0xfe, 0xba, 0xbf] | [0xbf, 0xba, 0xfe, 0xca]);
     let count = usize_num(read_num(bytes, 4, 4, little)?)?;
-    if count == 0 || count > 64 { return Err(MetadataError::Malformed("invalid universal Mach-O architecture count")); }
+    if count == 0 || count > 64 {
+        return Err(MetadataError::Malformed(
+            "invalid universal Mach-O architecture count",
+        ));
+    }
     let entry_size = if is_64 { 32usize } else { 20usize };
-    bounds(bytes, 8, count.checked_mul(entry_size).ok_or(MetadataError::Malformed("universal Mach-O table overflow"))?)?;
+    bounds(
+        bytes,
+        8,
+        count
+            .checked_mul(entry_size)
+            .ok_or(MetadataError::Malformed("universal Mach-O table overflow"))?,
+    )?;
     let mut canonical: Option<&[u8]> = None;
     for index in 0..count {
         let arch = 8 + index * entry_size;
@@ -847,7 +1060,11 @@ fn fat_mach_sections(bytes: &[u8]) -> Result<Vec<&[u8]>, MetadataError> {
         }
         let sections = mach_sections(slice)?;
         if sections.len() != 1 {
-            return if sections.is_empty() { Err(MetadataError::Missing) } else { Err(MetadataError::Duplicate) };
+            return if sections.is_empty() {
+                Err(MetadataError::Missing)
+            } else {
+                Err(MetadataError::Duplicate)
+            };
         }
         match canonical {
             None => canonical = Some(sections[0]),
@@ -861,16 +1078,24 @@ fn fat_mach_sections(bytes: &[u8]) -> Result<Vec<&[u8]>, MetadataError> {
 fn wasm_leb(bytes: &[u8], at: &mut usize) -> Result<usize, MetadataError> {
     let mut value = 0usize;
     for shift in (0..35).step_by(7) {
-        let byte = *bytes.get(*at).ok_or(MetadataError::Malformed("truncated Wasm LEB"))?;
+        let byte = *bytes
+            .get(*at)
+            .ok_or(MetadataError::Malformed("truncated Wasm LEB"))?;
         *at += 1;
-        value |= ((byte & 0x7f) as usize).checked_shl(shift).ok_or(MetadataError::Malformed("Wasm LEB overflow"))?;
-        if byte & 0x80 == 0 { return Ok(value); }
+        value |= ((byte & 0x7f) as usize)
+            .checked_shl(shift)
+            .ok_or(MetadataError::Malformed("Wasm LEB overflow"))?;
+        if byte & 0x80 == 0 {
+            return Ok(value);
+        }
     }
     Err(MetadataError::Malformed("Wasm LEB too long"))
 }
 
 fn wasm_sections(bytes: &[u8]) -> Result<Vec<&[u8]>, MetadataError> {
-    if bounds(bytes, 0, 8)? != b"\0asm\x01\0\0\0" { return Err(MetadataError::Malformed("unsupported Wasm header")); }
+    if bounds(bytes, 0, 8)? != b"\0asm\x01\0\0\0" {
+        return Err(MetadataError::Malformed("unsupported Wasm header"));
+    }
     let mut at = 8;
     let mut found = Vec::new();
     while at < bytes.len() {
@@ -884,7 +1109,9 @@ fn wasm_sections(bytes: &[u8]) -> Result<Vec<&[u8]>, MetadataError> {
             let name_len = wasm_leb(payload, &mut name_at)?;
             let name = bounds(payload, name_at, name_len)?;
             name_at += name_len;
-            if name == WASM_SECTION.as_bytes() { found.push(&payload[name_at..]); }
+            if name == WASM_SECTION.as_bytes() {
+                found.push(&payload[name_at..]);
+            }
         }
     }
     Ok(found)
@@ -894,9 +1121,13 @@ fn put_wasm_leb(out: &mut Vec<u8>, mut value: usize) {
     loop {
         let mut byte = (value & 0x7f) as u8;
         value >>= 7;
-        if value != 0 { byte |= 0x80; }
+        if value != 0 {
+            byte |= 0x80;
+        }
         out.push(byte);
-        if value == 0 { break; }
+        if value == 0 {
+            break;
+        }
     }
 }
 
@@ -1008,10 +1239,8 @@ pub fn command_schema_with_items(
         .filter(|field| field.computed.is_none())
         .map(|field| {
             let flag = field.name.replace('_', "-");
-            let short = marker(&field.serde_markers, Syntax::MARKER_SHORT)
-                .and_then(marker_string);
-            let env = marker(&field.serde_markers, Syntax::MARKER_ENV)
-                .and_then(marker_string);
+            let short = marker(&field.serde_markers, Syntax::MARKER_SHORT).and_then(marker_string);
+            let env = marker(&field.serde_markers, Syntax::MARKER_ENV).and_then(marker_string);
             let help = marker(&field.serde_markers, Syntax::MARKER_DOC)
                 .and_then(marker_string)
                 .unwrap_or_else(|| format!("value for --{flag}"));
@@ -1026,8 +1255,7 @@ pub fn command_schema_with_items(
                     default: None,
                 },
                 ty => CLIInputShape::Value {
-                    kind: scalar_kind(ty)
-                        .expect("sema permits only scalar fields on a CLI struct"),
+                    kind: scalar_kind(ty).expect("sema permits only scalar fields on a CLI struct"),
                     optional: false,
                     default: field_default(field),
                 },
@@ -1073,8 +1301,7 @@ pub fn command_schema_with_items(
             let inputs = function_inputs(function)?;
             Some(CLISubcommandSchema {
                 name: function.name.to_lowercase(),
-                description: marker(&function.markers, Syntax::MARKER_DOC)
-                    .and_then(marker_string),
+                description: marker(&function.markers, Syntax::MARKER_DOC).and_then(marker_string),
                 inputs,
             })
         })
@@ -1094,16 +1321,14 @@ pub fn command_schema_with_items(
         };
         commands.push(CLISubcommandSchema {
             name: binding.name.to_lowercase(),
-            description: marker(&binding.markers, Syntax::MARKER_DOC)
-                .and_then(marker_string),
+            description: marker(&binding.markers, Syntax::MARKER_DOC).and_then(marker_string),
             inputs,
         });
     }
 
     Some(CLICommandSchema {
         entry_type: structure.name.clone(),
-        description: marker(&structure.type_markers, Syntax::MARKER_DOC)
-            .and_then(marker_string),
+        description: marker(&structure.type_markers, Syntax::MARKER_DOC).and_then(marker_string),
         inputs,
         commands,
         standard: cli_standard(&structure.type_markers),
@@ -1208,9 +1433,10 @@ fn expr_default(expr: &Expr) -> Option<CLIDefault> {
 
 fn cli_standard(markers: &[Marker]) -> bool {
     marker(markers, Syntax::MARKER_CLI).is_some_and(|marker| {
-        marker.args.iter().any(|arg| {
-            matches!(arg, Expr::Ident(name, _) if name == "Standard")
-        })
+        marker
+            .args
+            .iter()
+            .any(|arg| matches!(arg, Expr::Ident(name, _) if name == "Standard"))
     })
 }
 
@@ -1406,19 +1632,48 @@ mod tests {
     #[test]
     fn hostile_records_fail_closed() {
         let record = encode_record(&schema());
-        assert_eq!(read_executable(b"not executable"), Err(MetadataError::UnknownFormat));
-        assert_eq!(read_executable(b"\0asm\x01\0\0\0"), Err(MetadataError::Missing));
-        assert_eq!(read_executable(&pe(&record, true)), Err(MetadataError::Duplicate));
-        assert_eq!(read_executable(&pe_with_trailing(&record, &record)), Err(MetadataError::Duplicate));
-        assert_eq!(read_executable(&pe_with_trailing(&record, &[0, 7])), Err(MetadataError::Malformed("nonzero bytes after PE metadata record")));
-        assert_eq!(read_executable(&pe_with_trailing(&record, &[0; 16])).unwrap(), schema());
-        assert_eq!(read_executable(&nested_fat_mach(&record)), Err(MetadataError::Malformed("nested universal Mach-O slice")));
+        assert_eq!(
+            read_executable(b"not executable"),
+            Err(MetadataError::UnknownFormat)
+        );
+        assert_eq!(
+            read_executable(b"\0asm\x01\0\0\0"),
+            Err(MetadataError::Missing)
+        );
+        assert_eq!(
+            read_executable(&pe(&record, true)),
+            Err(MetadataError::Duplicate)
+        );
+        assert_eq!(
+            read_executable(&pe_with_trailing(&record, &record)),
+            Err(MetadataError::Duplicate)
+        );
+        assert_eq!(
+            read_executable(&pe_with_trailing(&record, &[0, 7])),
+            Err(MetadataError::Malformed(
+                "nonzero bytes after PE metadata record"
+            ))
+        );
+        assert_eq!(
+            read_executable(&pe_with_trailing(&record, &[0; 16])).unwrap(),
+            schema()
+        );
+        assert_eq!(
+            read_executable(&nested_fat_mach(&record)),
+            Err(MetadataError::Malformed("nested universal Mach-O slice"))
+        );
 
         let mut unsupported = record.clone();
         unsupported[8..10].copy_from_slice(&6u16.to_le_bytes());
-        assert_eq!(decode_record(&unsupported), Err(MetadataError::UnsupportedVersion(6)));
+        assert_eq!(
+            decode_record(&unsupported),
+            Err(MetadataError::UnsupportedVersion(6))
+        );
         let mut corrupt = record;
         *corrupt.last_mut().unwrap() ^= 1;
-        assert_eq!(decode_record(&corrupt), Err(MetadataError::Malformed("digest mismatch")));
+        assert_eq!(
+            decode_record(&corrupt),
+            Err(MetadataError::Malformed("digest mismatch"))
+        );
     }
 }

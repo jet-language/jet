@@ -342,11 +342,7 @@ impl<'a> Interp<'a> {
         // TIR keeps a named `#Abilities` value as an ordinary local. Keep the
         // same value in the REPL host frame before the bridge evaluates a body;
         // boundary authorization consumes this carrier directly.
-        if self.repl_mode
-            && stmts
-                .iter()
-                .any(|stmt| matches!(stmt, Stmt::Caps { .. }))
-        {
+        if self.repl_mode && stmts.iter().any(|stmt| matches!(stmt, Stmt::Caps { .. })) {
             for stmt in stmts {
                 match self.exec_stmt(stmt, scope)? {
                     Flow::Normal => {}
@@ -399,7 +395,10 @@ impl<'a> Interp<'a> {
                 *scope = new_scope;
                 Ok(Flow::Normal)
             }
-            super::TirBridge::StmtOutcome::Returned { value, scope: new_scope } => {
+            super::TirBridge::StmtOutcome::Returned {
+                value,
+                scope: new_scope,
+            } => {
                 *scope = new_scope;
                 Ok(Flow::Return(value))
             }
@@ -514,12 +513,9 @@ impl<'a> Interp<'a> {
                 let authority = super::Builtins::authority_value_from_rights(
                     caps.iter().map(|(name, _)| name.clone()).collect(),
                 );
-                let previous_binding = binding.as_ref().map(|name| {
-                    (
-                        name.clone(),
-                        scope.insert(name.clone(), authority.clone()),
-                    )
-                });
+                let previous_binding = binding
+                    .as_ref()
+                    .map(|name| (name.clone(), scope.insert(name.clone(), authority.clone())));
                 let old_len = self.repl_grants.len();
                 self.repl_grants.push(authority);
                 self.impure_depth += 1;
@@ -600,8 +596,6 @@ impl<'a> Interp<'a> {
     }
 }
 
-
-
 thread_local! {
     static RUNTIME_ARGV: std::cell::RefCell<Option<Vec<String>>> =
         const { std::cell::RefCell::new(None) };
@@ -621,9 +615,8 @@ impl Drop for RuntimeArgvGuard {
 /// When set, impure `core.process.argv` uses this instead of the host process argv
 /// (so `cargo test` flags never leak into example output).
 pub fn with_runtime_argv<R>(args: &[String], run: impl FnOnce() -> R) -> R {
-    let previous = RUNTIME_ARGV.with(|slot| {
-        std::mem::replace(&mut *slot.borrow_mut(), Some(args.to_vec()))
-    });
+    let previous =
+        RUNTIME_ARGV.with(|slot| std::mem::replace(&mut *slot.borrow_mut(), Some(args.to_vec())));
     let _guard = RuntimeArgvGuard(previous);
     run()
 }

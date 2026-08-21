@@ -5,8 +5,8 @@
 //! schema identity and verify are the durable seam.
 
 use crate::PerformanceBudget::{stable_id, verify_stable_id, CanonicalJson};
-use crate::SHA256;
 use crate::Syntax::ARTIFACT_EXT_TRACE;
+use crate::SHA256;
 use std::collections::BTreeMap;
 
 pub const TRACE_SCHEMA: &str = "jet.trace";
@@ -42,18 +42,42 @@ pub struct TraceToolchain {
 impl TraceToolchain {
     pub fn to_json(&self) -> Result<CanonicalJson, String> {
         let digest_content = CanonicalJson::object([
-            ("compiler_build_id".into(), CanonicalJson::String(self.compiler_build_id.clone())),
-            ("jet_version".into(), CanonicalJson::String(self.jet_version.clone())),
-            ("runner_id".into(), CanonicalJson::String(self.runner_id.clone())),
-            ("stdlib_id".into(), CanonicalJson::String(self.stdlib_id.clone())),
+            (
+                "compiler_build_id".into(),
+                CanonicalJson::String(self.compiler_build_id.clone()),
+            ),
+            (
+                "jet_version".into(),
+                CanonicalJson::String(self.jet_version.clone()),
+            ),
+            (
+                "runner_id".into(),
+                CanonicalJson::String(self.runner_id.clone()),
+            ),
+            (
+                "stdlib_id".into(),
+                CanonicalJson::String(self.stdlib_id.clone()),
+            ),
         ])?;
         let digest = stable_id(&digest_content);
         CanonicalJson::object([
-            ("compiler_build_id".into(), CanonicalJson::String(self.compiler_build_id.clone())),
+            (
+                "compiler_build_id".into(),
+                CanonicalJson::String(self.compiler_build_id.clone()),
+            ),
             ("digest".into(), CanonicalJson::String(digest)),
-            ("jet_version".into(), CanonicalJson::String(self.jet_version.clone())),
-            ("runner_id".into(), CanonicalJson::String(self.runner_id.clone())),
-            ("stdlib_id".into(), CanonicalJson::String(self.stdlib_id.clone())),
+            (
+                "jet_version".into(),
+                CanonicalJson::String(self.jet_version.clone()),
+            ),
+            (
+                "runner_id".into(),
+                CanonicalJson::String(self.runner_id.clone()),
+            ),
+            (
+                "stdlib_id".into(),
+                CanonicalJson::String(self.stdlib_id.clone()),
+            ),
         ])
     }
 }
@@ -80,7 +104,10 @@ impl TraceHardware {
 
     pub fn to_json(&self) -> Result<CanonicalJson, String> {
         let body = CanonicalJson::object([
-            ("cpu_arch".into(), CanonicalJson::String(self.cpu_arch.clone())),
+            (
+                "cpu_arch".into(),
+                CanonicalJson::String(self.cpu_arch.clone()),
+            ),
             (
                 "logical_cpus".into(),
                 CanonicalJson::Integer(self.logical_cpus.to_string()),
@@ -90,7 +117,10 @@ impl TraceHardware {
         ])?;
         let fingerprint = stable_id(&body);
         CanonicalJson::object([
-            ("cpu_arch".into(), CanonicalJson::String(self.cpu_arch.clone())),
+            (
+                "cpu_arch".into(),
+                CanonicalJson::String(self.cpu_arch.clone()),
+            ),
             ("fingerprint".into(), CanonicalJson::String(fingerprint)),
             (
                 "logical_cpus".into(),
@@ -145,7 +175,10 @@ impl CapturePolicy {
                 "browser_rows_truncated".into(),
                 CanonicalJson::Bool(self.browser_rows_truncated),
             ),
-            ("default_exclusions".into(), CanonicalJson::Array(exclusions)),
+            (
+                "default_exclusions".into(),
+                CanonicalJson::Array(exclusions),
+            ),
             (
                 "io_row_limit".into(),
                 CanonicalJson::Integer(TRACE_IO_ROW_LIMIT.to_string()),
@@ -170,7 +203,10 @@ impl CapturePolicy {
                 "span_rows_truncated".into(),
                 CanonicalJson::Bool(self.span_rows_truncated),
             ),
-            ("schema".into(), CanonicalJson::Integer(CAPTURE_POLICY_SCHEMA.into())),
+            (
+                "schema".into(),
+                CanonicalJson::Integer(CAPTURE_POLICY_SCHEMA.into()),
+            ),
             (
                 "task_row_limit".into(),
                 CanonicalJson::Integer(TRACE_TASK_ROW_LIMIT.to_string()),
@@ -253,7 +289,10 @@ impl TraceSample {
     pub fn to_json(&self) -> Result<CanonicalJson, String> {
         CanonicalJson::object([
             ("domain".into(), CanonicalJson::String(self.domain.clone())),
-            ("duration_ns".into(), CanonicalJson::Integer(self.duration_ns.to_string())),
+            (
+                "duration_ns".into(),
+                CanonicalJson::Integer(self.duration_ns.to_string()),
+            ),
             ("symbol".into(), self.symbol.to_json()?),
         ])
     }
@@ -269,8 +308,14 @@ pub struct TraceAllocation {
 impl TraceAllocation {
     pub fn to_json(&self) -> Result<CanonicalJson, String> {
         CanonicalJson::object([
-            ("bytes".into(), CanonicalJson::Integer(self.bytes.to_string())),
-            ("count".into(), CanonicalJson::Integer(self.count.to_string())),
+            (
+                "bytes".into(),
+                CanonicalJson::Integer(self.bytes.to_string()),
+            ),
+            (
+                "count".into(),
+                CanonicalJson::Integer(self.count.to_string()),
+            ),
             ("symbol".into(), self.symbol.to_json()?),
         ])
     }
@@ -293,7 +338,10 @@ impl TraceTask {
         CanonicalJson::object([
             ("cancelled".into(), CanonicalJson::Bool(self.cancelled)),
             ("id".into(), CanonicalJson::Integer(self.id.to_string())),
-            ("parent".into(), CanonicalJson::Integer(self.parent.to_string())),
+            (
+                "parent".into(),
+                CanonicalJson::Integer(self.parent.to_string()),
+            ),
             ("state".into(), CanonicalJson::String(self.state.clone())),
             ("symbol".into(), self.symbol.to_json()?),
             ("wait".into(), CanonicalJson::String(self.wait.clone())),
@@ -326,7 +374,10 @@ impl TraceLock {
                 },
             ),
             ("closed".into(), CanonicalJson::Bool(self.closed)),
-            ("depth".into(), CanonicalJson::Integer(self.depth.to_string())),
+            (
+                "depth".into(),
+                CanonicalJson::Integer(self.depth.to_string()),
+            ),
             ("id".into(), CanonicalJson::Integer(self.id.to_string())),
             ("kind".into(), CanonicalJson::String(self.kind.clone())),
             (
@@ -377,11 +428,20 @@ impl TraceIo {
 
     pub fn to_json(&self) -> Result<CanonicalJson, String> {
         CanonicalJson::object([
-            ("end_ns".into(), CanonicalJson::Integer(self.end_ns.to_string())),
+            (
+                "end_ns".into(),
+                CanonicalJson::Integer(self.end_ns.to_string()),
+            ),
             ("kind".into(), CanonicalJson::String(self.kind.clone())),
-            ("start_ns".into(), CanonicalJson::Integer(self.start_ns.to_string())),
+            (
+                "start_ns".into(),
+                CanonicalJson::Integer(self.start_ns.to_string()),
+            ),
             ("symbol".into(), self.symbol.to_json()?),
-            ("task_id".into(), CanonicalJson::Integer(self.task_id.to_string())),
+            (
+                "task_id".into(),
+                CanonicalJson::Integer(self.task_id.to_string()),
+            ),
             ("wait".into(), CanonicalJson::String(self.wait.clone())),
         ])
     }
@@ -480,9 +540,18 @@ impl TraceBrowser {
     pub fn to_json(&self) -> Result<CanonicalJson, String> {
         CanonicalJson::object([
             ("class".into(), CanonicalJson::String(self.class.clone())),
-            ("clock".into(), CanonicalJson::String("browser_monotonic_mapped".into())),
-            ("duration_ns".into(), CanonicalJson::Integer(self.duration_ns.to_string())),
-            ("start_ns".into(), CanonicalJson::Integer(self.start_ns.to_string())),
+            (
+                "clock".into(),
+                CanonicalJson::String("browser_monotonic_mapped".into()),
+            ),
+            (
+                "duration_ns".into(),
+                CanonicalJson::Integer(self.duration_ns.to_string()),
+            ),
+            (
+                "start_ns".into(),
+                CanonicalJson::Integer(self.start_ns.to_string()),
+            ),
             ("symbol".into(), self.symbol.to_json()?),
         ])
     }
@@ -595,7 +664,13 @@ pub struct TraceSkeleton {
 
 impl TraceSkeleton {
     pub fn content_json(&self) -> Result<CanonicalJson, String> {
-        let argv = CanonicalJson::Array(self.argv.iter().cloned().map(CanonicalJson::String).collect());
+        let argv = CanonicalJson::Array(
+            self.argv
+                .iter()
+                .cloned()
+                .map(CanonicalJson::String)
+                .collect(),
+        );
         let samples = self
             .samples
             .iter()
@@ -652,13 +727,19 @@ impl TraceSkeleton {
             ("argv".into(), argv),
             ("browser".into(), CanonicalJson::Array(browser)),
             ("capture_policy".into(), self.capture_policy.to_json()?),
-            ("command".into(), CanonicalJson::String(self.command.clone())),
+            (
+                "command".into(),
+                CanonicalJson::String(self.command.clone()),
+            ),
             ("hardware".into(), self.hardware.to_json()?),
             ("io".into(), CanonicalJson::Array(io)),
             ("locks".into(), CanonicalJson::Array(locks)),
             ("native".into(), CanonicalJson::Array(native)),
             ("samples".into(), CanonicalJson::Array(samples)),
-            ("source_identity".into(), CanonicalJson::Array(source_identity)),
+            (
+                "source_identity".into(),
+                CanonicalJson::Array(source_identity),
+            ),
             ("source_maps".into(), CanonicalJson::Array(source_maps)),
             ("spans".into(), CanonicalJson::Array(spans)),
             ("tasks".into(), CanonicalJson::Array(tasks)),
@@ -673,7 +754,10 @@ pub fn jettrace_artifact(content: CanonicalJson) -> CanonicalJson {
         ("content".into(), content),
         ("schema".into(), CanonicalJson::String(TRACE_SCHEMA.into())),
         ("trace_id".into(), CanonicalJson::String(trace_id)),
-        ("version".into(), CanonicalJson::Integer(TRACE_VERSION.into())),
+        (
+            "version".into(),
+            CanonicalJson::Integer(TRACE_VERSION.into()),
+        ),
     ])
     .expect("fixed jettrace wrapper keys are unique")
 }
@@ -711,7 +795,11 @@ pub fn verify_jettrace(bytes: &[u8]) -> Result<CanonicalJson, String> {
         Some(CanonicalJson::String(id)) => id,
         _ => return Err("jettrace trace_id is not text".into()),
     };
-    if claimed.len() != 64 || !claimed.bytes().all(|byte| matches!(byte, b'0'..=b'9' | b'a'..=b'f')) {
+    if claimed.len() != 64
+        || !claimed
+            .bytes()
+            .all(|byte| matches!(byte, b'0'..=b'9' | b'a'..=b'f'))
+    {
         return Err("jettrace trace_id is not lowercase Hex64".into());
     }
     verify_stable_id(content, claimed)?;
@@ -782,7 +870,11 @@ fn validate_hardware(value: &CanonicalJson) -> Result<(), String> {
     text(&fields["target"], "content.hardware.target")?;
     unsigned(&fields["logical_cpus"], "content.hardware.logical_cpus")?;
     let claimed = text(&fields["fingerprint"], "content.hardware.fingerprint")?;
-    if claimed.len() != 64 || !claimed.bytes().all(|byte| matches!(byte, b'0'..=b'9' | b'a'..=b'f')) {
+    if claimed.len() != 64
+        || !claimed
+            .bytes()
+            .all(|byte| matches!(byte, b'0'..=b'9' | b'a'..=b'f'))
+    {
         return Err("content.hardware.fingerprint is not lowercase Hex64".into());
     }
     let body = CanonicalJson::object([
@@ -813,7 +905,10 @@ fn validate_browser(value: &CanonicalJson, row_limit: Option<usize>) -> Result<(
             &label,
             &["class", "clock", "duration_ns", "start_ns", "symbol"],
         )?;
-        if !matches!(text(&fields["class"], &format!("{label}.class"))?, "event" | "wasm" | "dom") {
+        if !matches!(
+            text(&fields["class"], &format!("{label}.class"))?,
+            "event" | "wasm" | "dom"
+        ) {
             return Err(format!("{label}.class must be event, wasm, or dom"));
         }
         if text(&fields["clock"], &format!("{label}.clock"))? != "browser_monotonic_mapped" {
@@ -906,12 +1001,7 @@ fn validate_tasks(
         if tasks
             .insert(
                 id,
-                (
-                    parent,
-                    state.into(),
-                    wait.into(),
-                    fields["symbol"].clone(),
-                ),
+                (parent, state.into(), wait.into(), fields["symbol"].clone()),
             )
             .is_some()
         {
@@ -920,7 +1010,9 @@ fn validate_tasks(
     }
     for (&id, (parent, _, _, _)) in &tasks {
         if *parent != 0 && !tasks.contains_key(parent) {
-            return Err(format!("content.tasks task {id} has missing parent {parent}"));
+            return Err(format!(
+                "content.tasks task {id} has missing parent {parent}"
+            ));
         }
         let mut seen = std::collections::BTreeSet::new();
         let mut current = id;
@@ -929,7 +1021,9 @@ fn validate_tasks(
                 break;
             }
             if !seen.insert(current) {
-                return Err(format!("content.tasks task {id} has cyclic parent causality"));
+                return Err(format!(
+                    "content.tasks task {id} has cyclic parent causality"
+                ));
             }
             current = *next;
         }
@@ -973,7 +1067,9 @@ fn validate_locks(value: &CanonicalJson) -> Result<(), String> {
         let send_waiters = unsigned(&fields["send_waiters"], &format!("{label}.send_waiters"))?;
         let recv_waiters = unsigned(&fields["recv_waiters"], &format!("{label}.recv_waiters"))?;
         if send_waiters == 0 && recv_waiters == 0 {
-            return Err(format!("{label} has no waiters (idle channel is not a lock fact)"));
+            return Err(format!(
+                "{label} has no waiters (idle channel is not a lock fact)"
+            ));
         }
         match &fields["closed"] {
             CanonicalJson::Bool(_) => {}
@@ -1076,7 +1172,10 @@ fn validate_native(
         if text(&fields["clock"], &format!("{label}.clock"))? != "process_cpu" {
             return Err(format!("{label}.clock must be process_cpu"));
         }
-        unsigned(&fields["observed_at_ns"], &format!("{label}.observed_at_ns"))?;
+        unsigned(
+            &fields["observed_at_ns"],
+            &format!("{label}.observed_at_ns"),
+        )?;
         let reason = text(&fields["reason"], &format!("{label}.reason"))?;
         let status = text(&fields["status"], &format!("{label}.status"))?;
         if text(&fields["target"], &format!("{label}.target"))?.is_empty() {
@@ -1222,7 +1321,11 @@ fn validate_source_identity(value: &CanonicalJson) -> Result<(), String> {
         let fields = object_keys(item, &label, &["path", "sha256", "symbols"])?;
         text(&fields["path"], &format!("{label}.path"))?;
         let hash = text(&fields["sha256"], &format!("{label}.sha256"))?;
-        if hash.len() != 64 || !hash.bytes().all(|byte| matches!(byte, b'0'..=b'9' | b'a'..=b'f')) {
+        if hash.len() != 64
+            || !hash
+                .bytes()
+                .all(|byte| matches!(byte, b'0'..=b'9' | b'a'..=b'f'))
+        {
             return Err(format!("{label}.sha256 is not lowercase Hex64"));
         }
         let symbols = match &fields["symbols"] {
@@ -1264,7 +1367,11 @@ fn validate_source_maps(value: &CanonicalJson) -> Result<(), String> {
         prior_path = Some(path);
         let map = text(&fields["map"], &format!("{label}.map"))?;
         let hash = text(&fields["sha256"], &format!("{label}.sha256"))?;
-        if hash.len() != 64 || !hash.bytes().all(|byte| matches!(byte, b'0'..=b'9' | b'a'..=b'f')) {
+        if hash.len() != 64
+            || !hash
+                .bytes()
+                .all(|byte| matches!(byte, b'0'..=b'9' | b'a'..=b'f'))
+        {
             return Err(format!("{label}.sha256 is not lowercase Hex64"));
         }
         if hash != SHA256::sha256_hex(map.as_bytes()) {
@@ -1426,11 +1533,12 @@ fn validate_capture_policy(value: &CanonicalJson) -> Result<CaptureLimits, Strin
         .map(|item| CanonicalJson::String((*item).into()))
         .collect::<Vec<_>>();
     if exclusions != &expected {
-        return Err("capture_policy.default_exclusions does not match D-PERFSESSION1 defaults".into());
+        return Err(
+            "capture_policy.default_exclusions does not match D-PERFSESSION1 defaults".into(),
+        );
     }
     if limits.task_rows.is_some() {
-        if unsigned(&fields["io_row_limit"], "capture_policy.io_row_limit")?
-            != TRACE_IO_ROW_LIMIT
+        if unsigned(&fields["io_row_limit"], "capture_policy.io_row_limit")? != TRACE_IO_ROW_LIMIT
             || unsigned(&fields["task_row_limit"], "capture_policy.task_row_limit")?
                 != TRACE_TASK_ROW_LIMIT
         {
@@ -1443,8 +1551,10 @@ fn validate_capture_policy(value: &CanonicalJson) -> Result<CaptureLimits, Strin
         }
     }
     if limits.browser_rows.is_some() {
-        if unsigned(&fields["browser_row_limit"], "capture_policy.browser_row_limit")?
-            != TRACE_BROWSER_ROW_LIMIT
+        if unsigned(
+            &fields["browser_row_limit"],
+            "capture_policy.browser_row_limit",
+        )? != TRACE_BROWSER_ROW_LIMIT
         {
             return Err("capture_policy browser row limit does not match this schema".into());
         }
@@ -1453,8 +1563,10 @@ fn validate_capture_policy(value: &CanonicalJson) -> Result<CaptureLimits, Strin
         }
     }
     if limits.native_rows.is_some() {
-        if unsigned(&fields["native_row_limit"], "capture_policy.native_row_limit")?
-            != TRACE_NATIVE_ROW_LIMIT
+        if unsigned(
+            &fields["native_row_limit"],
+            "capture_policy.native_row_limit",
+        )? != TRACE_NATIVE_ROW_LIMIT
         {
             return Err("capture_policy native row limit does not match this schema".into());
         }
@@ -1492,22 +1604,36 @@ fn validate_toolchain(value: &CanonicalJson) -> Result<(), String> {
     let fields = object_keys(
         value,
         "toolchain",
-        &["compiler_build_id", "digest", "jet_version", "runner_id", "stdlib_id"],
+        &[
+            "compiler_build_id",
+            "digest",
+            "jet_version",
+            "runner_id",
+            "stdlib_id",
+        ],
     )?;
     for key in ["compiler_build_id", "jet_version", "runner_id", "stdlib_id"] {
         text(&fields[key], &format!("toolchain.{key}"))?;
     }
     let digest = text(&fields["digest"], "toolchain.digest")?;
-    if digest.len() != 64 || !digest.bytes().all(|byte| matches!(byte, b'0'..=b'9' | b'a'..=b'f')) {
+    if digest.len() != 64
+        || !digest
+            .bytes()
+            .all(|byte| matches!(byte, b'0'..=b'9' | b'a'..=b'f'))
+    {
         return Err("toolchain.digest is not lowercase Hex64".into());
     }
     let digest_content = CanonicalJson::object([
-        ("compiler_build_id".into(), fields["compiler_build_id"].clone()),
+        (
+            "compiler_build_id".into(),
+            fields["compiler_build_id"].clone(),
+        ),
         ("jet_version".into(), fields["jet_version"].clone()),
         ("runner_id".into(), fields["runner_id"].clone()),
         ("stdlib_id".into(), fields["stdlib_id"].clone()),
     ])?;
-    verify_stable_id(&digest_content, digest).map_err(|_| "toolchain digest mismatch".to_string())?;
+    verify_stable_id(&digest_content, digest)
+        .map_err(|_| "toolchain digest mismatch".to_string())?;
     Ok(())
 }
 
@@ -1538,7 +1664,10 @@ pub fn trace_id(value: &CanonicalJson) -> Result<&str, String> {
         CanonicalJson::Object(fields) => fields,
         _ => return Err("jettrace wrapper is not an object".into()),
     };
-    text(fields.get("trace_id").ok_or("jettrace missing trace_id")?, "trace_id")
+    text(
+        fields.get("trace_id").ok_or("jettrace missing trace_id")?,
+        "trace_id",
+    )
 }
 
 pub fn artifact_extension() -> &'static str {
@@ -1738,11 +1867,9 @@ mod tests {
 
         skeleton.tasks[0].wait = "tcp accept".into();
         let bytes = build_skeleton_bytes(&skeleton).unwrap();
-        assert!(
-            verify_jettrace(&bytes)
-                .unwrap_err()
-                .contains("completed task must have an empty wait")
-        );
+        assert!(verify_jettrace(&bytes)
+            .unwrap_err()
+            .contains("completed task must have an empty wait"));
     }
 
     #[test]
@@ -1789,7 +1916,9 @@ mod tests {
             symbol: symbol.clone(),
         });
         let bytes = build_skeleton_bytes(&skeleton).unwrap();
-        assert!(verify_jettrace(&bytes).unwrap_err().contains("missing parent 1"));
+        assert!(verify_jettrace(&bytes)
+            .unwrap_err()
+            .contains("missing parent 1"));
 
         skeleton.tasks[0].parent = 0;
         skeleton.io.push(TraceIo {
@@ -1801,7 +1930,9 @@ mod tests {
             symbol,
         });
         let bytes = build_skeleton_bytes(&skeleton).unwrap();
-        assert!(verify_jettrace(&bytes).unwrap_err().contains("missing task 3"));
+        assert!(verify_jettrace(&bytes)
+            .unwrap_err()
+            .contains("missing task 3"));
     }
 
     #[test]
@@ -1914,7 +2045,10 @@ mod tests {
         skeleton.capture_policy.task_rows_truncated = true;
         let bytes = build_skeleton_bytes(&skeleton).unwrap();
         let text = String::from_utf8(bytes.clone()).unwrap();
-        assert!(text.contains("\"capture_policy\":{\"allowlist\":[]"), "{text}");
+        assert!(
+            text.contains("\"capture_policy\":{\"allowlist\":[]"),
+            "{text}"
+        );
         assert!(text.contains("\"browser_row_limit\":4096"), "{text}");
         assert!(text.contains("\"browser_rows_truncated\":true"), "{text}");
         assert!(text.contains("\"schema\":5,\"span_row_limit\""), "{text}");
@@ -1937,11 +2071,9 @@ mod tests {
         };
         policy.insert("task_row_limit".into(), CanonicalJson::Integer("0".into()));
         let bytes = jettrace_artifact(CanonicalJson::Object(content.clone())).bytes();
-        assert!(
-            verify_jettrace(&bytes)
-                .unwrap_err()
-                .contains("row limits do not match")
-        );
+        assert!(verify_jettrace(&bytes)
+            .unwrap_err()
+            .contains("row limits do not match"));
 
         let mut content = skeleton.content_json().unwrap();
         let CanonicalJson::Object(fields) = &mut content else {
@@ -1952,11 +2084,9 @@ mod tests {
             CanonicalJson::Array(vec![CanonicalJson::Null; TRACE_TASK_ROW_LIMIT as usize + 1]),
         );
         let bytes = jettrace_artifact(content).bytes();
-        assert!(
-            verify_jettrace(&bytes)
-                .unwrap_err()
-                .contains("exceeds capture_policy.task_row_limit")
-        );
+        assert!(verify_jettrace(&bytes)
+            .unwrap_err()
+            .contains("exceeds capture_policy.task_row_limit"));
 
         let mut content = skeleton.content_json().unwrap();
         let CanonicalJson::Object(fields) = &mut content else {
@@ -1967,7 +2097,10 @@ mod tests {
             CanonicalJson::Array(vec![CanonicalJson::Null; TRACE_SPAN_ROW_LIMIT as usize + 1]),
         );
         let error = verify_jettrace(&jettrace_artifact(content).bytes()).unwrap_err();
-        assert!(error.contains("exceeds capture_policy.span_row_limit"), "{error}");
+        assert!(
+            error.contains("exceeds capture_policy.span_row_limit"),
+            "{error}"
+        );
     }
 
     #[test]
@@ -1996,11 +2129,23 @@ mod tests {
         policy.insert("schema".into(), CanonicalJson::Integer("1".into()));
         let bytes = jettrace_artifact(content).bytes();
         let text = String::from_utf8(bytes.clone()).unwrap();
-        assert!(text.contains("\"capture_policy\":{\"allowlist\":[]"), "{text}");
+        assert!(
+            text.contains("\"capture_policy\":{\"allowlist\":[]"),
+            "{text}"
+        );
         assert!(text.contains("\"schema\":1},\"command\""), "{text}");
-        assert!(!text.contains("row_limit"), "legacy limits were fabricated: {text}");
-        assert!(!text.contains("rows_truncated"), "legacy truncation was fabricated: {text}");
-        assert!(text.contains("\"version\":1"), "outer version changed: {text}");
+        assert!(
+            !text.contains("row_limit"),
+            "legacy limits were fabricated: {text}"
+        );
+        assert!(
+            !text.contains("rows_truncated"),
+            "legacy truncation was fabricated: {text}"
+        );
+        assert!(
+            text.contains("\"version\":1"),
+            "outer version changed: {text}"
+        );
         verify_jettrace(&bytes).unwrap();
     }
 
@@ -2043,8 +2188,12 @@ mod tests {
     #[test]
     fn capture_policy_v4_remains_readable_with_empty_browser_domain() {
         let mut content = sample_skeleton().content_json().unwrap();
-        let CanonicalJson::Object(fields) = &mut content else { unreachable!() };
-        let CanonicalJson::Object(policy) = fields.get_mut("capture_policy").unwrap() else { unreachable!() };
+        let CanonicalJson::Object(fields) = &mut content else {
+            unreachable!()
+        };
+        let CanonicalJson::Object(policy) = fields.get_mut("capture_policy").unwrap() else {
+            unreachable!()
+        };
         policy.remove("browser_row_limit");
         policy.remove("browser_rows_truncated");
         policy.insert("schema".into(), CanonicalJson::Integer("4".into()));
@@ -2054,7 +2203,10 @@ mod tests {
     #[test]
     fn browser_rows_are_closed_bounded_and_source_attributed() {
         let mut skeleton = sample_skeleton();
-        let symbol = JetSymbolRef { path: "app.jet".into(), name: "run".into() };
+        let symbol = JetSymbolRef {
+            path: "app.jet".into(),
+            name: "run".into(),
+        };
         skeleton.browser.push(TraceBrowser {
             class: "event".into(),
             duration_ns: 25,
@@ -2064,11 +2216,16 @@ mod tests {
         let bytes = build_skeleton_bytes(&skeleton).unwrap();
         verify_jettrace(&bytes).unwrap();
         let text = String::from_utf8(bytes).unwrap();
-        assert!(text.contains("\"clock\":\"browser_monotonic_mapped\""), "{text}");
+        assert!(
+            text.contains("\"clock\":\"browser_monotonic_mapped\""),
+            "{text}"
+        );
         assert!(!text.contains("nonce"), "{text}");
 
         skeleton.browser[0].class = "payload".into();
-        assert!(verify_jettrace(&build_skeleton_bytes(&skeleton).unwrap()).unwrap_err().contains("class must be"));
+        assert!(verify_jettrace(&build_skeleton_bytes(&skeleton).unwrap())
+            .unwrap_err()
+            .contains("class must be"));
     }
 
     #[test]
@@ -2172,7 +2329,10 @@ mod tests {
             row.insert("status".into(), CanonicalJson::String("forged".into()));
 
             let error = verify_jettrace(&jettrace_artifact(content).bytes()).unwrap_err();
-            assert!(error.contains("status must be captured or unavailable"), "{schema}: {error}");
+            assert!(
+                error.contains("status must be captured or unavailable"),
+                "{schema}: {error}"
+            );
         }
     }
 
@@ -2202,7 +2362,9 @@ mod tests {
             1,
         );
         bytes = forged.into_bytes();
-        assert!(verify_jettrace(&bytes).unwrap_err().contains("content hash mismatch"));
+        assert!(verify_jettrace(&bytes)
+            .unwrap_err()
+            .contains("content hash mismatch"));
     }
 
     #[test]
@@ -2211,7 +2373,10 @@ mod tests {
         let wrapper = CanonicalJson::object([
             ("content".into(), content.clone()),
             ("schema".into(), CanonicalJson::String(TRACE_SCHEMA.into())),
-            ("trace_id".into(), CanonicalJson::String(stable_id(&content))),
+            (
+                "trace_id".into(),
+                CanonicalJson::String(stable_id(&content)),
+            ),
             ("version".into(), CanonicalJson::Integer("2".into())),
         ])
         .unwrap();
@@ -2222,14 +2387,12 @@ mod tests {
     #[test]
     fn embedded_source_maps_hash_and_sort_for_offline_truth() {
         let mut skeleton = sample_skeleton();
-        skeleton.source_maps.push(TraceSourceMap::jet_with_source(
-            "b.jet",
-            "fn run() {}\n",
-        ));
-        skeleton.source_maps.push(TraceSourceMap::jet_with_source(
-            "a.jet",
-            "fn run() {}\n",
-        ));
+        skeleton
+            .source_maps
+            .push(TraceSourceMap::jet_with_source("b.jet", "fn run() {}\n"));
+        skeleton
+            .source_maps
+            .push(TraceSourceMap::jet_with_source("a.jet", "fn run() {}\n"));
         let bytes = build_skeleton_bytes(&skeleton).unwrap();
         let text = String::from_utf8(bytes.clone()).unwrap();
         assert!(text.contains("\"source_maps\":[{"), "{text}");

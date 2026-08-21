@@ -23,8 +23,20 @@ fn report(label: String, signup: Signup) {
     }
 }
 
+fn report_over(label: String, signup: Signup, allow_short: Bool) {
+    if Validate.over(signup).check(signup.email.len() > 0, at: email, "email required").check(allow_short || signup.password.len() >= 12, at: password, "needs at least 12 characters").finish() == {
+        .Ok(v) :> { print("{label}: ok ({v.email})") }
+        .Err(errs) :> {
+            print("{label}: {errs.len()} problem(s)")
+            loop e, errs :> print("  {e.path}: {e.reason}")
+        }
+    }
+}
+
 fn run() {
     report("bad", Signup{email: "", password: "short"})
     report("same", Signup{email: "a@b.com", password: "a@b.com"})
     report("good", Signup{email: "a@b.com", password: "supersecretpw"})
+    report_over("over", Signup{email: "", password: "short"}, false)
+    report_over("over-context", Signup{email: "a@b.com", password: "short"}, true)
 }

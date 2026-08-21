@@ -29,10 +29,8 @@ static CBOR_ERROR_FIELD_METADATA: &[(&str, bool)] = &[
 
 static FIELD_ERROR_FIELD_METADATA: &[(&str, bool)] = &[("path", false), ("reason", false)];
 
-static ALLOC_ERROR_FIELD_METADATA: &[(&str, bool)] = &[
-    ("requested_bytes", false),
-    ("allocator", false),
-];
+static ALLOC_ERROR_FIELD_METADATA: &[(&str, bool)] =
+    &[("requested_bytes", false), ("allocator", false)];
 
 /// The one Core structural-type metadata table. `jet_debug_field_metadata`
 /// is its keyed view and `jet_debug_field_metadata_rows` its enumeration, so
@@ -214,8 +212,7 @@ pub fn jet_task_control_trace(paused: bool, cancel: bool) -> String {
 mod structural_debug_tests {
     use super::{
         jet_debug_field_metadata, jet_debug_record, jet_debug_record_fields, jet_debug_variant,
-        JetDebugField,
-        jet_task_control_trace,
+        jet_task_control_trace, JetDebugField,
     };
 
     #[test]

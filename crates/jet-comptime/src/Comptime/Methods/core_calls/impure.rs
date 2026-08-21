@@ -1,5 +1,5 @@
-use super::*;
 use super::super::repl_process::run_repl_process;
+use super::*;
 
 /// D-CTEFFECT1: execute a Tier-2 ambient comptime I/O effect (or REPL sandbox I/O).
 /// Only called when `impure_depth > 0` and `gates` (comptime) or from the

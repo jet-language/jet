@@ -55,7 +55,11 @@ pub fn str_match_scan(
                 if !str_hole_admits(ty, raw) {
                     return None;
                 }
-                binds.push((name.clone(), ty.clone().unwrap_or(Type::String), raw.to_string()));
+                binds.push((
+                    name.clone(),
+                    ty.clone().unwrap_or(Type::String),
+                    raw.to_string(),
+                ));
                 i = end;
             }
         }
@@ -73,7 +77,9 @@ fn str_hole_admits(ty: &Option<Type>, raw: &str) -> bool {
         Some(Type::InlineRange { lo, hi, .. }) => raw
             .parse::<i64>()
             .ok()
-            .and_then(|value| inline_range_semantics::jet_inline_range_from_int(value, *lo, *hi).ok())
+            .and_then(|value| {
+                inline_range_semantics::jet_inline_range_from_int(value, *lo, *hi).ok()
+            })
             .is_some(),
         Some(Type::Float) | Some(Type::Float32) => raw.parse::<f64>().is_ok(),
         Some(Type::Bool) => matches!(raw, "true" | "false" | "True" | "False" | "0" | "1"),
@@ -128,7 +134,10 @@ fn bin_bits_type(width: u8) -> Type {
     } else {
         64
     };
-    Type::IntN { signed: false, bits }
+    Type::IntN {
+        signed: false,
+        bits,
+    }
 }
 
 /// Byte-mode sibling of `str_match_scan`. Returns the bit position reached
@@ -151,8 +160,7 @@ pub fn bin_match_scan(
             },
         })
         .collect::<Vec<_>>();
-    let (bit_pos, values) =
-        bin_kernel::jet_bin_match_scan(subject, &kernel_parts, consume_prefix)?;
+    let (bit_pos, values) = bin_kernel::jet_bin_match_scan(subject, &kernel_parts, consume_prefix)?;
     let mut values = values.into_iter();
     let mut binds = Vec::new();
     for part in parts {
@@ -161,10 +169,9 @@ pub fn bin_match_scan(
         };
         let value = values.next()?;
         let (ty, bind) = match (spec, value) {
-            (BinSpec::Bits { width, .. }, bin_kernel::JetBinMatchValue::Int(value)) => (
-                bin_bits_type(*width),
-                BinBind::Int(value as i64),
-            ),
+            (BinSpec::Bits { width, .. }, bin_kernel::JetBinMatchValue::Int(value)) => {
+                (bin_bits_type(*width), BinBind::Int(value as i64))
+            }
             (BinSpec::Rest, bin_kernel::JetBinMatchValue::Rest(bytes)) => (
                 Type::List(Box::new(Type::IntN {
                     signed: false,
@@ -244,7 +251,12 @@ mod match_scan_tests {
             (24, &[1, 2, 3], 66051, 197121),
             (40, &[1, 2, 3, 4, 5], 4328719365, 21542142465),
             (48, &[1, 2, 3, 4, 5, 6], 1108152157446, 6618611909121),
-            (56, &[1, 2, 3, 4, 5, 6, 7], 283686952306183, 1976943448883713),
+            (
+                56,
+                &[1, 2, 3, 4, 5, 6, 7],
+                283686952306183,
+                1976943448883713,
+            ),
         ];
 
         for (width, bytes, big_endian, little_endian) in cases {
@@ -257,8 +269,7 @@ mod match_scan_tests {
                     spec: BinSpec::Bits { width, endian },
                     span: Span::new(0, 0),
                 }];
-                let (bits, binds) =
-                    bin_match_scan(bytes, &parts, false).expect("full-width match");
+                let (bits, binds) = bin_match_scan(bytes, &parts, false).expect("full-width match");
                 assert_eq!(bits, width as usize);
                 assert_eq!(binds[0].1, bin_bits_type(width));
                 assert_eq!(binds[0].2, BinBind::Int(expected));

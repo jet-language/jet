@@ -16,8 +16,10 @@ const U32_MAX_U64: u64 = u32::MAX as u64;
 /// dependency into the compiler seam. Compression ratio is deliberately zero;
 /// AOT's full decoder accepts the resulting raw blocks.
 pub(super) fn zstd_compress(data: &[u8]) -> Vec<u8> {
-    let mut out =
-        Vec::with_capacity(data.len().saturating_add(16 + data.len() / ZSTD_BLOCK_MAX * 3));
+    let mut out = Vec::with_capacity(
+        data.len()
+            .saturating_add(16 + data.len() / ZSTD_BLOCK_MAX * 3),
+    );
     zstd_frame_header(&mut out, data.len() as u64);
 
     if data.is_empty() {
@@ -76,12 +78,14 @@ pub(super) fn zstd_decompress(data: &[u8]) -> Result<Vec<u8>, String> {
             let base = 1u64 << (10 + u32::from(byte >> 3));
             Some(base + base / 8 * u64::from(byte & 7))
         };
-        let dictionary = read_le(data, input, dict_size).ok_or_else(|| fail("invalid zstd data"))?;
+        let dictionary =
+            read_le(data, input, dict_size).ok_or_else(|| fail("invalid zstd data"))?;
         input += dict_size;
         if dictionary != 0 {
             return Err(fail("dictionary frames are unsupported"));
         }
-        let mut expected = read_le(data, input, fcs_size).ok_or_else(|| fail("invalid zstd data"))?;
+        let mut expected =
+            read_le(data, input, fcs_size).ok_or_else(|| fail("invalid zstd data"))?;
         input += fcs_size;
         if fcs_size == 2 {
             expected += 256;
@@ -139,7 +143,9 @@ pub(super) fn zstd_decompress(data: &[u8]) -> Result<Vec<u8>, String> {
                     let (literals, used) = super::ZstdEntropy::literals(block, &mut huffman)
                         .ok_or_else(|| fail("invalid compressed literals"))?;
                     super::ZstdEntropy::sequences(
-                        block.get(used..).ok_or_else(|| fail("invalid compressed sequences"))?,
+                        block
+                            .get(used..)
+                            .ok_or_else(|| fail("invalid compressed sequences"))?,
                         &literals,
                         &mut sequences,
                         &mut out,
@@ -357,10 +363,9 @@ fn read_u32(data: &[u8], offset: usize) -> Option<u32> {
 fn read_le(data: &[u8], offset: usize, size: usize) -> Option<u64> {
     let bytes = data.get(offset..offset.checked_add(size)?)?;
     (size <= 8).then(|| {
-        bytes
-            .iter()
-            .enumerate()
-            .fold(0u64, |value, (shift, byte)| value | (u64::from(*byte) << (shift * 8)))
+        bytes.iter().enumerate().fold(0u64, |value, (shift, byte)| {
+            value | (u64::from(*byte) << (shift * 8))
+        })
     })
 }
 
@@ -403,7 +408,10 @@ fn xxh64(data: &[u8]) -> u64 {
         let mut lanes = [P1.wrapping_add(P2), P2, 0, 0u64.wrapping_sub(P1)];
         while offset + 32 <= data.len() {
             for lane in &mut lanes {
-                *lane = round(*lane, u64::from_le_bytes(data[offset..offset + 8].try_into().unwrap()));
+                *lane = round(
+                    *lane,
+                    u64::from_le_bytes(data[offset..offset + 8].try_into().unwrap()),
+                );
                 offset += 8;
             }
         }
@@ -422,13 +430,18 @@ fn xxh64(data: &[u8]) -> u64 {
     };
     hash = hash.wrapping_add(data.len() as u64);
     while offset + 8 <= data.len() {
-        hash ^= round(0, u64::from_le_bytes(data[offset..offset + 8].try_into().unwrap()));
+        hash ^= round(
+            0,
+            u64::from_le_bytes(data[offset..offset + 8].try_into().unwrap()),
+        );
         hash = hash.rotate_left(27).wrapping_mul(P1).wrapping_add(P4);
         offset += 8;
     }
     if offset + 4 <= data.len() {
-        hash ^= u64::from(u32::from_le_bytes(data[offset..offset + 4].try_into().unwrap()))
-            .wrapping_mul(P1);
+        hash ^= u64::from(u32::from_le_bytes(
+            data[offset..offset + 4].try_into().unwrap(),
+        ))
+        .wrapping_mul(P1);
         hash = hash.rotate_left(23).wrapping_mul(P2).wrapping_add(P3);
         offset += 4;
     }
@@ -502,11 +515,9 @@ impl Huffman {
         let mut code = 0u32;
         for length in 1..=15 {
             code |= bits.read(1)? << (length - 1);
-            if let Some((_, _, symbol)) = self
-                .0
-                .iter()
-                .find(|(candidate, candidate_len, _)| *candidate_len == length && *candidate == code)
-            {
+            if let Some((_, _, symbol)) = self.0.iter().find(|(candidate, candidate_len, _)| {
+                *candidate_len == length && *candidate == code
+            }) {
                 return Some(*symbol);
             }
         }
@@ -574,7 +585,9 @@ fn dynamic_trees(bits: &mut Bits<'_>) -> Option<(Huffman, Huffman)> {
     let literal_count = bits.read(5)? as usize + 257;
     let distance_count = bits.read(5)? as usize + 1;
     let code_count = bits.read(4)? as usize + 4;
-    let order = [16usize, 17, 18, 0, 8, 7, 9, 6, 10, 5, 11, 4, 12, 3, 13, 2, 14, 1, 15];
+    let order = [
+        16usize, 17, 18, 0, 8, 7, 9, 6, 10, 5, 11, 4, 12, 3, 13, 2, 14, 1, 15,
+    ];
     let mut code_lengths = [0u8; 19];
     for index in 0..code_count {
         code_lengths[order[index]] = bits.read(3)? as u8;
@@ -617,20 +630,19 @@ fn inflate_codes(
     expected_len: usize,
 ) -> Option<()> {
     const LENGTH_BASE: [usize; 29] = [
-        3, 4, 5, 6, 7, 8, 9, 10, 11, 13, 15, 17, 19, 23, 27, 31, 35, 43, 51, 59, 67, 83,
-        99, 115, 131, 163, 195, 227, 258,
+        3, 4, 5, 6, 7, 8, 9, 10, 11, 13, 15, 17, 19, 23, 27, 31, 35, 43, 51, 59, 67, 83, 99, 115,
+        131, 163, 195, 227, 258,
     ];
     const LENGTH_EXTRA: [usize; 29] = [
-        0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 2, 2, 2, 2, 3, 3, 3, 3, 4, 4, 4, 4,
-        5, 5, 5, 5, 0,
+        0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 2, 2, 2, 2, 3, 3, 3, 3, 4, 4, 4, 4, 5, 5, 5, 5, 0,
     ];
     const DIST_BASE: [usize; 30] = [
-        1, 2, 3, 4, 5, 7, 9, 13, 17, 25, 33, 49, 65, 97, 129, 193, 257, 385, 513, 769,
-        1025, 1537, 2049, 3073, 4097, 6145, 8193, 12289, 16385, 24577,
+        1, 2, 3, 4, 5, 7, 9, 13, 17, 25, 33, 49, 65, 97, 129, 193, 257, 385, 513, 769, 1025, 1537,
+        2049, 3073, 4097, 6145, 8193, 12289, 16385, 24577,
     ];
     const DIST_EXTRA: [usize; 30] = [
-        0, 0, 0, 0, 1, 1, 2, 2, 3, 3, 4, 4, 5, 5, 6, 6, 7, 7, 8, 8, 9, 9, 10, 10,
-        11, 11, 12, 12, 13, 13,
+        0, 0, 0, 0, 1, 1, 2, 2, 3, 3, 4, 4, 5, 5, 6, 6, 7, 7, 8, 8, 9, 9, 10, 10, 11, 11, 12, 12,
+        13, 13,
     ];
     loop {
         match literal.symbol(bits)? {
@@ -722,11 +734,11 @@ mod tests {
     #[test]
     fn dynamic_huffman_deflate_decodes() {
         let compressed = [
-            173, 140, 87, 21, 128, 48, 12, 69, 173, 60, 5, 24, 64, 77, 11, 233, 96, 52, 221,
-            5, 212, 147, 131, 6, 190, 239, 168, 142, 144, 154, 95, 118, 232, 204, 35, 192,
-            240, 133, 173, 157, 177, 128, 59, 101, 84, 193, 135, 122, 110, 172, 108, 103, 68,
-            37, 222, 121, 67, 139, 52, 124, 117, 48, 190, 147, 160, 135, 2, 14, 159, 26, 103,
-            105, 109, 153, 190, 236, 255, 235, 11,
+            173, 140, 87, 21, 128, 48, 12, 69, 173, 60, 5, 24, 64, 77, 11, 233, 96, 52, 221, 5,
+            212, 147, 131, 6, 190, 239, 168, 142, 144, 154, 95, 118, 232, 204, 35, 192, 240, 133,
+            173, 157, 177, 128, 59, 101, 84, 193, 135, 122, 110, 172, 108, 103, 68, 37, 222, 121,
+            67, 139, 52, 124, 117, 48, 190, 147, 160, 135, 2, 14, 159, 26, 103, 105, 109, 153, 190,
+            236, 255, 235, 11,
         ];
         let expected = b"the quick brown fox jumps over the lazy dog; pack my box with five dozen liquor jugs. "
             .repeat(2);
@@ -745,8 +757,8 @@ mod tests {
         // Python 3: gzip.compress(b"hello", mtime=0). Not produced by this
         // encoder, and its fixed-Huffman payload exercises a different path.
         let gzip = [
-            31, 139, 8, 0, 0, 0, 0, 0, 2, 3, 203, 72, 205, 201, 201, 7, 0, 134, 166, 16,
-            54, 5, 0, 0, 0,
+            31, 139, 8, 0, 0, 0, 0, 0, 2, 3, 203, 72, 205, 201, 201, 7, 0, 134, 166, 16, 54, 5, 0,
+            0, 0,
         ];
         assert_eq!(gzip_decompress(&gzip), Ok(b"hello".to_vec()));
     }
@@ -782,10 +794,7 @@ mod tests {
 
         let frame = zstd_compress(&vec![42; ZSTD_BLOCK_MAX + 1]);
         assert_eq!(&frame[..6], &[40, 181, 47, 253, 128, 56]);
-        assert_eq!(
-            &frame[6..10],
-            &((ZSTD_BLOCK_MAX + 1) as u32).to_le_bytes()
-        );
+        assert_eq!(&frame[6..10], &((ZSTD_BLOCK_MAX + 1) as u32).to_le_bytes());
         assert_eq!(&frame[10..13], &[0, 0, 16]); // non-final 128 KiB raw block
         let second = 13 + ZSTD_BLOCK_MAX;
         assert_eq!(&frame[second..second + 3], &[9, 0, 0]); // final one-byte raw block
@@ -836,7 +845,10 @@ mod tests {
 
     #[test]
     fn zstd_raw_rle_skippable_and_concatenated_frames_decode() {
-        assert_eq!(zstd_decompress(&zstd_compress(b"hello")), Ok(b"hello".to_vec()));
+        assert_eq!(
+            zstd_decompress(&zstd_compress(b"hello")),
+            Ok(b"hello".to_vec())
+        );
 
         let rle = [40, 181, 47, 253, 32, 10, 83, 0, 0, b'a'];
         assert_eq!(zstd_decompress(&rle), Ok(vec![b'a'; 10]));
@@ -861,7 +873,9 @@ mod tests {
         assert_eq!(zstd_decompress(&checksummed), Ok(b"hello".to_vec()));
         let mut corrupt = checksummed;
         corrupt[14] ^= 1;
-        assert!(zstd_decompress(&corrupt).unwrap_err().contains("checksum mismatch"));
+        assert!(zstd_decompress(&corrupt)
+            .unwrap_err()
+            .contains("checksum mismatch"));
 
         let wrong_size = [40, 181, 47, 253, 32, 6, 41, 0, 0, 104, 101, 108, 108, 111];
         assert!(zstd_decompress(&wrong_size)
@@ -875,8 +889,7 @@ mod tests {
         assert!(zstd_decompress(&oversized).unwrap_err().contains("64 MiB"));
         let max_window = [40, 181, 47, 253, 0, 136, 41, 0, 0, 104, 101, 108, 108, 111];
         assert_eq!(zstd_decompress(&max_window), Ok(b"hello".to_vec()));
-        let oversized_window =
-            [40, 181, 47, 253, 0, 137, 41, 0, 0, 104, 101, 108, 108, 111];
+        let oversized_window = [40, 181, 47, 253, 0, 137, 41, 0, 0, 104, 101, 108, 108, 111];
         assert!(zstd_decompress(&oversized_window)
             .unwrap_err()
             .contains("128 MiB"));
@@ -888,10 +901,10 @@ mod tests {
     fn zstd_stock_compressed_sequence_golden_decodes() {
         // zstd 1.5.7 compressed-block frame for a repeated pangram.
         let compressed = [
-            40, 181, 47, 253, 0, 88, 181, 1, 0, 180, 2, 116, 104, 101, 32, 113, 117, 105,
-            99, 107, 32, 98, 114, 111, 119, 110, 32, 102, 111, 120, 32, 106, 117, 109, 112,
-            115, 32, 111, 118, 101, 114, 32, 116, 104, 101, 32, 108, 97, 122, 121, 32, 100,
-            111, 103, 2, 0, 253, 169, 4, 6, 194, 44, 3,
+            40, 181, 47, 253, 0, 88, 181, 1, 0, 180, 2, 116, 104, 101, 32, 113, 117, 105, 99, 107,
+            32, 98, 114, 111, 119, 110, 32, 102, 111, 120, 32, 106, 117, 109, 112, 115, 32, 111,
+            118, 101, 114, 32, 116, 104, 101, 32, 108, 97, 122, 121, 32, 100, 111, 103, 2, 0, 253,
+            169, 4, 6, 194, 44, 3,
         ];
         assert_eq!(
             zstd_decompress(&compressed),
@@ -945,7 +958,9 @@ mod tests {
             Vec::new(),
             b"z".to_vec(),
             b"the quick brown fox jumps over the lazy dog ".repeat(200),
-            (0..20_000).map(|index| (index * 37) as u8).collect::<Vec<_>>(),
+            (0..20_000)
+                .map(|index| (index * 37) as u8)
+                .collect::<Vec<_>>(),
         ];
         for plain in corpora {
             for level in ["-1", "-5", "-19"] {

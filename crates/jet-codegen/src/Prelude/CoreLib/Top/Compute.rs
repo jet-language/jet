@@ -209,6 +209,487 @@ enum JetComputeTransformResult {
     },
 }
 
+/// One transform meaning crosses every host boundary.  The numeric form is
+/// also the resident host ABI; hosts marshal it but never select policy from
+/// a method string.
+#[repr(i64)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum JetComputeTransformKind {
+    Gradient = 0,
+    ValueAndGradient = 1,
+    Vjp = 2,
+    Jvp = 3,
+}
+
+impl JetComputeTransformKind {
+    pub fn from_i64(value: i64) -> Option<Self> {
+        match value {
+            0 => Some(Self::Gradient),
+            1 => Some(Self::ValueAndGradient),
+            2 => Some(Self::Vjp),
+            3 => Some(Self::Jvp),
+            _ => None,
+        }
+    }
+
+    pub fn is_jvp(self) -> bool {
+        matches!(self, Self::Jvp)
+    }
+
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Gradient => "gradient",
+            Self::ValueAndGradient => "value_and_gradient",
+            Self::Vjp => "vjp",
+            Self::Jvp => "jvp",
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum JetComputeResultShape {
+    Tensor,
+    TensorTuple(usize),
+}
+
+pub enum JetComputeBaseResult {
+    Tensor(JetTensor),
+    TensorTuple(Vec<JetTensor>),
+}
+
+pub struct JetComputeBase {
+    arity: usize,
+    invoke: std::rc::Rc<dyn Fn(&[JetTensor]) -> Result<JetComputeBaseResult, JetComputeError>>,
+}
+
+impl Clone for JetComputeBase {
+    fn clone(&self) -> Self {
+        Self {
+            arity: self.arity,
+            invoke: self.invoke.clone(),
+        }
+    }
+}
+
+impl JetComputeBase {
+    pub fn new<F>(arity: usize, invoke: F) -> Self
+    where
+        F: Fn(&[JetTensor]) -> Result<JetComputeBaseResult, JetComputeError> + 'static,
+    {
+        Self {
+            arity,
+            invoke: std::rc::Rc::new(invoke),
+        }
+    }
+
+    fn call(&self, inputs: &[JetTensor]) -> Result<JetComputeBaseResult, JetComputeError> {
+        if inputs.len() != self.arity {
+            return Err(JetComputeError::Unsupported(
+                "autodiff callable received the wrong number of Tensor arguments".to_string(),
+            ));
+        }
+        (self.invoke)(inputs)
+    }
+}
+
+pub struct JetComputeInputPack {
+    pub primals: Vec<JetTensor>,
+    pub tangents: Vec<JetTensor>,
+    flat: bool,
+}
+
+impl JetComputeInputPack {
+    pub fn new(primals: Vec<JetTensor>, tangents: Vec<JetTensor>) -> Self {
+        Self {
+            primals,
+            tangents,
+            flat: false,
+        }
+    }
+
+    /// Resident hosts receive one flat list from a typed function-value ABI.
+    /// The plan owns the JVP split, so the host does not inspect transform
+    /// policy while marshalling that list.
+    pub fn from_flat(values: Vec<JetTensor>) -> Self {
+        Self {
+            primals: values,
+            tangents: Vec::new(),
+            flat: true,
+        }
+    }
+}
+
+pub enum JetComputeCurriedResult {
+    Gradient(Vec<Vec<JetTensor>>),
+    ValueAndGradient {
+        value: JetTensor,
+        gradients: Vec<Vec<JetTensor>>,
+    },
+    Vjp {
+        value: JetTensor,
+        pull: i64,
+        grads: i64,
+    },
+    Jvp {
+        value: JetTensor,
+        tangent: JetTensor,
+    },
+}
+
+#[derive(Clone, Copy)]
+enum JetComputeCurriedContinuation {
+    Pull,
+    Grads,
+}
+
+#[derive(Clone)]
+enum JetComputeCurriedEntry {
+    Plan {
+        base: JetComputeBase,
+        kind: JetComputeTransformKind,
+        targets: Vec<i64>,
+        result_shape: JetComputeResultShape,
+    },
+    Continuation {
+        state: JetComputeVjpState,
+        targets: Vec<i64>,
+        kind: JetComputeCurriedContinuation,
+    },
+}
+
+struct JetComputeCurriedSlot {
+    refs: usize,
+    entry: JetComputeCurriedEntry,
+}
+
+thread_local! {
+    static JET_COMPUTE_CURRIED_HANDLES:
+        std::cell::RefCell<Vec<Option<JetComputeCurriedSlot>>> = const {
+            std::cell::RefCell::new(Vec::new())
+        };
+}
+
+fn jet_compute_curried_insert(entry: JetComputeCurriedEntry) -> i64 {
+    JET_COMPUTE_CURRIED_HANDLES.with(|handles| {
+        let mut handles = handles.borrow_mut();
+        let index = handles.len();
+        handles.push(Some(JetComputeCurriedSlot { refs: 1, entry }));
+        (index as i64).saturating_add(1)
+    })
+}
+
+fn jet_compute_curried_entry(handle: i64) -> Option<JetComputeCurriedEntry> {
+    let index = usize::try_from(handle).ok()?.checked_sub(1)?;
+    JET_COMPUTE_CURRIED_HANDLES.with(|handles| {
+        handles
+            .borrow()
+            .get(index)
+            .and_then(Option::as_ref)
+            .map(|slot| slot.entry.clone())
+    })
+}
+
+pub fn jet_compute_curried_new(
+    base: JetComputeBase,
+    kind: JetComputeTransformKind,
+    targets: &[i64],
+    result_shape: JetComputeResultShape,
+) -> i64 {
+    jet_compute_curried_insert(JetComputeCurriedEntry::Plan {
+        base,
+        kind,
+        targets: targets.to_vec(),
+        result_shape,
+    })
+}
+
+pub fn jet_compute_curried_clone(handle: i64) -> i64 {
+    let Some(index) = usize::try_from(handle).ok().and_then(|value| value.checked_sub(1)) else {
+        return 0;
+    };
+    JET_COMPUTE_CURRIED_HANDLES.with(|handles| {
+        let mut handles = handles.borrow_mut();
+        let Some(slot) = handles.get_mut(index).and_then(Option::as_mut) else {
+            return 0;
+        };
+        slot.refs = slot.refs.saturating_add(1);
+        handle
+    })
+}
+
+pub fn jet_compute_curried_drop(handle: i64) {
+    let Some(index) = usize::try_from(handle).ok().and_then(|value| value.checked_sub(1)) else {
+        return;
+    };
+    JET_COMPUTE_CURRIED_HANDLES.with(|handles| {
+        let mut handles = handles.borrow_mut();
+        let remove = match handles.get_mut(index).and_then(Option::as_mut) {
+            Some(slot) if slot.refs <= 1 => true,
+            Some(slot) => {
+                slot.refs -= 1;
+                false
+            }
+            None => return,
+        };
+        if remove {
+            handles[index] = None;
+        }
+    });
+}
+
+#[repr(transparent)]
+pub struct JetComputeHandle(i64);
+
+impl JetComputeHandle {
+    pub fn new(raw: i64) -> Self {
+        Self(raw)
+    }
+
+    pub fn raw(&self) -> i64 {
+        self.0
+    }
+}
+
+impl Clone for JetComputeHandle {
+    fn clone(&self) -> Self {
+        Self(jet_compute_curried_clone(self.0))
+    }
+}
+
+impl Drop for JetComputeHandle {
+    fn drop(&mut self) {
+        jet_compute_curried_drop(self.0);
+    }
+}
+
+fn jet_compute_curried_result_shape(
+    result: JetComputeBaseResult,
+    shape: JetComputeResultShape,
+) -> Result<Vec<JetTensor>, JetComputeError> {
+    let values = match (shape, result) {
+        (JetComputeResultShape::Tensor, JetComputeBaseResult::Tensor(value)) => {
+            vec![value]
+        }
+        (JetComputeResultShape::TensorTuple(expected), JetComputeBaseResult::TensorTuple(values)) => {
+            if values.len() != expected {
+                return Err(JetComputeError::Unsupported(format!(
+                    "autodiff base returned {} tensors; expected {expected}",
+                    values.len()
+                )));
+            }
+            values
+        }
+        (JetComputeResultShape::Tensor, JetComputeBaseResult::TensorTuple(_))
+        | (JetComputeResultShape::TensorTuple(_), JetComputeBaseResult::Tensor(_)) => {
+            return Err(JetComputeError::Unsupported(
+                "autodiff base returned the wrong result shape".to_string(),
+            ));
+        }
+    };
+    for value in &values {
+        jet_compute_validate_tensor(value)?;
+    }
+    Ok(values)
+}
+
+fn jet_compute_curried_gradient_result(
+    states: &[JetComputeVjpState],
+    targets: &[i64],
+) -> Result<Vec<Vec<JetTensor>>, JetComputeError> {
+    let gradients = states
+        .iter()
+        .map(|state| {
+            let seed = jet_compute_gradient_seed(state)?;
+            jet_compute_vjp_pull(state, &seed, targets)
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    if gradients.len() == 1 {
+        return Ok(gradients
+            .into_iter()
+            .next()
+            .unwrap_or_default()
+            .into_iter()
+            .map(|gradient| vec![gradient])
+            .collect());
+    }
+    let mut result = Vec::with_capacity(targets.len());
+    for target_index in 0..targets.len() {
+        result.push(
+            gradients
+                .iter()
+                .map(|values| values[target_index].clone())
+                .collect(),
+        );
+    }
+    Ok(result)
+}
+
+fn jet_compute_curried_call_plan(
+    base: &JetComputeBase,
+    kind: JetComputeTransformKind,
+    targets: &[i64],
+    result_shape: JetComputeResultShape,
+    input: JetComputeInputPack,
+) -> Result<JetComputeCurriedResult, JetComputeError> {
+    for tensor in input.primals.iter().chain(input.tangents.iter()) {
+        jet_compute_validate_tensor(tensor)?;
+    }
+    if matches!(result_shape, JetComputeResultShape::TensorTuple(_))
+        && !matches!(kind, JetComputeTransformKind::Gradient)
+    {
+        return Err(JetComputeError::Unsupported(
+            "only compute.gradient can transform a Tensor tuple".to_string(),
+        ));
+    }
+    let (tape, tracked) = jet_compute_trace_inputs(input.primals);
+    let result = base.call(&tracked)?;
+    let values = jet_compute_curried_result_shape(result, result_shape)?;
+    let states = values
+        .iter()
+        .cloned()
+        .map(|value| jet_compute_vjp_begin(value, tape.clone()))
+        .collect::<Vec<_>>();
+    match kind {
+        JetComputeTransformKind::Gradient => Ok(JetComputeCurriedResult::Gradient(
+            jet_compute_curried_gradient_result(&states, targets)?,
+        )),
+        JetComputeTransformKind::ValueAndGradient => {
+            let Some(state) = states.first() else {
+                return Err(JetComputeError::Unsupported(
+                    "value_and_gradient base returned no value".to_string(),
+                ));
+            };
+            Ok(JetComputeCurriedResult::ValueAndGradient {
+                value: jet_compute_remove_trace_level(&state.value, &state.tape),
+                gradients: jet_compute_curried_gradient_result(&states, targets)?,
+            })
+        }
+        JetComputeTransformKind::Vjp => {
+            let Some(state) = states.first() else {
+                return Err(JetComputeError::Unsupported(
+                    "vjp base returned no value".to_string(),
+                ));
+            };
+            let value = jet_compute_remove_trace_level(&state.value, &state.tape);
+            let pull = jet_compute_curried_insert(JetComputeCurriedEntry::Continuation {
+                state: state.clone(),
+                targets: targets.to_vec(),
+                kind: JetComputeCurriedContinuation::Pull,
+            });
+            let grads = jet_compute_curried_insert(JetComputeCurriedEntry::Continuation {
+                state: state.clone(),
+                targets: targets.to_vec(),
+                kind: JetComputeCurriedContinuation::Grads,
+            });
+            Ok(JetComputeCurriedResult::Vjp { value, pull, grads })
+        }
+        JetComputeTransformKind::Jvp => {
+            let Some(state) = states.first() else {
+                return Err(JetComputeError::Unsupported(
+                    "jvp base returned no value".to_string(),
+                ));
+            };
+            Ok(JetComputeCurriedResult::Jvp {
+                value: jet_compute_remove_trace_level(&state.value, &state.tape),
+                tangent: jet_compute_jvp(state, input.tangents)?,
+            })
+        }
+    }
+}
+
+fn jet_compute_curried_flat_input(
+    entry: &JetComputeCurriedEntry,
+    input: JetComputeInputPack,
+) -> Result<JetComputeInputPack, JetComputeError> {
+    if !input.flat {
+        return Ok(input);
+    }
+    let JetComputeInputPack { primals, .. } = input;
+    let JetComputeCurriedEntry::Plan { base, kind, .. } = entry else {
+        return Ok(JetComputeInputPack::new(primals, Vec::new()));
+    };
+    if !kind.is_jvp() {
+        return Ok(JetComputeInputPack::new(primals, Vec::new()));
+    }
+    let split = base.arity;
+    if primals.len() != split.saturating_mul(2) {
+        return Err(JetComputeError::Unsupported(
+            "jvp needs one tangent for every primal".to_string(),
+        ));
+    }
+    Ok(JetComputeInputPack::new(
+        primals[..split].to_vec(),
+        primals[split..].to_vec(),
+    ))
+}
+
+pub fn jet_compute_call_curried(
+    handle: i64,
+    input: JetComputeInputPack,
+) -> Result<JetComputeCurriedResult, JetComputeError> {
+    let Some(entry) = jet_compute_curried_entry(handle) else {
+        return Err(JetComputeError::Unsupported(
+            "autodiff callable handle is invalid or expired".to_string(),
+        ));
+    };
+    let input = jet_compute_curried_flat_input(&entry, input)?;
+    match entry {
+        JetComputeCurriedEntry::Plan {
+            base,
+            kind,
+            targets,
+            result_shape,
+        } => {
+            if kind.is_jvp() {
+                if input.primals.len() != input.tangents.len() {
+                    return Err(JetComputeError::Unsupported(
+                        "jvp needs one tangent for every primal".to_string(),
+                    ));
+                }
+            } else if !input.tangents.is_empty() {
+                return Err(JetComputeError::Unsupported(
+                    "non-JVP autodiff callable received tangent values".to_string(),
+                ));
+            }
+            jet_compute_curried_call_plan(&base, kind, &targets, result_shape, input)
+        }
+        JetComputeCurriedEntry::Continuation {
+            state,
+            targets,
+            kind,
+        } => {
+            if !input.tangents.is_empty() || input.primals.len() != usize::from(matches!(kind, JetComputeCurriedContinuation::Pull)) {
+                return Err(JetComputeError::Unsupported(
+                    "autodiff continuation received the wrong arguments".to_string(),
+                ));
+            }
+            let gradients = match kind {
+                JetComputeCurriedContinuation::Pull => {
+                    jet_compute_vjp_pull(&state, &input.primals[0], &targets)?
+                }
+                JetComputeCurriedContinuation::Grads => {
+                    let seed = jet_compute_gradient_seed(&state)?;
+                    jet_compute_vjp_pull(&state, &seed, &targets)?
+                }
+            };
+            Ok(JetComputeCurriedResult::Gradient(
+                gradients.into_iter().map(|gradient| vec![gradient]).collect(),
+            ))
+        }
+    }
+}
+
+pub fn jet_compute_call_curried_or_panic(
+    handle: i64,
+    input: JetComputeInputPack,
+    context: &str,
+) -> JetComputeCurriedResult {
+    match jet_compute_call_curried(handle, input) {
+        Ok(result) => result,
+        Err(error) => jet_panic("Compute.rs", line!(), &format!("{context}: {}", error.jet_show())),
+    }
+}
+
 struct JetComputeVjpRun<R> {
     pub value: JetTensor,
     pub pull: std::rc::Rc<dyn Fn(&JetTensor) -> R>,

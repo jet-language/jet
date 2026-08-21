@@ -40,6 +40,10 @@ pub struct Program {
     pub html_path: Option<String>,
     /// D-MARK-SCOPE1: source policy declarations with compiler-owned scope/target metadata.
     pub policy_declarations: Vec<crate::Policy::PolicyDeclaration>,
+    /// D-STRUCT-POLICY1=A: package-scoped user policy settings. Kept beside,
+    /// not inside, the scoped policy ladder because these declarations are
+    /// callable wrappers rather than lexical policy contributions.
+    pub user_policy_declarations: Vec<crate::AST::UserPolicyDecl>,
     /// D-MARK-STACK1: source-order applied rules for attachment sites whose
     /// semantic AST fields do not retain order. `None` targets the file;
     /// `Some(span)` targets the parsed function declaration.
@@ -119,8 +123,7 @@ pub enum CoreListPath {
 /// path.
 pub fn core_list_prefix(module_alias: &str) -> Option<String> {
     let rest = module_alias.strip_prefix(Syntax::CORE_SHORT)?;
-    (rest.is_empty() || rest.starts_with('.'))
-        .then(|| format!("{}{rest}", Syntax::CORE_SHORT))
+    (rest.is_empty() || rest.starts_with('.')).then(|| format!("{}{rest}", Syntax::CORE_SHORT))
 }
 
 /// Resolve one member path in a Core `.[…]` import list. The longest known
@@ -270,9 +273,7 @@ impl ForeignImportError {
             format!(
                 "foreign imports have exactly one library segment after the `{root}` language root"
             ),
-            format!(
-                "write `use {root}.[library]` or `use {root}.library as alias`"
-            ),
+            format!("write `use {root}.[library]` or `use {root}.library as alias`"),
             Some(self.span),
         )
     }
@@ -306,7 +307,7 @@ impl ImportDecl {
             || name == Syntax::CORE_CANONICAL
             || name == "app"
             || name.starts_with("core."))
-            .then(|| name.clone())
+        .then(|| name.clone())
     }
 
     /// Walk one canonical binding for a single import or each member of a
@@ -359,20 +360,14 @@ impl ImportDecl {
     /// `use alias.[item as local]`.  This helper is the shared semantic seam
     /// for loaders, sema, and codegen; no foreign namespace gets a grammar of
     /// its own.
-    pub fn foreign_imports(
-        &self,
-    ) -> Result<Vec<(ForeignNamespace, String)>, ForeignImportError> {
+    pub fn foreign_imports(&self) -> Result<Vec<(ForeignNamespace, String)>, ForeignImportError> {
         if matches!(&self.kind, ImportKind::File(_, _)) {
             return Ok(Vec::new());
         }
         let mut imports = Vec::new();
         for binding in self.walk_bindings() {
             let path = binding.path();
-            let Some(language) = path
-                .split('.')
-                .next()
-                .and_then(ForeignLanguage::from_root)
-            else {
+            let Some(language) = path.split('.').next().and_then(ForeignLanguage::from_root) else {
                 continue;
             };
             let Some(namespace) = ForeignNamespace::from_module_path(&path) else {
@@ -391,13 +386,13 @@ impl ImportDecl {
     /// list, or `use "<…>.h"`).
     pub fn is_c_import(&self) -> Result<bool, ForeignImportError> {
         match &self.kind {
-            ImportKind::Module(_, _) | ImportKind::Unqualified { .. } => self
-                .foreign_imports()
-                .map(|imports| {
+            ImportKind::Module(_, _) | ImportKind::Unqualified { .. } => {
+                self.foreign_imports().map(|imports| {
                     imports
                         .into_iter()
                         .any(|(ns, _)| ns.language == ForeignLanguage::C)
-                }),
+                })
+            }
             ImportKind::File(path, _) => Ok(path.ends_with(".h")),
         }
     }
@@ -669,7 +664,9 @@ impl ProgramBundle {
                 body.first().map_or(0, |stmt| stmt.span().start),
                 body.last().map_or(0, |stmt| stmt.span().end),
             );
-            module.items.push(Item::Func(Func::implicit_run(body, span)));
+            module
+                .items
+                .push(Item::Func(Func::implicit_run(body, span)));
         }
     }
 }
@@ -705,6 +702,8 @@ pub struct LoadedModule {
     pub html_path: Option<String>,
     /// Mirrors `Program::policy_declarations` for sema/index/explain consumers.
     pub policy_declarations: Vec<crate::Policy::PolicyDeclaration>,
+    /// Mirrors `Program::user_policy_declarations` for the package sema seam.
+    pub user_policy_declarations: Vec<crate::AST::UserPolicyDecl>,
     /// Mirrors `Program::rule_facts` for sema signature conformance.
     pub rule_facts: Vec<AppliedRuleApplication>,
 }

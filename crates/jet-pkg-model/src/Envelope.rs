@@ -553,7 +553,24 @@ pub fn try_output_hash_of_in_hangar(
     hangar_root: &Path,
     allow_semantic_xattrs: bool,
 ) -> Result<String, String> {
-    try_output_hash_of_with_hook(out, allow_semantic_xattrs, Some(hangar_root), &mut |_, _| {})
+    try_output_hash_of_in_hangar_with_policy(
+        out,
+        hangar_root,
+        allow_semantic_xattrs,
+        &mut |_, _| {},
+    )
+}
+
+/// Like [`try_output_hash_of_in_hangar`], with the same canonical traversal
+/// event hook as [`try_output_hash_of_with_policy`]. The hook is an observation
+/// seam only; the canonical archive remains the sole output identity.
+pub fn try_output_hash_of_in_hangar_with_policy(
+    out: &str,
+    hangar_root: &Path,
+    allow_semantic_xattrs: bool,
+    hook: &mut dyn FnMut(&Path, &'static str),
+) -> Result<String, String> {
+    try_output_hash_of_with_hook(out, allow_semantic_xattrs, Some(hangar_root), hook)
 }
 
 /// Like [`try_output_hash_of`], with an explicit semantic-xattr policy.
@@ -667,6 +684,10 @@ fn encode_node(
         .map_err(|e| format!("cannot inspect `{}`: {e}", path.display()))?;
     let kind = meta.file_type();
     let rel_bytes = path_bytes(rel);
+    // Reproducibility certification observes every already-validated node
+    // through this canonical walker. This keeps first-difference reporting
+    // from growing a second path traversal with different security rules.
+    hook(path, "node");
     // Sparse holes hash as logical zeros via ordinary reads; probe only so
     // ingest can log policy without changing the digest stream.
     if kind.is_file() {

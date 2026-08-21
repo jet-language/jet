@@ -49,6 +49,7 @@ mod CmdSemIndex;
 mod CmdSupply;
 mod CmdUnsafe;
 mod CmdGates;
+mod CmdStructure;
 mod CmdStructuralMerge;
 mod EngineDispatch;
 
@@ -64,7 +65,8 @@ use CmdDevTools::{
 };
 use CmdDossier::{run_dossier, run_module_explain};
 use CmdExpand::run_expand;
-use CmdInspect::{run_digest, run_guarantees, run_provenance};
+use CmdInspect::{run_digest, run_env, run_guarantees, run_provenance};
+use CmdStructure::run_structure;
 use CmdImpact::run_impact;
 use CmdPkg::{
     run_add, run_fetch, run_hangar_generations, run_hangar_rollback, run_hangar_verify,
@@ -1557,6 +1559,11 @@ fn main() {
     }
     // Commands with no required positional target.
     match cmd {
+        "inspect" if args.get(1).map(|arg| arg.as_str()) == Some("env") => {
+            let env_args = raw.iter().skip(2).cloned().collect::<Vec<_>>();
+            run_env(&env_args, mode.json);
+            return;
+        }
         "fix" if args.get(1).map(|arg| arg.as_str()) == Some("memory") => {
             CmdMemory::fix(&raw.iter().skip(2).cloned().collect::<Vec<_>>(), mode);
             return;
@@ -1952,6 +1959,11 @@ fn main() {
             CmdGates::run(&gate_args, mode.json, mode.color_stderr(), gates, false);
             return;
         }
+        "structure" => {
+            let structure_args: Vec<String> = raw.iter().skip(1).cloned().collect();
+            run_structure(&structure_args, mode.json, mode.color_stderr(), gates);
+            return;
+        }
         "authority" => {
             let authority_args: Vec<String> = raw.iter().skip(1).cloned().collect();
             CmdGates::run(&authority_args, mode.json, mode.color_stderr(), gates, true);
@@ -2309,7 +2321,7 @@ fn main() {
             exit(run_debug_native(&resolved, raw_frames, dap, mode));
         }
         // D-CLI-STORE2=A / D-JPK-STORECLI1=D: `jet hangar` owns every physical
-        // store verb. `verify`/`rollback`/`generations` reuse the existing
+        // store verb. `path`/`verify`/`rollback`/`generations` reuse the existing
         // real generation-tracking logic (renamed from `store`); `du` is
         // Jetpack's real per-object disk accounting. Archive operations cross
         // the version-checked Jetpack boundary so every transfer verb shares
@@ -2323,7 +2335,7 @@ fn main() {
                     run_hangar_rollback(gen_str);
                 }
                 "generations" => run_hangar_generations(),
-                "du" => {
+                "path" | "du" => {
                     exit(EngineDispatch::dispatch(
                         jet::Syntax::JETPACK_BINARY_NAME,
                         "hangar",

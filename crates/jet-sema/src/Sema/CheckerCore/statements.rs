@@ -579,6 +579,9 @@ impl<'a> Checker<'a> {
                         self.expected_type = saved_expected;
                         return;
                     }
+                    if let LValue::Local { name, .. } = &*target {
+                        self.mark_local_write(name);
+                    }
                     self.check_lvalue_change(target, "be assigned");
                     self.validate_shared_guard_lvalue(target);
                     // Beginner magic: place type feeds `.{…}` / `.Variant` on the RHS.
@@ -1723,7 +1726,7 @@ impl<'a> Checker<'a> {
                             ));
                         }
                         (None, Some(rt)) => {
-                            // D-FAIL-EXIT1: implicit `fn run` is `Unit ? Err`.
+                            // D-FAIL-EXIT1: implicit `fn run` is `Unit ! Err`.
                             // A bare `return` is successful exit, same as falling off
                             // the end of the body.
                             let fallible_void = matches!(

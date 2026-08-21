@@ -136,13 +136,19 @@ impl AppGraph {
     pub fn to_json(&self) -> String {
         let mut out = String::from("{\n");
         out.push_str(&format!("  \"entry\": {},\n", json_str(&self.entry_file)));
-        out.push_str(&format!("  \"hydration\": {},\n", json_str(&self.hydration)));
+        out.push_str(&format!(
+            "  \"hydration\": {},\n",
+            json_str(&self.hydration)
+        ));
         out.push_str(&format!("  \"shared_tir\": {},\n", self.shared_tir));
         out.push_str("  \"routes\": [\n");
         for (i, route) in self.routes.iter().enumerate() {
             out.push_str("    {\n");
             out.push_str(&format!("      \"path\": {},\n", json_str(&route.path)));
-            out.push_str(&format!("      \"handler\": {},\n", json_str(&route.handler)));
+            out.push_str(&format!(
+                "      \"handler\": {},\n",
+                json_str(&route.handler)
+            ));
             out.push_str(&format!(
                 "      \"render\": {},\n",
                 json_str(route.render.as_str())
@@ -162,7 +168,10 @@ impl AppGraph {
         for (i, action) in self.actions.iter().enumerate() {
             out.push_str("    {\n");
             out.push_str(&format!("      \"name\": {},\n", json_str(&action.name)));
-            out.push_str(&format!("      \"handler\": {},\n", json_str(&action.handler)));
+            out.push_str(&format!(
+                "      \"handler\": {},\n",
+                json_str(&action.handler)
+            ));
             out.push_str(&format!("      \"kind\": {},\n", json_str(&action.kind)));
             out.push_str(&format!(
                 "      \"provenance\": {}\n",
@@ -179,7 +188,10 @@ impl AppGraph {
         for (i, mount) in self.mounts.iter().enumerate() {
             out.push_str("    {\n");
             out.push_str(&format!("      \"prefix\": {},\n", json_str(&mount.prefix)));
-            out.push_str(&format!("      \"handler\": {},\n", json_str(&mount.handler)));
+            out.push_str(&format!(
+                "      \"handler\": {},\n",
+                json_str(&mount.handler)
+            ));
             out.push_str(&format!(
                 "      \"effects\": {},\n",
                 json_str_list(&mount.effects)

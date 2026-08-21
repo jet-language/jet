@@ -7,15 +7,15 @@
 use std::collections::BTreeMap;
 
 use super::mime_kernel;
-use crate::AST::{CtFloat, CtReport, CtValue, Type};
 use crate::Diagnostics::{Diagnostic, Span};
+use crate::AST::{CtFloat, CtReport, CtValue, Type};
 
 use crate::Comptime::Builtins::{as_bool, as_int};
 use crate::Comptime::Diagnostics::unsupported;
 use crate::Comptime::EmailAdapter;
 use crate::Comptime::Methods::as_float;
-use jet_foundation::Syntax::CoreCallPureRoute;
 use jet_foundation::Prelude::jet_as_bytes as as_bytes;
+use jet_foundation::Syntax::CoreCallPureRoute;
 
 type EvalResult = Result<CtValue, Diagnostic>;
 
@@ -28,13 +28,21 @@ pub(super) fn evaluate(
         (CoreCallPureRoute::Mime, "parse") => mime_parse(args, span),
         (CoreCallPureRoute::Mime, "from_extension") => mime_from_extension(args, span),
         (CoreCallPureRoute::Mime, "extension") => mime_extension(args, span),
-        (CoreCallPureRoute::Email, "address") => return EmailAdapter::evaluate("address", args, span),
+        (CoreCallPureRoute::Email, "address") => {
+            return EmailAdapter::evaluate("address", args, span)
+        }
         (CoreCallPureRoute::Email, "attachment") => {
             return EmailAdapter::evaluate("attachment", args, span)
         }
-        (CoreCallPureRoute::Email, "message") => return EmailAdapter::evaluate("message", args, span),
-        (CoreCallPureRoute::Email, "envelope") => return EmailAdapter::evaluate("envelope", args, span),
-        (CoreCallPureRoute::Email, "serialize") => return EmailAdapter::evaluate("serialize", args, span),
+        (CoreCallPureRoute::Email, "message") => {
+            return EmailAdapter::evaluate("message", args, span)
+        }
+        (CoreCallPureRoute::Email, "envelope") => {
+            return EmailAdapter::evaluate("envelope", args, span)
+        }
+        (CoreCallPureRoute::Email, "serialize") => {
+            return EmailAdapter::evaluate("serialize", args, span)
+        }
         (CoreCallPureRoute::EncodingXml, "canonical") => xml_canonical(args, span),
         (CoreCallPureRoute::Time, "period") => period(args, span),
         (CoreCallPureRoute::Time, "period_days") => period_unit(args, span, 2),
@@ -68,7 +76,10 @@ pub(super) fn evaluate(
         // ordinary Float sqrt remains on the core-call path below.
         (CoreCallPureRoute::Math, "sqrt") => match args {
             [value @ CtValue::Struct { type_name, .. }]
-                if type_name == crate::Syntax::TYPE_MEASUREMENT => measurement_sqrt(value, span),
+                if type_name == crate::Syntax::TYPE_MEASUREMENT =>
+            {
+                measurement_sqrt(value, span)
+            }
             _ => return None,
         },
         (CoreCallPureRoute::Measurement, "from") => measurement(args, span),
@@ -102,25 +113,57 @@ pub(super) fn evaluate(
         (CoreCallPureRoute::Net, "ip_to_string") => net_string_field(args, "IPAddr", "text", span),
         (CoreCallPureRoute::Net, "ip_is_ipv4") => net_ip_is_ipv4(args, span),
         (CoreCallPureRoute::Net, "socket_addr_parse") => net_socket_addr_parse(args, span),
-        (CoreCallPureRoute::Net, "socket_host") => net_string_field(args, "SocketAddr", "host", span),
-        (CoreCallPureRoute::Net, "socket_port") => net_value_field(args, "SocketAddr", "port", span),
-        (CoreCallPureRoute::Net, "socket_to_string") => net_string_field(args, "SocketAddr", "text", span),
-        (CoreCallPureRoute::Net, "ready_readable") => net_value_field(args, "NetReady", "readable", span),
-        (CoreCallPureRoute::Net, "ready_writable") => net_value_field(args, "NetReady", "writable", span),
-        (CoreCallPureRoute::Net, "error_operation") => net_string_field(args, "NetError", "operation", span),
-        (CoreCallPureRoute::Net, "error_address") => net_value_field(args, "NetError", "address", span),
+        (CoreCallPureRoute::Net, "socket_host") => {
+            net_string_field(args, "SocketAddr", "host", span)
+        }
+        (CoreCallPureRoute::Net, "socket_port") => {
+            net_value_field(args, "SocketAddr", "port", span)
+        }
+        (CoreCallPureRoute::Net, "socket_to_string") => {
+            net_string_field(args, "SocketAddr", "text", span)
+        }
+        (CoreCallPureRoute::Net, "ready_readable") => {
+            net_value_field(args, "NetReady", "readable", span)
+        }
+        (CoreCallPureRoute::Net, "ready_writable") => {
+            net_value_field(args, "NetReady", "writable", span)
+        }
+        (CoreCallPureRoute::Net, "error_operation") => {
+            net_string_field(args, "NetError", "operation", span)
+        }
+        (CoreCallPureRoute::Net, "error_address") => {
+            net_value_field(args, "NetError", "address", span)
+        }
         (CoreCallPureRoute::Net, "error_name") => net_value_field(args, "NetError", "name", span),
-        (CoreCallPureRoute::Net, "error_message") => net_string_field(args, "NetError", "message", span),
-        (CoreCallPureRoute::Net, "error_os_code") => net_value_field(args, "NetError", "os_code", span),
-        (CoreCallPureRoute::Net, "dns_srv_target") => net_string_field(args, "DNSSrv", "target", span),
+        (CoreCallPureRoute::Net, "error_message") => {
+            net_string_field(args, "NetError", "message", span)
+        }
+        (CoreCallPureRoute::Net, "error_os_code") => {
+            net_value_field(args, "NetError", "os_code", span)
+        }
+        (CoreCallPureRoute::Net, "dns_srv_target") => {
+            net_string_field(args, "DNSSrv", "target", span)
+        }
         (CoreCallPureRoute::Net, "dns_srv_port") => net_value_field(args, "DNSSrv", "port", span),
-        (CoreCallPureRoute::Net, "dns_srv_priority") => net_value_field(args, "DNSSrv", "priority", span),
-        (CoreCallPureRoute::Net, "dns_srv_weight") => net_value_field(args, "DNSSrv", "weight", span),
+        (CoreCallPureRoute::Net, "dns_srv_priority") => {
+            net_value_field(args, "DNSSrv", "priority", span)
+        }
+        (CoreCallPureRoute::Net, "dns_srv_weight") => {
+            net_value_field(args, "DNSSrv", "weight", span)
+        }
         (CoreCallPureRoute::Net, "udp_packet_data") => net_udp_packet_data(args, span),
-        (CoreCallPureRoute::Net, "udp_packet_bytes") => net_value_field(args, "UDPPacket", "data", span),
-        (CoreCallPureRoute::Net, "udp_packet_addr") => net_value_field(args, "UDPPacket", "addr", span),
-        (CoreCallPureRoute::Net, "udp_packet_original_len") => net_value_field(args, "UDPPacket", "original_len", span),
-        (CoreCallPureRoute::Net, "udp_packet_truncated") => net_value_field(args, "UDPPacket", "truncated", span),
+        (CoreCallPureRoute::Net, "udp_packet_bytes") => {
+            net_value_field(args, "UDPPacket", "data", span)
+        }
+        (CoreCallPureRoute::Net, "udp_packet_addr") => {
+            net_value_field(args, "UDPPacket", "addr", span)
+        }
+        (CoreCallPureRoute::Net, "udp_packet_original_len") => {
+            net_value_field(args, "UDPPacket", "original_len", span)
+        }
+        (CoreCallPureRoute::Net, "udp_packet_truncated") => {
+            net_value_field(args, "UDPPacket", "truncated", span)
+        }
         (CoreCallPureRoute::Crypto, "ed25519_verify_strict") => crypto_ed25519_verify(args, span),
         (CoreCallPureRoute::Crypto, "ed25519_sign") => crypto_ed25519_sign(args, span),
         (CoreCallPureRoute::Crypto, "hkdf_sha256_raw") => crypto_hkdf(args, span),
@@ -139,17 +182,33 @@ pub(super) fn evaluate(
         }
         (CoreCallPureRoute::Crypto, "argon2id") => crypto_argon2id(args, span),
         (CoreCallPureRoute::Crypto, "secret_bytes") => crypto_extract(args, 0, "Secret", span),
-        (CoreCallPureRoute::Crypto, "signing_key_bytes") => crypto_extract(args, 0, "SigningKey", span),
-        (CoreCallPureRoute::Crypto, "x25519_secret_bytes") => crypto_extract(args, 0, "X25519SecretKey", span),
-        (CoreCallPureRoute::Crypto, "shared_secret_bytes") => crypto_extract(args, 0, "SharedSecret", span),
+        (CoreCallPureRoute::Crypto, "signing_key_bytes") => {
+            crypto_extract(args, 0, "SigningKey", span)
+        }
+        (CoreCallPureRoute::Crypto, "x25519_secret_bytes") => {
+            crypto_extract(args, 0, "X25519SecretKey", span)
+        }
+        (CoreCallPureRoute::Crypto, "shared_secret_bytes") => {
+            crypto_extract(args, 0, "SharedSecret", span)
+        }
         // TIR lowers Signature/VerifyKey/… `.bytes()` to core.crypto.__*_bytes;
         // keep those pure field extracts resident so REPL does not hit E1802.
-        (CoreCallPureRoute::Crypto, "__signature_bytes") => crypto_extract(args, 0, "Signature", span),
-        (CoreCallPureRoute::Crypto, "__verify_key_bytes") => crypto_extract(args, 0, "VerifyKey", span),
-        (CoreCallPureRoute::Crypto, "__x25519_public_bytes") => crypto_extract(args, 0, "X25519PublicKey", span),
+        (CoreCallPureRoute::Crypto, "__signature_bytes") => {
+            crypto_extract(args, 0, "Signature", span)
+        }
+        (CoreCallPureRoute::Crypto, "__verify_key_bytes") => {
+            crypto_extract(args, 0, "VerifyKey", span)
+        }
+        (CoreCallPureRoute::Crypto, "__x25519_public_bytes") => {
+            crypto_extract(args, 0, "X25519PublicKey", span)
+        }
         (CoreCallPureRoute::Crypto, "__sealed_bytes") => crypto_extract(args, 0, "Sealed", span),
-        (CoreCallPureRoute::Crypto, "__digest256_bytes") => crypto_extract(args, 0, "Digest256", span),
-        (CoreCallPureRoute::Crypto, "__digest512_bytes") => crypto_extract(args, 0, "Digest512", span),
+        (CoreCallPureRoute::Crypto, "__digest256_bytes") => {
+            crypto_extract(args, 0, "Digest256", span)
+        }
+        (CoreCallPureRoute::Crypto, "__digest512_bytes") => {
+            crypto_extract(args, 0, "Digest512", span)
+        }
         // Typed decode/decode_bytes run in eval_method; arms prove inventory coverage.
         (CoreCallPureRoute::EncodingXml, "decode") => Err(unsupported(
             "core.encoding.xml.decode() requires a type argument",
@@ -198,13 +257,8 @@ pub(super) fn evaluate_method(
     }
     let result = match (normalized_type_name, method, args.len()) {
         (
-            "Signature"
-                | "Secret"
-                | "SigningKey"
-                | "VerifyKey"
-                | "X25519SecretKey"
-                | "X25519PublicKey"
-                | "SharedSecret",
+            "Signature" | "Secret" | "SigningKey" | "VerifyKey" | "X25519SecretKey"
+            | "X25519PublicKey" | "SharedSecret",
             "bytes",
             0,
         ) => value_field(recv, type_name, "bytes", span),
@@ -235,33 +289,28 @@ pub(super) fn evaluate_method(
         ("Url", "query", 0) => {
             super::url_parts_from_ct(recv, span).map(|url| CtValue::Str(url.query()))
         }
-        ("Url", "host", 0) => super::url_parts_from_ct(recv, span).map(|url| {
-            match url.host() {
-                Ok(host) => CtValue::Present(Box::new(CtValue::Str(host))),
-                Err(_) => CtValue::absent(Type::String),
-            }
+        ("Url", "host", 0) => super::url_parts_from_ct(recv, span).map(|url| match url.host() {
+            Ok(host) => CtValue::Present(Box::new(CtValue::Str(host))),
+            Err(_) => CtValue::absent(Type::String),
         }),
-        ("Url", "port", 0) => super::url_parts_from_ct(recv, span).map(|url| {
-            match url.port() {
+        ("Url", "port", 0) => super::url_parts_from_ct(recv, span).map(|url| match url.port() {
+            Ok(port) => CtValue::Present(Box::new(CtValue::Int(port))),
+            Err(_) => CtValue::absent(Type::Int),
+        }),
+        ("Url", "default_port", 0) => {
+            super::url_parts_from_ct(recv, span).map(|url| match url.default_port() {
                 Ok(port) => CtValue::Present(Box::new(CtValue::Int(port))),
                 Err(_) => CtValue::absent(Type::Int),
-            }
-        }),
-        ("Url", "default_port", 0) => super::url_parts_from_ct(recv, span).map(|url| {
-            match url.default_port() {
-                Ok(port) => CtValue::Present(Box::new(CtValue::Int(port))),
-                Err(_) => CtValue::absent(Type::Int),
-            }
-        }),
-        ("Url", "fragment", 0) => super::url_parts_from_ct(recv, span).map(|url| {
-            match url.fragment() {
+            })
+        }
+        ("Url", "fragment", 0) => {
+            super::url_parts_from_ct(recv, span).map(|url| match url.fragment() {
                 Ok(fragment) => CtValue::Present(Box::new(CtValue::Str(fragment))),
                 Err(_) => CtValue::absent(Type::String),
-            }
-        }),
-        ("Url", "path_segments", 0) => super::url_parts_from_ct(recv, span).map(|url| {
-            CtValue::List(url.path_segments().into_iter().map(CtValue::Str).collect())
-        }),
+            })
+        }
+        ("Url", "path_segments", 0) => super::url_parts_from_ct(recv, span)
+            .map(|url| CtValue::List(url.path_segments().into_iter().map(CtValue::Str).collect())),
         ("Url", "query_pairs", 0) => super::url_parts_from_ct(recv, span).map(|url| {
             CtValue::List(
                 url.query_pairs()
@@ -292,63 +341,70 @@ pub(super) fn evaluate_method(
                 Ok(super::url_parts_to_ct(&updated))
             })
         }
-        ("Url", "to_string", 0) => super::url_parts_from_ct(recv, span)
-            .map(|url| CtValue::Str(url.to_string_value())),
+        ("Url", "to_string", 0) => {
+            super::url_parts_from_ct(recv, span).map(|url| CtValue::Str(url.to_string_value()))
+        }
         ("Date" | "LocalDate", "year" | "month" | "day", 0) => {
             value_field(recv, type_name, method, span)
         }
-        ("Date" | "LocalDate", "to_string", 0) => date_from_value(recv, type_name, span)
-            .map(|date| CtValue::Str(date.to_string_fmt())),
-        ("Date" | "LocalDate", "weekday", 0) => date_from_value(recv, type_name, span)
-            .map(|date| CtValue::Int(date.inner.weekday())),
+        ("Date" | "LocalDate", "to_string", 0) => {
+            date_from_value(recv, type_name, span).map(|date| CtValue::Str(date.to_string_fmt()))
+        }
+        ("Date" | "LocalDate", "weekday", 0) => {
+            date_from_value(recv, type_name, span).map(|date| CtValue::Int(date.inner.weekday()))
+        }
         ("Date" | "LocalDate", "iso_weekday", 0) => date_from_value(recv, type_name, span)
             .map(|date| CtValue::Int(date.inner.iso_weekday())),
         ("Date" | "LocalDate", "day_of_year", 0) => date_from_value(recv, type_name, span)
             .map(|date| CtValue::Int(date.inner.day_of_year())),
-        ("Date" | "LocalDate", "iso_week", 0) => date_from_value(recv, type_name, span)
-            .map(|date| CtValue::Int(date.inner.iso_week())),
+        ("Date" | "LocalDate", "iso_week", 0) => {
+            date_from_value(recv, type_name, span).map(|date| CtValue::Int(date.inner.iso_week()))
+        }
         ("Date" | "LocalDate", "quarter_of_year", 0) => date_from_value(recv, type_name, span)
             .map(|date| CtValue::Int(date.inner.quarter_of_year())),
         ("Date" | "LocalDate", "days_in_month", 0) => date_from_value(recv, type_name, span)
             .map(|date| CtValue::Int(date.inner.days_in_month())),
         ("Date" | "LocalDate", "is_leap_year", 0) => date_from_value(recv, type_name, span)
             .map(|date| CtValue::Bool(date.inner.is_leap_year())),
-        ("Date" | "LocalDate", "replace", 3) => date_from_value(recv, type_name, span).and_then(
-            |date| {
+        ("Date" | "LocalDate", "replace", 3) => {
+            date_from_value(recv, type_name, span).and_then(|date| {
                 Ok(Date::from_inner(date.inner.replace(
                     as_int(&args[0], span)?,
                     as_int(&args[1], span)?,
                     as_int(&args[2], span)?,
                 ))
                 .value())
-            },
-        ),
+            })
+        }
         ("Date" | "LocalDate", "add_days", 1) => date_from_value(recv, type_name, span)
             .and_then(|date| Ok(date.add_days(as_int(&args[0], span)?).value())),
         ("Date" | "LocalDate", "add_months", 1) => date_from_value(recv, type_name, span)
             .and_then(|date| Ok(date.add_months(as_int(&args[0], span)?).value())),
-        ("Date" | "LocalDate", "diff_days", 1) => date_from_value(recv, type_name, span)
-            .and_then(|date| {
+        ("Date" | "LocalDate", "diff_days", 1) => {
+            date_from_value(recv, type_name, span).and_then(|date| {
                 let other = date_from_value(&args[0], "LocalDate", span)?;
                 Ok(CtValue::Int(date.inner.diff_days(&other.inner)))
-            }),
+            })
+        }
         ("Date" | "LocalDate", "add_period", 1) => date_from_value(recv, type_name, span)
             .and_then(|date| date_add_period(date, &args[0], span).map(Date::value)),
         ("Date" | "LocalDate", "truncate", 1) => date_from_value(recv, type_name, span)
             .and_then(|date| Ok(date_truncate(date, string_arg(args, 0, span)?).value())),
-        ("Date" | "LocalDate", "format", 1) => date_from_value(recv, type_name, span)
-            .and_then(|date| {
+        ("Date" | "LocalDate", "format", 1) => {
+            date_from_value(recv, type_name, span).and_then(|date| {
                 Ok(CtValue::Str(format_time_pattern(
                     string_arg(args, 0, span)?,
                     date,
                     LocalTime::new(0, 0, 0),
                 )))
-            }),
+            })
+        }
         ("LocalTime", "hour" | "minute" | "second", 0) => {
             value_field(recv, "LocalTime", method, span)
         }
-        ("LocalTime", "to_string", 0) => local_time_from_value(recv, span)
-            .map(|time| CtValue::Str(time.to_string_fmt())),
+        ("LocalTime", "to_string", 0) => {
+            local_time_from_value(recv, span).map(|time| CtValue::Str(time.to_string_fmt()))
+        }
         ("DateTime", "to_timestamp", 0) => value_field(recv, "DateTime", "secs", span),
         ("DateTime", "to_unix_ms", 0) => datetime_from_value(recv, span)
             .map(|date_time| CtValue::Int(date_time.inner.to_unix_ms())),
@@ -359,12 +415,15 @@ pub(super) fn evaluate_method(
         ("DateTime", "time", 0) => {
             datetime_from_value(recv, span).map(|date_time| date_time.time().value())
         }
-        ("DateTime", "hour", 0) => datetime_from_value(recv, span)
-            .map(|date_time| CtValue::Int(date_time.inner.hour())),
-        ("DateTime", "minute", 0) => datetime_from_value(recv, span)
-            .map(|date_time| CtValue::Int(date_time.inner.minute())),
-        ("DateTime", "second", 0) => datetime_from_value(recv, span)
-            .map(|date_time| CtValue::Int(date_time.inner.second())),
+        ("DateTime", "hour", 0) => {
+            datetime_from_value(recv, span).map(|date_time| CtValue::Int(date_time.inner.hour()))
+        }
+        ("DateTime", "minute", 0) => {
+            datetime_from_value(recv, span).map(|date_time| CtValue::Int(date_time.inner.minute()))
+        }
+        ("DateTime", "second", 0) => {
+            datetime_from_value(recv, span).map(|date_time| CtValue::Int(date_time.inner.second()))
+        }
         ("DateTime", "millisecond", 0) => datetime_from_value(recv, span)
             .map(|date_time| CtValue::Int(date_time.inner.millisecond())),
         ("DateTime", "microsecond", 0) => datetime_from_value(recv, span)
@@ -380,21 +439,16 @@ pub(super) fn evaluate_method(
                 date_time.time(),
             )))
         }),
-        ("DateTime", "plus_duration", 1) => {
-            datetime_from_value(recv, span).and_then(|date_time| {
-                let ns = duration_ns(&args[0], span)?;
-                Ok(date_time.plus_ns(ns).value())
-            })
-        }
+        ("DateTime", "plus_duration", 1) => datetime_from_value(recv, span).and_then(|date_time| {
+            let ns = duration_ns(&args[0], span)?;
+            Ok(date_time.plus_ns(ns).value())
+        }),
         ("DateTime", "difference", 1) => datetime_from_value(recv, span).and_then(|left| {
             let right = datetime_from_value(&args[0], span)?;
             Ok(duration_value(left.inner.difference_ns(&right.inner)))
         }),
-        ("DateTime", "truncate" | "round" | "floor" | "ceil", 1) => {
-            datetime_from_value(recv, span).and_then(|date_time| {
-                Ok(date_time.align(string_arg(args, 0, span)?, method).value())
-            })
-        }
+        ("DateTime", "truncate" | "round" | "floor" | "ceil", 1) => datetime_from_value(recv, span)
+            .and_then(|date_time| Ok(date_time.align(string_arg(args, 0, span)?, method).value())),
         ("DateTime", "replace", 6) => datetime_from_value(recv, span).and_then(|date_time| {
             Ok(DateTime::from_inner(date_time.inner.replace(
                 as_int(&args[0], span)?,
@@ -412,36 +466,49 @@ pub(super) fn evaluate_method(
         ("Instant", "elapsed_millis", 0) => instant_elapsed_millis(recv, span),
         ("Instant", "elapsed", 0) => instant_elapsed(recv, span),
         ("Zone", "name", 0) => string_field(recv, "Zone", "name", span),
-        ("Fraction", "to_string", 0) => fraction_from_value(recv, span)
-            .map(|f| CtValue::Str(f.to_string_rep())),
-        ("Fraction", "numerator", 0) => fraction_from_value(recv, span)
-            .map(|f| CtValue::Int(f.numerator)),
-        ("Fraction", "denominator", 0) => fraction_from_value(recv, span)
-            .map(|f| CtValue::Int(f.denominator)),
-        ("Fraction", "to_float", 0) => fraction_from_value(recv, span)
-            .map(|f| CtValue::Float(crate::AST::CtFloat::F64(f.numerator as f64 / f.denominator as f64))),
-        ("Fraction", "is_zero", 0) => fraction_from_value(recv, span)
-            .map(|f| CtValue::Bool(f.numerator == 0)),
+        ("Fraction", "to_string", 0) => {
+            fraction_from_value(recv, span).map(|f| CtValue::Str(f.to_string_rep()))
+        }
+        ("Fraction", "numerator", 0) => {
+            fraction_from_value(recv, span).map(|f| CtValue::Int(f.numerator))
+        }
+        ("Fraction", "denominator", 0) => {
+            fraction_from_value(recv, span).map(|f| CtValue::Int(f.denominator))
+        }
+        ("Fraction", "to_float", 0) => fraction_from_value(recv, span).map(|f| {
+            CtValue::Float(crate::AST::CtFloat::F64(
+                f.numerator as f64 / f.denominator as f64,
+            ))
+        }),
+        ("Fraction", "is_zero", 0) => {
+            fraction_from_value(recv, span).map(|f| CtValue::Bool(f.numerator == 0))
+        }
         ("Fraction", "equal", 1) => fraction_from_value(recv, span).and_then(|left| {
             let right = fraction_from_value(&args[0], span)?;
             Ok(CtValue::Bool(left == right))
         }),
-        ("Fraction", "add" | "sub" | "mul" | "div", 1) => fraction_from_value(recv, span).and_then(|left| {
-            let right = fraction_from_value(&args[0], span)?;
-            let out = match method {
-                "add" => left.add(&right),
-                "sub" => left.sub(&right),
-                "mul" => left.mul(&right),
-                "div" => left.div(&right),
-                _ => unreachable!("fraction method guard"),
-            };
-            match out {
-                Some(value) => Ok(value.to_value()),
-                None => Err(unsupported("a ratio that leaves the range, or divided by zero", span)),
-            }
-        }),
-        ("Decimal", "to_string", 0) => decimal_from_value(recv, span)
-            .map(|decimal| CtValue::Str(decimal.to_string_rep())),
+        ("Fraction", "add" | "sub" | "mul" | "div", 1) => {
+            fraction_from_value(recv, span).and_then(|left| {
+                let right = fraction_from_value(&args[0], span)?;
+                let out = match method {
+                    "add" => left.add(&right),
+                    "sub" => left.sub(&right),
+                    "mul" => left.mul(&right),
+                    "div" => left.div(&right),
+                    _ => unreachable!("fraction method guard"),
+                };
+                match out {
+                    Some(value) => Ok(value.to_value()),
+                    None => Err(unsupported(
+                        "a ratio that leaves the range, or divided by zero",
+                        span,
+                    )),
+                }
+            })
+        }
+        ("Decimal", "to_string", 0) => {
+            decimal_from_value(recv, span).map(|decimal| CtValue::Str(decimal.to_string_rep()))
+        }
         ("Decimal", "equal", 1) => decimal_from_value(recv, span).and_then(|left| {
             let right = decimal_from_value(&args[0], span)?;
             Ok(CtValue::Bool(left == right))
@@ -456,8 +523,12 @@ pub(super) fn evaluate_method(
             };
             Ok(out.to_value())
         }),
-        ("ZonedDateTime", "date", 0) => zoned_from_value(recv, span).map(|zoned| zoned.date().value()),
-        ("ZonedDateTime", "time", 0) => zoned_from_value(recv, span).map(|zoned| zoned.time().value()),
+        ("ZonedDateTime", "date", 0) => {
+            zoned_from_value(recv, span).map(|zoned| zoned.date().value())
+        }
+        ("ZonedDateTime", "time", 0) => {
+            zoned_from_value(recv, span).map(|zoned| zoned.time().value())
+        }
         ("ZonedDateTime", "offset_seconds", 0) => {
             zoned_from_value(recv, span).map(|zoned| CtValue::Int(zoned.offset_seconds()))
         }
@@ -467,7 +538,9 @@ pub(super) fn evaluate_method(
         ("ZonedDateTime", "to_datetime", 0) => {
             zoned_from_value(recv, span).map(|zoned| zoned.instant.value())
         }
-        ("ZonedDateTime", "zone", 0) => zoned_from_value(recv, span).map(|zoned| zoned.zone.value()),
+        ("ZonedDateTime", "zone", 0) => {
+            zoned_from_value(recv, span).map(|zoned| zoned.zone.value())
+        }
         ("ZonedDateTime", "to_string", 0) => {
             zoned_from_value(recv, span).map(|zoned| CtValue::Str(zoned.to_string_fmt()))
         }
@@ -548,7 +621,10 @@ pub(super) fn solver_require(
 /// D-SOLVER-LIB1=A: `solve.Solver.new(seed)` — same seed/checked/failures layout as AOT.
 pub(super) fn solver_new(args: &[CtValue], span: Span) -> EvalResult {
     if jet_foundation::Syntax::core_receiver_method(crate::Syntax::SOLVER_TYPE, "new").is_none() {
-        return Err(unsupported("Solver.new is not in the Core-call registry", span));
+        return Err(unsupported(
+            "Solver.new is not in the Core-call registry",
+            span,
+        ));
     }
     let seed = as_int(one(args, 0, "Solver", "new", span)?, span)?;
     Ok(solver_value(super::solver_kernel::jet_solver_new(seed)))
@@ -564,10 +640,7 @@ pub(super) fn display(value: &CtValue) -> Option<String> {
                 .iter()
                 .map(nested_display)
                 .collect::<Option<Vec<_>>>()?;
-            return Some(format!(
-                "[{}]",
-                values.join(", ")
-            ));
+            return Some(format!("[{}]", values.join(", ")));
         }
         CtValue::Map(entries) => {
             let values = entries
@@ -581,10 +654,7 @@ pub(super) fn display(value: &CtValue) -> Option<String> {
                     ))
                 })
                 .collect::<Option<Vec<_>>>()?;
-            return Some(format!(
-                "[:{}]",
-                values.join(", ")
-            ));
+            return Some(format!("[:{}]", values.join(", ")));
         }
         _ => {}
     }
@@ -630,6 +700,22 @@ pub(super) fn display(value: &CtValue) -> Option<String> {
             }
         }
     }
+    // A workflow handle is an opaque run identity. Keep the evaluator's
+    // rendering aligned with the Prelude handle's `JetShow` implementation;
+    // its durable cursor and authority are not user-facing fields.
+    if core_type == "ServiceWorkflow" {
+        if let CtValue::Struct { fields, .. } = value {
+            if let Some(CtValue::Int(run_id)) = fields.iter().find_map(|(name, field)| {
+                (name
+                    .strip_prefix(jet_foundation::Syntax::GENERATED_NAME_PREFIX)
+                    .unwrap_or(name.as_str())
+                    == "run_id")
+                    .then_some(field)
+            }) {
+                return Some(run_id.to_string());
+            }
+        }
+    }
     // D-ENCSTREAM-SURFACE1=A / I9: the shared encoding failure has one
     // rendering. AOT's `impl JetShow for EncodingError` and the Cranelift host
     // both call `jet_encoding_error_kernel_show`; the evaluator marshals the
@@ -669,15 +755,17 @@ pub(super) fn display(value: &CtValue) -> Option<String> {
             let CtValue::Int(byte_offset) = get("byte_offset")? else {
                 return None;
             };
-            return Some(super::encoding_error_kernel::jet_encoding_error_kernel_show(
-                variant("format")?,
-                variant("kind")?,
-                *byte_offset,
-                optional_int("line")?,
-                optional_int("column")?,
-                text("path")?,
-                text("reason")?,
-            ));
+            return Some(
+                super::encoding_error_kernel::jet_encoding_error_kernel_show(
+                    variant("format")?,
+                    variant("kind")?,
+                    *byte_offset,
+                    optional_int("line")?,
+                    optional_int("column")?,
+                    text("path")?,
+                    text("reason")?,
+                ),
+            );
         }
     }
     // D-VALIDATE-DECODE1=B / I9: the accumulated decode/validate failure has one
@@ -733,9 +821,9 @@ pub(super) fn display(value: &CtValue) -> Option<String> {
             };
             Some(format!("HyperLogLog(count={n})"))
         }
-        CtValue::Struct { type_name, .. }
-            if core_display.is_some() && type_name == "TDigest" =>
-            Some("TDigest".to_string()),
+        CtValue::Struct { type_name, .. } if core_display.is_some() && type_name == "TDigest" => {
+            Some("TDigest".to_string())
+        }
         CtValue::Struct { type_name, .. }
             if core_display.is_some() && type_name == "CountMinSketch" =>
         {
@@ -752,22 +840,46 @@ pub(super) fn display(value: &CtValue) -> Option<String> {
         CtValue::Struct { type_name, .. }
             if core_display.is_some() && type_name == crate::Syntax::SOLVER_TYPE =>
         {
-            let failures = int_field(value, crate::Syntax::SOLVER_TYPE, "failures", Span::new(0, 0)).ok()?;
+            let failures = int_field(
+                value,
+                crate::Syntax::SOLVER_TYPE,
+                "failures",
+                Span::new(0, 0),
+            )
+            .ok()?;
             let status = if failures == 0 { "ok" } else { "failed" };
             Some(format!("Solver(status: {status}, failures: {failures})"))
         }
         CtValue::Struct { type_name, fields }
             if core_display.is_some() && type_name == "ServiceUpgradeReceipt" =>
         {
-            let field = |name: &str| fields.iter().find(|(field, _)| field == name).map(|(_, value)| value);
-            let CtValue::Int(from) = field("from_generation")? else { return None; };
-            let CtValue::Int(to) = field("to_generation")? else { return None; };
-            let CtValue::Str(migration) = field("migration")? else { return None; };
-            let CtValue::Bool(rollback_available) = field("rollback_available")? else { return None; };
-            let CtValue::List(pinned) = field("pinned_shards")? else { return None; };
+            let field = |name: &str| {
+                fields
+                    .iter()
+                    .find(|(field, _)| field == name)
+                    .map(|(_, value)| value)
+            };
+            let CtValue::Int(from) = field("from_generation")? else {
+                return None;
+            };
+            let CtValue::Int(to) = field("to_generation")? else {
+                return None;
+            };
+            let CtValue::Str(migration) = field("migration")? else {
+                return None;
+            };
+            let CtValue::Bool(rollback_available) = field("rollback_available")? else {
+                return None;
+            };
+            let CtValue::List(pinned) = field("pinned_shards")? else {
+                return None;
+            };
             let pinned = pinned
                 .iter()
-                .map(|value| match value { CtValue::Str(value) => Some(value.clone()), _ => None })
+                .map(|value| match value {
+                    CtValue::Str(value) => Some(value.clone()),
+                    _ => None,
+                })
                 .collect::<Option<Vec<_>>>()?;
             Some(format!(
                 "ServiceUpgradeReceipt(from={from}, to={to}, migration={migration}, rollback_available={rollback_available}, pinned={})",
@@ -785,14 +897,17 @@ pub(super) fn display(value: &CtValue) -> Option<String> {
         {
             let get = |name: &str| -> Option<&CtValue> {
                 fields.iter().find_map(|(n, v)| {
-                    let n = n.strip_prefix(jet_foundation::Syntax::GENERATED_NAME_PREFIX).unwrap_or(n.as_str());
+                    let n = n
+                        .strip_prefix(jet_foundation::Syntax::GENERATED_NAME_PREFIX)
+                        .unwrap_or(n.as_str());
                     (n == name).then_some(v)
                 })
             };
             let kind = match get("kind")? {
-                CtValue::Enum { variant, .. } => {
-                    variant.strip_prefix(jet_foundation::Syntax::GENERATED_NAME_PREFIX).unwrap_or(variant).to_string()
-                }
+                CtValue::Enum { variant, .. } => variant
+                    .strip_prefix(jet_foundation::Syntax::GENERATED_NAME_PREFIX)
+                    .unwrap_or(variant)
+                    .to_string(),
                 _ => return None,
             };
             let operation = match get("operation")? {
@@ -832,12 +947,17 @@ pub(super) fn display(value: &CtValue) -> Option<String> {
             if type_name
                 .strip_prefix(jet_foundation::Syntax::GENERATED_NAME_PREFIX)
                 .unwrap_or(type_name.as_str())
-                == "Url" => super::url_parts_from_ct(value, Span::new(0, 0))
-            .ok()
-            .map(|url| url.to_string_value()),
+                == "Url" =>
+        {
+            super::url_parts_from_ct(value, Span::new(0, 0))
+                .ok()
+                .map(|url| url.to_string_value())
+        }
         CtValue::Struct { type_name, fields }
             if matches!(
-                type_name.strip_prefix(jet_foundation::Syntax::GENERATED_NAME_PREFIX).unwrap_or(type_name.as_str()),
+                type_name
+                    .strip_prefix(jet_foundation::Syntax::GENERATED_NAME_PREFIX)
+                    .unwrap_or(type_name.as_str()),
                 "Mime"
                     | "Period"
                     | "LocalDate"
@@ -853,12 +973,16 @@ pub(super) fn display(value: &CtValue) -> Option<String> {
                     | "Attachment"
             ) =>
         {
-            let ty = type_name.strip_prefix(jet_foundation::Syntax::GENERATED_NAME_PREFIX).unwrap_or(type_name);
-                let parts: Vec<String> = fields
+            let ty = type_name
+                .strip_prefix(jet_foundation::Syntax::GENERATED_NAME_PREFIX)
+                .unwrap_or(type_name);
+            let parts: Vec<String> = fields
                 .iter()
                 .filter(|(name, _)| !name.starts_with(super::URL_INTERNAL_PREFIX))
                 .map(|(name, v)| {
-                    let field = name.strip_prefix(jet_foundation::Syntax::GENERATED_NAME_PREFIX).unwrap_or(name);
+                    let field = name
+                        .strip_prefix(jet_foundation::Syntax::GENERATED_NAME_PREFIX)
+                        .unwrap_or(name);
                     Some(format!("{field}: {}", nested_display(v)?))
                 })
                 .collect::<Option<Vec<_>>>()?;
@@ -914,8 +1038,7 @@ fn canonical_structural_display(value: &CtValue) -> Option<String> {
                 })
                 .collect::<Option<Vec<_>>>()?;
             Some(jet_foundation::StructuralDebug::jet_debug_record(
-                type_name,
-                fields,
+                type_name, fields,
             ))
         }
         CtValue::Enum { variant, args, .. } => {
@@ -929,10 +1052,11 @@ fn canonical_structural_display(value: &CtValue) -> Option<String> {
                     .iter()
                     .map(|(label, value)| {
                         let shown = nested_display(value)?;
-                        Some(label.as_ref().map_or_else(
-                            || shown.clone(),
-                            |label| format!("{label}: {shown}"),
-                        ))
+                        Some(
+                            label
+                                .as_ref()
+                                .map_or_else(|| shown.clone(), |label| format!("{label}: {shown}")),
+                        )
                     })
                     .collect::<Option<Vec<_>>>()?;
                 Some(format!("{variant}({})", args.join(", ")))
@@ -1018,10 +1142,8 @@ fn io_error_display(value: &CtValue) -> Option<String> {
     let field = |wanted: &str| {
         fields.iter().find_map(|(name, value)| {
             (name == wanted
-                || name
-                    .strip_prefix(jet_foundation::Syntax::GENERATED_NAME_PREFIX)
-                    == Some(wanted))
-                .then_some(value)
+                || name.strip_prefix(jet_foundation::Syntax::GENERATED_NAME_PREFIX) == Some(wanted))
+            .then_some(value)
         })
     };
     let CtValue::Enum {
@@ -1084,12 +1206,8 @@ fn one<'a>(
     method: &str,
     span: Span,
 ) -> Result<&'a CtValue, Diagnostic> {
-    args.get(index).ok_or_else(|| {
-        unsupported(
-            &format!("{module}.{method}(): missing arg {index}"),
-            span,
-        )
-    })
+    args.get(index)
+        .ok_or_else(|| unsupported(&format!("{module}.{method}(): missing arg {index}"), span))
 }
 
 fn string_arg<'a>(args: &'a [CtValue], index: usize, span: Span) -> Result<&'a str, Diagnostic> {
@@ -1140,35 +1258,71 @@ fn ui_kind(variant: &str) -> CtValue {
 }
 
 fn ui_point(args: &[CtValue], span: Span) -> EvalResult {
-    Ok(structure("Point", vec![
-        ("x", CtValue::Float(CtFloat::f64(float_arg(args, 0, span)?))),
-        ("y", CtValue::Float(CtFloat::f64(float_arg(args, 1, span)?))),
-    ]))
+    Ok(structure(
+        "Point",
+        vec![
+            ("x", CtValue::Float(CtFloat::f64(float_arg(args, 0, span)?))),
+            ("y", CtValue::Float(CtFloat::f64(float_arg(args, 1, span)?))),
+        ],
+    ))
 }
 
 fn ui_size(args: &[CtValue], span: Span) -> EvalResult {
-    Ok(structure("Size", vec![
-        ("width", CtValue::Float(CtFloat::f64(float_arg(args, 0, span)?))),
-        ("height", CtValue::Float(CtFloat::f64(float_arg(args, 1, span)?))),
-    ]))
+    Ok(structure(
+        "Size",
+        vec![
+            (
+                "width",
+                CtValue::Float(CtFloat::f64(float_arg(args, 0, span)?)),
+            ),
+            (
+                "height",
+                CtValue::Float(CtFloat::f64(float_arg(args, 1, span)?)),
+            ),
+        ],
+    ))
 }
 
 fn ui_rect(args: &[CtValue], span: Span) -> EvalResult {
-    Ok(structure("Rect", vec![
-        ("x", CtValue::Float(CtFloat::f64(float_arg(args, 0, span)?))),
-        ("y", CtValue::Float(CtFloat::f64(float_arg(args, 1, span)?))),
-        ("width", CtValue::Float(CtFloat::f64(float_arg(args, 2, span)?))),
-        ("height", CtValue::Float(CtFloat::f64(float_arg(args, 3, span)?))),
-    ]))
+    Ok(structure(
+        "Rect",
+        vec![
+            ("x", CtValue::Float(CtFloat::f64(float_arg(args, 0, span)?))),
+            ("y", CtValue::Float(CtFloat::f64(float_arg(args, 1, span)?))),
+            (
+                "width",
+                CtValue::Float(CtFloat::f64(float_arg(args, 2, span)?)),
+            ),
+            (
+                "height",
+                CtValue::Float(CtFloat::f64(float_arg(args, 3, span)?)),
+            ),
+        ],
+    ))
 }
 
 fn ui_constraint(args: &[CtValue], span: Span) -> EvalResult {
-    Ok(structure("SizeConstraint", vec![
-        ("min_width", CtValue::Float(CtFloat::f64(float_arg(args, 0, span)?))),
-        ("min_height", CtValue::Float(CtFloat::f64(float_arg(args, 1, span)?))),
-        ("max_width", CtValue::Float(CtFloat::f64(float_arg(args, 2, span)?))),
-        ("max_height", CtValue::Float(CtFloat::f64(float_arg(args, 3, span)?))),
-    ]))
+    Ok(structure(
+        "SizeConstraint",
+        vec![
+            (
+                "min_width",
+                CtValue::Float(CtFloat::f64(float_arg(args, 0, span)?)),
+            ),
+            (
+                "min_height",
+                CtValue::Float(CtFloat::f64(float_arg(args, 1, span)?)),
+            ),
+            (
+                "max_width",
+                CtValue::Float(CtFloat::f64(float_arg(args, 2, span)?)),
+            ),
+            (
+                "max_height",
+                CtValue::Float(CtFloat::f64(float_arg(args, 3, span)?)),
+            ),
+        ],
+    ))
 }
 
 fn ui_node_value(
@@ -1180,15 +1334,29 @@ fn ui_node_value(
     kind: &str,
     children: Vec<CtValue>,
 ) -> CtValue {
-    structure("UiNode", vec![
-        ("label", CtValue::Str(label)),
-        ("width", CtValue::Float(CtFloat::f64(width))),
-        ("height", CtValue::Float(CtFloat::f64(height))),
-        ("role", role.map_or(CtValue::absent(Type::Named("UiAriaRole".to_string())), |role| CtValue::Present(Box::new(role)))),
-        ("color", color.map_or(CtValue::absent(Type::String), |color| CtValue::Present(Box::new(CtValue::Str(color))))),
-        ("kind", ui_kind(kind)),
-        ("children", CtValue::List(children)),
-    ])
+    structure(
+        "UiNode",
+        vec![
+            ("label", CtValue::Str(label)),
+            ("width", CtValue::Float(CtFloat::f64(width))),
+            ("height", CtValue::Float(CtFloat::f64(height))),
+            (
+                "role",
+                role.map_or(
+                    CtValue::absent(Type::Named("UiAriaRole".to_string())),
+                    |role| CtValue::Present(Box::new(role)),
+                ),
+            ),
+            (
+                "color",
+                color.map_or(CtValue::absent(Type::String), |color| {
+                    CtValue::Present(Box::new(CtValue::Str(color)))
+                }),
+            ),
+            ("kind", ui_kind(kind)),
+            ("children", CtValue::List(children)),
+        ],
+    )
 }
 
 fn ui_node(
@@ -1210,7 +1378,10 @@ fn ui_node(
 }
 
 fn ui_node_role(args: &[CtValue], span: Span) -> EvalResult {
-    let role = args.get(3).cloned().ok_or_else(|| unsupported("core.ui.node_role(): missing role", span))?;
+    let role = args
+        .get(3)
+        .cloned()
+        .ok_or_else(|| unsupported("core.ui.node_role(): missing role", span))?;
     let kind = match &role {
         CtValue::Enum { variant, .. } if variant == "Button" => "Button",
         CtValue::Enum { variant, .. } if variant == "TextInput" => "TextInput",
@@ -1258,17 +1429,36 @@ fn ui_box(args: &[CtValue], span: Span) -> EvalResult {
     let mut width = 0.0_f64;
     let mut height = 0.0_f64;
     for child in &children {
-        width = width.max(as_float(field(child, "UiNode", "width").ok_or_else(|| unsupported("core.ui.box() needs UiNode children", span))?, span)?);
-        height += as_float(field(child, "UiNode", "height").ok_or_else(|| unsupported("core.ui.box() needs UiNode children", span))?, span)?;
+        width = width.max(as_float(
+            field(child, "UiNode", "width")
+                .ok_or_else(|| unsupported("core.ui.box() needs UiNode children", span))?,
+            span,
+        )?);
+        height += as_float(
+            field(child, "UiNode", "height")
+                .ok_or_else(|| unsupported("core.ui.box() needs UiNode children", span))?,
+            span,
+        )?;
     }
-    Ok(ui_node_value(String::new(), width, height, Some(ui_role("Container")), None, "Box", children))
+    Ok(ui_node_value(
+        String::new(),
+        width,
+        height,
+        Some(ui_role("Container")),
+        None,
+        "Box",
+        children,
+    ))
 }
 
 fn ui_key_event(args: &[CtValue], span: Span) -> EvalResult {
     Ok(CtValue::Enum {
         type_name: "InputEvent".to_string(),
         variant: "Key".to_string(),
-        args: vec![(Some("code".to_string()), CtValue::Str(string_arg(args, 0, span)?.to_string()))],
+        args: vec![(
+            Some("code".to_string()),
+            CtValue::Str(string_arg(args, 0, span)?.to_string()),
+        )],
     })
 }
 
@@ -1281,12 +1471,15 @@ fn ui_resize_event(args: &[CtValue], span: Span) -> EvalResult {
 }
 
 fn raylib_color(args: &[CtValue], span: Span) -> EvalResult {
-    Ok(structure("RaylibColor", vec![
-        ("r", CtValue::Int(int_arg(args, 0, span)?)),
-        ("g", CtValue::Int(int_arg(args, 1, span)?)),
-        ("b", CtValue::Int(int_arg(args, 2, span)?)),
-        ("a", CtValue::Int(int_arg(args, 3, span)?)),
-    ]))
+    Ok(structure(
+        "RaylibColor",
+        vec![
+            ("r", CtValue::Int(int_arg(args, 0, span)?)),
+            ("g", CtValue::Int(int_arg(args, 1, span)?)),
+            ("b", CtValue::Int(int_arg(args, 2, span)?)),
+            ("a", CtValue::Int(int_arg(args, 3, span)?)),
+        ],
+    ))
 }
 
 fn io_style_force(args: &[CtValue], span: Span) -> EvalResult {
@@ -1298,30 +1491,47 @@ fn io_style_force(args: &[CtValue], span: Span) -> EvalResult {
 }
 
 fn net_error(operation: &str, address: Option<String>, message: String) -> CtValue {
-    structure("NetError", vec![
-        ("operation", CtValue::Str(operation.to_string())),
-        ("address", address.map_or(CtValue::absent(Type::String), |value| CtValue::Present(Box::new(CtValue::Str(value))))),
-        ("name", CtValue::absent(Type::String)),
-        ("message", CtValue::Str(message)),
-        ("os_code", CtValue::absent(Type::Int)),
-    ])
+    structure(
+        "NetError",
+        vec![
+            ("operation", CtValue::Str(operation.to_string())),
+            (
+                "address",
+                address.map_or(CtValue::absent(Type::String), |value| {
+                    CtValue::Present(Box::new(CtValue::Str(value)))
+                }),
+            ),
+            ("name", CtValue::absent(Type::String)),
+            ("message", CtValue::Str(message)),
+            ("os_code", CtValue::absent(Type::Int)),
+        ],
+    )
 }
 
 fn net_ip_addr(args: &[CtValue], span: Span) -> EvalResult {
     let text = string_arg(args, 0, span)?;
     let input = text.to_string();
-    Ok(match super::net_pure_kernel::jet_net_pure_parse_ip(&input) {
-        Ok(address) => CtValue::Present(Box::new(structure("IPAddr", vec![("text", CtValue::Str(address.to_string()))]))),
-        Err(error) => CtValue::failed(Box::new(net_error(
-            "parse IP address",
-            Some(text.to_string()),
-            format!("invalid IP address `{text}`: {error}"),
-        ))),
-    })
+    Ok(
+        match super::net_pure_kernel::jet_net_pure_parse_ip(&input) {
+            Ok(address) => CtValue::Present(Box::new(structure(
+                "IPAddr",
+                vec![("text", CtValue::Str(address.to_string()))],
+            ))),
+            Err(error) => CtValue::failed(Box::new(net_error(
+                "parse IP address",
+                Some(text.to_string()),
+                format!("invalid IP address `{text}`: {error}"),
+            ))),
+        },
+    )
 }
 
 fn net_ip_is_ipv4(args: &[CtValue], span: Span) -> EvalResult {
-    let text = match field(one(args, 0, "core.net", "ip_is_ipv4", span)?, "IPAddr", "text") {
+    let text = match field(
+        one(args, 0, "core.net", "ip_is_ipv4", span)?,
+        "IPAddr",
+        "text",
+    ) {
         Some(CtValue::Str(text)) => text,
         _ => return Err(unsupported("malformed IPAddr value", span)),
     };
@@ -1338,27 +1548,34 @@ fn net_ip_is_ipv4(args: &[CtValue], span: Span) -> EvalResult {
 fn net_socket_addr_parse(args: &[CtValue], span: Span) -> EvalResult {
     let text = string_arg(args, 0, span)?;
     let input = text.to_string();
-    Ok(match super::net_pure_kernel::jet_net_pure_parse_socket_addr(&input) {
-        Ok(address) => CtValue::Present(Box::new(structure("SocketAddr", vec![
-            (
-                "host",
-                CtValue::Str(super::net_pure_kernel::jet_net_pure_socket_host(&address)),
-            ),
-            (
-                "port",
-                CtValue::Int(super::net_pure_kernel::jet_net_pure_socket_port(&address)),
-            ),
-            (
-                "text",
-                CtValue::Str(super::net_pure_kernel::jet_net_pure_socket_to_string(&address)),
-            ),
-        ]))),
-        Err(error) => CtValue::failed(Box::new(net_error(
-            "parse socket address",
-            Some(text.to_string()),
-            format!("invalid socket address `{text}`: {error}"),
-        ))),
-    })
+    Ok(
+        match super::net_pure_kernel::jet_net_pure_parse_socket_addr(&input) {
+            Ok(address) => CtValue::Present(Box::new(structure(
+                "SocketAddr",
+                vec![
+                    (
+                        "host",
+                        CtValue::Str(super::net_pure_kernel::jet_net_pure_socket_host(&address)),
+                    ),
+                    (
+                        "port",
+                        CtValue::Int(super::net_pure_kernel::jet_net_pure_socket_port(&address)),
+                    ),
+                    (
+                        "text",
+                        CtValue::Str(super::net_pure_kernel::jet_net_pure_socket_to_string(
+                            &address,
+                        )),
+                    ),
+                ],
+            ))),
+            Err(error) => CtValue::failed(Box::new(net_error(
+                "parse socket address",
+                Some(text.to_string()),
+                format!("invalid socket address `{text}`: {error}"),
+            ))),
+        },
+    )
 }
 
 fn net_value_field(args: &[CtValue], type_name: &str, name: &str, span: Span) -> EvalResult {
@@ -1370,7 +1587,10 @@ fn net_value_field(args: &[CtValue], type_name: &str, name: &str, span: Span) ->
 fn net_string_field(args: &[CtValue], type_name: &str, name: &str, span: Span) -> EvalResult {
     match net_value_field(args, type_name, name, span)? {
         CtValue::Str(value) => Ok(CtValue::Str(value)),
-        _ => Err(unsupported(&format!("malformed {type_name}.{name} value"), span)),
+        _ => Err(unsupported(
+            &format!("malformed {type_name}.{name} value"),
+            span,
+        )),
     }
 }
 
@@ -1386,27 +1606,50 @@ fn crypto_secret(type_name: &str, bytes: Vec<u8>) -> CtValue {
 }
 
 fn crypto_error(reason: &str) -> CtValue {
-    structure("CryptoError", vec![("reason", CtValue::Str(reason.to_string()))])
+    structure(
+        "CryptoError",
+        vec![("reason", CtValue::Str(reason.to_string()))],
+    )
 }
 
 fn crypto_hkdf(args: &[CtValue], span: Span) -> EvalResult {
     let length = int_arg(args, 3, span)?;
     if !(0..=8_160).contains(&length) {
-        return Ok(CtValue::failed(Box::new(crypto_error("HKDF-SHA256 output length must be 0..8160"))));
+        return Ok(CtValue::failed(Box::new(crypto_error(
+            "HKDF-SHA256 output length must be 0..8160",
+        ))));
     }
     let bytes = crate::Comptime::CryptoLite::hkdf_sha256(
-        &as_bytes(one(args, 0, "core.crypto.expert", "hkdf_sha256_raw", span)?, span)?,
-        &as_bytes(one(args, 1, "core.crypto.expert", "hkdf_sha256_raw", span)?, span)?,
-        &as_bytes(one(args, 2, "core.crypto.expert", "hkdf_sha256_raw", span)?, span)?,
+        &as_bytes(
+            one(args, 0, "core.crypto.expert", "hkdf_sha256_raw", span)?,
+            span,
+        )?,
+        &as_bytes(
+            one(args, 1, "core.crypto.expert", "hkdf_sha256_raw", span)?,
+            span,
+        )?,
+        &as_bytes(
+            one(args, 2, "core.crypto.expert", "hkdf_sha256_raw", span)?,
+            span,
+        )?,
         length as usize,
     );
     Ok(CtValue::Present(Box::new(crypto_secret("Secret", bytes))))
 }
 
 fn crypto_ed25519_verify(args: &[CtValue], span: Span) -> EvalResult {
-    let public = as_bytes(one(args, 0, "core.crypto.expert", "ed25519_verify_strict", span)?, span)?;
-    let message = as_bytes(one(args, 1, "core.crypto.expert", "ed25519_verify_strict", span)?, span)?;
-    let signature = as_bytes(one(args, 2, "core.crypto.expert", "ed25519_verify_strict", span)?, span)?;
+    let public = as_bytes(
+        one(args, 0, "core.crypto.expert", "ed25519_verify_strict", span)?,
+        span,
+    )?;
+    let message = as_bytes(
+        one(args, 1, "core.crypto.expert", "ed25519_verify_strict", span)?,
+        span,
+    )?;
+    let signature = as_bytes(
+        one(args, 2, "core.crypto.expert", "ed25519_verify_strict", span)?,
+        span,
+    )?;
     if public.len() != 32 {
         return Ok(CtValue::failed(Box::new(crypto_error(&format!(
             "expert.ed25519_verify_strict: public must be exactly 32; got {}",
@@ -1436,8 +1679,14 @@ fn crypto_ed25519_verify(args: &[CtValue], span: Span) -> EvalResult {
 }
 
 fn crypto_ed25519_sign(args: &[CtValue], span: Span) -> EvalResult {
-    let seed = as_bytes(one(args, 0, "core.crypto.expert", "ed25519_sign", span)?, span)?;
-    let message = as_bytes(one(args, 1, "core.crypto.expert", "ed25519_sign", span)?, span)?;
+    let seed = as_bytes(
+        one(args, 0, "core.crypto.expert", "ed25519_sign", span)?,
+        span,
+    )?;
+    let message = as_bytes(
+        one(args, 1, "core.crypto.expert", "ed25519_sign", span)?,
+        span,
+    )?;
     if seed.len() != 32 {
         return Ok(CtValue::failed(Box::new(crypto_error(&format!(
             "expert.ed25519_sign: seed must be exactly 32; got {}",
@@ -1487,7 +1736,12 @@ fn crypto_aead_lengths(
     let (minimum, maximum, label, expected) = if opening {
         (16usize, 1_073_741_840usize, "ciphertext", "16..=1073741840")
     } else {
-        (0usize, 1_073_741_824usize, "plaintext", "at most 1073741824")
+        (
+            0usize,
+            1_073_741_824usize,
+            "plaintext",
+            "at most 1073741824",
+        )
     };
     if input.len() < minimum || input.len() > maximum {
         return Some(CtValue::failed(Box::new(crypto_error(&format!(
@@ -1515,9 +1769,15 @@ fn crypto_aead_seal(
     let nonce = as_bytes(one(args, 1, "core.crypto.expert", operation, span)?, span)?;
     let plaintext = as_bytes(one(args, 2, "core.crypto.expert", operation, span)?, span)?;
     let aad = as_bytes(one(args, 3, "core.crypto.expert", operation, span)?, span)?;
-    if let Some(error) =
-        crypto_aead_lengths(operation, &key, &nonce, nonce_length, &plaintext, &aad, false)
-    {
+    if let Some(error) = crypto_aead_lengths(
+        operation,
+        &key,
+        &nonce,
+        nonce_length,
+        &plaintext,
+        &aad,
+        false,
+    ) {
         return Ok(error);
     }
     let sealed = if aes {
@@ -1544,9 +1804,15 @@ fn crypto_aead_open(
     let nonce = as_bytes(one(args, 1, "core.crypto.expert", operation, span)?, span)?;
     let ciphertext = as_bytes(one(args, 2, "core.crypto.expert", operation, span)?, span)?;
     let aad = as_bytes(one(args, 3, "core.crypto.expert", operation, span)?, span)?;
-    if let Some(error) =
-        crypto_aead_lengths(operation, &key, &nonce, nonce_length, &ciphertext, &aad, true)
-    {
+    if let Some(error) = crypto_aead_lengths(
+        operation,
+        &key,
+        &nonce,
+        nonce_length,
+        &ciphertext,
+        &aad,
+        true,
+    ) {
         return Ok(error);
     }
     let opened = if nonce_length == 12 {
@@ -1569,9 +1835,7 @@ fn crypto_argon2id(args: &[CtValue], span: Span) -> EvalResult {
         "bytes",
     ) {
         Some(CtValue::Bytes(bytes)) => bytes.clone(),
-        Some(CtValue::List(bytes)) => {
-            as_bytes(&CtValue::List(bytes.clone()), span)?
-        }
+        Some(CtValue::List(bytes)) => as_bytes(&CtValue::List(bytes.clone()), span)?,
         _ => {
             return Err(unsupported(
                 "core.crypto.expert.argon2id() needs a Secret password",
@@ -1599,7 +1863,9 @@ fn crypto_argon2id(args: &[CtValue], span: Span) -> EvalResult {
         || !(1..=10).contains(&iterations)
         || !(1..=8).contains(&lanes)
         || memory_kib < 8 * lanes
-        || memory_kib.checked_mul(iterations).is_none_or(|value| value > 1_048_576)
+        || memory_kib
+            .checked_mul(iterations)
+            .is_none_or(|value| value > 1_048_576)
     {
         return Ok(CtValue::failed(Box::new(crypto_error(
             "password hash is outside Jet's accepted policy",
@@ -1626,23 +1892,38 @@ fn crypto_argon2id(args: &[CtValue], span: Span) -> EvalResult {
 }
 
 fn crypto_x25519(args: &[CtValue], span: Span) -> EvalResult {
-    let secret = as_bytes(one(args, 0, "core.crypto.expert", "x25519_raw", span)?, span)?;
-    let public = as_bytes(one(args, 1, "core.crypto.expert", "x25519_raw", span)?, span)?;
+    let secret = as_bytes(
+        one(args, 0, "core.crypto.expert", "x25519_raw", span)?,
+        span,
+    )?;
+    let public = as_bytes(
+        one(args, 1, "core.crypto.expert", "x25519_raw", span)?,
+        span,
+    )?;
     if secret.len() != 32 || public.len() != 32 {
-        return Ok(CtValue::failed(Box::new(crypto_error("X25519 keys must contain exactly 32 bytes"))));
+        return Ok(CtValue::failed(Box::new(crypto_error(
+            "X25519 keys must contain exactly 32 bytes",
+        ))));
     }
     let shared = crate::Comptime::CryptoLite::x25519(&secret, &public).expect("length checked");
     if shared == [0; 32] {
-        return Ok(CtValue::failed(Box::new(crypto_error("X25519 peer key does not contribute to a shared secret"))));
+        return Ok(CtValue::failed(Box::new(crypto_error(
+            "X25519 peer key does not contribute to a shared secret",
+        ))));
     }
-    Ok(CtValue::Present(Box::new(crypto_secret("Secret", shared.to_vec()))))
+    Ok(CtValue::Present(Box::new(crypto_secret(
+        "Secret",
+        shared.to_vec(),
+    ))))
 }
 
 fn crypto_extract(args: &[CtValue], index: usize, type_name: &str, span: Span) -> EvalResult {
     let value = one(args, index, "core.crypto.expert", "secret_bytes", span)?;
     match field(value, type_name, "bytes") {
         Some(CtValue::Bytes(bytes)) => Ok(CtValue::Bytes(bytes.clone())),
-        Some(CtValue::List(bytes)) => as_bytes(&CtValue::List(bytes.clone()), span).map(CtValue::Bytes),
+        Some(CtValue::List(bytes)) => {
+            as_bytes(&CtValue::List(bytes.clone()), span).map(CtValue::Bytes)
+        }
         _ => Err(unsupported(&format!("malformed {type_name} value"), span)),
     }
 }
@@ -1660,23 +1941,13 @@ fn field<'a>(value: &'a CtValue, type_name: &str, name: &str) -> Option<&'a CtVa
     }
 }
 
-fn value_field(
-    value: &CtValue,
-    type_name: &str,
-    name: &str,
-    span: Span,
-) -> EvalResult {
+fn value_field(value: &CtValue, type_name: &str, name: &str, span: Span) -> EvalResult {
     field(value, type_name, name)
         .cloned()
         .ok_or_else(|| unsupported(&format!("malformed {type_name}.{name} value"), span))
 }
 
-fn int_field(
-    value: &CtValue,
-    type_name: &str,
-    name: &str,
-    span: Span,
-) -> Result<i64, Diagnostic> {
+fn int_field(value: &CtValue, type_name: &str, name: &str, span: Span) -> Result<i64, Diagnostic> {
     as_int(
         field(value, type_name, name)
             .ok_or_else(|| unsupported(&format!("malformed {type_name}.{name} value"), span))?,
@@ -1684,12 +1955,7 @@ fn int_field(
     )
 }
 
-fn string_field(
-    value: &CtValue,
-    type_name: &str,
-    name: &str,
-    span: Span,
-) -> EvalResult {
+fn string_field(value: &CtValue, type_name: &str, name: &str, span: Span) -> EvalResult {
     match field(value, type_name, name) {
         Some(CtValue::Str(value)) => Ok(CtValue::Str(value.clone())),
         _ => Err(unsupported(
@@ -1719,13 +1985,13 @@ fn parse_mime(input: &str) -> Result<CtValue, String> {
 }
 
 fn mime_parts(value: &CtValue, span: Span) -> Result<mime_kernel::JetMimeParts, Diagnostic> {
-    let CtValue::Str(top) = field(value, "Mime", "top")
-        .ok_or_else(|| unsupported("malformed Mime.top value", span))?
+    let CtValue::Str(top) =
+        field(value, "Mime", "top").ok_or_else(|| unsupported("malformed Mime.top value", span))?
     else {
         return Err(unsupported("malformed Mime.top value", span));
     };
-    let CtValue::Str(sub) = field(value, "Mime", "sub")
-        .ok_or_else(|| unsupported("malformed Mime.sub value", span))?
+    let CtValue::Str(sub) =
+        field(value, "Mime", "sub").ok_or_else(|| unsupported("malformed Mime.sub value", span))?
     else {
         return Err(unsupported("malformed Mime.sub value", span));
     };
@@ -1927,7 +2193,9 @@ impl DateTime {
     }
 
     fn from_timestamp_ns(seconds: i64, nanos: u32) -> Self {
-        Self::from_inner(super::time_kernel::JetDateTime::from_timestamp_ns(seconds, nanos))
+        Self::from_inner(super::time_kernel::JetDateTime::from_timestamp_ns(
+            seconds, nanos,
+        ))
     }
 
     fn from_parts(
@@ -1996,7 +2264,11 @@ impl Zone {
     fn from_inner(inner: super::time_kernel::JetZone) -> Self {
         let name = inner.name();
         let offset = inner.offset_at_utc(0);
-        Self { inner, name, offset }
+        Self {
+            inner,
+            name,
+            offset,
+        }
     }
 
     fn utc() -> Self {
@@ -2029,7 +2301,11 @@ impl ZonedDateTime {
     fn from_inner(inner: super::time_kernel::JetZonedDateTime) -> Self {
         let instant = DateTime::from_inner(inner.to_datetime());
         let zone = Zone::from_inner(inner.zone());
-        Self { inner, instant, zone }
+        Self {
+            inner,
+            instant,
+            zone,
+        }
     }
 
     fn from_datetime(instant: DateTime, zone: Zone) -> Self {
@@ -2067,7 +2343,10 @@ impl ZonedDateTime {
     fn value(self) -> CtValue {
         structure(
             "ZonedDateTime",
-            vec![("instant", self.instant.value()), ("zone", self.zone.value())],
+            vec![
+                ("instant", self.instant.value()),
+                ("zone", self.zone.value()),
+            ],
         )
     }
 }
@@ -2090,19 +2369,34 @@ fn fraction_new(args: &[CtValue], span: Span) -> EvalResult {
     };
     let denominator = match args.get(1) {
         Some(CtValue::Int(n)) => *n,
-        _ => return Err(unsupported("a ratio bottom that is not a whole number", span)),
+        _ => {
+            return Err(unsupported(
+                "a ratio bottom that is not a whole number",
+                span,
+            ))
+        }
     };
-    Ok(match crate::Numeric::CtFraction::new(numerator, denominator) {
-        Some(value) => CtValue::Present(Box::new(value.to_value())),
-        None => CtValue::absent(crate::AST::Type::Named(crate::Syntax::TYPE_FRACTION.to_string())),
-    })
+    Ok(
+        match crate::Numeric::CtFraction::new(numerator, denominator) {
+            Some(value) => CtValue::Present(Box::new(value.to_value())),
+            None => CtValue::absent(crate::AST::Type::Named(
+                crate::Syntax::TYPE_FRACTION.to_string(),
+            )),
+        },
+    )
 }
 
-fn fraction_from_value(value: &CtValue, span: Span) -> Result<crate::Numeric::CtFraction, Diagnostic> {
+fn fraction_from_value(
+    value: &CtValue,
+    span: Span,
+) -> Result<crate::Numeric::CtFraction, Diagnostic> {
     crate::Numeric::CtFraction::from_value(value).map_err(|error| unsupported(&error, span))
 }
 
-fn decimal_from_value(value: &CtValue, span: Span) -> Result<crate::Numeric::CtDecimal, Diagnostic> {
+fn decimal_from_value(
+    value: &CtValue,
+    span: Span,
+) -> Result<crate::Numeric::CtDecimal, Diagnostic> {
     crate::Numeric::CtDecimal::from_value(value).map_err(|error| unsupported(&error, span))
 }
 
@@ -2304,7 +2598,7 @@ fn instant_elapsed_millis(value: &CtValue, span: Span) -> EvalResult {
             super::time_kernel::jet_time_monotonic_now_ns(),
             instant_start_ns(value, span)?,
         )
-            .saturating_div(1_000_000),
+        .saturating_div(1_000_000),
     ))
 }
 
@@ -2318,10 +2612,7 @@ fn instant_elapsed(value: &CtValue, span: Span) -> EvalResult {
 }
 
 fn duration_value(ns: i64) -> CtValue {
-    structure(
-        crate::Syntax::DURATION_TYPE,
-        vec![("ns", CtValue::Int(ns))],
-    )
+    structure(crate::Syntax::DURATION_TYPE, vec![("ns", CtValue::Int(ns))])
 }
 
 fn duration_ns(value: &CtValue, span: Span) -> Result<i64, Diagnostic> {
@@ -2329,24 +2620,30 @@ fn duration_ns(value: &CtValue, span: Span) -> Result<i64, Diagnostic> {
 }
 
 fn datetime_from_timestamp(args: &[CtValue], span: Span) -> EvalResult {
-    Ok(DateTime::from_inner(super::time_kernel::JetDateTime::from_timestamp(
-        int_arg(args, 0, span)?,
-    ))
-    .value())
+    Ok(
+        DateTime::from_inner(super::time_kernel::JetDateTime::from_timestamp(int_arg(
+            args, 0, span,
+        )?))
+        .value(),
+    )
 }
 
 fn datetime_from_unix_ms(args: &[CtValue], span: Span) -> EvalResult {
-    Ok(DateTime::from_inner(super::time_kernel::JetDateTime::from_unix_ms(
-        int_arg(args, 0, span)?,
-    ))
-    .value())
+    Ok(
+        DateTime::from_inner(super::time_kernel::JetDateTime::from_unix_ms(int_arg(
+            args, 0, span,
+        )?))
+        .value(),
+    )
 }
 
 fn datetime_parse(args: &[CtValue], span: Span) -> EvalResult {
-    Ok(match super::time_kernel::JetDateTime::parse_rfc3339(string_arg(args, 0, span)?) {
-        Ok(datetime) => CtValue::Present(Box::new(DateTime::from_inner(datetime).value())),
-        Err(error) => CtValue::failed(Box::new(CtValue::Str(error))),
-    })
+    Ok(
+        match super::time_kernel::JetDateTime::parse_rfc3339(string_arg(args, 0, span)?) {
+            Ok(datetime) => CtValue::Present(Box::new(DateTime::from_inner(datetime).value())),
+            Err(error) => CtValue::failed(Box::new(CtValue::Str(error))),
+        },
+    )
 }
 
 fn datetime_parts(args: &[CtValue], span: Span) -> EvalResult {
@@ -2403,12 +2700,7 @@ fn measurement(args: &[CtValue], span: Span) -> EvalResult {
     ))
 }
 
-fn measurement_arithmetic(
-    left: &CtValue,
-    method: &str,
-    right: &CtValue,
-    span: Span,
-) -> EvalResult {
+fn measurement_arithmetic(left: &CtValue, method: &str, right: &CtValue, span: Span) -> EvalResult {
     let left_value = match field(left, "Measurement", "value") {
         Some(CtValue::Float(value)) => value.as_f64(),
         _ => return Err(unsupported("malformed Measurement.value value", span)),
@@ -2462,7 +2754,6 @@ fn measurement_sqrt(value: &CtValue, span: Span) -> EvalResult {
     ))
 }
 
-
 // ── XML canonicalization ───────────────────────────────────────────────────
 
 fn xml_canonical(args: &[CtValue], span: Span) -> EvalResult {
@@ -2487,9 +2778,9 @@ fn xml_canonical(args: &[CtValue], span: Span) -> EvalResult {
     );
     Ok(match canonical {
         Ok(value) => CtValue::Present(Box::new(CtValue::Str(value))),
-        Err(error) => CtValue::failed(Box::new(
-            crate::Comptime::EncodingLite::xml_error_value(error),
-        )),
+        Err(error) => CtValue::failed(Box::new(crate::Comptime::EncodingLite::xml_error_value(
+            error,
+        ))),
     })
 }
 
@@ -2610,7 +2901,10 @@ impl<'a> crate::Comptime::Interpreter::Interp<'a> {
 
 // ── D-APPROX1=A: CtValue adapters for the shared Prelude kernel ──────────────
 
-fn hll_from_value(value: &CtValue, span: Span) -> Result<super::sketch_kernel::JetHyperLogLog, Diagnostic> {
+fn hll_from_value(
+    value: &CtValue,
+    span: Span,
+) -> Result<super::sketch_kernel::JetHyperLogLog, Diagnostic> {
     let CtValue::List(registers) = field(value, "HyperLogLog", "registers")
         .ok_or_else(|| unsupported("malformed HyperLogLog.registers value", span))?
     else {
@@ -2623,7 +2917,9 @@ fn hll_from_value(value: &CtValue, span: Span) -> Result<super::sketch_kernel::J
             _ => Err(unsupported("malformed HyperLogLog register", span)),
         })
         .collect::<Result<Vec<_>, _>>()?;
-    Ok(super::sketch_kernel::JetHyperLogLog::from_registers(registers))
+    Ok(super::sketch_kernel::JetHyperLogLog::from_registers(
+        registers,
+    ))
 }
 
 fn hll_value(sketch: &super::sketch_kernel::JetHyperLogLog) -> CtValue {
@@ -2656,7 +2952,10 @@ fn hll_count(recv: &CtValue, span: Span) -> EvalResult {
     Ok(CtValue::Int(hll_from_value(recv, span)?.count()))
 }
 
-fn tdigest_from_value(value: &CtValue, span: Span) -> Result<super::sketch_kernel::JetTDigest, Diagnostic> {
+fn tdigest_from_value(
+    value: &CtValue,
+    span: Span,
+) -> Result<super::sketch_kernel::JetTDigest, Diagnostic> {
     let CtValue::List(items) = field(value, "TDigest", "centroids")
         .ok_or_else(|| unsupported("malformed TDigest.centroids value", span))?
     else {
@@ -2712,7 +3011,10 @@ fn tdigest_quantile(recv: &CtValue, args: &[CtValue], span: Span) -> EvalResult 
     )))
 }
 
-fn cms_from_value(value: &CtValue, span: Span) -> Result<super::sketch_kernel::JetCountMinSketch, Diagnostic> {
+fn cms_from_value(
+    value: &CtValue,
+    span: Span,
+) -> Result<super::sketch_kernel::JetCountMinSketch, Diagnostic> {
     let CtValue::List(rows) = field(value, "CountMinSketch", "rows")
         .ok_or_else(|| unsupported("malformed CountMinSketch.rows value", span))?
     else {
@@ -2787,7 +3089,10 @@ fn reservoir_from_value(
     let count = int_field(value, "ReservoirSampler", "count", span)?;
     let rng = int_field(value, "ReservoirSampler", "rng", span)?;
     let CtValue::List(items) = value_field(value, "ReservoirSampler", "reservoir", span)? else {
-        return Err(unsupported("malformed ReservoirSampler.reservoir value", span));
+        return Err(unsupported(
+            "malformed ReservoirSampler.reservoir value",
+            span,
+        ));
     };
     let reservoir = items
         .into_iter()
@@ -2821,9 +3126,9 @@ fn reservoir_value(sketch: &super::sketch_kernel::JetReservoirSampler) -> CtValu
 }
 
 fn reservoir_new(args: &[CtValue], span: Span) -> EvalResult {
-    Ok(reservoir_value(&super::sketch_kernel::JetReservoirSampler::new(
-        int_arg(args, 0, span)?,
-    )))
+    Ok(reservoir_value(
+        &super::sketch_kernel::JetReservoirSampler::new(int_arg(args, 0, span)?),
+    ))
 }
 
 fn reservoir_add(recv: &CtValue, args: &[CtValue], span: Span) -> Result<CtValue, Diagnostic> {
@@ -2844,7 +3149,10 @@ fn reservoir_sample(recv: &CtValue, span: Span) -> EvalResult {
 
 // ── D-SOLVER-LIB1=A: CtValue adapter for the shared Prelude kernel ──────────
 
-fn solver_from_value(value: &CtValue, span: Span) -> Result<super::solver_kernel::jet_std::Solver, Diagnostic> {
+fn solver_from_value(
+    value: &CtValue,
+    span: Span,
+) -> Result<super::solver_kernel::jet_std::Solver, Diagnostic> {
     Ok(super::solver_kernel::jet_std::Solver {
         seed: int_field(value, crate::Syntax::SOLVER_TYPE, "seed", span)?,
         checked: int_field(value, crate::Syntax::SOLVER_TYPE, "checked", span)?,
@@ -2872,12 +3180,16 @@ fn solver_require_update(recv: &CtValue, args: &[CtValue], span: Span) -> EvalRe
 
 fn solver_failure_count(recv: &CtValue, span: Span) -> EvalResult {
     let solver = solver_from_value(recv, span)?;
-    Ok(CtValue::Int(super::solver_kernel::jet_solver_failure_count(&solver)))
+    Ok(CtValue::Int(
+        super::solver_kernel::jet_solver_failure_count(&solver),
+    ))
 }
 
 fn solver_status(recv: &CtValue, span: Span) -> EvalResult {
     let solver = solver_from_value(recv, span)?;
-    Ok(CtValue::Str(super::solver_kernel::jet_solver_status(&solver)))
+    Ok(CtValue::Str(super::solver_kernel::jet_solver_status(
+        &solver,
+    )))
 }
 
 #[cfg(test)]
@@ -2901,11 +3213,8 @@ mod tests {
                 ("inclusive_prefixes", CtValue::List(Vec::new())),
             ],
         );
-        let actual = xml_canonical(
-            &[CtValue::Bytes(vec![1, 2, 3]), options],
-            Span::new(0, 0),
-        )
-        .expect("invalid DataTree is a user Result error");
+        let actual = xml_canonical(&[CtValue::Bytes(vec![1, 2, 3]), options], Span::new(0, 0))
+            .expect("invalid DataTree is a user Result error");
         assert_eq!(
             actual,
             CtValue::failed(Box::new(xml_shape_error(

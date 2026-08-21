@@ -142,21 +142,30 @@ impl<'a> Parser<'a> {
         Ok((ty, Span::new(start, end)))
     }
 
-    /// D-FAIL-UNIT1=A: a unit-fallible declaration writes its failure clause
-    /// directly after the parameter list (`fn save() ? IOError`).
+    /// D-ERRSIGIL1=A: a unit-fallible declaration writes its failure clause
+    /// directly after the parameter list (`fn save() ! IOError`).
     pub(in crate::Parser) fn parse_unit_fallible_return(
         &mut self,
     ) -> Result<Option<(Type, Span)>, Diagnostic> {
-        if !matches!(self.peek().kind, TokKind::Question) {
+        let old_sigil = matches!(self.peek().kind, TokKind::Question);
+        if !old_sigil && !matches!(self.peek().kind, TokKind::Bang) {
             return Ok(None);
         }
-        let start = self.bump().span.start;
+        let sigil = self.bump().span;
+        let start = sigil.start;
         let err = if self.type_starts_here() {
             self.type_()?.0
         } else {
             Type::Named(Syntax::TYPE_ERR.to_string())
         };
         let end = self.toks[self.pos.saturating_sub(1)].span.end;
+        if old_sigil {
+            self.diags.push(Diagnostic::from_row(
+                "E-ERR-SIGIL",
+                &[],
+                Some(sigil),
+            ));
+        }
         Ok(Some((
             Type::Result {
                 ok: Box::new(Type::Named(Syntax::INTERNAL_UNIT_TYPE.to_string())),
@@ -184,13 +193,13 @@ impl<'a> Parser<'a> {
             "E0003",
             "this unit-fallible signature uses the retired arrow-and-unit form".to_string(),
             "a function that can fail but returns no value has no result payload for an arrow to introduce".to_string(),
-            "write `fn save(path: String) ? IOError`, or `fn sync() ?` for the default error".to_string(),
+            "write `fn save(path: String) ! IOError`, or `fn sync() !` for the default error".to_string(),
             Some(span),
         )
     }
 
     fn return_type_inner(&mut self) -> Result<(Type, Span), Diagnostic> {
-        // D-RESULT-OPTION-CANON1: return types use the same `T?` / `T ?` / `T ? E`
+        // D-ERRSIGIL1: return types use the same `T?` / `T !` / `T ! E`
         // rules as every other type position. Parentheses only group
         // (including optional `(T?)` when the author wants them).
         self.type_()
@@ -759,8 +768,8 @@ impl<'a> Parser<'a> {
                         self.diags.push(Diagnostic::error(
                             "E0406",
                             "`Result<T, E>` is old Jet error syntax".to_string(),
-                            "fallible Jet types are written as `T ? E`".to_string(),
-                            "write the return type as `T ? E`, or `T ?` for the default Err type"
+                            "fallible Jet types are written as `T ! E`".to_string(),
+                            "write the return type as `T ! E`, or `T !` for the default Err type"
                                 .to_string(),
                             Some(start),
                         ));
@@ -879,31 +888,48 @@ impl<'a> Parser<'a> {
                 Some(qspan),
             ));
         }
-        // D-RESULT-OPTION-CANON1 / S34: tight `T?` is Optional; spaced `T ?`
-        // (and `T ? E`) is fallible. Span-adjacency matches dashed-name
-        // disambiguation — no lexer change.
-        let member = if matches!(self.peek().kind, TokKind::Question) {
-            let base_end = self.toks[self.pos.saturating_sub(1)].span.end;
-            let tight = self.peek().span.start == base_end;
-            self.bump();
-            if self.type_starts_here() {
-                // Recursive `type_()` so `T ? E1 | E2` places the union on the
-                // error side (D-UNIONTYPE1=A).
-                let (err_ty, _) = self.type_()?;
-                Type::Result {
-                    ok: Box::new(base),
-                    err: Box::new(err_ty),
-                }
-            } else if tight {
-                Type::Option(Box::new(base))
-            } else {
-                Type::Result {
-                    ok: Box::new(base),
-                    err: Box::new(Type::Named(Syntax::TYPE_ERR.to_string())),
+        // D-ERRSIGIL1 / S34: tight `T?` is Optional; `T ! E` is fallible.
+        // The old spaced `T ? E` form is recovered as the same Result and
+        // teaches the dedicated fallible separator. Type-position `!` is
+        // claimed here, so expression-prefix `!` parsing is unchanged.
+        let member = match self.peek().kind {
+            TokKind::Question => {
+                let question = self.peek().span;
+                let base_end = self.toks[self.pos.saturating_sub(1)].span.end;
+                let tight = question.start == base_end;
+                self.bump();
+                if tight {
+                    Type::Option(Box::new(base))
+                } else {
+                    let err = if self.type_starts_here() {
+                        self.type_()?.0
+                    } else {
+                        Type::Named(Syntax::TYPE_ERR.to_string())
+                    };
+                    self.diags.push(Diagnostic::from_row(
+                        "E-ERR-SIGIL",
+                        &[],
+                        Some(question),
+                    ));
+                    Type::Result {
+                        ok: Box::new(base),
+                        err: Box::new(err),
+                    }
                 }
             }
-        } else {
-            base
+            TokKind::Bang => {
+                self.bump();
+                let err = if self.type_starts_here() {
+                    self.type_()?.0
+                } else {
+                    Type::Named(Syntax::TYPE_ERR.to_string())
+                };
+                Type::Result {
+                    ok: Box::new(base),
+                    err: Box::new(err),
+                }
+            }
+            _ => base,
         };
         // D-UNIONTYPE1=A: `A | B | …`. Right-hand side is recursive so nested
         // pipes flatten through `canonicalize_union`.

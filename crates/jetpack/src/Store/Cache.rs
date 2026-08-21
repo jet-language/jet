@@ -7,8 +7,11 @@
 //! narinfo and canonical NAR bytes, and an access failure is reported
 //! before an object is made locally usable.
 
-use super::{NarInfo, Roots, StoreEntry};
-use crate::TrustRoot::TrustKey;
+use super::{entry_action_key, NarInfo, ProducerRecord, Roots, StoreEntry};
+use crate::TrustRoot::{
+    allow_cache_builder, cache_builder_identity, is_cache_builder_allowed,
+    is_cache_builder_revoked, pin_cache_key, verify_pinned_cache_key, TrustKey,
+};
 use crate::SHA256;
 use std::collections::BTreeSet;
 use std::fs;
@@ -200,6 +203,9 @@ pub struct CacheTransferReport {
     pub nix_nar_hash: Option<String>,
     /// Public signature identity, never secret credential material.
     pub signed_fingerprint: String,
+    /// Provenance identities carried in the signed cache admission decision.
+    pub builder: String,
+    pub provenance: String,
     pub credential_provider: Option<String>,
     pub bytes: u64,
 }
@@ -347,6 +353,8 @@ pub fn bind_cache(
             Err(error) => return Err(error),
         }
     }
+    let key = read_trust_key(&binding.trust_key)?;
+    pin_cache_key(&roots.root, role, &key).map_err(io::Error::other)?;
     let path = binding_path(roots, role)?;
     binding.validate()?;
     crate::RuntimePolicy::with_lock(&roots.root, "cache-config", || {
@@ -434,21 +442,41 @@ pub fn publish_cache_entry(
         return Err(invalid("cache binding is read-only; publishing needs a write grant"));
     }
     let entry = select_entry(roots, target)?;
+    ensure_reproducible_for_shared_cache(roots, &entry)?;
     let output = Path::new(&entry.out);
     let metadata = fs::symlink_metadata(output)?;
     if metadata.file_type().is_symlink() || (!metadata.is_dir() && !metadata.is_file()) {
         return Err(invalid("only a local Hangar file or directory can be published as a NAR"));
     }
-    let (nar, stats) = super::write_nar(output)?;
     if entry.envelope.output_hash.is_empty() {
         return Err(invalid("Hangar entry has no output identity for cache publication"));
     }
+    let actual_output_hash =
+        super::try_entry_output_hash(roots, &entry).map_err(io::Error::other)?;
+    if actual_output_hash != entry.envelope.output_hash {
+        return Err(invalid(
+            "local output does not match the Hangar entry output identity",
+        ));
+    }
+    let (nar, stats) = super::write_nar(output)?;
     let key = read_trust_key(&binding.trust_key)?;
-    let info = nar_info_for(&entry, &stats);
+    verify_cache_writer_authority(roots, &entry, role, &key)?;
+    let builder = cache_builder_for_entry(&entry)?;
+    allow_cache_builder(&roots.root, role, &builder).map_err(io::Error::other)?;
+    let info = nar_info_for(&entry, &stats)?;
     let mut failures = Vec::new();
     for mirror in &binding.mirrors {
-        let endpoint = parse_endpoint(mirror)?;
-        validate_endpoint_binding(&binding, &endpoint, true)?;
+        let endpoint = match parse_endpoint(mirror) {
+            Ok(endpoint) => endpoint,
+            Err(error) => {
+                failures.push(format!("{mirror}: {error}"));
+                continue;
+            }
+        };
+        if let Err(error) = validate_endpoint_binding(&binding, &endpoint, true) {
+            failures.push(format!("{mirror}: {error}"));
+            continue;
+        }
         match publish_endpoint(&endpoint, &info, &nar, &key, roots, &entry) {
             Ok(proof) => {
                 return Ok(CacheTransferReport {
@@ -459,6 +487,8 @@ pub fn publish_cache_entry(
                     nar_hash: stats.digest,
                     nix_nar_hash: proof.nix_nar_hash,
                     signed_fingerprint: proof.signed_fingerprint,
+                    builder: cache_builder_for_report(&entry),
+                    provenance: cache_provenance_for_report(&entry),
                     credential_provider: binding.credential_provider.clone(),
                     bytes: stats.bytes,
                 });
@@ -476,23 +506,44 @@ pub fn verify_cache_transfer(
 ) -> io::Result<CacheTransferReport> {
     let binding = read_cache_binding(roots, role)?;
     let expected = select_entry(roots, target)?;
+    ensure_reproducible_for_shared_cache(roots, &expected)?;
     let key = read_trust_key(&binding.trust_key)?;
+    verify_cache_writer_authority(roots, &expected, role, &key)?;
+    let builder = cache_builder_for_entry(&expected)?;
+    if !is_cache_builder_allowed(&roots.root, role, &builder).map_err(io::Error::other)? {
+        return Err(invalid("cache builder is not allowlisted for this shared cache role"));
+    }
     let mut failures = Vec::new();
     for mirror in &binding.mirrors {
-        let endpoint = parse_endpoint(mirror)?;
-        validate_endpoint_binding(&binding, &endpoint, false)?;
-        if let Some(bytes) = verify_hangar_endpoint(&endpoint, &expected)? {
-            return Ok(CacheTransferReport {
-                role: binding.role.clone(),
-                mirror: mirror.clone(),
-                entry: expected.id.clone(),
-                output_hash: expected.envelope.output_hash.clone(),
-                nar_hash: super::nar_digest(&bytes),
-                nix_nar_hash: None,
-                signed_fingerprint: fingerprint_for_key(&key),
-                credential_provider: binding.credential_provider.clone(),
-                bytes: bytes.len() as u64,
-            });
+        let endpoint = match parse_endpoint(mirror) {
+            Ok(endpoint) => endpoint,
+            Err(error) => {
+                failures.push(format!("{mirror}: {error}"));
+                continue;
+            }
+        };
+        if let Err(error) = validate_endpoint_binding(&binding, &endpoint, false) {
+            failures.push(format!("{mirror}: {error}"));
+            continue;
+        }
+        match verify_hangar_endpoint(&endpoint, &expected) {
+            Ok(Some(bytes)) => {
+                return Ok(CacheTransferReport {
+                    role: binding.role.clone(),
+                    mirror: mirror.clone(),
+                    entry: expected.id.clone(),
+                    output_hash: expected.envelope.output_hash.clone(),
+                    nar_hash: super::nar_digest(&bytes),
+                    nix_nar_hash: None,
+                    signed_fingerprint: fingerprint_for_key(&key),
+                    builder: cache_builder_for_report(&expected),
+                    provenance: cache_provenance_for_report(&expected),
+                    credential_provider: binding.credential_provider.clone(),
+                    bytes: bytes.len() as u64,
+                });
+            }
+            Ok(None) => {}
+            Err(error) => failures.push(format!("{mirror}: {error}")),
         }
         match verify_nix_endpoint(&endpoint, &expected, &key) {
             Ok(Some(transfer)) => {
@@ -504,6 +555,8 @@ pub fn verify_cache_transfer(
                     nar_hash: transfer.nar_hash,
                     nix_nar_hash: Some(transfer.nix_nar_hash),
                     signed_fingerprint: transfer.signed_fingerprint,
+                    builder: cache_builder_for_report(&expected),
+                    provenance: cache_provenance_for_report(&expected),
                     credential_provider: binding.credential_provider.clone(),
                     bytes: transfer.nar.len() as u64,
                 });
@@ -516,6 +569,10 @@ pub fn verify_cache_transfer(
                 let bytes = artifact.nar;
                 if let Err(error) = verify_artifact_bytes(&artifact.info, &bytes) {
                     failures.push(format!("{mirror}: NAR validation failed: {error}"));
+                    continue;
+                }
+                if let Err(error) = verify_decoded_output_hash(roots, &expected, &bytes) {
+                    failures.push(format!("{mirror}: output identity failed: {error}"));
                     continue;
                 }
                 return Ok(report_for(
@@ -545,36 +602,63 @@ pub fn substitute_cache_entry(
     }
     validate_path_components(destination)?;
     let expected = select_entry(roots, target)?;
+    ensure_reproducible_for_shared_cache(roots, &expected)?;
     let key = read_trust_key(&binding.trust_key)?;
+    verify_cache_writer_authority(roots, &expected, role, &key)?;
+    let builder = cache_builder_for_entry(&expected)?;
+    if !is_cache_builder_allowed(&roots.root, role, &builder).map_err(io::Error::other)? {
+        return Err(invalid("cache builder is not allowlisted for this shared cache role"));
+    }
     let mut failures = Vec::new();
     for mirror in &binding.mirrors {
-        let endpoint = parse_endpoint(mirror)?;
-        validate_endpoint_binding(&binding, &endpoint, false)?;
-        if let Some(bytes) = substitute_hangar_endpoint(&endpoint, &expected, destination)? {
-            return Ok(CacheTransferReport {
-                role: binding.role.clone(),
-                mirror: mirror.clone(),
-                entry: expected.id.clone(),
-                output_hash: expected.envelope.output_hash.clone(),
-                nar_hash: super::nar_digest(&bytes),
-                nix_nar_hash: None,
-                signed_fingerprint: fingerprint_for_key(&key),
-                credential_provider: binding.credential_provider.clone(),
-                bytes: bytes.len() as u64,
-            });
+        let endpoint = match parse_endpoint(mirror) {
+            Ok(endpoint) => endpoint,
+            Err(error) => {
+                failures.push(format!("{mirror}: {error}"));
+                continue;
+            }
+        };
+        if let Err(error) = validate_endpoint_binding(&binding, &endpoint, false) {
+            failures.push(format!("{mirror}: {error}"));
+            continue;
         }
-        if let Some(transfer) = substitute_nix_endpoint(&endpoint, &expected, destination, &key)? {
-            return Ok(CacheTransferReport {
-                role: binding.role.clone(),
-                mirror: mirror.clone(),
-                entry: expected.id.clone(),
-                output_hash: expected.envelope.output_hash.clone(),
-                nar_hash: transfer.nar_hash,
-                nix_nar_hash: Some(transfer.nix_nar_hash),
-                signed_fingerprint: transfer.signed_fingerprint,
-                credential_provider: binding.credential_provider.clone(),
-                bytes: transfer.nar.len() as u64,
-            });
+        match substitute_hangar_endpoint(&endpoint, &expected, destination) {
+            Ok(Some(bytes)) => {
+                return Ok(CacheTransferReport {
+                    role: binding.role.clone(),
+                    mirror: mirror.clone(),
+                    entry: expected.id.clone(),
+                    output_hash: expected.envelope.output_hash.clone(),
+                    nar_hash: super::nar_digest(&bytes),
+                    nix_nar_hash: None,
+                    signed_fingerprint: fingerprint_for_key(&key),
+                    builder: cache_builder_for_report(&expected),
+                    provenance: cache_provenance_for_report(&expected),
+                    credential_provider: binding.credential_provider.clone(),
+                    bytes: bytes.len() as u64,
+                });
+            }
+            Ok(None) => {}
+            Err(error) => failures.push(format!("{mirror}: {error}")),
+        }
+        match substitute_nix_endpoint(&endpoint, &expected, destination, &key) {
+            Ok(Some(transfer)) => {
+                return Ok(CacheTransferReport {
+                    role: binding.role.clone(),
+                    mirror: mirror.clone(),
+                    entry: expected.id.clone(),
+                    output_hash: expected.envelope.output_hash.clone(),
+                    nar_hash: transfer.nar_hash,
+                    nix_nar_hash: Some(transfer.nix_nar_hash),
+                    signed_fingerprint: transfer.signed_fingerprint,
+                    builder: cache_builder_for_report(&expected),
+                    provenance: cache_provenance_for_report(&expected),
+                    credential_provider: binding.credential_provider.clone(),
+                    bytes: transfer.nar.len() as u64,
+                });
+            }
+            Ok(None) => {}
+            Err(error) => failures.push(format!("{mirror}: {error}")),
         }
         match find_artifact(&endpoint, target, Some(&expected), &key) {
             Ok(Some(artifact)) => {
@@ -603,6 +687,8 @@ pub fn substitute_cache_entry(
                             nar_hash: stats.digest,
                             nix_nar_hash: None,
                             signed_fingerprint: fingerprint_for_info(&artifact.info),
+                            builder: cache_builder_for_report(&expected),
+                            provenance: cache_provenance_for_report(&expected),
                             credential_provider: binding.credential_provider.clone(),
                             bytes: stats.bytes,
                         });
@@ -642,7 +728,7 @@ pub fn cache_binding_json(binding: &CacheBinding) -> String {
 
 pub fn cache_report_json(operation: &str, report: &CacheTransferReport) -> String {
     format!(
-        "{{\"operation\":{},\"role\":{},\"mirror\":{},\"entry\":{},\"output_hash\":{},\"nar_hash\":{},\"nix_nar_hash\":{},\"signed_fingerprint\":{},\"credential_provider\":{},\"bytes\":{}}}",
+        "{{\"operation\":{},\"role\":{},\"mirror\":{},\"entry\":{},\"output_hash\":{},\"nar_hash\":{},\"nix_nar_hash\":{},\"signed_fingerprint\":{},\"builder\":{},\"provenance\":{},\"credential_provider\":{},\"bytes\":{}}}",
         crate::JSON::quote(operation),
         crate::JSON::quote(&report.role),
         crate::JSON::quote(&report.mirror),
@@ -655,6 +741,8 @@ pub fn cache_report_json(operation: &str, report: &CacheTransferReport) -> Strin
             .map(crate::JSON::quote)
             .unwrap_or_else(|| "null".to_string()),
         crate::JSON::quote(&report.signed_fingerprint),
+        crate::JSON::quote(&report.builder),
+        crate::JSON::quote(&report.provenance),
         report
             .credential_provider
             .as_deref()
@@ -676,9 +764,19 @@ fn select_entry(roots: &Roots, target: &str) -> io::Result<StoreEntry> {
         .ok_or_else(|| invalid("no Hangar entry matches the cache target"))
 }
 
-fn nar_info_for(entry: &StoreEntry, stats: &super::NarStats) -> NarInfo {
+fn ensure_reproducible_for_shared_cache(roots: &Roots, entry: &StoreEntry) -> io::Result<()> {
+    let action_key = entry_action_key(entry);
+    if super::reproducibility_blocked(roots, &action_key)? {
+        return Err(invalid(
+            "action has unreproducible evidence and cannot satisfy trusted cache policy",
+        ));
+    }
+    Ok(())
+}
+
+fn nar_info_for(entry: &StoreEntry, stats: &super::NarStats) -> io::Result<NarInfo> {
     let name = format!("{}-{}", entry.envelope.output_hash, entry.id);
-    NarInfo {
+    Ok(NarInfo {
         store_path: format!("/jet/hangar/{name}"),
         url: format!("nar/{}.nar", entry.envelope.output_hash),
         compression: "none".to_string(),
@@ -690,10 +788,62 @@ fn nar_info_for(entry: &StoreEntry, stats: &super::NarStats) -> NarInfo {
             .iter()
             .map(|reference| format!("/jet/hangar/{reference}"))
             .collect(),
-        deriver: None,
+        deriver: Some(cache_deriver(entry)?),
         ca: None,
         signatures: Vec::new(),
+    })
+}
+
+/// Carry the existing action identity and producer record through the signed
+/// narinfo. The NAR itself carries bytes; this field carries the facts that
+/// make those bytes eligible for this cache entry.
+fn cache_deriver(entry: &StoreEntry) -> io::Result<String> {
+    if entry.envelope.output_hash.trim().is_empty()
+        || entry.envelope.platform.trim().is_empty()
+        || entry.envelope.provenance.trim().is_empty()
+        || entry.cache_identity.source_fingerprint.trim().is_empty()
+        || entry.cache_identity.recipe_fingerprint.trim().is_empty()
+        || entry.cache_identity.policy_fingerprint.trim().is_empty()
+        || entry.cache_identity.platform != entry.envelope.platform
+    {
+        return Err(invalid(
+            "cache entry has incomplete or mismatched provenance",
+        ));
     }
+    ProducerRecord::decode(&entry.producer_record).map_err(|error| {
+        invalid(&format!(
+            "cache entry has invalid producer provenance: {error}"
+        ))
+    })?;
+
+    let mut canonical = b"jet.cache-deriver.v2\0".to_vec();
+    for value in [
+        entry_action_key(entry),
+        entry.envelope.output_hash.clone(),
+        entry.envelope.platform.clone(),
+        entry.envelope.signature.clone(),
+        entry.envelope.provenance.clone(),
+        entry.cache_identity.source_fingerprint.clone(),
+        entry.cache_identity.recipe_fingerprint.clone(),
+        entry.cache_identity.policy_fingerprint.clone(),
+        entry.cache_identity.platform.clone(),
+        entry.platform_artifact_kind.clone(),
+        entry.producer_record.clone(),
+    ] {
+        canonical.extend_from_slice(&(value.len() as u64).to_be_bytes());
+        canonical.extend_from_slice(value.as_bytes());
+    }
+    canonical.extend_from_slice(&(entry.named_outputs.len() as u64).to_be_bytes());
+    for (name, digest) in &entry.named_outputs {
+        for value in [name, digest] {
+            canonical.extend_from_slice(&(value.len() as u64).to_be_bytes());
+            canonical.extend_from_slice(value.as_bytes());
+        }
+    }
+    Ok(format!(
+        "/jet/derivations/{}",
+        SHA256::sha256_hex(&canonical)
+    ))
 }
 
 fn find_artifact(
@@ -794,7 +944,10 @@ fn find_local_artifact(
     }
     if let Some(expected) = expected {
         let identity = format!("{}-{}", expected.envelope.output_hash, expected.id);
-        write_negative_hint(mirror, &identity)?;
+        // A negative result is only an advisory optimization. A read-only or
+        // disappearing mirror must not turn a source/cache miss into a hard
+        // failure, and it must never suppress the next ordered mirror.
+        let _ = write_negative_hint(mirror, &identity);
     }
     Ok(None)
 }
@@ -818,6 +971,12 @@ fn report_for(
         nar_hash: info.nar_hash.clone(),
         nix_nar_hash: None,
         signed_fingerprint: fingerprint_for_info(&info),
+        builder: expected
+            .map(cache_builder_for_report)
+            .unwrap_or_default(),
+        provenance: expected
+            .map(cache_provenance_for_report)
+            .unwrap_or_default(),
         credential_provider: binding.credential_provider.clone(),
         bytes,
     }
@@ -838,12 +997,48 @@ fn fingerprint_for_info(info: &NarInfo) -> String {
 fn verify_artifact_bytes(info: &NarInfo, nar: &[u8]) -> io::Result<()> {
     if info.file_size != nar.len() as u64
         || info.nar_size != nar.len() as u64
-        || info.nar_hash != super::nar_digest(nar)
+        || !super::nar_hash_matches(&info.nar_hash, nar)
     {
         return Err(invalid("NAR bytes do not match signed FileSize, NarSize, or NarHash"));
     }
     super::validate_nar(nar)?;
     Ok(())
+}
+
+/// Verify the decoded output identity before a cache hit is reported. NAR
+/// validity and NAR digest prove the transport object; the Hangar envelope is
+/// a different digest over the materialized output tree. Decode only into a
+/// private staging path, then remove it on every path.
+fn verify_decoded_output_hash(
+    roots: &Roots,
+    expected: &StoreEntry,
+    nar: &[u8],
+) -> io::Result<()> {
+    validate_component(&expected.id, "cache entry id")?;
+    let staging = roots
+        .root
+        .join("cache")
+        .join("verify")
+        .join(format!("{}-{}", expected.id, unique_suffix()));
+    validate_path_components(&staging)?;
+    ensure_parent(&staging)?;
+    let result = (|| {
+        super::read_nar(nar, &staging)?;
+        let actual = crate::Envelope::try_output_hash_of(&staging.to_string_lossy())
+            .map_err(io::Error::other)?;
+        if actual != expected.envelope.output_hash {
+            return Err(invalid(&format!(
+                "decoded output hash {actual} disagrees with {}",
+                expected.envelope.output_hash
+            )));
+        }
+        Ok(())
+    })();
+    if fs::symlink_metadata(&staging).is_ok() {
+        make_tree_writable_for_removal(&staging)?;
+        remove_tree(&staging)?;
+    }
+    result
 }
 
 fn nar_info_matches_entry(info: &NarInfo, entry: &StoreEntry) -> bool {
@@ -858,10 +1053,12 @@ fn nar_info_matches_entry(info: &NarInfo, entry: &StoreEntry) -> bool {
     expected_references.sort();
     let mut actual_references = info.references.clone();
     actual_references.sort();
+    let expected_deriver = cache_deriver(entry).ok();
     info.store_path == expected_path
         && info.url == expected_url
-        && info.nar_hash.starts_with("sha256:")
         && actual_references == expected_references
+        && info.deriver == expected_deriver
+        && info.ca.is_none()
 }
 
 fn read_trust_key(path: &Path) -> io::Result<TrustKey> {
@@ -871,6 +1068,126 @@ fn read_trust_key(path: &Path) -> io::Result<TrustKey> {
     }
     TrustKey::from_secret(read_regular_bounded(path, 4096)?)
         .map_err(|error| invalid(&error.to_string()))
+}
+
+fn verify_cache_writer_authority(
+    roots: &Roots,
+    entry: &StoreEntry,
+    role: &str,
+    key: &TrustKey,
+) -> io::Result<()> {
+    verify_pinned_cache_key(&roots.root, role, key).map_err(io::Error::other)?;
+    let builder = cache_builder_for_entry(entry)?;
+    if is_cache_builder_revoked(&roots.root, &builder)
+        .map_err(io::Error::other)?
+    {
+        return Err(invalid("cache builder is revoked; rebuild before publishing or using it"));
+    }
+    Ok(())
+}
+
+fn cache_builder_for_entry(entry: &StoreEntry) -> io::Result<String> {
+    if entry.reference.trim().is_empty()
+        || entry.envelope.provenance.trim().is_empty()
+        || entry.cache_identity.source_fingerprint.trim().is_empty()
+        || entry.cache_identity.recipe_fingerprint.trim().is_empty()
+        || entry.cache_identity.policy_fingerprint.trim().is_empty()
+        || entry.cache_identity.platform != entry.envelope.platform
+    {
+        return Err(invalid("cache entry has incomplete writer provenance"));
+    }
+    let producer = ProducerRecord::decode(&entry.producer_record)
+        .map_err(|error| invalid(&format!("cache producer record is invalid: {error}")))?;
+    let expected_policy = format!(
+        "policy={}\nplatform={}",
+        entry.cache_identity.policy_fingerprint, entry.cache_identity.platform
+    );
+    if producer.immutable_source.trim().is_empty()
+        || producer.source_digest.trim().is_empty()
+        || producer.facts.get("action.recipe").map(String::as_str)
+            != Some(entry.cache_identity.recipe_fingerprint.as_str())
+        || producer.policy_facts != expected_policy
+        || !producer
+            .facts
+            .get("cache.reproducibility")
+            .is_some_and(|value| {
+                value == "attested-v1" || value.starts_with("independent-agreeing-v1:")
+            })
+    {
+        return Err(invalid("cache entry has unverified writer provenance"));
+    }
+    let builder = cache_builder_identity(
+        &producer.provider,
+        &producer.immutable_source,
+        &producer.source_digest,
+    );
+    let provenance = crate::TrustRoot::CacheProvenance {
+        reference: producer
+            .facts
+            .get("cache.reference")
+            .cloned()
+            .unwrap_or_default(),
+        source: producer
+            .facts
+            .get("cache.source")
+            .cloned()
+            .unwrap_or_default(),
+        builder: producer
+            .facts
+            .get("cache.builder")
+            .cloned()
+            .unwrap_or_default(),
+        action: producer
+            .facts
+            .get("cache.action")
+            .cloned()
+            .unwrap_or_default(),
+        output: producer
+            .facts
+            .get("cache.output")
+            .cloned()
+            .unwrap_or_default(),
+        platform: producer
+            .facts
+            .get("cache.platform")
+            .cloned()
+            .unwrap_or_default(),
+        sandbox: producer
+            .facts
+            .get("cache.sandbox")
+            .cloned()
+            .unwrap_or_default(),
+        policy: producer
+            .facts
+            .get("cache.policy")
+            .cloned()
+            .unwrap_or_default(),
+    };
+    if provenance.validate().is_err()
+        || provenance.reference != entry.reference
+        || provenance.source != producer.immutable_source
+        || provenance.builder != builder
+        || provenance.action != super::cache_action_identity(
+            &producer,
+            &entry.reference,
+            &entry.cache_identity,
+        )
+        || provenance.output != entry.envelope.output_hash
+        || provenance.platform != entry.cache_identity.platform
+        || provenance.sandbox != "sandbox:policy-bound"
+        || provenance.policy != entry.cache_identity.policy_fingerprint
+    {
+        return Err(invalid("cache entry has incomplete writer provenance"));
+    }
+    Ok(builder)
+}
+
+fn cache_builder_for_report(entry: &StoreEntry) -> String {
+    cache_builder_for_entry(entry).unwrap_or_default()
+}
+
+fn cache_provenance_for_report(entry: &StoreEntry) -> String {
+    cache_deriver(entry).unwrap_or_default()
 }
 
 fn write_new_key(path: &Path, role: &str) -> io::Result<()> {
@@ -1510,21 +1827,7 @@ fn nix_path_info(uri: &str, path: &str) -> io::Result<NixPathInfo> {
 }
 
 fn nix_nar_hash_to_jet(value: &str) -> io::Result<String> {
-    if let Some(hex) = value.strip_prefix("sha256:") {
-        if hex.len() == 64 && hex.bytes().all(|byte| byte.is_ascii_hexdigit()) {
-            return Ok(format!("sha256:{}", hex.to_ascii_lowercase()));
-        }
-        return Err(invalid("Nix NarHash uses an unsupported non-hex sha256 encoding"));
-    }
-    let encoded = value
-        .strip_prefix("sha256-")
-        .ok_or_else(|| invalid("Nix metadata NarHash is not sha256"))?;
-    let bytes = jet_foundation::base_encoding_strict::decode_base64(encoded, false, false)
-        .map_err(|error| invalid(&format!("Nix metadata NarHash is invalid: {error}")))?;
-    if bytes.len() != 32 {
-        return Err(invalid("Nix metadata NarHash is not a 256-bit digest"));
-    }
-    Ok(format!("sha256:{}", bytes.iter().map(|byte| format!("{byte:02x}")).collect::<String>()))
+    super::normalize_nar_hash(value)
 }
 
 fn require_nix_store_path(path: &str) -> io::Result<()> {
@@ -1897,7 +2200,7 @@ fn publish_local_resumable(
 ) -> io::Result<()> {
     crate::RuntimePolicy::with_lock(root, "cache-publish", || {
         let signed = info.clone().signed(key)?;
-        if signed.nar_size != nar.len() as u64 || signed.nar_hash != super::nar_digest(nar) {
+        if signed.nar_size != nar.len() as u64 || !super::nar_hash_matches(&signed.nar_hash, nar) {
             return Err(invalid("NAR bytes do not match signed narinfo"));
         }
         ensure_directory(root)?;

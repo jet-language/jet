@@ -11,7 +11,7 @@ struct Sale {
     qty: Int
 }
 
-fn run() ? IOError | [FieldError] {
+fn run() ! IOError | [FieldError] {
     path :: "/tmp/jet-analytics-query.csv"
     files.write(path, "item,qty\npen,3\nink,5\nclip,1")?
     query :: SQL{"SELECT * FROM sales WHERE qty > 1 ORDER BY qty DESC LIMIT 2"}

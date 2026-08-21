@@ -4917,6 +4917,7 @@ impl<'a> Checker<'a> {
                 return self.infer_core_field(&module, member, *alias_span, span);
             }
             if let (Some(modules), Some(module_idx)) = (self.modules, self.imports.get(alias)) {
+                self.record_import_alias_reference(alias, *alias_span);
                 if let Some(sig) = modules[*module_idx].funcs.get(member) {
                     if sig.c_abi_name.is_some() {
                         let ty = Type::Fn {
@@ -5096,21 +5097,6 @@ impl<'a> Checker<'a> {
         }
         if let Type::Named(type_name) = t {
             let display_type_name = self.display_type_name(type_name, None);
-            // D-LAYOUT-FACTS1=B: `None(Int)` preserves the ratified wall, but
-            // reading a byte fact must identify the missing canonical target
-            // layout engine instead of becoming a silent absent value.
-            if Syntax::is_layout_byte_fact(type_name, member) {
-                self.diags.push(Diagnostic::error(
-                    "E0956",
-                    format!(
-                        "`{display_type_name}.{member}` is unavailable until a canonical target layout engine ships (D-LAYOUT-FACTS1=B)"
-                    ),
-                    "D-LAYOUT-FACTS1=B keeps byte facts absent until a canonical target layout engine exists".to_string(),
-                    "read `kind`, `target`, `guarantee`, and `source`, or a field's `name` and `ty`; ship the canonical target layout engine before reading byte facts".to_string(),
-                    Some(span),
-                ));
-                return None;
-            }
             // D-SWIZZLE1: named lane swizzles on vector/SIMD types (not matrices).
             if is_swizzleable_math_type(type_name) && !self.registry.contains(type_name) {
                 match parse_swizzle_member(member, type_name) {

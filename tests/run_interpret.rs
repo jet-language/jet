@@ -90,6 +90,51 @@ fn run_interpret_keeps_unused_c_member_lists_runnable() {
     let _ = fs::remove_dir_all(&dir);
 }
 
+#[test]
+fn c_extern_calls_match_aot_and_interpreter() {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let cache = std::env::temp_dir().join(format!("jet_c_extern_parity_{}", std::process::id()));
+    let _ = fs::remove_dir_all(&cache);
+
+    let run = |mode: &str| {
+        let mut command = Command::new(jet());
+        command.arg("run");
+        match mode {
+            "release" => {
+                command.arg("--release");
+            }
+            "interpret" => {
+                command.arg("--interpret");
+            }
+            _ => {}
+        }
+        command
+            .arg("examples/features/lowlevel/cbind/main.jet")
+            .current_dir(&root)
+            .env("JET_RUN_CACHE_DIR", cache.join(mode).join("run"))
+            .env("JET_CACHE_DIR", cache.join(mode).join("build"))
+            .env("NO_COLOR", "1")
+            .output()
+            .unwrap()
+    };
+
+    let release = run("release");
+    let default = run("default");
+    let interpret = run("interpret");
+    for (mode, output) in [("release", &release), ("default", &default), ("interpret", &interpret)] {
+        assert_eq!(
+            output.status.code(),
+            Some(0),
+            "{mode} C extern run failed:\n{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert_eq!(output.stdout, b"10\n7\n", "{mode} C extern output");
+        assert!(output.stderr.is_empty(), "{mode} C extern stderr: {:?}", output.stderr);
+    }
+
+    let _ = fs::remove_dir_all(&cache);
+}
+
 /// Cards #2014/#2015 (I9): an example AOT completes must complete identically
 /// on default `jet run` and on the forced tier-0 interpreter — same stdout,
 /// same stderr, same exit code — and the forced run must prove tier 0 answered.

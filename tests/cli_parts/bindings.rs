@@ -20,7 +20,7 @@ fn question_mark_code_query_matches_explain_verbatim() {
     assert_eq!(
         String::from_utf8_lossy(&via_help.stdout),
         String::from_utf8_lossy(&via_explain.stdout),
-        "`jet ? E0102` must render the same verbatim essay as `jet explain E0102` (I4)"
+        "`jet ! E0102` must render the same verbatim essay as `jet explain E0102` (I4)"
     );
 }
 

@@ -9,6 +9,7 @@ use std::path::Path;
 
 use crate::AST::CtKey;
 use crate::Comptime::CtValue;
+use jet_pkg_model::ProviderFacts::ProviderFacts;
 
 /// Return the fully-qualified name of a first-party integration call.
 ///
@@ -603,6 +604,10 @@ pub struct PackageProfileFact {
     pub provider: String,
     pub channel: Option<String>,
     pub declared_by: Vec<String>,
+    /// The provider identity, selector, typed facts, and native provenance
+    /// carried with this package. Consumers must not reconstruct it from
+    /// `raw` after planning.
+    pub provider_facts: ProviderFacts,
 }
 
 /// The read-only, source-backed generation plan. Realization and activation may
@@ -616,6 +621,68 @@ pub struct PackageProfilePlan {
     pub packages: Vec<PackageProfileFact>,
     pub collisions: BTreeMap<String, String>,
     pub sources: Vec<String>,
+    pub fingerprint: String,
+    pub provider_facts: BTreeMap<String, ProviderFacts>,
+}
+
+impl PackageProfilePlan {
+    pub(crate) fn finalize(mut self) -> Self {
+        let mut canonical = String::from("jet-package-profile-plan-v1\n");
+        fingerprint_field(&mut canonical, "name", &self.name);
+        for value in &self.selected_profiles {
+            fingerprint_field(&mut canonical, "selected", value);
+        }
+        for value in &self.applied {
+            fingerprint_field(&mut canonical, "applied", value);
+        }
+        for value in &self.sources {
+            fingerprint_field(&mut canonical, "source", value);
+        }
+        for package in &self.packages {
+            fingerprint_field(&mut canonical, "package.raw", &package.raw);
+            fingerprint_field(&mut canonical, "package.target", &package.target);
+            fingerprint_field(&mut canonical, "package.source", &package.source);
+            fingerprint_field(
+                &mut canonical,
+                "package.upstream",
+                package.upstream.as_deref().unwrap_or("<none>"),
+            );
+            fingerprint_field(&mut canonical, "package.provider", &package.provider);
+            fingerprint_field(
+                &mut canonical,
+                "package.channel",
+                package.channel.as_deref().unwrap_or("<none>"),
+            );
+            for owner in &package.declared_by {
+                fingerprint_field(&mut canonical, "package.declared_by", owner);
+            }
+            fingerprint_field(
+                &mut canonical,
+                "package.provider_facts",
+                &package.provider_facts.digest(),
+            );
+        }
+        for (path, provider) in &self.collisions {
+            fingerprint_field(&mut canonical, "collision.path", path);
+            fingerprint_field(&mut canonical, "collision.provider", provider);
+        }
+        self.fingerprint = jet_pkg_model::SHA256::sha256_hex(canonical.as_bytes());
+        self.provider_facts = self
+            .packages
+            .iter()
+            .map(|package| (package.raw.clone(), package.provider_facts.clone()))
+            .collect();
+        self
+    }
+}
+
+fn fingerprint_field(canonical: &mut String, key: &str, value: &str) {
+    canonical.push_str(key);
+    canonical.push('\t');
+    canonical.push_str(&value.len().to_string());
+    canonical.push('\t');
+    canonical.push_str(value);
+    canonical.push('\n');
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

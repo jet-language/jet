@@ -25,10 +25,7 @@ pub fn parse_json(text: &str, reject_duplicate_keys: bool) -> Result<Value, Erro
     parse_json_with_number_mode(text, reject_duplicate_keys, false)
 }
 
-pub fn parse_json_exact_numbers(
-    text: &str,
-    reject_duplicate_keys: bool,
-) -> Result<Value, Error> {
+pub fn parse_json_exact_numbers(text: &str, reject_duplicate_keys: bool) -> Result<Value, Error> {
     parse_json_with_number_mode(text, reject_duplicate_keys, true)
 }
 
@@ -80,9 +77,7 @@ impl Parser {
     }
 
     fn ws(&mut self) {
-        while self.pos < self.chars.len()
-            && is_json_structural_whitespace(self.chars[self.pos])
-        {
+        while self.pos < self.chars.len() && is_json_structural_whitespace(self.chars[self.pos]) {
             self.pos += 1;
         }
     }
@@ -167,9 +162,7 @@ impl Parser {
             match char::from_u32(combined) {
                 Some(ch) => out.push(ch),
                 None => {
-                    return Err(self.err(
-                        super::jet_encoding_errors::JSON_INVALID_UNICODE_ESCAPE,
-                    ));
+                    return Err(self.err(super::jet_encoding_errors::JSON_INVALID_UNICODE_ESCAPE));
                 }
             }
         } else if (0xDC00..=0xDFFF).contains(&code_point) {
@@ -178,9 +171,7 @@ impl Parser {
             match char::from_u32(code_point) {
                 Some(ch) => out.push(ch),
                 None => {
-                    return Err(self.err(
-                        super::jet_encoding_errors::JSON_INVALID_UNICODE_ESCAPE,
-                    ));
+                    return Err(self.err(super::jet_encoding_errors::JSON_INVALID_UNICODE_ESCAPE));
                 }
             }
         }
@@ -269,9 +260,7 @@ impl Parser {
                 Some(',') => self.pos += 1,
                 Some(']') => {}
                 _ => {
-                    return Err(self.err(
-                        super::jet_encoding_errors::JSON_EXPECTED_ARRAY_SEPARATOR,
-                    ));
+                    return Err(self.err(super::jet_encoding_errors::JSON_EXPECTED_ARRAY_SEPARATOR));
                 }
             }
         }
@@ -293,9 +282,7 @@ impl Parser {
             }
             self.pos += 1;
             let value = self.value()?;
-            if self.reject_duplicate_keys
-                && fields.iter().any(|(field, _)| field == &key)
-            {
+            if self.reject_duplicate_keys && fields.iter().any(|(field, _)| field == &key) {
                 return Err(self.err(super::jet_encoding_errors::JSON_DUPLICATE_OBJECT_KEY));
             }
             if let Some((_, current)) = fields.iter_mut().find(|(field, _)| field == &key) {
@@ -308,9 +295,9 @@ impl Parser {
                 Some(',') => self.pos += 1,
                 Some('}') => {}
                 _ => {
-                    return Err(self.err(
-                        super::jet_encoding_errors::JSON_EXPECTED_OBJECT_SEPARATOR,
-                    ));
+                    return Err(
+                        self.err(super::jet_encoding_errors::JSON_EXPECTED_OBJECT_SEPARATOR)
+                    );
                 }
             }
         }

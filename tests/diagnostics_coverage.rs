@@ -888,8 +888,6 @@ const DIAGNOSTIC_COVERAGE_ALLOWLIST: &[(&str, &str, &str)] = &[
     ("E0981", "left-only", "Tower #2093"),
     ("E0982", "left-only", "Tower #2093"),
     ("E1204", "left-only", "Tower #2093"),
-    ("E1214", "left-only", "Tower #2093"),
-    ("E1215", "left-only", "Tower #2093"),
     ("E1217", "left-only", "Tower #2093"),
     ("E1218", "left-only", "Tower #2093"),
     ("E1221", "left-only", "Tower #2093"),

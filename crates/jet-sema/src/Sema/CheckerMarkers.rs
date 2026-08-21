@@ -703,6 +703,105 @@ fn materialize_test_expected_fail(
 }
 
 impl<'a> crate::Sema::Checker<'a> {
+    /// D-STRUCT-POLICY1=A: validate a callable policy chain against the one
+    /// bundle-local setting table. Built-ins keep their existing typed-value
+    /// path; user declarations add only a name, parameter contract, and
+    /// checked wrapper body.
+    pub(crate) fn validate_callable_policy_values(
+        &mut self,
+        expressions: &[crate::AST::Expr],
+        span: crate::Diagnostics::Span,
+    ) -> bool {
+        let mut valid = true;
+        for expression in expressions {
+            let crate::AST::Expr::Call(call) = expression else {
+                continue;
+            };
+            if crate::AST::CallablePolicyChain::is_builtin(&call.name) {
+                continue;
+            }
+            let key = (self.package_scope.to_string(), call.name.clone());
+            let Some((_declaring_module, declaration)) =
+                self.callable_policy_declarations.get(&key)
+            else {
+                let declaring_package = self
+                    .callable_policy_declarations
+                    .iter()
+                    .find(|((_, name), _)| name == &call.name)
+                    .map(|((package, _), _)| package.as_str());
+                let package_detail = declaring_package.map_or_else(
+                    || format!("policy lookup package: {}", self.package_scope),
+                    |package| format!(
+                        "policy `{}` is declared in package `{package}`, not `{}`",
+                        call.name, self.package_scope
+                    ),
+                );
+                self.diags.push(
+                    Diagnostic::error(
+                        "E0355",
+                        format!("unknown callable policy setting `{}`", call.name),
+                        "a callable policy name must be a compiler-owned setting or a public policy declared in this package"
+                            .to_string(),
+                        format!("declare `pub policy {}(...) {{ wrap(call) {{ … }} }}" , call.name),
+                        Some(call.name_span),
+                    )
+                    .with_detail(format!("{package_detail}\nmodule: {}", self.module_path)),
+                );
+                valid = false;
+                continue;
+            };
+            let required = declaration
+                .params
+                .iter()
+                .filter(|param| param.default.is_none() && !param.variadic)
+                .count();
+            let fixed = declaration
+                .params
+                .iter()
+                .filter(|param| !param.variadic)
+                .count();
+            let has_variadic = declaration.params.iter().any(|param| param.variadic);
+            if call.args.len() < required || (!has_variadic && call.args.len() > fixed) {
+                self.diags.push(Diagnostic::error(
+                    "E0104",
+                    format!(
+                        "policy `{}` expects {} argument{}, got {}",
+                        call.name,
+                        if has_variadic { required } else { fixed },
+                        if has_variadic || fixed != 1 { "s" } else { "" },
+                        call.args.len()
+                    ),
+                    "policy arguments use the declaration's typed/defaulted parameter contract"
+                        .to_string(),
+                    format!("check the declaration of `{}`", call.name),
+                    Some(call.name_span),
+                ));
+                valid = false;
+            }
+            for (index, argument) in call.args.iter().enumerate() {
+                let Some(parameter) = declaration
+                    .params
+                    .get(index)
+                    .or_else(|| declaration.params.last().filter(|param| param.variadic))
+                else {
+                    continue;
+                };
+                let expected = self.resolve_type(parameter.ty.clone());
+                self.check_declared_type(&expected, parameter.ty_span);
+                let mut value = argument.expr.clone();
+                let Some(actual) = self.infer(&mut value) else {
+                    valid = false;
+                    continue;
+                };
+                if !self.check_type_assignable(&expected, &actual, argument.expr.span()) {
+                    valid = false;
+                }
+            }
+        }
+        let _ = span;
+        valid
+    }
+
     /// D-MEMO1=A: prove the marker's result-cache contract before TIR lowers
     /// the function. The existing purity fact and collection hashability gate
     /// are the only semantic sources; engines never repeat these checks.

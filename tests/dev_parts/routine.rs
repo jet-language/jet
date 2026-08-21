@@ -320,7 +320,7 @@ fn task_program_runs_via_jit() {
 ///
 /// D-FAIL-EXIT1=A — fallible entry and one exit law *(ratified 2026-08-06,
 /// card #1533)*: "`fn run()` is fallible by default." Entry `fn run` is
-/// therefore stamped `Unit ? Err`, and a `return` inside a `task { … }` body
+/// therefore stamped `Unit ! Err`, and a `return` inside a `task { … }` body
 /// belongs to the *enclosing* function — `examples/features/net/http_get.jet`
 /// relies on exactly that, where `?? return` inside `task { … }` leaves `run`.
 /// So `task { return "child" }` handed a `String` back from `run`: E0113 from
@@ -1329,7 +1329,7 @@ fn maybe(values: [Int]) => (Window?) {
     return Val(Window.{ values: selected })
 }
 
-fn result(values: [Int]) => Window ? String {
+fn result(values: [Int]) => Window ! String {
     selected :: values[0..1]
     return Ok(Window.{ values: selected })
 }
@@ -1493,7 +1493,7 @@ struct Envelope<T> { value: T, marker: Int }
 trait Select {
     fn select(self, left: [Int], right: [Int]) => Pair
     fn optional(self, left: [Int], right: [Int]) => (Pair?)
-    fn fallible(self, left: [Int], right: [Int]) => Pair ? String
+    fn fallible(self, left: [Int], right: [Int]) => Pair ! String
     fn tupled(self, left: [Int], right: [Int]) => (pair: Pair, count: Int)
     fn generic(self, left: [Int], right: [Int]) => Envelope<Pair>
 }
@@ -1525,7 +1525,7 @@ impl $TYPE.Select {
         right_view :: right[0..1]
         return Val(Pair.{ left: left_view, right: right_view })
     }
-    fn fallible(self, left: [Int], right: [Int]) => Pair ? String {
+    fn fallible(self, left: [Int], right: [Int]) => Pair ! String {
         left_view :: left[0..1]
         right_view :: right[0..1]
         return Ok(Pair.{ left: left_view, right: right_view })
@@ -2929,7 +2929,7 @@ fn physical_quantities_run_in_resident_jit_without_fallback() {
     millimeter(scale: 1/1000)
     thirdish(scale: 2/3)
 }
-fn run() ? {
+fn run() ! {
     distance :: 12meter
     elapsed :: 3s
     speed :: distance / elapsed
@@ -2958,7 +2958,7 @@ fn run() ? {
     meter
     thirdish(scale: 2/3)
 }
-fn run() ? {
+fn run() ! {
     Meter.from_thirdish(1thirdish)?
 }
 "#, "physical_quantity_inexact");
@@ -2968,7 +2968,7 @@ fn run() ? {
     // way E3002 now registers it: `  {n}. {fn} ({file}:{line})`, origin first,
     // under the root failure line. D-FAIL-ERROR1=A
     // (card #1528) + D-FAIL-EXIT1=A (card #1533): bare `fn run() ?` means
-    // `run() ? Err`, so the conversion's plain `String` error arrives as the
+    // `run() ! Err`, so the conversion's plain `String` error arrives as the
     // default error and `jet_render_err` prints `Error: {message}` -- no code,
     // because this error carries none -- at the process edge, then exits 1.
     let inexact_shown = fixture_shown("physical_quantity_inexact");
@@ -2990,7 +2990,7 @@ fn run() ? {
     meter
     almost(scale: 9007199254740993/9007199254740992)
 }
-fn run() ? {
+fn run() ! {
     Meter.from_almost(1almost)?
 }
 "#, "physical_quantity_exact_rational_edge");
@@ -3024,7 +3024,7 @@ fn run() ? {
     above_offset(scale: 1, offset: 9007199254740993/18014398509481984)
     below_offset(scale: 1, offset: -9007199254740993/18014398509481984)
 }
-fn run() ? {
+fn run() ! {
     tie :: Meter.from_half_rounded(1half, .NearestEven, digits: 0)?
     above :: Meter.from_above_half_rounded(1above_half, .NearestEven, digits: 0)?
     negative_source :: ThreeHalves.from_float(-1.0)
@@ -3045,7 +3045,7 @@ fn run() ? {
 
     let overflow = r#"
 #UnitFamily(Length, base: meter) { meter double(scale: 2) }
-fn run() ? {
+fn run() ! {
     source :: Double.from_float(1.7976931348623157e308)
     Meter.from_double_rounded(source, .NearestEven, digits: 0)?
 }
@@ -3083,7 +3083,7 @@ fn rounded_physical_quantities_match_resident_default_dev_and_aot() {
     kelvin
     shifted(scale: 1, offset: 249/1000)
 }
-fn run() ? {
+fn run() ! {
     positive :: Half.from_float(5.0)
     negative :: Half.from_float(-5.0)
     toward_zero :: Meter.from_half_rounded(positive, .TowardZero, digits: 0)?
@@ -3495,20 +3495,20 @@ fn resident_jit_result_abi_covers_calls_ok_err_try_and_entry() {
         return;
     }
     let success = r#"
-fn choose_ok() => Float ? String {
+fn choose_ok() => Float ! String {
     return Ok(0.25)
 }
 
-fn choose_err() => Float ? String {
+fn choose_err() => Float ! String {
     return Err("typed boom")
 }
 
-fn forward() => Float ? String {
+fn forward() => Float ! String {
     value :: choose_ok()?
     return Ok(value + 0.25)
 }
 
-fn run() ? {
+fn run() ! {
     print(forward()?)
 }
 "#;
@@ -3529,7 +3529,7 @@ fn run() ? {
     // line 16 — origin first under the root failure, spelled the way E3002 now
     // registers it: `  {n}. {fn} ({file}:{line})`.
     // D-FAIL-ERROR1=A (card #1528) + D-FAIL-EXIT1=A (card #1533): bare `fn run() ?`
-    // means `run() ? Err`, so the `String` error arrives as the default error and
+    // means `run() ! Err`, so the `String` error arrives as the default error and
     // the process edge prints one full report and exits 1. `jet_render_err`
     // renders `Error: {message}` with no code and `Error [{code}]: {message}`
     // with one. Same shape as the ratified AOT golden
@@ -3576,11 +3576,11 @@ fn resident_jit_fallible_void_cfg_fallthrough_matches_aot() {
         return;
     }
     let one_arm_fallthrough = r#"
-fn direct_ok() => Int ? {
+fn direct_ok() => Int ! {
     return Ok(7)
 }
 
-fn run() ? {
+fn run() ! {
     print(direct_ok()?)
     stop :: false
     if stop {
@@ -3590,11 +3590,11 @@ fn run() ? {
 }
 "#;
     let nested_fallthrough = r#"
-fn direct_ok() => Int ? {
+fn direct_ok() => Int ! {
     return Ok(7)
 }
 
-fn run() ? {
+fn run() ! {
     print(direct_ok()?)
     outer :: true
     inner :: false
@@ -3607,11 +3607,11 @@ fn run() ? {
 }
 "#;
     let neither_arm_terminates = r#"
-fn direct_ok() => Int ? {
+fn direct_ok() => Int ! {
     return Ok(7)
 }
 
-fn run() ? {
+fn run() ! {
     print(direct_ok()?)
     if true {
         print("left continues")
@@ -3622,11 +3622,11 @@ fn run() ? {
 }
 "#;
     let both_arms_terminate = r#"
-fn direct_ok() => Int ? {
+fn direct_ok() => Int ! {
     return Ok(7)
 }
 
-fn run() ? {
+fn run() ! {
     print(direct_ok()?)
     if true {
         return Err("left branch")
@@ -3660,7 +3660,7 @@ fn run() ? {
             "both_arms_terminate",
             both_arms_terminate,
             // D-FAIL-ERROR1=A (card #1528) + D-FAIL-EXIT1=A (card #1533): bare
-            // `fn run() ?` means `run() ? Err`, so `return Err("left branch")`
+            // `fn run() ?` means `run() ! Err`, so `return Err("left branch")`
             // reaches the process edge as one full default-error report and exits
             // 1. `jet_render_err` renders `Error: {message}` when the error
             // carries no code — see the ratified golden
@@ -3694,7 +3694,7 @@ fn resident_jit_fidelity_matches_runtime_contract() {
     let valid = r#"
 use core.perf as perf
 
-fn run() ? {
+fn run() ! {
     perf.reset_fidelity()
     print(perf.default_fidelity())
     perf.override_fidelity(0.25)?
@@ -3729,7 +3729,7 @@ fn run() ? {
     ] {
         let src = format!(
             r#"use core.perf as perf
-fn run() ? {{
+fn run() ! {{
     perf.reset_fidelity()
     perf.override_fidelity(0.375)?
     perf.override_fidelity({value})?
@@ -6457,7 +6457,7 @@ impl Email.Encode {
 }
 
 impl Email.Decode {
-    fn decode(tree: DataTree) => Email ? [FieldError] {
+    fn decode(tree: DataTree) => Email ! [FieldError] {
         f := tree.field("email") ?? DataTree.Text("")
         s := f.text() ?? ""
         return Ok(Email.{addr: s})

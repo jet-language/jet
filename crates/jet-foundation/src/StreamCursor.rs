@@ -200,7 +200,10 @@ mod stream_cursor_tests {
         let mut c = jet_cursor_over(&"   ab|cd".to_string());
         jet_cursor_skip_ws(&mut c);
         assert_eq!(c.pos, 3);
-        assert_eq!(jet_cursor_take_until(&mut c, &"|".to_string()), Ok("ab".to_string()));
+        assert_eq!(
+            jet_cursor_take_until(&mut c, &"|".to_string()),
+            Ok("ab".to_string())
+        );
         assert!(jet_cursor_take_until(&mut c, &"!".to_string()).is_err());
     }
 }

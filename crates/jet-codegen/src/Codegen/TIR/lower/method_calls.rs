@@ -208,6 +208,9 @@ pub(crate) fn service_method_route(handle: &str, method: &str) -> Option<(&'stat
         ("ServiceTree", "workflow_activity_complete") => ("workflow_activity_complete", true),
         ("ServiceTree", "workflow_history") => ("workflow_history", false),
         ("ServiceTree", "workflow_outcome") => ("workflow_outcome", false),
+        ("ServiceWorkflow", "sleep") => ("workflow_sleep", true),
+        ("ServiceWorkflow", "activity") => ("workflow_activity_wait", true),
+        ("ServiceWorkflow", "all") => ("workflow_all", true),
         ("ServiceTree", "directory_register") => ("directory_register", true),
         ("ServiceTree", "directory_resolve") => ("directory_resolve", false),
         ("ServiceTree", "handoff_generation") => ("handoff_generation", true),
@@ -1134,6 +1137,15 @@ fn lower_method_call_impl(
                 env,
             );
         });
+    }
+    // D-VALIDATE1: sema has already materialized `Validate.over(value)` as
+    // the compiler-owned builder literal. Erase only this surface head; the
+    // literal itself is the ordinary TIR value consumed by `.check`/`.finish`.
+    if recv_type.as_deref() == Some(Syntax::INTERNAL_VALIDATE_OVER)
+        && method == "over"
+        && args.is_empty()
+    {
+        return lowered_receiver.unwrap_or_else(|| crate::Codegen::TIR::lower_expr(receiver, cx, env));
     }
     if method == Syntax::conversion_method_for_source("Int")
         && args.len() == 1
@@ -4323,7 +4335,7 @@ fn lower_method_call_impl(
     // (Source/Collections.rs), read off the receiver's already-resolved type
     // `Task<T>`/`Receiver<T>`/`Sender<T>` (the LOWERED receiver's `.ty`, total from the
     // binding's annotated/inferred slot — never re-inferred in emit, I3): `join`
-    // → `T ? TaskFailure`; `detach`/`pause`/`resume`/`cancel`/`send` → Unit;
+    // → `T ! TaskFailure`; `detach`/`pause`/`resume`/`cancel`/`send` → Unit;
     // `receive` → `Result<T, Closed>`. Args lowered PLAINLY (the AST
     // `emit_builtin_method`'s `arg(i)` is a raw `emit_expr`).
     if recv_type.is_none() && is_concurrency_method_name(method, args.len()) {
@@ -5543,12 +5555,49 @@ fn lower_method_call_impl(
     // D-AUTHORITY-NAME1=A / D-AUTHORITY-WORD2=E: keep the two authority
     // operations as a receiver call whose implementation is supplied by the
     // shared Prelude. This is ordinary data, not a type/dispatch input.
-    if recv_type.as_deref() == Some(Syntax::TYPE_ABILITIES)
+    // Comptime constants have no local slot, so recover the same fact from
+    // their evaluated carrier before the static-call fallback mistakes a
+    // value name for a type name.
+    let comptime_authority_name = match receiver {
+        Expr::Ident(name, _) | Expr::ComptimeName { name, .. } => {
+            let marked_name = if Syntax::is_comptime_name(name) {
+                name.clone()
+            } else {
+                format!("{}{}", Syntax::COMPTIME_MARK, name)
+            };
+            let is_authority = |candidate: &str| {
+                matches!(
+                    cx.const_values.get(candidate),
+                    Some(crate::Comptime::CtValue::Struct { type_name, .. })
+                        if type_name == Syntax::TYPE_ABILITIES
+                )
+            };
+            if is_authority(name) {
+                Some(name.clone())
+            } else if is_authority(&marked_name) {
+                Some(marked_name)
+            } else {
+                None
+            }
+        }
+        _ => None,
+    };
+    if (recv_type.as_deref() == Some(Syntax::TYPE_ABILITIES)
+        || comptime_authority_name.is_some())
         && matches!(method, "with" | "without")
         && args.len() == 1
     {
         return in_own_frame(|| {
-            let recv = lower_expr(receiver, cx, env);
+            let recv = if let Some(name) = comptime_authority_name.as_ref() {
+                let comptime_receiver = Expr::ComptimeName {
+                    name: name.clone(),
+                    span: receiver.span(),
+                    value: None,
+                };
+                lower_expr(&comptime_receiver, cx, env)
+            } else {
+                lower_expr(receiver, cx, env)
+            };
             let targs = args
                 .iter()
                 .map(|arg| lower_one_call_arg(arg, None, env, cx))

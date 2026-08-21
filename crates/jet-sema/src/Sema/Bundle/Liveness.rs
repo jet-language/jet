@@ -1,0 +1,351 @@
+//! D-STRUCT-LIVE1=A: structure liveness is one sema projection over the name
+//! ledger. The pass does not inspect generated code or ask an execution tier
+//! to discover reachability.
+
+use crate::AST::{Func, Item, ProgramBundle};
+use crate::Diagnostics::{Diagnostic, Span};
+use crate::Syntax;
+use jet_foundation::App::AppGraph;
+use jet_foundation::Names::{NameAlias, NameDeclaration, NameLedger, NameVisibility, StructureFact,
+    StructureFactKind};
+
+struct LivenessCandidate {
+    code: &'static str,
+    name: String,
+    source: String,
+    span: Span,
+    detail: &'static str,
+}
+
+impl LivenessCandidate {
+    fn diagnostic(&self) -> Diagnostic {
+        Diagnostic::from_row(self.code, &[("name", self.name.as_str())], Some(self.span))
+    }
+
+    fn fact(&self) -> StructureFact {
+        StructureFact::new(
+            StructureFactKind::Liveness,
+            self.name.clone(),
+            self.source.clone(),
+            self.span,
+            "unreachable",
+            self.detail,
+            Some("_name".to_string()),
+        )
+    }
+}
+
+pub(super) fn check_liveness(
+    bundle: &ProgramBundle,
+    ledger: &mut NameLedger,
+    app_graph: Option<&AppGraph>,
+) -> Vec<Diagnostic> {
+    let mut candidates = Vec::new();
+    collect_unused_imports(bundle, ledger, &mut candidates);
+    collect_unused_private_functions(bundle, ledger, app_graph, &mut candidates);
+    collect_unreachable_exports(bundle, ledger, app_graph, &mut candidates);
+
+    candidates.sort_by(|a, b| {
+        a.source
+            .cmp(&b.source)
+            .then(a.span.start.cmp(&b.span.start))
+            .then(a.code.cmp(b.code))
+            .then(a.name.cmp(&b.name))
+    });
+
+    candidates
+        .into_iter()
+        .map(|candidate| {
+            ledger.record_structure_fact(candidate.fact());
+            candidate.diagnostic()
+        })
+        .collect()
+}
+
+fn collect_unused_imports(
+    bundle: &ProgramBundle,
+    ledger: &NameLedger,
+    candidates: &mut Vec<LivenessCandidate>,
+) {
+    for (module_idx, module) in bundle.modules.iter().enumerate() {
+        for import in &module.imports {
+            for binding in import.walk_bindings() {
+                // A public import is an export surface, not a private local
+                // binding. Its reachability is checked by the export pass.
+                if binding.is_pub || binding.is_package_pub || ignored_name(&binding.local) {
+                    continue;
+                }
+                let Some(alias) = ledger.alias(module_idx, &binding.local) else {
+                    continue;
+                };
+                if alias.span.start >= alias.span.end || alias_used(ledger, &module.display, alias) {
+                    continue;
+                }
+                candidates.push(LivenessCandidate {
+                    code: "L0103",
+                    name: binding.local,
+                    source: module.display.clone(),
+                    span: alias.span,
+                    detail: "import is never read",
+                });
+            }
+        }
+    }
+}
+
+fn collect_unused_private_functions(
+    bundle: &ProgramBundle,
+    ledger: &NameLedger,
+    app_graph: Option<&AppGraph>,
+    candidates: &mut Vec<LivenessCandidate>,
+) {
+    for declaration in ledger.declarations() {
+        if declaration.visibility != NameVisibility::Private
+            || declaration.kind != "function"
+            || ignored_name(&declaration.name)
+            || declaration.span.start >= declaration.span.end
+        {
+            continue;
+        }
+        if function_is_root(bundle, declaration, app_graph)
+            || private_function_used(bundle, ledger, declaration)
+        {
+            continue;
+        }
+        let Some(module) = bundle.modules.get(declaration.module) else {
+            continue;
+        };
+        candidates.push(LivenessCandidate {
+            code: "L0104",
+            name: display_name(declaration),
+            source: module.display.clone(),
+            span: declaration.span,
+            detail: "private function is never reached",
+        });
+    }
+}
+
+fn collect_unreachable_exports(
+    bundle: &ProgramBundle,
+    ledger: &NameLedger,
+    app_graph: Option<&AppGraph>,
+    candidates: &mut Vec<LivenessCandidate>,
+) {
+    for declaration in ledger.declarations() {
+        if declaration.visibility != NameVisibility::Package
+            || !export_kind(&declaration.kind)
+            || ignored_name(&declaration.name)
+            || declaration.name.contains('.')
+            || declaration.span.start >= declaration.span.end
+        {
+            continue;
+        }
+        if function_is_root(bundle, declaration, app_graph)
+            || declaration_reached_from_package(bundle, ledger, declaration)
+        {
+            continue;
+        }
+        let Some(module) = bundle.modules.get(declaration.module) else {
+            continue;
+        };
+        candidates.push(LivenessCandidate {
+            code: "L0105",
+            name: display_name(declaration),
+            source: module.display.clone(),
+            span: declaration.span,
+            detail: "package export is unreachable",
+        });
+    }
+
+    // `pub(package) use …` has an alias declaration rather than a top-level
+    // item declaration. Only aliases represented by source import bindings
+    // enter this export verdict; compiler-prelude aliases remain invisible.
+    for (module_idx, module) in bundle.modules.iter().enumerate() {
+        for import in &module.imports {
+            for binding in import.walk_bindings() {
+                if !binding.is_package_pub || ignored_name(&binding.local) {
+                    continue;
+                }
+                let Some(alias) = ledger.alias(module_idx, &binding.local) else {
+                    continue;
+                };
+                if alias.span.start >= alias.span.end
+                    || alias_reached_from_package(bundle, ledger, alias)
+                {
+                    continue;
+                }
+                candidates.push(LivenessCandidate {
+                    code: "L0105",
+                    name: binding.local,
+                    source: module.display.clone(),
+                    span: alias.span,
+                    detail: "package re-export is unreachable",
+                });
+            }
+        }
+    }
+}
+
+fn ignored_name(name: &str) -> bool {
+    name.is_empty()
+        || name.starts_with('_')
+        || name.starts_with(Syntax::GENERATED_NAME_PREFIX)
+}
+
+fn export_kind(kind: &str) -> bool {
+    matches!(
+        kind,
+        "function"
+            | "type"
+            | "const"
+            | "trait"
+            | "protocol"
+            | "state"
+            | "tag"
+            | "module"
+            | "file_module"
+            | "extern"
+            | "checked_text_head"
+    )
+}
+
+fn display_name(declaration: &NameDeclaration) -> String {
+    declaration
+        .name
+        .rsplit_once('.')
+        .map(|(_, leaf)| leaf.to_string())
+        .unwrap_or_else(|| declaration.name.clone())
+}
+
+fn alias_used(ledger: &NameLedger, source: &str, alias: &NameAlias) -> bool {
+    ledger.references().iter().any(|((module, _, _), reference)| {
+        module == source
+            && reference.kind == "import_alias"
+            && reference.def_span == alias.span
+    })
+}
+
+fn private_function_used(
+    bundle: &ProgramBundle,
+    ledger: &NameLedger,
+    declaration: &NameDeclaration,
+) -> bool {
+    let Some(target_path) = bundle
+        .modules
+        .get(declaration.module)
+        .map(|module| module.display.as_str())
+    else {
+        return false;
+    };
+    let function_span = find_function_by_name_span(
+        &bundle.modules[declaration.module].items,
+        declaration.span,
+    )
+    .map(|function| function.span);
+    ledger.references().iter().any(|((source, start, end), reference)| {
+        source == target_path
+            && reference.module_path == target_path
+            && reference.kind == "function"
+            && reference.def_span == declaration.span
+            && !function_span.is_some_and(|span| {
+                *start >= span.start && *end <= span.end
+            })
+    })
+}
+
+fn declaration_reached_from_package(
+    bundle: &ProgramBundle,
+    ledger: &NameLedger,
+    declaration: &NameDeclaration,
+) -> bool {
+    let Some(target_module) = bundle.modules.get(declaration.module) else {
+        return false;
+    };
+    ledger.references().iter().any(|((source, _, _), reference)| {
+        let Some(source_idx) = bundle
+            .modules
+            .iter()
+            .position(|module| module.display == *source)
+        else {
+            return false;
+        };
+        source_idx != declaration.module
+            && ledger
+                .module(source_idx)
+                .zip(ledger.module(declaration.module))
+                .is_some_and(|(source, target)| source.package == target.package)
+            && reference.module_path == target_module.display
+            && reference.def_span == declaration.span
+    })
+}
+
+fn alias_reached_from_package(
+    bundle: &ProgramBundle,
+    ledger: &NameLedger,
+    alias: &NameAlias,
+) -> bool {
+    let Some(owner) = ledger.module(alias.module) else {
+        return false;
+    };
+    ledger.aliases().any(|consumer| {
+        consumer.module != alias.module
+            && consumer.target_module == Some(alias.module)
+            && consumer.target.rsplit_once('.').map_or(false, |(_, leaf)| leaf == alias.name)
+            && ledger
+                .module(consumer.module)
+                .is_some_and(|module| module.package == owner.package)
+            && bundle
+                .modules
+                .get(consumer.module)
+                .is_some_and(|module| module.display != owner.path)
+    })
+}
+
+fn function_is_root(
+    bundle: &ProgramBundle,
+    declaration: &NameDeclaration,
+    app_graph: Option<&AppGraph>,
+) -> bool {
+    let Some(function) = find_function_by_name_span(
+        &bundle.modules[declaration.module].items,
+        declaration.span,
+    ) else {
+        return false;
+    };
+    if function.is_job
+        || matches!(
+            function.web_marker,
+            Some(jet_foundation::WebPartition::WebPartitionMarker::WasmExport)
+        )
+    {
+        return true;
+    }
+    if declaration.module == bundle.entry && function.name == "run" {
+        return true;
+    }
+    let Some(graph) = app_graph else { return false };
+    if declaration.module != bundle.entry {
+        return false;
+    }
+    let handler = |name: &str| name == function.name;
+    graph.routes.iter().any(|route| handler(&route.handler))
+        || graph.actions.iter().any(|action| handler(&action.handler))
+        || graph.mounts.iter().any(|mount| handler(&mount.handler))
+}
+
+fn find_function_by_name_span(items: &[Item], span: Span) -> Option<&Func> {
+    for item in items {
+        match item {
+            Item::Func(function) if function.name_span == span => return Some(function),
+            Item::CodeModule(module) => {
+                if let Some(body) = &module.body {
+                    if let Some(function) = find_function_by_name_span(body, span) {
+                        return Some(function);
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    None
+}

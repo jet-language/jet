@@ -10,6 +10,12 @@ file writes, and lock updates from that data.
 input. A Package can declare outputs, environments, services, dependencies,
 defaults, and root-only members.
 
+Package identity belongs in `package.jet`. Named dependency sources belong in
+the Jet-grammar `sources:` block in `env.jet`; `jetpack.toml` is retired and a
+present file fails with E1225. Jet resolves the project root first, then reads
+the applicable `package.jet`/`workspace.jet` facts and the selected `env.jet`
+module. This keeps one grammar responsible for every dependency reference.
+
 ```text
 name: "demo"
 version: "0.1.0"
@@ -107,9 +113,17 @@ module profile.dev {
 ```
 
 Run `jet profile plan dev` to inspect the resolved package generation. The plan
-keeps the raw package ref, source name, provider, channel, source module, and
-collision map. `--json` gives the same facts for tools. The command does not
-realize or change a generation.
+keeps the raw package ref, source name, provider, channel, source module,
+collision map, and a stable fingerprint. `--json` gives the same facts for
+tools, including a `provider_facts` carrier for each package. That carrier
+retains the exact reference, selector, resolved source, profile provenance,
+typed metadata, native provider document, and any explicit loss or conflict.
+The command does not realize or change a generation.
+
+An external provider ref without an exact version, revision, or digest fails
+with E1335. Ambiguous source inference and lossy provider metadata are reported
+as errors; the planner does not invent a default provider or discard a native
+field.
 
 The resolver applies parent generations first. It rejects missing parents,
 cycles, conflicting declarations, adapter packages, unsupported refs, and
@@ -217,7 +231,10 @@ jet hangar path
 An old state-directory Hangar, or the retired root-owned Hangar, is copied
 through an atomic staging directory on first use. The old tree stays in place
 so the migration is reversible. An incomplete staging tree stops the command
-and must be inspected before retrying.
+and must be moved aside without deletion, inspected, and repaired before
+retrying. Jetpack rejects a Hangar destination that is a symlink or
+non-directory, so migration cannot redirect writes outside the resolved user
+path.
 
 ## Hangar external roots
 
@@ -282,15 +299,21 @@ jet cache substitute app --role public --to /tmp/app-output --yes
 
 The first mirror with a valid signature, NAR digest, and decoded output hash
 wins. Publishing requires the separate binding write grant. A substitution
-never overwrites an existing destination.
+never overwrites an existing destination. Binding pins the role key in the
+trusted root. The first approved publication records the producer identity for
+that shared role; later reads require the same allowlisted identity and reject
+revoked builders or a changed key.
 
 Binary-cache substitution uses the canonical NAR codec. NAR bytes are hashed
-before admission, and a narinfo must carry a matching signed hash, size,
-reference set, and store identity. Substitution stages the decoded tree and
-refuses conflicting existing objects. Local and host-adapter transfers resume
-through a verified .partial prefix before publication. A missing or corrupt
-mirror falls back to source realization; it never installs an unsigned or
-replayed result.
+before admission, and an uncompressed narinfo must carry matching signed
+FileHash/FileSize and NarHash/NarSize values,
+reference set, store identity, and Jet action/provenance binding. The signed
+Deriver field carries that binding: it reuses the content-addressed action key
+and commits the output platform, producer record, and envelope provenance.
+Substitution stages the decoded tree and refuses conflicting existing objects.
+Local and host-adapter transfers resume through a verified .partial prefix
+before publication. A missing or corrupt mirror falls back to source
+realization; it never installs an unsigned, mismatched, or replayed result.
 
 `jet shared-store install` creates the optional administrator-installed shared
 Hangar configuration and socket-activation units. Each request runs as a
@@ -310,6 +333,12 @@ the archived metadata, content-checks the closure in an ephemeral `.incoming`
 stage, signs it only after admission, and removes stale stages before
 accepting new work. It never receives source or build commands. If the socket
 or a write grant is absent or expired, realization also stays private.
+
+`jet hangar recover` is the repair boundary for interrupted publication. It
+replays committed closure projections, removes abandoned ingest and archive
+stages, and reclaims snapshots whose lease owner is no longer alive. A
+symlinked staging or lease root stops recovery with the live path untouched so
+the operator can repair the boundary and retry.
 
 ## Services
 
@@ -379,17 +408,29 @@ lossless Jet meaning produces L0204. Unsupported or over-budget foreign-flake
 input produces E1256. Arbitrary evaluator functions never become Jet values.
 
 The private native evaluator is bounded before parsing: source input is capped
-at 1 MiB, token and expression budgets are finite, imports require explicit
-project-root authority, and only the pinned Stage A systems are accepted.
-Unsupported or over-budget expressions fail with a typed evaluator error. The
-production boundary does not invoke `nix` or require it on `PATH`.
+at 1 MiB, token, memory, and expression budgets are finite, imports require
+explicit project-root authority, JSON depth is bounded, and only the pinned
+Stage A systems are accepted. The host corpus has a pinned 1 second latency
+budget. Unsupported or over-budget expressions fail with a typed evaluator
+error. The production boundary does not invoke `nix` or require it on `PATH`.
 
-The evaluator's pinned breadth inventory records overlays, dev shells, and
-multi-output package projections as covered. Fixed-output fetchers, cross-system
-packages, and external flakes remain explicit skips: they require fetch,
-target/provider, or remote-source authority that this no-std boundary does not
-own. Differential fuzzing belongs to the host proof harness. These skips are
-reported as unsupported evaluator input; they are not empty or guessed values.
+The evaluator's pinned breadth inventory records overlays, dev shells,
+multi-output package projections, seeded differential cases, and performance
+budgets as covered. The host verifier compares every fixed mutation with the
+pinned Nix 2.34.8 oracle. Fixed-output fetchers use a verified `file:` source
+through explicit fetch authority and return canonical store-path contexts.
+Cross-system package identities use explicit pinned target authority and stay
+out of the host package list. Selected local external flakes use explicit
+`path:` provider authority and the same bounded evaluator. Remote providers,
+dynamic derivations, and IFD remain explicit skips: they require authority or
+staging that this boundary does not own. These limits are reported as
+unsupported evaluator input; they are not empty or guessed values.
+
+The bridge evaluates named `devShells.<system>.<name>` outputs with the same
+typed projection as `default`. The printed Jet shim remains the selected
+default shell; named-shell package facts and unsupported fields are retained in
+`.jet/lock`. A package derivation lock record lists `drvPath` and every
+declared output identity in stable output-name order.
 
 ## package.jet transitions
 
@@ -414,10 +455,15 @@ Build hooks lower to a finite action graph. Fetches need exact hashes. Exec
 steps use declared tool paths. Install paths stay under the output root.
 Successful outputs publish atomically and failed stages are removed. An
 approval binds the package, provider/source, staged source digest, platform,
-exact recipe digest, and declared abilities. A change in any of these facts
-needs a new approval; `--trust` is one-shot and CI accepts only an exact
-repository grant. Hook processes receive no caller environment or credentials,
-only the declared deterministic build values and the private output channel.
+exact recipe digest, declared tool-package refs, source-authority facts,
+effects, and platform facts.
+The same complete subject is used for the adapter cache and is recorded in the
+producer proof, so changing a tool provider/source cannot reuse an old approval
+or output. A change in any of these facts needs a new approval; `--trust` is
+one-shot and CI accepts only an exact repository grant. Fetch URLs cannot carry
+embedded credentials, and hook processes receive no caller environment or
+credentials, only the declared deterministic build values and private output
+channel. Failed stages publish no output.
 
 Environment images project the same package and service facts into OCI
 metadata. Secret values and dotenv contents do not enter the image projection.

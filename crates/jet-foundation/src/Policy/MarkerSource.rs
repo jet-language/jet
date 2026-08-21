@@ -12,8 +12,8 @@
 //! every name, parameter, and fact, so the shape can never drift apart.
 
 use super::{
-    AppliedRule, CompanionSite, PolicyScope, RuleArgType, RuleParam, RuleResolution,
-    RuleSignature, RuleSite, RuleStatus,
+    AppliedRule, CompanionSite, PolicyScope, RuleArgType, RuleParam, RuleResolution, RuleSignature,
+    RuleSite, RuleStatus,
 };
 
 /// The one authority for the marker vocabulary.
@@ -34,9 +34,9 @@ pub fn read() -> Vec<AppliedRule> {
 
 fn declaration(line: &str) -> AppliedRule {
     let rest = line["marker ".len()..].trim();
-    let open = rest
-        .find('(')
-        .unwrap_or_else(|| crate::ice!(None, "marker declaration without a parameter list: {line}"));
+    let open = rest.find('(').unwrap_or_else(|| {
+        crate::ice!(None, "marker declaration without a parameter list: {line}")
+    });
     let close = rest
         .rfind(')')
         .unwrap_or_else(|| crate::ice!(None, "marker declaration without a closing `)`: {line}"));
@@ -54,9 +54,9 @@ fn declaration(line: &str) -> AppliedRule {
     let mut status = RuleStatus::Active;
 
     for entry in split_top_level(&rest[open + 1..close]) {
-        let (label, value) = entry
-            .split_once(':')
-            .unwrap_or_else(|| crate::ice!(None, "marker parameter without `:` in {line}: {entry}"));
+        let (label, value) = entry.split_once(':').unwrap_or_else(|| {
+            crate::ice!(None, "marker parameter without `:` in {line}: {entry}")
+        });
         let (label, value) = (label.trim(), value.trim());
         if let Some(fact) = label.strip_prefix(crate::Syntax::COMPTIME_MARK) {
             match fact {
@@ -68,7 +68,11 @@ fn declaration(line: &str) -> AppliedRule {
                 "resolution" => resolution = rule_resolution(value, line),
                 "companion" => {
                     let parts = list(value);
-                    assert_eq!(parts.len(), 2, "`@companion` reads `[Rule, .Site]` in {line}");
+                    assert_eq!(
+                        parts.len(),
+                        2,
+                        "`@companion` reads `[Rule, .Site]` in {line}"
+                    );
                     companion_site = Some(CompanionSite {
                         rule: leak(parts[0]),
                         site: site(parts[1], line),
@@ -179,7 +183,11 @@ struct Scan {
 
 impl Scan {
     fn new() -> Self {
-        Self { depth: 0, in_string: false, escaped: false }
+        Self {
+            depth: 0,
+            in_string: false,
+            escaped: false,
+        }
     }
 
     /// True when this byte sits at top level and outside a string.
@@ -225,7 +233,10 @@ fn flag(value: &str, line: &str) -> bool {
     match value {
         "true" => true,
         "false" => false,
-        other => crate::ice!(None, "a marker fact reads `true` or `false`, found `{other}` in {line}"),
+        other => crate::ice!(
+            None,
+            "a marker fact reads `true` or `false`, found `{other}` in {line}"
+        ),
     }
 }
 
@@ -297,7 +308,10 @@ mod tests {
     #[test]
     fn a_row_carries_its_parameters_and_its_facts() {
         let rows = read();
-        let unsafe_row = rows.iter().find(|row| row.name == "Unsafe").expect("#Unsafe");
+        let unsafe_row = rows
+            .iter()
+            .find(|row| row.name == "Unsafe")
+            .expect("#Unsafe");
         assert_eq!(unsafe_row.signature.params.len(), 2);
         assert_eq!(unsafe_row.signature.params[0].name, "reason");
         assert_eq!(unsafe_row.signature.params[0].ty, RuleArgType::String);
@@ -320,7 +334,10 @@ mod tests {
         assert_eq!(companion.rule, "Job");
         assert_eq!(companion.site, RuleSite::Function);
 
-        let policy = rows.iter().find(|row| row.name == "Policy").expect("#Policy");
+        let policy = rows
+            .iter()
+            .find(|row| row.name == "Policy")
+            .expect("#Policy");
         assert!(policy.inherits);
         assert_eq!(policy.resolution, RuleResolution::Tighten);
         assert!(policy.policy_scopes.contains(&PolicyScope::Module));
@@ -330,10 +347,15 @@ mod tests {
     #[test]
     fn a_retired_row_keeps_its_replacement() {
         let rows = read();
-        let suppress = rows.iter().find(|row| row.name == "Suppress").expect("#Suppress");
+        let suppress = rows
+            .iter()
+            .find(|row| row.name == "Suppress")
+            .expect("#Suppress");
         assert_eq!(
             suppress.status,
-            RuleStatus::Retired { replacement: ".drop(\"reason\")" }
+            RuleStatus::Retired {
+                replacement: ".drop(\"reason\")"
+            }
         );
         let known = rows.iter().find(|row| row.name == "Known").expect("#Known");
         assert!(known.sites.is_empty());
@@ -342,8 +364,14 @@ mod tests {
     /// A comma inside a list, a paren, or a string never splits an entry.
     #[test]
     fn separators_inside_brackets_and_strings_are_not_separators() {
-        assert_eq!(split_top_level("a: [x, y], b: \"p, q\""), vec!["a: [x, y]", "b: \"p, q\""]);
-        assert_eq!(split_default("String = \"a = b\""), Some(("String", "\"a = b\"")));
+        assert_eq!(
+            split_top_level("a: [x, y], b: \"p, q\""),
+            vec!["a: [x, y]", "b: \"p, q\""]
+        );
+        assert_eq!(
+            split_default("String = \"a = b\""),
+            Some(("String", "\"a = b\""))
+        );
         assert_eq!(split_default("Duration | String"), None);
     }
 }

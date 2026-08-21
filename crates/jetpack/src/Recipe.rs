@@ -7,8 +7,8 @@
 //! lowered.
 //!
 //! The safety contract (D-JPK-ADAPTER1=A), enforced structurally:
-//! - **network** is denied except a locked `fetch(url, sha256:)` — a fetch with
-//!   no locked hash is ungranted ambient network (`E1236`);
+//! - **network** is denied except a locked, credential-free `fetch(url,
+//!   sha256:)` — an unlocked or credentialed fetch is refused (`E1236`);
 //! - **outputs** install only under the package output root — a step targeting
 //!   a path outside it escapes confinement (`E1237`);
 //! - **build tools** are realized `Pkg` deps, never host `/usr/bin` — an `exec`
@@ -87,9 +87,13 @@ impl RunReport {
 /// path `jet inspect audit` uses (D-BUILDSCOPE1: audit never executes). Returns the
 /// first violation as a diagnostic.
 pub fn validate(recipe: &BuildRecipe, ctx: &BuildContext) -> Result<(), Diagnostic> {
+    validate_finite_recipe(recipe, "pkg")?;
     for step in &recipe.steps {
         match step {
             BuildStep::Fetch { url, sha256 } => {
+                if credentialed_fetch_url(url) {
+                    return Err(e1236_credentialed_url());
+                }
                 if !valid_sha256(sha256) {
                     return Err(e1236_invalid_hash(url, sha256));
                 }
@@ -125,26 +129,33 @@ pub fn lower_to_plan(
         ActionKind, ActionSpec, BuildCapability, BuildContext as PlanContext, TargetSpec,
     };
 
+    validate_finite_recipe(recipe, package)?;
+
     let mut plan_ctx = PlanContext::new();
     let mut action_handles = Vec::new();
     for (idx, step) in recipe.steps.iter().enumerate() {
         let name = format!("recipe-{package}-{idx}");
+        let authority_effect = match step {
+            BuildStep::Fetch { .. } => "net.fetch".to_string(),
+            BuildStep::Exec { tool, .. } => format!("exec:{tool}"),
+            BuildStep::Install { .. } | BuildStep::InstallTree { .. } => "fs.write".to_string(),
+        };
         let spec = match step {
-            BuildStep::Fetch { url, sha256 } => ActionSpec::cached([
-                "jet-fetch",
-                url.as_str(),
-                sha256.as_str(),
-            ])
-            .with_kind(ActionKind::Generic)
-            .with_inputs(["."])
-            .with_outputs([format!(".jet/recipe/{package}/step-{idx}.stamp")])
-            .with_cap(BuildCapability::Net)
-            .with_env("SOURCE_DATE_EPOCH", "0")
-            .with_env_allowlist(["SOURCE_DATE_EPOCH"])
-            .with_helper_version("jet-fetch", env!("CARGO_PKG_VERSION"))
-            .with_label("recipe.step", "fetch")
-            .with_label("fetch.url", url.clone())
-            .with_label("fetch.sha256", sha256.clone()),
+            BuildStep::Fetch { url, sha256 } => {
+                if credentialed_fetch_url(url) {
+                    return Err(e1236_credentialed_url());
+                }
+                ActionSpec::cached(["jet-fetch", url.as_str(), sha256.as_str()])
+                    .with_kind(ActionKind::Generic)
+                    .with_inputs(["."])
+                    .with_cap(BuildCapability::Net)
+                    .with_env("SOURCE_DATE_EPOCH", "0")
+                    .with_env_allowlist(["SOURCE_DATE_EPOCH"])
+                    .with_helper_version("jet-fetch", env!("CARGO_PKG_VERSION"))
+                    .with_label("recipe.step", "fetch")
+                    .with_label("fetch.url", url.clone())
+                    .with_label("fetch.sha256", sha256.clone())
+            }
             BuildStep::Exec { tool, args } => {
                 let tool_path = realized_tool(tools, tool)?;
                 let mut argv = vec![tool_path.to_string_lossy().into_owned()];
@@ -152,7 +163,6 @@ pub fn lower_to_plan(
                 ActionSpec::cached(argv)
                     .with_kind(ActionKind::Compile)
                     .with_inputs(["."])
-                    .with_outputs([format!(".jet/recipe/{package}/step-{idx}.stamp")])
                     .with_cap(BuildCapability::Exec)
                     .with_env("SOURCE_DATE_EPOCH", "0")
                     .with_env("JET_PROFILE", "default")
@@ -161,40 +171,42 @@ pub fn lower_to_plan(
                     .with_label("recipe.step", "exec")
                     .with_label("recipe.tool", tool.clone())
             }
-            BuildStep::Install { src, dest } => ActionSpec::cached([
-                "jet-install",
-                src.as_str(),
-                dest.as_str(),
-            ])
-            .with_kind(ActionKind::SourceArchive)
-            .with_inputs([src.clone()])
-            .with_outputs([format!(".jet/recipe/{package}/step-{idx}.stamp")])
-            .with_cap(BuildCapability::FS)
-            .with_env("SOURCE_DATE_EPOCH", "0")
-            .with_env_allowlist(["SOURCE_DATE_EPOCH"])
-            .with_helper_version("jet-install", env!("CARGO_PKG_VERSION"))
-            .with_label("recipe.step", "install")
-            .with_label("install.dest", dest.clone()),
-            BuildStep::InstallTree { src, dest } => ActionSpec::cached([
-                "jet-install-tree",
-                src.as_str(),
-                dest.as_str(),
-            ])
-            .with_kind(ActionKind::SourceArchive)
-            .with_inputs([src.clone()])
-            .with_outputs([format!(".jet/recipe/{package}/step-{idx}.stamp")])
-            .with_cap(BuildCapability::FS)
-            .with_env("SOURCE_DATE_EPOCH", "0")
-            .with_env_allowlist(["SOURCE_DATE_EPOCH"])
-            .with_helper_version("jet-install-tree", env!("CARGO_PKG_VERSION"))
-            .with_label("recipe.step", "install-tree")
-            .with_label("install.dest", dest.clone()),
+            BuildStep::Install { src, dest } => {
+                ActionSpec::cached(["jet-install", src.as_str(), dest.as_str()])
+                    .with_kind(ActionKind::SourceArchive)
+                    .with_inputs([src.clone()])
+                    .with_cap(BuildCapability::FS)
+                    .with_env("SOURCE_DATE_EPOCH", "0")
+                    .with_env_allowlist(["SOURCE_DATE_EPOCH"])
+                    .with_helper_version("jet-install", env!("CARGO_PKG_VERSION"))
+                    .with_label("recipe.step", "install")
+                    .with_label("install.dest", dest.clone())
+            }
+            BuildStep::InstallTree { src, dest } => {
+                ActionSpec::cached(["jet-install-tree", src.as_str(), dest.as_str()])
+                    .with_kind(ActionKind::SourceArchive)
+                    .with_inputs([src.clone()])
+                    .with_cap(BuildCapability::FS)
+                    .with_env("SOURCE_DATE_EPOCH", "0")
+                    .with_env_allowlist(["SOURCE_DATE_EPOCH"])
+                    .with_helper_version("jet-install-tree", env!("CARGO_PKG_VERSION"))
+                    .with_label("recipe.step", "install-tree")
+                    .with_label("install.dest", dest.clone())
+            }
         };
-        let spec = if idx == 0 {
-            spec
-        } else {
-            spec.with_inputs([format!(".jet/recipe/{package}/step-{}.stamp", idx - 1)])
+        let mut outputs = vec![step_marker(package, idx)];
+        if let BuildStep::Install { dest, .. } | BuildStep::InstallTree { dest, .. } = step {
+            outputs.push(declared_output_path(package, dest)?);
         }
+        let spec = if idx == 0 {
+            spec.with_outputs(outputs)
+        } else {
+            spec.with_outputs(outputs)
+                .with_inputs([step_marker(package, idx - 1)])
+        }
+        .with_label("stage.index", idx.to_string())
+        .with_label("stage.bound", recipe.steps.len().to_string())
+        .with_label("authority.effect", authority_effect)
         .with_label("platform.os", std::env::consts::OS)
         .with_label("platform.arch", std::env::consts::ARCH);
         let handle = plan_ctx.action(name, spec).map_err(|err| {
@@ -213,28 +225,130 @@ pub fn lower_to_plan(
     for handle in action_handles {
         package_spec = package_spec.with_action(handle);
     }
-    let package_target = plan_ctx
-        .add_package(package, package_spec)
-        .map_err(|err| {
-            Diagnostic::error(
-                "E1238",
-                format!("recipe package `{package}` could not lower into BuildPlan"),
-                format!("{err:?}"),
-                "choose a unique package name for the recipe target.".to_string(),
-                None,
-            )
-        })?;
-    plan_ctx
-        .plan_with_default(package_target)
-        .map_err(|err| {
-            Diagnostic::error(
-                "E1238",
-                "recipe BuildPlan failed validation".to_string(),
-                format!("{err:?}"),
-                "resolve duplicate outputs or empty steps before caching.".to_string(),
-                None,
-            )
-        })
+    let package_target = plan_ctx.add_package(package, package_spec).map_err(|err| {
+        Diagnostic::error(
+            "E1238",
+            format!("recipe package `{package}` could not lower into BuildPlan"),
+            format!("{err:?}"),
+            "choose a unique package name for the recipe target.".to_string(),
+            None,
+        )
+    })?;
+    plan_ctx.plan_with_default(package_target).map_err(|err| {
+        Diagnostic::error(
+            "E1238",
+            "recipe BuildPlan failed validation".to_string(),
+            format!("{err:?}"),
+            "resolve duplicate outputs or empty steps before caching.".to_string(),
+            None,
+        )
+    })
+}
+
+fn step_marker(package: &str, index: usize) -> String {
+    format!(".jet/recipe/{package}/step-{index}.stamp")
+}
+
+fn validate_finite_recipe(recipe: &BuildRecipe, package: &str) -> Result<(), Diagnostic> {
+    if package.is_empty()
+        || package == "."
+        || package == ".."
+        || package.chars().any(char::is_control)
+        || package.contains('/')
+        || package.contains('\\')
+    {
+        return Err(e1238_plan(
+            "recipe package name is not one safe path segment",
+        ));
+    }
+    if recipe.steps.is_empty() {
+        return Err(e1238_plan(
+            "recipe must declare at least one finite staged action",
+        ));
+    }
+
+    let mut declared_outputs = Vec::<(String, String)>::new();
+    for (index, step) in recipe.steps.iter().enumerate() {
+        let (dest, is_tree) = match step {
+            BuildStep::Install { dest, .. } => (dest.as_str(), false),
+            BuildStep::InstallTree { dest, .. } => (dest.as_str(), true),
+            BuildStep::Fetch { .. } | BuildStep::Exec { .. } => continue,
+        };
+        let output = declared_output_path(package, dest)?;
+        let root = normalize(&PathBuf::from(format!(".jet/recipe/{package}/outputs")));
+        if !is_tree && Path::new(&output) == root {
+            return Err(e1238_plan(&format!(
+                "file install at recipe step {index} must declare a file below the output root"
+            )));
+        }
+        let step_name = format!("recipe-{package}-{index}");
+        if let Some((previous, previous_step)) = declared_outputs
+            .iter()
+            .find(|(previous, _)| output_paths_overlap(previous, &output))
+        {
+            return Err(e1238_output_conflict(
+                previous,
+                previous_step,
+                &output,
+                &step_name,
+            ));
+        }
+        declared_outputs.push((output, step_name));
+    }
+    Ok(())
+}
+
+fn declared_output_path(package: &str, dest: &str) -> Result<String, Diagnostic> {
+    let relative = Path::new(dest);
+    if dest.is_empty()
+        || dest.chars().any(char::is_control)
+        || relative.is_absolute()
+        || relative
+            .components()
+            .any(|component| component == std::path::Component::ParentDir)
+    {
+        return Err(e1237(dest));
+    }
+    let root = PathBuf::from(format!(".jet/recipe/{package}/outputs"));
+    let normalized = normalize(&root.join(relative));
+    if !normalized.starts_with(&normalize(&root)) {
+        return Err(e1237(dest));
+    }
+    normalized
+        .to_str()
+        .map(str::to_owned)
+        .ok_or_else(|| e1238_plan("recipe output path is not valid UTF-8"))
+}
+
+fn output_paths_overlap(left: &str, right: &str) -> bool {
+    left == right
+        || left
+            .strip_prefix(right)
+            .is_some_and(|suffix| suffix.starts_with(std::path::MAIN_SEPARATOR))
+        || right
+            .strip_prefix(left)
+            .is_some_and(|suffix| suffix.starts_with(std::path::MAIN_SEPARATOR))
+}
+
+fn e1238_plan(detail: &str) -> Diagnostic {
+    Diagnostic::error(
+        "E1238",
+        "recipe finite staged plan is invalid".to_string(),
+        detail.to_string(),
+        "fix the recipe's declared inputs, outputs, tools, or stage order.".to_string(),
+        None,
+    )
+}
+
+fn e1238_output_conflict(
+    previous: &str,
+    previous_step: &str,
+    output: &str,
+    step: &str,
+) -> Diagnostic {
+    e1238_plan(&format!(
+        "recipe output `{output}` overlaps output `{previous}` owned by `{previous_step}`; `{step}` cannot claim the same staged path"
+    ))
 }
 
 /// Hangar cache-identity hook: recipe fingerprint is the complete plan key
@@ -243,6 +357,15 @@ pub fn lower_to_plan(
 pub fn plan_recipe_fingerprint(
     plan: &crate::Comptime::Build::BuildPlan,
 ) -> Result<String, Diagnostic> {
+    plan.execution_model().map_err(|err| {
+        Diagnostic::error(
+            "E1238",
+            "could not admit lowered BuildPlan execution graph".to_string(),
+            format!("{err:?}"),
+            "remove cyclic or incomplete stage dependencies before caching.".to_string(),
+            None,
+        )
+    })?;
     plan.complete_recipe_fingerprint().map_err(|err| {
         Diagnostic::error(
             "E1238",
@@ -252,6 +375,61 @@ pub fn plan_recipe_fingerprint(
             None,
         )
     })
+}
+
+fn admitted_step_order(
+    plan: &crate::Comptime::Build::BuildPlan,
+    step_count: usize,
+) -> Result<Vec<usize>, Diagnostic> {
+    let model = plan.execution_model().map_err(|err| {
+        Diagnostic::error(
+            "E1238",
+            "recipe action graph is not finite and acyclic".to_string(),
+            format!("{err:?}"),
+            "remove cyclic or incomplete stage dependencies before execution.".to_string(),
+            None,
+        )
+    })?;
+    let mut seen = vec![false; step_count];
+    let mut order = Vec::with_capacity(step_count);
+    for stage in &model.stages {
+        if stage.actions.len() != 1 {
+            return Err(e1238_plan(
+                "recipe stage graph must admit exactly one action per finite stage",
+            ));
+        }
+        let action_id = stage.actions[0];
+        let action = plan
+            .actions()
+            .get(action_id.0)
+            .ok_or_else(|| e1238_plan("recipe stage graph refers to an unknown action"))?;
+        let index = action
+            .labels
+            .get("stage.index")
+            .and_then(|value| value.parse::<usize>().ok())
+            .ok_or_else(|| e1238_plan("recipe action is missing its finite stage index"))?;
+        let bound = action
+            .labels
+            .get("stage.bound")
+            .and_then(|value| value.parse::<usize>().ok())
+            .ok_or_else(|| e1238_plan("recipe action is missing its finite stage bound"))?;
+        if bound != step_count || index != stage.index || index >= step_count {
+            return Err(e1238_plan(
+                "recipe action stage facts do not match the finite recipe bound",
+            ));
+        }
+        if seen[index] {
+            return Err(e1238_plan("recipe stage graph repeats one action identity"));
+        }
+        seen[index] = true;
+        order.push(index);
+    }
+    if order.len() != step_count || seen.iter().any(|present| !present) {
+        return Err(e1238_plan(
+            "recipe stage graph does not cover every declared recipe action",
+        ));
+    }
+    Ok(order)
 }
 
 /// Run a recipe under the sandbox. Validates first (so a violation never gets to
@@ -266,24 +444,49 @@ pub fn run(
     // sandbox steps execute (cache identity consumers use the fingerprint).
     let plan = lower_to_plan(recipe, "pkg", &ctx.tools)?;
     let plan_fingerprint = plan_recipe_fingerprint(&plan)?;
-    let staged = staged_output_path(ctx.output_root);
+    let order = admitted_step_order(&plan, recipe.steps.len())?;
+    let staged = PrivateStage::new(ctx.output_root);
     let staged_ctx = BuildContext {
         source_dir: ctx.source_dir,
-        output_root: &staged,
+        output_root: staged.path(),
         tools: ctx.tools.clone(),
         fetch_cache: ctx.fetch_cache,
         offline: ctx.offline,
     };
-    let result = run_steps(recipe, &staged_ctx, transport);
-    match result {
-        Ok(mut report) => {
-            commit_staged_output(&staged, ctx.output_root)?;
-            report.plan_fingerprint = plan_fingerprint;
-            Ok(report)
+    let mut report = run_steps(recipe, &order, &staged_ctx, transport)?;
+    staged.publish(ctx.output_root)?;
+    report.plan_fingerprint = plan_fingerprint;
+    Ok(report)
+}
+
+struct PrivateStage {
+    path: PathBuf,
+    published: bool,
+}
+
+impl PrivateStage {
+    fn new(output_root: &Path) -> Self {
+        Self {
+            path: staged_output_path(output_root),
+            published: false,
         }
-        Err(error) => {
-            remove_path(&staged);
-            Err(error)
+    }
+
+    fn path(&self) -> &Path {
+        &self.path
+    }
+
+    fn publish(mut self, output_root: &Path) -> Result<(), Diagnostic> {
+        commit_staged_output(&self.path, output_root)?;
+        self.published = true;
+        Ok(())
+    }
+}
+
+impl Drop for PrivateStage {
+    fn drop(&mut self) {
+        if !self.published {
+            remove_path(&self.path);
         }
     }
 }
@@ -299,10 +502,11 @@ pub fn run_logged(
     validate(recipe, ctx)?;
     let plan = lower_to_plan(recipe, "pkg", &ctx.tools)?;
     let plan_fingerprint = plan_recipe_fingerprint(&plan)?;
-    let staged = staged_output_path(ctx.output_root);
+    let order = admitted_step_order(&plan, recipe.steps.len())?;
+    let staged = PrivateStage::new(ctx.output_root);
     let staged_ctx = BuildContext {
         source_dir: ctx.source_dir,
-        output_root: &staged,
+        output_root: staged.path(),
         tools: ctx.tools.clone(),
         fetch_cache: ctx.fetch_cache,
         offline: ctx.offline,
@@ -310,67 +514,71 @@ pub fn run_logged(
     let mut report = RunReport::default();
     let total = recipe.steps.len();
     let result = (|| {
-        std::fs::create_dir_all(staged_ctx.output_root).map_err(|error| {
-            recipe_io_error("could not create staged recipe output", error)
-        })?;
-        for (idx, step) in recipe.steps.iter().enumerate() {
-        let index = idx + 1;
-        let step_result = match step {
-            BuildStep::Fetch { url, sha256 } => {
-                do_fetch(url, sha256, &staged_ctx, transport, &mut report)
+        std::fs::create_dir_all(staged_ctx.output_root)
+            .map_err(|error| recipe_io_error("could not create staged recipe output", error))?;
+        for (position, step_index) in order.iter().enumerate() {
+            let step = recipe
+                .steps
+                .get(*step_index)
+                .ok_or_else(|| e1238_plan("admitted stage refers to a missing recipe step"))?;
+            let index = position + 1;
+            let step_result = match step {
+                BuildStep::Fetch { url, sha256 } => {
+                    do_fetch(url, sha256, &staged_ctx, transport, &mut report)
+                }
+                BuildStep::Exec { tool, args } => {
+                    do_exec_logged(tool, args, &staged_ctx, &mut report)
+                }
+                BuildStep::Install { src, dest } => {
+                    install_file(src, dest, &staged_ctx, &mut report)
+                }
+                BuildStep::InstallTree { src, dest } => {
+                    install_tree(src, dest, &staged_ctx, &mut report)
+                }
+            };
+            match step_result {
+                Ok(()) => attempt.push_step(step_log(step, index, total, ctx, "ok", "", "")),
+                Err(d) => {
+                    attempt.push_step(step_log(
+                        step,
+                        index,
+                        total,
+                        ctx,
+                        "failed",
+                        "",
+                        &format!("{}: {}\n{}\n", d.code, d.what, d.why),
+                    ));
+                    return Err(d);
+                }
             }
-            BuildStep::Exec { tool, args } => {
-                do_exec_logged(tool, args, &staged_ctx, &mut report)
-            }
-            BuildStep::Install { src, dest } => {
-                install_file(src, dest, &staged_ctx, &mut report)
-            }
-            BuildStep::InstallTree { src, dest } => {
-                install_tree(src, dest, &staged_ctx, &mut report)
-            }
-        };
-        match step_result {
-            Ok(()) => attempt.push_step(step_log(step, index, total, ctx, "ok", "", "")),
-            Err(d) => {
-                attempt.push_step(step_log(
-                    step,
-                    index,
-                    total,
-                    ctx,
-                    "failed",
-                    "",
-                    &format!("{}: {}\n{}\n", d.code, d.what, d.why),
-                ));
-                return Err(d);
-            }
-        }
         }
         Ok(report)
     })();
     match result {
         Ok(mut report) => {
-            commit_staged_output(&staged, ctx.output_root)?;
+            staged.publish(ctx.output_root)?;
             attempt.mark_ok();
             report.plan_fingerprint = plan_fingerprint;
             Ok(report)
         }
-        Err(error) => {
-            remove_path(&staged);
-            Err(error)
-        }
+        Err(error) => Err(error),
     }
 }
 
 fn run_steps(
     recipe: &BuildRecipe,
+    order: &[usize],
     ctx: &BuildContext,
     transport: Option<Transport>,
 ) -> Result<RunReport, Diagnostic> {
-    std::fs::create_dir_all(ctx.output_root).map_err(|error| {
-        recipe_io_error("could not create staged recipe output", error)
-    })?;
+    std::fs::create_dir_all(ctx.output_root)
+        .map_err(|error| recipe_io_error("could not create staged recipe output", error))?;
     let mut report = RunReport::default();
-    for step in &recipe.steps {
+    for step_index in order {
+        let step = recipe
+            .steps
+            .get(*step_index)
+            .ok_or_else(|| e1238_plan("admitted stage refers to a missing recipe step"))?;
         match step {
             BuildStep::Fetch { url, sha256 } => {
                 do_fetch(url, sha256, ctx, transport, &mut report)?;
@@ -394,15 +602,17 @@ fn install_file(
     let target = confined_dest(ctx.output_root, dest)?;
     let from = confined_source(ctx.source_dir, src, false)?;
     if let Some(parent) = target.parent() {
-        std::fs::create_dir_all(parent).map_err(|error| {
-            recipe_io_error("could not create an install directory", error)
-        })?;
+        std::fs::create_dir_all(parent)
+            .map_err(|error| recipe_io_error("could not create an install directory", error))?;
     }
     std::fs::copy(&from, &target).map_err(|e| {
         Diagnostic::error(
             "E1237",
             format!("build step could not install `{src}`"),
-            format!("copying `{}` into the output root failed: {e}", from.display()),
+            format!(
+                "copying `{}` into the output root failed: {e}",
+                from.display()
+            ),
             "make sure the source file exists in the staged tree.".to_string(),
             None,
         )
@@ -423,7 +633,10 @@ fn install_tree(
         Diagnostic::error(
             "E1237",
             format!("build step could not install `{src}`"),
-            format!("copying `{}` into the output root failed: {e}", from.display()),
+            format!(
+                "copying `{}` into the output root failed: {e}",
+                from.display()
+            ),
             "make sure the source directory exists in the staged tree.".to_string(),
             None,
         )
@@ -457,7 +670,10 @@ fn commit_staged_output(staged: &Path, output_root: &Path) -> Result<(), Diagnos
         if had_previous {
             let _ = std::fs::rename(&backup, output_root);
         }
-        return Err(recipe_io_error("could not publish staged recipe output", error));
+        return Err(recipe_io_error(
+            "could not publish staged recipe output",
+            error,
+        ));
     }
     if had_previous {
         remove_path(&backup);
@@ -513,7 +729,11 @@ fn copy_tree(src: &Path, dst: &Path) -> std::io::Result<()> {
     Ok(())
 }
 
-fn confined_source(source_root: &Path, source: &str, directory: bool) -> Result<PathBuf, Diagnostic> {
+fn confined_source(
+    source_root: &Path,
+    source: &str,
+    directory: bool,
+) -> Result<PathBuf, Diagnostic> {
     let relative = Path::new(source);
     if source.is_empty()
         || relative.is_absolute()
@@ -523,13 +743,13 @@ fn confined_source(source_root: &Path, source: &str, directory: bool) -> Result<
     {
         return Err(e1237_source(source));
     }
-    let root = source_root.canonicalize().map_err(|error| {
-        recipe_io_error("could not resolve the recipe source root", error)
-    })?;
+    let root = source_root
+        .canonicalize()
+        .map_err(|error| recipe_io_error("could not resolve the recipe source root", error))?;
     let path = source_root.join(relative);
-    let canonical = path.canonicalize().map_err(|error| {
-        recipe_io_error("could not resolve a recipe source", error)
-    })?;
+    let canonical = path
+        .canonicalize()
+        .map_err(|error| recipe_io_error("could not resolve a recipe source", error))?;
     if !canonical.starts_with(&root) {
         return Err(e1237_source(source));
     }
@@ -545,10 +765,17 @@ fn confined_source(source_root: &Path, source: &str, directory: bool) -> Result<
 /// Resolve `dest` under `output_root`, rejecting any escape (`..`, absolute
 /// path, or a symlink-free normalized path that leaves the root) with `E1237`.
 fn confined_dest(output_root: &Path, dest: &str) -> Result<PathBuf, Diagnostic> {
-    if dest.contains("..") || Path::new(dest).is_absolute() {
+    let relative = Path::new(dest);
+    if dest.is_empty()
+        || dest.chars().any(char::is_control)
+        || relative.is_absolute()
+        || relative
+            .components()
+            .any(|component| component == std::path::Component::ParentDir)
+    {
         return Err(e1237(dest));
     }
-    let joined = output_root.join(dest);
+    let joined = output_root.join(relative);
     let normalized = normalize(&joined);
     if !normalized.starts_with(&normalize(output_root)) {
         return Err(e1237(dest));
@@ -579,6 +806,9 @@ fn do_fetch(
     transport: Option<Transport>,
     report: &mut RunReport,
 ) -> Result<(), Diagnostic> {
+    if credentialed_fetch_url(url) {
+        return Err(e1236_credentialed_url());
+    }
     // A locked fetch must carry a path-safe, canonical SHA-256 key (checked in
     // validate too, defensively). Never let an unchecked lock value select a
     // cache path.
@@ -590,8 +820,8 @@ fn do_fetch(
     if cached.is_file() {
         // Offline-satisfiable only after re-verifying the immutable key. A
         // corrupt or stale cache entry must never become trusted input.
-        let cached_bytes = std::fs::read(&cached)
-            .map_err(|e| e1236_fetch(url, &format!("reading cache: {e}")))?;
+        let cached_bytes =
+            std::fs::read(&cached).map_err(|e| e1236_fetch(url, &format!("reading cache: {e}")))?;
         if SHA256::sha256_hex(&cached_bytes) == sha256 {
             report.fetches.push(FetchRecord {
                 url: url.to_string(),
@@ -640,15 +870,50 @@ fn valid_sha256(value: &str) -> bool {
     value.len() == 64 && value.bytes().all(|byte| byte.is_ascii_hexdigit())
 }
 
+/// Build hooks cannot receive a credential provider. Reject URL userinfo at
+/// the recipe boundary so the secret cannot reach transport, cache metadata,
+/// diagnostics, or step logs.
+fn credentialed_fetch_url(url: &str) -> bool {
+    if url.chars().any(char::is_control) {
+        return true;
+    }
+    let Some((_, rest)) = url.split_once("://") else {
+        return false;
+    };
+    let authority = rest.split(['/', '?', '#']).next().unwrap_or_default();
+    if authority.contains('@') {
+        return true;
+    }
+    let Some((_, query_and_fragment)) = rest.split_once('?') else {
+        return false;
+    };
+    let query = query_and_fragment.split('#').next().unwrap_or_default();
+    query.split('&').any(|field| {
+        let key = field.split('=').next().unwrap_or_default();
+        matches!(
+            key.trim().to_ascii_lowercase().as_str(),
+            "auth"
+                | "authorization"
+                | "api_key"
+                | "apikey"
+                | "credential"
+                | "password"
+                | "passwd"
+                | "secret"
+                | "sig"
+                | "signature"
+                | "token"
+                | "access_token"
+                | "refresh_token"
+        )
+    })
+}
+
 /// Construct the only environment a recipe tool may observe. Build hooks do
 /// not inherit the caller's credentials, proxy settings, locale, or other
 /// host state. The action graph declares the two deterministic policy values;
 /// `JET_BUILD_OUTPUT` is the private staging channel used by the recipe ABI.
-fn build_command(
-    exe: &Path,
-    args: &[String],
-    ctx: &BuildContext,
-) -> std::process::Command {
+fn build_command(exe: &Path, args: &[String], ctx: &BuildContext) -> std::process::Command {
     let mut command = std::process::Command::new(exe);
     command
         .env_clear()
@@ -685,25 +950,23 @@ fn do_exec(
     // sanctioned output surface. A hostile tool can still misbehave — the
     // OS-level sandbox is D-JPK-NODAEMON1's unprivileged jail (U28); this
     // seam enforces the *structural* contract.
-    let status = build_command(exe, args, ctx)
-        .status()
-        .map_err(|e| {
-            Diagnostic::error(
-                "E1238",
-                format!("build tool `{tool}` failed to run"),
-                format!(
-                    "the realized tool at {} could not be executed: {e}",
-                    exe.display()
-                ),
-                "make sure the tool dependency realized correctly.".to_string(),
-                None,
-            )
-        })?;
+    let status = build_command(exe, args, ctx).status().map_err(|e| {
+        Diagnostic::error(
+            "E1238",
+            format!("build tool `{tool}` failed to run"),
+            format!(
+                "the realized tool at {} could not be executed: {e}",
+                exe.display()
+            ),
+            "make sure the tool dependency realized correctly.".to_string(),
+            None,
+        )
+    })?;
     if !status.success() {
         return Err(Diagnostic::error(
             "E1238",
             format!("build tool `{tool}` exited with an error"),
-            format!("`{tool} {}` returned a non-zero status.", args.join(" ")),
+            format!("`{tool}` returned a non-zero status; declared arguments are omitted from the diagnostic."),
             "check the build recipe and the tool's arguments.".to_string(),
             None,
         ));
@@ -719,29 +982,23 @@ fn do_exec_logged(
     report: &mut RunReport,
 ) -> Result<(), Diagnostic> {
     let exe = realized_tool(&ctx.tools, tool)?;
-    let out = build_command(exe, args, ctx).output()
-        .map_err(|e| {
-            Diagnostic::error(
-                "E1238",
-                format!("build tool `{tool}` failed to run"),
-                format!(
-                    "the realized tool at {} could not be executed: {e}",
-                    exe.display()
-                ),
-                "make sure the tool dependency realized correctly.".to_string(),
-                None,
-            )
-        })?;
+    let out = build_command(exe, args, ctx).output().map_err(|e| {
+        Diagnostic::error(
+            "E1238",
+            format!("build tool `{tool}` failed to run"),
+            format!(
+                "the realized tool at {} could not be executed: {e}",
+                exe.display()
+            ),
+            "make sure the tool dependency realized correctly.".to_string(),
+            None,
+        )
+    })?;
     if !out.status.success() {
         return Err(Diagnostic::error(
             "E1238",
             format!("build tool `{tool}` exited with an error"),
-            format!(
-                "`{tool} {}` returned a non-zero status.\nstdout:\n{}\nstderr:\n{}",
-                args.join(" "),
-                String::from_utf8_lossy(&out.stdout),
-                String::from_utf8_lossy(&out.stderr)
-            ),
+            format!("`{tool}` returned a non-zero status; command arguments and tool output are omitted from the diagnostic."),
             "check the build recipe and the tool's arguments.".to_string(),
             None,
         ));
@@ -783,7 +1040,9 @@ fn step_name(step: &BuildStep) -> &'static str {
 fn step_command(step: &BuildStep) -> String {
     match step {
         BuildStep::Fetch { url, sha256 } => format!("fetch {url} sha256:{sha256}"),
-        BuildStep::Exec { tool, args } => format!("{tool} {}", args.join(" ")).trim().to_string(),
+        BuildStep::Exec { tool, args } => {
+            format!("{tool} [{} declared args]", args.len())
+        }
         BuildStep::Install { src, dest } => format!("install {src} {dest}"),
         BuildStep::InstallTree { src, dest } => format!("install-tree {src} {dest}"),
     }
@@ -793,41 +1052,27 @@ fn step_command(step: &BuildStep) -> String {
 // The interactive first-build approval UX is card #176 (U19); here we keep the
 // durable marker so a recipe's first build is distinguishable from a re-build.
 
-/// Record trust for a recipe hash. Returns `true` when this is the **first**
-/// build (the hash was newly trusted), `false` when it was already trusted.
-/// The trust file is a newline-separated list of accepted recipe hashes under
-/// the project's `.jet/` managed folder.
-pub fn trust_first_build(recipe_hash: &str, trust_file: &Path) -> bool {
-    let existing = std::fs::read_to_string(trust_file).unwrap_or_default();
-    if existing.lines().any(|l| l.trim() == recipe_hash) {
-        return false;
-    }
-    if let Some(parent) = trust_file.parent() {
-        std::fs::create_dir_all(parent).ok();
-    }
-    let mut updated = existing;
-    if !updated.is_empty() && !updated.ends_with('\n') {
-        updated.push('\n');
-    }
-    updated.push_str(recipe_hash);
-    updated.push('\n');
-    let _ = std::fs::write(trust_file, updated);
-    true
+/// Record trust for a recipe hash in the canonical trust store. Returns `true`
+/// when the hash is new and `false` when the store already contains it.
+pub fn trust_first_build(recipe_hash: &str, trust_store: &Path) -> bool {
+    crate::Trust::grant_hash(trust_store, recipe_hash)
 }
 
 // ── Diagnostics ───────────────────────────────────────────────────────────────
 
-/// E1236 — a build step reached the network without a locked `fetch(url, sha256:)`.
+/// E1236 — a build fetch is unlocked or carries credentials in its URL.
 pub fn e1236(url: &str) -> Diagnostic {
+    if credentialed_fetch_url(url) {
+        return e1236_credentialed_url();
+    }
     Diagnostic::error(
         "E1236",
-        "a build step tried to reach the network without a locked fetch".to_string(),
+        "a build fetch is not an allowed locked, credential-free input".to_string(),
         format!(
-            "during a build, network access is denied except a locked `fetch(url, sha256:)`. \
-             The fetch of `{url}` carries no `sha256:`, so its result can't be pinned and the \
-             build would not be reproducible."
+            "build hooks admit only content-hash-pinned fetches without URL userinfo or credential \
+             query fields; `{url}` is not an allowed build input."
         ),
-        "add the source hash: `fetch(\"…\", sha256: \"…\")`, or vendor the source with `jet registry vendor`."
+        "add the source hash, remove URL credentials, or vendor the source with `jet registry vendor`."
             .to_string(),
         None,
     )
@@ -854,6 +1099,16 @@ fn e1236_no_transport(url: &str) -> Diagnostic {
         ),
         "provide a `file://` mirror, or `jet registry vendor` the source so the build is offline."
             .to_string(),
+        None,
+    )
+}
+
+fn e1236_credentialed_url() -> Diagnostic {
+    Diagnostic::error(
+        "E1236",
+        "a build fetch contains embedded credentials".to_string(),
+        "build-hook fetch URLs are action inputs and may be retained in cache metadata and logs; URL userinfo and credential query fields are therefore not allowed.".to_string(),
+        "remove the credentials, use a public or vendored source, and keep authentication outside the build hook.".to_string(),
         None,
     )
 }
@@ -983,6 +1238,44 @@ mod tests {
     }
 
     #[test]
+    fn build_rejects_fetch_url_credentials_without_echoing_them() {
+        let base = scratch("fetch-credentials");
+        let src = base.join("src");
+        let out = base.join("out");
+        let cache = base.join("cache");
+        std::fs::create_dir_all(&src).unwrap();
+        let secret = "do-not-log-this-token";
+        let recipe = BuildRecipe {
+            steps: vec![BuildStep::Fetch {
+                url: format!("https://builder:{secret}@example.invalid/source.tar"),
+                sha256: "0".repeat(64),
+            }],
+        };
+        let error = run(
+            &recipe,
+            &BuildContext {
+                source_dir: &src,
+                output_root: &out,
+                tools: HashMap::new(),
+                fetch_cache: &cache,
+                offline: false,
+            },
+            None,
+        )
+        .expect_err("credentialed fetch must fail before transport");
+        assert_eq!(error.code, "E1236");
+        assert!(!format!("{error:?}").contains(secret));
+        assert!(!out.exists(), "rejected hooks must not publish an output");
+        assert!(credentialed_fetch_url(
+            "https://example.invalid/source.tar?token=hidden"
+        ));
+        assert!(!credentialed_fetch_url(
+            "https://example.invalid/source.tar?download=1"
+        ));
+        std::fs::remove_dir_all(&base).ok();
+    }
+
+    #[test]
     fn build_output_confined() {
         // An install targeting a path outside the output root → E1237.
         let base = scratch("confine");
@@ -1106,9 +1399,9 @@ mod tests {
     }
 
     #[test]
-    fn trust_gate_marks_first_build_once() {
+    fn recipe_and_trust_consumers_share_one_hash_grant() {
         let base = scratch("trust");
-        let trust = base.join(".jet/trust");
+        let trust = base.join("trust");
         let recipe = BuildRecipe {
             steps: vec![BuildStep::Install {
                 src: "a".to_string(),
@@ -1119,6 +1412,15 @@ mod tests {
         assert!(
             trust_first_build(&h, &trust),
             "first build is newly trusted"
+        );
+        assert!(
+            crate::Trust::is_trusted(&trust, &base, &h),
+            "the trust consumer sees the recipe grant"
+        );
+        assert_eq!(
+            crate::Trust::list_entries(&trust),
+            vec![format!("hash:{h}")],
+            "one canonical trust record is written"
         );
         assert!(
             !trust_first_build(&h, &trust),
@@ -1171,7 +1473,10 @@ mod tests {
         let plan = lower_to_plan(&recipe, "demo", &tools).expect("lower");
         assert_eq!(plan.actions().len(), 3);
         assert_eq!(plan.targets().len(), 1);
-        assert_eq!(plan.targets()[0].kind, crate::Comptime::Build::TargetKind::Package);
+        assert_eq!(
+            plan.targets()[0].kind,
+            crate::Comptime::Build::TargetKind::Package
+        );
         let kinds: Vec<_> = plan.actions().iter().map(|a| a.kind).collect();
         assert_eq!(
             kinds,
@@ -1190,5 +1495,104 @@ mod tests {
             plan_recipe_fingerprint(&plan).unwrap(),
             plan_recipe_fingerprint(&other).unwrap()
         );
+    }
+
+    #[test]
+    fn recipe_plan_binds_outputs_authority_and_finite_stage_facts() {
+        let recipe = BuildRecipe {
+            steps: vec![BuildStep::Install {
+                src: "bin/tool".to_string(),
+                dest: "bin/tool".to_string(),
+            }],
+        };
+        let plan = lower_to_plan(&recipe, "demo", &HashMap::new()).expect("lower");
+        let action = &plan.actions()[0];
+        let outputs = action
+            .outputs
+            .iter()
+            .map(|path| path.as_str())
+            .collect::<Vec<_>>();
+        assert_eq!(
+            outputs,
+            vec![
+                ".jet/recipe/demo/step-0.stamp",
+                ".jet/recipe/demo/outputs/bin/tool"
+            ]
+        );
+        assert!(action
+            .caps
+            .contains(&crate::Comptime::Build::BuildCapability::FS));
+        assert_eq!(
+            action.labels.get("authority.effect"),
+            Some(&"fs.write".to_string())
+        );
+        assert_eq!(action.labels.get("stage.index"), Some(&"0".to_string()));
+        assert_eq!(action.labels.get("stage.bound"), Some(&"1".to_string()));
+        assert!(action.labels.contains_key("platform.os"));
+        assert!(action.labels.contains_key("platform.arch"));
+    }
+
+    #[test]
+    fn finite_plan_rejects_empty_and_overlapping_outputs() {
+        let empty = lower_to_plan(&BuildRecipe::default(), "demo", &HashMap::new())
+            .expect_err("an empty staged recipe has no finite action graph");
+        assert_eq!(empty.code, "E1238");
+
+        let overlapping = BuildRecipe {
+            steps: vec![
+                BuildStep::InstallTree {
+                    src: "share".to_string(),
+                    dest: "share".to_string(),
+                },
+                BuildStep::Install {
+                    src: "tool".to_string(),
+                    dest: "share/tool".to_string(),
+                },
+            ],
+        };
+        let error = lower_to_plan(&overlapping, "demo", &HashMap::new())
+            .expect_err("two stages cannot own overlapping output paths");
+        assert_eq!(error.code, "E1238");
+        assert!(error.why.contains("overlaps output"));
+    }
+
+    #[test]
+    fn failed_stage_removes_partial_output_and_preserves_previous_output() {
+        let base = scratch("partial-stage");
+        let src = base.join("src");
+        let out = base.join("out");
+        let cache = base.join("cache");
+        std::fs::create_dir_all(&src).unwrap();
+        std::fs::write(src.join("tool"), "new").unwrap();
+        std::fs::create_dir_all(out.join("bin")).unwrap();
+        std::fs::write(out.join("bin/tool"), "old").unwrap();
+        let recipe = BuildRecipe {
+            steps: vec![
+                BuildStep::Install {
+                    src: "tool".to_string(),
+                    dest: "bin/tool".to_string(),
+                },
+                BuildStep::Fetch {
+                    url: "https://example.invalid/source.tar".to_string(),
+                    sha256: "0".repeat(64),
+                },
+            ],
+        };
+        let error = run(&recipe, &ctx_at(&base, &src, &out, &cache), None)
+            .expect_err("remote fetch without a transport must fail");
+        assert_eq!(error.code, "E1236");
+        assert_eq!(
+            std::fs::read_to_string(out.join("bin/tool")).unwrap(),
+            "old"
+        );
+        assert!(!base
+            .read_dir()
+            .unwrap()
+            .filter_map(Result::ok)
+            .any(|entry| entry
+                .file_name()
+                .to_string_lossy()
+                .starts_with(".out.jet-stage-")));
+        std::fs::remove_dir_all(&base).ok();
     }
 }

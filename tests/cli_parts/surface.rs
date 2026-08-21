@@ -1415,7 +1415,7 @@ fn question_mark_language_symbol_uses_shared_semantic_index() {
         .args(["?", "List.filter"])
         .env("NO_COLOR", "1")
         .output()
-        .expect("run jet ? List.filter");
+        .expect("run jet ! List.filter");
     assert!(output.status.success(), "status: {:?}", output.status);
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(stdout.contains("List.filter(f: fn(T) => Bool) => List<T>"), "signature missing: {stdout}");

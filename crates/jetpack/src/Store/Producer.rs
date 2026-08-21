@@ -14,6 +14,7 @@ pub(crate) fn canonical_producer(
 ) -> std::io::Result<String> {
     facts.insert("action.recipe".into(), identity.recipe_fingerprint.clone());
     facts.insert("closure.authority".into(), "hangar-cas".into());
+    facts.insert("cache.reproducibility".into(), "attested-v1".into());
     let plan = crate::Comptime::Build::BuildPlanReplay::from_facts(facts.clone())
         .map_err(std::io::Error::other)?;
     ProducerRecord::new(
@@ -127,6 +128,42 @@ impl ProducerRecord {
         format!("{body}checksum\t{checksum}\n")
     }
 
+    /// Bind the producer record to the exact cache admission facts. These
+    /// values are part of the immutable record, so a cache hit can rederive
+    /// the action, builder, policy, and output identity before using bytes.
+    pub(crate) fn bind_cache_provenance(
+        &mut self,
+        reference: &str,
+        output: &str,
+        identity: &CacheIdentity,
+    ) {
+        self.facts.insert("cache.reference".into(), reference.into());
+        self.facts
+            .insert("cache.source".into(), self.immutable_source.clone());
+        self.facts.insert(
+            "cache.builder".into(),
+            crate::TrustRoot::cache_builder_identity(
+                &self.provider,
+                &self.immutable_source,
+                &self.source_digest,
+            ),
+        );
+        self.facts.insert(
+            "cache.action".into(),
+            cache_action_identity(self, reference, identity),
+        );
+        self.facts.insert("cache.output".into(), output.into());
+        self.facts
+            .insert("cache.platform".into(), identity.platform.clone());
+        self.facts
+            .insert("cache.sandbox".into(), "sandbox:policy-bound".into());
+        self.facts
+            .insert("cache.policy".into(), identity.policy_fingerprint.clone());
+        self.facts
+            .entry("cache.reproducibility".into())
+            .or_insert_with(|| "attested-v1".into());
+    }
+
     pub fn decode(raw: &str) -> Result<Self, String> {
         let Some(raw) = raw.strip_suffix('\n') else {
             return Err("producer record is truncated".to_string());
@@ -207,6 +244,30 @@ impl ProducerRecord {
     }
 }
 
+pub(crate) fn cache_action_identity(
+    producer: &ProducerRecord,
+    reference: &str,
+    identity: &CacheIdentity,
+) -> String {
+    let mut canonical = b"jet-slsa-action-v1\0".to_vec();
+    let plan = producer.plan.encode();
+    for value in [
+        reference,
+        producer.provider.as_str(),
+        producer.immutable_source.as_str(),
+        producer.source_digest.as_str(),
+        identity.recipe_fingerprint.as_str(),
+        identity.policy_fingerprint.as_str(),
+        identity.platform.as_str(),
+        producer.toolchain_facts.as_str(),
+        plan.as_str(),
+    ] {
+        canonical.extend_from_slice(&(value.len() as u64).to_be_bytes());
+        canonical.extend_from_slice(value.as_bytes());
+    }
+    format!("sha256:{}", SHA256::sha256_hex(&canonical))
+}
+
 fn hex(value: &str) -> String {
     const DIGITS: &[u8; 16] = b"0123456789abcdef";
     let mut out = String::with_capacity(value.len() * 2);
@@ -249,6 +310,7 @@ fn hook_fact_mismatch(name: &str, expected: &str, actual: Option<&str>) -> std::
 fn validate_adapter_hook_producer(
     producer: &ProducerRecord,
     plan: &jet_env_model::ModuleEval::AdapterPlan,
+    table: &jet_pkg_model::RefSpec::SourceTable,
     expectation: &CacheExpectation,
 ) -> std::io::Result<()> {
     let jet_env_model::ModuleEval::AdapterRecipe::Build(recipe) = &plan.recipe else {
@@ -280,12 +342,26 @@ fn validate_adapter_hook_producer(
         recipe,
         &expectation.identity.source_fingerprint,
         &expectation.identity.platform,
+        table,
     );
     if producer.facts.get("build.identity").map(String::as_str) != Some(identity.as_str()) {
         return Err(hook_fact_mismatch(
             "build.identity",
             &identity,
             producer.facts.get("build.identity").map(String::as_str),
+        ));
+    }
+    if producer.plan.facts().get("adapter.build.identity").map(String::as_str)
+        != Some(identity.as_str())
+    {
+        return Err(hook_fact_mismatch(
+            "adapter.build.identity",
+            &identity,
+            producer
+                .plan
+                .facts()
+                .get("adapter.build.identity")
+                .map(String::as_str),
         ));
     }
     let capabilities = recipe.declared_capabilities().join(",");
@@ -298,12 +374,58 @@ fn validate_adapter_hook_producer(
             producer.facts.get("build.capabilities").map(String::as_str),
         ));
     }
+    let dependencies = crate::Provider::adapter_dependency_refs(plan).join(",");
+    let authority = table.trust_lines().join("\n");
+    if producer
+        .plan
+        .facts()
+        .get("adapter.build.dependencies")
+        .map(String::as_str)
+        != Some(dependencies.as_str())
+    {
+        return Err(hook_fact_mismatch(
+            "adapter.build.dependencies",
+            &dependencies,
+            producer
+                .plan
+                .facts()
+                .get("adapter.build.dependencies")
+                .map(String::as_str),
+        ));
+    }
+    if producer
+        .plan
+        .facts()
+        .get("adapter.build.authority")
+        .map(String::as_str)
+        != Some(authority.as_str())
+    {
+        return Err(hook_fact_mismatch(
+            "adapter.build.authority",
+            &authority,
+            producer
+                .plan
+                .facts()
+                .get("adapter.build.authority")
+                .map(String::as_str),
+        ));
+    }
+    if producer.facts.get("build.dependencies").map(String::as_str)
+        != Some(dependencies.as_str())
+    {
+        return Err(hook_fact_mismatch(
+            "build.dependencies",
+            &dependencies,
+            producer.facts.get("build.dependencies").map(String::as_str),
+        ));
+    }
     Ok(())
 }
 
 pub(crate) fn validate_cached_adapter_hook(
     entry: &StoreEntry,
     plan: &jet_env_model::ModuleEval::AdapterPlan,
+    table: &jet_pkg_model::RefSpec::SourceTable,
     expectation: &CacheExpectation,
 ) -> std::io::Result<()> {
     if !matches!(
@@ -320,12 +442,13 @@ pub(crate) fn validate_cached_adapter_hook(
     }
     let producer = ProducerRecord::decode(&entry.producer_record)
         .map_err(std::io::Error::other)?;
-    validate_adapter_hook_producer(&producer, plan, expectation)
+    validate_adapter_hook_producer(&producer, plan, table, expectation)
 }
 
 pub(crate) fn bind_adapter_hook_identity(
     realized: &mut crate::Provider::Realized,
     plan: &jet_env_model::ModuleEval::AdapterPlan,
+    table: &jet_pkg_model::RefSpec::SourceTable,
     expectation: &CacheExpectation,
     ctx: &crate::Provider::Ctx<'_>,
 ) -> std::io::Result<()> {
@@ -335,7 +458,7 @@ pub(crate) fn bind_adapter_hook_identity(
     ) {
         return Ok(());
     }
-    validate_adapter_hook_producer(&realized.producer, plan, expectation)?;
+    validate_adapter_hook_producer(&realized.producer, plan, table, expectation)?;
     let expected = crate::Provider::adapter_cache_identity(
         &expectation.identity.source_fingerprint,
         realized

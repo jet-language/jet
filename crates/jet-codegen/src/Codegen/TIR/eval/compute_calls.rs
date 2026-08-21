@@ -85,197 +85,273 @@ fn function_result_type(ty: &Type, span: Span) -> Result<Type, Diagnostic> {
     }
 }
 
+fn compute_transform_kind(
+    method: &str,
+    span: Span,
+) -> Result<crate::Comptime::ComputeLite::JetComputeTransformKind, Diagnostic> {
+    match method {
+        "gradient" => Ok(crate::Comptime::ComputeLite::JetComputeTransformKind::Gradient),
+        "value_and_gradient" => {
+            Ok(crate::Comptime::ComputeLite::JetComputeTransformKind::ValueAndGradient)
+        }
+        "vjp" => Ok(crate::Comptime::ComputeLite::JetComputeTransformKind::Vjp),
+        "jvp" => Ok(crate::Comptime::ComputeLite::JetComputeTransformKind::Jvp),
+        _ => Err(super::unsupported("core.compute transform", span)),
+    }
+}
+
+fn compute_result_shape(
+    ty: &Type,
+) -> crate::Comptime::ComputeLite::JetComputeResultShape {
+    match ty {
+        Type::Tuple(fields)
+            if fields
+                .iter()
+                .all(|(_, field)| field.is_compute_tensor_family()) =>
+        {
+            crate::Comptime::ComputeLite::JetComputeResultShape::TensorTuple(fields.len())
+        }
+        _ => crate::Comptime::ComputeLite::JetComputeResultShape::Tensor,
+    }
+}
+
+fn curried_gradient_value(
+    gradient_ty: &Type,
+    values: &[Vec<crate::Comptime::ComputeLite::JetTensor>],
+    span: Span,
+) -> Result<CtValue, Diagnostic> {
+    let Type::Tuple(fields) = gradient_ty else {
+        return Err(super::unsupported("autodiff gradient result", span));
+    };
+    if fields.len() != values.len() {
+        return Err(super::unsupported("autodiff gradient arity", span));
+    }
+    let values = fields
+        .iter()
+        .zip(values)
+        .map(|((_, ty), gradients)| match ty.as_ref() {
+            Type::Tuple(inner_fields) if inner_fields.len() == gradients.len() => tuple_value(
+                ty,
+                gradients
+                    .iter()
+                    .map(crate::Comptime::ComputeLite::autodiff_tensor_to_ct)
+                    .collect(),
+                span,
+            ),
+            _ if gradients.len() == 1 => Ok(
+                crate::Comptime::ComputeLite::autodiff_tensor_to_ct(&gradients[0]),
+            ),
+            _ => Err(super::unsupported("autodiff gradient result", span)),
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    tuple_value(gradient_ty, values, span)
+}
+
 impl<'a> EvalCtx<'a> {
-    pub(super) fn eval_compute_transform(
+    fn make_compute_handle(
         &mut self,
         method: &str,
         base: CtValue,
-        values: Vec<CtValue>,
         targets: Vec<i64>,
+        base_ty: &Type,
+    ) -> Result<
+        (
+            crate::Comptime::ComputeLite::JetComputeHandle,
+            crate::Comptime::ComputeLite::JetComputeTransformKind,
+        ),
+        Diagnostic,
+    > {
+        let span = self.span();
+        let kind = compute_transform_kind(method, span)?;
+        let Type::Fn { ret: Some(base_ret), .. } = base_ty else {
+            return Err(super::unsupported("autodiff transform function", span));
+        };
+        let base_arity = match base_ty {
+            Type::Fn { params, .. } => params.len(),
+            _ => 0,
+        };
+        let result_shape = compute_result_shape(base_ret);
+        let tuple_fields = match base_ret.as_ref() {
+            Type::Tuple(fields) if matches!(result_shape, crate::Comptime::ComputeLite::JetComputeResultShape::TensorTuple(_)) => {
+                fields.iter().map(|(name, _)| name.clone()).collect()
+            }
+            _ => Vec::new(),
+        };
+        let base_ptr = self as *mut EvalCtx<'a> as *mut ();
+        let base_value = base.clone();
+        let base_span = span;
+        let plan_base = crate::Comptime::ComputeLite::JetComputeBase::new(
+            base_arity,
+            move |inputs: &[crate::Comptime::ComputeLite::JetTensor]| {
+                let input_values = inputs
+                    .iter()
+                    .map(crate::Comptime::ComputeLite::autodiff_tensor_to_ct)
+                    .collect::<Vec<_>>();
+                // SAFETY: the handle is stored only in this evaluator's runtime
+                // and is called while that EvalCtx owns the runtime lock.
+                let ctx = unsafe { &mut *(base_ptr as *mut EvalCtx<'a>) };
+                let output = ctx
+                    .call_callable(&base_value, input_values)
+                    .map_err(|error| {
+                        crate::Comptime::ComputeLite::JetComputeError::Unsupported(
+                            error.what.clone(),
+                        )
+                    })?;
+                match &result_shape {
+                    crate::Comptime::ComputeLite::JetComputeResultShape::Tensor => {
+                        let tensor = crate::Comptime::ComputeLite::autodiff_tensor_from_ct(
+                            &output,
+                            base_span,
+                        )
+                        .map_err(|error| {
+                            crate::Comptime::ComputeLite::JetComputeError::Unsupported(
+                                error.what.clone(),
+                            )
+                        })?;
+                        Ok(crate::Comptime::ComputeLite::JetComputeBaseResult::Tensor(tensor))
+                    }
+                    crate::Comptime::ComputeLite::JetComputeResultShape::TensorTuple(_) => {
+                        let values = tuple_fields
+                            .iter()
+                            .map(|field| {
+                                tuple_field(&output, field, base_span).map_err(|error| {
+                                    crate::Comptime::ComputeLite::JetComputeError::Unsupported(
+                                        error.what.clone(),
+                                    )
+                                })
+                            })
+                            .collect::<Result<Vec<_>, _>>()?
+                            .iter()
+                            .map(|value| {
+                                crate::Comptime::ComputeLite::autodiff_tensor_from_ct(
+                                    value,
+                                    base_span,
+                                )
+                                .map_err(|error| {
+                                    crate::Comptime::ComputeLite::JetComputeError::Unsupported(
+                                        error.what.clone(),
+                                    )
+                                })
+                            })
+                            .collect::<Result<Vec<_>, _>>()?;
+                        Ok(crate::Comptime::ComputeLite::JetComputeBaseResult::TensorTuple(values))
+                    }
+                }
+            },
+        );
+        let raw = crate::Comptime::ComputeLite::jet_compute_curried_new(
+            plan_base,
+            kind,
+            &targets,
+            result_shape,
+        );
+        Ok((
+            crate::Comptime::ComputeLite::JetComputeHandle::new(raw),
+            kind,
+        ))
+    }
+
+    fn store_compute_handle(
+        &mut self,
+        raw: i64,
+        kind: crate::Comptime::ComputeLite::JetComputeTransformKind,
+        result_ty: Type,
+    ) -> CtValue {
+        self.store_callable(EvalCallable::ComputeHandle {
+            handle: crate::Comptime::ComputeLite::JetComputeHandle::new(raw),
+            kind,
+            result_ty,
+        })
+    }
+
+    pub(super) fn eval_compute_handle(
+        &mut self,
+        handle: &crate::Comptime::ComputeLite::JetComputeHandle,
+        kind: crate::Comptime::ComputeLite::JetComputeTransformKind,
+        args: Vec<CtValue>,
         result_ty: &Type,
     ) -> Result<CtValue, Diagnostic> {
         let span = self.span();
-        let (primal_values, tangent_values) = if method == "jvp" {
-            let primal_count = values.len() / 2;
-            if values.len() != primal_count.saturating_mul(2) {
+        let tensors = args
+            .iter()
+            .map(|value| {
+                crate::Comptime::ComputeLite::autodiff_tensor_from_ct(value, span)
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        let (primals, tangents) = if kind.is_jvp() {
+            if tensors.len() % 2 != 0 {
                 return Err(super::unsupported("compute.jvp arguments", span));
             }
-            values.split_at(primal_count)
+            let split = tensors.len() / 2;
+            (tensors[..split].to_vec(), tensors[split..].to_vec())
         } else {
-            (&values[..], &[][..])
+            (tensors, Vec::new())
         };
-        let tracked = crate::Comptime::ComputeLite::autodiff_trace_inputs(primal_values, span)?;
-        let output = self.call_callable(&base, tracked.clone())?;
-        let anchor = tracked
-            .first()
-            .cloned()
-            .unwrap_or_else(|| output.clone());
-        match method {
-            "gradient" => {
-                let gradient_ty = compute_gradient_type(method, result_ty)
-                    .ok_or_else(|| super::unsupported("compute.gradient result", span))?;
-                if let Type::Tuple(gradient_fields) = &gradient_ty {
-                    let Some((_, first_inner_ty)) = gradient_fields.first() else {
-                        return Err(super::unsupported("compute.gradient result", span));
-                    };
-                    if let Type::Tuple(component_fields) = first_inner_ty.as_ref() {
-                        let component_values = component_fields
-                            .iter()
-                            .map(|(component, _)| tuple_field(&output, component, span))
-                            .collect::<Result<Vec<_>, _>>()?;
-                        let component_gradients =
-                            crate::Comptime::ComputeLite::autodiff_nested_gradient(
-                                &component_values,
-                                &anchor,
-                                &targets,
-                                span,
-                            )?;
-                        let values = gradient_fields
-                            .iter()
-                            .enumerate()
-                            .map(|(target_index, (_, inner_ty))| {
-                                let Type::Tuple(inner_fields) = inner_ty.as_ref() else {
-                                    return Err(super::unsupported(
-                                        "compute.gradient result",
-                                        span,
-                                    ));
-                                };
-                                let inner_values = inner_fields
-                                    .iter()
-                                    .enumerate()
-                                    .map(|(component_index, _)| {
-                                        component_gradients
-                                            .get(component_index)
-                                            .and_then(|values| values.get(target_index))
-                                            .cloned()
-                                            .ok_or_else(|| {
-                                                super::unsupported(
-                                                    "compute.gradient result",
-                                                    span,
-                                                )
-                                            })
-                                    })
-                                    .collect::<Result<Vec<_>, _>>()?;
-                                tuple_value(inner_ty, inner_values, span)
-                            })
-                            .collect::<Result<Vec<_>, _>>()?;
-                        return tuple_value(&gradient_ty, values, span);
-                    }
-                }
-                let values = crate::Comptime::ComputeLite::autodiff_gradient(
-                    &output,
-                    &anchor,
-                    &targets,
-                    span,
-                )?;
-                tuple_value(&gradient_ty, values, span)
+        let result = crate::Comptime::ComputeLite::jet_compute_call_curried(
+            handle.raw(),
+            crate::Comptime::ComputeLite::JetComputeInputPack::new(primals, tangents),
+        )
+        .map_err(|error| {
+            super::unsupported(
+                &crate::Comptime::ComputeLite::autodiff_error_message(&error),
+                span,
+            )
+        })?;
+        match result {
+            crate::Comptime::ComputeLite::JetComputeCurriedResult::Gradient(values) => {
+                curried_gradient_value(result_ty, &values, span)
             }
-            "value_and_gradient" => {
-                let gradient_ty = compute_gradient_type(method, result_ty).ok_or_else(|| {
-                    super::unsupported("compute.value_and_gradient result", span)
-                })?;
-                let gradients = crate::Comptime::ComputeLite::autodiff_gradient(
-                    &output,
-                    &anchor,
-                    &targets,
+            crate::Comptime::ComputeLite::JetComputeCurriedResult::ValueAndGradient {
+                value,
+                gradients,
+            } => {
+                let gradient_ty = compute_gradient_type("value_and_gradient", result_ty)
+                    .ok_or_else(|| super::unsupported("compute.value_and_gradient result", span))?;
+                tuple_value(
+                    result_ty,
+                    vec![
+                        crate::Comptime::ComputeLite::autodiff_tensor_to_ct(&value),
+                        curried_gradient_value(&gradient_ty, &gradients, span)?,
+                    ],
                     span,
-                )?;
-                let gradients = tuple_value(&gradient_ty, gradients, span)?;
-                let value = crate::Comptime::ComputeLite::autodiff_value(
-                    &output,
-                    &anchor,
-                    span,
-                )?;
-                tuple_value(result_ty, vec![value, gradients], span)
+                )
             }
-            "vjp" => {
-                let gradient_ty = compute_gradient_type(method, result_ty)
+            crate::Comptime::ComputeLite::JetComputeCurriedResult::Vjp { value, pull, grads } => {
+                let gradient_ty = compute_gradient_type("vjp", result_ty)
                     .ok_or_else(|| super::unsupported("compute.vjp result", span))?;
-                let pull = self.store_callable(EvalCallable::ComputePull {
-                    output: output.clone(),
-                    anchor: anchor.clone(),
-                    targets: targets.clone(),
-                    gradient_ty: gradient_ty.clone(),
-                });
-                let grads = self.store_callable(EvalCallable::ComputeGrads {
-                    output: output.clone(),
-                    anchor: anchor.clone(),
-                    targets: targets.clone(),
-                    gradient_ty: gradient_ty.clone(),
-                });
-                let value = crate::Comptime::ComputeLite::autodiff_value(
-                    &output,
-                    &anchor,
-                    span,
-                )?;
+                let pull = self.store_compute_handle(
+                    pull,
+                    crate::Comptime::ComputeLite::JetComputeTransformKind::Gradient,
+                    gradient_ty.clone(),
+                );
+                let grads = self.store_compute_handle(
+                    grads,
+                    crate::Comptime::ComputeLite::JetComputeTransformKind::Gradient,
+                    gradient_ty,
+                );
                 Ok(CtValue::Struct {
                     type_name: "VjpRun".to_string(),
                     fields: vec![
-                        ("value".to_string(), value),
+                        (
+                            "value".to_string(),
+                            crate::Comptime::ComputeLite::autodiff_tensor_to_ct(&value),
+                        ),
                         ("pull".to_string(), pull),
                         ("grads".to_string(), grads),
                     ],
                 })
             }
-            "jvp" => {
-                let tangent = crate::Comptime::ComputeLite::autodiff_jvp(
-                    &output,
-                    &anchor,
-                    tangent_values,
+            crate::Comptime::ComputeLite::JetComputeCurriedResult::Jvp { value, tangent } => {
+                tuple_value(
+                    result_ty,
+                    vec![
+                        crate::Comptime::ComputeLite::autodiff_tensor_to_ct(&value),
+                        crate::Comptime::ComputeLite::autodiff_tensor_to_ct(&tangent),
+                    ],
                     span,
-                )?;
-                let value = crate::Comptime::ComputeLite::autodiff_value(
-                    &output,
-                    &anchor,
-                    span,
-                )?;
-                tuple_value(result_ty, vec![value, tangent], span)
+                )
             }
-            _ => Err(super::unsupported("core.compute transform", span)),
         }
-    }
-
-    pub(super) fn eval_compute_pull(
-        &mut self,
-        output: CtValue,
-        anchor: CtValue,
-        args: Vec<CtValue>,
-        targets: Vec<i64>,
-        gradient_ty: &Type,
-    ) -> Result<CtValue, Diagnostic> {
-        let span = self.span();
-        let [seed] = args.as_slice() else {
-            return Err(super::unsupported("compute.vjp.pull seed", span));
-        };
-        let values = crate::Comptime::ComputeLite::autodiff_vjp_pull(
-            &output,
-            &anchor,
-            seed,
-            &targets,
-            span,
-        )?;
-        tuple_value(gradient_ty, values, span)
-    }
-
-    pub(super) fn eval_compute_grads(
-        &mut self,
-        output: CtValue,
-        anchor: CtValue,
-        args: Vec<CtValue>,
-        targets: Vec<i64>,
-        gradient_ty: &Type,
-    ) -> Result<CtValue, Diagnostic> {
-        if !args.is_empty() {
-            return Err(super::unsupported("compute.vjp.grads arguments", self.span()));
-        }
-        let span = self.span();
-        let values = crate::Comptime::ComputeLite::autodiff_unit_grads(
-            &output,
-            &anchor,
-            &targets,
-            span,
-        )?;
-        tuple_value(gradient_ty, values, span)
     }
 
     pub(super) fn eval_core_compute_call(
@@ -296,16 +372,21 @@ impl<'a> EvalCtx<'a> {
             for arg in &args[1..args.len() - 1] {
                 values.push(self.eval_expr(arg, scope)?);
             }
+            let (handle, kind) = self.make_compute_handle(
+                method,
+                base,
+                targets,
+                &args[0].ty,
+            )?;
             if args.len() == 2 {
                 let result_ty = function_result_type(return_ty, source_span)?;
-                return Ok(self.store_callable(EvalCallable::ComputeTransform {
-                    base,
-                    method: method.to_string(),
-                    targets,
+                return Ok(self.store_callable(EvalCallable::ComputeHandle {
+                    handle,
+                    kind,
                     result_ty,
                 }));
             }
-            return self.eval_compute_transform(method, base, values, targets, return_ty);
+            return self.eval_compute_handle(&handle, kind, values, return_ty);
         }
 
         let mut argv = Vec::with_capacity(args.len());

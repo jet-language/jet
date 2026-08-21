@@ -12,6 +12,15 @@ use super::Environment::{
     LanguageProjection, LanguageSpec, PackageProfileSpec, PresetSpec, ResolvedPreset,
 };
 
+/// One `$NAME` read captured from a config surface. Environment variables are
+/// always text, so the type is explicit in the plan instead of being inferred
+/// again by an inspect or deploy consumer.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EnvironmentRead {
+    pub name: String,
+    pub ty: String,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PromptPathMode {
     Short,
@@ -358,6 +367,9 @@ pub struct EnvPlan {
     /// The source files that contributed to this graph, relative to the
     /// environment root and in deterministic discovery order.
     pub source_files: Vec<String>,
+    /// Every typed environment read in the root config surface and discovered
+    /// module files, in source/discovery order.
+    pub environment_reads: Vec<EnvironmentRead>,
     pub package_refs: Vec<String>,
     /// U20 adapter packages declared in `packages:`. Kept separate from refs
     /// because they have inline build identity and no provider selector.

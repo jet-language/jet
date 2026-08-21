@@ -305,9 +305,15 @@ mod tests {
         let message = b"expert crypto".to_vec();
         let aad = b"tenant".to_vec();
         let xsealed = xchacha20poly1305_seal(&key, &xnonce, &message, &aad).unwrap();
-        assert_eq!(xchacha20poly1305_open(&key, &xnonce, &xsealed, &aad).unwrap(), message);
+        assert_eq!(
+            xchacha20poly1305_open(&key, &xnonce, &xsealed, &aad).unwrap(),
+            message
+        );
         let asealed = aes256gcm_seal(&key, &anonce, &message, &aad).unwrap();
-        assert_eq!(aes256gcm_open(&key, &anonce, &asealed, &aad).unwrap(), message);
+        assert_eq!(
+            aes256gcm_open(&key, &anonce, &asealed, &aad).unwrap(),
+            message
+        );
     }
 
     #[test]

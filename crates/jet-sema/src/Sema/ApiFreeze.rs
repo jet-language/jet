@@ -179,7 +179,7 @@ pub fn canonical_api_type_name(ty: &Type, dimensions: &ApiUnitDimensions) -> Str
         Type::Shared(inner) => format!("Shared<{}>", canonical_api_type_name(inner, dimensions)),
         Type::Option(inner) => format!("{}?", canonical_api_type_name(inner, dimensions)),
         Type::Result { ok, err } => format!(
-            "{} ? {}",
+            "{} ! {}",
             canonical_api_type_name(ok, dimensions),
             canonical_api_type_name(err, dimensions)
         ),

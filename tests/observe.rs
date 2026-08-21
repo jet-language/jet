@@ -457,21 +457,21 @@ enum ParseError {
     Empty
     BadDigit(String)
 }
-fn parse_age(raw: String) => Int ? ParseError {
+fn parse_age(raw: String) => Int ! ParseError {
     if raw == "" {
         return Err(ParseError.Empty)
     }
     return Ok(42)
 }
-fn load(raw: String) => Int ? ParseError {
+fn load(raw: String) => Int ! ParseError {
     n :: parse_age(raw)? "loading age"
     return Ok((n * 2))
 }
-fn double(raw: String) => Int ? ParseError {
+fn double(raw: String) => Int ! ParseError {
     n :: load(raw)? "doubling age"
     return Ok((n * 2))
 }
-fn run() ? ParseError {
+fn run() ! ParseError {
     n :: double("")?
     print(n)
 }
@@ -516,14 +516,14 @@ fn try_note_interpolation_is_lazy_on_success() {
     }
 
     let src = r#"
-fn present() => String ? {
+fn present() => String ! {
     return Ok("ok")
 }
 fn note_value() => String {
     print("evaluated")
     return "unexpected"
 }
-fn wrapped() => String ? {
+fn wrapped() => String ! {
     value :: present()? "never {note_value()}"
     return Ok(value)
 }
@@ -549,18 +549,18 @@ fn uncaught_err_prints_propagation_chain() {
     // D-FAIL-CTX1=A: uncaught Err at `fn run() ?` prints the `?` journey
     // (file:line per frame, with notes) then the error text, exit 1.
     let src = r#"
-fn read_raw() => String ? {
+fn read_raw() => String ! {
     return Err("file not found")
 }
-fn parse_config() => String ? {
+fn parse_config() => String ! {
     raw :: read_raw()? "reading raw config"
     return Ok(raw)
 }
-fn load_config() => String ? {
+fn load_config() => String ! {
     cfg :: parse_config()? "loading config"
     return Ok(cfg)
 }
-fn run() ? {
+fn run() ! {
     _ :: load_config()?
 }
 "#;
@@ -599,14 +599,14 @@ fn propagation_trace_collapses_repeated_frames() {
     // The journey only reaches stderr when the failure escapes the entry, so
     // `run` propagates instead of recovering.
     let src = r#"
-fn dive(n: Int) => Int ? {
+fn dive(n: Int) => Int ! {
     if n <= 0 {
         return Err("bottom")
     }
     v :: dive((n - 1))?
     return Ok(v)
 }
-fn run() ? {
+fn run() ! {
     v :: dive(4)?
     print(v)
 }

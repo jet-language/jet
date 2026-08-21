@@ -2,15 +2,15 @@
 
 use std::cell::Cell;
 
-use crate::Diagnostics::{Diagnostic, Span};
-use crate::AST::{CtFloat, Type};
 use super::super::Builtins::{as_int, exact_big, exact_int_value};
 use super::super::Diagnostics::unsupported;
+use crate::Diagnostics::{Diagnostic, Span};
+use crate::AST::{CtFloat, Type};
 use crate::AST::{CtReport, CtValue};
 use jet_foundation::Prelude::jet_as_bytes as as_bytes;
 
-use super::time_deadline_kernel;
 pub(super) use super::super::TextLite::IoErrorOperation;
+use super::time_deadline_kernel;
 #[path = "../CorePureParity.rs"]
 mod core_pure_parity;
 
@@ -35,12 +35,7 @@ fn validate_core_call_projection(
     if jet_foundation::Syntax::core_call(module, method).is_none() {
         return Ok(());
     }
-    match jet_foundation::Syntax::core_call_projection(
-        module,
-        method,
-        projection,
-        actual_arity,
-    ) {
+    match jet_foundation::Syntax::core_call_projection(module, method, projection, actual_arity) {
         Ok(_) => Ok(()),
         Err(jet_foundation::Syntax::CoreCallProjectionError::Arity { expected, actual }) => {
             Err(unsupported(
@@ -55,15 +50,13 @@ fn validate_core_call_projection(
         // adapter also serves default `jet run`'s evaluator, so the message
         // names the evaluator that lacks the row instead of a phase the reader
         // may not be in.
-        Err(jet_foundation::Syntax::CoreCallProjectionError::Uncovered { .. }) => Err(
-            unsupported(
-                &format!(
-                    "{}.{}(): no shared-evaluator projection is declared",
-                    module, method
-                ),
-                span,
+        Err(jet_foundation::Syntax::CoreCallProjectionError::Uncovered { .. }) => Err(unsupported(
+            &format!(
+                "{}.{}(): no shared-evaluator projection is declared",
+                module, method
             ),
-        ),
+            span,
+        )),
         Err(jet_foundation::Syntax::CoreCallProjectionError::Unknown) => Err(unsupported(
             &format!("{}.{}(): unknown Core-call row", module, method),
             span,
@@ -94,10 +87,12 @@ pub(super) fn normalize_path_args(
             if type_name != "Path" {
                 return Ok(value);
             }
-            let path = fields.iter().find_map(|(name, value)| match (name.as_str(), value) {
-                ("inner", CtValue::Str(path)) => Some(path.clone()),
-                _ => None,
-            });
+            let path = fields
+                .iter()
+                .find_map(|(name, value)| match (name.as_str(), value) {
+                    ("inner", CtValue::Str(path)) => Some(path.clone()),
+                    _ => None,
+                });
             path.map(CtValue::Str)
                 .ok_or_else(|| unsupported("malformed Path value", span))
         })
@@ -169,21 +164,29 @@ pub fn apply_fake_method(
     if type_name != crate::Syntax::FAKE_TYPE {
         return Err(unsupported("Fake receiver", span));
     }
-    let state = fields.iter().find_map(|(name, value)| match (name.as_str(), value) {
-        ("state", CtValue::Int(value)) => Some(*value as u64),
-        _ => None,
-    }).unwrap_or(0);
-    let locale = fields.iter().find_map(|(name, value)| match (name.as_str(), value) {
-        ("locale", CtValue::Int(value)) => Some(*value as u8),
-        _ => None,
-    }).unwrap_or(0);
+    let state = fields
+        .iter()
+        .find_map(|(name, value)| match (name.as_str(), value) {
+            ("state", CtValue::Int(value)) => Some(*value as u64),
+            _ => None,
+        })
+        .unwrap_or(0);
+    let locale = fields
+        .iter()
+        .find_map(|(name, value)| match (name.as_str(), value) {
+            ("locale", CtValue::Int(value)) => Some(*value as u8),
+            _ => None,
+        })
+        .unwrap_or(0);
     let mut fake = fake_data_kernel::jet_std::Fake { state, locale };
     let result = match method {
         "locale" => {
             let locale = as_string(
-                args.first().ok_or_else(|| unsupported("Fake.locale argument", span))?,
+                args.first()
+                    .ok_or_else(|| unsupported("Fake.locale argument", span))?,
                 span,
-            )?.to_string();
+            )?
+            .to_string();
             let next = fake_data_kernel::jet_fake_locale(&fake, &locale);
             CtValue::Struct {
                 type_name: crate::Syntax::FAKE_TYPE.to_string(),
@@ -408,9 +411,9 @@ mod data_kernel {
 
 // #1657: `core.data` line renderers share AOT's `DataPlot.rs` the same way.
 mod data_plot_rt {
+    pub(crate) use super::data_kernel::jet_std;
     #[allow(unused_imports)]
     pub use jet_foundation::Outcome::*;
-    pub(crate) use super::data_kernel::jet_std;
 
     #[allow(unused_imports)]
     pub use jet_foundation::Outcome::*;
@@ -424,14 +427,12 @@ mod impure;
 #[path = "core_calls/values.rs"]
 mod values;
 pub use data::{apply_data_line_call, data_status_rows};
-use data::{
-    as_data_groups, as_float_list, data_error_value, data_float_value, data_result_value,
-};
+use data::{as_data_groups, as_float_list, data_error_value, data_float_value, data_result_value};
 pub use impure::{apply_impure_core_call, apply_impure_core_call_with_type};
-use values::{as_string_rows, csv_rows_from_records, named_tuple};
 pub(crate) use values::as_string;
-pub(super) use values::{url_parts_from_ct, URL_INTERNAL_PREFIX};
 pub(crate) use values::url_parts_to_ct;
+use values::{as_string_rows, csv_rows_from_records, named_tuple};
+pub(super) use values::{url_parts_from_ct, URL_INTERNAL_PREFIX};
 
 pub(in super::super) fn apply_core_pure_method(
     recv: &CtValue,
@@ -458,10 +459,7 @@ pub(in super::super) fn solver_require(
     core_pure_parity::solver_require(recv, args, span)
 }
 
-pub(in super::super) fn solver_new(
-    args: &[CtValue],
-    span: Span,
-) -> Result<CtValue, Diagnostic> {
+pub(in super::super) fn solver_new(args: &[CtValue], span: Span) -> Result<CtValue, Diagnostic> {
     core_pure_parity::solver_new(args, span)
 }
 
@@ -498,7 +496,10 @@ pub(in super::super) fn as_float(v: &CtValue, span: Span) -> Result<f64, Diagnos
         CtValue::Int(n) => Ok(*n as f64),
         // I4: these adapters run on default `jet run`'s evaluator too, so the
         // `what` names the argument and never a phase.
-        _ => Err(unsupported("non-numeric argument to a Core math call", span)),
+        _ => Err(unsupported(
+            "non-numeric argument to a Core math call",
+            span,
+        )),
     }
 }
 
@@ -509,16 +510,14 @@ fn as_ct_float(v: &CtValue, span: Span) -> Result<CtFloat, Diagnostic> {
         // functions. The checker and the AOT lowerer admit Fraction and
         // Decimal alike, so this evaluator must too or default `jet run`
         // disagrees with the type that was already accepted.
-        CtValue::Struct { type_name, .. }
-            if type_name == crate::Syntax::TYPE_FRACTION => {
+        CtValue::Struct { type_name, .. } if type_name == crate::Syntax::TYPE_FRACTION => {
             let fraction = crate::Numeric::CtFraction::from_value(v)
                 .map_err(|_| unsupported("malformed Fraction", span))?;
             Ok(CtFloat::F64(
                 fraction.numerator as f64 / fraction.denominator as f64,
             ))
         }
-        CtValue::Struct { type_name, .. }
-            if type_name == crate::Syntax::TYPE_DECIMAL => {
+        CtValue::Struct { type_name, .. } if type_name == crate::Syntax::TYPE_DECIMAL => {
             let decimal = crate::Numeric::CtDecimal::from_value(v)
                 .map_err(|_| unsupported("malformed Decimal", span))?;
             Ok(CtFloat::F64(decimal.to_f64()))
@@ -529,12 +528,12 @@ fn as_ct_float(v: &CtValue, span: Span) -> Result<CtFloat, Diagnostic> {
 
 fn core_math_float_min(left: CtFloat, right: CtFloat, span: Span) -> Result<CtFloat, Diagnostic> {
     match (left, right) {
-        (CtFloat::F32(left), CtFloat::F32(right)) => {
-            Ok(CtFloat::F32(math_lib_pure::jet_std_math_min_f32(left, right)))
-        }
-        (CtFloat::F64(left), CtFloat::F64(right)) => {
-            Ok(CtFloat::F64(math_lib_pure::jet_std_math_min_f64(left, right)))
-        }
+        (CtFloat::F32(left), CtFloat::F32(right)) => Ok(CtFloat::F32(
+            math_lib_pure::jet_std_math_min_f32(left, right),
+        )),
+        (CtFloat::F64(left), CtFloat::F64(right)) => Ok(CtFloat::F64(
+            math_lib_pure::jet_std_math_min_f64(left, right),
+        )),
         _ => Err(unsupported("mixing float widths", span)),
     }
 }
@@ -548,12 +547,12 @@ fn core_math_float_abs(value: CtFloat) -> CtFloat {
 
 fn core_math_float_max(left: CtFloat, right: CtFloat, span: Span) -> Result<CtFloat, Diagnostic> {
     match (left, right) {
-        (CtFloat::F32(left), CtFloat::F32(right)) => {
-            Ok(CtFloat::F32(math_lib_pure::jet_std_math_max_f32(left, right)))
-        }
-        (CtFloat::F64(left), CtFloat::F64(right)) => {
-            Ok(CtFloat::F64(math_lib_pure::jet_std_math_max_f64(left, right)))
-        }
+        (CtFloat::F32(left), CtFloat::F32(right)) => Ok(CtFloat::F32(
+            math_lib_pure::jet_std_math_max_f32(left, right),
+        )),
+        (CtFloat::F64(left), CtFloat::F64(right)) => Ok(CtFloat::F64(
+            math_lib_pure::jet_std_math_max_f64(left, right),
+        )),
         _ => Err(unsupported("mixing float widths", span)),
     }
 }
@@ -630,7 +629,6 @@ pub(super) fn io_error_value(
 ) -> CtValue {
     super::super::TextLite::io_error_value(operation, path, e)
 }
-
 
 /// D-TEXTWIDTH1=B: pull the two policy flags back out of a `TextWidth`
 /// `CtValue::Struct` (`ambiguous: .Wide|.Narrow`, `controls: .Zero|.Reject`).
@@ -729,7 +727,12 @@ pub fn apply_core_call_with_type(
         match args.get(index) {
             Some(CtValue::Bool(value)) => Ok(*value),
             Some(_) => Err(unsupported(
-                &format!("{}.{}(): argument {} must be Bool", module, method, index + 1),
+                &format!(
+                    "{}.{}(): argument {} must be Bool",
+                    module,
+                    method,
+                    index + 1
+                ),
                 span,
             )),
             None => Ok(default),
@@ -740,108 +743,94 @@ pub fn apply_core_call_with_type(
         // D-BENCH-KEEP1=A: comptime binds the same generic identity behavior;
         // the AOT-only black-box effect has no observable CtValue equivalent.
         ("core.prelude", "keep") => Ok(args.first().cloned().unwrap_or(CtValue::Unit)),
-        ("jet.unit", "magnitude") => {
-            Ok(CtValue::Str(as_float(one(0)?, span)?.to_string()))
-        }
+        ("jet.unit", "magnitude") => Ok(CtValue::Str(as_float(one(0)?, span)?.to_string())),
         // D-CORE-COMPRESS1=A / card #392 C4: pure gzip stays inside
         // tier-0. No native bridge, Boundary classification, or AOT fallback.
         ("core.archive.gzip", "compress") => Ok(CtValue::Bytes(
             super::super::ArchiveLite::gzip_compress(&as_bytes(one(0)?, span)?),
         )),
-        ("core.archive.gzip", "decompress") => {
-            Ok(match super::super::ArchiveLite::gzip_decompress(&as_bytes(one(0)?, span)?) {
+        ("core.archive.gzip", "decompress") => Ok(
+            match super::super::ArchiveLite::gzip_decompress(&as_bytes(one(0)?, span)?) {
                 Ok(bytes) => CtValue::Present(Box::new(CtValue::Bytes(bytes))),
                 Err(error) => CtValue::failed(Box::new(CtValue::Str(error))),
-            })
-        }
+            },
+        ),
         // The std-only resident codec accepts ordinary dictionaryless zstd
         // frames. The encoder deliberately chooses interoperable raw blocks.
         ("core.archive.zstd", "compress") => Ok(CtValue::Bytes(
             super::super::ArchiveLite::zstd_compress(&as_bytes(one(0)?, span)?),
         )),
-        ("core.archive.zstd", "decompress") => {
-            Ok(match super::super::ArchiveLite::zstd_decompress(&as_bytes(one(0)?, span)?) {
+        ("core.archive.zstd", "decompress") => Ok(
+            match super::super::ArchiveLite::zstd_decompress(&as_bytes(one(0)?, span)?) {
                 Ok(bytes) => CtValue::Present(Box::new(CtValue::Bytes(bytes))),
                 Err(error) => CtValue::failed(Box::new(CtValue::Str(error))),
-            })
-        }
+            },
+        ),
         // D-CORE-COMPRESS1=A / card #392 C4: archive containers are pure byte
         // transforms. Keep them interpreter-resident; never route through the
         // native FFI bridge or an AOT fallback.
-        ("core.archive", "zip_compress") => Ok(CtValue::Bytes(
-            super::super::ArchiveLite::zip_compress(
+        ("core.archive", "zip_compress") => {
+            Ok(CtValue::Bytes(super::super::ArchiveLite::zip_compress(
                 as_string(one(0)?, span)?,
                 &as_bytes(one(1)?, span)?,
-            ),
-        )),
+            )))
+        }
         ("core.archive", "zip_decompress") => Ok(CtValue::Bytes(
             super::super::ArchiveLite::zip_decompress(&as_bytes(one(0)?, span)?),
         )),
-        ("core.archive", "crc32") => Ok(CtValue::Int(
-            super::super::ArchiveLite::crc32_value(&as_bytes(one(0)?, span)?),
-        )),
-        ("core.archive", "adler32") => Ok(CtValue::Int(
-            super::super::ArchiveLite::adler32(&as_bytes(one(0)?, span)?),
-        )),
-        ("core.archive", "deflate") => Ok(CtValue::Bytes(
-            super::super::ArchiveLite::deflate(&as_bytes(one(0)?, span)?),
-        )),
+        ("core.archive", "crc32") => Ok(CtValue::Int(super::super::ArchiveLite::crc32_value(
+            &as_bytes(one(0)?, span)?,
+        ))),
+        ("core.archive", "adler32") => Ok(CtValue::Int(super::super::ArchiveLite::adler32(
+            &as_bytes(one(0)?, span)?,
+        ))),
+        ("core.archive", "deflate") => Ok(CtValue::Bytes(super::super::ArchiveLite::deflate(
+            &as_bytes(one(0)?, span)?,
+        ))),
         ("core.archive", "inflate") => Ok(CtValue::Bytes(
             super::super::ArchiveLite::inflate_bytes(&as_bytes(one(0)?, span)?),
         )),
         ("core.archive", "zip_names_json") => Ok(CtValue::Str(
             super::super::ArchiveLite::zip_names_json(&as_bytes(one(0)?, span)?),
         )),
-        ("core.archive", "zip_open") => Ok(CtValue::Bytes(
-            super::super::ArchiveLite::zip_open(&as_bytes(one(0)?, span)?),
-        )),
-        ("core.archive", "zip_next") => Ok(CtValue::Str(
-            super::super::ArchiveLite::zip_next(
-                &as_bytes(one(0)?, span)?,
-                as_int(one(1)?, span)?,
-            ),
-        )),
-        ("core.archive", "zip_read") => Ok(CtValue::Bytes(
-            super::super::ArchiveLite::zip_read(
-                &as_bytes(one(0)?, span)?,
-                &as_string(one(1)?, span)?,
-            ),
-        )),
-        ("core.archive", "zip_write") => Ok(CtValue::Bytes(
-            super::super::ArchiveLite::zip_write(
-                &as_bytes(one(0)?, span)?,
-                &as_string(one(1)?, span)?,
-                &as_bytes(one(2)?, span)?,
-            ),
-        )),
-        ("core.archive", "zip_close") => Ok(CtValue::Bytes(
-            super::super::ArchiveLite::zip_close(&as_bytes(one(0)?, span)?),
-        )),
-        ("core.archive", "zip_extract") => Ok(CtValue::Bytes(
-            super::super::ArchiveLite::zip_extract(
+        ("core.archive", "zip_open") => Ok(CtValue::Bytes(super::super::ArchiveLite::zip_open(
+            &as_bytes(one(0)?, span)?,
+        ))),
+        ("core.archive", "zip_next") => Ok(CtValue::Str(super::super::ArchiveLite::zip_next(
+            &as_bytes(one(0)?, span)?,
+            as_int(one(1)?, span)?,
+        ))),
+        ("core.archive", "zip_read") => Ok(CtValue::Bytes(super::super::ArchiveLite::zip_read(
+            &as_bytes(one(0)?, span)?,
+            &as_string(one(1)?, span)?,
+        ))),
+        ("core.archive", "zip_write") => Ok(CtValue::Bytes(super::super::ArchiveLite::zip_write(
+            &as_bytes(one(0)?, span)?,
+            &as_string(one(1)?, span)?,
+            &as_bytes(one(2)?, span)?,
+        ))),
+        ("core.archive", "zip_close") => Ok(CtValue::Bytes(super::super::ArchiveLite::zip_close(
+            &as_bytes(one(0)?, span)?,
+        ))),
+        ("core.archive", "zip_extract") => {
+            Ok(CtValue::Bytes(super::super::ArchiveLite::zip_extract(
                 &as_bytes(one(0)?, span)?,
                 &as_string(one(1)?, span)?,
-            ),
-        )),
-        ("core.archive", "unzip") => Ok(CtValue::Bytes(
-            super::super::ArchiveLite::unzip(
-                &as_bytes(one(0)?, span)?,
-                &as_string(one(1)?, span)?,
-            ),
-        )),
-        ("core.archive", "tar_add") => Ok(CtValue::Bytes(
-            super::super::ArchiveLite::tar_add(
-                &as_bytes(one(0)?, span)?,
-                as_string(one(1)?, span)?,
-                &as_bytes(one(2)?, span)?,
-            ),
-        )),
-        ("core.archive", "tar_get") => Ok(CtValue::Bytes(
-            super::super::ArchiveLite::tar_get(
-                &as_bytes(one(0)?, span)?,
-                as_string(one(1)?, span)?,
-            ),
-        )),
+            )))
+        }
+        ("core.archive", "unzip") => Ok(CtValue::Bytes(super::super::ArchiveLite::unzip(
+            &as_bytes(one(0)?, span)?,
+            &as_string(one(1)?, span)?,
+        ))),
+        ("core.archive", "tar_add") => Ok(CtValue::Bytes(super::super::ArchiveLite::tar_add(
+            &as_bytes(one(0)?, span)?,
+            as_string(one(1)?, span)?,
+            &as_bytes(one(2)?, span)?,
+        ))),
+        ("core.archive", "tar_get") => Ok(CtValue::Bytes(super::super::ArchiveLite::tar_get(
+            &as_bytes(one(0)?, span)?,
+            as_string(one(1)?, span)?,
+        ))),
         ("core.archive", "tar_names_json") => Ok(CtValue::Str(
             super::super::ArchiveLite::tar_names_json(&as_bytes(one(0)?, span)?),
         )),
@@ -858,12 +847,12 @@ pub fn apply_core_call_with_type(
         }),
         // D-FIDELITY-API1=A: explicit runtime-global signal. Interpreter owns
         // same f32-backed range and validation contract as AOT/JIT.
-        ("core.perf", "fidelity") => Ok(CtValue::Float(CtFloat::f64(
-            f32::from_bits(PERF_FIDELITY.with(Cell::get)) as f64,
-        ))),
-        ("core.perf", "default_fidelity") => Ok(CtValue::Float(CtFloat::f64(
-            f32::from_bits(PERF_DEFAULT_FIDELITY_BITS) as f64,
-        ))),
+        ("core.perf", "fidelity") => Ok(CtValue::Float(CtFloat::f64(f32::from_bits(
+            PERF_FIDELITY.with(Cell::get),
+        ) as f64))),
+        ("core.perf", "default_fidelity") => Ok(CtValue::Float(CtFloat::f64(f32::from_bits(
+            PERF_DEFAULT_FIDELITY_BITS,
+        ) as f64))),
         ("core.perf", "override_fidelity") => {
             let value = as_float(one(0)?, span)?;
             if !value.is_finite() || !(0.0..=1.0).contains(&value) {
@@ -890,49 +879,52 @@ pub fn apply_core_call_with_type(
                 Ok(exact_int_value(value.abs()))
             }
             CtValue::Float(f) => Ok(CtValue::Float(core_math_float_abs(*f))),
-            value if matches!(
-                &value,
-                CtValue::Struct { type_name, .. }
-                    if type_name == crate::Syntax::TYPE_COMPLEX
-            ) => crate::Comptime::ComplexParity::abs(&value)
-                .map(|magnitude| CtValue::Float(CtFloat::f64(magnitude)))
-                .ok_or_else(|| unsupported("malformed Complex value", span)),
+            value
+                if matches!(
+                    &value,
+                    CtValue::Struct { type_name, .. }
+                        if type_name == crate::Syntax::TYPE_COMPLEX
+                ) =>
+            {
+                crate::Comptime::ComplexParity::abs(&value)
+                    .map(|magnitude| CtValue::Float(CtFloat::f64(magnitude)))
+                    .ok_or_else(|| unsupported("malformed Complex value", span))
+            }
             _ => Err(unsupported("core.math.abs: non-numeric argument", span)),
         },
         ("core.math", "pow") => {
             let a = as_ct_float(one(0)?, span)?;
             let b = as_ct_float(one(1)?, span)?;
             Ok(CtValue::Float(
-                a.powf(b).ok_or_else(|| unsupported("mixing float widths", span))?,
+                a.powf(b)
+                    .ok_or_else(|| unsupported("mixing float widths", span))?,
             ))
         }
         ("core.math", "min") => match (one(0)?, one(1)?) {
             (CtValue::Int(left), CtValue::Int(right)) => Ok(CtValue::Int(
                 math_lib_pure::jet_std_math_min_i64(*left, *right),
             )),
-            (CtValue::Float(left), CtValue::Float(right)) => Ok(CtValue::Float(
-                core_math_float_min(*left, *right, span)?,
-            )),
+            (CtValue::Float(left), CtValue::Float(right)) => {
+                Ok(CtValue::Float(core_math_float_min(*left, *right, span)?))
+            }
             _ => Err(unsupported("core.math.min: non-numeric arguments", span)),
         },
         ("core.math", "max") => match (one(0)?, one(1)?) {
             (CtValue::Int(left), CtValue::Int(right)) => Ok(CtValue::Int(
                 math_lib_pure::jet_std_math_max_i64(*left, *right),
             )),
-            (CtValue::Float(left), CtValue::Float(right)) => Ok(CtValue::Float(
-                core_math_float_max(*left, *right, span)?,
-            )),
+            (CtValue::Float(left), CtValue::Float(right)) => {
+                Ok(CtValue::Float(core_math_float_max(*left, *right, span)?))
+            }
             _ => Err(unsupported("core.math.max: non-numeric arguments", span)),
         },
         ("core.math", "clamp") => match (one(0)?, one(1)?, one(2)?) {
             (CtValue::Int(value), CtValue::Int(low), CtValue::Int(high)) => Ok(CtValue::Int(
                 math_lib_pure::jet_std_math_clamp_i64(*value, *low, *high),
             )),
-            (CtValue::Float(value), CtValue::Float(low), CtValue::Float(high)) => {
-                Ok(CtValue::Float(core_math_float_clamp(
-                    *value, *low, *high, span,
-                )?))
-            }
+            (CtValue::Float(value), CtValue::Float(low), CtValue::Float(high)) => Ok(
+                CtValue::Float(core_math_float_clamp(*value, *low, *high, span)?),
+            ),
             _ => Err(unsupported("core.math.clamp: non-numeric arguments", span)),
         },
         ("core.math", "log2") => Ok(CtValue::Float(as_ct_float(one(0)?, span)?.log2())),
@@ -966,31 +958,35 @@ pub fn apply_core_call_with_type(
         ("core.math", "atan2") => {
             let left = as_ct_float(one(0)?, span)?;
             let right = as_ct_float(one(1)?, span)?;
-            Ok(CtValue::Float(left.atan2(right).ok_or_else(|| {
-                unsupported("mixing float widths", span)
-            })?))
+            Ok(CtValue::Float(
+                left.atan2(right)
+                    .ok_or_else(|| unsupported("mixing float widths", span))?,
+            ))
         }
         ("core.math", "copysign") => {
             let left = as_ct_float(one(0)?, span)?;
             let right = as_ct_float(one(1)?, span)?;
-            Ok(CtValue::Float(left.copysign(right).ok_or_else(|| {
-                unsupported("mixing float widths", span)
-            })?))
+            Ok(CtValue::Float(
+                left.copysign(right)
+                    .ok_or_else(|| unsupported("mixing float widths", span))?,
+            ))
         }
         ("core.math", "log") => {
             let left = as_ct_float(one(0)?, span)?;
             let right = as_ct_float(one(1)?, span)?;
-            Ok(CtValue::Float(left.log(right).ok_or_else(|| {
-                unsupported("mixing float widths", span)
-            })?))
+            Ok(CtValue::Float(
+                left.log(right)
+                    .ok_or_else(|| unsupported("mixing float widths", span))?,
+            ))
         }
         ("core.math", "fma") => {
             let a = as_ct_float(one(0)?, span)?;
             let b = as_ct_float(one(1)?, span)?;
             let c = as_ct_float(one(2)?, span)?;
-            Ok(CtValue::Float(a.mul_add(b, c).ok_or_else(|| {
-                unsupported("mixing float widths", span)
-            })?))
+            Ok(CtValue::Float(
+                a.mul_add(b, c)
+                    .ok_or_else(|| unsupported("mixing float widths", span))?,
+            ))
         }
         ("core.math", "factorial") => {
             let value = exact_big(one(0)?).ok_or_else(|| {
@@ -1022,9 +1018,8 @@ pub fn apply_core_call_with_type(
             })
         }
         ("core.math", method @ ("is_even" | "is_odd")) => {
-            let value = exact_big(one(0)?).ok_or_else(|| {
-                unsupported("parity of a value that is not a whole number", span)
-            })?;
+            let value = exact_big(one(0)?)
+                .ok_or_else(|| unsupported("parity of a value that is not a whole number", span))?;
             Ok(CtValue::Bool(if method == "is_even" {
                 value.is_even()
             } else {
@@ -1032,9 +1027,8 @@ pub fn apply_core_call_with_type(
             }))
         }
         ("core.math", method @ ("leading_ones" | "trailing_ones" | "digits")) => {
-            let value = exact_big(one(0)?).ok_or_else(|| {
-                unsupported("this operation needs a whole number", span)
-            })?;
+            let value = exact_big(one(0)?)
+                .ok_or_else(|| unsupported("this operation needs a whole number", span))?;
             Ok(CtValue::Int(if method == "leading_ones" {
                 value.leading_ones()
             } else if method == "trailing_ones" {
@@ -1044,24 +1038,20 @@ pub fn apply_core_call_with_type(
             }))
         }
         ("core.math", "binomial") => {
-            let n = exact_big(one(0)?).ok_or_else(|| {
-                unsupported("binomial needs whole numbers", span)
-            })?;
-            let k = exact_big(one(1)?).ok_or_else(|| {
-                unsupported("binomial needs whole numbers", span)
-            })?;
+            let n = exact_big(one(0)?)
+                .ok_or_else(|| unsupported("binomial needs whole numbers", span))?;
+            let k = exact_big(one(1)?)
+                .ok_or_else(|| unsupported("binomial needs whole numbers", span))?;
             Ok(match crate::Numeric::CtBigInt::binomial(&n, &k) {
                 Some(value) => CtValue::Present(Box::new(exact_int_value(value))),
                 None => CtValue::absent(Type::Int),
             })
         }
         ("core.math", method @ ("checked_add" | "checked_sub" | "checked_mul")) => {
-            let left = exact_big(one(0)?).ok_or_else(|| {
-                unsupported("checked arithmetic needs whole numbers", span)
-            })?;
-            let right = exact_big(one(1)?).ok_or_else(|| {
-                unsupported("checked arithmetic needs whole numbers", span)
-            })?;
+            let left = exact_big(one(0)?)
+                .ok_or_else(|| unsupported("checked arithmetic needs whole numbers", span))?;
+            let right = exact_big(one(1)?)
+                .ok_or_else(|| unsupported("checked arithmetic needs whole numbers", span))?;
             let value = match method {
                 "checked_add" => left.add(&right),
                 "checked_sub" => left.sub(&right),
@@ -1070,30 +1060,26 @@ pub fn apply_core_call_with_type(
             Ok(CtValue::Present(Box::new(exact_int_value(value))))
         }
         ("core.math", method @ ("checked_div" | "checked_rem")) => {
-            let left = exact_big(one(0)?).ok_or_else(|| {
-                unsupported("checked division needs whole numbers", span)
-            })?;
-            let right = exact_big(one(1)?).ok_or_else(|| {
-                unsupported("checked division needs whole numbers", span)
-            })?;
+            let left = exact_big(one(0)?)
+                .ok_or_else(|| unsupported("checked division needs whole numbers", span))?;
+            let right = exact_big(one(1)?)
+                .ok_or_else(|| unsupported("checked division needs whole numbers", span))?;
             Ok(match left.div_rem(&right) {
-                Some((quotient, remainder)) => CtValue::Present(Box::new(exact_int_value(
-                    if method == "checked_div" {
+                Some((quotient, remainder)) => {
+                    CtValue::Present(Box::new(exact_int_value(if method == "checked_div" {
                         quotient
                     } else {
                         remainder
-                    },
-                ))),
+                    })))
+                }
                 None => CtValue::absent(Type::Int),
             })
         }
         ("core.math", "checked_pow") => {
-            let base = exact_big(one(0)?).ok_or_else(|| {
-                unsupported("checked power needs whole numbers", span)
-            })?;
-            let exponent = exact_big(one(1)?).ok_or_else(|| {
-                unsupported("checked power needs whole numbers", span)
-            })?;
+            let base = exact_big(one(0)?)
+                .ok_or_else(|| unsupported("checked power needs whole numbers", span))?;
+            let exponent = exact_big(one(1)?)
+                .ok_or_else(|| unsupported("checked power needs whole numbers", span))?;
             Ok(match base.pow(&exponent) {
                 Some(value) => CtValue::Present(Box::new(exact_int_value(value))),
                 None => CtValue::absent(Type::Int),
@@ -1101,12 +1087,10 @@ pub fn apply_core_call_with_type(
         }
         ("core.math", method @ ("saturating_add" | "saturating_sub" | "saturating_mul"))
         | ("core.math", method @ ("wrapping_add" | "wrapping_sub" | "wrapping_mul")) => {
-            let left = exact_big(one(0)?).ok_or_else(|| {
-                unsupported("arithmetic needs whole numbers", span)
-            })?;
-            let right = exact_big(one(1)?).ok_or_else(|| {
-                unsupported("arithmetic needs whole numbers", span)
-            })?;
+            let left = exact_big(one(0)?)
+                .ok_or_else(|| unsupported("arithmetic needs whole numbers", span))?;
+            let right = exact_big(one(1)?)
+                .ok_or_else(|| unsupported("arithmetic needs whole numbers", span))?;
             let value = match method {
                 "saturating_add" | "wrapping_add" => left.add(&right),
                 "saturating_sub" | "wrapping_sub" => left.sub(&right),
@@ -1116,24 +1100,20 @@ pub fn apply_core_call_with_type(
             Ok(exact_int_value(value))
         }
         ("core.math", "int_pow") => {
-            let base = exact_big(one(0)?).ok_or_else(|| {
-                unsupported("integer power needs whole numbers", span)
-            })?;
-            let exponent = exact_big(one(1)?).ok_or_else(|| {
-                unsupported("integer power needs whole numbers", span)
-            })?;
+            let base = exact_big(one(0)?)
+                .ok_or_else(|| unsupported("integer power needs whole numbers", span))?;
+            let exponent = exact_big(one(1)?)
+                .ok_or_else(|| unsupported("integer power needs whole numbers", span))?;
             Ok(exact_int_value(
                 base.pow(&exponent)
                     .unwrap_or_else(|| crate::Numeric::CtBigInt::from_int(0)),
             ))
         }
         ("core.math", method @ ("gcd" | "lcm")) => {
-            let left = exact_big(one(0)?).ok_or_else(|| {
-                unsupported("number theory needs whole numbers", span)
-            })?;
-            let right = exact_big(one(1)?).ok_or_else(|| {
-                unsupported("number theory needs whole numbers", span)
-            })?;
+            let left = exact_big(one(0)?)
+                .ok_or_else(|| unsupported("number theory needs whole numbers", span))?;
+            let right = exact_big(one(1)?)
+                .ok_or_else(|| unsupported("number theory needs whole numbers", span))?;
             Ok(exact_int_value(if method == "gcd" {
                 crate::Numeric::CtBigInt::gcd(&left, &right)
             } else {
@@ -1141,12 +1121,10 @@ pub fn apply_core_call_with_type(
             }))
         }
         ("core.math", "div_mod" | "div_rem") => {
-            let left = exact_big(one(0)?).ok_or_else(|| {
-                unsupported("division needs whole numbers", span)
-            })?;
-            let right = exact_big(one(1)?).ok_or_else(|| {
-                unsupported("division needs whole numbers", span)
-            })?;
+            let left = exact_big(one(0)?)
+                .ok_or_else(|| unsupported("division needs whole numbers", span))?;
+            let right = exact_big(one(1)?)
+                .ok_or_else(|| unsupported("division needs whole numbers", span))?;
             let Some((mut quotient, mut remainder)) = left.div_rem(&right) else {
                 return Err(unsupported("division by zero", span));
             };
@@ -1159,34 +1137,30 @@ pub fn apply_core_call_with_type(
                 ("rem", exact_int_value(remainder)),
             ]))
         }
-        ("core.math", "is_normal") => {
-            Ok(CtValue::Bool(as_ct_float(one(0)?, span)?.as_f64().is_normal()))
-        }
-        ("core.math", "is_subnormal") => {
-            Ok(CtValue::Bool(as_ct_float(one(0)?, span)?.as_f64().is_subnormal()))
-        }
+        ("core.math", "is_normal") => Ok(CtValue::Bool(
+            as_ct_float(one(0)?, span)?.as_f64().is_normal(),
+        )),
+        ("core.math", "is_subnormal") => Ok(CtValue::Bool(
+            as_ct_float(one(0)?, span)?.as_f64().is_subnormal(),
+        )),
         ("core.math", "is_canonical") => {
             let x = as_ct_float(one(0)?, span)?;
             Ok(CtValue::Bool(x.is_finite() || x.is_nan()))
         }
-        ("core.math", "is_signed" | "sign_bit") => {
-            Ok(CtValue::Bool(as_ct_float(one(0)?, span)?.as_f64().is_sign_negative()))
-        }
-        ("core.math", "is_zero") => {
-            Ok(CtValue::Bool(as_ct_float(one(0)?, span)?.as_f64() == 0.0))
-        }
+        ("core.math", "is_signed" | "sign_bit") => Ok(CtValue::Bool(
+            as_ct_float(one(0)?, span)?.as_f64().is_sign_negative(),
+        )),
+        ("core.math", "is_zero") => Ok(CtValue::Bool(as_ct_float(one(0)?, span)?.as_f64() == 0.0)),
         ("core.math", "is_integer") => {
             let x = as_ct_float(one(0)?, span)?;
             Ok(CtValue::Bool(x.is_finite() && x.as_f64().fract() == 0.0))
         }
-        ("core.math", "next_up") => {
-            Ok(CtValue::Float(CtFloat::f64(as_ct_float(one(0)?, span)?.as_f64().next_up())))
-        }
-        ("core.math", "next_down") => {
-            Ok(CtValue::Float(CtFloat::f64(
-                as_ct_float(one(0)?, span)?.as_f64().next_down(),
-            )))
-        }
+        ("core.math", "next_up") => Ok(CtValue::Float(CtFloat::f64(
+            as_ct_float(one(0)?, span)?.as_f64().next_up(),
+        ))),
+        ("core.math", "next_down") => Ok(CtValue::Float(CtFloat::f64(
+            as_ct_float(one(0)?, span)?.as_f64().next_down(),
+        ))),
         ("core.math", "copy") => Ok(CtValue::Float(as_ct_float(one(0)?, span)?)),
         ("core.math", "cot") => {
             let x = as_ct_float(one(0)?, span)?.as_f64();
@@ -1206,7 +1180,9 @@ pub fn apply_core_call_with_type(
         ("core.math", "next_after") => {
             let a = as_ct_float(one(0)?, span)?.as_f64();
             let b = as_ct_float(one(1)?, span)?.as_f64();
-            Ok(CtValue::Float(CtFloat::f64(math_lib_pure::jet_std_math_next_after(a, b))))
+            Ok(CtValue::Float(CtFloat::f64(
+                math_lib_pure::jet_std_math_next_after(a, b),
+            )))
         }
         ("core.math", "ldexp" | "scaleb") => {
             let x = as_ct_float(one(0)?, span)?.as_f64();
@@ -1214,7 +1190,9 @@ pub fn apply_core_call_with_type(
                 CtValue::Int(v) => *v,
                 _ => return Err(unsupported("ldexp needs a whole-number exponent", span)),
             };
-            Ok(CtValue::Float(CtFloat::f64(math_lib_pure::jet_std_math_ldexp(x, exp))))
+            Ok(CtValue::Float(CtFloat::f64(
+                math_lib_pure::jet_std_math_ldexp(x, exp),
+            )))
         }
         ("core.math", "ilogb") => {
             let x = as_ct_float(one(0)?, span)?.as_f64();
@@ -1223,41 +1201,27 @@ pub fn apply_core_call_with_type(
                 None => CtValue::absent(Type::Int),
             })
         }
-        ("core.math", "logb") => {
-            Ok(CtValue::Float(CtFloat::f64(math_lib_pure::jet_std_math_logb(
-                as_ct_float(one(0)?, span)?.as_f64(),
-            ))))
-        }
-        ("core.math", "significand") => {
-            Ok(CtValue::Float(CtFloat::f64(math_lib_pure::jet_std_math_significand(
-                as_ct_float(one(0)?, span)?.as_f64(),
-            ))))
-        }
-        ("core.math", "ulp") => {
-            Ok(CtValue::Float(CtFloat::f64(math_lib_pure::jet_std_math_ulp(
-                as_ct_float(one(0)?, span)?.as_f64(),
-            ))))
-        }
-        ("core.math", "erf") => {
-            Ok(CtValue::Float(CtFloat::f64(math_lib_pure::jet_std_math_erf(
-                as_ct_float(one(0)?, span)?.as_f64(),
-            ))))
-        }
-        ("core.math", "erfc") => {
-            Ok(CtValue::Float(CtFloat::f64(math_lib_pure::jet_std_math_erfc(
-                as_ct_float(one(0)?, span)?.as_f64(),
-            ))))
-        }
-        ("core.math", "gamma") => {
-            Ok(CtValue::Float(CtFloat::f64(math_lib_pure::jet_std_math_gamma(
-                as_ct_float(one(0)?, span)?.as_f64(),
-            ))))
-        }
-        ("core.math", "lgamma") => {
-            Ok(CtValue::Float(CtFloat::f64(math_lib_pure::jet_std_math_lgamma(
-                as_ct_float(one(0)?, span)?.as_f64(),
-            ))))
-        }
+        ("core.math", "logb") => Ok(CtValue::Float(CtFloat::f64(
+            math_lib_pure::jet_std_math_logb(as_ct_float(one(0)?, span)?.as_f64()),
+        ))),
+        ("core.math", "significand") => Ok(CtValue::Float(CtFloat::f64(
+            math_lib_pure::jet_std_math_significand(as_ct_float(one(0)?, span)?.as_f64()),
+        ))),
+        ("core.math", "ulp") => Ok(CtValue::Float(CtFloat::f64(
+            math_lib_pure::jet_std_math_ulp(as_ct_float(one(0)?, span)?.as_f64()),
+        ))),
+        ("core.math", "erf") => Ok(CtValue::Float(CtFloat::f64(
+            math_lib_pure::jet_std_math_erf(as_ct_float(one(0)?, span)?.as_f64()),
+        ))),
+        ("core.math", "erfc") => Ok(CtValue::Float(CtFloat::f64(
+            math_lib_pure::jet_std_math_erfc(as_ct_float(one(0)?, span)?.as_f64()),
+        ))),
+        ("core.math", "gamma") => Ok(CtValue::Float(CtFloat::f64(
+            math_lib_pure::jet_std_math_gamma(as_ct_float(one(0)?, span)?.as_f64()),
+        ))),
+        ("core.math", "lgamma") => Ok(CtValue::Float(CtFloat::f64(
+            math_lib_pure::jet_std_math_lgamma(as_ct_float(one(0)?, span)?.as_f64()),
+        ))),
         ("core.math", "sin_cos") => {
             let x = as_ct_float(one(0)?, span)?.as_f64();
             let (s, c) = x.sin_cos();
@@ -1289,42 +1253,64 @@ pub fn apply_core_call_with_type(
         ("core.math", "hypot") => {
             let left = as_ct_float(one(0)?, span)?;
             let right = as_ct_float(one(1)?, span)?;
-            Ok(CtValue::Float(left.hypot(right).ok_or_else(|| {
-                unsupported("mixing float widths", span)
-            })?))
+            Ok(CtValue::Float(
+                left.hypot(right)
+                    .ok_or_else(|| unsupported("mixing float widths", span))?,
+            ))
         }
         ("core.math", "lerp") => {
             let left = as_ct_float(one(0)?, span)?;
             let right = as_ct_float(one(1)?, span)?;
             let t = as_ct_float(one(2)?, span)?;
-            Ok(CtValue::Float(left.lerp(right, t).ok_or_else(|| {
-                unsupported("mixing float widths", span)
-            })?))
+            Ok(CtValue::Float(
+                left.lerp(right, t)
+                    .ok_or_else(|| unsupported("mixing float widths", span))?,
+            ))
         }
         ("core.math", "is_nan") => Ok(CtValue::Bool(as_ct_float(one(0)?, span)?.is_nan())),
         ("core.math", "is_inf") => Ok(CtValue::Bool(as_ct_float(one(0)?, span)?.is_infinite())),
         ("core.math", "is_finite") => Ok(CtValue::Bool(as_ct_float(one(0)?, span)?.is_finite())),
         ("core.math", "sign") => Ok(CtValue::Int(as_ct_float(one(0)?, span)?.sign())),
         ("core.math", "to_bits") => Ok(CtValue::Int(as_ct_float(one(0)?, span)?.to_bits_i64())),
-        ("core.math", "from_bits") => Ok(CtValue::Float(CtFloat::f64(f64::from_bits(
-            as_int(one(0)?, span)? as u64,
-        )))),
+        ("core.math", "from_bits") => {
+            Ok(CtValue::Float(CtFloat::f64(f64::from_bits(
+                as_int(one(0)?, span)? as u64,
+            ))))
+        }
         // --- core.text module implementation surface (card #392: `"core.string"` was a
         // dead key here — no import ever resolves to it, `core.text` is the
         // only ratified spelling (KNOWN_CORE_MODULES), so every arm below was
         // unreachable and every `use core.text as t; t.trim(s)`-style call
         // hit the E0956 fallback. Logic ported verbatim from AOT's
         // `jet_text_*` prelude fns via `TextLite` — R12 parity. ---
-        ("core.text", "nfc") => Ok(CtValue::Str(super::super::TextLite::nfc(as_string(one(0)?, span)?))),
-        ("core.text", "nfd") => Ok(CtValue::Str(super::super::TextLite::nfd(as_string(one(0)?, span)?))),
-        ("core.text", "nfkc") => Ok(CtValue::Str(super::super::TextLite::nfkc(as_string(one(0)?, span)?))),
-        ("core.text", "nfkd") => Ok(CtValue::Str(super::super::TextLite::nfkd(as_string(one(0)?, span)?))),
+        ("core.text", "nfc") => Ok(CtValue::Str(super::super::TextLite::nfc(as_string(
+            one(0)?,
+            span,
+        )?))),
+        ("core.text", "nfd") => Ok(CtValue::Str(super::super::TextLite::nfd(as_string(
+            one(0)?,
+            span,
+        )?))),
+        ("core.text", "nfkc") => Ok(CtValue::Str(super::super::TextLite::nfkc(as_string(
+            one(0)?,
+            span,
+        )?))),
+        ("core.text", "nfkd") => Ok(CtValue::Str(super::super::TextLite::nfkd(as_string(
+            one(0)?,
+            span,
+        )?))),
         ("core.text", "casefold") => Ok(CtValue::Str(super::super::TextLite::casefold(as_string(
             one(0)?,
             span,
         )?))),
-        ("core.text", "lower") => Ok(CtValue::Str(super::super::TextLite::lower(as_string(one(0)?, span)?))),
-        ("core.text", "upper") => Ok(CtValue::Str(super::super::TextLite::upper(as_string(one(0)?, span)?))),
+        ("core.text", "lower") => Ok(CtValue::Str(super::super::TextLite::lower(as_string(
+            one(0)?,
+            span,
+        )?))),
+        ("core.text", "upper") => Ok(CtValue::Str(super::super::TextLite::upper(as_string(
+            one(0)?,
+            span,
+        )?))),
         ("core.text", "caseless_eq") => Ok(CtValue::Bool(super::super::TextLite::caseless_eq(
             as_string(one(0)?, span)?,
             as_string(one(1)?, span)?,
@@ -1361,7 +1347,7 @@ pub fn apply_core_call_with_type(
         )),
         // D-TEXTWIDTH1=B: 1-arg call uses the portable default policy and
         // returns a bare `Int`; the 2-arg (`policy:`) call can reject a
-        // control character under `.Reject`, so it returns `Int ? TextError`.
+        // control character under `.Reject`, so it returns `Int ! TextError`.
         // `TextWidth`'s two enum fields evaluate generically (`CtValue::Struct`/
         // `CtValue::Enum`, no per-type interpreter code needed) — this arm
         // just reads them back out.
@@ -1369,7 +1355,11 @@ pub fn apply_core_call_with_type(
             let s = as_string(one(0)?, span)?;
             if let Some(policy) = args.get(1) {
                 let (ambiguous_wide, controls_reject) = text_width_policy_flags(policy);
-                match super::super::TextLite::display_width_policy(s, ambiguous_wide, controls_reject) {
+                match super::super::TextLite::display_width_policy(
+                    s,
+                    ambiguous_wide,
+                    controls_reject,
+                ) {
                     Ok(n) => Ok(CtValue::Present(Box::new(CtValue::Int(n)))),
                     Err(message) => Ok(CtValue::failed(Box::new(CtValue::Struct {
                         type_name: "TextError".to_string(),
@@ -1377,20 +1367,21 @@ pub fn apply_core_call_with_type(
                     }))),
                 }
             } else {
-                Ok(CtValue::Int(super::super::TextLite::display_width_default(s)))
+                Ok(CtValue::Int(super::super::TextLite::display_width_default(
+                    s,
+                )))
             }
         }
-        ("core.text", "scalar_count") => {
-            Ok(CtValue::Int(as_string(one(0)?, span)?.chars().count() as i64))
-        }
+        ("core.text", "scalar_count") => Ok(CtValue::Int(
+            as_string(one(0)?, span)?.chars().count() as i64,
+        )),
         ("core.text", "byte_count") => Ok(CtValue::Int(as_string(one(0)?, span)?.len() as i64)),
         ("core.text", "is_alphabetic") => Ok(CtValue::Bool(super::super::TextLite::is_alphabetic(
             as_string(one(0)?, span)?,
         ))),
-        ("core.text", "is_numeric") => Ok(CtValue::Bool(super::super::TextLite::is_numeric(as_string(
-            one(0)?,
-            span,
-        )?))),
+        ("core.text", "is_numeric") => Ok(CtValue::Bool(super::super::TextLite::is_numeric(
+            as_string(one(0)?, span)?,
+        ))),
         ("core.text", "is_whitespace") => Ok(CtValue::Bool(super::super::TextLite::is_whitespace(
             as_string(one(0)?, span)?,
         ))),
@@ -1417,18 +1408,24 @@ pub fn apply_core_call_with_type(
                     .collect(),
             ))
         }
-        ("core.text", "trim") => Ok(CtValue::Str(super::super::TextLite::trim(as_string(one(0)?, span)?))),
+        ("core.text", "trim") => Ok(CtValue::Str(super::super::TextLite::trim(as_string(
+            one(0)?,
+            span,
+        )?))),
         ("core.text", "trim_start") => Ok(CtValue::Str(super::super::TextLite::trim_start(
             as_string(one(0)?, span)?,
         ))),
-        ("core.text", "trim_end") => Ok(CtValue::Str(super::super::TextLite::trim_end(
-            as_string(one(0)?, span)?,
-        ))),
+        ("core.text", "trim_end") => Ok(CtValue::Str(super::super::TextLite::trim_end(as_string(
+            one(0)?,
+            span,
+        )?))),
         ("core.text", "pad_start") => {
             let s = as_string(one(0)?, span)?.to_string();
             let w = as_int(one(1)?, span)?;
             let fill = as_string(one(2)?, span)?.to_string();
-            Ok(CtValue::Str(super::super::TextLite::pad_start(&s, w, &fill)))
+            Ok(CtValue::Str(super::super::TextLite::pad_start(
+                &s, w, &fill,
+            )))
         }
         ("core.text", "pad_end") => {
             let s = as_string(one(0)?, span)?.to_string();
@@ -1451,7 +1448,9 @@ pub fn apply_core_call_with_type(
                     .collect::<Result<Vec<_>, _>>()?,
                 _ => return Err(unsupported("core.text.starts_any: non-list argument", span)),
             };
-            Ok(CtValue::Bool(super::super::TextLite::starts_any(&s, &prefixes)))
+            Ok(CtValue::Bool(super::super::TextLite::starts_any(
+                &s, &prefixes,
+            )))
         }
         ("core.text", "ends_any") => {
             let s = as_string(one(0)?, span)?.to_string();
@@ -1462,7 +1461,9 @@ pub fn apply_core_call_with_type(
                     .collect::<Result<Vec<_>, _>>()?,
                 _ => return Err(unsupported("core.text.ends_any: non-list argument", span)),
             };
-            Ok(CtValue::Bool(super::super::TextLite::ends_any(&s, &suffixes)))
+            Ok(CtValue::Bool(super::super::TextLite::ends_any(
+                &s, &suffixes,
+            )))
         }
         ("core.text", "char_indices") => Ok(CtValue::List(
             super::super::TextLite::char_indices(as_string(one(0)?, span)?)
@@ -1477,7 +1478,9 @@ pub fn apply_core_call_with_type(
         ("core.event", "scope") => Ok(crate::Comptime::core_event_scope()),
         ("core.event", "policy_sync") => Ok(crate::Comptime::core_event_policy_sync()),
         ("core.event", "new") => Ok(crate::Comptime::core_event_new()),
-        ("core.event", "with_policy") => Ok(crate::Comptime::core_event_with_policy(one(0)?.clone())),
+        ("core.event", "with_policy") => {
+            Ok(crate::Comptime::core_event_with_policy(one(0)?.clone()))
+        }
         ("core.event", "hook") => Ok(crate::Comptime::core_event_hook(one(0)?.clone())),
         ("core.event", "decision_hook") => {
             Ok(crate::Comptime::core_event_decision_hook(one(0)?.clone()))
@@ -1500,7 +1503,10 @@ pub fn apply_core_call_with_type(
             // comptime interpreter has no runtime log-effect seam, so claiming
             // this call would silently drop observable behavior. Stop at the
             // honest boundary; default dev transparently executes the AOT TIR.
-            Err(unsupported("JSON lenient decode coercion audit effects", span))
+            Err(unsupported(
+                "JSON lenient decode coercion audit effects",
+                span,
+            ))
         }
         ("core.encoding.json", "to_string") => {
             let v = one(0)?;
@@ -1536,9 +1542,9 @@ pub fn apply_core_call_with_type(
                 Ok(CtValue::Str(super::super::EncodingLite::json_canonical(v)))
             }
         }
-        ("core.encoding.json", "events") => {
-            Ok(CtValue::Str(super::super::EncodingLite::json_events(one(0)?)))
-        }
+        ("core.encoding.json", "events") => Ok(CtValue::Str(
+            super::super::EncodingLite::json_events(one(0)?),
+        )),
         // --- core.encoding.jsonl (ported verbatim, `EncodingLite.rs`) ---
         ("core.encoding.jsonl", "parse") => {
             let text = as_string(one(0)?, span)?;
@@ -1550,9 +1556,16 @@ pub fn apply_core_call_with_type(
         ("core.encoding.jsonl", "to_string") => {
             let rows = match one(0)? {
                 CtValue::List(xs) => xs.clone(),
-                _ => return Err(unsupported("core.encoding.jsonl.to_string: expected a list", span)),
+                _ => {
+                    return Err(unsupported(
+                        "core.encoding.jsonl.to_string: expected a list",
+                        span,
+                    ))
+                }
             };
-            Ok(CtValue::Str(super::super::EncodingLite::jsonl_render(&rows)))
+            Ok(CtValue::Str(super::super::EncodingLite::jsonl_render(
+                &rows,
+            )))
         }
         // --- core.encoding.csv (ported verbatim, `EncodingLite.rs`) ---
         ("core.encoding.csv", "parse") => {
@@ -1584,9 +1597,9 @@ pub fn apply_core_call_with_type(
                 Err(e) => Ok(CtValue::failed(Box::new(e))),
             }
         }
-        ("core.encoding.toml", "to_string") => {
-            Ok(CtValue::Str(super::super::EncodingLite::toml_render(one(0)?)))
-        }
+        ("core.encoding.toml", "to_string") => Ok(CtValue::Str(
+            super::super::EncodingLite::toml_render(one(0)?),
+        )),
         // --- core.encoding.yaml (ported verbatim, `EncodingLite.rs`) ---
         ("core.encoding.yaml", "parse") => {
             let text = as_string(one(0)?, span)?;
@@ -1595,34 +1608,40 @@ pub fn apply_core_call_with_type(
                 Err(e) => Ok(CtValue::failed(Box::new(e))),
             }
         }
-        ("core.encoding.yaml", "to_string") => {
-            Ok(CtValue::Str(super::super::EncodingLite::yaml_render(one(0)?)))
-        }
+        ("core.encoding.yaml", "to_string") => Ok(CtValue::Str(
+            super::super::EncodingLite::yaml_render(one(0)?),
+        )),
         // --- core.encoding.xml (CtValue adapters over XmlKernel) ---
         ("core.encoding.xml", "parse") => {
             let text = as_string(one(0)?, span)?;
             match super::super::EncodingLite::xml_parse(text) {
                 Ok(v) => Ok(CtValue::Present(Box::new(v))),
-                Err(e) => Ok(CtValue::failed(Box::new(super::super::EncodingLite::xml_error_value(e)))),
+                Err(e) => Ok(CtValue::failed(Box::new(
+                    super::super::EncodingLite::xml_error_value(e),
+                ))),
             }
         }
         ("core.encoding.xml", "parse_with") => {
             let text = as_string(one(0)?, span)?;
             match super::super::EncodingLite::xml_parse_with(text, one(1)?) {
                 Ok(v) => Ok(CtValue::Present(Box::new(v))),
-                Err(e) => Ok(CtValue::failed(Box::new(super::super::EncodingLite::xml_error_value(e)))),
+                Err(e) => Ok(CtValue::failed(Box::new(
+                    super::super::EncodingLite::xml_error_value(e),
+                ))),
             }
         }
         ("core.encoding.xml", "parse_bytes") => {
             let bytes = as_bytes(one(0)?, span)?;
             match super::super::EncodingLite::xml_parse_bytes(&bytes, args.get(1)) {
                 Ok(v) => Ok(CtValue::Present(Box::new(v))),
-                Err(e) => Ok(CtValue::failed(Box::new(super::super::EncodingLite::xml_source_error_value(e)))),
+                Err(e) => Ok(CtValue::failed(Box::new(
+                    super::super::EncodingLite::xml_source_error_value(e),
+                ))),
             }
         }
-        ("core.encoding.xml", "to_string") => {
-            Ok(CtValue::Str(super::super::EncodingLite::xml_render(one(0)?)))
-        }
+        ("core.encoding.xml", "to_string") => Ok(CtValue::Str(
+            super::super::EncodingLite::xml_render(one(0)?),
+        )),
         ("core.encoding.xml", "to_bytes") => {
             match super::super::EncodingLite::xml_to_bytes(one(0)?, args.get(1)) {
                 Ok(bytes) => Ok(CtValue::Present(Box::new(CtValue::Bytes(bytes)))),
@@ -1630,12 +1649,10 @@ pub fn apply_core_call_with_type(
             }
         }
         // D-ENCXML-PROJECTION1=A: focused helpers (shared foundation projection).
-        ("core.encoding.xml", "root") => {
-            match super::super::EncodingLite::xml_root(one(0)?) {
-                Ok(v) => Ok(CtValue::Present(Box::new(v))),
-                Err(e) => Ok(CtValue::failed(Box::new(e))),
-            }
-        }
+        ("core.encoding.xml", "root") => match super::super::EncodingLite::xml_root(one(0)?) {
+            Ok(v) => Ok(CtValue::Present(Box::new(v))),
+            Err(e) => Ok(CtValue::failed(Box::new(e))),
+        },
         ("core.encoding.xml", "expanded_name") => {
             match super::super::EncodingLite::xml_expanded_name(one(0)?) {
                 Ok(v) => Ok(CtValue::Present(Box::new(v))),
@@ -1691,11 +1708,9 @@ pub fn apply_core_call_with_type(
                 ))),
             }
         }
-        ("core.encoding.cbor", "encode") => {
-            super::super::EncodingLite::cbor_encode(one(0)?)
-                .map(CtValue::Bytes)
-                .map_err(|error| unsupported(&error.reason, span))
-        }
+        ("core.encoding.cbor", "encode") => super::super::EncodingLite::cbor_encode(one(0)?)
+            .map(CtValue::Bytes)
+            .map_err(|error| unsupported(&error.reason, span)),
         ("core.encoding.cbor", "decode") => {
             let bytes = as_bytes(one(0)?, span)?;
             let options = super::super::EncodingLite::cbor_safe_options();
@@ -1708,9 +1723,7 @@ pub fn apply_core_call_with_type(
         // Runtime-only clock reads stay on the same Prelude time kernel as
         // AOT/JIT. The fold gate rejects them before this adapter is reached.
         ("core.time", "now") => Ok(CtValue::Int(time_deadline_kernel::jet_std_time_now())),
-        ("core.time", "now_utc") => {
-            Ok(runtime_datetime_value(time_kernel::JetDateTime::now()))
-        }
+        ("core.time", "now_utc") => Ok(runtime_datetime_value(time_kernel::JetDateTime::now())),
         ("core.time", "today") => Ok(runtime_date_value(time_kernel::JetDate::today_utc())),
         ("core.time", "instant") => Ok(CtValue::Struct {
             type_name: "Instant".to_string(),
@@ -1722,13 +1735,16 @@ pub fn apply_core_call_with_type(
         ("core.time", "sleep") => {
             let nanos = match one(0)? {
                 CtValue::Struct { type_name, fields }
-                    if type_name == crate::Syntax::DURATION_TYPE => fields
+                    if type_name == crate::Syntax::DURATION_TYPE =>
+                {
+                    fields
                         .iter()
                         .find_map(|(name, value)| match (name.as_str(), value) {
                             ("ns", CtValue::Int(value)) => Some(*value),
                             _ => None,
                         })
-                        .ok_or_else(|| unsupported("malformed Duration value", span))?,
+                        .ok_or_else(|| unsupported("malformed Duration value", span))?
+                }
                 _ => return Err(unsupported("time.sleep expects a Duration", span)),
             };
             time_deadline_kernel::jet_std_time_sleep_duration_ns(nanos);
@@ -1737,13 +1753,16 @@ pub fn apply_core_call_with_type(
         ("core.task", "timeout") => {
             let nanos = match one(0)? {
                 CtValue::Struct { type_name, fields }
-                    if type_name == crate::Syntax::DURATION_TYPE => fields
+                    if type_name == crate::Syntax::DURATION_TYPE =>
+                {
+                    fields
                         .iter()
                         .find_map(|(name, value)| match (name.as_str(), value) {
                             ("ns", CtValue::Int(value)) => Some(*value),
                             _ => None,
                         })
-                        .ok_or_else(|| unsupported("malformed Duration value", span))?,
+                        .ok_or_else(|| unsupported("malformed Duration value", span))?
+                }
                 _ => return Err(unsupported("task.timeout expects a Duration", span)),
             };
             time_deadline_kernel::jet_task_timeout_duration_ns(nanos);
@@ -1776,10 +1795,7 @@ pub fn apply_core_call_with_type(
             jet_foundation::RegexSyntax::validate(pattern).map_err(|error| {
                 Diagnostic::error(
                     "E0152",
-                    format!(
-                        "this regex pattern is invalid at position {}",
-                        error.offset
-                    ),
+                    format!("this regex pattern is invalid at position {}", error.offset),
                     error.reason,
                     "fix the pattern at the reported position".to_string(),
                     Some(span),
@@ -1882,9 +1898,9 @@ pub fn apply_core_call_with_type(
         ("core.math.random", "normal") => {
             let mean = as_float(one(0)?, span)?;
             let stddev = as_float(one(1)?, span)?;
-            Ok(CtValue::Float(CtFloat::f64(
-                ambient_random_kernel::normal(mean, stddev),
-            )))
+            Ok(CtValue::Float(CtFloat::f64(ambient_random_kernel::normal(
+                mean, stddev,
+            ))))
         }
         ("core.math.random", "exponential") => {
             let lambda = as_float(one(0)?, span)?;
@@ -1957,12 +1973,7 @@ pub fn apply_core_call_with_type(
         ("core.crypto.random", "bytes") => {
             let count = match one(0)? {
                 CtValue::Int(value) => *value,
-                _ => {
-                    return Err(unsupported(
-                        "crypto.random.bytes expects an Int",
-                        span,
-                    ))
-                }
+                _ => return Err(unsupported("crypto.random.bytes expects an Int", span)),
             };
             crypto_entropy_kernel::jet_crypto_entropy_bytes(count)
                 .map(CtValue::Bytes)
@@ -2082,15 +2093,17 @@ pub fn apply_core_call_with_type(
             let allow_whitespace = args_bool(1, false)?;
             let allow_missing_padding = args_bool(2, false)?;
             let edition = jet_foundation::PackageEdition::package_edition();
-            Ok(match jet_foundation::base_encoding_dispatch::decode_base64(
-                &edition,
-                s,
-                allow_whitespace,
-                allow_missing_padding,
-            ) {
-                Ok(bytes) => CtValue::Present(Box::new(CtValue::Bytes(bytes))),
-                Err(error) => CtValue::failed(Box::new(CtValue::Str(error))),
-            })
+            Ok(
+                match jet_foundation::base_encoding_dispatch::decode_base64(
+                    &edition,
+                    s,
+                    allow_whitespace,
+                    allow_missing_padding,
+                ) {
+                    Ok(bytes) => CtValue::Present(Box::new(CtValue::Bytes(bytes))),
+                    Err(error) => CtValue::failed(Box::new(CtValue::Str(error))),
+                },
+            )
         }
         // --- core.encoding.base64 URL-safe variant (pure; mirrors AOT's
         // `jet_std_b64url_*`, EncodingCodecs.rs — the same alphabet with
@@ -2098,24 +2111,26 @@ pub fn apply_core_call_with_type(
         // parity: include path=crates/jet-codegen/src/Prelude/Core/EncodingBase.rs
         ("core.encoding.base64", "encode_url") => {
             let bytes = as_bytes(one(0)?, span)?;
-            Ok(CtValue::Str(
-                encoding_base_kernel::jet_std_b64url_encode(&bytes),
-            ))
+            Ok(CtValue::Str(encoding_base_kernel::jet_std_b64url_encode(
+                &bytes,
+            )))
         }
         ("core.encoding.base64", "decode_url") => {
             let s = as_string(one(0)?, span)?;
             let allow_whitespace = args_bool(1, false)?;
             let allow_padding = args_bool(2, false)?;
             let edition = jet_foundation::PackageEdition::package_edition();
-            Ok(match jet_foundation::base_encoding_dispatch::decode_base64url(
-                &edition,
-                s,
-                allow_whitespace,
-                allow_padding,
-            ) {
-                Ok(bytes) => CtValue::Present(Box::new(CtValue::Bytes(bytes))),
-                Err(error) => CtValue::failed(Box::new(CtValue::Str(error))),
-            })
+            Ok(
+                match jet_foundation::base_encoding_dispatch::decode_base64url(
+                    &edition,
+                    s,
+                    allow_whitespace,
+                    allow_padding,
+                ) {
+                    Ok(bytes) => CtValue::Present(Box::new(CtValue::Bytes(bytes))),
+                    Err(error) => CtValue::failed(Box::new(CtValue::Str(error))),
+                },
+            )
         }
         // --- core.encoding.base32 (pure; mirrors AOT's `jet_std_base32_*`,
         // EncodingCodecs.rs, byte-for-byte — same alphabet, same bit-packing) ---
@@ -2130,16 +2145,18 @@ pub fn apply_core_call_with_type(
             let allow_missing_padding = args_bool(2, false)?;
             let allow_lowercase = args_bool(3, false)?;
             let edition = jet_foundation::PackageEdition::package_edition();
-            Ok(match jet_foundation::base_encoding_dispatch::decode_base32(
-                &edition,
-                s,
-                allow_whitespace,
-                allow_missing_padding,
-                allow_lowercase,
-            ) {
-                Ok(bytes) => CtValue::Present(Box::new(CtValue::Bytes(bytes))),
-                Err(e) => CtValue::failed(Box::new(CtValue::Str(e))),
-            })
+            Ok(
+                match jet_foundation::base_encoding_dispatch::decode_base32(
+                    &edition,
+                    s,
+                    allow_whitespace,
+                    allow_missing_padding,
+                    allow_lowercase,
+                ) {
+                    Ok(bytes) => CtValue::Present(Box::new(CtValue::Bytes(bytes))),
+                    Err(e) => CtValue::failed(Box::new(CtValue::Str(e))),
+                },
+            )
         }
         // --- D-URL1=A: core.net.url (pure RFC-3986-shaped parser, ported
         // verbatim from AOT's `JetURL`/`jet_url_*` in `UrlMime.rs` — see
@@ -2158,8 +2175,7 @@ pub fn apply_core_call_with_type(
             let query = as_string_rows(one(3)?, span)?;
             let fragment = as_string(one(4)?, span)?.to_string();
             Ok(
-                match super::super::UrlLite::from_parts(&scheme, &host, &path, &query, &fragment)
-                {
+                match super::super::UrlLite::from_parts(&scheme, &host, &path, &query, &fragment) {
                     Ok(u) => CtValue::Present(Box::new(url_parts_to_ct(&u))),
                     Err(e) => CtValue::failed(Box::new(CtValue::Str(e))),
                 },
@@ -2187,11 +2203,21 @@ pub fn apply_core_call_with_type(
                     };
                     let top = match get("top") {
                         Some(CtValue::Str(s)) => s,
-                        _ => return Err(unsupported("core.net.url.data: mime.top must be String", span)),
+                        _ => {
+                            return Err(unsupported(
+                                "core.net.url.data: mime.top must be String",
+                                span,
+                            ))
+                        }
                     };
                     let sub = match get("sub") {
                         Some(CtValue::Str(s)) => s,
-                        _ => return Err(unsupported("core.net.url.data: mime.sub must be String", span)),
+                        _ => {
+                            return Err(unsupported(
+                                "core.net.url.data: mime.sub must be String",
+                                span,
+                            ))
+                        }
                     };
                     let mut out = format!("{}/{}", top, sub);
                     if let Some(CtValue::List(params)) = get("params") {
@@ -2208,9 +2234,16 @@ pub fn apply_core_call_with_type(
                     }
                     out
                 }
-                _ => return Err(unsupported("core.net.url.data: first argument must be a Mime", span)),
+                _ => {
+                    return Err(unsupported(
+                        "core.net.url.data: first argument must be a Mime",
+                        span,
+                    ))
+                }
             };
-            Ok(url_parts_to_ct(&super::super::UrlLite::data(&rendered, text)))
+            Ok(url_parts_to_ct(&super::super::UrlLite::data(
+                &rendered, text,
+            )))
         }
         ("core.net.url", "query") => {
             let rows = as_string_rows(one(0)?, span)?;
@@ -2224,11 +2257,15 @@ pub fn apply_core_call_with_type(
                     )
                 })
                 .collect();
-            Ok(CtValue::Str(super::super::UrlLite::url_render_query(&pairs)))
+            Ok(CtValue::Str(super::super::UrlLite::url_render_query(
+                &pairs,
+            )))
         }
         ("core.net.url", "percent_encode") => {
             let s = as_string(one(0)?, span)?;
-            Ok(CtValue::Str(super::super::UrlLite::url_percent_encode(s, false)))
+            Ok(CtValue::Str(super::super::UrlLite::url_percent_encode(
+                s, false,
+            )))
         }
         ("core.net.url", "percent_decode") => {
             let s = as_string(one(0)?, span)?;
@@ -2241,9 +2278,8 @@ pub fn apply_core_call_with_type(
         ("core.compute", method) => super::super::ComputeLite::apply(method, &args, span),
         // D-SERVICE1=D / I9: typed `core.service` constructors use the same
         // Prelude adapter as tree methods; only the public module path differs.
-        ("core.service", "tree") => {
-            super::super::ServicesLite::apply("tree", &args, span)
-        }
+        ("core.service", "tree") => super::super::ServicesLite::apply("tree", &args, span),
+        ("core.service", "runtime") => super::super::ServicesLite::apply("runtime", &args, span),
         ("core.service", "state_store") => {
             super::super::ServicesLite::apply("state_store", &args, span)
         }
@@ -2262,9 +2298,7 @@ pub fn apply_core_call_with_type(
         ("core.service", "delivery_durable") => {
             super::super::ServicesLite::apply("delivery_durable", &args, span)
         }
-        ("core.services", method) => {
-            super::super::ServicesLite::apply(method, &args, span)
-        }
+        ("core.services", method) => super::super::ServicesLite::apply(method, &args, span),
         // D-AUTH1=A / I9: session batteries (JWT/PASETO stay on AOT/subset path).
         // Stateful store ops are Tier-2 (`is_tier2_core_call`) so pure
         // `evaluate_constant` cannot fold them into Ok(literals) while leaving
@@ -2309,10 +2343,7 @@ pub fn apply_core_call_with_type(
                     | "sync"
             ) =>
         {
-            if matches!(
-                method,
-                "auth" | "auth_oauth" | "auth_routes" | "auth_show"
-            ) {
+            if matches!(method, "auth" | "auth_oauth" | "auth_routes" | "auth_show") {
                 super::super::AuthLite::apply(method, &args, span)
             } else if method == "sync" {
                 super::super::SyncLite::apply(method, &args, span)
@@ -2421,12 +2452,10 @@ pub fn apply_core_call_with_type(
         )),
         ("core.data", "require_bridge") => {
             let provider = as_string(one(0)?, span)?.to_string();
-            Ok(
-                match data_kernel::jet_data_require_bridge(&provider) {
-                    Ok(()) => CtValue::Present(Box::new(CtValue::Unit)),
-                    Err(error) => CtValue::failed(Box::new(data_error_value(&error))),
-                },
-            )
+            Ok(match data_kernel::jet_data_require_bridge(&provider) {
+                Ok(()) => CtValue::Present(Box::new(CtValue::Unit)),
+                Err(error) => CtValue::failed(Box::new(data_error_value(&error))),
+            })
         }
         ("core.data", "bar_text") => {
             let groups = as_data_groups(one(0)?, span)?;

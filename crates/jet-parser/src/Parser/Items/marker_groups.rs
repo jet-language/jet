@@ -871,6 +871,11 @@ impl<'a> Parser<'a> {
         pub(in crate::Parser) fn marker_sequence_leads_to_function(&self) -> bool {
             if self.at_test_def()
                 || self.at_bench_def()
+                // `#Target(Web)` is the file default. It must be consumed by
+                // the top-level file-marker path before a following
+                // `#Target(JS|Wasm)` can attach to a function.
+                || (self.marker_name_at(self.pos) == Some(Syntax::MARKER_TARGET)
+                    && self.target_marker_selects_file_web_at(self.pos + 1))
                 // D-MARK-META1=B: maturity is a `#Meta` field, not a
                 // standalone marker. Let the top-level parser issue its
                 // ordinary unknown-marker diagnostic instead of classifying
@@ -1029,6 +1034,11 @@ impl<'a> Parser<'a> {
 
         pub(super) fn file_marker_stack_starts_here(&self) -> bool {
             if self.marker_sequence_leads_to_function() {
+                return false;
+            }
+            if self.marker_name_at(self.pos) == Some(Syntax::MARKER_TARGET)
+                && self.target_marker_selects_file_web_at(self.pos + 1)
+            {
                 return false;
             }
             if self.at_marker_list() {
@@ -1563,6 +1573,9 @@ impl<'a> Parser<'a> {
                     // Keep it in `type_markers`; `attach_type_markers` projects
                     // its variant into `StructDef.layout` below.
                     Syntax::MARKER_LAYOUT => {}
+                    // D-STRUCT-LIFE1=A: lifecycle metadata is retained on the
+                    // type for sema/formatter consumers, not lowered as a derive.
+                    Syntax::MARKER_DEPRECATED => {}
                     // Any other name is a derive-trait: the D-VERDICT-732-1
                     // (formerly D-MARKERMOVE3) built-ins (`#[Debug]`,
                     // `#[Summarize]`, `#[Comparable]`) or a user derive-trait name.

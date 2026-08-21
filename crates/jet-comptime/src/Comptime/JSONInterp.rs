@@ -1,8 +1,8 @@
 //! JSON rendering and value conversion for the comptime/REPL interpreter.
 //! Parsing uses the same foundation-backed Prelude kernel as AOT and JIT.
 
-use crate::AST::{CtFloat, CtKey, CtValue};
 use crate::Comptime::Builtins::exact_int_value;
+use crate::AST::{CtFloat, CtKey, CtValue};
 
 fn from_json_int(value: i64) -> CtValue {
     exact_int_value(crate::Numeric::CtBigInt::from_int(value))
@@ -94,10 +94,7 @@ fn from_typed_ordered_json(value: jet_foundation::EncodingJson::Value) -> CtValu
         jet_foundation::EncodingJson::Value::Array(values) => json_variant(
             "Array",
             Some(CtValue::List(
-                values
-                    .into_iter()
-                    .map(from_typed_ordered_json)
-                    .collect(),
+                values.into_iter().map(from_typed_ordered_json).collect(),
             )),
         ),
         jet_foundation::EncodingJson::Value::Int(_)
@@ -147,9 +144,7 @@ pub(super) fn json_payload<'a>(v: &'a CtValue, variant: &str) -> Option<&'a CtVa
     }
 }
 
-pub(super) fn parse_json(
-    text: &str,
-) -> Result<CtValue, jet_foundation::EncodingJson::Error> {
+pub(super) fn parse_json(text: &str) -> Result<CtValue, jet_foundation::EncodingJson::Error> {
     jet_foundation::EncodingJson::parse_json(text, false).map(from_json)
 }
 
@@ -162,8 +157,7 @@ pub(super) fn parse_json_ordered(
 pub(super) fn parse_json_typed_ordered(
     text: &str,
 ) -> Result<CtValue, jet_foundation::EncodingJson::Error> {
-    jet_foundation::EncodingJson::parse_json_exact_numbers(text, false)
-        .map(from_typed_ordered_json)
+    jet_foundation::EncodingJson::parse_json_exact_numbers(text, false).map(from_typed_ordered_json)
 }
 
 pub(super) fn json_error_value(e: jet_foundation::EncodingJson::Error) -> CtValue {
@@ -203,13 +197,16 @@ pub(super) fn render_ordered_datatree(v: &CtValue, pretty: bool, depth: usize) -
         } if matches!(
             type_name.as_str(),
             "DataTree" | "JSON" | "TOML" | "YAML" | "CSV"
-        ) => match variant.as_str() {
-            "Null" => "null".to_string(),
-            _ => args
-                .first()
-                .map(|(_, payload)| render_ordered_datatree(payload, pretty, depth))
-                .unwrap_or_else(|| "null".to_string()),
-        },
+        ) =>
+        {
+            match variant.as_str() {
+                "Null" => "null".to_string(),
+                _ => args
+                    .first()
+                    .map(|(_, payload)| render_ordered_datatree(payload, pretty, depth))
+                    .unwrap_or_else(|| "null".to_string()),
+            }
+        }
         CtValue::List(items) => {
             if items.is_empty() {
                 return "[]".to_string();
@@ -228,20 +225,13 @@ pub(super) fn render_ordered_datatree(v: &CtValue, pretty: bool, depth: usize) -
             let end = "  ".repeat(depth);
             let parts = items
                 .iter()
-                .map(|item| {
-                    format!(
-                        "{}{}",
-                        pad,
-                        render_ordered_datatree(item, true, depth + 1)
-                    )
-                })
+                .map(|item| format!("{}{}", pad, render_ordered_datatree(item, true, depth + 1)))
                 .collect::<Vec<_>>();
             format!("[\n{}\n{}]", parts.join(",\n"), end)
         }
-        CtValue::Struct {
-            type_name,
-            fields,
-        } if type_name == "JSONObject" => render_ordered_object(fields, pretty, depth),
+        CtValue::Struct { type_name, fields } if type_name == "JSONObject" => {
+            render_ordered_object(fields, pretty, depth)
+        }
         _ => render_json_pretty(v, pretty, depth),
     }
 }
@@ -295,13 +285,15 @@ pub(super) fn render_json_pretty(v: &CtValue, pretty: bool, depth: usize) -> Str
             type_name.as_str(),
             "DataTree" | "JSON" | "TOML" | "YAML" | "CSV"
         ) =>
-        match variant.as_str() {
-            "Null" => "null".to_string(),
-            _ => match args.first() {
-                Some((_, payload)) => render_json_pretty(payload, pretty, depth),
-                None => "null".to_string(),
-            },
-        },
+        {
+            match variant.as_str() {
+                "Null" => "null".to_string(),
+                _ => match args.first() {
+                    Some((_, payload)) => render_json_pretty(payload, pretty, depth),
+                    None => "null".to_string(),
+                },
+            }
+        }
         CtValue::Unit => "null".to_string(),
         CtValue::Bool(b) => b.to_string(),
         CtValue::Int(n) => n.to_string(),
@@ -362,10 +354,7 @@ pub(super) fn render_json_pretty(v: &CtValue, pretty: bool, depth: usize) -> Str
         }
         // EncodingLite Object payload: insertion-ordered `Struct` (AOT DataTree).
         // Sort keys so `json.canonical` matches BTreeMap / AOT sorted form.
-        CtValue::Struct {
-            type_name,
-            fields,
-        } if type_name == "JSONObject" => {
+        CtValue::Struct { type_name, fields } if type_name == "JSONObject" => {
             let mut fields = fields.clone();
             fields.sort_by(|a, b| a.0.cmp(&b.0));
             if fields.is_empty() {
@@ -385,7 +374,12 @@ pub(super) fn render_json_pretty(v: &CtValue, pretty: bool, depth: usize) -> Str
             let parts: Vec<String> = fields
                 .iter()
                 .map(|(k, v)| {
-                    format!("{}{}: {}", pad, quote_json(k), render_json_pretty(v, true, depth + 1))
+                    format!(
+                        "{}{}: {}",
+                        pad,
+                        quote_json(k),
+                        render_json_pretty(v, true, depth + 1)
+                    )
                 })
                 .collect();
             format!("{{\n{}\n{}}}", parts.join(",\n"), end)

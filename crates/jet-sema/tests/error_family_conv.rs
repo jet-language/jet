@@ -36,6 +36,7 @@ fn diags(src: &str) -> Vec<Diagnostic> {
             default_target: prog.default_target,
             html_path: prog.html_path.clone(),
             policy_declarations: prog.policy_declarations.clone(),
+            user_policy_declarations: prog.user_policy_declarations.clone(),
             rule_facts: std::mem::take(&mut prog.rule_facts),
         }],
         parse_teaching: Vec::new(),
@@ -67,7 +68,7 @@ fn core_json_error_converts_into_default_err() {
     let found = diags(
         r#"
 use core.encoding.json as json
-fn run() ? {
+fn run() ! {
     data :: json.decode("{}")?
     print(data)
 }

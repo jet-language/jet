@@ -5,9 +5,9 @@ use crate::Diagnostics::{Diagnostic, Span};
 
 #[allow(dead_code)]
 mod range_semantics {
-    use jet_foundation::StructuralDebug::jet_debug_range;
     #[allow(unused_imports)]
     pub use jet_foundation::Outcome::*;
+    use jet_foundation::StructuralDebug::jet_debug_range;
     include!("../../../jet-codegen/src/Prelude/Core/RangeBounds.rs");
 }
 
@@ -61,7 +61,10 @@ pub fn exact_big(value: &CtValue) -> Option<crate::Numeric::CtBigInt> {
 pub fn exact_int_value(value: crate::Numeric::CtBigInt) -> CtValue {
     const SMALL_MIN: i64 = -(1i64 << 62);
     const SMALL_MAX: i64 = (1i64 << 62) - 1;
-    match value.try_i64().filter(|value| (SMALL_MIN..=SMALL_MAX).contains(value)) {
+    match value
+        .try_i64()
+        .filter(|value| (SMALL_MIN..=SMALL_MAX).contains(value))
+    {
         Some(value) => CtValue::Int(value),
         None => CtValue::BigInt(value),
     }
@@ -96,10 +99,12 @@ fn canonical_time_field(value: &CtValue, type_name: &str, field: &str) -> Option
         return None;
     };
     (actual == type_name).then(|| {
-        fields.iter().find_map(|(name, value)| match (name.as_str(), value) {
-            (wanted, CtValue::Int(value)) if wanted == field => Some(*value),
-            _ => None,
-        })
+        fields
+            .iter()
+            .find_map(|(name, value)| match (name.as_str(), value) {
+                (wanted, CtValue::Int(value)) if wanted == field => Some(*value),
+                _ => None,
+            })
     })?
 }
 
@@ -118,7 +123,9 @@ fn canonical_instant(value: i64) -> CtValue {
 }
 
 pub(crate) fn authority_value_from_rights(rights: Vec<String>) -> CtValue {
-    authority_value(authority_semantics::jet_authority_rights_from_strings(rights))
+    authority_value(authority_semantics::jet_authority_rights_from_strings(
+        rights,
+    ))
 }
 
 fn authority_value(rights: std::collections::BTreeSet<String>) -> CtValue {
@@ -131,29 +138,25 @@ fn authority_value(rights: std::collections::BTreeSet<String>) -> CtValue {
     }
 }
 
-pub(crate) fn authority_holds(
-    value: &CtValue,
-) -> Option<jet_foundation::Authority::Holds> {
+pub(crate) fn authority_holds(value: &CtValue) -> Option<jet_foundation::Authority::Holds> {
     let CtValue::Struct { type_name, fields } = value else {
         return None;
     };
     if type_name != crate::Syntax::TYPE_ABILITIES {
         return None;
     }
-    fields
-        .iter()
-        .find_map(|(name, value)| {
-            (name == "rights").then(|| match value {
-                CtValue::List(values) => values
-                    .iter()
-                    .filter_map(|value| match value {
-                        CtValue::Str(right) => Some(right.clone()),
-                        _ => None,
-                    })
-                    .collect(),
-                _ => jet_foundation::Authority::Holds::new(),
-            })
+    fields.iter().find_map(|(name, value)| {
+        (name == "rights").then(|| match value {
+            CtValue::List(values) => values
+                .iter()
+                .filter_map(|value| match value {
+                    CtValue::Str(right) => Some(right.clone()),
+                    _ => None,
+                })
+                .collect(),
+            _ => jet_foundation::Authority::Holds::new(),
         })
+    })
 }
 
 fn authority_rights(value: &CtValue) -> std::collections::BTreeSet<String> {
@@ -188,16 +191,18 @@ fn apply_authority_method(
     };
     let held = authority_rights(recv);
     if method == "with" {
-        return Some(match authority_semantics::jet_authority_with_right(&held, requested) {
-            Ok(rights) => Ok(authority_value(rights)),
-            Err(message) => Err(Diagnostic::error(
-                "E0712",
-                format!("this Abilities value cannot narrow to `{requested}`"),
-                "the requested right is not held by this Abilities value".to_string(),
-                format!("use a right already held by the Abilities value: {message}"),
-                Some(span),
-            )),
-        });
+        return Some(
+            match authority_semantics::jet_authority_with_right(&held, requested) {
+                Ok(rights) => Ok(authority_value(rights)),
+                Err(message) => Err(Diagnostic::error(
+                    "E0712",
+                    format!("this Abilities value cannot narrow to `{requested}`"),
+                    "the requested right is not held by this Abilities value".to_string(),
+                    format!("use a right already held by the Abilities value: {message}"),
+                    Some(span),
+                )),
+            },
+        );
     }
     Some(Ok(authority_value(
         authority_semantics::jet_authority_without_right(&held, requested),
@@ -213,12 +218,7 @@ fn canonical_time_cmp(left: i64, right: i64) -> std::cmp::Ordering {
 }
 
 /// Binary operators with runtime-identical semantics.
-pub fn eval_binop(
-    op: BinOp,
-    l: CtValue,
-    r: CtValue,
-    span: Span,
-) -> Result<CtValue, Diagnostic> {
+pub fn eval_binop(op: BinOp, l: CtValue, r: CtValue, span: Span) -> Result<CtValue, Diagnostic> {
     use CtValue::*;
     match (op, l, r) {
         (op @ (BinOp::Add | BinOp::Sub), left, right)
@@ -229,7 +229,8 @@ pub fn eval_binop(
                     Struct { type_name: right_name, .. }
                 ) if left_name == crate::Syntax::DURATION_TYPE
                     && right_name == crate::Syntax::DURATION_TYPE
-            ) => {
+            ) =>
+        {
             let left = canonical_time_field(&left, crate::Syntax::DURATION_TYPE, "ns")
                 .ok_or_else(|| unsupported("malformed Duration value", span))?;
             let right = canonical_time_field(&right, crate::Syntax::DURATION_TYPE, "ns")
@@ -249,12 +250,17 @@ pub fn eval_binop(
                     Struct { type_name: right_name, .. }
                 ) if left_name == crate::Syntax::TYPE_INSTANT
                     && right_name == crate::Syntax::DURATION_TYPE
-            ) => Ok(canonical_instant(time_semantics::jet_time_instant_add_duration_ns(
-                canonical_time_field(&left, crate::Syntax::TYPE_INSTANT, "start_ns")
-                    .ok_or_else(|| unsupported("malformed Instant value", span))?,
-                canonical_time_field(&right, crate::Syntax::DURATION_TYPE, "ns")
-                    .ok_or_else(|| unsupported("malformed Duration value", span))?,
-            ))),
+            ) =>
+        {
+            Ok(canonical_instant(
+                time_semantics::jet_time_instant_add_duration_ns(
+                    canonical_time_field(&left, crate::Syntax::TYPE_INSTANT, "start_ns")
+                        .ok_or_else(|| unsupported("malformed Instant value", span))?,
+                    canonical_time_field(&right, crate::Syntax::DURATION_TYPE, "ns")
+                        .ok_or_else(|| unsupported("malformed Duration value", span))?,
+                ),
+            ))
+        }
         (BinOp::Add, left, right)
             if matches!(
                 (&left, &right),
@@ -263,12 +269,17 @@ pub fn eval_binop(
                     Struct { type_name: right_name, .. }
                 ) if left_name == crate::Syntax::DURATION_TYPE
                     && right_name == crate::Syntax::TYPE_INSTANT
-            ) => Ok(canonical_instant(time_semantics::jet_time_instant_add_duration_ns(
-                canonical_time_field(&right, crate::Syntax::TYPE_INSTANT, "start_ns")
-                    .ok_or_else(|| unsupported("malformed Instant value", span))?,
-                canonical_time_field(&left, crate::Syntax::DURATION_TYPE, "ns")
-                    .ok_or_else(|| unsupported("malformed Duration value", span))?,
-            ))),
+            ) =>
+        {
+            Ok(canonical_instant(
+                time_semantics::jet_time_instant_add_duration_ns(
+                    canonical_time_field(&right, crate::Syntax::TYPE_INSTANT, "start_ns")
+                        .ok_or_else(|| unsupported("malformed Instant value", span))?,
+                    canonical_time_field(&left, crate::Syntax::DURATION_TYPE, "ns")
+                        .ok_or_else(|| unsupported("malformed Duration value", span))?,
+                ),
+            ))
+        }
         (BinOp::Sub, left, right)
             if matches!(
                 (&left, &right),
@@ -277,12 +288,17 @@ pub fn eval_binop(
                     Struct { type_name: right_name, .. }
                 ) if left_name == crate::Syntax::TYPE_INSTANT
                     && right_name == crate::Syntax::DURATION_TYPE
-            ) => Ok(canonical_instant(time_semantics::jet_time_instant_sub_duration_ns(
-                canonical_time_field(&left, crate::Syntax::TYPE_INSTANT, "start_ns")
-                    .ok_or_else(|| unsupported("malformed Instant value", span))?,
-                canonical_time_field(&right, crate::Syntax::DURATION_TYPE, "ns")
-                    .ok_or_else(|| unsupported("malformed Duration value", span))?,
-            ))),
+            ) =>
+        {
+            Ok(canonical_instant(
+                time_semantics::jet_time_instant_sub_duration_ns(
+                    canonical_time_field(&left, crate::Syntax::TYPE_INSTANT, "start_ns")
+                        .ok_or_else(|| unsupported("malformed Instant value", span))?,
+                    canonical_time_field(&right, crate::Syntax::DURATION_TYPE, "ns")
+                        .ok_or_else(|| unsupported("malformed Duration value", span))?,
+                ),
+            ))
+        }
         (BinOp::Sub, left, right)
             if matches!(
                 (&left, &right),
@@ -291,31 +307,63 @@ pub fn eval_binop(
                     Struct { type_name: right_name, .. }
                 ) if left_name == crate::Syntax::TYPE_INSTANT
                     && right_name == crate::Syntax::TYPE_INSTANT
-            ) => Ok(canonical_duration(time_semantics::jet_time_instant_difference_ns(
-                canonical_time_field(&left, crate::Syntax::TYPE_INSTANT, "start_ns")
-                    .ok_or_else(|| unsupported("malformed Instant value", span))?,
-                canonical_time_field(&right, crate::Syntax::TYPE_INSTANT, "start_ns")
-                    .ok_or_else(|| unsupported("malformed Instant value", span))?,
-            ))),
-        (op @ (BinOp::Eq | BinOp::Ne | BinOp::Lt | BinOp::Gt | BinOp::Le | BinOp::Ge | BinOp::Compare), left, right)
-            if matches!(
-                (&left, &right),
-                (
-                    Struct { type_name: left_name, .. },
-                    Struct { type_name: right_name, .. }
-                ) if left_name == right_name
-                    && (left_name == crate::Syntax::DURATION_TYPE
-                        || left_name == crate::Syntax::TYPE_INSTANT)
-            ) => {
-            let field = if matches!(&left, Struct { type_name, .. } if type_name == crate::Syntax::DURATION_TYPE) {
+            ) =>
+        {
+            Ok(canonical_duration(
+                time_semantics::jet_time_instant_difference_ns(
+                    canonical_time_field(&left, crate::Syntax::TYPE_INSTANT, "start_ns")
+                        .ok_or_else(|| unsupported("malformed Instant value", span))?,
+                    canonical_time_field(&right, crate::Syntax::TYPE_INSTANT, "start_ns")
+                        .ok_or_else(|| unsupported("malformed Instant value", span))?,
+                ),
+            ))
+        }
+        (
+            op @ (BinOp::Eq
+            | BinOp::Ne
+            | BinOp::Lt
+            | BinOp::Gt
+            | BinOp::Le
+            | BinOp::Ge
+            | BinOp::Compare),
+            left,
+            right,
+        ) if matches!(
+            (&left, &right),
+            (
+                Struct { type_name: left_name, .. },
+                Struct { type_name: right_name, .. }
+            ) if left_name == right_name
+                && (left_name == crate::Syntax::DURATION_TYPE
+                    || left_name == crate::Syntax::TYPE_INSTANT)
+        ) =>
+        {
+            let field = if matches!(&left, Struct { type_name, .. } if type_name == crate::Syntax::DURATION_TYPE)
+            {
                 "ns"
             } else {
                 "start_ns"
             };
-            let left = canonical_time_field(&left, if field == "ns" { crate::Syntax::DURATION_TYPE } else { crate::Syntax::TYPE_INSTANT }, field)
-                .ok_or_else(|| unsupported("malformed Time value", span))?;
-            let right = canonical_time_field(&right, if field == "ns" { crate::Syntax::DURATION_TYPE } else { crate::Syntax::TYPE_INSTANT }, field)
-                .ok_or_else(|| unsupported("malformed Time value", span))?;
+            let left = canonical_time_field(
+                &left,
+                if field == "ns" {
+                    crate::Syntax::DURATION_TYPE
+                } else {
+                    crate::Syntax::TYPE_INSTANT
+                },
+                field,
+            )
+            .ok_or_else(|| unsupported("malformed Time value", span))?;
+            let right = canonical_time_field(
+                &right,
+                if field == "ns" {
+                    crate::Syntax::DURATION_TYPE
+                } else {
+                    crate::Syntax::TYPE_INSTANT
+                },
+                field,
+            )
+            .ok_or_else(|| unsupported("malformed Time value", span))?;
             let ordering = canonical_time_cmp(left, right);
             Ok(match op {
                 BinOp::Eq => Bool(ordering == std::cmp::Ordering::Equal),
@@ -337,9 +385,9 @@ pub fn eval_binop(
                 _ => unreachable!(),
             })
         }
-        (BinOp::Add, Str(left), Str(right)) => Ok(Str(
-            string_concat_semantics::jet_string_concat(&left, &right),
-        )),
+        (BinOp::Add, Str(left), Str(right)) => Ok(Str(string_concat_semantics::jet_string_concat(
+            &left, &right,
+        ))),
         // D-INTBIG1: default-Int arithmetic is exact. Small answers return to
         // CtValue::Int; only values outside the machine-word representation
         // remain in the shared limb carrier.
@@ -358,19 +406,25 @@ pub fn eval_binop(
         // D-INTDIV1=A: `/` answers the true quotient, so two whole numbers give
         // a Float. Sema has already moved both sides to Float in ordinary code;
         // this arm catches the comptime paths that reach the raw values.
-        (BinOp::Div, left, right)
-            if exact_big(&left).is_some() && exact_big(&right).is_some() =>
-        {
+        (BinOp::Div, left, right) if exact_big(&left).is_some() && exact_big(&right).is_some() => {
             let left = exact_big(&left).expect("whole-number dividend");
             let right = exact_big(&right).expect("whole-number divisor");
             if right.is_zero() {
                 Err(divide_by_zero(span))
             } else {
                 let left = left.to_string_rep().parse::<f64>().unwrap_or_else(|_| {
-                    if left.negative { f64::NEG_INFINITY } else { f64::INFINITY }
+                    if left.negative {
+                        f64::NEG_INFINITY
+                    } else {
+                        f64::INFINITY
+                    }
                 });
                 let right = right.to_string_rep().parse::<f64>().unwrap_or_else(|_| {
-                    if right.negative { f64::NEG_INFINITY } else { f64::INFINITY }
+                    if right.negative {
+                        f64::NEG_INFINITY
+                    } else {
+                        f64::INFINITY
+                    }
                 });
                 Ok(Float(crate::AST::CtFloat::F64(left / right)))
             }
@@ -392,9 +446,7 @@ pub fn eval_binop(
         }
         // D-MODSEM1=A: `%` is the floored modulo, whose answer takes the
         // divisor's sign; `%%` below is Rust's truncated remainder.
-        (BinOp::Mod, left, right)
-            if exact_big(&left).is_some() && exact_big(&right).is_some() =>
-        {
+        (BinOp::Mod, left, right) if exact_big(&left).is_some() && exact_big(&right).is_some() => {
             let left = exact_big(&left).expect("whole-number dividend");
             let right = exact_big(&right).expect("whole-number divisor");
             let Some((_, mut remainder)) = left.div_rem(&right) else {
@@ -405,9 +457,7 @@ pub fn eval_binop(
             }
             Ok(exact_int_value(remainder))
         }
-        (BinOp::Rem, left, right)
-            if exact_big(&left).is_some() && exact_big(&right).is_some() =>
-        {
+        (BinOp::Rem, left, right) if exact_big(&left).is_some() && exact_big(&right).is_some() => {
             let left = exact_big(&left).expect("whole-number dividend");
             let right = exact_big(&right).expect("whole-number divisor");
             let Some((_, remainder)) = left.div_rem(&right) else {
@@ -419,9 +469,7 @@ pub fn eval_binop(
         // range stops the build the way a multiplication does. A negative
         // exponent has no whole-number answer; sema types a written one as
         // Float, so one that reaches here came from a value it could not read.
-        (BinOp::Pow, left, right)
-            if exact_big(&left).is_some() && exact_big(&right).is_some() =>
-        {
+        (BinOp::Pow, left, right) if exact_big(&left).is_some() && exact_big(&right).is_some() => {
             let left = exact_big(&left).expect("whole-number base");
             let right = exact_big(&right).expect("whole-number exponent");
             let Some(exponent) = right.try_i64() else {
@@ -486,7 +534,11 @@ pub fn eval_binop(
         (BinOp::Shr, Int(_), Int(b)) if !(0..64).contains(&b) => Err(overflow("shift right", span)),
         (BinOp::Shl, Int(a), Int(b)) => Ok(Int(a << (b as u32))),
         (BinOp::Shr, Int(a), Int(b)) => Ok(Int(a >> (b as u32))),
-        (op @ (BinOp::Add | BinOp::Sub | BinOp::Mul | BinOp::Div | BinOp::Pow), Float(a), Float(b)) => a
+        (
+            op @ (BinOp::Add | BinOp::Sub | BinOp::Mul | BinOp::Div | BinOp::Pow),
+            Float(a),
+            Float(b),
+        ) => a
             .binop(op, b)
             .map(Float)
             .ok_or_else(|| unsupported("mixing float widths", span)),
@@ -601,11 +653,7 @@ mod tests {
     #[test]
     fn byte_storage_and_u8_list_compare_by_value() {
         let bytes = CtValue::Bytes(vec![0, 127, 255]);
-        let list = CtValue::List(vec![
-            CtValue::Int(0),
-            CtValue::Int(127),
-            CtValue::Int(255),
-        ]);
+        let list = CtValue::List(vec![CtValue::Int(0), CtValue::Int(127), CtValue::Int(255)]);
 
         assert_eq!(
             eval_binop(BinOp::Eq, bytes.clone(), list.clone(), Span::new(0, 0)).unwrap(),
@@ -624,20 +672,10 @@ mod tests {
     #[test]
     fn unequal_byte_storage_and_u8_list_do_not_compare_equal() {
         let bytes = CtValue::Bytes(vec![1, 2, 3]);
-        let different = CtValue::List(vec![
-            CtValue::Int(1),
-            CtValue::Int(2),
-            CtValue::Int(4),
-        ]);
+        let different = CtValue::List(vec![CtValue::Int(1), CtValue::Int(2), CtValue::Int(4)]);
 
         assert_eq!(
-            eval_binop(
-                BinOp::Eq,
-                bytes.clone(),
-                different.clone(),
-                Span::new(0, 0),
-            )
-            .unwrap(),
+            eval_binop(BinOp::Eq, bytes.clone(), different.clone(), Span::new(0, 0),).unwrap(),
             CtValue::Bool(false)
         );
         assert_eq!(
@@ -650,23 +688,11 @@ mod tests {
     fn ordering_then_keeps_the_first_non_equal_result() {
         let span = Span::new(0, 0);
         assert_eq!(
-            apply_method(
-                &ordering("Equal"),
-                "then",
-                vec![ordering("Greater")],
-                span,
-            )
-            .unwrap(),
+            apply_method(&ordering("Equal"), "then", vec![ordering("Greater")], span,).unwrap(),
             ordering("Greater")
         );
         assert_eq!(
-            apply_method(
-                &ordering("Less"),
-                "then",
-                vec![ordering("Greater")],
-                span,
-            )
-            .unwrap(),
+            apply_method(&ordering("Less"), "then", vec![ordering("Greater")], span,).unwrap(),
             ordering("Less")
         );
     }
@@ -693,11 +719,11 @@ pub fn cmp(a: CtValue, b: CtValue, span: Span) -> Result<std::cmp::Ordering, Dia
         (Bool(a), Bool(b)) => Ok(a.cmp(&b)),
         (Char(a), Char(b)) => Ok(a.cmp(&b)),
         (Str(a), Str(b)) => Ok(a.cmp(&b)),
-        (left, right) if exact_big(&left).is_some() && exact_big(&right).is_some() => Ok(
-            exact_big(&left)
+        (left, right) if exact_big(&left).is_some() && exact_big(&right).is_some() => {
+            Ok(exact_big(&left)
                 .expect("whole-number comparison")
-                .compare(&exact_big(&right).expect("whole-number comparison")),
-        ),
+                .compare(&exact_big(&right).expect("whole-number comparison")))
+        }
         _ => Err(unsupported("comparing these values", span)),
     }
 }
@@ -806,7 +832,12 @@ pub fn apply_static_type_method(
             (CtValue::Float(n), Type::Float32) => CtValue::Float(CtFloat::f32(n.as_f32())),
             (CtValue::Float(n), _) => CtValue::Int(n.trunc_i64()),
             (CtValue::Int(n), _) => CtValue::Int(n),
-            _ => return Some(Err(unsupported("numeric conversion with the wrong source type", span))),
+            _ => {
+                return Some(Err(unsupported(
+                    "numeric conversion with the wrong source type",
+                    span,
+                )))
+            }
         };
         let narrowing = match (int_kind(&source), int_kind(&target)) {
             (Some(src), Some(dst)) => {
@@ -817,7 +848,9 @@ pub fn apply_static_type_method(
             _ => false,
         };
         if narrowing {
-            let CtValue::Int(n) = converted else { unreachable!() };
+            let CtValue::Int(n) = converted else {
+                unreachable!()
+            };
             let (signed, bits) = int_kind(&target).unwrap();
             let (lo, hi) = crate::AST::int_range(signed, bits);
             return Some(Ok(if (lo..=hi).contains(&(n as i128)) {
@@ -895,10 +928,7 @@ pub fn apply_static_type_method(
                 Ok(text) => CtValue::Present(Box::new(CtValue::Str(text))),
                 Err(error) => CtValue::failed(Box::new(CtValue::Struct {
                     type_name: "UTF8Error".to_string(),
-                    fields: vec![(
-                        "message".to_string(),
-                        CtValue::Str(error.to_string()),
-                    )],
+                    fields: vec![("message".to_string(), CtValue::Str(error.to_string()))],
                 })),
             }))
         }
@@ -969,8 +999,7 @@ pub fn apply_mutating_with_type(
     }
     // D-DET1 / #777: Clock + seeded Rng mutate in place for TirBridge handles.
     let clock_next = if let CtValue::Struct { type_name, fields } = &*recv {
-        if type_name == crate::Syntax::CLOCK_TYPE && matches!(method, "tick" | "advance" | "wait")
-        {
+        if type_name == crate::Syntax::CLOCK_TYPE && matches!(method, "tick" | "advance" | "wait") {
             let now = fields
                 .iter()
                 .find_map(|(name, value)| match (name.as_str(), value) {
@@ -985,8 +1014,7 @@ pub fn apply_mutating_with_type(
                     Some(CtValue::Struct {
                         type_name,
                         fields: dfields,
-                    }) if type_name == crate::Syntax::DURATION_TYPE =>
-                    {
+                    }) if type_name == crate::Syntax::DURATION_TYPE => {
                         let millis = dfields
                             .iter()
                             .find_map(|(name, value)| match (name.as_str(), value) {
@@ -1099,7 +1127,9 @@ pub fn apply_mutating_with_type(
                 let value = args.first().cloned().unwrap_or(CtValue::Unit);
                 Ok(match xs.iter().position(|item| *item == value) {
                     Some(index) => CtValue::Present(Box::new(xs.remove(index))),
-                    None => CtValue::absent(xs.first().map(|item| item.jet_type()).unwrap_or(Type::Int)),
+                    None => {
+                        CtValue::absent(xs.first().map(|item| item.jet_type()).unwrap_or(Type::Int))
+                    }
                 })
             }
         }
@@ -1313,14 +1343,12 @@ pub fn apply_method(
         // the report changes — the same move the prelude's
         // `JetOptionalView::or_err` makes.
         (CtValue::Present(payload), "or_err") => Ok(CtValue::Present(payload.clone())),
-        (CtValue::Failed(CtReport::Clean(_)), "or_err") => {
-            match args.into_iter().next() {
-                Some(CtValue::Str(message)) => Ok(CtValue::failed(Box::new(
-                    CtValue::from_jet_err(&jet_foundation::Outcome::jet_err_from_message(message)),
-                ))),
-                _ => Err(unsupported("`.or_err` requires a string reason", span)),
-            }
-        }
+        (CtValue::Failed(CtReport::Clean(_)), "or_err") => match args.into_iter().next() {
+            Some(CtValue::Str(message)) => Ok(CtValue::failed(Box::new(CtValue::from_jet_err(
+                &jet_foundation::Outcome::jet_err_from_message(message),
+            )))),
+            _ => Err(unsupported("`.or_err` requires a string reason", span)),
+        },
         // D-FAIL-CARRIER1=A: the carrier's middle states. Marshalling only —
         // `carrier_fact` supplies the projection onto the report and calls the
         // prelude reader, which is where what a success and a failure each
@@ -1367,11 +1395,12 @@ pub fn apply_method(
                     Some(found) => CtValue::Present(Box::new(found.clone())),
                     None => CtValue::absent(Type::Named("JSON".to_string())),
                 },
-                Some(CtValue::Struct { fields, .. }) => match fields.iter().find(|(n, _)| n == &key)
-                {
-                    Some((_, found)) => CtValue::Present(Box::new(found.clone())),
-                    None => CtValue::absent(Type::Named("JSON".to_string())),
-                },
+                Some(CtValue::Struct { fields, .. }) => {
+                    match fields.iter().find(|(n, _)| n == &key) {
+                        Some((_, found)) => CtValue::Present(Box::new(found.clone())),
+                        None => CtValue::absent(Type::Named("JSON".to_string())),
+                    }
+                }
                 _ => CtValue::absent(Type::Named("JSON".to_string())),
             })
         }
@@ -1406,13 +1435,9 @@ pub fn apply_method(
                 None => CtValue::absent(Type::Float),
             })
         }
-        (value @ (CtValue::Int(_) | CtValue::BigInt(_)), "abs") => {
-            Ok(exact_int_value(
-                exact_big(value)
-                    .expect("whole-number absolute value")
-                    .abs(),
-            ))
-        }
+        (value @ (CtValue::Int(_) | CtValue::BigInt(_)), "abs") => Ok(exact_int_value(
+            exact_big(value).expect("whole-number absolute value").abs(),
+        )),
         (CtValue::Float(f), "abs") => Ok(CtValue::Float(f.abs())),
         (CtValue::Float(f), "is_nan") => Ok(CtValue::Bool(f.is_nan())),
         (CtValue::Float(f), "is_infinite") => Ok(CtValue::Bool(f.is_infinite())),
@@ -1454,7 +1479,9 @@ pub fn apply_method(
         }
         (CtValue::List(xs), "count") => {
             let needle = args.into_iter().next().unwrap_or(CtValue::Unit);
-            Ok(CtValue::Int(xs.iter().filter(|item| *item == &needle).count() as i64))
+            Ok(CtValue::Int(
+                xs.iter().filter(|item| *item == &needle).count() as i64,
+            ))
         }
         (CtValue::List(xs), "concat") => {
             let Some(CtValue::List(other)) = args.into_iter().next() else {
@@ -1758,10 +1785,7 @@ pub fn apply_method(
                     .zip(other)
                     .map(|(a, b)| CtValue::Struct {
                         type_name: "(a,b)".to_string(),
-                        fields: vec![
-                            ("a".to_string(), a.clone()),
-                            ("b".to_string(), b),
-                        ],
+                        fields: vec![("a".to_string(), a.clone()), ("b".to_string(), b)],
                     })
                     .collect(),
             ))
@@ -1813,7 +1837,11 @@ pub fn apply_method(
             let len = xs.len() as i64;
             let s = start.clamp(0, len) as usize;
             let e = end.clamp(0, len) as usize;
-            Ok(CtValue::List(if e <= s { vec![] } else { xs[s..e].to_vec() }))
+            Ok(CtValue::List(if e <= s {
+                vec![]
+            } else {
+                xs[s..e].to_vec()
+            }))
         }
         (CtValue::List(xs), "binary_search") => {
             let needle = args.first().cloned().unwrap_or(CtValue::Int(0));
@@ -1829,7 +1857,11 @@ pub fn apply_method(
                 return Err(unsupported("union needs a list", span));
             };
             let mut out = xs.clone();
-            for x in other { if !out.contains(&x) { out.push(x); } }
+            for x in other {
+                if !out.contains(&x) {
+                    out.push(x);
+                }
+            }
             Ok(CtValue::List(out))
         }
         (CtValue::List(xs), "intersection") => {
@@ -1837,17 +1869,25 @@ pub fn apply_method(
                 return Err(unsupported("intersection needs a list", span));
             };
             let mut out = Vec::new();
-            for x in xs { if other.contains(x) && !out.contains(x) { out.push(x.clone()); } }
+            for x in xs {
+                if other.contains(x) && !out.contains(x) {
+                    out.push(x.clone());
+                }
+            }
             Ok(CtValue::List(out))
         }
         (CtValue::List(xs), "difference") => {
             let Some(CtValue::List(other)) = args.into_iter().next() else {
                 return Err(unsupported("difference needs a list", span));
             };
-            Ok(CtValue::List(xs.iter().filter(|x| !other.contains(x)).cloned().collect()))
+            Ok(CtValue::List(
+                xs.iter().filter(|x| !other.contains(x)).cloned().collect(),
+            ))
         }
         (CtValue::List(xs), "random") => {
-            if xs.is_empty() { return Ok(CtValue::absent(Type::Int)); }
+            if xs.is_empty() {
+                return Ok(CtValue::absent(Type::Int));
+            }
             let mut state: u64 = 0xC0FF_EE42;
             state = state.wrapping_mul(6364136223846793005).wrapping_add(1);
             let i = ((state >> 33) as usize) % xs.len();
@@ -1859,18 +1899,27 @@ pub fn apply_method(
             if index < 0 || index as usize >= xs.len() {
                 return Err(index_oob(xs.len(), index, span));
             }
-            Ok(CtValue::List(super::CollectionEval::list_replace(xs, index, new)))
+            Ok(CtValue::List(super::CollectionEval::list_replace(
+                xs, index, new,
+            )))
         }
         (CtValue::List(xs), "min_max") => {
-            if xs.is_empty() { return Ok(CtValue::absent(Type::Int)); }
-            let min = xs.iter().min_by(|a,b| a.jet_show().cmp(&b.jet_show())).cloned().unwrap();
-            let max = xs.iter().max_by(|a,b| a.jet_show().cmp(&b.jet_show())).cloned().unwrap();
+            if xs.is_empty() {
+                return Ok(CtValue::absent(Type::Int));
+            }
+            let min = xs
+                .iter()
+                .min_by(|a, b| a.jet_show().cmp(&b.jet_show()))
+                .cloned()
+                .unwrap();
+            let max = xs
+                .iter()
+                .max_by(|a, b| a.jet_show().cmp(&b.jet_show()))
+                .cloned()
+                .unwrap();
             Ok(CtValue::Present(Box::new(CtValue::Struct {
                 type_name: String::new(),
-                fields: vec![
-                    ("min".into(), min),
-                    ("max".into(), max),
-                ],
+                fields: vec![("min".into(), min), ("max".into(), max)],
             })))
         }
         // Map
@@ -1921,29 +1970,34 @@ pub fn apply_method(
             None => CtValue::absent(Type::Int),
         }),
         (CtValue::Map(m), "to_list") => Ok(CtValue::List(
-            m.iter().map(|(k,v)| CtValue::Struct {
-                type_name: String::new(),
-                fields: vec![
-                    ("key".into(), k.to_value()),
-                    ("value".into(), v.clone()),
-                ],
-            }).collect()
+            m.iter()
+                .map(|(k, v)| CtValue::Struct {
+                    type_name: String::new(),
+                    fields: vec![("key".into(), k.to_value()), ("value".into(), v.clone())],
+                })
+                .collect(),
         )),
-        (CtValue::Map(m), "min") => Ok(match m.values().min_by(|a,b| a.jet_show().cmp(&b.jet_show())) {
-            Some(v) => CtValue::Present(Box::new(v.clone())),
-            None => CtValue::absent(Type::Int),
-        }),
-        (CtValue::Map(m), "max") => Ok(match m.values().max_by(|a,b| a.jet_show().cmp(&b.jet_show())) {
-            Some(v) => CtValue::Present(Box::new(v.clone())),
-            None => CtValue::absent(Type::Int),
-        }),
+        (CtValue::Map(m), "min") => Ok(
+            match m.values().min_by(|a, b| a.jet_show().cmp(&b.jet_show())) {
+                Some(v) => CtValue::Present(Box::new(v.clone())),
+                None => CtValue::absent(Type::Int),
+            },
+        ),
+        (CtValue::Map(m), "max") => Ok(
+            match m.values().max_by(|a, b| a.jet_show().cmp(&b.jet_show())) {
+                Some(v) => CtValue::Present(Box::new(v.clone())),
+                None => CtValue::absent(Type::Int),
+            },
+        ),
         (CtValue::Map(m), "intersection") => {
             let Some(CtValue::Map(other)) = args.into_iter().next() else {
                 return Err(unsupported("intersection needs a map", span));
             };
             let mut out = std::collections::BTreeMap::new();
-            for (k,v) in m.iter() {
-                if other.contains_key(k) { out.insert(k.clone(), v.clone()); }
+            for (k, v) in m.iter() {
+                if other.contains_key(k) {
+                    out.insert(k.clone(), v.clone());
+                }
             }
             Ok(CtValue::Map(out))
         }
@@ -1954,7 +2008,9 @@ pub fn apply_method(
             let mut out = std::collections::BTreeMap::new();
             for k in keys {
                 let key = CtKey::from_value(k).ok_or_else(|| unsupported("map key", span))?;
-                if let Some(v) = m.get(&key) { out.insert(key, v.clone()); }
+                if let Some(v) = m.get(&key) {
+                    out.insert(key, v.clone());
+                }
             }
             Ok(CtValue::Map(out))
         }
@@ -1982,20 +2038,30 @@ pub fn apply_method(
         (CtValue::Str(s), "trim_start") => Ok(CtValue::Str(super::TextLite::trim_start(s))),
         (CtValue::Str(s), "trim_end") => Ok(CtValue::Str(super::TextLite::trim_end(s))),
         (CtValue::Str(s), "pad_start") => {
-            let (Some(CtValue::Int(width)), Some(CtValue::Str(fill))) = (args.first(), args.get(1)) else {
-                return Err(unsupported("pad_start requires an Int width and text fill", span));
+            let (Some(CtValue::Int(width)), Some(CtValue::Str(fill))) = (args.first(), args.get(1))
+            else {
+                return Err(unsupported(
+                    "pad_start requires an Int width and text fill",
+                    span,
+                ));
             };
             Ok(CtValue::Str(super::TextLite::pad_start(s, *width, fill)))
         }
         (CtValue::Str(s), "pad_end") => {
-            let (Some(CtValue::Int(width)), Some(CtValue::Str(fill))) = (args.first(), args.get(1)) else {
-                return Err(unsupported("pad_end requires an Int width and text fill", span));
+            let (Some(CtValue::Int(width)), Some(CtValue::Str(fill))) = (args.first(), args.get(1))
+            else {
+                return Err(unsupported(
+                    "pad_end requires an Int width and text fill",
+                    span,
+                ));
             };
             Ok(CtValue::Str(super::TextLite::pad_end(s, *width, fill)))
         }
         (CtValue::Str(s), "index_of") => match args.into_iter().next() {
             Some(CtValue::Str(needle)) => Ok(match s.find(&needle) {
-                Some(byte) => CtValue::Present(Box::new(CtValue::Int(s[..byte].chars().count() as i64))),
+                Some(byte) => {
+                    CtValue::Present(Box::new(CtValue::Int(s[..byte].chars().count() as i64)))
+                }
                 None => CtValue::absent(Type::Int),
             }),
             _ => Err(unsupported("index_of with a non-text argument", span)),
@@ -2028,16 +2094,22 @@ pub fn apply_method(
         (CtValue::Str(s), "reverse") => Ok(CtValue::Str(super::TextLite::reverse(s))),
         (CtValue::Str(s), "normalize") => Ok(CtValue::Str(super::TextLite::nfc(s))),
         (CtValue::Str(s), "remove_prefix") => match args.into_iter().next() {
-            Some(CtValue::Str(prefix)) => Ok(CtValue::Str(super::TextLite::remove_prefix(s, &prefix))),
+            Some(CtValue::Str(prefix)) => {
+                Ok(CtValue::Str(super::TextLite::remove_prefix(s, &prefix)))
+            }
             _ => Err(unsupported("remove_prefix with a non-text argument", span)),
         },
         (CtValue::Str(s), "remove_suffix") => match args.into_iter().next() {
-            Some(CtValue::Str(suffix)) => Ok(CtValue::Str(super::TextLite::remove_suffix(s, &suffix))),
+            Some(CtValue::Str(suffix)) => {
+                Ok(CtValue::Str(super::TextLite::remove_suffix(s, &suffix)))
+            }
             _ => Err(unsupported("remove_suffix with a non-text argument", span)),
         },
         (CtValue::Str(s), "last_index_of") => match args.into_iter().next() {
             Some(CtValue::Str(needle)) => Ok(match s.rfind(&needle) {
-                Some(byte) => CtValue::Present(Box::new(CtValue::Int(s[..byte].chars().count() as i64))),
+                Some(byte) => {
+                    CtValue::Present(Box::new(CtValue::Int(s[..byte].chars().count() as i64)))
+                }
                 None => CtValue::absent(Type::Int),
             }),
             _ => Err(unsupported("last_index_of with a non-text argument", span)),
@@ -2063,7 +2135,9 @@ pub fn apply_method(
         (CtValue::Str(s), "match") => match args.into_iter().next() {
             Some(CtValue::Str(pattern)) => Ok(match super::RegexLite::RegexLite::parse(&pattern) {
                 Ok(re) => CtValue::Present(Box::new(match re.find(s) {
-                    Some(m) => CtValue::Present(Box::new(CtValue::Str(s[m.start..m.end].to_string()))),
+                    Some(m) => {
+                        CtValue::Present(Box::new(CtValue::Str(s[m.start..m.end].to_string())))
+                    }
                     None => CtValue::absent(Type::String),
                 })),
                 Err(message) => CtValue::failed(Box::new(CtValue::Str(message))),
@@ -2073,15 +2147,16 @@ pub fn apply_method(
         (CtValue::Str(s), "rsplit") => match args.into_iter().next() {
             Some(CtValue::Str(sep)) => {
                 let parts = if sep.is_empty() {
-                    s.split(sep.as_str()).map(|p| p.to_string()).collect::<Vec<_>>()
+                    s.split(sep.as_str())
+                        .map(|p| p.to_string())
+                        .collect::<Vec<_>>()
                 } else {
-                    let mut parts: Vec<String> = s.rsplit(sep.as_str()).map(|p| p.to_string()).collect();
+                    let mut parts: Vec<String> =
+                        s.rsplit(sep.as_str()).map(|p| p.to_string()).collect();
                     parts.reverse();
                     parts
                 };
-                Ok(CtValue::List(
-                    parts.into_iter().map(CtValue::Str).collect(),
-                ))
+                Ok(CtValue::List(parts.into_iter().map(CtValue::Str).collect()))
             }
             _ => Err(unsupported("rsplit with a non-text argument", span)),
         },
@@ -2091,7 +2166,10 @@ pub fn apply_method(
                     type_name: "(before,after)".to_string(),
                     fields: vec![
                         ("before".to_string(), CtValue::Str(s[..at].to_string())),
-                        ("after".to_string(), CtValue::Str(s[at + sep.len()..].to_string())),
+                        (
+                            "after".to_string(),
+                            CtValue::Str(s[at + sep.len()..].to_string()),
+                        ),
                     ],
                 })),
                 None => CtValue::absent(Type::Tuple(vec![
@@ -2213,21 +2291,56 @@ pub fn apply_method(
                 .unwrap_or_else(|| CtValue::List(Vec::new())))
         }
         (CtValue::Struct { type_name, fields }, "has_method") if type_name == "TypeInfo" => {
-            let needle = match args.first() { Some(CtValue::Str(value)) => value, _ => return Err(unsupported("`has_method` requires a string", span)) };
+            let needle = match args.first() {
+                Some(CtValue::Str(value)) => value,
+                _ => return Err(unsupported("`has_method` requires a string", span)),
+            };
             let found = fields.iter().find(|(name, _)| name == "methods").and_then(|(_, value)| match value { CtValue::List(values) => Some(values), _ => None }).is_some_and(|values| values.iter().any(|value| matches!(value, CtValue::Struct { fields, .. } if fields.iter().any(|(name, value)| name == "name" && matches!(value, CtValue::Str(actual) if actual == needle)))));
             Ok(CtValue::Bool(found))
         }
         (CtValue::Struct { type_name, fields }, "implements") if type_name == "TypeInfo" => {
-            let needle = match args.first() { Some(CtValue::Str(value)) => value, _ => return Err(unsupported("`implements` requires a string", span)) };
-            let found = fields.iter().find(|(name, _)| name == "implements").and_then(|(_, value)| match value { CtValue::List(values) => Some(values), _ => None }).is_some_and(|values| values.iter().any(|value| matches!(value, CtValue::Str(actual) if actual == needle)));
+            let needle = match args.first() {
+                Some(CtValue::Str(value)) => value,
+                _ => return Err(unsupported("`implements` requires a string", span)),
+            };
+            let found = fields
+                .iter()
+                .find(|(name, _)| name == "implements")
+                .and_then(|(_, value)| match value {
+                    CtValue::List(values) => Some(values),
+                    _ => None,
+                })
+                .is_some_and(|values| {
+                    values
+                        .iter()
+                        .any(|value| matches!(value, CtValue::Str(actual) if actual == needle))
+                });
             Ok(CtValue::Bool(found))
         }
         (CtValue::Struct { type_name, fields }, "reaches_panic") if type_name == "FunctionInfo" => {
-            Ok(fields.iter().find(|(name, _)| name == "reaches_panic").map(|(_, value)| value.clone()).unwrap_or(CtValue::Bool(false)))
+            Ok(fields
+                .iter()
+                .find(|(name, _)| name == "reaches_panic")
+                .map(|(_, value)| value.clone())
+                .unwrap_or(CtValue::Bool(false)))
         }
         (CtValue::Struct { type_name, fields }, "has") if type_name == "EffectInfo" => {
-            let needle = match args.first() { Some(CtValue::Str(value)) => value, _ => return Err(unsupported("`has` requires a string", span)) };
-            let found = fields.iter().find(|(name, _)| name == "values").and_then(|(_, value)| match value { CtValue::List(values) => Some(values), _ => None }).is_some_and(|values| values.iter().any(|value| matches!(value, CtValue::Str(actual) if actual == needle)));
+            let needle = match args.first() {
+                Some(CtValue::Str(value)) => value,
+                _ => return Err(unsupported("`has` requires a string", span)),
+            };
+            let found = fields
+                .iter()
+                .find(|(name, _)| name == "values")
+                .and_then(|(_, value)| match value {
+                    CtValue::List(values) => Some(values),
+                    _ => None,
+                })
+                .is_some_and(|values| {
+                    values
+                        .iter()
+                        .any(|value| matches!(value, CtValue::Str(actual) if actual == needle))
+                });
             Ok(CtValue::Bool(found))
         }
         // D-METAREFLECT1 / D-REFLECT1: `.has_marker(name)` on reflected member handles.
@@ -2238,21 +2351,14 @@ pub fn apply_method(
                 Some(CtValue::Str(s)) => s,
                 _ => return Err(unsupported("`has_marker` requires a string argument", span)),
             };
-            if let Some((_, CtValue::List(markers))) =
-                fields.iter().find(|(n, _)| n == "markers")
-            {
-                let found = markers
-                    .iter()
-                    .any(|m| match m {
-                        CtValue::Str(name) => *name == needle,
-                        CtValue::Struct { fields, .. } => fields.iter().any(
-                            |(field, value)| {
-                                field == "name"
-                                    && matches!(value, CtValue::Str(name) if *name == needle)
-                            },
-                        ),
-                        _ => false,
-                    });
+            if let Some((_, CtValue::List(markers))) = fields.iter().find(|(n, _)| n == "markers") {
+                let found = markers.iter().any(|m| match m {
+                    CtValue::Str(name) => *name == needle,
+                    CtValue::Struct { fields, .. } => fields.iter().any(|(field, value)| {
+                        field == "name" && matches!(value, CtValue::Str(name) if *name == needle)
+                    }),
+                    _ => false,
+                });
                 return Ok(CtValue::Bool(found));
             }
             Ok(CtValue::Bool(false))
@@ -2335,9 +2441,13 @@ pub fn apply_method(
                 _ => unreachable!("guarded Match method"),
             }
         }
-        (CtValue::Enum { type_name, variant, .. }, method)
-            if type_name == "Loadable"
-                && matches!(method, "is_idle" | "is_loading" | "is_loaded" | "is_failed") =>
+        (
+            CtValue::Enum {
+                type_name, variant, ..
+            },
+            method,
+        ) if type_name == "Loadable"
+            && matches!(method, "is_idle" | "is_loading" | "is_loaded" | "is_failed") =>
         {
             let actual = match variant.as_str() {
                 "Idle" => loadable_semantics::JET_LOADABLE_IDLE,
@@ -2356,7 +2466,14 @@ pub fn apply_method(
                 actual, expected,
             )))
         }
-        (CtValue::Enum { type_name, variant, args }, "loaded") if type_name == "Loadable" => {
+        (
+            CtValue::Enum {
+                type_name,
+                variant,
+                args,
+            },
+            "loaded",
+        ) if type_name == "Loadable" => {
             let tag = match variant.as_str() {
                 "Idle" => loadable_semantics::JET_LOADABLE_IDLE,
                 "Loading" => loadable_semantics::JET_LOADABLE_LOADING,
@@ -2372,7 +2489,14 @@ pub fn apply_method(
                 CtValue::absent(crate::AST::Type::Named("Unit".to_string()))
             })
         }
-        (CtValue::Enum { type_name, variant, args: values }, "or_else") if type_name == "Loadable" => {
+        (
+            CtValue::Enum {
+                type_name,
+                variant,
+                args: values,
+            },
+            "or_else",
+        ) if type_name == "Loadable" => {
             let tag = match variant.as_str() {
                 "Idle" => loadable_semantics::JET_LOADABLE_IDLE,
                 "Loading" => loadable_semantics::JET_LOADABLE_LOADING,
@@ -2381,7 +2505,10 @@ pub fn apply_method(
                 _ => u8::MAX,
             };
             if loadable_semantics::jet_loadable_has_value(tag) {
-                Ok(values.first().map(|(_, value)| value.clone()).unwrap_or(CtValue::Unit))
+                Ok(values
+                    .first()
+                    .map(|(_, value)| value.clone())
+                    .unwrap_or(CtValue::Unit))
             } else {
                 args.into_iter()
                     .next()
@@ -2409,16 +2536,17 @@ pub fn apply_method(
                 })
                 .unwrap_or(0);
             let scale = match args.first() {
-                Some(CtValue::Enum { type_name, variant, .. })
-                    if type_name == crate::Syntax::DURATION_UNIT_TYPE => match variant.as_str() {
-                        "Nanoseconds" => 1_i64,
-                        "Microseconds" => 1_000,
-                        "Milliseconds" => 1_000_000,
-                        "Seconds" => 1_000_000_000,
-                        "Minutes" => 60_000_000_000,
-                        "Hours" => 3_600_000_000_000,
-                        _ => return Err(unsupported("this duration unit", span)),
-                    },
+                Some(CtValue::Enum {
+                    type_name, variant, ..
+                }) if type_name == crate::Syntax::DURATION_UNIT_TYPE => match variant.as_str() {
+                    "Nanoseconds" => 1_i64,
+                    "Microseconds" => 1_000,
+                    "Milliseconds" => 1_000_000,
+                    "Seconds" => 1_000_000_000,
+                    "Minutes" => 60_000_000_000,
+                    "Hours" => 3_600_000_000_000,
+                    _ => return Err(unsupported("this duration unit", span)),
+                },
                 _ => return Err(unsupported("Duration.in expects a DurationUnit", span)),
             };
             Ok(CtValue::Present(Box::new(CtValue::Int(

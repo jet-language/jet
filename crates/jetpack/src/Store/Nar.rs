@@ -54,11 +54,18 @@ pub struct NarInfo {
 
 /// Serialize a store tree into canonical NAR bytes.
 pub fn write_nar(root: &Path) -> io::Result<(Vec<u8>, NarStats)> {
+    let metadata = fs::symlink_metadata(root)?;
+    if metadata.file_type().is_symlink() {
+        return Err(invalid("NAR source root cannot be a symlink"));
+    }
+    let root = root
+        .canonicalize()
+        .map_err(|error| invalid(&format!("cannot resolve NAR source: {error}")))?;
     let mut output = Vec::new();
     put_string(&mut output, NAR_MAGIC)?;
     put_string(&mut output, "(")?;
     let mut state = EncodeState::default();
-    encode_node(root, &mut output, &mut state, 0)?;
+    encode_node(&root, &root, &mut output, &mut state, 0)?;
     put_string(&mut output, ")")?;
     let stats = NarStats {
         digest: digest_for(&output),
@@ -102,7 +109,7 @@ fn decode_nar(bytes: &[u8]) -> io::Result<(NarNode, NarStats)> {
         return Err(invalid("NAR root is not a node"));
     }
     let mut state = DecodeState::default();
-    let node = decode_node(&mut reader, &mut state, 0)?;
+    let node = decode_node(&mut reader, &mut state, 0, 0)?;
     if reader.string()? != ")" || reader.remaining() != 0 {
         return Err(invalid("NAR has trailing or unbalanced data"));
     }
@@ -141,14 +148,14 @@ impl NarInfo {
         }
         let mut references = BTreeSet::new();
         for reference in &self.references {
-            validate_store_path(reference)?;
+            validate_store_reference(reference)?;
             if !references.insert(reference) {
                 return Err(invalid("narinfo contains duplicate references"));
             }
         }
         if let Some(deriver) = &self.deriver {
-            if !deriver.is_empty() {
-                validate_store_path(deriver)?;
+            if !deriver.is_empty() && deriver != "unknown-deriver" {
+                validate_store_reference(deriver)?;
             }
         }
         if let Some(ca) = &self.ca {
@@ -183,6 +190,7 @@ impl NarInfo {
         line(&mut out, "StorePath", &self.store_path)?;
         line(&mut out, "URL", &self.url)?;
         line(&mut out, "Compression", &self.compression)?;
+        line(&mut out, "FileHash", &self.nar_hash)?;
         line(&mut out, "FileSize", &self.file_size.to_string())?;
         line(&mut out, "NarHash", &self.nar_hash)?;
         line(&mut out, "NarSize", &self.nar_size.to_string())?;
@@ -228,6 +236,7 @@ impl NarInfo {
             ca: None,
             signatures: Vec::new(),
         };
+        let mut file_hash = None;
         let mut seen = BTreeSet::new();
         for raw in text.lines() {
             if raw.is_empty() {
@@ -246,6 +255,7 @@ impl NarInfo {
                     "StorePath" => info.store_path = value.to_string(),
                     "URL" => info.url = value.to_string(),
                     "Compression" => info.compression = value.to_string(),
+                    "FileHash" => file_hash = Some(value.to_string()),
                     "FileSize" => info.file_size = parse_u64(value, "FileSize")?,
                     "NarHash" => info.nar_hash = value.to_string(),
                     "NarSize" => info.nar_size = parse_u64(value, "NarSize")?,
@@ -266,6 +276,10 @@ impl NarInfo {
             }
         }
         info.validate()?;
+        let file_hash = file_hash.ok_or_else(|| invalid("narinfo has no FileHash field"))?;
+        if !same_digest(&file_hash, &info.nar_hash) {
+            return Err(invalid("narinfo FileHash and NarHash disagree"));
+        }
         Ok(info)
     }
 
@@ -337,7 +351,7 @@ pub fn substitute_local(
 }
 
 fn verify_nar_info_bytes(info: &NarInfo, nar: &[u8]) -> io::Result<()> {
-    if info.nar_size != nar.len() as u64 || info.nar_hash != digest_for(nar) {
+    if info.nar_size != nar.len() as u64 || !hash_matches(&info.nar_hash, nar) {
         return Err(invalid("NAR bytes do not match signed narinfo"));
     }
     Ok(())
@@ -350,6 +364,7 @@ struct EncodeState {
 
 fn encode_node(
     path: &Path,
+    root: &Path,
     out: &mut Vec<u8>,
     state: &mut EncodeState,
     depth: usize,
@@ -374,6 +389,11 @@ fn encode_node(
             .to_str()
             .ok_or_else(|| invalid("NAR symlink target is not UTF-8"))?;
         validate_symlink_target(target)?;
+        if target.starts_with('/') {
+            validate_absolute_symlink_target(target)?;
+        } else {
+            validate_relative_symlink_target(path, root, target)?;
+        }
         put_string(out, "target")?;
         put_string(out, target)?;
         put_string(out, ")")?;
@@ -381,16 +401,22 @@ fn encode_node(
         put_string(out, "(")?;
         put_string(out, "type")?;
         put_string(out, "directory")?;
-        let mut children = fs::read_dir(path)?.collect::<Result<Vec<_>, _>>()?;
-        children.sort_by_key(|entry| entry.file_name());
+        let mut children = fs::read_dir(path)?
+            .collect::<Result<Vec<_>, _>>()?
+            .into_iter()
+            .map(|child| {
+                let name = child
+                    .file_name()
+                    .to_str()
+                    .ok_or_else(|| invalid("NAR filename is not UTF-8"))?
+                    .to_string();
+                validate_name(&name)?;
+                Ok((name, child))
+            })
+            .collect::<io::Result<Vec<_>>>()?;
+        children.sort_by(|(left, _), (right, _)| left.cmp(right));
         let mut names = BTreeSet::new();
-        for child in children {
-            let name = child
-                .file_name()
-                .to_str()
-                .ok_or_else(|| invalid("NAR filename is not UTF-8"))?
-                .to_string();
-            validate_name(&name)?;
+        for (name, child) in children {
             if !names.insert(name.clone()) {
                 return Err(invalid("NAR directory contains duplicate names"));
             }
@@ -399,7 +425,7 @@ fn encode_node(
             put_string(out, "name")?;
             put_string(out, &name)?;
             put_string(out, "node")?;
-            encode_node(&child.path(), out, state, depth + 1)?;
+            encode_node(&child.path(), root, out, state, depth + 1)?;
             put_string(out, ")")?;
         }
         put_string(out, ")")?;
@@ -441,6 +467,7 @@ fn decode_node(
     reader: &mut NarReader<'_>,
     state: &mut DecodeState,
     depth: usize,
+    relative_depth: usize,
 ) -> io::Result<NarNode> {
     if depth > MAX_DEPTH {
         return Err(invalid("NAR tree is too deep"));
@@ -457,6 +484,7 @@ fn decode_node(
         "directory" => {
             let mut entries = Vec::new();
             let mut names = BTreeSet::new();
+            let mut previous_name = None;
             loop {
                 match reader.string()?.as_str() {
                     ")" => break NarNode::Directory(entries),
@@ -469,10 +497,19 @@ fn decode_node(
                         if !names.insert(name.clone()) {
                             return Err(invalid("NAR directory contains duplicate names"));
                         }
+                        if previous_name
+                            .as_deref()
+                            .is_some_and(|previous| previous >= name.as_str())
+                        {
+                            return Err(invalid(
+                                "NAR directory entries are not in canonical name order",
+                            ));
+                        }
+                        previous_name = Some(name.clone());
                         if reader.string()? != "node" {
                             return Err(invalid("NAR directory entry has no node"));
                         }
-                        let child = decode_node(reader, state, depth + 1)?;
+                        let child = decode_node(reader, state, depth + 1, relative_depth + 1)?;
                         if reader.string()? != ")" {
                             return Err(invalid("NAR directory entry is unbalanced"));
                         }
@@ -483,37 +520,31 @@ fn decode_node(
             }
         }
         "regular" => {
-            let mut executable = false;
-            let mut bytes = None;
-            loop {
-                match reader.string()?.as_str() {
-                    "executable" => {
-                        if reader.string()? != "" || executable {
-                            return Err(invalid("NAR regular executable marker is malformed"));
-                        }
-                        executable = true;
-                    }
-                    "contents" => {
-                        if bytes.is_some() {
-                            return Err(invalid("NAR regular file repeats contents"));
-                        }
-                        let value = reader.bytes()?;
-                        state.bytes = state
-                            .bytes
-                            .checked_add(value.len() as u64)
-                            .ok_or_else(|| invalid("NAR byte count overflow"))?;
-                        if state.bytes > MAX_NAR_BYTES as u64 {
-                            return Err(invalid("NAR contents exceed the 1 GiB limit"));
-                        }
-                        bytes = Some(value);
-                    }
-                    ")" => break NarNode::Regular {
-                        executable,
-                        bytes: bytes.ok_or_else(|| invalid("NAR regular file has no contents"))?,
-                    },
-                    _ => return Err(invalid("NAR regular file has an unknown field")),
+            let mut field = reader.string()?;
+            let executable = if field == "executable" {
+                if reader.string()? != "" {
+                    return Err(invalid("NAR regular executable marker is malformed"));
                 }
+                field = reader.string()?;
+                true
+            } else {
+                false
+            };
+            if field != "contents" {
+                return Err(invalid("NAR regular file has no contents"));
             }
+            let bytes = reader.bytes()?;
+            state.bytes = state
+                .bytes
+                .checked_add(bytes.len() as u64)
+                .ok_or_else(|| invalid("NAR byte count overflow"))?;
+            if state.bytes > MAX_NAR_BYTES as u64 {
+                return Err(invalid("NAR contents exceed the 1 GiB limit"));
+            }
+            if reader.string()? != ")" {
+                return Err(invalid("NAR regular file is unbalanced"));
+            }
+            NarNode::Regular { executable, bytes }
         }
         "symlink" => {
             if reader.string()? != "target" {
@@ -521,6 +552,14 @@ fn decode_node(
             }
             let target = reader.string()?;
             validate_symlink_target(&target)?;
+            if target.starts_with('/') {
+                validate_absolute_symlink_target(&target)?;
+            } else {
+                if relative_depth == 0 {
+                    return Err(invalid("NAR root relative symlink has no safe parent"));
+                }
+                validate_relative_symlink_depth(&target, relative_depth - 1)?;
+            }
             if reader.string()? != ")" {
                 return Err(invalid("NAR symlink is unbalanced"));
             }
@@ -577,9 +616,7 @@ fn write_decoded_node(node: &NarNode, path: &Path, root: &Path) -> io::Result<()
 
 fn create_symlink(target: &str, path: &Path, root: &Path) -> io::Result<()> {
     if target.starts_with('/') {
-        if !target.starts_with("/nix/store/") {
-            return Err(invalid("NAR absolute symlink must point into /nix/store"));
-        }
+        validate_absolute_symlink_target(target)?;
     } else {
         let parent = path.parent().unwrap_or(root);
         let candidate = parent.join(target);
@@ -726,12 +763,51 @@ fn validate_symlink_target(value: &str) -> io::Result<()> {
     Ok(())
 }
 
+fn validate_absolute_symlink_target(value: &str) -> io::Result<()> {
+    if !value.starts_with("/nix/store/") {
+        return Err(invalid("NAR absolute symlink must point into /nix/store"));
+    }
+    validate_store_path(value)
+}
+
+fn validate_relative_symlink_target(path: &Path, root: &Path, target: &str) -> io::Result<()> {
+    let parent = path
+        .parent()
+        .ok_or_else(|| invalid("NAR symlink has no parent"))?;
+    let relative_parent = parent
+        .strip_prefix(root)
+        .map_err(|_| invalid("NAR symlink is outside its output root"))?;
+    let depth = relative_parent
+        .components()
+        .filter(|component| matches!(component, Component::Normal(_)))
+        .count();
+    validate_relative_symlink_depth(target, depth)
+}
+
+fn validate_relative_symlink_depth(target: &str, mut depth: usize) -> io::Result<()> {
+    for component in Path::new(target).components() {
+        match component {
+            Component::CurDir => {}
+            Component::Normal(_) => depth = depth.saturating_add(1),
+            Component::ParentDir if depth > 0 => depth -= 1,
+            Component::ParentDir => {
+                return Err(invalid("NAR relative symlink escapes its output root"));
+            }
+            Component::RootDir | Component::Prefix(_) => {
+                return Err(invalid("NAR relative symlink is not relative"));
+            }
+        }
+    }
+    Ok(())
+}
+
 fn validate_store_path(value: &str) -> io::Result<()> {
     let mut parts = value.split('/');
     let safe = value.starts_with('/')
         && value != "/"
         && parts.next() == Some("")
         && parts.all(|part| !part.is_empty() && part != "." && part != "..")
+        && !value.contains('\\')
         && !value.contains('\n')
         && !value.contains('\r')
         && !value.contains('\0');
@@ -739,6 +815,24 @@ fn validate_store_path(value: &str) -> io::Result<()> {
         return Err(invalid("narinfo has an unsafe store path"));
     }
     Ok(())
+}
+
+fn validate_store_reference(value: &str) -> io::Result<()> {
+    if value.starts_with('/') {
+        validate_store_path(value)
+    } else if value.is_empty()
+        || value == "."
+        || value == ".."
+        || value == "unknown-deriver"
+        || value.len() > MAX_NAME_BYTES * 4
+        || value.contains('/')
+        || value.contains('\\')
+        || value.bytes().any(|byte| byte == 0 || byte.is_ascii_control())
+    {
+        Err(invalid("narinfo has an unsafe store reference"))
+    } else {
+        Ok(())
+    }
 }
 
 fn validate_relative_url(value: &str) -> io::Result<()> {
@@ -765,17 +859,86 @@ fn validate_relative_url(value: &str) -> io::Result<()> {
 }
 
 fn validate_digest(value: &str) -> io::Result<()> {
-    let Some(hex) = value.strip_prefix("sha256:") else {
-        return Err(invalid("narinfo hash must use sha256:"));
-    };
-    if hex.len() != 64 || !hex.bytes().all(|byte| byte.is_ascii_hexdigit()) {
-        return Err(invalid("narinfo hash is not a SHA-256 digest"));
+    if decode_sha256(value).is_some() {
+        Ok(())
+    } else {
+        Err(invalid("narinfo hash is not a SHA-256 digest"))
     }
-    Ok(())
 }
 
 fn digest_for(bytes: &[u8]) -> String {
     format!("sha256:{}", SHA256::sha256_hex(bytes))
+}
+
+pub(crate) fn nar_hash_matches(expected: &str, bytes: &[u8]) -> bool {
+    hash_matches(expected, bytes)
+}
+
+pub(crate) fn normalize_nar_hash(value: &str) -> io::Result<String> {
+    let bytes = decode_sha256(value).ok_or_else(|| invalid("Nix NarHash is not a SHA-256 digest"))?;
+    Ok(format!("sha256:{}", bytes_to_hex(&bytes)))
+}
+
+fn hash_matches(expected: &str, bytes: &[u8]) -> bool {
+    decode_sha256(expected).is_some_and(|hash| hash == SHA256::sha256(bytes))
+}
+
+fn same_digest(left: &str, right: &str) -> bool {
+    match (decode_sha256(left), decode_sha256(right)) {
+        (Some(left), Some(right)) => left == right,
+        _ => false,
+    }
+}
+
+fn decode_sha256(value: &str) -> Option<[u8; 32]> {
+    if let Some(hex) = value.strip_prefix("sha256:") {
+        if hex.len() == 64 && hex.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+            let mut bytes = [0u8; 32];
+            for (index, pair) in hex.as_bytes().chunks_exact(2).enumerate() {
+                bytes[index] = (hex_value(pair[0])? << 4) | hex_value(pair[1])?;
+            }
+            return Some(bytes);
+        }
+        return decode_nix_base32(hex);
+    }
+    let encoded = value.strip_prefix("sha256-")?;
+    let bytes = jet_foundation::base_encoding_strict::decode_base64(encoded, false, false).ok()?;
+    bytes.try_into().ok()
+}
+
+fn hex_value(value: u8) -> Option<u8> {
+    match value {
+        b'0'..=b'9' => Some(value - b'0'),
+        b'a'..=b'f' => Some(value - b'a' + 10),
+        b'A'..=b'F' => Some(value - b'A' + 10),
+        _ => None,
+    }
+}
+
+fn bytes_to_hex(bytes: &[u8]) -> String {
+    bytes.iter().map(|byte| format!("{byte:02x}")).collect()
+}
+
+fn decode_nix_base32(value: &str) -> Option<[u8; 32]> {
+    const ALPHABET: &[u8] = b"0123456789abcdfghijklmnpqrsvwxyz";
+    if value.len() != 52 {
+        return None;
+    }
+    let mut output = [0u8; 32];
+    for (index, byte) in value.bytes().enumerate() {
+        let digit = ALPHABET.iter().position(|candidate| *candidate == byte)? as u8;
+        let bit = (51 - index) * 5;
+        for offset in 0..5 {
+            if digit & (1 << offset) != 0 {
+                let target = bit + offset;
+                if target >= 256 {
+                    return None;
+                }
+                output[target / 8] |= 1 << (target % 8);
+            }
+        }
+    }
+    Some(output)
 }
 
 fn line(output: &mut String, key: &str, value: &str) -> io::Result<()> {

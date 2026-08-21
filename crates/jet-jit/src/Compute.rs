@@ -243,6 +243,10 @@ mod semantics {
         }
     }
 
+    pub(super) fn error_message(error: &JetComputeError) -> String {
+        error.jet_show()
+    }
+
     pub(super) fn nested_gradient(
         states: &[VjpState],
         targets: &[i64],
@@ -560,6 +564,7 @@ pub(crate) struct ComputeState {
     streams: Vec<Option<semantics::Stream>>,
     sparse: Vec<Option<semantics::Sparse>>,
     vjp_states: Vec<Option<semantics::VjpState>>,
+    curried_handles: Vec<i64>,
 }
 
 impl ComputeState {
@@ -569,6 +574,9 @@ impl ComputeState {
         self.streams.clear();
         self.sparse.clear();
         self.vjp_states.clear();
+        for handle in self.curried_handles.drain(..) {
+            semantics::jet_compute_curried_drop(handle);
+        }
     }
 }
 
@@ -861,9 +869,18 @@ fn alloc_vjp_run(
     if value_handle == 0 || gradients_handle == 0 {
         return 0;
     }
+    let grads = bind_jit_callable_handle(
+        runtime,
+        crate::host_seam::guarded_addr(jet_jit_compute_vjp_grads_value) as i64,
+        gradients_handle,
+        true,
+    );
+    if grads == 0 {
+        return 0;
+    }
     alloc_record_words(
         runtime,
-        &[value_handle, pull, gradients_handle],
+        &[value_handle, pull, grads],
         "core.compute.vjp",
     )
 }
@@ -1025,61 +1042,256 @@ fn run_transform(
     }
 }
 
-fn run_transform_factory(runtime: &mut JitRuntime, env: i64, inputs: &[i64]) -> i64 {
-    let Some(fields) = read_record_words(runtime, env, 5) else {
-        return transform_failure(runtime, "core.compute transform environment is invalid");
+fn curried_base(
+    base_handle: i64,
+    base_arity: usize,
+    result_fields: usize,
+) -> semantics::JetComputeBase {
+    semantics::JetComputeBase::new(base_arity, move |inputs| {
+        let result = Concurrency::with_runtime_mut(|runtime| {
+            let Some(callable) = jit_callable_parts(runtime, base_handle) else {
+                return Some(Err(semantics::JetComputeError::Unsupported(
+                    "core.compute transform received an invalid function".to_string(),
+                )));
+            };
+            let handles = inputs
+                .iter()
+                .cloned()
+                .map(|tensor| alloc_tensor(runtime, tensor))
+                .collect::<Vec<_>>();
+            if handles.iter().any(|handle| *handle == 0) {
+                return Some(Err(semantics::JetComputeError::Unsupported(
+                    "core.compute transform received an invalid Tensor".to_string(),
+                )));
+            }
+            let output_handle = invoke_callable(callable, &handles);
+            if output_handle == 0 {
+                return Some(Err(semantics::JetComputeError::Unsupported(
+                    "core.compute transform function returned no value".to_string(),
+                )));
+            }
+            if result_fields == 0 {
+                let Some(value) = slot(runtime, output_handle).map(|slot| slot.tensor.clone()) else {
+                    return Some(Err(semantics::JetComputeError::Unsupported(
+                        "core.compute transform returned an invalid Tensor".to_string(),
+                    )));
+                };
+                return Some(Ok(semantics::JetComputeBaseResult::Tensor(value)));
+            }
+            let Some(fields) = read_record_words(runtime, output_handle, result_fields) else {
+                return Some(Err(semantics::JetComputeError::Unsupported(
+                    "core.compute.gradient returned an invalid tuple".to_string(),
+                )));
+            };
+            let Some(values) = fields
+                .iter()
+                .map(|handle| slot(runtime, *handle).map(|slot| slot.tensor.clone()))
+                .collect::<Option<Vec<_>>>()
+            else {
+                return Some(Err(semantics::JetComputeError::Unsupported(
+                    "core.compute.gradient tuple field is not a Tensor".to_string(),
+                )));
+            };
+            Some(Ok(semantics::JetComputeBaseResult::TensorTuple(values)))
+        });
+        result.unwrap_or_else(|| {
+            Err(semantics::JetComputeError::Unsupported(
+                "core.compute transform has no active resident runtime".to_string(),
+            ))
+        })
+    })
+}
+
+fn alloc_curried_gradient(
+    runtime: &mut JitRuntime,
+    values: &[Vec<semantics::Tensor>],
+    context: &str,
+) -> i64 {
+    let mut outer = Vec::with_capacity(values.len());
+    for target in values {
+        let handle = if target.len() == 1 {
+            alloc_tensor(runtime, target[0].clone())
+        } else {
+            alloc_tensor_record(runtime, target, context)
+        };
+        if handle == 0 {
+            return 0;
+        }
+        outer.push(handle);
+    }
+    alloc_record_words(runtime, &outer, context)
+}
+
+fn run_curried_handle(
+    runtime: &mut JitRuntime,
+    handle: i64,
+    inputs: &[i64],
+) -> i64 {
+    let Some(tensors) = inputs
+        .iter()
+        .map(|handle| slot(runtime, *handle).map(|slot| slot.tensor.clone()))
+        .collect::<Option<Vec<_>>>()
+    else {
+        return transform_failure(runtime, "core.compute transform received an invalid Tensor");
     };
-    let Some(method) = runtime.heap.clone_string(fields[2]) else {
-        return transform_failure(runtime, "core.compute transform method is invalid");
+    let result = match semantics::jet_compute_call_curried(
+        handle,
+        semantics::JetComputeInputPack::from_flat(tensors),
+    ) {
+        Ok(result) => result,
+        Err(error) => return transform_failure(runtime, &semantics::error_message(&error)),
     };
-    let Ok(base_arity) = usize::try_from(fields[3]) else {
-        return transform_failure(runtime, "core.compute transform arity is invalid");
+    match result {
+        semantics::JetComputeCurriedResult::Gradient(values) => {
+            alloc_curried_gradient(runtime, &values, "core.compute.gradient")
+        }
+        semantics::JetComputeCurriedResult::ValueAndGradient { value, gradients } => {
+            let value_handle = alloc_tensor(runtime, value);
+            let gradients_handle = alloc_curried_gradient(
+                runtime,
+                &gradients,
+                "core.compute.value_and_gradient",
+            );
+            if value_handle == 0 || gradients_handle == 0 {
+                0
+            } else {
+                alloc_record_words(
+                    runtime,
+                    &[value_handle, gradients_handle],
+                    "core.compute.value_and_gradient",
+                )
+            }
+        }
+        semantics::JetComputeCurriedResult::Vjp { value, pull, grads } => {
+            let value_handle = alloc_tensor(runtime, value);
+            if value_handle == 0 {
+                return 0;
+            }
+            runtime.compute.curried_handles.push(pull);
+            runtime.compute.curried_handles.push(grads);
+            let pull_callable = bind_jit_callable_handle(
+                runtime,
+                crate::host_seam::guarded_addr(jet_jit_compute_curried_pull) as i64,
+                pull,
+                true,
+            );
+            let grads_callable = bind_jit_callable_handle(
+                runtime,
+                crate::host_seam::guarded_addr(jet_jit_compute_curried_grads) as i64,
+                grads,
+                true,
+            );
+            if pull_callable == 0 || grads_callable == 0 {
+                0
+            } else {
+                alloc_record_words(
+                    runtime,
+                    &[value_handle, pull_callable, grads_callable],
+                    "core.compute.vjp",
+                )
+            }
+        }
+        semantics::JetComputeCurriedResult::Jvp { value, tangent } => {
+            let value_handle = alloc_tensor(runtime, value);
+            let tangent_handle = alloc_tensor(runtime, tangent);
+            if value_handle == 0 || tangent_handle == 0 {
+                0
+            } else {
+                alloc_record_words(
+                    runtime,
+                    &[value_handle, tangent_handle],
+                    "core.compute.jvp",
+                )
+            }
+        }
+    }
+}
+
+/// Marshal one resident callable invocation into the single Prelude-owned
+/// curried call. The record is adapter state only: the plan handle retains
+/// transform policy, tape state, and continuation lifetime in the Prelude.
+fn run_curried_call(runtime: &mut JitRuntime, env: i64, inputs: &[i64]) -> i64 {
+    run_curried_handle(runtime, env, inputs)
+}
+
+fn run_curried_call_list(runtime: &mut JitRuntime, env: i64, inputs_handle: i64) -> i64 {
+    let Some(inputs) = read_int_list(runtime, inputs_handle) else {
+        return transform_failure(runtime, "core.compute transform inputs are invalid");
     };
-    let Ok(result_fields) = usize::try_from(fields[4]) else {
-        return transform_failure(runtime, "core.compute transform result shape is invalid");
-    };
+    run_curried_call(runtime, env, &inputs)
+}
+
+/// The resident host call has one logical ABI for every curried transform.
+/// Typed function-value adapters below only pack their arguments into a list
+/// and enter this operation.
+fn jet_jit_compute_call_curried(env: i64, inputs_handle: i64) -> i64 {
+    Concurrency::with_runtime_mut(|runtime| run_curried_call_list(runtime, env, inputs_handle))
+}
+
+fn run_curried_call_adapter(runtime: &mut JitRuntime, env: i64, inputs: &[i64]) -> i64 {
     let inputs_handle = alloc_int_list(runtime, inputs);
     if inputs_handle == 0 {
         return 0;
     }
-    run_transform(
-        runtime,
-        fields[0],
-        inputs_handle,
-        fields[1],
-        &method,
-        base_arity,
-        result_fields,
-    )
+    run_curried_call_list(runtime, env, inputs_handle)
 }
 
-fn jet_jit_compute_transform_factory_0(env: i64) -> i64 {
-    Concurrency::with_runtime_mut(|runtime| run_transform_factory(runtime, env, &[]))
+fn jet_jit_compute_curried_pull(env: i64, seed: i64) -> i64 {
+    Concurrency::with_runtime_mut(|runtime| {
+        run_curried_handle(
+            runtime,
+            env,
+            &[seed],
+        )
+    })
 }
 
-fn jet_jit_compute_transform_factory_1(env: i64, a: i64) -> i64 {
-    Concurrency::with_runtime_mut(|runtime| run_transform_factory(runtime, env, &[a]))
+fn jet_jit_compute_vjp_grads_value(env: i64) -> i64 {
+    env
 }
 
-fn jet_jit_compute_transform_factory_2(env: i64, a: i64, b: i64) -> i64 {
-    Concurrency::with_runtime_mut(|runtime| run_transform_factory(runtime, env, &[a, b]))
+fn jet_jit_compute_curried_grads(env: i64) -> i64 {
+    Concurrency::with_runtime_mut(|runtime| {
+        let result = semantics::jet_compute_call_curried(
+            env,
+            semantics::JetComputeInputPack::new(Vec::new(), Vec::new()),
+        );
+        let values = match result {
+            Ok(semantics::JetComputeCurriedResult::Gradient(values)) => values,
+            Ok(_) => return transform_failure(runtime, "core.compute.vjp.grads returned the wrong result"),
+            Err(error) => return transform_failure(runtime, &semantics::error_message(&error)),
+        };
+        alloc_curried_gradient(runtime, &values, "core.compute.vjp.grads")
+    })
 }
 
-fn jet_jit_compute_transform_factory_3(env: i64, a: i64, b: i64, c: i64) -> i64 {
-    Concurrency::with_runtime_mut(|runtime| run_transform_factory(runtime, env, &[a, b, c]))
+fn jet_jit_compute_curried_call_0(env: i64) -> i64 {
+    Concurrency::with_runtime_mut(|runtime| run_curried_call_adapter(runtime, env, &[]))
 }
 
-fn jet_jit_compute_transform_factory_4(
+fn jet_jit_compute_curried_call_1(env: i64, a: i64) -> i64 {
+    Concurrency::with_runtime_mut(|runtime| run_curried_call_adapter(runtime, env, &[a]))
+}
+
+fn jet_jit_compute_curried_call_2(env: i64, a: i64, b: i64) -> i64 {
+    Concurrency::with_runtime_mut(|runtime| run_curried_call_adapter(runtime, env, &[a, b]))
+}
+
+fn jet_jit_compute_curried_call_3(env: i64, a: i64, b: i64, c: i64) -> i64 {
+    Concurrency::with_runtime_mut(|runtime| run_curried_call_adapter(runtime, env, &[a, b, c]))
+}
+
+fn jet_jit_compute_curried_call_4(
     env: i64,
     a: i64,
     b: i64,
     c: i64,
     d: i64,
 ) -> i64 {
-    Concurrency::with_runtime_mut(|runtime| run_transform_factory(runtime, env, &[a, b, c, d]))
+    Concurrency::with_runtime_mut(|runtime| run_curried_call_adapter(runtime, env, &[a, b, c, d]))
 }
 
-fn jet_jit_compute_transform_factory_5(
+fn jet_jit_compute_curried_call_5(
     env: i64,
     a: i64,
     b: i64,
@@ -1087,10 +1299,10 @@ fn jet_jit_compute_transform_factory_5(
     d: i64,
     e: i64,
 ) -> i64 {
-    Concurrency::with_runtime_mut(|runtime| run_transform_factory(runtime, env, &[a, b, c, d, e]))
+    Concurrency::with_runtime_mut(|runtime| run_curried_call_adapter(runtime, env, &[a, b, c, d, e]))
 }
 
-fn jet_jit_compute_transform_factory_6(
+fn jet_jit_compute_curried_call_6(
     env: i64,
     a: i64,
     b: i64,
@@ -1099,7 +1311,7 @@ fn jet_jit_compute_transform_factory_6(
     e: i64,
     f: i64,
 ) -> i64 {
-    Concurrency::with_runtime_mut(|runtime| run_transform_factory(runtime, env, &[a, b, c, d, e, f]))
+    Concurrency::with_runtime_mut(|runtime| run_curried_call_adapter(runtime, env, &[a, b, c, d, e, f]))
 }
 
 fn jet_jit_compute_vjp_pull(env: i64, seed: i64) -> i64 {
@@ -1133,7 +1345,7 @@ fn jet_jit_compute_transform(
     result_fields: i64,
 ) -> i64 {
     Concurrency::with_runtime_mut(|runtime| {
-        let Some(method) = runtime.heap.clone_string(method) else {
+        let Some(kind) = semantics::JetComputeTransformKind::from_i64(method) else {
             return transform_failure(runtime, "core.compute transform method is invalid");
         };
         let Ok(base_arity) = usize::try_from(base_arity) else {
@@ -1148,12 +1360,47 @@ fn jet_jit_compute_transform(
                 base,
                 inputs,
                 targets,
-                &method,
+                kind.name(),
                 base_arity,
                 result_fields,
             );
         }
-        let adapter_arity = if method == "jvp" {
+        transform_failure(runtime, "core.compute curried transform needs its constructor seam")
+    })
+}
+
+fn jet_jit_compute_curried_new(
+    base: i64,
+    targets: i64,
+    method: i64,
+    base_arity: i64,
+    result_fields: i64,
+) -> i64 {
+    Concurrency::with_runtime_mut(|runtime| {
+        let Some(kind) = semantics::JetComputeTransformKind::from_i64(method) else {
+            return transform_failure(runtime, "core.compute transform method is invalid");
+        };
+        let Ok(base_arity) = usize::try_from(base_arity) else {
+            return transform_failure(runtime, "core.compute transform arity is invalid");
+        };
+        let Ok(result_fields) = usize::try_from(result_fields) else {
+            return transform_failure(runtime, "core.compute transform result shape is invalid");
+        };
+        let Some(targets) = read_int_list(runtime, targets) else {
+            return transform_failure(runtime, "core.compute transform expects integer targets");
+        };
+        let plan = semantics::jet_compute_curried_new(
+            curried_base(base, base_arity, result_fields),
+            kind,
+            &targets,
+            if result_fields == 0 {
+                semantics::JetComputeResultShape::Tensor
+            } else {
+                semantics::JetComputeResultShape::TensorTuple(result_fields)
+            },
+        );
+        runtime.compute.curried_handles.push(plan);
+        let adapter_arity = if kind.is_jvp() {
             base_arity.saturating_mul(2)
         } else {
             base_arity
@@ -1162,25 +1409,16 @@ fn jet_jit_compute_transform(
         // addresses rather than as named `host_fns!` imports, so they need the
         // same no-unwind boundary explicitly (#1997, `host_seam.rs`).
         let fn_ptr = match adapter_arity {
-            0 => crate::host_seam::guarded_addr(jet_jit_compute_transform_factory_0) as i64,
-            1 => crate::host_seam::guarded_addr(jet_jit_compute_transform_factory_1) as i64,
-            2 => crate::host_seam::guarded_addr(jet_jit_compute_transform_factory_2) as i64,
-            3 => crate::host_seam::guarded_addr(jet_jit_compute_transform_factory_3) as i64,
-            4 => crate::host_seam::guarded_addr(jet_jit_compute_transform_factory_4) as i64,
-            5 => crate::host_seam::guarded_addr(jet_jit_compute_transform_factory_5) as i64,
-            6 => crate::host_seam::guarded_addr(jet_jit_compute_transform_factory_6) as i64,
+            0 => crate::host_seam::guarded_addr(jet_jit_compute_curried_call_0) as i64,
+            1 => crate::host_seam::guarded_addr(jet_jit_compute_curried_call_1) as i64,
+            2 => crate::host_seam::guarded_addr(jet_jit_compute_curried_call_2) as i64,
+            3 => crate::host_seam::guarded_addr(jet_jit_compute_curried_call_3) as i64,
+            4 => crate::host_seam::guarded_addr(jet_jit_compute_curried_call_4) as i64,
+            5 => crate::host_seam::guarded_addr(jet_jit_compute_curried_call_5) as i64,
+            6 => crate::host_seam::guarded_addr(jet_jit_compute_curried_call_6) as i64,
             _ => return transform_failure(runtime, "core.compute transform function arity exceeds the resident ABI"),
         };
-        let method = runtime.heap.alloc_string(method);
-        let env = alloc_record_words(
-            runtime,
-            &[base, targets, method, base_arity as i64, result_fields as i64],
-            "core.compute transform",
-        );
-        if env == 0 {
-            return 0;
-        }
-        bind_jit_callable_handle(runtime, fn_ptr, env, true)
+        bind_jit_callable_handle(runtime, fn_ptr, plan, true)
     })
 }
 
@@ -2110,6 +2348,19 @@ host_fns! {
             .push(cranelift_codegen::ir::AbiParam::new(
                 cranelift_codegen::ir::types::I64,
             ));
+        let mut sig_curried_new = cranelift_codegen::ir::Signature::new(cc);
+        for _ in 0..5 {
+            sig_curried_new
+                .params
+                .push(cranelift_codegen::ir::AbiParam::new(
+                    cranelift_codegen::ir::types::I64,
+                ));
+        }
+        sig_curried_new
+            .returns
+            .push(cranelift_codegen::ir::AbiParam::new(
+                cranelift_codegen::ir::types::I64,
+            ));
         let mut sig_window = cranelift_codegen::ir::Signature::new(cc);
         for ty in [
             cranelift_codegen::ir::types::I64,
@@ -2190,4 +2441,6 @@ host_fns! {
     view: "jet_jit_compute_view" => jet_jit_compute_view: sig_window;
     view_mut: "jet_jit_compute_view_mut" => jet_jit_compute_view_mut: sig_window;
     transform: "jet_compute_transform" => jet_jit_compute_transform: sig_transform;
+    curried_new: "jet_compute_curried_new" => jet_jit_compute_curried_new: sig_curried_new;
+    call_curried: "jet_compute_call_curried" => jet_jit_compute_call_curried: sig_two;
 }

@@ -1,8 +1,8 @@
 //! D-LIVEQUERY1=A / I9: `app` ambient includes Prelude `LiveQuery.rs`.
 
-use crate::AST::{CtValue, Type};
-use crate::Diagnostics::{Diagnostic, Span};
 use super::Diagnostics::unsupported;
+use crate::Diagnostics::{Diagnostic, Span};
+use crate::AST::{CtValue, Type};
 
 #[allow(unused_imports)]
 pub use jet_foundation::Outcome::*;
@@ -12,7 +12,10 @@ fn live_to_ct(q: &JetLiveQuery) -> CtValue {
     CtValue::Struct {
         type_name: "LiveQuery".to_string(),
         fields: vec![
-            ("id".to_string(), CtValue::Int(q.id.min(i64::MAX as u64) as i64)),
+            (
+                "id".to_string(),
+                CtValue::Int(q.id.min(i64::MAX as u64) as i64),
+            ),
             ("footprint".to_string(), CtValue::Str(q.footprint.display())),
             ("value".to_string(), CtValue::Str(q.value.clone())),
             (
@@ -41,8 +44,9 @@ fn ct_to_live(v: &CtValue, span: Span) -> Result<JetLiveQuery, Diagnostic> {
     };
     let footprint = match field("footprint")? {
         CtValue::Str(s) if s.is_empty() => JetLiveFootprint { paths: Vec::new() },
-        CtValue::Str(s) => JetLiveFootprint::parse(s)
-            .ok_or_else(|| unsupported("footprint", span))?,
+        CtValue::Str(s) => {
+            JetLiveFootprint::parse(s).ok_or_else(|| unsupported("footprint", span))?
+        }
         _ => return Err(unsupported("footprint", span)),
     };
     let active = match field("active")? {
@@ -81,11 +85,7 @@ fn ct_to_live(v: &CtValue, span: Span) -> Result<JetLiveQuery, Diagnostic> {
 /// JIT/interpreter adapter for a typed live query. The callback remains in
 /// the shared Prelude registry; the CtValue is only the ordinary structural
 /// handle crossing the engine boundary.
-pub fn live_query_with<F>(
-    footprint: String,
-    initial: String,
-    rerun: F,
-) -> CtValue
+pub fn live_query_with<F>(footprint: String, initial: String, rerun: F) -> CtValue
 where
     F: Fn() -> Result<String, String> + Send + Sync + 'static,
 {

@@ -109,12 +109,7 @@ impl TargetMachine {
             false,
         );
         push_field(&mut out, "mmio", &mmio_json(&usage.mmio), false);
-        push_field(
-            &mut out,
-            "execution",
-            &execution_json(self),
-            false,
-        );
+        push_field(&mut out, "execution", &execution_json(self), false);
         if let Some(budget) = budget {
             push_field(&mut out, "size_budget", &budget.to_json(), false);
         }
@@ -292,9 +287,9 @@ impl TargetMachine {
                 .is_some_and(|g| !g.reason.trim().is_empty())
         });
         let mmio_in_region = usage.mmio.iter().all(|a| {
-            self.memory.iter().any(|r| {
-                r.kind == MemoryKind::Mmio && r.contains(a.address, a.size)
-            })
+            self.memory
+                .iter()
+                .any(|r| r.kind == MemoryKind::Mmio && r.contains(a.address, a.size))
         });
         SafetyReview {
             no_os: self.no_os,

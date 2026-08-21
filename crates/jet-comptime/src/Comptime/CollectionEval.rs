@@ -1,8 +1,8 @@
 //! Comptime/TIR-eval collection ops (#722 / #777). Same CtValue shapes as
 //! `Methods/dispatch/eval_method.rs` — one table for TirBridge + old helpers.
 
-use crate::AST::Type;
 use crate::Diagnostics::{Diagnostic, Span};
+use crate::AST::Type;
 
 use super::Builtins::{as_int, cmp};
 use super::Diagnostics::{index_oob, unsupported};
@@ -11,11 +11,9 @@ use jet_foundation::Prelude::jet_as_bytes as as_bytes;
 
 #[allow(dead_code, non_camel_case_types, unused_imports)]
 mod collection_semantics {
-    use jet_foundation::StructuralDebug::{
-        jet_debug_map, jet_debug_optional, jet_debug_range,
-    };
     #[allow(unused_imports)]
     pub use jet_foundation::Outcome::*;
+    use jet_foundation::StructuralDebug::{jet_debug_map, jet_debug_optional, jet_debug_range};
 
     #[derive(Clone)]
     struct JetByteBuffer {
@@ -162,10 +160,7 @@ mod collection_semantics {
         result
     }
 
-    pub(super) fn try_string_push(
-        text: &mut String,
-        addition: &str,
-    ) -> JetOutcome<(), AllocError> {
+    pub(super) fn try_string_push(text: &mut String, addition: &str) -> JetOutcome<(), AllocError> {
         jet_string_try_push(text, addition)
     }
 
@@ -269,10 +264,12 @@ fn list_field(fields: &[(String, CtValue)], wanted: &str) -> Vec<CtValue> {
 }
 
 fn int_field(fields: &[(String, CtValue)], wanted: &str) -> Option<i64> {
-    fields.iter().find_map(|(name, value)| match (name.as_str(), value) {
-        (name, CtValue::Int(n)) if name == wanted => Some(*n),
-        _ => None,
-    })
+    fields
+        .iter()
+        .find_map(|(name, value)| match (name.as_str(), value) {
+            (name, CtValue::Int(n)) if name == wanted => Some(*n),
+            _ => None,
+        })
 }
 
 fn unique_values(items: Vec<CtValue>) -> Vec<CtValue> {
@@ -424,7 +421,11 @@ pub fn byte_buffer_from(bytes: &CtValue, span: Span) -> Result<CtValue, Diagnost
 }
 
 /// Prelude `StaticCall` constructors lowered from `Type.new()`.
-pub fn prelude_new(path: &str, args: Vec<CtValue>, span: Span) -> Option<Result<CtValue, Diagnostic>> {
+pub fn prelude_new(
+    path: &str,
+    args: Vec<CtValue>,
+    span: Span,
+) -> Option<Result<CtValue, Diagnostic>> {
     Some(match path {
         "JetBitSet" => Ok(bitset_struct(Vec::new())),
         "JetByteBuffer" => {
@@ -479,8 +480,10 @@ pub fn apply_method(
         return None;
     };
     let method = if method == "contains"
-        && matches!(type_name.as_str(), "Set" | crate::Syntax::TYPE_RANK | crate::Syntax::TYPE_BITS)
-    {
+        && matches!(
+            type_name.as_str(),
+            "Set" | crate::Syntax::TYPE_RANK | crate::Syntax::TYPE_BITS
+        ) {
         "has"
     } else {
         method
@@ -490,7 +493,14 @@ pub fn apply_method(
         return Some(bag_method(fields, method, args, span));
     }
     if type_name == crate::Syntax::TYPE_SET {
-        return Some(set_method(crate::Syntax::TYPE_SET, fields, method, args, span, false));
+        return Some(set_method(
+            crate::Syntax::TYPE_SET,
+            fields,
+            method,
+            args,
+            span,
+            false,
+        ));
     }
     if type_name == crate::Syntax::TYPE_RANK {
         return Some(set_method(
@@ -539,7 +549,10 @@ pub fn apply_mutating(
             | (crate::Syntax::TYPE_RANK, "add" | "remove" | "clear")
             | ("PriorityQueue", "push" | "pop" | "clear" | "remove")
             | (crate::Syntax::TYPE_BITS, "add" | "remove" | "clear")
-            | (crate::Syntax::TYPE_QUEUE, "push_front" | "push_back" | "pop_front" | "pop_back" | "clear")
+            | (
+                crate::Syntax::TYPE_QUEUE,
+                "push_front" | "push_back" | "pop_front" | "pop_back" | "clear"
+            )
             | ("Cache", "add" | "add_new" | "get" | "remove" | "clear")
             | (
                 crate::Syntax::TYPE_BYTES,
@@ -564,7 +577,15 @@ pub fn apply_mutating(
     };
     let result = match type_name.as_str() {
         crate::Syntax::TYPE_TALLY => bag_mutating(recv, fields, method, &args, span),
-        "Set" => set_mutating(recv, crate::Syntax::TYPE_SET, fields, method, &args, span, false),
+        "Set" => set_mutating(
+            recv,
+            crate::Syntax::TYPE_SET,
+            fields,
+            method,
+            &args,
+            span,
+            false,
+        ),
         crate::Syntax::TYPE_RANK => set_mutating(
             recv,
             crate::Syntax::TYPE_RANK,
@@ -610,7 +631,9 @@ fn bag_method(
                 .sum(),
         )),
         "is_empty" => Ok(CtValue::Bool(items.is_empty())),
-        "has" => Ok(CtValue::Bool(items.contains(args.first().unwrap_or(&CtValue::Unit)))),
+        "has" => Ok(CtValue::Bool(
+            items.contains(args.first().unwrap_or(&CtValue::Unit)),
+        )),
         "count" => Ok(CtValue::Int(
             items
                 .iter()
@@ -731,9 +754,9 @@ fn set_method(
         "copy" | "to_set" => Ok(set_struct(type_name, items)),
         "capacity" => Ok(CtValue::Int(items.len() as i64)),
         "equal" => {
-            let other = args.first().ok_or_else(|| {
-                unsupported(&format!("{type_name}.equal missing argument"), span)
-            })?;
+            let other = args
+                .first()
+                .ok_or_else(|| unsupported(&format!("{type_name}.equal missing argument"), span))?;
             let CtValue::Struct {
                 type_name: other_type,
                 fields: other_fields,
@@ -748,11 +771,10 @@ fn set_method(
                 return Ok(CtValue::Bool(false));
             }
             let other_items = list_field(other_fields, "items");
-            Ok(CtValue::Bool(set_semantics::jet_set_is_subset_by(
-                &items, &other_items, |a, b| a == b,
-            ) && set_semantics::jet_set_is_subset_by(
-                &other_items, &items, |a, b| a == b,
-            )))
+            Ok(CtValue::Bool(
+                set_semantics::jet_set_is_subset_by(&items, &other_items, |a, b| a == b)
+                    && set_semantics::jet_set_is_subset_by(&other_items, &items, |a, b| a == b),
+            ))
         }
         "first" => Ok(items
             .first()
@@ -763,9 +785,9 @@ fn set_method(
             .cloned()
             .map_or_else(option_none, |v| CtValue::Present(Box::new(v)))),
         "union" => {
-            let other = args.first().ok_or_else(|| {
-                unsupported(&format!("{type_name}.union missing argument"), span)
-            })?;
+            let other = args
+                .first()
+                .ok_or_else(|| unsupported(&format!("{type_name}.union missing argument"), span))?;
             let CtValue::Struct {
                 type_name: other_type,
                 fields: other_fields,
@@ -783,7 +805,8 @@ fn set_method(
                 ));
             }
             let other_items = list_field(other_fields, "items");
-            let merged = set_semantics::jet_set_union_by(&items, &other_items, |left, right| left == right);
+            let merged =
+                set_semantics::jet_set_union_by(&items, &other_items, |left, right| left == right);
             let merged = if sorted {
                 sorted_unique(merged, span)?
             } else {
@@ -791,8 +814,12 @@ fn set_method(
             };
             Ok(set_struct(type_name, merged))
         }
-        "intersection" | "difference" | "symmetric_difference" | "is_subset"
-        | "is_superset" | "is_disjoint" => {
+        "intersection"
+        | "difference"
+        | "symmetric_difference"
+        | "is_subset"
+        | "is_superset"
+        | "is_disjoint" => {
             let other = args.first().ok_or_else(|| {
                 unsupported(&format!("{type_name}.{method} missing argument"), span)
             })?;
@@ -816,25 +843,54 @@ fn set_method(
             let equal = |left: &CtValue, right: &CtValue| left == right;
             match method {
                 "is_subset" => Ok(CtValue::Bool(set_semantics::jet_set_is_subset_by(
-                    &items, &other_items, equal,
+                    &items,
+                    &other_items,
+                    equal,
                 ))),
                 "is_superset" => Ok(CtValue::Bool(set_semantics::jet_set_is_superset_by(
-                    &items, &other_items, equal,
+                    &items,
+                    &other_items,
+                    equal,
                 ))),
                 "is_disjoint" => Ok(CtValue::Bool(set_semantics::jet_set_is_disjoint_by(
-                    &items, &other_items, equal,
+                    &items,
+                    &other_items,
+                    equal,
                 ))),
                 "intersection" => {
-                    let values = set_semantics::jet_set_intersection_by(&items, &other_items, equal);
-                    Ok(set_struct(type_name, if sorted { sorted_unique(values, span)? } else { values }))
+                    let values =
+                        set_semantics::jet_set_intersection_by(&items, &other_items, equal);
+                    Ok(set_struct(
+                        type_name,
+                        if sorted {
+                            sorted_unique(values, span)?
+                        } else {
+                            values
+                        },
+                    ))
                 }
                 "difference" => {
                     let values = set_semantics::jet_set_difference_by(&items, &other_items, equal);
-                    Ok(set_struct(type_name, if sorted { sorted_unique(values, span)? } else { values }))
+                    Ok(set_struct(
+                        type_name,
+                        if sorted {
+                            sorted_unique(values, span)?
+                        } else {
+                            values
+                        },
+                    ))
                 }
                 "symmetric_difference" => {
-                    let values = set_semantics::jet_set_symmetric_difference_by(&items, &other_items, equal);
-                    Ok(set_struct(type_name, if sorted { sorted_unique(values, span)? } else { values }))
+                    let values =
+                        set_semantics::jet_set_symmetric_difference_by(&items, &other_items, equal);
+                    Ok(set_struct(
+                        type_name,
+                        if sorted {
+                            sorted_unique(values, span)?
+                        } else {
+                            values
+                        },
+                    ))
                 }
                 _ => unreachable!(),
             }
@@ -961,7 +1017,12 @@ fn priority_queue_mutating(
                 let value = args.first().cloned().unwrap_or(CtValue::Unit);
                 match items.iter().position(|item| *item == value) {
                     Some(index) => CtValue::Present(Box::new(items.remove(index))),
-                    None => CtValue::absent(items.first().map(|item| item.jet_type()).unwrap_or(Type::Int)),
+                    None => CtValue::absent(
+                        items
+                            .first()
+                            .map(|item| item.jet_type())
+                            .unwrap_or(Type::Int),
+                    ),
                 }
             }
         }
@@ -1369,7 +1430,9 @@ fn byte_buffer_method(
         "split" => {
             let sep = as_string(args.first().unwrap_or(&CtValue::Str(String::new())), span)?;
             Ok(CtValue::List(
-                text.split(&sep).map(|s| CtValue::Str(s.to_string())).collect(),
+                text.split(&sep)
+                    .map(|s| CtValue::Str(s.to_string()))
+                    .collect(),
             ))
         }
         "replace" => {
@@ -1379,10 +1442,11 @@ fn byte_buffer_method(
         }
         "join" => {
             let parts = match args.first() {
-                Some(CtValue::List(xs)) => xs
-                    .iter()
-                    .map(|x| as_string(x, span))
-                    .collect::<Result<Vec<_>, _>>()?,
+                Some(CtValue::List(xs)) => {
+                    xs.iter()
+                        .map(|x| as_string(x, span))
+                        .collect::<Result<Vec<_>, _>>()?
+                }
                 _ => Vec::new(),
             };
             Ok(byte_buffer_struct(parts.join(&text).into_bytes()))
@@ -1528,7 +1592,10 @@ fn byte_buffer_mutating(
         }
         "read" => {
             if pos >= bytes.len() {
-                CtValue::absent(Type::List(Box::new(Type::IntN { signed: false, bits: 8 })))
+                CtValue::absent(Type::List(Box::new(Type::IntN {
+                    signed: false,
+                    bits: 8,
+                })))
             } else {
                 let out = bytes[pos..].to_vec();
                 pos = bytes.len();
@@ -1538,7 +1605,10 @@ fn byte_buffer_mutating(
         "read_bytes" => {
             let n = as_int(args.first().unwrap_or(&CtValue::Int(0)), span)?;
             if n < 0 || pos + (n as usize) > bytes.len() {
-                CtValue::absent(Type::List(Box::new(Type::IntN { signed: false, bits: 8 })))
+                CtValue::absent(Type::List(Box::new(Type::IntN {
+                    signed: false,
+                    bits: 8,
+                })))
             } else {
                 let out = bytes[pos..pos + n as usize].to_vec();
                 pos += n as usize;

@@ -1,5 +1,6 @@
 use super::actions_policy::{
-    ActionCache, ActionKind, ActionSpec, BuildCapability, BuildPolicy, BuildResourcePool, LegacyWrapperSpec,
+    ActionCache, ActionKind, ActionSpec, BuildCapability, BuildPolicy, BuildResourcePool,
+    LegacyWrapperSpec,
 };
 use super::context::BuildContext;
 use super::errors_keys::{dependency_cycle_text, BuildError};
@@ -13,8 +14,8 @@ use super::provenance_toolchains::{
     SigningIdentitySpec, SysrootIdentity, ToolchainSpec,
 };
 use super::targets::TargetSpec;
-use crate::AST::{ComptimeInput, CtValue};
 use crate::Diagnostics::{Diagnostic, Span};
+use crate::AST::{ComptimeInput, CtValue};
 use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -88,8 +89,12 @@ pub fn abort_program_build(context: &CtValue) {
     }
 }
 
-pub fn finish_program_build(context: &CtValue, returned: &CtValue) -> Result<(BuildPlan, Vec<Diagnostic>), Diagnostic> {
-    let id = build_session_id(context).ok_or_else(|| build_diag("lost build context", Span::new(0, 0)))?;
+pub fn finish_program_build(
+    context: &CtValue,
+    returned: &CtValue,
+) -> Result<(BuildPlan, Vec<Diagnostic>), Diagnostic> {
+    let id = build_session_id(context)
+        .ok_or_else(|| build_diag("lost build context", Span::new(0, 0)))?;
     let default = returned_handle(returned, crate::Syntax::TYPE_BUILD_PLAN)
         .and_then(|(_, target)| (target >= 0).then_some(target as usize));
     let session = PROGRAM_BUILD_SESSIONS.with(|sessions| sessions.borrow_mut().remove(&id));
@@ -149,25 +154,17 @@ pub fn eval_program_build_input_method(
 ) -> Option<Result<CtValue, Diagnostic>> {
     build_session_id(receiver)?;
     match method {
-        "find" => Some(
-            (|| {
-                if args.len() != 1 {
-                    return Err(build_diag("`b.find` requires exactly one glob", span));
-                }
-                let builtin = crate::Syntax::BUILTIN_FIND;
-                let glob = first_string_literal.ok_or_else(|| {
-                    crate::Comptime::Methods::embed_path_err(builtin, "literal", span)
-                })?;
-                let glob =
-                    crate::Comptime::Methods::check_literal_embed_path(builtin, glob, span)?;
-                crate::Comptime::Methods::eval_locked_find(
-                    base_dir,
-                    &glob,
-                    embed_inputs,
-                    span,
-                )
-            })(),
-        ),
+        "find" => Some((|| {
+            if args.len() != 1 {
+                return Err(build_diag("`b.find` requires exactly one glob", span));
+            }
+            let builtin = crate::Syntax::BUILTIN_FIND;
+            let glob = first_string_literal.ok_or_else(|| {
+                crate::Comptime::Methods::embed_path_err(builtin, "literal", span)
+            })?;
+            let glob = crate::Comptime::Methods::check_literal_embed_path(builtin, glob, span)?;
+            crate::Comptime::Methods::eval_locked_find(base_dir, &glob, embed_inputs, span)
+        })()),
         "embed" => Some(crate::Comptime::Methods::eval_build_embed(
             args,
             base_dir,
@@ -207,7 +204,9 @@ fn eval_session_method(
     if (ambient_probe || action_has_effects || plugin_requested) && !in_impure_gate {
         return Err(Diagnostic::error(
             "E3502",
-            format!("`b.{method}` touches the ambient world and must be inside `#Impure(\"reason\")`"),
+            format!(
+                "`b.{method}` touches the ambient world and must be inside `#Impure(\"reason\")`"
+            ),
             "build effects must be declared exactly where an auditor can see them".to_string(),
             format!("wrap the `b.{method}` call in `#Impure(\"why it is needed\")`"),
             Some(span),
@@ -241,7 +240,11 @@ fn eval_session_method(
                     span,
                 )
             })?;
-            let path = format!(".jet/generated/{}/{}.jet", session.package, safe_name(&name));
+            let path = format!(
+                ".jet/generated/{}/{}.jet",
+                session.package,
+                safe_name(&name)
+            );
             session
                 .context
                 .generate(name, path, source.to_string())
@@ -253,29 +256,20 @@ fn eval_session_method(
             let outputs = string_list_arg(&args, 2, span)?;
             let argv = string_list_arg(&args, 3, span)?;
             let caps = string_list_arg(&args, 4, span)?;
-            let mut spec = ActionSpec::cached(argv).with_inputs(inputs).with_outputs(outputs);
+            let mut spec = ActionSpec::cached(argv)
+                .with_inputs(inputs)
+                .with_outputs(outputs);
             for cap in caps {
                 spec = spec.with_cap(parse_capability(&cap, span)?);
             }
             if args.len() >= 7 {
-                let toolchain = handle_arg(
-                    &args,
-                    5,
-                    crate::Syntax::TYPE_BUILD_TOOLCHAIN,
-                    id,
-                    span,
-                )?;
+                let toolchain =
+                    handle_arg(&args, 5, crate::Syntax::TYPE_BUILD_TOOLCHAIN, id, span)?;
                 spec = spec.with_toolchain(ToolchainHandle {
                     id: ToolchainId(toolchain),
                     context: id,
                 });
-                for probe in handle_list_arg(
-                    &args,
-                    6,
-                    crate::Syntax::TYPE_BUILD_PROBE,
-                    id,
-                    span,
-                )? {
+                for probe in handle_list_arg(&args, 6, crate::Syntax::TYPE_BUILD_PROBE, id, span)? {
                     spec = spec.with_probe(ProbeHandle {
                         id: ProbeId(probe),
                         context: id,
@@ -283,13 +277,7 @@ fn eval_session_method(
                 }
             }
             if args.len() >= 8 {
-                let signing = handle_arg(
-                    &args,
-                    7,
-                    "BuildSigningIdentity",
-                    id,
-                    span,
-                )?;
+                let signing = handle_arg(&args, 7, "BuildSigningIdentity", id, span)?;
                 spec = spec.with_signing_identity(super::handles::SigningIdentityHandle {
                     id: super::handles::SigningIdentityId(signing),
                     context: id,
@@ -373,7 +361,12 @@ fn eval_session_method(
                 "gradle" => LegacyWrapperSpec::gradle(argv),
                 "npm" => LegacyWrapperSpec::npm(argv),
                 "cargo" => LegacyWrapperSpec::cargo(argv),
-                _ => return Err(build_diag(&format!("unknown legacy wrapper `{kind}`"), span)),
+                _ => {
+                    return Err(build_diag(
+                        &format!("unknown legacy wrapper `{kind}`"),
+                        span,
+                    ))
+                }
             }
             .with_inputs(inputs)
             .with_outputs(outputs);
@@ -381,26 +374,15 @@ fn eval_session_method(
                 wrapper = wrapper.with_cap(parse_capability(&cap, span)?);
             }
             if args.len() >= 7 {
-                let toolchain = handle_arg(
-                    &args,
-                    6,
-                    crate::Syntax::TYPE_BUILD_TOOLCHAIN,
-                    id,
-                    span,
-                )?;
+                let toolchain =
+                    handle_arg(&args, 6, crate::Syntax::TYPE_BUILD_TOOLCHAIN, id, span)?;
                 wrapper = wrapper.with_toolchain(ToolchainHandle {
                     id: ToolchainId(toolchain),
                     context: id,
                 });
             }
             if args.len() >= 8 {
-                for probe in handle_list_arg(
-                    &args,
-                    7,
-                    crate::Syntax::TYPE_BUILD_PROBE,
-                    id,
-                    span,
-                )? {
+                for probe in handle_list_arg(&args, 7, crate::Syntax::TYPE_BUILD_PROBE, id, span)? {
                     wrapper = wrapper.with_probe(ProbeHandle {
                         id: ProbeId(probe),
                         context: id,
@@ -408,13 +390,7 @@ fn eval_session_method(
                 }
             }
             if args.len() >= 9 {
-                let signing = handle_arg(
-                    &args,
-                    8,
-                    "BuildSigningIdentity",
-                    id,
-                    span,
-                )?;
+                let signing = handle_arg(&args, 8, "BuildSigningIdentity", id, span)?;
                 wrapper = wrapper.with_signing_identity(SigningIdentityHandle {
                     id: SigningIdentityId(signing),
                     context: id,
@@ -447,7 +423,10 @@ fn eval_session_method(
             if args.len() >= 12 {
                 for entry in string_list_arg(&args, 11, span)? {
                     let (key, value) = entry.split_once('=').ok_or_else(|| {
-                        build_diag("legacy wrapper environment entries must use KEY=VALUE", span)
+                        build_diag(
+                            "legacy wrapper environment entries must use KEY=VALUE",
+                            span,
+                        )
                     })?;
                     wrapper = wrapper.with_env(key, value);
                 }
@@ -482,7 +461,12 @@ fn eval_session_method(
                 wrapper = wrapper.with_cache(match cache.to_ascii_lowercase().as_str() {
                     "cached" => ActionCache::Cached,
                     "phony" | "uncached" => ActionCache::UncachedPhony,
-                    _ => return Err(build_diag("legacy wrapper cache must be cached or phony", span)),
+                    _ => {
+                        return Err(build_diag(
+                            "legacy wrapper cache must be cached or phony",
+                            span,
+                        ))
+                    }
                 });
             }
             // A denied wrapper cannot contribute a graph. Preserve the
@@ -510,11 +494,9 @@ fn eval_session_method(
                         span,
                     ));
                 }
-                let imported = LegacyWrapperSpec::from_project_file(
-                    &session.project_root,
-                    wrapper.kind,
-                )
-                .map_err(|error| build_error_diag(&error, span))?;
+                let imported =
+                    LegacyWrapperSpec::from_project_file(&session.project_root, wrapper.kind)
+                        .map_err(|error| build_error_diag(&error, span))?;
                 validate_legacy_import_contract(&wrapper, &imported, span)?;
                 for (label, value) in imported.labels {
                     if !matches!(label.as_str(), "legacy.import" | "legacy.project-file") {
@@ -531,8 +513,8 @@ fn eval_session_method(
                 .action(name, spec)
                 .map(|handle| handle_value(crate::Syntax::TYPE_BUILD_ACTION, id, handle.id.0))
         }
-        "add_executable" | "add_library" | "add_test" | "add_asset_bundle"
-        | "add_doc" | "add_install" | "add_package" | "add_publish" => {
+        "add_executable" | "add_library" | "add_test" | "add_asset_bundle" | "add_doc"
+        | "add_install" | "add_package" | "add_publish" => {
             let name = string_arg(&args, 0, span)?;
             let sources = string_list_arg(&args, 1, span)?;
             let actions = handle_list_arg(&args, 2, crate::Syntax::TYPE_BUILD_ACTION, id, span)?;
@@ -547,7 +529,8 @@ fn eval_session_method(
                 });
             }
             if args.len() >= 4 {
-                for target in handle_list_arg(&args, 3, crate::Syntax::TYPE_BUILD_TARGET, id, span)? {
+                for target in handle_list_arg(&args, 3, crate::Syntax::TYPE_BUILD_TARGET, id, span)?
+                {
                     spec = spec.with_dep(TargetRef {
                         id: TargetId(target),
                         context: id,
@@ -563,7 +546,8 @@ fn eval_session_method(
                 }
             }
             if args.len() >= 6 {
-                let toolchain = handle_arg(&args, 5, crate::Syntax::TYPE_BUILD_TOOLCHAIN, id, span)?;
+                let toolchain =
+                    handle_arg(&args, 5, crate::Syntax::TYPE_BUILD_TOOLCHAIN, id, span)?;
                 spec = spec.with_toolchain(ToolchainHandle {
                     id: ToolchainId(toolchain),
                     context: id,
@@ -599,7 +583,8 @@ fn eval_session_method(
             }
             if args.len() >= 4 {
                 let sdk = string_arg(&args, 3, span)?;
-                toolchain = toolchain.with_sdk(SdkIdentity::new(sdk, "declared", provenance.clone()));
+                toolchain =
+                    toolchain.with_sdk(SdkIdentity::new(sdk, "declared", provenance.clone()));
             }
             if args.len() >= 5 {
                 let linker = string_arg(&args, 4, span)?;
@@ -607,7 +592,11 @@ fn eval_session_method(
             }
             if args.len() >= 6 {
                 let sysroot = string_arg(&args, 5, span)?;
-                toolchain = toolchain.with_sysroot(SysrootIdentity::new(sysroot, "declared", provenance.clone()));
+                toolchain = toolchain.with_sysroot(SysrootIdentity::new(
+                    sysroot,
+                    "declared",
+                    provenance.clone(),
+                ));
             }
             session
                 .context
@@ -641,7 +630,12 @@ fn eval_session_method(
                     std::iter::empty::<String>(),
                     string_arg(&args, 3, span)?,
                 ),
-                _ => return Err(build_diag(&format!("unknown typed probe kind `{kind}`"), span)),
+                _ => {
+                    return Err(build_diag(
+                        &format!("unknown typed probe kind `{kind}`"),
+                        span,
+                    ))
+                }
             };
             let (reproducibility, toolchain_index) = if kind == "compile_check" {
                 match args.get(4) {
@@ -665,22 +659,27 @@ fn eval_session_method(
             if let Some(value) = reproducibility {
                 let value = match value {
                     CtValue::Str(value) => value,
-                    _ => return Err(build_diag("probe reproducibility must be `ambient` or `reproducible`", span)),
+                    _ => {
+                        return Err(build_diag(
+                            "probe reproducibility must be `ambient` or `reproducible`",
+                            span,
+                        ))
+                    }
                 };
                 spec = spec.with_reproducibility(match value.to_ascii_lowercase().as_str() {
                     "ambient" => ReproducibilityClass::Ambient,
                     "reproducible" => ReproducibilityClass::Reproducible,
-                    _ => return Err(build_diag("probe reproducibility must be `ambient` or `reproducible`", span)),
+                    _ => {
+                        return Err(build_diag(
+                            "probe reproducibility must be `ambient` or `reproducible`",
+                            span,
+                        ))
+                    }
                 });
             }
             if let Some(index) = toolchain_index {
-                let toolchain = handle_arg(
-                    &args,
-                    index,
-                    crate::Syntax::TYPE_BUILD_TOOLCHAIN,
-                    id,
-                    span,
-                )?;
+                let toolchain =
+                    handle_arg(&args, index, crate::Syntax::TYPE_BUILD_TOOLCHAIN, id, span)?;
                 spec = spec.with_toolchain(ToolchainHandle {
                     id: ToolchainId(toolchain),
                     context: id,
@@ -704,14 +703,17 @@ fn eval_session_method(
                 session.diagnostics.push(Diagnostic::error(
                     "E3530",
                     format!("build rule code `{code}` is reserved"),
-                    "codes beginning with E or W followed only by digits belong to the compiler".to_string(),
+                    "codes beginning with E or W followed only by digits belong to the compiler"
+                        .to_string(),
                     "use a project prefix such as `ORG01`".to_string(),
                     Some(diagnostic_span),
                 ));
             } else {
                 match build_project_error(code, what, why, fix, Some(diagnostic_span)) {
                     Ok(diagnostic) => session.diagnostics.push(diagnostic),
-                    Err(detail) => session.diagnostics.push(build_diag(detail, diagnostic_span)),
+                    Err(detail) => session
+                        .diagnostics
+                        .push(build_diag(detail, diagnostic_span)),
                 }
             }
             return Ok(CtValue::Unit);
@@ -730,7 +732,10 @@ fn eval_session_method(
         }
         "contribute" => {
             if args.len() != 2 {
-                return Err(build_diag("`b.contribute` requires a fact name and one value", span));
+                return Err(build_diag(
+                    "`b.contribute` requires a fact name and one value",
+                    span,
+                ));
             }
             let name = string_arg(&args, 0, span)?;
             if name.trim().is_empty() || name.contains('.') {
@@ -752,7 +757,10 @@ fn eval_session_method(
             session.context.contribute(contribution);
             return Ok(CtValue::Unit);
         }
-        _ => return None.ok_or_else(|| build_diag(&format!("unknown build method `{method}`"), span)),
+        _ => {
+            return None
+                .ok_or_else(|| build_diag(&format!("unknown build method `{method}`"), span))
+        }
     };
     Ok(match result {
         Ok(value) => CtValue::Present(Box::new(value)),
@@ -760,7 +768,10 @@ fn eval_session_method(
     })
 }
 
-fn fact_value_arg(value: &CtValue, span: Span) -> Result<jet_foundation::Policy::FactValue, Diagnostic> {
+fn fact_value_arg(
+    value: &CtValue,
+    span: Span,
+) -> Result<jet_foundation::Policy::FactValue, Diagnostic> {
     match value {
         CtValue::Bool(value) => Ok(jet_foundation::Policy::FactValue::Bool(*value)),
         CtValue::Int(value) => Ok(jet_foundation::Policy::FactValue::Int(*value)),
@@ -792,16 +803,32 @@ fn validate_legacy_import_contract(
             span,
         ));
     }
-    let declared_inputs = declared.inputs.iter().cloned().collect::<std::collections::BTreeSet<_>>();
-    let imported_inputs = imported.inputs.iter().cloned().collect::<std::collections::BTreeSet<_>>();
+    let declared_inputs = declared
+        .inputs
+        .iter()
+        .cloned()
+        .collect::<std::collections::BTreeSet<_>>();
+    let imported_inputs = imported
+        .inputs
+        .iter()
+        .cloned()
+        .collect::<std::collections::BTreeSet<_>>();
     if declared_inputs != imported_inputs {
         return Err(build_diag(
             "legacy wrapper inputs must exactly match its canonical project-file import",
             span,
         ));
     }
-    let declared_outputs = declared.outputs.iter().cloned().collect::<std::collections::BTreeSet<_>>();
-    let imported_outputs = imported.outputs.iter().cloned().collect::<std::collections::BTreeSet<_>>();
+    let declared_outputs = declared
+        .outputs
+        .iter()
+        .cloned()
+        .collect::<std::collections::BTreeSet<_>>();
+    let imported_outputs = imported
+        .outputs
+        .iter()
+        .cloned()
+        .collect::<std::collections::BTreeSet<_>>();
     if declared_outputs != imported_outputs {
         return Err(build_diag(
             "legacy wrapper outputs must exactly match its canonical project-file import",
@@ -848,23 +875,42 @@ fn validate_legacy_import_contract(
 }
 
 fn build_session_id(value: &CtValue) -> Option<u64> {
-    let CtValue::Struct { type_name, fields } = value else { return None };
-    if type_name != crate::Syntax::TYPE_BUILD_CONTEXT { return None; }
-    fields.iter().find_map(|(name, value)| match (name.as_str(), value) {
-        ("__session", CtValue::Int(id)) if *id >= 0 => Some(*id as u64),
-        _ => None,
-    })
+    let CtValue::Struct { type_name, fields } = value else {
+        return None;
+    };
+    if type_name != crate::Syntax::TYPE_BUILD_CONTEXT {
+        return None;
+    }
+    fields
+        .iter()
+        .find_map(|(name, value)| match (name.as_str(), value) {
+            ("__session", CtValue::Int(id)) if *id >= 0 => Some(*id as u64),
+            _ => None,
+        })
 }
 
 fn returned_handle(value: &CtValue, type_name: &str) -> Option<(u64, i64)> {
-    let value = match value { CtValue::Present(value) => value.as_ref(), other => other };
-    let CtValue::Struct { type_name: actual, fields } = value else { return None };
-    if actual != type_name { return None; }
+    let value = match value {
+        CtValue::Present(value) => value.as_ref(),
+        other => other,
+    };
+    let CtValue::Struct {
+        type_name: actual,
+        fields,
+    } = value
+    else {
+        return None;
+    };
+    if actual != type_name {
+        return None;
+    }
     let session = fields.iter().find_map(|(n, v)| match (n.as_str(), v) {
-        ("session", CtValue::Int(id)) => Some(*id as u64), _ => None
+        ("session", CtValue::Int(id)) => Some(*id as u64),
+        _ => None,
     })?;
     let id = fields.iter().find_map(|(n, v)| match (n.as_str(), v) {
-        ("id", CtValue::Int(id)) => Some(*id), _ => None
+        ("id", CtValue::Int(id)) => Some(*id),
+        _ => None,
     })?;
     Some((session, id))
 }
@@ -879,54 +925,100 @@ fn handle_value(type_name: &str, session: u64, id: usize) -> CtValue {
     }
 }
 
-fn handle_arg(args: &[CtValue], index: usize, ty: &str, session: u64, span: Span) -> Result<usize, Diagnostic> {
+fn handle_arg(
+    args: &[CtValue],
+    index: usize,
+    ty: &str,
+    session: u64,
+    span: Span,
+) -> Result<usize, Diagnostic> {
     match args.get(index).and_then(|v| returned_handle(v, ty)) {
         Some((actual, id)) if actual == session && id >= 0 => Ok(id as usize),
-        _ => Err(build_diag(&format!("argument {} must be a `{ty}` from this build", index + 1), span)),
+        _ => Err(build_diag(
+            &format!("argument {} must be a `{ty}` from this build", index + 1),
+            span,
+        )),
     }
 }
 
-fn handle_list_arg(args: &[CtValue], index: usize, ty: &str, session: u64, span: Span) -> Result<Vec<usize>, Diagnostic> {
+fn handle_list_arg(
+    args: &[CtValue],
+    index: usize,
+    ty: &str,
+    session: u64,
+    span: Span,
+) -> Result<Vec<usize>, Diagnostic> {
     let Some(CtValue::List(values)) = args.get(index) else {
-        return Err(build_diag(&format!("argument {} must be a list", index + 1), span));
+        return Err(build_diag(
+            &format!("argument {} must be a list", index + 1),
+            span,
+        ));
     };
-    values.iter().map(|value| handle_arg(std::slice::from_ref(value), 0, ty, session, span)).collect()
+    values
+        .iter()
+        .map(|value| handle_arg(std::slice::from_ref(value), 0, ty, session, span))
+        .collect()
 }
 
 fn string_arg(args: &[CtValue], index: usize, span: Span) -> Result<String, Diagnostic> {
     match args.get(index) {
         Some(CtValue::Str(value)) => Ok(value.clone()),
-        _ => Err(build_diag(&format!("argument {} must be String", index + 1), span)),
+        _ => Err(build_diag(
+            &format!("argument {} must be String", index + 1),
+            span,
+        )),
     }
 }
 
 fn source_span_arg(args: &[CtValue], index: usize, span: Span) -> Result<Span, Diagnostic> {
     let Some(CtValue::Struct { type_name, fields }) = args.get(index) else {
-        return Err(build_diag("custom build diagnostics require a source span", span));
+        return Err(build_diag(
+            "custom build diagnostics require a source span",
+            span,
+        ));
     };
     if type_name != crate::Syntax::TYPE_SOURCE_SPAN {
-        return Err(build_diag("custom build diagnostics require a source span", span));
+        return Err(build_diag(
+            "custom build diagnostics require a source span",
+            span,
+        ));
     }
     let value = |name: &str| {
-        fields.iter().find_map(|(field, value)| match (field.as_str(), value) {
-            (actual, CtValue::Int(value)) if actual == name && *value >= 0 => Some(*value as usize),
-            _ => None,
-        })
+        fields
+            .iter()
+            .find_map(|(field, value)| match (field.as_str(), value) {
+                (actual, CtValue::Int(value)) if actual == name && *value >= 0 => {
+                    Some(*value as usize)
+                }
+                _ => None,
+            })
     };
     match (value("start"), value("end")) {
         (Some(start), Some(end)) if start <= end => Ok(Span::new(start, end)),
-        _ => Err(build_diag("custom build diagnostics require a valid source span", span)),
+        _ => Err(build_diag(
+            "custom build diagnostics require a valid source span",
+            span,
+        )),
     }
 }
 
 fn string_list_arg(args: &[CtValue], index: usize, span: Span) -> Result<Vec<String>, Diagnostic> {
     let Some(CtValue::List(values)) = args.get(index) else {
-        return Err(build_diag(&format!("argument {} must be [String]", index + 1), span));
+        return Err(build_diag(
+            &format!("argument {} must be [String]", index + 1),
+            span,
+        ));
     };
-    values.iter().map(|value| match value {
-        CtValue::Str(value) => Ok(value.clone()),
-        _ => Err(build_diag(&format!("argument {} must be [String]", index + 1), span)),
-    }).collect()
+    values
+        .iter()
+        .map(|value| match value {
+            CtValue::Str(value) => Ok(value.clone()),
+            _ => Err(build_diag(
+                &format!("argument {} must be [String]", index + 1),
+                span,
+            )),
+        })
+        .collect()
 }
 
 fn parse_capability(name: &str, span: Span) -> Result<BuildCapability, Diagnostic> {
@@ -939,7 +1031,15 @@ fn parse_capability(name: &str, span: Span) -> Result<BuildCapability, Diagnosti
 }
 
 fn safe_name(name: &str) -> String {
-    name.chars().map(|c| if c.is_ascii_alphanumeric() || c == '_' || c == '-' { c } else { '_' }).collect()
+    name.chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '_' || c == '-' {
+                c
+            } else {
+                '_'
+            }
+        })
+        .collect()
 }
 
 fn build_error_diag(error: &BuildError, span: Span) -> Diagnostic {
@@ -948,12 +1048,21 @@ fn build_error_diag(error: &BuildError, span: Span) -> Diagnostic {
 
 fn build_error_text(error: &BuildError) -> String {
     match error {
-        BuildError::DuplicateTargetName(name) => format!("target name `{name}` is registered twice"),
-        BuildError::DuplicateActionName(name) => format!("action name `{name}` is registered twice"),
-        BuildError::CompilerPackageDependencyMissing { package, dependency } => format!(
+        BuildError::DuplicateTargetName(name) => {
+            format!("target name `{name}` is registered twice")
+        }
+        BuildError::DuplicateActionName(name) => {
+            format!("action name `{name}` is registered twice")
+        }
+        BuildError::CompilerPackageDependencyMissing {
+            package,
+            dependency,
+        } => format!(
             "compiler package `{package}` depends on missing package artifact `{dependency}`"
         ),
-        BuildError::DuplicateToolchainName(name) => format!("toolchain name `{name}` is registered twice"),
+        BuildError::DuplicateToolchainName(name) => {
+            format!("toolchain name `{name}` is registered twice")
+        }
         BuildError::DuplicateProbeName(name) => format!("probe name `{name}` is registered twice"),
         BuildError::InvalidPath(path) => {
             format!("build path `{path}` must be relative and stay inside the project")
@@ -963,9 +1072,9 @@ fn build_error_text(error: &BuildError) -> String {
             kind.as_str(),
             kind.project_file()
         ),
-        BuildError::LegacyProjectFileInvalid(path) => format!(
-            "legacy project file `{path}` must be a readable regular file"
-        ),
+        BuildError::LegacyProjectFileInvalid(path) => {
+            format!("legacy project file `{path}` must be a readable regular file")
+        }
         BuildError::UndeclaredEnvName { action, key } => {
             format!("action `{action}` allowlists undeclared environment variable `{key}`")
         }
@@ -973,11 +1082,17 @@ fn build_error_text(error: &BuildError) -> String {
         BuildError::InvalidPluginDigest(message) => {
             format!("build plugin component digest is invalid: {message}")
         }
-        BuildError::CachedActionWithoutOutputs(name) => format!("cached action `{name}` declares no outputs"),
-        BuildError::PhonyActionWithoutCaps(name) => format!("uncached action `{name}` declares no abilities"),
-        BuildError::DuplicateBuildOutput { output, first_action, second_action } => format!(
-            "output `{output}` is owned by both `{first_action}` and `{second_action}`"
-        ),
+        BuildError::CachedActionWithoutOutputs(name) => {
+            format!("cached action `{name}` declares no outputs")
+        }
+        BuildError::PhonyActionWithoutCaps(name) => {
+            format!("uncached action `{name}` declares no abilities")
+        }
+        BuildError::DuplicateBuildOutput {
+            output,
+            first_action,
+            second_action,
+        } => format!("output `{output}` is owned by both `{first_action}` and `{second_action}`"),
         BuildError::DuplicateGeneratedModuleName(name) => {
             format!("E3511: generation rounds form a cycle: module `{name}` is generated twice")
         }

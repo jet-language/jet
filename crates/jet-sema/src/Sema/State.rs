@@ -723,11 +723,11 @@ impl<'a> StateCtx<'a> {
                     .unwrap_or(Span::new(0, 0));
                 let cur = self.flow.states.get(&local).cloned();
                 if let Some(req) = self.tbl.fn_requires.get(name) {
-                    self.check_state(&local, cur.as_deref(), req, name, name, span);
+                    self.check_state(&local, cur.as_deref(), req, &local, name, span);
                 }
                 if let Some((from, to)) = self.tbl.fn_transitions.get(name) {
                     if let Some(req) = from {
-                        self.check_state(&local, cur.as_deref(), req, name, name, span);
+                        self.check_state(&local, cur.as_deref(), req, &local, name, span);
                     }
                     if crate::Sema::knowledge_gate_allows(
                         KnowledgePlane::State,

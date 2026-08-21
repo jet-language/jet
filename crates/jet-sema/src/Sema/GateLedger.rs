@@ -65,6 +65,7 @@ impl GateLedger {
             visit_items(&module.display, &module.items, &mut ledger);
         }
         append_fact_gates(&mut ledger, &bundle.build_facts);
+        ledger.append_structure_facts(&bundle.name_ledger);
         ledger.sort();
         ledger
     }
@@ -89,6 +90,33 @@ impl GateLedger {
 
     pub fn sort(&mut self) {
         self.inner.sort();
+    }
+
+    /// Project structure exceptions into the same gate ledger as every other
+    /// written escape. A structure fact with no gate tightens silently and is
+    /// deliberately absent from this projection.
+    pub fn append_structure_facts(&mut self, facts: &jet_foundation::Names::NameLedger) {
+        for fact in facts.structure_facts() {
+            let Some(gate) = fact.gate.as_deref() else {
+                continue;
+            };
+            self.push(GateEntry {
+                kind: GateKind::Structure,
+                domain: "structure".to_string(),
+                scope: fact.kind.name().to_string(),
+                source: fact.source.clone(),
+                span: Some(fact.span),
+                subject: fact.subject.clone(),
+                reason: Some(gate.to_string()),
+                status: Some(fact.status.clone()),
+                detail: fact.detail.clone(),
+                provenance: vec![format!(
+                    "{}:{}..{}",
+                    fact.source, fact.span.start, fact.span.end
+                )],
+                operations: Vec::new(),
+            });
+        }
     }
 }
 
@@ -569,6 +597,28 @@ mod tests {
         ledger.push(second);
         assert_eq!(ledger.entries().len(), 1);
         assert_eq!(ledger.entries()[0].provenance.len(), 2);
+    }
+
+    #[test]
+    fn structure_facts_use_the_same_gate_ledger() {
+        let mut names = jet_foundation::Names::NameLedger::default();
+        names.record_structure_fact(jet_foundation::Names::StructureFact::new(
+            jet_foundation::Names::StructureFactKind::Liveness,
+            "files",
+            "app.jet",
+            Span::new(4, 9),
+            "unused",
+            "remove or rename to _files",
+            Some("_name".to_string()),
+        ));
+
+        let mut ledger = GateLedger::default();
+        ledger.append_structure_facts(&names);
+
+        assert_eq!(ledger.entries().len(), 1);
+        assert_eq!(ledger.entries()[0].kind, GateKind::Structure);
+        assert_eq!(ledger.entries()[0].domain, "structure");
+        assert_eq!(ledger.entries()[0].reason.as_deref(), Some("_name"));
     }
 
     #[test]

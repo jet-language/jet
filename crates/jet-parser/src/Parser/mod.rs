@@ -27,13 +27,19 @@ mod Statements;
 mod Types;
 
 pub fn parse(toks: &[Token]) -> Result<Program, Vec<Diagnostic>> {
-    parse_inner(toks, false)
+    parse_inner(toks, false, false)
+}
+
+/// Parse a Jetpack config surface. The config grammar reserves `$NAME` for a
+/// typed environment read; ordinary Jet source keeps the same token retired.
+pub fn parse_config(toks: &[Token]) -> Result<Program, Vec<Diagnostic>> {
+    parse_inner(toks, false, true)
 }
 
 /// Parse for `jet fmt`: succeeds when the AST is recoverable, even if live
 /// teaching diagnostics rewrote retired marker or punctuation forms.
 pub fn parse_for_fmt(toks: &[Token]) -> Result<Program, Vec<Diagnostic>> {
-    parse_inner(toks, true)
+    parse_inner(toks, true, false)
 }
 
 /// Parse for editor/LSP check: recover through live teaching errors, return
@@ -58,9 +64,11 @@ pub fn parse_for_check(toks: &[Token]) -> Result<(Program, Vec<Diagnostic>), Vec
         callable_tail_block_depth: None,
         module_arg_expr_depth: None,
         allow_lowercase_leading_dot: false,
+        allow_environment_reads: false,
         migration_mode: true,
         derive_template_depth: 0,
         policy_declarations: Vec::new(),
+        user_policy_declarations: Vec::new(),
         applied_rules: Vec::new(),
         rule_facts: Vec::new(),
         block_spans: Vec::new(),
@@ -80,7 +88,11 @@ pub fn parse_for_check(toks: &[Token]) -> Result<(Program, Vec<Diagnostic>), Vec
     }
 }
 
-fn parse_inner(toks: &[Token], for_fmt: bool) -> Result<Program, Vec<Diagnostic>> {
+fn parse_inner(
+    toks: &[Token],
+    for_fmt: bool,
+    allow_environment_reads: bool,
+) -> Result<Program, Vec<Diagnostic>> {
     let toks = crate::Lexer::without_comments(toks);
     let (toks, fenced_statements) = crate::FencedNames::expand(&toks)?;
     check_token_nesting(&toks)?;
@@ -100,9 +112,11 @@ fn parse_inner(toks: &[Token], for_fmt: bool) -> Result<Program, Vec<Diagnostic>
         callable_tail_block_depth: None,
         module_arg_expr_depth: None,
         allow_lowercase_leading_dot: false,
+        allow_environment_reads,
         migration_mode: for_fmt,
         derive_template_depth: 0,
         policy_declarations: Vec::new(),
+        user_policy_declarations: Vec::new(),
         applied_rules: Vec::new(),
         rule_facts: Vec::new(),
         block_spans: Vec::new(),
@@ -181,6 +195,7 @@ fn is_teaching_parse_diag(code: &str) -> bool {
             | "E0374"
             | "E0378"
             | "E0379"
+            | "E-ERR-SIGIL"
             | "E0999"
             | "E0412"
             | "E0413"
@@ -246,11 +261,15 @@ struct Parser<'a> {
     /// recoverable for `fmt`/check so formatter can rewrite old sources; no
     /// user-facing switch exposes this mode.
     migration_mode: bool,
+    /// D-ONCE-DOLLAR1=B: config surfaces admit `$NAME` as a typed environment
+    /// read. Ordinary source leaves the same token on the teaching path.
+    allow_environment_reads: bool,
     /// >0 while parsing a typed item-template body (`derive`, marker, or
     /// `b.generate`). A compile-time name in a type slot is an internal hole
     /// here; expansion fills it before ordinary sema checks the item.
     derive_template_depth: usize,
     policy_declarations: Vec<crate::Policy::PolicyDeclaration>,
+    user_policy_declarations: Vec<crate::AST::UserPolicyDecl>,
     applied_rules: Vec<crate::AST::AppliedRuleApplication>,
     rule_facts: Vec<crate::AST::AppliedRuleApplication>,
     block_spans: Vec<Span>,
@@ -276,23 +295,22 @@ fn check_token_nesting(toks: &[Token]) -> Result<(), Vec<Diagnostic>> {
 }
 
 impl<'a> Parser<'a> {
-    pub(super) fn retired_comptime_mark(&self, span: Span) -> Diagnostic {
+    pub(super) fn environment_read_outside_config(&self, span: Span) -> Diagnostic {
         Diagnostic::error(
             "E0003",
-            format!(
-                "the compile-time prefix `{}` is retired",
-                Syntax::RETIRED_COMPTIME_MARK
-            ),
-            format!(
-                "D-ONCE-AT1=D gives `{}` one prefix mark for compile-time names and fact reads; infix `@` package refs stay unchanged",
-                Syntax::COMPTIME_MARK
-            ),
-            format!(
-                "write `{}name`, `{}if <condition> {{ … }}`, or `T.{}layout`",
-                Syntax::COMPTIME_MARK,
-                Syntax::COMPTIME_MARK,
-                Syntax::COMPTIME_MARK
-            ),
+            "`$NAME` is an environment read for config surfaces only".to_string(),
+            "D-ONCE-DOLLAR1=B reserves `$NAME` for typed environment access in `env.jet` and deploy/config files; ordinary program code does not read the environment with `$`".to_string(),
+            "move the read to `env.jet` or a deploy/config file, or use an explicit program API for runtime environment access".to_string(),
+            Some(span),
+        )
+    }
+
+    pub(super) fn invalid_environment_read(&self, span: Span) -> Diagnostic {
+        Diagnostic::error(
+            "E0003",
+            "an environment read needs a plain name after `$`".to_string(),
+            "config-surface environment access has the typed form `$NAME`".to_string(),
+            "write a name such as `$HOME` in `env.jet` or a deploy/config file".to_string(),
             Some(span),
         )
     }
@@ -1343,9 +1361,11 @@ fn run() {
             callable_tail_block_depth: None,
             module_arg_expr_depth: None,
             allow_lowercase_leading_dot: false,
+            allow_environment_reads: false,
             migration_mode: false,
             derive_template_depth: 0,
             policy_declarations: Vec::new(),
+            user_policy_declarations: Vec::new(),
             applied_rules: Vec::new(),
             rule_facts: Vec::new(),
             block_spans: Vec::new(),
@@ -1570,7 +1590,7 @@ fn notify(ready: Bool) :[Net]> {
         }
     }
 
-    /// D-RESULT-OPTION-CANON1: tight `T?` is Optional; spaced `T ?` is fallible.
+    /// D-ERRSIGIL1: tight `T?` is Optional; `T ! E` is fallible.
     #[test]
     fn return_type_question_spacing_disambiguates_option_vs_result() {
         let opt = program("fn a() :> Int? { return None }\nfn run() {}\n");
@@ -1583,7 +1603,7 @@ fn notify(ready: Bool) :[Net]> {
             "tight `Int?` must be Optional"
         );
 
-        let res = program("fn b() :> Int ? { return Ok(1) }\nfn run() {}\n");
+        let res = program("fn b() :> Int ! { return Ok(1) }\nfn run() {}\n");
         let b = res.items.iter().find_map(|i| match i {
             crate::AST::Item::Func(f) if f.name == "b" => Some(f),
             _ => None,
@@ -1593,7 +1613,7 @@ fn notify(ready: Bool) :[Net]> {
                 b.expect("b").return_type,
                 Some(crate::AST::Type::Result { .. })
             ),
-            "spaced `Int ?` must be Result"
+            "`Int !` must be Result"
         );
 
         let paren = program("fn c() :> (Int?) { return None }\nfn run() {}\n");
@@ -1608,12 +1628,24 @@ fn notify(ready: Bool) :[Net]> {
     }
 
     #[test]
-    fn unit_fallible_signatures_use_the_post_parameter_question() {
+    fn fallible_type_sigil_is_valid_in_all_type_positions() {
         let parsed = program(
-            "fn save(path: String) ? IOError {}\n\
-             fn sync() ? {}\n\
-             fn bounded() :[FS]> ? IOError {}\n\
-             fn load() :> Config ? IOError {}\n",
+            "struct Holder { value: Int ! IOError }\n\
+             alias Box<T> :: T\n\
+             fn take(value: Int ! IOError) :> Box<Int ! IOError> { return value }\n\
+             fn run() {}\n",
+        );
+        assert!(parsed.items.iter().any(|item| matches!(item, crate::AST::Item::Struct(_))));
+        assert!(parsed.items.iter().any(|item| matches!(item, crate::AST::Item::TypeAlias(_))));
+    }
+
+    #[test]
+    fn unit_fallible_signatures_use_the_post_parameter_bang() {
+        let parsed = program(
+            "fn save(path: String) ! IOError {}\n\
+             fn sync() ! {}\n\
+             fn bounded() :[FS]> ! IOError {}\n\
+             fn load() :> Config ! IOError {}\n",
         );
         let find = |name| {
             parsed.items.iter().find_map(|item| match item {
@@ -1644,18 +1676,18 @@ fn notify(ready: Bool) :[Net]> {
         use crate::Formatter::format_source;
 
         let source =
-            "fn save(path: String) ? IOError {}\nfn sync() ? {}\nfn bounded() :[FS]> ? IOError {}\n";
+            "fn save(path: String) ! IOError {}\nfn sync() ! {}\nfn bounded() :[FS]> ! IOError {}\n";
         let once = format_source(source).expect("unit-fallible signatures format");
-        assert!(once.contains("fn save(path: String) ? IOError"), "{once}");
-        assert!(once.contains("fn sync() ?"), "{once}");
-        assert!(once.contains("fn bounded() :[FS]> ? IOError"), "{once}");
+        assert!(once.contains("fn save(path: String) ! IOError"), "{once}");
+        assert!(once.contains("fn sync() !"), "{once}");
+        assert!(once.contains("fn bounded() :[FS]> ! IOError"), "{once}");
         assert_eq!(once, format_source(&once).expect("formatted form is stable"));
     }
 
     #[test]
     fn retired_unit_fallible_arrow_form_teaches_the_new_signature() {
         let source = format!(
-            "fn save() {} () ? IOError {{ return }}\n",
+            "fn save() {} () ! IOError {{ return }}\n",
             Syntax::OP_UNIFIED_ARROW
         );
         let (tokens, lex_diagnostics) = lex(&source);
@@ -1665,7 +1697,7 @@ fn notify(ready: Bool) :[Net]> {
             .iter()
             .find(|diagnostic| diagnostic.code == "E0003")
             .expect("E0003");
-        assert!(diagnostic.fix.contains("fn save(path: String) ? IOError"));
+        assert!(diagnostic.fix.contains("fn save(path: String) ! IOError"));
     }
 
     /// D-SPREAD1=A: `prefix.[a, b]` parses as MemberSpread.

@@ -83,7 +83,11 @@ impl ReportPath {
                 Err(_) => return Self::new(display.into_owned()),
             }
         };
-        Self::new(lexically_normalize(&absolute).to_string_lossy().into_owned())
+        Self::new(
+            lexically_normalize(&absolute)
+                .to_string_lossy()
+                .into_owned(),
+        )
     }
 
     pub fn as_str(&self) -> &str {

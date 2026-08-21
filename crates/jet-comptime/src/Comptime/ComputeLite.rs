@@ -4,11 +4,11 @@
 //! to `CtValue` lives here; engines must not re-encode tensor law.
 //! parity: include path=crates/jet-codegen/src/Prelude/CoreLib/Top/Compute.rs
 
+use super::Diagnostics::unsupported;
+use crate::Diagnostics::{Diagnostic, Span};
 use crate::AST::{
     ClosureData, CtFloat, CtOpaque, CtReport, CtValue, Lambda, LambdaBody, LambdaMeta, Type,
 };
-use crate::Diagnostics::{Diagnostic, Span};
-use super::Diagnostics::unsupported;
 
 trait JetShow {
     fn jet_show(&self) -> String;
@@ -22,9 +22,9 @@ trait JetDisplay {
 // evaluator.  Comptime has its own value boundary, so it supplies only the
 // small range carrier and panic adapter needed to include that core source.
 mod compute_range_semantics {
-    use jet_foundation::StructuralDebug::jet_debug_range;
     #[allow(unused_imports)]
     pub use jet_foundation::Outcome::*;
+    use jet_foundation::StructuralDebug::jet_debug_range;
     include!("../../../jet-codegen/src/Prelude/Core/RangeBounds.rs");
 }
 use compute_range_semantics::jet_range_bounds;
@@ -59,9 +59,7 @@ fn device_to_ct(device: JetComputeDevice) -> CtValue {
 fn ct_to_device(value: &CtValue, span: Span) -> Result<JetComputeDevice, Diagnostic> {
     match value {
         CtValue::Enum {
-            type_name,
-            variant,
-            ..
+            type_name, variant, ..
         } if type_name == "ComputeDevice" => match variant.as_str() {
             "Auto" => Ok(JetComputeDevice::Auto),
             "CPU" | "Cpu" => Ok(JetComputeDevice::Cpu),
@@ -145,8 +143,12 @@ fn ct_to_receipt(value: &CtValue, span: Span) -> Result<JetComputePlacementRecei
         abilities,
         reason,
     };
-    jet_compute_validate_placement(receipt.selected, &receipt)
-        .map_err(|error| unsupported(&format!("ComputePlacement metadata: {}", error.jet_show()), span))?;
+    jet_compute_validate_placement(receipt.selected, &receipt).map_err(|error| {
+        unsupported(
+            &format!("ComputePlacement metadata: {}", error.jet_show()),
+            span,
+        )
+    })?;
     Ok(receipt)
 }
 
@@ -157,7 +159,10 @@ fn transfer_to_ct(transfer: &JetComputeTransferReceipt) -> CtValue {
             ("from".to_string(), device_to_ct(transfer.from)),
             ("to".to_string(), device_to_ct(transfer.to)),
             ("bytes".to_string(), CtValue::Int(transfer.bytes)),
-            ("fallback".to_string(), CtValue::Str(transfer.fallback.clone())),
+            (
+                "fallback".to_string(),
+                CtValue::Str(transfer.fallback.clone()),
+            ),
         ],
     }
 }
@@ -383,9 +388,9 @@ pub fn tensor_window_values_share_handle(left: &CtValue, right: &CtValue) -> boo
             .and_then(|opaque| opaque.downcast_ref::<JetComputeWindowHandle>())
             .map(|handle| std::sync::Arc::clone(&handle.valid))
     };
-    handle(left).zip(handle(right)).is_some_and(|(left, right)| {
-        std::sync::Arc::ptr_eq(&left, &right)
-    })
+    handle(left)
+        .zip(handle(right))
+        .is_some_and(|(left, right)| std::sync::Arc::ptr_eq(&left, &right))
 }
 
 fn tensor_handle_from_fields(
@@ -405,20 +410,13 @@ fn tensor_handle_from_fields(
     data.opaque
         .as_ref()
         .and_then(|opaque| opaque.downcast_ref::<JetComputeTensorHandle>())
-        .filter(|handle| {
-            handle
-                .valid
-                .load(std::sync::atomic::Ordering::Acquire)
-        })
+        .filter(|handle| handle.valid.load(std::sync::atomic::Ordering::Acquire))
         .cloned()
         .map(Some)
         .ok_or_else(|| unsupported("Tensor handle", span))
 }
 
-fn tensor_handle_state(
-    value: &CtValue,
-    span: Span,
-) -> Result<JetComputeTensorHandle, Diagnostic> {
+fn tensor_handle_state(value: &CtValue, span: Span) -> Result<JetComputeTensorHandle, Diagnostic> {
     let CtValue::Struct { fields, .. } = value else {
         return Err(unsupported("Tensor", span));
     };
@@ -433,9 +431,13 @@ fn trace_to_ct(trace: &JetComputeTrace) -> CtValue {
             "autodiff tape ended before its trace was marshalled",
         )
     });
-    let tape = tape_handle
-        .lock()
-        .unwrap_or_else(|_| jet_panic("ComputeLite::trace_to_ct", line!(), "autodiff tape is poisoned"));
+    let tape = tape_handle.lock().unwrap_or_else(|_| {
+        jet_panic(
+            "ComputeLite::trace_to_ct",
+            line!(),
+            "autodiff tape is poisoned",
+        )
+    });
     let nodes = tape
         .nodes
         .iter()
@@ -461,7 +463,10 @@ fn trace_to_ct(trace: &JetComputeTrace) -> CtValue {
                             .collect(),
                     ),
                 ),
-                ("output".to_string(), tensor_to_ct_inner(&node.output, false)),
+                (
+                    "output".to_string(),
+                    tensor_to_ct_inner(&node.output, false),
+                ),
             ],
         })
         .collect();
@@ -539,7 +544,11 @@ fn tensor_to_ct_with_handle(
         ),
         (
             "data".to_string(),
-            CtValue::List(data.iter().map(|v| CtValue::Float(CtFloat::f64(*v))).collect()),
+            CtValue::List(
+                data.iter()
+                    .map(|v| CtValue::Float(CtFloat::f64(*v)))
+                    .collect(),
+            ),
         ),
         ("device".to_string(), device_to_ct(tensor.device)),
         (
@@ -553,9 +562,7 @@ fn tensor_to_ct_with_handle(
                 .as_ref()
                 .map(transfer_to_ct)
                 .map(|value| CtValue::Present(Box::new(value)))
-                .unwrap_or_else(|| {
-                    CtValue::absent(Type::Named("ComputeTransfer".to_string()))
-                }),
+                .unwrap_or_else(|| CtValue::absent(Type::Named("ComputeTransfer".to_string()))),
         ),
     ];
     if include_trace {
@@ -603,7 +610,10 @@ fn as_f64_list(value: &CtValue, span: Span) -> Result<Vec<f64>, Diagnostic> {
     }
 }
 
-fn tape_rule_from_ct(value: &CtValue, span: Span) -> Result<Option<JetComputeTapeRule>, Diagnostic> {
+fn tape_rule_from_ct(
+    value: &CtValue,
+    span: Span,
+) -> Result<Option<JetComputeTapeRule>, Diagnostic> {
     let kind = match value {
         CtValue::Str(kind) => kind.as_str(),
         CtValue::Struct { type_name, fields } if type_name == "__JetComputeRule" => fields
@@ -663,9 +673,7 @@ fn tape_rule_from_ct(value: &CtValue, span: Span) -> Result<Option<JetComputeTap
         "sgd_step" => JetComputeTapeRule::SgdStep {
             learning_rate: learning_rate()?,
         },
-        "negate" | "abs" | "exp" | "log" | "sqrt" => {
-            JetComputeTapeRule::Unary(kind.to_string())
-        }
+        "negate" | "abs" | "exp" | "log" | "sqrt" => JetComputeTapeRule::Unary(kind.to_string()),
         "reshape" => JetComputeTapeRule::Reshape {
             source_shape: source_shape()?,
         },
@@ -709,7 +717,9 @@ fn trace_from_ct(value: &CtValue, span: Span) -> Result<JetComputeTrace, Diagnos
         _ => return Err(unsupported("autodiff trace identity", span)),
     };
     let node = match field("node")? {
-        CtValue::Int(node) if *node >= 0 => usize::try_from(*node).map_err(|_| unsupported("autodiff trace node", span))?,
+        CtValue::Int(node) if *node >= 0 => {
+            usize::try_from(*node).map_err(|_| unsupported("autodiff trace node", span))?
+        }
         _ => return Err(unsupported("autodiff trace node", span)),
     };
     let _inputs = match field("inputs")? {
@@ -771,7 +781,11 @@ fn trace_from_ct(value: &CtValue, span: Span) -> Result<JetComputeTrace, Diagnos
     if node >= nodes.len() {
         return Err(unsupported("autodiff trace node", span));
     }
-    let parent = match fields.iter().find(|(name, _)| name == "parent").map(|(_, value)| value) {
+    let parent = match fields
+        .iter()
+        .find(|(name, _)| name == "parent")
+        .map(|(_, value)| value)
+    {
         Some(CtValue::Present(value)) => Some(Box::new(trace_from_ct(value, span)?)),
         Some(CtValue::Failed(CtReport::Clean(_))) | None => None,
         Some(_) => return Err(unsupported("autodiff trace parent", span)),
@@ -785,6 +799,18 @@ fn trace_from_ct(value: &CtValue, span: Span) -> Result<JetComputeTrace, Diagnos
 
 fn ct_to_tensor(value: &CtValue, span: Span) -> Result<JetTensor, Diagnostic> {
     ct_to_tensor_inner(value, span, true)
+}
+
+pub fn autodiff_tensor_to_ct(tensor: &JetTensor) -> CtValue {
+    tensor_to_ct(tensor)
+}
+
+pub fn autodiff_tensor_from_ct(value: &CtValue, span: Span) -> Result<JetTensor, Diagnostic> {
+    ct_to_tensor(value, span)
+}
+
+pub fn autodiff_error_message(error: &JetComputeError) -> String {
+    error.jet_show()
 }
 
 fn ct_to_tensor_inner(
@@ -811,16 +837,17 @@ fn ct_to_tensor_inner(
     jet_compute_validate_tensor(&tensor)
         .map_err(|error| unsupported(&format!("Tensor metadata: {}", error.jet_show()), span))?;
     if let Some(receipt) = &tensor.last_transfer {
-        jet_compute_validate_transfer_receipt(&tensor, receipt)
-            .map_err(|error| unsupported(&format!("Tensor transfer metadata: {}", error.jet_show()), span))?;
+        jet_compute_validate_transfer_receipt(&tensor, receipt).map_err(|error| {
+            unsupported(
+                &format!("Tensor transfer metadata: {}", error.jet_show()),
+                span,
+            )
+        })?;
     }
     Ok(tensor)
 }
 
-fn tensor_window_args(
-    args: &[CtValue],
-    span: Span,
-) -> Result<(i64, i64, bool), Diagnostic> {
+fn tensor_window_args(args: &[CtValue], span: Span) -> Result<(i64, i64, bool), Diagnostic> {
     match args {
         [CtValue::Struct { type_name, fields }] if type_name == crate::Syntax::TYPE_RANGE => {
             let field = |name: &str| {
@@ -837,7 +864,11 @@ fn tensor_window_args(
                 Some(CtValue::Int(value)) => *value,
                 _ => return Err(unsupported("Range.end", span)),
             };
-            Ok((start, end, matches!(field("exclusive"), Some(CtValue::Bool(true)))))
+            Ok((
+                start,
+                end,
+                matches!(field("exclusive"), Some(CtValue::Bool(true))),
+            ))
         }
         [CtValue::Int(start), CtValue::Int(end)] => Ok((*start, *end, false)),
         _ => Err(unsupported("Tensor view range", span)),
@@ -873,10 +904,12 @@ pub fn tensor_view_mut_window(
         .lock()
         .map_err(|_| unsupported("Tensor handle", span))?;
     let (start, end, exclusive) = tensor_window_args(args, span)?;
-    let view = jet_compute_view_mut_checked(&mut tensor, start, end, exclusive)
-        .map_err(|error| unsupported(&format!("Tensor mutable view: {}", error.jet_show()), span))?;
-    let len = usize::try_from(view.len())
-        .map_err(|_| unsupported("Tensor mutable view length", span))?;
+    let view =
+        jet_compute_view_mut_checked(&mut tensor, start, end, exclusive).map_err(|error| {
+            unsupported(&format!("Tensor mutable view: {}", error.jet_show()), span)
+        })?;
+    let len =
+        usize::try_from(view.len()).map_err(|_| unsupported("Tensor mutable view length", span))?;
     Ok((0, len))
 }
 
@@ -910,15 +943,8 @@ pub fn tensor_view_set_value(
         .map_err(|_| unsupported("Tensor handle", span))?;
     let (start, end, exclusive) = tensor_window_args(args, span)?;
     let replacement = as_float(replacement, span)?;
-    jet_compute_window_set(
-        &mut tensor,
-        start,
-        end,
-        exclusive,
-        index,
-        replacement,
-    )
-    .map_err(|error| unsupported(&format!("Tensor view: {error}"), span))?;
+    jet_compute_window_set(&mut tensor, start, end, exclusive, index, replacement)
+        .map_err(|error| unsupported(&format!("Tensor view: {error}"), span))?;
     let snapshot = (*tensor).clone();
     drop(tensor);
     Ok(tensor_to_ct_with_handle(
@@ -939,8 +965,7 @@ pub fn tensor_view_list(
     let view = jet_compute_view_checked(&tensor, start, end, exclusive)
         .map_err(|error| unsupported(&format!("Tensor view: {}", error.jet_show()), span))?;
     Ok(CtValue::List(
-        view
-            .iter()
+        view.iter()
             .map(|value| CtValue::Float(CtFloat::f64(*value)))
             .collect(),
     ))
@@ -1025,9 +1050,9 @@ pub fn tensor_values_share_handle(left: &CtValue, right: &CtValue) -> bool {
             .and_then(|opaque| opaque.downcast_ref::<JetComputeTensorHandle>())
             .map(|handle| std::sync::Arc::clone(&handle.valid))
     };
-    handle(left).zip(handle(right)).is_some_and(|(left, right)| {
-        std::sync::Arc::ptr_eq(&left, &right)
-    })
+    handle(left)
+        .zip(handle(right))
+        .is_some_and(|(left, right)| std::sync::Arc::ptr_eq(&left, &right))
 }
 
 pub fn tensor_replace_data(
@@ -1160,8 +1185,12 @@ fn ct_to_sparse(value: &CtValue, span: Span) -> Result<JetSparseCsr, Diagnostic>
         col_idx: as_i64_list(field("col_idx")?, span)?,
         values: as_f64_list(field("values")?, span)?,
     };
-    jet_compute_validate_sparse(&sparse)
-        .map_err(|error| unsupported(&format!("SparseTensor metadata: {}", error.jet_show()), span))?;
+    jet_compute_validate_sparse(&sparse).map_err(|error| {
+        unsupported(
+            &format!("SparseTensor metadata: {}", error.jet_show()),
+            span,
+        )
+    })?;
     Ok(sparse)
 }
 
@@ -1229,10 +1258,7 @@ pub fn autodiff_value(
 /// Start one per-call autodiff tape for the Tensor arguments. The returned
 /// values retain the tape through the CtValue boundary; no ambient/global tape
 /// is used.
-pub fn autodiff_trace_inputs(
-    values: &[CtValue],
-    span: Span,
-) -> Result<Vec<CtValue>, Diagnostic> {
+pub fn autodiff_trace_inputs(values: &[CtValue], span: Span) -> Result<Vec<CtValue>, Diagnostic> {
     let inputs = values
         .iter()
         .map(|value| ct_to_tensor(value, span))
@@ -1250,14 +1276,9 @@ pub fn autodiff_gradient(
     targets: &[i64],
     span: Span,
 ) -> Result<Vec<CtValue>, Diagnostic> {
-    let JetComputeTransformResult::Gradient(values) = autodiff_transform_state(
-        "gradient",
-        output,
-        anchor,
-        &[],
-        targets,
-        span,
-    )? else {
+    let JetComputeTransformResult::Gradient(values) =
+        autodiff_transform_state("gradient", output, anchor, &[], targets, span)?
+    else {
         return Err(unsupported("compute.gradient result", span));
     };
     Ok(values.iter().map(tensor_to_ct).collect())
@@ -1316,14 +1337,9 @@ pub fn autodiff_jvp(
     tangents: &[CtValue],
     span: Span,
 ) -> Result<CtValue, Diagnostic> {
-    let JetComputeTransformResult::Jvp { tangent, .. } = autodiff_transform_state(
-        "jvp",
-        output,
-        anchor,
-        tangents,
-        &[],
-        span,
-    )? else {
+    let JetComputeTransformResult::Jvp { tangent, .. } =
+        autodiff_transform_state("jvp", output, anchor, tangents, &[], span)?
+    else {
         return Err(unsupported("compute.jvp result", span));
     };
     Ok(tensor_to_ct(&tangent))
@@ -1345,11 +1361,7 @@ fn as_int(value: &CtValue, span: Span) -> Result<i64, Diagnostic> {
 }
 
 /// Evaluate a `core.compute` call against the shared Prelude (I9).
-pub fn apply(
-    method: &str,
-    args: &[CtValue],
-    span: Span,
-) -> Result<CtValue, Diagnostic> {
+pub fn apply(method: &str, args: &[CtValue], span: Span) -> Result<CtValue, Diagnostic> {
     let one = |i: usize| {
         args.get(i)
             .ok_or_else(|| unsupported(&format!("core.compute.{method} arg {i}"), span))
@@ -1373,53 +1385,52 @@ pub fn apply(
             Ok(t) => ok_tensor(t),
             Err(e) => err_compute(e),
         }),
-        "matrix" => Ok(match jet_compute_matrix(
-            as_int(one(0)?, span)?,
-            as_int(one(1)?, span)?,
-            as_float(one(2)?, span)?,
-        ) {
-            Ok(t) => ok_tensor(t),
-            Err(e) => err_compute(e),
-        }),
-        "vec" => Ok(match jet_compute_vec(as_int(one(0)?, span)?, as_float(one(1)?, span)?) {
-            Ok(t) => ok_tensor(t),
-            Err(e) => err_compute(e),
-        }),
-        "add" => Ok(match jet_compute_add(
-            &ct_to_tensor(one(0)?, span)?,
-            &ct_to_tensor(one(1)?, span)?,
-        ) {
-            Ok(t) => ok_tensor(t),
-            Err(e) => err_compute(e),
-        }),
-        "mul" => Ok(match jet_compute_mul(
-            &ct_to_tensor(one(0)?, span)?,
-            &ct_to_tensor(one(1)?, span)?,
-        ) {
-            Ok(t) => ok_tensor(t),
-            Err(e) => err_compute(e),
-        }),
-        "matmul" => Ok(match jet_compute_matmul(
-            &ct_to_tensor(one(0)?, span)?,
-            &ct_to_tensor(one(1)?, span)?,
-        ) {
-            Ok(t) => ok_tensor(t),
-            Err(e) => err_compute(e),
-        }),
-        "reshape" => Ok(match jet_compute_reshape(
-            &ct_to_tensor(one(0)?, span)?,
-            &as_i64_list(one(1)?, span)?,
-        ) {
-            Ok(t) => ok_tensor(t),
-            Err(e) => err_compute(e),
-        }),
-        "get" => Ok(match jet_compute_get(
-            &ct_to_tensor(one(0)?, span)?,
-            &as_i64_list(one(1)?, span)?,
-        ) {
-            Ok(v) => CtValue::Present(Box::new(CtValue::Float(CtFloat::f64(v)))),
-            Err(e) => err_compute(e),
-        }),
+        "matrix" => Ok(
+            match jet_compute_matrix(
+                as_int(one(0)?, span)?,
+                as_int(one(1)?, span)?,
+                as_float(one(2)?, span)?,
+            ) {
+                Ok(t) => ok_tensor(t),
+                Err(e) => err_compute(e),
+            },
+        ),
+        "vec" => Ok(
+            match jet_compute_vec(as_int(one(0)?, span)?, as_float(one(1)?, span)?) {
+                Ok(t) => ok_tensor(t),
+                Err(e) => err_compute(e),
+            },
+        ),
+        "add" => Ok(
+            match jet_compute_add(&ct_to_tensor(one(0)?, span)?, &ct_to_tensor(one(1)?, span)?) {
+                Ok(t) => ok_tensor(t),
+                Err(e) => err_compute(e),
+            },
+        ),
+        "mul" => Ok(
+            match jet_compute_mul(&ct_to_tensor(one(0)?, span)?, &ct_to_tensor(one(1)?, span)?) {
+                Ok(t) => ok_tensor(t),
+                Err(e) => err_compute(e),
+            },
+        ),
+        "matmul" => Ok(
+            match jet_compute_matmul(&ct_to_tensor(one(0)?, span)?, &ct_to_tensor(one(1)?, span)?) {
+                Ok(t) => ok_tensor(t),
+                Err(e) => err_compute(e),
+            },
+        ),
+        "reshape" => Ok(
+            match jet_compute_reshape(&ct_to_tensor(one(0)?, span)?, &as_i64_list(one(1)?, span)?) {
+                Ok(t) => ok_tensor(t),
+                Err(e) => err_compute(e),
+            },
+        ),
+        "get" => Ok(
+            match jet_compute_get(&ct_to_tensor(one(0)?, span)?, &as_i64_list(one(1)?, span)?) {
+                Ok(v) => CtValue::Present(Box::new(CtValue::Float(CtFloat::f64(v)))),
+                Err(e) => err_compute(e),
+            },
+        ),
         "set" => {
             let handle = tensor_handle_state(one(0)?, span)?;
             let mut tensor = handle
@@ -1477,51 +1488,55 @@ pub fn apply(
             one(0)?,
             span,
         )?))),
-        "placement" => Ok(CtValue::Str(jet_compute_tensor_placement(
-            &ct_to_tensor(one(0)?, span)?,
-        ))),
+        "placement" => Ok(CtValue::Str(jet_compute_tensor_placement(&ct_to_tensor(
+            one(0)?,
+            span,
+        )?))),
         "device_cpu" => Ok(device_to_ct(jet_compute_device_cpu())),
         "device_auto" => Ok(device_to_ct(jet_compute_device_auto())),
-        "on_device" => Ok(match jet_compute_on_device(
-            &ct_to_tensor(one(0)?, span)?,
-            ct_to_device(one(1)?, span)?,
-        ) {
-            Ok(t) => ok_tensor(t),
-            Err(e) => err_compute(e),
-        }),
+        "on_device" => Ok(
+            match jet_compute_on_device(&ct_to_tensor(one(0)?, span)?, ct_to_device(one(1)?, span)?)
+            {
+                Ok(t) => ok_tensor(t),
+                Err(e) => err_compute(e),
+            },
+        ),
         // #1136 ndarray slice — broadcast / ufunc / transpose / sum_axis
-        "broadcast_to" => Ok(match jet_compute_broadcast_to(
-            &ct_to_tensor(one(0)?, span)?,
-            &as_i64_list(one(1)?, span)?,
-        ) {
-            Ok(t) => ok_tensor(t),
-            Err(e) => err_compute(e),
-        }),
+        "broadcast_to" => Ok(
+            match jet_compute_broadcast_to(
+                &ct_to_tensor(one(0)?, span)?,
+                &as_i64_list(one(1)?, span)?,
+            ) {
+                Ok(t) => ok_tensor(t),
+                Err(e) => err_compute(e),
+            },
+        ),
         "transpose" => Ok(match jet_compute_transpose(&ct_to_tensor(one(0)?, span)?) {
             Ok(t) => ok_tensor(t),
             Err(e) => err_compute(e),
         }),
-        "sum_axis" => Ok(match jet_compute_sum_axis(
-            &ct_to_tensor(one(0)?, span)?,
-            as_int(one(1)?, span)?,
-        ) {
-            Ok(t) => ok_tensor(t),
-            Err(e) => err_compute(e),
-        }),
-        "negate" | "abs" | "exp" | "log" | "sqrt" => {
-            Ok(match jet_compute_unary(method, &ct_to_tensor(one(0)?, span)?) {
+        "sum_axis" => Ok(
+            match jet_compute_sum_axis(&ct_to_tensor(one(0)?, span)?, as_int(one(1)?, span)?) {
                 Ok(t) => ok_tensor(t),
                 Err(e) => err_compute(e),
-            })
-        }
-        "sub" | "div" | "maximum" | "minimum" => Ok(match jet_compute_binary(
-            method,
-            &ct_to_tensor(one(0)?, span)?,
-            &ct_to_tensor(one(1)?, span)?,
-        ) {
-            Ok(t) => ok_tensor(t),
-            Err(e) => err_compute(e),
-        }),
+            },
+        ),
+        "negate" | "abs" | "exp" | "log" | "sqrt" => Ok(
+            match jet_compute_unary(method, &ct_to_tensor(one(0)?, span)?) {
+                Ok(t) => ok_tensor(t),
+                Err(e) => err_compute(e),
+            },
+        ),
+        "sub" | "div" | "maximum" | "minimum" => Ok(
+            match jet_compute_binary(
+                method,
+                &ct_to_tensor(one(0)?, span)?,
+                &ct_to_tensor(one(1)?, span)?,
+            ) {
+                Ok(t) => ok_tensor(t),
+                Err(e) => err_compute(e),
+            },
+        ),
         "eye" => Ok(match jet_compute_eye(as_int(one(0)?, span)?) {
             Ok(t) => ok_tensor(t),
             Err(e) => err_compute(e),
@@ -1532,22 +1547,23 @@ pub fn apply(
         }),
         "inv" | "fft" => {
             let tensor = ct_to_tensor(one(0)?, span)?;
-            Ok(match if method == "inv" {
-                jet_compute_inv(&tensor)
-            } else {
-                jet_compute_fft(&tensor)
-            } {
+            Ok(
+                match if method == "inv" {
+                    jet_compute_inv(&tensor)
+                } else {
+                    jet_compute_fft(&tensor)
+                } {
+                    Ok(t) => ok_tensor(t),
+                    Err(e) => err_compute(e),
+                },
+            )
+        }
+        "solve" => Ok(
+            match jet_compute_solve(&ct_to_tensor(one(0)?, span)?, &ct_to_tensor(one(1)?, span)?) {
                 Ok(t) => ok_tensor(t),
                 Err(e) => err_compute(e),
-            })
-        }
-        "solve" => Ok(match jet_compute_solve(
-            &ct_to_tensor(one(0)?, span)?,
-            &ct_to_tensor(one(1)?, span)?,
-        ) {
-            Ok(t) => ok_tensor(t),
-            Err(e) => err_compute(e),
-        }),
+            },
+        ),
         "stream_new" => Ok(stream_to_ct(&jet_compute_stream_new())),
         "stream_sync" => Ok(
             match jet_compute_stream_sync(&ct_to_stream(one(0)?, span)?) {
@@ -1559,39 +1575,43 @@ pub fn apply(
             one(0)?,
             span,
         )?))),
-        "transfer" => Ok(match jet_compute_transfer(
-            &ct_to_tensor(one(0)?, span)?,
-            ct_to_device(one(1)?, span)?,
-        ) {
-            Ok(t) => ok_tensor(t),
-            Err(e) => err_compute(e),
-        }),
+        "transfer" => Ok(
+            match jet_compute_transfer(&ct_to_tensor(one(0)?, span)?, ct_to_device(one(1)?, span)?)
+            {
+                Ok(t) => ok_tensor(t),
+                Err(e) => err_compute(e),
+            },
+        ),
         "transfer_show" => Ok(CtValue::Str(jet_compute_transfer_show(&ct_to_tensor(
             one(0)?,
             span,
         )?))),
-        "kernel_bounds_ok" => Ok(match jet_compute_kernel_bounds_ok(
-            &as_i64_list(one(0)?, span)?,
-            &as_i64_list(one(1)?, span)?,
-        ) {
-            Ok(b) => CtValue::Present(Box::new(CtValue::Bool(b))),
-            Err(e) => err_compute(e),
-        }),
-        "mse_loss" => Ok(match jet_compute_mse_loss(
-            &ct_to_tensor(one(0)?, span)?,
-            &ct_to_tensor(one(1)?, span)?,
-        ) {
-            Ok(t) => ok_tensor(t),
-            Err(e) => err_compute(e),
-        }),
-        "sgd_step" => Ok(match jet_compute_sgd_step(
-            &ct_to_tensor(one(0)?, span)?,
-            &ct_to_tensor(one(1)?, span)?,
-            as_float(one(2)?, span)?,
-        ) {
-            Ok(t) => ok_tensor(t),
-            Err(e) => err_compute(e),
-        }),
+        "kernel_bounds_ok" => Ok(
+            match jet_compute_kernel_bounds_ok(
+                &as_i64_list(one(0)?, span)?,
+                &as_i64_list(one(1)?, span)?,
+            ) {
+                Ok(b) => CtValue::Present(Box::new(CtValue::Bool(b))),
+                Err(e) => err_compute(e),
+            },
+        ),
+        "mse_loss" => Ok(
+            match jet_compute_mse_loss(&ct_to_tensor(one(0)?, span)?, &ct_to_tensor(one(1)?, span)?)
+            {
+                Ok(t) => ok_tensor(t),
+                Err(e) => err_compute(e),
+            },
+        ),
+        "sgd_step" => Ok(
+            match jet_compute_sgd_step(
+                &ct_to_tensor(one(0)?, span)?,
+                &ct_to_tensor(one(1)?, span)?,
+                as_float(one(2)?, span)?,
+            ) {
+                Ok(t) => ok_tensor(t),
+                Err(e) => err_compute(e),
+            },
+        ),
         "serialize" => Ok(match jet_compute_serialize(&ct_to_tensor(one(0)?, span)?) {
             Ok(payload) => CtValue::Present(Box::new(CtValue::Str(payload))),
             Err(e) => err_compute(e),
@@ -1614,29 +1634,30 @@ pub fn apply(
             one(0)?,
             span,
         )?))),
-        "sparse_mv" => Ok(match jet_compute_sparse_mv(
-            &ct_to_sparse(one(0)?, span)?,
-            &ct_to_tensor(one(1)?, span)?,
-        ) {
-            Ok(t) => ok_tensor(t),
-            Err(e) => err_compute(e),
-        }),
+        "sparse_mv" => Ok(
+            match jet_compute_sparse_mv(
+                &ct_to_sparse(one(0)?, span)?,
+                &ct_to_tensor(one(1)?, span)?,
+            ) {
+                Ok(t) => ok_tensor(t),
+                Err(e) => err_compute(e),
+            },
+        ),
         "sparse_show" => Ok(CtValue::Str(jet_compute_sparse_show(&ct_to_sparse(
             one(0)?,
             span,
         )?))),
-        "matmul_f32_tile" => Ok(match jet_compute_matmul_f32_tile(
-            &ct_to_tensor(one(0)?, span)?,
-            &ct_to_tensor(one(1)?, span)?,
-        ) {
-            Ok(t) => ok_tensor(t),
-            Err(e) => err_compute(e),
-        }),
+        "matmul_f32_tile" => Ok(
+            match jet_compute_matmul_f32_tile(
+                &ct_to_tensor(one(0)?, span)?,
+                &ct_to_tensor(one(1)?, span)?,
+            ) {
+                Ok(t) => ok_tensor(t),
+                Err(e) => err_compute(e),
+            },
+        ),
         "profile_f32_strict" | "profile_show" => Ok(CtValue::Str(jet_compute_profile_show())),
-        _ => Err(unsupported(
-            &format!("`core.compute.{method}()`"),
-            span,
-        )),
+        _ => Err(unsupported(&format!("`core.compute.{method}()`"), span)),
     }
 }
 

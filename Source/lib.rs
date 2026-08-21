@@ -127,7 +127,12 @@ fn with_compiler_stack<R: Send>(work: impl FnOnce() -> R + Send) -> R {
     // every compiler entry point. Build uses the same ambient seam, so a
     // `comptime` binding and `fn build` cannot observe different APIs.
     jet_driver::run_compiler_work(|| {
-        Comptime::with_ambient(Some(Compiler::eval_core_call_with_type), None, work)
+        Comptime::with_ambient(
+            Some(Compiler::eval_core_call_with_type),
+            None,
+            None,
+            work,
+        )
     })
 }
 

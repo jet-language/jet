@@ -90,8 +90,16 @@ fn run() {
     print(conflict_first)
     print(conflict_second)
     print(conflict_duplicate)
+    noncanonical_list :: app.sync("SyncList(r2:b|r1:a)", over: "sync-canonical-list-laws")
+    noncanonical_counter :: app.sync("PNCounter(r=+01/-0)", over: "sync-canonical-counter-laws")
+    print(noncanonical_list)
+    print(noncanonical_counter)
 }
 "#;
+
+const SYNC_EXPECTED: &str = concat!(
+    "text_commutes:true\ntext_merged:SyncText(hello, world!)\ntext_associates:true\ntext_idempotent:true\ntext_all_edits:SyncText(goodbye, world!)\ntext_clock:LamportClock(r1=12,r2=12,r3=18)\nmid_low:SyncText(aZb)\nmid_high:SyncText(aZb)\ntext_collision:SyncError(invalid SyncText)\nmap_converges:true\nlist_converges:true\ncounter_idempotent:5\ninvalid_policy:rejected\nowner_allowed:true\nowner_denied:false\npublic_allowed:true\ninvalid_text:SyncError(invalid SyncText)\nSyncOver(session=sync-laws, generation=1, doc=SyncMap(k=right))\nSyncOver(session=sync-laws, generation=1, doc=SyncMap(k=right))\nSyncOver(session=sync-merge-laws, generation=1, doc=SyncMap(a=1))\nSyncOver(session=sync-merge-laws, generation=2, doc=SyncMap(a=1,b=2))\nSyncOver(session=sync-merge-laws, generation=2, doc=SyncMap(a=1,b=2))\nSyncError(document is not a canonical CRDT value)\nSyncOver(session=sync-conflict-laws, generation=1, doc=SyncMap(k=left))\nSyncError(document merge denied)\nSyncOver(session=sync-conflict-laws, generation=1, doc=SyncMap(k=left))\nSyncError(document is not a canonical CRDT value)\nSyncError(document is not a canonical CRDT value)\n"
+);
 
 #[test]
 fn sync_laws_hold_on_aot_path() {
@@ -100,26 +108,12 @@ fn sync_laws_hold_on_aot_path() {
     }
     let (code, stdout) = build_and_run("sync_laws", SOURCE);
     assert_eq!(code, 0);
-    assert_eq!(
-        stdout,
-        concat!(
-        "text_commutes:true\ntext_merged:SyncText(hello, world!)\ntext_associates:true\ntext_idempotent:true\ntext_all_edits:SyncText(goodbye, world!)\ntext_clock:LamportClock(r1=12,r2=12,r3=18)\nmid_low:SyncText(aZb)\nmid_high:SyncText(aZb)\ntext_collision:SyncError(invalid SyncText)\nmap_converges:true\nlist_converges:true\ncounter_idempotent:5\ninvalid_policy:rejected\nowner_allowed:true\nowner_denied:false\npublic_allowed:true\ninvalid_text:SyncError(invalid SyncText)\nSyncOver(session=sync-laws, generation=1, doc=SyncMap(k=right))\nSyncOver(session=sync-laws, generation=1, doc=SyncMap(k=right))\nSyncOver(session=sync-merge-laws, generation=1, doc=SyncMap(a=1))\nSyncOver(session=sync-merge-laws, generation=2, doc=SyncMap(a=1,b=2))\nSyncOver(session=sync-merge-laws, generation=2, doc=SyncMap(a=1,b=2))\nSyncError(document is not a canonical CRDT value)\n"
-        ,
-        "text_commutes:true\ntext_merged:SyncText(hello, world!)\ntext_associates:true\ntext_idempotent:true\ntext_all_edits:SyncText(goodbye, world!)\ntext_clock:LamportClock(r1=12,r2=12,r3=18)\nmid_low:SyncText(aZb)\nmid_high:SyncText(aZb)\ntext_collision:SyncError(invalid SyncText)\nmap_converges:true\nlist_converges:true\ncounter_idempotent:5\ninvalid_policy:rejected\nowner_allowed:true\nowner_denied:false\npublic_allowed:true\ninvalid_text:SyncError(invalid SyncText)\nSyncOver(session=sync-laws, generation=1, doc=SyncMap(k=right))\nSyncOver(session=sync-laws, generation=1, doc=SyncMap(k=right))\nSyncOver(session=sync-merge-laws, generation=1, doc=SyncMap(a=1))\nSyncOver(session=sync-merge-laws, generation=2, doc=SyncMap(a=1,b=2))\nSyncOver(session=sync-merge-laws, generation=2, doc=SyncMap(a=1,b=2))\nSyncError(document is not a canonical CRDT value)\nSyncOver(session=sync-conflict-laws, generation=1, doc=SyncMap(k=left))\nSyncError(document merge denied)\nSyncOver(session=sync-conflict-laws, generation=1, doc=SyncMap(k=left))\n"
-        )
-    );
+    assert_eq!(stdout, SYNC_EXPECTED);
 }
 
 #[test]
 fn sync_laws_hold_on_default_run() {
     let (code, stdout, stderr) = run_default_multi("sync_laws_jit", "main.jet", &[("main.jet", SOURCE)]);
     assert_eq!(code, 0, "default jet run failed: {stderr}");
-    assert_eq!(
-        stdout,
-        concat!(
-        "text_commutes:true\ntext_merged:SyncText(hello, world!)\ntext_associates:true\ntext_idempotent:true\ntext_all_edits:SyncText(goodbye, world!)\ntext_clock:LamportClock(r1=12,r2=12,r3=18)\nmid_low:SyncText(aZb)\nmid_high:SyncText(aZb)\ntext_collision:SyncError(invalid SyncText)\nmap_converges:true\nlist_converges:true\ncounter_idempotent:5\ninvalid_policy:rejected\nowner_allowed:true\nowner_denied:false\npublic_allowed:true\ninvalid_text:SyncError(invalid SyncText)\nSyncOver(session=sync-laws, generation=1, doc=SyncMap(k=right))\nSyncOver(session=sync-laws, generation=1, doc=SyncMap(k=right))\nSyncOver(session=sync-merge-laws, generation=1, doc=SyncMap(a=1))\nSyncOver(session=sync-merge-laws, generation=2, doc=SyncMap(a=1,b=2))\nSyncOver(session=sync-merge-laws, generation=2, doc=SyncMap(a=1,b=2))\nSyncError(document is not a canonical CRDT value)\n"
-        ,
-        "text_commutes:true\ntext_merged:SyncText(hello, world!)\ntext_associates:true\ntext_idempotent:true\ntext_all_edits:SyncText(goodbye, world!)\ntext_clock:LamportClock(r1=12,r2=12,r3=18)\nmid_low:SyncText(aZb)\nmid_high:SyncText(aZb)\ntext_collision:SyncError(invalid SyncText)\nmap_converges:true\nlist_converges:true\ncounter_idempotent:5\ninvalid_policy:rejected\nowner_allowed:true\nowner_denied:false\npublic_allowed:true\ninvalid_text:SyncError(invalid SyncText)\nSyncOver(session=sync-laws, generation=1, doc=SyncMap(k=right))\nSyncOver(session=sync-laws, generation=1, doc=SyncMap(k=right))\nSyncOver(session=sync-merge-laws, generation=1, doc=SyncMap(a=1))\nSyncOver(session=sync-merge-laws, generation=2, doc=SyncMap(a=1,b=2))\nSyncOver(session=sync-merge-laws, generation=2, doc=SyncMap(a=1,b=2))\nSyncError(document is not a canonical CRDT value)\nSyncOver(session=sync-conflict-laws, generation=1, doc=SyncMap(k=left))\nSyncError(document merge denied)\nSyncOver(session=sync-conflict-laws, generation=1, doc=SyncMap(k=left))\n"
-        )
-    );
+    assert_eq!(stdout, SYNC_EXPECTED);
 }

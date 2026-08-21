@@ -887,7 +887,7 @@ fn run() {
 }
 
 /// c97/D-STRPARSE1: `String.lines()` (→ `[String]`) and `Int.parse(text)` (→
-/// `Int ? ParseError`). Both are compiler built-ins, so `main` routes
+/// `Int ! ParseError`). Both are compiler built-ins, so `main` routes
 /// through the TIR — proven by the emitted `jet_string_lines` helper call and
 /// the Prelude parse-kernel call. `Int.parse` composes with `??`: a good parse
 /// yields the value, a bad one (`"abc"`) takes the fallback.

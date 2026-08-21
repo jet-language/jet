@@ -5,9 +5,9 @@
 //! path instead. That is a named tier gap, not a second policy: no token rule is
 //! re-encoded here.
 
-use crate::AST::{CtValue, Type};
-use crate::Diagnostics::{Diagnostic, Span};
 use super::Diagnostics::unsupported;
+use crate::Diagnostics::{Diagnostic, Span};
+use crate::AST::{CtValue, Type};
 
 #[allow(unused_imports)]
 pub use jet_foundation::Outcome::*;
@@ -67,11 +67,11 @@ fn auth_to_ct(a: &JetAuthApp) -> CtValue {
     CtValue::Struct {
         type_name: "Auth".to_string(),
         fields: vec![
-            ("users_table".to_string(), CtValue::Str(a.users_table.clone())),
             (
-                "providers".to_string(),
-                CtValue::Str(a.providers.join(",")),
+                "users_table".to_string(),
+                CtValue::Str(a.users_table.clone()),
             ),
+            ("providers".to_string(), CtValue::Str(a.providers.join(","))),
         ],
     }
 }
@@ -157,16 +157,20 @@ pub fn apply(method: &str, args: &[CtValue], span: Span) -> Result<CtValue, Diag
             as_int(1)?,
         ))),
         "session_show" => Ok(CtValue::Str(jet_auth_session_show(&ct_to_session(
-            one(0)?, span,
+            one(0)?,
+            span,
         )?))),
         "session_user" => Ok(CtValue::Str(jet_auth_session_user(&ct_to_session(
-            one(0)?, span,
+            one(0)?,
+            span,
         )?))),
         "session_cookie" => Ok(CtValue::Str(jet_auth_session_cookie(&ct_to_session(
-            one(0)?, span,
+            one(0)?,
+            span,
         )?))),
         "session_id" => Ok(CtValue::Str(jet_auth_session_id(&ct_to_session(
-            one(0)?, span,
+            one(0)?,
+            span,
         )?))),
         "magic_link_issue" => Ok(result_str(jet_auth_magic_link_issue(
             as_str(0)?,
@@ -191,11 +195,10 @@ pub fn apply(method: &str, args: &[CtValue], span: Span) -> Result<CtValue, Diag
             as_str(1)?,
         ))),
         "auth_routes" => Ok(CtValue::Str(jet_app_auth_routes(&ct_to_auth(
-            one(0)?, span,
+            one(0)?,
+            span,
         )?))),
-        "auth_show" => Ok(CtValue::Str(jet_app_auth_show(&ct_to_auth(
-            one(0)?, span,
-        )?))),
+        "auth_show" => Ok(CtValue::Str(jet_app_auth_show(&ct_to_auth(one(0)?, span)?))),
         _ => Err(unsupported(&format!("`core.auth.{method}()`"), span)),
     }
 }

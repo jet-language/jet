@@ -1,8 +1,8 @@
 //! D-SYNC1=A / D-DBPOLICY1=A / I9: `core.sync` ambient includes Prelude `Sync.rs`.
 
-use crate::AST::{CtValue, Type};
-use crate::Diagnostics::{Diagnostic, Span};
 use super::Diagnostics::unsupported;
+use crate::Diagnostics::{Diagnostic, Span};
+use crate::AST::{CtValue, Type};
 
 // `Sync.rs` is shared verbatim with the AOT Prelude.  The comptime tier
 // supplies the same small host boundary that the emitted module gets from
@@ -69,7 +69,8 @@ impl __jet_Encode for u64 {
 impl __jet_Decode for u64 {
     fn jet_decode(tree: &jet_std::DataTree) -> Result<Self, Vec<jet_std::FieldError>> {
         jet_std::decode_int(tree).and_then(|value| {
-            u64::try_from(value).map_err(|_| jet_std::FieldError::one("expected non-negative integer"))
+            u64::try_from(value)
+                .map_err(|_| jet_std::FieldError::one("expected non-negative integer"))
         })
     }
 }
@@ -122,7 +123,10 @@ fn text_to_ct(doc: &JetSyncText) -> CtValue {
                             type_name: "SyncTextAtom".to_string(),
                             fields: vec![
                                 ("replica".to_string(), CtValue::Str(atom.replica.clone())),
-                                ("counter".to_string(), CtValue::Str(atom.counter.to_string())),
+                                (
+                                    "counter".to_string(),
+                                    CtValue::Str(atom.counter.to_string()),
+                                ),
                                 (
                                     "after".to_string(),
                                     CtValue::Str(match &atom.after {
@@ -156,15 +160,13 @@ fn counter_to_ct(c: &JetSyncCounter) -> CtValue {
                 CtValue::List(
                     c.counts
                         .iter()
-                        .map(|(replica, positive, negative)| {
-                            CtValue::Struct {
-                                type_name: "SyncCounterEntry".to_string(),
-                                fields: vec![
-                                    ("replica".to_string(), CtValue::Str(replica.clone())),
-                                    ("positive".to_string(), CtValue::Str(positive.to_string())),
-                                    ("negative".to_string(), CtValue::Str(negative.to_string())),
-                                ],
-                            }
+                        .map(|(replica, positive, negative)| CtValue::Struct {
+                            type_name: "SyncCounterEntry".to_string(),
+                            fields: vec![
+                                ("replica".to_string(), CtValue::Str(replica.clone())),
+                                ("positive".to_string(), CtValue::Str(positive.to_string())),
+                                ("negative".to_string(), CtValue::Str(negative.to_string())),
+                            ],
                         })
                         .collect(),
                 ),
@@ -293,8 +295,9 @@ fn ct_to_text(v: &CtValue, span: Span) -> Result<JetSyncText, Diagnostic> {
                 };
                 let replica = text("replica")?;
                 let counter = match field("counter")? {
-                    CtValue::Int(n) if *n >= 0 => u64::try_from(*n)
-                        .map_err(|_| unsupported("SyncText atom counter", span))?,
+                    CtValue::Int(n) if *n >= 0 => {
+                        u64::try_from(*n).map_err(|_| unsupported("SyncText atom counter", span))?
+                    }
                     CtValue::Str(value) => value
                         .parse::<u64>()
                         .map_err(|_| unsupported("SyncText atom counter", span))?,
@@ -455,13 +458,11 @@ fn ct_to_counter(v: &CtValue, span: Span) -> Result<JetSyncCounter, Diagnostic> 
                 None => return Err(unsupported("SyncCounter counts", span)),
             };
             Ok(JetSyncCounter {
-                counts: vec![
-                    (
-                        "ambient".to_string(),
-                        if value >= 0 { value as u64 } else { 0 },
-                        if value < 0 { value.unsigned_abs() } else { 0 },
-                    ),
-                ],
+                counts: vec![(
+                    "ambient".to_string(),
+                    if value >= 0 { value as u64 } else { 0 },
+                    if value < 0 { value.unsigned_abs() } else { 0 },
+                )],
                 valid,
             })
         }
@@ -506,8 +507,9 @@ fn ct_to_map(v: &CtValue, span: Span) -> Result<JetSyncMap, Diagnostic> {
                         _ => return Err(unsupported("SyncMap value", span)),
                     };
                     let clock = match field("clock")? {
-                        CtValue::Int(n) if *n >= 0 => u64::try_from(*n)
-                            .map_err(|_| unsupported("SyncMap clock", span))?,
+                        CtValue::Int(n) if *n >= 0 => {
+                            u64::try_from(*n).map_err(|_| unsupported("SyncMap clock", span))?
+                        }
                         CtValue::Str(value) => value
                             .parse::<u64>()
                             .map_err(|_| unsupported("SyncMap clock", span))?,
@@ -700,7 +702,8 @@ pub fn apply(method: &str, args: &[CtValue], span: Span) -> Result<CtValue, Diag
             &ct_to_text(one(1)?, span)?,
         ))),
         "text_show" => Ok(CtValue::Str(jet_sync_text_show(&ct_to_text(
-            one(0)?, span,
+            one(0)?,
+            span,
         )?))),
         "text_edit" => Ok(text_to_ct(&jet_sync_text_edit(
             ct_to_text(one(0)?, span)?,
@@ -710,7 +713,8 @@ pub fn apply(method: &str, args: &[CtValue], span: Span) -> Result<CtValue, Diag
             as_str(4)?,
         ))),
         "text_metadata" => Ok(CtValue::Str(jet_sync_text_metadata(&ct_to_text(
-            one(0)?, span,
+            one(0)?,
+            span,
         )?))),
         "counter_new" => Ok(counter_to_ct(&jet_sync_counter_new(as_str(0)?, as_int(1)?))),
         "counter_inc" => Ok(counter_to_ct(&jet_sync_counter_inc(
@@ -723,7 +727,8 @@ pub fn apply(method: &str, args: &[CtValue], span: Span) -> Result<CtValue, Diag
             &ct_to_counter(one(1)?, span)?,
         ))),
         "counter_value" => Ok(CtValue::Int(jet_sync_counter_value(&ct_to_counter(
-            one(0)?, span,
+            one(0)?,
+            span,
         )?))),
         "map_new" => Ok(map_to_ct(&jet_sync_map_new())),
         "map_set" => Ok(map_to_ct(&jet_sync_map_set(
@@ -731,10 +736,12 @@ pub fn apply(method: &str, args: &[CtValue], span: Span) -> Result<CtValue, Diag
             as_str(1)?,
             as_str(2)?,
         ))),
-        "map_get" => Ok(match jet_sync_map_get(&ct_to_map(one(0)?, span)?, &as_str(1)?) {
-            Some(s) => CtValue::Present(Box::new(CtValue::Str(s))),
-            None => CtValue::absent(Type::String),
-        }),
+        "map_get" => Ok(
+            match jet_sync_map_get(&ct_to_map(one(0)?, span)?, &as_str(1)?) {
+                Some(s) => CtValue::Present(Box::new(CtValue::Str(s))),
+                None => CtValue::absent(Type::String),
+            },
+        ),
         "map_merge" => Ok(map_to_ct(&jet_sync_map_merge(
             &ct_to_map(one(0)?, span)?,
             &ct_to_map(one(1)?, span)?,
@@ -751,7 +758,8 @@ pub fn apply(method: &str, args: &[CtValue], span: Span) -> Result<CtValue, Diag
             &ct_to_list(one(1)?, span)?,
         ))),
         "list_show" => Ok(CtValue::Str(jet_sync_list_show(&ct_to_list(
-            one(0)?, span,
+            one(0)?,
+            span,
         )?))),
         "policy_new" => Ok(match jet_db_policy_new(as_str(0)?, as_str(1)?) {
             Ok(p) => CtValue::Present(Box::new(policy_to_ct(&p))),
@@ -763,7 +771,8 @@ pub fn apply(method: &str, args: &[CtValue], span: Span) -> Result<CtValue, Diag
             &as_str(2)?,
         ))),
         "policy_show" => Ok(CtValue::Str(jet_db_policy_show(&ct_to_policy(
-            one(0)?, span,
+            one(0)?,
+            span,
         )?))),
         "sync" => Ok(CtValue::Str(jet_app_sync(as_str(0)?, as_str(1)?))),
         _ => Err(unsupported(&format!("`core.sync.{method}()`"), span)),

@@ -1,7 +1,7 @@
 // D-SYNC1=A / D-DBPOLICY1=A (#1159/#1160): CRDT values + typed row policies.
 
-use super::{__jet_Decode, __jet_Encode, JetShow, jet_live_publish_transport};
 use super::jet_std;
+use super::{__jet_Decode, __jet_Encode, jet_live_publish_transport, JetShow};
 
 pub(crate) const MAX_SYNC_TEXT: usize = 1024 * 1024;
 /// Tombstones outlive the characters they replace, so a document holds more
@@ -203,7 +203,11 @@ pub(crate) fn jet_sync_text_new(replica: String, text: String) -> JetSyncText {
 /// Replace the whole document: every visible atom becomes a tombstone and the
 /// new text is written at the start.  The tombstones stay so a replica that
 /// never saw them still converges here after a merge.
-pub(crate) fn jet_sync_text_set(mut doc: JetSyncText, replica: String, text: String) -> JetSyncText {
+pub(crate) fn jet_sync_text_set(
+    mut doc: JetSyncText,
+    replica: String,
+    text: String,
+) -> JetSyncText {
     let inserted = text.chars().count();
     if !doc.valid
         || !jet_sync_token_is_valid(&replica)
@@ -378,14 +382,15 @@ fn jet_sync_counter_invalid() -> JetSyncCounter {
     }
 }
 
-pub(crate) fn jet_sync_counter_inc(mut counter: JetSyncCounter, replica: String, delta: i64) -> JetSyncCounter {
+pub(crate) fn jet_sync_counter_inc(
+    mut counter: JetSyncCounter,
+    replica: String,
+    delta: i64,
+) -> JetSyncCounter {
     if !counter.valid || !jet_sync_token_is_valid(&replica) {
         return counter;
     }
-    if let Some((_, positive, negative)) = counter
-        .counts
-        .iter_mut()
-        .find(|(r, _, _)| r == &replica)
+    if let Some((_, positive, negative)) = counter.counts.iter_mut().find(|(r, _, _)| r == &replica)
     {
         if delta >= 0 {
             let Some(next) = positive.checked_add(delta as u64) else {
@@ -451,13 +456,16 @@ pub(crate) fn jet_sync_counter_merge(a: &JetSyncCounter, b: &JetSyncCounter) -> 
         };
     }
     let counts = merged
-            .into_iter()
-            .map(|(replica, (positive, negative))| (replica, positive, negative))
-            .collect::<Vec<_>>();
+        .into_iter()
+        .map(|(replica, (positive, negative))| (replica, positive, negative))
+        .collect::<Vec<_>>();
     if jet_sync_counter_total(&counts).is_none() {
         return jet_sync_counter_invalid();
     }
-    JetSyncCounter { counts, valid: true }
+    JetSyncCounter {
+        counts,
+        valid: true,
+    }
 }
 
 pub(crate) fn jet_sync_counter_value(counter: &JetSyncCounter) -> i64 {
@@ -508,7 +516,8 @@ fn jet_sync_map_set_replica(
         .map(|(_, _, clock, _)| *clock)
         .max()
         .unwrap_or(0)
-        .checked_add(1) else {
+        .checked_add(1)
+    else {
         return JetSyncMap {
             entries: Vec::new(),
             valid: false,
@@ -570,12 +579,15 @@ pub(crate) fn jet_sync_map_merge(a: &JetSyncMap, b: &JetSyncMap) -> JetSyncMap {
                 valid: false,
             };
         }
-        let replace = merged.get(key).map_or(true, |(existing, existing_clock, existing_writer)| {
-            *clock > *existing_clock
-                || (*clock == *existing_clock
-                    && (writer.as_str(), value.as_str())
-                        > (existing_writer.as_str(), existing.as_str()))
-        });
+        let replace =
+            merged
+                .get(key)
+                .map_or(true, |(existing, existing_clock, existing_writer)| {
+                    *clock > *existing_clock
+                        || (*clock == *existing_clock
+                            && (writer.as_str(), value.as_str())
+                                > (existing_writer.as_str(), existing.as_str()))
+                });
         if replace {
             merged.insert(key.clone(), (value.clone(), *clock, writer.clone()));
         }
@@ -674,7 +686,8 @@ where
         .map(|(_, _, clock, _)| *clock)
         .max()
         .unwrap_or(0)
-        .checked_add(1) else {
+        .checked_add(1)
+    else {
         return JetSyncMapGeneric {
             entries: Vec::new(),
             valid: false,
@@ -749,12 +762,18 @@ where
         }
         let key_id = jet_sync_value_id(key);
         let value_id = jet_sync_value_id(value);
-        let replace = merged.get(&key_id).map_or(true, |(_, existing, existing_clock, existing_writer)| {
-            *clock > *existing_clock
-                || (*clock == *existing_clock
-                    && (writer.as_str(), value_id.as_str())
-                        > (existing_writer.as_str(), jet_sync_value_id(existing).as_str()))
-        });
+        let replace =
+            merged
+                .get(&key_id)
+                .map_or(true, |(_, existing, existing_clock, existing_writer)| {
+                    *clock > *existing_clock
+                        || (*clock == *existing_clock
+                            && (writer.as_str(), value_id.as_str())
+                                > (
+                                    existing_writer.as_str(),
+                                    jet_sync_value_id(existing).as_str(),
+                                ))
+                });
         if replace {
             merged.insert(key_id, (key.clone(), value.clone(), *clock, writer.clone()));
         }
@@ -841,7 +860,11 @@ pub(crate) fn jet_db_policy_from_compiled(
     })
 }
 
-pub(crate) fn jet_db_policy_allows(policy: &JetRowPolicy, user: &String, row_owner: &String) -> bool {
+pub(crate) fn jet_db_policy_allows(
+    policy: &JetRowPolicy,
+    user: &String,
+    row_owner: &String,
+) -> bool {
     if !jet_sync_token_is_valid(user) || !jet_sync_token_is_valid(row_owner) {
         return false;
     }
@@ -852,7 +875,17 @@ pub(crate) fn jet_db_policy_allows(policy: &JetRowPolicy, user: &String, row_own
 }
 
 pub(crate) fn jet_db_policy_show(policy: &JetRowPolicy) -> String {
-    format!("RowPolicy(table={}, expr={})", policy.table, policy.expression)
+    format!(
+        "RowPolicy(table={}, expr={})",
+        policy.table, policy.expression
+    )
+}
+
+/// D-DBPOLICY1: audit the policy that is active on this bounded scope. The
+/// scope is the authority boundary, so the output includes the bound user and
+/// the compiled SQL predicate used by every DB path.
+pub(crate) fn jet_db_policy_audit(scope: &JetDbScope) -> String {
+    jet_std::jet_db_policy_audit_line(&scope.policy.table, scope.policy.compiled, &scope.user)
 }
 
 pub(crate) fn jet_sync_list_new() -> JetSyncList {
@@ -862,7 +895,11 @@ pub(crate) fn jet_sync_list_new() -> JetSyncList {
     }
 }
 
-pub(crate) fn jet_sync_list_push(mut list: JetSyncList, replica: String, item: String) -> JetSyncList {
+pub(crate) fn jet_sync_list_push(
+    mut list: JetSyncList,
+    replica: String,
+    item: String,
+) -> JetSyncList {
     if !list.valid || !jet_sync_token_is_valid(&replica) || item.len() > MAX_SYNC_TEXT {
         return list;
     }
@@ -876,7 +913,8 @@ pub(crate) fn jet_sync_list_push(mut list: JetSyncList, replica: String, item: S
             };
         }
     }
-    list.items.sort_by(|left, right| (&left.0, &left.1).cmp(&(&right.0, &right.1)));
+    list.items
+        .sort_by(|left, right| (&left.0, &left.1).cmp(&(&right.0, &right.1)));
     list
 }
 
@@ -889,17 +927,15 @@ pub(crate) fn jet_sync_list_merge(a: &JetSyncList, b: &JetSyncList) -> JetSyncLi
     }
     let mut out = a.clone();
     for (replica, item) in &b.items {
-        if !out
-            .items
-            .iter()
-            .any(|(r, i)| r == replica && i == item)
-        {
+        if !out.items.iter().any(|(r, i)| r == replica && i == item) {
             out.items.push((replica.clone(), item.clone()));
         }
     }
-    if out.items.iter().any(|(replica, item)| {
-        !jet_sync_token_is_valid(replica) || item.len() > MAX_SYNC_TEXT
-    }) {
+    if out
+        .items
+        .iter()
+        .any(|(replica, item)| !jet_sync_token_is_valid(replica) || item.len() > MAX_SYNC_TEXT)
+    {
         return JetSyncList {
             items: Vec::new(),
             valid: false,
@@ -916,9 +952,7 @@ pub(crate) fn jet_sync_list_merge(a: &JetSyncList, b: &JetSyncList) -> JetSyncLi
 }
 
 pub(crate) fn jet_sync_token_is_valid(value: &str) -> bool {
-    !value.trim().is_empty()
-        && value.len() <= MAX_SYNC_TEXT
-        && !value.chars().any(char::is_control)
+    !value.trim().is_empty() && value.len() <= MAX_SYNC_TEXT && !value.chars().any(char::is_control)
 }
 
 pub(crate) fn jet_sync_list_show(list: &JetSyncList) -> String {
@@ -969,13 +1003,9 @@ where
     if item_id.len() > MAX_SYNC_TEXT {
         return list;
     }
-    if !list
-        .items
-        .iter()
-        .any(|(existing_replica, existing_item)| {
-            existing_replica == &replica && jet_sync_value_id(existing_item) == item_id
-        })
-        && list.items.len() < MAX_SYNC_ENTRIES
+    if !list.items.iter().any(|(existing_replica, existing_item)| {
+        existing_replica == &replica && jet_sync_value_id(existing_item) == item_id
+    }) && list.items.len() < MAX_SYNC_ENTRIES
     {
         list.items.push((replica, item));
     } else if !list.items.iter().any(|(existing_replica, existing_item)| {
@@ -1066,7 +1096,9 @@ fn jet_sync_list_metadata_generic<T>(list: &JetSyncListGeneric<T>) -> String {
 }
 
 impl JetShow for JetSyncText {
-    fn jet_show(&self) -> String { jet_sync_text_show(self) }
+    fn jet_show(&self) -> String {
+        jet_sync_text_show(self)
+    }
 }
 
 impl JetShow for JetSyncCounter {
@@ -1074,12 +1106,18 @@ impl JetShow for JetSyncCounter {
         if !self.valid {
             return "SyncError(invalid SyncCounter)".to_string();
         }
-        format!("{}={}", jet_sync_counter_metadata(self), jet_sync_counter_value(self))
+        format!(
+            "{}={}",
+            jet_sync_counter_metadata(self),
+            jet_sync_counter_value(self)
+        )
     }
 }
 
 impl JetShow for JetSyncMap {
-    fn jet_show(&self) -> String { jet_sync_map_show(self) }
+    fn jet_show(&self) -> String {
+        jet_sync_map_show(self)
+    }
 }
 
 impl<K, V> JetShow for JetSyncMapGeneric<K, V>
@@ -1087,18 +1125,24 @@ where
     K: __jet_Encode,
     V: __jet_Encode,
 {
-    fn jet_show(&self) -> String { jet_sync_map_show_generic(self) }
+    fn jet_show(&self) -> String {
+        jet_sync_map_show_generic(self)
+    }
 }
 
 impl JetShow for JetSyncList {
-    fn jet_show(&self) -> String { jet_sync_list_show(self) }
+    fn jet_show(&self) -> String {
+        jet_sync_list_show(self)
+    }
 }
 
 impl<T> JetShow for JetSyncListGeneric<T>
 where
     T: __jet_Encode,
 {
-    fn jet_show(&self) -> String { jet_sync_list_show_generic(self) }
+    fn jet_show(&self) -> String {
+        jet_sync_list_show_generic(self)
+    }
 }
 
 fn jet_sync_decode_error(message: impl Into<String>) -> Vec<jet_std::FieldError> {
@@ -1128,8 +1172,12 @@ fn jet_sync_object<'a>(
         return Err(jet_sync_decode_error(format!("{label} must be an object")));
     };
     if fields.len() != expected.len()
-        || fields.iter().any(|(key, _)| !expected.iter().any(|name| *name == key))
-        || expected.iter().any(|name| !fields.iter().any(|(key, _)| key == name))
+        || fields
+            .iter()
+            .any(|(key, _)| !expected.iter().any(|name| *name == key))
+        || expected
+            .iter()
+            .any(|name| !fields.iter().any(|(key, _)| key == name))
     {
         return Err(jet_sync_decode_error(format!(
             "{label} has missing, duplicate, or unknown fields"
@@ -1255,11 +1303,11 @@ impl __jet_Encode for JetSyncText {
                                     None => String::new(),
                                 }),
                             ),
-                            ("ch".to_string(), jet_std::DataTree::Text(atom.ch.to_string())),
                             (
-                                "deleted".to_string(),
-                                jet_std::DataTree::Bool(atom.deleted),
+                                "ch".to_string(),
+                                jet_std::DataTree::Text(atom.ch.to_string()),
                             ),
+                            ("deleted".to_string(), jet_std::DataTree::Bool(atom.deleted)),
                         ])
                     })
                     .collect(),
@@ -1285,8 +1333,7 @@ impl __jet_Decode for JetSyncText {
             return Err(jet_sync_decode_error("SyncText atom limit exceeded"));
         }
         let mut atoms: Vec<JetSyncTextAtom> = Vec::with_capacity(values.len());
-        let mut seen: std::collections::BTreeSet<(String, u64)> =
-            std::collections::BTreeSet::new();
+        let mut seen: std::collections::BTreeSet<(String, u64)> = std::collections::BTreeSet::new();
         let mut errors = Vec::new();
         for (index, value) in values.iter().enumerate() {
             let fields = match jet_sync_object(
@@ -1322,13 +1369,10 @@ impl __jet_Decode for JetSyncText {
                 &mut entry_errors,
                 |tree| jet_sync_decode_string(tree, "SyncText.after"),
             );
-            let ch = jet_sync_decode_field(
-                fields,
-                "ch",
-                "SyncText atom",
-                &mut entry_errors,
-                |tree| jet_sync_decode_string(tree, "SyncText.ch"),
-            );
+            let ch =
+                jet_sync_decode_field(fields, "ch", "SyncText atom", &mut entry_errors, |tree| {
+                    jet_sync_decode_string(tree, "SyncText.ch")
+                });
             let deleted = jet_sync_decode_field(
                 fields,
                 "deleted",
@@ -1361,9 +1405,7 @@ impl __jet_Decode for JetSyncText {
                     _ => None,
                 };
                 match (anchor, single) {
-                    (Ok(anchor), Some(ch))
-                        if jet_sync_token_is_valid(&replica) && counter > 0 =>
-                    {
+                    (Ok(anchor), Some(ch)) if jet_sync_token_is_valid(&replica) && counter > 0 => {
                         if !seen.insert((replica.clone(), counter)) {
                             entry_errors.extend(jet_sync_decode_error(
                                 "SyncText contains duplicate atom identities",
@@ -1379,8 +1421,7 @@ impl __jet_Decode for JetSyncText {
                         }
                     }
                     _ => {
-                        entry_errors
-                            .extend(jet_sync_decode_error("SyncText atom is invalid"));
+                        entry_errors.extend(jet_sync_decode_error("SyncText atom is invalid"));
                     }
                 }
             }
@@ -1411,10 +1452,7 @@ impl __jet_Decode for JetSyncText {
                 .cmp(&right.replica)
                 .then_with(|| left.counter.cmp(&right.counter))
         });
-        Ok(JetSyncText {
-            atoms,
-            valid: true,
-        })
+        Ok(JetSyncText { atoms, valid: true })
     }
 }
 
@@ -1426,23 +1464,30 @@ impl __jet_Encode for JetSyncCounter {
                 jet_std::DataTree::Bool(true),
             )]);
         }
-        jet_std::DataTree::Object(vec![
-            (
-                "counts".to_string(),
-                jet_std::DataTree::Array(
-                    self.counts
-                        .iter()
-                        .map(|(replica, positive, negative)| {
-                            jet_std::DataTree::Object(vec![
-                                ("replica".to_string(), jet_std::DataTree::Text(replica.clone())),
-                                ("positive".to_string(), jet_std::DataTree::Text(positive.to_string())),
-                                ("negative".to_string(), jet_std::DataTree::Text(negative.to_string())),
-                            ])
-                        })
-                        .collect(),
-                ),
+        jet_std::DataTree::Object(vec![(
+            "counts".to_string(),
+            jet_std::DataTree::Array(
+                self.counts
+                    .iter()
+                    .map(|(replica, positive, negative)| {
+                        jet_std::DataTree::Object(vec![
+                            (
+                                "replica".to_string(),
+                                jet_std::DataTree::Text(replica.clone()),
+                            ),
+                            (
+                                "positive".to_string(),
+                                jet_std::DataTree::Text(positive.to_string()),
+                            ),
+                            (
+                                "negative".to_string(),
+                                jet_std::DataTree::Text(negative.to_string()),
+                            ),
+                        ])
+                    })
+                    .collect(),
             ),
-        ])
+        )])
     }
 }
 
@@ -1538,24 +1583,28 @@ impl __jet_Encode for JetSyncMap {
                 jet_std::DataTree::Bool(true),
             )]);
         }
-        jet_std::DataTree::Object(vec![
-            (
-                "entries".to_string(),
-                jet_std::DataTree::Array(
-                    self.entries
-                        .iter()
-                        .map(|(key, value, clock, writer)| {
-                            jet_std::DataTree::Object(vec![
-                                ("key".to_string(), jet_std::DataTree::Text(key.clone())),
-                                ("value".to_string(), jet_std::DataTree::Text(value.clone())),
-                                ("clock".to_string(), jet_std::DataTree::Text(clock.to_string())),
-                                ("writer".to_string(), jet_std::DataTree::Text(writer.clone())),
-                            ])
-                        })
-                        .collect(),
-                ),
+        jet_std::DataTree::Object(vec![(
+            "entries".to_string(),
+            jet_std::DataTree::Array(
+                self.entries
+                    .iter()
+                    .map(|(key, value, clock, writer)| {
+                        jet_std::DataTree::Object(vec![
+                            ("key".to_string(), jet_std::DataTree::Text(key.clone())),
+                            ("value".to_string(), jet_std::DataTree::Text(value.clone())),
+                            (
+                                "clock".to_string(),
+                                jet_std::DataTree::Text(clock.to_string()),
+                            ),
+                            (
+                                "writer".to_string(),
+                                jet_std::DataTree::Text(writer.clone()),
+                            ),
+                        ])
+                    })
+                    .collect(),
             ),
-        ])
+        )])
     }
 }
 
@@ -1578,25 +1627,20 @@ impl __jet_Decode for JetSyncMap {
         let mut entries = Vec::with_capacity(values.len());
         let mut errors = Vec::new();
         for (index, value) in values.iter().enumerate() {
-            let fields = match jet_sync_object(
-                value,
-                &["key", "value", "clock", "writer"],
-                "SyncMap entry",
-            ) {
-                Ok(fields) => fields,
-                Err(entry_errors) => {
-                    jet_sync_frame_entry(&mut errors, index, entry_errors);
-                    continue;
-                }
-            };
+            let fields =
+                match jet_sync_object(value, &["key", "value", "clock", "writer"], "SyncMap entry")
+                {
+                    Ok(fields) => fields,
+                    Err(entry_errors) => {
+                        jet_sync_frame_entry(&mut errors, index, entry_errors);
+                        continue;
+                    }
+                };
             let mut entry_errors = Vec::new();
-            let key = jet_sync_decode_field(
-                fields,
-                "key",
-                "SyncMap entry",
-                &mut entry_errors,
-                |tree| jet_sync_decode_string(tree, "SyncMap.key"),
-            );
+            let key =
+                jet_sync_decode_field(fields, "key", "SyncMap entry", &mut entry_errors, |tree| {
+                    jet_sync_decode_string(tree, "SyncMap.key")
+                });
             let entry_value = jet_sync_decode_field(
                 fields,
                 "value",
@@ -1628,9 +1672,7 @@ impl __jet_Decode for JetSyncMap {
                 {
                     entry_errors.extend(jet_sync_decode_error("SyncMap entry is invalid"));
                 } else if entries.iter().any(|(existing, _, _, _)| existing == &key) {
-                    entry_errors.extend(jet_sync_decode_error(
-                        "SyncMap contains duplicate keys",
-                    ));
+                    entry_errors.extend(jet_sync_decode_error("SyncMap contains duplicate keys"));
                 } else {
                     entries.push((key, entry_value, clock, writer));
                 }
@@ -1658,22 +1700,23 @@ impl __jet_Encode for JetSyncList {
                 jet_std::DataTree::Bool(true),
             )]);
         }
-        jet_std::DataTree::Object(vec![
-            (
-                "items".to_string(),
-                jet_std::DataTree::Array(
-                    self.items
-                        .iter()
-                        .map(|(replica, item)| {
-                            jet_std::DataTree::Object(vec![
-                                ("replica".to_string(), jet_std::DataTree::Text(replica.clone())),
-                                ("item".to_string(), jet_std::DataTree::Text(item.clone())),
-                            ])
-                        })
-                        .collect(),
-                ),
+        jet_std::DataTree::Object(vec![(
+            "items".to_string(),
+            jet_std::DataTree::Array(
+                self.items
+                    .iter()
+                    .map(|(replica, item)| {
+                        jet_std::DataTree::Object(vec![
+                            (
+                                "replica".to_string(),
+                                jet_std::DataTree::Text(replica.clone()),
+                            ),
+                            ("item".to_string(), jet_std::DataTree::Text(item.clone())),
+                        ])
+                    })
+                    .collect(),
             ),
-        ])
+        )])
     }
 }
 
@@ -1711,13 +1754,10 @@ impl __jet_Decode for JetSyncList {
                 &mut entry_errors,
                 |tree| jet_sync_decode_string(tree, "SyncList.replica"),
             );
-            let item = jet_sync_decode_field(
-                fields,
-                "item",
-                "SyncList item",
-                &mut entry_errors,
-                |tree| jet_sync_decode_string(tree, "SyncList.item"),
-            );
+            let item =
+                jet_sync_decode_field(fields, "item", "SyncList item", &mut entry_errors, |tree| {
+                    jet_sync_decode_string(tree, "SyncList.item")
+                });
             if let (Some(replica), Some(item)) = (replica, item) {
                 if !jet_sync_token_is_valid(&replica) || item.len() > MAX_SYNC_TEXT {
                     entry_errors.extend(jet_sync_decode_error("SyncList item is invalid"));
@@ -1737,10 +1777,7 @@ impl __jet_Decode for JetSyncList {
             return Err(errors);
         }
         items.sort_by(|left, right| (&left.0, &left.1).cmp(&(&right.0, &right.1)));
-        Ok(JetSyncList {
-            items,
-            valid: true,
-        })
+        Ok(JetSyncList { items, valid: true })
     }
 }
 
@@ -1756,24 +1793,28 @@ where
                 jet_std::DataTree::Bool(true),
             )]);
         }
-        jet_std::DataTree::Object(vec![
-            (
-                "entries".to_string(),
-                jet_std::DataTree::Array(
-                    self.entries
-                        .iter()
-                        .map(|(key, value, clock, writer)| {
-                            jet_std::DataTree::Object(vec![
-                                ("key".to_string(), key.jet_encode()),
-                                ("value".to_string(), value.jet_encode()),
-                                ("clock".to_string(), jet_std::DataTree::Text(clock.to_string())),
-                                ("writer".to_string(), jet_std::DataTree::Text(writer.clone())),
-                            ])
-                        })
-                        .collect(),
-                ),
+        jet_std::DataTree::Object(vec![(
+            "entries".to_string(),
+            jet_std::DataTree::Array(
+                self.entries
+                    .iter()
+                    .map(|(key, value, clock, writer)| {
+                        jet_std::DataTree::Object(vec![
+                            ("key".to_string(), key.jet_encode()),
+                            ("value".to_string(), value.jet_encode()),
+                            (
+                                "clock".to_string(),
+                                jet_std::DataTree::Text(clock.to_string()),
+                            ),
+                            (
+                                "writer".to_string(),
+                                jet_std::DataTree::Text(writer.clone()),
+                            ),
+                        ])
+                    })
+                    .collect(),
             ),
-        ])
+        )])
     }
 }
 
@@ -1800,17 +1841,15 @@ where
         let mut entries = Vec::with_capacity(values.len());
         let mut errors = Vec::new();
         for (index, value) in values.iter().enumerate() {
-            let fields = match jet_sync_object(
-                value,
-                &["key", "value", "clock", "writer"],
-                "SyncMap entry",
-            ) {
-                Ok(fields) => fields,
-                Err(entry_errors) => {
-                    jet_sync_frame_entry(&mut errors, index, entry_errors);
-                    continue;
-                }
-            };
+            let fields =
+                match jet_sync_object(value, &["key", "value", "clock", "writer"], "SyncMap entry")
+                {
+                    Ok(fields) => fields,
+                    Err(entry_errors) => {
+                        jet_sync_frame_entry(&mut errors, index, entry_errors);
+                        continue;
+                    }
+                };
             let mut entry_errors = Vec::new();
             let key = jet_sync_decode_field(
                 fields,
@@ -1851,9 +1890,8 @@ where
                         .iter()
                         .any(|(existing_key, _, _, _)| jet_sync_value_id(existing_key) == key_id)
                     {
-                        entry_errors.extend(jet_sync_decode_error(
-                            "SyncMap contains duplicate keys",
-                        ));
+                        entry_errors
+                            .extend(jet_sync_decode_error("SyncMap contains duplicate keys"));
                     } else {
                         entries.push((key, entry_value, clock, writer));
                     }
@@ -1866,9 +1904,7 @@ where
         if !errors.is_empty() {
             return Err(errors);
         }
-        entries.sort_by(|left, right| {
-            jet_sync_value_id(&left.0).cmp(&jet_sync_value_id(&right.0))
-        });
+        entries.sort_by(|left, right| jet_sync_value_id(&left.0).cmp(&jet_sync_value_id(&right.0)));
         Ok(JetSyncMapGeneric {
             entries,
             valid: true,
@@ -1887,22 +1923,23 @@ where
                 jet_std::DataTree::Bool(true),
             )]);
         }
-        jet_std::DataTree::Object(vec![
-            (
-                "items".to_string(),
-                jet_std::DataTree::Array(
-                    self.items
-                        .iter()
-                        .map(|(replica, item)| {
-                            jet_std::DataTree::Object(vec![
-                                ("replica".to_string(), jet_std::DataTree::Text(replica.clone())),
-                                ("item".to_string(), item.jet_encode()),
-                            ])
-                        })
-                        .collect(),
-                ),
+        jet_std::DataTree::Object(vec![(
+            "items".to_string(),
+            jet_std::DataTree::Array(
+                self.items
+                    .iter()
+                    .map(|(replica, item)| {
+                        jet_std::DataTree::Object(vec![
+                            (
+                                "replica".to_string(),
+                                jet_std::DataTree::Text(replica.clone()),
+                            ),
+                            ("item".to_string(), item.jet_encode()),
+                        ])
+                    })
+                    .collect(),
             ),
-        ])
+        )])
     }
 }
 
@@ -1958,9 +1995,8 @@ where
                     if items.iter().any(|(existing_replica, existing_item)| {
                         existing_replica == &replica && jet_sync_value_id(existing_item) == item_id
                     }) {
-                        entry_errors.extend(jet_sync_decode_error(
-                            "SyncList contains duplicate items",
-                        ));
+                        entry_errors
+                            .extend(jet_sync_decode_error("SyncList contains duplicate items"));
                     } else {
                         items.push((replica, item));
                     }
@@ -1978,10 +2014,7 @@ where
             let right_id = jet_sync_value_id(&right.1);
             (left.0.as_str(), left_id).cmp(&(right.0.as_str(), right_id))
         });
-        Ok(JetSyncListGeneric {
-            items,
-            valid: true,
-        })
+        Ok(JetSyncListGeneric { items, valid: true })
     }
 }
 
@@ -2055,7 +2088,10 @@ fn jet_sync_split_display_once(value: &str, separator: char) -> Option<(String, 
         } else if ch == '\\' {
             escaped = true;
         } else if ch == separator {
-            return Some((value[..index].to_string(), value[index + ch.len_utf8()..].to_string()));
+            return Some((
+                value[..index].to_string(),
+                value[index + ch.len_utf8()..].to_string(),
+            ));
         }
     }
     None
@@ -2083,9 +2119,7 @@ fn jet_sync_document_map_entries(
         let (raw_key, raw_value) = jet_sync_split_display_once(&entry, '=')?;
         let key = jet_sync_unescape_display(&raw_key)?;
         let value = jet_sync_unescape_display(&raw_value)?;
-        if !jet_sync_document_key_valid(&key, &[])
-            || value.len() > MAX_SYNC_TEXT
-        {
+        if !jet_sync_document_key_valid(&key, &[]) || value.len() > MAX_SYNC_TEXT {
             return None;
         }
         if entries.insert(key, value).is_some() {
@@ -2107,9 +2141,7 @@ fn jet_sync_document_list_items(
         let (raw_replica, raw_value) = jet_sync_split_display_once(&item, ':')?;
         let replica = jet_sync_unescape_display(&raw_replica)?;
         let value = jet_sync_unescape_display(&raw_value)?;
-        if !jet_sync_document_key_valid(&replica, &[])
-            || value.len() > MAX_SYNC_TEXT
-        {
+        if !jet_sync_document_key_valid(&replica, &[]) || value.len() > MAX_SYNC_TEXT {
             return None;
         }
         if !items.insert((replica, value)) {
@@ -2163,26 +2195,67 @@ impl JetSyncDocument {
             || representation != value
             || representation.len() > MAX_SYNC_DOCUMENT
             || representation.chars().any(char::is_control)
-            || ![
-                "SyncText(",
-                "SyncMap(",
-                "SyncList(",
-                "PNCounter(",
-            ]
-            .iter()
-            .any(|prefix| representation.starts_with(prefix))
+            || !["SyncText(", "SyncMap(", "SyncList(", "PNCounter("]
+                .iter()
+                .any(|prefix| representation.starts_with(prefix))
         {
             return None;
         }
         if !representation.ends_with(')') {
             return None;
         }
-        if representation.starts_with("SyncMap(") {
-            jet_sync_document_map_entries(&representation)?;
+        let canonical = if representation.starts_with("SyncMap(") {
+            let entries = jet_sync_document_map_entries(&representation)?;
+            format!(
+                "SyncMap({})",
+                entries
+                    .into_iter()
+                    .map(|(key, value)| {
+                        format!(
+                            "{}={}",
+                            jet_sync_escape_display(&key),
+                            jet_sync_escape_display(&value)
+                        )
+                    })
+                    .collect::<Vec<_>>()
+                    .join(",")
+            )
         } else if representation.starts_with("SyncList(") {
-            jet_sync_document_list_items(&representation)?;
+            let items = jet_sync_document_list_items(&representation)?;
+            format!(
+                "SyncList({})",
+                items
+                    .into_iter()
+                    .map(|(replica, value)| {
+                        format!(
+                            "{}:{}",
+                            jet_sync_escape_display(&replica),
+                            jet_sync_escape_display(&value)
+                        )
+                    })
+                    .collect::<Vec<_>>()
+                    .join("|")
+            )
         } else if representation.starts_with("PNCounter(") {
-            jet_sync_document_counter_entries(&representation)?;
+            let counts = jet_sync_document_counter_entries(&representation)?;
+            format!(
+                "PNCounter({})",
+                counts
+                    .into_iter()
+                    .map(|(replica, (positive, negative))| {
+                        format!(
+                            "{}=+{positive}/-{negative}",
+                            jet_sync_escape_display(&replica)
+                        )
+                    })
+                    .collect::<Vec<_>>()
+                    .join(",")
+            )
+        } else {
+            representation.clone()
+        };
+        if canonical != representation {
+            return None;
         }
         Some(Self { representation })
     }

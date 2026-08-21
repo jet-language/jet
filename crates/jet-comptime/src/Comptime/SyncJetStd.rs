@@ -62,7 +62,11 @@ pub fn render_datatree_json(tree: &DataTree, pretty: bool, depth: usize) -> Stri
         DataTree::Text(value) => quote_json(value),
         DataTree::Bytes(values) => format!(
             "[{}]",
-            values.iter().map(u8::to_string).collect::<Vec<_>>().join(",")
+            values
+                .iter()
+                .map(u8::to_string)
+                .collect::<Vec<_>>()
+                .join(",")
         ),
         DataTree::Array(values) => {
             if values.is_empty() {

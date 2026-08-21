@@ -1146,6 +1146,62 @@ deps: .{
     assert_eq!(mf.package.description.as_deref(), Some("A test package"));
     assert_eq!(mf.package.license.as_deref(), Some("MIT OR Apache-2.0"));
     assert!(mf.dependencies.is_empty());
+    assert!(mf.boundaries.is_empty());
+}
+
+#[test]
+fn manifest_parse_import_boundaries() {
+    let raw = min_manifest("app", "0.1.0")
+        + r#"
+boundaries: {
+    deny: [
+        { from: "app.ui", to: "app.db" },
+        { from: "app.api.*", to: "app.db.*" },
+    ],
+}
+"#;
+    let mf = jet::Manifest::parse(&PathBuf::from("package.jet"), &raw)
+        .expect("boundary policy should parse");
+    assert_eq!(mf.boundaries.len(), 2);
+    assert_eq!(mf.boundaries[0].from, "app.ui");
+    assert_eq!(mf.boundaries[0].to, "app.db");
+    assert!(mf.boundaries[1].matches("app.api.auth", "app.db.users"));
+    assert!(!mf.boundaries[1].matches("app.web", "app.db.users"));
+}
+
+#[test]
+fn loader_enforces_import_boundaries_and_warns_on_zero_match() {
+    let denied = tmp_dir("import_boundary_denied");
+    write(
+        &denied,
+        "package.jet",
+        &(min_manifest("app", "0.1.0")
+            + "boundaries: { deny: [{ from: \"app.ui\", to: \"app.db\" }] }\n"),
+    );
+    write(&denied, "ui.jet", "use db;\nfn run() { }\n");
+    write(&denied, "db.jet", "pub fn value() => Int { return 1 }\n");
+    let error = jet::Loader::load_entry(denied.join("ui.jet").to_str().unwrap())
+        .expect_err("a denied import edge must fail during loading");
+    assert_eq!(first_diag_code(&error), "E0619");
+    assert!(error[0].what.contains("app.ui"));
+    assert!(error[0].what.contains("app.db"));
+    fs::remove_dir_all(&denied).unwrap();
+
+    let unused = tmp_dir("import_boundary_unused");
+    write(
+        &unused,
+        "package.jet",
+        &(min_manifest("app", "0.1.0")
+            + "boundaries: { deny: [{ from: \"app.ui\", to: \"app.db\" }] }\n"),
+    );
+    write(&unused, "ui.jet", "fn run() { }\n");
+    let bundle = jet::Loader::load_entry(unused.join("ui.jet").to_str().unwrap())
+        .expect("an unmatched boundary is a warning");
+    assert!(bundle
+        .parse_teaching
+        .iter()
+        .any(|diagnostic| diagnostic.code == "L0619"));
+    fs::remove_dir_all(&unused).unwrap();
 }
 
 #[test]

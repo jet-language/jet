@@ -1,5 +1,5 @@
 // D-FAIL-CONV2=A (ratified 2026-08-17, card #2018): the standard library declares
-// the conversion for its own error family. A program can write `fn run() ?` and
+// the conversion for its own error family. A program can write `fn run() !` and
 // pass a Core failure up with `?` without declaring anything, because these
 // declarations already sit on the existing D-ERR-CONV rail. One source; every
 // tier lowers the same `impl <CoreError> => Err` block, the same way
@@ -11,7 +11,7 @@
 // conversion cannot break a program that never produces that error.
 //
 // An author who wants the failure named still writes the named form
-// (`fn run() ? JSONError`), and that stays correct: this file only makes the
+// (`fn run() ! JSONError`), and that stays correct: this file only makes the
 // unnamed form work.
 //
 // D-FAIL-CONV1=A keeps the rest of the rule intact. A user error type still
@@ -24,7 +24,7 @@
 //   1. the Prelude registers it printable — `auto_printable` in
 //      `TraitRegistry::register_synthetic_display_debug`, so the Prelude already
 //      owns its failure text;
-//   2. a Core signature returns it in the error position of a `T ? E` result, so
+//   2. a Core signature returns it in the error position of a `T ! E` result, so
 //      a program can actually receive one; and
 //   3. showing it is not prohibited.
 //

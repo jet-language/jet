@@ -129,6 +129,51 @@
         }
     }
 
+    /// The transformer returns the proof together with rewritten SQL. A
+    /// backend may marshal the two payload fields, but it cannot get policy
+    /// SQL without first receiving this proof-bearing application.
+    #[derive(Clone, Debug, PartialEq, Eq)]
+    pub struct JetDBPolicyProof {
+        table: String,
+        operation: String,
+        predicate: String,
+        user: String,
+        user_bind_index: Option<usize>,
+    }
+
+    #[derive(Clone, Debug, PartialEq)]
+    pub struct JetDBPolicyApplication {
+        pub sql: String,
+        pub params: Vec<DBValue>,
+        pub proof: JetDBPolicyProof,
+    }
+
+    impl JetDBPolicyApplication {
+        pub fn into_parts(self) -> Result<(String, Vec<DBValue>), DBError> {
+            let row_filter_proved = self.proof.predicate == "true"
+                || self.proof.operation.starts_with("migration-")
+                || self
+                    .proof
+                    .user_bind_index
+                    .is_some_and(|index| {
+                        self.params.get(index) == Some(&DBValue::Text(self.proof.user.clone()))
+                    });
+            if !row_filter_proved {
+                return Err(DBError {
+                    message: "row policy proof does not match the rewritten SQL binds".to_string(),
+                });
+            }
+            (self.proof.predicate == "true"
+                || self.proof.operation.starts_with("migration-")
+                || self.proof.operation == "insert"
+                || self.sql.contains("owner = ?"))
+                .then_some((self.sql, self.params))
+                .ok_or_else(|| DBError {
+                    message: "row policy proof does not match the rewritten SQL predicate".to_string(),
+                })
+        }
+    }
+
     // The closed policy language lives in `RowPolicy.rs`, included beside this
     // fragment on every tier. Public raw-text entry points compile once at the
     // boundary; scoped entry points below receive the compiled enum directly.
@@ -334,6 +379,53 @@
             .map(|(start, _, _)| *start)
     }
 
+    fn db_sql_placeholder_count(sql: &str) -> usize {
+        let bytes = sql.as_bytes();
+        let mut count = 0;
+        let mut i = 0;
+        while i < bytes.len() {
+            let quote = match bytes[i] {
+                b'\'' | b'"' | b'`' => Some(bytes[i]),
+                b'[' => {
+                    i += 1;
+                    while i < bytes.len() && bytes[i] != b']' {
+                        i += 1;
+                    }
+                    if i < bytes.len() {
+                        i += 1;
+                    }
+                    None
+                }
+                b'?' => {
+                    count += 1;
+                    i += 1;
+                    None
+                }
+                _ => {
+                    i += 1;
+                    None
+                }
+            };
+            let Some(quote) = quote else {
+                continue;
+            };
+            i += 1;
+            while i < bytes.len() {
+                if bytes[i] == quote {
+                    if bytes.get(i + 1) == Some(&quote) {
+                        i += 2;
+                    } else {
+                        i += 1;
+                        break;
+                    }
+                } else {
+                    i += 1;
+                }
+            }
+        }
+        count
+    }
+
     fn db_sql_update_mutates_owner(tokens: &[(usize, usize, String)]) -> bool {
         let Some(set_index) = tokens.iter().position(|(_, _, word)| word == "set") else {
             return false;
@@ -377,7 +469,8 @@
     ) -> Result<(String, Vec<DBValue>), DBError> {
         let (table, compiled) = jet_db_policy_compile(table, expression)
             .map_err(|message| DBError { message })?;
-        jet_db_apply_compiled_policy(sql, params, &table, compiled, user)
+        jet_db_apply_compiled_policy_with_proof(sql, params, &table, compiled, user)
+            .and_then(JetDBPolicyApplication::into_parts)
     }
 
     /// Apply an already compiled policy. Scope carriers use this path so a
@@ -389,6 +482,20 @@
         compiled: JetRowPolicyExpr,
         user: &str,
     ) -> Result<(String, Vec<DBValue>), DBError> {
+        jet_db_apply_compiled_policy_with_proof(sql, params, table, compiled, user)
+            .and_then(JetDBPolicyApplication::into_parts)
+    }
+
+    /// Apply a compiled policy and retain the enforcement proof until the
+    /// caller has selected its execution path. All scoped query, mutation,
+    /// transaction, and live adapters use this entry point.
+    pub fn jet_db_apply_compiled_policy_with_proof(
+        sql: &str,
+        params: &Vec<DBValue>,
+        table: &str,
+        compiled: JetRowPolicyExpr,
+        user: &str,
+    ) -> Result<JetDBPolicyApplication, DBError> {
         jet_db_apply_policy_inner(sql, params, table, compiled, user, false)
     }
 
@@ -404,7 +511,8 @@
     ) -> Result<(String, Vec<DBValue>), DBError> {
         let (table, compiled) = jet_db_policy_compile(table, expression)
             .map_err(|message| DBError { message })?;
-        jet_db_apply_compiled_migration_policy(sql, params, &table, compiled, user)
+        jet_db_apply_compiled_migration_policy_with_proof(sql, params, &table, compiled, user)
+            .and_then(JetDBPolicyApplication::into_parts)
     }
 
     /// Migration form of [`jet_db_apply_compiled_policy`]. Schema statements
@@ -416,7 +524,40 @@
         compiled: JetRowPolicyExpr,
         user: &str,
     ) -> Result<(String, Vec<DBValue>), DBError> {
+        jet_db_apply_compiled_migration_policy_with_proof(sql, params, table, compiled, user)
+            .and_then(JetDBPolicyApplication::into_parts)
+    }
+
+    pub fn jet_db_apply_compiled_migration_policy_with_proof(
+        sql: &str,
+        params: &Vec<DBValue>,
+        table: &str,
+        compiled: JetRowPolicyExpr,
+        user: &str,
+    ) -> Result<JetDBPolicyApplication, DBError> {
         jet_db_apply_policy_inner(sql, params, table, compiled, user, true)
+    }
+
+    fn jet_db_policy_application(
+        sql: String,
+        params: Vec<DBValue>,
+        table: &str,
+        compiled: JetRowPolicyExpr,
+        operation: &str,
+        user: &str,
+        user_bind_index: Option<usize>,
+    ) -> JetDBPolicyApplication {
+        JetDBPolicyApplication {
+            sql,
+            params,
+            proof: JetDBPolicyProof {
+                table: table.to_string(),
+                operation: operation.to_string(),
+                predicate: compiled.sql_predicate().to_string(),
+                user: user.to_string(),
+                user_bind_index,
+            },
+        }
     }
 
     fn jet_db_apply_policy_inner(
@@ -426,7 +567,7 @@
         compiled: JetRowPolicyExpr,
         user: &str,
         allow_schema: bool,
-    ) -> Result<(String, Vec<DBValue>), DBError> {
+    ) -> Result<JetDBPolicyApplication, DBError> {
         let policy_table = table;
         if sql.len() > 1024 * 1024
             || sql
@@ -458,13 +599,29 @@
                     message: "migration metadata is managed only by db.migrate".to_string(),
                 });
             }
-            return Ok((sql.to_string(), params.clone()));
+            return Ok(jet_db_policy_application(
+                sql.to_string(),
+                params.clone(),
+                policy_table,
+                compiled,
+                "migration-metadata",
+                user,
+                None,
+            ));
         }
         let kind = first.as_str();
         if !matches!(kind, "select" | "update" | "delete" | "insert") {
             if matches!(kind, "create" | "alter" | "drop" | "pragma" | "begin" | "commit" | "rollback") {
                 if allow_schema {
-                    return Ok((sql.to_string(), params.clone()));
+                    return Ok(jet_db_policy_application(
+                        sql.to_string(),
+                        params.clone(),
+                        policy_table,
+                        compiled,
+                        "migration-schema",
+                        user,
+                        None,
+                    ));
                 }
                 return Err(DBError {
                     message: "schema and transaction-control SQL is only allowed in db.migrate or through the scope transaction controls".to_string(),
@@ -485,8 +642,16 @@
                 message: "policy-scoped SQL must name one simple target table without joins or subqueries".to_string(),
             });
         }
-        if compiled == JetRowPolicyExpr::AllowAll {
-            return Ok((sql.to_string(), params.clone()));
+        if !compiled.requires_owner_filter() {
+            return Ok(jet_db_policy_application(
+                sql.to_string(),
+                params.clone(),
+                policy_table,
+                compiled,
+                kind,
+                user,
+                None,
+            ));
         }
         if kind == "insert" {
             let Some((columns, owner_index)) = db_sql_insert_columns_and_values(sql, &tokens)
@@ -503,15 +668,21 @@
             }
             let mut scoped_params = params.clone();
             scoped_params[owner_index] = DBValue::Text(user.to_string());
-            return Ok((sql.to_string(), scoped_params));
+            return Ok(jet_db_policy_application(
+                sql.to_string(),
+                scoped_params,
+                policy_table,
+                compiled,
+                kind,
+                user,
+                Some(owner_index),
+            ));
         }
         if kind == "update" && db_sql_update_mutates_owner(&tokens) {
             return Err(DBError {
                 message: "owner policy does not allow changing the owner column".to_string(),
             });
         }
-        let mut scoped_params = params.clone();
-        scoped_params.push(DBValue::Text(user.to_string()));
         let where_token = tokens
             .iter()
             .find(|(_, _, word)| word == "where")
@@ -520,6 +691,14 @@
             .and_then(|(_, end)| db_sql_clause_start(&tokens, end))
             .or_else(|| db_sql_clause_start(&tokens, 0))
             .unwrap_or_else(|| sql.len());
+        let user_index = db_sql_placeholder_count(&sql[..insertion]);
+        if user_index > params.len() {
+            return Err(DBError {
+                message: "policy-scoped SQL bind count does not match its placeholders".to_string(),
+            });
+        }
+        let mut scoped_params = params.clone();
+        scoped_params.insert(user_index, DBValue::Text(user.to_string()));
         let (head, tail) = sql.split_at(insertion);
         let suffix = if tail.trim().is_empty() {
             String::new()
@@ -542,7 +721,15 @@
         } else {
             format!("{} WHERE owner = ?{}", head.trim_end(), suffix)
         };
-        Ok((scoped_sql, scoped_params))
+        Ok(jet_db_policy_application(
+            scoped_sql,
+            scoped_params,
+            policy_table,
+            compiled,
+            kind,
+            user,
+            Some(user_index),
+        ))
     }
 
     // ── core.db wire codec ──────────────────────────────────────────────────────

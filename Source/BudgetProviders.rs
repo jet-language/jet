@@ -8,7 +8,7 @@ use jet_foundation::PerformanceBudget::{stable_id, CanonicalJson, Rational};
 use jet_foundation::PerformanceBudget::{Comparison, Direction, Enforcement, Evaluation, MeasurementPolicy, Percentile};
 use jet_foundation::SHA256::sha256_hex;
 use std::collections::BTreeMap;
-use std::io::{Read, Write};
+use std::io::{BufRead, BufReader, Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::mpsc;
@@ -216,15 +216,195 @@ fn build_artifact_provider(request: &ProviderRequest, _: &ProviderCancellation) 
         return Err(ProviderFailure::operation(FailureClass::Incompatible, "built artifact is not a regular file"));
     }
     let value = Rational::parse(&metadata.len().to_string(), "1").map_err(ProviderFailure::malformed)?;
-    let mut events = Vec::with_capacity(request.specs.len() + 1);
-    for (index, spec) in request.specs.iter().enumerate() {
-        if !matches!(spec.metric.as_str(), "BinarySize" | "ArtifactSize") {
-            return Err(ProviderFailure::operation(FailureClass::Unsupported, format!("BuildArtifact does not support metric `{}`", spec.metric)));
+    let runtime = if request.specs.iter().any(|spec| matches!(spec.metric.as_str(), "StartupTime" | "MemoryHighWater")) {
+        #[cfg(target_os = "linux")]
+        {
+            Some(measure_artifact_runtime(path, ARTIFACT_RUNTIME_SAMPLES)?)
         }
-        events.push(ProviderEvent::Sample { spec: index as u32, metric: spec.metric.clone(), value: value.clone() });
+        #[cfg(not(target_os = "linux"))]
+        {
+            return Err(ProviderFailure::operation(
+                FailureClass::Unavailable,
+                "BuildArtifact startup and memory measurements require Linux /proc process accounting",
+            ));
+        }
+    } else {
+        None
+    };
+    let mut events = Vec::with_capacity(request.specs.len() * ARTIFACT_RUNTIME_SAMPLES + 1);
+    let mut sample_count = 0u64;
+    for (index, spec) in request.specs.iter().enumerate() {
+        match spec.metric.as_str() {
+            "BinarySize" | "ArtifactSize" => {
+                events.push(ProviderEvent::Sample { spec: index as u32, metric: spec.metric.clone(), value: value.clone() });
+                sample_count += 1;
+            }
+            "StartupTime" => {
+                let runtime = runtime.as_ref().expect("runtime measurements were requested");
+                for sample in &runtime.startup_ns {
+                    events.push(ProviderEvent::Sample { spec: index as u32, metric: spec.metric.clone(), value: sample.clone() });
+                    sample_count += 1;
+                }
+            }
+            "MemoryHighWater" => {
+                let runtime = runtime.as_ref().expect("runtime measurements were requested");
+                for sample in &runtime.memory_bytes {
+                    events.push(ProviderEvent::Sample { spec: index as u32, metric: spec.metric.clone(), value: sample.clone() });
+                    sample_count += 1;
+                }
+            }
+            _ => {
+                return Err(ProviderFailure::operation(FailureClass::Unsupported, format!("BuildArtifact does not support metric `{}`", spec.metric)));
+            }
+        }
     }
-    events.push(ProviderEvent::Complete { request_id: request.request_id.clone(), samples: request.specs.len() as u64 });
+    events.push(ProviderEvent::Complete { request_id: request.request_id.clone(), samples: sample_count });
     Ok(events)
+}
+
+const ARTIFACT_RUNTIME_SAMPLES: usize = 20;
+const ARTIFACT_READY_DEADLINE: Duration = Duration::from_secs(2);
+
+#[derive(Debug)]
+struct ArtifactRuntime {
+    startup_ns: Vec<Rational>,
+    memory_bytes: Vec<Rational>,
+}
+
+#[cfg(target_os = "linux")]
+fn measure_artifact_runtime(path: &Path, samples: usize) -> Result<ArtifactRuntime, ProviderFailure> {
+    let mut startup_ns = Vec::with_capacity(samples);
+    let mut memory_bytes = Vec::with_capacity(samples);
+    for _ in 0..samples {
+        let started = Instant::now();
+        let mut command = Command::new(path);
+        command.stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::null());
+        #[cfg(unix)]
+        {
+            use std::os::unix::process::CommandExt;
+            command.process_group(0);
+        }
+        let mut child = command.spawn().map_err(|error| {
+            ProviderFailure::operation(FailureClass::Execution, format!("cannot launch artifact for startup/RSS measurement: {error}"))
+        })?;
+        let pid = child.id();
+        let stdout = child.stdout.take().ok_or_else(|| {
+            ProviderFailure::operation(FailureClass::Execution, "artifact stdout was unavailable for its readiness line")
+        })?;
+        let (ready_tx, ready_rx) = mpsc::sync_channel(1);
+        let reader = std::thread::spawn(move || {
+            let mut line = String::new();
+            let result = BufReader::new(stdout).read_line(&mut line).map_err(|error| error.to_string());
+            let _ = ready_tx.send(result);
+        });
+        let deadline = Instant::now() + ARTIFACT_READY_DEADLINE;
+        let mut high_water = 0u64;
+        let ready_ns = loop {
+            if let Some(value) = read_vm_hwm(pid)? {
+                high_water = high_water.max(value);
+            }
+            match ready_rx.try_recv() {
+                Ok(Ok(bytes)) if bytes > 0 => {
+                    if let Some(value) = read_vm_hwm(pid)? {
+                        high_water = high_water.max(value);
+                    }
+                    let value = stop_artifact(pid)?;
+                    high_water = high_water.max(value);
+                    break started.elapsed().as_nanos();
+                }
+                Ok(Ok(_)) => {
+                    let _ = reader.join();
+                    return Err(ProviderFailure::operation(FailureClass::Unavailable, "artifact exited without a readiness line"));
+                }
+                Ok(Err(error)) => {
+                    let _ = reader.join();
+                    return Err(ProviderFailure::operation(FailureClass::Unavailable, format!("artifact readiness read failed: {error}")));
+                }
+                Err(mpsc::TryRecvError::Disconnected) => {
+                    let _ = reader.join();
+                    return Err(ProviderFailure::operation(FailureClass::Unavailable, "artifact readiness reader exited unexpectedly"));
+                }
+                Err(mpsc::TryRecvError::Empty) => {}
+            }
+            match wait4_artifact(pid, true)? {
+                Some(value) => {
+                    high_water = high_water.max(value);
+                    match ready_rx.recv_timeout(Duration::from_millis(100)) {
+                        Ok(Ok(bytes)) if bytes > 0 => break started.elapsed().as_nanos(),
+                        Ok(Ok(_)) => return Err(ProviderFailure::operation(FailureClass::Unavailable, "artifact exited without a readiness line")),
+                        Ok(Err(error)) => return Err(ProviderFailure::operation(FailureClass::Unavailable, format!("artifact readiness read failed: {error}"))),
+                        Err(_) => return Err(ProviderFailure::operation(FailureClass::Unavailable, "artifact exited before its readiness line")),
+                    }
+                }
+                None if Instant::now() < deadline => {}
+                None => {
+                    let _ = stop_artifact(pid);
+                    let _ = reader.join();
+                    return Err(ProviderFailure::operation(FailureClass::Timeout, "artifact did not emit a readiness line within 2 seconds"));
+                }
+            }
+            std::thread::sleep(Duration::from_millis(1));
+        };
+        let _ = reader.join();
+        if high_water == 0 {
+            return Err(ProviderFailure::operation(FailureClass::Unavailable, "artifact exited before VmHWM could be observed"));
+        }
+        startup_ns.push(Rational::parse(&ready_ns.to_string(), "1").map_err(ProviderFailure::malformed)?);
+        memory_bytes.push(Rational::parse(&high_water.to_string(), "1").map_err(ProviderFailure::malformed)?);
+    }
+    Ok(ArtifactRuntime { startup_ns, memory_bytes })
+}
+
+#[cfg(target_os = "linux")]
+fn wait4_artifact(pid: u32, nonblocking: bool) -> Result<Option<u64>, ProviderFailure> {
+    use std::os::raw::{c_int, c_long};
+
+    extern "C" {
+        fn wait4(pid: c_int, status: *mut c_int, options: c_int, usage: *mut c_long) -> c_int;
+    }
+    let mut status = 0;
+    let mut usage = [0 as c_long; 18];
+    let options = if nonblocking { 1 } else { 0 };
+    let result = unsafe { wait4(pid as c_int, &mut status, options, usage.as_mut_ptr()) };
+    if result == 0 {
+        return Ok(None);
+    }
+    if result < 0 {
+        return Err(ProviderFailure::operation(FailureClass::Execution, format!("cannot collect artifact resource usage: {}", std::io::Error::last_os_error())));
+    }
+    let kib = u64::try_from(usage[4]).map_err(|_| ProviderFailure::malformed("artifact ru_maxrss is negative"))?;
+    Ok(Some(kib.checked_mul(1024).ok_or_else(|| ProviderFailure::malformed("artifact ru_maxrss overflowed bytes"))?))
+}
+
+#[cfg(target_os = "linux")]
+fn stop_artifact(pid: u32) -> Result<u64, ProviderFailure> {
+    use std::os::raw::c_int;
+
+    extern "C" {
+        fn kill(pid: c_int, signal: c_int) -> c_int;
+    }
+    let _ = unsafe { kill(-(pid as c_int), 9) };
+    wait4_artifact(pid, false)?.ok_or_else(|| ProviderFailure::operation(FailureClass::Execution, "artifact wait4 returned without reaping the process"))
+}
+
+#[cfg(target_os = "linux")]
+fn read_vm_hwm(pid: u32) -> Result<Option<u64>, ProviderFailure> {
+    let path = format!("/proc/{pid}/status");
+    let status = match std::fs::read_to_string(&path) {
+        Ok(status) => status,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(ProviderFailure::operation(FailureClass::Unavailable, format!("cannot read {path}: {error}"))),
+    };
+    let Some(line) = status.lines().find(|line| line.starts_with("VmHWM:")) else {
+        return Err(ProviderFailure::operation(FailureClass::Unavailable, "artifact status has no VmHWM"));
+    };
+    let mut fields = line.split_whitespace();
+    let _ = fields.next();
+    let kib = fields.next().ok_or_else(|| ProviderFailure::malformed("artifact VmHWM has no value"))?.parse::<u64>().map_err(|_| ProviderFailure::malformed("artifact VmHWM is not an integer"))?;
+    if fields.next() != Some("kB") {
+        return Err(ProviderFailure::malformed("artifact VmHWM is not expressed in kB"));
+    }
+    Ok(Some(kib.checked_mul(1024).ok_or_else(|| ProviderFailure::malformed("artifact VmHWM overflowed bytes"))?))
 }
 
 const COMPILE_WARMUPS: u128 = 1;
@@ -249,6 +429,10 @@ pub const NATIVE_BUILD_DEADLINE: Duration = Duration::from_secs(120);
 /// `mode` names the CompilerProbe cache state; other kinds pass `None`.
 pub fn collection_deadline(kind: &str, mode: Option<&str>, facts: Duration, native_build: Duration) -> Duration {
     match kind {
+        // Twenty target-process trials may each wait for the declared ready
+        // line. The provider's own deadline remains finite; this outer bound
+        // must not cancel a healthy slow target before all trials complete.
+        "BuildArtifact" => Duration::from_secs(ARTIFACT_READY_DEADLINE.as_secs() * ARTIFACT_RUNTIME_SAMPLES as u64) + facts,
         "CompilerProbe" => {
             // A trial is one measured child compile. An `Edit` collection also
             // builds the clean tree once, up front, to produce the warm cache

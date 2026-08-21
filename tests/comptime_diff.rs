@@ -833,7 +833,7 @@ fn data_empty_input_error_matches_comptime_and_runtime() {
         let src = format!(
             r#"use core.data as data
 
-fn show(result: Float ? DataError) => String {{
+fn show(result: Float ! DataError) => String {{
     if result == {{
         .Ok(value) -> return "ok {{value}}"
         .Err(e) -> return "{{e.operation}}|{{e.reason}}"
@@ -866,7 +866,7 @@ fn xml_hostile_error_matches_comptime_and_runtime() {
     }
     let src = r#"use core.encoding.xml as xml
 
-fn show(result: DataTree ? XMLError) => String {
+fn show(result: DataTree ! XMLError) => String {
     if result == {
         .Ok(_) -> return "ok"
         .Err(e) -> {

@@ -1,4 +1,5 @@
-// D-META-BODY1=A: one typed item template per reflected field.
+// D-STRUCT-ONCE1=A: one typed @loop mechanism reaches derive/marker bodies,
+// root impl items, and interpolated test declarations.
 derive T.FieldNames {
     @loop field, T.@fields {
         method :: "field_{field.@name}"
@@ -6,14 +7,46 @@ derive T.FieldNames {
     }
 }
 
+marker AddMarkerFields(@sites: [.Type]) {
+    type_name :: target.@name
+    @loop field, target.@fields {
+        method :: "marked_{field.@name}"
+        impl @type_name {
+            fn @method(self) String :> field.@name
+        }
+    }
+}
+
 #FieldNames
+#AddMarkerFields
 struct Point {
     x: Int
     y: Int
+}
+
+struct Case {
+    n: Int
+}
+
+@cases :: [Case]{Case{n: 1}, Case{n: 2}}
+
+@loop T, [Point] {
+    impl T {
+        fn generated(self) String :> "generated"
+    }
+}
+
+@loop case, @cases {
+    #Test("case {case.n}") {
+        assert(case.n > 0)
+    }
 }
 
 fn run() {
     point := Point{x: 1, y: 2}
     print(point.field_x())
     print(point.field_y())
+    print(point.marked_x())
+    print(point.marked_y())
+    print(point.generated())
 }

@@ -40,3 +40,11 @@ fact Attribution(@holds: .Value, @safe: .None, @gates: [], @decision: "D-FACT-HO
 fact TrackOrigin(@holds: .Value, @safe: .None, @gates: [], @decision: "D-PROVENANCE1")
 fact UnitScaleProvenance(@holds: .Value, @safe: .None, @gates: [], @decision: "D-UNIT-SCALE-PROVENANCE1")
 fact Maturity(@holds: .Value, @safe: .None, @gates: [], @decision: "D-MARK-META1")
+
+// D-STRUCT-PLANE1=A: the program's structure is a build-time fact plane. The
+// three rows share the one law and name the one written word that can loosen
+// each direction; their observed entries are compiler-only and erase before
+// runtime.
+fact StructureLiveness(@name: "Structure.Liveness", @holds: .Build, @safe: .Gain, @gates: ["_name"], @decision: "D-STRUCT-PLANE1")
+fact StructureLifecycle(@name: "Structure.Lifecycle", @holds: .Build, @safe: .Shrink, @gates: ["policy allow"], @decision: "D-STRUCT-PLANE1")
+fact StructureImportEdge(@name: "Structure.ImportEdge", @holds: .Build, @safe: .Shrink, @gates: ["manifest rule edit"], @decision: "D-STRUCT-PLANE1")

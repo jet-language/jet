@@ -46,7 +46,7 @@ impl Session.Close {
 
 pub fn close(session: ^Session) { abi.close(session.value) }
 
-pub fn open() Session ? RError {
+pub fn open() Session ! RError {
     handle :: abi.open()
     if abi.take_error() != 0 :> return Err(RError.NotRunning)
     return Ok(Session{value: handle})
@@ -54,7 +54,7 @@ pub fn open() Session ? RError {
 
 pub fn cancel(session: Session) { abi.cancel(session.value) }
 
-pub fn transform(session: Session, input: DataTree, deadline_ms: Int) DataTree ? RError {
+pub fn transform(session: Session, input: DataTree, deadline_ms: Int) DataTree ! RError {
     raw :: abi.transform(session.value, json.to_string(input), deadline_ms)
     code :: abi.take_error()
     if code == 1 :> return Err(RError.NotRunning)
@@ -68,7 +68,7 @@ pub fn transform(session: Session, input: DataTree, deadline_ms: Int) DataTree ?
     return Ok(response.field("value") ?? DataTree.Null)
 }
 
-pub fn transform_table<T: [Encode, Decode]>(session: Session, table: Table<T>, deadline_ms: Int) Table<T> ? RError {
+pub fn transform_table<T: [Encode, Decode]>(session: Session, table: Table<T>, deadline_ms: Int) Table<T> ! RError {
     raw :: abi.transform_table(session.value, json.to_string(data.rows(~table)), deadline_ms)
     code :: abi.take_error()
     if code == 1 :> return Err(RError.NotRunning)
@@ -84,7 +84,7 @@ pub fn transform_table<T: [Encode, Decode]>(session: Session, table: Table<T>, d
     return Ok(data.table(~rows))
 }
 
-pub fn transform_plot(session: Session, input: DataTree, deadline_ms: Int) String ? RError {
+pub fn transform_plot(session: Session, input: DataTree, deadline_ms: Int) String ! RError {
     raw :: abi.transform_plot(session.value, json.to_string(input), deadline_ms)
     code :: abi.take_error()
     if code == 1 :> return Err(RError.NotRunning)
@@ -99,7 +99,7 @@ pub fn transform_plot(session: Session, input: DataTree, deadline_ms: Int) Strin
     return Ok(value)
 }
 
-pub fn double_values(session: Session, input: DataTree, deadline_ms: Int) DataTree ? RError {
+pub fn double_values(session: Session, input: DataTree, deadline_ms: Int) DataTree ! RError {
     raw :: abi.double_values(session.value, json.to_string(input), deadline_ms)
     code :: abi.take_error()
     if code == 1 :> return Err(RError.NotRunning)
@@ -113,7 +113,7 @@ pub fn double_values(session: Session, input: DataTree, deadline_ms: Int) DataTr
     return Ok(response.field("value") ?? DataTree.Null)
 }
 
-pub fn double_values_table<T: [Encode, Decode]>(session: Session, table: Table<T>, deadline_ms: Int) Table<T> ? RError {
+pub fn double_values_table<T: [Encode, Decode]>(session: Session, table: Table<T>, deadline_ms: Int) Table<T> ! RError {
     raw :: abi.double_values_table(session.value, json.to_string(data.rows(~table)), deadline_ms)
     code :: abi.take_error()
     if code == 1 :> return Err(RError.NotRunning)
@@ -129,7 +129,7 @@ pub fn double_values_table<T: [Encode, Decode]>(session: Session, table: Table<T
     return Ok(data.table(~rows))
 }
 
-pub fn double_values_plot(session: Session, input: DataTree, deadline_ms: Int) String ? RError {
+pub fn double_values_plot(session: Session, input: DataTree, deadline_ms: Int) String ! RError {
     raw :: abi.double_values_plot(session.value, json.to_string(input), deadline_ms)
     code :: abi.take_error()
     if code == 1 :> return Err(RError.NotRunning)
@@ -144,7 +144,7 @@ pub fn double_values_plot(session: Session, input: DataTree, deadline_ms: Int) S
     return Ok(value)
 }
 
-pub fn scale_table(session: Session, input: DataTree, deadline_ms: Int) DataTree ? RError {
+pub fn scale_table(session: Session, input: DataTree, deadline_ms: Int) DataTree ! RError {
     raw :: abi.scale_table(session.value, json.to_string(input), deadline_ms)
     code :: abi.take_error()
     if code == 1 :> return Err(RError.NotRunning)
@@ -158,7 +158,7 @@ pub fn scale_table(session: Session, input: DataTree, deadline_ms: Int) DataTree
     return Ok(response.field("value") ?? DataTree.Null)
 }
 
-pub fn scale_table_table<T: [Encode, Decode]>(session: Session, table: Table<T>, deadline_ms: Int) Table<T> ? RError {
+pub fn scale_table_table<T: [Encode, Decode]>(session: Session, table: Table<T>, deadline_ms: Int) Table<T> ! RError {
     raw :: abi.scale_table_table(session.value, json.to_string(data.rows(~table)), deadline_ms)
     code :: abi.take_error()
     if code == 1 :> return Err(RError.NotRunning)
@@ -174,7 +174,7 @@ pub fn scale_table_table<T: [Encode, Decode]>(session: Session, table: Table<T>,
     return Ok(data.table(~rows))
 }
 
-pub fn scale_table_plot(session: Session, input: DataTree, deadline_ms: Int) String ? RError {
+pub fn scale_table_plot(session: Session, input: DataTree, deadline_ms: Int) String ! RError {
     raw :: abi.scale_table_plot(session.value, json.to_string(input), deadline_ms)
     code :: abi.take_error()
     if code == 1 :> return Err(RError.NotRunning)
@@ -189,7 +189,7 @@ pub fn scale_table_plot(session: Session, input: DataTree, deadline_ms: Int) Str
     return Ok(value)
 }
 
-pub fn plot_scores(session: Session, input: DataTree, deadline_ms: Int) DataTree ? RError {
+pub fn plot_scores(session: Session, input: DataTree, deadline_ms: Int) DataTree ! RError {
     raw :: abi.plot_scores(session.value, json.to_string(input), deadline_ms)
     code :: abi.take_error()
     if code == 1 :> return Err(RError.NotRunning)
@@ -203,7 +203,7 @@ pub fn plot_scores(session: Session, input: DataTree, deadline_ms: Int) DataTree
     return Ok(response.field("value") ?? DataTree.Null)
 }
 
-pub fn plot_scores_table<T: [Encode, Decode]>(session: Session, table: Table<T>, deadline_ms: Int) Table<T> ? RError {
+pub fn plot_scores_table<T: [Encode, Decode]>(session: Session, table: Table<T>, deadline_ms: Int) Table<T> ! RError {
     raw :: abi.plot_scores_table(session.value, json.to_string(data.rows(~table)), deadline_ms)
     code :: abi.take_error()
     if code == 1 :> return Err(RError.NotRunning)
@@ -219,7 +219,7 @@ pub fn plot_scores_table<T: [Encode, Decode]>(session: Session, table: Table<T>,
     return Ok(data.table(~rows))
 }
 
-pub fn plot_scores_plot(session: Session, input: DataTree, deadline_ms: Int) String ? RError {
+pub fn plot_scores_plot(session: Session, input: DataTree, deadline_ms: Int) String ! RError {
     raw :: abi.plot_scores_plot(session.value, json.to_string(input), deadline_ms)
     code :: abi.take_error()
     if code == 1 :> return Err(RError.NotRunning)
@@ -234,7 +234,7 @@ pub fn plot_scores_plot(session: Session, input: DataTree, deadline_ms: Int) Str
     return Ok(value)
 }
 
-pub fn fail_call(session: Session, input: DataTree, deadline_ms: Int) DataTree ? RError {
+pub fn fail_call(session: Session, input: DataTree, deadline_ms: Int) DataTree ! RError {
     raw :: abi.fail_call(session.value, json.to_string(input), deadline_ms)
     code :: abi.take_error()
     if code == 1 :> return Err(RError.NotRunning)
@@ -248,7 +248,7 @@ pub fn fail_call(session: Session, input: DataTree, deadline_ms: Int) DataTree ?
     return Ok(response.field("value") ?? DataTree.Null)
 }
 
-pub fn fail_call_table<T: [Encode, Decode]>(session: Session, table: Table<T>, deadline_ms: Int) Table<T> ? RError {
+pub fn fail_call_table<T: [Encode, Decode]>(session: Session, table: Table<T>, deadline_ms: Int) Table<T> ! RError {
     raw :: abi.fail_call_table(session.value, json.to_string(data.rows(~table)), deadline_ms)
     code :: abi.take_error()
     if code == 1 :> return Err(RError.NotRunning)
@@ -264,7 +264,7 @@ pub fn fail_call_table<T: [Encode, Decode]>(session: Session, table: Table<T>, d
     return Ok(data.table(~rows))
 }
 
-pub fn fail_call_plot(session: Session, input: DataTree, deadline_ms: Int) String ? RError {
+pub fn fail_call_plot(session: Session, input: DataTree, deadline_ms: Int) String ! RError {
     raw :: abi.fail_call_plot(session.value, json.to_string(input), deadline_ms)
     code :: abi.take_error()
     if code == 1 :> return Err(RError.NotRunning)
@@ -279,7 +279,7 @@ pub fn fail_call_plot(session: Session, input: DataTree, deadline_ms: Int) Strin
     return Ok(value)
 }
 
-pub fn sleep_call(session: Session, input: DataTree, deadline_ms: Int) DataTree ? RError {
+pub fn sleep_call(session: Session, input: DataTree, deadline_ms: Int) DataTree ! RError {
     raw :: abi.sleep_call(session.value, json.to_string(input), deadline_ms)
     code :: abi.take_error()
     if code == 1 :> return Err(RError.NotRunning)
@@ -293,7 +293,7 @@ pub fn sleep_call(session: Session, input: DataTree, deadline_ms: Int) DataTree 
     return Ok(response.field("value") ?? DataTree.Null)
 }
 
-pub fn sleep_call_table<T: [Encode, Decode]>(session: Session, table: Table<T>, deadline_ms: Int) Table<T> ? RError {
+pub fn sleep_call_table<T: [Encode, Decode]>(session: Session, table: Table<T>, deadline_ms: Int) Table<T> ! RError {
     raw :: abi.sleep_call_table(session.value, json.to_string(data.rows(~table)), deadline_ms)
     code :: abi.take_error()
     if code == 1 :> return Err(RError.NotRunning)
@@ -309,7 +309,7 @@ pub fn sleep_call_table<T: [Encode, Decode]>(session: Session, table: Table<T>, 
     return Ok(data.table(~rows))
 }
 
-pub fn sleep_call_plot(session: Session, input: DataTree, deadline_ms: Int) String ? RError {
+pub fn sleep_call_plot(session: Session, input: DataTree, deadline_ms: Int) String ! RError {
     raw :: abi.sleep_call_plot(session.value, json.to_string(input), deadline_ms)
     code :: abi.take_error()
     if code == 1 :> return Err(RError.NotRunning)

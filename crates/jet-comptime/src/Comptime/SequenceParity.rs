@@ -78,7 +78,10 @@ pub(super) fn eval_sequence_method(
     if method == "insert" {
         return Some((|| {
             let [index, item] = args else {
-                return Err(unsupported("the method `.insert` with these arguments", span));
+                return Err(unsupported(
+                    "the method `.insert` with these arguments",
+                    span,
+                ));
             };
             let index = as_int(index, span)?;
             if index < 0 || index as usize > xs.len() {
@@ -139,7 +142,11 @@ fn eval(
         }
         ("chunks", [n]) => {
             let n = as_int(n, span)?.max(1) as usize;
-            CtValue::List(xs.chunks(n).map(|chunk| CtValue::List(chunk.to_vec())).collect())
+            CtValue::List(
+                xs.chunks(n)
+                    .map(|chunk| CtValue::List(chunk.to_vec()))
+                    .collect(),
+            )
         }
         ("count_by", [f]) => {
             let mut out = BTreeMap::new();
@@ -149,7 +156,9 @@ fn eval(
                     span,
                 )?;
                 let count = out.entry(key).or_insert(CtValue::Int(0));
-                let CtValue::Int(count) = count else { unreachable!() };
+                let CtValue::Int(count) = count else {
+                    unreachable!()
+                };
                 *count += 1;
             }
             CtValue::Map(out)
@@ -166,17 +175,17 @@ fn eval(
         ("indexed", []) => CtValue::List(
             xs.iter()
                 .enumerate()
-                .map(|(idx, item)| tuple(vec![
-                    ("idx", CtValue::Int(idx as i64)),
-                    ("item", item.clone()),
-                ]))
+                .map(|(idx, item)| {
+                    tuple(vec![
+                        ("idx", CtValue::Int(idx as i64)),
+                        ("item", item.clone()),
+                    ])
+                })
                 .collect(),
         ),
-        ("indexes", []) => CtValue::List(
-            (0..xs.len())
-                .map(|idx| CtValue::Int(idx as i64))
-                .collect(),
-        ),
+        ("indexes", []) => {
+            CtValue::List((0..xs.len()).map(|idx| CtValue::Int(idx as i64)).collect())
+        }
         ("filter_map", [f]) => {
             let mut out = Vec::new();
             for x in xs {
@@ -193,10 +202,7 @@ fn eval(
             }
             CtValue::List(out)
         }
-        ("first", []) => option(
-            crate::Comptime::CollectionEval::iter_first(xs.to_vec()),
-            xs,
-        ),
+        ("first", []) => option(crate::Comptime::CollectionEval::iter_first(xs.to_vec()), xs),
         ("flat_map", [f]) => {
             let mut out = Vec::new();
             for x in xs {
@@ -318,7 +324,10 @@ fn eval(
                     no.push(x.clone());
                 }
             }
-            tuple(vec![("false_", CtValue::List(no)), ("true_", CtValue::List(yes))])
+            tuple(vec![
+                ("false_", CtValue::List(no)),
+                ("true_", CtValue::List(yes)),
+            ])
         }
         ("position", [f]) => {
             let mut found = None;
@@ -397,7 +406,9 @@ fn eval(
             for x in xs {
                 match x {
                     CtValue::Present(value) => out.push((**value).clone()),
-                    CtValue::Failed(CtReport::Told(error)) => return Ok(CtValue::failed(error.clone())),
+                    CtValue::Failed(CtReport::Told(error)) => {
+                        return Ok(CtValue::failed(error.clone()))
+                    }
                     _ => return Err(unsupported("try_collect on a non-Result list", span)),
                 }
             }
@@ -410,8 +421,14 @@ fn eval(
                 let CtValue::Struct { fields, .. } = x else {
                     return Err(unsupported("unzip on a non-tuple list", span));
                 };
-                let a = fields.iter().find(|(name, _)| name == "a").map(|(_, v)| v.clone());
-                let b = fields.iter().find(|(name, _)| name == "b").map(|(_, v)| v.clone());
+                let a = fields
+                    .iter()
+                    .find(|(name, _)| name == "a")
+                    .map(|(_, v)| v.clone());
+                let b = fields
+                    .iter()
+                    .find(|(name, _)| name == "b")
+                    .map(|(_, v)| v.clone());
                 match (a, b) {
                     (Some(a), Some(b)) => {
                         left.push(a);
@@ -420,20 +437,28 @@ fn eval(
                     _ => return Err(unsupported("unzip on a tuple without `a` and `b`", span)),
                 }
             }
-            tuple(vec![("a", CtValue::List(left)), ("b", CtValue::List(right))])
+            tuple(vec![
+                ("a", CtValue::List(left)),
+                ("b", CtValue::List(right)),
+            ])
         }
         ("windows", [n]) => {
             let n = as_int(n, span)?.max(1) as usize;
             CtValue::List(if n > xs.len() {
                 Vec::new()
             } else {
-                xs.windows(n).map(|window| CtValue::List(window.to_vec())).collect()
+                xs.windows(n)
+                    .map(|window| CtValue::List(window.to_vec()))
+                    .collect()
             })
         }
-        ("zip" | "zip_short" | "zip_pad", _) => {
-            eval_zip(xs, method, args, arg_labels, span)?
+        ("zip" | "zip_short" | "zip_pad", _) => eval_zip(xs, method, args, arg_labels, span)?,
+        _ => {
+            return Err(unsupported(
+                &format!("the method `.{method}` with these arguments"),
+                span,
+            ))
         }
-        _ => return Err(unsupported(&format!("the method `.{method}` with these arguments"), span)),
     };
     Ok(value)
 }
@@ -454,17 +479,16 @@ fn eval_zip(
             Some("fills") => column_fills = Some(value.clone()),
             _ => match value {
                 CtValue::List(values) => columns.push(values.clone()),
-                _ => {
-                    return Err(unsupported(
-                        "zip with a non-list argument",
-                        span,
-                    ))
-                }
+                _ => return Err(unsupported("zip with a non-list argument", span)),
             },
         }
     }
 
-    if method == "zip" && columns.iter().any(|column| column.len() != columns[0].len()) {
+    if method == "zip"
+        && columns
+            .iter()
+            .any(|column| column.len() != columns[0].len())
+    {
         return Err(Diagnostic::error(
             "E0128",
             "zip inputs have different lengths".to_string(),
@@ -491,7 +515,9 @@ fn eval_zip(
         if let Some(CtValue::Struct { fields, .. }) = &column_fills {
             let field = zip_field_name(index);
             if let Some((_, value)) = fields.iter().find(|(name, _)| {
-                name == &field || name.strip_prefix(jet_foundation::Syntax::GENERATED_NAME_PREFIX) == Some(field.as_str())
+                name == &field
+                    || name.strip_prefix(jet_foundation::Syntax::GENERATED_NAME_PREFIX)
+                        == Some(field.as_str())
             }) {
                 return value.clone();
             }
@@ -540,7 +566,11 @@ fn zip_field_name(index: usize) -> String {
 fn tuple(fields: Vec<(&str, CtValue)>) -> CtValue {
     let type_name = format!(
         "({})",
-        fields.iter().map(|(name, _)| *name).collect::<Vec<_>>().join(",")
+        fields
+            .iter()
+            .map(|(name, _)| *name)
+            .collect::<Vec<_>>()
+            .join(",")
     );
     CtValue::Struct {
         type_name,
@@ -588,8 +618,7 @@ fn extreme_by(
     };
     let mut best_key = interp.call_inline_closure(f, vec![best.clone()], span, scope)?;
     for candidate in &xs[1..] {
-        let candidate_key =
-            interp.call_inline_closure(f, vec![candidate.clone()], span, scope)?;
+        let candidate_key = interp.call_inline_closure(f, vec![candidate.clone()], span, scope)?;
         let order = cmp(best_key.clone(), candidate_key.clone(), span)?;
         if (maximum && order != Ordering::Greater) || (!maximum && order == Ordering::Greater) {
             best = candidate.clone();
@@ -608,9 +637,7 @@ fn aggregate(
     let Some(first) = xs.first() else {
         return Ok(match resolved_ret {
             Some(Type::Float) => CtValue::Float(CtFloat::f64(if product { 1.0 } else { 0.0 })),
-            Some(Type::Float32) => {
-                CtValue::Float(CtFloat::f32(if product { 1.0 } else { 0.0 }))
-            }
+            Some(Type::Float32) => CtValue::Float(CtFloat::f32(if product { 1.0 } else { 0.0 })),
             _ => CtValue::Int(if product { 1 } else { 0 }),
         });
     };
@@ -621,7 +648,11 @@ fn aggregate(
                 let Some(value) = crate::Comptime::Builtins::exact_big(x) else {
                     return Err(unsupported("sum/product on mixed numeric types", span));
                 };
-                acc = if product { acc.mul(&value) } else { acc.add(&value) };
+                acc = if product {
+                    acc.mul(&value)
+                } else {
+                    acc.add(&value)
+                };
             }
             Ok(crate::Comptime::Builtins::exact_int_value(acc))
         }

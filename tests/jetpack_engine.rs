@@ -271,7 +271,6 @@ fn binary_cache_local_publish_verify_and_reject_corruption() {
     .unwrap();
     let fallback = jetpack::Store::verify_cache_transfer(&roots, &entry.id, "public").unwrap();
     assert_eq!(fallback.mirror, mirror.path.display().to_string());
-
     fs::remove_file(&nar).unwrap();
     fs::remove_file(&info).unwrap();
     fs::write(
@@ -388,6 +387,87 @@ fn binary_cache_local_publish_verify_and_reject_corruption() {
     )
     .is_err());
     assert!(!rejected.join("out").exists());
+}
+
+#[test]
+fn reproducibility_registration_writes_first_difference_and_blocks_cache() {
+    let root = Scratch::new("reproducibility-root");
+    let first_source = Scratch::new("reproducibility-first");
+    let second_source = Scratch::new("reproducibility-second");
+    let mirror = Scratch::new("reproducibility-mirror");
+    fs::write(first_source.join("payload"), "first bytes\n").unwrap();
+    fs::write(second_source.join("payload"), "second bytes\n").unwrap();
+    let roots = jetpack::Store::Roots {
+        root: root.path.clone(),
+        dev_mode: false,
+    };
+    let identity = jetpack::Store::CacheIdentity {
+        source_fingerprint: "sha256:repro-source".into(),
+        recipe_fingerprint: "sha256:repro-recipe".into(),
+        policy_fingerprint: "sha256:repro-policy".into(),
+        platform: jetpack::Envelope::host_platform(),
+    };
+    let first = jetpack::Store::ingest_tree(
+        &roots,
+        &jetpack::Store::IngestRequest {
+            name: "reproducible-action".into(),
+            version: "1".into(),
+            reference: "reproducibility:action".into(),
+            cache_identity: identity.clone(),
+            references: Vec::new(),
+            outputs: std::collections::BTreeMap::from([("out".into(), first_source.path.clone())]),
+            signature: String::new(),
+            provenance: "builder:first".into(),
+            platform_artifact_kind: String::new(),
+        },
+    )
+    .unwrap()
+    .entry;
+    let error = jetpack::Store::ingest_tree(
+        &roots,
+        &jetpack::Store::IngestRequest {
+            name: "reproducible-action".into(),
+            version: "1".into(),
+            reference: "reproducibility:action".into(),
+            cache_identity: identity,
+            references: Vec::new(),
+            outputs: std::collections::BTreeMap::from([("out".into(), second_source.path.clone())]),
+            signature: String::new(),
+            provenance: "builder:second".into(),
+            platform_artifact_kind: String::new(),
+        },
+    )
+    .unwrap_err();
+    let error = format!("{error:?}");
+    assert!(error.contains("unreproducible"), "{error}");
+    assert!(error.contains("conflicting bytes"), "{error}");
+
+    let reports = root.path.join("private/unreproducible");
+    let report_path = fs::read_dir(&reports)
+        .unwrap()
+        .map(|entry| entry.unwrap().path())
+        .find(|path| path.extension().and_then(|value| value.to_str()) == Some("json"))
+        .expect("structured reproducibility report");
+    let report = fs::read_to_string(report_path).unwrap();
+    assert!(report.contains("\"schema\":\"jet-reproducibility-report-v1\""));
+    assert!(report.contains("\"producer_action\""));
+    assert!(report.contains("\"first_difference\""));
+    assert!(report.contains("\"path\":\"payload\""), "{report}");
+    assert!(report.contains(&first.envelope.output_hash));
+    assert!(!jetpack::Store::list_checked(&roots).unwrap().iter().any(|entry| {
+        entry.envelope.output_hash != first.envelope.output_hash
+    }));
+
+    jetpack::Store::bind_cache(
+        &roots,
+        "trusted",
+        vec![mirror.path.display().to_string()],
+        None,
+        None,
+        true,
+    )
+    .unwrap();
+    assert!(jetpack::Store::publish_cache_entry(&roots, &first.id, "trusted").is_err());
 }
 
 #[test]
@@ -539,6 +619,9 @@ module profile.dev {
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(stdout.contains("\"raw\":\"ripgrep@default\""), "{stdout}");
     assert!(stdout.contains("\"provider\":\"nix\""), "{stdout}");
+    assert!(stdout.contains("\"fingerprint\":\"sha256-"), "{stdout}");
+    assert!(stdout.contains("\"provider_facts\":{"), "{stdout}");
+    assert!(stdout.contains("\"profile\":\"dev\""), "{stdout}");
     assert!(stdout.contains("\"bin/editor\":\"fd@default\""), "{stdout}");
 }
 
@@ -560,6 +643,55 @@ fn package_generation_plan_reports_inheritance_cycles() {
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(stderr.contains("E1332"), "{stderr}");
     assert!(stderr.contains("inheritance cycle"), "{stderr}");
+}
+
+#[test]
+fn package_generation_plan_rejects_ambiguous_provider_facts() {
+    let project = Scratch::new("profile-plan-ambiguous-provider");
+    fs::write(
+        project.join("env.jet"),
+        r#"
+module sources {
+    sources: { remote: acme/tools@github }
+}
+module profile.dev {
+    packages: [hello@remote]
+}
+"#,
+    )
+    .unwrap();
+    let output = jetpack()
+        .args(["profile", "plan", "dev", "--no-color", "--offline"])
+        .current_dir(&project.path)
+        .env("JETPACK_ROOT", project.join("jet-root"))
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(2));
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("E1335"), "{stderr}");
+    assert!(stderr.contains("ambiguous provider fact"), "{stderr}");
+    assert!(stderr.contains("unresolved inference"), "{stderr}");
+}
+
+#[test]
+fn package_generation_plan_rejects_lossy_external_provider_facts() {
+    let project = Scratch::new("profile-plan-lossy-provider");
+    fs::write(
+        project.join("env.jet"),
+        "module profile.dev { packages: [tool@cran] }\n",
+    )
+    .unwrap();
+    let output = jetpack()
+        .args(["profile", "plan", "dev", "--no-color", "--offline"])
+        .current_dir(&project.path)
+        .env("JETPACK_ROOT", project.join("jet-root"))
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(2));
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("E1335"), "{stderr}");
+    assert!(stderr.contains("lossy or conflicting provider fact"), "{stderr}");
+    assert!(stderr.contains("exact version, revision, or digest"), "{stderr}");
 }
 
 #[test]

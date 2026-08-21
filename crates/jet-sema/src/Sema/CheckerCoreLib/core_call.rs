@@ -957,6 +957,7 @@ impl<'a> Checker<'a> {
             type_args: &[Type],
             args: &mut Vec<crate::AST::CallArg>,
         ) -> Option<Type> {
+            self.record_core_import_reference(module, alias_span);
             // D-FRONTENDAPI1=A: the compiler surface is a read-only
             // compile-time value API. It is intentionally handled before the
             // ordinary Core effect/fixed-signature tables so it cannot become
@@ -1230,19 +1231,9 @@ impl<'a> Checker<'a> {
                 && matches!(name, "encode" | "decode")
                 && (name != "decode" || type_args.is_empty())
             {
-                if let Some(dep) = super::super::Edition::check_core_deprecation(module, name) {
-                    use super::super::Edition::{deprecation_phase, DeprecationPhase};
-                    match deprecation_phase(&dep) {
-                        DeprecationPhase::Removed => {
-                            self.diags
-                                .push(super::super::Edition::e2002(&dep, Some(span)));
-                        }
-                        DeprecationPhase::Deprecated => {
-                            self.diags
-                                .push(super::super::Edition::l2001(&dep, Some(span)));
-                        }
-                        DeprecationPhase::Active => {}
-                    }
+                if let Some(dep) = Syntax::core_deprecation(module, name) {
+                    let item = format!("{}.{}", module_short_name(module), name);
+                    self.check_deprecation(&item, &dep, span);
                 }
             }
             // D-EFF1: `#Pure` is the empty effect set, so any effectful Core call —
@@ -1298,7 +1289,10 @@ impl<'a> Checker<'a> {
                     "app.sync", args, &[(1, "over")], span, &mut self.diags,
                 );
             }
-            if module == "core.services" && name == "runtime" && args.len() == 2 {
+            if matches!(module, "core.service" | "core.services")
+                && name == "runtime"
+                && args.len() == 2
+            {
                 super::net_text_time::require_exact_labels(
                     "services.runtime", args, &[(1, "retention")], span, &mut self.diags,
                 );
@@ -1825,7 +1819,7 @@ impl<'a> Checker<'a> {
                     return Some(Type::String);
                 }
                 // D-JSON3: the UNTYPED `json.decode(text)` form is the lenient
-                // dynamic decode — same `Data ? JSONError` shape as `parse`, with
+                // dynamic decode — same `Data ! JSONError` shape as `parse`, with
                 // string→number/bool coercions surfaced as log lines
                 // (docs/reference/core-library.md, `jet_std_json_decode_lenient`
                 // in the Prelude, `enc_ok_is_json` in emit). `decode` is registered
@@ -5043,7 +5037,7 @@ impl<'a> Checker<'a> {
                 // D-TEXTWIDTH1=B: `text.display_width(s)` (portable default,
                 // returns bare `Int`) vs `text.display_width(s, policy: cjk)`
                 // (the `.Reject` control policy can fail, so it returns
-                // `Int ? TextError`). Named-arg dispatch mirrors `game.run`.
+                // `Int ! TextError`). Named-arg dispatch mirrors `game.run`.
                 ("core.text", "display_width") => {
                     match args.len() {
                         1 => {

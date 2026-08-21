@@ -125,7 +125,7 @@ pub fn is_polymorphic_core_special(module: &str, name: &str) -> bool {
             | ("core.term", "print")
             | ("core.term", "progress")
             // D-TEXTWIDTH1=B: `text.display_width(s)` returns `Int`, while
-            // `text.display_width(s, policy: p)` returns `Int ? TextError` —
+            // `text.display_width(s, policy: p)` returns `Int ! TextError` —
             // the `.Reject` control policy can fail. One call, two return
             // types chosen by arity, so no `core_fixed_sig` row can state it:
             // that table holds exactly one param list and one return, and
@@ -1406,7 +1406,38 @@ fn core_fixed_sig_impl(
                 (read, Type::String),
                 (read, Type::Int),
             ],
-            Some(result_ty(Type::Int, Type::Named("ServiceError".to_string()))),
+            Some(result_ty(
+                Type::Named("ServiceWorkflow".to_string()),
+                Type::Named("ServiceError".to_string()),
+            )),
+        )),
+        ("core.services", "workflow_sleep") => Some((
+            vec![
+                (read, Type::Named("ServiceWorkflow".to_string())),
+                (read, Type::Named("Duration".to_string())),
+            ],
+            Some(result_ty(
+                Type::Named("Unit".into()),
+                Type::Named("ServiceError".to_string()),
+            )),
+        )),
+        ("core.services", "workflow_activity_wait") => Some((
+            vec![
+                (read, Type::Named("ServiceWorkflow".to_string())),
+                (read, Type::String),
+                (read, Type::String),
+            ],
+            Some(result_ty(Type::String, Type::Named("ServiceError".to_string()))),
+        )),
+        ("core.services", "workflow_all") => Some((
+            vec![
+                (read, Type::Named("ServiceWorkflow".to_string())),
+                (read, Type::List(Box::new(Type::String))),
+            ],
+            Some(result_ty(
+                Type::List(Box::new(Type::String)),
+                Type::Named("ServiceError".to_string()),
+            )),
         )),
         ("core.services", "workflow_step") => Some((
             vec![
@@ -2916,6 +2947,12 @@ fn core_fixed_sig_impl(
             vec![(read, Type::String), (read, Type::String)],
             Some(result_ty(Type::Named("RowPolicy".to_string()), Type::String)),
         )),
+        // D-DBPOLICY1: audit is scoped to the active DBScope, so it cannot
+        // inspect or manufacture authority for another connection.
+        ("core.db", "policy_audit") => Some((
+            vec![(read, Type::Named("DBScope".to_string()))],
+            Some(Type::String),
+        )),
         ("core.db", "params") => Some((
             vec![(read, Type::Named("SQL".to_string()))],
             Some(Type::List(Box::new(Type::Named(Syntax::TYPE_DB_VALUE.to_string())))),
@@ -2983,7 +3020,7 @@ fn core_fixed_sig_impl(
             Some(result_ty(Type::Named("Mod".to_string()), Type::String)),
         )),
         // D-UUIDENC1=A: hex and base64 codecs. `encode` is infallible; `decode`
-        // returns `[Byte] ? String` (invalid input → Err).
+        // returns `[Byte] ! String` (invalid input → Err).
         ("core.encoding.hex", "encode") => {
             Some((vec![(read, list_u8.clone())], Some(Type::String)))
         }

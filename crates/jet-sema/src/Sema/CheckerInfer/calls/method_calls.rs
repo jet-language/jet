@@ -505,6 +505,21 @@ impl<'a> Checker<'a> {
         recv_type_out: &mut Option<String>,
         resolved_ret_out: &mut Option<Type>,
     ) -> Option<Type> {
+        // D-VALIDATE1: the first pass elaborates `Validate.over(value)` into
+        // the hidden builder literal. Chained calls infer their receiver again;
+        // keep that compiler-owned node idempotent instead of trying to resolve
+        // the erased `over` method on the materialized builder.
+        if recv_type_out.as_deref() == Some(Syntax::INTERNAL_VALIDATE_OVER)
+            && method == "over"
+            && args.is_empty()
+            && matches!(
+                receiver.as_ref(),
+                Expr::StructLit { type_name, .. }
+                    if type_name == Syntax::TYPE_VALIDATE_BUILDER
+            )
+        {
+            return resolved_ret_out.clone();
+        }
         // D-MEMO1=A: `name.cache()` is a read-only projection of one
         // memoized function's store. It is resolved from the registered
         // function signature before ordinary receiver/method lookup.
@@ -1268,6 +1283,56 @@ impl<'a> Checker<'a> {
             }
             if let Expr::Ident(type_name, type_span) = &**receiver {
                 let display_type_name = self.display_type_name(type_name, None);
+                // D-VALIDATE1: the use-site escape keeps the same `check` rule
+                // vocabulary as an in-body validator. `over` is a compiler-owned
+                // static head; it materializes the ordinary generated builder so
+                // every later `check`/`finish` call remains normal Jet code.
+                if type_name == Syntax::TYPE_VALIDATE
+                    && method == "over"
+                    && self.lookup(type_name).is_none()
+                {
+                    if args.len() != 1 {
+                        self.diags
+                            .push(wrong_core_arity("Validate.over", 1, args.len(), span));
+                        for arg in args.iter_mut() {
+                            self.infer(&mut arg.expr);
+                        }
+                        return None;
+                    }
+                    let value_ty = self.infer(&mut args[0].expr)?;
+                    let value_span = args[0].span;
+                    let value = std::mem::replace(
+                        &mut args[0].expr,
+                        Expr::Int(0, value_span, None, None),
+                    );
+                    let builder_ty = Type::Apply {
+                        name: Syntax::TYPE_VALIDATE_BUILDER.to_string(),
+                        args: vec![value_ty],
+                    };
+                    **receiver = Expr::StructLit {
+                        type_name: Syntax::TYPE_VALIDATE_BUILDER.to_string(),
+                        type_args: match &builder_ty {
+                            Type::Apply { args, .. } => args.clone(),
+                            _ => Vec::new(),
+                        },
+                        import_ns: None,
+                        as_trait: None,
+                        fields: vec![
+                            (
+                                "value".to_string(),
+                                span,
+                                Expr::Copy(Box::new(value), span),
+                            ),
+                            ("errors".to_string(), span, Expr::ListLit(Vec::new(), span)),
+                        ],
+                        inferred: false,
+                        span,
+                    };
+                    args.clear();
+                    *recv_type_out = Some(Syntax::INTERNAL_VALIDATE_OVER.to_string());
+                    *resolved_ret_out = Some(builder_ty.clone());
+                    return Some(builder_ty);
+                }
                 // D-SERDE13=B: `Data.Text(x)` etc. — the retired spelling of the value
                 // tree. Point at `DataTree` (no alias, I8) before generic resolution.
                 if type_name == "Data" {
@@ -2074,6 +2139,135 @@ impl<'a> Checker<'a> {
                     return self.check_static_method(type_name, method, span, owner_type_args, type_args, args);
                 }
             }
+            // D-VALIDATE1: `Validate.over(s).check(...)` and `.finish()` are
+            // surface methods on the generated builder. Validate the rule at
+            // this boundary, then lower the call through the ordinary generated
+            // methods so AOT, JIT, interpreter, and web share one implementation.
+            if matches!(method, "check" | "finish") {
+                if let Some(recv_ty) = self.infer(receiver) {
+                    if let Type::Apply { name, args: type_args } = &recv_ty {
+                        if name == Syntax::TYPE_VALIDATE_BUILDER && type_args.len() == 1 {
+                            let subject_ty = type_args[0].clone();
+                            let builder_ty = recv_ty.clone();
+                            *recv_type_out = Some(Syntax::TYPE_VALIDATE_BUILDER.to_string());
+                            if method == "finish" {
+                                if !args.is_empty() {
+                                    self.diags.push(wrong_core_arity(
+                                        "Validate.finish",
+                                        0,
+                                        args.len(),
+                                        span,
+                                    ));
+                                    for arg in args.iter_mut() {
+                                        self.infer(&mut arg.expr);
+                                    }
+                                }
+                                let result = Type::Result {
+                                    ok: Box::new(subject_ty),
+                                    err: Box::new(decode_error_ty()),
+                                };
+                                *resolved_ret_out = Some(result.clone());
+                                return Some(result);
+                            }
+
+                            if args.len() != 3 {
+                                self.diags
+                                    .push(crate::Sema::e0353_bad_validate_rule(span));
+                                for arg in args.iter_mut() {
+                                    self.infer(&mut arg.expr);
+                                }
+                                *resolved_ret_out = Some(builder_ty.clone());
+                                return Some(builder_ty);
+                            }
+                            let valid_shape = args[0].label.is_none()
+                                && args[1]
+                                    .label
+                                    .as_ref()
+                                    .is_some_and(|(label, _)| label == "at")
+                                && args[2].label.is_none();
+                            let field_name = match &args[1].expr {
+                                Expr::Ident(name, field_span) => Some((name.clone(), *field_span)),
+                                // The first pass elaborates the bare field name to
+                                // the String consumed by the generated method. A
+                                // chained receiver can infer this call more than
+                                // once, so accept that compiler-owned form only
+                                // when the builder dispatch fact is already set.
+                                Expr::Str(parts, field_span)
+                                    if recv_type_out.as_deref()
+                                        == Some(Syntax::TYPE_VALIDATE_BUILDER)
+                                        && matches!(
+                                            parts.as_slice(),
+                                            [StrPart::Lit(_)]
+                                        ) =>
+                                {
+                                    let [StrPart::Lit(name)] = parts.as_slice() else {
+                                        unreachable!("single literal checked above")
+                                    };
+                                    Some((name.clone(), *field_span))
+                                }
+                                _ => None,
+                            };
+                            let Some((field_name, field_span)) = field_name else {
+                                self.diags
+                                    .push(crate::Sema::e0353_bad_validate_rule(args[1].span));
+                                for arg in args.iter_mut() {
+                                    self.infer(&mut arg.expr);
+                                }
+                                *resolved_ret_out = Some(builder_ty.clone());
+                                return Some(builder_ty);
+                            };
+                            if !valid_shape {
+                                self.diags
+                                    .push(crate::Sema::e0353_bad_validate_rule(args[1].span));
+                                for arg in args.iter_mut() {
+                                    self.infer(&mut arg.expr);
+                                }
+                                *resolved_ret_out = Some(builder_ty.clone());
+                                return Some(builder_ty);
+                            }
+                            let subject_name = match &subject_ty {
+                                Type::Named(name) | Type::Apply { name, .. } => name.as_str(),
+                                _ => "",
+                            };
+                            let has_field = !subject_name.is_empty()
+                                && self
+                                    .struct_fields_for_type_name(subject_name)
+                                    .is_some_and(|fields| {
+                                        fields.iter().any(|(name, _, _)| name == &field_name)
+                                    });
+                            if !has_field {
+                                self.diags.push(crate::Sema::e0354_unknown_validate_field(
+                                    &field_name,
+                                    field_span,
+                                ));
+                            }
+                            // `at:` is a path label, not a runtime expression. Resolve
+                            // the bare sibling field now so the generated method receives
+                            // the canonical String expected by the one FieldError contract.
+                            args[1].expr = Expr::Str(
+                                vec![StrPart::Lit(field_name)],
+                                args[1].expr.span(),
+                            );
+                            if let Some(condition_ty) = self.infer(&mut args[0].expr) {
+                                self.check_type_assignable(
+                                    &Type::Bool,
+                                    &condition_ty,
+                                    args[0].expr.span(),
+                                );
+                            }
+                            if let Some(reason_ty) = self.infer(&mut args[2].expr) {
+                                self.check_type_assignable(
+                                    &Type::String,
+                                    &reason_ty,
+                                    args[2].expr.span(),
+                                );
+                            }
+                            *resolved_ret_out = Some(builder_ty.clone());
+                            return Some(builder_ty);
+                        }
+                    }
+                }
+            }
             self.borrow_ctx = true;
             // D-MEM1 stage S5: chaining `.trim()`/`.after()`/`.before()` onto a
             // string-view name is the one builtin-method shape its bare `&str`
@@ -2681,6 +2875,12 @@ impl<'a> Checker<'a> {
                         return ret;
                     }
                 }
+                if handle_ty == "ServiceWorkflow" {
+                    if let Some(ret) = self.check_service_workflow_method(method, args, span) {
+                        *recv_type_out = Some(handle_ty.clone());
+                        return ret;
+                    }
+                }
                 if handle_ty == "ServiceEndpoint" {
                     if let Some(ret) = self.check_service_endpoint_method(method, args, span) {
                         *recv_type_out = Some(handle_ty.clone());
@@ -2904,7 +3104,7 @@ impl<'a> Checker<'a> {
                     return ret;
                 }
             }
-            // D-DATAFLOW1=A: DataStream<T>.next() → T? ? DataError
+            // D-DATAFLOW1=A: DataStream<T>.next() → T? ! DataError
             if let Type::Apply { name, args: type_args } = &recv_ty {
                 if name == "DataStream" && method == "next" {
                     if !args.is_empty() {
@@ -3619,7 +3819,7 @@ impl<'a> Checker<'a> {
                     *recv_type_out = Some(handle_ty_s.clone());
                     // For allocator value methods, infer the payload once. The
                     // fallible spelling keeps the same payload inside one
-                    // `T ? AllocError` carrier.
+                    // `T ! AllocError` carrier.
                     if matches!(method, "alloc" | "try_alloc") {
                         if let Some(arg) = args.get_mut(0) {
                             let inferred = self.infer(&mut arg.expr);
@@ -4833,6 +5033,9 @@ impl<'a> Checker<'a> {
             } else if owner_mod != self.module_idx
                 && Syntax::classify_identifier(method) == Syntax::IdentifierClass::SoftPublic {
                 self.diags.push(crate::Sema::Diagnostics::soft_public_use(method, span));
+            }
+            if let Some(dep) = msig.deprecation.as_ref() {
+                self.check_deprecation(&method_name, dep, span);
             }
             let applied_args = match &recv_ty {
                 Type::Apply { args, .. } => Some(args.as_slice()),

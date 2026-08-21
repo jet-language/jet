@@ -68,6 +68,14 @@ pub(crate) fn method_call_in_subset(
                 .iter()
                 .all(|arg| expr_in_subset(&arg.expr, cx, locals));
     }
+    // D-VALIDATE1: `Validate.over(value)` is only a compiler-owned head; its
+    // materialized builder is an ordinary covered struct value.
+    if recv_type.as_deref() == Some(Syntax::INTERNAL_VALIDATE_OVER)
+        && method == "over"
+        && args.is_empty()
+    {
+        return expr_in_subset(receiver, cx, locals);
+    }
     // D-AUTHORITY-NAME1=A: the carried Authority value
     // has exactly one instance family. Keep both operations in TIR as ordinary
     // receiver calls; their policy lives in the shared Prelude helpers.

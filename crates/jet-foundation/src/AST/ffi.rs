@@ -4,7 +4,8 @@ use super::{ExternFn, Type};
 use std::path::{Path, PathBuf};
 
 impl ExternFn {
-    /// Whether the resident JIT can execute this signature through the hidden bridge.
+    /// Whether the resident JIT and tier-0 evaluator can execute this signature
+    /// through the hidden bridge.
     ///
     /// Every other valid C signature stays on CModule's direct wrapper path.
     pub fn hidden_c_bridge_compatible(&self) -> bool {
@@ -16,6 +17,7 @@ impl ExternFn {
             Some(Type::Int) => {
                 self.params.is_empty()
                     || matches!(self.params.as_slice(), [param] if param.ty == Type::Int)
+                    || matches!(self.params.as_slice(), [param] if param.ty == Type::String)
                     || matches!(
                         self.params.as_slice(),
                         [left, right] if left.ty == Type::Int && right.ty == Type::Int
@@ -74,9 +76,7 @@ impl CFfi {
         self.import_links
             .iter()
             .find(|l| {
-                l.importing_idx == importing_idx
-                    && l.scope.as_deref() == scope
-                    && l.alias == alias
+                l.importing_idx == importing_idx && l.scope.as_deref() == scope && l.alias == alias
             })
             .map(|l| l.target_idx)
     }

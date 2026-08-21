@@ -403,12 +403,16 @@ fn io_error_ct(error: text_kernel::jet_std::IOError) -> crate::AST::CtValue {
     let context_value = |context: text_kernel::jet_std::IOContext| {
         let optional_string = |value: Option<String>| {
             value
-                .map(|value| crate::AST::CtValue::Present(Box::new(crate::AST::CtValue::Str(value))))
+                .map(|value| {
+                    crate::AST::CtValue::Present(Box::new(crate::AST::CtValue::Str(value)))
+                })
                 .unwrap_or_else(|| crate::AST::CtValue::absent(crate::AST::Type::String))
         };
         let optional_int = |value: Option<i64>| {
             value
-                .map(|value| crate::AST::CtValue::Present(Box::new(crate::AST::CtValue::Int(value))))
+                .map(|value| {
+                    crate::AST::CtValue::Present(Box::new(crate::AST::CtValue::Int(value)))
+                })
                 .unwrap_or_else(|| crate::AST::CtValue::absent(crate::AST::Type::Int))
         };
         crate::AST::CtValue::Struct {
@@ -424,9 +428,7 @@ fn io_error_ct(error: text_kernel::jet_std::IOError) -> crate::AST::CtValue {
     let (variant, context) = match error {
         text_kernel::jet_std::IOError::InvalidInput(context) => ("InvalidInput", context),
         text_kernel::jet_std::IOError::NotFound(context) => ("NotFound", context),
-        text_kernel::jet_std::IOError::PermissionDenied(context) => {
-            ("PermissionDenied", context)
-        }
+        text_kernel::jet_std::IOError::PermissionDenied(context) => ("PermissionDenied", context),
         text_kernel::jet_std::IOError::TimedOut(context) => ("TimedOut", context),
         text_kernel::jet_std::IOError::Cancelled(context) => ("Cancelled", context),
         text_kernel::jet_std::IOError::Closed(context) => ("Closed", context),
@@ -494,9 +496,7 @@ pub(super) fn fs_list_dir(path: &str) -> FsResult<Vec<(String, String, bool)>> {
         })
         .map_err(io_error_ct)
 }
-pub(super) fn fs_walk_parallel(
-    path: &str,
-) -> FsResult<Vec<(String, String, bool, i64)>> {
+pub(super) fn fs_walk_parallel(path: &str) -> FsResult<Vec<(String, String, bool, i64)>> {
     text_kernel::fs_walk_parallel(path)
         .map(|entries| {
             entries
@@ -507,42 +507,108 @@ pub(super) fn fs_walk_parallel(
         .map_err(io_error_ct)
 }
 
-pub(super) fn nfd(s: &str) -> String { text_kernel::nfd(s) }
-pub(super) fn nfkd(s: &str) -> String { text_kernel::nfkd(s) }
-pub(super) fn nfc(s: &str) -> String { text_kernel::nfc(s) }
-pub(super) fn nfkc(s: &str) -> String { text_kernel::nfkc(s) }
-pub(super) fn casefold(s: &str) -> String { text_kernel::casefold(s) }
-pub(super) fn alphabetic(cp: u32) -> bool { text_kernel::alphabetic(cp) }
-pub(super) fn letter(cp: u32) -> bool { text_kernel::letter(cp) }
-pub(super) fn numeric(cp: u32) -> bool { text_kernel::numeric(cp) }
-pub(super) fn whitespace(cp: u32) -> bool { text_kernel::whitespace(cp) }
-pub(super) fn lower(s: &str) -> String { text_kernel::lower(s) }
-pub(super) fn upper(s: &str) -> String { text_kernel::upper(s) }
-pub(super) fn title(s: &str) -> String { text_kernel::title(s) }
-pub(super) fn caseless_eq(a: &str, b: &str) -> bool { text_kernel::caseless_eq(a, b) }
-pub(super) fn graphemes(s: &str) -> Vec<String> { text_kernel::graphemes(s) }
-pub(super) fn word_segments(s: &str) -> Vec<String> { text_kernel::word_segments(s) }
-pub(super) fn words(s: &str) -> Vec<String> { text_kernel::words(s) }
-pub(super) fn sentence_segments(s: &str) -> Vec<String> { text_kernel::sentence_segments(s) }
-pub(super) fn sentences(s: &str) -> Vec<String> { text_kernel::sentences(s) }
-pub(super) fn display_width_default(s: &str) -> i64 { text_kernel::display_width_default(s) }
+pub(super) fn nfd(s: &str) -> String {
+    text_kernel::nfd(s)
+}
+pub(super) fn nfkd(s: &str) -> String {
+    text_kernel::nfkd(s)
+}
+pub(super) fn nfc(s: &str) -> String {
+    text_kernel::nfc(s)
+}
+pub(super) fn nfkc(s: &str) -> String {
+    text_kernel::nfkc(s)
+}
+pub(super) fn casefold(s: &str) -> String {
+    text_kernel::casefold(s)
+}
+pub(super) fn alphabetic(cp: u32) -> bool {
+    text_kernel::alphabetic(cp)
+}
+pub(super) fn letter(cp: u32) -> bool {
+    text_kernel::letter(cp)
+}
+pub(super) fn numeric(cp: u32) -> bool {
+    text_kernel::numeric(cp)
+}
+pub(super) fn whitespace(cp: u32) -> bool {
+    text_kernel::whitespace(cp)
+}
+pub(super) fn lower(s: &str) -> String {
+    text_kernel::lower(s)
+}
+pub(super) fn upper(s: &str) -> String {
+    text_kernel::upper(s)
+}
+pub(super) fn title(s: &str) -> String {
+    text_kernel::title(s)
+}
+pub(super) fn caseless_eq(a: &str, b: &str) -> bool {
+    text_kernel::caseless_eq(a, b)
+}
+pub(super) fn graphemes(s: &str) -> Vec<String> {
+    text_kernel::graphemes(s)
+}
+pub(super) fn word_segments(s: &str) -> Vec<String> {
+    text_kernel::word_segments(s)
+}
+pub(super) fn words(s: &str) -> Vec<String> {
+    text_kernel::words(s)
+}
+pub(super) fn sentence_segments(s: &str) -> Vec<String> {
+    text_kernel::sentence_segments(s)
+}
+pub(super) fn sentences(s: &str) -> Vec<String> {
+    text_kernel::sentences(s)
+}
+pub(super) fn display_width_default(s: &str) -> i64 {
+    text_kernel::display_width_default(s)
+}
 pub(super) fn display_width_policy(s: &str, wide: bool, reject: bool) -> Result<i64, String> {
     text_kernel::display_width_policy(s, wide, reject)
 }
-pub(super) fn is_alphabetic(s: &str) -> bool { text_kernel::is_alphabetic(s) }
-pub(super) fn is_numeric(s: &str) -> bool { text_kernel::is_numeric(s) }
-pub(super) fn is_whitespace(s: &str) -> bool { text_kernel::is_whitespace(s) }
-pub(super) fn is_lower(s: &str) -> bool { text_kernel::is_lower(s) }
-pub(super) fn is_upper(s: &str) -> bool { text_kernel::is_upper(s) }
-pub(super) fn capitalize(s: &str) -> String { text_kernel::capitalize(s) }
-pub(super) fn swapcase(s: &str) -> String { text_kernel::swapcase(s) }
-pub(super) fn remove_prefix(s: &str, prefix: &str) -> String { text_kernel::remove_prefix(s, prefix) }
-pub(super) fn remove_suffix(s: &str, suffix: &str) -> String { text_kernel::remove_suffix(s, suffix) }
-pub(super) fn compare(a: &str, b: &str) -> i64 { text_kernel::compare(a, b) }
-pub(super) fn reverse(s: &str) -> String { text_kernel::reverse(s) }
-pub(super) fn trim_start(s: &str) -> String { text_kernel::trim_start(s) }
-pub(super) fn trim_end(s: &str) -> String { text_kernel::trim_end(s) }
-pub(super) fn trim(s: &str) -> String { text_kernel::trim(s) }
+pub(super) fn is_alphabetic(s: &str) -> bool {
+    text_kernel::is_alphabetic(s)
+}
+pub(super) fn is_numeric(s: &str) -> bool {
+    text_kernel::is_numeric(s)
+}
+pub(super) fn is_whitespace(s: &str) -> bool {
+    text_kernel::is_whitespace(s)
+}
+pub(super) fn is_lower(s: &str) -> bool {
+    text_kernel::is_lower(s)
+}
+pub(super) fn is_upper(s: &str) -> bool {
+    text_kernel::is_upper(s)
+}
+pub(super) fn capitalize(s: &str) -> String {
+    text_kernel::capitalize(s)
+}
+pub(super) fn swapcase(s: &str) -> String {
+    text_kernel::swapcase(s)
+}
+pub(super) fn remove_prefix(s: &str, prefix: &str) -> String {
+    text_kernel::remove_prefix(s, prefix)
+}
+pub(super) fn remove_suffix(s: &str, suffix: &str) -> String {
+    text_kernel::remove_suffix(s, suffix)
+}
+pub(super) fn compare(a: &str, b: &str) -> i64 {
+    text_kernel::compare(a, b)
+}
+pub(super) fn reverse(s: &str) -> String {
+    text_kernel::reverse(s)
+}
+pub(super) fn trim_start(s: &str) -> String {
+    text_kernel::trim_start(s)
+}
+pub(super) fn trim_end(s: &str) -> String {
+    text_kernel::trim_end(s)
+}
+pub(super) fn trim(s: &str) -> String {
+    text_kernel::trim(s)
+}
 pub(super) fn splitn(s: &str, pattern: &str, count: i64) -> Vec<String> {
     text_kernel::splitn(s, pattern, count)
 }
@@ -564,11 +630,27 @@ pub(super) fn starts_any(s: &str, prefixes: &[String]) -> bool {
 pub(super) fn ends_any(s: &str, suffixes: &[String]) -> bool {
     text_kernel::ends_any(s, suffixes)
 }
-pub(super) fn char_indices(s: &str) -> Vec<String> { text_kernel::char_indices(s) }
-pub(super) fn inspect(s: &str) -> Vec<String> { text_kernel::inspect(s) }
-pub(super) fn unicode_scalar_count(s: &str) -> i64 { text_kernel::unicode_scalar_count(s) }
-pub(super) fn unicode_byte_count(s: &str) -> i64 { text_kernel::unicode_byte_count(s) }
-pub(super) fn unicode_is_ascii(s: &str) -> bool { text_kernel::unicode_is_ascii(s) }
-pub(super) fn unicode_lower(s: &str) -> String { text_kernel::unicode_lower(s) }
-pub(super) fn unicode_upper(s: &str) -> String { text_kernel::unicode_upper(s) }
-pub(super) fn unicode_scalars(s: &str) -> Vec<String> { text_kernel::unicode_scalars(s) }
+pub(super) fn char_indices(s: &str) -> Vec<String> {
+    text_kernel::char_indices(s)
+}
+pub(super) fn inspect(s: &str) -> Vec<String> {
+    text_kernel::inspect(s)
+}
+pub(super) fn unicode_scalar_count(s: &str) -> i64 {
+    text_kernel::unicode_scalar_count(s)
+}
+pub(super) fn unicode_byte_count(s: &str) -> i64 {
+    text_kernel::unicode_byte_count(s)
+}
+pub(super) fn unicode_is_ascii(s: &str) -> bool {
+    text_kernel::unicode_is_ascii(s)
+}
+pub(super) fn unicode_lower(s: &str) -> String {
+    text_kernel::unicode_lower(s)
+}
+pub(super) fn unicode_upper(s: &str) -> String {
+    text_kernel::unicode_upper(s)
+}
+pub(super) fn unicode_scalars(s: &str) -> Vec<String> {
+    text_kernel::unicode_scalars(s)
+}

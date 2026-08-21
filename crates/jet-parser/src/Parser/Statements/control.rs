@@ -2129,7 +2129,11 @@ impl<'a> Parser<'a> {
             }
             TokKind::Dollar => {
                 let span = self.bump().span;
-                Err(self.retired_comptime_mark(span))
+                Err(if self.allow_environment_reads {
+                    self.invalid_environment_read(span)
+                } else {
+                    self.environment_read_outside_config(span)
+                })
             }
             TokKind::Ident(n) if false && n == Syntax::FOREIGN_MATCH => {
                 let t = self.bump();

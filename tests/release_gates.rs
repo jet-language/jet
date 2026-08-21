@@ -272,12 +272,10 @@ fn ga_feature_size_budgets() {
 //
 //     UPDATE_EXPECT=1 cargo test --test release_gates
 //
-// E2002 and L2001 are not yet user-triggerable (the deprecation registry is
-// empty pre-1.0 — see docs/spec/diagnostics.md). The deprecation fixture is
-// rendered from a synthetic registry entry so the wording is still pinned.
+// E2002 and L2001 are exercised by the encoding edition/UI tests. This gate
+// checks that the two Core aliases resolve through the one marker payload.
 // ============================================================================
 
-use jet::Diagnostics::Diagnostic;
 use jet::Manifest::{self};
 
 fn release_dir() -> PathBuf {
@@ -345,35 +343,13 @@ fn no_edition_field_is_accepted() {
 }
 
 #[test]
-fn deprecation_e2002_and_l2001() {
-    let synth = Manifest::lookup_deprecation("cbor.encode").expect("cbor.encode deprecation");
-    let lint = Manifest::l2001(&synth, None);
-    let err = Manifest::e2002(&synth, None);
-    assert_eq!(lint.code, "L2001");
-    assert_eq!(err.code, "E2002");
-
-    let mut rendered = String::new();
-    rendered.push_str(&render_standalone(&lint));
-    rendered.push('\n');
-    rendered.push_str(&render_standalone(&err));
-    check_fixture("deprecation.txt", &rendered);
-}
-
-/// Render a diagnostic with no source span (manifest-level / lint diagnostics).
-fn render_standalone(d: &Diagnostic) -> String {
-    jet::render_diagnostics("(deprecation registry)", "", std::slice::from_ref(d))
-}
-
-#[test]
-fn registry_lists_encoding_cbor_migrations() {
-    assert!(
-        Manifest::DEPRECATIONS.iter().any(|dep| dep.item == "cbor.encode"),
-        "cbor.encode deprecation must stay registered for L2001/E2002"
-    );
-    assert!(
-        Manifest::lookup_deprecation("cbor.decode").is_some(),
-        "cbor.decode deprecation must stay registered for L2001/E2002"
-    );
+fn core_encoding_migrations_use_one_marker_payload() {
+    let encode = jet::Syntax::core_deprecation("core.encoding.cbor", "encode")
+        .expect("cbor.encode deprecation");
+    assert_eq!(encode.since, "2027");
+    assert_eq!(encode.replacement, "cbor.to_bytes");
+    assert_eq!(encode.removed_in.as_deref(), Some("2028"));
+    assert!(jet::Syntax::core_deprecation("core.encoding.cbor", "decode").is_some());
 }
 
 #[test]

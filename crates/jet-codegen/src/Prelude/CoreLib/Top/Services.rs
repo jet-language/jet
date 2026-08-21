@@ -407,6 +407,15 @@ struct JetServiceWorkflow {
     outcome: Option<JetTaskOutcome>,
 }
 
+/// D-SERVICE-WORKFLOW1=D: a workflow handle is the only value that may issue
+/// recorded wait points. The state is shared so cloning a handle cannot create
+/// a second replay cursor or a second delivery path.
+#[derive(Clone, Debug)]
+struct JetWorkflowHandle {
+    authority: JetServiceStateAuthority,
+    state: std::sync::Arc<std::sync::Mutex<JetServiceWorkflow>>,
+}
+
 #[derive(Clone, Debug)]
 struct JetServiceTree {
     name: String,
@@ -540,6 +549,27 @@ impl JetShow for JetTaskStatus {
             Self::Paused => "Paused".to_string(),
             Self::CancelRequested => "CancelRequested".to_string(),
         }
+    }
+}
+
+impl JetShow for JetWorkflowHandle {
+    fn jet_show(&self) -> String {
+        self.state
+            .lock()
+            .map(|workflow| workflow.run_id.to_string())
+            .unwrap_or_else(|_| "<workflow-poisoned>".to_string())
+    }
+}
+
+impl JetDisplay for JetWorkflowHandle {
+    fn jet_display(&self) -> String {
+        self.jet_show()
+    }
+}
+
+impl JetDebug for JetWorkflowHandle {
+    fn jet_debug(&self) -> String {
+        self.jet_show()
     }
 }
 
@@ -1037,6 +1067,7 @@ fn jet_services_start(tree: &mut JetServiceTree) -> Result<(), JetServiceError> 
             "service tree is already started".to_string(),
         ));
     }
+    let _rollout_lock = jet_services_rollout_operation_lock(tree)?;
     jet_services_restore_rollout_state(tree)?;
     jet_services_validate_tree(tree)?;
     if tree.name.trim().is_empty()
@@ -1249,6 +1280,7 @@ fn jet_services_close_runtime_groups(tree: &mut JetServiceTree) {
 }
 
 fn jet_services_stop(tree: &mut JetServiceTree) -> Result<(), JetServiceError> {
+    let _rollout_lock = jet_services_rollout_operation_lock(tree)?;
     jet_services_close_runtime_groups(tree);
     let preserve_mailboxes = tree.delivery == JetServiceDelivery::DurableAtLeastOnce;
     let reset_partition = tree.state_adapter == JetServiceStateAdapter::Empty;
@@ -1396,6 +1428,7 @@ fn jet_services_finish_drain(
     tree: &mut JetServiceTree,
     endpoint: &JetServiceEndpoint,
 ) -> Result<(), JetServiceError> {
+    let _rollout_lock = jet_services_rollout_operation_lock(tree)?;
     jet_services_validate_endpoint(tree, endpoint)?;
     let worker_index = tree
         .workers
@@ -3031,6 +3064,43 @@ fn jet_services_rollout_path(
     Ok(path)
 }
 
+fn jet_services_rollout_operation_lock(
+    tree: &JetServiceTree,
+) -> Result<Option<ServiceAuthorityFileLock>, JetServiceError> {
+    let Some(authority) = tree.state_authority.as_ref() else {
+        return Ok(None);
+    };
+    service_authority_file_lock(&authority.store, "rollout-operation").map(Some)
+}
+
+fn jet_services_rollout_store_assert_current(
+    tree: &JetServiceTree,
+) -> Result<(), JetServiceError> {
+    let Some(persisted) = jet_services_rollout_store_load(tree)? else {
+        return Ok(());
+    };
+    if persisted != jet_services_rollout_snapshot(tree) {
+        return Err(JetServiceError::Stale(
+            "service rollout state changed since this controller started".to_string(),
+        ));
+    }
+    Ok(())
+}
+
+fn jet_services_rollback_store_path(
+    authority: &JetServiceStateAuthority,
+    generation: i64,
+) -> Result<String, JetServiceError> {
+    let path = format!("{}.rollback-g{}", authority.store, generation);
+    service_authority_validate_text(
+        &path,
+        "service rollback store",
+        MAX_SERVICE_STATE_STORE,
+        false,
+    )?;
+    Ok(path)
+}
+
 fn jet_services_rollout_store_load(
     tree: &JetServiceTree,
 ) -> Result<Option<JetServiceRolloutState>, JetServiceError> {
@@ -3137,6 +3207,13 @@ fn jet_services_restore_rollout_state(tree: &mut JetServiceTree) -> Result<(), J
             let authority = tree.state_authority.as_ref().ok_or_else(|| {
                 jet_services_state_error("rollout receipt has no state authority")
             })?;
+            let expected_store =
+                jet_services_rollback_store_path(authority, receipt.from_generation)?;
+            if receipt.rollback_store != expected_store {
+                return Err(jet_services_state_error(
+                    "rollout receipt names a rollback store outside its state authority",
+                ));
+            }
             jet_services_state_validate_path(std::path::Path::new(&receipt.rollback_store))?;
             if !std::path::Path::new(&receipt.rollback_store).is_file() {
                 return Err(jet_services_state_error(
@@ -3815,6 +3892,80 @@ fn jet_services_workflow_authority(
     })
 }
 
+fn jet_services_workflow_handle(
+    tree: &JetServiceTree,
+    run_id: i64,
+) -> Result<JetWorkflowHandle, JetServiceError> {
+    let authority = jet_services_workflow_authority(tree)?;
+    let workflow = tree
+        .workflows
+        .iter()
+        .find(|workflow| workflow.run_id == run_id)
+        .cloned()
+        .ok_or_else(|| JetServiceError::Unknown(format!("workflow run {run_id} not found")))?;
+    Ok(JetWorkflowHandle {
+        authority,
+        state: std::sync::Arc::new(std::sync::Mutex::new(workflow)),
+    })
+}
+
+trait JetWorkflowRunId {
+    fn jet_workflow_run_id(&self) -> i64;
+}
+
+impl JetWorkflowRunId for i64 {
+    fn jet_workflow_run_id(&self) -> i64 {
+        *self
+    }
+}
+
+impl JetWorkflowRunId for JetWorkflowHandle {
+    fn jet_workflow_run_id(&self) -> i64 {
+        self.state
+            .lock()
+            .map(|workflow| workflow.run_id)
+            .unwrap_or_default()
+    }
+}
+
+fn jet_services_workflow_run_id<R: JetWorkflowRunId>(run_id: &R) -> i64 {
+    run_id.jet_workflow_run_id()
+}
+
+fn jet_services_workflow_sync_tree(
+    tree: &mut JetServiceTree,
+) -> Result<(), JetServiceError> {
+    let cursors: std::collections::HashMap<i64, usize> = tree
+        .workflows
+        .iter()
+        .map(|workflow| (workflow.run_id, workflow.replay_cursor))
+        .collect();
+    let mut workflows = jet_services_workflow_replay(&jet_services_workflow_authority(tree)?)?;
+    for workflow in &mut workflows {
+        workflow.replay_cursor = cursors.get(&workflow.run_id).copied().unwrap_or(0);
+    }
+    tree.workflows = workflows;
+    Ok(())
+}
+
+fn jet_services_workflow_sync_handle_into_tree(
+    tree: &mut JetServiceTree,
+    handle: &JetWorkflowHandle,
+) -> Result<(), JetServiceError> {
+    let workflow = handle
+        .state
+        .lock()
+        .map_err(|_| JetServiceError::Policy("workflow handle state lock is poisoned".to_string()))?
+        .clone();
+    let target = tree
+        .workflows
+        .iter_mut()
+        .find(|candidate| candidate.run_id == workflow.run_id)
+        .ok_or_else(|| JetServiceError::Unknown(format!("workflow run {} not found", workflow.run_id)))?;
+    *target = workflow;
+    Ok(())
+}
+
 fn jet_services_workflow_field<'a>(
     input: &'a str,
     label: &str,
@@ -4143,6 +4294,157 @@ fn jet_services_workflow_apply(
             }
             workflow.steps.push(step.clone());
             workflow.history.push(format!("step:{step}"));
+        } else if let Some(fields) = payload.strip_prefix("workflow-wait-sleep:") {
+            let (run_id_text, nanos_text) = fields.split_once(':').ok_or_else(|| {
+                jet_services_state_error("workflow sleep run id or duration is missing")
+            })?;
+            let run_id = run_id_text.parse::<i64>().map_err(|_| {
+                jet_services_state_error("workflow sleep run id is invalid")
+            })?;
+            let nanos = nanos_text.parse::<i64>().map_err(|_| {
+                jet_services_state_error("workflow sleep duration is invalid")
+            })?;
+            if run_id < 1 {
+                return Err(jet_services_state_error("workflow sleep run id is invalid"));
+            }
+            let workflow = workflows
+                .iter_mut()
+                .find(|workflow| workflow.run_id == run_id)
+                .ok_or_else(|| jet_services_state_error("workflow sleep has no start record"))?;
+            if workflow.outcome.is_some() {
+                return Err(jet_services_state_error(
+                    "workflow sleep follows a terminal workflow outcome",
+                ));
+            }
+            workflow.history.push(format!("sleep:{nanos}"));
+            workflow.status = JetTaskStatus::Running;
+        } else if let Some(fields) = payload.strip_prefix("workflow-wait-sleep-cancelled:") {
+            let run_id = fields.parse::<i64>().map_err(|_| {
+                jet_services_state_error("workflow cancelled sleep run id is invalid")
+            })?;
+            if run_id < 1 {
+                return Err(jet_services_state_error(
+                    "workflow cancelled sleep run id is invalid",
+                ));
+            }
+            let workflow = workflows
+                .iter_mut()
+                .find(|workflow| workflow.run_id == run_id)
+                .ok_or_else(|| {
+                    jet_services_state_error("workflow cancelled sleep has no start record")
+                })?;
+            if workflow.outcome.is_some()
+                || !workflow.history.last().is_some_and(|entry| entry.starts_with("sleep:"))
+            {
+                return Err(jet_services_state_error(
+                    "workflow cancelled sleep is out of order",
+                ));
+            }
+            workflow.history.push("sleep-cancelled".to_string());
+            workflow.status = JetTaskStatus::CancelRequested;
+            workflow.outcome = Some(JetTaskOutcome::Cancelled);
+        } else if let Some(fields) = payload.strip_prefix("workflow-wait-sleep-deadline:") {
+            let run_id = fields.parse::<i64>().map_err(|_| {
+                jet_services_state_error("workflow deadline sleep run id is invalid")
+            })?;
+            if run_id < 1 {
+                return Err(jet_services_state_error(
+                    "workflow deadline sleep run id is invalid",
+                ));
+            }
+            let workflow = workflows
+                .iter_mut()
+                .find(|workflow| workflow.run_id == run_id)
+                .ok_or_else(|| {
+                    jet_services_state_error("workflow deadline sleep has no start record")
+                })?;
+            if workflow.outcome.is_some()
+                || !workflow.history.last().is_some_and(|entry| entry.starts_with("sleep:"))
+            {
+                return Err(jet_services_state_error(
+                    "workflow deadline sleep is out of order",
+                ));
+            }
+            workflow.history.push("sleep-deadline".to_string());
+            workflow.status = JetTaskStatus::Paused;
+            workflow.outcome = Some(JetTaskOutcome::DeadlineBlown);
+        } else if let Some(fields) = payload.strip_prefix("workflow-wait-activity:") {
+            let (run_id_text, fields) = fields.split_once(':').ok_or_else(|| {
+                jet_services_state_error("workflow activity wait run id is missing")
+            })?;
+            let run_id = run_id_text.parse::<i64>().map_err(|_| {
+                jet_services_state_error("workflow activity wait run id is invalid")
+            })?;
+            let (activity, rest) = jet_services_workflow_take_field(fields, "wait activity")?;
+            let (argument, rest) = jet_services_workflow_take_field(rest, "wait argument")?;
+            if run_id < 1
+                || rest != ""
+                || jet_services_workflow_token(activity, "activity", MAX_SERVICE_NAME).is_err()
+                || argument.len() > MAX_SERVICE_MESSAGE
+                || argument.chars().any(char::is_control)
+            {
+                return Err(jet_services_state_error(
+                    "workflow activity wait contains invalid fields",
+                ));
+            }
+            let workflow = workflows
+                .iter_mut()
+                .find(|workflow| workflow.run_id == run_id)
+                .ok_or_else(|| {
+                    jet_services_state_error("workflow activity wait has no start record")
+                })?;
+            if workflow.outcome.is_some() {
+                return Err(jet_services_state_error(
+                    "workflow activity wait follows a terminal workflow outcome",
+                ));
+            }
+            workflow
+                .history
+                .push(format!("activity:{activity}:{argument}"));
+            workflow.status = JetTaskStatus::Running;
+        } else if let Some(fields) = payload.strip_prefix("workflow-wait-all:") {
+            let (run_id_text, fields) = fields.split_once(':').ok_or_else(|| {
+                jet_services_state_error("workflow all wait run id is missing")
+            })?;
+            let run_id = run_id_text.parse::<i64>().map_err(|_| {
+                jet_services_state_error("workflow all wait run id is invalid")
+            })?;
+            let (count_text, mut rest) = fields.split_once(':').ok_or_else(|| {
+                jet_services_state_error("workflow all wait count is missing")
+            })?;
+            let count = count_text.parse::<usize>().map_err(|_| {
+                jet_services_state_error("workflow all wait count is invalid")
+            })?;
+            if run_id < 1 || count > MAX_SERVICE_WORKFLOW_STEPS {
+                return Err(jet_services_state_error(
+                    "workflow all wait count is outside the bounded range",
+                ));
+            }
+            let mut values = Vec::with_capacity(count);
+            for _ in 0..count {
+                let (value, next) = jet_services_workflow_take_field(rest, "all wait value")?;
+                if value.len() > MAX_SERVICE_MESSAGE {
+                    return Err(jet_services_state_error("workflow all wait value is too large"));
+                }
+                values.push(value.to_string());
+                rest = next;
+            }
+            if !rest.is_empty() {
+                return Err(jet_services_state_error(
+                    "workflow all wait contains trailing fields",
+                ));
+            }
+            let workflow = workflows
+                .iter_mut()
+                .find(|workflow| workflow.run_id == run_id)
+                .ok_or_else(|| jet_services_state_error("workflow all wait has no start record"))?;
+            if workflow.outcome.is_some() {
+                return Err(jet_services_state_error(
+                    "workflow all wait follows a terminal workflow outcome",
+                ));
+            }
+            workflow.history.push(format!("all:{}", values.join(",")));
+            workflow.status = JetTaskStatus::Running;
         } else if let Some(fields) = payload.strip_prefix("workflow-activity:") {
             let (run_id_text, fields) = fields.split_once(':').ok_or_else(|| {
                 jet_services_state_error("workflow activity run id is missing")
@@ -4362,6 +4664,38 @@ fn jet_services_workflow_append(
     Ok(())
 }
 
+fn jet_services_workflow_append_handle(
+    handle: &JetWorkflowHandle,
+    payload: String,
+) -> Result<(), JetServiceError> {
+    let _workflow_lock = service_authority_file_lock(&handle.authority.store, "workflow")?;
+    let mut applied = jet_services_workflow_replay(&handle.authority)?;
+    let mut state = handle
+        .state
+        .lock()
+        .map_err(|_| JetServiceError::Policy("workflow handle state lock is poisoned".to_string()))?;
+    let run_id = state.run_id;
+    let index = applied
+        .iter()
+        .position(|workflow| workflow.run_id == run_id)
+        .ok_or_else(|| JetServiceError::Unknown(format!("workflow run {run_id} not found")))?;
+    applied[index].replay_cursor = state.replay_cursor;
+    if applied[index] != *state {
+        return Err(jet_services_state_error(
+            "workflow handle history does not match the durable workflow log",
+        ));
+    }
+    jet_services_workflow_apply(&mut applied, &payload)?;
+    let record = jet_services_state_record(&format!("v{}:", handle.authority.version), &payload);
+    jet_services_state_store_append(&handle.authority, &record)?;
+    *state = applied
+        .into_iter()
+        .find(|workflow| workflow.run_id == run_id)
+        .ok_or_else(|| jet_services_state_error("workflow handle disappeared after append"))?;
+    state.replay_cursor = state.history.len();
+    Ok(())
+}
+
 fn jet_services_workflow_store_load(
     tree: &JetServiceTree,
 ) -> Result<Vec<JetServiceWorkflow>, JetServiceError> {
@@ -4369,7 +4703,7 @@ fn jet_services_workflow_store_load(
     jet_services_workflow_replay(&authority)
 }
 
-fn jet_services_workflow_start(
+fn jet_services_workflow_start_id(
     tree: &mut JetServiceTree,
     id: String,
     version: i64,
@@ -4379,6 +4713,7 @@ fn jet_services_workflow_start(
             "service tree is not started".to_string(),
         ));
     }
+    jet_services_workflow_sync_tree(tree)?;
     if id.trim().is_empty()
         || id.chars().any(char::is_control)
         || id.len() > MAX_SERVICE_NAME
@@ -4430,16 +4765,173 @@ fn jet_services_workflow_start(
     Ok(run_id)
 }
 
-fn jet_services_workflow_step(
+fn jet_services_workflow_start(
     tree: &mut JetServiceTree,
-    run_id: i64,
+    id: String,
+    version: i64,
+) -> Result<JetWorkflowHandle, JetServiceError> {
+    let run_id = jet_services_workflow_start_id(tree, id, version)?;
+    jet_services_workflow_handle(tree, run_id)
+}
+
+fn jet_services_workflow_sleep(
+    handle: &JetWorkflowHandle,
+    nanos: i64,
+) -> Result<(), JetServiceError> {
+    let expected = format!("sleep:{nanos}");
+    {
+        let mut workflow = handle.state.lock().map_err(|_| {
+            JetServiceError::Policy("workflow handle state lock is poisoned".to_string())
+        })?;
+        if workflow.replay_cursor != 0 {
+            if jet_services_workflow_replay_event(&mut workflow, &expected)? {
+                match workflow.history.get(workflow.replay_cursor).map(String::as_str) {
+                    Some("sleep-cancelled") => {
+                        workflow.replay_cursor += 1;
+                        workflow.status = JetTaskStatus::CancelRequested;
+                        workflow.outcome = Some(JetTaskOutcome::Cancelled);
+                        return Err(JetServiceError::Policy(
+                            "workflow sleep was cancelled".to_string(),
+                        ));
+                    }
+                    Some("sleep-deadline") => {
+                        workflow.replay_cursor += 1;
+                        workflow.status = JetTaskStatus::Paused;
+                        workflow.outcome = Some(JetTaskOutcome::DeadlineBlown);
+                        return Err(JetServiceError::Policy(
+                            "workflow sleep deadline expired".to_string(),
+                        ));
+                    }
+                    _ => {}
+                }
+                return Ok(());
+            }
+        } else {
+            workflow.replay_cursor = workflow.history.len();
+        }
+    }
+    jet_services_workflow_append_handle(
+        handle,
+        format!("workflow-wait-sleep:{}:{nanos}", jet_services_workflow_run_id(handle)),
+    )?;
+    match jet_services_workflow_sleep_wait(nanos) {
+        JetServiceWorkflowWait::Ready(()) => Ok(()),
+        JetServiceWorkflowWait::Cancelled => {
+            jet_services_workflow_append_handle(
+                handle,
+                format!(
+                    "workflow-wait-sleep-cancelled:{}",
+                    jet_services_workflow_run_id(handle)
+                ),
+            )?;
+            Err(JetServiceError::Policy(
+                "workflow sleep was cancelled".to_string(),
+            ))
+        }
+        JetServiceWorkflowWait::Deadline(_) => {
+            jet_services_workflow_append_handle(
+                handle,
+                format!(
+                    "workflow-wait-sleep-deadline:{}",
+                    jet_services_workflow_run_id(handle)
+                ),
+            )?;
+            Err(JetServiceError::Policy(
+                "workflow sleep deadline expired".to_string(),
+            ))
+        }
+        JetServiceWorkflowWait::Panicked(reason) => Err(JetServiceError::Policy(format!(
+            "workflow sleep failed: {reason}"
+        ))),
+    }
+}
+
+fn jet_services_workflow_activity_wait(
+    handle: &JetWorkflowHandle,
+    activity: String,
+    argument: String,
+) -> Result<String, JetServiceError> {
+    jet_services_workflow_token(&activity, "activity", MAX_SERVICE_NAME)?;
+    if argument.len() > MAX_SERVICE_MESSAGE || argument.chars().any(char::is_control) {
+        return Err(JetServiceError::Policy(
+            "workflow activity argument is outside the bounded visible range".to_string(),
+        ));
+    }
+    let expected = format!("activity:{activity}:{argument}");
+    {
+        let mut workflow = handle.state.lock().map_err(|_| {
+            JetServiceError::Policy("workflow handle state lock is poisoned".to_string())
+        })?;
+        if workflow.replay_cursor != 0 {
+            if jet_services_workflow_replay_event(&mut workflow, &expected)? {
+                return Ok(argument);
+            }
+        } else {
+            workflow.replay_cursor = workflow.history.len();
+        }
+    }
+    jet_services_workflow_append_handle(
+        handle,
+        format!(
+            "workflow-wait-activity:{}:{}{}",
+            jet_services_workflow_run_id(handle),
+            jet_services_workflow_frame(&activity),
+            jet_services_workflow_frame(&argument)
+        ),
+    )?;
+    Ok(argument)
+}
+
+fn jet_services_workflow_all(
+    handle: &JetWorkflowHandle,
+    values: Vec<String>,
+) -> Result<Vec<String>, JetServiceError> {
+    if values.len() > MAX_SERVICE_WORKFLOW_STEPS
+        || values
+            .iter()
+            .any(|value| value.len() > MAX_SERVICE_MESSAGE || value.chars().any(char::is_control))
+    {
+        return Err(JetServiceError::Policy(
+            "workflow all wait values are outside the bounded visible range".to_string(),
+        ));
+    }
+    let expected = format!("all:{}", values.join(","));
+    {
+        let mut workflow = handle.state.lock().map_err(|_| {
+            JetServiceError::Policy("workflow handle state lock is poisoned".to_string())
+        })?;
+        if workflow.replay_cursor != 0 {
+            if jet_services_workflow_replay_event(&mut workflow, &expected)? {
+                return Ok(values);
+            }
+        } else {
+            workflow.replay_cursor = workflow.history.len();
+        }
+    }
+    let mut payload = format!(
+        "workflow-wait-all:{}:{}:",
+        jet_services_workflow_run_id(handle),
+        values.len()
+    );
+    for value in &values {
+        payload.push_str(&jet_services_workflow_frame(value));
+    }
+    jet_services_workflow_append_handle(handle, payload)?;
+    Ok(values)
+}
+
+fn jet_services_workflow_step<R: JetWorkflowRunId>(
+    tree: &mut JetServiceTree,
+    run_id: R,
     step: String,
 ) -> Result<(), JetServiceError> {
+    let run_id = run_id.jet_workflow_run_id();
     if !tree.started {
         return Err(JetServiceError::NotStarted(
             "service tree is not started".to_string(),
         ));
     }
+    jet_services_workflow_sync_tree(tree)?;
     jet_services_workflow_validate_step(&step)?;
     let index = tree
         .workflows
@@ -4480,18 +4972,20 @@ fn jet_services_workflow_step(
     Ok(())
 }
 
-fn jet_services_workflow_activity(
+fn jet_services_workflow_activity<R: JetWorkflowRunId>(
     tree: &mut JetServiceTree,
-    run_id: i64,
+    run_id: R,
     activity: String,
     key: String,
     max_attempts: i64,
 ) -> Result<JetTaskStatus, JetServiceError> {
+    let run_id = run_id.jet_workflow_run_id();
     if !tree.started {
         return Err(JetServiceError::NotStarted(
             "service tree is not started".to_string(),
         ));
     }
+    jet_services_workflow_sync_tree(tree)?;
     jet_services_workflow_token(&activity, "activity", MAX_SERVICE_NAME)?;
     jet_services_workflow_token(&key, "idempotency key", MAX_SERVICE_NAME)?;
     if max_attempts < 1 || max_attempts > MAX_SERVICE_ACTIVITY_ATTEMPTS {
@@ -4562,17 +5056,19 @@ fn jet_services_workflow_activity(
     Ok(JetTaskStatus::Running)
 }
 
-fn jet_services_workflow_activity_retry(
+fn jet_services_workflow_activity_retry<R: JetWorkflowRunId>(
     tree: &mut JetServiceTree,
-    run_id: i64,
+    run_id: R,
     key: String,
     outcome: JetTaskOutcome,
 ) -> Result<JetTaskStatus, JetServiceError> {
+    let run_id = run_id.jet_workflow_run_id();
     if !tree.started {
         return Err(JetServiceError::NotStarted(
             "service tree is not started".to_string(),
         ));
     }
+    jet_services_workflow_sync_tree(tree)?;
     jet_services_workflow_token(&key, "idempotency key", MAX_SERVICE_NAME)?;
     let workflow_index = tree
         .workflows
@@ -4638,17 +5134,19 @@ fn jet_services_workflow_activity_retry(
     Ok(JetTaskStatus::Paused)
 }
 
-fn jet_services_workflow_activity_complete(
+fn jet_services_workflow_activity_complete<R: JetWorkflowRunId>(
     tree: &mut JetServiceTree,
-    run_id: i64,
+    run_id: R,
     key: String,
     outcome: JetTaskOutcome,
 ) -> Result<JetTaskOutcome, JetServiceError> {
+    let run_id = run_id.jet_workflow_run_id();
     if !tree.started {
         return Err(JetServiceError::NotStarted(
             "service tree is not started".to_string(),
         ));
     }
+    jet_services_workflow_sync_tree(tree)?;
     jet_services_workflow_token(&key, "idempotency key", MAX_SERVICE_NAME)?;
     if !outcome.is_valid() {
         return Err(JetServiceError::Policy(
@@ -4719,22 +5217,24 @@ fn jet_services_workflow_activity_complete(
     Ok(outcome)
 }
 
-fn jet_services_workflow_history(
+fn jet_services_workflow_history<R: JetWorkflowRunId>(
     tree: &JetServiceTree,
-    run_id: i64,
+    run_id: R,
 ) -> Result<String, JetServiceError> {
-    tree.workflows
+    let run_id = run_id.jet_workflow_run_id();
+    jet_services_workflow_replay(&jet_services_workflow_authority(tree)?)?
         .iter()
         .find(|w| w.run_id == run_id)
         .map(|w| w.history.join("|"))
         .ok_or_else(|| JetServiceError::Unknown(format!("workflow run {run_id} not found")))
 }
 
-fn jet_services_workflow_outcome(
+fn jet_services_workflow_outcome<R: JetWorkflowRunId>(
     tree: &JetServiceTree,
-    run_id: i64,
+    run_id: R,
 ) -> Result<JetTaskOutcome, JetServiceError> {
-    tree.workflows
+    let run_id = run_id.jet_workflow_run_id();
+    jet_services_workflow_replay(&jet_services_workflow_authority(tree)?)?
         .iter()
         .find(|workflow| workflow.run_id == run_id)
         .and_then(|workflow| workflow.outcome.clone())
@@ -4755,6 +5255,7 @@ fn jet_services_directory_register(
             "service tree is not started".to_string(),
         ));
     }
+    let _rollout_lock = jet_services_rollout_operation_lock(tree)?;
     if name.trim().is_empty()
         || name.chars().any(char::is_control)
         || name.len() > MAX_SERVICE_NAME
@@ -4888,6 +5389,7 @@ fn jet_services_drain_worker(
             "service tree is not started".to_string(),
         ));
     }
+    let _rollout_lock = jet_services_rollout_operation_lock(tree)?;
     let name = {
         let worker = jet_services_find_worker_mut(tree, endpoint)?;
         worker.name.clone()
@@ -4963,6 +5465,7 @@ fn jet_services_partition_worker(
             "service tree is not started".to_string(),
         ));
     }
+    let _rollout_lock = jet_services_rollout_operation_lock(tree)?;
     let (name, was_running, task, worker_endpoint) = {
         let worker = jet_services_find_worker_mut(tree, endpoint)?;
         let was_running = worker.running;
@@ -5068,6 +5571,7 @@ fn jet_services_reconcile_worker(
             "service tree is not started".to_string(),
         ));
     }
+    let _rollout_lock = jet_services_rollout_operation_lock(tree)?;
     jet_services_validate_endpoint(tree, endpoint).or_else(|error| match error {
         JetServiceError::Partitioned(_) => Ok(()),
         other => Err(other),
@@ -5149,13 +5653,7 @@ fn jet_services_prepare_rollback(
     if authority.migration == "forward_only" {
         return Ok((String::new(), false, authority.migration.clone()));
     }
-    let rollback_store = format!("{}.rollback-g{}", authority.store, tree.generation);
-    service_authority_validate_text(
-        &rollback_store,
-        "service rollback store",
-        MAX_SERVICE_STATE_STORE,
-        false,
-    )?;
+    let rollback_store = jet_services_rollback_store_path(authority, tree.generation)?;
     let records = jet_services_state_store_load(authority, &tree.state_adapter)?;
     let rollback_authority = JetServiceStateAuthority {
         store: rollback_store.clone(),
@@ -5215,6 +5713,13 @@ fn jet_services_restore_rollback(
     let authority = tree.state_authority.as_ref().ok_or_else(|| {
         JetServiceError::Policy("upgrade receipt requires a state authority".to_string())
     })?;
+    let expected_store =
+        jet_services_rollback_store_path(authority, receipt.from_generation)?;
+    if receipt.rollback_store != expected_store {
+        return Err(jet_services_state_error(
+            "rollout receipt names a rollback store outside its state authority",
+        ));
+    }
     let rollback_authority = JetServiceStateAuthority {
         store: receipt.rollback_store.clone(),
         ..authority.clone()
@@ -5384,6 +5889,8 @@ fn jet_services_handoff_generation(tree: &mut JetServiceTree) -> Result<i64, Jet
             "service tree is not started".to_string(),
         ));
     }
+    let _rollout_lock = jet_services_rollout_operation_lock(tree)?;
+    jet_services_rollout_store_assert_current(tree)?;
     let pinned_before_handoff = tree
         .last_upgrade
         .as_ref()
@@ -5625,6 +6132,8 @@ fn jet_services_rollback_generation(tree: &mut JetServiceTree) -> Result<i64, Je
             "service tree is not started".to_string(),
         ));
     }
+    let _rollout_lock = jet_services_rollout_operation_lock(tree)?;
+    jet_services_rollout_store_assert_current(tree)?;
     if tree.previous_generation <= 0 {
         return Err(JetServiceError::Policy(
             "no previous generation to roll back to".to_string(),

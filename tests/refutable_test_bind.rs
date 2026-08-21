@@ -7,7 +7,7 @@ mod common;
 const EXAMPLE_OUTPUT: &str = "7\n7\ninvalid\ninvalid\n";
 
 const VALID: &str = r#"
-fn parse_age() => Int ? String {
+fn parse_age() => Int ! String {
     return .Ok(42)
 }
 
@@ -42,7 +42,7 @@ fn sema_accepts_diverging_test_bind_and_keeps_the_name_afterward() {
 #[test]
 fn sema_rejects_a_non_diverging_test_bind_route() {
     let source = r#"
-fn parse_age() => Int ? String { return .Ok(42) }
+fn parse_age() => Int ! String { return .Ok(42) }
 fn run() {
     parse_age() == .Ok(age) ?? 0
 }
@@ -57,7 +57,7 @@ fn run() {
 #[test]
 fn a_test_without_a_route_does_not_bind_pattern_names() {
     let source = r#"
-fn parse_age() => Int ? String { return .Ok(42) }
+fn parse_age() => Int ! String { return .Ok(42) }
 fn run() {
     matched :: parse_age() == .Ok(age)
     print(age)

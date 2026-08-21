@@ -30,7 +30,7 @@ impl Session.Close {
 
 pub fn close(session: ^Session) { abi.close(session.value) }
 
-pub fn open() Session ? RubyError {
+pub fn open() Session ! RubyError {
     handle :: abi.open()
     if abi.take_error() != 0 :> return Err(RubyError.NotRunning)
     return Ok(Session{value: handle})
@@ -38,7 +38,7 @@ pub fn open() Session ? RubyError {
 
 pub fn cancel(session: Session) { abi.cancel(session.value) }
 
-pub fn transform(session: Session, input: DataTree, deadline_ms: Int) DataTree ? RubyError {
+pub fn transform(session: Session, input: DataTree, deadline_ms: Int) DataTree ! RubyError {
     raw :: abi.transform(session.value, json.to_string(input), deadline_ms)
     code :: abi.take_error()
     if code == 1 :> return Err(RubyError.NotRunning)
@@ -52,7 +52,7 @@ pub fn transform(session: Session, input: DataTree, deadline_ms: Int) DataTree ?
     return Ok(response.field("value") ?? DataTree.Null)
 }
 
-pub fn fail_call(session: Session, input: DataTree, deadline_ms: Int) DataTree ? RubyError {
+pub fn fail_call(session: Session, input: DataTree, deadline_ms: Int) DataTree ! RubyError {
     raw :: abi.fail_call(session.value, json.to_string(input), deadline_ms)
     code :: abi.take_error()
     if code == 1 :> return Err(RubyError.NotRunning)
@@ -66,7 +66,7 @@ pub fn fail_call(session: Session, input: DataTree, deadline_ms: Int) DataTree ?
     return Ok(response.field("value") ?? DataTree.Null)
 }
 
-pub fn sleep_call(session: Session, input: DataTree, deadline_ms: Int) DataTree ? RubyError {
+pub fn sleep_call(session: Session, input: DataTree, deadline_ms: Int) DataTree ! RubyError {
     raw :: abi.sleep_call(session.value, json.to_string(input), deadline_ms)
     code :: abi.take_error()
     if code == 1 :> return Err(RubyError.NotRunning)

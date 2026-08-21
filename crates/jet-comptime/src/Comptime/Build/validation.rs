@@ -154,16 +154,19 @@ pub(super) fn validate_probe(name: &str, spec: &ProbeSpec) -> Result<(), BuildEr
 
 fn valid_header_name(header: &str) -> bool {
     !header.is_empty()
-        && !header.chars().any(|character| {
-            matches!(character, '\0' | '\n' | '\r' | '"' | '<' | '>')
-        })
+        && !header
+            .chars()
+            .any(|character| matches!(character, '\0' | '\n' | '\r' | '"' | '<' | '>'))
         && Path::new(header).is_relative()
         && Path::new(header)
             .components()
             .all(|component| matches!(component, Component::Normal(_)))
 }
 
-pub(super) fn validate_provenance(name: &str, provenance: &BuildProvenance) -> Result<(), BuildError> {
+pub(super) fn validate_provenance(
+    name: &str,
+    provenance: &BuildProvenance,
+) -> Result<(), BuildError> {
     match &provenance.source {
         ProvenanceSource::JetpackDependency(dep)
         | ProvenanceSource::AmbientRecord(dep)

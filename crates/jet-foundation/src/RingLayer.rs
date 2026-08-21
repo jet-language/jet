@@ -179,7 +179,10 @@ mod tests {
 
     #[test]
     fn helper_usage_keys_map_to_layer() {
-        assert_eq!(core_usage_layer("core.term::input"), Some(RuntimeLayer::Std));
+        assert_eq!(
+            core_usage_layer("core.term::input"),
+            Some(RuntimeLayer::Std)
+        );
         assert_eq!(
             core_usage_layer("core.math::__mathtypes__"),
             Some(RuntimeLayer::Core)

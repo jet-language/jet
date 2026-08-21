@@ -32,12 +32,11 @@ pub const CONFIG_SANDBOX_VERBS: &[&str] = &[
 /// a grant (unlike accepting the interactive prompt, which does).
 pub const TRUST_BYPASS_FLAG: &str = "--trust";
 
-/// U19: the env/dev trust store, `~/.jet/trust` (home-scoped: a user's trust
-/// decisions follow them across projects, unlike the project-local `.jet/`
-/// managed folder). Plain newline-separated `hash:`/`pattern:` lines, mirroring
-/// the plain-text convention `Jetpack::Recipe`'s adapter trust marker already
-/// uses. Lives under the same default dir as `~/.jet/config.jet`
-/// (`CONFIG_DEFAULT_DIR`).
+/// U19: the shared trust store, `~/.jet/trust` (home-scoped: a user's trust
+/// decisions follow them across projects). Plain newline-separated
+/// `hash:`/`pattern:` lines. `Jetpack::Recipe`'s adapter trust marker uses the
+/// same store and record format. Lives under the same default dir as
+/// `~/.jet/config.jet` (`CONFIG_DEFAULT_DIR`).
 pub const TRUST_FILE: &str = "trust";
 
 /// D-JPK-DISPATCH1=B (A1, card c9jetpackgates): `jet` execs the engine
@@ -154,29 +153,50 @@ pub const OPTION_PRIORITY_TIERS: &[&str] = &["Default", "Force", "Priority"];
 
 /// D-PERFBUDGET-GRAMMAR1=A: closed typed Budget vocabulary. Leading-dot enum
 /// cases use these exact spellings; no metric-key shorthand or aliases exist.
-pub const PERF_BUDGET_SCOPES: &[&str] =
-    &["Package", "Env", "Service", "Scene", "Test", "Target"];
+pub const PERF_BUDGET_SCOPES: &[&str] = &["Package", "Env", "Service", "Scene", "Test", "Target"];
 pub const PERF_BUDGET_PROVIDERS: &[&str] = &[
-    "BuildArtifact", "CompilerFacts", "AllocationProbe", "BenchMeasurement",
-    "ServiceProbe", "SceneProbe", "CompilerProbe",
+    "BuildArtifact",
+    "CompilerFacts",
+    "AllocationProbe",
+    "BenchMeasurement",
+    "ServiceProbe",
+    "SceneProbe",
+    "CompilerProbe",
 ];
 pub const PERF_BUDGET_METRICS: &[&str] = &[
-    "BinarySize", "ArtifactSize", "GeneratedUnsafe", "PublicApiItems",
-    "DependencyCount", "EffectCount", "AllocationCount", "AllocationBytes",
-    "StartupTime", "FrameTime", "Latency", "Throughput", "MemoryHighWater",
-    "BenchTime", "ServiceReadiness", "SceneAssetBytes", "DrawCalls", "CompileTime",
+    "BinarySize",
+    "ArtifactSize",
+    "GeneratedUnsafe",
+    "PublicApiItems",
+    "DependencyCount",
+    "EffectCount",
+    "AllocationCount",
+    "AllocationBytes",
+    "StartupTime",
+    "FrameTime",
+    "Latency",
+    "Throughput",
+    "MemoryHighWater",
+    "BenchTime",
+    "ServiceReadiness",
+    "SceneAssetBytes",
+    "DrawCalls",
+    "CompileTime",
 ];
 pub const PERF_BUDGET_PERCENTILES: &[&str] = &["P50", "P90", "P95", "P99", "P999"];
 pub const PERF_BUDGET_COMPARISONS: &[&str] = &["Absolute", "AbsoluteFrom", "RelativeTo"];
-pub const PERF_BUDGET_LIMITS: &[&str] =
-    &["AtMost", "AtLeast", "RegressionAtMost", "ImprovementAtLeast"];
+pub const PERF_BUDGET_LIMITS: &[&str] = &[
+    "AtMost",
+    "AtLeast",
+    "RegressionAtMost",
+    "ImprovementAtLeast",
+];
 pub const PERF_BUDGET_ENFORCEMENT: &[&str] = &["Fail", "Warn"];
 pub const PERF_BUDGET_SELECTIONS: &[&str] = &["Current", "All", "Only"];
 pub const PERF_BUDGET_TARGET_SELECTORS: &[&str] = &["Class", "Triple"];
 pub const PERF_BUDGET_TARGET_CLASSES: &[&str] =
     &["Native", "Web", "Freestanding", "Plugin", "OSImage"];
-pub const PERF_BUDGET_PROFILES: &[&str] =
-    &["Dev", "Release", "Small", "Test", "Bench", "Named"];
+pub const PERF_BUDGET_PROFILES: &[&str] = &["Dev", "Release", "Small", "Test", "Bench", "Named"];
 pub const PERF_BUDGET_UNIT_SUFFIXES: &[&str] =
     &["ns", "us", "ms", "s", "B", "KiB", "MiB", "GiB", "pct"];
 
@@ -222,8 +242,15 @@ pub const TYPE_FLEET: &str = "Fleet";
 /// D-ECO-OUTPUT-KINDS1 / D-SHAPE-OUTPUT-CALLABLE1: closed package result sum.
 pub const TYPE_OUTPUT: &str = "Output";
 pub const OUTPUT_KINDS: &[&str] = &[
-    "Library", "Executable", "Service", "Check", "Environment", "Image", "Bundle",
-    "System", "Fleet",
+    "Library",
+    "Executable",
+    "Service",
+    "Check",
+    "Environment",
+    "Image",
+    "Bundle",
+    "System",
+    "Fleet",
 ];
 pub const OUTPUT_FIELD_NAME: &str = "name";
 pub const OUTPUT_FIELD_ENTRY: &str = "entry";
@@ -356,8 +383,8 @@ pub const PACKAGE_FILE: &str = "package.jet";
 
 /// D-WORKSPACE1 (B) + D-WORKSPACE2 (A), ratified 2026-06-25: the monorepo index
 /// is a `module workspace { members: … }` written in `workspace.jet`, parallel to
-/// `env.jet`/`config.jet` — retiring the root `jetpack.toml` index so the whole
-/// project is one grammar (Jet). `members:` may run arbitrary `comptime`
+/// `env.jet`/`config.jet`; the old root `jetpack.toml` plane is retired so the
+/// whole project uses one grammar (Jet). `members:` may run arbitrary `comptime`
 /// (D-WORKSPACE1=B). Wired by the resolver (board card c156). `NS_WORKSPACE` is
 /// declared with the other reserved namespaces near `NS_ENV`.
 pub const WORKSPACE_FILE: &str = "workspace.jet";
@@ -613,8 +640,8 @@ pub const PAYLOAD_FILE: &str = "pkg.jet";
 /// -> U10 `pack.jet` -> D-JPK-FILES `pkg.jet`). Finding one of these instead
 /// of `PAYLOAD_FILE` is E1226, not a silent fallback — D-JPK-FILENAME2
 /// reconfirmed `pkg.jet` as final, so these never come back as aliases.
-/// `jetpack.toml` is a *different*, still-live file (D-JPK-FILES repo
-/// metadata: `[repo]`/`[sources]`) and does not belong on this list.
+/// `jetpack.toml` is a separate retired config plane and is rejected by the
+/// Jetpack CLI with E1225; it is not a manifest fallback.
 pub const STALE_MANIFEST_NAMES: &[&str] = &["pack.jet", "payload.jet", "jet.toml"];
 
 /// D-CONF-PLANE1/D-CONF-NAME1=A (ratified 2026-08-06): the top-level

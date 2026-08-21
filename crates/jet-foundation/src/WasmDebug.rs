@@ -27,7 +27,9 @@ pub fn code_section_payload_offset(wasm: &[u8]) -> Result<Option<usize>, WasmDeb
     }
     let mut at = 8usize;
     while at < wasm.len() {
-        let id = *wasm.get(at).ok_or(WasmDebugError::Malformed("truncated section id"))?;
+        let id = *wasm
+            .get(at)
+            .ok_or(WasmDebugError::Malformed("truncated section id"))?;
         at += 1;
         let size = read_uleb(wasm, &mut at)?;
         let payload_start = at;
@@ -82,7 +84,9 @@ fn custom_section_payloads<'a>(
     let mut at = 8usize;
     let mut found = Vec::new();
     while at < wasm.len() {
-        let id = *wasm.get(at).ok_or(WasmDebugError::Malformed("truncated section id"))?;
+        let id = *wasm
+            .get(at)
+            .ok_or(WasmDebugError::Malformed("truncated section id"))?;
         at += 1;
         let size = read_uleb(wasm, &mut at)?;
         let end = at

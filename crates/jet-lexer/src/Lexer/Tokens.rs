@@ -171,8 +171,8 @@ pub enum TokKind {
     ShrEq,
     /// S76 (2026-06-16): `#` separates the element type and size in `[T#N]`.
     Hash,
-    /// D-ONCE-AT1=D: retired compile-time mark `$`, kept for the E0003
-    /// migration diagnostic.
+    /// D-ONCE-DOLLAR1=B: `$` is the config-surface environment-read token;
+    /// the parser keeps it on the E0003 teaching path in ordinary source.
     Dollar,
     /// S5: `//` through end of line (M6 fmt preserves these).
     LineComment(String),

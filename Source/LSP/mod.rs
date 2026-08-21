@@ -636,7 +636,7 @@ fn run() {
         assert!(items.iter().any(|item| {
             item.label == "from_float"
                 && item.detail.as_deref()
-                    == Some("F32.from_float(value: Float) -> F32 ? String")
+                    == Some("F32.from_float(value: Float) -> F32 ! String")
         }));
     }
 
@@ -669,7 +669,7 @@ fn run() {
         assert!(token_items.iter().any(|item| {
             item.label == "from_u8"
                 && item.detail.as_deref()
-                    == Some("Token.from_u8(value: U8) -> Token ? String")
+                    == Some("Token.from_u8(value: U8) -> Token ! String")
         }));
         for (unit_site, _) in src.match_indices("Credit.from_int") {
             let unit_items = compute_completions(

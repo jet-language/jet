@@ -1044,6 +1044,14 @@ deno run --allow-net=api.stripe.com --allow-read=./data app.ts
   - `C`: It guarantees a fifth shape the moment agent grants land, which is the pattern that produced this ballot.
 - **Trade-off:** Every in-repo manifest migrates once and external examples in docs are rewritten. Accepted: greenfield law prefers one canonical current form over parallel spellings.
 
+#### Implementation guard
+
+Implementation follow-up #1682 keeps adapter-recipe trust in the canonical
+trust store. `Recipe::trust_first_build` uses the store's `hash:<sha256>` record
+through `Trust::grant_hash`; it does not create a project-local trust file.
+Future trust consumers must use this record or amend D-AUTHORITY-MANIFEST1 with
+a different fact name and format.
+
 #### Review passes
 
 - **base:** The first draft compared one merged block, shared-schema-hidden-keys, and status quo, recommending the merged block for reviewability.

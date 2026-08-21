@@ -1,6 +1,6 @@
 use super::{
-    AccessConvention, BinMatchPart, BindPattern, CallablePolicyChain, CtValue, EnumLitArg, Func, IndexKind, OrFallback, Param,
-    Pattern, Stmt, StrMatchPart, TryConvert, Type,
+    AccessConvention, BinMatchPart, BindPattern, CallablePolicyChain, CtValue, EnumLitArg, Func,
+    IndexKind, OrFallback, Param, Pattern, Stmt, StrMatchPart, TryConvert, Type,
 };
 use crate::{Diagnostics::Span, Syntax};
 
@@ -318,7 +318,7 @@ pub struct LambdaMeta {
     /// D-CONC-SPAWN1: the body contains a `?` that sema typed against the
     /// enclosing function's fallible return. A spawned closure with this flag
     /// early-returns that error, so every engine must give the closure a
-    /// `Result` carrier (`Task<T ? E>`), or the rendered Rust `?` sits inside
+    /// `Result` carrier (`Task<T ! E>`), or the rendered Rust `?` sits inside
     /// a `()` closure and rustc rejects the generated code (I2).
     pub fallible_propagation: bool,
 }
@@ -652,9 +652,9 @@ pub enum Expr {
         pattern: Pattern,
         span: Span,
     },
-    /// S34: `Ok(expr)` — success value for `T ? E`.
+    /// S34: `Ok(expr)` — success value for `T ! E`.
     Ok(Box<Expr>, Span),
-    /// S34: `Err(expr)` — failure value for `T ? E`.
+    /// S34: `Err(expr)` — failure value for `T ! E`.
     Err(Box<Expr>, Span),
     /// S7: postfix `?` — propagate a fallible value.
     /// S7/D-FAIL-CTX1: `expr?` — propagates failure and may carry a lazy
@@ -933,7 +933,13 @@ impl Expr {
                     walk(base, f);
                     walk(index, f);
                 }
-                Expr::Slice { base, start, end, range, .. } => {
+                Expr::Slice {
+                    base,
+                    start,
+                    end,
+                    range,
+                    ..
+                } => {
                     walk(base, f);
                     walk(start, f);
                     walk(end, f);
@@ -972,11 +978,15 @@ impl Expr {
                     }
                 }
                 Expr::Tainted(inner, _, _) => walk(inner, f),
-                Expr::PatternTest { subject, pattern, .. } => {
+                Expr::PatternTest {
+                    subject, pattern, ..
+                } => {
                     walk(subject, f);
                     walk_pattern(pattern, f);
                 }
-                Expr::OrFallback { value, fallback, .. } => {
+                Expr::OrFallback {
+                    value, fallback, ..
+                } => {
                     walk(value, f);
                     walk_fallback(fallback, f);
                 }

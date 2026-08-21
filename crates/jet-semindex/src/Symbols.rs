@@ -817,7 +817,7 @@ fn distinct_conversion_symbols(
                 kind: SemanticSymbolKind::Member,
                 signature: format!(
                     "{owner}.{method}(value: {source}) -> {owner}{}",
-                    if fallible { " ? String" } else { "" }
+                    if fallible { " ! String" } else { "" }
                 ),
                 summary: format!("Converts {source} to {owner}."),
                 examples: Vec::new(),
@@ -1123,13 +1123,13 @@ fn language_symbols() -> Vec<SemanticSymbol> {
     for (owner, signature, summary, example) in [
         (
             "Int",
-            "Int.parse(text: String) -> Int ? ParseError",
+            "Int.parse(text: String) -> Int ! ParseError",
             "Parses text as an Int.",
             "Int.parse(text)?",
         ),
         (
             "Float",
-            "Float.parse(text: String) -> Float ? ParseError",
+            "Float.parse(text: String) -> Float ! ParseError",
             "Parses text as a Float.",
             "Float.parse(text)?",
         ),
@@ -1163,7 +1163,7 @@ fn language_symbols() -> Vec<SemanticSymbol> {
                 .flatten()
                 .expect("numeric conversion catalog entry has a return type");
             let result = match ret {
-                AST::Type::Result { .. } => format!("{target_name} ? String"),
+                AST::Type::Result { .. } => format!("{target_name} ! String"),
                 _ => target_name.to_string(),
             };
             let qualified_name = format!("{target_name}.{method}");
@@ -1187,12 +1187,12 @@ fn language_symbols() -> Vec<SemanticSymbol> {
 }
 
 const BUILTIN_METHODS: &[(&str, &str, &str, Option<&str>)] = &[
-    ("Duration.milliseconds", "Duration.milliseconds(value: Int | Float) -> Duration ? RangeError", "Checked runtime duration in milliseconds.", None),
-    ("Duration.seconds", "Duration.seconds(value: Int | Float) -> Duration ? RangeError", "Checked runtime duration in seconds.", None),
-    ("Duration.minutes", "Duration.minutes(value: Int | Float) -> Duration ? RangeError", "Checked runtime duration in minutes.", None),
+    ("Duration.milliseconds", "Duration.milliseconds(value: Int | Float) -> Duration ! RangeError", "Checked runtime duration in milliseconds.", None),
+    ("Duration.seconds", "Duration.seconds(value: Int | Float) -> Duration ! RangeError", "Checked runtime duration in seconds.", None),
+    ("Duration.minutes", "Duration.minutes(value: Int | Float) -> Duration ! RangeError", "Checked runtime duration in minutes.", None),
     ("Clock.system", "Clock.system() -> Clock #(Time)", "Explicit monotonic production clock.", None),
-    ("Duration.hours", "Duration.hours(value: Int | Float) -> Duration ? RangeError", "Checked runtime duration in hours.", None),
-    ("Duration.in", "Duration.in(unit: DurationUnit) -> Int ? RangeError", "Reads a checked whole duration unit.", Some("duration.in(.Milliseconds)?")),
+    ("Duration.hours", "Duration.hours(value: Int | Float) -> Duration ! RangeError", "Checked runtime duration in hours.", None),
+    ("Duration.in", "Duration.in(unit: DurationUnit) -> Int ! RangeError", "Reads a checked whole duration unit.", Some("duration.in(.Milliseconds)?")),
     ("List.len", "List.len() => Int", "Number of items.", Some("items.len()")),
     ("List.is_empty", "List.is_empty() => Bool", "True when there are no items.", None),
     ("List.push", "List.push(item: T)", "Appends an item to the end.", None),

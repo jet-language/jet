@@ -15,16 +15,25 @@ pub(super) fn as_data_groups(
     span: Span,
 ) -> Result<Vec<data_kernel::jet_std::DataGroup>, Diagnostic> {
     let CtValue::List(items) = v else {
-        return Err(unsupported("core.data: argument must be `[DataGroup]`", span));
+        return Err(unsupported(
+            "core.data: argument must be `[DataGroup]`",
+            span,
+        ));
     };
     items
         .iter()
         .map(|item| {
             let CtValue::Struct { type_name, fields } = item else {
-                return Err(unsupported("core.data: argument must be `[DataGroup]`", span));
+                return Err(unsupported(
+                    "core.data: argument must be `[DataGroup]`",
+                    span,
+                ));
             };
             if type_name != "DataGroup" {
-                return Err(unsupported("core.data: argument must be `[DataGroup]`", span));
+                return Err(unsupported(
+                    "core.data: argument must be `[DataGroup]`",
+                    span,
+                ));
             }
             let field = |name: &str| {
                 fields
@@ -81,7 +90,10 @@ pub(super) fn as_data_line_options(
     };
     let string = |name: &str| match field(name)? {
         CtValue::Str(value) => Ok(value),
-        _ => Err(unsupported("DataLineOptions string field has the wrong type", span)),
+        _ => Err(unsupported(
+            "DataLineOptions string field has the wrong type",
+            span,
+        )),
     };
     let markers = match field("markers")? {
         CtValue::Bool(value) => value,
@@ -90,7 +102,12 @@ pub(super) fn as_data_line_options(
     let reference = match field("reference")? {
         CtValue::Present(value) => Ok(as_float(&value, span)?),
         CtValue::Failed(CtReport::Clean(_)) => Err(jet_foundation::Outcome::JetAbsent),
-        _ => return Err(unsupported("DataLineOptions `reference` must be Float?", span)),
+        _ => {
+            return Err(unsupported(
+                "DataLineOptions `reference` must be Float?",
+                span,
+            ))
+        }
     };
     Ok(data_kernel::jet_std::DataLineOptions {
         title: string("title")?,
@@ -114,7 +131,10 @@ fn data_checked_surface() -> bool {
 /// One `DataError` value for every `core.data` failure, built from the kernel's
 /// own error — comptime never writes its own reason text.
 pub(super) fn data_error_value(error: &data_kernel::jet_std::DataError) -> CtValue {
-    let index = |slot: &jet_foundation::Outcome::JetOutcome<i64, jet_foundation::Outcome::JetAbsent>| match slot {
+    let index = |slot: &jet_foundation::Outcome::JetOutcome<
+        i64,
+        jet_foundation::Outcome::JetAbsent,
+    >| match slot {
         Ok(value) => CtValue::Present(Box::new(CtValue::Int(*value))),
         Err(_) => CtValue::absent(Type::Int),
     };
@@ -129,7 +149,10 @@ pub(super) fn data_error_value(error: &data_kernel::jet_std::DataError) -> CtVal
                     args: Vec::new(),
                 },
             ),
-            ("operation".to_string(), CtValue::Str(error.operation.clone())),
+            (
+                "operation".to_string(),
+                CtValue::Str(error.operation.clone()),
+            ),
             ("row".to_string(), index(&error.row)),
             ("column".to_string(), index(&error.column)),
             ("index".to_string(), index(&error.index)),

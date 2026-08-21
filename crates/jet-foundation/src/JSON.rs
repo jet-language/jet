@@ -89,8 +89,8 @@ pub fn read_protocol_content_length(reader: &mut impl BufRead) -> io::Result<Opt
     loop {
         let remaining = MAX_PROTOCOL_HEADER_BYTES.saturating_sub(total);
         let mut line = String::new();
-        let read = std::io::Read::take(&mut *reader, (remaining + 1) as u64)
-            .read_line(&mut line)?;
+        let read =
+            std::io::Read::take(&mut *reader, (remaining + 1) as u64).read_line(&mut line)?;
         if read == 0 {
             return Ok(None);
         }
@@ -308,7 +308,9 @@ impl<'a> JSONParser<'a> {
             }
             if c == '\\' {
                 self.bump();
-                let esc = self.bump().ok_or_else(|| "unterminated string".to_string())?;
+                let esc = self
+                    .bump()
+                    .ok_or_else(|| "unterminated string".to_string())?;
                 out.push(match esc {
                     '"' => '"',
                     '\\' => '\\',
@@ -463,7 +465,9 @@ fn is_known_provider_noise(line: &str) -> bool {
         && store.ends_with("/store")
         && !path.contains('"')
         && link.len() == 52
-        && link.chars().all(|c| "0123456789abcdfghijklmnpqrsvwxyz".contains(c))
+        && link
+            .chars()
+            .all(|c| "0123456789abcdfghijklmnpqrsvwxyz".contains(c))
 }
 
 pub fn parse_lenient(input: &str) -> Result<FilteredJson, String> {
@@ -496,9 +500,17 @@ mod tests {
         let parsed = parse_json(r#"{"text":"caf\u00e9 \ud83d\ude80","n":-1.25e+2}"#);
         assert!(parsed.is_ok());
 
-        let deepest = format!("{}0{}", "[".repeat(MAX_JSON_DEPTH), "]".repeat(MAX_JSON_DEPTH));
+        let deepest = format!(
+            "{}0{}",
+            "[".repeat(MAX_JSON_DEPTH),
+            "]".repeat(MAX_JSON_DEPTH)
+        );
         assert!(parse_json(&deepest).is_ok());
-        let too_deep = format!("{}0{}", "[".repeat(MAX_JSON_DEPTH + 1), "]".repeat(MAX_JSON_DEPTH + 1));
+        let too_deep = format!(
+            "{}0{}",
+            "[".repeat(MAX_JSON_DEPTH + 1),
+            "]".repeat(MAX_JSON_DEPTH + 1)
+        );
         assert!(parse_json(&too_deep).is_err());
     }
 
@@ -552,7 +564,10 @@ mod tests {
         let frame = format!("{}\r\n", "X: y\r\n".repeat(MAX_PROTOCOL_HEADER_COUNT + 1));
         let error = read_protocol_content_length(&mut std::io::Cursor::new(frame)).unwrap_err();
         assert_eq!(error.kind(), io::ErrorKind::InvalidData);
-        assert_eq!(error.to_string(), "protocol headers exceed the 64-field limit");
+        assert_eq!(
+            error.to_string(),
+            "protocol headers exceed the 64-field limit"
+        );
     }
 
     #[test]

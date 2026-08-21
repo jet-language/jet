@@ -5,6 +5,8 @@ repo="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 fixture="$repo/tests/fixtures/nix-compat/authority-escape/Cargo.toml"
 build_fixture="$repo/tests/fixtures/nix-compat/build-script-escape/Cargo.toml"
 manifest="$repo/crates/jet-nix-eval/Cargo.toml"
+breadth="$repo/tests/fixtures/nix-compat/breadth.json"
+breadth_verifier="$repo/scripts/agent/verify-nix-eval-breadth.js"
 # card 1640: fixture builds and logs never live inside target/ — bounded
 # scratch, cleaned on exit.
 scratch="$(mktemp -d "${TMPDIR:-/tmp}/nix-eval-stopline.XXXXXX")"
@@ -18,6 +20,16 @@ if ! grep -Eq '^build[[:space:]]*=[[:space:]]*false[[:space:]]*$' "$manifest"; t
 fi
 if [ -e "$repo/crates/jet-nix-eval/build.rs" ]; then
   echo "error: native Nix evaluator cannot contain a build script" >&2
+  exit 1
+fi
+for required in '"fuzz_seeds"' '"memory_bytes": 16777216' '"latency_micros": 1000000'; do
+  if ! grep -Fq "$required" "$breadth"; then
+    echo "error: native Nix evaluator breadth fixture is missing $required" >&2
+    exit 1
+  fi
+done
+if ! grep -Fq 'function mutate' "$breadth_verifier"; then
+  echo "error: native Nix evaluator breadth verifier has no seeded mutation path" >&2
   exit 1
 fi
 if cargo metadata --manifest-path "$manifest" --no-deps --format-version 1 \

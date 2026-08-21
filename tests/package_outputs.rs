@@ -344,7 +344,7 @@ fn computed_build_contribution_records_lock_and_matches_explain_golden() {
 /// The actions declare no capabilities, so this package reaches graph
 /// validation without an `#Impure` gate or an execution grant, and the cycle
 /// is rejected before any action is spawned.
-const ACTION_CYCLE_BUILD: &str = r#"fn build(b: BuildContext) => BuildPlan ? {
+const ACTION_CYCLE_BUILD: &str = r#"fn build(b: BuildContext) => BuildPlan ! {
     alpha :: b.action("alpha", ["gamma.stamp"], ["alpha.stamp"], ["sh", "-c", "true"], [])?
     beta :: b.action("beta", ["alpha.stamp"], ["beta.stamp"], ["sh", "-c", "true"], [])?
     gamma :: b.action("gamma", ["beta.stamp"], ["gamma.stamp"], ["sh", "-c", "true"], [])?

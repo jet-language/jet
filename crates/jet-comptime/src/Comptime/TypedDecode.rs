@@ -16,8 +16,8 @@
 
 use std::collections::{BTreeSet, HashMap};
 
-use crate::AST::{CtFloat, CtKey, Field, Marker, MigrationDecl, MigrationOp, StructDef, Type};
 use crate::Diagnostics::{Diagnostic, Span};
+use crate::AST::{CtFloat, CtKey, Field, Marker, MigrationDecl, MigrationOp, StructDef, Type};
 
 use super::Diagnostics::unsupported;
 use super::Interpreter::Interp;
@@ -151,9 +151,11 @@ fn migration_wire_key(style: Option<&str>, s: &StructDef, name: &str) -> String 
 
 fn variant_of(tree: &CtValue) -> Option<(&str, Option<&CtValue>)> {
     match tree {
-        CtValue::Enum { type_name, variant, args } if type_name == "JSON" => {
-            Some((variant.as_str(), args.first().map(|(_, v)| v)))
-        }
+        CtValue::Enum {
+            type_name,
+            variant,
+            args,
+        } if type_name == "JSON" => Some((variant.as_str(), args.first().map(|(_, v)| v))),
         CtValue::Bytes(_) => Some(("Bytes", Some(tree))),
         _ => None,
     }
@@ -185,9 +187,10 @@ fn object_pairs(tree: &CtValue) -> Option<Vec<(String, CtValue)>> {
 }
 fn object_get<'a>(tree: &'a CtValue, key: &str) -> Option<&'a CtValue> {
     match json_payload(tree, "Object") {
-        Some(CtValue::Struct { type_name, fields }) if type_name == "JSONObject" => {
-            fields.iter().find(|(field, _)| field == key).map(|(_, value)| value)
-        }
+        Some(CtValue::Struct { type_name, fields }) if type_name == "JSONObject" => fields
+            .iter()
+            .find(|(field, _)| field == key)
+            .map(|(_, value)| value),
         Some(CtValue::Map(m)) => m.get(&CtKey::Str(key.to_string())),
         _ => None,
     }
@@ -202,7 +205,9 @@ fn rebuild_object(pairs: Vec<(String, CtValue)>) -> CtValue {
     )
 }
 fn object_key_set(tree: &CtValue) -> BTreeSet<String> {
-    object_pairs(tree).map(|p| p.into_iter().map(|(k, _)| k).collect()).unwrap_or_default()
+    object_pairs(tree)
+        .map(|p| p.into_iter().map(|(k, _)| k).collect())
+        .unwrap_or_default()
 }
 fn text_cell(cell: String) -> CtValue {
     json_variant("Text", Some(CtValue::Str(cell)))
@@ -230,20 +235,24 @@ fn key_to_string(key: &CtKey) -> String {
 /// wire before re-decoding. Struct encoding recurses using the type's own
 /// field wire keys (so a nested-struct `add`/`change` stays consistent with
 /// how that type would normally serialize).
-fn encode_ct_value(v: &CtValue, structs: &std::collections::HashMap<String, &StructDef>) -> CtValue {
+fn encode_ct_value(
+    v: &CtValue,
+    structs: &std::collections::HashMap<String, &StructDef>,
+) -> CtValue {
     match v {
         CtValue::Int(n) => json_variant("Int", Some(CtValue::Int(*n))),
         CtValue::BigInt(n) => json_variant("Int", Some(CtValue::BigInt(n.clone()))),
-        CtValue::Float(value) => json_variant(
-            "Float",
-            Some(CtValue::Float(CtFloat::f64(value.as_f64()))),
-        ),
+        CtValue::Float(value) => {
+            json_variant("Float", Some(CtValue::Float(CtFloat::f64(value.as_f64()))))
+        }
         CtValue::Bool(b) => json_variant("Bool", Some(CtValue::Bool(*b))),
         CtValue::Str(s) => json_variant("Text", Some(CtValue::Str(s.clone()))),
         CtValue::Char(c) => json_variant("Text", Some(CtValue::Str(c.to_string()))),
         CtValue::List(xs) => json_variant(
             "Array",
-            Some(CtValue::List(xs.iter().map(|x| encode_ct_value(x, structs)).collect())),
+            Some(CtValue::List(
+                xs.iter().map(|x| encode_ct_value(x, structs)).collect(),
+            )),
         ),
         CtValue::Present(inner) => encode_ct_value(inner, structs),
         CtValue::Failed(CtReport::Clean(_)) => json_variant("Null", None),
@@ -262,9 +271,19 @@ fn encode_ct_value(v: &CtValue, structs: &std::collections::HashMap<String, &Str
                     (key, encode_ct_value(v, structs))
                 })
                 .collect();
-            json_variant("Object", Some(CtValue::Map(entries.into_iter().map(|(k, v)| (CtKey::Str(k), v)).collect())))
+            json_variant(
+                "Object",
+                Some(CtValue::Map(
+                    entries
+                        .into_iter()
+                        .map(|(k, v)| (CtKey::Str(k), v))
+                        .collect(),
+                )),
+            )
         }
-        CtValue::Enum { type_name, args, .. } if type_name.starts_with("__JetUnion_") => args
+        CtValue::Enum {
+            type_name, args, ..
+        } if type_name.starts_with("__JetUnion_") => args
             .first()
             .map(|(_, value)| encode_ct_value(value, structs))
             .unwrap_or_else(|| json_variant("Null", None)),
@@ -308,10 +327,9 @@ fn typed_union_wire_shapes(
             .contains_key(name)
             .then_some(vec!["Object"])
             .unwrap_or_default(),
-        Type::Result { .. }
-        | Type::Fn { .. }
-        | Type::TraitObject(_)
-        | Type::Measure(_) => Vec::new(),
+        Type::Result { .. } | Type::Fn { .. } | Type::TraitObject(_) | Type::Measure(_) => {
+            Vec::new()
+        }
     };
     shapes.sort_unstable();
     shapes.dedup();
@@ -332,14 +350,16 @@ fn decode_int(tree: &CtValue) -> Result<CtValue, CtValue> {
                 .map(super::Builtins::exact_int_value)
                 .map_err(|_| decode_error(format!("expected Int, found number {text}")))
         }
-        Some(("TypedText", Some(CtValue::Str(text)))) => Err(decode_error(format!(
-            "expected Int, found text {:?}",
-            text
-        ))),
+        Some(("TypedText", Some(CtValue::Str(text)))) => {
+            Err(decode_error(format!("expected Int, found text {:?}", text)))
+        }
         Some(("Text", Some(CtValue::Str(text)))) => crate::Numeric::CtBigInt::from_str(text.trim())
             .map(super::Builtins::exact_int_value)
             .map_err(|_| decode_error(format!("expected Int, found text {:?}", text))),
-        _ => Err(decode_error(format!("expected Int, found {}", datatree_kind_for(tree)))),
+        _ => Err(decode_error(format!(
+            "expected Int, found {}",
+            datatree_kind_for(tree)
+        ))),
     }
 }
 fn decode_float(tree: &CtValue) -> Result<CtValue, CtValue> {
@@ -348,11 +368,11 @@ fn decode_float(tree: &CtValue) -> Result<CtValue, CtValue> {
             Ok(CtValue::Float(CtFloat::f64(value.as_f64())))
         }
         Some(("Int", Some(CtValue::Int(n)))) => Ok(CtValue::Float(CtFloat::f64(*n as f64))),
-        Some(("Number", Some(CtValue::Str(text))))
-        | Some(("Text", Some(CtValue::Str(text)))) => {
-            let value = text.trim().parse::<f64>().map_err(|_| {
-                decode_error(format!("expected Float, found text {:?}", text))
-            })?;
+        Some(("Number", Some(CtValue::Str(text)))) | Some(("Text", Some(CtValue::Str(text)))) => {
+            let value = text
+                .trim()
+                .parse::<f64>()
+                .map_err(|_| decode_error(format!("expected Float, found text {:?}", text)))?;
             if value.is_finite() {
                 Ok(CtValue::Float(CtFloat::f64(value)))
             } else {
@@ -363,7 +383,10 @@ fn decode_float(tree: &CtValue) -> Result<CtValue, CtValue> {
             "expected Float, found text {:?}",
             text
         ))),
-        _ => Err(decode_error(format!("expected Float, found {}", datatree_kind_for(tree)))),
+        _ => Err(decode_error(format!(
+            "expected Float, found {}",
+            datatree_kind_for(tree)
+        ))),
     }
 }
 fn decode_bool(tree: &CtValue) -> Result<CtValue, CtValue> {
@@ -376,9 +399,15 @@ fn decode_bool(tree: &CtValue) -> Result<CtValue, CtValue> {
         Some(("Text", Some(CtValue::Str(text)))) => match text.trim() {
             "true" => Ok(CtValue::Bool(true)),
             "false" => Ok(CtValue::Bool(false)),
-            _ => Err(decode_error(format!("expected Bool, found text {:?}", text))),
+            _ => Err(decode_error(format!(
+                "expected Bool, found text {:?}",
+                text
+            ))),
         },
-        _ => Err(decode_error(format!("expected Bool, found {}", datatree_kind_for(tree)))),
+        _ => Err(decode_error(format!(
+            "expected Bool, found {}",
+            datatree_kind_for(tree)
+        ))),
     }
 }
 fn decode_string(tree: &CtValue) -> Result<CtValue, CtValue> {
@@ -392,15 +421,23 @@ fn decode_string(tree: &CtValue) -> Result<CtValue, CtValue> {
         Some(("Int", Some(CtValue::BigInt(n)))) => Ok(CtValue::Str(n.to_string_rep())),
         Some(("Float", Some(CtValue::Float(f)))) => Ok(CtValue::Str(format!("{:?}", f))),
         Some(("Bool", Some(CtValue::Bool(b)))) => Ok(CtValue::Str(b.to_string())),
-        _ => Err(decode_error(format!("expected Text, found {}", datatree_kind_for(tree)))),
+        _ => Err(decode_error(format!(
+            "expected Text, found {}",
+            datatree_kind_for(tree)
+        ))),
     }
 }
 fn decode_char(tree: &CtValue) -> Result<CtValue, CtValue> {
-    let CtValue::Str(s) = decode_string(tree)? else { unreachable!() };
+    let CtValue::Str(s) = decode_string(tree)? else {
+        unreachable!()
+    };
     let mut it = s.chars();
     match (it.next(), it.next()) {
         (Some(c), None) => Ok(CtValue::Char(c)),
-        _ => Err(decode_error(format!("expected a single Char, found {:?}", s))),
+        _ => Err(decode_error(format!(
+            "expected a single Char, found {:?}",
+            s
+        ))),
     }
 }
 
@@ -435,17 +472,13 @@ fn decode_f32(tree: &CtValue) -> Result<CtValue, CtValue> {
     let value = match variant_of(tree) {
         Some(("Float", Some(CtValue::Float(value)))) => value.as_f64(),
         Some(("Int", Some(CtValue::Int(value)))) => *value as f64,
-        Some(("Number", Some(CtValue::Str(text))))
-        | Some(("Text", Some(CtValue::Str(text)))) => {
-            text.trim().parse::<f64>().map_err(|_| {
-                decode_error(format!("expected F32, found text {:?}", text))
-            })?
+        Some(("Number", Some(CtValue::Str(text)))) | Some(("Text", Some(CtValue::Str(text)))) => {
+            text.trim()
+                .parse::<f64>()
+                .map_err(|_| decode_error(format!("expected F32, found text {:?}", text)))?
         }
         Some(("TypedText", Some(CtValue::Str(text)))) => {
-            return Err(decode_error(format!(
-                "expected F32, found text {:?}",
-                text
-            )))
+            return Err(decode_error(format!("expected F32, found text {:?}", text)))
         }
         _ => {
             return Err(decode_error(format!(
@@ -499,25 +532,25 @@ pub(super) fn typed_decode_builtin_value(
     match ty {
         Type::Int => Some(decode_int(tree)),
         Type::IntN { signed, bits } => Some(decode_int_n(tree, *signed, *bits, &ty.name())),
-        Type::InlineRange { base, lo, hi } => typed_decode_builtin_value(base, tree).map(|result| {
-            result.and_then(|value| match value {
-                CtValue::Int(n) => match inline_range_semantics::jet_inline_range_from_int(
-                    n, *lo, *hi,
-                ) {
-                    Ok(value) => Ok(CtValue::Int(value)),
-                    Err(reason) => Err(decode_error(reason)),
-                },
-                other => Ok(other),
+        Type::InlineRange { base, lo, hi } => {
+            typed_decode_builtin_value(base, tree).map(|result| {
+                result.and_then(|value| match value {
+                    CtValue::Int(n) => {
+                        match inline_range_semantics::jet_inline_range_from_int(n, *lo, *hi) {
+                            Ok(value) => Ok(CtValue::Int(value)),
+                            Err(reason) => Err(decode_error(reason)),
+                        }
+                    }
+                    other => Ok(other),
+                })
             })
-        }),
+        }
         Type::Float => Some(decode_float(tree)),
         Type::Float32 => Some(decode_f32(tree)),
         Type::Bool => Some(decode_bool(tree)),
         Type::String => Some(decode_string(tree)),
         Type::Char => Some(decode_char(tree)),
-        Type::Named(name) if name == crate::Syntax::TYPE_DECIMAL => {
-            Some(decode_decimal(tree))
-        }
+        Type::Named(name) if name == crate::Syntax::TYPE_DECIMAL => Some(decode_decimal(tree)),
         Type::Option(inner) => match variant_of(tree) {
             Some(("Null", _)) => Some(Ok(CtValue::absent((**inner).clone()))),
             _ => typed_decode_builtin_value(inner, tree)
@@ -607,7 +640,11 @@ impl<'a> Interp<'a> {
     /// then fall back to the scalar/container representation used by the
     /// typed tree walker. This is the interpreter-side marshalling adapter:
     /// codec policy remains in the Jet method body, just as it does for AOT.
-    pub(super) fn encode_value(&mut self, value: &CtValue, span: Span) -> Result<CtValue, Diagnostic> {
+    pub(super) fn encode_value(
+        &mut self,
+        value: &CtValue,
+        span: Span,
+    ) -> Result<CtValue, Diagnostic> {
         if let Some(type_name) = value_type_name(value) {
             if let Some(func) = self
                 .methods
@@ -658,13 +695,13 @@ impl<'a> Interp<'a> {
                     type_name: "JSONObject".to_string(),
                     fields: fields
                         .iter()
-                        .map(|(name, value)| {
-                            Ok((name.clone(), self.encode_value(value, span)?))
-                        })
+                        .map(|(name, value)| Ok((name.clone(), self.encode_value(value, span)?)))
                         .collect::<Result<Vec<_>, Diagnostic>>()?,
                 }),
             ),
-            CtValue::Enum { type_name, args, .. } if type_name.starts_with("__JetUnion_") => {
+            CtValue::Enum {
+                type_name, args, ..
+            } if type_name.starts_with("__JetUnion_") => {
                 let Some((_, value)) = args.first() else {
                     return Err(unsupported("this union has no payload", span));
                 };
@@ -700,25 +737,32 @@ impl<'a> Interp<'a> {
         }
         let mut frame = std::collections::HashMap::new();
         frame.insert(func.params[0].name.clone(), tree.clone());
-        Some(match self.call_func(&format!("{name}.decode"), func, frame) {
-            Ok(CtValue::Present(value)) => Ok(*value),
-            Ok(CtValue::Failed(CtReport::Told(error))) => Err(*error),
-            Ok(CtValue::Failed(CtReport::Clean(_))) => {
-                Err(decode_error(format!("`{name}.decode` returned no value")))
-            }
-            Ok(other) => Err(decode_error(format!(
-                "`{name}.decode` returned {}",
-                other.jet_show()
-            ))),
-            Err(diagnostic) => Err(decode_error(diagnostic.what)),
-        })
+        Some(
+            match self.call_func(&format!("{name}.decode"), func, frame) {
+                Ok(CtValue::Present(value)) => Ok(*value),
+                Ok(CtValue::Failed(CtReport::Told(error))) => Err(*error),
+                Ok(CtValue::Failed(CtReport::Clean(_))) => {
+                    Err(decode_error(format!("`{name}.decode` returned no value")))
+                }
+                Ok(other) => Err(decode_error(format!(
+                    "`{name}.decode` returned {}",
+                    other.jet_show()
+                ))),
+                Err(diagnostic) => Err(decode_error(diagnostic.what)),
+            },
+        )
     }
 
     /// The non-migrating decode: mirrors a type's plain `jet_decode` walk.
     /// Recurses through Option/List and nested user structs; the top-level
     /// The typed `decode<T>` entry point (`typed_decode_top`) is what
     /// additionally tries the `#PublishedSchema` migration chain on failure.
-    pub(super) fn typed_decode_value(&mut self, ty: &Type, tree: &CtValue, span: Span) -> Result<CtValue, CtValue> {
+    pub(super) fn typed_decode_value(
+        &mut self,
+        ty: &Type,
+        tree: &CtValue,
+        span: Span,
+    ) -> Result<CtValue, CtValue> {
         if let Some(decoded) = typed_decode_builtin_value(ty, tree) {
             return decoded;
         }
@@ -820,7 +864,12 @@ impl<'a> Interp<'a> {
         }
     }
 
-    fn typed_decode_struct(&mut self, name: &str, tree: &CtValue, span: Span) -> Result<CtValue, CtValue> {
+    fn typed_decode_struct(
+        &mut self,
+        name: &str,
+        tree: &CtValue,
+        span: Span,
+    ) -> Result<CtValue, CtValue> {
         let Some(sdef) = self.structs.get(name).copied() else {
             return Err(decode_error(format!(
                 "comptime has no `{}` struct registered to decode into",
@@ -832,7 +881,10 @@ impl<'a> Interp<'a> {
         }
         let style = container_rename_all(&sdef.serde_markers);
         let style = style.as_deref();
-        let deny = serde_has(&sdef.serde_markers, crate::Syntax::MARKER_DENY_UNKNOWN_FIELDS);
+        let deny = serde_has(
+            &sdef.serde_markers,
+            crate::Syntax::MARKER_DENY_UNKNOWN_FIELDS,
+        );
         let has_flatten = sdef
             .fields
             .iter()
@@ -873,10 +925,7 @@ impl<'a> Interp<'a> {
                 let v = match self.typed_decode_value(&f.ty, tree, span) {
                     Ok(value) => value,
                     Err(error) => {
-                        extend_decode_errors(
-                            &mut errors,
-                            decode_error_under(&f.name, error),
-                        );
+                        extend_decode_errors(&mut errors, decode_error_under(&f.name, error));
                         zero_value(&f.ty)
                     }
                 };
@@ -888,17 +937,16 @@ impl<'a> Interp<'a> {
                 Some(cell) => match self.typed_decode_value(&f.ty, cell, span) {
                     Ok(value) => value,
                     Err(error) => {
-                        extend_decode_errors(
-                            &mut errors,
-                            decode_error_under(&key, error),
-                        );
+                        extend_decode_errors(&mut errors, decode_error_under(&key, error));
                         zero_value(&f.ty)
                     }
                 },
                 None => {
                     if let Type::Option(inner) = &f.ty {
                         CtValue::absent((**inner).clone())
-                    } else if serde_marker(&f.serde_markers, crate::Syntax::MARKER_DEFAULT).is_some() {
+                    } else if serde_marker(&f.serde_markers, crate::Syntax::MARKER_DEFAULT)
+                        .is_some()
+                    {
                         self.field_default_value(f, span)
                     } else {
                         errors.push(CtValue::Struct {
@@ -923,20 +971,31 @@ impl<'a> Interp<'a> {
         if !errors.is_empty() {
             return Err(CtValue::List(errors));
         }
-        let decoded = CtValue::Struct { type_name: name.to_string(), fields: out_fields };
-        if let Some(validate) = self.methods.get(&(name.to_string(), "validate".to_string())).copied() {
+        let decoded = CtValue::Struct {
+            type_name: name.to_string(),
+            fields: out_fields,
+        };
+        if let Some(validate) = self
+            .methods
+            .get(&(name.to_string(), "validate".to_string()))
+            .copied()
+        {
             let Some(param) = validate.params.first() else {
-                return Err(decode_error("generated validate method has no value parameter"));
+                return Err(decode_error(
+                    "generated validate method has no value parameter",
+                ));
             };
             let mut frame = std::collections::HashMap::new();
             frame.insert(param.name.clone(), decoded.clone());
             match self.call_func(&format!("{name}.validate"), validate, frame) {
                 Ok(CtValue::Present(value)) => return Ok(*value),
                 Ok(CtValue::Failed(CtReport::Told(error))) => return Err(*error),
-                Ok(other) => return Err(decode_error(format!(
-                    "generated validate method returned {}",
-                    other.jet_show()
-                ))),
+                Ok(other) => {
+                    return Err(decode_error(format!(
+                        "generated validate method returned {}",
+                        other.jet_show()
+                    )))
+                }
                 Err(diagnostic) => return Err(decode_error(diagnostic.what)),
             }
         }
@@ -963,7 +1022,12 @@ impl<'a> Interp<'a> {
 
     /// `TypeName -> [v1..vK] wire-key shapes` — mirrors
     /// `Codegen/Items.rs::migration_shapes`.
-    fn migration_shapes(&self, style: Option<&str>, s: &StructDef, blocks: &[&MigrationDecl]) -> Vec<Vec<String>> {
+    fn migration_shapes(
+        &self,
+        style: Option<&str>,
+        s: &StructDef,
+        blocks: &[&MigrationDecl],
+    ) -> Vec<Vec<String>> {
         let mut shape: BTreeSet<String> = s
             .fields
             .iter()
@@ -1018,7 +1082,9 @@ impl<'a> Interp<'a> {
                     let key = migration_wire_key(style, s, field);
                     pairs.retain(|p| p.0 != key);
                 }
-                MigrationOp::Add { field, default_fn, .. } => {
+                MigrationOp::Add {
+                    field, default_fn, ..
+                } => {
                     let key = migration_wire_key(style, s, field);
                     let Some(fn_name) = default_fn.as_deref() else {
                         return Err(decode_error(format!(
@@ -1038,7 +1104,12 @@ impl<'a> Interp<'a> {
                     let encoded = encode_ct_value(&value, self.structs);
                     pairs.push((key, encoded));
                 }
-                MigrationOp::Change { field, from_ty, conv_fn, .. } => {
+                MigrationOp::Change {
+                    field,
+                    from_ty,
+                    conv_fn,
+                    ..
+                } => {
                     let key = migration_wire_key(style, s, field);
                     let Some(fn_name) = conv_fn.as_deref() else {
                         return Err(decode_error(format!(
@@ -1053,7 +1124,10 @@ impl<'a> Interp<'a> {
                         )));
                     };
                     let Some(pos) = pairs.iter().position(|p| p.0 == key) else {
-                        return Err(decode_error(format!("E2410: missing required field `{}`", field)));
+                        return Err(decode_error(format!(
+                            "E2410: missing required field `{}`",
+                            field
+                        )));
                     };
                     let old_value = self
                         .typed_decode_value(from_ty, &pairs[pos].1, span)
@@ -1062,7 +1136,9 @@ impl<'a> Interp<'a> {
                     if let Some(param) = func.params.first() {
                         frame.insert(param.name.clone(), old_value);
                     }
-                    let new_value = self.call_func(fn_name, func, frame).map_err(|d| decode_error(d.what.clone()))?;
+                    let new_value = self
+                        .call_func(fn_name, func, frame)
+                        .map_err(|d| decode_error(d.what.clone()))?;
                     pairs[pos].1 = encode_ct_value(&new_value, self.structs);
                 }
             }
@@ -1076,18 +1152,30 @@ impl<'a> Interp<'a> {
     /// chain-walker (`emit_migration_chain_walker`): on failure, detect which
     /// historical shape the data's key set matches (newest first) and walk
     /// the step functions forward.
-    pub(super) fn typed_decode_top(&mut self, ty: &Type, tree: &CtValue, span: Span) -> Result<CtValue, CtValue> {
+    pub(super) fn typed_decode_top(
+        &mut self,
+        ty: &Type,
+        tree: &CtValue,
+        span: Span,
+    ) -> Result<CtValue, CtValue> {
         match self.typed_decode_value(ty, tree, span) {
             Ok(v) => Ok(v),
             Err(e) => {
                 let Type::Named(name) = ty else { return Err(e) };
-                let Some(sdef) = self.structs.get(name.as_str()).copied() else { return Err(e) };
+                let Some(sdef) = self.structs.get(name.as_str()).copied() else {
+                    return Err(e);
+                };
                 let published = sdef.is_published_schema
-                    || sdef.derives.iter().any(|(t, _)| t == crate::Syntax::MARKER_PUBLISHED_SCHEMA);
+                    || sdef
+                        .derives
+                        .iter()
+                        .any(|(t, _)| t == crate::Syntax::MARKER_PUBLISHED_SCHEMA);
                 if !published || !sdef.type_params.is_empty() {
                     return Err(e);
                 }
-                let Some(blocks) = self.migrations.get(name.as_str()).cloned() else { return Err(e) };
+                let Some(blocks) = self.migrations.get(name.as_str()).cloned() else {
+                    return Err(e);
+                };
                 if blocks.is_empty() {
                     return Err(e);
                 }
@@ -1104,9 +1192,17 @@ impl<'a> Interp<'a> {
                     if !matches {
                         continue;
                     }
-                    let Some(mut pairs) = object_pairs(tree) else { return Err(e) };
+                    let Some(mut pairs) = object_pairs(tree) else {
+                        return Err(e);
+                    };
                     for i in j..shapes.len() {
-                        self.apply_migration_step(sdef, style.as_deref(), blocks[i], &mut pairs, span)?;
+                        self.apply_migration_step(
+                            sdef,
+                            style.as_deref(),
+                            blocks[i],
+                            &mut pairs,
+                            span,
+                        )?;
                     }
                     let new_tree = rebuild_object(pairs);
                     let value = self.typed_decode_value(ty, &new_tree, span)?;
@@ -1131,16 +1227,19 @@ impl<'a> Interp<'a> {
             return self.eval_typed_csv_decode(text, ty, span);
         }
         let parsed: Result<CtValue, CtValue> = match module {
-            "core.encoding.json" => super::JSONInterp::parse_json_typed_ordered(text)
-                .map_err(|e| json_parse_err_to_decode("JSON", super::JSONInterp::json_error_value(e))),
-            "core.encoding.toml" => super::EncodingLite::toml_parse(text).map_err(|e| json_parse_err_to_decode("TOML", e)),
-            "core.encoding.yaml" => super::EncodingLite::yaml_parse(text).map_err(|e| json_parse_err_to_decode("YAML", e)),
-            "core.encoding.xml" => {
-                match super::EncodingLite::xml_parse(text) {
-                    Ok(document) => super::EncodingLite::xml_project_for_decode(&document),
-                    Err(e) => Err(super::EncodingLite::xml_error_value(e)),
-                }
+            "core.encoding.json" => {
+                super::JSONInterp::parse_json_typed_ordered(text).map_err(|e| {
+                    json_parse_err_to_decode("JSON", super::JSONInterp::json_error_value(e))
+                })
             }
+            "core.encoding.toml" => super::EncodingLite::toml_parse(text)
+                .map_err(|e| json_parse_err_to_decode("TOML", e)),
+            "core.encoding.yaml" => super::EncodingLite::yaml_parse(text)
+                .map_err(|e| json_parse_err_to_decode("YAML", e)),
+            "core.encoding.xml" => match super::EncodingLite::xml_parse(text) {
+                Ok(document) => super::EncodingLite::xml_project_for_decode(&document),
+                Err(e) => Err(super::EncodingLite::xml_error_value(e)),
+            },
             // I4: named construct, not a phase — the typed decoder is the
             // runtime evaluator's decoder too.
             // This function serves the typed `decode` verb, so name it rather

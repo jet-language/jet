@@ -12,18 +12,15 @@
 # #2075: the assignment is weighted, not round-robin. A Cargo target is atomic,
 # so a 45-minute `golden` stayed a 45-minute shard while five other jobs idled —
 # round-robin balances the COUNT of targets and ignores their cost. This script
-# reads measured seconds from `tools/ci/test-weights.tsv` and assigns heaviest
-# first to the currently-lightest shard (LPT, the standard greedy makespan
-# heuristic: deterministic, and never worse than 4/3 of optimal). Targets with no
-# measured row take DEFAULT_WEIGHT, so an unmeasured target is scheduled, never
-# skipped.
+# reads measured seconds from `tools/ci/test-weights.tsv` and passes the rows to
+# the shared weighted LPT engine. Corpus gates use that same engine with stem
+# weights, so there is one sharding notion (I8).
 #
 # Output: one cargo-test argument line per selected target, e.g.
 #   -p jet-lexer --lib
 #   -p jet --test golden
-# Callers loop over stdout and run `cargo test $line` per line. The stderr
-# summary reports this shard's predicted seconds and the spread across all
-# shards, which is the number that says whether the split is honest yet.
+# Callers loop over stdout and run `cargo test $line` per line. The shared
+# engine's stderr summary reports predicted load and spread.
 set -euo pipefail
 
 if [ "$#" -ne 2 ]; then
@@ -103,60 +100,28 @@ if [ -f "$weights_file" ]; then
   done <"$weights_file"
 fi
 
-# Heaviest first (weight descending, then the row itself ascending so equal
-# weights — every unmeasured target — keep a stable, reviewable order).
-ordered="$(
+# Shared #2075 weighted LPT assignment. The item field keeps all remaining
+# tabs, so the cargo inventory row stays lossless until it is decoded below.
+selected_rows="$(
   for row in "${all_targets[@]}"; do
-    printf '%012d\t%s\n' "${weight[$row]:-$DEFAULT_WEIGHT}" "$row"
-  done | sort -t$'\t' -k1,1nr -k2,4
+    printf '%s\t%s\n' "${weight[$row]:-$DEFAULT_WEIGHT}" "$row"
+  done | bash "$repo/tools/ci/weighted-shards.sh" "$shard_index" "$shard_count"
 )"
 
-loads=()
-for ((shard = 0; shard < shard_count; shard++)); do
-  loads[shard]=0
-done
 selected_lines=()
-selected_seconds=0
-total=0
-while IFS= read -r line; do
-  total=$((total + 1))
-  seconds=$((10#${line%%$'\t'*}))
-  row="${line#*$'\t'}"
-  lightest=0
-  for ((shard = 1; shard < shard_count; shard++)); do
-    if [ "${loads[shard]}" -lt "${loads[lightest]}" ]; then
-      lightest="$shard"
-    fi
-  done
-  loads[lightest]=$((loads[lightest] + seconds))
-  if [ "$lightest" -ne "$shard_index" ]; then
-    continue
-  fi
-  selected_seconds=$((selected_seconds + seconds))
-  IFS=$'\t' read -r pkg kind name <<<"$row"
-  case "$kind" in
-    lib) selected_lines+=("-p $pkg --lib") ;;
-    bin) selected_lines+=("-p $pkg --bin $name") ;;
-    test) selected_lines+=("-p $pkg --test $name") ;;
-  esac
-done <<<"$ordered"
+if [ -n "$selected_rows" ]; then
+  while IFS= read -r row; do
+    IFS=$'\t' read -r pkg kind name <<<"$row"
+    case "$kind" in
+      lib) selected_lines+=("-p $pkg --lib") ;;
+      bin) selected_lines+=("-p $pkg --bin $name") ;;
+      test) selected_lines+=("-p $pkg --test $name") ;;
+    esac
+  done <<<"$selected_rows"
+fi
 
 # Emitted sorted: the shard's contents are a set, and a stable order keeps two
 # runs of the same shard diffable.
 if [ "${#selected_lines[@]}" -gt 0 ]; then
   printf '%s\n' "${selected_lines[@]}" | sort
 fi
-
-heaviest="${loads[0]}"
-lightest_load="${loads[0]}"
-for ((shard = 1; shard < shard_count; shard++)); do
-  if [ "${loads[shard]}" -gt "$heaviest" ]; then heaviest="${loads[shard]}"; fi
-  if [ "${loads[shard]}" -lt "$lightest_load" ]; then lightest_load="${loads[shard]}"; fi
-done
-if [ "$lightest_load" -gt 0 ]; then
-  hundredths=$((heaviest * 100 / lightest_load))
-  spread="$(printf '%d.%02dx' "$((hundredths / 100))" "$((hundredths % 100))")"
-else
-  spread="n/a"
-fi
-echo "test-shards: shard $shard_index/$shard_count selected ${#selected_lines[@]} of $total workspace test targets, predicted ${selected_seconds}s (shard loads: ${loads[*]}; spread ${heaviest}s/${lightest_load}s = $spread)" >&2

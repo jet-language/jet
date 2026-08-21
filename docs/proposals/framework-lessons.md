@@ -50,8 +50,12 @@ an implementation boundary; it does not keep that behavior as an option.
   policy. It previously existed twice and the two copies disagreed: the wire
   validator accepted a leading-digit table name that the typed constructor
   rejected, so a policy legal on one tier was illegal on another.
-  The general policy closure compiler, the generated per-path proof or filter,
-  and the ratified audit-output listing of active policies are unshipped.
+  The closed compiler now lowers its accepted forms to a bind-safe SQL
+  predicate. Every scoped SQL adapter consumes and validates a proof-bearing
+  application before execution, and `db.policy_audit(scope)` exposes the
+  active scope's compiled predicate and bound identity. The ratified general
+  typed closure surface (`db.policy<T>((user, row) => ...)`) remains
+  unshipped.
 - D-OBSERVE-LIVE1 renders only typed, bounded task, channel, effect, and
   resource facts. Payloads and process memory remain outside the schema. The
   producer is reachable only from the AOT generated runtime (`Prelude/EnvInit.rs`
@@ -75,16 +79,15 @@ an implementation boundary; it does not keep that behavior as an option.
   canonical Time resolver now accepts `2h` and `1d` alongside the existing
   units, and `jet dev` reads the same checked result. Service and jetos
   consumers remain unshipped.
-- D-VALIDATE1 has in-body accumulation and `Type.validate`. Derived struct
-  decode runs the same validator after shape decoding. A hand `impl T.Decode`
-  does NOT: the codec bridge emits the user body only
+- D-VALIDATE1 has in-body accumulation, `Type.validate`, and the
+  outside-context `Validate.over(s)` builder. Derived struct decode runs the
+  same validator after shape decoding. A hand `impl T.Decode` opts in
+  explicitly: the codec bridge emits the user body only
   (`Codegen/TIR/emit/functions.rs:691-735`), while the automatic call exists
   solely in the generated decoder (`Sema/Registration/Serde.rs:1029-1041`).
-  The ratified text says `decode<T>()` runs the block automatically, so
-  "hand codecs opt in explicitly" is a current limitation owed as work, not a
-  lawful exception. D-VALIDATE-DECODE1 settles the sole
-  `Result<T, [FieldError]>` Decode contract across generated and hand codecs.
-  `Validate.over` is unshipped.
+  D-VALIDATE-DECODE1 settles the sole `Result<T, [FieldError]>` Decode
+  contract across generated and hand codecs. `Validate.over` uses the same
+  `check(...)` vocabulary and accumulates the same `[FieldError]` result.
 
 ## Verification checkpoint
 

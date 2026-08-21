@@ -10,8 +10,7 @@ use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 
 use crate::Diagnostics::{Diagnostic, Span};
 use crate::AST::{
-    EnumLitArg, Expr, Func, LambdaBody, LValue, OrFallback, Pattern, Stmt, StrPart,
-    StructPatField,
+    EnumLitArg, Expr, Func, LValue, LambdaBody, OrFallback, Pattern, Stmt, StrPart, StructPatField,
 };
 
 use super::Diagnostics::impurity_diag;
@@ -369,7 +368,10 @@ pub(super) fn reachable_owned_funcs(
         .collect();
     let reachable_names = jet_foundation::Facts::project_reachability(
         &reverse,
-        [jet_foundation::Facts::ReachabilityRow::new("reachable", seeds)],
+        [jet_foundation::Facts::ReachabilityRow::new(
+            "reachable",
+            seeds,
+        )],
     )
     .nodes_with("reachable", "reachable");
     reachable_names
@@ -401,7 +403,10 @@ fn walk_expr_nodes(e: &Expr, opts: WalkOpts, f: &mut impl FnMut(&Expr)) {
         | Expr::NoElse(_)
         | Expr::ReduceMarker(_, _)
         | Expr::ComptimeName { .. } => {}
-        Expr::ListLit(items, _) | Expr::CompareChain { operands: items, .. } => {
+        Expr::ListLit(items, _)
+        | Expr::CompareChain {
+            operands: items, ..
+        } => {
             for item in items {
                 walk_expr_nodes(item, opts, f);
             }
@@ -484,8 +489,7 @@ fn walk_expr_nodes(e: &Expr, opts: WalkOpts, f: &mut impl FnMut(&Expr)) {
         Expr::EnumLit { args, .. } => {
             for arg in args {
                 let value = match arg {
-                    EnumLitArg::Positional(value)
-                    | EnumLitArg::Named { expr: value, .. } => value,
+                    EnumLitArg::Positional(value) | EnumLitArg::Named { expr: value, .. } => value,
                 };
                 walk_expr_nodes(value, opts, f);
             }
@@ -777,7 +781,11 @@ fn walk_stmt_expr_nodes(s: &Stmt, opts: WalkOpts, f: &mut impl FnMut(&Expr)) {
     }
 }
 
-fn walk_if_stmt_expr_nodes(if_stmt: &crate::AST::IfStmt, opts: WalkOpts, f: &mut impl FnMut(&Expr)) {
+fn walk_if_stmt_expr_nodes(
+    if_stmt: &crate::AST::IfStmt,
+    opts: WalkOpts,
+    f: &mut impl FnMut(&Expr),
+) {
     walk_expr_nodes(&if_stmt.cond, opts, f);
     walk_stmt_body_nodes(&if_stmt.then_body, opts, f);
     match &if_stmt.else_branch {

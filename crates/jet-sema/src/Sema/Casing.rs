@@ -184,6 +184,7 @@ fn item_names(item: &Item, traits: &HashSet<String>, out: &mut Vec<Diagnostic>) 
             pascal(&d.trait_name, d.trait_span, "trait", out);
             derive_body_names(&d.body, out);
         }
+        Item::TemplateLoop(_) => {}
         // D-SHAPE-CASE2=A: foreign declarations are exempt zones. Other
         // declaration families carry no user-defined identifier category.
         Item::CModule(_) | Item::ExternRust(_) | Item::ErrorConv(_) | Item::Migration(_) => {}

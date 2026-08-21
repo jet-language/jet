@@ -27,7 +27,12 @@ pub struct StreamingSha256 {
 
 impl StreamingSha256 {
     pub fn new() -> Self {
-        Self { state: H0, block: [0; 64], block_len: 0, byte_len: 0 }
+        Self {
+            state: H0,
+            block: [0; 64],
+            block_len: 0,
+            byte_len: 0,
+        }
     }
 
     pub fn update(&mut self, mut data: &[u8]) {
@@ -43,7 +48,9 @@ impl StreamingSha256 {
             }
         }
         let mut chunks = data.chunks_exact(64);
-        for chunk in &mut chunks { compress(&mut self.state, chunk); }
+        for chunk in &mut chunks {
+            compress(&mut self.state, chunk);
+        }
         let remainder = chunks.remainder();
         self.block[..remainder.len()].copy_from_slice(remainder);
         self.block_len = remainder.len();
@@ -55,7 +62,9 @@ impl StreamingSha256 {
         tail[self.block_len] = 0x80;
         let tail_len = if self.block_len < 56 { 64 } else { 128 };
         tail[tail_len - 8..tail_len].copy_from_slice(&self.byte_len.wrapping_mul(8).to_be_bytes());
-        for block in tail[..tail_len].chunks_exact(64) { compress(&mut self.state, block); }
+        for block in tail[..tail_len].chunks_exact(64) {
+            compress(&mut self.state, block);
+        }
         let mut out = [0u8; 32];
         for (index, word) in self.state.iter().enumerate() {
             out[index * 4..index * 4 + 4].copy_from_slice(&word.to_be_bytes());
@@ -65,7 +74,9 @@ impl StreamingSha256 {
 }
 
 impl Default for StreamingSha256 {
-    fn default() -> Self { Self::new() }
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 pub fn sha256_file_hex(path: &std::path::Path) -> std::io::Result<String> {
@@ -75,18 +86,22 @@ pub fn sha256_file_hex(path: &std::path::Path) -> std::io::Result<String> {
     let mut buffer = [0u8; 64 * 1024];
     loop {
         let count = file.read(&mut buffer)?;
-        if count == 0 { break; }
+        if count == 0 {
+            break;
+        }
         hasher.update(&buffer[..count]);
     }
     Ok(hex(hasher.finalize()))
 }
 
 fn hex(bytes: [u8; 32]) -> String {
-    bytes.iter().fold(String::with_capacity(64), |mut text, byte| {
-        use std::fmt::Write;
-        let _ = write!(text, "{byte:02x}");
-        text
-    })
+    bytes
+        .iter()
+        .fold(String::with_capacity(64), |mut text, byte| {
+            use std::fmt::Write;
+            let _ = write!(text, "{byte:02x}");
+            text
+        })
 }
 
 pub fn sha256(data: &[u8]) -> [u8; 32] {
@@ -240,9 +255,13 @@ mod tests {
 
     #[test]
     fn streaming_matches_one_shot_across_block_boundaries() {
-        let data = (0..10_000).map(|value| (value % 251) as u8).collect::<Vec<_>>();
+        let data = (0..10_000)
+            .map(|value| (value % 251) as u8)
+            .collect::<Vec<_>>();
         let mut streaming = StreamingSha256::new();
-        for chunk in data.chunks(73) { streaming.update(chunk); }
+        for chunk in data.chunks(73) {
+            streaming.update(chunk);
+        }
         assert_eq!(hex(streaming.finalize()), sha256_hex(&data));
     }
 }

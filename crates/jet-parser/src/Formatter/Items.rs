@@ -435,6 +435,9 @@ impl<'a> Fmt<'a> {
             Item::ProtocolDecl(p) => self.fmt_protocol_decl(p),
             // D-META-CODE1=A: derive bodies are typed item templates.
             Item::UserDerive(d) => self.fmt_derive_decl(d),
+            // D-STRUCT-ONCE1=A: root declaration loops use the same typed
+            // body formatter as derive and marker templates.
+            Item::TemplateLoop(loop_item) => self.fmt_item_template_loop(loop_item),
             // D-CONF-GENSPELL1=A: generic module templates are typed item
             // templates, not opaque source strings.
             Item::GenericModule(gm) => self.fmt_generic_module(gm),
@@ -527,6 +530,16 @@ impl<'a> Fmt<'a> {
         self.end_block();
     }
 
+    /// D-STRUCT-POLICY1=A: policy wrappers are carried beside ordinary items,
+    /// so preserve their checked source boundary in the formatter's first
+    /// implementation slice.
+    pub(super) fn fmt_user_policy_decl(&mut self, declaration: &crate::AST::UserPolicyDecl) {
+        let text = &self.src[declaration.span.start..declaration.span.end];
+        self.write(text);
+        self.newline();
+        self.skip_verbatim_comments(declaration.span.end);
+    }
+
     fn fmt_derive_decl(&mut self, derive: &crate::AST::DeriveDef) {
         self.write("derive ");
         self.write(&derive.type_param);
@@ -536,6 +549,18 @@ impl<'a> Fmt<'a> {
         self.newline();
         self.with_indent(|f| f.fmt_derive_body_items(&derive.body));
         self.emit_leading(derive.span.end);
+        self.end_template_block();
+    }
+
+    fn fmt_item_template_loop(&mut self, loop_item: &crate::AST::ItemTemplateLoop) {
+        self.write("@loop ");
+        self.write(&loop_item.var);
+        self.write(", ");
+        self.fmt_expr(&loop_item.source, Prec::OrFallback);
+        self.write(" {");
+        self.newline();
+        self.with_indent(|f| f.fmt_derive_body_items(&loop_item.body));
+        self.emit_leading(loop_item.span.end);
         self.end_template_block();
     }
 

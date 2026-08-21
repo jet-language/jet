@@ -162,7 +162,7 @@ expr     = precedence climbing over:
   value (`Type.{ … }`) when needed; mismatched headed literals are ordinary
   type errors.
 - A program must define `fn run` with no parameters and no return type,
-  `fn run() ?` for top-level error propagation, or a single typed CLI
+  `fn run() !` for top-level error propagation, or a single typed CLI
   parameter as described by D-CLIFLAG1 (E0101, E1308). Execution starts
   there. `run` never takes `pub` (S12).
 - `name :: value` is immutable; `name := value` is mutable (D-BIND-BARE1).
@@ -292,7 +292,7 @@ keep code readable from top to bottom. See
   (D-VERDICT-1321-1). `term.print`/`term.eprint` accept the same variadic
   form. `Float` always prints a decimal part (S21): `-5.0`, not `-5`.
 - `input()` / `input(prompt)` is prelude (D-NAME-ALIAS1); reads a line from
-  stdin, strips the trailing newline, and returns `String ? IOError`.
+  stdin, strips the trailing newline, and returns `String ! IOError`.
   Use `??` to unwrap or handle the error.
 - Functions: multi-argument calls, checked arity (E0104) and argument
   types (E0112). A function with a return type must return on every path
@@ -857,7 +857,7 @@ impl Circle {
   D-AUTODERIVE-SYNTAX1=D). `#Codable` requests both codec directions;
   `#Encode` and `#Decode` request one direction.
 - **Encoding traits (D-SERDE2/D-SERDE16):** `Encode.encode(self) => DataTree`
-  and `Decode.decode(tree: DataTree) => Self ? [FieldError]` are ordinary Jet
+  and `Decode.decode(tree: DataTree) => Self ! [FieldError]` are ordinary Jet
   trait methods. `DataTree.decode<T>()` is the one public typed-dispatch path;
   primitive, container, generated, and hand-written implementations all use it.
   Built-in derives build typed Jet items beside the marked type and check them
@@ -882,12 +882,14 @@ impl Circle {
   statement be exactly this shape (E0353), `at:` to name a real field
   (E0354), and purity-checks the whole synthesized function (S60/E3401) —
   a rule may reference only sibling fields and pure calls. `Type.validate(value)`
-  runs the block standalone, returning `value ? [FieldError]`. Derived struct
+  runs the block standalone, returning `value ! [FieldError]`. Derived struct
   decoders now pass a successfully shaped value through that validator, so
   shape and rule failures share one list. Hand-written codecs still opt into
-  validation explicitly. The `Validate.over(s)` use-site escape for rules
-  needing outside context remains a separate framework slice. The contract
-  ruling is recorded as `D-VALIDATE-DECODE1=B`.
+  validation explicitly. `Validate.over(s)` starts the outside-context
+  builder; chained `check(cond, at: field, "msg")` rules use the same field
+  vocabulary and accumulate into `[FieldError]`, and `finish()` returns
+  `T ! [FieldError]`. The contract ruling is recorded as
+  `D-VALIDATE-DECODE1=B`.
 - **Computed fields (D-FIELDPOL1 / D-FIELDMEMO1):** `name: T => expr` is an
   unmarked read-time formula over sibling fields. Put `#Memo` immediately
   before the field when the result should be retained after its first read;
@@ -1077,9 +1079,9 @@ runtime path.
 
 ## M4 — errors as values (done)
 
-Failure-returning functions return **`T ? E`** (S34): `T` is the success payload,
+Failure-returning functions return **`T ! E`** (S34): `T` is the success payload,
 `E` is any enum, struct, `String`, or the default **`Err`** type. Omitting
-the error side in a function return — **`T ?`** — means **`T ? Err`**.
+the error side in a function return — **`T !`** — means **`T ! Err`**.
 Build outcomes with **`Ok(v)`** and **`Err(e)`**; test them with
 **`== .Ok(n)`** / **`== .Err(e)`** (same pattern machinery as M3 optionals).
 Cross-type **`?`** conversion uses one declared rail (D-ERR-CONV/D-FAIL-CONV1):
@@ -1087,7 +1089,7 @@ Cross-type **`?`** conversion uses one declared rail (D-ERR-CONV/D-FAIL-CONV1):
 the default `Err` target; `?` applies it automatically. A conversion into
 `Err` may name a foreign source type, while typed targets keep the orphan rule
 (S28). D-FAIL-CONV2=A ships that conversion for the standard library's own
-error family, so a plain `fn run() ?` can pass a library failure up with `?`
+error family, so a plain `fn run() !` can pass a library failure up with `?`
 and declare nothing; a program's own error type still needs its own
 declaration. `E2402` fires when `?` would need an undeclared conversion; `E2405`
 fires on duplicate declarations; `E2406` fires on typed-target orphan-rule
@@ -1096,9 +1098,9 @@ violations.
 - Postfix **`?`** (S7) propagates: unwraps `ok`, early-returns `err`. The
   enclosing function must return a compatible fallible type. On **`T?`**,
   `?` propagates `None` when the function returns an optional.
-- Return types follow **D-RESULT-OPTION-CANON1** like every other type
-  position: tight **`T?`** is Optional; spaced **`T ?`** / **`T ? E`** is
-  fallible. Parentheses (`=> (T?)`) remain legal grouping, not required.
+- Return types follow **D-ERRSIGIL1** like every other type position: tight
+  **`T?`** is Optional; fallible types use **`T !`** or **`T ! E`**.
+  Parentheses (`=> (T?)`) remain legal grouping, not required.
 - **`?? <expr>`** (S35/S71) is the fallback operator on a fallible value or
   optional: yields the success payload or evaluates the right side. Precedence is
   looser than **`&&`** / **`||`**, so `a? ?? b` and `x == 1 || y ?? 0`
@@ -1113,7 +1115,7 @@ violations.
   name, **`it`** names the subject for pattern arms like **`it == .Ok(n)`**.
 - **`fn run()`** is fallible by default: `?` works inside it with no annotation.
   An unhandled entry error prints its full report and exits 1. An expert may
-  pin the family with **`fn run() ? StoreErr`**.
+  pin the family with **`fn run() ! StoreErr`**.
 
 At an explicit process stop, active `defer close(^resource)` actions run in
 reverse declaration order, `scope.guard` closures run in reverse registration
@@ -1282,7 +1284,7 @@ C, C++, and JS are active namespace binders. C uses the namespace surface
 C++ uses the same forms over a
 clang-AST-derived, content-addressed C-ABI shim: namespaces are selected
 explicitly, public scalar classes become owned opaque handles, exceptions become
-`T ? CppError`, pure named callbacks keep their checked C ABI, and template
+`T ! CppError`, pure named callbacks keep their checked C ABI, and template
 instantiations are requested on demand. `jet inspect bind cpp` requires the
 selected target and absolute clang/archiver paths; include/library search paths
 and link libraries are audited in binding provenance and reused at final link.
@@ -1314,7 +1316,7 @@ function. **`extern rust "std" { … }`** works for Rust standard-library items 
 no extra dependency. Non-`core` crates require an exact version pin (**E0701**).
 
 Allowed boundary types pass **by value**: `Int`, `Float`, `Bool`, `String`,
-`Char`, `[T]`/`[K:V]`/`T?`/`T ? E` built from allowed types, and
+`Char`, `[T]`/`[K:V]`/`T?`/`T ! E` built from allowed types, and
 structs/enums whose fields are allowed. No borrowed parameters or returns, no
 callbacks (**E0702**).
 
@@ -1848,7 +1850,7 @@ becomes the browser API checker.
 ordinary Core values. There is no `event` declaration syntax in this slice.
 
 - `event.new<T>() => Event<T>` creates a typed many-subscriber event source.
-- `event.async_result<T, E>(policy, failures) => AsyncEvent<T, E> ? String`
+- `event.async_result<T, E>(policy, failures) => AsyncEvent<T, E> ! String`
   creates one scheduler-backed bounded queue; see [Bounded buffering law](#bounded-buffering-law)
   for its pressure behavior. `emit_async` returns `Task<DispatchReport<E>>`;
   queue, running, blocked, failure, cancellation, deadline, close, and overflow
@@ -2160,7 +2162,7 @@ partially guessed.
 | Boundary | Accepted input | Deliberate rejection |
 |---|---|---|
 | LSP/DAP JSON, framing, and request envelopes | UTF-8 RFC 8259 null/booleans, finite numbers, strings (including `\\u` surrogate pairs), arrays, and objects through depth 64. Object names are unique. `Content-Length` bodies are capped at 1 MiB before allocation; framing headers are capped at 8 KiB and 64 fields. JSON-RPC requests use `jsonrpc: "2.0"`, a string `method`, object/array `params`, and a string or signed-64-bit-integer `id`. DAP requests use `type: "request"`, a positive `u32` `seq`, a nonempty string `command`, and optional object `arguments`; breakpoint lines are positive `u32` integers. LSP positions are nonnegative `u32` integers; `jet.impact` depth is clamped to 1–64. | Oversized headers/bodies, duplicate `Content-Length` headers, or non-UTF-8 frames; duplicate JSON names; raw string control characters; malformed/overflowing numbers; lone surrogates; deeper nesting; non-object requests; fractional IDs/positions/sequences/lines; and scalar parameters. JSON-RPC syntax errors return `-32700`; invalid JSON-RPC envelopes return `-32600` with a null id. Malformed DAP envelopes are not dispatched, and unknown string commands receive an unsuccessful response. |
-| `jetpack.toml` manifest | TOML syntax followed by the closed `[repo]` (`name`, `version`) and `[sources]` string-valued schema. Dotted top-level keys are allowed. Syntax recovery continues at the next statement so independent errors are reported together. | Duplicate assignments or table declarations, dotted-key/table collisions, invalid escapes/numeric lexemes or overflow, non-string schema values, array tables, unknown tables/keys, and retired `[packages]`. These are Jet-owned E1214/E1215/E1225 diagnostics. |
+| Project configuration files | `package.jet` owns package identity, `workspace.jet` owns workspace membership, and `env.jet` owns named source aliases and environment facts. All three use Jet grammar and are resolved from the nearest applicable project root. | A `jetpack.toml` file is a retired second grammar and is rejected with E1225 before dependency resolution. |
 | SemVer and dependency ranges | SemVer 2.0.0 `major.minor.patch`, optional pre-release/build identifiers, and the documented node-semver comparator, caret, tilde, x, hyphen, whitespace-AND, and `||`-OR forms. A leading version `v` is accepted for tag compatibility; an empty requirement means `*`. | Core numeric overflow/leading zeroes, empty identifiers, invalid characters, wildcard-before-number forms, empty `||` alternatives, and any range whose exclusive upper bound would overflow `u64`. Pre-release numeric identifiers remain spec-unbounded and compare without integer conversion. |
 | C bind prototypes | Top-level `return_type name(parameters);` declarations for the documented scalar, `char*`, and `void` subset. `(void)`/empty lists and unnamed scalar parameters are accepted. Unsupported but structurally valid types are reported in the skipped list. | Function bodies/pointers, variadics, unbalanced lists, empty comma fields, trailing declarator text, non-ASCII C identifiers, and declarations with no return type. No guessed binding is emitted. |
 | Registry JSONL and advisory database | One UTF-8 JSON object per registry line with nonempty string `name`/`version`, optional string `content_hash`, `fingerprint`, `public_key`, and `signature`, plus optional boolean `yanked`; older lines may omit signing fields. Advisory lines are `id|package|affected|fixed-or-empty|title[|severity]`; blank lines and `#` comments are allowed, and unknown/missing severity remains `medium` for compatibility. | Malformed/duplicate/nested-fake JSON fields, unknown registry keys, wrong field types, partial registry records, advisory field-count errors, empty required fields, invalid affected/fixed versions, or `|` inside fields. Reads fail closed with E2607 rather than skipping security metadata. |
@@ -2248,7 +2250,7 @@ generated prelude (D-CORENS1/D-CORENS-CANON1): file/terminal/env/process I/O,
 math, random, time, args, exact default and fixed-width numeric types, and
 unified `core.encoding` serialization (JSON/CSV/TOML/YAML over
 one `DataTree` value, plus `#Codable` derive). Every fallible call returns
-`T ? E`, handled with `?`/`??`/a pattern test like any M4 result. Importing a
+`T ! E`, handled with `?`/`??`/a pattern test like any M4 result. Importing a
 module is free (R10) — codegen only emits the helpers a program actually
 calls. See core-library.md for the full module list, signatures, and
 examples; UI snapshots: `tests/ui/core_*`, teaching errors **E0037**–**E0039**.
@@ -2405,7 +2407,7 @@ Example and golden: `examples/features/concurrency/freeze_capture.jet` and
 `tests/ui/frozen_capture_use_after_move.jet` and
 `tests/ui/freeze_shared_source.jet`.
 
-`handle.join() => T ? TaskFailure` waits for the task and consumes its handle.
+`handle.join() => T ! TaskFailure` waits for the task and consumes its handle.
 Calling `.join()` twice is ordinary use-after-move (**E0121**). Dropping a bound
 `Task` without joining, using its result, or detaching it is a compile error
 (**L1101**, D-CONC-JOIN1) because the program may end before the task finishes.
@@ -2465,7 +2467,7 @@ linked send/receive pair, destructured at the call site: `(tx, rx) ::
 channel<T>()`. A second sender is `~tx` — there's no combined
 "channel" value to fetch one off of. `sender.send(value)` moves a `T` into the
 channel (ownership semantics for non-copy values), and
-`receiver.receive() => T ? Closed` blocks until a value arrives or all senders
+`receiver.receive() => T ! Closed` blocks until a value arrives or all senders
 are gone. Close the sender, then `loop value, receiver :> ...` drains until
 the channel closes. Channel payloads
 must be sendable (**E1102**).
@@ -2626,7 +2628,7 @@ refused, and a lambda may not capture the handle — so no child outlives the
 scope that joins it. `self` holds the receiver, never the group, so a method
 opens no new escape. A spawn through a parameter group still owns its captures.
 
-`join()` is fallible: `Task<T>.join() => T ? TaskFailure`. The failure values
+`join()` is fallible: `Task<T>.join() => T ! TaskFailure`. The failure values
 are `.Cancelled`, `.DeadlineBlown`, and `.Panicked(reason)`. `TaskOutcome`,
 `TaskStatus`, `.trace()`, and `.exception()` are retired; cancellation and
 deadline behavior use the one failure rail.
@@ -2660,9 +2662,9 @@ Combinators are nested selectors, not methods on a group handle:
 
 | Operation | Completion and cancellation |
 | --- | --- |
-| `task.all { a(), b() }` | Returns `[T] ? TaskFailure`; waits for every child and fail-fast cancels the remaining children. |
-| `task.race { a(), b() }` | Returns `T ? TaskFailure`; the first successful result wins and cancels the losers. |
-| `task.any { a(), b() }` | Returns `T ? TaskFailure`; the first completed result wins and cancels the remaining children. |
+| `task.all { a(), b() }` | Returns `[T] ! TaskFailure`; waits for every child and fail-fast cancels the remaining children. |
+| `task.race { a(), b() }` | Returns `T ! TaskFailure`; the first successful result wins and cancels the losers. |
+| `task.any { a(), b() }` | Returns `T ! TaskFailure`; the first completed result wins and cancels the remaining children. |
 | `task.group g(limit: n) { ... }` | Owns the dynamic children, bounds active children, and joins them at the closing brace. |
 
 - Waiting on several sources at once — a select — is a subjectless `if` table
@@ -3657,15 +3659,15 @@ api: Output :: .Service.{ name: "todo-api", entry: serve };
 release: Output :: .Check.{ name: "release", entry: verify_release };
 
 fn launch() {}
-fn serve() ? {}
-fn verify_release() ? {}
+fn serve() ! {}
+fn verify_release() ! {}
 ```
 
 `Output` is a closed sum with exactly `Library`, `Executable`, `Service`,
 `Check`, `Environment`, `Image`, `Bundle`, `System`, and `Fleet`. Every Output
 has fixed text `name:`. Executable, Service, and Check also require `entry:`.
 An Executable takes zero or one `#CLI`-derived parameter; Service and Check
-take none. All three return `()` or `() ?`. Sema resolves and validates the
+take none. All three return `()` or `() !`. Sema resolves and validates the
 callable before TIR or Rust emission, and publishes its definition and solved
 effect row to semantic tooling.
 
@@ -3843,9 +3845,10 @@ time the bundle compiled at all) — the same side-channel `jet inspect semindex
   and policy.
 - `effects` (D-EFF1 / D-SEMINDEX1) — each checked function's resolved effect
   row, including direct effects, callees, and provenance.
-- `layout` (D-LAYOUT-FACTS1=B) — compiler-owned type layout facts. Physical
-  byte facts remain optional; when absent, the lens names the registered
-  diagnostic and the reason.
+- `layout` (D-LAYOUT-FACTS1=B) — compiler-owned type layout facts. One
+  target-aware engine computes size, alignment, stride, and field offsets for
+  Jet-owned physical layouts; default-layout byte facts remain optional, and
+  the lens names the registered diagnostic and reason when they are absent.
 - `derive` (D-ONCE-DERIVE1) — behavior already attached to structs,
   enums, and distinct types, with their checked identity and source span.
 - `callable-signature` (D-CALLPOLICY1=E) — the complete checked callable
@@ -4149,8 +4152,8 @@ fn run() {
 ```
 
 `Plugin.load(path) => Plugin` produces a handle (mirrors `core.db`'s
-`open`/`open_memory`); `.call(name, [Float]) => Float ? String` and
-`.call_int(name, [Int]) => Int ? String` are the only instance methods (v1
+`open`/`open_memory`); `.call(name, [Float]) => Float ! String` and
+`.call_int(name, [Int]) => Int ! String` are the only instance methods (v1
 scope — every parameter and the return type must be all-`Int` or all-`Float`,
 E1260; Bool is a trivial follow-on, Text needs the Component Model's
 memory-based string ABI, a real future increment). The wasmtime host embedded
@@ -4179,7 +4182,7 @@ shape) — see docs/spec/diagnostics.md.
 ## Programmable builds as Jet (D-BUILDENTRY1 and build-graph decisions)
 
 `jet build` checks the root program, then runs one optional package-local
-`fn build(b: BuildContext) => BuildPlan ?` through the same interpreter used by
+`fn build(b: BuildContext) => BuildPlan !` through the same interpreter used by
 comptime. The compiler discovers it in any source file in the package, or in
 the package's `package.jet`; two candidates name both sites and fail. An
 Output-level `entry:` remains an explicit override for rare layouts. For a
@@ -4201,7 +4204,7 @@ target_triple)` records the target identity; `b.probe(name, kind, value)`
 supports `find_program`, `pkg_config`, and `header` probe kinds.
 
 ```jet
-fn build(b: BuildContext) =[Exec, FS]=> BuildPlan ? {
+fn build(b: BuildContext) =[Exec, FS]=> BuildPlan ! {
     #Impure("run declared toolchain probe and action") {
     shell :: b.probe("shell", "find_program", "sh")?
     native :: b.toolchain("native", "x86_64-linux")?

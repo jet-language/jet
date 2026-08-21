@@ -1,6 +1,6 @@
 use super::{AccessConvention, BinOp, Expr, Lambda, ParamZone, Type};
-use std::any::Any;
 use crate::Names::{mangle, mangle_path};
+use std::any::Any;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 
@@ -49,9 +49,7 @@ pub type ViewProvenanceMap = BTreeMap<Vec<String>, ViewProvenance>;
 /// A plain `OnceLock` freezes the first partial result in recursive call
 /// graphs; this cell publishes each larger iteration until convergence.
 #[derive(Debug, Clone, Default)]
-pub struct ViewProvenanceCell(
-    std::sync::Arc<std::sync::RwLock<Option<ViewProvenanceMap>>>,
-);
+pub struct ViewProvenanceCell(std::sync::Arc<std::sync::RwLock<Option<ViewProvenanceMap>>>);
 
 impl ViewProvenanceCell {
     pub fn new() -> Self {
@@ -66,10 +64,7 @@ impl ViewProvenanceCell {
     }
 
     pub fn set(&self, provenance: ViewProvenanceMap) {
-        *self
-            .0
-            .write()
-            .expect("view provenance lock poisoned") = Some(provenance);
+        *self.0.write().expect("view provenance lock poisoned") = Some(provenance);
     }
 }
 
@@ -87,10 +82,24 @@ pub fn canonical_view_provenance_map(map: &ViewProvenanceMap) -> String {
         .join("|")
 }
 
+/// D-STRUCT-LIFE1=A: one lifecycle marker payload shared by user declarations
+/// and compiler-owned Core marker applications.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Deprecation {
+    pub since: String,
+    pub replacement: String,
+    pub removed_in: Option<String>,
+}
+
 impl ViewProvenance {
     pub fn canonical(&self) -> String {
         let access = if self.mutable { "write" } else { "read" };
-        if let Some(source) = self.sources.iter().next().filter(|_| self.sources.len() == 1) {
+        if let Some(source) = self
+            .sources
+            .iter()
+            .next()
+            .filter(|_| self.sources.len() == 1)
+        {
             let canonical = source.canonical();
             let (owner, path) = canonical
                 .split_once(";path:")
@@ -114,11 +123,16 @@ impl ViewSourcePath {
             ViewSource::Parameter(index) => format!("parameter:{index}"),
             ViewSource::Static { module_path, name } => format!("static:{module_path}::{name}"),
         };
-        let path = self.projections.iter().map(|projection| match projection {
-            ViewSourceProjection::Field(name) => format!("field:{name}"),
-            ViewSourceProjection::Index => "index".to_string(),
-            ViewSourceProjection::Range => "range".to_string(),
-        }).collect::<Vec<_>>().join("/");
+        let path = self
+            .projections
+            .iter()
+            .map(|projection| match projection {
+                ViewSourceProjection::Field(name) => format!("field:{name}"),
+                ViewSourceProjection::Index => "index".to_string(),
+                ViewSourceProjection::Range => "range".to_string(),
+            })
+            .collect::<Vec<_>>()
+            .join("/");
         format!("{source};path:{path}")
     }
 }
@@ -133,6 +147,8 @@ pub struct FuncSig {
     /// selected by the receiver-first call spelling.
     pub root_param: bool,
     pub return_type: Option<Type>,
+    /// D-STRUCT-LIFE1=A: the declaration's retiring marker, if any.
+    pub deprecation: Option<Deprecation>,
     /// Sema-proved stable source for a returned view. Callers compose the
     /// parameter index onto the corresponding actual argument place.
     pub return_view_provenance: ViewProvenanceCell,
@@ -390,50 +406,124 @@ impl CtFloat {
         }
     }
 
-    pub fn sqrt(self) -> Self { unary_math!(self, sqrt) }
-    pub fn floor(self) -> Self { unary_math!(self, floor) }
-    pub fn ceil(self) -> Self { unary_math!(self, ceil) }
-    pub fn log2(self) -> Self { unary_math!(self, log2) }
-    pub fn log10(self) -> Self { unary_math!(self, log10) }
-    pub fn sin(self) -> Self { unary_math!(self, sin) }
-    pub fn cos(self) -> Self { unary_math!(self, cos) }
-    pub fn tan(self) -> Self { unary_math!(self, tan) }
-    pub fn asin(self) -> Self { unary_math!(self, asin) }
-    pub fn acos(self) -> Self { unary_math!(self, acos) }
-    pub fn atan(self) -> Self { unary_math!(self, atan) }
-    pub fn sinh(self) -> Self { unary_math!(self, sinh) }
-    pub fn cosh(self) -> Self { unary_math!(self, cosh) }
-    pub fn tanh(self) -> Self { unary_math!(self, tanh) }
-    pub fn exp(self) -> Self { unary_math!(self, exp) }
-    pub fn ln(self) -> Self { unary_math!(self, ln) }
-    pub fn trunc(self) -> Self { unary_math!(self, trunc) }
-    pub fn fract(self) -> Self { unary_math!(self, fract) }
-    pub fn acosh(self) -> Self { unary_math!(self, acosh) }
-    pub fn asinh(self) -> Self { unary_math!(self, asinh) }
-    pub fn atanh(self) -> Self { unary_math!(self, atanh) }
-    pub fn cbrt(self) -> Self { unary_math!(self, cbrt) }
-    pub fn exp2(self) -> Self { unary_math!(self, exp2) }
-    pub fn exp_m1(self) -> Self { unary_math!(self, exp_m1) }
-    pub fn ln_1p(self) -> Self { unary_math!(self, ln_1p) }
-    pub fn signum(self) -> Self { unary_math!(self, signum) }
-    pub fn to_degrees(self) -> Self { unary_math!(self, to_degrees) }
-    pub fn to_radians(self) -> Self { unary_math!(self, to_radians) }
+    pub fn sqrt(self) -> Self {
+        unary_math!(self, sqrt)
+    }
+    pub fn floor(self) -> Self {
+        unary_math!(self, floor)
+    }
+    pub fn ceil(self) -> Self {
+        unary_math!(self, ceil)
+    }
+    pub fn log2(self) -> Self {
+        unary_math!(self, log2)
+    }
+    pub fn log10(self) -> Self {
+        unary_math!(self, log10)
+    }
+    pub fn sin(self) -> Self {
+        unary_math!(self, sin)
+    }
+    pub fn cos(self) -> Self {
+        unary_math!(self, cos)
+    }
+    pub fn tan(self) -> Self {
+        unary_math!(self, tan)
+    }
+    pub fn asin(self) -> Self {
+        unary_math!(self, asin)
+    }
+    pub fn acos(self) -> Self {
+        unary_math!(self, acos)
+    }
+    pub fn atan(self) -> Self {
+        unary_math!(self, atan)
+    }
+    pub fn sinh(self) -> Self {
+        unary_math!(self, sinh)
+    }
+    pub fn cosh(self) -> Self {
+        unary_math!(self, cosh)
+    }
+    pub fn tanh(self) -> Self {
+        unary_math!(self, tanh)
+    }
+    pub fn exp(self) -> Self {
+        unary_math!(self, exp)
+    }
+    pub fn ln(self) -> Self {
+        unary_math!(self, ln)
+    }
+    pub fn trunc(self) -> Self {
+        unary_math!(self, trunc)
+    }
+    pub fn fract(self) -> Self {
+        unary_math!(self, fract)
+    }
+    pub fn acosh(self) -> Self {
+        unary_math!(self, acosh)
+    }
+    pub fn asinh(self) -> Self {
+        unary_math!(self, asinh)
+    }
+    pub fn atanh(self) -> Self {
+        unary_math!(self, atanh)
+    }
+    pub fn cbrt(self) -> Self {
+        unary_math!(self, cbrt)
+    }
+    pub fn exp2(self) -> Self {
+        unary_math!(self, exp2)
+    }
+    pub fn exp_m1(self) -> Self {
+        unary_math!(self, exp_m1)
+    }
+    pub fn ln_1p(self) -> Self {
+        unary_math!(self, ln_1p)
+    }
+    pub fn signum(self) -> Self {
+        unary_math!(self, signum)
+    }
+    pub fn to_degrees(self) -> Self {
+        unary_math!(self, to_degrees)
+    }
+    pub fn to_radians(self) -> Self {
+        unary_math!(self, to_radians)
+    }
 
-    pub fn powf(self, other: Self) -> Option<Self> { binary_math!(self, other, powf) }
-    pub fn min(self, other: Self) -> Option<Self> { binary_math!(self, other, min) }
-    pub fn max(self, other: Self) -> Option<Self> { binary_math!(self, other, max) }
-    pub fn atan2(self, other: Self) -> Option<Self> { binary_math!(self, other, atan2) }
-    pub fn hypot(self, other: Self) -> Option<Self> { binary_math!(self, other, hypot) }
-    pub fn copysign(self, other: Self) -> Option<Self> { binary_math!(self, other, copysign) }
-    pub fn log(self, other: Self) -> Option<Self> { binary_math!(self, other, log) }
+    pub fn powf(self, other: Self) -> Option<Self> {
+        binary_math!(self, other, powf)
+    }
+    pub fn min(self, other: Self) -> Option<Self> {
+        binary_math!(self, other, min)
+    }
+    pub fn max(self, other: Self) -> Option<Self> {
+        binary_math!(self, other, max)
+    }
+    pub fn atan2(self, other: Self) -> Option<Self> {
+        binary_math!(self, other, atan2)
+    }
+    pub fn hypot(self, other: Self) -> Option<Self> {
+        binary_math!(self, other, hypot)
+    }
+    pub fn copysign(self, other: Self) -> Option<Self> {
+        binary_math!(self, other, copysign)
+    }
+    pub fn log(self, other: Self) -> Option<Self> {
+        binary_math!(self, other, log)
+    }
 
     /// One rounding for a multiply and an add together, so the product keeps
     /// its full width before the sum. Mixing widths is refused, as it is for
     /// every other width-generic operation.
     pub fn mul_add(self, factor: Self, addend: Self) -> Option<Self> {
         match (self, factor, addend) {
-            (CtFloat::F64(a), CtFloat::F64(b), CtFloat::F64(c)) => Some(CtFloat::F64(a.mul_add(b, c))),
-            (CtFloat::F32(a), CtFloat::F32(b), CtFloat::F32(c)) => Some(CtFloat::F32(a.mul_add(b, c))),
+            (CtFloat::F64(a), CtFloat::F64(b), CtFloat::F64(c)) => {
+                Some(CtFloat::F64(a.mul_add(b, c)))
+            }
+            (CtFloat::F32(a), CtFloat::F32(b), CtFloat::F32(c)) => {
+                Some(CtFloat::F32(a.mul_add(b, c)))
+            }
             _ => None,
         }
     }
@@ -463,7 +553,11 @@ impl CtFloat {
     }
 }
 
-fn serialize_float<T: fmt::Debug + PartialOrd + Copy>(value: T, suffix: &str, module: &str) -> String
+fn serialize_float<T: fmt::Debug + PartialOrd + Copy>(
+    value: T,
+    suffix: &str,
+    module: &str,
+) -> String
 where
     f64: From<T>,
 {
@@ -504,7 +598,7 @@ pub enum CtValue {
         args: Vec<(Option<String>, CtValue)>,
     },
     /// D-FAIL-CARRIER1=A — the payload side of the one outcome carrier. `T?`
-    /// and `T ? E` are two views of this carrier, so a present payload has one
+    /// and `T ! E` are two views of this carrier, so a present payload has one
     /// spelling, not one per view. Mirrors the prelude's `Ok` on
     /// `JetOutcome<T, E>`.
     Present(Box<CtValue>),
@@ -545,11 +639,9 @@ impl PartialEq for CtValue {
                     && left_fields
                         .iter()
                         .filter(|(name, _)| !crate::Syntax::is_memo_storage_name(name))
-                        .eq(
-                            right_fields
-                                .iter()
-                                .filter(|(name, _)| !crate::Syntax::is_memo_storage_name(name)),
-                        )
+                        .eq(right_fields
+                            .iter()
+                            .filter(|(name, _)| !crate::Syntax::is_memo_storage_name(name)))
             }
             (
                 Self::Enum {
@@ -562,7 +654,9 @@ impl PartialEq for CtValue {
                     variant: right_variant,
                     args: right_args,
                 },
-            ) => left_type == right_type && left_variant == right_variant && left_args == right_args,
+            ) => {
+                left_type == right_type && left_variant == right_variant && left_args == right_args
+            }
             (Self::Present(left), Self::Present(right)) => left == right,
             (Self::Failed(left), Self::Failed(right)) => left == right,
             (Self::Unit, Self::Unit) => true,
@@ -574,10 +668,10 @@ impl PartialEq for CtValue {
 
 /// D-FAIL-CARRIER1=A — the report on the stop side of the one outcome carrier.
 ///
-/// `T?` and `T ? E` stop the same way; they differ only in what the report has
+/// `T?` and `T ! E` stop the same way; they differ only in what the report has
 /// to say. A clean report says nothing but the payload it lacks, and is the
 /// comptime twin of the prelude's zero-sized `JetAbsent`. A told report is the
-/// error value on `T ? E`'s stop side.
+/// error value on `T ! E`'s stop side.
 #[derive(Clone, Debug, PartialEq)]
 pub enum CtReport {
     /// The clean report: an absence, which is not a failure.
@@ -593,7 +687,7 @@ impl CtValue {
         CtValue::Failed(CtReport::Clean(ty.into()))
     }
 
-    /// Stop with a told report: the `T ? E` view of the carrier.
+    /// Stop with a told report: the `T ! E` view of the carrier.
     pub fn failed(report: Box<CtValue>) -> CtValue {
         CtValue::Failed(CtReport::Told(report))
     }
@@ -762,7 +856,10 @@ pub enum CtKey {
         fields: Vec<(String, CtKey)>,
     },
     /// D-MAP-KEY1: payload-free enum variants are already complete values.
-    Enum { type_name: String, variant: String },
+    Enum {
+        type_name: String,
+        variant: String,
+    },
 }
 
 impl CtKey {
@@ -779,9 +876,7 @@ impl CtKey {
             }
             // The map type fixes the enum, so the variant is the complete
             // value-bearing part of this key adapter.
-            CtKey::Enum { variant, .. } => {
-                map_key_semantics::JetMapKey::String(variant.clone())
-            }
+            CtKey::Enum { variant, .. } => map_key_semantics::JetMapKey::String(variant.clone()),
         }
     }
 }
@@ -939,7 +1034,8 @@ impl CtValue {
             CtValue::Closure(_) => Type::Fn {
                 params: Vec::new(),
                 ret: None,
-                effect_bound: None, return_view_provenance: None,
+                effect_bound: None,
+                return_view_provenance: None,
                 param_contract: None,
                 call_metadata: None,
             },
@@ -997,7 +1093,7 @@ impl CtValue {
                     .filter(|(n, _)| {
                         !crate::Syntax::is_memo_storage_name(n)
                             && !(matches!(type_name.as_str(), "Table" | "Series" | "LazyFrame")
-                            && n == "elem_type")
+                                && n == "elem_type")
                             && !(type_name == "Tensor" && n == "__jet_tensor_handle")
                     })
                     .cloned()
@@ -1425,10 +1521,7 @@ impl CtValue {
                     _ => mangle_path(type_name),
                 };
                 if type_name == "Range" {
-                    format!(
-                        "{rust_type} {{ {}, exclusive: false }}",
-                        parts.join(", ")
-                    )
+                    format!("{rust_type} {{ {}, exclusive: false }}", parts.join(", "))
                 } else {
                     format!("{rust_type} {{ {} }}", parts.join(", "))
                 }
@@ -1534,7 +1627,10 @@ mod tests {
         assert_eq!(nested.to_json(), "[16777216.0,16777217.0]");
         assert_eq!(nested.serialize(), "vec![16777216.0f32, 16777217.0f64]");
         assert_eq!(CtFloat::f32(f32::NAN).serialize(), "f32::NAN");
-        assert_eq!(CtFloat::f64(f64::NEG_INFINITY).serialize(), "f64::NEG_INFINITY");
+        assert_eq!(
+            CtFloat::f64(f64::NEG_INFINITY).serialize(),
+            "f64::NEG_INFINITY"
+        );
     }
 
     #[test]
@@ -1561,10 +1657,7 @@ mod tests {
             args: vec![(None, CtValue::Int(3))],
         };
 
-        assert_eq!(
-            value.serialize(),
-            "__jet___JetUnion_Int_String::Int(3i64)"
-        );
+        assert_eq!(value.serialize(), "__jet___JetUnion_Int_String::Int(3i64)");
     }
 
     #[test]
@@ -1583,7 +1676,10 @@ mod tests {
         let value = CtValue::Struct {
             type_name: crate::Syntax::TYPE_ERR.to_string(),
             fields: vec![
-                ("message".to_string(), CtValue::Str("config failed".to_string())),
+                (
+                    "message".to_string(),
+                    CtValue::Str("config failed".to_string()),
+                ),
                 (
                     "code".to_string(),
                     CtValue::Present(Box::new(CtValue::Str("CFG404".to_string()))),
@@ -1594,7 +1690,10 @@ mod tests {
 
         let error = value.to_jet_err().expect("checked Err shape must marshal");
         assert_eq!(crate::Outcome::jet_err_message(&error), "config failed");
-        assert_eq!(value.jet_show(), "Error [CFG404]: config failed\n  cause: bad input");
+        assert_eq!(
+            value.jet_show(),
+            "Error [CFG404]: config failed\n  cause: bad input"
+        );
         assert_eq!(CtValue::from_jet_err(&error), value);
     }
 }

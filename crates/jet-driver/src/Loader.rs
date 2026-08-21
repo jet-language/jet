@@ -171,6 +171,112 @@ impl PkgResolution {
     }
 }
 
+/// D-STRUCT-EDGE1=A: the package-owned part of one resolved import graph.
+/// The loader owns enforcement; engines only receive a successfully loaded
+/// graph, so this policy has no runtime representation.
+#[derive(Clone)]
+struct ImportBoundaryPolicy {
+    package: String,
+    source_root: PathBuf,
+    deny: Vec<crate::Package::ImportBoundary>,
+}
+
+impl ImportBoundaryPolicy {
+    fn from_manifest(manifest: &Manifest::Manifest, source_root: &Path) -> Self {
+        Self {
+            package: manifest.package.name.clone(),
+            source_root: normalize_path(source_root),
+            deny: manifest.boundaries.clone(),
+        }
+    }
+
+    fn module_name(&self, path: &Path, items: &[Item]) -> String {
+        if let Some(name) = items.iter().find_map(|item| match item {
+            Item::Module(module) => Some(module.name.as_str()),
+            _ => None,
+        }) {
+            return format!("{}.{}", self.package, name);
+        }
+        let path = normalize_path(path);
+        let root = normalize_path(&self.source_root);
+        let relative = path.strip_prefix(&root).unwrap_or(path.as_path());
+        let mut parts = relative
+            .components()
+            .filter_map(|component| component.as_os_str().to_str())
+            .map(str::to_owned)
+            .collect::<Vec<_>>();
+        if let Some(last) = parts.last_mut() {
+            let stem = Path::new(last)
+                .file_stem()
+                .and_then(|stem| stem.to_str())
+                .map(str::to_owned);
+            if let Some(stem) = stem {
+                *last = stem;
+            }
+        }
+        if parts.len() > 1 && matches!(parts.last().map(String::as_str), Some("main" | "module")) {
+            parts.pop();
+        }
+        std::iter::once(self.package.as_str())
+            .chain(parts.iter().map(String::as_str))
+            .collect::<Vec<_>>()
+            .join(".")
+    }
+}
+
+fn boundary_policy_for_dependency(
+    manifest_root: &Path,
+    source_root: &Path,
+) -> Result<Option<ImportBoundaryPolicy>, Diagnostic> {
+    match Manifest::load(manifest_root) {
+        Some(Ok(manifest)) => Ok(Some(ImportBoundaryPolicy::from_manifest(
+            &manifest,
+            source_root,
+        ))),
+        Some(Err(diagnostic)) => Err(diagnostic),
+        None => Ok(None),
+    }
+}
+
+fn boundary_policy_index(policies: &[ImportBoundaryPolicy], path: &Path) -> Option<usize> {
+    let path = normalize_path(path);
+    policies
+        .iter()
+        .enumerate()
+        .filter(|(_, policy)| path.starts_with(&policy.source_root))
+        .max_by_key(|(_, policy)| policy.source_root.components().count())
+        .map(|(index, _)| index)
+}
+
+fn import_boundary_violation(
+    policies: &[ImportBoundaryPolicy],
+    from_module: &LoadedModule,
+    to_module: &LoadedModule,
+    span: Span,
+) -> Option<(usize, usize, Diagnostic)> {
+    let from_index = boundary_policy_index(policies, &from_module.path)?;
+    let to_index = boundary_policy_index(policies, &to_module.path)?;
+    let from_policy = &policies[from_index];
+    let from_name = from_policy.module_name(&from_module.path, &from_module.items);
+    let to_name = policies[to_index].module_name(&to_module.path, &to_module.items);
+    let (rule_index, rule) = from_policy
+        .deny
+        .iter()
+        .enumerate()
+        .find(|(_, rule)| rule.matches(&from_name, &to_name))?;
+    let rule_display = format!("{} -> {}", rule.from, rule.to);
+    let diagnostic = Diagnostic::from_row(
+        "E0619",
+        &[
+            ("from", &from_name),
+            ("to", &to_name),
+            ("rule", &rule_display),
+        ],
+        Some(span),
+    );
+    Some((from_index, rule_index, diagnostic))
+}
+
 /// Build the U17 package resolution from a project's `package.jet` text and the
 /// shared hangar store.
 ///
@@ -460,6 +566,7 @@ fn load_entry_with_overlays_mode_on_stack(
         package_lints_deny,
         package_guarantees,
         program_allocator,
+        boundary_policies,
     ) = if let Some(manifest_dir) = manifest_root
     {
         // Found a Package root — validate it and collect dep source paths.
@@ -808,6 +915,15 @@ fn load_entry_with_overlays_mode_on_stack(
                         ),
                     )
                 })?;
+                let mut boundary_policies = vec![ImportBoundaryPolicy::from_manifest(
+                    &mf,
+                    &manifest_dir,
+                )];
+                boundary_policies.extend(
+                    dep_dirs
+                        .values()
+                        .filter_map(|dependency| dependency.boundary_policy.clone()),
+                );
                 (
                     manifest_dir,
                     dep_dirs,
@@ -816,6 +932,7 @@ fn load_entry_with_overlays_mode_on_stack(
                     package_lints_deny,
                     package_guarantees,
                     package_manifest.allocator.clone(),
+                    boundary_policies,
                 )
             }
         }
@@ -895,6 +1012,7 @@ fn load_entry_with_overlays_mode_on_stack(
             Vec::new(),
             PackageGuarantees::default(),
             crate::TargetMachine::AllocatorPolicy::HostedDefault,
+            Vec::new(),
         )
     };
 
@@ -1081,6 +1199,10 @@ fn load_entry_with_overlays_mode_on_stack(
             jet_foundation::Names::package_scope_for(&module.path, &project_root),
         );
     }
+    let mut boundary_hits = boundary_policies
+        .iter()
+        .map(|policy| vec![false; policy.deny.len()])
+        .collect::<Vec<_>>();
     for module_idx in 0..modules.len() {
         let (module_path, imports) = {
             let m = &modules[module_idx];
@@ -1107,8 +1229,39 @@ fn load_entry_with_overlays_mode_on_stack(
             ) {
                 let norm = normalize_path(&target_path);
                 if let Some(&target_idx) = path_to_idx.get(&norm) {
+                    if let Some((policy_idx, rule_idx, diagnostic)) = import_boundary_violation(
+                        &boundary_policies,
+                        &modules[module_idx],
+                        &modules[target_idx],
+                        imp.span,
+                    ) {
+                        boundary_hits[policy_idx][rule_idx] = true;
+                        let module = &modules[module_idx];
+                        return Err(record_loader_error(
+                            &mut sink,
+                            LoaderError::at(
+                                &module.display,
+                                &module.source,
+                                vec![diagnostic],
+                            ),
+                        ));
+                    }
                     name_ledger.record_import_target(module_idx, imp.span, target_idx);
                 }
+            }
+        }
+    }
+
+    // D-STRUCT-EDGE1=A: an unused rule is feedback, not a hard failure.
+    for (policy_idx, policy) in boundary_policies.iter().enumerate() {
+        for (rule_idx, rule) in policy.deny.iter().enumerate() {
+            if !boundary_hits[policy_idx][rule_idx] {
+                let rule_display = format!("{} -> {}", rule.from, rule.to);
+                parse_teaching.push(Diagnostic::from_row(
+                    "L0619",
+                    &[("rule", &rule_display)],
+                    None,
+                ));
             }
         }
     }
@@ -1209,6 +1362,7 @@ fn load_entry_with_overlays_mode_on_stack(
             default_target: program.default_target,
             html_path: program.html_path,
             policy_declarations: program.policy_declarations,
+            user_policy_declarations: program.user_policy_declarations,
             rule_facts: program.rule_facts,
         });
     }
@@ -1569,6 +1723,7 @@ fn dry_resolve_recursive(
 struct DependencyDir {
     manifest_root: PathBuf,
     source_root: PathBuf,
+    boundary_policy: Option<ImportBoundaryPolicy>,
 }
 
 /// Collect each dependency's owning manifest root and source root.
@@ -1596,7 +1751,11 @@ fn collect_dep_dirs(
                     dep_name.clone(),
                     DependencyDir {
                         manifest_root: resolver.root().to_path_buf(),
-                        source_root: src_root,
+                        source_root: src_root.clone(),
+                        boundary_policy: boundary_policy_for_dependency(
+                            resolver.root(),
+                            &src_root,
+                        )?,
                     },
                 );
             }
@@ -1616,7 +1775,11 @@ fn collect_dep_dirs(
                         dep_name.clone(),
                         DependencyDir {
                             manifest_root: resolver.root().to_path_buf(),
-                            source_root: src_root,
+                            source_root: src_root.clone(),
+                            boundary_policy: boundary_policy_for_dependency(
+                                resolver.root(),
+                                &src_root,
+                            )?,
                         },
                     );
                     }
@@ -1825,6 +1988,7 @@ fn load_file(
         default_target: prog.default_target,
         html_path: prog.html_path.clone(),
         policy_declarations: effective_declarations,
+        user_policy_declarations: std::mem::take(&mut prog.user_policy_declarations),
         rule_facts: std::mem::take(&mut prog.rule_facts),
     });
 
@@ -2616,8 +2780,8 @@ mod stale_manifest_name_tests {
 
     #[test]
     fn jetpack_toml_is_not_stale() {
-        // jetpack.toml is a different, still-live file (repo metadata) —
-        // must never be mistaken for a retired manifest name.
+        // jetpack.toml is a retired config file, not a package-manifest name;
+        // the package loader must not misreport it as E1226.
         let dir = tempdir("jetpacktoml");
         fs::write(dir.join("jetpack.toml"), "").unwrap();
         assert_eq!(find_stale_manifest_name(&dir), None);

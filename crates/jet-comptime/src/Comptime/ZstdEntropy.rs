@@ -53,7 +53,11 @@ impl ReverseBits {
                 bits.push((byte >> bit) & 1);
             }
         }
-        Some(Self { remaining: bits.len() as isize, bits, next: 0 })
+        Some(Self {
+            remaining: bits.len() as isize,
+            bits,
+            next: 0,
+        })
     }
 
     fn read(&mut self, count: u8) -> usize {
@@ -132,12 +136,23 @@ impl FseTable {
         if total != size || probabilities.is_empty() || probabilities.len() > 256 {
             return None;
         }
-        let mut entries = vec![FseEntry { baseline: 0, bits: 0, symbol: 0 }; size];
+        let mut entries = vec![
+            FseEntry {
+                baseline: 0,
+                bits: 0,
+                symbol: 0
+            };
+            size
+        ];
         let mut high = size;
         for (symbol, probability) in probabilities.iter().enumerate() {
             if *probability == -1 {
                 high = high.checked_sub(1)?;
-                entries[high] = FseEntry { baseline: 0, bits: log, symbol: symbol as u8 };
+                entries[high] = FseEntry {
+                    baseline: 0,
+                    bits: log,
+                    symbol: symbol as u8,
+                };
             }
         }
         let step = (size >> 1) + (size >> 3) + 3;
@@ -223,7 +238,13 @@ impl Huffman {
             let count = usize::from(header - 127);
             let bytes = source.get(1..1 + count.div_ceil(2))?;
             let weights = (0..count)
-                .map(|index| if index % 2 == 0 { bytes[index / 2] >> 4 } else { bytes[index / 2] & 15 })
+                .map(|index| {
+                    if index % 2 == 0 {
+                        bytes[index / 2] >> 4
+                    } else {
+                        bytes[index / 2] & 15
+                    }
+                })
                 .collect();
             (weights, 1 + count.div_ceil(2))
         };
@@ -243,7 +264,12 @@ impl Huffman {
         }
         weights.push((32 - leftover.leading_zeros()) as u8);
         if !weights.contains(&1)
-            || weights.iter().filter(|weight| **weight != 0).take(2).count() < 2
+            || weights
+                .iter()
+                .filter(|weight| **weight != 0)
+                .take(2)
+                .count()
+                < 2
         {
             return None;
         }
@@ -271,7 +297,10 @@ impl Huffman {
             let start = starts[usize::from(length)];
             starts[usize::from(length)] += span;
             for entry in &mut entries[start..start + span] {
-                *entry = HuffEntry { symbol: symbol as u8, bits: length };
+                *entry = HuffEntry {
+                    symbol: symbol as u8,
+                    bits: length,
+                };
             }
         }
         Some((Self { log, entries }, used))
@@ -296,17 +325,17 @@ impl Huffman {
 #[derive(Default)]
 pub(super) struct HuffmanState(Option<Huffman>);
 
-pub(super) fn literals(
-    block: &[u8],
-    state: &mut HuffmanState,
-) -> Option<(Vec<u8>, usize)> {
+pub(super) fn literals(block: &[u8], state: &mut HuffmanState) -> Option<(Vec<u8>, usize)> {
     let first = *block.first()?;
     let kind = first & 3;
     let format = (first >> 2) & 3;
     if kind < 2 {
         let (header, size) = match format {
             0 | 2 => (1, usize::from(first >> 3)),
-            1 => (2, usize::from(first >> 4) + (usize::from(*block.get(1)?) << 4)),
+            1 => (
+                2,
+                usize::from(first >> 4) + (usize::from(*block.get(1)?) << 4),
+            ),
             _ => (
                 3,
                 usize::from(first >> 4)
@@ -383,37 +412,32 @@ pub(super) fn literals(
 }
 
 const LL_BASE: [usize; 36] = [
-    0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 18, 20, 22, 24,
-    28, 32, 40, 48, 64, 128, 256, 512, 1024, 2048, 4096, 8192, 16384, 32768,
-    65536,
+    0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 18, 20, 22, 24, 28, 32, 40, 48, 64,
+    128, 256, 512, 1024, 2048, 4096, 8192, 16384, 32768, 65536,
 ];
 const LL_BITS: [u8; 36] = [
-    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 2, 2, 3, 3,
-    4, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 2, 2, 3, 3, 4, 6, 7, 8, 9, 10, 11,
+    12, 13, 14, 15, 16,
 ];
 const ML_BASE: [usize; 53] = [
-    3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22,
-    23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 37, 39, 41, 43, 47,
-    51, 59, 67, 83, 99, 131, 259, 515, 1027, 2051, 4099, 8195, 16387, 32771,
-    65539,
+    3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27,
+    28, 29, 30, 31, 32, 33, 34, 35, 37, 39, 41, 43, 47, 51, 59, 67, 83, 99, 131, 259, 515, 1027,
+    2051, 4099, 8195, 16387, 32771, 65539,
 ];
 const ML_BITS: [u8; 53] = [
-    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-    0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 2, 2, 3, 3, 4, 4, 5, 7, 8, 9, 10,
-    11, 12, 13, 14, 15, 16,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    1, 1, 1, 1, 2, 2, 3, 3, 4, 4, 5, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16,
 ];
 const LL_DEFAULT: [i32; 36] = [
-    4, 3, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 1, 1, 1, 2, 2, 2, 2, 2, 2, 2, 2,
-    2, 3, 2, 1, 1, 1, 1, 1, -1, -1, -1, -1,
+    4, 3, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 1, 1, 1, 2, 2, 2, 2, 2, 2, 2, 2, 2, 3, 2, 1, 1, 1, 1, 1,
+    -1, -1, -1, -1,
 ];
 const ML_DEFAULT: [i32; 53] = [
-    1, 4, 3, 2, 2, 2, 2, 2, 2, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
-    1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, -1,
-    -1, -1, -1, -1, -1, -1,
+    1, 4, 3, 2, 2, 2, 2, 2, 2, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+    1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, -1, -1, -1, -1, -1, -1, -1,
 ];
 const OF_DEFAULT: [i32; 29] = [
-    1, 1, 1, 1, 1, 1, 2, 2, 2, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
-    -1, -1, -1, -1, -1,
+    1, 1, 1, 1, 1, 1, 2, 2, 2, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, -1, -1, -1, -1, -1,
 ];
 
 pub(super) struct SequenceState {
@@ -469,7 +493,11 @@ fn sequence_table(
             }
             *current = Some(FseTable {
                 log: 0,
-                entries: vec![FseEntry { baseline: 0, bits: 0, symbol }],
+                entries: vec![FseEntry {
+                    baseline: 0,
+                    bits: 0,
+                    symbol,
+                }],
             });
             Some(1)
         }
@@ -483,7 +511,11 @@ fn sequence_table(
     }
 }
 
-fn update_sequence_state(table: &FseTable, entry: FseEntry, bits: &mut ReverseBits) -> Option<usize> {
+fn update_sequence_state(
+    table: &FseTable,
+    entry: FseEntry,
+    bits: &mut ReverseBits,
+) -> Option<usize> {
     let state = entry.baseline.checked_add(bits.read(entry.bits))?;
     (state < table.entries.len()).then_some(state)
 }
@@ -616,8 +648,12 @@ pub(super) fn sequences(
         let ml_code = usize::from(ml_entry.symbol);
         let of_code = of_entry.symbol;
         let offset_value = (1usize << of_code).checked_add(bits.read(of_code))?;
-        let match_length = ML_BASE.get(ml_code)?.checked_add(bits.read(ML_BITS[ml_code]))?;
-        let literal_length = LL_BASE.get(ll_code)?.checked_add(bits.read(LL_BITS[ll_code]))?;
+        let match_length = ML_BASE
+            .get(ml_code)?
+            .checked_add(bits.read(ML_BITS[ml_code]))?;
+        let literal_length = LL_BASE
+            .get(ll_code)?
+            .checked_add(bits.read(LL_BITS[ll_code]))?;
         if bits.remaining < 0 {
             return None;
         }
@@ -681,7 +717,13 @@ mod tests {
     }
 
     fn corpus(len: usize) -> (Vec<u8>, Vec<u8>) {
-        let alphabet = if len < 1_000 { 8 } else if len < 100_000 { 16 } else { 64 };
+        let alphabet = if len < 1_000 {
+            8
+        } else if len < 100_000 {
+            16
+        } else {
+            64
+        };
         let mut value = 1u32;
         let mut plain = Vec::with_capacity(len);
         let mut seen = HashSet::new();
@@ -689,10 +731,15 @@ mod tests {
             value ^= value << 13;
             value ^= value >> 17;
             value ^= value << 5;
-            let candidate = if value & 3 == 0 { 0 } else { 1 + (value as u8 % (alphabet - 1)) };
+            let candidate = if value & 3 == 0 {
+                0
+            } else {
+                1 + (value as u8 % (alphabet - 1))
+            };
             if plain.len() >= 3 {
                 let at = plain.len();
-                let key = u32::from_le_bytes([plain[at - 3], plain[at - 2], plain[at - 1], candidate]);
+                let key =
+                    u32::from_le_bytes([plain[at - 3], plain[at - 2], plain[at - 1], candidate]);
                 if !seen.insert(key) {
                     continue;
                 }
@@ -744,7 +791,8 @@ mod tests {
         let mut offset = 5 + usize::from(!single) + dict + fcs;
         let mut out = Vec::new();
         loop {
-            let header = u32::from_le_bytes([frame[offset], frame[offset + 1], frame[offset + 2], 0]);
+            let header =
+                u32::from_le_bytes([frame[offset], frame[offset + 1], frame[offset + 2], 0]);
             offset += 3;
             let size = (header >> 3) as usize;
             out.push(&frame[offset..offset + size]);
@@ -780,7 +828,10 @@ mod tests {
                 assert!(!literals.is_empty() && used < block.len());
             }
         }
-        assert!(kinds.contains(&2) && kinds.contains(&3), "expected compressed + treeless: {kinds:?}");
+        assert!(
+            kinds.contains(&2) && kinds.contains(&3),
+            "expected compressed + treeless: {kinds:?}"
+        );
     }
 
     #[test]
@@ -797,9 +848,12 @@ mod tests {
                 modes.push(section[header]);
             }
         }
-        assert!(modes.iter().any(|modes| {
-            [modes >> 6, (modes >> 4) & 3, (modes >> 2) & 3].contains(&3)
-        }), "stock corpus must repeat an LL/ML/OF table: {modes:02x?}");
+        assert!(
+            modes
+                .iter()
+                .any(|modes| { [modes >> 6, (modes >> 4) & 3, (modes >> 2) & 3].contains(&3) }),
+            "stock corpus must repeat an LL/ML/OF table: {modes:02x?}"
+        );
     }
 
     #[test]
@@ -822,17 +876,7 @@ mod tests {
         )
         .is_some());
         assert_eq!(out, b"ABBBB");
-        assert!(sequences(
-            &[1, 0xfc, 1],
-            b"C",
-            &mut state,
-            &mut out,
-            0,
-            8,
-            128,
-            128,
-        )
-        .is_some());
+        assert!(sequences(&[1, 0xfc, 1], b"C", &mut state, &mut out, 0, 8, 128, 128,).is_some());
         assert_eq!(out, b"ABBBBCCCC");
         let mut zero_count = Vec::new();
         assert!(sequences(
@@ -872,17 +916,20 @@ mod tests {
             &[1, 0x54, 0, 0, 0, 1],
             &[1, 0x54, 1, 0, 0, 3],
         ] {
-            assert!(sequences(
-                malformed,
-                b"B",
-                &mut SequenceState::default(),
-                &mut vec![b'A'],
-                0,
-                8,
-                128,
-                128,
-            )
-            .is_none(), "accepted malformed sequence section: {malformed:?}");
+            assert!(
+                sequences(
+                    malformed,
+                    b"B",
+                    &mut SequenceState::default(),
+                    &mut vec![b'A'],
+                    0,
+                    8,
+                    128,
+                    128,
+                )
+                .is_none(),
+                "accepted malformed sequence section: {malformed:?}"
+            );
         }
     }
 

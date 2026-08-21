@@ -71,7 +71,7 @@ current working tree.
 | Resident admission | `crates/jet-jit/src/jit/safety.rs:45-80` admits the lowered `[function, targets]` shape through `args.len() >= 2`, then checks the value count. For that valid shape, `value_count == 0` and `expected_values == 0`, so the predicate does not currently refuse it; it has no source-arity-one fact. | Replace the broad admission with an explicit curried shape check. Keep malformed shapes out. Do not treat the guard as the closure lifetime mechanism. |
 | AOT emit | `crates/jet-codegen/src/Codegen/TIR/emit/core_calls.rs:212-223` rejects fewer than two TIR arguments and defines `args.len() == 2` as `transform`; `:339-405` emits the returned `Rc` closure. | The curried arm must create and call the Prelude handle. The `Rc` closure may remain only as a marshalling adapter, if needed. |
 | TIR and resident JIT lowering | `crates/jet-codegen/src/Codegen/TIR/lower/method_calls.rs:308-393` appends the implicit `List<Int>` target, producing `[base, targets]` for the curried source form. `crates/jet-jit/src/jit/lower_ctx.rs:13792-13827` accepts that shape, passes zero as the input-list handle, and calls the private transform factory path. | Change source/TIR lowering, the resident guard, AOT emit, and JIT marshalling in one implementation diff. The JIT must stop manufacturing a second transform convention. |
-| Interpreter and current JIT callable models | `crates/jet-codegen/src/Codegen/TIR/eval/compute_calls.rs:281-326` stores `EvalCallable::ComputeTransform` for `args.len() == 2`; `eval/mod.rs:1218-1265,3452-3550` snapshots and dispatches it. The JIT stores compute state in `ComputeState` (`crates/jet-jit/src/Compute.rs:551-567`), runs direct transform policy in `:866-1021`, and creates arity-specific factories in `:1023-1098,1122-1180`. | Move plan, tape, transform selection, and continuation lifetime to the Prelude. Both engines become adapters over the same handle and call operation. |
+| Interpreter and current JIT callable models | `crates/jet-codegen/src/Codegen/TIR/eval/compute_calls.rs:281-326` stores `EvalCallable::ComputeTransform` for `args.len() == 2`; `eval/mod.rs:1218-1265,3452-3550` snapshots and dispatches it. Its `ComputeLite` seam reconstructs the tape and applies the transform in `crates/jet-comptime/src/Comptime/ComputeLite.rs:1180-1214`. The JIT stores compute state in `ComputeState` (`crates/jet-jit/src/Compute.rs:556-573`), runs direct transform policy in `:871-1026`, and creates arity-specific factories in `:1028-1103,1127-1184`. | Move plan, tape, transform selection, and continuation lifetime to the Prelude. Both engines become adapters over the same handle and call operation. |
 
 This is an I9 divergence, not only an admission refusal. The card's wording
 that the resident arity guard refuses the curried form is stale: the current
@@ -80,6 +80,16 @@ closure, resident JIT uses an arity-specific factory plus an environment
 record, and the interpreter uses compute-specific callable records. Each can
 represent the value, but no one representation owns the closure across all
 host seams. The design fixes that split instead of adding a fourth convention.
+
+The resident predicate has a second blocker for the card's full proof. Its
+return gate currently accepts a tuple only for `gradient`
+(`crates/jet-jit/src/jit/safety.rs:62-67`). Sema defines tuple results for
+`value_and_gradient` and `jvp`, and an applied `VjpRun` result for `vjp`
+(`crates/jet-sema/src/Sema/CheckerCoreLib/core_call.rs:864-874`). Therefore
+`compute_autodiff` cannot become resident by fixing only the curried
+`gradient` handle. Follow-up B must carry the exact checked result shapes for
+all four transforms into its same lowering/admission change. It must not use a
+blanket result-type acceptance rule.
 
 ## Same program: before and after
 
@@ -464,3 +474,16 @@ implementation evidence:
 2. **Open; re-homed to Follow-up B.** No guard or lowering arm changed.
 3. **Open; re-homed to Follow-up C.** `compute_autodiff` remains in
    `tests/jit_corpus_gate.txt:534` until the resident proof passes.
+
+## Compiler finding
+
+The card's statement that the resident arity guard currently refuses the
+curried form is false for the present compiler. The lowerer already appends
+the target list, so `compute.gradient(f)` reaches the resident predicate as
+`[base, targets]`; the predicate computes zero value arguments and zero
+expected values, then admits that shape. The AOT guard has the same fact:
+`args.len() == 2` passes its `args.len() < 2` check and enters the existing
+inline `Rc` closure arm. The compiler problem is the missing shared closure
+owner and the resident whole-program fallback, not missing user syntax. This
+document treats the guards as narrowing points so the follow-up keeps their
+admission contract in lockstep with the new lowering/handle arm.

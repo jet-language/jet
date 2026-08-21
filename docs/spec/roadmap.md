@@ -50,7 +50,8 @@ live open-decision queue.
 **E2-M2 — Release policy, editions, epoch contract** verified 2026-06-16. Ratified
 compatibility/release policy ([`release-policy.md`](release-policy.md));
 `edition:` marker in `package.jet`; enriched `jet --version` banner; E2001
-reachable, E2002/L2001 registered (honestly empty pre-1.0 deprecation registry).
+reachable, E2002/L2001 registered through the public `#Deprecated` lifecycle
+marker and the same Core marker payload.
 
 **E2-M3 — Developer command UX** verified 2026-06-16. Stable exit-code table,
 TTY-aware color (NO_COLOR/FORCE_COLOR/--color), versioned `--json` schema,
@@ -114,7 +115,7 @@ M0–M14, v1.0 arc, verified 2026-06-14.
 - **M0** — bootstrap: lexer, parser, Rust codegen, `jet run`, hello-world golden test.
 - **M1–M2** — functions, variables, control flow, basic types.
 - **M3** — structs and enums (data types).
-- **M4** — error handling: `T ? E`, `?` propagation, `??`, `panic`.
+- **M4** — error handling: `T ! E`, `?` propagation, `??`, `panic`.
 - **M5** — collections: lists, maps, strings.
 - **M6** — tooling: `jet fmt`, `jet test`, multi-file imports.
 - **M7** — FFI: `extern rust` inline crate deps.

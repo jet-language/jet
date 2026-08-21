@@ -155,6 +155,17 @@ pub fn import_broker_archive(roots: &Roots, bytes: &[u8]) -> io::Result<ArchiveR
     Ok(report)
 }
 
+/// Sweep archive verification/import stages left by a crashed process. The
+/// Hangar lock is held by the caller, so a live archive operation cannot be
+/// mistaken for abandoned state. A symlinked stage root stops recovery rather
+/// than allowing cleanup to follow an attacker-controlled path.
+pub(super) fn recover_archive_staging_unlocked(roots: &Roots) -> io::Result<usize> {
+    super::Ingest::sweep_abandoned_directory(
+        &roots.hangar_dir().join(ARCHIVE_STAGE),
+        "Hangar archive staging",
+    )
+}
+
 /// Have the shared-store broker sign a bounded, content-verified archive.
 /// This keeps the administrator's signing secret inside the broker process.
 pub fn attest_archive(roots: &Roots, bytes: &[u8], key: &str) -> io::Result<Vec<u8>> {
@@ -280,6 +291,7 @@ pub fn repair_archive(
     source_archive: Option<&Path>,
     key: Option<&str>,
 ) -> io::Result<ArchiveReport> {
+    super::Ingest::require_real_directory(&roots.hangar_dir(), "Hangar root")?;
     let entry = select_entry(roots, target)?;
     match verify_live_entry(roots, &entry) {
         Ok(()) => {
@@ -316,7 +328,7 @@ pub fn repair_archive(
         ));
     }
     let quarantine = hangar.join("quarantine");
-    fs::create_dir_all(&quarantine)?;
+    super::Ingest::ensure_real_directory(&quarantine, "Hangar quarantine")?;
     let backup = quarantine.join(format!(
         "repair-{}-{}",
         entry.envelope.output_hash,
@@ -340,8 +352,13 @@ pub fn repair_archive(
 }
 
 fn build_archive(roots: &Roots, target: &str, include_closure: bool) -> io::Result<Archive> {
+    super::Ingest::require_real_directory(&roots.hangar_dir(), "Hangar root")?;
     let entry = select_entry(roots, target)?;
     verify_live_entry(roots, &entry)?;
+    super::Ingest::require_real_directory(
+        &roots.hangar_dir().join("objects"),
+        "Hangar object pool",
+    )?;
     let graph = Closure::closure_graph_structure(roots)?;
     let root_digest = entry.envelope.output_hash.clone();
     let mut digests = if include_closure {
@@ -426,12 +443,18 @@ fn build_archive(roots: &Roots, target: &str, include_closure: bool) -> io::Resu
 }
 
 fn import_archive_unlocked(roots: &Roots, archive: Archive) -> io::Result<usize> {
+    super::Ingest::ensure_real_directory(&roots.hangar_dir(), "Hangar root")?;
+    let archive_stage = roots.hangar_dir().join(ARCHIVE_STAGE);
+    super::Ingest::ensure_real_directory(&archive_stage, "Hangar archive staging")?;
+    let objects_dir = roots.hangar_dir().join("objects");
+    super::Ingest::ensure_real_directory(&objects_dir, "Hangar object pool")?;
     let stage = roots
         .hangar_dir()
         .join(ARCHIVE_STAGE)
         .join(format!("{}-{}", std::process::id(), unique_suffix()));
     let stage_objects = stage.join("objects");
-    fs::create_dir_all(&stage_objects)?;
+    fs::create_dir(&stage)?;
+    fs::create_dir(&stage_objects)?;
     let result = (|| {
         let mut package_records = Vec::new();
         let mut seen_digests = BTreeSet::new();
@@ -488,8 +511,6 @@ fn import_archive_unlocked(roots: &Roots, archive: Archive) -> io::Result<usize>
 
         validate_import_destinations(roots, &package_records, &seen_digests)?;
 
-        let objects_dir = roots.hangar_dir().join("objects");
-        fs::create_dir_all(&objects_dir)?;
         let mut moved = Vec::new();
         for digest in &seen_digests {
             let staged = stage_objects.join(digest);
@@ -607,12 +628,15 @@ fn verify_archive_object(
 }
 
 fn verify_archive_contents(roots: &Roots, archive: &Archive) -> io::Result<()> {
+    super::Ingest::ensure_real_directory(&roots.hangar_dir(), "Hangar root")?;
+    let archive_stage = roots.hangar_dir().join(ARCHIVE_STAGE);
+    super::Ingest::ensure_real_directory(&archive_stage, "Hangar archive staging")?;
     let stage = roots
         .hangar_dir()
         .join(ARCHIVE_STAGE)
         .join(format!("verify-{}-{}", std::process::id(), unique_suffix()));
     let result = (|| {
-        fs::create_dir_all(&stage)?;
+        fs::create_dir(&stage)?;
         let mut outputs = BTreeSet::new();
         for object in archive.objects.iter().filter(|object| object.meta.is_empty()) {
             let output = stage.join(&object.digest);

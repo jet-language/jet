@@ -44,7 +44,7 @@ fn inline_range_comptime_and_repl_accept_legal_inputs() {
     let transcript = jet::REPL::run_transcript(
         &[
             "fn set_brightness(level: Int(0..100)) => Int(0..100) :: level",
-            "fn checked_inline(raw: Int) => Int(0..100) ? String :: Int(0..100).from_int(raw)",
+            "fn checked_inline(raw: Int) => Int(0..100) ! String :: Int(0..100).from_int(raw)",
             "print(set_brightness(42))",
             "print(checked_inline(3) ?? Int(0..100).from_int(0))",
         ],

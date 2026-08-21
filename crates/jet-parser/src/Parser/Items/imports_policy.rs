@@ -5,6 +5,71 @@ use super::TargetMarker;
 use super::helpers::format_version_segment;
 
 impl<'a> Parser<'a> {
+        /// D-STRUCT-POLICY1=A: parse the one user-authored setting form,
+        /// `pub policy name(params…) { wrap(call) { … } }`. `policy` and
+        /// `wrap` are contextual words, so the declaration owns the exact
+        /// shape without adding lexer tokens or a second declaration parser.
+        pub(in crate::Parser) fn user_policy_decl(
+            &mut self,
+            is_pub: bool,
+        ) -> Result<crate::AST::UserPolicyDecl, Diagnostic> {
+            let start = self.peek().span;
+            self.expect_ident("to start a policy declaration")?;
+            let (name, name_span) = self.expect_ident("the policy setting name")?;
+            self.expect(TokKind::LParen, "to open the policy parameter list")?;
+            let params = self.parse_param_list()?;
+            self.expect(TokKind::LBrace, "to open the policy declaration")?;
+
+            let (wrap, wrap_span) = self.expect_ident("`wrap` in a policy declaration")?;
+            if wrap != Syntax::KW_WRAP {
+                return Err(Diagnostic::error(
+                    "E0003",
+                    format!("expected `{}` in a policy declaration, found `{wrap}`", Syntax::KW_WRAP),
+                    "a user policy has one checked wrapper boundary around the supplied callable"
+                        .to_string(),
+                    format!("write `{}`(call) {{ … }}", Syntax::KW_WRAP),
+                    Some(wrap_span),
+                ));
+            }
+            self.expect(TokKind::LParen, "after `wrap` in a policy declaration")?;
+            let (call, call_span) = self.expect_ident("the callable name in `wrap(call)`")?;
+            if call != "call" {
+                return Err(Diagnostic::error(
+                    "E0003",
+                    format!("a policy wrapper must receive `call`, found `{call}`"),
+                    "D-STRUCT-POLICY1 gives the wrapper one callable value and no AST or signature-edit power"
+                        .to_string(),
+                    "write `wrap(call) { … }`".to_string(),
+                    Some(call_span),
+                ));
+            }
+            self.expect(TokKind::RParen, "to close `wrap(call)`")?;
+            self.expect(TokKind::LBrace, "to open the policy wrapper body")?;
+            let body = self.block_stmts();
+            let end = self.toks[self.pos.saturating_sub(1)].span.end;
+            if matches!(self.peek().kind, TokKind::Semi) {
+                self.bump();
+            }
+            if !is_pub {
+                return Err(Diagnostic::error(
+                    "E0003",
+                    "a user policy setting must be public".to_string(),
+                    "policy settings are nominal package vocabulary and their users must resolve one package-owned name"
+                        .to_string(),
+                    "write `pub policy name(...) { wrap(call) { … } }`".to_string(),
+                    Some(start),
+                ));
+            }
+            Ok(crate::AST::UserPolicyDecl {
+                is_pub,
+                name,
+                name_span,
+                params,
+                body,
+                span: Span::new(start.start, end),
+            })
+        }
+
         /// D-CALLPOLICY1=E: the function-level `#Policy` marker is the typed
         /// callable wrapper chain. The retired scoped-policy identifiers do
         /// not enter this parser path.
@@ -53,7 +118,7 @@ impl<'a> Parser<'a> {
             matches!(
                 (
                     self.toks.get(self.pos + 3).and_then(|token| match &token.kind {
-                        TokKind::Ident(name) if crate::AST::CallablePolicyChain::NAMES.contains(&name.as_str()) => Some(&token.kind),
+                        TokKind::Ident(_) => Some(&token.kind),
                         _ => None,
                     }),
                     self.toks.get(self.pos + 4).map(|token| &token.kind),
@@ -544,6 +609,34 @@ impl<'a> Parser<'a> {
             let mut pub_file = false;
             let mut no_prelude = false;
             loop {
+                // D-STRUCT-POLICY1=A: these contextual declarations live at
+                // package/file top level and are carried beside ordinary
+                // items. Keep them out of `Item` so every existing item
+                // consumer continues to see only code-bearing declarations.
+                if matches!(self.peek().kind, TokKind::KwPub)
+                    && matches!(&self.peek2().kind, TokKind::Ident(name) if name == Syntax::KW_POLICY)
+                {
+                    self.bump(); // `pub`
+                    match self.user_policy_decl(true) {
+                        Ok(declaration) => self.user_policy_declarations.push(declaration),
+                        Err(diagnostic) => {
+                            self.diags.push(diagnostic);
+                            self.sync_top();
+                        }
+                    }
+                    continue;
+                }
+                if matches!(&self.peek().kind, TokKind::Ident(name) if name == Syntax::KW_POLICY)
+                {
+                    match self.user_policy_decl(false) {
+                        Ok(declaration) => self.user_policy_declarations.push(declaration),
+                        Err(diagnostic) => {
+                            self.diags.push(diagnostic);
+                            self.sync_top();
+                        }
+                    }
+                    continue;
+                }
                 let r = match &self.peek().kind {
                     TokKind::Eof => break,
                     // S6-R: the lexer inserts a synthetic terminator after the `}`
@@ -1333,7 +1426,16 @@ impl<'a> Parser<'a> {
                     }
                     TokKind::Dollar => {
                         let span = self.bump().span;
-                        Err(self.retired_comptime_mark(span))
+                        Err(if self.allow_environment_reads {
+                            self.invalid_environment_read(span)
+                        } else {
+                            self.environment_read_outside_config(span)
+                        })
+                    }
+                    // D-STRUCT-ONCE1=A adds only the root `@loop` item form;
+                    // statement parsing keeps the ratified `@if` spelling.
+                    TokKind::At if matches!(self.peek2().kind, TokKind::KwLoop) => {
+                        self.item_template_loop().map(Item::TemplateLoop)
                     }
                     TokKind::At => {
                         let t = self.bump();
@@ -1513,6 +1615,7 @@ impl<'a> Parser<'a> {
                 default_target,
                 html_path,
                 policy_declarations: std::mem::take(&mut self.policy_declarations),
+                user_policy_declarations: std::mem::take(&mut self.user_policy_declarations),
                 applied_rules: std::mem::take(&mut self.applied_rules),
                 rule_facts: std::mem::take(&mut self.rule_facts),
             }

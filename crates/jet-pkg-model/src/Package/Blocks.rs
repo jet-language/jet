@@ -1,4 +1,4 @@
-//! Structural sub-parsers for the `deps:`, `packages:`, `build:`,
+//! Structural sub-parsers for the `deps:`, `packages:`, `boundaries:`, `build:`,
 //! `authority:`, and `policy:` blocks of the ratified `package.jet`
 //! vocabulary
 //! (D-CONF-PLANE1, D-CONF-NAME1). These blocks carry semantics ratified by
@@ -85,6 +85,102 @@ pub(super) fn unquote(s: &str) -> String {
     } else {
         s.to_string()
     }
+}
+
+/// D-STRUCT-EDGE1=A: one package-owned import edge denial.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ImportBoundary {
+    pub from: String,
+    pub to: String,
+}
+
+impl ImportBoundary {
+    /// Match an exact module name or one trailing subtree wildcard. Both
+    /// `name.*` and `name*` are accepted as the same trailing-wildcard shape;
+    /// the manifest keeps the user's spelling for diagnostics and digests.
+    pub fn matches(&self, from: &str, to: &str) -> bool {
+        boundary_pattern_matches(&self.from, from) && boundary_pattern_matches(&self.to, to)
+    }
+}
+
+fn boundary_pattern_matches(pattern: &str, value: &str) -> bool {
+    let Some(prefix) = pattern.strip_suffix('*') else {
+        return pattern == value;
+    };
+    let prefix = prefix.strip_suffix('.').unwrap_or(prefix);
+    prefix.is_empty() || value == prefix || value.starts_with(&format!("{prefix}."))
+}
+
+fn parse_boundary_pattern(field: &str, value: &str) -> Result<String, PackageParseError> {
+    let value = value.trim();
+    if value.len() < 2 || !value.starts_with('"') || !value.ends_with('"') {
+        return Err(err(format!("`boundaries.deny.{field}` must be a quoted module pattern")));
+    }
+    let value = unquote(value);
+    let stars = value.chars().filter(|ch| *ch == '*').count();
+    if stars > 1 || (stars == 1 && !value.ends_with('*')) {
+        return Err(err(format!(
+            "`boundaries.deny.{field}` allows at most one trailing `*` subtree wildcard"
+        )));
+    }
+    let prefix = value.strip_suffix('*').unwrap_or(&value);
+    if prefix.trim_end_matches('.').is_empty() && !value.ends_with('*') {
+        return Err(err(format!("`boundaries.deny.{field}` must name a module")));
+    }
+    Ok(value)
+}
+
+/// Parse `boundaries: { deny: [{ from: "...", to: "..." }] }`.
+pub(super) fn parse_boundaries(body: &str) -> Result<Vec<ImportBoundary>, PackageParseError> {
+    let mut deny = None;
+    for (field, value) in key_value_entries(body)? {
+        if field != "deny" {
+            return Err(err(format!("unknown `boundaries` field `{field}`")));
+        }
+        if deny.replace(value).is_some() {
+            return Err(err("`boundaries.deny` is declared more than once"));
+        }
+    }
+    let Some(value) = deny else {
+        return Ok(Vec::new());
+    };
+    let value = value.trim();
+    let Some(list) = value.strip_prefix('[').and_then(|rest| rest.strip_suffix(']')) else {
+        return Err(err("`boundaries.deny` must be a list of edge records"));
+    };
+    let mut boundaries = Vec::new();
+    for entry in top_level_commas(list) {
+        let entry = entry.trim();
+        if entry.is_empty() {
+            continue;
+        }
+        let Some(record) = entry
+            .strip_prefix('{')
+            .and_then(|rest| rest.strip_suffix('}'))
+        else {
+            return Err(err("each `boundaries.deny` entry must be an edge record"));
+        };
+        let mut from = None;
+        let mut to = None;
+        for (field, value) in key_value_entries(record)? {
+            match field.as_str() {
+                "from" if from.is_none() => from = Some(parse_boundary_pattern("from", &value)?),
+                "to" if to.is_none() => to = Some(parse_boundary_pattern("to", &value)?),
+                "from" | "to" => {
+                    return Err(err(format!("`boundaries.deny.{field}` is declared more than once")))
+                }
+                other => return Err(err(format!("unknown boundary edge field `{other}`"))),
+            }
+        }
+        let Some(from) = from else {
+            return Err(err("each `boundaries.deny` entry needs `from`"));
+        };
+        let Some(to) = to else {
+            return Err(err("each `boundaries.deny` entry needs `to`"));
+        };
+        boundaries.push(ImportBoundary { from, to });
+    }
+    Ok(boundaries)
 }
 
 fn err(detail: impl Into<String>) -> PackageParseError {
@@ -1223,6 +1319,7 @@ const MANIFEST_BLOCKS: &[&str] = &[
     Syntax::MANIFEST_BLOCK_GRANTS,
     Syntax::MANIFEST_BLOCK_AUTHORITY,
     Syntax::MANIFEST_BLOCK_POLICY,
+    Syntax::MANIFEST_BLOCK_BOUNDARIES,
     "dev_deps",
     "patch",
     "workspace",

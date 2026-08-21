@@ -65,6 +65,133 @@ fn unsupported(what: &str, span: Span) -> Diagnostic {
     jet_foundation::Prelude::jet_e0956_unsupported(what, span)
 }
 
+fn ambient_log_field(key: String, value: String, kind: &str) -> CtValue {
+    CtValue::Struct {
+        type_name: "LogField".to_string(),
+        fields: vec![
+            ("key".to_string(), CtValue::Str(key)),
+            ("value".to_string(), CtValue::Str(value)),
+            ("kind".to_string(), CtValue::Str(kind.to_string())),
+        ],
+    }
+}
+
+fn ambient_log_field_parts(value: &CtValue) -> Option<(String, String, String)> {
+    let CtValue::Struct { fields, .. } = value else {
+        return None;
+    };
+    let get = |name: &str| {
+        fields.iter().find_map(|(field, value)| {
+            (field == name).then(|| match value {
+                CtValue::Str(value) => value.clone(),
+                _ => String::new(),
+            })
+        })
+    };
+    let key = get("key")?;
+    let value = get("value")?;
+    let kind = get("kind").unwrap_or_else(|| "string".to_string());
+    Some((key, value, kind))
+}
+
+fn ambient_log_call(method: &str, args: &[CtValue], span: Span) -> Result<CtValue, Diagnostic> {
+    let one_string = |index: usize, what: &str| {
+        args.get(index)
+            .and_then(|value| match value {
+                CtValue::Str(value) => Some(value.clone()),
+                _ => None,
+            })
+            .ok_or_else(|| unsupported(what, span))
+    };
+    match method {
+        "set_sink" => {
+            let kind = one_string(0, "core.log.set_sink kind")?;
+            let path = one_string(1, "core.log.set_sink path")?;
+            crate::CoreHost::ambient_log_set_sink(&kind, &path);
+            Ok(CtValue::Unit)
+        }
+        "otlp_file" => {
+            let path = one_string(0, "core.log.otlp_file path")?;
+            crate::CoreHost::ambient_log_otlp_file(&path);
+            Ok(CtValue::Unit)
+        }
+        "sample_every" => match args.first() {
+            Some(CtValue::Int(n)) => {
+                crate::CoreHost::ambient_log_sample_every(*n);
+                Ok(CtValue::Unit)
+            }
+            _ => Err(unsupported("core.log.sample_every count", span)),
+        },
+        "disable" => {
+            crate::CoreHost::ambient_log_disable();
+            Ok(CtValue::Unit)
+        }
+        "flush" => {
+            crate::CoreHost::ambient_log_flush();
+            Ok(CtValue::Unit)
+        }
+        "field" => Ok(ambient_log_field(
+            one_string(0, "core.log.field key")?,
+            one_string(1, "core.log.field value")?,
+            "string",
+        )),
+        "int" => match args.get(1) {
+            Some(CtValue::Int(value)) => Ok(ambient_log_field(
+                one_string(0, "core.log.int key")?,
+                value.to_string(),
+                "int",
+            )),
+            _ => Err(unsupported("core.log.int value", span)),
+        },
+        "bool" => match args.get(1) {
+            Some(CtValue::Bool(value)) => Ok(ambient_log_field(
+                one_string(0, "core.log.bool key")?,
+                value.to_string(),
+                "bool",
+            )),
+            _ => Err(unsupported("core.log.bool value", span)),
+        },
+        "counter" => match args.get(1) {
+            Some(CtValue::Int(value)) => Ok(ambient_log_field(
+                format!("metric.counter.{}", one_string(0, "core.log.counter name")?),
+                value.to_string(),
+                "counter",
+            )),
+            _ => Err(unsupported("core.log.counter value", span)),
+        },
+        "redact" => Ok(ambient_log_field(
+            one_string(0, "core.log.redact key")?,
+            "[redacted]".to_string(),
+            "redacted",
+        )),
+        "info" | "warn" | "error" | "debug" => {
+            let message = one_string(0, "core.log message")?;
+            crate::CoreHost::ambient_log_emit(method, &message, &[]);
+            Ok(CtValue::Unit)
+        }
+        "info_fields" | "warn_fields" | "error_fields" | "debug_fields" => {
+            let message = one_string(0, "core.log fields message")?;
+            let Some(CtValue::List(values)) = args.get(1) else {
+                return Err(unsupported("core.log fields list", span));
+            };
+            let fields = values
+                .iter()
+                .map(|value| {
+                    ambient_log_field_parts(value)
+                        .ok_or_else(|| unsupported("core.log field value", span))
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+            crate::CoreHost::ambient_log_emit(
+                method.strip_suffix("_fields").unwrap_or(method),
+                &message,
+                &fields,
+            );
+            Ok(CtValue::Unit)
+        }
+        _ => Err(unsupported(&format!("core.log.{method}"), span)),
+    }
+}
+
 fn env_config_error(reason: impl Into<String>) -> CtValue {
     CtValue::failed(Box::new(CtValue::List(vec![CtValue::Struct {
         type_name: "FieldError".to_string(),
@@ -1734,16 +1861,6 @@ fn db_scope_parts(recv: &CtValue) -> Option<(u64, String, wire::JetRowPolicyExpr
     Some((handle, table, compiled, user))
 }
 
-fn service_runtime_value(store: String, retention_ms: i64) -> CtValue {
-    CtValue::Struct {
-        type_name: "ServiceRuntime".to_string(),
-        fields: vec![
-            ("store".to_string(), CtValue::Str(store)),
-            ("retention_ms".to_string(), CtValue::Int(retention_ms)),
-        ],
-    }
-}
-
 fn service_runtime_parts(recv: &CtValue) -> Option<service_prelude::JetServiceRuntime> {
     let CtValue::Struct { type_name, fields } = recv else {
         return None;
@@ -1861,8 +1978,23 @@ fn service_duration_ns(value: &CtValue) -> Option<i64> {
     }
 }
 
-fn service_duration_ms(value: &CtValue) -> Option<i64> {
-    service_duration_ns(value).map(|ns| ns / 1_000_000)
+fn workflow_wait(nanos: i64) -> service_prelude::JetServiceWorkflowWait<()> {
+    match jet_codegen::scheduler::jet_scheduler_wait_without_unwind(|| {
+        jet_codegen::scheduler::jet_std_time_sleep_duration_ns(nanos)
+    }) {
+        jet_codegen::scheduler::JetSchedulerWait::Ready(()) => {
+            service_prelude::JetServiceWorkflowWait::Ready(())
+        }
+        jet_codegen::scheduler::JetSchedulerWait::Cancelled => {
+            service_prelude::JetServiceWorkflowWait::Cancelled
+        }
+        jet_codegen::scheduler::JetSchedulerWait::Deadline(reason) => {
+            service_prelude::JetServiceWorkflowWait::Deadline(reason)
+        }
+        jet_codegen::scheduler::JetSchedulerWait::Panicked(reason) => {
+            service_prelude::JetServiceWorkflowWait::Panicked(reason)
+        }
+    }
 }
 
 fn ct_db_value(v: &CtValue) -> Option<wire::DBValue> {
@@ -1940,9 +2072,9 @@ fn ambient_db_scope_execute(
 ) -> Result<i64, wire::DBError> {
     let (handle, table, compiled, user) = scope;
     let (sql, values) = if allow_schema {
-        wire::jet_db_apply_compiled_migration_policy(sql, params, table, *compiled, user)?
+        wire::jet_db_apply_compiled_migration_policy_with_proof(sql, params, table, *compiled, user)?.into_parts()?
     } else {
-        wire::jet_db_apply_compiled_policy(sql, params, table, *compiled, user)?
+        wire::jet_db_apply_compiled_policy_with_proof(sql, params, table, *compiled, user)?.into_parts()?
     };
     let result = DB::runtime_execute(*handle, &sql, &wire::jet_db_encode_params(&values));
     wire::jet_db_decode_execute_result(&result)
@@ -1956,9 +2088,9 @@ fn ambient_db_scope_query(
 ) -> Result<Vec<wire::JetDBRow>, wire::DBError> {
     let (handle, table, compiled, user) = scope;
     let (sql, values) = if allow_schema {
-        wire::jet_db_apply_compiled_migration_policy(sql, params, table, *compiled, user)?
+        wire::jet_db_apply_compiled_migration_policy_with_proof(sql, params, table, *compiled, user)?.into_parts()?
     } else {
-        wire::jet_db_apply_compiled_policy(sql, params, table, *compiled, user)?
+        wire::jet_db_apply_compiled_policy_with_proof(sql, params, table, *compiled, user)?.into_parts()?
     };
     let result = DB::runtime_query(*handle, &sql, &wire::jet_db_encode_params(&values));
     wire::jet_db_decode_query_result(&result)
@@ -2769,6 +2901,23 @@ fn ambient_auth_call(
     })())
 }
 
+/// Runtime FFI is an ambient adapter, not a second calling convention. The
+/// bridge loader in `Ffi` resolves the generated C-ABI twin of the same
+/// `jet_ffi_*` wrapper that AOT emits, and owns all argument/return marshalling.
+pub(crate) fn ambient_extern_call(
+    wrapper: &str,
+    args: Vec<CtValue>,
+    span: Span,
+    resolved_ret: Option<Type>,
+) -> Option<Result<CtValue, Diagnostic>> {
+    Some(crate::Ffi::call_ctvalue(
+        wrapper,
+        &args,
+        resolved_ret.as_ref(),
+        span,
+    ))
+}
+
 // #1999 / #2003 / D-ENV-MUTATE1: Jet owns a process-global logical environment;
 // user mutation never touches the host process environment. Every in-process
 // engine reads that one table through `CoreHost::jit_env_value_raw` (raw, for
@@ -2808,6 +2957,9 @@ pub fn ambient_core_call(
                 span,
             )));
         }
+    }
+    if module == "core.log" {
+        return Some(ambient_log_call(method, &args, span));
     }
     // D-BENCH-KEEP1=A: the interpreter marshals through the same Prelude
     // `jet_keep` sink as generated AOT; black-boxing the CtValue prevents the
@@ -3450,17 +3602,19 @@ pub fn ambient_core_call(
         // construction and rendering execute the same ServicesLite Prelude
         // used by AOT and TIR.
         ("core.service", "tree" | "tree_show") => {
-            Some(jet_codegen::Comptime::ServicesLite::apply(method, &args, span))
+            Some(service_prelude::with_workflow_wait(workflow_wait, || {
+                service_prelude::apply(method, &args, span)
+            }))
         }
-        ("core.services", "runtime") => {
-            let (Some(CtValue::Str(store)), Some(retention)) = (args.first(), args.get(1)) else {
-                return Some(Err(unsupported("core.services.runtime arguments", span)));
-            };
-            let Some(retention_ms) = service_duration_ms(retention) else {
-                return Some(Err(unsupported("core.services.runtime duration", span)));
-            };
-            Some(Ok(service_runtime_value(store.clone(), retention_ms)))
-        }
+        ("core.service" | "core.services", "runtime") => Some(
+            service_prelude::with_workflow_wait(workflow_wait, || {
+                service_prelude::apply("runtime", &args, span)
+            }),
+        ),
+        ("core.services", method) => Some(service_prelude::with_workflow_wait(
+            workflow_wait,
+            || service_prelude::apply(method, &args, span),
+        )),
         ("core.db", "policy") => {
             let (Some(CtValue::Str(table)), Some(CtValue::Str(expression))) =
                 (args.first(), args.get(1))
@@ -3473,6 +3627,15 @@ pub fn ambient_core_call(
                 Ok((table, compiled)) => CtValue::Present(Box::new(db_policy_value(table, compiled))),
                 Err(error) => CtValue::failed(Box::new(CtValue::Str(error))),
             }))
+        }
+        ("core.db", "policy_audit") => {
+            let Some(scope) = args.first().and_then(db_scope_parts) else {
+                return Some(Err(unsupported("core.db.policy_audit scope", span)));
+            };
+            let (_, table, compiled, user) = scope;
+            Some(Ok(CtValue::Str(wire::jet_db_policy_audit_line(
+                &table, compiled, &user,
+            ))))
         }
         ("core.db", "transaction" | "migrate") => {
             let Some(scope_value) = args.first() else {
@@ -4464,10 +4627,15 @@ pub fn ambient_handle(
                 Err(e) => return Some(Err(e)),
             };
             let (handle, sql, values) = match db_scope_parts(recv) {
-                Some((handle, table, compiled, user)) => match wire::jet_db_apply_compiled_policy(
+                Some((handle, table, compiled, user)) => match wire::jet_db_apply_compiled_policy_with_proof(
                     &sql, &values, &table, compiled, &user,
                 ) {
-                    Ok((sql, values)) => (handle, sql, values),
+                    Ok(application) => match application.into_parts() {
+                        Ok((sql, values)) => (handle, sql, values),
+                        Err(error) => {
+                            return Some(Ok(CtValue::failed(Box::new(db_err(error.message)))));
+                        }
+                    },
                     Err(error) => return Some(Ok(CtValue::failed(Box::new(db_err(error.message))))),
                 },
                 None => return Some(Ok(CtValue::failed(Box::new(db_err(
@@ -4491,10 +4659,15 @@ pub fn ambient_handle(
                 Err(e) => return Some(Err(e)),
             };
             let (handle, sql, values) = match db_scope_parts(recv) {
-                Some((handle, table, compiled, user)) => match wire::jet_db_apply_compiled_policy(
+                Some((handle, table, compiled, user)) => match wire::jet_db_apply_compiled_policy_with_proof(
                     &sql, &values, &table, compiled, &user,
                 ) {
-                    Ok((sql, values)) => (handle, sql, values),
+                    Ok(application) => match application.into_parts() {
+                        Ok((sql, values)) => (handle, sql, values),
+                        Err(error) => {
+                            return Some(Ok(CtValue::failed(Box::new(db_err(error.message)))));
+                        }
+                    },
                     Err(error) => return Some(Ok(CtValue::failed(Box::new(db_err(error.message))))),
                 },
                 None => return Some(Ok(CtValue::failed(Box::new(db_err(
@@ -4557,14 +4730,19 @@ pub fn ambient_handle(
                     )))))
                 }
             };
-            let (sql, values) = match wire::jet_db_apply_compiled_policy(
+            let (sql, values) = match wire::jet_db_apply_compiled_policy_with_proof(
                 &raw_sql,
                 &raw_values,
                 &table,
                 compiled,
                 &user,
             ) {
-                Ok(value) => value,
+                Ok(application) => match application.into_parts() {
+                    Ok(value) => value,
+                    Err(error) => {
+                        return Some(Ok(CtValue::failed(Box::new(db_err(error.message)))));
+                    }
+                },
                 Err(error) => return Some(Ok(CtValue::failed(Box::new(db_err(error.message))))),
             };
             let out = DB::runtime_query(handle, &sql, &wire::jet_db_encode_params(&values));
@@ -4585,13 +4763,14 @@ pub fn ambient_handle(
                         footprint,
                         initial,
                         move || {
-                            let (sql, values) = wire::jet_db_apply_compiled_policy(
+                            let (sql, values) = wire::jet_db_apply_compiled_policy_with_proof(
                                 &rerun_sql,
                                 &rerun_values,
                                 &rerun_table,
                                 rerun_compiled,
                                 &rerun_user,
                             )
+                            .and_then(|application| application.into_parts())
                             .map_err(|error| error.message)?;
                             let out = DB::runtime_query(
                                 handle,

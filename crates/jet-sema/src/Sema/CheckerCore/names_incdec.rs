@@ -203,6 +203,7 @@ impl<'a> Checker<'a> {
                         }
                         return None;
                     };
+                    self.mark_local_write(name);
                     if !info.mutable {
                         let what = if info.param_conv.is_some() {
                             format!("the parameter `{}` can't be changed here", name)

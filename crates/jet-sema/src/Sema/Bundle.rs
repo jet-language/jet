@@ -16,6 +16,7 @@ mod Units;
 
 mod GenericModules;
 mod InlineCalls;
+mod Liveness;
 mod Outputs;
 mod Pipeline;
 mod Validation;
@@ -816,7 +817,7 @@ fn builtin_type_registry() -> TypeRegistry {
     types.insert(Syntax::TYPE_ORDERING.to_string(), TypeDef::Enum {
         variants, variant_order: vec!["Less".to_string(), "Equal".to_string(), "Greater".to_string()],
         groups: HashMap::new(), methods: HashMap::new(), single_use: false,
-        must_use: false, c_layout_tag: None,
+        deprecation: None, must_use: false, c_layout_tag: None,
     });
     let remove_by_variants = ["Val", "Slot"].into_iter().map(|name| {
         (name.to_string(), (zero, VariantPayload::Unit))
@@ -826,6 +827,7 @@ fn builtin_type_registry() -> TypeRegistry {
         variant_order: vec!["Val".to_string(), "Slot".to_string()],
         groups: HashMap::new(),
         methods: HashMap::new(),
+        deprecation: None,
         single_use: false,
         must_use: false,
         c_layout_tag: None,
@@ -1412,7 +1414,7 @@ fn populate_name_ledger(
                         local.to_string(),
                         target,
                         target_module,
-                        import.alias_span,
+                        binding.item_span.unwrap_or(import.alias_span),
                         alias_visibility,
                     );
                 }
@@ -2085,6 +2087,7 @@ mod structure_tests {
                 default_target: program.default_target,
                 html_path: program.html_path,
                 policy_declarations: program.policy_declarations,
+                user_policy_declarations: program.user_policy_declarations,
                 rule_facts: program.rule_facts,
             }],
             parse_teaching: Vec::new(),

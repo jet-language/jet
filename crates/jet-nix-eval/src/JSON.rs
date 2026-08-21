@@ -3,6 +3,8 @@ use alloc::format;
 use alloc::string::String;
 use alloc::vec::Vec;
 
+const MAX_DEPTH: usize = super::EVALUATOR_EXPRESSION_LIMIT;
+
 #[derive(Debug, Clone, PartialEq)]
 pub(super) enum JSON {
     Null,
@@ -43,7 +45,7 @@ pub(super) fn parse(input: &str) -> Result<JSON, String> {
         pos: 0,
     };
     parser.skip_ws();
-    let value = parser.value()?;
+    let value = parser.value(0)?;
     parser.skip_ws();
     if parser.pos != parser.chars.len() {
         return Err("trailing characters after JSON value".into());
@@ -75,11 +77,14 @@ impl Parser {
         }
     }
 
-    fn value(&mut self) -> Result<JSON, String> {
+    fn value(&mut self, depth: usize) -> Result<JSON, String> {
+        if depth > MAX_DEPTH {
+            return Err("JSON value is too deeply nested".into());
+        }
         self.skip_ws();
         match self.peek() {
-            Some('{') => self.object(),
-            Some('[') => self.array(),
+            Some('{') => self.object(depth),
+            Some('[') => self.array(depth),
             Some('"') => Ok(JSON::Str(self.string()?)),
             Some('t') | Some('f') => self.boolean(),
             Some('n') => self.null(),
@@ -89,7 +94,7 @@ impl Parser {
         }
     }
 
-    fn object(&mut self) -> Result<JSON, String> {
+    fn object(&mut self, depth: usize) -> Result<JSON, String> {
         self.bump();
         let mut values = BTreeMap::new();
         self.skip_ws();
@@ -107,7 +112,7 @@ impl Parser {
             if self.bump() != Some(':') {
                 return Err("expected `:` after object key".into());
             }
-            let value = self.value()?;
+            let value = self.value(depth + 1)?;
             if values.insert(key.clone(), value).is_some() {
                 return Err(format!("duplicate object key `{key}`"));
             }
@@ -121,7 +126,7 @@ impl Parser {
         Ok(JSON::Object(values))
     }
 
-    fn array(&mut self) -> Result<JSON, String> {
+    fn array(&mut self, depth: usize) -> Result<JSON, String> {
         self.bump();
         let mut values = Vec::new();
         self.skip_ws();
@@ -130,7 +135,7 @@ impl Parser {
             return Ok(JSON::Array(values));
         }
         loop {
-            values.push(self.value()?);
+            values.push(self.value(depth + 1)?);
             self.skip_ws();
             match self.bump() {
                 Some(',') => {}

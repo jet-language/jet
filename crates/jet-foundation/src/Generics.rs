@@ -49,8 +49,8 @@ pub fn parse_quantity_bound(bound: &str) -> Option<(&str, &str)> {
 }
 
 pub const BUILTIN_TRAITS: &[&str] = &[
-    PRINTABLE, EQUATABLE, COMPARABLE, SERIALIZE, ENCODE, DECODE, RENDERABLE, CLOSE,
-    ADD, SUB, MUL, DIV,
+    PRINTABLE, EQUATABLE, COMPARABLE, SERIALIZE, ENCODE, DECODE, RENDERABLE, CLOSE, ADD, SUB, MUL,
+    DIV,
 ];
 
 pub fn is_builtin_trait(name: &str) -> bool {
@@ -239,8 +239,7 @@ pub fn unify_types(
             }
         }
         (Type::Apply { args: a1, .. }, Type::Apply { args: a2, .. }) => {
-            a1.len() == a2.len()
-                && unify_composite_pair(&expected, &found, subst, type_params)
+            a1.len() == a2.len() && unify_composite_pair(&expected, &found, subst, type_params)
         }
         (Type::List(_), Type::List(_))
         | (Type::Option(_), Type::Option(_))
@@ -249,8 +248,14 @@ pub fn unify_types(
         }
         (Type::TraitObject(t1), Type::TraitObject(t2)) if t1 == t2 => true,
         (
-            Type::Quantity { base: b1, dimension: d1 },
-            Type::Quantity { base: b2, dimension: d2 },
+            Type::Quantity {
+                base: b1,
+                dimension: d1,
+            },
+            Type::Quantity {
+                base: b2,
+                dimension: d2,
+            },
         ) if d1 == d2 => unify_types(b1, b2, subst, type_params),
         (
             Type::InlineRange {
@@ -379,9 +384,7 @@ pub fn rust_type_param_list(
             if let Some(ex) = extra_bounds.get(&p.name) {
                 for b in ex {
                     let rb = match b.as_str() {
-                        "Clone" | "JetShow" | "JetDebug" | "PartialEq" | "PartialOrd" => {
-                            b.clone()
-                        }
+                        "Clone" | "JetShow" | "JetDebug" | "PartialEq" | "PartialOrd" => b.clone(),
                         _ if matches!(b.as_str(), IO_READER | IO_WRITER | DRIVER) => {
                             rust_trait_bound(b).unwrap_or("").to_string()
                         }
@@ -417,9 +420,7 @@ pub fn e0905(type_name: &str, trait_name: &str, span: Span, needs_derive: bool) 
     let fix = if trait_name == COMPARABLE && type_name == crate::Syntax::TYPE_FLOAT {
         "use explicit Float comparisons or sort by a total key that handles NaN".to_string()
     } else if needs_derive && (trait_name == COMPARABLE || trait_name == SERIALIZE) {
-        format!(
-            "write `#{trait_name}` before `{type_name}`, or use a different approach"
-        )
+        format!("write `#{trait_name}` before `{type_name}`, or use a different approach")
     } else if trait_name == COMPARABLE {
         format!("write `#Comparable` before `{type_name}`, or use `sort_by` with a key")
     } else {
@@ -520,11 +521,9 @@ pub fn e0914(selector: &str, span: Span) -> Diagnostic {
             crate::Syntax::InterpolationSelectorArguments::Precision => {
                 format!("`:{}(n)`", selector.name)
             }
-            crate::Syntax::InterpolationSelectorArguments::UnitStyle(styles) => format!(
-                "`:{}({})`",
-                selector.name,
-                styles.join("|")
-            ),
+            crate::Syntax::InterpolationSelectorArguments::UnitStyle(styles) => {
+                format!("`:{}({})`", selector.name, styles.join("|"))
+            }
         })
         .collect::<Vec<_>>();
     let valid = join_with_or(&valid_items);
@@ -823,7 +822,11 @@ pub fn collect_clone_type_param_mentions(
                 collect_clone_type_param_mentions(member, param_names, out);
             }
         }
-        Type::Map { key, value, .. } | Type::Result { ok: key, err: value } => {
+        Type::Map { key, value, .. }
+        | Type::Result {
+            ok: key,
+            err: value,
+        } => {
             collect_clone_type_param_mentions(key, param_names, out);
             collect_clone_type_param_mentions(value, param_names, out);
         }
@@ -881,9 +884,7 @@ pub fn collect_type_param_mentions(
         Type::List(inner)
         | Type::Shared(inner)
         | Type::Option(inner)
-        | Type::Tagged { inner, .. } => {
-            collect_type_param_mentions(inner, param_names, out)
-        }
+        | Type::Tagged { inner, .. } => collect_type_param_mentions(inner, param_names, out),
         Type::FixedList { elem, .. } => collect_type_param_mentions(elem, param_names, out),
         Type::Union(members) => {
             for m in members {
@@ -998,7 +999,7 @@ mod tests {
             ret: Some(Box::new(Type::Int)),
             effect_bound: None,
             param_contract: Some(vec![("force".to_string(), zone)]),
-                call_metadata: None,
+            call_metadata: None,
             return_view_provenance: None,
         };
         let required = Type::Apply {

@@ -1247,7 +1247,7 @@ fn repl_all_complex_binding_shapes_survive_across_turns() {
             "counts[\"jet\"]",
             "maybe: Int? :: Val(7)",
             "maybe ?? 0",
-            "result: Int ? String :: Ok(9)",
+            "result: Int ! String :: Ok(9)",
             "result ?? 0",
             "state :: State.Ready(11)",
             "state_value(state)",
@@ -1979,11 +1979,11 @@ fn shared_semantic_symbol_has_complete_identity_and_docs() {
 #[test]
 fn shared_semantic_symbols_catalog_numeric_conversions_and_parse() {
     let parse = jet::SemanticSymbols::lookup("Int.parse").expect("Int.parse symbol");
-    assert_eq!(parse.signature, "Int.parse(text: String) -> Int ? ParseError");
+    assert_eq!(parse.signature, "Int.parse(text: String) -> Int ! ParseError");
     let narrow = jet::SemanticSymbols::lookup("F32.from_float")
         .expect("F32.from_float symbol");
     assert_eq!(narrow.module, "core.numeric");
-    assert!(narrow.signature.ends_with("-> F32 ? String"));
+    assert!(narrow.signature.ends_with("-> F32 ! String"));
     assert!(jet::SemanticSymbols::lookup("I64.from_f32").is_some());
     assert!(jet::SemanticSymbols::lookup("F64.from_u32").is_some());
 }

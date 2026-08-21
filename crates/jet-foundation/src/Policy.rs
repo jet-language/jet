@@ -7,12 +7,43 @@ use std::sync::LazyLock;
 pub use crate::Authority::Scope as PolicyScope;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Ord, PartialOrd)]
-pub enum PolicyKey { Unsafe, Impure, Nondeterministic, ScopedGc, ExplicitUnits, Copies, Sentries }
+pub enum PolicyKey {
+    Unsafe,
+    Impure,
+    Nondeterministic,
+    ScopedGc,
+    ExplicitUnits,
+    Copies,
+    Sentries,
+}
 
 impl PolicyKey {
-    pub const fn name(self) -> &'static str { match self { Self::Unsafe => "unsafe", Self::Impure => "impure", Self::Nondeterministic => "nondeterministic", Self::ScopedGc => "gc", Self::ExplicitUnits => "explicit_units", Self::Copies => "copies", Self::Sentries => "sentries" } }
-    pub fn parse(name: &str) -> Option<Self> { match name { "unsafe" => Some(Self::Unsafe), "impure" => Some(Self::Impure), "nondeterministic" => Some(Self::Nondeterministic), "gc" => Some(Self::ScopedGc), "explicit_units" => Some(Self::ExplicitUnits), "copies" => Some(Self::Copies), "sentries" => Some(Self::Sentries), _ => None } }
-    pub const fn is_audited_gate(self) -> bool { matches!(self, Self::Unsafe | Self::Impure | Self::Nondeterministic) }
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::Unsafe => "unsafe",
+            Self::Impure => "impure",
+            Self::Nondeterministic => "nondeterministic",
+            Self::ScopedGc => "gc",
+            Self::ExplicitUnits => "explicit_units",
+            Self::Copies => "copies",
+            Self::Sentries => "sentries",
+        }
+    }
+    pub fn parse(name: &str) -> Option<Self> {
+        match name {
+            "unsafe" => Some(Self::Unsafe),
+            "impure" => Some(Self::Impure),
+            "nondeterministic" => Some(Self::Nondeterministic),
+            "gc" => Some(Self::ScopedGc),
+            "explicit_units" => Some(Self::ExplicitUnits),
+            "copies" => Some(Self::Copies),
+            "sentries" => Some(Self::Sentries),
+            _ => None,
+        }
+    }
+    pub const fn is_audited_gate(self) -> bool {
+        matches!(self, Self::Unsafe | Self::Impure | Self::Nondeterministic)
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -34,39 +65,60 @@ pub enum PolicyValue {
 }
 
 impl PolicyValue {
-    pub fn display(self) -> String { match self {
-        Self::Enabled => "true".into(), Self::Limit(n) => n.to_string(),
-        Self::Forbid => ".Forbid".into(), Self::Default => ".Default".into(),
-        Self::GateOnly => ".GateOnly".into(), Self::Obligations => ".Obligations".into(),
-        Self::Relaxed => ".Relaxed".into(), Self::PerSite => ".PerSite".into(),
-        Self::Track => ".Track".into(), Self::Skip => ".Skip".into(), Self::Allow => ".Allow".into(),
-        Self::On => ".On".into(), Self::Off => ".Off".into(), Self::Explicit => ".Explicit".into(),
-    } }
+    pub fn display(self) -> String {
+        match self {
+            Self::Enabled => "true".into(),
+            Self::Limit(n) => n.to_string(),
+            Self::Forbid => ".Forbid".into(),
+            Self::Default => ".Default".into(),
+            Self::GateOnly => ".GateOnly".into(),
+            Self::Obligations => ".Obligations".into(),
+            Self::Relaxed => ".Relaxed".into(),
+            Self::PerSite => ".PerSite".into(),
+            Self::Track => ".Track".into(),
+            Self::Skip => ".Skip".into(),
+            Self::Allow => ".Allow".into(),
+            Self::On => ".On".into(),
+            Self::Off => ".Off".into(),
+            Self::Explicit => ".Explicit".into(),
+        }
+    }
 }
 
 /// The six lexical source rungs used by every build fact. Package is the
 /// outermost source and Item is the nearest source.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Ord, PartialOrd)]
-pub enum SourceScope { Package, File, Module, Function, Block, Item }
+pub enum SourceScope {
+    Package,
+    File,
+    Module,
+    Function,
+    Block,
+    Item,
+}
 
 impl SourceScope {
-    pub const fn name(self) -> &'static str { match self {
-        Self::Package => "package",
-        Self::File => "file",
-        Self::Module => "module",
-        Self::Function => "function",
-        Self::Block => "block",
-        Self::Item => "item",
-    } }
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::Package => "package",
+            Self::File => "file",
+            Self::Module => "module",
+            Self::Function => "function",
+            Self::Block => "block",
+            Self::Item => "item",
+        }
+    }
 
-    const fn rank(self) -> u8 { match self {
-        Self::Package => 0,
-        Self::File => 1,
-        Self::Module => 2,
-        Self::Function => 3,
-        Self::Block => 4,
-        Self::Item => 5,
-    } }
+    const fn rank(self) -> u8 {
+        match self {
+            Self::Package => 0,
+            Self::File => 1,
+            Self::Module => 2,
+            Self::Function => 3,
+            Self::Block => 4,
+            Self::Item => 5,
+        }
+    }
 }
 
 /// Contribution layers are ordered from least to most explicit. A later
@@ -84,25 +136,29 @@ pub enum ContributionLayer {
 }
 
 impl ContributionLayer {
-    pub const fn name(self) -> &'static str { match self {
-        Self::Declaration => "declaration",
-        Self::OptimizationBundle => "optimization bundle",
-        Self::Workspace => "workspace",
-        Self::Environment => "environment",
-        Self::System => "system",
-        Self::Fleet => "fleet",
-        Self::CommandLine => "command line",
-    } }
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::Declaration => "declaration",
+            Self::OptimizationBundle => "optimization bundle",
+            Self::Workspace => "workspace",
+            Self::Environment => "environment",
+            Self::System => "system",
+            Self::Fleet => "fleet",
+            Self::CommandLine => "command line",
+        }
+    }
 
-    const fn rank(self) -> u8 { match self {
-        Self::Declaration => 0,
-        Self::OptimizationBundle => 1,
-        Self::Workspace => 2,
-        Self::Environment => 3,
-        Self::System => 4,
-        Self::Fleet => 5,
-        Self::CommandLine => 6,
-    } }
+    const fn rank(self) -> u8 {
+        match self {
+            Self::Declaration => 0,
+            Self::OptimizationBundle => 1,
+            Self::Workspace => 2,
+            Self::Environment => 3,
+            Self::System => 4,
+            Self::Fleet => 5,
+            Self::CommandLine => 6,
+        }
+    }
 
     const fn can_force(self) -> bool {
         matches!(self, Self::System | Self::Fleet)
@@ -111,7 +167,10 @@ impl ContributionLayer {
 
 /// How a fact combines across the contribution ladder.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum FactMerge { Override, TightenOnly }
+pub enum FactMerge {
+    Override,
+    TightenOnly,
+}
 
 /// A fact key carries its resolver merge direction and an optional resolver-
 /// owned default writer; contributors supply only a value and provenance.
@@ -170,16 +229,18 @@ pub enum FactValue {
 }
 
 impl FactValue {
-    pub fn display(&self) -> String { match self {
-        Self::Bool(value) => value.to_string(),
-        Self::Int(value) => value.to_string(),
-        Self::Char(value) => format!("'{value}'"),
-        Self::Text(value) => format!("\"{value}\""),
-        Self::Enum(value) => format!(".{value}"),
-        Self::OptionalText(Some(value)) => format!("Some(\"{value}\")"),
-        Self::OptionalText(None) => "None".to_string(),
-        Self::Policy(value) => value.display(),
-    } }
+    pub fn display(&self) -> String {
+        match self {
+            Self::Bool(value) => value.to_string(),
+            Self::Int(value) => value.to_string(),
+            Self::Char(value) => format!("'{value}'"),
+            Self::Text(value) => format!("\"{value}\""),
+            Self::Enum(value) => format!(".{value}"),
+            Self::OptionalText(Some(value)) => format!("Some(\"{value}\")"),
+            Self::OptionalText(None) => "None".to_string(),
+            Self::Policy(value) => value.display(),
+        }
+    }
 
     fn safety_relation(&self, next: &Self) -> SafetyRelation {
         if self == next {
@@ -187,13 +248,25 @@ impl FactValue {
         }
         match (self, next) {
             (Self::Bool(outer), Self::Bool(inner)) => {
-                if *outer && !*inner { SafetyRelation::Tighten } else { SafetyRelation::Widen }
+                if *outer && !*inner {
+                    SafetyRelation::Tighten
+                } else {
+                    SafetyRelation::Widen
+                }
             }
             (Self::Int(outer), Self::Int(inner)) => {
-                if inner < outer { SafetyRelation::Tighten } else { SafetyRelation::Widen }
+                if inner < outer {
+                    SafetyRelation::Tighten
+                } else {
+                    SafetyRelation::Widen
+                }
             }
             (Self::Policy(outer), Self::Policy(inner)) => {
-                if gate_widens(*outer, *inner) { SafetyRelation::Widen } else { SafetyRelation::Tighten }
+                if gate_widens(*outer, *inner) {
+                    SafetyRelation::Widen
+                } else {
+                    SafetyRelation::Tighten
+                }
             }
             _ => SafetyRelation::Incomparable,
         }
@@ -201,7 +274,12 @@ impl FactValue {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum SafetyRelation { Same, Tighten, Widen, Incomparable }
+enum SafetyRelation {
+    Same,
+    Tighten,
+    Widen,
+    Incomparable,
+}
 
 /// One written contributor to one fact. `target` lets a source-scoped value
 /// identify the item it governs without changing the global ordering law.
@@ -297,24 +375,83 @@ pub struct EffectiveFact {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum FactError {
-    InvalidForce { key: String, layer: ContributionLayer, source: String },
-    Conflict { key: String, layer: ContributionLayer, first: FactContribution, second: FactContribution },
-    SafetyWidening { key: String, previous: FactContribution, next: FactContribution },
-    SafetyIncomparable { key: String, previous: FactContribution, next: FactContribution },
+    InvalidForce {
+        key: String,
+        layer: ContributionLayer,
+        source: String,
+    },
+    Conflict {
+        key: String,
+        layer: ContributionLayer,
+        first: FactContribution,
+        second: FactContribution,
+    },
+    SafetyWidening {
+        key: String,
+        previous: FactContribution,
+        next: FactContribution,
+    },
+    SafetyIncomparable {
+        key: String,
+        previous: FactContribution,
+        next: FactContribution,
+    },
 }
 
 impl FactError {
-    pub fn message(&self) -> String { match self {
-        Self::InvalidForce { key, layer, source } => format!("fact `{key}` uses `.Force` at the unsupported {} layer ({source})", layer.name()),
-        Self::Conflict { key, layer, first, second } => format!("fact `{key}` has conflicting values at the {} layer: {}:{} and {}:{}", layer.name(), first.source, first.span.start, second.source, second.span.start),
-        Self::SafetyWidening { key, previous, next } => format!("fact `{key}` widens from {} at {} to {} at {}", previous.value.display(), previous.source, next.value.display(), next.source),
-        Self::SafetyIncomparable { key, previous, next } => format!("fact `{key}` has unrelated safety values at {} and {}", previous.source, next.source),
-    } }
+    pub fn message(&self) -> String {
+        match self {
+            Self::InvalidForce { key, layer, source } => format!(
+                "fact `{key}` uses `.Force` at the unsupported {} layer ({source})",
+                layer.name()
+            ),
+            Self::Conflict {
+                key,
+                layer,
+                first,
+                second,
+            } => format!(
+                "fact `{key}` has conflicting values at the {} layer: {}:{} and {}:{}",
+                layer.name(),
+                first.source,
+                first.span.start,
+                second.source,
+                second.span.start
+            ),
+            Self::SafetyWidening {
+                key,
+                previous,
+                next,
+            } => format!(
+                "fact `{key}` widens from {} at {} to {} at {}",
+                previous.value.display(),
+                previous.source,
+                next.value.display(),
+                next.source
+            ),
+            Self::SafetyIncomparable {
+                key,
+                previous,
+                next,
+            } => format!(
+                "fact `{key}` has unrelated safety values at {} and {}",
+                previous.source, next.source
+            ),
+        }
+    }
 
     /// The same typed conflict reaches the product diagnostic and names both
     /// written locations. Other resolver failures remain typed resolver errors.
     pub fn diagnostic(&self) -> Option<crate::Diagnostics::Diagnostic> {
-        let Self::Conflict { key, layer, first, second } = self else { return None };
+        let Self::Conflict {
+            key,
+            layer,
+            first,
+            second,
+        } = self
+        else {
+            return None;
+        };
         Some(crate::Diagnostics::Diagnostic::error(
             "E3521",
             format!("fact `{key}` has conflicting values at the {} layer", layer.name()),
@@ -326,7 +463,11 @@ impl FactError {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum PolicyCombine { Tighten, Override, Merge }
+pub enum PolicyCombine {
+    Tighten,
+    Override,
+    Merge,
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct PolicyRule {
@@ -335,21 +476,69 @@ pub struct PolicyRule {
     pub combine: PolicyCombine,
 }
 
-const PACKAGE_SCOPES: &[PolicyScope] = &[PolicyScope::Package, PolicyScope::Module, PolicyScope::Function, PolicyScope::Block];
-const ALL_SCOPES: &[PolicyScope] = &[PolicyScope::Organization, PolicyScope::Package, PolicyScope::Module, PolicyScope::Function, PolicyScope::Block];
+const PACKAGE_SCOPES: &[PolicyScope] = &[
+    PolicyScope::Package,
+    PolicyScope::Module,
+    PolicyScope::Function,
+    PolicyScope::Block,
+];
+const ALL_SCOPES: &[PolicyScope] = &[
+    PolicyScope::Organization,
+    PolicyScope::Package,
+    PolicyScope::Module,
+    PolicyScope::Function,
+    PolicyScope::Block,
+];
 pub const POLICY_RULES: &[PolicyRule] = &[
-    PolicyRule { key: PolicyKey::Unsafe, scopes: ALL_SCOPES, combine: PolicyCombine::Tighten },
-    PolicyRule { key: PolicyKey::Impure, scopes: ALL_SCOPES, combine: PolicyCombine::Tighten },
-    PolicyRule { key: PolicyKey::Nondeterministic, scopes: ALL_SCOPES, combine: PolicyCombine::Tighten },
-    PolicyRule { key: PolicyKey::ScopedGc, scopes: PACKAGE_SCOPES, combine: PolicyCombine::Override },
-    PolicyRule { key: PolicyKey::ExplicitUnits, scopes: PACKAGE_SCOPES, combine: PolicyCombine::Tighten },
-    PolicyRule { key: PolicyKey::Copies, scopes: PACKAGE_SCOPES, combine: PolicyCombine::Tighten },
-    PolicyRule { key: PolicyKey::Sentries, scopes: PACKAGE_SCOPES, combine: PolicyCombine::Tighten },
+    PolicyRule {
+        key: PolicyKey::Unsafe,
+        scopes: ALL_SCOPES,
+        combine: PolicyCombine::Tighten,
+    },
+    PolicyRule {
+        key: PolicyKey::Impure,
+        scopes: ALL_SCOPES,
+        combine: PolicyCombine::Tighten,
+    },
+    PolicyRule {
+        key: PolicyKey::Nondeterministic,
+        scopes: ALL_SCOPES,
+        combine: PolicyCombine::Tighten,
+    },
+    PolicyRule {
+        key: PolicyKey::ScopedGc,
+        scopes: PACKAGE_SCOPES,
+        combine: PolicyCombine::Override,
+    },
+    PolicyRule {
+        key: PolicyKey::ExplicitUnits,
+        scopes: PACKAGE_SCOPES,
+        combine: PolicyCombine::Tighten,
+    },
+    PolicyRule {
+        key: PolicyKey::Copies,
+        scopes: PACKAGE_SCOPES,
+        combine: PolicyCombine::Tighten,
+    },
+    PolicyRule {
+        key: PolicyKey::Sentries,
+        scopes: PACKAGE_SCOPES,
+        combine: PolicyCombine::Tighten,
+    },
 ];
 
-pub const AUDITED_GATE_KEYS: &[PolicyKey] = &[PolicyKey::Unsafe, PolicyKey::Impure, PolicyKey::Nondeterministic];
+pub const AUDITED_GATE_KEYS: &[PolicyKey] = &[
+    PolicyKey::Unsafe,
+    PolicyKey::Impure,
+    PolicyKey::Nondeterministic,
+];
 
-pub fn rule(key: PolicyKey) -> &'static PolicyRule { POLICY_RULES.iter().find(|r| r.key == key).expect("registered policy key") }
+pub fn rule(key: PolicyKey) -> &'static PolicyRule {
+    POLICY_RULES
+        .iter()
+        .find(|r| r.key == key)
+        .expect("registered policy key")
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PolicyDeclaration {
@@ -373,52 +562,107 @@ pub struct EffectivePolicy {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PolicyError {
-    ProhibitedScope { key: PolicyKey, scope: PolicyScope, span: Span },
-    Conflict { key: PolicyKey, scope: PolicyScope, first: Span, second: Span },
-    Widening { key: PolicyKey, outer: PolicyValue, inner: PolicyValue, span: Span },
+    ProhibitedScope {
+        key: PolicyKey,
+        scope: PolicyScope,
+        span: Span,
+    },
+    Conflict {
+        key: PolicyKey,
+        scope: PolicyScope,
+        first: Span,
+        second: Span,
+    },
+    Widening {
+        key: PolicyKey,
+        outer: PolicyValue,
+        inner: PolicyValue,
+        span: Span,
+    },
 }
 
 /// Resolve declarations ordered outer-to-inner. One effective value is returned,
 /// while every shadowed/tightened declaration remains available to explain tools.
-fn resolve_policy(key: PolicyKey, declarations: impl IntoIterator<Item = PolicyDeclaration>) -> Result<Option<EffectivePolicy>, PolicyError> {
-    let mut declarations = declarations.into_iter().filter(|d| d.key == key).collect::<Vec<_>>();
+fn resolve_policy(
+    key: PolicyKey,
+    declarations: impl IntoIterator<Item = PolicyDeclaration>,
+) -> Result<Option<EffectivePolicy>, PolicyError> {
+    let mut declarations = declarations
+        .into_iter()
+        .filter(|d| d.key == key)
+        .collect::<Vec<_>>();
     declarations.sort_by_key(|declaration| declaration.scope.rank());
     let mut chain = Vec::new();
     let mut effective = None;
     for declaration in declarations {
         if !rule(key).scopes.contains(&declaration.scope) {
-            return Err(PolicyError::ProhibitedScope { key, scope: declaration.scope, span: declaration.span });
+            return Err(PolicyError::ProhibitedScope {
+                key,
+                scope: declaration.scope,
+                span: declaration.span,
+            });
         }
-        if let Some(previous) = chain.iter().find(|previous: &&PolicyDeclaration| previous.scope == declaration.scope && previous.target == declaration.target) {
-            return Err(PolicyError::Conflict { key, scope: declaration.scope, first: previous.span, second: declaration.span });
+        if let Some(previous) = chain.iter().find(|previous: &&PolicyDeclaration| {
+            previous.scope == declaration.scope && previous.target == declaration.target
+        }) {
+            return Err(PolicyError::Conflict {
+                key,
+                scope: declaration.scope,
+                first: previous.span,
+                second: declaration.span,
+            });
         }
         let mut next = declaration.value;
         if let Some(outer) = effective {
             let widens = match (key, outer, declaration.value) {
-                (PolicyKey::ScopedGc | PolicyKey::ExplicitUnits, PolicyValue::Enabled, PolicyValue::Enabled) => false,
+                (
+                    PolicyKey::ScopedGc | PolicyKey::ExplicitUnits,
+                    PolicyValue::Enabled,
+                    PolicyValue::Enabled,
+                ) => false,
                 (PolicyKey::Copies, PolicyValue::Explicit, PolicyValue::Explicit) => false,
                 (PolicyKey::Sentries, PolicyValue::On, PolicyValue::On | PolicyValue::Off) => false,
                 (PolicyKey::Sentries, PolicyValue::Off, PolicyValue::On) => true,
                 (PolicyKey::Sentries, PolicyValue::Off, PolicyValue::Off) => false,
-                (PolicyKey::Unsafe | PolicyKey::Impure | PolicyKey::Nondeterministic, outer, inner) => gate_widens(outer, inner),
+                (
+                    PolicyKey::Unsafe | PolicyKey::Impure | PolicyKey::Nondeterministic,
+                    outer,
+                    inner,
+                ) => gate_widens(outer, inner),
                 _ => true,
             };
             if rule(key).combine == PolicyCombine::Tighten && widens {
-                return Err(PolicyError::Widening { key, outer, inner: declaration.value, span: declaration.span });
+                return Err(PolicyError::Widening {
+                    key,
+                    outer,
+                    inner: declaration.value,
+                    span: declaration.span,
+                });
             }
             if rule(key).combine == PolicyCombine::Merge {
                 next = match (outer, declaration.value) {
                     (PolicyValue::Limit(a), PolicyValue::Limit(b)) => PolicyValue::Limit(a.min(b)),
                     (PolicyValue::Enabled, PolicyValue::Enabled) => PolicyValue::Enabled,
                     (PolicyValue::Forbid, PolicyValue::Forbid) => PolicyValue::Forbid,
-                    _ => return Err(PolicyError::Conflict { key, scope: declaration.scope, first: chain.last().unwrap().span, second: declaration.span }),
+                    _ => {
+                        return Err(PolicyError::Conflict {
+                            key,
+                            scope: declaration.scope,
+                            first: chain.last().unwrap().span,
+                            second: declaration.span,
+                        })
+                    }
                 };
             }
         }
         effective = Some(next);
         chain.push(declaration);
     }
-    Ok(effective.map(|value| EffectivePolicy { key, value, provenance: chain }))
+    Ok(effective.map(|value| EffectivePolicy {
+        key,
+        value,
+        provenance: chain,
+    }))
 }
 
 /// One resolver seam for policies and build facts. The key selects the
@@ -460,10 +704,7 @@ impl ResolutionKey for FactKey {
     }
 }
 
-pub fn resolve<K, I>(
-    key: K,
-    declarations: I,
-) -> Result<Option<K::Effective>, K::Error>
+pub fn resolve<K, I>(key: K, declarations: I) -> Result<Option<K::Effective>, K::Error>
 where
     K: ResolutionKey,
     I: IntoIterator<Item = K::Declaration>,
@@ -514,7 +755,11 @@ fn resolve_fact(
         if group != Some(identity) {
             group = Some(identity);
             first_in_group = Some(declaration);
-        } else if declaration.value != first_in_group.expect("fact conflict group has a first writer").value {
+        } else if declaration.value
+            != first_in_group
+                .expect("fact conflict group has a first writer")
+                .value
+        {
             let first = first_in_group.expect("fact conflict group has a first writer");
             return Err(FactError::Conflict {
                 key: key.name.clone(),
@@ -554,7 +799,9 @@ fn resolve_fact(
                 && declaration.scope.rank() == effective_scope
         })
         .collect::<Vec<_>>();
-    let first = candidates.first().expect("non-empty effective fact candidates");
+    let first = candidates
+        .first()
+        .expect("non-empty effective fact candidates");
     for second in candidates.iter().skip(1) {
         if second.value != first.value {
             return Err(FactError::Conflict {
@@ -664,7 +911,9 @@ pub fn parse_value(key: PolicyKey, raw: &str) -> Result<PolicyValue, String> {
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub struct GateSet { bits: u8 }
+pub struct GateSet {
+    bits: u8,
+}
 
 impl GateSet {
     pub fn allow(key: PolicyKey) -> Self {
@@ -682,7 +931,9 @@ impl GateSet {
         }
     }
 
-    pub fn insert(&mut self, key: PolicyKey) { self.bits |= Self::bit(key); }
+    pub fn insert(&mut self, key: PolicyKey) {
+        self.bits |= Self::bit(key);
+    }
 
     /// Resolve an invocation allowance through the same policy resolver used
     /// by package and organization declarations. The bitset is only the
@@ -691,16 +942,25 @@ impl GateSet {
         resolve_invocation(key, &self).unwrap_or(false)
     }
 
-    fn contains(self, key: PolicyKey) -> bool { self.bits & Self::bit(key) != 0 }
-    pub fn is_empty(self) -> bool { self.bits == 0 }
+    fn contains(self, key: PolicyKey) -> bool {
+        self.bits & Self::bit(key) != 0
+    }
+    pub fn is_empty(self) -> bool {
+        self.bits == 0
+    }
 
     /// Parse one CLI `name=allow` entry. The synthetic declaration goes
     /// through the same resolver as package and organization policy.
     pub fn parse(spec: &str) -> Result<PolicyKey, String> {
-        let (name, value) = spec.split_once('=').ok_or_else(|| "use `--gate name=allow`".to_string())?;
-        let key = PolicyKey::parse(name.trim()).ok_or_else(|| format!("`{}` is not an audited gate", name.trim()))?;
+        let (name, value) = spec
+            .split_once('=')
+            .ok_or_else(|| "use `--gate name=allow`".to_string())?;
+        let key = PolicyKey::parse(name.trim())
+            .ok_or_else(|| format!("`{}` is not an audited gate", name.trim()))?;
         if !key.is_audited_gate() || value.trim() != "allow" {
-            return Err(format!("`--gate {spec}` must name an audited gate with `=allow`"));
+            return Err(format!(
+                "`--gate {spec}` must name an audited gate with `=allow`"
+            ));
         }
         resolve_invocation(key, &Self::allow(key))
             .map_err(|error| format!("invalid gate `{spec}`: {error:?}"))?;
@@ -757,8 +1017,19 @@ impl ExplainableResolution for EffectivePolicy {
     fn explain_resolution(&self) -> String {
         let mut out = format!("{} = {}", self.key.name(), self.value.display());
         for (index, declaration) in self.provenance.iter().enumerate() {
-            let status = if index + 1 == self.provenance.len() { "effective" } else { "shadowed" };
-            out.push_str(&format!("\n  [{status}] {} {} at {}:{}..{}", declaration.scope.name(), declaration.value.display(), declaration.source, declaration.span.start, declaration.span.end));
+            let status = if index + 1 == self.provenance.len() {
+                "effective"
+            } else {
+                "shadowed"
+            };
+            out.push_str(&format!(
+                "\n  [{status}] {} {} at {}:{}..{}",
+                declaration.scope.name(),
+                declaration.value.display(),
+                declaration.source,
+                declaration.span.start,
+                declaration.span.end
+            ));
         }
         out
     }
@@ -768,7 +1039,13 @@ impl ExplainableResolution for EffectiveFact {
     fn explain_resolution(&self) -> String {
         let mut out = format!("{} = {}", self.key.name, self.value.display());
         for (index, contribution) in self.provenance.iter().enumerate() {
-            let status = if index == self.effective { "effective" } else if contribution.force { "pinned" } else { "shadowed" };
+            let status = if index == self.effective {
+                "effective"
+            } else if contribution.force {
+                "pinned"
+            } else {
+                "shadowed"
+            };
             let pin = contribution
                 .force_reason
                 .as_deref()
@@ -777,7 +1054,17 @@ impl ExplainableResolution for EffectiveFact {
                 .reason
                 .as_deref()
                 .map_or(String::new(), |reason| format!(" reason={reason}"));
-            out.push_str(&format!("\n  [{status}] {} / {} {} at {}:{}..{}{}{}", contribution.layer.name(), contribution.scope.name(), contribution.value.display(), contribution.source, contribution.span.start, contribution.span.end, pin, reason));
+            out.push_str(&format!(
+                "\n  [{status}] {} / {} {} at {}:{}..{}{}{}",
+                contribution.layer.name(),
+                contribution.scope.name(),
+                contribution.value.display(),
+                contribution.source,
+                contribution.span.start,
+                contribution.span.end,
+                pin,
+                reason
+            ));
         }
         out
     }
@@ -788,7 +1075,26 @@ pub fn explain<R: ExplainableResolution>(resolution: &R) -> String {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum RuleSite { Package, File, Module, Function, Method, Block, Statement, Expression, Type, Impl, Declaration, Constant, Field, Variant, Parameter, Test, Operation, Text }
+pub enum RuleSite {
+    Package,
+    File,
+    Module,
+    Function,
+    Method,
+    Block,
+    Statement,
+    Expression,
+    Type,
+    Impl,
+    Declaration,
+    Constant,
+    Field,
+    Variant,
+    Parameter,
+    Test,
+    Operation,
+    Text,
+}
 
 impl RuleSite {
     pub const ALL: [Self; 18] = [
@@ -897,7 +1203,12 @@ pub enum RuleStatus {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum RuleResolution { SiteBound, Override, Merge, Tighten }
+pub enum RuleResolution {
+    SiteBound,
+    Override,
+    Merge,
+    Tighten,
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RuleArgType {
@@ -926,7 +1237,10 @@ pub struct RuleArgDeclaration {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum VariantSegment { First, Last }
+pub enum VariantSegment {
+    First,
+    Last,
+}
 
 /// An extra attachment site that a rule earns from a companion on the same
 /// target (D-TASKS-LIST1=A: `#Doc` describes a `#Job`).
@@ -957,7 +1271,14 @@ fn canonical_rule_arg_variants(name: &str) -> Option<&'static [&'static str]> {
             crate::Syntax::RENAME_ALL_KEBAB,
             crate::Syntax::RENAME_ALL_SCREAMING,
         ],
-        "ObligationMode" => &["None", "GateOnly", "Obligations", "PerSite", "Track", "Skip"],
+        "ObligationMode" => &[
+            "None",
+            "GateOnly",
+            "Obligations",
+            "PerSite",
+            "Track",
+            "Skip",
+        ],
         "Site" => SITE_VARIANTS,
         "PolicySetting" => &[
             "unsafe",
@@ -1009,7 +1330,12 @@ pub static RULE_ARG_DECLARATIONS: LazyLock<Vec<RuleArgDeclaration>> = LazyLock::
     // are seeded rather than found.
     let mut names = std::collections::BTreeSet::from(["Site", "Track"]);
     for row in APPLIED_RULES.iter() {
-        names.extend(row.signature.params.iter().map(|parameter| parameter.source_type));
+        names.extend(
+            row.signature
+                .params
+                .iter()
+                .map(|parameter| parameter.source_type),
+        );
         names.extend(row.signature.variadic_source_type);
     }
     names
@@ -1035,7 +1361,9 @@ const fn canonical_variant_segment(name: &str) -> VariantSegment {
 }
 
 pub fn rule_arg_declaration(name: &str) -> Option<&'static RuleArgDeclaration> {
-    RULE_ARG_DECLARATIONS.iter().find(|declaration| declaration.name == name)
+    RULE_ARG_DECLARATIONS
+        .iter()
+        .find(|declaration| declaration.name == name)
 }
 
 impl RuleArgType {
@@ -1050,7 +1378,6 @@ impl RuleArgType {
             Self::EffectRoots => "[Effect]",
         }
     }
-
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1122,10 +1449,7 @@ impl RuleSignature {
 
     /// Bind source arguments to normalized parameter slots. The parser and
     /// every marker applicator use this one arity/label/variadic algorithm.
-    pub fn argument_bindings(
-        self,
-        labels: &[Option<&str>],
-    ) -> Option<Vec<RuleArgumentBinding>> {
+    pub fn argument_bindings(self, labels: &[Option<&str>]) -> Option<Vec<RuleArgumentBinding>> {
         let mut supplied = vec![false; self.params.len()];
         let mut positional = 0usize;
         let mut saw_named = false;
@@ -1196,8 +1520,10 @@ impl RuleSignature {
                 .enumerate()
                 .map(|(source_index, label)| {
                     let name = &label.as_ref()?.0;
-                    let parameter_index =
-                        self.params.iter().position(|parameter| parameter.name == name)?;
+                    let parameter_index = self
+                        .params
+                        .iter()
+                        .position(|parameter| parameter.name == name)?;
                     Some(RuleArgumentBinding {
                         source_index,
                         parameter_index: Some(parameter_index),
@@ -1213,11 +1539,13 @@ impl RuleSignature {
                 .enumerate()
                 .map(|(source_index, label)| {
                     if let Some((name, _)) = label {
-                        matches!(name.as_str(), "copies" | "sentries").then_some(RuleArgumentBinding {
-                            source_index,
-                            parameter_index: None,
-                            ty: self.variadic?,
-                        })
+                        matches!(name.as_str(), "copies" | "sentries").then_some(
+                            RuleArgumentBinding {
+                                source_index,
+                                parameter_index: None,
+                                ty: self.variadic?,
+                            },
+                        )
                     } else {
                         Some(RuleArgumentBinding {
                             source_index,
@@ -1323,7 +1651,10 @@ impl MarkerVocabulary {
 
     /// Every spellable name, for a nearest-spelling suggestion.
     pub fn names(&self) -> Vec<String> {
-        active_rule_names().into_iter().chain(self.declared.iter().cloned()).collect()
+        active_rule_names()
+            .into_iter()
+            .chain(self.declared.iter().cloned())
+            .collect()
     }
 
     /// Return the source declaration for a user rule, if this build supplied
@@ -1367,7 +1698,8 @@ pub fn marker_wrong_site_error(
             if let Some(companion) = row.companion_site {
                 sites.push(format!(
                     "{} with companion `#{}`",
-                    companion.site.name(), companion.rule
+                    companion.site.name(),
+                    companion.rule
                 ));
             }
             sites
@@ -1387,9 +1719,9 @@ pub fn marker_wrong_site_error(
     // `@name :: value` (spec.md:718-720). "Move it to a registered site"
     // cannot lead there, because an unmarked `name :: value` is not a
     // declaration at file or module scope at all.
-    let fix = if row
-        .is_some_and(|row| row.companion_site.is_none() && matches!(row.sites, [RuleSite::Constant]))
-    {
+    let fix = if row.is_some_and(|row| {
+        row.companion_site.is_none() && matches!(row.sites, [RuleSite::Constant])
+    }) {
         format!("write `#{name} @name :: value` — a constant is a marked compile-time binding")
     } else {
         format!("move `#{name}` to one of its registered sites")
@@ -1588,8 +1920,17 @@ pub fn rule_allows_with_companions<'a>(
 }
 
 pub const DERIVE_RULES: &[&str] = &[
-    "Codable", "Encode", "Decode", "Comparable", "Equatable", "Debug",
-    "Numeric", "Printable", "CLI", "Patchable", "UnitFamily",
+    "Codable",
+    "Encode",
+    "Decode",
+    "Comparable",
+    "Equatable",
+    "Debug",
+    "Numeric",
+    "Printable",
+    "CLI",
+    "Patchable",
+    "UnitFamily",
 ];
 
 /// A trait may rhyme with a type-site marker only when that marker is the
@@ -1609,15 +1950,31 @@ mod tests {
     fn every_registered_rule_has_one_exact_applicability_row() {
         let rows = super::applied_rule_registry();
         for row in rows {
-            assert_eq!(rows.iter().filter(|candidate| candidate.name == row.name).count(), 1, "{}", row.name);
+            assert_eq!(
+                rows.iter()
+                    .filter(|candidate| candidate.name == row.name)
+                    .count(),
+                1,
+                "{}",
+                row.name
+            );
             // D-META-STAGE1=B: an active row must keep at least one legal site.
             // A retired row may keep none, because a stage that is no longer a
             // rule about a target has nowhere left to be written.
             if matches!(row.status, super::RuleStatus::Active) {
                 assert!(!row.sites.is_empty(), "{}", row.name);
             }
-            assert_eq!(row.signature.variadic.is_some(), row.signature.variadic_source_type.is_some(), "{}", row.name);
-            assert!(row.signature.required() <= row.signature.params.len(), "{}", row.name);
+            assert_eq!(
+                row.signature.variadic.is_some(),
+                row.signature.variadic_source_type.is_some(),
+                "{}",
+                row.name
+            );
+            assert!(
+                row.signature.required() <= row.signature.params.len(),
+                "{}",
+                row.name
+            );
             for param in row.signature.params {
                 assert!(!param.name.is_empty(), "{}", row.name);
                 assert!(!param.source_type.is_empty(), "{}", row.name);
@@ -1633,8 +1990,8 @@ mod tests {
         let published: Vec<&str> = RuleSite::ALL.iter().map(|site| site.name()).collect();
         assert_eq!(published, super::SITE_VARIANTS);
 
-        let declaration =
-            super::rule_arg_declaration("Site").expect("`Site` is published in `core.compiler.lang`");
+        let declaration = super::rule_arg_declaration("Site")
+            .expect("`Site` is published in `core.compiler.lang`");
         assert_eq!(declaration.variants, super::SITE_VARIANTS);
         assert_eq!(declaration.variant_segment, super::VariantSegment::Last);
     }
@@ -1682,7 +2039,15 @@ mod tests {
             assert!(row.policy_scopes.is_empty());
         }
         let policy = rows.iter().find(|row| row.name == "Policy").unwrap();
-        assert_eq!(policy.policy_scopes, &[super::PolicyScope::Package, super::PolicyScope::Module, super::PolicyScope::Function, super::PolicyScope::Block]);
+        assert_eq!(
+            policy.policy_scopes,
+            &[
+                super::PolicyScope::Package,
+                super::PolicyScope::Module,
+                super::PolicyScope::Function,
+                super::PolicyScope::Block
+            ]
+        );
         assert!(!super::rule_allows("Pure", super::RuleSite::Type));
         assert!(!super::rule_allows("Codable", super::RuleSite::Function));
         assert!(!super::rule_allows("Doc", super::RuleSite::Block));
@@ -1697,7 +2062,12 @@ mod tests {
         assert_eq!(super::RULE_ARG_DECLARATIONS.len(), 18);
         let mut expected = std::collections::BTreeSet::from(["Site", "Track"]);
         for row in super::APPLIED_RULES.iter() {
-            expected.extend(row.signature.params.iter().map(|parameter| parameter.source_type));
+            expected.extend(
+                row.signature
+                    .params
+                    .iter()
+                    .map(|parameter| parameter.source_type),
+            );
             expected.extend(row.signature.variadic_source_type);
         }
         expected.retain(|name| super::canonical_rule_arg_variants(name).is_some());
@@ -1752,7 +2122,10 @@ mod tests {
             variants("NamingCase"),
             &["camel", "snake", "pascal", "kebab", "screaming"]
         );
-        assert_eq!(variants("Ability"), crate::Authority::EFFECT_ROOTS.as_slice());
+        assert_eq!(
+            variants("Ability"),
+            crate::Authority::EFFECT_ROOTS.as_slice()
+        );
     }
 
     /// D-MARK-FORM1=A / D-MARK-REPEAT1=A / D-VERDICT-1455-1: the facts the
@@ -1799,15 +2172,21 @@ mod tests {
 
         // Which path segment names a variant is declaration data.
         assert_eq!(
-            super::rule_arg_declaration("Ability").unwrap().variant_segment,
+            super::rule_arg_declaration("Ability")
+                .unwrap()
+                .variant_segment,
             super::VariantSegment::First
         );
         assert_eq!(
-            super::rule_arg_declaration("Target").unwrap().variant_segment,
+            super::rule_arg_declaration("Target")
+                .unwrap()
+                .variant_segment,
             super::VariantSegment::First
         );
         assert_eq!(
-            super::rule_arg_declaration("NamingCase").unwrap().variant_segment,
+            super::rule_arg_declaration("NamingCase")
+                .unwrap()
+                .variant_segment,
             super::VariantSegment::Last
         );
 
@@ -1855,14 +2234,10 @@ mod tests {
         );
         assert!(meta.argument_bindings(&[None, Some("maturity")]).is_some());
         assert!(meta.argument_bindings(&[Some("maturity")]).is_some());
-        assert!(
-            meta.argument_bindings(&[Some("category"), None])
-                .is_none()
-        );
-        assert!(
-            meta.argument_bindings(&[Some("category"), Some("category")])
-                .is_none()
-        );
+        assert!(meta.argument_bindings(&[Some("category"), None]).is_none());
+        assert!(meta
+            .argument_bindings(&[Some("category"), Some("category")])
+            .is_none());
         assert!(meta.argument_types(&[Some("unknown")]).is_none());
         let transition = super::applied_rule("Transition").unwrap().signature;
         assert!(transition.argument_bindings(&[Some("to")]).is_none());
@@ -1890,18 +2265,78 @@ mod tests {
         let resolved = super::resolve(
             key.clone(),
             [
-                contribution("package", super::SourceScope::Package, super::ContributionLayer::Declaration, "package.jet"),
-                contribution("file", super::SourceScope::File, super::ContributionLayer::Declaration, "src/main.jet"),
-                contribution("module", super::SourceScope::Module, super::ContributionLayer::Declaration, "src/main.jet"),
-                contribution("function", super::SourceScope::Function, super::ContributionLayer::Declaration, "src/main.jet"),
-                contribution("block", super::SourceScope::Block, super::ContributionLayer::Declaration, "src/main.jet"),
-                contribution("item", super::SourceScope::Item, super::ContributionLayer::Declaration, "src/main.jet"),
-                contribution("bundle", super::SourceScope::Package, super::ContributionLayer::OptimizationBundle, "build bundle"),
-                contribution("workspace", super::SourceScope::Package, super::ContributionLayer::Workspace, "workspace.jet"),
-                contribution("environment", super::SourceScope::Package, super::ContributionLayer::Environment, "env.dev"),
-                contribution("system", super::SourceScope::Package, super::ContributionLayer::System, "system.dev"),
-                contribution("fleet", super::SourceScope::Package, super::ContributionLayer::Fleet, "fleet.ci"),
-                contribution("cli", super::SourceScope::Package, super::ContributionLayer::CommandLine, "command line"),
+                contribution(
+                    "package",
+                    super::SourceScope::Package,
+                    super::ContributionLayer::Declaration,
+                    "package.jet",
+                ),
+                contribution(
+                    "file",
+                    super::SourceScope::File,
+                    super::ContributionLayer::Declaration,
+                    "src/main.jet",
+                ),
+                contribution(
+                    "module",
+                    super::SourceScope::Module,
+                    super::ContributionLayer::Declaration,
+                    "src/main.jet",
+                ),
+                contribution(
+                    "function",
+                    super::SourceScope::Function,
+                    super::ContributionLayer::Declaration,
+                    "src/main.jet",
+                ),
+                contribution(
+                    "block",
+                    super::SourceScope::Block,
+                    super::ContributionLayer::Declaration,
+                    "src/main.jet",
+                ),
+                contribution(
+                    "item",
+                    super::SourceScope::Item,
+                    super::ContributionLayer::Declaration,
+                    "src/main.jet",
+                ),
+                contribution(
+                    "bundle",
+                    super::SourceScope::Package,
+                    super::ContributionLayer::OptimizationBundle,
+                    "build bundle",
+                ),
+                contribution(
+                    "workspace",
+                    super::SourceScope::Package,
+                    super::ContributionLayer::Workspace,
+                    "workspace.jet",
+                ),
+                contribution(
+                    "environment",
+                    super::SourceScope::Package,
+                    super::ContributionLayer::Environment,
+                    "env.dev",
+                ),
+                contribution(
+                    "system",
+                    super::SourceScope::Package,
+                    super::ContributionLayer::System,
+                    "system.dev",
+                ),
+                contribution(
+                    "fleet",
+                    super::SourceScope::Package,
+                    super::ContributionLayer::Fleet,
+                    "fleet.ci",
+                ),
+                contribution(
+                    "cli",
+                    super::SourceScope::Package,
+                    super::ContributionLayer::CommandLine,
+                    "command line",
+                ),
             ],
         )
         .unwrap()
@@ -1966,7 +2401,10 @@ mod tests {
         )
         .unwrap()
         .unwrap();
-        assert_eq!(resolved.value, super::FactValue::Text("release".to_string()));
+        assert_eq!(
+            resolved.value,
+            super::FactValue::Text("release".to_string())
+        );
         let explanation = super::explain(&resolved);
         assert!(explanation.contains("[effective] system"));
         assert!(explanation.contains("pin=release certification"));
@@ -1991,7 +2429,10 @@ mod tests {
         )
         .unwrap()
         .unwrap();
-        assert_eq!(effective.value, super::FactValue::Text("release".to_string()));
+        assert_eq!(
+            effective.value,
+            super::FactValue::Text("release".to_string())
+        );
         assert_eq!(effective.provenance.len(), 2);
         assert!(super::explain(&effective).contains("[shadowed] declaration / package \"dev\""));
 
@@ -2037,6 +2478,9 @@ mod tests {
                 "workspace.jet",
             ),
         ];
-        assert!(matches!(super::resolve(key, widening), Err(super::FactError::SafetyWidening { .. })));
+        assert!(matches!(
+            super::resolve(key, widening),
+            Err(super::FactError::SafetyWidening { .. })
+        ));
     }
 }

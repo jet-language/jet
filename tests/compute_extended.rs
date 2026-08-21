@@ -5,7 +5,7 @@ mod common;
 #[path = "tir_support/mod.rs"]
 mod tir_support;
 
-use tir_support::{assert_tiers_agree, build_and_run, run_default_multi};
+use tir_support::{assert_tiers_agree, build_and_run, jit_run_traced, run_default_multi};
 
 fn assert_aot_and_default_parity(name: &str, source: &str, required: &[&str]) {
     let (aot_code, aot_stdout) = build_and_run(name, source);
@@ -33,10 +33,92 @@ fn linalg_and_fft_use_the_cpu_oracle() {
 
 #[test]
 fn autodiff_sparse_simd_and_streams_use_real_paths() {
-    assert_aot_and_default_parity(
-        "compute_autodiff_targeted",
-        include_str!("../examples/features/tooling/compute_autodiff.jet"),
-        &["grad:", "jvp:", "vjp:", "nnz:2", "mv:", "profile=F32Strict+Reproducible", "ComputeStream"],
+    let source = include_str!("../examples/features/tooling/compute_autodiff.jet");
+    let expected = include_str!("../examples/features/expected/tooling/compute_autodiff.out");
+    let mut bundle = jet::Loader::load_entry("examples/features/tooling/compute_autodiff.jet")
+        .expect("load compute autodiff example");
+    jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
+    assert_tiers_agree("compute_autodiff_targeted", source, expected);
+    let (code, stdout, stderr) = jit_run_traced("compute_autodiff_targeted_trace", source);
+    assert_eq!(code, 0, "traced default jet run failed: {stderr}");
+    assert_eq!(stdout, expected, "traced default output drifted: {stderr}");
+    assert!(stderr.contains("tier1 native"), "autodiff did not stay resident:\n{stderr}");
+    assert!(!stderr.contains("tier0 interp"), "autodiff deopted:\n{stderr}");
+}
+
+#[test]
+fn curried_autodiff_shapes_share_the_prelude_handle() {
+    assert_tiers_agree(
+        "compute_curried_autodiff_shapes",
+        r#"
+use core.compute as compute
+
+fn loss(w: Tensor, x: Tensor) Tensor :> compute.mul(w, x) ?? panic("loss")
+
+fn run() {
+    w :: compute.from_list([2.0]) ?? panic("w")
+    x :: compute.from_list([4.0]) ?? panic("x")
+    tangent_w :: compute.ones([1]) ?? panic("tangent_w")
+    tangent_x :: compute.ones([1]) ?? panic("tangent_x")
+
+    value_and_gradient :: compute.value_and_gradient(loss)
+    (value, gradients) :: value_and_gradient(w, x)
+    print("value:{compute.to_list(value)}")
+    print("value_gradient_w:{compute.to_list(gradients.w)}")
+
+    jvp :: compute.jvp(loss)
+    (jvp_value, jvp_tangent) :: jvp(w, x, tangent_w, tangent_x)
+    print("jvp_value:{compute.to_list(jvp_value)}")
+    print("jvp_tangent:{compute.to_list(jvp_tangent)}")
+
+    vjp :: compute.vjp(loss)
+    vjp_run :: vjp(w, x)
+    pull_fn :: vjp_run.pull
+    pull :: pull_fn(~tangent_w)
+    print("vjp_pull_w:{compute.to_list(pull.w)}")
+    print("vjp_grads_x:{compute.to_list(vjp_run.grads.x)}")
+}
+"#,
+        "value:[8.0]\nvalue_gradient_w:[4.0]\njvp_value:[8.0]\njvp_tangent:[6.0]\nvjp_pull_w:[4.0]\nvjp_grads_x:[2.0]\n",
+    );
+}
+
+#[test]
+fn autodiff_purity_keeps_compute_failure_fallback_but_rejects_effectful_loss() {
+    let pure = r#"
+use core.compute as compute
+
+fn loss(value: Tensor) Tensor {
+    return compute.mul(value, value) ?? panic("loss")
+}
+
+fn run() {
+    value :: compute.ones([1]) ?? panic("value")
+    gradient :: compute.gradient(loss, ~value)
+}
+"#;
+    jet::compile(pure).expect("a checked compute failure fallback must remain differentiable");
+
+    let impure = r#"
+use core.compute as compute
+
+fn loss(value: Tensor) Tensor {
+    print("side effect")
+    return compute.mul(value, value) ?? panic("loss")
+}
+
+fn run() {
+    value :: compute.ones([1]) ?? panic("value")
+    gradient :: compute.gradient(loss, ~value)
+    print(compute.to_list(gradient))
+}
+"#;
+    let diagnostics = jet::compile(impure).expect_err("an effectful loss must be rejected");
+    assert!(
+        diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.what.contains("needs a pure Tensor function")),
+        "missing autodiff purity diagnostic: {diagnostics:?}"
     );
 }
 

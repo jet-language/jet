@@ -326,6 +326,12 @@ fn systemd_escape_path(path: &Path) -> String {
 
 #[cfg(unix)]
 fn admin_service_unit_text(executable: &Path, config: &SharedStoreConfig) -> String {
+    // StateDirectory creates the root and each nested write target before
+    // systemd applies the filesystem namespace. ReadWritePaths does not create
+    // missing mount points, so omitting these entries makes first promotion
+    // fail before the broker can inspect the authenticated request.
+    let state_directories =
+        "jet/shared-store/root jet/shared-store/root/.incoming jet/shared-store/root/hangar jet/shared-store/root/.locks";
     let writable_paths = [
         config.shared_root.join(".incoming"),
         config.shared_root.join("hangar"),
@@ -335,12 +341,25 @@ fn admin_service_unit_text(executable: &Path, config: &SharedStoreConfig) -> Str
     .map(|path| systemd_escape_path(&path))
     .collect::<Vec<_>>()
     .join(" ");
+    let readonly_paths = [
+        config.shared_root.clone(),
+        config.grants.clone(),
+        config
+            .trust_key
+            .parent()
+            .unwrap_or(Path::new("/"))
+            .to_path_buf(),
+    ]
+    .into_iter()
+    .map(|path| systemd_escape_path(&path))
+    .collect::<Vec<_>>()
+    .join(" ");
     format!(
-        "[Unit]\nDescription=Jet shared-store broker request\nRequires=jet-shared-store.socket\n\n[Service]\nType=oneshot\nExecStart={} shared-store broker --fd 3\nDynamicUser=yes\nStateDirectory=jet/shared-store/broker\nStateDirectoryMode=0700\nLoadCredential=hangar.key:{}\nEnvironment=JET_SHARED_STORE_TRUST_KEY=%d/hangar.key\nNoNewPrivileges=yes\nPrivateTmp=yes\nPrivateDevices=yes\nProtectSystem=strict\nProtectHome=read-only\nProtectKernelTunables=yes\nProtectKernelModules=yes\nProtectControlGroups=yes\nProtectClock=yes\nProtectProc=invisible\nProcSubset=pid\nLockPersonality=yes\nRestrictNamespaces=yes\nRestrictSUIDSGID=yes\nRestrictRealtime=yes\nMemoryDenyWriteExecute=yes\nCapabilityBoundingSet=\nAmbientCapabilities=\nRestrictAddressFamilies=AF_UNIX\nIPAddressDeny=any\nReadOnlyPaths={} {}\nUMask=0077\nTimeoutStartSec=120\nReadWritePaths={}\n",
+        "[Unit]\nDescription=Jet shared-store broker request\nRequires=jet-shared-store.socket\n\n[Service]\nType=oneshot\nExecStart={} shared-store broker --fd 3\nDynamicUser=yes\nStateDirectory={}\nStateDirectoryMode=0700\nLoadCredential=hangar.key:{}\nEnvironment=JET_SHARED_STORE_TRUST_KEY=%d/hangar.key\nNoNewPrivileges=yes\nPrivateTmp=yes\nPrivateDevices=yes\nProtectSystem=strict\nProtectHome=read-only\nProtectKernelTunables=yes\nProtectKernelModules=yes\nProtectControlGroups=yes\nProtectClock=yes\nProtectProc=invisible\nProcSubset=pid\nLockPersonality=yes\nRestrictNamespaces=yes\nRestrictSUIDSGID=yes\nRestrictRealtime=yes\nMemoryDenyWriteExecute=yes\nCapabilityBoundingSet=\nAmbientCapabilities=\nRestrictAddressFamilies=AF_UNIX\nIPAddressDeny=any\nReadOnlyPaths={}\nUMask=0077\nTimeoutStartSec=120\nReadWritePaths={}\n",
         systemd_escape_path(executable),
+        state_directories,
         systemd_escape_path(&config.trust_key),
-        systemd_escape_path(&config.grants),
-        systemd_escape_path(&config.trust_key.parent().unwrap_or(Path::new("/"))),
+        readonly_paths,
         writable_paths
     )
 }
@@ -1949,8 +1968,12 @@ mod tests {
         let service = admin_service_unit_text(Path::new("/usr/bin/jetpack"), &config);
         assert!(service.contains("DynamicUser=yes"), "{service}");
         assert!(!service.contains("User=root"), "{service}");
-        assert!(service.contains("StateDirectory=jet/shared-store/broker\n"));
-        assert!(service.contains("ReadOnlyPaths=/var/lib/jet/shared-store/users"));
+        assert!(service.contains(
+            "StateDirectory=jet/shared-store/root jet/shared-store/root/.incoming jet/shared-store/root/hangar jet/shared-store/root/.locks\n"
+        ));
+        assert!(service.contains(
+            "ReadOnlyPaths=/var/lib/jet/shared-store/root /var/lib/jet/shared-store/users /var/lib/jet/shared-store/trust\n"
+        ));
         assert!(service.contains(
             "ReadWritePaths=/var/lib/jet/shared-store/root/.incoming /var/lib/jet/shared-store/root/hangar /var/lib/jet/shared-store/root/.locks\n"
         ));
@@ -2032,6 +2055,99 @@ mod tests {
         std::os::unix::fs::symlink(root.join("fresh-stage"), root.join("link")).unwrap();
         #[cfg(unix)]
         assert!(sweep_stale_incoming_at(&root, now_secs()).is_err());
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn promotion_commits_verified_archive_and_preserves_live_data_on_rejection() {
+        let root = std::env::temp_dir().join(format!(
+            "jet-shared-store-promotion-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .map(|duration| duration.as_nanos())
+                .unwrap_or_default()
+        ));
+        let _ = fs::remove_dir_all(&root);
+        let source = root.join("source");
+        fs::create_dir_all(&source).unwrap();
+        fs::write(source.join("payload"), "broker payload\n").unwrap();
+        let local = Roots {
+            root: root.clone(),
+            dev_mode: false,
+        };
+        let entry = crate::Store::ingest_tree(
+            &local,
+            &crate::Store::IngestRequest {
+                name: "broker-demo".into(),
+                version: "1".into(),
+                reference: "broker-demo@local".into(),
+                cache_identity: crate::Store::CacheIdentity {
+                    source_fingerprint: "sha256:broker-source".into(),
+                    recipe_fingerprint: "sha256:broker-action".into(),
+                    policy_fingerprint: "sha256:broker-policy".into(),
+                    platform: crate::Envelope::host_platform(),
+                },
+                references: Vec::new(),
+                outputs: std::collections::BTreeMap::from([("out".into(), source)]),
+                signature: String::new(),
+                provenance: "broker promotion test".into(),
+                platform_artifact_kind: String::new(),
+            },
+        )
+        .unwrap()
+        .entry;
+        let archive = Archive::export_unsigned_archive(&local, &entry.id, true).unwrap();
+        let shared_root = root.join("shared");
+        let config = SharedStoreConfig {
+            socket: root.join("broker.sock"),
+            shared_root: shared_root.clone(),
+            trust_key: root.join("trust/hangar.key"),
+            grants: root.join("users"),
+        };
+        let key_path = root.join("broker-key");
+        fs::write(&key_path, [b'k'; 32]).unwrap();
+        let binding = provenance_binding_for_entry(&entry).unwrap();
+
+        promote_staged_archive(
+            &Roots {
+                root: shared_root.clone(),
+                dev_mode: false,
+            },
+            &config,
+            &key_path.display().to_string(),
+            &archive,
+            &binding,
+        )
+        .unwrap();
+        let shared = Roots {
+            root: shared_root.clone(),
+            dev_mode: false,
+        };
+        let published = super::super::find_by_reference(&shared, &entry.reference).unwrap();
+        super::super::verify_hangar_object(&shared, &published).unwrap();
+        assert!(fs::read_dir(shared_root.join(".incoming"))
+            .unwrap()
+            .next()
+            .is_none());
+
+        let mut corrupted = archive;
+        corrupted[0] ^= 1;
+        assert!(promote_staged_archive(
+            &shared,
+            &config,
+            &key_path.display().to_string(),
+            &corrupted,
+            &binding,
+        )
+        .is_err());
+        let still_published = super::super::find_by_reference(&shared, &entry.reference).unwrap();
+        assert_eq!(still_published.id, published.id);
+        super::super::verify_hangar_object(&shared, &still_published).unwrap();
+        assert!(fs::read_dir(shared_root.join(".incoming"))
+            .unwrap()
+            .next()
+            .is_none());
         let _ = fs::remove_dir_all(root);
     }
 

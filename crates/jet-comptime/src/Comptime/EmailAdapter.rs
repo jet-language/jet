@@ -1,7 +1,7 @@
 //! CtValue marshalling for the one Prelude `core.email` kernel.
 
-use crate::AST::{CtReport, CtValue, Type};
 use crate::Diagnostics::{Diagnostic, Span};
+use crate::AST::{CtReport, CtValue, Type};
 
 use super::Diagnostics::unsupported;
 
@@ -59,11 +59,7 @@ fn copy_secret(value: &Vec<u8>) -> Vec<u8> {
     value.clone()
 }
 
-pub fn evaluate(
-    method: &str,
-    args: &[CtValue],
-    span: Span,
-) -> Option<Result<CtValue, Diagnostic>> {
+pub fn evaluate(method: &str, args: &[CtValue], span: Span) -> Option<Result<CtValue, Diagnostic>> {
     let result = match method {
         "address" => email_address(args, span),
         "attachment" => email_attachment(args, span),
@@ -114,9 +110,8 @@ fn one<'a>(
     method: &str,
     span: Span,
 ) -> Result<&'a CtValue, Diagnostic> {
-    args.get(index).ok_or_else(|| {
-        unsupported(&format!("email.{method}(): missing argument {index}"), span)
-    })
+    args.get(index)
+        .ok_or_else(|| unsupported(&format!("email.{method}(): missing argument {index}"), span))
 }
 
 fn string(value: &CtValue, span: Span) -> Result<&str, Diagnostic> {
@@ -142,12 +137,13 @@ fn bytes(value: &CtValue, span: Span) -> Result<Vec<u8>, Diagnostic> {
 
 fn field<'a>(value: &'a CtValue, type_name: &str, name: &str) -> Option<&'a CtValue> {
     match value {
-        CtValue::Struct { type_name: actual, fields } if actual == type_name => {
-            fields
-                .iter()
-                .find(|(field, _)| field == name)
-                .map(|(_, value)| value)
-        }
+        CtValue::Struct {
+            type_name: actual,
+            fields,
+        } if actual == type_name => fields
+            .iter()
+            .find(|(field, _)| field == name)
+            .map(|(_, value)| value),
         _ => None,
     }
 }
@@ -163,18 +159,21 @@ fn structure(type_name: &str, fields: Vec<(&str, CtValue)>) -> CtValue {
 }
 
 fn address_value(address: &jet_email::Address) -> CtValue {
-    structure("Address", vec![
-        (
-            "display",
-            address
-                .display
-                .as_ref()
-                .map_or(CtValue::absent(Type::String), |display| {
-                    CtValue::Present(Box::new(CtValue::Str(display.clone())))
-                }),
-        ),
-        ("mailbox", CtValue::Str(address.mailbox.clone())),
-    ])
+    structure(
+        "Address",
+        vec![
+            (
+                "display",
+                address
+                    .display
+                    .as_ref()
+                    .map_or(CtValue::absent(Type::String), |display| {
+                        CtValue::Present(Box::new(CtValue::Str(display.clone())))
+                    }),
+            ),
+            ("mailbox", CtValue::Str(address.mailbox.clone())),
+        ],
+    )
 }
 
 fn address_from_value(value: &CtValue, span: Span) -> Result<jet_email::Address, Diagnostic> {
@@ -204,11 +203,14 @@ fn address_list(value: &CtValue, span: Span) -> Result<Vec<jet_email::Address>, 
 }
 
 fn attachment_value(attachment: &jet_email::Attachment) -> CtValue {
-    structure("Attachment", vec![
-        ("filename", CtValue::Str(attachment.filename.clone())),
-        ("mime", CtValue::Str(attachment.mime.clone())),
-        ("bytes", CtValue::Bytes(attachment.bytes.clone())),
-    ])
+    structure(
+        "Attachment",
+        vec![
+            ("filename", CtValue::Str(attachment.filename.clone())),
+            ("mime", CtValue::Str(attachment.mime.clone())),
+            ("bytes", CtValue::Bytes(attachment.bytes.clone())),
+        ],
+    )
 }
 
 fn attachment_from_value(value: &CtValue, span: Span) -> Result<jet_email::Attachment, Diagnostic> {
@@ -218,12 +220,21 @@ fn attachment_from_value(value: &CtValue, span: Span) -> Result<jet_email::Attac
     };
     let mime = match field(value, "Attachment", "mime") {
         Some(CtValue::Str(value)) => value.clone(),
-        _ => return Err(unsupported("email Attachment content type is invalid", span)),
+        _ => {
+            return Err(unsupported(
+                "email Attachment content type is invalid",
+                span,
+            ))
+        }
     };
     let bytes = field(value, "Attachment", "bytes")
         .ok_or_else(|| unsupported("email Attachment bytes are missing", span))
         .and_then(|value| bytes(value, span))?;
-    Ok(jet_email::Attachment { filename, mime, bytes })
+    Ok(jet_email::Attachment {
+        filename,
+        mime,
+        bytes,
+    })
 }
 
 fn attachment_list(value: &CtValue, span: Span) -> Result<Vec<jet_email::Attachment>, Diagnostic> {
@@ -237,13 +248,16 @@ fn attachment_list(value: &CtValue, span: Span) -> Result<Vec<jet_email::Attachm
 }
 
 fn envelope_value(envelope: &jet_email::Envelope) -> CtValue {
-    structure("Envelope", vec![
-        ("from", address_value(&envelope.from)),
-        (
-            "recipients",
-            CtValue::List(envelope.recipients.iter().map(address_value).collect()),
-        ),
-    ])
+    structure(
+        "Envelope",
+        vec![
+            ("from", address_value(&envelope.from)),
+            (
+                "recipients",
+                CtValue::List(envelope.recipients.iter().map(address_value).collect()),
+            ),
+        ],
+    )
 }
 
 fn envelope_from_value(value: &CtValue, span: Span) -> Result<jet_email::Envelope, Diagnostic> {
@@ -257,32 +271,29 @@ fn envelope_from_value(value: &CtValue, span: Span) -> Result<jet_email::Envelop
 }
 
 fn message_value(message: &jet_email::Message) -> CtValue {
-    structure("Message", vec![
-        ("from", address_value(&message.from)),
-        (
-            "to",
-            CtValue::List(message.to.iter().map(address_value).collect()),
-        ),
-        (
-            "bcc",
-            CtValue::List(message.bcc.iter().map(address_value).collect()),
-        ),
-        ("subject", CtValue::Str(message.subject.clone())),
-        ("text", CtValue::Str(message.text.clone())),
-        ("html", CtValue::Str(message.html.clone())),
-        (
-            "attachments",
-            CtValue::List(
-                message
-                    .attachments
-                    .iter()
-                    .map(attachment_value)
-                    .collect(),
+    structure(
+        "Message",
+        vec![
+            ("from", address_value(&message.from)),
+            (
+                "to",
+                CtValue::List(message.to.iter().map(address_value).collect()),
             ),
-        ),
-        ("envelope", envelope_value(&message.envelope)),
-        ("wire_upper", CtValue::Int(message.wire_upper as i64)),
-    ])
+            (
+                "bcc",
+                CtValue::List(message.bcc.iter().map(address_value).collect()),
+            ),
+            ("subject", CtValue::Str(message.subject.clone())),
+            ("text", CtValue::Str(message.text.clone())),
+            ("html", CtValue::Str(message.html.clone())),
+            (
+                "attachments",
+                CtValue::List(message.attachments.iter().map(attachment_value).collect()),
+            ),
+            ("envelope", envelope_value(&message.envelope)),
+            ("wire_upper", CtValue::Int(message.wire_upper as i64)),
+        ],
+    )
 }
 
 fn message_from_value(value: &CtValue, span: Span) -> Result<jet_email::Message, Diagnostic> {
@@ -314,7 +325,10 @@ fn message_from_value(value: &CtValue, span: Span) -> Result<jet_email::Message,
     )
     .map_err(|error| {
         unsupported(
-            &format!("email Message is invalid: {}", jet_email::error_reason(&error)),
+            &format!(
+                "email Message is invalid: {}",
+                jet_email::error_reason(&error)
+            ),
             span,
         )
     })?;
@@ -426,9 +440,8 @@ fn enum_args<'a>(
 }
 
 fn enum_arg<'a>(args: &'a [(Option<String>, CtValue)], name: &str) -> Option<&'a CtValue> {
-    args.iter().find_map(|(field, value)| {
-        (field.as_deref() == Some(name)).then_some(value)
-    })
+    args.iter()
+        .find_map(|(field, value)| (field.as_deref() == Some(name)).then_some(value))
 }
 
 fn int(value: &CtValue, what: &str, span: Span) -> Result<i64, Diagnostic> {
@@ -492,7 +505,10 @@ pub fn limits_safe_value() -> CtValue {
     structure(
         "Limits",
         vec![
-            ("max_reply_line_bytes", CtValue::Int(limits.max_reply_line_bytes)),
+            (
+                "max_reply_line_bytes",
+                CtValue::Int(limits.max_reply_line_bytes),
+            ),
             ("max_reply_lines", CtValue::Int(limits.max_reply_lines)),
             ("max_capabilities", CtValue::Int(limits.max_capabilities)),
             ("max_recipients", CtValue::Int(limits.max_recipients)),
@@ -590,7 +606,12 @@ fn smtp_config_from_value(
         Some(value) if enum_args(value, "RecipientPolicy", "DeliverAccepted").is_some() => {
             jet_email::RecipientPolicy::DeliverAccepted
         }
-        _ => return Err(unsupported("email SMTPConfig.recipient_policy is invalid", span)),
+        _ => {
+            return Err(unsupported(
+                "email SMTPConfig.recipient_policy is invalid",
+                span,
+            ))
+        }
     };
     let trust = field(value, "SMTPConfig", "trust")
         .ok_or_else(|| unsupported("email SMTPConfig.trust is missing", span))
@@ -620,14 +641,14 @@ fn mailer_value(handle: usize) -> CtValue {
 
 fn mailer_handle(value: &CtValue) -> Option<usize> {
     match value {
-        CtValue::Struct { type_name, fields } if type_name == "Mailer" => fields
-            .iter()
-            .find_map(|(name, value)| match (name.as_str(), value) {
-                ("handle", CtValue::Int(value)) if *value > 0 => {
-                    Some(*value as usize - 1)
-                }
-                _ => None,
-            }),
+        CtValue::Struct { type_name, fields } if type_name == "Mailer" => {
+            fields
+                .iter()
+                .find_map(|(name, value)| match (name.as_str(), value) {
+                    ("handle", CtValue::Int(value)) if *value > 0 => Some(*value as usize - 1),
+                    _ => None,
+                })
+        }
         _ => None,
     }
 }
@@ -758,7 +779,12 @@ pub fn ambient_handle(
             Ok(message) => message,
             Err(error) => return Some(Err(error)),
         },
-        None => return Some(Err(unsupported("email Mailer.send(): missing message", span))),
+        None => {
+            return Some(Err(unsupported(
+                "email Mailer.send(): missing message",
+                span,
+            )))
+        }
     };
     let mut mailers = ambient_mailers()
         .lock()

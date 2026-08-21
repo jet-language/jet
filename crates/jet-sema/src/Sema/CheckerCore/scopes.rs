@@ -35,6 +35,9 @@ impl<'a> Checker<'a> {
         /// this: their own caller already decided the name is free.
         pub(crate) fn declare_in_scope(&mut self, name: &str, info: LocalInfo) {
             let depth = self.flow.depth;
+            if !info.invalid {
+                self.note_unused_binding(name, info.def_span, info.param_conv.is_some());
+            }
             // D-FACT-OWN1: every binding enters the shared crossing plane with
             // the ownership prover's answer. Do not give parameters and other
             // scope-only bindings a private/default sendability bit.
@@ -260,6 +263,9 @@ impl<'a> Checker<'a> {
             if name == "_" {
                 return;
             }
+            if !info.invalid {
+                self.note_unused_binding(name, info.def_span, info.param_conv.is_some());
+            }
             if self.lookup(name).is_some()
                 || self.consts.contains_key(name)
                 || self.loop_labels.iter().any(|label| label == name)
@@ -305,6 +311,7 @@ impl<'a> Checker<'a> {
                 self.diags.push(already_defined(&name, name_span));
             } else {
                 let depth = self.flow.depth;
+                self.note_unused_binding(&name, name_span, false);
                 self.flow.bindings.set_at(
                     &name,
                     depth,

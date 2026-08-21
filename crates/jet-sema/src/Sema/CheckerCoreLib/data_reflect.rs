@@ -2,16 +2,16 @@ use crate::AST::Type;
 use super::core_types::decode_error_ty;
 
 /// D-SERDE-ACCESS=B + D-SERDE14=A: accessor methods on `DataTree`. Every read
-/// yields `T ? [FieldError]` so a `?` chain composes with no mapping ceremony
+/// yields `T ! [FieldError]` so a `?` chain composes with no mapping ceremony
 /// inside a hand `decode`; `.field` and `.at` fill `FieldError.path` from the
 /// segment they read. Scalar readers leave the path empty, so a containing
 /// decoder frames their result with `FieldError.under`.
-/// `.field(name)` → `DataTree ? [FieldError]`
-/// `.at(i)` → `DataTree ? [FieldError]`
-/// `.int()` → `Int ? [FieldError]`
-/// `.text()` → `String ? [FieldError]`
-/// `.bool()` → `Bool ? [FieldError]`
-/// `.float()` → `Float ? [FieldError]`
+/// `.field(name)` → `DataTree ! [FieldError]`
+/// `.at(i)` → `DataTree ! [FieldError]`
+/// `.int()` → `Int ! [FieldError]`
+/// `.text()` → `String ! [FieldError]`
+/// `.bool()` → `Bool ! [FieldError]`
+/// `.float()` → `Float ! [FieldError]`
 pub fn datatree_method_return(method: &str, n_args: usize) -> Option<Type> {
     let decode_err = || Box::new(decode_error_ty());
     match (method, n_args) {

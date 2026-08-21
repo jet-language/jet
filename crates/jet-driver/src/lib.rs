@@ -38,10 +38,10 @@ pub fn run_compiler_work<R: Send>(work: impl FnOnce() -> R + Send) -> R {
     if jet_foundation::CompilerStack::on_compiler_worker() {
         return work();
     }
-    let (ambient_core_call, ambient_handle) = Comptime::ambient_hooks();
+    let (ambient_core_call, ambient_handle, ambient_extern_call) = Comptime::ambient_hooks();
     jet_foundation::CompilerStack::run_on_compiler_stack(move || {
         boot_tir_eval();
-        Comptime::with_ambient(ambient_core_call, ambient_handle, work)
+        Comptime::with_ambient(ambient_core_call, ambient_handle, ambient_extern_call, work)
     })
 }
 

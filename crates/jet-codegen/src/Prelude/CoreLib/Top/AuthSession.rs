@@ -92,6 +92,7 @@ fn jet_auth_delivery_capability(value: &str) -> Option<String> {
     }
     if domain.split('.').any(|label| {
         label.is_empty()
+            || label.len() > 63
             || label.starts_with('-')
             || label.ends_with('-')
             || !label

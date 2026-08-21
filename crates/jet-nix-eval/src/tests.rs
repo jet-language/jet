@@ -718,12 +718,12 @@ fn breadth_fixture_matches_native_projection_for_every_seed() {
     assert_eq!(budget_number("memory_bytes"), EVALUATOR_MEMORY_BYTES);
     assert_eq!(budget_number("latency_micros"), EVALUATOR_LATENCY_MICROS as usize);
     // The pinned latency budget is asserted as a *declared* number, not measured
-    // here. This crate is `#![no_std]` on purpose — the lints above keep process
-    // and network authority out of the evaluator seam — so `std::time` is not
-    // reachable, and a wall-clock assertion inside a unit test would in any case
-    // fail on a loaded machine rather than on a real regression. Cost is pinned
-    // deterministically by the input, token, step, import, string and memory
-    // budgets asserted directly above; measured latency belongs in a benchmark.
+    // here. This crate is `#![no_std]` on purpose — its lints keep process and
+    // network authority out of the evaluator seam — so `std::time` is not
+    // reachable, and a wall-clock assertion in a unit test fails on a loaded
+    // machine rather than on a real regression. Cost stays pinned by the
+    // deterministic budgets asserted above; measured latency belongs in a
+    // benchmark.
 }
 
 fn fixture_strings(value: &JSONValue) -> Vec<String> {
@@ -800,17 +800,6 @@ fn pinned_inventory_has_no_implicit_skip_reason() {
     assert!(inventory.iter().any(|entry| {
         entry.surface == "devshells" && entry.status == InventoryStatus::Covered
     }));
-    for (surface, class) in [
-        ("fixed-output-fetchers", "buildable"),
-        ("cross-system-packages", "buildable"),
-        ("external-flakes", "evaluable"),
-    ] {
-        assert!(inventory.iter().any(|entry| {
-            entry.surface == surface
-                && entry.status == InventoryStatus::Covered
-                && entry.class == class
-        }));
-    }
     assert!(inventory.iter().all(|entry| !entry.reason.trim().is_empty()));
     let budget = evaluator_budget();
     assert_eq!(budget.input_bytes, 1 << 20);

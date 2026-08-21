@@ -7,13 +7,14 @@
 //! view returns, use-after-move, and borrow rules that keep generated Rust
 //! sound without surfacing Rust concepts to users.
 
-use crate::Diagnostics::{Diagnostic, Span};
+use crate::Diagnostics::{Diagnostic, Span, TextEdit};
 use crate::Traits::TraitRegistry;
 use crate::AST::{
-    AccessConvention, CallablePolicyChain, Expr, ExternFn, Func, KnowledgeVector, QuantityKind, Stmt, Type,
+    AccessConvention, CallablePolicyChain, Deprecation, Expr, ExternFn, Func, KnowledgeVector,
+    Marker, QuantityKind, Stmt, StrPart, Type,
     VariantPayload,
 };
-use std::collections::{BTreeSet, HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 
 mod Casing;
 
@@ -62,6 +63,8 @@ impl UninitState {
 pub(crate) struct MethodSig {
     params: Vec<(AccessConvention, Type)>,
     return_type: Option<Type>,
+    /// D-STRUCT-LIFE1=A: the method's retiring lifecycle marker.
+    deprecation: Option<Deprecation>,
     /// D-GENERIC-CALL1=A: method-owned type parameters, distinct from the
     /// receiver's generic arguments.
     type_params: Vec<crate::AST::TypeParam>,
@@ -92,6 +95,8 @@ pub(crate) enum TypeDef {
     Struct {
         fields: Vec<(String, Span, Type)>,
         methods: HashMap<String, MethodSig>,
+        /// D-STRUCT-LIFE1=A: type-level retiring lifecycle marker.
+        deprecation: Option<Deprecation>,
         /// D-LIN1 (ratified 2026-06-21): `#SingleUse` was present before `struct`.
         /// Values of this type must be consumed exactly once (E0140/E0141) and
         /// may not be aliased (E0142).
@@ -122,6 +127,8 @@ pub(crate) enum TypeDef {
         /// its subtree). A group name matches its whole subtree in patterns.
         groups: HashMap<String, (Span, Vec<String>)>,
         methods: HashMap<String, MethodSig>,
+        /// D-STRUCT-LIFE1=A: type-level retiring lifecycle marker.
+        deprecation: Option<Deprecation>,
         /// D-LIN1 (ratified 2026-06-21): `#SingleUse` was present before `enum`.
         single_use: bool,
         /// D-MUSTUSE1 (c18iwxqx): `#MustUse` was present before `enum`.
@@ -135,6 +142,8 @@ pub(crate) enum TypeDef {
     Distinct {
         base: Type,
         derives: Vec<String>,
+        /// D-STRUCT-LIFE1=A: type-level retiring lifecycle marker.
+        deprecation: Option<Deprecation>,
         /// D-TYPE2-FOUND1: semantic facts live on the one type knowledge
         /// vector. The interval plane is projected here for existing checks.
         knowledge: KnowledgeVector,
@@ -144,6 +153,7 @@ pub(crate) enum TypeDef {
     Alias {
         params: Vec<crate::AST::TypeParam>,
         target: Type,
+        deprecation: Option<Deprecation>,
     },
 }
 
@@ -554,6 +564,47 @@ impl TypeRegistry {
     }
 }
 
+fn marker_argument<'a>(marker: &'a Marker, name: &str, positional: usize) -> Option<&'a Expr> {
+    marker
+        .arg_labels
+        .iter()
+        .enumerate()
+        .find_map(|(index, label)| {
+            label
+                .as_ref()
+                .filter(|(label, _)| label == name)
+                .and_then(|_| marker.args.get(index))
+        })
+        .or_else(|| marker.args.get(positional))
+}
+
+fn marker_string(expr: &Expr) -> Option<String> {
+    match expr {
+        Expr::Str(parts, _) => parts
+            .iter()
+            .try_fold(String::new(), |mut text, part| match part {
+                StrPart::Lit(value) => {
+                    text.push_str(value);
+                    Some(text)
+                }
+                StrPart::Interp(..) => None,
+            }),
+        Expr::Ident(name, _) if name == "none" => None,
+        _ => None,
+    }
+}
+
+fn deprecation_from_markers(markers: &[Marker]) -> Option<Deprecation> {
+    let marker = markers
+        .iter()
+        .find(|marker| marker.name == crate::Syntax::MARKER_DEPRECATED)?;
+    Some(Deprecation {
+        since: marker_string(marker_argument(marker, "since", 0)?)?,
+        replacement: marker_string(marker_argument(marker, "use", 1)?)?,
+        removed_in: marker_argument(marker, "removed_in", 2).and_then(marker_string),
+    })
+}
+
 fn func_to_method_sig(f: &Func) -> MethodSig {
     let self_param = f.self_param();
     // param_info and defaults exclude `self` — they parallel the args a
@@ -577,6 +628,7 @@ fn func_to_method_sig(f: &Func) -> MethodSig {
             })
             .collect(),
         return_type: f.return_type.clone(),
+        deprecation: deprecation_from_markers(&f.markers),
         type_params: f.type_params.clone(),
         is_static: self_param.is_none(),
         self_conv: self_param.map(|p| p.convention),
@@ -597,7 +649,7 @@ fn func_to_method_sig(f: &Func) -> MethodSig {
     }
 }
 
-fn func_to_sig(f: &Func) -> FuncSig {
+pub(crate) fn func_to_sig(f: &Func) -> FuncSig {
     let param_variadic: Vec<bool> = f.params.iter().map(|p| p.variadic).collect();
     let return_view_provenance = crate::AST::ViewProvenanceCell::new();
     if let Some(provenance) = &f.return_view_provenance {
@@ -642,6 +694,7 @@ fn func_to_sig(f: &Func) -> FuncSig {
         variadic_bounds: f.params.last().and_then(|p| p.variadic_bound_list.clone()),
         return_type: f.return_type.clone(),
         return_view_provenance,
+        deprecation: deprecation_from_markers(&f.markers),
         is_extern: f.inline_foreign.is_some(),
         is_c_abi: false,
         c_abi_name: None,
@@ -694,6 +747,7 @@ fn extern_to_sig(ef: &ExternFn, is_c_abi: bool) -> FuncSig {
         variadic_bounds: ef.params.last().and_then(|p| p.variadic_bound_list.clone()),
         return_type: ef.return_type.clone(),
         return_view_provenance: crate::AST::ViewProvenanceCell::new(),
+        deprecation: None,
         is_extern: true,
         is_c_abi,
         c_abi_name: ef.abi.as_ref().map(|(name, _)| name.clone()),
@@ -840,6 +894,14 @@ pub(crate) struct LocalInfo {
     /// diagnostic. A well-typed value whose initializer failed an ownership,
     /// sendability, or contract rule is NOT invalid — its later reports stand.
     invalid: bool,
+}
+
+#[derive(Debug, Clone)]
+struct UnusedBinding {
+    name: String,
+    span: Span,
+    parameter: bool,
+    fix: Option<TextEdit>,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -1272,6 +1334,7 @@ pub enum CompileMode {
 
 pub(crate) struct ModuleState {
     module_path: String,
+    package_scope: String,
     module_alias: String,
     /// Source items retained for compile-time reflection folds. The same AST
     /// is the producer for `Type.reflect()` and direct registered fact reads;
@@ -1303,6 +1366,10 @@ pub(crate) struct ModuleState {
     /// D-STATE-DECL: declared typestate labels by owning type.
     declared_states: HashMap<String, Vec<String>>,
     policy_declarations: Vec<crate::Policy::PolicyDeclaration>,
+    /// D-STRUCT-POLICY1=A: one bundle-local nominal setting table shared by
+    /// marker and `apply` validation.
+    callable_policy_declarations:
+        BTreeMap<(String, String), (usize, crate::AST::UserPolicyDecl)>,
     rule_facts: Vec<crate::AST::AppliedRuleApplication>,
     /// D-MOD2: inline code module aliases present in this file (alias → module name).
     /// `math.double(x)` resolves to `__jet_math__double(x)` when `math` is in here.
@@ -1415,11 +1482,19 @@ pub(crate) struct Checker<'a> {
     inline_reexport_core: &'a HashMap<(String, String), (String, String)>,
     inline_reexport_foreign: &'a HashMap<(String, String), usize>,
     module_path: &'a str,
+    package_scope: &'a str,
     policy_declarations: &'a [crate::Policy::PolicyDeclaration],
+    callable_policy_declarations:
+        &'a BTreeMap<(String, String), (usize, crate::AST::UserPolicyDecl)>,
     rule_facts: Vec<crate::AST::AppliedRuleApplication>,
     current_function_span: Span,
     name_ledger: &'a mut jet_foundation::Names::NameLedger,
     diags: Vec<Diagnostic>,
+    /// D-LINT-UNUSED1: source declarations whose successful body check found
+    /// no read or write. The declaration identity is the sema `def_span`, so
+    /// shadowed names never share a liveness fact.
+    unused_bindings: Vec<UnusedBinding>,
+    unused_binding_refs: HashSet<Span>,
     /// D-FACT-FLOW1: the one store of per-binding facts — declarations, flow
     /// narrowing, moves, uninitialised places and open borrow windows. Every
     /// plane joins through `FlowFacts`; nothing here keeps the last-walked path.

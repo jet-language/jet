@@ -76,9 +76,18 @@ impl BuildPlan {
         for (index, contribution) in self.fact_contributions().iter().enumerate() {
             let prefix = format!("fact_contribution.{index}");
             facts.insert(format!("{prefix}.key"), contribution.key.clone());
-            facts.insert(format!("{prefix}.value"), format!("{:?}", contribution.value));
-            facts.insert(format!("{prefix}.scope"), contribution.scope.name().to_string());
-            facts.insert(format!("{prefix}.layer"), contribution.layer.name().to_string());
+            facts.insert(
+                format!("{prefix}.value"),
+                format!("{:?}", contribution.value),
+            );
+            facts.insert(
+                format!("{prefix}.scope"),
+                contribution.scope.name().to_string(),
+            );
+            facts.insert(
+                format!("{prefix}.layer"),
+                contribution.layer.name().to_string(),
+            );
             facts.insert(format!("{prefix}.source"), contribution.source.clone());
             facts.insert(
                 format!("{prefix}.reason"),
@@ -134,7 +143,10 @@ impl BuildPlan {
                     .collect::<Vec<_>>()
                     .join(","),
             );
-            facts.insert(format!("{prefix}.toolchain"), target.toolchain.id().0.to_string());
+            facts.insert(
+                format!("{prefix}.toolchain"),
+                target.toolchain.id().0.to_string(),
+            );
             facts.insert(format!("{prefix}.metadata"), map_debug(&target.metadata));
         }
         for (index, action) in self.actions().iter().enumerate() {
@@ -164,7 +176,12 @@ impl BuildPlan {
             facts.insert(format!("{prefix}.env"), map_debug(&action.env));
             facts.insert(
                 format!("{prefix}.env_allowlist"),
-                action.env_allowlist.iter().cloned().collect::<Vec<_>>().join("\0"),
+                action
+                    .env_allowlist
+                    .iter()
+                    .cloned()
+                    .collect::<Vec<_>>()
+                    .join("\0"),
             );
             facts.insert(
                 format!("{prefix}.caps"),
@@ -175,7 +192,10 @@ impl BuildPlan {
                     .collect::<Vec<_>>()
                     .join("\0"),
             );
-            facts.insert(format!("{prefix}.toolchain"), action.toolchain.id().0.to_string());
+            facts.insert(
+                format!("{prefix}.toolchain"),
+                action.toolchain.id().0.to_string(),
+            );
             facts.insert(format!("{prefix}.labels"), map_debug(&action.labels));
             facts.insert(
                 format!("{prefix}.helpers"),
@@ -289,9 +309,6 @@ mod tests {
         assert_eq!(BuildPlanReplay::decode(&encoded).unwrap(), replay);
         assert_eq!(replay.encode(), encoded);
         assert!(BuildPlanReplay::decode("jet-build-plan-replay-v1\n61\t6").is_err());
-        assert!(BuildPlanReplay::decode(
-            "jet-build-plan-replay-v1\n61\t62\n61\t63\n"
-        )
-        .is_err());
+        assert!(BuildPlanReplay::decode("jet-build-plan-replay-v1\n61\t62\n61\t63\n").is_err());
     }
 }

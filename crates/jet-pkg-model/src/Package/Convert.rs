@@ -70,6 +70,7 @@ pub fn to_manifest(facts: &PackageFacts, raw: &str) -> Result<crate::Manifest::M
             allocator: facts.allocator.clone(),
         },
         authority: facts.authority.clone(),
+        boundaries: facts.boundaries.clone(),
         dependencies,
         dependencies_rust: BTreeMap::new(),
         raw: raw.to_string(),

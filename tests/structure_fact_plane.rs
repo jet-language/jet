@@ -61,7 +61,6 @@ fn structure_facts_and_gates_use_one_ledger() {
     names.record_structure_fact(fact);
     assert_eq!(names.structure_facts().len(), 1);
 
-    // The module and the struct share the name, so the struct needs both segments.
     let mut gates = jet::Sema::GateLedger::GateLedger::default();
     gates.append_structure_facts(&names);
     assert_eq!(gates.entries().len(), 1);

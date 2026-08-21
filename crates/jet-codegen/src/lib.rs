@@ -53,9 +53,11 @@ pub mod scheduler {
         JetTaskFailure,
     };
     include!("Prelude/Deadline.rs");
+    include!("Prelude/WorkflowWait.rs");
     include!("SchedulerHost.rs");
     include!("Prelude/CoreLib/Top/TimeSleep.rs");
     include!("Prelude/Scheduler.rs");
+    include!("Prelude/CoreLib/Top/WorkflowSleep.rs");
     include!("Prelude/Stream.rs");
     include!("Prelude/Observe.rs");
 }

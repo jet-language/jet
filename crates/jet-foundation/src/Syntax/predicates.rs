@@ -166,8 +166,12 @@ mod tests {
 
     #[test]
     fn core_module_keys_reject_internal_jet_prefix() {
-        assert!(KNOWN_CORE_MODULES.iter().all(|name| !name.starts_with("jet.")));
-        for ring in ["log", "crypto", "http", "regex", "reactive", "archive", "game", "db", "plugin", "time"] {
+        assert!(KNOWN_CORE_MODULES
+            .iter()
+            .all(|name| !name.starts_with("jet.")));
+        for ring in [
+            "log", "crypto", "http", "regex", "reactive", "archive", "game", "db", "plugin", "time",
+        ] {
             assert!(is_known_core_module(&format!("core.{ring}")));
             assert!(!is_known_core_module(&format!("jet.{ring}")));
         }
@@ -354,14 +358,12 @@ pub fn edit_distance(a: &str, b: &str) -> usize {
     prev[b.len()]
 }
 use super::core_surface::{
-    CLOCK_TYPE, KW_CONST, KW_COPY, KW_MOVE, KW_MUTATE,
-    KW_YIELD, LIT_NULL, RETIRED_TYPE_ERROR, TYPE_DATETIME, TYPE_ERR,
-    TYPE_FRACTION, TYPE_INSTANT, TYPE_PATH, TYPE_REGEX, TYPE_URL,
+    CLOCK_TYPE, KW_CONST, KW_COPY, KW_MOVE, KW_MUTATE, KW_YIELD, LIT_NULL, RETIRED_TYPE_ERROR,
+    TYPE_DATETIME, TYPE_ERR, TYPE_FRACTION, TYPE_INSTANT, TYPE_PATH, TYPE_REGEX, TYPE_URL,
 };
 use super::effects_surface::KW_STATE_DECL;
 use super::math_layout::{
-    FOREIGN_MATCH, KW_COMPTIME, KW_SWITCH, TYPE_BITS, TYPE_BYTES, TYPE_DATA, TYPE_JSON,
-    TYPE_RESULT,
+    FOREIGN_MATCH, KW_COMPTIME, KW_SWITCH, TYPE_BITS, TYPE_BYTES, TYPE_DATA, TYPE_JSON, TYPE_RESULT,
 };
 use super::package_files::{JET_KEYWORD_LIST, JET_TYPE_LIST};
 use super::{canonical_name_case, NameCase};
@@ -494,7 +496,10 @@ pub fn sanitize_generated_name(raw: &str, case: NameCase, fallback: &str) -> Str
             {
                 normalized.push('_');
             }
-            normalized.extend(ch.to_lowercase().take(if case == NameCase::Snake { 1 } else { 0 }));
+            normalized.extend(
+                ch.to_lowercase()
+                    .take(if case == NameCase::Snake { 1 } else { 0 }),
+            );
             if case == NameCase::Pascal {
                 normalized.push(ch);
             }
@@ -579,8 +584,18 @@ mod generated_name_tests {
     }
     #[test]
     fn canonical_core_names_are_reserved_for_generated_names() {
-        for name in ["Decimal", "Duration", "Date", "LocalDate", "LocalTime", "JSONError"] {
-            assert!(is_reserved_generated_name(name), "unreserved canonical Core name `{name}`");
+        for name in [
+            "Decimal",
+            "Duration",
+            "Date",
+            "LocalDate",
+            "LocalTime",
+            "JSONError",
+        ] {
+            assert!(
+                is_reserved_generated_name(name),
+                "unreserved canonical Core name `{name}`"
+            );
         }
     }
 

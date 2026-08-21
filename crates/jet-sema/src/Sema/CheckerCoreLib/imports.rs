@@ -92,6 +92,9 @@ impl<'a> Checker<'a> {
                 return None;
             };
             let item_name = mangled.strip_prefix(&member_prefix).unwrap_or(mangled);
+            if let Some(dep) = sig.deprecation.as_ref() {
+                self.check_deprecation(item_name, dep, span);
+            }
             self.check_foreign_transaction_call(&sig, item_name, span);
             self.record_current_function_reference(mangled, span);
             self.record_edge(mangled.to_string(), span);
@@ -378,6 +381,9 @@ impl<'a> Checker<'a> {
                     self.diags.push(soft_public_use(name, span));
                 }
                 let sig = target.funcs.get(name).unwrap().clone();
+                if let Some(dep) = sig.deprecation.as_ref() {
+                    self.check_deprecation(name, dep, span);
+                }
                 self.check_foreign_transaction_call(&sig, name, span);
                 // D-APILABEL1=A: a call across a module boundary binds by the
                 // same law as a local one. Without this a label here was read

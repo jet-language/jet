@@ -167,10 +167,7 @@ pub struct DiagnosticCause {
 
 impl DiagnosticCause {
     pub fn matches(&self, diagnostic: &Diagnostic) -> bool {
-        self.code == diagnostic.code
-            && self
-                .span
-                .is_none_or(|span| diagnostic.span == Some(span))
+        self.code == diagnostic.code && self.span.is_none_or(|span| diagnostic.span == Some(span))
     }
 }
 
@@ -228,11 +225,7 @@ impl Diagnostic {
 
     /// Build a report from a typed row and its named hole values. The row
     /// supplies all product wording and any structured fix metadata.
-    pub fn from_row(
-        code: impl Into<String>,
-        holes: &[(&str, &str)],
-        span: Option<Span>,
-    ) -> Self {
+    pub fn from_row(code: impl Into<String>, holes: &[(&str, &str)], span: Option<Span>) -> Self {
         let code = code.into();
         let row = crate::Registry::diagnostic(&code)
             .unwrap_or_else(|| crate::ice!(None, "diagnostic `{code}` has no typed row"));
@@ -384,7 +377,12 @@ impl Diagnostic {
     /// user-facing diagnostic — so this skips `error()`'s registry lookup
     /// instead of panicking on the code every one of them would otherwise
     /// trigger by construction.
-    fn internal_sentinel(code: &'static str, what: String, why: String, span: Option<Span>) -> Self {
+    fn internal_sentinel(
+        code: &'static str,
+        what: String,
+        why: String,
+        span: Option<Span>,
+    ) -> Self {
         Diagnostic {
             moment: ReportMoment::Run,
             severity: Severity::Error,
@@ -435,7 +433,6 @@ impl Diagnostic {
         }
     }
 
-
     /// D-LAYOUT-FACTS1=B: physical byte values are optional facts. Tooling
     /// uses this registered diagnostic when the typed layout model carries a
     /// clean absence instead of printing an unexplained `unknown` value.
@@ -444,20 +441,12 @@ impl Diagnostic {
         member: &str,
         span: Option<Span>,
     ) -> Self {
-        Self::from_row(
-            "E0959",
-            &[("type", type_name), ("member", member)],
-            span,
-        )
+        Self::from_row("E0959", &[("type", type_name), ("member", member)], span)
     }
 
     pub fn source_nesting_exceeded(depth: usize, span: Span) -> Self {
         let depth = depth.to_string();
-        Self::from_row(
-            "E1403",
-            &[("depth", &depth)],
-            Some(span),
-        )
+        Self::from_row("E1403", &[("depth", &depth)], Some(span))
     }
 
     pub fn lint(
@@ -529,8 +518,7 @@ impl Diagnostic {
             Some(span),
         );
         assert_eq!(
-            crate::Registry::diagnostic("E2702")
-                .and_then(|row| row.structured_fix),
+            crate::Registry::diagnostic("E2702").and_then(|row| row.structured_fix),
             Some(crate::Registry::StructuredFix::CryptoMisuse),
             "E2702 must keep its typed crypto structured fix"
         );
@@ -556,8 +544,7 @@ impl Diagnostic {
             Some(span),
         );
         assert_eq!(
-            crate::Registry::diagnostic("E2702")
-                .and_then(|row| row.structured_fix),
+            crate::Registry::diagnostic("E2702").and_then(|row| row.structured_fix),
             Some(crate::Registry::StructuredFix::CryptoMisuse),
             "E2702 must keep its typed crypto structured fix"
         );
@@ -609,7 +596,10 @@ impl Diagnostic {
             .filter(|row| row.severity == Severity::Lint)
             .and_then(|row| row.lint_name)
         {
-            out.push_str(&format!("{} [{}] ({}): {}\n", label, self.code, name, self.what));
+            out.push_str(&format!(
+                "{} [{}] ({}): {}\n",
+                label, self.code, name, self.what
+            ));
         } else {
             out.push_str(&format!("{} [{}]: {}\n", label, self.code, self.what));
         }
@@ -790,10 +780,7 @@ fn row_applicability(
     })
 }
 
-fn row_safety(
-    row: &crate::Registry::DiagnosticRow,
-    edit: Option<&TextEdit>,
-) -> Option<FixSafety> {
+fn row_safety(row: &crate::Registry::DiagnosticRow, edit: Option<&TextEdit>) -> Option<FixSafety> {
     edit.and_then(|_| row.structured_fix)
         .and_then(|_| row.fix_safety)
 }
@@ -967,10 +954,7 @@ fn unicode_general_category(cp: u32) -> u8 {
 }
 
 fn unicode_grapheme_class(cp: u32) -> u8 {
-    unicode_range_value(
-        crate::generated::UnicodeTables::UNICODE_GRAPHEME_BREAK,
-        cp,
-    )
+    unicode_range_value(crate::generated::UnicodeTables::UNICODE_GRAPHEME_BREAK, cp)
 }
 
 fn unicode_grapheme_break(previous: u8, current: u8) -> bool {
@@ -1023,9 +1007,7 @@ fn diagnostic_graphemes(s: &str) -> Vec<&str> {
             cp,
         )
     };
-    let incb = |cp| {
-        unicode_range_value(crate::generated::UnicodeTables::UNICODE_INCB, cp)
-    };
+    let incb = |cp| unicode_range_value(crate::generated::UnicodeTables::UNICODE_INCB, cp);
     let mut starts = vec![0];
     let mut ri_run = usize::from(unicode_grapheme_class(first as u32) == RI);
     let mut saw_pictographic = is_pictographic(first as u32);
@@ -1036,21 +1018,16 @@ fn diagnostic_graphemes(s: &str) -> Vec<&str> {
         let (byte, current) = chars[index];
         let previous_class = unicode_grapheme_class(previous as u32);
         let current_class = unicode_grapheme_class(current as u32);
-        let is_break = if previous_class == ZWJ
-            && saw_pictographic
-            && is_pictographic(current as u32)
-        {
-            false
-        } else if previous_class == RI && current_class == RI {
-            ri_run % 2 == 0
-        } else if incb_pending
-            && incb_linker
-            && incb(current as u32) == INCB_CONSONANT
-        {
-            false
-        } else {
-            unicode_grapheme_break(previous_class, current_class)
-        };
+        let is_break =
+            if previous_class == ZWJ && saw_pictographic && is_pictographic(current as u32) {
+                false
+            } else if previous_class == RI && current_class == RI {
+                ri_run % 2 == 0
+            } else if incb_pending && incb_linker && incb(current as u32) == INCB_CONSONANT {
+                false
+            } else {
+                unicode_grapheme_break(previous_class, current_class)
+            };
         if is_break {
             starts.push(byte);
         }
@@ -1090,18 +1067,14 @@ fn diagnostic_cluster_width(cluster: &str) -> usize {
     }
     let keycap = matches!(
         codepoints.as_slice(),
-        ['0'..='9' | '#' | '*', '\u{20E3}']
-            | ['0'..='9' | '#' | '*', '\u{FE0F}', '\u{20E3}']
+        ['0'..='9' | '#' | '*', '\u{20E3}'] | ['0'..='9' | '#' | '*', '\u{FE0F}', '\u{20E3}']
     );
     let ri_pair = codepoints.len() >= 2
         && unicode_grapheme_class(codepoints[0] as u32) == 6
         && unicode_grapheme_class(codepoints[1] as u32) == 6;
     let emoji_style = cluster.contains('\u{FE0F}')
         && codepoints.iter().any(|c| {
-            unicode_range_contains(
-                crate::generated::UnicodeTables::UNICODE_EMOJI,
-                *c as u32,
-            )
+            unicode_range_contains(crate::generated::UnicodeTables::UNICODE_EMOJI, *c as u32)
         });
     let wide = codepoints.iter().any(|c| {
         unicode_range_value(
@@ -1300,7 +1273,14 @@ mod crypto_diagnostic_contract_tests {
                 "\"expected\":\"0..8160\",\"actual\":8161}\n"
             )
         );
-        for forbidden in ["password", "plaintext", "ciphertext", "backend", "rustc", "dependency"] {
+        for forbidden in [
+            "password",
+            "plaintext",
+            "ciphertext",
+            "backend",
+            "rustc",
+            "dependency",
+        ] {
             assert!(!json.contains(forbidden), "leaked `{forbidden}`: {json}");
         }
     }
@@ -1318,7 +1298,10 @@ mod crypto_diagnostic_contract_tests {
         assert!(json.starts_with("{\"schema\":\"jet.report/v1\",\"moment\":\"compile\""));
         assert_eq!(json.lines().count(), 1);
         assert!(crate::JSON::parse_json(json.trim_end()).is_ok());
-        assert_eq!(render_all_json(&ReportPath::from_process("x.jet"), "", &[]), "");
+        assert_eq!(
+            render_all_json(&ReportPath::from_process("x.jet"), "", &[]),
+            ""
+        );
     }
 
     #[test]
@@ -1361,12 +1344,18 @@ mod crypto_diagnostic_contract_tests {
         );
         let lines = json.lines().collect::<Vec<_>>();
         assert!(lines[0].contains("\"cause\":[],\"clears\":3"), "{json}");
-        assert!(lines[1].contains("\"cause\":[\"E0109\"],\"clears\":1"), "{json}");
+        assert!(
+            lines[1].contains("\"cause\":[\"E0109\"],\"clears\":1"),
+            "{json}"
+        );
         assert!(
             lines[2].contains("\"cause\":[\"E0108\",\"E0109\"],\"clears\":0"),
             "{json}"
         );
-        assert!(lines[3].contains("\"cause\":[\"E0109\"],\"clears\":0"), "{json}");
+        assert!(
+            lines[3].contains("\"cause\":[\"E0109\"],\"clears\":0"),
+            "{json}"
+        );
     }
 
     #[test]
@@ -1463,7 +1452,10 @@ mod crypto_diagnostic_contract_tests {
             (CryptoMisuseReason::MemoryTimeCost, "memory_time_cost"),
             (CryptoMisuseReason::RawNonce, "raw_nonce"),
             (CryptoMisuseReason::RawAlgorithm, "raw_algorithm"),
-            (CryptoMisuseReason::DeterministicEntropy, "deterministic_entropy"),
+            (
+                CryptoMisuseReason::DeterministicEntropy,
+                "deterministic_entropy",
+            ),
         ];
         for (reason, spelling) in reasons {
             assert_eq!(reason.as_str(), spelling);
@@ -1511,8 +1503,16 @@ mod crypto_diagnostic_contract_tests {
         let json = render_all_json(&ReportPath::from_process("x.jet"), "x", &[crypto, generic]);
         let lines = json.lines().collect::<Vec<_>>();
         assert_eq!(lines.len(), 2, "{json}");
-        assert!(lines.iter().all(|line| crate::JSON::parse_json(line).is_ok()));
-        assert!(lines[0].contains("\"schema\":\"jet.report/v1\"") && lines[0].contains("\"code\":\"E2702\""));
-        assert!(lines[1].contains("\"schema\":\"jet.report/v1\"") && lines[1].contains("\"code\":\"E0001\""));
+        assert!(lines
+            .iter()
+            .all(|line| crate::JSON::parse_json(line).is_ok()));
+        assert!(
+            lines[0].contains("\"schema\":\"jet.report/v1\"")
+                && lines[0].contains("\"code\":\"E2702\"")
+        );
+        assert!(
+            lines[1].contains("\"schema\":\"jet.report/v1\"")
+                && lines[1].contains("\"code\":\"E0001\"")
+        );
     }
 }

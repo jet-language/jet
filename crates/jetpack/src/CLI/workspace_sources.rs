@@ -1,8 +1,7 @@
 use super::parse::Flags;
 use crate::EnvFile::EnvFile;
-use crate::ManifestTOML;
 use crate::Provider;
-use crate::RefSpec::{self, ProviderKind};
+use crate::RefSpec;
 use crate::Syntax;
 use crate::WorkspaceFile;
 use crate::WorkspaceLock;
@@ -49,6 +48,32 @@ fn report_authority_error(diagnostic: Diagnostic) -> ! {
         )
     );
     std::process::exit(2)
+}
+
+fn retired_jetpack_toml_diagnostic() -> Diagnostic {
+    Diagnostic::error(
+        "E1225",
+        "`jetpack.toml` is retired.".to_string(),
+        "Package identity and named sources now live in `package.jet` and `env.jet`, so dependency resolution uses one Jet grammar (D-ONCE-RETIRE1).".to_string(),
+        "Move `[repo]` `name`/`version` to `package.jet`, move `[sources]` entries to `env.jet` `sources: { … }`, then delete `jetpack.toml`.".to_string(),
+        None,
+    )
+}
+
+pub(super) fn reject_retired_jetpack_toml(dir: &Path) -> Result<(), i32> {
+    if !dir.join(Syntax::JETPACK_TOML).is_file() {
+        return Ok(());
+    }
+    let diagnostic = retired_jetpack_toml_diagnostic();
+    eprint!(
+        "{}",
+        crate::Diagnostics::render_all(
+            Syntax::JETPACK_TOML,
+            "",
+            std::slice::from_ref(&diagnostic),
+        )
+    );
+    Err(2)
 }
 
 type CheckedWorkspaceSource = (AuthorityResolver, WorkspaceSource);
@@ -287,57 +312,18 @@ fn finish_workspace_load(
     }
 }
 
-/// Load `[sources]` from `jetpack.toml` in `dir`, print any parse errors, and
-/// return the resulting `SourceTable`. Returns an empty table when the file is
-/// absent (not an error). Prints E1214/E1215 to stderr and returns `Err(2)` if
-/// the file exists but has errors; the non-error entries are still returned so
-/// the caller can decide whether to hard-exit or soft-degrade.
-pub(super) fn load_toml_sources(dir: &Path) -> Result<RefSpec::SourceTable, (RefSpec::SourceTable, i32)> {
-    let Some((manifest, errors)) = ManifestTOML::load(dir) else {
-        return Ok(RefSpec::SourceTable::empty());
-    };
-
-    // Convert `target@provider` entries in `[sources]` to SourceTable decls.
-    // We use `Infer` as the provider kind so U9 inference runs at realize time,
-    // matching the typed `module { … }` surface behaviour.
-    let decls = manifest.sources.into_iter().filter_map(|(name, raw_ref)| {
-        match RefSpec::classify_provider_ref(&raw_ref) {
-            Ok(pr) => {
-                let upstream = format!("{}:{}", pr.provider.label(), pr.target);
-                Some((name, upstream, ProviderKind::Infer))
-            }
-            Err(_) => None, // malformed ref: skip silently (E1214 covers the line)
-        }
-    });
-    let table = RefSpec::SourceTable::from_decls(decls);
-
-    if errors.is_empty() {
-        Ok(table)
-    } else {
-        let rendered = ManifestTOML::render_errors(Syntax::JETPACK_TOML, &errors);
-        eprint!("{}", rendered);
-        Err((table, 2))
-    }
-}
-
 /// The named-source table declared by the current project's env file (empty
 /// when there is none). Used so explicit CLI refs are project-aware.
-/// Also merges any `[sources]` declared in `jetpack.toml` (additive — env.jet
-/// inline declarations win on conflict).
 pub(super) fn cwd_table() -> RefSpec::SourceTable {
     let dir = project_root(&std::env::current_dir().unwrap_or_default());
-    let mut table = match checked_env_file(&dir) {
+    if let Err(code) = reject_retired_jetpack_toml(&dir) {
+        std::process::exit(code);
+    }
+    let table = match checked_env_file(&dir) {
         Ok(Some(env)) => env.source_table(),
         Ok(None) => RefSpec::SourceTable::empty(),
         Err(diagnostic) => report_authority_error(diagnostic),
     };
-    // Merge jetpack.toml [sources] as defaults (non-overriding).
-    // Ignore parse errors here — cwd_table is used for explicit CLI refs;
-    // load_project_plan handles the hard-exit case for project-scoped commands.
-    let toml_table = match load_toml_sources(&dir) {
-        Ok(t) | Err((t, _)) => t,
-    };
-    table.merge_defaults(toml_table);
     table
 }
 

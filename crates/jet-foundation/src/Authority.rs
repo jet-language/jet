@@ -105,7 +105,10 @@ impl Effect {
     }
 
     pub fn all() -> Holds {
-        EFFECT_ROOTS.iter().map(|root| (*root).to_string()).collect()
+        EFFECT_ROOTS
+            .iter()
+            .map(|root| (*root).to_string())
+            .collect()
     }
 }
 
@@ -173,7 +176,9 @@ impl BuildEffect {
             return None;
         }
         let canonical = parse_root(value)?;
-        Self::ALL.into_iter().find(|effect| canonical == effect.name())
+        Self::ALL
+            .into_iter()
+            .find(|effect| canonical == effect.name())
     }
 }
 
@@ -323,6 +328,7 @@ pub enum GateKind {
     StateTransition,
     PrecisionDemotion,
     Nondeterministic,
+    Structure,
 }
 
 impl GateKind {
@@ -340,6 +346,7 @@ impl GateKind {
             Self::StateTransition => "state_transition",
             Self::PrecisionDemotion => "precision_demotion",
             Self::Nondeterministic => "nondeterministic",
+            Self::Structure => "structure",
         }
     }
 
@@ -355,14 +362,10 @@ impl GateKind {
             "scrub" | "taint" | "taint_scrub" => Some(Self::TaintScrub),
             "drop" | "detach" | "duty" | "duty_drop" => Some(Self::DutyDrop),
             "state" | "transition" | "state_transition" => Some(Self::StateTransition),
-            "approx"
-            | "precision"
-            | "precision_demotion"
-            | "rounded"
-            | "wrapping"
-            | "saturating"
-            | "checked" => Some(Self::PrecisionDemotion),
+            "approx" | "precision" | "precision_demotion" | "rounded" | "wrapping"
+            | "saturating" | "checked" => Some(Self::PrecisionDemotion),
             "nondeterministic" | "determinism" => Some(Self::Nondeterministic),
+            "structure" => Some(Self::Structure),
             _ => None,
         }
     }
@@ -399,6 +402,7 @@ impl GateKind {
             Self::DutyDrop => 9,
             Self::StateTransition => 10,
             Self::PrecisionDemotion => 11,
+            Self::Structure => 12,
         }
     }
 }
@@ -461,7 +465,11 @@ impl GateLedger {
         if entry.provenance.is_empty() {
             entry.provenance.push(entry.source.clone());
         }
-        if let Some(existing) = self.entries.iter_mut().find(|candidate| same_fact(candidate, &entry)) {
+        if let Some(existing) = self
+            .entries
+            .iter_mut()
+            .find(|candidate| same_fact(candidate, &entry))
+        {
             for provenance in entry.provenance {
                 if !existing.provenance.contains(&provenance) {
                     existing.provenance.push(provenance);
@@ -546,11 +554,7 @@ mod tests {
     #[test]
     fn rights_use_one_tree_and_only_tighten() {
         let outer = Holds::from(["FS".to_string(), "Net".to_string()]);
-        let inner = Holds::from([
-            "FS.Read".to_string(),
-            "Net".to_string(),
-            "DB".to_string(),
-        ]);
+        let inner = Holds::from(["FS.Read".to_string(), "Net".to_string(), "DB".to_string()]);
         assert!(covers("FS", "FS.Read"));
         assert!(!tighten(&outer, &inner));
         assert!(!tighten(&inner, &outer));
@@ -613,8 +617,8 @@ mod tests {
         assert_eq!(
             EFFECT_ROOTS.as_slice(),
             &[
-                "Net", "FS", "IO", "DB", "Time", "Rand", "Env", "Exec", "Log", "GPU",
-                "FFI", "Browser", "Secret",
+                "Net", "FS", "IO", "DB", "Time", "Rand", "Env", "Exec", "Log", "GPU", "FFI",
+                "Browser", "Secret",
             ]
         );
         assert_eq!(Effect::all().len(), 13);
@@ -642,10 +646,30 @@ mod tests {
     #[test]
     fn retired_flat_ffi_spellings_do_not_parse() {
         for root in [
-            "Go", "Java", "DotNet", "Fortran", "Cobol", "Tcl", "Lua", "Ada", "Pascal",
-            "Dart", "PowerShell", "Perl", "Ruby", "Php", "R", "Com", "Cpp", "Py", "Octave",
+            "Go",
+            "Java",
+            "DotNet",
+            "Fortran",
+            "Cobol",
+            "Tcl",
+            "Lua",
+            "Ada",
+            "Pascal",
+            "Dart",
+            "PowerShell",
+            "Perl",
+            "Ruby",
+            "Php",
+            "R",
+            "Com",
+            "Cpp",
+            "Py",
+            "Octave",
         ] {
-            assert!(parse_right(root).is_none(), "retired spelling parsed: {root}");
+            assert!(
+                parse_right(root).is_none(),
+                "retired spelling parsed: {root}"
+            );
             assert!(Effect::parse(root).is_none(), "retired root parsed: {root}");
         }
     }

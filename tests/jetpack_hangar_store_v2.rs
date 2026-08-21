@@ -367,3 +367,43 @@ fn manual_external_root_cli_is_atomic_and_reports_stale_etag() {
     );
     assert!(String::from_utf8_lossy(&unregister.stderr).contains("Removed external root"));
 }
+
+#[test]
+fn hangar_recovery_reclaims_crashed_stages_and_dead_leases_without_following_escape() {
+    let root = Scratch::new("hangar-v2-recovery-root");
+    let roots = jetpack::Store::Roots {
+        root: root.path.clone(),
+        dev_mode: false,
+    };
+    let archive_stage = roots.hangar_dir().join(".archive-stage/abandoned");
+    fs::create_dir_all(&archive_stage).unwrap();
+    fs::write(archive_stage.join("payload"), "partial archive").unwrap();
+    let dead_lease = roots.root.join("leases/4294967295-0-abandoned");
+    fs::create_dir_all(&dead_lease).unwrap();
+    fs::write(dead_lease.join("payload"), "lease snapshot").unwrap();
+
+    assert_eq!(jetpack::Store::recover_hangar(&roots).unwrap(), 2);
+    assert!(!roots.hangar_dir().join(".archive-stage/abandoned").exists());
+    assert!(!dead_lease.exists());
+
+    #[cfg(unix)]
+    {
+        let outside = Scratch::new("hangar-v2-recovery-outside");
+        fs::write(outside.join("must-survive"), "live data").unwrap();
+        let stage_root = roots.hangar_dir().join(".archive-stage");
+        fs::remove_dir_all(&stage_root).unwrap();
+        std::os::unix::fs::symlink(&outside.path, &stage_root).unwrap();
+        let error = jetpack::Store::recover_hangar(&roots).unwrap_err();
+        assert!(error.to_string().contains("archive staging"), "{error}");
+        assert_eq!(fs::read_to_string(outside.join("must-survive")).unwrap(), "live data");
+        fs::remove_file(stage_root).unwrap();
+
+        let lease_root = roots.root.join("leases");
+        fs::remove_dir_all(&lease_root).unwrap();
+        std::os::unix::fs::symlink(&outside.path, &lease_root).unwrap();
+        let error = jetpack::Store::recover_hangar(&roots).unwrap_err();
+        assert!(error.to_string().contains("lease directory"), "{error}");
+        assert_eq!(fs::read_to_string(outside.join("must-survive")).unwrap(), "live data");
+        fs::remove_file(lease_root).unwrap();
+    }
+}

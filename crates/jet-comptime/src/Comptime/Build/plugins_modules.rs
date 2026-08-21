@@ -73,11 +73,8 @@ impl WasmComponentPluginSpec {
         let component_path = component_path.as_ref();
         reject_plugin_link(manifest_path, "manifest")?;
         reject_plugin_link(component_path, "component")?;
-        let manifest = read_packaged_file_bounded(
-            manifest_path,
-            "manifest",
-            BUILD_PLUGIN_MAX_MANIFEST_BYTES,
-        )?;
+        let manifest =
+            read_packaged_file_bounded(manifest_path, "manifest", BUILD_PLUGIN_MAX_MANIFEST_BYTES)?;
         let component = read_packaged_file_bounded(
             component_path,
             "component",
@@ -142,7 +139,9 @@ impl WasmComponentPluginSpec {
             let key = key.trim();
             let value = value.trim();
             if !fields.insert(key) {
-                return Err(format!("plugin manifest field {key} is declared more than once"));
+                return Err(format!(
+                    "plugin manifest field {key} is declared more than once"
+                ));
             }
             match key {
                 "name" => name = Some(manifest_string(value, key)?),
@@ -213,12 +212,10 @@ pub fn read_packaged_file_bounded(
     limit: usize,
 ) -> Result<Vec<u8>, String> {
     reject_plugin_link(path, label)?;
-    let metadata = fs::metadata(path)
-        .map_err(|error| format!("could not stat plugin {label}: {error}"))?;
+    let metadata =
+        fs::metadata(path).map_err(|error| format!("could not stat plugin {label}: {error}"))?;
     if metadata.len() > limit as u64 {
-        return Err(format!(
-            "plugin {label} exceeds {limit} bytes"
-        ));
+        return Err(format!("plugin {label} exceeds {limit} bytes"));
     }
     let mut options = fs::OpenOptions::new();
     options.read(true);
@@ -324,7 +321,9 @@ fn manifest_string(value: &str, field: &str) -> Result<String, String> {
         } else if ch == '\\' {
             escaped = true;
         } else if ch == '"' {
-            return Err(format!("plugin manifest field {field} contains an unescaped quote"));
+            return Err(format!(
+                "plugin manifest field {field} contains an unescaped quote"
+            ));
         } else {
             out.push(ch);
         }
@@ -341,10 +340,14 @@ fn manifest_capabilities(value: &str) -> Result<BTreeSet<BuildCapability>, Strin
         .and_then(|value| value.strip_suffix(']'))
         .ok_or_else(|| "plugin manifest abilities must be a list".to_string())?;
     let mut capabilities = BTreeSet::new();
-    for item in value.split(',').map(str::trim).filter(|item| !item.is_empty()) {
+    for item in value
+        .split(',')
+        .map(str::trim)
+        .filter(|item| !item.is_empty())
+    {
         let name = manifest_string(item, "abilities")?;
-        let capability = BuildCapability::parse(&name)
-            .ok_or_else(|| format!("unknown build ability {name}"))?;
+        let capability =
+            BuildCapability::parse(&name).ok_or_else(|| format!("unknown build ability {name}"))?;
         capabilities.insert(capability);
     }
     Ok(capabilities)
@@ -492,12 +495,8 @@ pub struct PackagedPluginTarget {
     pub metadata: BTreeMap<String, String>,
 }
 
-pub type PackagedPluginRunner = fn(
-    &Path,
-    &Path,
-    &WasmComponentPluginSpec,
-    &str,
-) -> Result<PackagedPluginContribution, String>;
+pub type PackagedPluginRunner =
+    fn(&Path, &Path, &WasmComponentPluginSpec, &str) -> Result<PackagedPluginContribution, String>;
 
 thread_local! {
     static PACKAGED_PLUGIN_RUNNER: std::cell::Cell<Option<PackagedPluginRunner>> =
@@ -527,8 +526,12 @@ pub fn run_packaged_plugin(
 ) -> Result<PackagedPluginContribution, String> {
     PACKAGED_PLUGIN_RUNNER.with(|slot| {
         slot.get()
-            .ok_or_else(|| "packaged build-plugin host is not installed".to_string())?
-            (manifest_path, component_path, spec, manifest_digest)
+            .ok_or_else(|| "packaged build-plugin host is not installed".to_string())?(
+            manifest_path,
+            component_path,
+            spec,
+            manifest_digest,
+        )
     })
 }
 
@@ -550,17 +553,15 @@ pub fn encode_build_plugin_request(spec: &WasmComponentPluginSpec) -> Vec<u8> {
 /// Decode the bounded, versioned response from the packaged component. A
 /// response is either a complete graph contribution or a typed failure; no
 /// partially decoded object is returned to the context.
-pub fn decode_build_plugin_response(
-    bytes: &[u8],
-) -> Result<PackagedPluginContribution, String> {
+pub fn decode_build_plugin_response(bytes: &[u8]) -> Result<PackagedPluginContribution, String> {
     if bytes.len() > BUILD_PLUGIN_MAX_RESPONSE_BYTES {
         return Err(format!(
             "build plugin response exceeds {} bytes",
             BUILD_PLUGIN_MAX_RESPONSE_BYTES
         ));
     }
-    let text = std::str::from_utf8(bytes)
-        .map_err(|_| "build plugin response is not UTF-8".to_string())?;
+    let text =
+        std::str::from_utf8(bytes).map_err(|_| "build plugin response is not UTF-8".to_string())?;
     let mut version = None;
     let mut status = None;
     let mut error = None;
@@ -664,8 +665,12 @@ fn decode_packaged_action(value: &str) -> Result<PackagedPluginAction, String> {
         outputs: wire_unlist(fields[2], "action outputs")?,
         argv: wire_unlist(fields[3], "action argv")?,
         env: wire_unmap(fields[4], "action env")?,
-        env_allowlist: wire_unlist(fields[5], "action env allowlist")?.into_iter().collect(),
-        caps: wire_unlist(fields[6], "action abilities")?.into_iter().collect(),
+        env_allowlist: wire_unlist(fields[5], "action env allowlist")?
+            .into_iter()
+            .collect(),
+        caps: wire_unlist(fields[6], "action abilities")?
+            .into_iter()
+            .collect(),
         cache: wire_unscalar(fields[7], "action cache")?,
         kind: wire_unscalar(fields[8], "action kind")?,
         toolchain: wire_optional(fields[9], "action toolchain")?,
@@ -673,7 +678,9 @@ fn decode_packaged_action(value: &str) -> Result<PackagedPluginAction, String> {
         signing_identity: wire_optional(fields[11], "action signing identity")?,
         labels: wire_unmap(fields[12], "action labels")?,
         helper_versions: wire_unmap(fields[13], "action helper versions")?,
-        resource_pools: wire_unlist(fields[14], "action resource pools")?.into_iter().collect(),
+        resource_pools: wire_unlist(fields[14], "action resource pools")?
+            .into_iter()
+            .collect(),
         legacy_wrapper: wire_optional(fields[15], "action legacy wrapper")?,
         variant_identity: wire_optional(fields[16], "action variant identity")?,
     })
@@ -755,9 +762,10 @@ fn wire_unlist(value: &str, field: &str) -> Result<Vec<String>, String> {
             return Err(format!("{field} list item is truncated"));
         }
         let (encoded, tail) = next.split_at(encoded_len);
-        values.push(String::from_utf8(hex_decode(encoded)?).map_err(|_| {
-            format!("{field} list item is not UTF-8")
-        })?);
+        values.push(
+            String::from_utf8(hex_decode(encoded)?)
+                .map_err(|_| format!("{field} list item is not UTF-8"))?,
+        );
         rest = tail;
     }
     if !rest.is_empty() {

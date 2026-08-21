@@ -2663,7 +2663,9 @@ focused projection of `T.reflect().layout`, not a second metadata model. Users
 cannot declare `@` members.
 members. Layout exposes kind, optional size/alignment/stride, target,
 guarantee, source, fields, and typed `[.field]` selection. Field byte facts are
-optional when physical layout is not guaranteed. Completion visibly groups
+computed by one target-aware compiler engine for Jet-owned physical layouts
+(`c`, `columnar`, and fixed-width scalar members); they remain optional when
+physical layout is not guaranteed. Completion visibly groups
 `@layout` as a compiler fact; hover, rename, navigation, diagnostics,
 `jet inspect expand --facts layout`, and JSON project the same model.
 
@@ -4346,8 +4348,9 @@ example.
 
 **S52 — Files** *(D-JPK-FILES, D-JPK-FILENAME2)*: per-package manifest
 is **`package.jet`** (bare `name:`/`version:` identity + `packages:` +
-`deps:` + `targets:` + `effects:`); other `.jet` files contribute Configs;
-`module workspace` is discovered by declaration (`members:` may run
+`deps:` + `targets:` + `effects:`); `env.jet` owns named source aliases
+(`sources: { name: target@provider }`) and environment facts; other `.jet`
+files contribute Configs; `module workspace` is discovered by declaration (`members:` may run
 comptime — inline lists, `find("./dir")`, or an expression referencing a
 sibling `comptime`/`fn`; D-WORKSPACE1/2 — the root `jetpack.toml` index is
 retired). A member is addressed three ways (D-MONOREF1=A, implemented):
@@ -6680,6 +6683,10 @@ widening is written and audited.
   dependency grants, trust defaults and provider bounds; replaced keys are
   migrated and deleted. This amends D-EFFBUDGET1,
   D-JPK-POLICYSURFACE1 and D-JPK-GRANTSCHEMA1. Implementation: #1570.
+  Amendment #1682: adapter-recipe trust uses the shared trust store's
+  `hash:<sha256>` record through `Trust::grant_hash`; it does not create a
+  project-local trust record. Future trust consumers use this record or add a
+  named fact and format here before they write one.
 - **D-AUTHORITY-GATE1=A**: every authority gate records in one provenance-
   carrying ledger; `jet inspect authority` reads the rights view and existing
   views remain filters. Implementation: #1571.

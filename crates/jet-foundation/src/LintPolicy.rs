@@ -17,7 +17,11 @@ pub struct LintPolicyError {
 
 impl LintPolicyError {
     fn message(detail: impl Into<String>) -> Self {
-        Self { detail: detail.into(), code: None, name: None }
+        Self {
+            detail: detail.into(),
+            code: None,
+            name: None,
+        }
     }
 
     fn diagnostic_code(detail: impl Into<String>, code: &str, name: Option<&str>) -> Self {
@@ -437,5 +441,15 @@ mod tests {
         assert_eq!(out[0].code, "E1293");
         assert_eq!(out[0].severity, Severity::Error);
         assert!(out[0].what.contains("same_enum_guard_table"));
+    }
+
+    #[test]
+    fn promotes_unused_binding_lint_by_registered_name() {
+        assert_eq!(code_for_name("unused_local_binding"), Some("L0101"));
+        let lint = Diagnostic::from_row("L0101", &[("name", "value")], None);
+        let out = apply(&["unused_local_binding".to_string()], vec![lint]);
+        assert_eq!(out[0].code, "E1293");
+        assert_eq!(out[0].severity, Severity::Error);
+        assert!(out[0].what.contains("unused_local_binding"));
     }
 }

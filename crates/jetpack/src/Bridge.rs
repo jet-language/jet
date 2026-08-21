@@ -6,9 +6,10 @@
 //! Writes the validated foreign graph to the project's `.jet/lock`, but never
 //! touches `env.jet`: the shim prints to stdout so the user reviews and merges
 //! it themselves (I8 — one canonical env surface, no silent second manifest).
-//! Fields the shim can't express (`shellHook`, a second named devShell, …)
-//! remain in the lock as `unmapped` facts and fire L0204, one warning per
-//! field, without blocking the print.
+//! Fields the shim can't express (`shellHook`, named devShells outside the
+//! selected default, …) remain in the lock as `unmapped` facts and fire L0204,
+//! one warning per field, without blocking the print. Named shells still get
+//! the same bounded native package projection in evaluator records.
 //!
 //! Determinism for tests: a captured provider payload can still stand in for
 //! the foreign result, but the product path evaluates the supported literal
@@ -20,7 +21,7 @@ use super::SemanticLock::FlakeGraph;
 use super::JSON;
 use crate::Diagnostics::Diagnostic;
 use crate::Syntax;
-use std::path::Path;
+use std::path::{Component, Path};
 use std::rc::Rc;
 
 /// Facts pulled from a flake's default devShell.
@@ -29,7 +30,8 @@ pub struct DevShellFacts {
     /// `buildInputs` package names, sorted + deduped for a stable shim.
     pub packages: Vec<String>,
     /// Fields present in the devShell that `env.*` has no spelling for yet
-    /// (U16's L0204) — today just `shellHook` when it's non-empty.
+    /// (U16's L0204), including unsupported package identities and non-empty
+    /// hooks.
     pub unmapped: Vec<String>,
 }
 
@@ -47,13 +49,24 @@ pub fn read_devshell_facts(
     flake_dir: &Path,
     fixtures: Option<&Path>,
 ) -> Result<DevShellFacts, ProviderError> {
+    read_devshell_output_facts(flake_dir, fixtures, "default")
+}
+
+fn read_devshell_output_facts(
+    flake_dir: &Path,
+    fixtures: Option<&Path>,
+    output: &str,
+) -> Result<DevShellFacts, ProviderError> {
     match fixtures {
-        Some(dir) => {
+        Some(dir) if output == "default" => {
             let path = dir.join(FIXTURE_FILE);
             let stdout = std::fs::read_to_string(&path)
                 .map_err(|_| ProviderError::FixtureMissing(path))?;
             parse_facts_json(&stdout)
         }
+        Some(_) => Err(ProviderError::Unsupported(
+            "named devShell fixtures require a native flake source".to_string(),
+        )),
         None => {
             let flake_path = [
                 flake_dir.join(Syntax::FOREIGN_FLAKE_FILE),
@@ -79,19 +92,11 @@ pub fn read_devshell_facts(
                     flake_dir.display()
                 ))
             })?;
-            let authority = crate::NixEval::ProjectImportAuthority::open(&source_root)
-                .map_err(|error| {
-                    ProviderError::Unsupported(format!(
-                        "couldn't open flake project root for imports: {error}"
-                    ))
-                })?;
-            let import_authority: Rc<dyn Fn(&str) -> Result<String, String>> =
-                Rc::new(move |relative: &str| {
-                    authority.read(relative).map_err(|error| error.to_string())
-                });
-            let evaluation = crate::NixEval::evaluate_devshell_with_import_authority(
+            let import_authority = native_authority(&source_root)?;
+            let evaluation = crate::NixEval::evaluate_devshell_output_with_import_authority(
                 &source,
                 &system,
+                output,
                 Some(import_authority),
             )
                 .map_err(|error| {
@@ -111,7 +116,17 @@ pub fn read_devshell_facts(
                 })?;
             Ok(DevShellFacts {
                 packages: evaluation.packages().to_vec(),
-                unmapped: evaluation.unsupported().to_vec(),
+                unmapped: evaluation
+                    .unsupported()
+                    .iter()
+                    .cloned()
+                    .chain(
+                        evaluation
+                            .cross_packages()
+                            .iter()
+                            .map(|package| format!("cross-package:{package}")),
+                    )
+                    .collect(),
             })
         }
     }
@@ -123,6 +138,212 @@ fn host_system() -> String {
         other => other,
     };
     format!("{}-{os}", std::env::consts::ARCH)
+}
+
+fn native_authority(
+    root: &Path,
+) -> Result<Rc<dyn Fn(&str) -> Result<String, String>>, ProviderError> {
+    let authority = crate::NixEval::ProjectImportAuthority::open(root).map_err(|error| {
+        ProviderError::Unsupported(format!(
+            "couldn't open flake project root for native authority: {error}"
+        ))
+    })?;
+    let authority = Rc::new(authority);
+    Ok(Rc::new(move |request: &str| {
+        if let Some(target) = request.strip_prefix("@target:") {
+            return target_authority(target);
+        }
+        if let Some(reference) = request.strip_prefix("@flake:") {
+            return external_flake_source(&authority, reference);
+        }
+        if let Some(request) = request.strip_prefix("@flake-import:") {
+            let (reference, relative) = request.split_once('\n').ok_or_else(|| {
+                "external flake import authority request is malformed".to_string()
+            })?;
+            return external_flake_file(&authority, reference, relative);
+        }
+        if request.starts_with("@fetch:") {
+            return fetch_source(&authority, request);
+        }
+        authority.read(request).map_err(|error| error.to_string())
+    }))
+}
+
+fn target_authority(selector: &str) -> Result<String, String> {
+    match selector {
+        "aarch64-multiplatform" | "aarch64-linux" => Ok("aarch64-linux".to_string()),
+        "x86_64-linux" => Ok("x86_64-linux".to_string()),
+        "aarch64-darwin" => Ok("aarch64-darwin".to_string()),
+        "x86_64-darwin" => Ok("x86_64-darwin".to_string()),
+        _ => Err(format!(
+            "target selector {selector} is outside the pinned native target authority"
+        )),
+    }
+}
+
+fn external_flake_source(
+    authority: &crate::NixEval::ProjectImportAuthority,
+    reference: &str,
+) -> Result<String, String> {
+    reference
+        .strip_prefix("path:")
+        .ok_or_else(|| "remote external flake provider authority is not configured".to_string())?;
+    external_flake_file(authority, reference, "flake.nix")
+}
+
+fn external_flake_file(
+    authority: &crate::NixEval::ProjectImportAuthority,
+    reference: &str,
+    relative: &str,
+) -> Result<String, String> {
+    let root = reference
+        .strip_prefix("path:")
+        .ok_or_else(|| "remote external flake provider authority is not configured".to_string())?;
+    let root = root.split_once('?').map_or(root, |(value, _)| value);
+    let root = normalize_authority_path(root.strip_prefix("./").unwrap_or(root))?;
+    let relative = normalize_authority_path(relative)?;
+    let path = if root.is_empty() {
+        relative
+    } else {
+        format!("{root}/{relative}")
+    };
+    authority.read(&path).map_err(|error| error.to_string())
+}
+
+fn normalize_authority_path(raw: &str) -> Result<String, String> {
+    let path = Path::new(raw);
+    if raw.contains('\\')
+        || raw.contains('\0')
+        || path.is_absolute()
+        || path
+            .components()
+            .any(|component| !matches!(component, Component::Normal(_)))
+    {
+        return Err("authority path must stay inside the flake project".to_string());
+    }
+    Ok(path
+        .components()
+        .filter_map(|component| match component {
+            Component::Normal(value) => Some(value.to_string_lossy().into_owned()),
+            _ => None,
+        })
+        .collect::<Vec<_>>()
+        .join("/"))
+}
+
+fn fetch_source(
+    authority: &crate::NixEval::ProjectImportAuthority,
+    request: &str,
+) -> Result<String, String> {
+    let mut fields = request.strip_prefix("@fetch:").unwrap_or_default().split('\n');
+    let kind = fields.next().unwrap_or_default();
+    let url = fields
+        .next()
+        .ok_or_else(|| "fetch authority request is missing URL".to_string())?;
+    let expected = fields
+        .next()
+        .ok_or_else(|| "fetch authority request is missing hash".to_string())?;
+    let name = fields
+        .next()
+        .ok_or_else(|| "fetch authority request is missing name".to_string())?;
+    let _revision = fields.next().unwrap_or_default();
+    if fields.next().is_some() {
+        return Err("fetch authority request has too many fields".to_string());
+    }
+    let relative = url
+        .strip_prefix("file:")
+        .ok_or_else(|| "native fetch authority permits only file: sources".to_string())?;
+    let relative = normalize_authority_path(relative.strip_prefix("./").unwrap_or(relative))?;
+    let source = authority
+        .read(&relative)
+        .map_err(|error| format!("could not read fetched source: {error}"))?;
+    let expected = fetch_hash_hex(expected)?;
+    let actual = crate::SHA256::sha256_hex(source.as_bytes());
+    if actual != expected {
+        return Err(format!(
+            "verified fetch hash mismatch: expected {expected}, got {actual}"
+        ));
+    }
+    let name = normalize_fetch_name(name)?;
+    let method = match kind {
+        "fetchurl" => "sha256",
+        "fetchTarball" | "fetchTree" | "fetchGit" => "r:sha256",
+        _ => return Err(format!("unsupported fixed-output fetcher {kind}")),
+    };
+    Ok(crate::NixDrv::make_fixed_output_path(
+        crate::NixDrv::DEFAULT_STORE_DIR,
+        &name,
+        method,
+        &expected,
+    ))
+}
+
+fn normalize_fetch_name(name: &str) -> Result<String, String> {
+    if name.is_empty()
+        || name == "."
+        || name == ".."
+        || name.contains('/')
+        || name.contains('\\')
+        || name.contains('\0')
+        || name.bytes().any(|byte| byte.is_ascii_control())
+    {
+        return Err("fetch authority returned an invalid output name".to_string());
+    }
+    Ok(name.to_string())
+}
+
+fn fetch_hash_hex(value: &str) -> Result<String, String> {
+    if value.len() == 64 && value.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+        return Ok(value.to_ascii_lowercase());
+    }
+    if let Some(encoded) = value.strip_prefix("sha256-") {
+        let bytes = decode_base64(encoded)?;
+        return Ok(hex_encode(&bytes));
+    }
+    let bytes = crate::NixDrv::nix32_decode(value)
+        .map_err(|error| format!("invalid fixed-output hash: {error}"))?;
+    if bytes.len() != 32 {
+        return Err("fixed-output hash is not 256 bits".to_string());
+    }
+    Ok(hex_encode(&bytes))
+}
+
+fn decode_base64(value: &str) -> Result<Vec<u8>, String> {
+    let mut output = Vec::new();
+    let mut buffer = 0u32;
+    let mut bits = 0u8;
+    for byte in value.bytes() {
+        if byte == b'=' {
+            break;
+        }
+        let digit = match byte {
+            b'A'..=b'Z' => byte - b'A',
+            b'a'..=b'z' => byte - b'a' + 26,
+            b'0'..=b'9' => byte - b'0' + 52,
+            b'+' => 62,
+            b'/' => 63,
+            _ => return Err("invalid fixed-output SRI hash".to_string()),
+        };
+        buffer = (buffer << 6) | u32::from(digit);
+        bits += 6;
+        if bits >= 8 {
+            bits -= 8;
+            output.push((buffer >> bits) as u8);
+            buffer &= (1 << bits) - 1;
+        }
+    }
+    if output.len() != 32 {
+        return Err("fixed-output SRI hash is not 256 bits".to_string());
+    }
+    Ok(output)
+}
+
+fn hex_encode(bytes: &[u8]) -> String {
+    bytes.iter().fold(String::with_capacity(bytes.len() * 2), |mut output, byte| {
+        use std::fmt::Write;
+        let _ = write!(output, "{byte:02x}");
+        output
+    })
 }
 
 fn parse_facts_json(text: &str) -> Result<DevShellFacts, ProviderError> {
@@ -244,6 +465,7 @@ pub fn cmd_flake(theme: &Theme, dir: &Path, fixtures: Option<&Path>) -> i32 {
         Ok(mut graph) => {
             let system = host_system();
             let mut native_derivations = Vec::new();
+            let mut native_devshells = Vec::new();
             let source = match std::fs::read_to_string(&flake_path) {
                 Ok(source) => source,
                 Err(error) => {
@@ -252,6 +474,24 @@ pub fn cmd_flake(theme: &Theme, dir: &Path, fixtures: Option<&Path>) -> i32 {
                         &format!("couldn't evaluate package derivations: {error}"),
                         "fix the flake file, then run `jet bridge flake` again.",
                     );
+                    return 1;
+                }
+            };
+            let source_root = match dir.canonicalize() {
+                Ok(root) => root,
+                Err(error) => {
+                    theme.error(
+                        "couldn't resolve flake project root",
+                        &error.to_string(),
+                        "run `jet bridge flake` from a readable project directory.",
+                    );
+                    return 1;
+                }
+            };
+            let native_authority = match native_authority(&source_root) {
+                Ok(authority) => authority,
+                Err(error) => {
+                    super::CLI::report_provider_error(theme, &error);
                     return 1;
                 }
             };
@@ -269,29 +509,60 @@ pub fn cmd_flake(theme: &Theme, dir: &Path, fixtures: Option<&Path>) -> i32 {
                     );
                     return 1;
                 }
-                if output.system != system {
-                    continue;
-                }
-                match crate::NixEval::evaluate_derivation_output(
+                match crate::NixEval::evaluate_derivation_output_with_import_authority(
                     &source,
-                    &system,
+                    &output.system,
                     &output.attribute,
+                    Some(native_authority.clone()),
                 ) {
-                    Ok(derivation) => native_derivations.push((output.name.clone(), derivation)),
+                    Ok(derivation) => {
+                        native_derivations.push((
+                            output.name.clone(),
+                            output.system.clone(),
+                            derivation,
+                        ));
+                    }
                     Err(error) => {
+                        if output.system != system {
+                            let loss = format!(
+                                "packages:{}:{}",
+                                output.system, output.attribute
+                            );
+                            if !facts.unmapped.iter().any(|item| item == &loss) {
+                                facts.unmapped.push(loss);
+                            }
+                            continue;
+                        }
                         theme.error(
                             "couldn't evaluate a package derivation",
                             &format!("{}: {error}", output.name),
-                            "use a supported pure derivation, or wait for the later evaluator breadth card.",
+                            "use a supported pure derivation with explicit local authority, then run `jet bridge flake` again.",
                         );
                         return 1;
                     }
                 }
             }
-            if graph.named_dev_shells().len() > 1
-                && !facts.unmapped.iter().any(|item| item == "named devShells")
-            {
-                facts.unmapped.push("named devShells".to_string());
+            let default_facts = facts.clone();
+            for output in graph.named_dev_shells() {
+                if output.system != system {
+                    continue;
+                }
+                if output.attribute == "default" {
+                    native_devshells.push((output.name.clone(), default_facts.clone()));
+                    continue;
+                }
+                match read_devshell_output_facts(dir, None, &output.attribute) {
+                    Ok(named) => native_devshells.push((output.name.clone(), named)),
+                    Err(_) => {
+                        let label = format!(
+                            "{}:{}:{}",
+                            output.kind.as_str(), output.system, output.attribute
+                        );
+                        if !facts.unmapped.iter().any(|item| item == &label) {
+                            facts.unmapped.push(label);
+                        }
+                    }
+                }
             }
             for field in &graph.unsupported {
                 if !facts.unmapped.iter().any(|item| item == field) {
@@ -308,7 +579,7 @@ pub fn cmd_flake(theme: &Theme, dir: &Path, fixtures: Option<&Path>) -> i32 {
                     super::SemanticLock::FlakeOutputKind::Package =>
                         record_package_output_fact(&mut facts, output, &system),
                     super::SemanticLock::FlakeOutputKind::DevShell => {
-                        if output.attribute != "default"
+                        if (output.system != system || output.attribute != "default")
                             && !facts.unmapped.iter().any(|item| item == &label)
                         {
                             facts.unmapped.push(label);
@@ -335,14 +606,17 @@ pub fn cmd_flake(theme: &Theme, dir: &Path, fixtures: Option<&Path>) -> i32 {
                     return 1;
                 }
             };
-            for (output_name, derivation) in &native_derivations {
-                if derivation.outputs().get("out").is_none() {
-                    let loss = format!("derivation output {output_name} has no out path");
-                    if !facts.unmapped.iter().any(|existing| existing == &loss) {
-                        facts.unmapped.push(loss);
-                    }
+            let inventory = match crate::NixEval::pinned_inventory() {
+                Ok(inventory) => inventory,
+                Err(error) => {
+                    theme.error(
+                        "couldn't load the native evaluator inventory",
+                        &error.to_string(),
+                        "use a supported native evaluator manifest, then run `jet bridge flake` again.",
+                    );
+                    return 1;
                 }
-            }
+            };
             for field in &facts.unmapped {
                 if !graph.unsupported.iter().any(|existing| existing == field) {
                     graph.unsupported.push(field.clone());
@@ -367,18 +641,53 @@ pub fn cmd_flake(theme: &Theme, dir: &Path, fixtures: Option<&Path>) -> i32 {
                     ..super::SemanticLock::LockRationale::default()
                 },
             ));
-            for (output_name, derivation) in native_derivations {
-                let Some(out) = derivation.outputs().get("out") else {
-                    continue;
+            for entry in inventory {
+                let status = match entry.status {
+                    jet_nix_eval::InventoryStatus::Covered => "covered",
+                    jet_nix_eval::InventoryStatus::Skipped => "skipped",
                 };
-                let exact = format!("drvPath={};out={out}", derivation.drv_path());
+                let exact = format!(
+                    "status={status};class={};reason={}",
+                    entry.class, entry.reason
+                );
+                lock.records.push(super::SemanticLock::SemanticRecord::new(
+                    super::SemanticLock::LockIdentity {
+                        kind: super::SemanticLock::LockRecordKind::FlakeEvaluator,
+                        key: format!("flake-evaluator-inventory:{}", entry.surface),
+                        hash: crate::SHA256::sha256_hex(exact.as_bytes()),
+                        exact: exact.clone(),
+                        platform: system.clone(),
+                    },
+                    super::SemanticLock::LockRationale {
+                        source_ref: flake_path.display().to_string(),
+                        provider: "native-nix-evaluator".to_string(),
+                        exact_output: exact,
+                        reason: entry.reason.to_string(),
+                        ..super::SemanticLock::LockRationale::default()
+                    },
+                ));
+            }
+            for (output_name, output_system, derivation) in native_derivations {
+                if derivation.outputs().get("out").is_none() {
+                    let loss = format!("derivation output {output_name} has no out path");
+                    if !facts.unmapped.iter().any(|existing| existing == &loss) {
+                        facts.unmapped.push(loss);
+                    }
+                }
+                let outputs = derivation
+                    .outputs()
+                    .iter()
+                    .map(|(name, path)| format!("{name}={path}"))
+                    .collect::<Vec<_>>()
+                    .join(";");
+                let exact = format!("drvPath={};{outputs}", derivation.drv_path());
                 lock.records.push(super::SemanticLock::SemanticRecord::new(
                     super::SemanticLock::LockIdentity {
                         kind: super::SemanticLock::LockRecordKind::FlakeEvaluator,
                         key: format!("flake-derivation:{output_name}"),
                         hash: crate::SHA256::sha256_hex(exact.as_bytes()),
                         exact: exact.clone(),
-                        platform: system.clone(),
+                        platform: output_system,
                     },
                     super::SemanticLock::LockRationale {
                         source_ref: flake_path.display().to_string(),
@@ -388,6 +697,9 @@ pub fn cmd_flake(theme: &Theme, dir: &Path, fixtures: Option<&Path>) -> i32 {
                         ..super::SemanticLock::LockRationale::default()
                     },
                 ));
+            }
+            for (output_name, shell) in native_devshells {
+                record_devshell_fact(&mut lock, &output_name, &shell, &system, &flake_path);
             }
             if let Err(error) = super::SemanticLock::atomic_commit(dir, &lock) {
                 theme.error(
@@ -459,6 +771,36 @@ fn record_package_output_fact(
     if !facts.unmapped.iter().any(|item| item == &label) {
         facts.unmapped.push(label);
     }
+}
+
+fn record_devshell_fact(
+    lock: &mut super::SemanticLock::SemanticLockFile,
+    output_name: &str,
+    facts: &DevShellFacts,
+    system: &str,
+    flake_path: &Path,
+) {
+    let exact = format!(
+        "packages={};unsupported={}",
+        facts.packages.join(","),
+        facts.unmapped.join(",")
+    );
+    lock.records.push(super::SemanticLock::SemanticRecord::new(
+        super::SemanticLock::LockIdentity {
+            kind: super::SemanticLock::LockRecordKind::FlakeEvaluator,
+            key: format!("flake-devshell:{output_name}"),
+            hash: crate::SHA256::sha256_hex(exact.as_bytes()),
+            exact: exact.clone(),
+            platform: system.to_string(),
+        },
+        super::SemanticLock::LockRationale {
+            source_ref: flake_path.display().to_string(),
+            provider: "native-nix-evaluator".to_string(),
+            exact_output: exact,
+            reason: "bounded named devShell package projection".to_string(),
+            ..super::SemanticLock::LockRationale::default()
+        },
+    ));
 }
 
 #[cfg(test)]

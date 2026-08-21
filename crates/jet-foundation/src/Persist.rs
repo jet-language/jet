@@ -270,10 +270,7 @@ fn encode_payload(value: &CtValue) -> String {
         CtValue::Int(n) => format!(r#"{{"shape":"Int","value":{n}}}"#),
         CtValue::Bool(b) => format!(r#"{{"shape":"Bool","value":{b}}}"#),
         CtValue::Str(s) => {
-            format!(
-                r#"{{"shape":"String","value":"{}"}}"#,
-                json_escape(s)
-            )
+            format!(r#"{{"shape":"String","value":"{}"}}"#, json_escape(s))
         }
         CtValue::Char(c) => {
             format!(
@@ -282,7 +279,10 @@ fn encode_payload(value: &CtValue) -> String {
             )
         }
         CtValue::Float(f) => format!(r#"{{"shape":"Float","value":{}}}"#, f.render()),
-        other => format!(r#"{{"shape":"Opaque","debug":"{}"}}"#, json_escape(&format!("{other:?}"))),
+        other => format!(
+            r#"{{"shape":"Opaque","debug":"{}"}}"#,
+            json_escape(&format!("{other:?}"))
+        ),
     }
 }
 
@@ -365,9 +365,7 @@ fn json_raw_field<'a>(payload: &'a str, field: &str) -> Option<&'a str> {
     let marker = format!("\"{field}\":");
     let start = payload.find(&marker)? + marker.len();
     let rest = payload[start..].trim_start();
-    let end = rest
-        .find([',', '}'])
-        .unwrap_or(rest.len());
+    let end = rest.find([',', '}']).unwrap_or(rest.len());
     Some(rest[..end].trim())
 }
 

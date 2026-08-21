@@ -8,6 +8,7 @@ use std::path::Path;
 
 use crate::Comptime;
 use crate::Diagnostics::Diagnostic;
+use crate::Lexer::{StrTokPart, TokKind, Token};
 use crate::Syntax;
 use crate::AST::{
     CallArg, ContribValue, Contribution, CtKey, CtValue, EnvLit, Expr, Func, Item, ModuleDecl,
@@ -31,6 +32,7 @@ use super::Diagnostics::{
 use super::Computed::evaluate_named_fields;
 use super::System::{evaluate_fleet, evaluate_image, evaluate_system, evaluate_vmtest};
 use super::Types::{AdapterPlan, AdapterRecipe, DevServicePlan, EvaluatedModule};
+use super::Types::EnvironmentRead;
 
 /// Parse `src` and evaluate every enabled module it declares. `base_dir`
 /// resolves `embed_file` inside contribution expressions, same as ordinary
@@ -48,7 +50,7 @@ pub(super) fn parse_program(src: &str) -> Result<crate::AST::Program, Diagnostic
     if let Some(d) = lex_diags.into_iter().next() {
         return Err(d);
     }
-    crate::Parser::parse(&toks).map_err(|mut diags| {
+    crate::Parser::parse_config(&toks).map_err(|mut diags| {
         diags.pop().unwrap_or_else(|| {
             Diagnostic::error(
                 "E0000",
@@ -59,6 +61,62 @@ pub(super) fn parse_program(src: &str) -> Result<crate::AST::Program, Diagnostic
             )
         })
     })
+}
+
+/// Read the one config-surface spelling of environment access. The lexer has
+/// already separated `$` from the following identifier, so quoted shell text
+/// such as `"echo $HOME"` is not mistaken for a Jet environment read. String
+/// interpolation token streams are walked recursively because they are parsed
+/// as expressions by the config parser.
+pub(super) fn environment_reads(src: &str) -> Result<Vec<EnvironmentRead>, Diagnostic> {
+    let (tokens, lex_diags) = crate::Lexer::lex(src);
+    if let Some(diagnostic) = lex_diags.into_iter().next() {
+        return Err(diagnostic);
+    }
+    let mut reads = Vec::new();
+    collect_environment_reads(&tokens, &mut reads);
+    Ok(reads)
+}
+
+fn collect_environment_reads(tokens: &[Token], reads: &mut Vec<EnvironmentRead>) {
+    let tokens = crate::Lexer::without_comments(tokens);
+    for (index, token) in tokens.iter().enumerate() {
+        if matches!(&token.kind, TokKind::Dollar) {
+            if let Some(Token {
+                kind: TokKind::Ident(name),
+                ..
+            }) = tokens.get(index + 1)
+            {
+                let name = format!("${name}");
+                if !reads.iter().any(|read| read.name == name) {
+                    reads.push(EnvironmentRead {
+                        name,
+                        ty: Syntax::TYPE_STRING.to_string(),
+                    });
+                }
+            }
+        }
+        if let TokKind::Str(parts) = &token.kind {
+            for part in parts {
+                if let StrTokPart::Interp(interpolation) = part {
+                    collect_environment_reads(interpolation, reads);
+                }
+            }
+        }
+    }
+}
+
+fn environment_globals(reads: &[EnvironmentRead]) -> HashMap<String, CtValue> {
+    reads
+        .iter()
+        .map(|read| {
+            let name = read.name.strip_prefix('$').unwrap_or(read.name.as_str());
+            let value = std::env::var_os(name)
+                .map(|value| value.to_string_lossy().into_owned())
+                .unwrap_or_default();
+            (read.name.clone(), CtValue::Str(value))
+        })
+        .collect()
 }
 
 /// Evaluate every enabled `Item::Module` in `items` (already-parsed).
@@ -72,7 +130,13 @@ pub fn evaluate_modules(
     // callers of this public evaluator get the same semantics.
     jet_codegen::Codegen::TIR::install_comptime_bridge();
     let funcs = collect_funcs(items);
-    let globals = collect_comptime_globals(items, &funcs, base_dir)?;
+    let reads = environment_reads(src)?;
+    let globals = collect_comptime_globals(
+        items,
+        &funcs,
+        base_dir,
+        &environment_globals(&reads),
+    )?;
     let mut out = Vec::new();
     for item in items {
         let Item::Module(m) = item else { continue };
@@ -103,6 +167,7 @@ fn collect_comptime_globals<'a>(
     items: &'a [Item],
     funcs: &HashMap<String, &'a Func>,
     base_dir: &Path,
+    environment_globals: &HashMap<String, CtValue>,
 ) -> Result<HashMap<String, crate::Comptime::CtValue>, Diagnostic> {
     let definitions = items
         .iter()
@@ -115,7 +180,7 @@ fn collect_comptime_globals<'a>(
         .collect::<HashMap<_, _>>();
     let computed = evaluate_named_fields(
         &definitions,
-        &HashMap::new(),
+        environment_globals,
         funcs,
         &HashSet::new(),
         base_dir,

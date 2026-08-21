@@ -262,7 +262,7 @@ pub(crate) fn core_type_known(name: &str) -> bool {
         | "Tensor" | "ComputeError" | "ComputeDevice" | "ComputeStream" | "VjpRun"
         | "SparseTensor"
         // D-SERVICE1=D: structured service tree handles.
-        | "ServiceTree" | "ServiceEndpoint" | "ServiceError" | "ServiceRestart"
+        | "ServiceTree" | "ServiceWorkflow" | "ServiceEndpoint" | "ServiceError" | "ServiceRestart"
         | "ServiceDelivery" | "ServiceRuntime" | "ServiceStateStore" | "ServiceReceipt"
         | "ServiceUpgradeReceipt" | "TaskOutcome" | "TaskStatus"
         | "HTTPRequest" | "HTTPResponse" | "HTTPRouter" | "HTTPClient" | "HTTPClientType"

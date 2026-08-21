@@ -124,6 +124,7 @@ pub(crate) fn register_distinct(
         TypeDef::Distinct {
             base: d.base.clone(),
             derives: d.derives.iter().map(|(name, _)| name.clone()).collect(),
+            deprecation: super::super::deprecation_from_markers(&d.type_markers),
             knowledge: d
                 .range
                 .map_or_else(KnowledgeVector::default, |(lo, hi, _)| {
@@ -168,6 +169,7 @@ pub(crate) fn register_type_alias(
         TypeDef::Alias {
             params: a.type_params.clone(),
             target: a.target.clone(),
+            deprecation: None,
         },
     );
 }
@@ -589,7 +591,8 @@ impl<'a> ComptimeTypeResolver<'a> {
             | Item::UnitFamily(_)
             | Item::Migration(_)
             | Item::StateDecl(_)
-            | Item::ErrorConv(_) => {}
+            | Item::ErrorConv(_)
+            | Item::TemplateLoop(_) => {}
         }
     }
 
@@ -1009,6 +1012,7 @@ pub(crate) fn comptime_context_from_items(
             | Item::StateDecl(_) // D-STATE-DECL
             | Item::ProtocolDecl(_) // D-PROTO1/D-PROTO2
             | Item::UserDerive(_) // D-METADERIVE1=A: expanded in Bundle.rs
+            | Item::TemplateLoop(_) // D-STRUCT-ONCE1=A: expanded before registration
             | Item::GenericModule(_) // D-CONF-GENSPELL1=A: template — erases
             | Item::ModuleAlias(_) => {} // D-CONF-GENSPELL1=A: alias — erases after expansion
             Item::MarkerDecl(_) | Item::FactDecl(_) => {
@@ -1158,6 +1162,7 @@ pub(crate) fn register_struct(
         TypeDef::Struct {
             fields,
             methods: HashMap::new(),
+            deprecation: super::super::deprecation_from_markers(&s.type_markers),
             single_use: s.is_single_use,
             must_use: s.is_must_use,
             columnar: s.layout == Some(crate::AST::StructLayout::Columnar),
@@ -1668,6 +1673,7 @@ pub(crate) fn register_enum(
             variant_order,
             groups,
             methods: HashMap::new(),
+            deprecation: super::super::deprecation_from_markers(&e.type_markers),
             single_use: e.is_single_use,
             must_use: e.is_must_use,
             c_layout_tag: e.c_layout_tag(),

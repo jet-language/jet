@@ -32,9 +32,9 @@ fn package_transition_surface_formats_canonically_and_idempotently() {
 
 #[test]
 fn type_alias_binding_sigils_are_canonical_and_idempotent() {
-    let source = "alias Result<T> :: T ? Int\nfn run() {}\n";
+    let source = "alias Result<T> :: T ! Int\nfn run() {}\n";
     let once = jet::format_source(source).expect("canonical alias spelling should format");
-    assert!(once.contains("alias Result<T> :: T ? Int"), "{once}");
+    assert!(once.contains("alias Result<T> :: T ! Int"), "{once}");
     assert!(!once.contains("alias Result<T> ="), "{once}");
     let twice = jet::format_source(&once).expect("canonical alias spelling should reformat");
     assert_eq!(once, twice, "alias formatting must be idempotent");
@@ -151,13 +151,16 @@ fn fmt_preserves_root_receiver_declarations() {
 
 #[test]
 fn fmt_canonicalizes_unit_return_types() {
-    let src = "fn run() ? { return Err(\"boom\") }\n";
+    let src = "fn run() ! { return Err(\"boom\") }\n";
     let once = jet::format_source(src).expect("unit return type should format");
-    assert!(once.contains("fn run() ?"), "formatter lost the unit-fallible return:\n{once}");
+    assert!(once.contains("fn run() !"), "formatter lost the unit-fallible return:\n{once}");
     let twice = jet::format_source(&once).expect("formatted unit return should re-format");
     assert_eq!(once, twice, "unit return formatting must be idempotent");
+    let retired = jet::format_source("fn run() ? { return Err(\"boom\") }\n")
+        .expect("fmt should teach retired unit-fallible spelling");
+    assert!(retired.contains("fn run() !"), "{retired}");
     assert!(
-        jet::format_source("fn run() => Void ? { return Err(\"boom\") }\n").is_err(),
+        jet::format_source("fn run() => Void ! { return Err(\"boom\") }\n").is_err(),
         "retired Void must not be accepted by the formatter"
     );
 }
@@ -431,25 +434,35 @@ fn fmt_keeps_transaction_comment_inside_transaction_block() {
 
 #[test]
 fn fmt_keeps_optional_return_sugar() {
-    // D-RESULT-OPTION-CANON1: bare `T?` is Optional; fallible is spaced `T ?`.
+    // D-ERRSIGIL1: bare `T?` is Optional; fallible is `T ! E`.
     let src = r#"fn parse_count(raw: String) => Int? {
     return Err("empty");
 }
 "#;
     let out = jet::format_source(src).expect("fmt should parse optional return");
     assert!(
-        out.contains("fn parse_count(raw: String) :> Int? {"),
+        out.contains("fn parse_count(raw: String) Int? {"),
         "expected `Int?` optional return to stay `Int?`, got:\n{out}"
     );
-    let fallible = r#"fn parse_count(raw: String) => Int ? {
+    let fallible = r#"fn parse_count(raw: String) => Int ! {
     return Err("empty");
 }
 "#;
     let fallible_out =
         jet::format_source(fallible).expect("fmt should parse fallible return");
     assert!(
-        fallible_out.contains("fn parse_count(raw: String) :> Int ? {"),
-        "expected spaced `Int ?` fallible return to stay spaced, got:\n{fallible_out}"
+        fallible_out.contains("fn parse_count(raw: String) Int ! {"),
+        "expected `Int !` fallible return to stay canonical, got:\n{fallible_out}"
+    );
+
+    let retired = r#"fn parse_count(raw: String) => Int ? String {
+    return Err("empty");
+}
+"#;
+    let retired_out = jet::format_source(retired).expect("fmt should teach retired fallible type");
+    assert!(
+        retired_out.contains("fn parse_count(raw: String) Int ! String {"),
+        "expected retired `Int ? String` to rewrite to `Int ! String`, got:\n{retired_out}"
     );
 }
 
@@ -1261,7 +1274,7 @@ fn run() {
 
 #[test]
 fn fmt_preserves_optional_result_variants() {
-    let src = r#"fn f(flag: Bool) => Int ? String {
+    let src = r#"fn f(flag: Bool) => Int ! String {
     maybe :: .Val(1)
     empty :: .None
     if maybe == {
@@ -1286,7 +1299,7 @@ fn fmt_canonicalizes_anonymous_union_types() {
     let src = r#"fn hold(v: String | Int) => Int | String {
     return v
 }
-fn parse(raw: String) => Int ? String | Bool {
+fn parse(raw: String) => Int ! String | Bool {
     return .Err(false)
 }
 "#;
@@ -1296,7 +1309,7 @@ fn parse(raw: String) => Int ? String | Bool {
         "expected canonical `Int | String` spelling, got:\n{once}"
     );
     assert!(
-        once.contains("Int ? Bool | String") || once.contains("Int ? String | Bool"),
+        once.contains("Int ! Bool | String") || once.contains("Int ! String | Bool"),
         "expected fallible error-side union, got:\n{once}"
     );
     let twice = jet::format_source(&once).expect("union fmt must be idempotent");

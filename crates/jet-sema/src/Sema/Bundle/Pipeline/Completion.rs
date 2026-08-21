@@ -108,6 +108,7 @@ pub(super) fn complete_bundle_check(
                 | Item::StateDecl(_) // D-STATE1: erases
                 | Item::ProtocolDecl(_) // D-PROTO1/D-PROTO2: erases
                 | Item::UserDerive(_) // D-METADERIVE1=A: already expanded above
+                | Item::TemplateLoop(_) // D-STRUCT-ONCE1=A: expanded before this pass
                 | Item::GenericModule(_) // D-CONF-GENSPELL1=A: template — erases
                 | Item::ModuleAlias(_) => {} // D-CONF-GENSPELL1=A: alias — erases after expansion
             }
@@ -530,6 +531,14 @@ pub(super) fn complete_bundle_check(
     // D-WEBAPP1=D / D-WEBAUTHOR1=D (Tower #1274, #1703): one sema-known application graph.
     let (app_graph, app_diags) = super::super::super::App::extract_app_graph(bundle);
     diags.extend(app_diags);
+    // D-STRUCT-LIVE1=A: all body references, resolved outputs, and application
+    // roots are now present in the one name ledger. Emit the four warning-only
+    // structure verdicts before the ledger is published on the bundle.
+    diags.extend(super::super::Liveness::check_liveness(
+        bundle,
+        &mut name_ledger,
+        app_graph.as_ref(),
+    ));
 
     // D-OSTARGET1=A (ratified 2026-07-01, c134): native OS platform gating —
     // mixed-axis conflicts and unmatched cross-gate calls.

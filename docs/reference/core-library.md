@@ -220,6 +220,29 @@ uses that truth row.
 For the `[T]` row, `flatten` and `flat_map` return a plain list immediately;
 `.lazy().flatten()` and `.lazy().flat_map(...)` return deferred `Iter` views.
 
+#### Sequence algorithm audit (card #2139)
+
+The sequence jobs from the no-raw-loops catalog split into shipped, composable,
+and ballot-needed work:
+
+| Job | Current surface | Decision |
+| --- | --- | --- |
+| Sorted membership search | `binary_search(value)` and `binary_search_by(compare)` require sorted input and return `Int?`. | Already shipped. Do not add a second binary-search spelling. |
+| Lower-bound insertion position | `position(predicate)` can find a monotone boundary, but it scans; it is not a binary lower bound. | Keep separate from `binary_search`. Add only after choosing one name and defining the sorted-input contract. |
+| Move a contiguous selection (`slide`) | `slice` and `concat` can rebuild the result, but both move directions need destination adjustment and several segments. | Worth a named method for UI reorder code; not a useful one-liner. No method lands in this audit. |
+| Gather predicate matches at a pivot (`gather`) | Two `partition` calls over the left and right slices, followed by four concatenated parts, express the result without an index loop. | Worth a named method for repeated regroup edits; the composition is too long and easy to mis-wire. No method lands in this audit. |
+
+`slide` and `gather` are not declined as impossible. A future addition must use
+one spelling per job under D-ONCE-VERB1 and define mutation, index bounds, and
+allocation under D-STDRUBRIC1. The names and contracts need a ballot before a
+new method is added. This audit adds no syntax and no collection API.
+
+`partition` is stable: `false_` and `true_` each keep source order. The List
+sort family is stable too: `sort`, `sort_by`, `sort_desc`, `sort_by_desc`, and
+the comparator form keep source order for equal keys. `binary_search` returns a
+matching index, not the first matching index or an insertion position; use a
+future lower-bound operation when that distinction matters.
+
 `Set`'s closure and sequence adapters (`all`, `each`, `filter`, `fold`, `map`,
 `flat_map`, `min`, `max`) use the same collection kernels as every other
 container (I8: one mechanism, not a parallel set-native surface). `map` and
@@ -935,8 +958,8 @@ Examples: `examples/features/crypto/auth_tokens.jet`,
 The current production boundary for `core.sync` is the fixed String carrier
 surface below plus the closed row-policy language. The broader ratified
 `SyncMap<K,V>`/`SyncList<T>`/`#Codable` carrier surface, vector-clock access,
-authenticated remote reconnect, and general policy-closure compiler remain
-unshipped and are recorded in the framework-transplant closeout.
+authenticated remote reconnect, and the ratified general policy-closure
+surface remain unshipped and are recorded in the framework-transplant closeout.
 
 ```jet
 text_new / text_set / text_edit / text_merge / text_show / text_metadata
@@ -962,8 +985,11 @@ returns absence from `map_get`; an invalid counter still renders `0`, pending
 an owner decision on that public return contract.
 
 Beginner row policies use `owner == user`; expert policies may use `true`.
-Only those two expressions compile. `DBScope` carries the compiled policy and
-user through query, mutation, transaction, and live-query paths. `app.sync(doc,
+Only those two expressions compile. The shared compiler lowers each accepted
+form to a bind-safe SQL predicate. `DBScope` carries the compiled policy and
+user through query, mutation, transaction, and live-query paths.
+`db.policy_audit(scope)` reports the active scope's table, user, canonical
+expression, and compiled predicate. `app.sync(doc,
   over: session)` publishes a canonical CRDT display through a bounded
   process-local session registry, merges duplicate/reordered list/counter
   displays and equal-valued map entries, publishes the latest receipt through
@@ -2588,14 +2614,15 @@ struct Signup {
 errs :: Signup.validate(bad_signup) // Signup ! [FieldError]
 ```
 
-`Type.validate(value)` runs the block standalone, returning `value ?
+`Type.validate(value)` runs the block standalone, returning `value !
 [FieldError]` — `FieldError` carries `.path`/`.reason`, the same shape as
 typed decode failures. Rule expressions are purity-checked (S60/E3401): a `check`'s
 condition and message may reference only the struct's own fields and pure
 calls, never Net/DB/IO. Derived decoders invoke this validator after shape
-decoding; hand codecs opt in explicitly. The `Validate.over(s)` use-site
-escape (for rules needing outside context, like a database lookup) is
-unshipped; see docs/spec/syntax-decisions.md's D-VALIDATE1 entry.
+decoding; hand codecs opt in explicitly. `Validate.over(s)` starts the
+outside-context builder. Its chained `check(cond, at: field, "message")` rules
+use the same field path and `[FieldError]` contract, accumulate across the
+chain, and `finish()` returns `T ! [FieldError]`.
 
 **Field attributes** (D-SERDE5):
 
@@ -3661,6 +3688,7 @@ the driver. Cleanup stays on `Close` via `close(...)`.
 |-----|---------|-------|
 | `db.policy(table, expression)` | `RowPolicy ! String` | Closed policies: `true` or `owner == user` |
 | `conn.with_policy(policy, user)` | `DBScope` | Binds the policy and identity; the raw connection has no row operations |
+| `db.policy_audit(scope)` | `String` | Audits the active scope's compiled predicate and bound user |
 | `scoped.execute(sql, params)` | `Int ! DBError` | Affected row count, with the policy applied; schema/control SQL belongs to `db.migrate` or explicit transaction controls |
 | `scoped.query(sql, params)` | `[Row] ! DBError` | `Row` is `Map<String, DBValue>`; returned rows are scoped |
 | `scoped.query_one(sql, params)` | `Row? ! DBError` | First allowed row, if any |
@@ -3838,7 +3866,19 @@ The public tree fronts now cover worker and named supervisor-group creation,
 restart and delivery policy,
 start/stop, live and durable send, receive, mailbox/restart inspection, worker
 failure and drain, dead-letter/event counters, state adapters, snapshots and
-events, workflow start/step/history, typed activity scheduling/retry/completion
+events, workflow start/step/history, and the typed workflow-handle wait surface:
+
+```jet
+workflow :: tree.workflow_start("checkout", 1) ?? panic("workflow")
+workflow.sleep(Duration.seconds(1) ?? panic("duration")) ?? panic("sleep")
+answer :: workflow.activity("charge", "charge-1") ?? panic("activity")
+workflow.all([answer]) ?? panic("all")
+```
+
+`sleep`, `activity`, and `all` append a bounded wait decision on first
+execution. A replay consumes the matching history entry and does not wait or
+redeliver the activity again. Cancellation and deadline outcomes are recorded
+as terminal workflow history. Activity scheduling/retry/completion
 and run outcomes, directory register/resolve, generation handoff/rollback,
 partition and reconciliation of a shard across a generation handoff,
 upgrade receipts, chaos failure, observation, and display. Activity retry takes

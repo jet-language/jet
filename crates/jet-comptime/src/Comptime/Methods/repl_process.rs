@@ -1,18 +1,24 @@
 //! REPL authorization and pinned process execution.
 
-use crate::Diagnostics::{Diagnostic, Span};
 use super::super::Diagnostics::unsupported;
-use crate::AST::{CtValue, Type};
-use jet_foundation::Authority::{answer, Holds, Verdict};
-use jet_foundation::Effects::{core_effect, is_nondeterministic_core, Effect};
 use super::core_calls::{
     apply_core_call_with_type, apply_impure_core_call_with_type, as_string, io_error_value,
     normalize_path_args, IoErrorOperation,
 };
+use crate::Diagnostics::{Diagnostic, Span};
+use crate::AST::{CtValue, Type};
+use jet_foundation::Authority::{answer, Holds, Verdict};
+use jet_foundation::Effects::{core_effect, is_nondeterministic_core, Effect};
 
-pub(super) fn repl_effect_request(module: &str, method: &str, args: &[CtValue]) -> super::super::ReplEffectRequest {
+pub(super) fn repl_effect_request(
+    module: &str,
+    method: &str,
+    args: &[CtValue],
+) -> super::super::ReplEffectRequest {
     let shown = |i: usize, fallback: &str| {
-        args.get(i).map(CtValue::jet_show).unwrap_or_else(|| fallback.to_string())
+        args.get(i)
+            .map(CtValue::jet_show)
+            .unwrap_or_else(|| fallback.to_string())
     };
     let (root, operation, resource) = if is_nondeterministic_core(module, method) {
         let (root, operation) = match core_effect(module, method) {
@@ -23,23 +29,25 @@ pub(super) fn repl_effect_request(module: &str, method: &str, args: &[CtValue]) 
         (root, operation, method.to_string())
     } else {
         match (module, method) {
-            ("core.files", "read" | "read_bytes" | "exists" | "is_dir") =>
-                ("FS", "Read", shown(0, "<path>")),
-            ("core.files", "write" | "append_all" | "create_dir" | "remove") =>
-                ("FS", "Write", shown(0, "<path>")),
+            ("core.files", "read" | "read_bytes" | "exists" | "is_dir") => {
+                ("FS", "Read", shown(0, "<path>"))
+            }
+            ("core.files", "write" | "append_all" | "create_dir" | "remove") => {
+                ("FS", "Write", shown(0, "<path>"))
+            }
             ("core.sys", "get") => ("Env", "Read", shown(0, "<key>")),
             ("core.sys", "set") => ("Env", "Write", shown(0, "<key>")),
             ("core.sys", "current_dir") => ("Env", "Read", "PWD".to_string()),
             ("core.sys", "home_dir") => ("Env", "Read", "HOME".to_string()),
             ("core.term", "eprint") => ("IO", "Write", "stderr".to_string()),
-            ("core.term", "input" | "read_all_input" | "stdin") =>
-                ("IO", "Read", "stdin".to_string()),
+            ("core.term", "input" | "read_all_input" | "stdin") => {
+                ("IO", "Read", "stdin".to_string())
+            }
             ("core.process", "argv") => ("IO", "Read", "argv".to_string()),
             ("core.process", "run") => ("Exec", "Run", shown(0, "<command>")),
             ("core.process", "exit") => ("Exec", "Exit", shown(0, "0")),
             ("core.math.random", _) => ("Rand", "Draw", method.to_string()),
-            ("core.net" | "core.net.tls", _) =>
-                ("Net", method, shown(0, "<network resource>")),
+            ("core.net" | "core.net.tls", _) => ("Net", method, shown(0, "<network resource>")),
             _ => ("IO", method, module.to_string()),
         }
     };
@@ -66,11 +74,7 @@ pub(super) fn apply_repl_fs_call(
         "write" | "append_all" | "create_dir" | "remove" => IoErrorOperation::Write,
         _ => IoErrorOperation::Read,
     };
-    let io_error = |error| CtValue::failed(Box::new(io_error_value(
-        io_operation,
-        &path,
-        error,
-    )));
+    let io_error = |error| CtValue::failed(Box::new(io_error_value(io_operation, &path, error)));
     match method {
         "read" => Ok(match authorizer.fs_read(&path) {
             Ok(bytes) => match String::from_utf8(bytes) {
@@ -85,19 +89,25 @@ pub(super) fn apply_repl_fs_call(
         }),
         "write" | "append_all" => {
             let content = as_string(one(1)?, span)?;
-            Ok(match authorizer.fs_write(&path, content.as_bytes(), method == "append_all") {
-                Ok(()) => CtValue::Present(Box::new(CtValue::Unit)),
-                Err(error) => io_error(error),
-            })
+            Ok(
+                match authorizer.fs_write(&path, content.as_bytes(), method == "append_all") {
+                    Ok(()) => CtValue::Present(Box::new(CtValue::Unit)),
+                    Err(error) => io_error(error),
+                },
+            )
         }
         "exists" => authorizer
             .fs_exists(&path)
             .map(CtValue::Bool)
-            .map_err(|error| unsupported(&format!("secure filesystem check failed: {error}"), span)),
+            .map_err(|error| {
+                unsupported(&format!("secure filesystem check failed: {error}"), span)
+            }),
         "is_dir" => authorizer
             .fs_is_dir(&path)
             .map(CtValue::Bool)
-            .map_err(|error| unsupported(&format!("secure filesystem check failed: {error}"), span)),
+            .map_err(|error| {
+                unsupported(&format!("secure filesystem check failed: {error}"), span)
+            }),
         "create_dir" => Ok(match authorizer.fs_create_dir(&path) {
             Ok(()) => CtValue::Present(Box::new(CtValue::Unit)),
             Err(error) => io_error(error),
@@ -124,15 +134,7 @@ pub fn apply_repl_authorized_core_call(
     authorizer: Option<&mut dyn super::super::ReplAuthorizer>,
 ) -> Result<CtValue, Diagnostic> {
     apply_repl_authorized_core_call_with_type(
-        module,
-        method,
-        args,
-        span,
-        base_dir,
-        sink,
-        grants,
-        authorizer,
-        None,
+        module, method, args, span, base_dir, sink, grants, authorizer, None,
     )
 }
 
@@ -278,7 +280,10 @@ pub(super) fn pin_repl_command(
     span: Span,
 ) -> Result<std::fs::File, Diagnostic> {
     let Some(CtValue::List(words)) = args.first_mut() else {
-        return Err(unsupported("process.run expects a list of command words", span));
+        return Err(unsupported(
+            "process.run expects a list of command words",
+            span,
+        ));
     };
     let Some(CtValue::Str(program)) = words.first_mut() else {
         return Err(unsupported("process.run needs an executable name", span));
@@ -306,12 +311,21 @@ pub(super) fn pin_repl_command(
     };
     let executable = std::fs::File::open(&resolved).map_err(|error| {
         unsupported(
-            &format!("process.run could not pin executable `{}`: {error}", resolved.display()),
+            &format!(
+                "process.run could not pin executable `{}`: {error}",
+                resolved.display()
+            ),
             span,
         )
     })?;
-    if !executable.metadata().is_ok_and(|metadata| metadata.is_file()) {
-        return Err(unsupported("process.run executable is not a regular file", span));
+    if !executable
+        .metadata()
+        .is_ok_and(|metadata| metadata.is_file())
+    {
+        return Err(unsupported(
+            "process.run executable is not a regular file",
+            span,
+        ));
     }
     *program = resolved.to_string_lossy().into_owned();
     Ok(executable)
@@ -343,18 +357,16 @@ pub(super) fn run_repl_process(
     use std::time::{Duration, Instant};
 
     static CAPTURE_ID: AtomicU64 = AtomicU64::new(0);
-    let capture_file = |stream: &str| {
-        loop {
-            let id = CAPTURE_ID.fetch_add(1, Ordering::Relaxed);
-            let path = std::env::temp_dir().join(format!(
-                "jet-repl-process-{}-{id}-{stream}",
-                std::process::id()
-            ));
-            match OpenOptions::new().write(true).create_new(true).open(&path) {
-                Ok(file) => break Ok((path, file)),
-                Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => continue,
-                Err(e) => break Err(e),
-            }
+    let capture_file = |stream: &str| loop {
+        let id = CAPTURE_ID.fetch_add(1, Ordering::Relaxed);
+        let path = std::env::temp_dir().join(format!(
+            "jet-repl-process-{}-{id}-{stream}",
+            std::process::id()
+        ));
+        match OpenOptions::new().write(true).create_new(true).open(&path) {
+            Ok(file) => break Ok((path, file)),
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(e) => break Err(e),
         }
     };
     let (stdout_path, stdout_file) = capture_file("stdout")?;

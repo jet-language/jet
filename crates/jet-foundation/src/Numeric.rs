@@ -1,12 +1,11 @@
 //! D-INTBIG1 / D-DECIMAL1: arbitrary-precision default `Int` and base-10 `Decimal`.
 //! Shared name/method tables for sema and codegen.
 
+use crate::JSONNumber::{json_decimal_lexeme, json_exact_integer_text};
 use crate::Syntax;
 use crate::AST::{Expr, Marker, Type};
-use crate::JSONNumber::{json_decimal_lexeme, json_exact_integer_text};
 
-pub const MONEY_LINT_NAMES: &[&str] =
-    &["price", "cost", "amount", "fee", "balance", "tax"];
+pub const MONEY_LINT_NAMES: &[&str] = &["price", "cost", "amount", "fee", "balance", "tax"];
 
 pub fn is_decimal_type_name(name: &str) -> bool {
     name == Syntax::TYPE_DECIMAL
@@ -102,19 +101,28 @@ impl CtFraction {
             b = r;
         }
         let divisor = if a == 0 { 1 } else { a };
-        Some(Self { numerator: n / divisor, denominator: d / divisor })
+        Some(Self {
+            numerator: n / divisor,
+            denominator: d / divisor,
+        })
     }
 
     pub fn add(&self, other: &Self) -> Option<Self> {
         let left = self.numerator.checked_mul(other.denominator)?;
         let right = other.numerator.checked_mul(self.denominator)?;
-        Self::new(left.checked_add(right)?, self.denominator.checked_mul(other.denominator)?)
+        Self::new(
+            left.checked_add(right)?,
+            self.denominator.checked_mul(other.denominator)?,
+        )
     }
 
     pub fn sub(&self, other: &Self) -> Option<Self> {
         let left = self.numerator.checked_mul(other.denominator)?;
         let right = other.numerator.checked_mul(self.denominator)?;
-        Self::new(left.checked_sub(right)?, self.denominator.checked_mul(other.denominator)?)
+        Self::new(
+            left.checked_sub(right)?,
+            self.denominator.checked_mul(other.denominator)?,
+        )
     }
 
     pub fn mul(&self, other: &Self) -> Option<Self> {
@@ -142,8 +150,14 @@ impl CtFraction {
         crate::AST::CtValue::Struct {
             type_name: Syntax::TYPE_FRACTION.to_string(),
             fields: vec![
-                ("numerator".to_string(), crate::AST::CtValue::Int(self.numerator)),
-                ("denominator".to_string(), crate::AST::CtValue::Int(self.denominator)),
+                (
+                    "numerator".to_string(),
+                    crate::AST::CtValue::Int(self.numerator),
+                ),
+                (
+                    "denominator".to_string(),
+                    crate::AST::CtValue::Int(self.denominator),
+                ),
             ],
         }
     }
@@ -166,7 +180,10 @@ impl CtFraction {
                 }
             }
         }
-        Ok(Self { numerator, denominator })
+        Ok(Self {
+            numerator,
+            denominator,
+        })
     }
 }
 
@@ -319,21 +336,16 @@ impl CtBigInt {
         } else {
             (false, text.as_str())
         };
-        let (radix, digits) = if let Some(rest) = body.strip_prefix("0x")
-            .or_else(|| body.strip_prefix("0X"))
-        {
-            (16, rest)
-        } else if let Some(rest) = body.strip_prefix("0o")
-            .or_else(|| body.strip_prefix("0O"))
-        {
-            (8, rest)
-        } else if let Some(rest) = body.strip_prefix("0b")
-            .or_else(|| body.strip_prefix("0B"))
-        {
-            (2, rest)
-        } else {
-            return Self::from_str(&text);
-        };
+        let (radix, digits) =
+            if let Some(rest) = body.strip_prefix("0x").or_else(|| body.strip_prefix("0X")) {
+                (16, rest)
+            } else if let Some(rest) = body.strip_prefix("0o").or_else(|| body.strip_prefix("0O")) {
+                (8, rest)
+            } else if let Some(rest) = body.strip_prefix("0b").or_else(|| body.strip_prefix("0B")) {
+                (2, rest)
+            } else {
+                return Self::from_str(&text);
+            };
         if digits.is_empty() {
             return Err(format!("invalid integer literal `{s}`"));
         }
@@ -813,9 +825,7 @@ impl CtBigInt {
         let mut a = left.abs();
         let mut b = right.abs();
         while !b.is_zero() {
-            let (_, remainder) = a
-                .div_rem(&b)
-                .expect("gcd divisor is nonzero");
+            let (_, remainder) = a.div_rem(&b).expect("gcd divisor is nonzero");
             a = b;
             b = remainder.abs();
         }
@@ -827,11 +837,7 @@ impl CtBigInt {
             return CtBigInt::from_int(0);
         }
         let divisor = Self::gcd(left, right);
-        let quotient = left
-            .abs()
-            .div_rem(&divisor)
-            .expect("lcm gcd is nonzero")
-            .0;
+        let quotient = left.abs().div_rem(&divisor).expect("lcm gcd is nonzero").0;
         quotient.mul(&right.abs())
     }
 
@@ -850,10 +856,7 @@ impl CtBigInt {
         let mut result = one.clone();
         while index.compare(&limit) != std::cmp::Ordering::Greater {
             let numerator = n.sub(&limit).add(&index);
-            result = result
-                .mul(&numerator)
-                .div_rem(&index)?
-                .0;
+            result = result.mul(&numerator).div_rem(&index)?.0;
             index = index.add(&one);
         }
         Some(result)
@@ -1106,14 +1109,20 @@ impl CtDecimal {
         crate::AST::CtValue::Struct {
             type_name: crate::Syntax::TYPE_DECIMAL.to_string(),
             fields: vec![
-                ("negative".to_string(), crate::AST::CtValue::Bool(self.negative)),
+                (
+                    "negative".to_string(),
+                    crate::AST::CtValue::Bool(self.negative),
+                ),
                 (
                     "digits".to_string(),
                     crate::AST::CtValue::Str(
                         self.digits.iter().map(|d| (b'0' + *d) as char).collect(),
                     ),
                 ),
-                ("scale".to_string(), crate::AST::CtValue::Int(self.scale as i64)),
+                (
+                    "scale".to_string(),
+                    crate::AST::CtValue::Int(self.scale as i64),
+                ),
             ],
         }
     }

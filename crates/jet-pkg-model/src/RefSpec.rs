@@ -193,15 +193,6 @@ impl SourceTable {
         }
     }
 
-    /// Merge `other` into this table, filling in names that are not already
-    /// declared here. `self` wins on conflict — inline declarations take
-    /// priority over `jetpack.toml` fallbacks.
-    pub fn merge_defaults(&mut self, other: SourceTable) {
-        for (name, entry) in other.named {
-            self.named.entry(name).or_insert(entry);
-        }
-    }
-
     /// One `name=upstream@provider` line per declared source, in name order
     /// (the `BTreeMap` is already sorted). U19: folded into the trust-gate's
     /// env-definition hash, so re-pointing a named source (even with an

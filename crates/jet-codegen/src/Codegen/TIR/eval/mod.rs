@@ -1221,23 +1221,10 @@ enum EvalCallable<'a> {
         captured: HashMap<String, CtValue>,
     },
     Named(&'a str),
-    ComputeTransform {
-        base: CtValue,
-        method: String,
-        targets: Vec<i64>,
+    ComputeHandle {
+        handle: crate::Comptime::ComputeLite::JetComputeHandle,
+        kind: crate::Comptime::ComputeLite::JetComputeTransformKind,
         result_ty: Type,
-    },
-    ComputePull {
-        output: CtValue,
-        anchor: CtValue,
-        targets: Vec<i64>,
-        gradient_ty: Type,
-    },
-    ComputeGrads {
-        output: CtValue,
-        anchor: CtValue,
-        targets: Vec<i64>,
-        gradient_ty: Type,
     },
 }
 
@@ -1247,23 +1234,10 @@ enum EvalCallableSnapshot<'a> {
         captured: HashMap<String, CtValue>,
     },
     Named(&'a str),
-    ComputeTransform {
-        base: CtValue,
-        method: String,
-        targets: Vec<i64>,
+    ComputeHandle {
+        handle: crate::Comptime::ComputeLite::JetComputeHandle,
+        kind: crate::Comptime::ComputeLite::JetComputeTransformKind,
         result_ty: Type,
-    },
-    ComputePull {
-        output: CtValue,
-        anchor: CtValue,
-        targets: Vec<i64>,
-        gradient_ty: Type,
-    },
-    ComputeGrads {
-        output: CtValue,
-        anchor: CtValue,
-        targets: Vec<i64>,
-        gradient_ty: Type,
     },
 }
 
@@ -1793,7 +1767,7 @@ impl<'a> EvalCtx<'a> {
         if self.task_sender.is_some() {
             return run(self);
         }
-        let (ambient_core, ambient_handle) = crate::Comptime::ambient_hooks();
+        let (ambient_core, ambient_handle, ambient_extern) = crate::Comptime::ambient_hooks();
         std::thread::scope(|threads| {
             let (sender, receiver) = mpsc::channel();
             self.task_sender = Some(sender);
@@ -1813,6 +1787,7 @@ impl<'a> EvalCtx<'a> {
                                     crate::Comptime::with_ambient(
                                         ambient_core,
                                         ambient_handle,
+                                        ambient_extern,
                                         || Self::run_eval_job(job_config, job),
                                     )
                                 })
@@ -3469,38 +3444,12 @@ impl<'a> EvalCtx<'a> {
                     }
                 }
                 Some(EvalCallable::Named(name)) => EvalCallableSnapshot::Named(*name),
-                Some(EvalCallable::ComputeTransform {
-                    base,
-                    method,
-                    targets,
-                    result_ty,
-                }) => EvalCallableSnapshot::ComputeTransform {
-                    base: base.clone(),
-                    method: method.clone(),
-                    targets: targets.clone(),
-                    result_ty: result_ty.clone(),
-                },
-                Some(EvalCallable::ComputePull {
-                    output,
-                    anchor,
-                    targets,
-                    gradient_ty,
-                }) => EvalCallableSnapshot::ComputePull {
-                    output: output.clone(),
-                    anchor: anchor.clone(),
-                    targets: targets.clone(),
-                    gradient_ty: gradient_ty.clone(),
-                },
-                Some(EvalCallable::ComputeGrads {
-                    output,
-                    anchor,
-                    targets,
-                    gradient_ty,
-                }) => EvalCallableSnapshot::ComputeGrads {
-                    output: output.clone(),
-                    anchor: anchor.clone(),
-                    targets: targets.clone(),
-                    gradient_ty: gradient_ty.clone(),
+                Some(EvalCallable::ComputeHandle { handle, kind, result_ty }) => {
+                    EvalCallableSnapshot::ComputeHandle {
+                        handle: handle.clone(),
+                        kind: *kind,
+                        result_ty: result_ty.clone(),
+                    }
                 },
                 None => return Err(unsupported("calling an unknown function value", self.span())),
             }
@@ -3535,24 +3484,9 @@ impl<'a> EvalCtx<'a> {
                 let mut child = HashMap::new();
                 self.run_func(func, args, &mut child)
             }
-            EvalCallableSnapshot::ComputeTransform {
-                base,
-                method,
-                targets,
-                result_ty,
-            } => self.eval_compute_transform(&method, base, args, targets, &result_ty),
-            EvalCallableSnapshot::ComputePull {
-                output,
-                anchor,
-                targets,
-                gradient_ty,
-            } => self.eval_compute_pull(output, anchor, args, targets, &gradient_ty),
-            EvalCallableSnapshot::ComputeGrads {
-                output,
-                anchor,
-                targets,
-                gradient_ty,
-            } => self.eval_compute_grads(output, anchor, args, targets, &gradient_ty),
+            EvalCallableSnapshot::ComputeHandle { handle, kind, result_ty } => {
+                self.eval_compute_handle(&handle, kind, args, &result_ty)
+            }
         }
     }
 
@@ -4345,7 +4279,7 @@ fn run_program_with_structs_at_stage_and_cli(
     // yields a plain `Str` that matches neither the `.Ok` nor the `.Err` arm and
     // the arm table prints nothing. The comptime ambient hooks are the one piece
     // of caller-established state the run reads, so they are carried explicitly.
-    let (ambient_core, ambient_handle) = crate::Comptime::ambient_hooks();
+    let (ambient_core, ambient_handle, ambient_extern) = crate::Comptime::ambient_hooks();
     let edition = program.edition.clone();
     // D-FAIL-CTX1 / I9: the E3002 journey belongs to the program, not to
     // whichever thread the evaluator needed for stack room. `?` pushes its hop
@@ -4364,21 +4298,26 @@ fn run_program_with_structs_at_stage_and_cli(
             .stack_size(64 * 1024 * 1024)
             .spawn_scoped(scope, move || {
                 let outcome = jet_foundation::PackageEdition::with_package_edition(&edition, || {
-                crate::Comptime::with_ambient(ambient_core, ambient_handle, || {
-                    run_program_with_structs_on_stack(
-                        program,
-                        base_dir,
-                        sink,
-                        globals,
-                        core_imports,
-                        gates,
-                        struct_fields,
-                        struct_field_types,
-                        stage,
-                        cli_dispatch,
-                        package_hardened,
+                    crate::Comptime::with_ambient(
+                        ambient_core,
+                        ambient_handle,
+                        ambient_extern,
+                        || {
+                            run_program_with_structs_on_stack(
+                                program,
+                                base_dir,
+                                sink,
+                                globals,
+                                core_imports,
+                                gates,
+                                struct_fields,
+                                struct_field_types,
+                                stage,
+                                cli_dispatch,
+                                package_hardened,
+                            )
+                        },
                     )
-                })
                 });
                 (outcome, jet_foundation::Outcome::jet_journey_take_hops())
             })
@@ -4802,56 +4741,68 @@ fn eval_expr_hook(
     req: &mut Comptime::TirBridge::ExprEvalRequest<'_>,
 ) -> Result<CtValue, Diagnostic> {
     let fragment_funcs = merge_fragment_funcs(req.funcs, req.methods);
-    let (tir, mut spawn_lambdas) = lower_expr_for_eval(
-        req.expr,
-        &fragment_funcs,
-        req.methods,
-        req.structs,
-        req.computed_fields,
-        req.globals,
-        req.core_imports,
-        req.distinct_ranges,
-        req.distinct_bases,
-        req.unit_families,
-    )?;
-    let mut cx = empty_cx();
-    seed_fragment_structs(&mut cx, req.structs, req.methods, req.computed_fields);
-    seed_fragment_distinct_types(&mut cx, req.distinct_ranges, req.distinct_bases);
-    seed_fragment_unit_families(&mut cx, req.unit_families);
-    seed_fragment_funcs(&mut cx, &fragment_funcs);
-    cx.struct_fields = normalize_struct_field_types(req.structs);
-    cx.type_names.extend(req.structs.keys().cloned());
-    cx.core_imports = req.core_imports.clone();
-    cx.jit_spawn_site_base = spawn_lambdas.len();
-    let lowered: Vec<TFunc> = fragment_funcs
-        .iter()
-        .filter_map(|(name, f)| {
-            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                crate::Codegen::TIR::with_eval_fragment(|| {
-                    let mut lowered = match name.rsplit_once("::") {
-                        Some((owner, method))
-                            if req
-                                .methods
-                                .contains_key(&(owner.to_string(), method.to_string())) =>
-                        {
-                            TIR::lower_method(f, owner, &cx)
-                        }
-                        Some((owner, "encode")) => {
-                            TIR::lower_trait_method(f, owner, &cx, crate::Generics::ENCODE)
-                        }
-                        Some((owner, "decode")) => {
-                            TIR::lower_trait_method(f, owner, &cx, crate::Generics::DECODE)
-                        }
-                        _ => TIR::lower_func(f, &cx),
-                    };
-                    lowered.name = name.clone();
-                    lowered
+    let expr = req.expr;
+    let methods = req.methods;
+    let structs = req.structs;
+    let computed_fields = req.computed_fields;
+    let globals = req.globals;
+    let core_imports = req.core_imports;
+    let distinct_ranges = req.distinct_ranges;
+    let distinct_bases = req.distinct_bases;
+    let unit_families = req.unit_families;
+    let (tir, spawn_lambdas, lowered) =
+        jet_foundation::CompilerStack::run_on_compiler_stack(move || {
+            let (tir, mut spawn_lambdas) = lower_expr_for_eval(
+                expr,
+                &fragment_funcs,
+                methods,
+                structs,
+                computed_fields,
+                globals,
+                core_imports,
+                distinct_ranges,
+                distinct_bases,
+                unit_families,
+            )?;
+            let mut cx = empty_cx();
+            seed_fragment_structs(&mut cx, structs, methods, computed_fields);
+            seed_fragment_distinct_types(&mut cx, distinct_ranges, distinct_bases);
+            seed_fragment_unit_families(&mut cx, unit_families);
+            seed_fragment_funcs(&mut cx, &fragment_funcs);
+            cx.struct_fields = normalize_struct_field_types(structs);
+            cx.type_names.extend(structs.keys().cloned());
+            cx.core_imports = core_imports.clone();
+            cx.jit_spawn_site_base = spawn_lambdas.len();
+            let lowered: Vec<TFunc> = fragment_funcs
+                .iter()
+                .filter_map(|(name, f)| {
+                    std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                        crate::Codegen::TIR::with_eval_fragment(|| {
+                            let mut lowered = match name.rsplit_once("::") {
+                                Some((owner, method))
+                                    if methods
+                                        .contains_key(&(owner.to_string(), method.to_string())) =>
+                                {
+                                    TIR::lower_method(f, owner, &cx)
+                                }
+                                Some((owner, "encode")) => {
+                                    TIR::lower_trait_method(f, owner, &cx, crate::Generics::ENCODE)
+                                }
+                                Some((owner, "decode")) => {
+                                    TIR::lower_trait_method(f, owner, &cx, crate::Generics::DECODE)
+                                }
+                                _ => TIR::lower_func(f, &cx),
+                            };
+                            lowered.name = name.clone();
+                            lowered
+                        })
+                    }))
+                    .ok()
                 })
-            }))
-            .ok()
-        })
-        .collect();
-    spawn_lambdas.extend(std::mem::take(&mut *cx.jit_spawn_lambdas.borrow_mut()));
+                .collect();
+            spawn_lambdas.extend(std::mem::take(&mut *cx.jit_spawn_lambdas.borrow_mut()));
+            Ok((tir, spawn_lambdas, lowered))
+        })?;
     let funcs: HashMap<String, &TFunc> = lowered.iter().map(|f| (f.name.clone(), f)).collect();
     let base_dir = req.base_dir.to_path_buf();
     let fuel = req.fuel;

@@ -347,6 +347,46 @@ fn budget_update_is_plan_first_and_yes_applies_once() {
 }
 
 #[test]
+#[cfg(target_os = "linux")]
+fn build_artifact_receipt_collects_footprint_samples() {
+    use jet_foundation::PerformanceBudget::CanonicalJson;
+
+    let source = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("examples/performance/receipts/hello");
+    let dir = isolated_cwd("build_artifact_receipt");
+    copy_dir_all(&source, &dir);
+    let output = Command::new(jet()).args(["budget", "check", "--json"]).current_dir(&dir).output().unwrap();
+    assert_eq!(output.status.code(), Some(1), "missing statistical baseline must be unavailable");
+    assert!(output.stderr.is_empty(), "JSON mode must keep diagnostics in stdout");
+
+    let CanonicalJson::Object(command) = CanonicalJson::parse_canonical(&output.stdout).unwrap() else { panic!("command") };
+    let CanonicalJson::Object(report) = &command["report"] else { panic!("report") };
+    let CanonicalJson::Object(content) = &report["content"] else { panic!("content") };
+    let CanonicalJson::Array(measurements) = &content["measurements"] else { panic!("measurements") };
+    assert_eq!(measurements.len(), 3);
+    for measurement in measurements {
+        let CanonicalJson::Object(measurement) = measurement else { panic!("measurement") };
+        let CanonicalJson::Object(provider) = &measurement["provider"] else { panic!("provider") };
+        assert_eq!(provider["kind"], CanonicalJson::String("BuildArtifact".into()));
+        assert_eq!(provider["version"], CanonicalJson::String("jet-artifact-footprint-v1-first-line-vmhwm-trials-20".into()));
+        assert_eq!(provider["isolation"], CanonicalJson::String("fresh-child-process-per-trial".into()));
+        let CanonicalJson::Object(metric) = &measurement["metric"] else { panic!("metric") };
+        let CanonicalJson::Array(samples) = &measurement["samples"] else { panic!("samples") };
+        match &metric["name"] {
+            CanonicalJson::String(name) if name == "BinarySize" => assert_eq!(samples.len(), 1),
+            CanonicalJson::String(name) if name == "StartupTime" || name == "MemoryHighWater" => assert_eq!(samples.len(), 20),
+            other => panic!("unexpected metric: {other:?}"),
+        }
+        for sample in samples {
+            let CanonicalJson::Object(sample) = sample else { panic!("sample") };
+            assert!(matches!(sample["num"], CanonicalJson::Integer(ref value) if value != "0"));
+            assert_eq!(sample["den"], CanonicalJson::Integer("1".into()));
+        }
+    }
+    assert!(CanonicalJson::Object(content.clone()).bytes().windows(b"Throughput".len()).all(|window| window != b"Throughput"));
+    jet_foundation::PerformanceBudget::verify_budget_report(&CanonicalJson::Object(report.clone()).bytes()).unwrap();
+}
+
+#[test]
 fn budget_json_projection_is_exact_and_tool_failure_uses_null_report_fields() {
     use jet_foundation::PerformanceBudget::CanonicalJson;
     let dir = budget_project("budget_json_exact", 10);

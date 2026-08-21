@@ -9,15 +9,15 @@ impl StoreErr => Err {
     return Err("missing")
 }
 
-fn read_store() => Int ? StoreErr {
+fn read_store() => Int ! StoreErr {
     return Err(StoreErr.Missing)
 }
 
-fn get_user() => Int ? {
+fn get_user() => Int ! {
     return Ok(read_store()?)
 }
 
-fn run() ? {
+fn run() ! {
     get_user()?
 }
 "#;
@@ -32,11 +32,11 @@ impl String => Err {
     return Err(self)
 }
 
-fn read_store() => Int ? String {
+fn read_store() => Int ! String {
     return Err("missing")
 }
 
-fn run() ? {
+fn run() ! {
     value :: read_store()?
     print(value)
 }
@@ -66,11 +66,11 @@ impl StoreErr => Err {
     return Err("store unavailable")
 }
 
-fn read_store() => Int ? StoreErr {
+fn read_store() => Int ! StoreErr {
     return Err(StoreErr.Missing)
 }
 
-fn get_user() => Int ? {
+fn get_user() => Int ! {
     value :: read_store()?
     return Ok(value)
 }

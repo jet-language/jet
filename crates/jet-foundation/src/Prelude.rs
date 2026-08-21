@@ -5,8 +5,8 @@
 
 use std::sync::LazyLock;
 
-use crate::AST::CtValue;
 use crate::Diagnostics::{Diagnostic, Span};
+use crate::AST::CtValue;
 
 pub const SOURCE: &str = include_str!("../../jet-codegen/src/Prelude/core/prelude.jet");
 
@@ -107,7 +107,7 @@ pub fn migration_lint_for(
 ) -> Option<&'static str> {
     (entry(name).is_some()
         && jet_foundation_epoch_year(package_edition) < jet_foundation_epoch_year(introduced))
-        .then_some(PRELUDE_MIGRATION_LINT)
+    .then_some(PRELUDE_MIGRATION_LINT)
 }
 
 /// Every name in the current registry belongs to the current prelude epoch.
@@ -128,7 +128,11 @@ fn parse(source: &'static str) -> Vec<Entry> {
             continue;
         }
         if let Some(rest) = line.strip_prefix("pub fn ") {
-            if let Some(name) = rest.split(['(', ' ', '{']).next().filter(|name| !name.is_empty()) {
+            if let Some(name) = rest
+                .split(['(', ' ', '{'])
+                .next()
+                .filter(|name| !name.is_empty())
+            {
                 entries.push(Entry {
                     name,
                     target: Target::Builtin,
@@ -145,7 +149,11 @@ fn parse(source: &'static str) -> Vec<Entry> {
         let Some(members) = members.strip_suffix(']') else {
             continue;
         };
-        for member in members.split(',').map(str::trim).filter(|member| !member.is_empty()) {
+        for member in members
+            .split(',')
+            .map(str::trim)
+            .filter(|member| !member.is_empty())
+        {
             let mut names = member.split(" as ").map(str::trim);
             let original = names.next().unwrap_or_default();
             let local = names.next().unwrap_or(original);
@@ -162,7 +170,10 @@ fn parse(source: &'static str) -> Vec<Entry> {
                     item: original,
                 }
             };
-            entries.push(Entry { name: local, target });
+            entries.push(Entry {
+                name: local,
+                target,
+            });
         }
     }
     entries
@@ -171,18 +182,24 @@ fn parse(source: &'static str) -> Vec<Entry> {
 #[cfg(test)]
 mod tests {
     use super::{
-        addition_is_epoch_boundary, entry, entries, introduced_epoch, jet_as_bytes,
-        migration_lint_for, names, Target, POLICY_CRITERIA, PRELUDE_EPOCH,
-        PRELUDE_MIGRATION_LINT, SOURCE,
+        addition_is_epoch_boundary, entries, entry, introduced_epoch, jet_as_bytes,
+        migration_lint_for, names, Target, POLICY_CRITERIA, PRELUDE_EPOCH, PRELUDE_MIGRATION_LINT,
+        SOURCE,
     };
-    use crate::AST::CtValue;
     use crate::Diagnostics::Span;
+    use crate::AST::CtValue;
 
     #[test]
     fn source_is_the_complete_ambient_registry() {
         assert_eq!(entries().len(), 21);
-        assert_eq!(entry("print").map(|entry| entry.target), Some(Target::Builtin));
-        assert_eq!(entry("assert_eq").map(|entry| entry.target), Some(Target::Builtin));
+        assert_eq!(
+            entry("print").map(|entry| entry.target),
+            Some(Target::Builtin)
+        );
+        assert_eq!(
+            entry("assert_eq").map(|entry| entry.target),
+            Some(Target::Builtin)
+        );
         assert_eq!(
             entry("keep").map(|entry| entry.target),
             Some(Target::Core {
@@ -197,7 +214,10 @@ mod tests {
                 item: "read",
             })
         );
-        assert_eq!(entry("embed_file").map(|entry| entry.target), Some(Target::Comptime));
+        assert_eq!(
+            entry("embed_file").map(|entry| entry.target),
+            Some(Target::Comptime)
+        );
         assert_eq!(entry("Clock").map(|entry| entry.target), Some(Target::Type));
         assert!(names().any(|name| name == "file_exists"));
     }
@@ -210,8 +230,8 @@ mod tests {
             CtValue::List(vec![CtValue::Int(256)]),
             CtValue::List(vec![CtValue::Str("not a byte".to_string())]),
         ] {
-            let error = jet_as_bytes(&value, span)
-                .expect_err("invalid byte value must be rejected");
+            let error =
+                jet_as_bytes(&value, span).expect_err("invalid byte value must be rejected");
             assert_eq!(error.code, "E0956");
             assert_eq!(
                 error.what,
@@ -231,7 +251,9 @@ mod tests {
     #[test]
     fn policy_is_the_ratified_seven_part_gate() {
         assert_eq!(POLICY_CRITERIA.len(), 7);
-        assert!(POLICY_CRITERIA.iter().all(|criterion| !criterion.is_empty()));
+        assert!(POLICY_CRITERIA
+            .iter()
+            .all(|criterion| !criterion.is_empty()));
         assert!(addition_is_epoch_boundary("2026", "2027"));
         assert!(!addition_is_epoch_boundary("2026", "2026"));
     }
@@ -256,8 +278,14 @@ mod tests {
         assert!(!SOURCE.contains("into("));
 
         let total = [
-            "print", "panic", "assert", "assert_eq", "keep", "eprint",
-            "file_exists", "channel",
+            "print",
+            "panic",
+            "assert",
+            "assert_eq",
+            "keep",
+            "eprint",
+            "file_exists",
+            "channel",
         ];
         let result = ["input", "read_file", "write_file"];
         for entry in entries() {

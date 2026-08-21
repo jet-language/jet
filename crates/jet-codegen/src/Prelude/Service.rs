@@ -5,12 +5,33 @@
 use jet_foundation::AST::CtValue;
 use jet_foundation::Diagnostics::{Diagnostic, Span};
 
+fn workflow_wait(nanos: i64) -> jet_codegen::Comptime::ServicesLite::JetServiceWorkflowWait<()> {
+    match jet_codegen::scheduler::jet_scheduler_wait_without_unwind(|| {
+        jet_codegen::scheduler::jet_std_time_sleep_duration_ns(nanos)
+    }) {
+        jet_codegen::scheduler::JetSchedulerWait::Ready(()) => {
+            jet_codegen::Comptime::ServicesLite::JetServiceWorkflowWait::Ready(())
+        }
+        jet_codegen::scheduler::JetSchedulerWait::Cancelled => {
+            jet_codegen::Comptime::ServicesLite::JetServiceWorkflowWait::Cancelled
+        }
+        jet_codegen::scheduler::JetSchedulerWait::Deadline(reason) => {
+            jet_codegen::Comptime::ServicesLite::JetServiceWorkflowWait::Deadline(reason)
+        }
+        jet_codegen::scheduler::JetSchedulerWait::Panicked(reason) => {
+            jet_codegen::Comptime::ServicesLite::JetServiceWorkflowWait::Panicked(reason)
+        }
+    }
+}
+
 pub(crate) fn services_apply(
     method: &str,
     args: &[CtValue],
     span: Span,
 ) -> Result<CtValue, Diagnostic> {
-    jet_codegen::Comptime::ServicesLite::apply(method, args, span)
+    jet_codegen::Comptime::ServicesLite::with_workflow_wait(workflow_wait, || {
+        jet_codegen::Comptime::ServicesLite::apply(method, args, span)
+    })
 }
 
 pub(crate) fn services_runtime_apply(

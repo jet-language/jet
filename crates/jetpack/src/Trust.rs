@@ -14,8 +14,8 @@
 //! Store: `~/.jet/trust` (`Syntax::TRUST_FILE` under `Syntax::CONFIG_DEFAULT_DIR`,
 //! HOME-resolved the same way `JetOS::resolve_config_path` resolves
 //! `~/.jet/config.jet`). Plain newline-separated lines, `hash:<sha256>` or
-//! `pattern:<glob/prefix>` — the same plain-text style `Recipe::trust_first_build`
-//! already uses for its own (project-local, adapter-recipe) trust marker.
+//! `pattern:<glob/prefix>`. `Recipe::trust_first_build` uses this store and
+//! record format through the helpers below.
 
 use std::io::IsTerminal;
 use std::path::{Path, PathBuf};
@@ -651,13 +651,15 @@ fn matches_canonical_pattern(pattern: &str, subject: &str) -> bool {
     }
 }
 
-/// Persist a hash grant (the interactive prompt's "yes"). Idempotent.
-pub fn grant_hash(store: &Path, hash: &str) {
+/// Persist a hash grant (the interactive prompt's "yes"). Returns `true` when
+/// the grant is new and `false` when the store already contains it.
+pub fn grant_hash(store: &Path, hash: &str) -> bool {
     let line = format!("{HASH_PREFIX}{hash}");
     if read_lines(store).iter().any(|l| *l == line) {
-        return;
+        return false;
     }
     append_line(store, &line);
+    true
 }
 
 /// `jetpack config trust add <pattern>`. Returns `false` if already present.

@@ -504,6 +504,9 @@ thread_local! {
     static JIT_LOG_LEVEL: Cell<u8> = const { Cell::new(1) };
     static JIT_LOG_DISABLED: Cell<bool> = const { Cell::new(false) };
     static JIT_LOG_FORMAT: Cell<u8> = const { Cell::new(0) };
+    static JIT_LOG_SINK_PATH: RefCell<String> = const { RefCell::new(String::new()) };
+    static JIT_LOG_SAMPLE_EVERY: Cell<i64> = const { Cell::new(1) };
+    static JIT_LOG_SAMPLE_COUNT: Cell<i64> = const { Cell::new(0) };
     static JIT_LOG_TRACE_ID: RefCell<String> = const { RefCell::new(String::new()) };
     static JIT_LOG_SPANS: RefCell<Vec<(i64, String)>> = const { RefCell::new(Vec::new()) };
     static JIT_LOG_NEXT_SPAN: Cell<i64> = const { Cell::new(1) };
@@ -547,6 +550,21 @@ fn jit_log_setup_str(format: &str) {
     JIT_LOG_FORMAT.with(|f| f.set(n));
 }
 
+fn jit_log_set_sink_str(kind: &str, path: &str) {
+    let n: u8 = match kind {
+        "jsonl" | "json" => 1,
+        "text" => 2,
+        _ => 1,
+    };
+    JIT_LOG_FORMAT.with(|f| f.set(n));
+    JIT_LOG_SINK_PATH.with(|p| *p.borrow_mut() = path.to_string());
+}
+
+fn jit_log_sample_every(n: i64) {
+    JIT_LOG_SAMPLE_EVERY.with(|every| every.set(n.max(1)));
+    JIT_LOG_SAMPLE_COUNT.with(|count| count.set(0));
+}
+
 fn jit_log_format_active() -> u8 {
     let explicit = JIT_LOG_FORMAT.with(|f| f.get());
     if explicit != 0 {
@@ -572,6 +590,23 @@ fn jit_log_json_escape(s: &str) -> String {
         }
     }
     out
+}
+
+fn jit_log_write(line: &str) {
+    let path = JIT_LOG_SINK_PATH.with(|p| p.borrow().clone());
+    if path.is_empty() {
+        let _ = crate::runtime_host::write_jit_stderr(
+            &crate::IO::term_prelude::jet_term_print_frame(line),
+            false,
+        );
+    } else if let Ok(mut file) = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(path)
+    {
+        use std::io::Write;
+        let _ = writeln!(file, "{line}");
+    }
 }
 
 /// Mirrors AOT `unix_to_ymdhms` in RingCsvLogTimeCrypto.rs.
@@ -613,6 +648,16 @@ fn is_leap(y: i32) -> bool {
 
 fn jit_log_emit(level: &str, msg: &str, fields: &[JitLogField]) {
     if JIT_LOG_DISABLED.with(|d| d.get()) {
+        return;
+    }
+    let keep = JIT_LOG_SAMPLE_EVERY.with(|every| {
+        JIT_LOG_SAMPLE_COUNT.with(|count| {
+            let next = count.get() + 1;
+            count.set(next);
+            every.get() <= 1 || (next - 1) % every.get() == 0
+        })
+    });
+    if !keep {
         return;
     }
     let ts = std::time::SystemTime::now()
@@ -685,12 +730,7 @@ fn jit_log_emit(level: &str, msg: &str, fields: &[JitLogField]) {
             )
         }
     };
-    // One routing adapter: a log line belongs where the program's other lines
-    // land, in the order the program emitted it.
-    let _ = crate::runtime_host::write_jit_stderr(
-        &crate::IO::term_prelude::jet_term_print_frame(&line),
-        false,
-    );
+    jit_log_write(&line);
 }
 
 fn jet_jit_log_set_level(msg: i64) {
@@ -699,6 +739,18 @@ fn jet_jit_log_set_level(msg: i64) {
 
 fn jet_jit_log_setup(msg: i64) {
     jit_log_setup_str(&clone_string(msg));
+}
+
+fn jet_jit_log_set_sink(kind: i64, path: i64) {
+    jit_log_set_sink_str(&clone_string(kind), &clone_string(path));
+}
+
+fn jet_jit_log_sample_every(n: i64) {
+    jit_log_sample_every(n);
+}
+
+fn jet_jit_log_otlp_file(path: i64) {
+    jit_log_set_sink_str("jsonl", &clone_string(path));
 }
 
 fn jet_jit_log_debug(msg: i64) {
@@ -745,6 +797,19 @@ fn jet_jit_log_disable() {
 
 fn jet_jit_log_flush() {
     let _ = std::io::Write::flush(&mut std::io::stderr());
+    JIT_LOG_SINK_PATH.with(|path| {
+        let path = path.borrow();
+        if path.is_empty() {
+            return;
+        }
+        if let Ok(mut file) = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(path.as_str())
+        {
+            let _ = std::io::Write::flush(&mut file);
+        }
+    });
 }
 
 fn jet_jit_log_enabled(level: i64) -> i8 {
@@ -884,6 +949,44 @@ fn jet_jit_log_info_fields(msg: i64, fields: i64) {
         let fs = read_log_fields(fields);
         jit_log_emit("info", &clone_string(msg), &fs);
     }
+}
+
+pub(crate) fn ambient_log_set_sink(kind: &str, path: &str) {
+    jit_log_set_sink_str(kind, path);
+}
+
+pub(crate) fn ambient_log_sample_every(n: i64) {
+    jit_log_sample_every(n);
+}
+
+pub(crate) fn ambient_log_otlp_file(path: &str) {
+    jit_log_set_sink_str("jsonl", path);
+}
+
+pub(crate) fn ambient_log_disable() {
+    JIT_LOG_DISABLED.with(|disabled| disabled.set(true));
+}
+
+pub(crate) fn ambient_log_emit(level: &str, message: &str, fields: &[(String, String, String)]) {
+    let Some(rank) = jit_log_level_rank(level) else {
+        return;
+    };
+    if JIT_LOG_LEVEL.with(|current| current.get() > rank) {
+        return;
+    }
+    let fields = fields
+        .iter()
+        .map(|(key, value, kind)| JitLogField {
+            key: key.clone(),
+            value: value.clone(),
+            kind: kind.clone(),
+        })
+        .collect::<Vec<_>>();
+    jit_log_emit(level, message, &fields);
+}
+
+pub(crate) fn ambient_log_flush() {
+    jet_jit_log_flush();
 }
 
 // ── core.files and typed Path (mirrors jet_std_fs_* / jet_std_path_*) ────────
@@ -2148,6 +2251,9 @@ host_fns! {
     os_stop: "jet_jit_os_stop" => jet_jit_os_stop: sig_void_i64;
     log_set_level: "jet_jit_log_set_level" => jet_jit_log_set_level: sig_void_str;
     log_setup: "jet_jit_log_setup" => jet_jit_log_setup: sig_void_str;
+    log_set_sink: "jet_jit_log_set_sink" => jet_jit_log_set_sink: sig_void_i64_i64;
+    log_sample_every: "jet_jit_log_sample_every" => jet_jit_log_sample_every: sig_void_i64;
+    log_otlp_file: "jet_jit_log_otlp_file" => jet_jit_log_otlp_file: sig_void_str;
     log_debug: "jet_jit_log_debug" => jet_jit_log_debug: sig_void_str;
     log_info: "jet_jit_log_info" => jet_jit_log_info: sig_void_str;
     log_warn: "jet_jit_log_warn" => jet_jit_log_warn: sig_void_str;

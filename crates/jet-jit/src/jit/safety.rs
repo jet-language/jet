@@ -45,6 +45,7 @@ fn resident_safe_string_parts(parts: &[TStrPart], callees: &HashSet<String>) -> 
 fn resident_safe_compute_call(
     method: &str,
     args: &[TExpr],
+    result_ty: &Type,
     callees: &HashSet<String>,
 ) -> bool {
     match (method, args) {
@@ -66,6 +67,7 @@ fn resident_safe_compute_call(
                             .iter()
                             .all(|(_, field)| field.is_compute_tensor_family())))
             });
+            let valid_transform_result = resident_safe_compute_result(method, args, result_ty);
             let value_count = args.len().saturating_sub(2);
             let expected_values = if value_count == 0 {
                 0
@@ -77,6 +79,7 @@ fn resident_safe_compute_call(
             value_count == expected_values
                 && valid_params
                 && valid_result
+                && valid_transform_result
                 && args.iter().all(|arg| resident_safe_expr(arg, callees))
         }
         ("from_list", [values]) if jit_list_float_type(&values.ty) => {
@@ -224,6 +227,36 @@ fn resident_safe_compute_call(
         ("to_list", [tensor]) if tensor.ty.is_compute_tensor_family() => {
             resident_safe_expr(tensor, callees)
         }
+        _ => false,
+    }
+}
+
+fn resident_safe_compute_gradient_result(ty: &Type) -> bool {
+    ty.is_compute_tensor_family()
+        || matches!(ty, Type::Tuple(fields) if fields
+            .iter()
+            .all(|(_, field)| resident_safe_compute_gradient_result(field)))
+}
+
+fn resident_safe_compute_result(method: &str, args: &[TExpr], result_ty: &Type) -> bool {
+    let result = if args.len() == 2 {
+        let Type::Fn { ret: Some(ret), .. } = result_ty else {
+            return false;
+        };
+        ret.as_ref()
+    } else {
+        result_ty
+    };
+    match method {
+        "gradient" => resident_safe_compute_gradient_result(result),
+        "value_and_gradient" => matches!(result, Type::Tuple(fields) if fields.len() == 2
+            && fields[0].1.is_compute_tensor_family()
+            && resident_safe_compute_gradient_result(fields[1].1.as_ref())),
+        "jvp" => matches!(result, Type::Tuple(fields) if fields.len() == 2
+            && fields.iter().all(|(_, field)| field.is_compute_tensor_family())),
+        "vjp" => matches!(result, Type::Apply { name, args } if name == "VjpRun"
+            && args.len() == 1
+            && resident_safe_compute_gradient_result(&args[0])),
         _ => false,
     }
 }
@@ -609,7 +642,7 @@ mod gate_follows_lowering {
     /// `iconst(I64, 0)` — so the gate may not answer for one and refuse the
     /// other. It refused `Unit`, which fell into `resident_safe_expr_recursive`'s
     /// `_ => false`, and that refused every fallible-void `fn run` spelling an
-    /// early bare `return`: D-FAIL-EXIT1 makes such a `run` return `Unit ? Err`,
+    /// early bare `return`: D-FAIL-EXIT1 makes such a `run` return `Unit ! Err`,
     /// and TIR lowers the bare `return` to `Return(Some(Ok(Unit)))`
     /// (`lower/statements.rs`). `examples/features/io/watcher.jet:15` was the
     /// corpus case.
@@ -2095,7 +2128,7 @@ fn resident_safe_expr_recursive(expr: &TExpr, callees: &HashSet<String>) -> bool
                 return supported && args.iter().all(|arg| resident_safe_expr(arg, callees));
             }
             if module == "core.compute" {
-                return resident_safe_compute_call(method, args, callees);
+                return resident_safe_compute_call(method, args, &expr.ty, callees);
             }
             // I8/I9: admission is not a second policy. `lower_service_core_call`
             // (lower_ctx.rs) accepts a call exactly when `service_core_arity`
@@ -4621,6 +4654,12 @@ pub(crate) fn resident_safe_stmt(stmt: &TStmt, callees: &HashSet<String>) -> boo
                             Type::Tuple(fields) => fields.len(),
                             _ => 0,
                         }
+                    && resident_safe_expr(init, callees))
+                || (matches!(
+                    &init.ty,
+                    Type::Apply { name, .. } if name == "VjpRun"
+                ) && binds.len() <= 3
+                    && !binds.is_empty()
                     && resident_safe_expr(init, callees))
                 || (matches!(
                     &init.ty,

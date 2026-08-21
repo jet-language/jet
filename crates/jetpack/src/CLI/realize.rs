@@ -1,6 +1,8 @@
 use super::parse::Flags;
 use super::update_search_info::shell_on_failed_build;
-use super::workspace_sources::{cwd_table, cwd_workspace_index, fixtures_for, load_toml_sources, project_root};
+use super::workspace_sources::{
+    cwd_table, cwd_workspace_index, fixtures_for, project_root, reject_retired_jetpack_toml,
+};
 use crate::EnvFile;
 use crate::Lock;
 use jet_env_model::ModuleEval;
@@ -367,7 +369,7 @@ pub(super) fn realize_adapter(
         offline: flags.offline,
         project_dir: project_dir.as_deref(),
     };
-    let expectation = match Provider::adapter_cache_expectation(plan, &ctx) {
+    let expectation = match Provider::adapter_cache_expectation(plan, table, &ctx) {
         Ok(expectation) => expectation,
         Err(error) => {
             report_provider_error(theme, &error);
@@ -380,6 +382,7 @@ pub(super) fn realize_adapter(
             recipe,
             &expectation.identity.source_fingerprint,
             &expectation.identity.platform,
+            table,
         );
         if Trust::gate_build_identity(theme, &Trust::store_path(), &identity, flags.trust)
             .is_err()
@@ -603,13 +606,9 @@ pub(super) fn load_project_plan_with_selections(
 ) -> Result<RunPlan, i32> {
     let cwd = std::env::current_dir().unwrap_or_default();
     let dir = project_env_root(&cwd);
-
-    // Load jetpack.toml [sources] first so they are available as defaults.
-    // If the file exists but is malformed, surface the diagnostics and bail out.
-    let toml_table = match load_toml_sources(&dir) {
-        Ok(t) => t,
-        Err((_, code)) => return Err(code),
-    };
+    if let Err(code) = reject_retired_jetpack_toml(&dir) {
+        return Err(code);
+    }
 
     let Ok(src) = std::fs::read_to_string(EnvFile::path_in(&dir)) else {
         theme.error(
@@ -627,14 +626,7 @@ pub(super) fn load_project_plan_with_selections(
     // (U3/U6/U8) is evaluated through `modeval`; the Phase-1 `pkg.*` directive
     // surface stays the fallback until the typed example fully replaces it.
     if ModuleEval::is_module_surface(&src) {
-        return typed_plan_with_defaults(
-            theme,
-            &src,
-            &dir,
-            toml_table,
-            requested_preset,
-            requested_environment,
-        );
+        return typed_plan(theme, &src, &dir, requested_preset, requested_environment);
     }
 
     if let Some(name) = requested_environment {
@@ -648,9 +640,7 @@ pub(super) fn load_project_plan_with_selections(
     }
 
     let ef = EnvFile::parse(&src);
-    let mut table = ef.source_table();
-    // Fold jetpack.toml sources as defaults (env.jet inline declarations win).
-    table.merge_defaults(toml_table);
+    let table = ef.source_table();
     let refs = classify_all(theme, ef.refs().iter().map(String::as_str), &table)?;
     Ok(RunPlan {
         project_root: dir.clone(),
@@ -666,15 +656,13 @@ pub(super) fn load_project_plan_with_selections(
     })
 }
 
-/// Evaluate the typed `module { … }` env surface (U3/U6/U8) into a plan,
-/// optionally seeding `jetpack.toml` [sources] as defaults. Source refs merge
-/// across modules and `Pkg` sugar resolves to `package@source` refs; the
-/// merged `prompt` becomes the shell label.
-fn typed_plan_with_defaults(
+/// Evaluate the typed `module { … }` env surface (U3/U6/U8) into a plan.
+/// Source refs merge across modules and `Pkg` sugar resolves to
+/// `package@source` refs; the merged `prompt` becomes the shell label.
+fn typed_plan(
     theme: &Theme,
     src: &str,
     dir: &Path,
-    toml_defaults: RefSpec::SourceTable,
     requested_preset: Option<&str>,
     requested_environment: Option<&str>,
 ) -> Result<RunPlan, i32> {
@@ -691,8 +679,7 @@ fn typed_plan_with_defaults(
         );
         2
     })?;
-    let mut table = plan.table;
-    table.merge_defaults(toml_defaults);
+    let table = plan.table;
     // U12: a dev service with no explicit `run:` that matches the built-in
     // catalog implicitly depends on that catalog's package (e.g. `redis: {
     // enable: true }` needs `redis-server` on PATH) — fold its ref in

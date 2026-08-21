@@ -4,7 +4,8 @@
 use super::Concurrency;
 use cranelift_codegen::ir::{types, AbiParam, Signature};
 use cranelift_module::Module;
-use jet_foundation::AST::{ProgramBundle, Type};
+use jet_foundation::AST::{CtFloat, CtValue, ProgramBundle, Type};
+use jet_foundation::Diagnostics::{Diagnostic, Span};
 use std::collections::HashMap;
 use std::ffi::{CStr, CString};
 use std::os::raw::{c_char, c_int, c_void};
@@ -87,6 +88,11 @@ unsafe impl Send for FfiState {}
 
 static FFI_STATE: Mutex<Option<FfiState>> = Mutex::new(None);
 
+enum BindError {
+    Diagnostics(Vec<Diagnostic>),
+    Message(String),
+}
+
 fn param_abi(ty: &Type) -> Option<ParamAbi> {
     match ty {
         Type::Int | Type::InlineRange { .. } => Some(ParamAbi::Int),
@@ -118,22 +124,46 @@ fn trap(msg: &str) {
 
 /// Prepare the AOT FFI bridge and bind its C-ABI trampolines for resident JIT.
 pub(crate) fn bind_bundle_ffi(bundle: &ProgramBundle) -> Result<(), String> {
+    bind_bundle_ffi_impl(bundle).map_err(|error| match error {
+        BindError::Diagnostics(diags) => diags
+            .into_iter()
+            .map(|d| format!("{}: {}", d.code, d.what))
+            .collect::<Vec<_>>()
+            .join("; "),
+        BindError::Message(reason) => reason,
+    })
+}
+
+/// Bind the bridge for tier 0 while preserving capability diagnostics from
+/// bridge preparation (for example E3201 when a native library is absent).
+pub(crate) fn bind_bundle_ffi_for_interpreter(
+    bundle: &ProgramBundle,
+) -> Result<(), Vec<Diagnostic>> {
+    bind_bundle_ffi_impl(bundle).map_err(|error| match error {
+        BindError::Diagnostics(diags) => diags,
+        BindError::Message(reason) => vec![Diagnostic::error(
+            "E0956",
+            format!("interpreter FFI bridge unavailable: {reason}"),
+            "the interpreter could not load the bridge used by the native FFI path".to_string(),
+            "report this as a compiler bug".to_string(),
+            None,
+        )],
+    })
+}
+
+fn bind_bundle_ffi_impl(bundle: &ProgramBundle) -> Result<(), BindError> {
     clear_ffi();
     let entries = jet_pkg_model::FFI::collect_externs(bundle);
     if entries.is_empty() {
         return Ok(());
     }
-    let link = jet_pkg_model::FFI::prepare(bundle).map_err(|diags| {
-        diags
-            .into_iter()
-            .map(|d| format!("{}: {}", d.code, d.what))
-            .collect::<Vec<_>>()
-            .join("; ")
-    })?;
+    let link = jet_pkg_model::FFI::prepare(bundle).map_err(BindError::Diagnostics)?;
     let Some(link) = link else {
-        return Err("jit ffi: prepare returned no link for extern entries".into());
+        return Err(BindError::Message(
+            "jit ffi: prepare returned no link for extern entries".into(),
+        ));
     };
-    load_cdylib(&link.cdylib_path, &entries)
+    load_cdylib(&link.cdylib_path, &entries).map_err(BindError::Message)
 }
 
 pub(crate) fn clear_ffi() {
@@ -248,46 +278,92 @@ fn load_cdylib(
     }
 }
 
-/// `wrapper` / `args` are heap string / int-list handles. Returns Jet ABI value
-/// (string handle, i64, f64-bits, bool as i64).
-fn jet_jit_extern_call(wrapper: i64, args: i64) -> i64 {
-    let name = clone_string(wrapper);
-    let argv = Concurrency::with_runtime_mut(|rt| {
-        let len = rt.heap.list_len(args).unwrap_or(0);
-        let mut out = Vec::with_capacity(len as usize);
-        for i in 0..len {
-            out.push(rt.heap.list_get_int(args, i).unwrap_or(0));
-        }
-        out
-    });
+fn ffi_diag(wrapper: &str, detail: impl Into<String>, span: Span) -> Diagnostic {
+    Diagnostic::error(
+        "E0956",
+        format!("extern call `{wrapper}` {}", detail.into()),
+        "the runtime FFI adapter could not marshal this call through the prepared bridge"
+            .to_string(),
+        "report this as a compiler bug".to_string(),
+        Some(span),
+    )
+}
+
+/// Call one prepared bridge entry from the canonical TIR evaluator.
+///
+/// This is the interpreter-side adapter for the same `*_cabi` symbols that
+/// Cranelift calls. It does not call a raw foreign symbol or reproduce the C
+/// wrapper's conversion/policy logic; the generated bridge remains the one
+/// semantic boundary shared with AOT.
+pub(crate) fn call_ctvalue(
+    wrapper: &str,
+    args: &[CtValue],
+    ret_ty: Option<&Type>,
+    span: Span,
+) -> Result<CtValue, Diagnostic> {
     let state = FFI_STATE.lock().unwrap_or_else(|e| e.into_inner());
     let Some(state) = state.as_ref() else {
-        trap("jit ffi: no bridge bound");
-        return 0;
+        return Err(ffi_diag(wrapper, "has no prepared bridge", span));
     };
-    let Some(entry) = state.by_wrapper.get(&name) else {
-        trap(&format!("jit ffi: unbound wrapper `{name}`"));
-        return 0;
+    let Some(entry) = state.by_wrapper.get(wrapper) else {
+        return Err(ffi_diag(wrapper, "is not bound in the prepared bridge", span));
     };
-    if argv.len() != entry.params.len() {
-        trap(&format!(
-            "jit ffi: `{name}` argc {} != {}",
-            argv.len(),
-            entry.params.len()
+    if args.len() != entry.params.len() {
+        return Err(ffi_diag(
+            wrapper,
+            format!("argc {} != {}", args.len(), entry.params.len()),
+            span,
         ));
-        return 0;
     }
-    // Materialize owned string args so pointers stay live for the call.
-    let mut owned_strings: Vec<String> = Vec::new();
-    for (i, abi) in entry.params.iter().enumerate() {
-        if matches!(abi, ParamAbi::String) {
-            owned_strings.push(clone_string(argv[i]));
+
+    let strings: Vec<Option<String>> = entry
+        .params
+        .iter()
+        .enumerate()
+        .map(|(index, abi)| match abi {
+            ParamAbi::String => match args.get(index) {
+                Some(CtValue::Str(value)) => Ok(Some(value.clone())),
+                _ => Err(ffi_diag(
+                    wrapper,
+                    format!("argument {index} is not a String"),
+                    span,
+                )),
+            },
+            _ => Ok(None),
+        })
+        .collect::<Result<_, _>>()?;
+    let int_arg = |index: usize| match args.get(index) {
+        Some(CtValue::Int(value)) => Ok(*value),
+        _ => Err(ffi_diag(
+            wrapper,
+            format!("argument {index} is not an Int"),
+            span,
+        )),
+    };
+    let float_arg = |index: usize| match args.get(index) {
+        Some(CtValue::Float(value)) => Ok(value.as_f64()),
+        _ => Err(ffi_diag(
+            wrapper,
+            format!("argument {index} is not a Float"),
+            span,
+        )),
+    };
+    let float_result = |value: f64| {
+        if matches!(ret_ty, Some(Type::Float32)) {
+            CtValue::Float(CtFloat::f32(value as f32))
+        } else {
+            CtValue::Float(CtFloat::f64(value))
         }
-    }
-    // Specialized fast paths for the shapes examples use.
+    };
+
     match (entry.params.as_slice(), entry.ret) {
+        ([ParamAbi::String], RetAbi::Int) => {
+            type FnStrInt = unsafe extern "C" fn(*const u8, usize) -> i64;
+            let f: FnStrInt = unsafe { std::mem::transmute(entry.ptr) };
+            let value = strings[0].as_deref().expect("String ABI argument");
+            Ok(CtValue::Int(unsafe { f(value.as_ptr(), value.len()) }))
+        }
         ([ParamAbi::String], RetAbi::String) => {
-            let s = &owned_strings[0];
             type FnStr = unsafe extern "C" fn(
                 *const u8,
                 usize,
@@ -295,12 +371,12 @@ fn jet_jit_extern_call(wrapper: i64, args: i64) -> i64 {
                 *mut usize,
             ) -> i32;
             let f: FnStr = unsafe { std::mem::transmute(entry.ptr) };
-            let mut out_ptr: *mut u8 = std::ptr::null_mut();
-            let mut out_len: usize = 0;
-            let rc = unsafe { f(s.as_ptr(), s.len(), &mut out_ptr, &mut out_len) };
+            let value = strings[0].as_deref().expect("String ABI argument");
+            let mut out_ptr = std::ptr::null_mut();
+            let mut out_len = 0;
+            let rc = unsafe { f(value.as_ptr(), value.len(), &mut out_ptr, &mut out_len) };
             if rc != 0 {
-                trap(&format!("jit ffi: `{name}` returned {rc}"));
-                return 0;
+                return Err(ffi_diag(wrapper, format!("returned {rc}"), span));
             }
             let bytes = if out_ptr.is_null() {
                 Vec::new()
@@ -312,24 +388,30 @@ fn jet_jit_extern_call(wrapper: i64, args: i64) -> i64 {
                     unsafe { free(out_ptr, out_len) };
                 }
             }
-            return alloc_string(String::from_utf8_lossy(&bytes).into_owned());
+            String::from_utf8(bytes)
+                .map(CtValue::Str)
+                .map_err(|_| ffi_diag(wrapper, "returned invalid UTF-8", span))
+        }
+        ([ParamAbi::Int], RetAbi::Int) => {
+            type FnInt = unsafe extern "C" fn(i64) -> i64;
+            let f: FnInt = unsafe { std::mem::transmute(entry.ptr) };
+            Ok(CtValue::Int(unsafe { f(int_arg(0)?) }))
         }
         ([ParamAbi::Int, ParamAbi::Int], RetAbi::Int) => {
-            type FnII = unsafe extern "C" fn(i64, i64) -> i64;
-            let f: FnII = unsafe { std::mem::transmute(entry.ptr) };
-            return unsafe { f(argv[0], argv[1]) };
+            type FnIntInt = unsafe extern "C" fn(i64, i64) -> i64;
+            let f: FnIntInt = unsafe { std::mem::transmute(entry.ptr) };
+            Ok(CtValue::Int(unsafe { f(int_arg(0)?, int_arg(1)?) }))
         }
         ([ParamAbi::Int], RetAbi::Unit) => {
-            type FnI = unsafe extern "C" fn(i64);
-            let f: FnI = unsafe { std::mem::transmute(entry.ptr) };
-            unsafe { f(argv[0]) };
-            return 0;
+            type FnInt = unsafe extern "C" fn(i64);
+            let f: FnInt = unsafe { std::mem::transmute(entry.ptr) };
+            unsafe { f(int_arg(0)?) };
+            Ok(CtValue::Unit)
         }
         ([ParamAbi::Float], RetAbi::Float) => {
-            type FnF = unsafe extern "C" fn(f64) -> f64;
-            let f: FnF = unsafe { std::mem::transmute(entry.ptr) };
-            let value = unsafe { f(f64::from_bits(argv[0] as u64)) };
-            return value.to_bits() as i64;
+            type FnFloat = unsafe extern "C" fn(f64) -> f64;
+            let f: FnFloat = unsafe { std::mem::transmute(entry.ptr) };
+            Ok(float_result(unsafe { f(float_arg(0)?) }))
         }
         (
             [
@@ -342,49 +424,91 @@ fn jet_jit_extern_call(wrapper: i64, args: i64) -> i64 {
             ],
             RetAbi::Float,
         ) => {
-            type Fn6F = unsafe extern "C" fn(f64, f64, f64, f64, f64, f64) -> f64;
-            let f: Fn6F = unsafe { std::mem::transmute(entry.ptr) };
-            let value = unsafe {
+            type FnSixFloat = unsafe extern "C" fn(f64, f64, f64, f64, f64, f64) -> f64;
+            let f: FnSixFloat = unsafe { std::mem::transmute(entry.ptr) };
+            Ok(float_result(unsafe {
                 f(
-                    f64::from_bits(argv[0] as u64),
-                    f64::from_bits(argv[1] as u64),
-                    f64::from_bits(argv[2] as u64),
-                    f64::from_bits(argv[3] as u64),
-                    f64::from_bits(argv[4] as u64),
-                    f64::from_bits(argv[5] as u64),
+                    float_arg(0)?,
+                    float_arg(1)?,
+                    float_arg(2)?,
+                    float_arg(3)?,
+                    float_arg(4)?,
+                    float_arg(5)?,
                 )
-            };
-            return value.to_bits() as i64;
+            }))
         }
-        _ => {}
-    }
-
-    // Generic scalar path (no strings).
-    if entry.params.iter().any(|p| matches!(p, ParamAbi::String))
-        || matches!(entry.ret, RetAbi::String)
-    {
-        trap(&format!("jit ffi: unsupported signature for `{name}`"));
-        return 0;
-    }
-    match (entry.params.as_slice(), entry.ret) {
         ([], RetAbi::Unit) => {
-            type Fn0 = unsafe extern "C" fn();
-            let f: Fn0 = unsafe { std::mem::transmute(entry.ptr) };
+            type FnUnit = unsafe extern "C" fn();
+            let f: FnUnit = unsafe { std::mem::transmute(entry.ptr) };
             unsafe { f() };
-            0
+            Ok(CtValue::Unit)
         }
         ([], RetAbi::Int) => {
-            type Fn0 = unsafe extern "C" fn() -> i64;
-            let f: Fn0 = unsafe { std::mem::transmute(entry.ptr) };
-            unsafe { f() }
+            type FnUnitInt = unsafe extern "C" fn() -> i64;
+            let f: FnUnitInt = unsafe { std::mem::transmute(entry.ptr) };
+            Ok(CtValue::Int(unsafe { f() }))
         }
-        ([ParamAbi::Int], RetAbi::Int) => {
-            type Fn1 = unsafe extern "C" fn(i64) -> i64;
-            let f: Fn1 = unsafe { std::mem::transmute(entry.ptr) };
-            unsafe { f(argv[0]) }
+        _ => Err(ffi_diag(wrapper, "has an unsupported signature", span)),
+    }
+}
+
+/// `wrapper` / `args` are heap string / int-list handles. Returns Jet ABI value
+/// (string handle, i64, f64-bits, bool as i64).
+fn jet_jit_extern_call(wrapper: i64, args: i64) -> i64 {
+    let name = clone_string(wrapper);
+    let argv = Concurrency::with_runtime_mut(|rt| {
+        let len = rt.heap.list_len(args).unwrap_or(0);
+        let mut out = Vec::with_capacity(len as usize);
+        for i in 0..len {
+            out.push(rt.heap.list_get_int(args, i).unwrap_or(0));
         }
+        out
+    });
+    let params = {
+        let state = FFI_STATE.lock().unwrap_or_else(|e| e.into_inner());
+        let Some(state) = state.as_ref() else {
+            trap("jit ffi: no bridge bound");
+            return 0;
+        };
+        let Some(entry) = state.by_wrapper.get(&name) else {
+            trap(&format!("jit ffi: unbound wrapper `{name}`"));
+            return 0;
+        };
+        entry.params.clone()
+    };
+    if argv.len() != params.len() {
+        trap(&format!(
+            "jit ffi: `{name}` argc {} != {}",
+            argv.len(),
+            params.len()
+        ));
+        return 0;
+    }
+    let ct_args = params
+        .iter()
+        .zip(argv)
+        .map(|(abi, value)| match abi {
+            ParamAbi::Int => CtValue::Int(value),
+            ParamAbi::Float => CtValue::Float(CtFloat::f64(f64::from_bits(value as u64))),
+            ParamAbi::Bool => CtValue::Bool(value != 0),
+            ParamAbi::String => CtValue::Str(clone_string(value)),
+        })
+        .collect::<Vec<_>>();
+    let value = match call_ctvalue(&name, &ct_args, None, Span::new(0, 0)) {
+        Ok(value) => value,
+        Err(error) => {
+            trap(&error.what);
+            return 0;
+        }
+    };
+    match value {
+        CtValue::Unit => 0,
+        CtValue::Int(value) => value,
+        CtValue::Float(value) => value.as_f64().to_bits() as i64,
+        CtValue::Bool(value) => i64::from(value),
+        CtValue::Str(value) => alloc_string(value),
         _ => {
-            trap(&format!("jit ffi: unsupported signature for `{name}`"));
+            trap(&format!("jit ffi: `{name}` returned an unsupported value"));
             0
         }
     }

@@ -324,8 +324,9 @@ impl<'a> Lexer<'a> {
                 }
                 '@' => toks.push(simple(self, TokKind::At, 1)),
                 '#' => toks.push(simple(self, TokKind::Hash, 1)),
-                // D-ONCE-AT1=D: `$` is no longer a compile-time mark. Keep it
-                // as a standalone token so the parser can teach the `@` swap.
+                // D-ONCE-DOLLAR1=B: `$` is a config-surface environment-read
+                // token. Keep it standalone so the parser can apply the
+                // config-only rule and its E0003 teaching path.
                 '$' => toks.push(simple(self, TokKind::Dollar, 1)),
                 '?' if next == '?' => toks.push(simple(self, TokKind::QuestionQuestion, 2)),
                 '?' if next == '.' => toks.push(simple(self, TokKind::QuestionDot, 2)),

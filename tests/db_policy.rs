@@ -14,6 +14,8 @@ fn run() {
     conn := db.open_memory()
     policy :: db.policy("tasks", "owner == user") ?? panic("policy")
     scoped := conn.with_policy(policy, "alice")
+    audit :: db.policy_audit(scoped)
+    print("audit:{audit}")
     _created :: db.migrate(scoped, "tasks-v1", ["CREATE TABLE tasks (owner TEXT, title TEXT)"]) ?? panic("create")
     _schema :: db.migrate(scoped, "other-v1", ["CREATE TABLE other (owner TEXT, title TEXT)"]) ?? panic("schema")
     schema_bypass :: scoped.execute("DROP TABLE other", [])
@@ -34,6 +36,15 @@ fn run() {
         [DBValue.Text("one"), DBValue.Text("two")]
     ) ?? panic("query")
     print("rows:{rows.len()}")
+    limited :: scoped.query(
+        "SELECT title FROM tasks WHERE title = ? ORDER BY title LIMIT ? OFFSET ?",
+        [DBValue.Text("one"), DBValue.Int(1), DBValue.Int(0)]
+    ) ?? panic("limit")
+    print("limit:{limited.len()}")
+    _one_row :: scoped.query_one("SELECT title FROM tasks ORDER BY title", []) ?? panic("query one")
+    print("query-one:ok")
+    _tx :: db.transaction(scoped, "policy-tx", ["UPDATE tasks SET title = 'one'"]) ?? panic("transaction")
+    print("transaction:ok")
     bypass :: scoped.query("SELECT title FROM other", [])
     if bypass == {
         .Ok(_) -> { print("bypass:accepted") }
@@ -102,7 +113,7 @@ fn run() {
 fn db_scope_enforces_policy_on_query_insert_and_live_aot() {
     let (code, stdout) = build_and_run("db_policy_scope", SOURCE);
     assert_eq!(code, 0);
-    assert_eq!(stdout, "schema:rejected\nrows:2\nbypass:rejected\ncross:1:2\nblank-user:rejected\nlive:ok\ncomment:rejected\nblock:rejected\njoin:rejected\nsubquery:rejected\nupsert:rejected\nreplace:rejected\n");
+    assert_eq!(stdout, "audit:DBPolicy(table=tasks, user=alice, expr=owner == user, predicate=owner = ?)\nschema:rejected\nrows:2\nlimit:1\nquery-one:ok\ntransaction:ok\nbypass:rejected\ncross:1:2\nblank-user:rejected\nlive:ok\ncomment:rejected\nblock:rejected\njoin:rejected\nsubquery:rejected\nupsert:rejected\nreplace:rejected\n");
 }
 
 #[test]
@@ -113,7 +124,7 @@ fn db_scope_enforces_policy_on_query_insert_and_live_default() {
         &[("main.jet", SOURCE)],
     );
     assert_eq!(code, 0, "default jet run failed: {stderr}");
-    assert_eq!(stdout, "schema:rejected\nrows:2\nbypass:rejected\ncross:1:2\nblank-user:rejected\nlive:ok\ncomment:rejected\nblock:rejected\njoin:rejected\nsubquery:rejected\nupsert:rejected\nreplace:rejected\n");
+    assert_eq!(stdout, "audit:DBPolicy(table=tasks, user=alice, expr=owner == user, predicate=owner = ?)\nschema:rejected\nrows:2\nlimit:1\nquery-one:ok\ntransaction:ok\nbypass:rejected\ncross:1:2\nblank-user:rejected\nlive:ok\ncomment:rejected\nblock:rejected\njoin:rejected\nsubquery:rejected\nupsert:rejected\nreplace:rejected\n");
 }
 
 /// D-DBPOLICY1=A + I9: the closed policy language is one fact

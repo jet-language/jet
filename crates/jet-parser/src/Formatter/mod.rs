@@ -800,6 +800,17 @@ fn format_program_with_tokens(
         f.newline();
         f.emit_trailing(policy_span.end);
     }
+    // D-STRUCT-POLICY1=A: user settings are declarations, not scoped policy
+    // contributions. Keep them on the top-level declaration plane.
+    for declaration in &prog.user_policy_declarations {
+        if !first {
+            f.blank_line_between_items();
+        }
+        first = false;
+        f.emit_leading(declaration.span.start);
+        f.fmt_user_policy_decl(declaration);
+        f.emit_trailing(declaration.span.end);
+    }
     // D-ENTRY-SCRIPT1=B: script statements stay on the top-level surface for
     // formatting; sema adds the implicit `run` only after this pass. The AST
     // stores declarations and script statements in separate collections, so
@@ -1007,6 +1018,8 @@ fn item_span_start(item: &Item, src: &str) -> usize {
         Item::ProtocolDecl(p) => p.span.start,
         // D-METADERIVE1=A: use the derive block's own span.
         Item::UserDerive(d) => d.span.start,
+        // D-STRUCT-ONCE1=A: root declaration loop span.
+        Item::TemplateLoop(loop_item) => loop_item.span.start,
         // D-CONF-GENSPELL1=A: generic module template span.
         Item::GenericModule(gm) => gm.span.start,
         // D-CONF-GENSPELL1=A: module alias span.
@@ -1082,6 +1095,8 @@ fn item_span_end(item: &Item) -> usize {
         Item::ProtocolDecl(p) => p.span.end,
         // D-METADERIVE1=A: use the derive block's own span end.
         Item::UserDerive(d) => d.span.end,
+        // D-STRUCT-ONCE1=A: root declaration loop span end.
+        Item::TemplateLoop(loop_item) => loop_item.span.end,
         // D-CONF-GENSPELL1=A: generic module template span end.
         Item::GenericModule(gm) => gm.span.end,
         // D-CONF-GENSPELL1=A: module alias span end.

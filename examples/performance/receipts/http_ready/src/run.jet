@@ -1,0 +1,76 @@
+module system.http_ready { target: linux.x64 }
+
+module perf.receipt {
+    budgets: [
+        Budget{
+            name: "binary",
+            scope: .Target("http_ready"),
+            metric: .BinarySize,
+            provider: .BuildArtifact("http_ready"),
+            comparison: .Absolute,
+            limit: .AtMost(1MiB),
+            applies: BudgetApplies{
+                targets: .Only([.Class(.Native)]),
+                profiles: .Only([.Dev]),
+            },
+        },
+        Budget{
+            name: "startup",
+            scope: .Target("http_ready"),
+            metric: .StartupTime,
+            provider: .BuildArtifact("http_ready"),
+            comparison: .AbsoluteFrom("card-2142/linux-x86-64-dev"),
+            limit: .AtMost(50ms),
+            applies: BudgetApplies{
+                targets: .Only([.Class(.Native)]),
+                profiles: .Only([.Dev]),
+            },
+        },
+        Budget{
+            name: "memory-high-water",
+            scope: .Target("http_ready"),
+            metric: .MemoryHighWater,
+            provider: .BuildArtifact("http_ready"),
+            comparison: .AbsoluteFrom("card-2142/linux-x86-64-dev"),
+            limit: .AtMost(8MiB),
+            applies: BudgetApplies{
+                targets: .Only([.Class(.Native)]),
+                profiles: .Only([.Dev]),
+            },
+        },
+    ],
+}
+
+use core.net as net
+use core.tasks as tasks
+
+fn run() ! NetError | RangeError | TaskFailure {
+    listener :: net.tcp_listen("127.0.0.1:0")?
+    address :: listener.local_addr()?
+    print("ready")
+    budget :: Duration.milliseconds(1000)?
+    server :: task {
+        stream :: listener.accept(deadline: budget)?
+        _request :: stream.read_text(8192, deadline: budget)?
+        response :: [U8]{
+            72, 84, 84, 80, 47, 49, 46, 49, 32, 50, 48, 48, 32, 79, 75, 13, 10,
+            67, 111, 110, 116, 101, 110, 116, 45, 76, 101, 110, 103, 116, 104, 58,
+            32, 50, 13, 10, 67, 111, 110, 110, 101, 99, 116, 105, 111, 110, 58,
+            32, 99, 108, 111, 115, 101, 13, 10, 13, 10, 111, 107,
+        }
+        stream.write_all(response, deadline: budget)?
+    }
+    client :: net.tcp_connect(address)?
+    write_ready :: client.ready(NetReadyInterest.Write, deadline: budget)?
+    print(net.ready_writable(write_ready))
+    request :: [U8]{
+        71, 69, 84, 32, 47, 32, 72, 84, 84, 80, 47, 49, 46, 49, 13, 10,
+        72, 111, 115, 116, 58, 32, 108, 111, 99, 97, 108, 104, 111, 115, 116,
+        13, 10, 13, 10,
+    }
+    client.write_all(request, deadline: budget)?
+    response :: client.read_text(8192, deadline: budget)?
+    print(response.starts_with("HTTP/1.1 200 OK"))
+    print(response.ends_with("ok"))
+    server.join()?
+}

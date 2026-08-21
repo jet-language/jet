@@ -13,6 +13,7 @@ use crate::AST::{
 };
 
 use crate::AST::CtValue;
+use jet_foundation::Layout::{FieldLayoutFacts, LayoutFacts, TargetLayout, TargetLayoutEngine};
 use jet_foundation::Reflection::ReflectionField;
 
 #[derive(Debug, Clone, Default)]
@@ -50,27 +51,28 @@ fn ct_list(xs: Vec<CtValue>) -> CtValue {
     CtValue::List(xs)
 }
 
-fn unknown_layout_bytes() -> CtValue {
-    // D-LAYOUT-FACTS1=B: byte facts stay absent until a canonical target
-    // layout engine exists. `None(Int)` is the typed optional value used by
-    // the public `LayoutInfo`/`LayoutField` model.
-    CtValue::absent(crate::AST::Type::Int)
-}
-
 fn layout_field_info(
     name: impl Into<String>,
     ty: impl Into<String>,
     guarantee: &str,
     source: &str,
+    target: &TargetLayout,
+    facts: Option<&FieldLayoutFacts>,
 ) -> CtValue {
     ct_struct(
         crate::Syntax::TYPE_LAYOUT_FIELD,
         &[
             ("name", ct_str(name)),
             ("ty", ct_str(ty)),
-            ("offset", unknown_layout_bytes()),
-            ("size", unknown_layout_bytes()),
-            ("target", ct_str("unknown")),
+            (
+                "offset",
+                optional_layout_byte(facts.and_then(|facts| facts.offset)),
+            ),
+            (
+                "size",
+                optional_layout_byte(facts.and_then(|facts| facts.size)),
+            ),
+            ("target", ct_str(target.triple.clone())),
             ("guarantee", ct_str(guarantee)),
             ("source", ct_str(source)),
         ],
@@ -81,16 +83,27 @@ fn layout_info(
     kind: &str,
     guarantee: &str,
     source: &str,
-    fields: impl IntoIterator<Item = (String, String)>,
+    target: &TargetLayout,
+    fields: Vec<(String, String)>,
+    facts: &LayoutFacts,
 ) -> CtValue {
     ct_struct(
         crate::Syntax::TYPE_LAYOUT_INFO,
         &[
             ("kind", ct_str(kind)),
-            ("size", unknown_layout_bytes()),
-            ("alignment", unknown_layout_bytes()),
-            ("stride", unknown_layout_bytes()),
-            ("target", ct_str("unknown")),
+            (
+                "size",
+                optional_layout_byte(facts.bytes.map(|bytes| bytes.size)),
+            ),
+            (
+                "alignment",
+                optional_layout_byte(facts.bytes.map(|bytes| bytes.alignment)),
+            ),
+            (
+                "stride",
+                optional_layout_byte(facts.bytes.map(|bytes| bytes.stride)),
+            ),
+            ("target", ct_str(target.triple.clone())),
             ("guarantee", ct_str(guarantee)),
             ("source", ct_str(source)),
             (
@@ -98,7 +111,17 @@ fn layout_info(
                 ct_list(
                     fields
                         .into_iter()
-                        .map(|(name, ty)| layout_field_info(name, ty, guarantee, source))
+                        .enumerate()
+                        .map(|(index, (name, ty))| {
+                            layout_field_info(
+                                name,
+                                ty,
+                                guarantee,
+                                source,
+                                target,
+                                facts.fields.get(index),
+                            )
+                        })
                         .collect(),
                 ),
             ),
@@ -106,28 +129,48 @@ fn layout_info(
     )
 }
 
-fn layout_info_for_struct(s: &StructDef) -> CtValue {
+fn optional_layout_byte(value: Option<u64>) -> CtValue {
+    value
+        .and_then(|value| i64::try_from(value).ok())
+        .map(|value| CtValue::Present(Box::new(CtValue::Int(value))))
+        .unwrap_or_else(|| CtValue::absent(crate::AST::Type::Int))
+}
+
+fn layout_info_for_struct(s: &StructDef, engine: &TargetLayoutEngine<'_>) -> CtValue {
     let (kind, guarantee) = match s.layout.as_ref() {
         Some(StructLayout::C) => ("c", "repr(C) declaration"),
         Some(StructLayout::Columnar) => ("columnar", "columnar storage declaration"),
         None => ("default", "physical layout unspecified"),
     };
+    let facts = engine.struct_facts(s);
     layout_info(
         kind,
         guarantee,
         "struct declaration",
+        engine.target(),
         s.reflection_fields()
-            .map(|field| (field.name.clone(), field.ty.name())),
+            .map(|field| (field.name.clone(), field.ty.name()))
+            .collect(),
+        &facts,
     )
 }
 
 /// Build the focused layout projection for a struct without exposing the
 /// wider `TypeInfo` wrapper. Tooling uses this same value as `T.@layout`.
 pub fn build_struct_layout_info(s: &StructDef) -> CtValue {
-    layout_info_for_struct(s)
+    let engine = TargetLayoutEngine::new(std::iter::empty::<&Item>(), TargetLayout::host());
+    build_struct_layout_info_with_engine(s, &engine)
 }
 
-fn layout_info_for_enum(def: &EnumDef) -> CtValue {
+/// Build a struct layout projection using the bundle's canonical target engine.
+pub fn build_struct_layout_info_with_engine(
+    s: &StructDef,
+    engine: &TargetLayoutEngine<'_>,
+) -> CtValue {
+    layout_info_for_struct(s, engine)
+}
+
+fn layout_info_for_enum(def: &EnumDef, engine: &TargetLayoutEngine<'_>) -> CtValue {
     let fields = def.variants.iter().map(|variant| {
         let ty = match &variant.payload {
             VariantPayload::Unit => "Unit".to_string(),
@@ -143,18 +186,36 @@ fn layout_info_for_enum(def: &EnumDef) -> CtValue {
         };
         (variant.name.clone(), ty)
     });
+    let fields = fields.collect::<Vec<_>>();
+    let (kind, guarantee) = if def.c_layout_tag().is_some() {
+        ("c", "repr(C) declaration")
+    } else {
+        ("default", "enum physical layout unspecified")
+    };
+    let facts = engine.enum_facts(def);
     layout_info(
-        "default",
-        "enum physical layout unspecified",
+        kind,
+        guarantee,
         "enum declaration",
+        engine.target(),
         fields,
+        &facts,
     )
 }
 
 /// Build the focused layout projection for an enum without exposing the
 /// wider `TypeInfo` wrapper. Tooling uses this same value as `T.@layout`.
 pub fn build_enum_layout_info(def: &EnumDef) -> CtValue {
-    layout_info_for_enum(def)
+    let engine = TargetLayoutEngine::new(std::iter::empty::<&Item>(), TargetLayout::host());
+    build_enum_layout_info_with_engine(def, &engine)
+}
+
+/// Build an enum layout projection using the bundle's canonical target engine.
+pub fn build_enum_layout_info_with_engine(
+    def: &EnumDef,
+    engine: &TargetLayoutEngine<'_>,
+) -> CtValue {
+    layout_info_for_enum(def, engine)
 }
 
 fn ct_struct(type_name: &str, fields: &[(&str, CtValue)]) -> CtValue {
@@ -1423,6 +1484,7 @@ pub fn registered_fact_value(
 /// reflection call or a second type table.
 pub fn reflect_type_value(items: &[Item], type_name: &str, module: &str) -> Option<CtValue> {
     let module = if module.is_empty() { "main" } else { module };
+    let layout_engine = TargetLayoutEngine::host(items.iter());
     for item in items {
         match item {
             Item::Struct(def) if def.name == type_name => {
@@ -1439,19 +1501,22 @@ pub fn reflect_type_value(items: &[Item], type_name: &str, module: &str) -> Opti
                         _ => None,
                     })
                     .unwrap_or_default();
-                return Some(build_struct_type_info_with_path(
+                return Some(build_struct_type_info_with_path_and_vocabulary_and_engine(
                     def,
                     &states,
                     &format!("{module}.{type_name}"),
+                    None,
+                    &layout_engine,
                 ));
             }
             Item::Enum(def) if def.name == type_name => {
                 let path = format!("{module}.{type_name}");
-                return Some(build_enum_type_info(
+                return Some(build_enum_type_info_with_engine(
                     def,
                     module,
                     &format!("{module}::{type_name}"),
                     &path,
+                    &layout_engine,
                 ));
             }
             Item::Distinct(def) if def.name == type_name => {
@@ -1785,6 +1850,21 @@ pub fn build_struct_type_info_with_path_and_vocabulary(
     path: &str,
     vocabulary: Option<&jet_foundation::Policy::MarkerVocabulary>,
 ) -> CtValue {
+    let engine = TargetLayoutEngine::new(std::iter::empty::<&Item>(), TargetLayout::host());
+    build_struct_type_info_with_path_and_vocabulary_and_engine(
+        s, states, path, vocabulary, &engine,
+    )
+}
+
+/// Build a struct reflection handle with the same target engine used by the
+/// focused `T.@layout` projection.
+pub fn build_struct_type_info_with_path_and_vocabulary_and_engine(
+    s: &StructDef,
+    states: &[String],
+    path: &str,
+    vocabulary: Option<&jet_foundation::Policy::MarkerVocabulary>,
+    layout_engine: &TargetLayoutEngine<'_>,
+) -> CtValue {
     let reflection_fields = jet_foundation::Reflection::fields(s);
     let fields_info: Vec<CtValue> = reflection_fields
         .iter()
@@ -1794,7 +1874,7 @@ pub fn build_struct_type_info_with_path_and_vocabulary(
         .reflection_fields()
         .flat_map(|field| type_dimensions(&field.ty))
         .collect::<Vec<_>>();
-    let layout = build_struct_layout_info(s);
+    let layout = build_struct_layout_info_with_engine(s, layout_engine);
     let methods_info: Vec<CtValue> = s
         .methods
         .iter()
@@ -1888,7 +1968,18 @@ pub fn build_distinct_type_info_with_path(
     module: &str,
     path: &str,
 ) -> CtValue {
-    let layout = layout_info("default", "physical layout unspecified", "distinct declaration", Vec::<(String, String)>::new());
+    let engine = TargetLayoutEngine::new(std::iter::empty::<&Item>(), TargetLayout::host());
+    let layout = layout_info(
+        "default",
+        "physical layout unspecified",
+        "distinct declaration",
+        engine.target(),
+        Vec::new(),
+        &LayoutFacts {
+            bytes: None,
+            fields: Vec::new(),
+        },
+    );
     let dimensions = d
         .quantity
         .as_ref()
@@ -1963,8 +2054,14 @@ fn qualified_method_info(method: &Func, module: &str, identity: &str) -> CtValue
     info
 }
 
-fn build_enum_type_info(def: &EnumDef, module: &str, identity: &str, path: &str) -> CtValue {
-    let layout = build_enum_layout_info(def);
+fn build_enum_type_info_with_engine(
+    def: &EnumDef,
+    module: &str,
+    identity: &str,
+    path: &str,
+    layout_engine: &TargetLayoutEngine<'_>,
+) -> CtValue {
+    let layout = build_enum_layout_info_with_engine(def, layout_engine);
     let mut dimensions = Vec::new();
     let mut facts = Vec::new();
     for variant in &def.variants {
@@ -2098,6 +2195,12 @@ pub fn build_program_info(
     bundle: &crate::AST::ProgramBundle,
     facts: &ProgramSemanticFacts,
 ) -> CtValue {
+    let layout_engine = TargetLayoutEngine::host(
+        bundle
+            .modules
+            .iter()
+            .flat_map(|module| module.items.iter()),
+    );
     let mut external_impls = std::collections::HashMap::<
         (String, String),
         (Vec<String>, Vec<CtValue>, Vec<CtValue>),
@@ -2162,7 +2265,13 @@ pub fn build_program_info(
                         })
                         .unwrap_or_default();
                     let mut info = qualify_info(
-                        build_struct_type_info_with_states(def, &states),
+                        build_struct_type_info_with_path_and_vocabulary_and_engine(
+                            def,
+                            &states,
+                            &def.name,
+                            None,
+                            &layout_engine,
+                        ),
                         &module_name,
                         &program_reflection_identity(
                             &facts.name_ledger,
@@ -2222,7 +2331,7 @@ pub fn build_program_info(
                     package_types.push(info);
                 }
                 crate::AST::Item::Enum(def) => {
-                    let mut info = build_enum_type_info(
+                    let mut info = build_enum_type_info_with_engine(
                         def,
                         &module_name,
                         &program_reflection_identity(
@@ -2232,6 +2341,7 @@ pub fn build_program_info(
                             &def.name,
                         ),
                         &ledger_path(&facts.name_ledger, module_idx, &module_name, &def.name),
+                        &layout_engine,
                     );
                     if let CtValue::Struct { fields, .. } = &mut info {
                         if let Some((_, CtValue::List(values))) =

@@ -1102,6 +1102,28 @@ pub(super) fn cmd_audit(theme: &Theme) -> i32 {
             "  platform:    {}",
             theme.gray(&e.envelope.platform)
         ));
+        match Store::ProducerRecord::decode(&e.producer_record) {
+            Ok(producer) => {
+                for (label, key) in [
+                    ("action", "cache.action"),
+                    ("builder", "cache.builder"),
+                    ("policy", "cache.policy"),
+                    ("reproducibility", "cache.reproducibility"),
+                    ("toolchain", "toolchain_facts"),
+                ] {
+                    let value = match key {
+                        "toolchain_facts" => producer.toolchain_facts.as_str(),
+                        _ => producer
+                            .facts
+                            .get(key)
+                            .map(String::as_str)
+                            .unwrap_or("<missing>"),
+                    };
+                    theme.detail(&format!("  {label}:       {value}"));
+                }
+            }
+            Err(error) => theme.detail(&format!("  provenance:   <invalid producer record: {error}>")),
+        }
     }
     0
 }

@@ -1,6 +1,39 @@
 use super::*;
 
 #[test]
+fn inspect_env_lists_typed_environment_reads() {
+    let dir = isolated_cwd("inspect_env_reads");
+    for (file, snapshot) in [
+        ("env.jet", "inspect_env_reads.json"),
+        ("config.jet", "inspect_config_reads.json"),
+    ] {
+        fs::write(
+            dir.join(file),
+            "module env.dev {\n    prompt: $HOME\n}\n",
+        )
+        .unwrap();
+        let output = Command::new(jet())
+            .args(["inspect", "env", file, "--json"])
+            .current_dir(&dir)
+            .env("HOME", "/test/home")
+            .env("NO_COLOR", "1")
+            .output()
+            .unwrap();
+        assert_eq!(
+            output.status.code(),
+            Some(0),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let json = String::from_utf8(output.stdout).unwrap();
+        assert!(parse_json(&json).is_ok(), "inspect env JSON must parse: {json}");
+        assert!(json.contains("\"name\":\"$HOME\""), "{json}");
+        assert!(json.contains("\"type\":\"String\""), "{json}");
+        check_snapshot(snapshot, &json);
+    }
+}
+
+#[test]
 fn inspect_guarantees_reports_mixed_components_and_json() {
     let dir = isolated_cwd("inspect_guarantees_mixed");
     fs::write(

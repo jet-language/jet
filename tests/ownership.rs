@@ -4083,7 +4083,7 @@ fn run() {
 /// The wrappers are spelled `JetOutcome<…>` now, not `Option`/`Result`.
 /// D-FAIL-CARRIER1=A / D-FAIL-MODEL1=A (ratified 2026-08-06,
 /// crates/jet-foundation/src/Outcome.rs:1-22) make one carrier serve both
-/// surface forms: `T?` is `JetOutcome<T, JetAbsent>` and `T ? E` is
+/// surface forms: `T?` is `JetOutcome<T, JetAbsent>` and `T ! E` is
 /// `JetOutcome<T, E>`. A raw `Option` here would be the second optional
 /// representation that decision exists to remove. The leaf-not-wrapper
 /// property is untouched by the rename, so the negative guards move to the
@@ -4101,7 +4101,7 @@ fn maybe(values: [Int]) => (Window?) {
     return Val(Window.{ values: selected })
 }
 
-fn result(values: [Int]) => Window ? String {
+fn result(values: [Int]) => Window ! String {
     selected :: values[0..1]
     return Ok(Window.{ values: selected })
 }

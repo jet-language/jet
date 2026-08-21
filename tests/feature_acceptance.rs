@@ -598,7 +598,7 @@ fn absish(n: Int) => Int {
     return a + b
 }
 
-fn stamp(path: String) =[FS]=> String ? {
+fn stamp(path: String) =[FS]=> String ! {
     return path
 }
 

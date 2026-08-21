@@ -162,7 +162,10 @@ mod tests {
             ) {
                 child.env("FORCE_COLOR", "1");
             }
-            assert!(child.status().unwrap().success(), "policy child failed: {case}");
+            assert!(
+                child.status().unwrap().success(),
+                "policy child failed: {case}"
+            );
         }
     }
 }

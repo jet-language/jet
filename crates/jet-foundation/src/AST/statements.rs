@@ -473,7 +473,9 @@ impl Stmt {
 
         fn visit_for_kind(kind: &mut ForKind, f: &mut impl FnMut(&mut Expr)) {
             match kind {
-                ForKind::Range { start, end, step, .. } => {
+                ForKind::Range {
+                    start, end, step, ..
+                } => {
                     visit_expr(start, f);
                     visit_expr(end, f);
                     if let Some(step) = step {
@@ -641,55 +643,89 @@ impl Stmt {
                 | Stmt::Yield(_, current) => *current = span,
                 Stmt::BreakLabelValue(_, _, _, current) => *current = span,
                 Stmt::While {
-                    body, span: current, ..
+                    body,
+                    span: current,
+                    ..
                 }
                 | Stmt::For {
-                    body, span: current, ..
+                    body,
+                    span: current,
+                    ..
                 }
                 | Stmt::Loop {
-                    body, span: current, ..
+                    body,
+                    span: current,
+                    ..
                 }
                 | Stmt::Unsafe {
-                    body, span: current, ..
+                    body,
+                    span: current,
+                    ..
                 }
                 | Stmt::Impure {
-                    body, span: current, ..
+                    body,
+                    span: current,
+                    ..
                 }
                 | Stmt::Reactive {
-                    body, span: current, ..
+                    body,
+                    span: current,
+                    ..
                 }
                 | Stmt::Shield {
-                    body, span: current, ..
+                    body,
+                    span: current,
+                    ..
                 }
                 | Stmt::Switched {
-                    body, span: current, ..
+                    body,
+                    span: current,
+                    ..
                 }
                 | Stmt::Region {
-                    body, span: current, ..
+                    body,
+                    span: current,
+                    ..
                 }
                 | Stmt::Policy {
-                    body, span: current, ..
+                    body,
+                    span: current,
+                    ..
                 }
                 | Stmt::TaskGroup {
-                    body, span: current, ..
+                    body,
+                    span: current,
+                    ..
                 }
                 | Stmt::Layout {
-                    body, span: current, ..
+                    body,
+                    span: current,
+                    ..
                 }
                 | Stmt::Caps {
-                    body, span: current, ..
+                    body,
+                    span: current,
+                    ..
                 }
                 | Stmt::ComptimeBlock {
-                    body, span: current, ..
+                    body,
+                    span: current,
+                    ..
                 }
                 | Stmt::Live {
-                    body, span: current, ..
+                    body,
+                    span: current,
+                    ..
                 }
                 | Stmt::AssumeDet {
-                    body, span: current, ..
+                    body,
+                    span: current,
+                    ..
                 }
                 | Stmt::Transact {
-                    body, span: current, ..
+                    body,
+                    span: current,
+                    ..
                 } => {
                     *current = span;
                     for child in body {
@@ -751,7 +787,9 @@ impl Stmt {
                     }
                 }
                 Stmt::ContextBlock {
-                    body, span: current, ..
+                    body,
+                    span: current,
+                    ..
                 } => {
                     *current = span;
                     for child in body {
@@ -759,7 +797,9 @@ impl Stmt {
                     }
                 }
                 Stmt::ScopeMember {
-                    body, span: current, ..
+                    body,
+                    span: current,
+                    ..
                 } => {
                     *current = span;
                     for child in body {

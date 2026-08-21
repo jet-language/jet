@@ -118,7 +118,11 @@ pub(super) fn csv_render(rows: &[Vec<String>]) -> String {
         .map(|row| {
             row.iter()
                 .map(|field| {
-                    if field.contains(',') || field.contains('"') || field.contains('\n') || field.contains('\r') {
+                    if field.contains(',')
+                        || field.contains('"')
+                        || field.contains('\n')
+                        || field.contains('\r')
+                    {
                         format!("\"{}\"", field.replace('"', "\"\""))
                     } else {
                         field.clone()
@@ -178,7 +182,10 @@ pub(super) fn toml_parse(raw: &str) -> Result<CtValue, CtValue> {
         if p.peek().is_none() {
             break;
         }
-        match p.statement().map_err(|e| json_error_struct(e.line as i64, e.message))? {
+        match p
+            .statement()
+            .map_err(|e| json_error_struct(e.line as i64, e.message))?
+        {
             Some(item) => items.push(item),
             None => {}
         }
@@ -275,7 +282,10 @@ fn toml_ensure_table(node: &CtValue, path: &[String]) -> CtValue {
                 entries[idx].1 = toml_ensure_table(&entries[idx].1, rest);
             }
         }
-        None => entries.push((seg.clone(), toml_ensure_table(&json_object(Vec::new()), rest))),
+        None => entries.push((
+            seg.clone(),
+            toml_ensure_table(&json_object(Vec::new()), rest),
+        )),
     }
     json_object(entries)
 }
@@ -371,15 +381,15 @@ fn toml_value_to_json(v: TOMLValue) -> CtValue {
     match v {
         TOMLValue::String(s) => json_variant("Text", Some(CtValue::Str(s))),
         TOMLValue::Integer(n) => json_variant("Int", Some(CtValue::Int(n))),
-        TOMLValue::Float(value) => {
-            json_variant("Float", Some(CtValue::Float(CtFloat::f64(value))))
-        }
+        TOMLValue::Float(value) => json_variant("Float", Some(CtValue::Float(CtFloat::f64(value)))),
         TOMLValue::Boolean(b) => json_variant("Bool", Some(CtValue::Bool(b))),
         TOMLValue::Datetime(s) => json_variant("Text", Some(CtValue::Str(s))),
         TOMLValue::Array(xs) => json_array(xs.into_iter().map(toml_value_to_json).collect()),
-        TOMLValue::InlineTable(es) => {
-            json_object(es.into_iter().map(|(k, v)| (k, toml_value_to_json(v))).collect())
-        }
+        TOMLValue::InlineTable(es) => json_object(
+            es.into_iter()
+                .map(|(k, v)| (k, toml_value_to_json(v)))
+                .collect(),
+        ),
     }
 }
 
@@ -519,7 +529,11 @@ impl TOMLParser {
         }
         match self.peek() {
             None | Some('\n') | Some('\r') => Ok(()),
-            Some(c) => Err(self.err(jet_foundation::EncodingErrors::toml_unexpected_after_value(c))),
+            Some(c) => Err(
+                self.err(jet_foundation::EncodingErrors::toml_unexpected_after_value(
+                    c,
+                )),
+            ),
         }
     }
     fn statement(&mut self) -> Result<Option<TOMLItem>, TOMLParseError> {
@@ -543,7 +557,9 @@ impl TOMLParser {
         self.bump();
         if array {
             if self.peek() != Some(']') {
-                return Err(self.err(jet_foundation::EncodingErrors::TOML_EXPECTED_ARRAY_TABLE_CLOSE));
+                return Err(
+                    self.err(jet_foundation::EncodingErrors::TOML_EXPECTED_ARRAY_TABLE_CLOSE)
+                );
             }
             self.bump();
         }
@@ -560,9 +576,9 @@ impl TOMLParser {
         }
         self.skip_inline_ws();
         if self.peek() != Some('=') {
-            return Err(self.err(jet_foundation::EncodingErrors::toml_expected_equals_after_key(
-                &path.join("."),
-            )));
+            return Err(self.err(
+                jet_foundation::EncodingErrors::toml_expected_equals_after_key(&path.join(".")),
+            ));
         }
         self.bump();
         self.skip_inline_ws();
@@ -600,7 +616,11 @@ impl TOMLParser {
                 }
                 Ok(s)
             }
-            Some(c) => Err(self.err(jet_foundation::EncodingErrors::toml_invalid_key_character(c))),
+            Some(c) => Err(
+                self.err(jet_foundation::EncodingErrors::toml_invalid_key_character(
+                    c,
+                )),
+            ),
             None => Err(self.err(jet_foundation::EncodingErrors::TOML_EXPECTED_KEY)),
         }
     }
@@ -677,7 +697,9 @@ impl TOMLParser {
         }
         let mut out = String::new();
         loop {
-            if self.peek() == Some('"') && self.peek_at(1) == Some('"') && self.peek_at(2) == Some('"')
+            if self.peek() == Some('"')
+                && self.peek_at(1) == Some('"')
+                && self.peek_at(2) == Some('"')
             {
                 self.bump();
                 self.bump();
@@ -686,16 +708,21 @@ impl TOMLParser {
             }
             match self.bump() {
                 None => {
-                    return Err(self.err(
-                        jet_foundation::EncodingErrors::TOML_UNTERMINATED_MULTILINE_STRING,
-                    ))
+                    return Err(self
+                        .err(jet_foundation::EncodingErrors::TOML_UNTERMINATED_MULTILINE_STRING))
                 }
                 Some('\\') => {
-                    if matches!(self.peek(), Some('\n') | Some('\r') | Some(' ') | Some('\t')) {
+                    if matches!(
+                        self.peek(),
+                        Some('\n') | Some('\r') | Some(' ') | Some('\t')
+                    ) {
                         let mut sawline = false;
                         let save = self.pos;
                         let saveline = self.line;
-                        while matches!(self.peek(), Some(' ') | Some('\t') | Some('\r') | Some('\n')) {
+                        while matches!(
+                            self.peek(),
+                            Some(' ') | Some('\t') | Some('\r') | Some('\n')
+                        ) {
                             if self.peek() == Some('\n') {
                                 sawline = true;
                             }
@@ -741,10 +768,13 @@ impl TOMLParser {
             v = v * 16 + d;
             self.pos += 1;
         }
-        char::from_u32(v).ok_or_else(|| self.err(jet_foundation::EncodingErrors::TOML_INVALID_UNICODE_SCALAR))
+        char::from_u32(v)
+            .ok_or_else(|| self.err(jet_foundation::EncodingErrors::TOML_INVALID_UNICODE_SCALAR))
     }
     fn literal_string(&mut self) -> Result<String, TOMLParseError> {
-        if self.peek() == Some('\'') && self.peek_at(1) == Some('\'') && self.peek_at(2) == Some('\'')
+        if self.peek() == Some('\'')
+            && self.peek_at(1) == Some('\'')
+            && self.peek_at(2) == Some('\'')
         {
             return self.multiline_literal_string();
         }
@@ -753,9 +783,9 @@ impl TOMLParser {
         loop {
             match self.bump() {
                 None | Some('\n') => {
-                    return Err(self.err(
-                        jet_foundation::EncodingErrors::TOML_UNTERMINATED_LITERAL_STRING,
-                    ))
+                    return Err(
+                        self.err(jet_foundation::EncodingErrors::TOML_UNTERMINATED_LITERAL_STRING)
+                    )
                 }
                 Some('\'') => return Ok(out),
                 Some(c) => out.push(c),
@@ -774,7 +804,9 @@ impl TOMLParser {
         }
         let mut out = String::new();
         loop {
-            if self.peek() == Some('\'') && self.peek_at(1) == Some('\'') && self.peek_at(2) == Some('\'')
+            if self.peek() == Some('\'')
+                && self.peek_at(1) == Some('\'')
+                && self.peek_at(2) == Some('\'')
             {
                 self.bump();
                 self.bump();
@@ -801,7 +833,9 @@ impl TOMLParser {
                     self.bump();
                     return Ok(TOMLValue::Array(items));
                 }
-                None => return Err(self.err(jet_foundation::EncodingErrors::TOML_UNTERMINATED_ARRAY)),
+                None => {
+                    return Err(self.err(jet_foundation::EncodingErrors::TOML_UNTERMINATED_ARRAY))
+                }
                 _ => {}
             }
             items.push(self.value()?);
@@ -815,11 +849,13 @@ impl TOMLParser {
                     return Ok(TOMLValue::Array(items));
                 }
                 Some(c) => {
-                    return Err(self.err(
-                        jet_foundation::EncodingErrors::toml_expected_array_separator(c),
-                    ))
+                    return Err(
+                        self.err(jet_foundation::EncodingErrors::toml_expected_array_separator(c))
+                    )
                 }
-                None => return Err(self.err(jet_foundation::EncodingErrors::TOML_UNTERMINATED_ARRAY)),
+                None => {
+                    return Err(self.err(jet_foundation::EncodingErrors::TOML_UNTERMINATED_ARRAY))
+                }
             }
         }
     }
@@ -857,14 +893,14 @@ impl TOMLParser {
                 Some(',') => continue,
                 Some('}') => return Ok(TOMLValue::InlineTable(entries)),
                 Some(c) => {
-                    return Err(self.err(
-                        jet_foundation::EncodingErrors::toml_expected_inline_separator(c),
-                    ))
+                    return Err(
+                        self.err(jet_foundation::EncodingErrors::toml_expected_inline_separator(c))
+                    )
                 }
                 None => {
-                    return Err(self.err(
-                        jet_foundation::EncodingErrors::TOML_UNTERMINATED_INLINE_TABLE,
-                    ))
+                    return Err(
+                        self.err(jet_foundation::EncodingErrors::TOML_UNTERMINATED_INLINE_TABLE)
+                    )
                 }
             }
         }
@@ -992,7 +1028,11 @@ impl TOMLParser {
         }
         i64::from_str_radix(&tok, radix)
             .map(TOMLValue::Integer)
-            .map_err(|_| self.err(jet_foundation::EncodingErrors::toml_invalid_radix_integer(radix, &tok)))
+            .map_err(|_| {
+                self.err(jet_foundation::EncodingErrors::toml_invalid_radix_integer(
+                    radix, &tok,
+                ))
+            })
     }
 }
 fn toml_is_bare_key_char(c: char) -> bool {
@@ -1502,7 +1542,10 @@ fn yaml_scalar_value(s: &str) -> CtValue {
             return json_variant("Float", Some(CtValue::Float(CtFloat::f64(f64::INFINITY))))
         }
         "-.inf" | "-.Inf" => {
-            return json_variant("Float", Some(CtValue::Float(CtFloat::f64(f64::NEG_INFINITY))))
+            return json_variant(
+                "Float",
+                Some(CtValue::Float(CtFloat::f64(f64::NEG_INFINITY))),
+            )
         }
         ".nan" | ".NaN" | ".NAN" => {
             return json_variant("Float", Some(CtValue::Float(CtFloat::f64(f64::NAN))))
@@ -1550,7 +1593,12 @@ fn yaml_render_node(t: &CtValue, indent: usize, out: &mut String) {
                 out.push_str(&format!("{}{}:\n", pad, yaml_render_key(k)));
                 yaml_render_seq(&json_array_items(v).unwrap(), indent, out);
             } else {
-                out.push_str(&format!("{}{}: {}\n", pad, yaml_render_key(k), yaml_render_scalar(v)));
+                out.push_str(&format!(
+                    "{}{}: {}\n",
+                    pad,
+                    yaml_render_key(k),
+                    yaml_render_scalar(v)
+                ));
             }
         }
         return;
@@ -1724,9 +1772,7 @@ fn xml_value_from_ct(value: &CtValue) -> Result<jet_foundation::XmlPull::Value, 
     Err("XML tree contains a non-DataTree value".to_string())
 }
 
-pub(super) fn xml_from_ct(
-    value: &CtValue,
-) -> Result<jet_foundation::XmlPull::Value, String> {
+pub(super) fn xml_from_ct(value: &CtValue) -> Result<jet_foundation::XmlPull::Value, String> {
     let mut value = xml_value_from_ct(value)?;
     // The runtime kernel owns XML attribute-value normalization and lexical
     // trust. Validate before restoring closed-schema order, or a reordered
@@ -1745,14 +1791,38 @@ pub(super) fn xml_safe_limits_value() -> CtValue {
     CtValue::Struct {
         type_name: "XMLLimits".to_string(),
         fields: vec![
-            ("max_depth".to_string(), CtValue::Int(limits.max_depth as i64)),
-            ("max_nodes".to_string(), CtValue::Int(limits.max_nodes as i64)),
-            ("max_attributes_per_element".to_string(), CtValue::Int(limits.max_attributes_per_element as i64)),
-            ("max_name_bytes".to_string(), CtValue::Int(limits.max_name_bytes as i64)),
-            ("max_text_bytes".to_string(), CtValue::Int(limits.max_text_bytes as i64)),
-            ("max_entity_declarations".to_string(), CtValue::Int(limits.max_entity_declarations as i64)),
-            ("max_entity_depth".to_string(), CtValue::Int(limits.max_entity_depth as i64)),
-            ("max_entity_replacement_bytes".to_string(), CtValue::Int(limits.max_entity_replacement_bytes as i64)),
+            (
+                "max_depth".to_string(),
+                CtValue::Int(limits.max_depth as i64),
+            ),
+            (
+                "max_nodes".to_string(),
+                CtValue::Int(limits.max_nodes as i64),
+            ),
+            (
+                "max_attributes_per_element".to_string(),
+                CtValue::Int(limits.max_attributes_per_element as i64),
+            ),
+            (
+                "max_name_bytes".to_string(),
+                CtValue::Int(limits.max_name_bytes as i64),
+            ),
+            (
+                "max_text_bytes".to_string(),
+                CtValue::Int(limits.max_text_bytes as i64),
+            ),
+            (
+                "max_entity_declarations".to_string(),
+                CtValue::Int(limits.max_entity_declarations as i64),
+            ),
+            (
+                "max_entity_depth".to_string(),
+                CtValue::Int(limits.max_entity_depth as i64),
+            ),
+            (
+                "max_entity_replacement_bytes".to_string(),
+                CtValue::Int(limits.max_entity_replacement_bytes as i64),
+            ),
         ],
     }
 }
@@ -1761,9 +1831,14 @@ pub(super) fn xml_safe_options_value() -> CtValue {
     CtValue::Struct {
         type_name: "XMLParseOptions".to_string(),
         fields: vec![
-            ("entities".to_string(), CtValue::Enum {
-                type_name: "XMLEntityPolicy".to_string(), variant: "Preserve".to_string(), args: Vec::new(),
-            }),
+            (
+                "entities".to_string(),
+                CtValue::Enum {
+                    type_name: "XMLEntityPolicy".to_string(),
+                    variant: "Preserve".to_string(),
+                    args: Vec::new(),
+                },
+            ),
             ("limits".to_string(), xml_safe_limits_value()),
         ],
     }
@@ -1773,12 +1848,22 @@ pub(super) fn xml_safe_render_options_value() -> CtValue {
     CtValue::Struct {
         type_name: "XMLRenderOptions".to_string(),
         fields: vec![
-            ("encoding".to_string(), CtValue::Enum {
-                type_name: "XMLEncoding".to_string(), variant: "UTF8".to_string(), args: Vec::new(),
-            }),
-            ("lexical".to_string(), CtValue::Enum {
-                type_name: "XMLLexicalPolicy".to_string(), variant: "PreserveValid".to_string(), args: Vec::new(),
-            }),
+            (
+                "encoding".to_string(),
+                CtValue::Enum {
+                    type_name: "XMLEncoding".to_string(),
+                    variant: "UTF8".to_string(),
+                    args: Vec::new(),
+                },
+            ),
+            (
+                "lexical".to_string(),
+                CtValue::Enum {
+                    type_name: "XMLLexicalPolicy".to_string(),
+                    variant: "PreserveValid".to_string(),
+                    args: Vec::new(),
+                },
+            ),
         ],
     }
 }
@@ -1803,21 +1888,32 @@ pub(super) fn xml_parse_bytes(
 }
 
 fn xml_int(fields: &[(String, CtValue)], name: &str) -> i64 {
-    fields.iter().find_map(|(field, value)| {
-        (field == name).then_some(value).and_then(|value| match value {
-            CtValue::Int(value) => Some(*value),
-            _ => None,
+    fields
+        .iter()
+        .find_map(|(field, value)| {
+            (field == name)
+                .then_some(value)
+                .and_then(|value| match value {
+                    CtValue::Int(value) => Some(*value),
+                    _ => None,
+                })
         })
-    }).unwrap_or(-1)
+        .unwrap_or(-1)
 }
 
-fn xml_options(value: &CtValue) -> Result<jet_foundation::XmlPull::ParseOptions, jet_foundation::XmlPull::Error> {
+fn xml_options(
+    value: &CtValue,
+) -> Result<jet_foundation::XmlPull::ParseOptions, jet_foundation::XmlPull::Error> {
     let CtValue::Struct { fields, .. } = value else {
         return Ok(jet_foundation::XmlPull::ParseOptions::safe());
     };
-    let entities = fields.iter().find_map(|(name, value)| (name == "entities").then_some(value));
+    let entities = fields
+        .iter()
+        .find_map(|(name, value)| (name == "entities").then_some(value));
     let entities = match entities {
-        Some(CtValue::Enum { variant, .. }) if variant == "Reject" => jet_foundation::XmlPull::EntityPolicy::Reject,
+        Some(CtValue::Enum { variant, .. }) if variant == "Reject" => {
+            jet_foundation::XmlPull::EntityPolicy::Reject
+        }
         Some(CtValue::Enum { variant, args, .. }) if variant == "Resolve" => {
             let mut resolved = BTreeMap::new();
             if let Some((_, CtValue::Map(entries))) = args.first() {
@@ -1832,7 +1928,15 @@ fn xml_options(value: &CtValue) -> Result<jet_foundation::XmlPull::ParseOptions,
         _ => jet_foundation::XmlPull::EntityPolicy::Preserve,
     };
     let limits_fields = fields.iter().find_map(|(name, value)| {
-        if name == "limits" { if let CtValue::Struct { fields, .. } = value { Some(fields.as_slice()) } else { None } } else { None }
+        if name == "limits" {
+            if let CtValue::Struct { fields, .. } = value {
+                Some(fields.as_slice())
+            } else {
+                None
+            }
+        } else {
+            None
+        }
     });
     let safe = jet_foundation::XmlPull::Limits::safe();
     let to_usize = |value: i64| usize::try_from(value).unwrap_or(usize::MAX);
@@ -1847,13 +1951,18 @@ fn xml_options(value: &CtValue) -> Result<jet_foundation::XmlPull::ParseOptions,
             max_entity_depth: to_usize(xml_int(fields, "max_entity_depth")),
             max_entity_replacement_bytes: to_usize(xml_int(fields, "max_entity_replacement_bytes")),
         }
-    } else { safe };
+    } else {
+        safe
+    };
     let options = jet_foundation::XmlPull::ParseOptions { entities, limits };
     options.limits.validate()?;
     Ok(options)
 }
 
-fn xml_error_value_with_source(error: jet_foundation::XmlPull::Error, source_bytes: bool) -> CtValue {
+fn xml_error_value_with_source(
+    error: jet_foundation::XmlPull::Error,
+    source_bytes: bool,
+) -> CtValue {
     let kind = format!("{:?}", error.kind);
     let byte_offset = if source_bytes || error.line.is_some() {
         CtValue::Present(Box::new(CtValue::Int(error.offset as i64)))
@@ -1863,10 +1972,29 @@ fn xml_error_value_with_source(error: jet_foundation::XmlPull::Error, source_byt
     CtValue::Struct {
         type_name: "XMLError".to_string(),
         fields: vec![
-            ("kind".to_string(), CtValue::Enum { type_name: "XMLReason".to_string(), variant: kind, args: Vec::new() }),
+            (
+                "kind".to_string(),
+                CtValue::Enum {
+                    type_name: "XMLReason".to_string(),
+                    variant: kind,
+                    args: Vec::new(),
+                },
+            ),
             ("byte_offset".to_string(), byte_offset),
-            ("line".to_string(), error.line.map(|value| CtValue::Present(Box::new(CtValue::Int(value as i64)))).unwrap_or(CtValue::absent(Type::Int))),
-            ("column".to_string(), error.column.map(|value| CtValue::Present(Box::new(CtValue::Int(value as i64)))).unwrap_or(CtValue::absent(Type::Int))),
+            (
+                "line".to_string(),
+                error
+                    .line
+                    .map(|value| CtValue::Present(Box::new(CtValue::Int(value as i64))))
+                    .unwrap_or(CtValue::absent(Type::Int)),
+            ),
+            (
+                "column".to_string(),
+                error
+                    .column
+                    .map(|value| CtValue::Present(Box::new(CtValue::Int(value as i64))))
+                    .unwrap_or(CtValue::absent(Type::Int)),
+            ),
             ("path".to_string(), CtValue::Str(error.path)),
             ("reason".to_string(), CtValue::Str(error.reason)),
         ],
@@ -1885,7 +2013,14 @@ fn xml_shape_error_value(reason: String) -> CtValue {
     CtValue::Struct {
         type_name: "XMLError".to_string(),
         fields: vec![
-            ("kind".to_string(), CtValue::Enum { type_name: "XMLReason".to_string(), variant: "Shape".to_string(), args: Vec::new() }),
+            (
+                "kind".to_string(),
+                CtValue::Enum {
+                    type_name: "XMLReason".to_string(),
+                    variant: "Shape".to_string(),
+                    args: Vec::new(),
+                },
+            ),
             ("byte_offset".to_string(), CtValue::absent(Type::Int)),
             ("line".to_string(), CtValue::absent(Type::Int)),
             ("column".to_string(), CtValue::absent(Type::Int)),
@@ -1958,21 +2093,32 @@ pub(super) fn xml_project_for_decode(document: &CtValue) -> Result<CtValue, CtVa
         .map_err(xml_error_value)
 }
 
-pub(super) fn xml_to_bytes(
-    value: &CtValue,
-    options: Option<&CtValue>,
-) -> Result<Vec<u8>, CtValue> {
+pub(super) fn xml_to_bytes(value: &CtValue, options: Option<&CtValue>) -> Result<Vec<u8>, CtValue> {
     let value = xml_from_ct(value).map_err(xml_shape_error_value)?;
     let (encoding, lexical) = match options {
         Some(CtValue::Struct { fields, .. }) => {
-            let encoding = match fields.iter().find_map(|(name, value)| (name == "encoding").then_some(value)) {
-                Some(CtValue::Enum { variant, .. }) if variant == "UTF8BOM" => jet_foundation::XmlPull::RenderEncoding::UTF8Bom,
-                Some(CtValue::Enum { variant, .. }) if variant == "UTF16LE" => jet_foundation::XmlPull::RenderEncoding::Utf16Le,
-                Some(CtValue::Enum { variant, .. }) if variant == "UTF16BE" => jet_foundation::XmlPull::RenderEncoding::Utf16Be,
+            let encoding = match fields
+                .iter()
+                .find_map(|(name, value)| (name == "encoding").then_some(value))
+            {
+                Some(CtValue::Enum { variant, .. }) if variant == "UTF8BOM" => {
+                    jet_foundation::XmlPull::RenderEncoding::UTF8Bom
+                }
+                Some(CtValue::Enum { variant, .. }) if variant == "UTF16LE" => {
+                    jet_foundation::XmlPull::RenderEncoding::Utf16Le
+                }
+                Some(CtValue::Enum { variant, .. }) if variant == "UTF16BE" => {
+                    jet_foundation::XmlPull::RenderEncoding::Utf16Be
+                }
                 _ => jet_foundation::XmlPull::RenderEncoding::UTF8,
             };
-            let lexical = match fields.iter().find_map(|(name, value)| (name == "lexical").then_some(value)) {
-                Some(CtValue::Enum { variant, .. }) if variant == "Deterministic" => jet_foundation::XmlPull::LexicalPolicy::Deterministic,
+            let lexical = match fields
+                .iter()
+                .find_map(|(name, value)| (name == "lexical").then_some(value))
+            {
+                Some(CtValue::Enum { variant, .. }) if variant == "Deterministic" => {
+                    jet_foundation::XmlPull::LexicalPolicy::Deterministic
+                }
                 _ => jet_foundation::XmlPull::LexicalPolicy::PreserveValid,
             };
             (encoding, lexical)
@@ -1982,7 +2128,8 @@ pub(super) fn xml_to_bytes(
             jet_foundation::XmlPull::LexicalPolicy::PreserveValid,
         ),
     };
-    jet_foundation::XmlKernel::render_document_bytes(&value, encoding, lexical).map_err(xml_error_value)
+    jet_foundation::XmlKernel::render_document_bytes(&value, encoding, lexical)
+        .map_err(xml_error_value)
 }
 
 #[cfg(test)]
@@ -2033,11 +2180,7 @@ mod xml_tests {
 
         let utf16_source = "<?xml version='1.0' encoding='UTF-16'?><r>é🙂</r>";
         let mut utf16 = vec![0xff, 0xfe];
-        utf16.extend(
-            utf16_source
-                .encode_utf16()
-                .flat_map(u16::to_le_bytes),
-        );
+        utf16.extend(utf16_source.encode_utf16().flat_map(u16::to_le_bytes));
 
         for (variant, bytes) in [("UTF8BOM", utf8), ("UTF16LE", utf16)] {
             let expected =
@@ -2124,10 +2267,10 @@ mod xml_tests {
 
     #[test]
     fn hostile_deep_snapshots_match_runtime_rejection() {
-        const SOURCE: &str = "<r xmlns='urn:\troot' xmlns:p='urn:p' a='x\t y' b='z'><?go   now?></r>";
+        const SOURCE: &str =
+            "<r xmlns='urn:\troot' xmlns:p='urn:p' a='x\t y' b='z'><?go   now?></r>";
         let parsed = || jet_foundation::XmlPull::parse_document(SOURCE).expect("parse XML");
-        let assert_parity =
-            |value: jet_foundation::XmlPull::Value, source: &str, label: &str| {
+        let assert_parity = |value: jet_foundation::XmlPull::Value, source: &str, label: &str| {
             let runtime = jet_foundation::XmlPull::render_document(&value).expect("runtime render");
             let comptime = xml_render(&xml_to_ct(value));
             assert_eq!(comptime, runtime, "{label}");
@@ -2146,8 +2289,7 @@ mod xml_tests {
         let mut reordered_attributes = parsed();
         let root = first(field_mut(&mut reordered_attributes, "children"));
         let semantic = field_mut(field_mut(root, "open_lexical"), "semantic");
-        let jet_foundation::XmlPull::Value::Array(attributes) =
-            field_mut(semantic, "attributes")
+        let jet_foundation::XmlPull::Value::Array(attributes) = field_mut(semantic, "attributes")
         else {
             panic!("attribute array")
         };
@@ -2165,12 +2307,8 @@ mod xml_tests {
         let mut stale_leaf = parsed();
         let root = first(field_mut(&mut stale_leaf, "children"));
         let processing_instruction = first(field_mut(root, "children"));
-        let semantic = field_mut(
-            field_mut(processing_instruction, "lexical"),
-            "semantic",
-        );
-        *field_mut(semantic, "value") =
-            jet_foundation::XmlPull::Value::Text("stale".to_string());
+        let semantic = field_mut(field_mut(processing_instruction, "lexical"), "semantic");
+        *field_mut(semantic, "value") = jet_foundation::XmlPull::Value::Text("stale".to_string());
         assert_parity(stale_leaf, SOURCE, "stale leaf snapshot");
 
         const SIMPLE: &str = "<r  a='x'/>";
@@ -2438,9 +2576,7 @@ fn cbor_kernel_value(value: &CtValue) -> Result<jet_foundation::CborKernel::Valu
     if let Some(entries) = json_object_entries(value) {
         return entries
             .iter()
-            .map(|(key, value)| {
-                cbor_kernel_value(value).map(|value| (key.clone(), value))
-            })
+            .map(|(key, value)| cbor_kernel_value(value).map(|value| (key.clone(), value)))
             .collect::<Result<Vec<_>, _>>()
             .map(jet_foundation::CborKernel::Value::Object);
     }
@@ -2478,9 +2614,7 @@ fn cbor_kernel_value(value: &CtValue) -> Result<jet_foundation::CborKernel::Valu
             .map(jet_foundation::CborKernel::Value::Object),
         CtValue::Struct { fields, .. } => fields
             .iter()
-            .map(|(key, value)| {
-                cbor_kernel_value(value).map(|value| (key.clone(), value))
-            })
+            .map(|(key, value)| cbor_kernel_value(value).map(|value| (key.clone(), value)))
             .collect::<Result<Vec<_>, _>>()
             .map(jet_foundation::CborKernel::Value::Object),
         CtValue::Present(value) | CtValue::Failed(CtReport::Told(value)) => {
@@ -2538,12 +2672,9 @@ fn cbor_kernel_tree(value: jet_foundation::CborKernel::Value) -> CtValue {
             json_variant("Text", Some(CtValue::Str(value)))
         }
         jet_foundation::CborKernel::Value::Bytes(value) => CtValue::Bytes(value),
-        jet_foundation::CborKernel::Value::Array(values) => json_array(
-            values
-                .into_iter()
-                .map(cbor_kernel_tree)
-                .collect(),
-        ),
+        jet_foundation::CborKernel::Value::Array(values) => {
+            json_array(values.into_iter().map(cbor_kernel_tree).collect())
+        }
         jet_foundation::CborKernel::Value::Object(entries) => json_object(
             entries
                 .into_iter()
@@ -2554,12 +2685,14 @@ fn cbor_kernel_tree(value: jet_foundation::CborKernel::Value) -> CtValue {
 }
 
 pub(super) fn cbor_encode(v: &CtValue) -> Result<Vec<u8>, CBORError> {
-    let value = cbor_kernel_value(v).map_err(|reason| CBORError::new("Unsupported", 0, "$", reason))?;
+    let value =
+        cbor_kernel_value(v).map_err(|reason| CBORError::new("Unsupported", 0, "$", reason))?;
     jet_foundation::CborKernel::encode(&value, false).map_err(cbor_kernel_error)
 }
 
 pub(super) fn cbor_encode_canonical(v: &CtValue) -> Result<Vec<u8>, CBORError> {
-    let value = cbor_kernel_value(v).map_err(|reason| CBORError::new("Unsupported", 0, "$", reason))?;
+    let value =
+        cbor_kernel_value(v).map_err(|reason| CBORError::new("Unsupported", 0, "$", reason))?;
     jet_foundation::CborKernel::encode(&value, true).map_err(cbor_kernel_error)
 }
 
@@ -2712,8 +2845,14 @@ pub(super) fn encoding_limits_safe_value() -> CtValue {
         fields: vec![
             ("buffer_bytes".to_string(), CtValue::Int(lim.buffer_bytes)),
             ("max_depth".to_string(), CtValue::Int(lim.max_depth)),
-            ("max_item_bytes".to_string(), CtValue::Int(lim.max_item_bytes)),
-            ("max_total_bytes".to_string(), CtValue::absent(crate::AST::Type::Int)),
+            (
+                "max_item_bytes".to_string(),
+                CtValue::Int(lim.max_item_bytes),
+            ),
+            (
+                "max_total_bytes".to_string(),
+                CtValue::absent(crate::AST::Type::Int),
+            ),
             (
                 "max_expansion_depth".to_string(),
                 CtValue::Int(lim.max_expansion_depth),
@@ -2774,8 +2913,14 @@ fn encoding_error_value(kind: &str, reason: impl Into<String>) -> CtValue {
                 },
             ),
             ("byte_offset".to_string(), CtValue::Int(0)),
-            ("line".to_string(), CtValue::Present(Box::new(CtValue::Int(1)))),
-            ("column".to_string(), CtValue::Present(Box::new(CtValue::Int(1)))),
+            (
+                "line".to_string(),
+                CtValue::Present(Box::new(CtValue::Int(1))),
+            ),
+            (
+                "column".to_string(),
+                CtValue::Present(Box::new(CtValue::Int(1))),
+            ),
             ("path".to_string(), CtValue::Str(String::new())),
             ("reason".to_string(), CtValue::Str(reason.into())),
             (
@@ -2903,7 +3048,10 @@ fn jcs_decimal_distance(
         .expect("absolute decimal distance")
 }
 
-fn jcs_positive_big_cmp(left: &jcs_big::JetBigInt, right: &jcs_big::JetBigInt) -> std::cmp::Ordering {
+fn jcs_positive_big_cmp(
+    left: &jcs_big::JetBigInt,
+    right: &jcs_big::JetBigInt,
+) -> std::cmp::Ordering {
     let left = left.to_string_rep();
     let right = right.to_string_rep();
     left.len().cmp(&right.len()).then_with(|| left.cmp(&right))
@@ -2917,9 +3065,12 @@ fn jcs_shortest(value: f64) -> String {
     };
     let digit = shortest.as_bytes()[index] - b'0';
     let mut candidates = vec![(shortest.clone(), digit)];
-    for replacement in [digit.checked_sub(1), digit.checked_add(1).filter(|next| *next < 10)]
-        .into_iter()
-        .flatten()
+    for replacement in [
+        digit.checked_sub(1),
+        digit.checked_add(1).filter(|next| *next < 10),
+    ]
+    .into_iter()
+    .flatten()
     {
         let mut candidate = shortest.clone().into_bytes();
         candidate[index] = b'0' + replacement;
@@ -2954,10 +3105,18 @@ fn jcs_number(value: f64) -> String {
     let shortest = jcs_shortest(value.abs());
     let (mantissa, exponent) = shortest
         .split_once('e')
-        .map(|(mantissa, exponent)| (mantissa, exponent.parse::<i32>().expect("Rust float exponent")))
+        .map(|(mantissa, exponent)| {
+            (
+                mantissa,
+                exponent.parse::<i32>().expect("Rust float exponent"),
+            )
+        })
         .unwrap_or((&shortest, 0));
     let decimal = mantissa.find('.').unwrap_or(mantissa.len()) as i32;
-    let mut digits = mantissa.bytes().filter(|byte| *byte != b'.').collect::<Vec<_>>();
+    let mut digits = mantissa
+        .bytes()
+        .filter(|byte| *byte != b'.')
+        .collect::<Vec<_>>();
     let leading = digits.iter().take_while(|byte| **byte == b'0').count();
     digits.drain(..leading);
     while digits.len() > 1 && digits.last() == Some(&b'0') {
@@ -3032,11 +3191,7 @@ fn jcs_quote_text(text: &str) -> Vec<u8> {
     out
 }
 
-fn jcs_tree(
-    value: &CtValue,
-    limits: &EncodingLimitsLite,
-    depth: i64,
-) -> Result<Vec<u8>, CtValue> {
+fn jcs_tree(value: &CtValue, limits: &EncodingLimitsLite, depth: i64) -> Result<Vec<u8>, CtValue> {
     if depth > limits.max_depth {
         return Err(encoding_error_value(
             "Limit",
@@ -3057,7 +3212,11 @@ fn jcs_tree(
                         Some(CtValue::Bool(b)) => *b,
                         _ => false,
                     };
-                    return Ok(if b { b"true".to_vec() } else { b"false".to_vec() });
+                    return Ok(if b {
+                        b"true".to_vec()
+                    } else {
+                        b"false".to_vec()
+                    });
                 }
                 "Int" => {
                     if let Some(CtValue::Int(n)) = args.first().map(|(_, v)| v) {
@@ -3131,7 +3290,11 @@ fn jcs_tree(
         }
     }
     match value {
-        CtValue::Bool(b) => Ok(if *b { b"true".to_vec() } else { b"false".to_vec() }),
+        CtValue::Bool(b) => Ok(if *b {
+            b"true".to_vec()
+        } else {
+            b"false".to_vec()
+        }),
         CtValue::Int(n) => {
             if (*n as f64) as i128 != *n as i128 {
                 Err(encoding_error_value(
@@ -3194,9 +3357,8 @@ pub(super) fn json_canonical_jcs(
             ),
         ));
     }
-    String::from_utf8(bytes).map_err(|_| {
-        encoding_error_value("Unsupported", "canonical JSON output is not UTF-8")
-    })
+    String::from_utf8(bytes)
+        .map_err(|_| encoding_error_value("Unsupported", "canonical JSON output is not UTF-8"))
 }
 
 pub(super) fn json_canonical(v: &CtValue) -> String {
@@ -3204,7 +3366,11 @@ pub(super) fn json_canonical(v: &CtValue) -> String {
 }
 pub(super) fn json_events(v: &CtValue) -> String {
     fn walk(path: String, t: &CtValue, out: &mut Vec<String>) {
-        let here = if path.is_empty() { "$".to_string() } else { path };
+        let here = if path.is_empty() {
+            "$".to_string()
+        } else {
+            path
+        };
         if let Some(entries) = json_object_entries(t) {
             out.push(format!("object_start {here}"));
             for (k, v) in &entries {

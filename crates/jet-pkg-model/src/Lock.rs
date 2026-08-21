@@ -217,7 +217,14 @@ pub fn enforce_provenance_requirement(
                 matches!(report.transparency.status, ProvenanceStatus::Verified)
             }
             crate::Package::ProvenanceRequirement::Attested => {
-                report.build.value != "not recorded"
+                // An envelope's generic build/provenance text is only a
+                // recorded fact. It is not an attestation and must not lift a
+                // package over an explicit `attested` floor.
+                package
+                    .provenance
+                    .as_ref()
+                    .and_then(|provenance| provenance.build.as_deref())
+                    .is_some_and(|value| !value.trim().is_empty())
             }
         };
         if !satisfied {

@@ -1,0 +1,835 @@
+//! Reproducibility certification at the Hangar closure boundary.
+//!
+//! The registration gate is the one place every locally realized object must
+//! cross before it becomes a closure fact. This module compares only entries
+//! with the same action identity, records immutable divergence evidence, and
+//! leaves the trusted closure/cache graph unchanged on failure.
+
+use super::{entry_action_key, list_unlocked, Ingest, ProducerRecord, Roots, StoreEntry};
+use crate::{Envelope, SHA256};
+use std::collections::{BTreeMap, BTreeSet};
+use std::fs;
+use std::io::{self, Read as _, Write as _};
+use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
+
+const REPORT_DIR: &str = "unreproducible";
+const REPORT_STATUS: &str = "unreproducible";
+const REPORT_SCHEMA: &str = "jet-reproducibility-report-v1";
+
+static REPORT_SEQUENCE: AtomicU64 = AtomicU64::new(0);
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct FirstDifference {
+    path: String,
+    kind: String,
+    left: String,
+    right: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct NodeObservation {
+    kind: &'static str,
+    mode: u32,
+    digest: Option<String>,
+    target: Option<String>,
+    hardlink: Option<String>,
+    xattrs: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct OutputSnapshot {
+    digest: String,
+    nodes: BTreeMap<Vec<u8>, NodeObservation>,
+}
+
+/// Check a candidate before the closure transaction can publish it.
+/// `additional` contains entries in the same not-yet-committed batch.
+pub(crate) fn certify_registration_unlocked(
+    roots: &Roots,
+    entry: &StoreEntry,
+    additional: &[StoreEntry],
+) -> io::Result<()> {
+    let action_key = entry_action_key(entry);
+    if reproducibility_blocked(roots, &action_key)? {
+        return Err(unreproducible_error(
+            &action_key,
+            "this action already has durable unreproducible evidence",
+        ));
+    }
+
+    let producer = decode_producer(entry)?;
+    let mut candidates = BTreeMap::new();
+    for candidate in list_unlocked(roots)
+        .into_iter()
+        .chain(additional.iter().cloned())
+    {
+        if candidate.id != entry.id && entry_action_key(&candidate) == action_key {
+            candidates.insert(candidate.id.clone(), candidate);
+        }
+    }
+
+    for candidate in candidates.into_values() {
+        let candidate_producer = decode_producer(&candidate)?;
+        verify_existing_output(roots, &candidate)?;
+        let (left, right, left_producer, right_producer) =
+            if entry_sort_key(entry) <= entry_sort_key(&candidate) {
+                (entry, &candidate, &producer, &candidate_producer)
+            } else {
+                (&candidate, entry, &candidate_producer, &producer)
+            };
+        let difference = entry_difference(roots, left, right)?;
+        if let Some(difference) = difference {
+            let report = report_json(
+                &action_key,
+                left,
+                right,
+                left_producer,
+                right_producer,
+                &difference,
+            );
+            let report_path = persist_report(roots, &action_key, &report)?;
+            return Err(unreproducible_error(
+                &action_key,
+                &format!(
+                    "conflicting bytes or provenance at `{}`; report `{}`",
+                    difference.path,
+                    report_path.display()
+                ),
+            ));
+        }
+    }
+    Ok(())
+}
+
+/// A durable report blocks trusted cache use for the action until a fresh,
+/// independently agreeing certification has replaced the action explicitly.
+pub(crate) fn reproducibility_blocked(roots: &Roots, action_key: &str) -> io::Result<bool> {
+    let Some(directory) = report_directory(roots, false)? else {
+        return Ok(false);
+    };
+    let path = report_path(&directory, action_key);
+    match fs::symlink_metadata(path) {
+        Ok(metadata) if metadata.file_type().is_symlink() || !metadata.is_file() => {
+            Err(invalid("reproducibility evidence is not a regular file"))
+        }
+        Ok(_) => Ok(true),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(false),
+        Err(error) => Err(error),
+    }
+}
+
+fn entry_difference(
+    roots: &Roots,
+    left: &StoreEntry,
+    right: &StoreEntry,
+) -> io::Result<Option<FirstDifference>> {
+    let left_snapshot = snapshot_for_entry(roots, left)?;
+    let right_snapshot = snapshot_for_entry(roots, right)?;
+    if left_snapshot.digest != right_snapshot.digest {
+        return Ok(Some(
+            first_node_difference(&left_snapshot, &right_snapshot).unwrap_or(FirstDifference {
+                path: ".".to_string(),
+                kind: "canonical-output".to_string(),
+                left: left_snapshot.digest,
+                right: right_snapshot.digest,
+            }),
+        ));
+    }
+    Ok(metadata_difference(left, right))
+}
+
+fn snapshot_for_entry(roots: &Roots, entry: &StoreEntry) -> io::Result<OutputSnapshot> {
+    let path = Path::new(&entry.out);
+    let hangar = roots.hangar_dir();
+    let canonical_hangar = fs::canonicalize(&hangar).unwrap_or(hangar);
+    let hangar_root = path
+        .starts_with(&canonical_hangar)
+        .then_some(canonical_hangar);
+    snapshot_output(
+        path,
+        hangar_root.as_deref(),
+        !entry.platform_artifact_kind.is_empty(),
+    )
+}
+
+fn snapshot_output(
+    path: &Path,
+    hangar_root: Option<&Path>,
+    allow_semantic_xattrs: bool,
+) -> io::Result<OutputSnapshot> {
+    let canonical = fs::canonicalize(path)?;
+    let mut observed = Vec::new();
+    let mut hook = |node: &Path, event: &'static str| {
+        if event == "node" {
+            observed.push(node.to_path_buf());
+        }
+    };
+    let digest = match hangar_root {
+        Some(hangar_root) => Envelope::try_output_hash_of_in_hangar_with_policy(
+            &path.to_string_lossy(),
+            hangar_root,
+            allow_semantic_xattrs,
+            &mut hook,
+        ),
+        None => Envelope::try_output_hash_of_with_policy(
+            &path.to_string_lossy(),
+            allow_semantic_xattrs,
+            &mut hook,
+        ),
+    }
+    .map_err(io::Error::other)?;
+
+    let mut nodes = BTreeMap::new();
+    let mut hardlink_first = BTreeMap::new();
+    for node in observed {
+        let relative = node
+            .strip_prefix(&canonical)
+            .map_err(|_| invalid("reproducibility observation escaped its output root"))?;
+        let key = path_bytes(relative);
+        let observation = observe_node(&node, &key, &mut hardlink_first)?;
+        if nodes.insert(key, observation).is_some() {
+            return Err(invalid("reproducibility observed one output node twice"));
+        }
+    }
+
+    let confirmed = match hangar_root {
+        Some(hangar_root) => Envelope::try_output_hash_of_in_hangar(
+            &path.to_string_lossy(),
+            hangar_root,
+            allow_semantic_xattrs,
+        ),
+        None => Envelope::try_output_hash_of(&path.to_string_lossy()),
+    }
+    .map_err(io::Error::other)?;
+    if confirmed != digest {
+        return Err(invalid(
+            "output changed while collecting reproducibility evidence",
+        ));
+    }
+    Ok(OutputSnapshot { digest, nodes })
+}
+
+fn observe_node(
+    path: &Path,
+    relative: &[u8],
+    hardlink_first: &mut BTreeMap<(u64, u64), Vec<u8>>,
+) -> io::Result<NodeObservation> {
+    let metadata = fs::symlink_metadata(path)?;
+    let kind = metadata.file_type();
+    let xattrs = Envelope::list_xattr_names(path)
+        .map_err(io::Error::other)?
+        .into_iter()
+        .filter(|name| !Envelope::is_excluded_xattr(name))
+        .collect::<Vec<_>>();
+    let mode = mode_of(&metadata);
+    if kind.is_dir() {
+        return Ok(NodeObservation {
+            kind: "directory",
+            mode,
+            digest: None,
+            target: None,
+            hardlink: None,
+            xattrs,
+        });
+    }
+    if kind.is_symlink() {
+        let target = fs::read_link(path)?;
+        return Ok(NodeObservation {
+            kind: "symlink",
+            mode,
+            digest: None,
+            target: Some(path_display(&path_bytes(&target))),
+            hardlink: None,
+            xattrs,
+        });
+    }
+    if !kind.is_file() {
+        return Err(invalid(
+            "reproducibility observed an unsupported special file",
+        ));
+    }
+    let hardlink = file_identity(&metadata).and_then(|identity| {
+        hardlink_first
+            .insert(identity, relative.to_vec())
+            .map(|first| path_display(&first))
+    });
+    let digest = read_file_digest(path)?;
+    Ok(NodeObservation {
+        kind: "file",
+        mode,
+        digest: Some(digest),
+        target: None,
+        hardlink,
+        xattrs,
+    })
+}
+
+fn read_file_digest(path: &Path) -> io::Result<String> {
+    let mut options = fs::OpenOptions::new();
+    options.read(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt as _;
+        options.custom_flags(Envelope::nofollow_open_flag().map_err(io::Error::other)?);
+    }
+    let mut file = options.open(path)?;
+    let before = metadata_fingerprint(&file.metadata()?);
+    let mut bytes = Vec::new();
+    file.read_to_end(&mut bytes)?;
+    let after = metadata_fingerprint(&file.metadata()?);
+    if before != after {
+        return Err(invalid(
+            "file changed while collecting reproducibility evidence",
+        ));
+    }
+    Ok(format!("sha256-{}", SHA256::sha256_hex(&bytes)))
+}
+
+fn first_node_difference(left: &OutputSnapshot, right: &OutputSnapshot) -> Option<FirstDifference> {
+    let paths = left
+        .nodes
+        .keys()
+        .chain(right.nodes.keys())
+        .cloned()
+        .collect::<BTreeSet<_>>();
+    for path in paths {
+        match (left.nodes.get(&path), right.nodes.get(&path)) {
+            (Some(left), Some(right)) if left != right => {
+                return Some(node_difference(&path, left, right));
+            }
+            (Some(left), None) => {
+                return Some(FirstDifference {
+                    path: path_display(&path),
+                    kind: "missing-right".to_string(),
+                    left: observation_value(left),
+                    right: "<missing>".to_string(),
+                });
+            }
+            (None, Some(right)) => {
+                return Some(FirstDifference {
+                    path: path_display(&path),
+                    kind: "missing-left".to_string(),
+                    left: "<missing>".to_string(),
+                    right: observation_value(right),
+                });
+            }
+            (Some(_), Some(_)) => {}
+            (None, None) => {}
+        }
+    }
+    None
+}
+
+fn node_difference(
+    path: &[u8],
+    left: &NodeObservation,
+    right: &NodeObservation,
+) -> FirstDifference {
+    let kind = if left.kind != right.kind {
+        "node-kind"
+    } else if left.mode != right.mode {
+        "mode"
+    } else if left.digest != right.digest {
+        "bytes"
+    } else if left.target != right.target {
+        "symlink-target"
+    } else if left.hardlink != right.hardlink {
+        "hardlink"
+    } else {
+        "xattrs"
+    };
+    FirstDifference {
+        path: path_display(path),
+        kind: kind.to_string(),
+        left: observation_value(left),
+        right: observation_value(right),
+    }
+}
+
+fn metadata_difference(left: &StoreEntry, right: &StoreEntry) -> Option<FirstDifference> {
+    for (kind, left, right) in [
+        (
+            "provenance",
+            left.envelope.provenance.clone(),
+            right.envelope.provenance.clone(),
+        ),
+        (
+            "source-fingerprint",
+            left.cache_identity.source_fingerprint.clone(),
+            right.cache_identity.source_fingerprint.clone(),
+        ),
+        (
+            "recipe-fingerprint",
+            left.cache_identity.recipe_fingerprint.clone(),
+            right.cache_identity.recipe_fingerprint.clone(),
+        ),
+        (
+            "policy-fingerprint",
+            left.cache_identity.policy_fingerprint.clone(),
+            right.cache_identity.policy_fingerprint.clone(),
+        ),
+        (
+            "platform",
+            left.cache_identity.platform.clone(),
+            right.cache_identity.platform.clone(),
+        ),
+        (
+            "platform-artifact-kind",
+            left.platform_artifact_kind.clone(),
+            right.platform_artifact_kind.clone(),
+        ),
+    ] {
+        if left != right {
+            return Some(FirstDifference {
+                path: ".".to_string(),
+                kind: kind.to_string(),
+                left,
+                right,
+            });
+        }
+    }
+    let named_outputs = left
+        .named_outputs
+        .keys()
+        .chain(right.named_outputs.keys())
+        .cloned()
+        .collect::<BTreeSet<_>>();
+    for name in named_outputs {
+        let left_digest = left.named_outputs.get(&name).cloned();
+        let right_digest = right.named_outputs.get(&name).cloned();
+        if left_digest != right_digest {
+            return Some(FirstDifference {
+                path: format!("output/{name}"),
+                kind: "named-output".to_string(),
+                left: left_digest.unwrap_or_else(|| "<missing>".to_string()),
+                right: right_digest.unwrap_or_else(|| "<missing>".to_string()),
+            });
+        }
+    }
+    let left_provenance = ProducerRecord::decode(&left.producer_record)
+        .ok()
+        .map(|producer| producer_provenance_facts(&producer));
+    let right_provenance = ProducerRecord::decode(&right.producer_record)
+        .ok()
+        .map(|producer| producer_provenance_facts(&producer));
+    if left_provenance != right_provenance {
+        return Some(FirstDifference {
+            path: ".".to_string(),
+            kind: "producer-provenance".to_string(),
+            left: json_map(&left_provenance.unwrap_or_default()),
+            right: json_map(&right_provenance.unwrap_or_default()),
+        });
+    }
+    None
+}
+
+fn producer_provenance_facts(producer: &ProducerRecord) -> BTreeMap<String, String> {
+    let mut facts = BTreeMap::from([
+        ("provider".to_string(), producer.provider.clone()),
+        (
+            "immutable_source".to_string(),
+            producer.immutable_source.clone(),
+        ),
+        ("source_digest".to_string(), producer.source_digest.clone()),
+        (
+            "toolchain_facts".to_string(),
+            producer.toolchain_facts.clone(),
+        ),
+        ("policy_facts".to_string(), producer.policy_facts.clone()),
+    ]);
+    for (key, value) in &producer.facts {
+        if !is_output_fact(key) {
+            facts.insert(format!("fact.{key}"), value.clone());
+        }
+    }
+    for (key, value) in producer.plan.facts() {
+        if !is_output_fact(key) {
+            facts.insert(format!("plan.{key}"), value.clone());
+        }
+    }
+    facts
+}
+
+fn is_output_fact(key: &str) -> bool {
+    key.starts_with("output.") || key.starts_with("nix.output.") || key == "cache.output"
+}
+
+fn report_json(
+    action_key: &str,
+    left: &StoreEntry,
+    right: &StoreEntry,
+    left_producer: &ProducerRecord,
+    right_producer: &ProducerRecord,
+    difference: &FirstDifference,
+) -> String {
+    let mut fields = BTreeMap::new();
+    fields.insert("action_key".to_string(), crate::JSON::quote(action_key));
+    fields.insert(
+        "first_difference".to_string(),
+        json_object(BTreeMap::from([
+            ("kind".to_string(), crate::JSON::quote(&difference.kind)),
+            ("left".to_string(), crate::JSON::quote(&difference.left)),
+            ("path".to_string(), crate::JSON::quote(&difference.path)),
+            ("right".to_string(), crate::JSON::quote(&difference.right)),
+        ])),
+    );
+    fields.insert(
+        "left".to_string(),
+        side_json(left, left_producer, action_key),
+    );
+    fields.insert(
+        "producer_action".to_string(),
+        json_object(BTreeMap::from([
+            (
+                "left_provider".to_string(),
+                crate::JSON::quote(&left_producer.provider),
+            ),
+            (
+                "left_source".to_string(),
+                crate::JSON::quote(&left_producer.immutable_source),
+            ),
+            (
+                "right_provider".to_string(),
+                crate::JSON::quote(&right_producer.provider),
+            ),
+            (
+                "right_source".to_string(),
+                crate::JSON::quote(&right_producer.immutable_source),
+            ),
+        ])),
+    );
+    fields.insert(
+        "right".to_string(),
+        side_json(right, right_producer, action_key),
+    );
+    fields.insert("schema".to_string(), crate::JSON::quote(REPORT_SCHEMA));
+    fields.insert("status".to_string(), crate::JSON::quote(REPORT_STATUS));
+    format!("{}\n", json_object(fields))
+}
+
+fn side_json(entry: &StoreEntry, producer: &ProducerRecord, action_key: &str) -> String {
+    json_object(BTreeMap::from([
+        ("action_key".to_string(), crate::JSON::quote(action_key)),
+        (
+            "capabilities".to_string(),
+            crate::JSON::quote(
+                producer
+                    .facts
+                    .get("build.capabilities")
+                    .map(String::as_str)
+                    .unwrap_or(""),
+            ),
+        ),
+        ("entry".to_string(), crate::JSON::quote(&entry.id)),
+        (
+            "output_hash".to_string(),
+            crate::JSON::quote(&entry.envelope.output_hash),
+        ),
+        (
+            "platform".to_string(),
+            crate::JSON::quote(&entry.envelope.platform),
+        ),
+        ("producer_facts".to_string(), json_map(&producer.facts)),
+        (
+            "provenance".to_string(),
+            crate::JSON::quote(&entry.envelope.provenance),
+        ),
+        ("replay_facts".to_string(), json_map(producer.plan.facts())),
+        (
+            "source_fingerprint".to_string(),
+            crate::JSON::quote(&entry.cache_identity.source_fingerprint),
+        ),
+        (
+            "recipe_fingerprint".to_string(),
+            crate::JSON::quote(&entry.cache_identity.recipe_fingerprint),
+        ),
+        (
+            "policy_fingerprint".to_string(),
+            crate::JSON::quote(&entry.cache_identity.policy_fingerprint),
+        ),
+    ]))
+}
+
+fn persist_report(roots: &Roots, action_key: &str, report: &str) -> io::Result<PathBuf> {
+    let directory = report_directory(roots, true)?
+        .ok_or_else(|| invalid("cannot create the private reproducibility evidence directory"))?;
+    let destination = report_path(&directory, action_key);
+    if let Ok(metadata) = fs::symlink_metadata(&destination) {
+        if metadata.file_type().is_symlink() || !metadata.is_file() {
+            return Err(invalid(
+                "reproducibility evidence path is not a regular file",
+            ));
+        }
+        return Err(unreproducible_error(
+            action_key,
+            "this action already has durable unreproducible evidence",
+        ));
+    }
+    let sequence = REPORT_SEQUENCE.fetch_add(1, Ordering::Relaxed);
+    let partial = directory.join(format!(
+        ".{}-partial-{}-{}",
+        report_file_stem(action_key),
+        std::process::id(),
+        sequence
+    ));
+    let result = (|| {
+        let mut file = fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&partial)?;
+        file.write_all(report.as_bytes())?;
+        file.sync_all()?;
+        set_private_file_mode(&partial)?;
+        fs::hard_link(&partial, &destination)?;
+        fs::remove_file(&partial)?;
+        super::sync_store_node(&directory, true)?;
+        Ok::<(), io::Error>(())
+    })();
+    if result.is_err() {
+        let _ = fs::remove_file(&partial);
+    }
+    result.map(|()| destination)
+}
+
+fn report_directory(roots: &Roots, create: bool) -> io::Result<Option<PathBuf>> {
+    let root = &roots.root;
+    let root_metadata = match fs::symlink_metadata(root) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == io::ErrorKind::NotFound && !create => return Ok(None),
+        Err(error) => return Err(error),
+    };
+    if root_metadata.file_type().is_symlink() || !root_metadata.is_dir() {
+        return Err(invalid("Jetpack root is not a real directory"));
+    }
+    let private = root.join("private");
+    ensure_directory(&private, create)?;
+    let Some(private) = private_if_present(&private, create)? else {
+        return Ok(None);
+    };
+    let directory = private.join(REPORT_DIR);
+    ensure_directory(&directory, create)?;
+    let Some(directory) = private_if_present(&directory, create)? else {
+        return Ok(None);
+    };
+    set_private_directory_mode(&directory)?;
+    Ok(Some(directory))
+}
+
+fn ensure_directory(path: &Path, create: bool) -> io::Result<()> {
+    match fs::symlink_metadata(path) {
+        Ok(metadata) if metadata.file_type().is_symlink() || !metadata.is_dir() => {
+            Err(invalid("reproducibility evidence directory is not real"))
+        }
+        Ok(_) => Ok(()),
+        Err(error) if error.kind() == io::ErrorKind::NotFound && create => fs::create_dir(path),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(error),
+    }
+}
+
+fn private_if_present(path: &Path, create: bool) -> io::Result<Option<PathBuf>> {
+    match fs::symlink_metadata(path) {
+        Ok(metadata) if metadata.file_type().is_symlink() || !metadata.is_dir() => {
+            Err(invalid("reproducibility evidence directory is not real"))
+        }
+        Ok(_) => Ok(Some(path.to_path_buf())),
+        Err(error) if error.kind() == io::ErrorKind::NotFound && !create => Ok(None),
+        Err(error) => Err(error),
+    }
+}
+
+fn report_path(directory: &Path, action_key: &str) -> PathBuf {
+    directory.join(format!("{}.json", report_file_stem(action_key)))
+}
+
+fn report_file_stem(action_key: &str) -> String {
+    let valid = action_key.len() == 71
+        && action_key.starts_with("sha256-")
+        && action_key[7..].bytes().all(|byte| byte.is_ascii_hexdigit());
+    if valid {
+        action_key.to_string()
+    } else {
+        format!("sha256-{}", SHA256::sha256_hex(action_key.as_bytes()))
+    }
+}
+
+fn verify_existing_output(roots: &Roots, entry: &StoreEntry) -> io::Result<()> {
+    let actual = Ingest::try_entry_output_hash(roots, entry).map_err(io::Error::other)?;
+    if actual != entry.envelope.output_hash {
+        return Err(invalid(&format!(
+            "existing action output `{}` is corrupt: expected `{}`, got `{actual}`",
+            entry.id, entry.envelope.output_hash
+        )));
+    }
+    Ok(())
+}
+
+fn decode_producer(entry: &StoreEntry) -> io::Result<ProducerRecord> {
+    ProducerRecord::decode(&entry.producer_record).map_err(|error| {
+        invalid(&format!(
+            "reproducibility action `{}` has invalid producer provenance: {error}",
+            entry.id
+        ))
+    })
+}
+
+fn entry_sort_key(entry: &StoreEntry) -> (String, String) {
+    (entry.envelope.output_hash.clone(), entry.id.clone())
+}
+
+fn unreproducible_error(action_key: &str, detail: &str) -> io::Error {
+    io::Error::new(
+        io::ErrorKind::InvalidData,
+        format!("unreproducible action `{action_key}`: {detail}"),
+    )
+}
+
+fn invalid(detail: &str) -> io::Error {
+    io::Error::new(io::ErrorKind::InvalidData, detail)
+}
+
+fn json_object(fields: BTreeMap<String, String>) -> String {
+    let mut out = String::from("{");
+    for (index, (key, value)) in fields.into_iter().enumerate() {
+        if index > 0 {
+            out.push(',');
+        }
+        out.push_str(&crate::JSON::quote(&key));
+        out.push(':');
+        out.push_str(&value);
+    }
+    out.push('}');
+    out
+}
+
+fn json_map(map: &BTreeMap<String, String>) -> String {
+    json_object(
+        map.iter()
+            .map(|(key, value)| (key.clone(), crate::JSON::quote(value)))
+            .collect(),
+    )
+}
+
+fn observation_value(observation: &NodeObservation) -> String {
+    format!(
+        "kind={};mode={};digest={};target={};hardlink={};xattrs={}",
+        observation.kind,
+        observation.mode,
+        observation.digest.as_deref().unwrap_or("<none>"),
+        observation.target.as_deref().unwrap_or("<none>"),
+        observation.hardlink.as_deref().unwrap_or("<none>"),
+        observation.xattrs.join(",")
+    )
+}
+
+fn path_display(path: &[u8]) -> String {
+    if path.is_empty() {
+        return ".".to_string();
+    }
+    String::from_utf8(path.to_vec()).unwrap_or_else(|_| format!("hex:{}", hex(path)))
+}
+
+fn hex(bytes: &[u8]) -> String {
+    const DIGITS: &[u8; 16] = b"0123456789abcdef";
+    let mut out = String::with_capacity(bytes.len() * 2);
+    for byte in bytes {
+        out.push(DIGITS[(byte >> 4) as usize] as char);
+        out.push(DIGITS[(byte & 15) as usize] as char);
+    }
+    out
+}
+
+fn path_bytes(path: &Path) -> Vec<u8> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::ffi::OsStrExt as _;
+        return path.as_os_str().as_bytes().to_vec();
+    }
+    #[cfg(not(unix))]
+    path.to_string_lossy().as_bytes().to_vec()
+}
+
+fn mode_of(metadata: &fs::Metadata) -> u32 {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt as _;
+        return metadata.permissions().mode();
+    }
+    #[cfg(not(unix))]
+    u32::from(metadata.permissions().readonly())
+}
+
+fn file_identity(metadata: &fs::Metadata) -> Option<(u64, u64)> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt as _;
+        return (metadata.nlink() > 1).then(|| (metadata.dev(), metadata.ino()));
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = metadata;
+        None
+    }
+}
+
+fn metadata_fingerprint(metadata: &fs::Metadata) -> String {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt as _;
+        return format!(
+            "{}:{}:{}:{}:{}:{}:{}:{}",
+            metadata.dev(),
+            metadata.ino(),
+            metadata.len(),
+            metadata.mtime(),
+            metadata.mtime_nsec(),
+            metadata.ctime(),
+            metadata.ctime_nsec(),
+            metadata.mode()
+        );
+    }
+    #[cfg(not(unix))]
+    format!(
+        "{}:{}:{}",
+        metadata.len(),
+        metadata.permissions().readonly(),
+        metadata
+            .modified()
+            .ok()
+            .and_then(|time| time.duration_since(std::time::UNIX_EPOCH).ok())
+            .map_or(0, |duration| duration.as_nanos())
+    )
+}
+
+fn set_private_directory_mode(path: &Path) -> io::Result<()> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt as _;
+        fs::set_permissions(path, fs::Permissions::from_mode(0o700))?;
+    }
+    let _ = path;
+    Ok(())
+}
+
+fn set_private_file_mode(path: &Path) -> io::Result<()> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt as _;
+        fs::set_permissions(path, fs::Permissions::from_mode(0o600))?;
+    }
+    let _ = path;
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn report_file_stem_is_path_safe_and_stable() {
+        let action = format!("sha256-{}", "a".repeat(64));
+        assert_eq!(report_file_stem(&action), action);
+        assert!(report_file_stem("../action").starts_with("sha256-"));
+    }
+}

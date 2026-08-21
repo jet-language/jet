@@ -2077,7 +2077,7 @@ function packageAttributedContainers(surfaces) {
 // competitor ships Map.new, Set.new and a double-ended queue constructor, and Jet constructs
 // differently. That is one design question, not one backlog item per container,
 // so it is reported as a repeat instead of hiding inside the row count.
-function repeatedCapabilities(rows) {
+function repeatedOperations(rows) {
   const byKey = new Map();
   for (const row of rows) {
     if (row.verdict !== "jet_loses") continue;
@@ -2087,10 +2087,10 @@ function repeatedCapabilities(rows) {
   return Array.from(byKey.entries())
     .filter(function (pair) { return pair[1].length >= 3; })
     .map(function (pair) {
-      return { capability: pair[0], containers: pair[1].sort(), rowCount: pair[1].length };
+      return { operation: pair[0], containers: pair[1].sort(), rowCount: pair[1].length };
     })
     .sort(function (left, right) {
-      return right.rowCount - left.rowCount || left.capability.localeCompare(right.capability);
+      return right.rowCount - left.rowCount || left.operation.localeCompare(right.operation);
     });
 }
 
@@ -2172,7 +2172,7 @@ function buildLedger() {
     },
     inventory: { modules: modules, fixedSignaturePairs: fixedPairs, collections: collections },
     lossClusters: clusters,
-    repeatedCapabilities: repeatedCapabilities(rows),
+    repeatedOperations: repeatedOperations(rows),
     packageAttributedContainers: packageAttributedContainers(surfaces),
     uncomparedDomains: uncompared,
     rows: rows,
@@ -2202,8 +2202,8 @@ function buildLedger() {
       qualifiedWinCount: rows.filter(function (row) {
         return row.verdict === "jet_wins" && row.qualifies;
       }).length,
-      repeatedCapabilityCount: repeatedCapabilities(rows).length,
-      repeatedCapabilityRowCount: repeatedCapabilities(rows).reduce(function (n, item) {
+      repeatedOperationCount: repeatedOperations(rows).length,
+      repeatedOperationRowCount: repeatedOperations(rows).reduce(function (n, item) {
         return n + item.rowCount;
       }, 0),
       packageAttributedContainerCount: packageAttributedContainers(surfaces).length,
@@ -2292,7 +2292,7 @@ function validateRepeatedNames(ledger) {
   }
   if (unclassified.length) {
     throw new Error(
-      "unclassified repeated capability name: " + unclassified.sort().join(", ") +
+      "unclassified repeated operation name: " + unclassified.sort().join(", ") +
         " — add each to CROSS_DOMAIN_POOLED or CROSS_DOMAIN_DISTINCT",
     );
   }
@@ -2457,7 +2457,7 @@ function markdown(ledger) {
     "  ledger and stay counted, but they are recorded rather than scored.",
     "- A gap merges by domain, so one name can still recur across domains, and",
     "  that has two different answers. `clone` on a List and on a Map is one",
-    "  capability asked twice, so its witnesses pool across domains before the",
+    "  operation asked twice, so its witnesses pool across domains before the",
     "  two-witness threshold; scoring each domain alone can hold a real gap at",
     "  one witness forever. `close` on a byte buffer and on a database handle",
     "  are different operations sharing a spelling, so they keep the per-domain",
@@ -2697,8 +2697,8 @@ function hostileFixtures() {
     }
   }));
 
-  results.push(rejects("a recurring capability name nobody classified",
-    "unclassified repeated capability name", function () {
+  results.push(rejects("a recurring operation name nobody classified",
+    "unclassified repeated operation name", function () {
     // Prefer a POOLED name that still has competitor_operation rows in 2+
     // domains after synonym folds. `clone` collapsed to a single domain.
     const name = "hash";

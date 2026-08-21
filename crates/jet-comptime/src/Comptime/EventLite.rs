@@ -9,9 +9,9 @@ use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use crate::AST::CtValue;
 use crate::Comptime::Diagnostics::unsupported;
 use crate::Diagnostics::{Diagnostic, Span};
+use crate::AST::CtValue;
 
 static NEXT_ID: AtomicU64 = AtomicU64::new(1);
 
@@ -190,12 +190,12 @@ fn handle_value(type_name: &str, id: i64) -> CtValue {
 
 fn handle_id(recv: &CtValue, want: &str) -> Option<i64> {
     match recv {
-        CtValue::Struct { type_name, fields } if type_name == want => fields
-            .iter()
-            .find_map(|(n, v)| match (n.as_str(), v) {
+        CtValue::Struct { type_name, fields } if type_name == want => {
+            fields.iter().find_map(|(n, v)| match (n.as_str(), v) {
                 ("id", CtValue::Int(i)) => Some(*i),
                 _ => None,
-            }),
+            })
+        }
         _ => None,
     }
 }
@@ -259,13 +259,7 @@ fn store_sub(sub: Subscription) -> CtValue {
     handle_value("Subscription", push_sub(sub))
 }
 
-fn event_add(
-    event_id: i64,
-    scope_id: i64,
-    priority: i64,
-    once: bool,
-    handler: CtValue,
-) -> CtValue {
+fn event_add(event_id: i64, scope_id: i64, priority: i64, once: bool, handler: CtValue) -> CtValue {
     let sub = scope_track(scope_id, Subscription::new());
     if !sub.active() {
         return store_sub(sub);
@@ -298,13 +292,7 @@ fn event_add(
     store_sub(sub)
 }
 
-fn hook_add(
-    hook_id: i64,
-    scope_id: i64,
-    priority: i64,
-    once: bool,
-    handler: CtValue,
-) -> CtValue {
+fn hook_add(hook_id: i64, scope_id: i64, priority: i64, once: bool, handler: CtValue) -> CtValue {
     // AOT Hook::add inserts the listener before scope.track.
     let sub = Subscription::new();
     let lid = next_id();
@@ -669,8 +657,8 @@ fn eval_method_inner(
             Ok(make_trace(delivered))
         }
         ("Event", "listener_count") => {
-            let eid =
-                handle_id(recv, "Event").ok_or_else(|| unsupported("Event.listener_count", span))?;
+            let eid = handle_id(recv, "Event")
+                .ok_or_else(|| unsupported("Event.listener_count", span))?;
             let n = EVENTS.with(|slot| {
                 let v = slot.borrow();
                 let idx = eid.saturating_sub(1) as usize;
@@ -694,8 +682,8 @@ fn eval_method_inner(
             Ok(CtValue::Str(format!("listeners={n} queued=0 dropped=0")))
         }
         ("EventTrace", "summary") => {
-            let id =
-                handle_id(recv, "EventTrace").ok_or_else(|| unsupported("EventTrace.summary", span))?;
+            let id = handle_id(recv, "EventTrace")
+                .ok_or_else(|| unsupported("EventTrace.summary", span))?;
             let summary = TRACES.with(|slot| {
                 let v = slot.borrow();
                 let idx = id.saturating_sub(1) as usize;
@@ -760,7 +748,8 @@ fn eval_method_inner(
             Ok(hook_add(hid, sid, 0, true, handler))
         }
         ("Hook", "on_priority") => {
-            let hid = handle_id(recv, "Hook").ok_or_else(|| unsupported("Hook.on_priority", span))?;
+            let hid =
+                handle_id(recv, "Hook").ok_or_else(|| unsupported("Hook.on_priority", span))?;
             let sid = args
                 .first()
                 .and_then(|a| handle_id(a, "EventScope"))
@@ -786,10 +775,7 @@ fn eval_method_inner(
                 let v = slot.borrow();
                 let idx = hid.saturating_sub(1) as usize;
                 match v.get(idx).and_then(|h| h.as_ref()) {
-                    Some(hook) => (
-                        hook.fallback.clone(),
-                        collect_dispatch(&hook.listeners),
-                    ),
+                    Some(hook) => (hook.fallback.clone(), collect_dispatch(&hook.listeners)),
                     None => (CtValue::Unit, Vec::new()),
                 }
             });
@@ -817,8 +803,8 @@ fn eval_method_inner(
             Ok(result)
         }
         ("DecisionHook", "on") => {
-            let hid =
-                handle_id(recv, "DecisionHook").ok_or_else(|| unsupported("DecisionHook.on", span))?;
+            let hid = handle_id(recv, "DecisionHook")
+                .ok_or_else(|| unsupported("DecisionHook.on", span))?;
             let sid = args
                 .first()
                 .and_then(|a| handle_id(a, "EventScope"))
@@ -887,9 +873,7 @@ fn eval_method_inner(
                         type_name,
                         variant,
                         args: dargs,
-                    } if type_name == "HookDecision"
-                        || type_name.ends_with("HookDecision") =>
-                    {
+                    } if type_name == "HookDecision" || type_name.ends_with("HookDecision") => {
                         match variant.as_str() {
                             "Continue" => {}
                             "Transform" => {
@@ -996,8 +980,8 @@ fn eval_method_inner(
             Ok(make_task(make_report(true, count)))
         }
         ("AsyncEvent", "close") => {
-            let eid =
-                handle_id(recv, "AsyncEvent").ok_or_else(|| unsupported("AsyncEvent.close", span))?;
+            let eid = handle_id(recv, "AsyncEvent")
+                .ok_or_else(|| unsupported("AsyncEvent.close", span))?;
             ASYNC_EVENTS.with(|slot| {
                 let mut v = slot.borrow_mut();
                 let idx = eid.saturating_sub(1) as usize;
@@ -1054,9 +1038,6 @@ fn eval_method_inner(
             });
             Ok(CtValue::Bool(delivered))
         }
-        _ => Err(unsupported(
-            &format!("event method `{ty}.{method}`"),
-            span,
-        )),
+        _ => Err(unsupported(&format!("event method `{ty}.{method}`"), span)),
     }
 }

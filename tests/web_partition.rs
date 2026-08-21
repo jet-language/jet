@@ -224,6 +224,7 @@ fn dom_fn() {
             default_target: prog.default_target,
             html_path: prog.html_path.clone(),
             policy_declarations: std::mem::take(&mut prog.policy_declarations),
+            user_policy_declarations: std::mem::take(&mut prog.user_policy_declarations),
             rule_facts: std::mem::take(&mut prog.rule_facts),
         }],
         parse_teaching: vec![],

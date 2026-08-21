@@ -192,7 +192,7 @@ impl Email.Encode {
 }
 
 impl Email.Decode {
-    fn decode(tree: DataTree) => Email ? [FieldError] {
+    fn decode(tree: DataTree) => Email ! [FieldError] {
         f := tree.field("email") ?? DataTree.Text("")
         s := f.text() ?? ""
         return .Ok(Email.{addr: s})
@@ -243,7 +243,7 @@ impl HandEmail.Encode {
     fn encode(self) => DataTree :: DataTree.Object(["address": DataTree.Text(~self.address)])
 }
 impl HandEmail.Decode {
-    fn decode(tree: DataTree) => HandEmail ? [FieldError] {
+    fn decode(tree: DataTree) => HandEmail ! [FieldError] {
         field :: tree.field("address") ?? DataTree.Text("")
         address :: field.text() ?? ""
         return Ok(HandEmail.{ address: address })
@@ -295,7 +295,7 @@ use core.encoding.json as json
 struct Boxed<T> { value: T }
 
 fn generic_encode<T: Encode>(value: T) => String :: json.to_string(value)
-fn generic_decode<T: Decode>(wire: String) => T ? [FieldError] :: json.decode<T>(wire)
+fn generic_decode<T: Decode>(wire: String) => T ! [FieldError] :: json.decode<T>(wire)
 
 fn run() {
     value :: Boxed<Int>.{ value: 7 }
@@ -333,7 +333,7 @@ fn datatree_decode_dispatches_all_decode_impl_kinds() {
 struct Point { x: Int }
 struct Email { addr: String }
 impl Email.Decode {
-    fn decode(tree: DataTree) => Email ? [FieldError] {
+    fn decode(tree: DataTree) => Email ! [FieldError] {
         value := tree.field("address") ?? DataTree.Text("")
         return .Ok(Email.{ addr: value.text() ?? "" })
     }
@@ -796,8 +796,12 @@ derive T.LayoutFacts {
     source :: info.source
     reflected_kind :: reflected.kind
     field_name :: selected.name
+    size :: info.size
+    reflected_size :: reflected.size
+    selected_offset :: selected.offset
+    reflected_offset :: reflected.fields[0].offset
     name :: T.reflect().name
-    fn layout_facts(self) => String :: "{@kind}:{@target}:{@guarantee}:{@source}:{@reflected_kind}:{@field_name}"
+    fn layout_facts(self) => String :: "{@kind}:{@target}:{@guarantee}:{@source}:{@reflected_kind}:{@field_name}:{@size}:{@reflected_size}:{@selected_offset}:{@reflected_offset}"
 }
 
 #LayoutFacts
@@ -831,10 +835,10 @@ fn run() {
     assert_eq!(code, 0, "layout facts derive failed: {stderr}");
     assert_eq!(
         stdout,
-        "default:unknown:physical layout unspecified:struct declaration:default:count\n"
+        "default:x86_64-unknown-linux-gnu:physical layout unspecified:struct declaration:default:count:null:null:null:null\n"
             .to_string()
-            + "c:unknown:repr(C) declaration:struct declaration:c:count\n"
-            + "columnar:unknown:columnar storage declaration:struct declaration:columnar:count\n"
+            + "c:x86_64-unknown-linux-gnu:repr(C) declaration:struct declaration:c:count:8:8:0:0\n"
+            + "columnar:x86_64-unknown-linux-gnu:columnar storage declaration:struct declaration:columnar:count:32:32:0:0\n"
     );
     let _ = fs::remove_dir_all(&dir);
 }
@@ -956,6 +960,71 @@ fn run() { print(0) }
         diags.iter().any(|diag| diag.code == "E0211"),
         "expected generated code to re-enter cloneability checking: {diags:?}"
     );
+}
+
+/// D-STRUCT-ONCE1=A: the existing typed `@loop` reaches marker bodies, root
+/// impl-item position, and test declarations. The generated names and test
+/// slots must survive the ordinary sema/codegen path together.
+#[test]
+fn structure_once_loops_cover_marker_impl_and_test_items() {
+    let dir = std::env::temp_dir().join(format!(
+        "jet_structure_once_{}",
+        std::process::id()
+    ));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap();
+    let file = dir.join("structure_once.jet");
+    let source = r#"
+marker AddFields(@sites: [.Type]) {
+    type_name :: target.@name
+    @loop field, target.@fields {
+        method :: "field_{field.@name}"
+        impl @type_name {
+            fn @method(self) String :> field.@name
+        }
+    }
+}
+
+struct Case { n: Int }
+
+#AddFields
+struct Person { first: String  last: String }
+
+@cases :: [Case]{ Case{ n: 1 }, Case{ n: 2 } }
+
+@loop T, [Person] {
+    impl T {
+        fn generated(self) String :> "generated"
+    }
+}
+
+@loop case, @cases {
+    #Test("case {case.n}") {
+        assert(case.n > 0)
+    }
+}
+
+fn run() {
+    person :: Person{ first: "a", last: "b" }
+    print(person.field_first())
+    print(person.field_last())
+    print(person.generated())
+}
+"#;
+    fs::write(&file, source).unwrap();
+    let shown = file.to_string_lossy();
+    let (harness, _) = jet::compile_tests_with_path(source, &shown).unwrap_or_else(|diags| {
+        panic!(
+            "D-STRUCT-ONCE1 fixture rejected:\n{}",
+            jet::render_diagnostics(&shown, source, &diags)
+        )
+    });
+    assert!(harness.contains("field_first"), "marker-body method missing");
+    assert!(harness.contains("field_last"), "marker-body method missing");
+    assert!(harness.contains("generated"), "closed type-list impl missing");
+    assert!(harness.contains("case 1"), "first interpolated test missing");
+    assert!(harness.contains("case 2"), "second interpolated test missing");
+    let _ = fs::remove_dir_all(&dir);
 }
 
 /// #495 / I2: a field read from a bare (`Read`) parameter is still rooted in
@@ -1113,7 +1182,7 @@ migration Config {
     add host: String = "localhost"
 }
 
-fn run() ? [FieldError] {
+fn run() ! [FieldError] {
     old :: json.decode<Config>("{{\"port\":2}}")?
     print("json {old.port} {old.host}")
     toml_old :: toml.decode<Config>("port = 3\n")?

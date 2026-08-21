@@ -2,7 +2,125 @@
 
 use super::*;
 
+fn is_side_effect_free_literal(expr: &Expr) -> bool {
+    match expr {
+        Expr::Int(..) | Expr::Float(..) | Expr::Bool(..) | Expr::Char(..) | Expr::UnitLit { .. } => {
+            true
+        }
+        Expr::Str(parts, _) => parts
+            .iter()
+            .all(|part| matches!(part, crate::AST::StrPart::Lit(_))),
+        Expr::Paren(inner, _) | Expr::Unary(_, inner, _) => is_side_effect_free_literal(inner),
+        Expr::Binary(_, left, right, _) => {
+            is_side_effect_free_literal(left) && is_side_effect_free_literal(right)
+        }
+        _ => false,
+    }
+}
+
 impl<'a> Checker<'a> {
+    fn unused_name_is_intentional(name: &str) -> bool {
+        name.is_empty()
+            || name.starts_with('_')
+            || name == crate::Syntax::KW_SELF
+            || name == "result"
+            || name == crate::Syntax::AMBIENT_ERR
+            || name == crate::Syntax::KW_IT
+    }
+
+    pub(crate) fn note_unused_binding(&mut self, name: &str, span: Span, parameter: bool) {
+        if Self::unused_name_is_intentional(name)
+            || span.start >= span.end
+            || self.unused_bindings.iter().any(|binding| binding.span == span)
+        {
+            return;
+        }
+        self.unused_bindings.push(UnusedBinding {
+            name: name.to_string(),
+            span,
+            parameter,
+            fix: None,
+        });
+    }
+
+    pub(crate) fn note_unused_binding_fix(
+        &mut self,
+        span: Span,
+        init: &Expr,
+        is_comptime: bool,
+        has_metadata: bool,
+    ) {
+        if is_comptime || has_metadata || !is_side_effect_free_literal(init) {
+            return;
+        }
+        let init_span = init.span();
+        if init_span.start <= span.start {
+            return;
+        }
+        if let Some(binding) = self.unused_bindings.iter_mut().find(|binding| binding.span == span) {
+            binding.fix = Some(crate::Diagnostics::TextEdit {
+                span: Span::new(span.start, init_span.start),
+                new_text: String::new(),
+            });
+        }
+    }
+
+    pub(crate) fn mark_local_write(&mut self, name: &str) {
+        if let Some(def_span) = self.lookup(name).map(|info| info.def_span) {
+            self.unused_binding_refs.insert(def_span);
+        }
+    }
+
+    fn mark_local_name_reference(&mut self, name: &str) {
+        if let Some(def_span) = self.lookup(name).map(|info| info.def_span) {
+            self.unused_binding_refs.insert(def_span);
+        }
+    }
+
+    pub(crate) fn mark_default_parameter_references(&mut self, params: &[crate::AST::Param]) {
+        for param in params {
+            let Some(default) = &param.default else { continue };
+            let mut copy = default.clone();
+            copy.for_each_expr_mut(|node| match node {
+                Expr::Ident(name, _) | Expr::ComptimeName { name, .. } => {
+                    self.mark_local_name_reference(name);
+                }
+                Expr::Call(call) => self.mark_local_name_reference(&call.name),
+                _ => {}
+            });
+        }
+    }
+
+    pub(crate) fn emit_unused_binding_lints(&mut self) {
+        for binding in std::mem::take(&mut self.unused_bindings) {
+            if self.unused_binding_refs.contains(&binding.span) {
+                continue;
+            }
+            self.name_ledger.record_structure_fact(
+                jet_foundation::Names::StructureFact::new(
+                    jet_foundation::Names::StructureFactKind::Liveness,
+                    binding.name.clone(),
+                    self.module_path.to_string(),
+                    binding.span,
+                    "unused",
+                    if binding.parameter {
+                        "parameter is never read"
+                    } else {
+                        "binding is never read"
+                    },
+                    Some("_name".to_string()),
+                ),
+            );
+            let code = if binding.parameter { "L0102" } else { "L0101" };
+            let name = binding.name.as_str();
+            let mut diagnostic = Diagnostic::from_row(code, &[("name", name)], Some(binding.span));
+            if let Some(edit) = binding.fix {
+                diagnostic = diagnostic.with_edit(edit);
+            }
+            self.diags.push(diagnostic);
+        }
+    }
+
     pub(crate) fn record_reference_anchor(
         &mut self,
         span: Span,
@@ -49,6 +167,7 @@ impl<'a> Checker<'a> {
     }
 
     pub(crate) fn record_local_reference(&mut self, span: Span, info: &LocalInfo) {
+        self.unused_binding_refs.insert(info.def_span);
         let kind = if info.param_conv.is_some() { "param" } else { "local" };
         let module_path = self.module_path.to_string();
         self.record_reference_anchor(span, &module_path, kind, info.def_span);
@@ -109,7 +228,30 @@ impl<'a> Checker<'a> {
             .map(|alias| alias.span);
         if let Some(def_span) = def_span {
             let module_path = self.module_path.to_string();
-            self.record_reference_anchor(span, &module_path, "import_alias", def_span);
+            self.record_reference_anchor_with_identity(
+                span,
+                &module_path,
+                "import_alias",
+                def_span,
+                Some(format!("import:{alias}")),
+            );
+        }
+    }
+
+    pub(crate) fn record_core_import_reference(&mut self, module: &str, span: Span) {
+        let aliases: Vec<String> = self
+            .core_imports
+            .iter()
+            .filter(|(_, imported)| {
+                *imported == module
+                    || module
+                        .strip_prefix(imported.as_str())
+                        .is_some_and(|rest| rest.starts_with('.'))
+            })
+            .map(|(alias, _)| alias.clone())
+            .collect();
+        for alias in aliases {
+            self.record_import_alias_reference(&alias, span);
         }
     }
 
@@ -172,4 +314,3 @@ impl<'a> Checker<'a> {
         }
     }
 }
-

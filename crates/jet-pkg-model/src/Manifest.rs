@@ -8,7 +8,7 @@
 //! `package.jet` replaces the old TOML `jet.toml` as a clean break (U1/U10) —
 //! no back-compat alias.
 
-use crate::Diagnostics::{Diagnostic, Span};
+use crate::Diagnostics::Diagnostic;
 use crate::Authority::AuthorityResolver;
 use crate::Package::{self, PackageParseError};
 use crate::Syntax;
@@ -100,84 +100,6 @@ pub fn e2001(requested: &str) -> Diagnostic {
     )
 }
 
-/// A deprecated language item: the edition it was deprecated in, its replacement,
-/// and the edition it is removed in (the end of its migration window). The
-/// registry is honest and currently empty — Jet is pre-1.0, so nothing post-1.0
-/// has been deprecated yet. E2002/L2001 read from this table, so they become
-/// reachable the moment the first real deprecation is registered, without
-/// touching the diagnostic plumbing.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct Deprecation {
-    /// The deprecated item as the user writes it (a keyword, sigil, or name).
-    pub item: &'static str,
-    /// The edition in which the item became deprecated.
-    pub since_edition: &'static str,
-    /// What to use instead (named in the diagnostic).
-    pub replacement: &'static str,
-    /// The edition in which the item stops compiling (the migration window's end).
-    pub removed_in_edition: &'static str,
-}
-
-/// The deprecation registry (D-REL5). Encoding CBOR forwarding entries ship with
-/// card #712 / D-ENC-CBOR-SURFACE1.
-pub const DEPRECATIONS: &[Deprecation] = &[
-    Deprecation {
-        item: "cbor.encode",
-        since_edition: "2027",
-        replacement: "cbor.to_bytes",
-        removed_in_edition: "2028",
-    },
-    Deprecation {
-        item: "cbor.decode",
-        since_edition: "2027",
-        replacement: "cbor.parse",
-        removed_in_edition: "2028",
-    },
-];
-
-/// Look up a deprecation by the item's spelling.
-pub fn lookup_deprecation(item: &str) -> Option<&'static Deprecation> {
-    DEPRECATIONS.iter().find(|d| d.item == item)
-}
-
-/// E2002 — a deprecated item is used past its migration window (i.e. in an
-/// edition at or after `removed_in_edition`). Names the replacement.
-pub fn e2002(dep: &Deprecation, span: Option<Span>) -> Diagnostic {
-    Diagnostic::error(
-        "E2002",
-        format!("`{}` was removed in edition {}", dep.item, dep.removed_in_edition),
-        format!(
-            "`{}` was deprecated in edition {} and no longer exists in this edition; it has reached the end of its migration window.",
-            dep.item, dep.since_edition,
-        ),
-        format!(
-            "use `{}` instead, or run `{} fix` to migrate automatically.",
-            dep.replacement,
-            Syntax::BINARY_NAME,
-        ),
-        span,
-    )
-}
-
-/// L2001 — a lint: an item is deprecated in this edition but still compiles
-/// during its migration window. Suggests `jet fix`.
-pub fn l2001(dep: &Deprecation, span: Option<Span>) -> Diagnostic {
-    Diagnostic::lint(
-        "L2001",
-        format!("`{}` is deprecated", dep.item),
-        format!(
-            "`{}` was deprecated in edition {} and will be removed in edition {}; it still works for now but should be migrated.",
-            dep.item, dep.since_edition, dep.removed_in_edition,
-        ),
-        format!(
-            "use `{}` instead, or run `{} fix` to migrate automatically.",
-            dep.replacement,
-            Syntax::BINARY_NAME,
-        ),
-        span,
-    )
-}
-
 /// The `jet --version` banner (E2-D1). Deterministic and golden-testable: it
 /// states the compiler SemVer, the supported epoch/edition range, the newest
 /// stable edition, and the registry-protocol compatibility.
@@ -232,6 +154,8 @@ pub struct Manifest {
     /// D-AUTHORITY-MANIFEST1=A: package authority policy, including the
     /// D-BOUND-PROV1 provenance requirement.
     pub authority: crate::Package::PackageAuthority,
+    /// D-STRUCT-EDGE1=A: package-owned import boundary policy.
+    pub boundaries: Vec<crate::Package::ImportBoundary>,
     /// Jet package dependencies.
     pub dependencies: BTreeMap<String, DepSpec>,
     /// Rust crate dependencies for `extern rust` blocks. Always empty today:

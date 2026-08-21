@@ -2953,6 +2953,7 @@ pub(crate) fn run_eval(file: &str, pure_required: bool, mode: OutputMode) {
                 funcs_sig.insert(
                     f.name.clone(),
                     jet::Sema::FuncSig {
+                        deprecation: None,
                         params: f
                             .params
                             .iter()

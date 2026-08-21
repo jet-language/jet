@@ -26,11 +26,11 @@
 //! here, beside their replacement, so this table remains the one registry.
 
 use super::{
-    COMPTIME_MARK, DEFAULT_ENTRY_FILE, INTERPOLATION_SELECTOR_EXAMPLE, LEGACY_ENTRY_FILE,
-    PACKAGE_FILE, PAYLOAD_FILE, RETIRED_COMPTIME_MARK, RETIRED_TARGET_PLUGIN,
-    RETIRED_INTERPOLATION_SELECTOR_EXAMPLE, RETIRED_TYPE_BITS, RETIRED_TYPE_BYTES,
-    RETIRED_TYPE_QUEUE, RETIRED_TYPE_RANK, RETIRED_TYPE_TALLY, TARGET_SANDBOX, TYPE_BITS,
-    TYPE_BYTES, TYPE_QUEUE, TYPE_RANK, TYPE_TALLY,
+    COMPTIME_MARK, DEFAULT_ENTRY_FILE, INTERPOLATION_SELECTOR_EXAMPLE, JETPACK_TOML,
+    LEGACY_ENTRY_FILE, PACKAGE_FILE, PAYLOAD_FILE, RETIRED_COMPTIME_MARK,
+    RETIRED_INTERPOLATION_SELECTOR_EXAMPLE, RETIRED_TARGET_PLUGIN, RETIRED_TYPE_BITS,
+    RETIRED_TYPE_BYTES, RETIRED_TYPE_QUEUE, RETIRED_TYPE_RANK, RETIRED_TYPE_TALLY, TARGET_SANDBOX,
+    TYPE_BITS, TYPE_BYTES, TYPE_QUEUE, TYPE_RANK, TYPE_TALLY,
 };
 use crate::Diagnostics::{Diagnostic, Span};
 
@@ -123,6 +123,15 @@ pub const RETIREMENTS: &[Retirement] = &[
         code: None,
     },
     Retirement {
+        id: "jetpack-file",
+        retired: JETPACK_TOML,
+        canonical: "package.jet + env.jet",
+        kind: RetirementKind::Semantic,
+        decision: "D-ONCE-RETIRE1",
+        since: "2026-08-07",
+        code: Some("E1225"),
+    },
+    Retirement {
         id: "manifest-identity",
         retired: "payload: {",
         canonical: "name:",
@@ -198,10 +207,10 @@ pub const RETIREMENTS: &[Retirement] = &[
         id: "comptime-mark",
         retired: RETIRED_COMPTIME_MARK,
         canonical: COMPTIME_MARK,
-        kind: RetirementKind::Rename,
-        decision: "D-ONCE-AT1",
+        kind: RetirementKind::Semantic,
+        decision: "D-ONCE-DOLLAR1=B",
         since: "2026-08-07",
-        code: None,
+        code: Some("E0003"),
     },
     Retirement {
         id: "set-take",
@@ -682,13 +691,19 @@ pub fn law_violations_of(rows: &[Retirement]) -> Vec<String> {
             out.push(format!("{}: a row names an empty spelling", row.id));
         }
         if row.retired == row.canonical {
-            out.push(format!("{}: retires the form it names as canonical", row.id));
+            out.push(format!(
+                "{}: retires the form it names as canonical",
+                row.id
+            ));
         }
         if row.decision.is_empty() {
             out.push(format!("{}: names no decision", row.id));
         }
         if row.since.len() != 10 || row.since.match_indices('-').count() != 2 {
-            out.push(format!("{}: `{}` is not a YYYY-MM-DD date", row.id, row.since));
+            out.push(format!(
+                "{}: `{}` is not a YYYY-MM-DD date",
+                row.id, row.since
+            ));
         }
         match (row.kind, row.code) {
             (RetirementKind::Rename, Some(code)) => out.push(format!(
@@ -741,7 +756,7 @@ mod tests {
             rename_target(RETIRED_INTERPOLATION_SELECTOR_EXAMPLE),
             Some(INTERPOLATION_SELECTOR_EXAMPLE)
         );
-        assert_eq!(rename_target(RETIRED_COMPTIME_MARK), Some(COMPTIME_MARK));
+        assert_eq!(rename_target(RETIRED_COMPTIME_MARK), None);
         assert_eq!(rename_target("io.println"), Some("io.print"));
         assert_eq!(rename_target("io.sprint"), Some("{value}"));
         assert_eq!(rename_target("io.repr"), Some("{value:Debug}"));

@@ -20,9 +20,9 @@ pub const UNIFIED_LOCK_FILE: &str = ".jet/lock";
 /// for new resolution.
 pub const HANGAR_DIR: &str = "/etc/jet/hangar";
 
-/// D-JPK-FILES (ratified 2026-06-18): repo metadata and source defaults at
-/// repo root. TOML format; holds `[repo]` and `[sources]`. D-WORKSPACE1 moved
-/// the old `[packages]` monorepo index to `workspace.jet`.
+/// D-ONCE-RETIRE1=C (ratified 2026-08-07): the old TOML config filename is
+/// retained only as a migration sentinel. It is never parsed; the CLI emits
+/// E1225 and points users to the Jet-grammar files that replace its jobs.
 pub const JETPACK_TOML: &str = "jetpack.toml";
 
 /// Owner ruling 2026-07-17: a project's zero-ceremony executable entry is
@@ -31,23 +31,6 @@ pub const DEFAULT_ENTRY_FILE: &str = "run.jet";
 
 /// Pre-ruling project entry name, accepted only as a compatibility fallback.
 pub const LEGACY_ENTRY_FILE: &str = "main.jet";
-
-/// D-JPK-FILES (ratified 2026-06-18): `[repo]` table in `jetpack.toml`.
-pub const JTOML_TABLE_REPO: &str = "repo";
-
-/// D-JPK-FILES (ratified 2026-06-18), amended by D-JPK-REF1: `[sources]`
-/// table in `jetpack.toml` — named source refs (`name = "target#ver@provider"`).
-pub const JTOML_TABLE_SOURCES: &str = "sources";
-
-/// D-WORKSPACE1: retired `[packages]` table in `jetpack.toml`. Kept only so
-/// the parser can emit E1225 with a targeted migration hint.
-pub const JTOML_TABLE_PACKAGES: &str = "packages";
-
-/// D-JPK-FILES (ratified 2026-06-18): `name` key in `[repo]`.
-pub const JTOML_KEY_NAME: &str = "name";
-
-/// D-JPK-FILES (ratified 2026-06-18): `version` key in `[repo]`.
-pub const JTOML_KEY_VERSION: &str = "version";
 
 /// D-LIT-DOT1=B (ratified 2026-08-20): named struct construction `Type{ field: val }`.
 /// Inferred form (type from context): `{ field: val }` — no type name.
@@ -204,6 +187,12 @@ pub const MARKER_MUST_USE: &str = "MustUse"; // D-MUSTUSE1
 /// use-site escape for rules needing outside context.
 pub const KW_VALIDATE_BLOCK: &str = "validate"; // D-VALIDATE1
 
+/// D-VALIDATE1: the outside-context validation builder keeps the one
+/// `check(…, at: field, …)` rule vocabulary while remaining compiler-owned.
+pub const TYPE_VALIDATE: &str = "Validate";
+pub const TYPE_VALIDATE_BUILDER: &str = "__JetValidate";
+pub const INTERNAL_VALIDATE_OVER: &str = "\0jet.validate.over";
+
 /// D-VALIDATE1: the builtin call name inside a `validate { … }` block —
 /// `check(cond, at: field, "msg")` records one `FieldError { path, reason }`
 /// when `cond` is false. Contextual: recognized as this builtin only inside
@@ -344,28 +333,28 @@ pub const LAYOUT_COLUMNAR: &str = "columnar"; // D-SOA1 / D-SOA2A
 pub const MARKER_CODABLE: &str = "Codable"; // D-SERDE4
 pub const MARKER_ENCODE: &str = "Encode"; // D-SERDE4
 pub const MARKER_DECODE: &str = "Decode"; // D-SERDE4
-                                        // D-VERDICT-732-1 (formerly D-MARKERMOVE3, B, ratified 2026-07-02): the
-                                        // other built-in derive markers that join Codable/Encode/Decode — all on
-                                        // `#`, the sole rule prefix.
-                                        // D-META-AUTO1=A / D-AUTODERIVE-SYNTAX1=D: all six structural
-                                        // auto-derive controls accept the same leading `!` refusal, including
-                                        // `#!Codable`. User derives (`derive T.Wire { … }`, applied as
-                                        // `#[Wire]`) also stay `#` — built-in and user derives share the
-                                        // same prefix; only the derive name tells them apart.
+                                          // D-VERDICT-732-1 (formerly D-MARKERMOVE3, B, ratified 2026-07-02): the
+                                          // other built-in derive markers that join Codable/Encode/Decode — all on
+                                          // `#`, the sole rule prefix.
+                                          // D-META-AUTO1=A / D-AUTODERIVE-SYNTAX1=D: all six structural
+                                          // auto-derive controls accept the same leading `!` refusal, including
+                                          // `#!Codable`. User derives (`derive T.Wire { … }`, applied as
+                                          // `#[Wire]`) also stay `#` — built-in and user derives share the
+                                          // same prefix; only the derive name tells them apart.
 pub const MARKER_COMPARABLE: &str = "Comparable"; // D-VERDICT-732-1 (formerly D-MARKERMOVE3)
-                                                // Per-field attributes (D-SERDE5 = A), written `#[…]` before a field.
+                                                  // Per-field attributes (D-SERDE5 = A), written `#[…]` before a field.
 pub const MARKER_RENAME: &str = "Rename"; // D-SERDE5  #[Rename("wire_key")]
 pub const MARKER_SKIP: &str = "Skip"; // D-SERDE5  #[Skip]
 pub const MARKER_DEFAULT: &str = "Default"; // D-SERDE5  #[Default] / #[Default(expr)]
 pub const MARKER_FLATTEN: &str = "Flatten"; // D-SERDE5  #[Flatten]
-                                          // Container attributes (D-SERDE3/7/8), written `#[…]` before a struct/enum.
+                                            // Container attributes (D-SERDE3/7/8), written `#[…]` before a struct/enum.
 pub const MARKER_RENAME_ALL: &str = "RenameAll"; // D-SERDE3  #[RenameAll(camel)]
 pub const MARKER_DENY_UNKNOWN_FIELDS: &str = "DenyUnknownFields"; // D-SERDE8
 /// D-MARKER-NAME-HYGIENE1=A: serde's internal discriminant field is not a
 /// compile-time fact tag.
 pub const MARKER_TAG: &str = "Discriminant"; // D-SERDE7, D-MARKER-NAME-HYGIENE1
 pub const MARKER_UNTAGGED: &str = "Untagged"; // D-SERDE7  #[Untagged]
-                                            // D-SERDE3 (= C) RenameAll casing keywords — closed typed menu, own-case args.
+                                              // D-SERDE3 (= C) RenameAll casing keywords — closed typed menu, own-case args.
 pub const RENAME_ALL_CAMEL: &str = "camel"; // D-SERDE3
 pub const RENAME_ALL_SNAKE: &str = "snake"; // D-SERDE3
 pub const RENAME_ALL_PASCAL: &str = "pascal"; // D-SERDE3
@@ -634,7 +623,13 @@ pub const BUILD_OPTIMIZE_FULL: &str = "full"; // D-BUILDPROFILE1
 /// Used by Sema/Purity and Comptime/Purity to detect I/O calls inside
 /// `pure fn` or comptime contexts. Both consumers must agree on this set;
 /// having it here prevents silent divergence.
-pub const IMPURE_BUILTINS: &[&str] = &[BUILTIN_PRINT, "eprint", "print", BUILTIN_INPUT, "read_all_input"];
+pub const IMPURE_BUILTINS: &[&str] = &[
+    BUILTIN_PRINT,
+    "eprint",
+    "print",
+    BUILTIN_INPUT,
+    "read_all_input",
+];
 
 // ── Marker plane (current law: D-VERDICT-732-1, ratified 2026-07-23, card #732) ──
 //
@@ -652,18 +647,15 @@ pub const IMPURE_BUILTINS: &[&str] = &[BUILTIN_PRINT, "eprint", "print", BUILTIN
 // old comments or docs; check docs/spec/syntax-decisions.md for the live law
 // before trusting any comment that predates 2026-07-23.
 use super::{
-    BUILTIN_INPUT, BUILTIN_PRINT, CTX_BLOCK, KW_ALIAS, KW_AS,
-    KW_BREAK, KW_DEFER, KW_DERIVE, KW_EFFECT_DECL, KW_ELSE, KW_ENUM,
-    KW_CONC_TASK, KW_FREEZE, KW_EXTERN, KW_FN, KW_IF, KW_IMPL, KW_IMPURE, KW_IT, KW_JOB, KW_LOOP, KW_MARKER, KW_MODULE,
-    KW_POLICY, KW_WRAP,
-    KW_PRIV, KW_PROTOCOL, KW_PUB, KW_RETURN,
-    KW_SELF, KW_SHARED, KW_STATE, KW_STATE_DECL, KW_STRUCT, KW_TAG, KW_TEST,
-    KW_TODO, KW_TRAIT, KW_TRANSACT, KW_TRANSITION, KW_UNSAFE, KW_USE, LIT_FALSE,
-    LIT_NULL, LIT_TRUE, PROTO_CLIENT, PROTO_SERVER, TYPE_BITS, TYPE_BOOL,
-    TYPE_BTREE_MAP, TYPE_BYTES, TYPE_CHAR, TYPE_QUEUE, TYPE_F32, TYPE_F64, TYPE_FLOAT,
-    TYPE_HASH_MAP, TYPE_I16, TYPE_I32, TYPE_I64, TYPE_I8, TYPE_INT, TYPE_LRU,
-    TYPE_MAP, TYPE_PRIORITY_QUEUE, TYPE_RECEIVER, TYPE_SENDER, TYPE_SET, TYPE_TALLY,
-    TYPE_SHARED, TYPE_SHARED_GUARD, TYPE_SHARED_WEAK, TYPE_CONDITION, TYPE_RANK,
-    TYPE_STRING, TYPE_TASK, TYPE_TASK_FAILURE, TYPE_U16,
-    TYPE_U32, TYPE_U64, TYPE_U8, TYPE_UNIT,
+    BUILTIN_INPUT, BUILTIN_PRINT, CTX_BLOCK, KW_ALIAS, KW_AS, KW_BREAK, KW_CONC_TASK, KW_DEFER,
+    KW_DERIVE, KW_EFFECT_DECL, KW_ELSE, KW_ENUM, KW_EXTERN, KW_FN, KW_FREEZE, KW_IF, KW_IMPL,
+    KW_IMPURE, KW_IT, KW_JOB, KW_LOOP, KW_MARKER, KW_MODULE, KW_POLICY, KW_PRIV, KW_PROTOCOL,
+    KW_PUB, KW_RETURN, KW_SELF, KW_SHARED, KW_STATE, KW_STATE_DECL, KW_STRUCT, KW_TAG, KW_TEST,
+    KW_TODO, KW_TRAIT, KW_TRANSACT, KW_TRANSITION, KW_UNSAFE, KW_USE, KW_WRAP, LIT_FALSE, LIT_NULL,
+    LIT_TRUE, PROTO_CLIENT, PROTO_SERVER, TYPE_BITS, TYPE_BOOL, TYPE_BTREE_MAP, TYPE_BYTES,
+    TYPE_CHAR, TYPE_CONDITION, TYPE_F32, TYPE_F64, TYPE_FLOAT, TYPE_HASH_MAP, TYPE_I16, TYPE_I32,
+    TYPE_I64, TYPE_I8, TYPE_INT, TYPE_LRU, TYPE_MAP, TYPE_PRIORITY_QUEUE, TYPE_QUEUE, TYPE_RANK,
+    TYPE_RECEIVER, TYPE_SENDER, TYPE_SET, TYPE_SHARED, TYPE_SHARED_GUARD, TYPE_SHARED_WEAK,
+    TYPE_STRING, TYPE_TALLY, TYPE_TASK, TYPE_TASK_FAILURE, TYPE_U16, TYPE_U32, TYPE_U64, TYPE_U8,
+    TYPE_UNIT,
 };

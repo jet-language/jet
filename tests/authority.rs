@@ -69,10 +69,15 @@ fn authority_boundary_consumers_take_the_named_value() {
 use core.process as process
 use core.plugin as plugin
 
+struct SessionHolder {
+    abilities: Abilities
+}
+
 fn run() {
+    session :: SessionHolder{abilities: Abilities.workspace()}
     #Abilities(abilities: Exec, IO) {
         result :: process.run(["echo", "abilities"], abilities)
-        plugin :: plugin.load("missing.wasm", abilities)
+        plugin :: plugin.load("missing.wasm", session.abilities)
         print("boundary")
     }
 }
@@ -163,7 +168,7 @@ fn authority_dev_runs_the_same_value() {
 
 #[test]
 fn authority_comptime_uses_the_same_value() {
-    let source = "@abilities :: Abilities.from_rights([\"FS.Read\"])\n\nfn run() { print(\"abilities\") }\n";
+    let source = "@abilities :: Abilities.from_rights([\"FS.Read\", \"IO\"])\n@narrowed :: abilities.with(\"FS.Read\")\n@released :: narrowed.without(\"FS.Read\")\n\nfn run() { print(\"abilities\") }\n";
     let output = jet::compile(source).expect("comptime should construct Abilities");
     assert!(output.rust.contains("JetAuthority"), "{}", output.rust);
 }
@@ -174,6 +179,7 @@ fn authority_repl_accepts_the_same_value() {
         &[
             "abilities :: Abilities.workspace()",
             "narrowed :: abilities.with(\"FS.Read\")",
+            "released :: narrowed.without(\"FS.Read\")",
             "#Abilities(scoped: FS.Read) { inside :: scoped.with(\"FS.Read\") }",
             "print(\"abilities\")",
         ],
@@ -189,6 +195,21 @@ fn authority_web_accepts_the_same_value() {
         .expect("web should accept Abilities")
         .web
         .expect("web tier dropped Abilities");
-    assert!(web.wasm_rust.contains("__jet_run"), "web run export missing");
-    assert!(!web.wasm_rust.contains("Authority"), "web handle leaked into emission");
+    assert!(
+        web.wasm_rust
+            .contains("pub extern \"C\" fn jet_export_run() -> i32"),
+        "web run export missing"
+    );
+    assert!(
+        web.wasm_rust.contains("jet_authority_with"),
+        "web lost Abilities.with"
+    );
+    assert!(
+        web.wasm_rust.contains("jet_authority_without"),
+        "web lost Abilities.without"
+    );
+    assert!(
+        !web.wasm_rust.contains("struct Abilities"),
+        "web handle leaked into emission"
+    );
 }

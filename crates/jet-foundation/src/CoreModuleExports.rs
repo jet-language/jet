@@ -89,29 +89,44 @@ const CORE_ROOT_TYPES: &[&str] = &[
 const CORE_MODULE_EXPORTS: &[(&str, &[(&str, CoreLeafKind)])] = &[
     ("core.crypto", CRYPTO_LEAVES),
     ("core.encoding", ENCODING_LEAVES),
-    ("core.encoding.json", &[
-        ("JSONReader", CoreLeafKind::Plain),
-        ("JSONWriter", CoreLeafKind::Plain),
-    ]),
-    ("core.encoding.jsonl", &[
-        ("JSONLReader", CoreLeafKind::Plain),
-        ("JSONLWriter", CoreLeafKind::Plain),
-    ]),
-    ("core.encoding.csv", &[
-        ("CSVReader", CoreLeafKind::Plain),
-        ("CSVWriter", CoreLeafKind::Plain),
-    ]),
-    ("core.encoding.xml", &[
-        ("XMLReader", CoreLeafKind::Plain),
-        ("XMLWriter", CoreLeafKind::Plain),
-    ]),
-    ("core.encoding.cbor", &[
-        ("CBORReader", CoreLeafKind::Plain),
-        ("CBORWriter", CoreLeafKind::Plain),
-        ("CBOROptions", CoreLeafKind::Plain),
-        ("CBORError", CoreLeafKind::Plain),
-        ("CBORErrorKind", CoreLeafKind::Plain),
-    ]),
+    (
+        "core.encoding.json",
+        &[
+            ("JSONReader", CoreLeafKind::Plain),
+            ("JSONWriter", CoreLeafKind::Plain),
+        ],
+    ),
+    (
+        "core.encoding.jsonl",
+        &[
+            ("JSONLReader", CoreLeafKind::Plain),
+            ("JSONLWriter", CoreLeafKind::Plain),
+        ],
+    ),
+    (
+        "core.encoding.csv",
+        &[
+            ("CSVReader", CoreLeafKind::Plain),
+            ("CSVWriter", CoreLeafKind::Plain),
+        ],
+    ),
+    (
+        "core.encoding.xml",
+        &[
+            ("XMLReader", CoreLeafKind::Plain),
+            ("XMLWriter", CoreLeafKind::Plain),
+        ],
+    ),
+    (
+        "core.encoding.cbor",
+        &[
+            ("CBORReader", CoreLeafKind::Plain),
+            ("CBORWriter", CoreLeafKind::Plain),
+            ("CBOROptions", CoreLeafKind::Plain),
+            ("CBORError", CoreLeafKind::Plain),
+            ("CBORErrorKind", CoreLeafKind::Plain),
+        ],
+    ),
     ("core.email", EMAIL_LEAVES),
     ("core.sys", ENV_LEAVES),
     ("core.mem", MEM_LEAVES),
@@ -157,14 +172,26 @@ mod tests {
 
     #[test]
     fn known_modules_resolve_without_a_bespoke_arm() {
-        assert_eq!(core_leaf_kind("core.email", "Address"), Some(CoreLeafKind::Plain));
+        assert_eq!(
+            core_leaf_kind("core.email", "Address"),
+            Some(CoreLeafKind::Plain)
+        );
         assert_eq!(
             core_leaf_kind("core.crypto", "Secret"),
             Some(CoreLeafKind::CryptoNominal)
         );
-        assert_eq!(core_leaf_kind("core.crypto", "VerifyKey"), Some(CoreLeafKind::Plain));
-        assert_eq!(core_leaf_kind("core.sys", "EnvError"), Some(CoreLeafKind::Plain));
-        assert_eq!(core_leaf_kind("core.encoding.cbor", "CBORReader"), Some(CoreLeafKind::Plain));
+        assert_eq!(
+            core_leaf_kind("core.crypto", "VerifyKey"),
+            Some(CoreLeafKind::Plain)
+        );
+        assert_eq!(
+            core_leaf_kind("core.sys", "EnvError"),
+            Some(CoreLeafKind::Plain)
+        );
+        assert_eq!(
+            core_leaf_kind("core.encoding.cbor", "CBORReader"),
+            Some(CoreLeafKind::Plain)
+        );
         assert_eq!(core_leaf_kind("core.email", "NoSuchLeaf"), None);
         assert_eq!(core_leaf_kind("core.nonexistent", "Address"), None);
     }

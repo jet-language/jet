@@ -137,7 +137,7 @@ pub fn quarantine_invalid_entry(
         let operation = (|| {
             permissions.make_writable(&hangar, &hangar)?;
             let quarantine = hangar.join("quarantine");
-            fs::create_dir_all(&quarantine)?;
+            ensure_real_directory(&quarantine, "Hangar quarantine")?;
             let stamp = now_secs();
             let record = hangar.join(&current.id);
             if fs::symlink_metadata(&record).is_ok() {
@@ -365,36 +365,108 @@ pub(super) fn recover_hangar_staging_unlocked(roots: &Roots) -> std::io::Result<
     let hangar = roots.hangar_dir();
     let mut swept = 0usize;
     let stage = hangar.join(STAGE_DIR);
-    if stage.is_dir() {
-        for ent in fs::read_dir(&stage)? {
-            let ent = ent?;
-            let path = ent.path();
-            if path.is_dir() {
-                fs::remove_dir_all(&path)?;
-                swept += 1;
-            } else {
-                fs::remove_file(&path)?;
-                swept += 1;
-            }
-        }
-    }
+    swept += sweep_abandoned_directory(&stage, "Hangar ingest staging")?;
     let objects = hangar.join(OBJECTS_DIR);
-    if objects.is_dir() {
-        for ent in fs::read_dir(&objects)? {
-            let ent = ent?;
-            let name = ent.file_name().to_string_lossy().into_owned();
-            if name.ends_with(PARTIAL_SUFFIX) {
-                let path = ent.path();
-                if path.is_dir() {
-                    fs::remove_dir_all(path)?;
-                } else {
-                    fs::remove_file(path)?;
-                }
-                swept += 1;
+    let metadata = match fs::symlink_metadata(&objects) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(swept),
+        Err(error) => return Err(error),
+    };
+    if metadata.file_type().is_symlink() || !metadata.is_dir() {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "Hangar object pool is not a real directory; repair the path before recovery",
+        ));
+    }
+    for ent in fs::read_dir(&objects)? {
+        let ent = ent?;
+        let name = ent.file_name().to_string_lossy().into_owned();
+        if name.ends_with(PARTIAL_SUFFIX) {
+            let path = ent.path();
+            let metadata = fs::symlink_metadata(&path)?;
+            if metadata.file_type().is_symlink() || metadata.is_file() {
+                fs::remove_file(&path)?;
+            } else if metadata.is_dir() {
+                fs::remove_dir_all(&path)?;
+            } else {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    format!("Hangar partial object `{}` is not removable", path.display()),
+                ));
             }
+            swept += 1;
         }
     }
     Ok(swept)
+}
+
+/// Remove only abandoned children from a staging directory. The directory
+/// itself must be a real directory; a symlink is a path-escape repair stop,
+/// not permission to walk or remove the target it names.
+pub(super) fn sweep_abandoned_directory(path: &Path, label: &str) -> std::io::Result<usize> {
+    let metadata = match fs::symlink_metadata(path) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(0),
+        Err(error) => return Err(error),
+    };
+    if metadata.file_type().is_symlink() || !metadata.is_dir() {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            format!("{label} is not a real directory; repair the path before recovery"),
+        ));
+    }
+    let mut swept = 0;
+    for entry in fs::read_dir(path)? {
+        let child = entry?.path();
+        let metadata = fs::symlink_metadata(&child)?;
+        if metadata.file_type().is_symlink() || metadata.is_file() {
+            fs::remove_file(&child)?;
+        } else if metadata.is_dir() {
+            fs::remove_dir_all(&child)?;
+        } else {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                format!("{label} contains an unsupported entry `{}`", child.display()),
+            ));
+        }
+        swept += 1;
+    }
+    Ok(swept)
+}
+
+pub(super) fn ensure_real_directory(path: &Path, label: &str) -> std::io::Result<()> {
+    match fs::symlink_metadata(path) {
+        Ok(metadata) if metadata.file_type().is_symlink() || !metadata.is_dir() => {
+            Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                format!("{label} is not a real directory; repair the path before writing"),
+            ))
+        }
+        Ok(_) => Ok(()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            fs::create_dir_all(path)?;
+            let metadata = fs::symlink_metadata(path)?;
+            if metadata.file_type().is_symlink() || !metadata.is_dir() {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    format!("{label} is not a real directory; repair the path before writing"),
+                ));
+            }
+            Ok(())
+        }
+        Err(error) => Err(error),
+    }
+}
+
+pub(super) fn require_real_directory(path: &Path, label: &str) -> std::io::Result<()> {
+    let metadata = fs::symlink_metadata(path)?;
+    if metadata.file_type().is_symlink() || !metadata.is_dir() {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            format!("{label} is not a real directory; repair the path before reading"),
+        ));
+    }
+    Ok(())
 }
 
 /// Atomic staged ingest: no-follow copy → path-law + canonical digest →
@@ -425,12 +497,13 @@ fn ingest_tree_unlocked(
         )));
     }
     let hangar = roots.hangar_dir();
-    fs::create_dir_all(&hangar)?;
+    ensure_real_directory(&hangar, "Hangar root")?;
     recover_hangar_staging_unlocked(roots)?;
 
     let stamp = format!("{}-{}", now_secs(), std::process::id());
+    ensure_real_directory(&hangar.join(STAGE_DIR), "Hangar ingest staging")?;
     let stage = hangar.join(STAGE_DIR).join(&stamp);
-    fs::create_dir_all(&stage)?;
+    fs::create_dir(&stage)?;
 
     let result = (|| {
         let mut named_digests = BTreeMap::new();
@@ -480,9 +553,72 @@ fn ingest_tree_unlocked(
             .cloned()
             .ok_or_else(|| IngestError::Invalid("missing `out` digest".into()))?;
         let objects = hangar.join(OBJECTS_DIR);
-        fs::create_dir_all(&objects)?;
+        ensure_real_directory(&objects, "Hangar object pool")?;
         let final_obj = objects.join(&primary);
         let deduplicated = final_obj.is_dir();
+        let out_path = final_obj.to_string_lossy().into_owned();
+        let bin = final_obj.join("bin");
+        let envelope = super::super::Envelope::Envelope {
+            output_hash: primary.clone(),
+            platform: if req.cache_identity.platform.is_empty() {
+                super::super::Envelope::host_platform()
+            } else {
+                req.cache_identity.platform.clone()
+            },
+            signature: req.signature.clone(),
+            provenance: if req.provenance.is_empty() {
+                format!("{} via hangar-ingest", req.reference)
+            } else {
+                req.provenance.clone()
+            },
+        };
+        let id = entry_id(&req.name, &req.version, &req.reference, &out_path);
+        let dir = hangar.join(&id);
+        let now = now_secs();
+        let mut producer = ProducerRecord::decode(&canonical_producer(
+            "hangar-ingest",
+            &format!("cas:{primary}"),
+            &primary,
+            &req.cache_identity,
+            req.outputs
+                .keys()
+                .map(|name| (format!("output.{name}"), named_digests[name].clone()))
+                .collect(),
+        )?)
+        .map_err(std::io::Error::other)?;
+        producer.bind_cache_provenance(&req.reference, &primary, &req.cache_identity);
+        let entry = StoreEntry {
+            id: id.clone(),
+            name: req.name.clone(),
+            version: req.version.clone(),
+            reference: req.reference.clone(),
+            out: out_path,
+            bin: if bin.is_dir() {
+                bin.to_string_lossy().into_owned()
+            } else {
+                String::new()
+            },
+            rlib: String::new(),
+            envelope,
+            cache_identity: req.cache_identity.clone(),
+            references: req.references.clone(),
+            named_outputs: named_digests.clone(),
+            platform_artifact_kind: req.platform_artifact_kind.clone(),
+            producer_record: producer.encode(),
+            realized_at: read_meta(&dir).and_then(|m| m.realized_at).unwrap_or(now),
+            last_used_at: now,
+        };
+        let mut staged_entry = entry.clone();
+        staged_entry.out = staged_outs
+            .get("out")
+            .ok_or_else(|| IngestError::Invalid("missing staged `out` path".into()))?
+            .to_string_lossy()
+            .into_owned();
+        // Certify while the candidate is still in the private ingest stage.
+        // A divergent tree therefore never becomes a Hangar CAS object or a
+        // closure record; failed-stage cleanup remains untrusted quarantine.
+        super::certify_registration_unlocked(roots, &staged_entry, &[])
+            .map_err(|error| IngestError::Invalid(error.to_string()))?;
         for (name, staged) in &staged_outs {
             let digest = named_digests.get(name).ok_or_else(|| {
                 IngestError::Invalid(format!("named output `{name}` has no digest"))
@@ -534,72 +670,24 @@ fn ingest_tree_unlocked(
             super::sync_store_directory(&objects)?;
         }
 
-        let out_path = final_obj.to_string_lossy().into_owned();
-        let bin = final_obj.join("bin");
-        let envelope = super::super::Envelope::Envelope {
-            output_hash: primary.clone(),
-            platform: if req.cache_identity.platform.is_empty() {
-                super::super::Envelope::host_platform()
-            } else {
-                req.cache_identity.platform.clone()
-            },
-            signature: req.signature.clone(),
-            provenance: if req.provenance.is_empty() {
-                format!("{} via hangar-ingest", req.reference)
-            } else {
-                req.provenance.clone()
-            },
-        };
-        let id = entry_id(&req.name, &req.version, &req.reference, &out_path);
-        let dir = hangar.join(&id);
-        let now = now_secs();
-        let realized_at = read_meta(&dir).and_then(|m| m.realized_at).unwrap_or(now);
-        let entry = StoreEntry {
-            id: id.clone(),
-            name: req.name.clone(),
-            version: req.version.clone(),
-            reference: req.reference.clone(),
-            out: out_path,
-            bin: if bin.is_dir() {
-                bin.to_string_lossy().into_owned()
-            } else {
-                String::new()
-            },
-            rlib: String::new(),
-            envelope,
-            cache_identity: req.cache_identity.clone(),
-            references: req.references.clone(),
-            named_outputs: named_digests.clone(),
-            platform_artifact_kind: req.platform_artifact_kind.clone(),
-            producer_record: canonical_producer(
-                "hangar-ingest",
-                &format!("cas:{primary}"),
-                &primary,
-                &req.cache_identity,
-                req.outputs
-                    .keys()
-                    .map(|name| (format!("output.{name}"), named_digests[name].clone()))
-                    .collect(),
-            )?,
-            realized_at,
-            last_used_at: now,
-        };
         register_entry_unlocked(roots, &entry)?;
         Ok(IngestedObject { entry, deduplicated })
     })();
 
     // Always scrub this stage dir (success moved trees out; failure quarantines).
     if result.is_err() {
-        let quarantine = hangar.join("quarantine").join(format!("ingest-{stamp}"));
-        if let Some(parent) = quarantine.parent() {
-            let _ = fs::create_dir_all(parent);
-        }
-        if stage.exists() {
-            if fs::rename(&stage, &quarantine).is_err() {
+        let quarantine_root = hangar.join("quarantine");
+        if ensure_real_directory(&quarantine_root, "Hangar quarantine").is_ok() {
+            let quarantine = quarantine_root.join(format!("ingest-{stamp}"));
+            if fs::symlink_metadata(&stage).is_ok()
+                && fs::rename(&stage, &quarantine).is_err()
+            {
                 let _ = fs::remove_dir_all(&stage);
             }
+        } else if fs::symlink_metadata(&stage).is_ok() {
+            let _ = fs::remove_dir_all(&stage);
         }
-    } else if stage.exists() {
+    } else if fs::symlink_metadata(&stage).is_ok() {
         let _ = fs::remove_dir_all(&stage);
     }
     result

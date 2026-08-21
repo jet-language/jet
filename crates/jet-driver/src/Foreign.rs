@@ -527,6 +527,7 @@ fn materialize_namespace(
                 default_target: program.default_target,
                 html_path: program.html_path.clone(),
                 policy_declarations: program.policy_declarations.clone(),
+                user_policy_declarations: program.user_policy_declarations.clone(),
                 rule_facts: std::mem::take(&mut program.rule_facts),
             });
             return Ok(module_idx);
@@ -548,6 +549,7 @@ fn materialize_namespace(
         default_target: None,
         html_path: None,
         policy_declarations: Vec::new(),
+        user_policy_declarations: Vec::new(),
         rule_facts: Vec::new(),
     });
     Ok(module_idx)

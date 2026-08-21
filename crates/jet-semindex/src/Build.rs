@@ -855,6 +855,7 @@ fn item_span(item: &AST::Item) -> Span {
         AST::Item::StateDecl(x) => x.span,
         AST::Item::ProtocolDecl(x) => x.span,
         AST::Item::UserDerive(x) => x.span,
+        AST::Item::TemplateLoop(x) => x.span,
         AST::Item::GenericModule(x) => x.span,
         AST::Item::ModuleAlias(x) => x.span,
     }
@@ -2016,6 +2017,20 @@ fn collect_item(item: &Item, mp: &str, module: &LoadedModule, ctx: &mut WalkCtx<
                                 }
                             }
                         }
+                    }
+                }
+            });
+        }
+        Item::TemplateLoop(value) => {
+            structural_slot(ctx, "source", StructuralSlotKind::Scalar, |ctx| {
+                collect_expr(&value.source, mp, ctx);
+            });
+            structural_slot(ctx, "body", StructuralSlotKind::List, |ctx| {
+                for body_item in &value.body {
+                    match body_item {
+                        AST::DeriveBodyItem::Item(item) => collect_item(item, mp, module, ctx),
+                        AST::DeriveBodyItem::Stmt(stmt) => collect_stmt(stmt, mp, module, ctx),
+                        AST::DeriveBodyItem::Loop { source, .. } => collect_expr(source, mp, ctx),
                     }
                 }
             });

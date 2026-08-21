@@ -34,7 +34,7 @@ pub use Source::{
     evaluate_env_with_selections, evaluate_package_profile, is_module_surface,
 };
 pub use Types::{
-    AdapterPlan, AdapterRecipe, DevServicePlan, EnvPlan, EnvironmentFacts, EvaluatedModule,
+    AdapterPlan, AdapterRecipe, DevServicePlan, EnvPlan, EnvironmentFacts, EnvironmentRead, EvaluatedModule,
     FleetPlan, HostOverride, HostOverrideProvenance, HostOverrideValue, HostPlan, ImageKind, ImagePlan, OptionPlan,
     PromptPathMode, PromptStripMode,
     ReadyProbe, RestartPolicy, ServicePlan, ShutdownPolicy, SystemPlan, VmTestPlan,

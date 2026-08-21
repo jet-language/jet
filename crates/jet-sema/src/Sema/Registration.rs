@@ -31,7 +31,7 @@ fn is_void_named(ty: &Type) -> bool {
 }
 
 /// True when a declared return type carries no value payload: `()` / `Unit`,
-/// or fallible void (`() ? E`). Same void-named match used by asm return
+/// or fallible void (`() ! E`). Same void-named match used by asm return
 /// checks in this file.
 fn is_void_like_return(ty: &Type) -> bool {
     is_void_named(ty)
@@ -268,7 +268,25 @@ impl<'a> Checker<'a> {
             }
             if p.name == Syntax::KW_SELF {
                 if let Some(owner) = owner_type {
-                    let self_ty = Type::Named(owner.to_string());
+                    // Generic impl methods own the same type parameters as
+                    // their enclosing struct/enum. Keep that application on
+                    // `self`; a bare owner name would make a returned `self`
+                    // fail against a declared `Owner<T>` result.
+                    let owner_params = self
+                        .trait_reg
+                        .struct_params
+                        .get(owner)
+                        .or_else(|| self.trait_reg.enum_params.get(owner));
+                    let self_ty = owner_params.map_or_else(
+                        || Type::Named(owner.to_string()),
+                        |params| Type::Apply {
+                            name: owner.to_string(),
+                            args: params
+                                .iter()
+                                .map(|param| Type::Named(param.name.clone()))
+                                .collect(),
+                        },
+                    );
                     self.declare_in_scope(
                         &p.name,
                         LocalInfo {
@@ -344,7 +362,18 @@ impl<'a> Checker<'a> {
                 );
             }
         }
+        self.mark_default_parameter_references(&f.params);
         self.check_memoized_function(f);
+        // D-STRUCT-POLICY1=A: callable marker values use the same package
+        // vocabulary as `apply`; declaration bodies are checked separately
+        // against each wrapped function signature below the bundle seam.
+        for marker in &f.markers {
+            if marker.name == Syntax::MARKER_POLICY
+                && crate::AST::CallablePolicyChain::parse(&marker.args).is_ok()
+            {
+                let _ = self.validate_callable_policy_values(&marker.args, marker.span);
+            }
+        }
         for mut marker in self.take_targeted_rule_facts(f.span) {
             let Some(arguments) = self.validate_rule_signature(&mut marker) else {
                 if marker.name == Syntax::MARKER_EVERY {
@@ -475,6 +504,9 @@ impl<'a> Checker<'a> {
         self.in_unsafe = self.in_unsafe || f.is_unsafe;
         self.check_block(&mut f.body, false);
         self.in_unsafe = prev_unsafe;
+        // D-LINT-UNUSED1: all local and parameter references are known after
+        // the body pass, including references in nested scopes and defaults.
+        self.emit_unused_binding_lints();
         // D-ANY-JAI1: a trait-bounded variadic has no zero-cost representation
         // for arbitrary use (heterogeneous elements, no boxing allowed) — codegen
         // only covers one shape, a direct `loop x; parts { … }` loop, unrolled

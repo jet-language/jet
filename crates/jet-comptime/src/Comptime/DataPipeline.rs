@@ -13,8 +13,8 @@
 
 use std::collections::{BTreeMap, HashMap};
 
-use crate::AST::{CtFloat, Type};
 use crate::Diagnostics::{Diagnostic, Span};
+use crate::AST::{CtFloat, Type};
 
 use super::Diagnostics::unsupported;
 use super::Interpreter::Interp;
@@ -24,25 +24,41 @@ use crate::AST::{CtReport, CtValue};
 fn ct_struct(type_name: &str, fields: Vec<(&str, CtValue)>) -> CtValue {
     CtValue::Struct {
         type_name: type_name.to_string(),
-        fields: fields.into_iter().map(|(n, v)| (n.to_string(), v)).collect(),
+        fields: fields
+            .into_iter()
+            .map(|(n, v)| (n.to_string(), v))
+            .collect(),
     }
 }
 fn struct_field<'a>(v: &'a CtValue, type_name: &str, field: &str) -> Option<&'a CtValue> {
     match v {
-        CtValue::Struct { type_name: t, fields } if t == type_name => {
-            fields.iter().find(|(n, _)| n == field).map(|(_, v)| v)
-        }
+        CtValue::Struct {
+            type_name: t,
+            fields,
+        } if t == type_name => fields.iter().find(|(n, _)| n == field).map(|(_, v)| v),
         _ => None,
     }
 }
 fn expect_list<'a>(v: &'a CtValue, what: &str, span: Span) -> Result<&'a Vec<CtValue>, Diagnostic> {
     match v {
         CtValue::List(xs) => Ok(xs),
-        _ => Err(unsupported(&format!("`data.{}` needs a list-backed value", what), span)),
+        _ => Err(unsupported(
+            &format!("`data.{}` needs a list-backed value", what),
+            span,
+        )),
     }
 }
-fn expect_struct<'a>(v: &'a CtValue, type_name: &str, what: &str, span: Span) -> Result<(&'a Vec<CtValue>, i64, Option<&'a Vec<CtValue>>), Diagnostic> {
-    let field_key = if type_name == "Series" { "values" } else { "rows" };
+fn expect_struct<'a>(
+    v: &'a CtValue,
+    type_name: &str,
+    what: &str,
+    span: Span,
+) -> Result<(&'a Vec<CtValue>, i64, Option<&'a Vec<CtValue>>), Diagnostic> {
+    let field_key = if type_name == "Series" {
+        "values"
+    } else {
+        "rows"
+    };
     match struct_field(v, type_name, field_key) {
         Some(CtValue::List(xs)) => {
             let missing = match struct_field(v, type_name, "missing") {
@@ -55,7 +71,10 @@ fn expect_struct<'a>(v: &'a CtValue, type_name: &str, what: &str, span: Span) ->
             });
             Ok((xs, missing, plan))
         }
-        _ => Err(unsupported(&format!("`data.{}` needs a `{}` value", what, type_name), span)),
+        _ => Err(unsupported(
+            &format!("`data.{}` needs a `{}` value", what, type_name),
+            span,
+        )),
     }
 }
 
@@ -155,7 +174,10 @@ pub fn table_value(
         vec![
             ("rows", CtValue::List(rows)),
             ("missing", CtValue::Int(0)),
-            ("plan", CtValue::List(vec![CtValue::Str("table".to_string())])),
+            (
+                "plan",
+                CtValue::List(vec![CtValue::Str("table".to_string())]),
+            ),
             ("elem_type", CtValue::Str(elem_type)),
         ],
     ))
@@ -190,8 +212,7 @@ pub fn schema_columns_for_type(
     if type_params.len() != args.len() {
         return None;
     }
-    let subst: HashMap<String, Type> =
-        type_params.into_iter().zip(args.iter().cloned()).collect();
+    let subst: HashMap<String, Type> = type_params.into_iter().zip(args.iter().cloned()).collect();
     Some(
         fields
             .iter()
@@ -264,7 +285,11 @@ pub fn schema_value(
 }
 
 impl<'a> Interp<'a> {
-    fn materialize_lazy(&mut self, frame: &CtValue, span: Span) -> Result<Vec<CtValue>, Diagnostic> {
+    fn materialize_lazy(
+        &mut self,
+        frame: &CtValue,
+        span: Span,
+    ) -> Result<Vec<CtValue>, Diagnostic> {
         let (rows, _, _) = expect_struct(frame, "LazyFrame", "collect", span)?;
         let mut rows = rows.clone();
         let operations = match struct_field(frame, "LazyFrame", "operations") {
@@ -273,13 +298,25 @@ impl<'a> Interp<'a> {
         };
         for operation in operations {
             let CtValue::Struct { type_name, fields } = operation else {
-                return Err(unsupported("`data.collect()` found an invalid lazy operation", span));
+                return Err(unsupported(
+                    "`data.collect()` found an invalid lazy operation",
+                    span,
+                ));
             };
             if type_name != "DataLazyOperation" {
-                return Err(unsupported("`data.collect()` found an invalid lazy operation", span));
+                return Err(unsupported(
+                    "`data.collect()` found an invalid lazy operation",
+                    span,
+                ));
             }
-            let kind = fields.iter().find(|(name, _)| name == "kind").map(|(_, value)| value);
-            let function = fields.iter().find(|(name, _)| name == "function").map(|(_, value)| value);
+            let kind = fields
+                .iter()
+                .find(|(name, _)| name == "kind")
+                .map(|(_, value)| value);
+            let function = fields
+                .iter()
+                .find(|(name, _)| name == "function")
+                .map(|(_, value)| value);
             match (kind, function) {
                 (Some(CtValue::Str(kind)), Some(function)) if kind == "filter" => {
                     let mut out = Vec::new();
@@ -306,7 +343,12 @@ impl<'a> Interp<'a> {
                     keyed.sort_by(|a, b| a.0.cmp(&b.0));
                     rows = keyed.into_iter().map(|(_, row)| row).collect();
                 }
-                _ => return Err(unsupported("`data.collect()` found an invalid lazy operation", span)),
+                _ => {
+                    return Err(unsupported(
+                        "`data.collect()` found an invalid lazy operation",
+                        span,
+                    ))
+                }
             }
         }
         Ok(rows)
@@ -328,7 +370,12 @@ impl<'a> Interp<'a> {
                 };
                 let text = match argv.first() {
                     Some(CtValue::Str(s)) => s.clone(),
-                    _ => return Err(unsupported("`data.csv()`: expected a string argument", span)),
+                    _ => {
+                        return Err(unsupported(
+                            "`data.csv()`: expected a string argument",
+                            span,
+                        ))
+                    }
                 };
                 self.eval_typed_csv_decode(&text, ty, span)
             }
@@ -338,7 +385,12 @@ impl<'a> Interp<'a> {
                 };
                 let text = match argv.first() {
                     Some(CtValue::Str(s)) => s.clone(),
-                    _ => return Err(unsupported("`data.json()`: expected a string argument", span)),
+                    _ => {
+                        return Err(unsupported(
+                            "`data.json()`: expected a string argument",
+                            span,
+                        ))
+                    }
                 };
                 // Array-of-objects → `[T]`, same Decode model as `encoding.json.decode<[T]>`.
                 self.eval_typed_decode(
@@ -349,10 +401,14 @@ impl<'a> Interp<'a> {
                 )
             }
             "count" => {
-                let recv = argv.first().ok_or_else(|| unsupported("`data.count()`: missing argument", span))?;
+                let recv = argv
+                    .first()
+                    .ok_or_else(|| unsupported("`data.count()`: missing argument", span))?;
                 match recv {
                     CtValue::List(xs) => Ok(CtValue::Int(xs.len() as i64)),
-                    CtValue::Struct { type_name, .. } if type_name == "Table" || type_name == "LazyFrame" => {
+                    CtValue::Struct { type_name, .. }
+                        if type_name == "Table" || type_name == "LazyFrame" =>
+                    {
                         let count = if type_name == "LazyFrame" {
                             self.materialize_lazy(recv, span)?.len()
                         } else {
@@ -364,7 +420,10 @@ impl<'a> Interp<'a> {
                         let (values, ..) = expect_struct(recv, "Series", "count", span)?;
                         Ok(CtValue::Int(values.len() as i64))
                     }
-                    _ => Err(unsupported("`data.count()` needs a typed table or series", span)),
+                    _ => Err(unsupported(
+                        "`data.count()` needs a typed table or series",
+                        span,
+                    )),
                 }
             }
             "table" => table_value(&argv[0], arg0_ty, call_ret, span),
@@ -386,9 +445,9 @@ impl<'a> Interp<'a> {
                 Ok(CtValue::List(values.clone()))
             }
             "schema" => {
-                let recv = argv.first().ok_or_else(|| {
-                    unsupported("`data.schema()`: missing argument", span)
-                })?;
+                let recv = argv
+                    .first()
+                    .ok_or_else(|| unsupported("`data.schema()`: missing argument", span))?;
                 let structs = self.structs;
                 let row: SchemaRow<'_> = &|name: &str| {
                     let def = structs.get(name)?;
@@ -406,8 +465,12 @@ impl<'a> Interp<'a> {
                 schema_value(recv, arg0_ty, row, span)
             }
             "missing_count" => {
-                let (values, missing, _) = expect_struct(&argv[0], "Series", "missing_count", span)?;
-                let none_count = values.iter().filter(|v| matches!(v, CtValue::Failed(CtReport::Clean(_)))).count() as i64;
+                let (values, missing, _) =
+                    expect_struct(&argv[0], "Series", "missing_count", span)?;
+                let none_count = values
+                    .iter()
+                    .filter(|v| matches!(v, CtValue::Failed(CtReport::Clean(_))))
+                    .count() as i64;
                 Ok(CtValue::Int(missing + none_count))
             }
             "lazy" => {
@@ -485,7 +548,10 @@ impl<'a> Interp<'a> {
                 if method == "filter" {
                     let mut out = Vec::new();
                     for row in &rows {
-                        if super::Builtins::as_bool(&self.call_closure(&f, vec![row.clone()], span)?, span)? {
+                        if super::Builtins::as_bool(
+                            &self.call_closure(&f, vec![row.clone()], span)?,
+                            span,
+                        )? {
                             out.push(row.clone());
                         }
                     }
@@ -493,7 +559,8 @@ impl<'a> Interp<'a> {
                 } else {
                     let mut keyed = Vec::with_capacity(rows.len());
                     for row in &rows {
-                        let k = as_string(&self.call_closure(&f, vec![row.clone()], span)?, span)?.to_string();
+                        let k = as_string(&self.call_closure(&f, vec![row.clone()], span)?, span)?
+                            .to_string();
                         keyed.push((k, row.clone()));
                     }
                     keyed.sort_by(|a, b| a.0.cmp(&b.0));
@@ -501,12 +568,18 @@ impl<'a> Interp<'a> {
                 }
             }
             "group_count" | "group_sum" | "group_mean" => {
-                let value_f = if method == "group_count" { None } else { Some(argv.pop().unwrap()) };
+                let value_f = if method == "group_count" {
+                    None
+                } else {
+                    Some(argv.pop().unwrap())
+                };
                 let key_f = argv.pop().unwrap();
                 let rows = expect_list(&argv[0], method, span)?.clone();
                 let mut groups: BTreeMap<String, (i64, f64)> = BTreeMap::new();
                 for row in &rows {
-                    let key = as_string(&self.call_closure(&key_f, vec![row.clone()], span)?, span)?.to_string();
+                    let key =
+                        as_string(&self.call_closure(&key_f, vec![row.clone()], span)?, span)?
+                            .to_string();
                     let value = match &value_f {
                         Some(f) => as_float(&self.call_closure(f, vec![row.clone()], span)?, span)?,
                         None => 0.0,
@@ -576,7 +649,10 @@ impl<'a> Interp<'a> {
                         }
                         None if method == "left_join" => joined.push(ct_struct(
                             "DataJoin",
-                            vec![("left", left_row), ("right", CtValue::absent(Type::Named("Unknown".to_string())))],
+                            vec![
+                                ("left", left_row),
+                                ("right", CtValue::absent(Type::Named("Unknown".to_string()))),
+                            ],
                         )),
                         None => {}
                     }

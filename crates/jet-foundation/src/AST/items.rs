@@ -69,6 +69,10 @@ pub enum Item {
     ProtocolDecl(ProtocolDecl),
     /// D-METADERIVE1=A: `derive T.Trait { … }` user-authored derive.
     UserDerive(DeriveDef),
+    /// D-STRUCT-ONCE1=A: a file-level `@loop` whose body expands to ordinary
+    /// declarations. Sema removes this template before registration; the
+    /// generated items then use the same checking path as written items.
+    TemplateLoop(ItemTemplateLoop),
     /// D-CONF-GENSPELL1=A: `module name<types>(values) { … }` — a parameterized
     /// module template.
     /// Stores the body as-is; sema expands `ModuleAlias` references before codegen.
@@ -113,6 +117,19 @@ pub struct MarkerDecl {
     /// uses `marker Name on [.Text] { check … hole … }` so the type and its
     /// construction contract share the marker vocabulary.
     pub text: Option<MarkerTextDecl>,
+    pub span: Span,
+}
+
+/// D-STRUCT-POLICY1=A: one package-scoped, user-authored callable setting.
+/// The wrapper body remains ordinary checked Jet statements; `call` is the
+/// callable supplied by each `#Policy`/`apply` use site.
+#[derive(Debug, Clone)]
+pub struct UserPolicyDecl {
+    pub is_pub: bool,
+    pub name: String,
+    pub name_span: Span,
+    pub params: Vec<Param>,
+    pub body: Vec<Stmt>,
     pub span: Span,
 }
 
@@ -222,8 +239,9 @@ pub enum GenericModuleParam {
 impl GenericModuleParam {
     pub fn name(&self) -> &str {
         match self {
-            GenericModuleParam::Type { name, .. }
-            | GenericModuleParam::Value { name, .. } => name.as_str(),
+            GenericModuleParam::Type { name, .. } | GenericModuleParam::Value { name, .. } => {
+                name.as_str()
+            }
         }
     }
 
@@ -788,6 +806,18 @@ pub enum DeriveBodyItem {
     },
 }
 
+/// D-STRUCT-ONCE1=A: one root declaration template introduced by `@loop`.
+/// The body deliberately reuses `DeriveBodyItem`, so marker, derive, generated,
+/// and root loops share one typed expansion mechanism.
+#[derive(Debug, Clone)]
+pub struct ItemTemplateLoop {
+    pub var: String,
+    pub var_span: Span,
+    pub source: Expr,
+    pub body: Vec<DeriveBodyItem>,
+    pub span: Span,
+}
+
 /// D-METADERIVE1=A: `derive T.Trait { … }` user-authored derive.
 #[derive(Debug, Clone)]
 pub struct DeriveDef {
@@ -1217,7 +1247,7 @@ impl Func {
 }
 
 /// D-WEBAPP1=D: does this type name the `App` service builder — `App` itself,
-/// or `App ? E`?
+/// or `App ! E`?
 ///
 /// One canonical answer (I8). Sema's app-graph extraction, AOT entry emit, the
 /// web artifact front door, and the interpreter entry each carried a private
@@ -1310,9 +1340,7 @@ impl JobSkip {
     pub fn reason_for_host(&self, host: &str) -> Option<String> {
         match self {
             Self::Always(reason) => Some(reason.clone()),
-            Self::UnlessPlatform { platform }
-                if !matches_host_platform(platform, host) =>
-            {
+            Self::UnlessPlatform { platform } if !matches_host_platform(platform, host) => {
                 Some(format!("host platform is not {platform}"))
             }
             Self::UnlessPlatform { .. } => None,
@@ -1561,20 +1589,41 @@ pub enum StructLayout {
 /// D-REPRC2: selected C enum tag representation. `CInt` is C's `int`;
 /// fixed-width forms are the explicit expert override.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum CEnumTag { CInt, U8, I8, U16, I16, U32, I32, U64, I64 }
+pub enum CEnumTag {
+    CInt,
+    U8,
+    I8,
+    U16,
+    I16,
+    U32,
+    I32,
+    U64,
+    I64,
+}
 
 impl EnumDef {
     pub fn c_layout_tag(&self) -> Option<CEnumTag> {
-        let marker = self.type_markers.iter().find(|m| m.name == crate::Syntax::MARKER_LAYOUT)?;
-        let Some(Expr::Ident(first, _)) = marker.args.first() else { return None };
-        if !first.eq_ignore_ascii_case("c") { return None; }
+        let marker = self
+            .type_markers
+            .iter()
+            .find(|m| m.name == crate::Syntax::MARKER_LAYOUT)?;
+        let Some(Expr::Ident(first, _)) = marker.args.first() else {
+            return None;
+        };
+        if !first.eq_ignore_ascii_case("c") {
+            return None;
+        }
         Some(match marker.args.get(1) {
             None => CEnumTag::CInt,
             Some(Expr::Ident(n, _)) => match n.as_str() {
-                "U8" => CEnumTag::U8, "I8" => CEnumTag::I8,
-                "U16" => CEnumTag::U16, "I16" => CEnumTag::I16,
-                "U32" => CEnumTag::U32, "I32" => CEnumTag::I32,
-                "U64" => CEnumTag::U64, "I64" => CEnumTag::I64,
+                "U8" => CEnumTag::U8,
+                "I8" => CEnumTag::I8,
+                "U16" => CEnumTag::U16,
+                "I16" => CEnumTag::I16,
+                "U32" => CEnumTag::U32,
+                "I32" => CEnumTag::I32,
+                "U64" => CEnumTag::U64,
+                "I64" => CEnumTag::I64,
                 _ => return None,
             },
             _ => return None,
@@ -1690,7 +1739,7 @@ impl StructDef {
     }
 }
 
-/// D-TYPEALIAS1 / D-ALIAS-OP1=B: `alias Name<T, E> :: T ? E` — transparent generic type shortcut.
+/// D-TYPEALIAS1 / D-ALIAS-OP1=B: `alias Name<T, E> :: T ! E` — transparent generic type shortcut.
 #[derive(Debug, Clone)]
 pub struct TypeAliasDef {
     pub is_pub: bool,
@@ -1893,7 +1942,11 @@ impl UnitFamilyDef {
                     .collect(),
                     quantity: self.resolved_dimension.clone().map(|dimension| {
                         let kind = if affine {
-                            if is_point { QuantityKind::Point } else { QuantityKind::Delta }
+                            if is_point {
+                                QuantityKind::Point
+                            } else {
+                                QuantityKind::Delta
+                            }
                         } else {
                             QuantityKind::Linear
                         };
@@ -2173,8 +2226,10 @@ pub fn resolved_decode_wire_shapes(items: &[Item], ty: &Type) -> Option<Vec<Serd
                         return resolve(items, &target, seen);
                     }
                     Item::UnitFamily(family) => {
-                        if let Some(def) =
-                            family.distinct_defs().into_iter().find(|def| def.name == name)
+                        if let Some(def) = family
+                            .distinct_defs()
+                            .into_iter()
+                            .find(|def| def.name == name)
                         {
                             return def
                                 .derives

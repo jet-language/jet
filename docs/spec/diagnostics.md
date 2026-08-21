@@ -129,6 +129,15 @@ duplicate this — it is the one surface for lint walls (I8).
 The list takes stable snake_case lint names such as `float_money`; diagnostic
 codes are rendered beside names but are never policy values.
 
+Unused-code lints use the same warning tier. `unused_local_binding`,
+`unused_parameter`, `unused_import`, and `unused_private_fn` report names that
+the checked module never reads or calls. `unreachable_export` reports a
+`pub(package)` declaration or application-target export with no consumer in
+the package import graph. A library `pub` stays exempt. A name beginning with
+`_` is an intentional discard and stays silent. A team may promote any of
+these rows with the existing `policy.lints.deny` surface; no unused-code-specific
+policy exists.
+
 New warning codes always use the `L` prefix. `W0410` predates that law and is
 the sole frozen historical `W`-prefix exception: its stable code must not be
 renumbered, and no new `W` code may be allocated.
@@ -312,6 +321,11 @@ renumbered, and no new `W` code may be allocated.
 | E0805 | sema  | `yield` used outside a function declared `:> Stream<T>` (D-STREAMYIELD1) |
 | E0806 | sema  | a generator's `return` carries a value (D-STREAMYIELD1) |
 | E0807 | sema  | a `yield`ed value's type doesn't match the stream's element type (D-STREAMYIELD1) |
+| L0101 | sema  | unused local binding (D-LINT-UNUSED1, warning) |
+| L0102 | sema  | unused parameter (D-LINT-UNUSED1, warning) |
+| L0103 | sema  | unused import (D-LINT-UNUSED1, warning) |
+| L0104 | sema  | unused private function (D-LINT-UNUSED1, warning) |
+| L0105 | sema  | unreachable package-scoped export (D-STRUCT-LIVE1, warning) |
 | L0151 | sema  | typestate: a declared state has no outgoing `#Transition(S, …)` — a dead-end state (D-STATE-DECL, warning) |
 | L0152 | sema  | typestate: two paths meet and leave one value in different states, so it is untracked from there (D-STATE1, D-FACT-FLOW1, warning) |
 | E0201 | sema  | the move marker `^` is required; value can't be copied |
@@ -432,6 +446,7 @@ renumbered, and no new `W` code may be allocated.
 | E0404 | sema  | `ok`/`err` need a fallible context        |
 | E0405 | sema  | `??` fallback type/`return` mismatch or non-diverging test-bind route |
 | E0406 | parse | old `Result<T, E>` fallible type syntax   |
+| E-ERR-SIGIL | parse | retired `?` fallible type separator; use `!` (D-ERRSIGIL1) |
 | E0407 | sema  | `.drop()` reason missing or invalid (D-IGNORERET2) |
 | E0408 | sema  | `err` used in an optional fallback (D-CHOOSE-TEST1=A) |
 | E0410 | parse | *retired by D-MARK-DISCARD1=A* (was: `#Suppress` unknown argument) |
@@ -478,6 +493,7 @@ renumbered, and no new `W` code may be allocated.
 | L0510 | sema | declaration replaces a readable Core prelude alias (D-NAME-ALIAS1) |
 | L0520 | sema  | auto-printable struct used in bare `{value}` without `Display` (migration lint, D-DISPLAY-SHAPE) |
 | L0601 | sema  | outside use of a soft-public `_name`; callable but not a minor-version compatibility promise (D-SHAPE-INTERNAL1=A) |
+| L0619 | jet   | package boundary rule matches no import edge (D-STRUCT-EDGE1) |
 | L1141 | sema  | autodiff transform result called inline; bind the derivative before calling it (D-COMPUTE-GRAD1=E) |
 | E0601 | sema  | `#Test` block in wrong position / none found |
 | E0602 | jet   | `use` path escapes the project (`..` or outside entry tree) |
@@ -497,6 +513,7 @@ renumbered, and no new `W` code may be allocated.
 | E0616 | sema  | `.setup` is not the first statement in the test (D-DOTSCOPE1) |
 | E0617 | sema  | a scope member has the wrong argument shape (D-DOTSCOPE1) |
 | E0618 | sema  | a scope member is nested instead of a top-level statement of the marker block (D-DOTSCOPE1) |
+| E0619 | jet   | an import edge is denied by a package boundary policy (D-STRUCT-EDGE1) |
 | E0620 | sema  | imported script has executable top-level statements (D-ENTRY-SCRIPT1) |
 | E0621 | sema  | script has loose statements and an explicit `fn run` (D-ENTRY-SCRIPT1) |
 | E0631 | sema  | an arena `view` escapes its region — returned, stored, given away, or captured (D-ALLOC2/D-REGION1) |
@@ -605,7 +622,7 @@ renumbered, and no new `W` code may be allocated.
 | E3412 | sema  | `core.net.{method}()` is not available at comptime (only `fetch` is Tier-1) |
 | E3413 | sema  | comptime `fetch` sha256 mismatch — content hash doesn't match the `sha256:` pin (D-CTEFFECT1 / D-NETDEP1=A) |
 | E3414 | sema  | comptime `fetch` failed — bad URL, unsupported scheme, network error, or non-UTF-8 content (D-CTEFFECT1 / D-NETDEP1=A) |
-| E3501 | build | selected root `fn build` has wrong `fn(BuildContext) => BuildPlan ?` signature (D-BUILDENTRY1) |
+| E3501 | build | selected root `fn build` has wrong `fn(BuildContext) => BuildPlan !` signature (D-BUILDENTRY1) |
 | E3502 | build | programmable build evaluation, graph validation, or generated-source materialization failed |
 | E3503 | build | root build authority is undeclared, ungated, or denied by effective policy (D-BUILDPOLICY1) |
 | E3504 | build | build action requested authority not granted by CLI/package/workspace policy (D-BUILDPOLICY1) |
@@ -677,7 +694,7 @@ renumbered, and no new `W` code may be allocated.
 | E0956 | sema  | construct not yet supported by the canonical evaluator; `core.compiler` is explicitly compile-time-only and cannot be called from runtime code (D-FRONTENDAPI1) |
 | E0957 | sema  | `embed_file`/`embed_bytes` path or `find` glob not a literal, absolute, or escaping via `..` |
 | E0958 | sema  | **retired** (D-CTEFFECT1 2026-06-25): replaced by E3410 (Tier-2 effect without `#Impure` gate) |
-| E0959 | tooling | a compiler-owned layout byte fact is unavailable because no canonical target layout engine supplies it (D-LAYOUT-FACTS1=B) |
+| E0959 | tooling | a compiler-owned layout byte fact is unavailable because the type's layout guarantee does not specify physical bytes (D-LAYOUT-FACTS1=B) |
 | E0960 | parse | module contribution names a non-reserved namespace (U3: `env`/`system`/`image`) |
 | E0961 | parse | member spread `.[…]` entry is not a bare identifier (D-SPREAD1) |
 | E0963 | sema  | fixed-size list length is not a computable integer (D-META-CONST1/S76) |
@@ -782,15 +799,13 @@ renumbered, and no new `W` code may be allocated.
 | E1211 | jet   | `packages:` block-form entry uses the removed `kind:` field — write `targets:` (D-TGT1) |
 | E1212 | jet   | package declared in `packages:` but no `module <name>` found in source tree (U10) |
 | E1213 | jet   | package declared in `packages:` but `module <name>` found in multiple files (U10) |
-| E1214 | jet   | `jetpack.toml` has a malformed line — not a valid `key = "value"` assignment or `[table]` header (D-JPK-FILES) |
-| E1215 | jet   | `jetpack.toml` contains an unknown table or key name, with a did-you-mean suggestion (D-JPK-FILES) |
 | E1216 | jet   | a `targets:` block has an unknown field (D-TGT3) |
 | E1217 | jet   | a dependency in `package.jet` has no locked revision — `--locked`/publish needs every dep pinned (D-SUPPLY1) |
 | E1218 | jet   | a breaking public-API change is published under a non-major version bump (D-SUPPLY1) |
 | E1219 | jet   | unknown build profile name passed to `--profile` (D-BUILDPROFILE1) |
 | E1220 | jet   | a transitive dependency uses an effect outside the `package.jet` `authority.holds` budget (Panic names the stop site) (D-EFFBUDGET1, D-NOPANIC1=D) |
 | E1221 | jet   | a malformed `authority:` block in `package.jet` (D-AUTHORITY-MANIFEST1) |
-| E1225 | jet   | `jetpack.toml` uses the retired `[packages]` monorepo index (D-WORKSPACE1) |
+| E1225 | jet   | `jetpack.toml` is retired (D-ONCE-RETIRE1) |
 | E1226 | jet   | a retired manifest filename (`pkg.jet`/`pack.jet`/`payload.jet`/`jet.toml`) found where `package.jet` belongs (D-ECO-FILEROOT1) |
 | E1227 | jet   | `jet` and the `jetpack`/`jetos` engine binary disagree on protocol version (D-JPK-DISPATCH1) |
 | E1228 | jet   | an engine verb needs an engine binary (`jetpack`/`jetos`) that isn't installed (D-JPK-DISPATCH1) |
@@ -801,7 +816,7 @@ renumbered, and no new `W` code may be allocated.
 | E1233 | jet   | an in-repo dependency names a package outside the source's workspace index (D-MONOREF1) |
 | E1234 | jet   | `jet registry publish` refused: the version already exists in the registry index and is not yanked — versions are immutable (D-VERSION1) |
 | E1235 | jet   | `jet registry publish`/`jet registry yank` couldn't reach the registry index (git clone/pull/push failed) |
-| E1236 | jet   | a build step reached the network without a locked `fetch(url, sha256:)` (D-JPK-ADAPTER1) |
+| E1236 | jet   | a build fetch is unlocked or carries credentials in its URL (D-JPK-ADAPTER1) |
 | E1237 | jet   | a build step wrote outside the package output root (D-JPK-ADAPTER1) |
 | E1238 | jet   | a build recipe named a tool that is not a realized adapter `deps:` dependency (D-JPK-ADAPTER1) |
 | E1239 | jet   | `module workspace` declared in more than one file (discovery-by-declaration, D-JPK-FILENAME2) |
@@ -872,7 +887,7 @@ renumbered, and no new `W` code may be allocated.
 | E1300 | jetpack | the retired `--profile` spelling selected an environment composition; presets own that word now (D-CONF-WORD1) |
 | E1342 | jetpack | the retired `--env-profile` spelling selected an environment module; `--env` owns that axis now (D-ENVFLAG1) |
 | E1343 | jet | the retired audited-effect boolean changed gate policy semantics (D-ONCE-GATE1=A) |
-| E1315 | jetpack | Hangar Store v2 ingest aborted (source mutated during race-safe copy, unsupported special object/xattr, or digest mismatch on verify) (E4-JP1) |
+| E1315 | jetpack | Hangar Store v2 ingest aborted (source mutated during race-safe copy, unsupported special object/xattr, digest mismatch on verify, or an unreproducible action) (E4-JP1, E4-JP18) |
 | E1316 | jetpack | ambiguous or unmatched typed package variant selection (E4-JP15, D-JPK-VARIANT1) |
 | E1317 | jetpack | a direct CLI ref uses retired provider-first order or the retired `path@` prefix (D-JPK-REF1) |
 | E2001 | jet   | `package.jet` requests an edition this toolchain can't provide (E2-M2, D-REL3) |
@@ -959,13 +974,9 @@ D-LOOPEVAL1, D-LOOPSTATE1, and D-COMPREHENSION1.
 These enforce the compatibility contract in docs/spec/release-policy.md. An
 **edition** opts a project into a specific era of Jet syntax (D-REL3); the
 toolchain advertises the editions it supports in `jet --version`. **E2001** is
-fully reachable from a real `package.jet`. **E2002** and **L2001** read from the
-deprecation registry in `crates/jet-pkg-model/src/Manifest.rs`
-(`DEPRECATIONS`); that registry is
-empty pre-1.0 by design — Jet has deprecated nothing post-1.0 yet — so these two
-codes are registered and snapshotted but not yet user-triggerable. They become
-reachable the moment the first real deprecation is added, with no change to the
-diagnostic plumbing (the C-FFI E3202 precedent: registered + honest about reach).
+fully reachable from a real `package.jet`. **E2002** and **L2001** use the
+deprecation metadata carried by `#Deprecated(since:, use:, removed_in:)` and by
+the same synthetic marker payload for Core declarations without Jet source.
 
 | Code | What | Why | Fix |
 |------|------|-----|-----|
@@ -1018,7 +1029,7 @@ names never provide an alternate lookup path.
 
 | Code | What | Why | Fix |
 |------|------|-----|-----|
-| E1321 | the Output kind, payload, entry reference, callable contract, or singular selection is invalid | `Output` has nine closed kinds; runnable entries are checked function references. Executables take zero or one CLI-derived parameter, Services and Checks take none, and all return `()` or `() ?`. A singular run without `fn run` also needs one unambiguous Executable. | Use a ratified kind and fields, point `entry:` at one visible safe function with the role's exact signature, or select one of the listed Executables explicitly. |
+| E1321 | the Output kind, payload, entry reference, callable contract, or singular selection is invalid | `Output` has nine closed kinds; runnable entries are checked function references. Executables take zero or one CLI-derived parameter, Services and Checks take none, and all return `()` or `() !`. A singular run without `fn run` also needs one unambiguous Executable. | Use a ratified kind and fields, point `entry:` at one visible safe function with the role's exact signature, or select one of the listed Executables explicitly. |
 
 ### Ecosystem and environment composition diagnostics
 
@@ -1199,7 +1210,7 @@ block reserved for M6.
 | Code | What | Why | Fix |
 |------|------|-----|-----|
 | E2401 | The delegation target `{field}` doesn't implement `{trait}`, or the type has no field named `{field}`. | `impl Type.Trait using field` forwards every `Trait` method to the `field` field; if that field's type hasn't implemented `Trait`, there's nothing to forward to. | Implement `impl FieldType.Trait` on the field's type, or choose a different field that does implement `Trait`. If the field doesn't exist, add `{field}: FieldType` to the struct. |
-| E2402 | `?` can't convert `{err}` into `Err` — no declared conversion exists. | `?` uses the declared conversion rail; `{err}` can reach `Err` only through `impl {err} => Err`. | Add `impl {err} => Err { … }` before this function, or change the return type to `T ? {err}`. |
+| E2402 | `?` can't convert `{err}` into `Err` — no declared conversion exists. | `?` uses the declared conversion rail; `{err}` can reach `Err` only through `impl {err} => Err`. | Add `impl {err} => Err { … }` before this function, or change the return type to `T ! {err}`. |
 | E2403 | Field-pun name `{name}` is not in scope (or is not a field of `{type}`). | `Type { name }` is shorthand for `Type { name: name }` — it reads the local variable `name` and assigns it to the field of the same name. If no such local exists, or if `Type` has no field by that name, the shorthand is ambiguous. | Introduce a local `name :: …;` before the struct literal, or write the long form `Type { field_name: value }`. |
 | E2404 | `` `?` can't turn a `{Source}` into a `{Target}` here ``. | `?` changes an error's type only when you've declared how via `impl Source => Target { … }` (D-ERR-CONV); no such declaration exists for this pair. | Add `impl {Source} => {Target} { … }` before the function that uses `?`. |
 | E2405 | `impl {Source} => {Target}` is already declared. | There can be at most one declared way to convert a `Source` error into a `Target`; the second block is rejected. | Remove one of the two `impl … => …` blocks. |
@@ -1367,6 +1378,17 @@ Inside an applied-rule block a statement-position `.name { … }` / `.name(args)
 | E0617 | this scope member has the wrong arguments. | Each member has a fixed shape: `.timeout(500ms)` takes one duration value, `.setup`/`.expect_fail` take none, `.skip` takes an optional reason string. | Match the member's shape, e.g. `.timeout(500ms) { … }`, `.timeout(wait) { … }`, or `.skip("reason") { … }`. |
 | E0618 | scope members can't be nested. | Each member is a top-level region of the marker block; nesting one inside another member or a control block has no meaning. | Move the member out to the top level of the block. |
 
+## Package boundary diagnostics (D-STRUCT-EDGE1)
+
+Package-owned import edges are narrowed by `boundaries: { deny: [...] }` in
+the declaring package's manifest. A rule that matches no loaded edge is a
+warning so stale structure policy stays visible without blocking compilation.
+
+| Code | What | Why | Fix |
+|------|------|-----|-----|
+| E0619 | package boundary denies `{from}` importing `{to}` under `{rule}` | the declaring package's `boundaries.deny` policy keeps this module edge out of the package's allowed structure | remove the import, or remove/update boundary rule `{rule}` in `package.jet` |
+| L0619 | package boundary rule `{rule}` matches no loaded import edge | zero-match rules are dead structure policy and can hide a misspelled module name | remove the unused rule, or update it to match the intended import edge |
+
 ## Script entry diagnostics (D-ENTRY-SCRIPT1)
 
 A script's loose top-level statements belong to the entry file only. They
@@ -1400,13 +1422,13 @@ runtime value it can't see.
 ## Compiler-owned layout fact diagnostics (D-LAYOUT-FACTS1=B)
 
 `T.@layout` and `T.reflect().layout` preserve typed optional byte facts. The
-inspect lens reports the same absence explicitly when the selected target has
-no canonical physical layout engine yet; it never turns absence into a false
-zero or a blank field.
+inspect lens reports the same absence explicitly when a type leaves physical
+field order or padding to rustc; it never turns absence into a false zero or a
+blank field.
 
 | Code | What | Why | Fix |
 |------|------|-----|-----|
-| E0959 | `` `{type}.{member}` is unavailable until a canonical target layout engine ships (D-LAYOUT-FACTS1=B) `` | D-LAYOUT-FACTS1=B keeps byte facts absent until a canonical target layout engine exists. | Read `kind`, `target`, `guarantee`, and `source`, or a field's `name` and `ty`; ship the canonical target layout engine before reading byte facts. |
+| E0959 | `` `{type}.{member}` has no byte fact for its declared layout guarantee (D-LAYOUT-FACTS1=B) `` | the default layout leaves field order and padding to rustc; only Jet-owned physical layouts receive byte facts | Read `kind`, `target`, `guarantee`, and `source`, or add an owner-approved physical layout declaration such as `#Layout(c)`. |
 
 ## Layout constraint diagnostics (D-LAYOUT1 / D-LAYOUT-GATES1 / D-LAYOUT-CTOR1)
 
@@ -1878,20 +1900,18 @@ Error [E0997]: `find` can't read the directory `/tmp/no-such-packages`
  Fix: create the directory, or fix the path so it points at your packages folder
 ```
 
-## Package management diagnostics (M12, D-JPK-FILES)
+## Package management diagnostics (M12, D-JPK-FILES, D-ONCE-RETIRE1)
 
-`jetpack.toml` is read by the `jetpack` CLI (never by `jet run`/`jet build` —
-R9). Malformed input is surfaced as E1214/E1215 before any resolution runs.
-These diagnostics have no source span (the file is not a Jet source file) and
-follow the same spanless voice as CLI diagnostics. Pinned as rendered-output
+`jetpack.toml` is no longer read. The `jetpack` CLI rejects its presence before
+dependency resolution so a project cannot combine TOML with the Jet-grammar
+configuration plane. This diagnostic has no source span (the file is not a Jet
+source file) and follows the same spanless voice as CLI diagnostics. Pinned as rendered-output
 snapshots in `tests/jetpack_engine.rs` (the `tests/ui/` harness only renders
 front-end `.jet` diagnostics).
 
 | Code | What | Why | Fix |
 |------|------|-----|-----|
-| E1214 | `jetpack.toml` line {n} is not a valid assignment or table header. | Every line in `jetpack.toml` must be `key = "value"` (inside a table), a `[table]` header, or a blank/comment line. Anything else can't be interpreted. | Fix the line so it is either `[table]`, `key = "value"`, or a blank or `#`-comment line. |
-| E1215 | `jetpack.toml` {kind} `{name}` is not recognized. | `jetpack.toml` only accepts the tables `[repo]` and `[sources]`, and the keys listed for each. An unknown name is usually a typo. | Did you mean `{suggestion}`? Check the allowed names for this table. |
-| E1225 | `jetpack.toml` `[packages]` is retired. | Monorepo member indexes now live in `workspace.jet` so package sets use Jet's module grammar instead of a second manifest shape. | Move the member list to `workspace.jet`: `module workspace { members: find("./packages") }`. |
+| E1225 | `jetpack.toml` is retired. | Package identity and named sources now live in `package.jet` and `env.jet`, so dependency resolution uses one Jet grammar (D-ONCE-RETIRE1). | Move `[repo]` `name`/`version` to `package.jet`, move `[sources]` entries to `env.jet` `sources: { … }`, then delete `jetpack.toml`. |
 | E1226 | `{name}` is not the package manifest name — Jet reads `package.jet`. | The manifest filename is frozen to one spelling (D-ECO-FILEROOT1) so tooling, docs, and every worked example never have to guess which file to read. `pkg.jet`, `pack.jet`, `payload.jet`, and `jet.toml` are retired names from earlier manifest reshapes. | Rename `{name}` to `package.jet`. |
 | E1227 | `jet` {jet_version} and `{engine}` {engine_version} disagree. | `jet` and its engine binaries (`jetpack`, `jetos`) ship as one toolchain and must match exactly — a version-skewed engine may not understand what `jet` sends it. `jet` checks this with an `--engine-protocol` handshake before running any engine verb. | Use matching `jet`/`{engine}` versions — reinstall the toolchain so both binaries come from the same release. |
 | E1228 | `{verb}` needs the `{engine}` engine, which isn't installed. | `{verb}` is an engine verb — `jet` execs `{engine}` for it (D-JPK-DISPATCH1) rather than linking package-manager/OS logic into the compiler binary. | Install the matching Jet toolchain; the `{engine}` binary ships alongside `jet`. |
@@ -1903,7 +1923,7 @@ front-end `.jet` diagnostics).
 | E1233 | In-repo dependency `{name}` is outside the workspace. | A member's `package.jet` depends on another in-repo package, but that package is not in the source repo's `workspace.jet` member index, so the sparse checkout can't include it (D-MONOREF1). | Add the dependency to the source repo's `workspace.jet` `members:`, or depend on it as an external `package@source` ref. |
 | E1234 | `{name}` {version} already exists in the registry index and is not yanked. | Published versions are immutable (D-VERSION1) — a version can never be overwritten, only yanked, so anyone who already locked it keeps building the exact same bytes. | Bump the version in `package.jet` and publish again, or `jet registry yank {version}` the existing one first if it was a mistake (yanking hides it from new resolution; it does not free the version number for reuse). |
 | E1235 | Couldn't reach the registry index at `{url}`. | The git operation against the registry failed — network, auth, or a stale local clone. The registry is a git repo, so `jet registry publish`/`jet registry yank` clone/pull it, write the version line, then commit and push. | Check network access and credentials for `{url}`, or set `JET_REGISTRY_URL` to a reachable mirror. |
-| E1236 | A build step tried to reach the network without a locked fetch. | During a build, network access is denied except a locked `fetch(url, sha256:)`; an unpinned fetch would make the build unreproducible (D-JPK-ADAPTER1). | Add the source hash: `fetch("…", sha256: "…")`, or vendor the source with `jet registry vendor`. |
+| E1236 | A build fetch is not an allowed locked, credential-free input. | Build hooks admit only content-hash-pinned fetches without URL userinfo or credential query fields; credentials in URLs could enter action identity, cache metadata, or logs (D-JPK-ADAPTER1). | Add the source hash, remove URL credentials, or vendor the source with `jet registry vendor`. |
 | E1237 | A build step tried to write outside the output root. | A build may only install files under its own package output root; writing elsewhere would let a build mutate the machine or other packages (D-JPK-ADAPTER1). | Install into a path under the output root (no `..`, no absolute paths). |
 | E1238 | Build tool `{tool}` is not a realized dependency. | Build tools must be realized adapter `deps:` packages so the build is reproducible; a build never falls through to host `/usr/bin` (D-JPK-ADAPTER1). | Add `{tool}` to the adapter's `deps: […]` list so Jetpack realizes it into the hangar. |
 | E1240 | No Rust build toolchain is available to build this package. | Building an `extern rust` bridge dependency needs a pinned Rust toolchain realized into the hangar, or Nix; neither is present (D-JPK-BUILDTOOL1). | Run `jet update jet` to realize the pinned toolchain, or install Nix so the bridge builds through the compatibility provider. |
@@ -1986,7 +2006,7 @@ front-end `.jet` diagnostics).
 
 | Code | What | Why | Fix |
 |---|---|---|---|
-| E3501 | `fn build` must take one `BuildContext` and return `BuildPlan ?`. | Build authority and graph handoff are one typed contract. A different signature cannot be selected by `jet build` or modeled by the LSP. | Write `fn build(b: BuildContext) => BuildPlan ?`. |
+| E3501 | `fn build` must take one `BuildContext` and return `BuildPlan !`. | Build authority and graph handoff are one typed contract. A different signature cannot be selected by `jet build` or modeled by the LSP. | Write `fn build(b: BuildContext) => BuildPlan !`. |
 | E3502 | Build plan is invalid, build evaluation returned an error, or generated source could not materialize. | One selected root entry owns one deterministic graph. Handles cannot cross build sessions, outputs need one owner, and generated Jet must become a real file before checking. | Fix the named graph node or generated module; inspect it with `jet inspect graph` and `jet inspect explain-build`. |
 | E3503 | This root build asks for authority missing from its declaration, `#Impure` gate, or effective policy. | Build authority must pass all three independent checks before any probe or action executes. | Declare the effect, gate the ambient operation with `#Impure("reason")`, and grant the effect through CLI/package/workspace policy. |
 | E3504 | Build action `{action}` asks for ungranted `{right}` authority. | Source declaration makes authority auditable but does not grant it. Invocation, package, and workspace policy cap ambient effects independently. | Pass the named `--allow-<effect>` flag for a one-file build, or grant the effect in package/workspace policy. |

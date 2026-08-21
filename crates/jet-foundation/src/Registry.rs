@@ -280,8 +280,7 @@ pub fn block_marker(
                         && declaration.target == Some(*span)
                         && matches!(
                             declaration.value,
-                            crate::Policy::PolicyValue::Track
-                                | crate::Policy::PolicyValue::Skip
+                            crate::Policy::PolicyValue::Track | crate::Policy::PolicyValue::Skip
                         )
                 })
                 .map(|declaration| declaration.value.display())
@@ -348,10 +347,7 @@ pub fn block_marker(
         ),
         Stmt::Transact { name, .. } => (
             crate::Syntax::KW_TRANSACT,
-            name.iter()
-                .cloned()
-                .map(MarkerArgument::Ident)
-                .collect(),
+            name.iter().cloned().map(MarkerArgument::Ident).collect(),
         ),
         Stmt::Switched { marker, .. } => {
             return marker_row_and_args(&marker.name, marker.negated, marker_arguments(marker));
@@ -668,9 +664,7 @@ impl FactRead {
             Self::Attribution => Some(crate::Syntax::COMPILER_FACT_ATTRIBUTION),
             Self::TrackOrigin => Some(crate::Syntax::COMPILER_FACT_TRACK_ORIGIN),
             Self::ViewProvenance => Some(crate::Syntax::COMPILER_FACT_VIEW_PROVENANCE),
-            Self::UnitScaleProvenance => {
-                Some(crate::Syntax::COMPILER_FACT_UNIT_SCALE_PROVENANCE)
-            }
+            Self::UnitScaleProvenance => Some(crate::Syntax::COMPILER_FACT_UNIT_SCALE_PROVENANCE),
             Self::Maturity => Some(crate::Syntax::COMPILER_FACT_MATURITY),
             Self::BuildProfile => Some(crate::Syntax::COMPILER_BUILD_FACT_PROFILE),
             Self::RegisteredPlane(_)
@@ -778,8 +772,7 @@ pub fn fact_read(member: &str) -> Option<FactRead> {
             return None;
         };
         let kind = read.reflection_kind()?;
-        (crate::Syntax::canonical_name_case(kind, crate::Syntax::NameCase::Snake)
-            == source_name)
+        (crate::Syntax::canonical_name_case(kind, crate::Syntax::NameCase::Snake) == source_name)
             .then_some(read)
     })
 }
@@ -845,12 +838,11 @@ pub fn build_fact_read(path: &str) -> Option<FactRead> {
         crate::Syntax::COMPILER_BUILD_FACT_STAMP_TOOLCHAIN => {
             ("Build.Stamp.Toolchain", FactRead::BuildStampToolchain)
         }
-        crate::Syntax::COMPILER_BUILD_FACT_STAMP_AT => {
-            ("Build.Stamp.At", FactRead::BuildStampAt)
-        }
+        crate::Syntax::COMPILER_BUILD_FACT_STAMP_AT => ("Build.Stamp.At", FactRead::BuildStampAt),
         _ => return None,
     };
-    row(row_name).is_some_and(|registered| registered.kind() == RowKind::Fact)
+    row(row_name)
+        .is_some_and(|registered| registered.kind() == RowKind::Fact)
         .then_some(read)
 }
 
@@ -872,8 +864,7 @@ pub const FACT_SOURCE: &str = include_str!("../../jet-codegen/src/Prelude/Facts.
 
 /// D-REPORT-HOME1=A: the compile-time row source. Markdown and terminal
 /// renderers are projections of this table, never another authority.
-pub const DIAGNOSTIC_SOURCE: &str =
-    include_str!("../../jet-codegen/src/Prelude/Diagnostics.jet");
+pub const DIAGNOSTIC_SOURCE: &str = include_str!("../../jet-codegen/src/Prelude/Diagnostics.jet");
 
 static FACT_DECLARATIONS: LazyLock<Vec<FactDeclaration>> = LazyLock::new(read_fact_declarations);
 static DIAGNOSTIC_ROWS: LazyLock<Vec<DiagnosticRow>> = LazyLock::new(read_diagnostic_rows);
@@ -896,9 +887,7 @@ pub fn diagnostic(code: &str) -> Option<&'static DiagnosticRow> {
 /// One runtime-stop lookup. A code is user-owned at runtime only while its
 /// registered row is active and declares the runtime stage.
 pub fn active_runtime_diagnostic(code: &str) -> Option<&'static DiagnosticRow> {
-    diagnostic(code).filter(|row| {
-        row.stage == "runtime" && row.status == DiagnosticStatus::Active
-    })
+    diagnostic(code).filter(|row| row.stage == "runtime" && row.status == DiagnosticStatus::Active)
 }
 
 /// Every lint row in the one diagnostic registry.
@@ -910,7 +899,9 @@ pub fn lint_rows() -> impl Iterator<Item = &'static DiagnosticRow> {
 
 /// Diagnostic rows as rows of the shared registration table.
 pub fn diagnostic_registry_rows() -> impl Iterator<Item = &'static RegistryRow> {
-    rows().iter().filter(|row| row.kind() == RowKind::Diagnostic)
+    rows()
+        .iter()
+        .filter(|row| row.kind() == RowKind::Diagnostic)
 }
 
 fn is_diagnostic_code(code: &str) -> bool {
@@ -945,7 +936,10 @@ fn diagnostic_row_from_source(line: &str) -> DiagnosticRow {
         matches!(fields.len(), 12 | 13),
         "diagnostic row needs 12 fields, or 13 with a lint name: {line}"
     );
-    assert_eq!(fields[0], "diagnostic", "unknown diagnostic row kind: {line}");
+    assert_eq!(
+        fields[0], "diagnostic",
+        "unknown diagnostic row kind: {line}"
+    );
     let code = leak(&unescape_source(fields[1]));
     let lint_name = (fields.len() == 13).then(|| leak(&unescape_source(fields[12])));
     let stage = leak(&unescape_source(fields[2]));
@@ -989,7 +983,10 @@ fn diagnostic_row_from_source(line: &str) -> DiagnosticRow {
     let detail = match fields[10] {
         "true" => true,
         "false" => false,
-        other => crate::ice!(None, "diagnostic detail flag `{other}` is not bool in {line}"),
+        other => crate::ice!(
+            None,
+            "diagnostic detail flag `{other}` is not bool in {line}"
+        ),
     };
     let (structured_fix, fix_safety) = match fields[11] {
         "-" => (None, None),
@@ -1056,16 +1053,22 @@ fn structured_fix_from_source(value: &'static str, line: &str) -> StructuredFix 
             _ => crate::ice!(None, "unknown generated structured fix `{kind}` in {line}"),
         };
     }
-    crate::ice!(None, "unknown structured diagnostic fix `{marker}` in {line}");
+    crate::ice!(
+        None,
+        "unknown structured diagnostic fix `{marker}` in {line}"
+    );
 }
 
 fn fix_safety_from_source(value: &'static str, line: &str) -> Option<FixSafety> {
     if value == "crypto_misuse" {
         return None;
     }
-    let (_, safety) = value
-        .rsplit_once('|')
-        .unwrap_or_else(|| crate::ice!(None, "structured fix `{value}` has no safety grade in {line}"));
+    let (_, safety) = value.rsplit_once('|').unwrap_or_else(|| {
+        crate::ice!(
+            None,
+            "structured fix `{value}` has no safety grade in {line}"
+        )
+    });
     Some(match safety {
         "formatting" => FixSafety::Formatting,
         "behavior-preserving" => FixSafety::BehaviorPreserving,
@@ -1186,12 +1189,15 @@ fn fact_declaration(line: &str) -> FactDeclaration {
     FactDeclaration {
         source_name,
         name,
-        target: target.unwrap_or_else(|| crate::ice!(None, "fact declaration without `@holds`: {line}")),
+        target: target
+            .unwrap_or_else(|| crate::ice!(None, "fact declaration without `@holds`: {line}")),
         safe_direction: safe_direction
             .unwrap_or_else(|| crate::ice!(None, "fact declaration without `@safe`: {line}")),
-        gates: gates.unwrap_or_else(|| crate::ice!(None, "fact declaration without `@gates`: {line}")),
+        gates: gates
+            .unwrap_or_else(|| crate::ice!(None, "fact declaration without `@gates`: {line}")),
         published_by,
-        decision: decision.unwrap_or_else(|| crate::ice!(None, "fact declaration without `@decision`: {line}")),
+        decision: decision
+            .unwrap_or_else(|| crate::ice!(None, "fact declaration without `@decision`: {line}")),
         identity_bearing,
     }
 }
@@ -1232,7 +1238,14 @@ fn fact_gates(value: &str, line: &str) -> &'static [&'static str] {
         split_top_level(inner)
             .into_iter()
             .filter(|gate| !gate.is_empty())
-            .map(|gate| leak(gate.strip_prefix('.').unwrap_or(gate)))
+            .map(|gate| {
+                let gate = gate.trim();
+                if gate.starts_with('"') {
+                    leak(&unquote(gate, line))
+                } else {
+                    leak(gate.strip_prefix('.').unwrap_or(gate))
+                }
+            })
             .collect(),
     )
 }
@@ -1396,7 +1409,11 @@ const TRUTH_ROWS: &[RegistryRow] = &[
     truth_row(
         "RegistrationTable",
         "crates/jet-foundation/src/Registry.rs",
-        &["jet explain", "jet inspect facts", "compile-time reflection"],
+        &[
+            "jet explain",
+            "jet inspect facts",
+            "compile-time reflection",
+        ],
         Guard {
             test: "every_row_states_the_one_way_law",
             file: "tests/marker_registry_coverage.rs",
@@ -1454,7 +1471,11 @@ const TRUTH_ROWS: &[RegistryRow] = &[
     truth_row(
         "IceReport",
         "crates/jet-foundation/src/Diagnostics.rs",
-        &["the jet binary panic hook", "the ice! macro", "compile driver reports"],
+        &[
+            "the jet binary panic hook",
+            "the ice! macro",
+            "compile driver reports",
+        ],
         Guard {
             test: "no_hand_typed_ice_banner_outside_the_one_home",
             file: "tests/ice_report_single_home.rs",
@@ -1547,6 +1568,27 @@ pub fn fact_rows() -> impl Iterator<Item = &'static RegistryRow> {
         .filter_map(|declaration| row(declaration.name))
 }
 
+/// D-STRUCT-PLANE1=A: structure is a projection of the same fact rows, not a
+/// second registry. Its three subjects are compiler build facts, so they stay
+/// out of the typed value-plane reflection table.
+pub fn structure_rows() -> impl Iterator<Item = &'static RegistryRow> {
+    fact_rows().filter(|row| row.name.starts_with("Structure."))
+}
+
+/// Resolve a typed structure subject through the same rows. The row's dotted
+/// leaf is the only spelling authority; the enum does not carry a duplicate
+/// table of registry names.
+pub fn structure_row(kind: crate::Names::StructureFactKind) -> Option<&'static RegistryRow> {
+    structure_rows().find(|row| {
+        row.name
+            .rsplit_once('.')
+            .is_some_and(|(_, leaf)| {
+                leaf.replace('-', "")
+                    .eq_ignore_ascii_case(&kind.name().replace('-', ""))
+            })
+    })
+}
+
 /// Type-plane rows come from the readable Prelude declarations.
 pub fn type_plane_rows() -> impl Iterator<Item = &'static RegistryRow> {
     fact_rows().filter(|row| row.name.starts_with("Type."))
@@ -1564,9 +1606,7 @@ pub fn reflection_kind(name: &str) -> Option<&'static str> {
     if row.name == "Type.Interval" {
         return Some("Range");
     }
-    row.name
-        .strip_prefix("Type.")
-        .or(Some(row.name))
+    row.name.strip_prefix("Type.").or(Some(row.name))
 }
 
 /// The drift guard for the two law columns (D-FACT-LAW1=B), and for the one
@@ -1605,10 +1645,7 @@ pub fn law_violations() -> Vec<String> {
     }
     for plane in fact_rows().filter(|row| row.kind() == RowKind::Plane) {
         match registered_fact_read(plane.name) {
-            None => violations.push(format!(
-                "plane `{}` has no FactRead projection",
-                plane.name
-            )),
+            None => violations.push(format!("plane `{}` has no FactRead projection", plane.name)),
             Some(read) => {
                 if !read
                     .registered_planes()
@@ -1658,6 +1695,14 @@ fn check(rows: &[RegistryRow]) -> Vec<String> {
                  a gate loosens a direction, so say which way tightens",
                 row.name,
                 row.kind().name()
+            ));
+        }
+        if row.name.starts_with("Structure.")
+            && (row.safe_direction == SafeDirection::None || row.gates.is_empty())
+        {
+            violations.push(format!(
+                "structure row `{}` must state both a safe direction and a gate",
+                row.name
             ));
         }
         for gate in row.gates {
@@ -1747,9 +1792,7 @@ fn truth_violations(row: &RegistryRow) -> Vec<String> {
 mod tests {
     use super::{
         diagnostic, diagnostic_registry_rows, diagnostic_rows, fact_declarations, fact_rows,
-        law_violations,
-        row, rows, type_plane, type_plane_rows,
-        RowKind, RowTarget, SafeDirection,
+        law_violations, row, rows, type_plane, type_plane_rows, RowKind, RowTarget, SafeDirection,
         StructuredFix,
     };
 
@@ -1783,16 +1826,12 @@ mod tests {
 
     #[test]
     fn type_plane_rows_declare_identity_policy() {
-        assert!(
-            row(type_plane("Interval"))
-                .expect("interval plane is registered")
-                .is_identity_bearing()
-        );
-        assert!(
-            !row(type_plane("Obligation"))
-                .expect("obligation plane is registered")
-                .is_identity_bearing()
-        );
+        assert!(row(type_plane("Interval"))
+            .expect("interval plane is registered")
+            .is_identity_bearing());
+        assert!(!row(type_plane("Obligation"))
+            .expect("obligation plane is registered")
+            .is_identity_bearing());
     }
 
     #[test]
@@ -1866,7 +1905,18 @@ mod tests {
         };
         assert!(check(&[prover_with_algebra])[0].contains("no plane algebra"));
 
-        assert_eq!(check(&[gate_with_no_direction, gate_with_no_direction]).len(), 3);
+        let structure_without_pair = RegistryRow {
+            name: "Structure.Bad",
+            target: RowTarget::Build,
+            gates: &[],
+            ..gate_with_no_direction
+        };
+        assert!(check(&[structure_without_pair])[0].contains("structure row"));
+
+        assert_eq!(
+            check(&[gate_with_no_direction, gate_with_no_direction]).len(),
+            3
+        );
     }
 
     /// D-ONCE-LAW1=A: the case the law exists for. A truth row that registers
@@ -1895,13 +1945,22 @@ mod tests {
         };
         assert_eq!(check(&[guarded]), Vec::<String>::new());
 
-        let unguarded = RegistryRow { guard: None, ..guarded };
+        let unguarded = RegistryRow {
+            guard: None,
+            ..guarded
+        };
         assert!(check(&[unguarded])[0].contains("no guard"));
 
-        let homeless = RegistryRow { home: None, ..guarded };
+        let homeless = RegistryRow {
+            home: None,
+            ..guarded
+        };
         assert!(check(&[homeless])[0].contains("names no home"));
 
-        let unread = RegistryRow { renderers: &[], ..guarded };
+        let unread = RegistryRow {
+            renderers: &[],
+            ..guarded
+        };
         assert!(check(&[unread])[0].contains("names no renderer"));
 
         // The three columns belong to a truth row and to nothing else.
@@ -1919,10 +1978,17 @@ mod tests {
         use super::truths;
 
         let names: Vec<&str> = truths().map(|row| row.name).collect();
-        assert!(names.len() >= 7, "the registry is born non-empty: {names:?}");
+        assert!(
+            names.len() >= 7,
+            "the registry is born non-empty: {names:?}"
+        );
         for row in truths() {
             assert!(row.home.is_some(), "`{}` names no home", row.name);
-            assert!(!row.renderers.is_empty(), "`{}` names no renderer", row.name);
+            assert!(
+                !row.renderers.is_empty(),
+                "`{}` names no renderer",
+                row.name
+            );
             assert!(row.guard.is_some(), "`{}` names no guard", row.name);
         }
     }
@@ -1938,8 +2004,14 @@ mod tests {
     #[test]
     fn diagnostic_rows_are_typed_and_have_one_source() {
         assert!(diagnostic_rows().len() >= 700);
-        assert_eq!(diagnostic("E0102").expect("E0102 row").severity, crate::Diagnostics::Severity::Error);
-        assert_eq!(diagnostic("L2001").expect("L2001 row").severity, crate::Diagnostics::Severity::Lint);
+        assert_eq!(
+            diagnostic("E0102").expect("E0102 row").severity,
+            crate::Diagnostics::Severity::Error
+        );
+        assert_eq!(
+            diagnostic("L2001").expect("L2001 row").severity,
+            crate::Diagnostics::Severity::Lint
+        );
         for row in diagnostic_rows() {
             assert!(!row.code.is_empty());
             assert!(!row.what.is_empty());
@@ -1961,10 +2033,7 @@ mod tests {
         assert!(rendered.what.contains("Point.size"));
 
         let crypto = diagnostic("E2702").expect("E2702 row");
-        assert_eq!(
-            crypto.structured_fix,
-            Some(StructuredFix::CryptoMisuse)
-        );
+        assert_eq!(crypto.structured_fix, Some(StructuredFix::CryptoMisuse));
         assert_eq!(
             diagnostic("E0999").and_then(|row| row.structured_fix),
             Some(StructuredFix::GeneratedMarkerGroup)
@@ -1987,7 +2056,11 @@ mod tests {
 
         for row in diagnostic_rows() {
             if let Some(fix) = row.structured_fix {
-                assert!(!fix.source_marker().is_empty(), "{} has an empty typed fix", row.code);
+                assert!(
+                    !fix.source_marker().is_empty(),
+                    "{} has an empty typed fix",
+                    row.code
+                );
             }
         }
     }

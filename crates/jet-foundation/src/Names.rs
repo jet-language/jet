@@ -11,10 +11,7 @@ pub fn package_scope_for(path: &Path, project_root: &Path) -> String {
     let scope = if norm_path.starts_with(&norm_root) {
         norm_root
     } else {
-        norm_path
-            .parent()
-            .map(normalize_path)
-            .unwrap_or(norm_path)
+        norm_path.parent().map(normalize_path).unwrap_or(norm_path)
     };
     scope.to_string_lossy().into_owned()
 }
@@ -83,6 +80,61 @@ pub struct NameAlias {
     pub visibility: NameVisibility,
 }
 
+/// D-STRUCT-PLANE1=A: the three structure subjects share one fact shape. The
+/// semantic owner supplies the status/detail; the gate is optional because a
+/// fact that tightens silently has no ledger entry.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Ord, PartialOrd, Hash)]
+pub enum StructureFactKind {
+    Liveness,
+    Lifecycle,
+    ImportEdge,
+}
+
+impl StructureFactKind {
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::Liveness => "liveness",
+            Self::Lifecycle => "lifecycle",
+            Self::ImportEdge => "import-edge",
+        }
+    }
+}
+
+/// One checked structure observation. This is compiler data only; it is never
+/// an AST value and has no codegen projection.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StructureFact {
+    pub kind: StructureFactKind,
+    pub subject: String,
+    pub source: String,
+    pub span: Span,
+    pub status: String,
+    pub detail: String,
+    pub gate: Option<String>,
+}
+
+impl StructureFact {
+    pub fn new(
+        kind: StructureFactKind,
+        subject: impl Into<String>,
+        source: impl Into<String>,
+        span: Span,
+        status: impl Into<String>,
+        detail: impl Into<String>,
+        gate: Option<String>,
+    ) -> Self {
+        Self {
+            kind,
+            subject: subject.into(),
+            source: source.into(),
+            span,
+            status: status.into(),
+            detail: detail.into(),
+            gate,
+        }
+    }
+}
+
 /// A checked source reference and its resolved declaration origin.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NameReference {
@@ -105,6 +157,7 @@ pub struct NameLedger {
     display_paths: HashMap<(usize, String), String>,
     aliases: HashMap<(usize, String), NameAlias>,
     references: HashMap<(String, usize, usize), NameReference>,
+    structure_facts: Vec<StructureFact>,
 }
 
 impl NameLedger {
@@ -124,7 +177,14 @@ impl NameLedger {
     }
 
     pub fn set_module(&mut self, module: usize, alias: String, path: String, package: String) {
-        self.modules.insert(module, NameModule { alias, path, package });
+        self.modules.insert(
+            module,
+            NameModule {
+                alias,
+                path,
+                package,
+            },
+        );
     }
 
     pub fn module(&self, module: usize) -> Option<&NameModule> {
@@ -174,6 +234,10 @@ impl NameLedger {
 
     pub fn declaration(&self, module: usize, name: &str) -> Option<&NameDeclaration> {
         self.declarations.get(&(module, name.to_string()))
+    }
+
+    pub fn declarations(&self) -> impl Iterator<Item = &NameDeclaration> {
+        self.declarations.values()
     }
 
     pub fn declaration_path(&self, module: usize, name: &str) -> Option<&str> {
@@ -265,12 +329,7 @@ impl NameLedger {
     /// indexes already carry the declaration span, which is the bridge for
     /// inline-module names stored under generated keys. A span shared by
     /// several declarations names none of them, so it resolves to nothing.
-    pub fn canonical_path_at(
-        &self,
-        module: usize,
-        start: usize,
-        end: usize,
-    ) -> Option<String> {
+    pub fn canonical_path_at(&self, module: usize, start: usize, end: usize) -> Option<String> {
         self.declaration_at(module, start, end, None)
             .map(|declaration| declaration.path.clone())
     }
@@ -310,10 +369,10 @@ impl NameLedger {
         let leaf = name.rsplit_once('.').map_or(name, |(_, leaf)| leaf);
         let mut paths = BTreeSet::new();
         for declaration in self.declarations.values() {
-            if declaration.name == leaf
-                && self.visible(from_module, declaration.module, leaf)
-            {
-                if let Some(path) = self.display_declaration_path(declaration.module, &declaration.name) {
+            if declaration.name == leaf && self.visible(from_module, declaration.module, leaf) {
+                if let Some(path) =
+                    self.display_declaration_path(declaration.module, &declaration.name)
+                {
                     paths.insert(path);
                 }
             }
@@ -435,7 +494,8 @@ impl NameLedger {
                                 if declaration.module != target_module {
                                     continue;
                                 }
-                                let Some(suffix) = declaration.path.strip_prefix(prefix.as_str()) else {
+                                let Some(suffix) = declaration.path.strip_prefix(prefix.as_str())
+                                else {
                                     continue;
                                 };
                                 paths.insert((
@@ -482,6 +542,10 @@ impl NameLedger {
         self.aliases.get(&(module, name.to_string()))
     }
 
+    pub fn aliases(&self) -> impl Iterator<Item = &NameAlias> {
+        self.aliases.values()
+    }
+
     pub fn effective_alias(&self, module: usize, name: &str) -> Option<&NameAlias> {
         self.alias(module, name)
     }
@@ -490,7 +554,10 @@ impl NameLedger {
         let visibility = self
             .declaration(target_module, name)
             .map(|declaration| declaration.visibility)
-            .or_else(|| self.effective_alias(target_module, name).map(|alias| alias.visibility));
+            .or_else(|| {
+                self.effective_alias(target_module, name)
+                    .map(|alias| alias.visibility)
+            });
         let Some(visibility) = visibility else {
             return false;
         };
@@ -529,7 +596,8 @@ impl NameLedger {
         end: usize,
         reference: NameReference,
     ) {
-        self.references.insert((source_module, start, end), reference);
+        self.references
+            .insert((source_module, start, end), reference);
     }
 
     pub fn reference(&self, module_path: &str, start: usize, end: usize) -> Option<&NameReference> {
@@ -538,6 +606,25 @@ impl NameLedger {
 
     pub fn references(&self) -> &HashMap<(String, usize, usize), NameReference> {
         &self.references
+    }
+
+    /// Record one structure fact in the same ledger as names and references.
+    /// Repeated writers of the same observation coalesce here, so no later
+    /// reader has to reconcile two structure tables.
+    pub fn record_structure_fact(&mut self, fact: StructureFact) {
+        if !self.structure_facts.contains(&fact) {
+            self.structure_facts.push(fact);
+        }
+    }
+
+    pub fn structure_facts(&self) -> &[StructureFact] {
+        &self.structure_facts
+    }
+
+    pub fn merge_structure_facts(&mut self, other: &Self) {
+        for fact in &other.structure_facts {
+            self.record_structure_fact(fact.clone());
+        }
     }
 
     pub fn merge_references(&mut self, other: &Self) {
@@ -549,6 +636,7 @@ impl NameLedger {
     pub fn body_snapshot(&self) -> Self {
         let mut snapshot = self.clone();
         snapshot.references.clear();
+        snapshot.structure_facts.clear();
         snapshot
     }
 
@@ -558,6 +646,7 @@ impl NameLedger {
         self.display_paths.clear();
         self.aliases.clear();
         self.references.clear();
+        self.structure_facts.clear();
     }
 }
 
@@ -607,9 +696,24 @@ mod tests {
     #[test]
     fn ledger_projects_paths_and_visibility() {
         let mut ledger = NameLedger::default();
-        ledger.set_module(0, "app".to_string(), "app.jet".to_string(), "pkg".to_string());
-        ledger.set_module(1, "lib".to_string(), "lib.jet".to_string(), "pkg".to_string());
-        ledger.set_module(2, "dep".to_string(), "dep.jet".to_string(), "dep".to_string());
+        ledger.set_module(
+            0,
+            "app".to_string(),
+            "app.jet".to_string(),
+            "pkg".to_string(),
+        );
+        ledger.set_module(
+            1,
+            "lib".to_string(),
+            "lib.jet".to_string(),
+            "pkg".to_string(),
+        );
+        ledger.set_module(
+            2,
+            "dep".to_string(),
+            "dep.jet".to_string(),
+            "dep".to_string(),
+        );
         ledger.declare(
             1,
             "Thing".to_string(),
@@ -626,8 +730,18 @@ mod tests {
     #[test]
     fn ledger_projects_alias_visibility() {
         let mut ledger = NameLedger::default();
-        ledger.set_module(0, "app".to_string(), "app.jet".to_string(), "pkg".to_string());
-        ledger.set_module(1, "lib".to_string(), "lib.jet".to_string(), "pkg".to_string());
+        ledger.set_module(
+            0,
+            "app".to_string(),
+            "app.jet".to_string(),
+            "pkg".to_string(),
+        );
+        ledger.set_module(
+            1,
+            "lib".to_string(),
+            "lib.jet".to_string(),
+            "pkg".to_string(),
+        );
         ledger.record_alias(
             0,
             "Thing".to_string(),
@@ -638,7 +752,10 @@ mod tests {
         );
         assert!(ledger.exported(0, "Thing"));
         assert!(ledger.public(0, "Thing"));
-        assert_eq!(ledger.alias(0, "Thing").map(|alias| alias.target.as_str()), Some("lib.Thing"));
+        assert_eq!(
+            ledger.alias(0, "Thing").map(|alias| alias.target.as_str()),
+            Some("lib.Thing")
+        );
 
         // Declaration visibility governs the public surface; the alias keeps
         // the import target available to consumers.
@@ -657,9 +774,24 @@ mod tests {
     #[test]
     fn file_module_declaration_keeps_visibility_and_alias_target() {
         let mut ledger = NameLedger::default();
-        ledger.set_module(0, "app".to_string(), "app.jet".to_string(), "pkg".to_string());
-        ledger.set_module(1, "lib".to_string(), "lib.jet".to_string(), "pkg".to_string());
-        ledger.set_module(2, "dep".to_string(), "dep.jet".to_string(), "dep".to_string());
+        ledger.set_module(
+            0,
+            "app".to_string(),
+            "app.jet".to_string(),
+            "pkg".to_string(),
+        );
+        ledger.set_module(
+            1,
+            "lib".to_string(),
+            "lib.jet".to_string(),
+            "pkg".to_string(),
+        );
+        ledger.set_module(
+            2,
+            "dep".to_string(),
+            "dep.jet".to_string(),
+            "dep".to_string(),
+        );
 
         ledger.declare(
             1,
@@ -734,8 +866,18 @@ mod tests {
     #[test]
     fn canonical_path_follows_declarations_and_aliases() {
         let mut ledger = NameLedger::default();
-        ledger.set_module(0, "app".to_string(), "app.jet".to_string(), "pkg".to_string());
-        ledger.set_module(1, "lib".to_string(), "lib.jet".to_string(), "pkg".to_string());
+        ledger.set_module(
+            0,
+            "app".to_string(),
+            "app.jet".to_string(),
+            "pkg".to_string(),
+        );
+        ledger.set_module(
+            1,
+            "lib".to_string(),
+            "lib.jet".to_string(),
+            "pkg".to_string(),
+        );
         ledger.declare(
             1,
             "Thing".to_string(),
@@ -752,7 +894,10 @@ mod tests {
             span(),
             NameVisibility::Public,
         );
-        assert_eq!(ledger.canonical_path(1, "Thing"), Some("lib.Thing".to_string()));
+        assert_eq!(
+            ledger.canonical_path(1, "Thing"),
+            Some("lib.Thing".to_string())
+        );
         assert_eq!(
             ledger.canonical_path_at(1, 3, 7),
             Some("lib.Thing".to_string())
@@ -769,8 +914,14 @@ mod tests {
             ledger.display_path(0, &member_name("Inner", "helper"), Some(0)),
             Some("app.Inner.helper".to_string())
         );
-        assert_eq!(ledger.canonical_path(0, "Alias"), Some("lib.Thing".to_string()));
-        assert_eq!(ledger.display_path(0, "Alias", Some(1)), Some("Alias".to_string()));
+        assert_eq!(
+            ledger.canonical_path(0, "Alias"),
+            Some("lib.Thing".to_string())
+        );
+        assert_eq!(
+            ledger.display_path(0, "Alias", Some(1)),
+            Some("Alias".to_string())
+        );
 
         ledger.record_alias(
             0,
@@ -788,9 +939,24 @@ mod tests {
     #[test]
     fn display_path_qualifies_ambiguous_visible_leaves() {
         let mut ledger = NameLedger::default();
-        ledger.set_module(0, "app".to_string(), "app.jet".to_string(), "pkg".to_string());
-        ledger.set_module(1, "one".to_string(), "one.jet".to_string(), "pkg".to_string());
-        ledger.set_module(2, "two".to_string(), "two.jet".to_string(), "pkg".to_string());
+        ledger.set_module(
+            0,
+            "app".to_string(),
+            "app.jet".to_string(),
+            "pkg".to_string(),
+        );
+        ledger.set_module(
+            1,
+            "one".to_string(),
+            "one.jet".to_string(),
+            "pkg".to_string(),
+        );
+        ledger.set_module(
+            2,
+            "two".to_string(),
+            "two.jet".to_string(),
+            "pkg".to_string(),
+        );
         for (module, path) in [(1, "one.Thing"), (2, "two.Thing")] {
             ledger.declare(
                 module,
@@ -810,9 +976,24 @@ mod tests {
     #[test]
     fn display_path_at_projects_unique_and_ambiguous_definitions() {
         let mut ledger = NameLedger::default();
-        ledger.set_module(0, "app".to_string(), "app.jet".to_string(), "pkg".to_string());
-        ledger.set_module(1, "one".to_string(), "one.jet".to_string(), "pkg".to_string());
-        ledger.set_module(2, "two".to_string(), "two.jet".to_string(), "pkg".to_string());
+        ledger.set_module(
+            0,
+            "app".to_string(),
+            "app.jet".to_string(),
+            "pkg".to_string(),
+        );
+        ledger.set_module(
+            1,
+            "one".to_string(),
+            "one.jet".to_string(),
+            "pkg".to_string(),
+        );
+        ledger.set_module(
+            2,
+            "two".to_string(),
+            "two.jet".to_string(),
+            "pkg".to_string(),
+        );
         ledger.declare(
             0,
             "Point".to_string(),
@@ -844,7 +1025,12 @@ mod tests {
     #[test]
     fn display_path_at_projects_members_from_their_owner() {
         let mut ledger = NameLedger::default();
-        ledger.set_module(0, "app".to_string(), "app.jet".to_string(), "pkg".to_string());
+        ledger.set_module(
+            0,
+            "app".to_string(),
+            "app.jet".to_string(),
+            "pkg".to_string(),
+        );
         ledger.declare(
             0,
             "Point".to_string(),

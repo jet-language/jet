@@ -135,11 +135,15 @@ fn store_block(block: &Block, out: &mut [u8]) {
 }
 
 fn blake2b_g(a: &mut u64, b: &mut u64, c: &mut u64, d: &mut u64) {
-    *a = a.wrapping_add(*b).wrapping_add(2u64.wrapping_mul((*a & 0xffff_ffff) * (*b & 0xffff_ffff)));
+    *a = a
+        .wrapping_add(*b)
+        .wrapping_add(2u64.wrapping_mul((*a & 0xffff_ffff) * (*b & 0xffff_ffff)));
     *d = (*d ^ *a).rotate_right(32);
     *c = c.wrapping_add(*d);
     *b = (*b ^ *c).rotate_right(24);
-    *a = a.wrapping_add(*b).wrapping_add(2u64.wrapping_mul((*a & 0xffff_ffff) * (*b & 0xffff_ffff)));
+    *a = a
+        .wrapping_add(*b)
+        .wrapping_add(2u64.wrapping_mul((*a & 0xffff_ffff) * (*b & 0xffff_ffff)));
     *d = (*d ^ *a).rotate_right(16);
     *c = c.wrapping_add(*d);
     *b = (*b ^ *c).rotate_right(63);
@@ -149,15 +153,35 @@ fn permute_block(v: &mut Block) {
     // Argon2 Blake2b round over 16-word columns/rows — use reference G pairs.
     for i in 0..8 {
         let i0 = i * 16;
-        let mut a = [v[i0], v[i0 + 1], v[i0 + 2], v[i0 + 3], v[i0 + 4], v[i0 + 5], v[i0 + 6], v[i0 + 7],
-            v[i0 + 8], v[i0 + 9], v[i0 + 10], v[i0 + 11], v[i0 + 12], v[i0 + 13], v[i0 + 14], v[i0 + 15]];
+        let mut a = [
+            v[i0],
+            v[i0 + 1],
+            v[i0 + 2],
+            v[i0 + 3],
+            v[i0 + 4],
+            v[i0 + 5],
+            v[i0 + 6],
+            v[i0 + 7],
+            v[i0 + 8],
+            v[i0 + 9],
+            v[i0 + 10],
+            v[i0 + 11],
+            v[i0 + 12],
+            v[i0 + 13],
+            v[i0 + 14],
+            v[i0 + 15],
+        ];
         // Apply Blake2b-style round on the 16 words (Argon2 P).
         fn gb(a: &mut [u64; 16], i: usize, j: usize, k: usize, l: usize) {
-            a[i] = a[i].wrapping_add(a[j]).wrapping_add(2u64.wrapping_mul((a[i] & 0xffff_ffff) * (a[j] & 0xffff_ffff)));
+            a[i] = a[i]
+                .wrapping_add(a[j])
+                .wrapping_add(2u64.wrapping_mul((a[i] & 0xffff_ffff) * (a[j] & 0xffff_ffff)));
             a[l] = (a[l] ^ a[i]).rotate_right(32);
             a[k] = a[k].wrapping_add(a[l]);
             a[j] = (a[j] ^ a[k]).rotate_right(24);
-            a[i] = a[i].wrapping_add(a[j]).wrapping_add(2u64.wrapping_mul((a[i] & 0xffff_ffff) * (a[j] & 0xffff_ffff)));
+            a[i] = a[i]
+                .wrapping_add(a[j])
+                .wrapping_add(2u64.wrapping_mul((a[i] & 0xffff_ffff) * (a[j] & 0xffff_ffff)));
             a[l] = (a[l] ^ a[i]).rotate_right(16);
             a[k] = a[k].wrapping_add(a[l]);
             a[j] = (a[j] ^ a[k]).rotate_right(63);
@@ -176,15 +200,33 @@ fn permute_block(v: &mut Block) {
     }
     for i in 0..8 {
         let mut a = [
-            v[i], v[i + 8], v[i + 16], v[i + 24], v[i + 32], v[i + 40], v[i + 48], v[i + 56],
-            v[i + 64], v[i + 72], v[i + 80], v[i + 88], v[i + 96], v[i + 104], v[i + 112], v[i + 120],
+            v[i],
+            v[i + 8],
+            v[i + 16],
+            v[i + 24],
+            v[i + 32],
+            v[i + 40],
+            v[i + 48],
+            v[i + 56],
+            v[i + 64],
+            v[i + 72],
+            v[i + 80],
+            v[i + 88],
+            v[i + 96],
+            v[i + 104],
+            v[i + 112],
+            v[i + 120],
         ];
         fn gb(a: &mut [u64; 16], i: usize, j: usize, k: usize, l: usize) {
-            a[i] = a[i].wrapping_add(a[j]).wrapping_add(2u64.wrapping_mul((a[i] & 0xffff_ffff) * (a[j] & 0xffff_ffff)));
+            a[i] = a[i]
+                .wrapping_add(a[j])
+                .wrapping_add(2u64.wrapping_mul((a[i] & 0xffff_ffff) * (a[j] & 0xffff_ffff)));
             a[l] = (a[l] ^ a[i]).rotate_right(32);
             a[k] = a[k].wrapping_add(a[l]);
             a[j] = (a[j] ^ a[k]).rotate_right(24);
-            a[i] = a[i].wrapping_add(a[j]).wrapping_add(2u64.wrapping_mul((a[i] & 0xffff_ffff) * (a[j] & 0xffff_ffff)));
+            a[i] = a[i]
+                .wrapping_add(a[j])
+                .wrapping_add(2u64.wrapping_mul((a[i] & 0xffff_ffff) * (a[j] & 0xffff_ffff)));
             a[l] = (a[l] ^ a[i]).rotate_right(16);
             a[k] = a[k].wrapping_add(a[l]);
             a[j] = (a[j] ^ a[k]).rotate_right(63);
@@ -317,7 +359,15 @@ pub(super) fn hash(
                         } else {
                             (j2 as usize) % lanes as usize
                         };
-                        let (start, area) = ref_area(pass, slice, index, lane, ref_lane, segment_length, lane_length);
+                        let (start, area) = ref_area(
+                            pass,
+                            slice,
+                            index,
+                            lane,
+                            ref_lane,
+                            segment_length,
+                            lane_length,
+                        );
                         let relative = mapping(j1, area);
                         (ref_lane, start + relative)
                     } else {
@@ -326,7 +376,15 @@ pub(super) fn hash(
                         } else {
                             (j2 as usize) % lanes as usize
                         };
-                        let (start, area) = ref_area(pass, slice, index, lane, ref_lane, segment_length, lane_length);
+                        let (start, area) = ref_area(
+                            pass,
+                            slice,
+                            index,
+                            lane,
+                            ref_lane,
+                            segment_length,
+                            lane_length,
+                        );
                         let relative = mapping(j1, area);
                         (ref_lane, start + relative)
                     };
@@ -342,13 +400,22 @@ pub(super) fn hash(
 
     let mut blockhash = memory[(lanes as usize - 1) * lane_length];
     for lane in 0..lanes as usize - 1 {
-        xor_block(&mut blockhash, &memory[lane * lane_length + lane_length - 1]);
+        xor_block(
+            &mut blockhash,
+            &memory[lane * lane_length + lane_length - 1],
+        );
     }
-    xor_block(&mut blockhash, &memory[(lanes as usize - 1) * lane_length + lane_length - 1]);
+    xor_block(
+        &mut blockhash,
+        &memory[(lanes as usize - 1) * lane_length + lane_length - 1],
+    );
     // Fix final xor: last block of each lane
     blockhash = memory[lane_length - 1];
     for lane in 1..lanes as usize {
-        xor_block(&mut blockhash, &memory[lane * lane_length + lane_length - 1]);
+        xor_block(
+            &mut blockhash,
+            &memory[lane * lane_length + lane_length - 1],
+        );
     }
     let mut bytes = [0u8; BLOCK_SIZE];
     store_block(&blockhash, &mut bytes);

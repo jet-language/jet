@@ -516,6 +516,11 @@ impl<'a> Parser<'a> {
                     TokKind::KwEnum => Some(crate::AST::DeriveBodyItem::Item(Box::new(
                         crate::AST::Item::Enum(self.enum_def(false)?),
                     ))),
+                    TokKind::Hash if self.at_test_def() => Some(
+                        crate::AST::DeriveBodyItem::Item(Box::new(
+                            crate::AST::Item::Test(self.test_def()?),
+                        )),
+                    ),
                     TokKind::Hash
                         if self.at_marker_list()
                             || self.at_single_type_marker() => Some(
@@ -560,6 +565,30 @@ impl<'a> Parser<'a> {
                 source,
                 body,
                 span: Span::new(start, end),
+            })
+        }
+
+        /// D-STRUCT-ONCE1=A: root declaration position reuses the same
+        /// typed loop body as derive and marker templates.
+        pub(crate) fn item_template_loop(
+            &mut self,
+        ) -> Result<crate::AST::ItemTemplateLoop, Diagnostic> {
+            let crate::AST::DeriveBodyItem::Loop {
+                var,
+                var_span,
+                source,
+                body,
+                span,
+            } = self.derive_body_loop()?
+            else {
+                unreachable!("derive_body_loop always returns a loop item")
+            };
+            Ok(crate::AST::ItemTemplateLoop {
+                var,
+                var_span,
+                source,
+                body,
+                span,
             })
         }
 

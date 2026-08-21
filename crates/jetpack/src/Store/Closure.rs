@@ -659,6 +659,9 @@ pub(crate) fn register_entries_unlocked(
         verify_registration_output(roots, entry)?;
     }
     let (_, graph) = migrate_closure_graph_unlocked(roots)?;
+    for entry in entries {
+        super::certify_registration_unlocked(roots, entry, entries)?;
+    }
     let mut object_map = BTreeMap::new();
     let mut records = Vec::new();
     let mut seen_records = BTreeSet::new();
@@ -737,6 +740,7 @@ fn register_entry_unlocked_mode(
 ) -> std::io::Result<bool> {
     verify_registration_output(roots, entry)?;
     let (_, graph) = migrate_closure_graph_unlocked(roots)?;
+    super::certify_registration_unlocked(roots, entry, &[])?;
     let (objects, record) = descriptor_for_entry(roots, entry)?;
     if graph.records.get(&record.id) == Some(&record)
         && objects
@@ -1058,13 +1062,20 @@ fn normalize_legacy_entry(mut entry: StoreEntry) -> std::io::Result<StoreEntry> 
             entry.id
         )));
     }
-    entry.producer_record = canonical_producer(
+    let mut producer = ProducerRecord::decode(&canonical_producer(
         "legacy-migration",
         &format!("cas:{}", identity.source_fingerprint),
         &identity.source_fingerprint,
         identity,
         BTreeMap::from([("legacy.reference".into(), entry.reference.clone())]),
-    )?;
+    )?)
+    .map_err(std::io::Error::other)?;
+    producer.bind_cache_provenance(
+        &entry.reference,
+        &entry.envelope.output_hash,
+        identity,
+    );
+    entry.producer_record = producer.encode();
     Ok(entry)
 }
 

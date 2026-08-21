@@ -968,9 +968,9 @@ pub fn fact_read_members() -> impl Iterator<Item = String> {
 pub const TYPE_LAYOUT_INFO: &str = "LayoutInfo";
 pub const TYPE_LAYOUT_FIELD: &str = "LayoutField";
 
-/// D-LAYOUT-FACTS1=B: byte facts remain unavailable until a canonical target
-/// layout engine exists. Keep this vocabulary shared by sema and comptime so
-/// neither path turns the typed absence into a silent answer.
+/// D-LAYOUT-FACTS1=B: the byte-fact vocabulary is shared by reflection and
+/// tooling. Values are optional: the canonical target engine fills them for
+/// Jet-owned physical layouts, while default layouts retain typed absence.
 pub fn is_layout_byte_fact(type_name: &str, field: &str) -> bool {
     matches!(
         (type_name, field),

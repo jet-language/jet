@@ -61,17 +61,17 @@ fn day_kind(day: String) String {
     }
 }
 
-// --- errors: `T ? E`, ok/err, `?` propagate, `??` fallback ---------------
+// --- errors: `T ! E`, ok/err, `?` propagate, `??` fallback ---------------
 enum ParseError {
     Empty
 }
 
-fn parse_age(raw: String) Int ? ParseError {
+fn parse_age(raw: String) Int ! ParseError {
     if raw == "" :> return Err(ParseError.Empty)
     return Ok(7)
 }
 
-fn double_age(raw: String) Int ? ParseError {
+fn double_age(raw: String) Int ! ParseError {
     n :: parse_age(raw)?
     return Ok(n * 2)
 }

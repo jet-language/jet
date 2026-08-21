@@ -248,6 +248,422 @@ pub struct Signature {
     pub sig_hex: String,
 }
 
+/// SLSA-shaped facts that make one cache result usable.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CacheProvenance {
+    pub reference: String,
+    pub source: String,
+    pub builder: String,
+    pub action: String,
+    pub output: String,
+    pub platform: String,
+    pub sandbox: String,
+    pub policy: String,
+}
+
+impl CacheProvenance {
+    pub fn validate(&self) -> Result<(), TrustError> {
+        for (field, value) in [
+            ("reference", &self.reference),
+            ("source", &self.source),
+            ("builder", &self.builder),
+            ("action", &self.action),
+            ("output", &self.output),
+            ("platform", &self.platform),
+            ("sandbox", &self.sandbox),
+            ("policy", &self.policy),
+        ] {
+            if value.trim().is_empty() || value.contains(['\n', '\r']) {
+                return Err(TrustError::CacheReceiptInvalid {
+                    detail: format!("cache provenance {field} is empty or contains a newline"),
+                });
+            }
+        }
+        Ok(())
+    }
+
+    fn canonical(&self, role: &str, version: u64, issued_unix: u64, expires_unix: u64) -> String {
+        format!(
+            "jet-slsa-cache-v1\nrole={role}\nversion={version}\nissued={issued_unix}\nexpires={expires_unix}\nreference={}\nsource={}\nbuilder={}\naction={}\noutput={}\nplatform={}\nsandbox={}\npolicy={}\n",
+            self.reference,
+            self.source,
+            self.builder,
+            self.action,
+            self.output,
+            self.platform,
+            self.sandbox,
+            self.policy,
+        )
+    }
+}
+
+/// Signed, time-bounded cache admission receipt.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CacheReceipt {
+    pub role: String,
+    pub provenance: CacheProvenance,
+    pub version: u64,
+    pub issued_unix: u64,
+    pub expires_unix: u64,
+    pub signature: Signature,
+}
+
+impl CacheReceipt {
+    pub fn issue(
+        role: &str,
+        provenance: CacheProvenance,
+        version: u64,
+        issued_unix: u64,
+        expires_unix: u64,
+        key: &TrustKey,
+    ) -> Result<Self, TrustError> {
+        if role.trim().is_empty() || role.contains(['\n', '\r']) {
+            return Err(TrustError::CacheReceiptInvalid {
+                detail: "cache receipt role is empty or contains a newline".into(),
+            });
+        }
+        if expires_unix <= issued_unix {
+            return Err(TrustError::CacheReceiptInvalid {
+                detail: "cache receipt expiry must be after its issue time".into(),
+            });
+        }
+        if version == 0 {
+            return Err(TrustError::CacheReceiptInvalid {
+                detail: "cache receipt version must be positive".into(),
+            });
+        }
+        provenance.validate()?;
+        let signature = key.sign(provenance.canonical(role, version, issued_unix, expires_unix).as_bytes());
+        Ok(Self {
+            role: role.to_string(),
+            provenance,
+            version,
+            issued_unix,
+            expires_unix,
+            signature,
+        })
+    }
+
+    pub fn verify(&self, key: &TrustKey, clock: &dyn TrustedClock) -> Result<(), TrustError> {
+        if self.version == 0 || self.expires_unix <= self.issued_unix {
+            return Err(TrustError::CacheReceiptInvalid {
+                detail: "cache receipt version or expiry is invalid".into(),
+            });
+        }
+        self.provenance.validate()?;
+        let now = clock.now_unix();
+        if now < self.issued_unix {
+            return Err(TrustError::CacheReceiptInvalid {
+                detail: format!("cache receipt is not valid until {}", self.issued_unix),
+            });
+        }
+        if now >= self.expires_unix {
+            return Err(TrustError::CacheReceiptExpired {
+                expires_unix: self.expires_unix,
+                now_unix: now,
+            });
+        }
+        let expected = key.sign(
+            self.provenance
+                .canonical(&self.role, self.version, self.issued_unix, self.expires_unix)
+                .as_bytes(),
+        );
+        if self.signature != expected {
+            return Err(TrustError::CacheReceiptInvalid {
+                detail: "cache receipt signature does not verify".into(),
+            });
+        }
+        Ok(())
+    }
+}
+
+/// Stable host-owned identity for one cache builder input domain.
+pub fn cache_builder_identity(provider: &str, immutable_source: &str, source_digest: &str) -> String {
+    let mut canonical = String::from("jet-cache-builder-v1\n");
+    for value in [provider, immutable_source, source_digest] {
+        canonical.push_str(&value.len().to_string());
+        canonical.push(':');
+        canonical.push_str(value);
+        canonical.push('\n');
+    }
+    format!("cache-builder:sha256:{}", SHA256::sha256_hex(canonical.as_bytes()))
+}
+
+fn cache_role_component(role: &str) -> Result<(), TrustError> {
+    if role.is_empty()
+        || role.len() > 128
+        || !role
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.'))
+    {
+        return Err(TrustError::CacheReceiptInvalid {
+            detail: format!("invalid cache role `{role}`"),
+        });
+    }
+    Ok(())
+}
+
+fn cache_key_pin_path(roots_dir: &Path, role: &str) -> Result<PathBuf, TrustError> {
+    cache_role_component(role)?;
+    Ok(roots_dir.join("trust").join(format!("cache-{role}.pin")))
+}
+
+fn cache_key_fingerprint(key: &TrustKey) -> String {
+    format!("{}:{}", key.key_id, key.algorithm)
+}
+
+fn cache_key_pin_body(key: &TrustKey) -> String {
+    format!("key_id={}\nalgorithm={}\n", key.key_id, key.algorithm)
+}
+
+fn read_cache_key_pin(path: &Path, role: &str) -> Result<String, TrustError> {
+    match std::fs::symlink_metadata(path) {
+        Ok(metadata) if metadata.file_type().is_symlink() || !metadata.is_file() => {
+            return Err(TrustError::IO {
+                detail: format!("cache key pin for `{role}` is not a regular file"),
+            });
+        }
+        Ok(_) => {}
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            return Err(TrustError::CacheKeyMissing {
+                role: role.to_string(),
+            });
+        }
+        Err(error) => {
+            return Err(TrustError::IO {
+                detail: error.to_string(),
+            });
+        }
+    }
+    let text = std::fs::read_to_string(path).map_err(|error| TrustError::IO {
+        detail: error.to_string(),
+    })?;
+    let mut key_id = None;
+    let mut algorithm = None;
+    for line in text.lines() {
+        if let Some(value) = line.strip_prefix("key_id=") {
+            key_id = Some(value.to_string());
+        } else if let Some(value) = line.strip_prefix("algorithm=") {
+            algorithm = Some(value.to_string());
+        }
+    }
+    let key_id = key_id.ok_or_else(|| TrustError::CacheKeyMissing {
+        role: role.to_string(),
+    })?;
+    let algorithm = algorithm.ok_or_else(|| TrustError::CacheKeyMissing {
+        role: role.to_string(),
+    })?;
+    Ok(format!("{key_id}:{algorithm}"))
+}
+
+/// Pin a cache role's signing identity on first use. Existing pins are
+/// immutable; key rotation requires an explicit host-side rebind operation.
+pub fn pin_cache_key(roots_dir: &Path, role: &str, key: &TrustKey) -> Result<(), TrustError> {
+    let path = cache_key_pin_path(roots_dir, role)?;
+    ensure_trust_dir(roots_dir)?;
+    let expected = cache_key_fingerprint(key);
+    match std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&path)
+    {
+        Ok(mut file) => {
+            use std::io::Write as _;
+            file.write_all(cache_key_pin_body(key).as_bytes())
+                .map_err(|error| TrustError::IO {
+                    detail: error.to_string(),
+                })?;
+            file.sync_all().map_err(|error| TrustError::IO {
+                detail: error.to_string(),
+            })?;
+            Ok(())
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
+            let actual = read_cache_key_pin(&path, role)?;
+            if actual == expected {
+                Ok(())
+            } else {
+                Err(TrustError::CacheKeyChanged {
+                    role: role.to_string(),
+                    expected,
+                    actual,
+                })
+            }
+        }
+        Err(error) => Err(TrustError::IO {
+            detail: error.to_string(),
+        }),
+    }
+}
+
+/// Verify a cache role against its already-created host pin.
+pub(crate) fn verify_pinned_cache_key(
+    roots_dir: &Path,
+    role: &str,
+    key: &TrustKey,
+) -> Result<(), TrustError> {
+    let path = cache_key_pin_path(roots_dir, role)?;
+    let expected = cache_key_fingerprint(key);
+    let actual = read_cache_key_pin(&path, role)?;
+    if actual != expected {
+        return Err(TrustError::CacheKeyChanged {
+            role: role.to_string(),
+            expected: actual,
+            actual: expected,
+        });
+    }
+    Ok(())
+}
+
+fn revoked_builders_path(roots_dir: &Path) -> PathBuf {
+    roots_dir.join("trust").join("revoked-cache-builders")
+}
+
+/// Revoke one builder identity in host-owned trust state.
+pub fn revoke_cache_builder(roots_dir: &Path, builder: &str) -> Result<(), TrustError> {
+    if builder.trim().is_empty() || builder.contains(['\n', '\r']) {
+        return Err(TrustError::CacheReceiptInvalid {
+            detail: "cache builder identity is empty or contains a newline".into(),
+        });
+    }
+    let dir = ensure_trust_dir(roots_dir)?;
+    let path = revoked_builders_path(roots_dir);
+    let mut builders = match std::fs::symlink_metadata(&path) {
+        Ok(metadata) if metadata.file_type().is_symlink() || !metadata.is_file() => {
+            return Err(TrustError::IO {
+                detail: "revoked cache-builder list is not a regular file".into(),
+            });
+        }
+        Ok(_) => std::fs::read_to_string(&path)
+            .map_err(|error| TrustError::IO {
+                detail: error.to_string(),
+            })?
+            .lines()
+            .filter(|line| !line.trim().is_empty())
+            .map(str::to_string)
+            .collect::<BTreeSet<_>>(),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => BTreeSet::new(),
+        Err(error) => {
+            return Err(TrustError::IO {
+                detail: error.to_string(),
+            });
+        }
+    };
+    builders.insert(builder.to_string());
+    let body = builders.into_iter().collect::<Vec<_>>().join("\n") + "\n";
+    atomic_trust_write(&dir.join("revoked-cache-builders"), body.as_bytes())
+}
+
+pub fn is_cache_builder_revoked(roots_dir: &Path, builder: &str) -> Result<bool, TrustError> {
+    if builder.trim().is_empty() || builder.contains(['\n', '\r']) {
+        return Err(TrustError::CacheReceiptInvalid {
+            detail: "cache builder identity is empty or contains a newline".into(),
+        });
+    }
+    let path = revoked_builders_path(roots_dir);
+    let text = match std::fs::symlink_metadata(&path) {
+        Ok(metadata) if metadata.file_type().is_symlink() || !metadata.is_file() => {
+            return Err(TrustError::IO {
+                detail: "revoked cache-builder list is not a regular file".into(),
+            });
+        }
+        Ok(_) => std::fs::read_to_string(path).map_err(|error| TrustError::IO {
+            detail: error.to_string(),
+        })?,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(false),
+        Err(error) => {
+            return Err(TrustError::IO {
+                detail: error.to_string(),
+            });
+        }
+    };
+    Ok(text.lines().any(|line| line == builder))
+}
+
+fn cache_builder_allowlist_path(roots_dir: &Path, role: &str) -> Result<PathBuf, TrustError> {
+    cache_role_component(role)?;
+    Ok(roots_dir
+        .join("trust")
+        .join("cache-builders")
+        .join(format!("{role}.allow")))
+}
+
+/// Add one immutable builder identity to a shared cache role's host allowlist.
+/// The first publication is the explicit write-grant boundary; later reads
+/// accept only identities already recorded here.
+pub fn allow_cache_builder(
+    roots_dir: &Path,
+    role: &str,
+    builder: &str,
+) -> Result<(), TrustError> {
+    if builder.trim().is_empty() || builder.contains(['\n', '\r']) {
+        return Err(TrustError::CacheReceiptInvalid {
+            detail: "cache builder identity is empty or contains a newline".into(),
+        });
+    }
+    let path = cache_builder_allowlist_path(roots_dir, role)?;
+    let parent = path.parent().ok_or_else(|| TrustError::IO {
+        detail: "cache builder allowlist has no parent directory".into(),
+    })?;
+    std::fs::create_dir_all(parent).map_err(|error| TrustError::IO {
+        detail: error.to_string(),
+    })?;
+    let mut builders = match std::fs::symlink_metadata(&path) {
+        Ok(metadata) if metadata.file_type().is_symlink() || !metadata.is_file() => {
+            return Err(TrustError::IO {
+                detail: "cache builder allowlist is not a regular file".into(),
+            });
+        }
+        Ok(_) => std::fs::read_to_string(&path)
+            .map_err(|error| TrustError::IO {
+                detail: error.to_string(),
+            })?
+            .lines()
+            .filter(|line| !line.trim().is_empty())
+            .map(str::to_string)
+            .collect::<BTreeSet<_>>(),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => BTreeSet::new(),
+        Err(error) => {
+            return Err(TrustError::IO {
+                detail: error.to_string(),
+            });
+        }
+    };
+    builders.insert(builder.to_string());
+    let body = builders.into_iter().collect::<Vec<_>>().join("\n") + "\n";
+    atomic_trust_write(&path, body.as_bytes())
+}
+
+pub fn is_cache_builder_allowed(
+    roots_dir: &Path,
+    role: &str,
+    builder: &str,
+) -> Result<bool, TrustError> {
+    if builder.trim().is_empty() || builder.contains(['\n', '\r']) {
+        return Err(TrustError::CacheReceiptInvalid {
+            detail: "cache builder identity is empty or contains a newline".into(),
+        });
+    }
+    let path = cache_builder_allowlist_path(roots_dir, role)?;
+    let text = match std::fs::symlink_metadata(&path) {
+        Ok(metadata) if metadata.file_type().is_symlink() || !metadata.is_file() => {
+            return Err(TrustError::IO {
+                detail: "cache builder allowlist is not a regular file".into(),
+            });
+        }
+        Ok(_) => std::fs::read_to_string(&path).map_err(|error| TrustError::IO {
+            detail: error.to_string(),
+        })?,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(false),
+        Err(error) => {
+            return Err(TrustError::IO {
+                detail: error.to_string(),
+            });
+        }
+    };
+    Ok(text.lines().any(|line| line == builder))
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum MetadataRole {
     Root,
@@ -387,6 +803,11 @@ pub enum TrustError {
     InvalidPublisher { detail: String },
     IdentityKindMismatch { kind: IdentityKind, detail: String },
     RotationRejected { detail: String },
+    CacheReceiptExpired { expires_unix: u64, now_unix: u64 },
+    CacheReceiptInvalid { detail: String },
+    CacheKeyChanged { role: String, expected: String, actual: String },
+    CacheKeyMissing { role: String },
+    CacheBuilderRevoked { builder: String },
     IO { detail: String },
 }
 
@@ -431,6 +852,21 @@ impl fmt::Display for TrustError {
             TrustError::ConsistentSnapshotMismatch { role, detail } => {
                 write!(f, "consistent snapshot mismatch for `{role}`: {detail}")
             }
+            TrustError::CacheReceiptExpired {
+                expires_unix,
+                now_unix,
+            } => write!(f, "cache receipt expired at {expires_unix} (trusted now {now_unix})"),
+            TrustError::CacheKeyChanged {
+                role,
+                expected,
+                actual,
+            } => write!(f, "cache key for `{role}` changed: expected {expected}, got {actual}"),
+            TrustError::CacheKeyMissing { role } => {
+                write!(f, "cache key pin for `{role}` is missing")
+            }
+            TrustError::CacheBuilderRevoked { builder } => {
+                write!(f, "cache builder `{builder}` is revoked")
+            }
             TrustError::DelegationDenied { path, detail } => {
                 write!(f, "delegation denied for `{path}`: {detail}")
             }
@@ -438,6 +874,7 @@ impl fmt::Display for TrustError {
             TrustError::InvalidKey { detail }
             | TrustError::InvalidThreshold { detail }
             | TrustError::InvalidPublisher { detail }
+            | TrustError::CacheReceiptInvalid { detail }
             | TrustError::RotationRejected { detail }
             | TrustError::IO { detail } => write!(f, "{detail}"),
             TrustError::IdentityKindMismatch { kind, detail } => {
@@ -446,6 +883,11 @@ impl fmt::Display for TrustError {
         }
     }
 }
+
+/// `Debug` and `Display` are exhaustive above and `Error` needs nothing more.
+/// Callers that box a trust failure or convert it into an `io::Error` need
+/// this bound; the error text is already complete.
+impl std::error::Error for TrustError {}
 
 /// Trusted-time source. Production uses wall clock; tests inject fixed time.
 pub trait TrustedClock {
@@ -527,6 +969,90 @@ impl Keyring {
     }
 }
 
+fn ensure_trust_dir(roots_dir: &Path) -> Result<PathBuf, TrustError> {
+    match std::fs::symlink_metadata(roots_dir) {
+        Ok(metadata) if metadata.file_type().is_symlink() || !metadata.is_dir() => {
+            return Err(TrustError::IO {
+                detail: "trust root is not a real directory".into(),
+            });
+        }
+        Ok(_) => {}
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            std::fs::create_dir_all(roots_dir).map_err(|error| TrustError::IO {
+                detail: error.to_string(),
+            })?;
+        }
+        Err(error) => {
+            return Err(TrustError::IO {
+                detail: error.to_string(),
+            });
+        }
+    }
+    let dir = roots_dir.join("trust");
+    match std::fs::symlink_metadata(&dir) {
+        Ok(metadata) if metadata.file_type().is_symlink() || !metadata.is_dir() => {
+            Err(TrustError::IO {
+                detail: "trust directory is not a real directory".into(),
+            })
+        }
+        Ok(_) => Ok(dir),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            std::fs::create_dir(&dir).map_err(|error| TrustError::IO {
+                detail: error.to_string(),
+            })?;
+            Ok(dir)
+        }
+        Err(error) => Err(TrustError::IO {
+            detail: error.to_string(),
+        }),
+    }
+}
+
+fn atomic_trust_write(path: &Path, body: &[u8]) -> Result<(), TrustError> {
+    let dir = path.parent().ok_or_else(|| TrustError::IO {
+        detail: "trusted state path has no parent directory".into(),
+    })?;
+    for attempt in 0..16u32 {
+        let temporary = dir.join(format!(
+            ".{}.{}.{}.tmp",
+            path.file_name().and_then(|name| name.to_str()).unwrap_or("trust"),
+            std::process::id(),
+            attempt
+        ));
+        let mut file = match std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&temporary)
+        {
+            Ok(file) => file,
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(error) => {
+                return Err(TrustError::IO {
+                    detail: error.to_string(),
+                });
+            }
+        };
+        use std::io::Write as _;
+        let result = file
+            .write_all(body)
+            .and_then(|_| file.sync_all())
+            .and_then(|_| {
+                drop(file);
+                std::fs::rename(&temporary, path)
+            });
+        if let Err(error) = result {
+            let _ = std::fs::remove_file(&temporary);
+            return Err(TrustError::IO {
+                detail: error.to_string(),
+            });
+        }
+        return Ok(());
+    }
+    Err(TrustError::IO {
+        detail: "could not allocate a trusted-state temporary file".into(),
+    })
+}
+
 /// Persistent trusted-root bootstrap pin under a Jetpack root.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RootBootstrap {
@@ -541,22 +1067,39 @@ impl RootBootstrap {
     }
 
     pub fn write(&self, roots_dir: &Path) -> Result<(), TrustError> {
-        let dir = roots_dir.join("trust");
-        std::fs::create_dir_all(&dir).map_err(|e| TrustError::IO {
-            detail: e.to_string(),
-        })?;
+        ensure_trust_dir(roots_dir)?;
         let body = format!(
             "digest={}\nversion={}\nconsistent_snapshot={}\n",
             self.pin_digest, self.root_version, self.consistent_snapshot
         );
-        std::fs::write(Self::path(roots_dir), body).map_err(|e| TrustError::IO {
-            detail: e.to_string(),
-        })
+        atomic_trust_write(&Self::path(roots_dir), body.as_bytes())
     }
 
     pub fn load(roots_dir: &Path) -> Result<Self, TrustError> {
-        let text = std::fs::read_to_string(Self::path(roots_dir)).map_err(|_| {
-            TrustError::BootstrapMissing
+        let path = Self::path(roots_dir);
+        let metadata = match std::fs::symlink_metadata(&path) {
+            Ok(metadata) if metadata.file_type().is_symlink() || !metadata.is_file() => {
+                return Err(TrustError::IO {
+                    detail: "trusted-root bootstrap is not a regular file".into(),
+                });
+            }
+            Ok(metadata) => metadata,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                return Err(TrustError::BootstrapMissing);
+            }
+            Err(error) => {
+                return Err(TrustError::IO {
+                    detail: error.to_string(),
+                });
+            }
+        };
+        if metadata.len() > 4096 {
+            return Err(TrustError::IO {
+                detail: "trusted-root bootstrap is too large".into(),
+            });
+        }
+        let text = std::fs::read_to_string(path).map_err(|error| TrustError::IO {
+            detail: error.to_string(),
         })?;
         let mut digest = None;
         let mut version = None;
@@ -570,8 +1113,12 @@ impl RootBootstrap {
                 consistent = Some(v == "true");
             }
         }
+        let pin_digest = digest.ok_or(TrustError::BootstrapMissing)?;
+        if pin_digest.len() != 64 || !pin_digest.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+            return Err(TrustError::BootstrapMissing);
+        }
         Ok(Self {
-            pin_digest: digest.ok_or(TrustError::BootstrapMissing)?,
+            pin_digest,
             root_version: version.ok_or(TrustError::BootstrapMissing)?,
             consistent_snapshot: consistent.ok_or(TrustError::BootstrapMissing)?,
         })
@@ -586,8 +1133,12 @@ pub struct TrustEngine {
     pub policy: TrustPolicy,
     /// Last accepted monotonic versions per role.
     pub versions: BTreeMap<MetadataRole, u64>,
+    /// Canonical bytes accepted for each role/version. Equal versions may be
+    /// rechecked, but a different signed payload is a replacement attack.
+    metadata_digests: BTreeMap<MetadataRole, String>,
     pub keyring: Keyring,
     pub identities: BTreeMap<IdentityKind, BoundIdentity>,
+    roots_dir: Option<PathBuf>,
 }
 
 impl TrustEngine {
@@ -630,17 +1181,39 @@ impl TrustEngine {
             consistent_snapshot: signed_root.signed.consistent_snapshot,
         };
         if let Some(dir) = roots_dir {
-            bootstrap.write(dir)?;
+            match RootBootstrap::load(dir) {
+                Ok(existing) => {
+                    if existing.pin_digest != digest {
+                        return Err(TrustError::BootstrapPinMismatch {
+                            expected: existing.pin_digest,
+                            actual: digest,
+                        });
+                    }
+                    if signed_root.signed.version < existing.root_version {
+                        return Err(TrustError::Rollback {
+                            role: MetadataRole::Root,
+                            current: existing.root_version,
+                            incoming: signed_root.signed.version,
+                        });
+                    }
+                }
+                Err(TrustError::BootstrapMissing) => bootstrap.write(dir)?,
+                Err(error) => return Err(error),
+            }
         }
         let mut versions = BTreeMap::new();
         versions.insert(MetadataRole::Root, signed_root.signed.version);
+        let mut metadata_digests = BTreeMap::new();
+        metadata_digests.insert(MetadataRole::Root, digest.clone());
         Ok(Self {
             root: signed_root.signed.clone(),
             root_digest: digest,
             policy,
             versions,
+            metadata_digests,
             keyring,
             identities: BTreeMap::new(),
+            roots_dir: roots_dir.map(Path::to_path_buf),
         })
     }
 
@@ -653,7 +1226,7 @@ impl TrustEngine {
         clock: &dyn TrustedClock,
     ) -> Result<Self, TrustError> {
         let pin = RootBootstrap::load(roots_dir)?;
-        let eng = Self::bootstrap(
+        let mut eng = Self::bootstrap(
             signed_root,
             keyring,
             policy,
@@ -668,6 +1241,7 @@ impl TrustEngine {
                 incoming: eng.root.version,
             });
         }
+        eng.roots_dir = Some(roots_dir.to_path_buf());
         Ok(eng)
     }
 
@@ -710,6 +1284,18 @@ impl TrustEngine {
             current_role,
             &self.keyring,
         )?;
+        let incoming_role = signed_root.signed.roles.get(&MetadataRole::Root).ok_or(
+            TrustError::InvalidThreshold {
+                detail: "incoming root missing root role".into(),
+            },
+        )?;
+        verify_role_signatures(
+            MetadataRole::Root,
+            &canonical,
+            &signed_root.signatures,
+            incoming_role,
+            &self.keyring,
+        )?;
         check_expiry(MetadataRole::Root, signed_root.signed.expires_unix, clock)?;
         let current_v = *self.versions.get(&MetadataRole::Root).unwrap_or(&0);
         if signed_root.signed.version <= current_v {
@@ -719,9 +1305,35 @@ impl TrustEngine {
                 incoming: signed_root.signed.version,
             });
         }
+        let digest = SHA256::sha256_hex(canonical.as_bytes());
+        if let Some(roots_dir) = &self.roots_dir {
+            let existing = RootBootstrap::load(roots_dir)?;
+            if existing.pin_digest != self.root_digest {
+                return Err(TrustError::BootstrapPinMismatch {
+                    expected: self.root_digest.clone(),
+                    actual: existing.pin_digest,
+                });
+            }
+            if existing.root_version != current_v {
+                return Err(TrustError::Rollback {
+                    role: MetadataRole::Root,
+                    current: existing.root_version,
+                    incoming: current_v,
+                });
+            }
+            RootBootstrap {
+                pin_digest: digest.clone(),
+                root_version: signed_root.signed.version,
+                consistent_snapshot: signed_root.signed.consistent_snapshot,
+            }
+            .write(roots_dir)?;
+        }
         self.root = signed_root.signed.clone();
-        self.root_digest = SHA256::sha256_hex(canonical.as_bytes());
+        self.root_digest = digest.clone();
+        self.versions.clear();
         self.versions.insert(MetadataRole::Root, signed_root.signed.version);
+        self.metadata_digests.clear();
+        self.metadata_digests.insert(MetadataRole::Root, digest);
         Ok(())
     }
 
@@ -781,6 +1393,12 @@ impl TrustEngine {
         if let Some(path) = delegated_path {
             self.ensure_delegation_allows(path)?;
         }
+        enforce_metadata_digest(
+            self,
+            MetadataRole::Targets,
+            signed.signed.version,
+            &canonical,
+        )?;
         self.versions
             .insert(MetadataRole::Targets, signed.signed.version);
         Ok(())
@@ -810,6 +1428,7 @@ impl TrustEngine {
         )?;
         check_expiry(MetadataRole::Snapshot, signed.signed.expires_unix, clock)?;
         enforce_monotonic(self, MetadataRole::Snapshot, signed.signed.version)?;
+        require_metadata_digest(self, MetadataRole::Targets, targets_version, targets_canonical)?;
         if self.root.consistent_snapshot {
             let entry = signed.signed.meta.get("targets").ok_or(
                 TrustError::ConsistentSnapshotMismatch {
@@ -849,6 +1468,12 @@ impl TrustEngine {
                 });
             }
         }
+        enforce_metadata_digest(
+            self,
+            MetadataRole::Snapshot,
+            signed.signed.version,
+            &canonical,
+        )?;
         self.versions
             .insert(MetadataRole::Snapshot, signed.signed.version);
         Ok(())
@@ -878,6 +1503,7 @@ impl TrustEngine {
         )?;
         check_expiry(MetadataRole::Timestamp, signed.signed.expires_unix, clock)?;
         enforce_monotonic(self, MetadataRole::Timestamp, signed.signed.version)?;
+        require_metadata_digest(self, MetadataRole::Snapshot, snapshot_version, snapshot_canonical)?;
         if signed.signed.snapshot.version != snapshot_version {
             return Err(TrustError::ConsistentSnapshotMismatch {
                 role: "snapshot".into(),
@@ -901,6 +1527,12 @@ impl TrustEngine {
                 detail: format!("sha256 {got} != {want}"),
             });
         }
+        enforce_metadata_digest(
+            self,
+            MetadataRole::Timestamp,
+            signed.signed.version,
+            &canonical,
+        )?;
         self.versions
             .insert(MetadataRole::Timestamp, signed.signed.version);
         Ok(())
@@ -1110,6 +1742,53 @@ fn enforce_monotonic(
     // slice; advancing requires strictly greater for root updates. Targets/
     // snapshot/timestamp accept equal as idempotent refresh.
     Ok(())
+}
+
+fn enforce_metadata_digest(
+    eng: &mut TrustEngine,
+    role: MetadataRole,
+    version: u64,
+    canonical: &str,
+) -> Result<(), TrustError> {
+    let digest = SHA256::sha256_hex(canonical.as_bytes());
+    let current_version = *eng.versions.get(&role).unwrap_or(&0);
+    if current_version == version {
+        if let Some(previous) = eng.metadata_digests.get(&role) {
+            if previous == &digest {
+                return Ok(());
+            }
+            return Err(TrustError::ConsistentSnapshotMismatch {
+                role: role.as_str().to_string(),
+                detail: format!("same version has different canonical bytes: {previous} != {digest}"),
+            });
+        }
+    }
+    eng.metadata_digests.insert(role, digest);
+    Ok(())
+}
+
+fn require_metadata_digest(
+    eng: &TrustEngine,
+    role: MetadataRole,
+    version: u64,
+    canonical: &str,
+) -> Result<(), TrustError> {
+    let digest = SHA256::sha256_hex(canonical.as_bytes());
+    let accepted_version = *eng.versions.get(&role).unwrap_or(&0);
+    match eng.metadata_digests.get(&role) {
+        Some(accepted) if accepted_version == version && accepted == &digest => Ok(()),
+        Some(_) => Err(TrustError::ConsistentSnapshotMismatch {
+            role: role.as_str().to_string(),
+            detail: format!(
+                "version {version} does not name the accepted {} metadata",
+                role.as_str()
+            ),
+        }),
+        None => Err(TrustError::ConsistentSnapshotMismatch {
+            role: role.as_str().to_string(),
+            detail: format!("{} metadata was not accepted in this session", role.as_str()),
+        }),
+    }
 }
 
 fn enforce_size(role: MetadataRole, size: usize, policy: &TrustPolicy) -> Result<(), TrustError> {

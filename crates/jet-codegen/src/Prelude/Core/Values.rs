@@ -2,7 +2,7 @@ trait JetShow {
     fn jet_show(&self) -> String;
     /// D-FAIL-CARRIER1=A: is this the carrier's clean report? The optional view
     /// answers yes, so `T?` prints its payload bare and its absence as `null`;
-    /// every failure report answers no, so `T ? E` prints its verdict.
+    /// every failure report answers no, so `T ! E` prints its verdict.
     fn jet_report_is_clean() -> bool
     where
         Self: Sized,

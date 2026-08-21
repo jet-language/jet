@@ -2,19 +2,17 @@
 //! `eval_require`, `eval_embed_file`. These are further
 //! `impl Interp` methods; the struct and spine live in `interp.rs`.
 
-#[path = "../SequenceParity.rs"]
-mod sequence_parity;
 #[path = "dispatch/eval_method.rs"]
 mod eval_method;
+#[path = "../SequenceParity.rs"]
+mod sequence_parity;
 
 use std::collections::HashMap;
 use std::path::Path;
 
 use crate::Diagnostics::{Diagnostic, Span};
+use crate::AST::{AccessConvention, CallArg, CtFloat, Expr, Func, LambdaBody, StrPart, Type, UnOp};
 use jet_foundation::Effects::{core_requires_comptime_gate, is_nondeterministic_core};
-use crate::AST::{
-    AccessConvention, CallArg, CtFloat, Expr, Func, LambdaBody, StrPart, Type, UnOp,
-};
 
 use super::super::Builtins::{
     apply_method, apply_mutating, apply_static_type_method, as_bool, as_int, cmp,
@@ -22,17 +20,15 @@ use super::super::Builtins::{
 use super::super::Diagnostics::{comptime_panic, unsupported};
 use super::super::Diagnostics::{EARLY_RETURN_CODE, ERR_PROPAGATE_CODE};
 use super::super::Interpreter::{Flow, Interp};
-use crate::AST::CtValue;
-use jet_foundation::Prelude::jet_as_bytes as as_bytes;
-use jet_foundation::Names::{mangle, mangle_path};
 use super::core_calls::{
-    apply_core_call_with_type, apply_data_line_call,
-    apply_impure_core_call_with_type, as_float, display_core_pure_value,
-    eval_regex_replace_all_with, jet_term_print_frame, sketch_add, solver_new, solver_require,
+    apply_core_call_with_type, apply_data_line_call, apply_impure_core_call_with_type, as_float,
+    display_core_pure_value, eval_regex_replace_all_with, jet_term_print_frame, sketch_add,
+    solver_new, solver_require,
 };
-use super::repl_process::{
-    apply_repl_authorized_core_call_with_type,
-};
+use super::repl_process::apply_repl_authorized_core_call_with_type;
+use crate::AST::CtValue;
+use jet_foundation::Names::{mangle, mangle_path};
+use jet_foundation::Prelude::jet_as_bytes as as_bytes;
 
 mod seeded_random_kernel {
     include!("../../../../jet-codegen/src/Prelude/Core/SeededRandom.rs");
@@ -77,12 +73,7 @@ fn unique_values(items: Vec<CtValue>) -> Vec<CtValue> {
 /// D-META-USER1=A: turn the four declared rejection fields into the one
 /// registered project diagnostic used by both comptime evaluators.
 pub fn project_rejection(args: &[CtValue], span: Span) -> Result<CtValue, Diagnostic> {
-    let [
-        CtValue::Str(code),
-        CtValue::Str(what),
-        CtValue::Str(why),
-        CtValue::Str(fix),
-    ] = args
+    let [CtValue::Str(code), CtValue::Str(what), CtValue::Str(why), CtValue::Str(fix)] = args
     else {
         return Err(unsupported(
             "`reject` requires String code, what, why, and fix arguments",
@@ -187,14 +178,14 @@ pub fn apply_seeded_rng_method_with_type(
                 seeded_random_kernel::jet_seeded_rng_float_range(state, low, high),
             )))
         }
-        "bool" if args.is_empty() => Ok(CtValue::Bool(
-            seeded_random_kernel::jet_seeded_rng_bool(state),
-        )),
+        "bool" if args.is_empty() => Ok(CtValue::Bool(seeded_random_kernel::jet_seeded_rng_bool(
+            state,
+        ))),
         "bool" => {
             let p = float(0)?;
-            Ok(CtValue::Bool(
-                seeded_random_kernel::jet_seeded_rng_bool_p(state, p),
-            ))
+            Ok(CtValue::Bool(seeded_random_kernel::jet_seeded_rng_bool_p(
+                state, p,
+            )))
         }
         "normal" => {
             let mean = float(0)?;
@@ -211,9 +202,9 @@ pub fn apply_seeded_rng_method_with_type(
         }
         "bytes" => {
             let count = as_int(args.first().unwrap_or(&CtValue::Int(0)), span)?;
-            Ok(CtValue::Bytes(
-                seeded_random_kernel::jet_seeded_rng_bytes(state, count),
-            ))
+            Ok(CtValue::Bytes(seeded_random_kernel::jet_seeded_rng_bytes(
+                state, count,
+            )))
         }
         "split" => Ok(CtValue::Struct {
             type_name: crate::Syntax::RNG_TYPE.to_string(),
@@ -718,32 +709,30 @@ pub fn eval_net_fetch(
     embed_inputs: Option<&mut Vec<crate::AST::ComptimeInput>>,
     span: Span,
 ) -> Result<CtValue, Diagnostic> {
-    let url = match args.first() {
-        Some(CtValue::Str(s)) => s.clone(),
-        _ => {
-            return Err(Diagnostic::error(
+    let url =
+        match args.first() {
+            Some(CtValue::Str(s)) => s.clone(),
+            _ => return Err(Diagnostic::error(
                 "E3414",
                 "fetch: first argument must be a string URL".to_string(),
                 "`core.net.fetch` expects a string URL as its first argument".to_string(),
                 "pass a string literal: `net.fetch('https://example.com/data.txt', sha256: '…')`"
                     .to_string(),
                 Some(span),
-            ))
-        }
-    };
-    let expected = match args.get(1) {
-        Some(CtValue::Str(s)) => s.clone(),
-        _ => {
-            return Err(Diagnostic::error(
+            )),
+        };
+    let expected =
+        match args.get(1) {
+            Some(CtValue::Str(s)) => s.clone(),
+            _ => return Err(Diagnostic::error(
                 "E3414",
                 "fetch: `sha256:` argument missing or not a string".to_string(),
                 "`core.net.fetch` requires a `sha256:` labelled argument for content verification"
                     .to_string(),
                 "add `sha256: '<64-hex-chars>'` as the second argument".to_string(),
                 Some(span),
-            ))
-        }
-    };
+            )),
+        };
 
     let bytes = jet_net::fetch(&url).map_err(|error| {
         Diagnostic::error(
@@ -785,7 +774,6 @@ pub fn eval_net_fetch(
 }
 
 impl<'a> Interp<'a> {
-
     pub(in super::super) fn eval_call(
         &mut self,
         name: &str,
@@ -915,10 +903,7 @@ impl<'a> Interp<'a> {
             && !scope.contains_key(name)
         {
             if args.len() != 2 {
-                return Err(unsupported(
-                    "`Complex` takes exactly two arguments",
-                    span,
-                ));
+                return Err(unsupported("`Complex` takes exactly two arguments", span));
             }
             let real = as_float(&self.eval(&args[0].expr, scope)?, span)?;
             let imaginary = as_float(&self.eval(&args[1].expr, scope)?, span)?;
@@ -991,8 +976,14 @@ impl<'a> Interp<'a> {
             return self.call_closure(&f, vals, span);
         }
         // A user function: bind params, run the body in a fresh frame.
-        let qualified = name.split_once('.').map(|(module, symbol)| format!("{module}::{symbol}"));
-        let func = match self.funcs.get(name).copied().or_else(|| qualified.as_ref().and_then(|name| self.funcs.get(name).copied())) {
+        let qualified = name
+            .split_once('.')
+            .map(|(module, symbol)| format!("{module}::{symbol}"));
+        let func = match self.funcs.get(name).copied().or_else(|| {
+            qualified
+                .as_ref()
+                .and_then(|name| self.funcs.get(name).copied())
+        }) {
             Some(f) => f,
             None => {
                 // c139 JIT/interpreter-parity: `Name(expr)` where `Name` isn't a
@@ -1153,7 +1144,11 @@ impl<'a> Interp<'a> {
     /// any struct/enum with no such impl — sema only accepts those in
     /// interpolation when they're "auto-printable", which `jet_show()`
     /// already matches).
-    pub(in super::super) fn show_value(&mut self, v: &CtValue, _span: Span) -> Result<String, Diagnostic> {
+    pub(in super::super) fn show_value(
+        &mut self,
+        v: &CtValue,
+        _span: Span,
+    ) -> Result<String, Diagnostic> {
         let type_name = match v {
             CtValue::Struct { type_name, .. } | CtValue::Enum { type_name, .. } => {
                 Some(type_name.clone())
@@ -1345,7 +1340,11 @@ impl<'a> Interp<'a> {
             if let Some(scope) = writeback_scope.as_deref_mut() {
                 for name in data.captured.keys() {
                     let shadowed = data.lambda.params.iter().any(|param| param.name == *name);
-                    let taken = data.lambda.take_names.iter().any(|(taken, _)| taken == name);
+                    let taken = data
+                        .lambda
+                        .take_names
+                        .iter()
+                        .any(|(taken, _)| taken == name);
                     if !shadowed && !taken && scope.contains_key(name) {
                         let value = frame.get(name).expect("captured binding stays in frame");
                         scope.insert(name.clone(), value.clone());
@@ -1407,7 +1406,10 @@ impl<'a> Interp<'a> {
         scope: &mut HashMap<String, CtValue>,
     ) -> Result<CtValue, Diagnostic> {
         let Some(arg) = args.first() else {
-            return Err(unsupported(&format!("`{mode}` needs one binary expression"), span));
+            return Err(unsupported(
+                &format!("`{mode}` needs one binary expression"),
+                span,
+            ));
         };
         let Expr::Binary(op, left, right, _) = &arg.expr else {
             return Err(unsupported(

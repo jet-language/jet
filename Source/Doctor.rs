@@ -10,6 +10,7 @@
 //! The C-FFI section (D-BUILD1) reports pkg-config presence and hangar link
 //! dirs honestly.
 
+use std::fs;
 use std::path::PathBuf;
 use std::process::Command;
 
@@ -329,19 +330,41 @@ fn check_ffi() -> Vec<Check> {
             "not found (only needed for C FFI builds)",
         ));
     }
-    // Hangar link dirs: the shared C-lib store.
-    let hangar = PathBuf::from(crate::Syntax::HANGAR_DIR);
-    if hangar.is_dir() {
-        out.push(Check::ok("c-ffi", "hangar", hangar.display().to_string()));
-    } else {
-        out.push(Check::note(
+    // Hangar link dirs: the user-owned C-lib store.
+    let hangar = jetpack::Store::resolve().hangar_dir();
+    match fs::symlink_metadata(&hangar) {
+        Ok(metadata) if metadata.file_type().is_symlink() => out.push(Check::problem(
+            "c-ffi",
+            "hangar",
+            format!("{} is a symlink", hangar.display()),
+            "move the symlink aside without following it, then retry `jet hangar path`",
+            false,
+        )),
+        Ok(metadata) if metadata.is_dir() => {
+            out.push(Check::ok("c-ffi", "hangar", hangar.display().to_string()));
+        }
+        Ok(_) => out.push(Check::problem(
+            "c-ffi",
+            "hangar",
+            format!("{} is not a directory", hangar.display()),
+            "move the path aside without deleting it, then retry `jet hangar path`",
+            false,
+        )),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => out.push(Check::note(
             "c-ffi",
             "hangar",
             format!(
                 "{} not present (created when you realize a C library)",
                 hangar.display()
             ),
-        ));
+        )),
+        Err(error) => out.push(Check::problem(
+            "c-ffi",
+            "hangar",
+            format!("{} cannot be inspected ({})", hangar.display(), error.kind()),
+            "restore access to the resolved user Hangar path",
+            false,
+        )),
     }
     out
 }

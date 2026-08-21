@@ -95,8 +95,17 @@ dependencies = ["textkit"]
         publisher: Some("ed25519:ak3f \"textkit team\"".into()),
         build: None,
     });
+    lock.packages[0].envelope = Some(jetpack::Lock::LockEnvelope {
+        output_hash: "sha256-output".into(),
+        platform: "x86_64-linux".into(),
+        signature: "".into(),
+        provenance: "provider-built".into(),
+    });
     assert!(Lock::enforce_provenance_requirement(&lock, ProvenanceRequirement::Logged).is_ok());
-    assert!(Lock::enforce_provenance_requirement(&lock, ProvenanceRequirement::Attested).is_err());
+    assert!(
+        Lock::enforce_provenance_requirement(&lock, ProvenanceRequirement::Attested).is_err(),
+        "generic envelope provenance is recorded evidence, not an attestation"
+    );
 
     lock.packages[0].provenance.as_mut().unwrap().build = Some("slsa v1.0".into());
     assert!(Lock::enforce_provenance_requirement(&lock, ProvenanceRequirement::Attested).is_ok());

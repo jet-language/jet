@@ -129,12 +129,49 @@ pub(crate) fn adapter_action_identity(
     recipe: &BuildRecipe,
     source_digest: &str,
     platform: &str,
+    table: &SourceTable,
 ) -> String {
     if matches!(&plan.recipe, AdapterRecipe::Build(_)) {
-        recipe.build_identity_for_source(&plan.name, &plan.source, source_digest, platform)
+        recipe.build_identity_for_source_with_dependencies(
+            &plan.name,
+            &plan.source,
+            source_digest,
+            platform,
+            &adapter_identity_inputs(plan, table),
+        )
     } else {
         recipe.build_identity(&plan.name, source_digest, platform)
     }
+}
+
+/// Canonicalize the exact package refs used to provide build tools. The
+/// dependency list is an authority input, not merely a realization hint:
+/// changing a provider/source must change the hook subject before any tool is
+/// realized.
+pub(crate) fn adapter_dependency_refs(plan: &AdapterPlan) -> Vec<String> {
+    let mut dependencies = plan
+        .deps
+        .iter()
+        .map(jet_env_model::ModuleEval::pkg_ref)
+        .collect::<Vec<_>>();
+    dependencies.sort();
+    dependencies
+}
+
+/// Add the exact declared source authorities to the hook subject. A named
+/// source can keep the same spelling while its pinned upstream or provider
+/// changes; that is a trust change even when the recipe and dependency refs do
+/// not move.
+pub(crate) fn adapter_identity_inputs(plan: &AdapterPlan, table: &SourceTable) -> Vec<String> {
+    let mut inputs = adapter_dependency_refs(plan);
+    inputs.extend(
+        table
+            .trust_lines()
+            .into_iter()
+            .map(|line| format!("authority:{line}")),
+    );
+    inputs.sort();
+    inputs
 }
 
 pub(crate) fn adapter_cache_identity(
@@ -366,6 +403,7 @@ pub fn cache_expectation(
 /// bytes plus the normalized recipe.
 pub fn adapter_cache_expectation(
     plan: &AdapterPlan,
+    table: &SourceTable,
     ctx: &Ctx,
 ) -> Result<super::Store::CacheExpectation, ProviderError> {
     let source_ref = super::RefSpec::classify_provider_ref(&plan.source).map_err(|_| {
@@ -389,6 +427,7 @@ pub fn adapter_cache_expectation(
         &recipe,
         identity_source,
         &super::Envelope::host_platform(),
+        table,
     );
     let id_input = format!(
         "u20-adapter-v1\nname={}\nsource={}\nsource_hash={}\nidentity={}\n",
@@ -1465,6 +1504,7 @@ pub(crate) fn realize_adapter(
     ctx: &Ctx,
     expected: &super::Store::CacheExpectation,
     tools: &HashMap<String, PathBuf>,
+    table: &SourceTable,
 ) -> Result<Realized, ProviderError> {
     let source_ref = super::RefSpec::classify_provider_ref(&plan.source).map_err(|_| {
         ProviderError::Adapter(format!(
@@ -1488,6 +1528,7 @@ pub(crate) fn realize_adapter(
         &recipe,
         identity_source,
         &super::Envelope::host_platform(),
+        table,
     );
     let identity = adapter_cache_identity(&source_fingerprint, &build_identity, ctx);
     if identity != expected.identity {
@@ -1552,9 +1593,27 @@ pub(crate) fn realize_adapter(
         &format!("adapt:{}:{}", plan.name, plan.source),
         &format!("adapter:{build_identity}"),
     );
+    let declared_dependencies = adapter_dependency_refs(plan).join(",");
+    let declared_capabilities = recipe.declared_capabilities().join(",");
+    let declared_authority = table.trust_lines().join("\n");
     let replay = Recipe::lower_to_plan(&recipe, &plan.name, &build_ctx.tools)
         .map_err(|d| ProviderError::Adapter(d.what))?
         .replay_record()
+        .map_err(ProviderError::Adapter)?;
+    let mut replay_facts = replay.facts().clone();
+    replay_facts.insert(
+        "adapter.build.dependencies".to_string(),
+        declared_dependencies.clone(),
+    );
+    replay_facts.insert(
+        "adapter.build.identity".to_string(),
+        build_identity.clone(),
+    );
+    replay_facts.insert(
+        "adapter.build.authority".to_string(),
+        declared_authority.clone(),
+    );
+    let replay = crate::Comptime::Build::BuildPlanReplay::from_facts(replay_facts)
         .map_err(ProviderError::Adapter)?;
     let producer = super::Store::ProducerRecord::new(
         "adapter",
@@ -1562,15 +1621,21 @@ pub(crate) fn realize_adapter(
         &source_fingerprint,
         replay,
         format!(
-            "declared-tools:{:?}\nbuild-identity={build_identity}\ncapabilities={}",
-            build_ctx.tools,
-            recipe.declared_capabilities().join(",")
+            "declared-tools={}\nbuild-identity={build_identity}\ncapabilities={}\ndependencies={}\nauthority={}",
+            declared_dependencies,
+            declared_capabilities,
+            declared_dependencies,
+            declared_authority,
         ),
         format!("policy={}\nplatform={}", identity.policy_fingerprint, identity.platform),
         BTreeMap::from([
             ("adapter.source".into(), plan.source.clone()),
             ("build.identity".into(), build_identity),
-            ("build.capabilities".into(), recipe.declared_capabilities().join(",")),
+            ("build.capabilities".into(), declared_capabilities),
+            (
+                "build.dependencies".into(),
+                declared_dependencies,
+            ),
         ]),
     )
     .map_err(ProviderError::Adapter)?;

@@ -1,14 +1,18 @@
 // D-LAYOUT-FACTS1=B: focused layout facts and full reflection share one
-// typed model; physical byte facts are intentionally absent by default.
+// typed model; default layout keeps bytes absent, physical layouts expose them.
 derive T.LayoutFacts {
     info :: T.@layout
     reflected :: T.reflect().layout
     selected :: info[.count]
     kind :: info.kind
+    target :: info.target
+    size :: info.size
+    reflected_size :: reflected.size
+    selected_offset :: selected.offset
+    reflected_offset :: reflected.fields[0].offset
     reflected_kind :: reflected.kind
     field_name :: selected.name
-    name :: T.reflect().name
-    fn layout_facts(self) String :> "{@kind}:{@reflected_kind}:{@field_name}"
+    fn layout_facts(self) String :> "{@kind}:{@target}:{@size}:{@reflected_size}:{@selected_offset}:{@reflected_offset}:{@reflected_kind}:{@field_name}"
 }
 
 #LayoutFacts
@@ -17,7 +21,23 @@ struct Packet {
     label: String
 }
 
+#[Layout(c), LayoutFacts]
+struct CPacket {
+    count: U32
+    flag: U8
+}
+
+#[Layout(columnar), LayoutFacts]
+struct ColumnPacket {
+    count: Int
+    label: String
+}
+
 fn run() {
     packet :: Packet{count: 2, label: "ok"}
+    c_packet :: CPacket{count: 2, flag: 1}
+    column_packet :: ColumnPacket{count: 2, label: "ok"}
     print(packet.layout_facts())
+    print(c_packet.layout_facts())
+    print(column_packet.layout_facts())
 }

@@ -7,15 +7,15 @@
 
 use crate::Diagnostics::{Diagnostic, Span};
 use crate::Generics::{
-    self, e0902, e0906, e0907, e0908, e0913, sig_matches_trait, substitute_type,
-    unify_types, BUILTIN_TRAITS, COMPARABLE, DEBUG, DECODE, DISPLAY, ENCODE, EQUATABLE, PRINTABLE,
-    CLOSE, RENDERABLE, SERIALIZE,
+    self, e0902, e0906, e0907, e0908, e0913, sig_matches_trait, substitute_type, unify_types,
+    BUILTIN_TRAITS, CLOSE, COMPARABLE, DEBUG, DECODE, DISPLAY, ENCODE, EQUATABLE, PRINTABLE,
+    RENDERABLE, SERIALIZE,
 };
 use crate::Syntax;
 use crate::AST::FuncSig;
 use crate::AST::{
-    AccessConvention, DistinctDef, EnumDef, Func, ImplDef, Item, ProgramBundle,
-    StructDef, TraitDef, TraitImplBlock, TraitMethodSig, Type, TypeParam,
+    AccessConvention, DistinctDef, EnumDef, Func, ImplDef, Item, ProgramBundle, StructDef,
+    TraitDef, TraitImplBlock, TraitMethodSig, Type, TypeParam,
 };
 use std::collections::{HashMap, HashSet};
 
@@ -139,7 +139,8 @@ impl TraitRegistry {
                     .imports
                     .iter()
                     .filter_map(|import| {
-                        name_ledger.import_target(module_idx, import.span)
+                        name_ledger
+                            .import_target(module_idx, import.span)
                             .map(|target| (import.import_alias(), target))
                     })
                     .collect();
@@ -160,8 +161,7 @@ impl TraitRegistry {
                         {
                             return Some(true);
                         }
-                        let (target, leaf) = if let Some((namespace, leaf)) =
-                            name.rsplit_once("::")
+                        let (target, leaf) = if let Some((namespace, leaf)) = name.rsplit_once("::")
                         {
                             let identity = format!("{namespace}::{leaf}");
                             (name_ledger.nominal_module(&identity)?, leaf)
@@ -198,42 +198,24 @@ impl TraitRegistry {
                     continue;
                 };
                 let identity = |leaf: &String| name_ledger.nominal_identity(target, leaf);
-                registries[module_idx].auto_printable.extend(
-                    snapshot[target]
-                        .auto_printable
-                        .iter()
-                        .filter_map(identity),
-                );
-                registries[module_idx].auto_debug.extend(
-                    snapshot[target]
-                        .auto_debug
-                        .iter()
-                        .filter_map(identity),
-                );
-                registries[module_idx].auto_equatable.extend(
-                    snapshot[target]
-                        .auto_equatable
-                        .iter()
-                        .filter_map(identity),
-                );
-                registries[module_idx].auto_comparable.extend(
-                    snapshot[target]
-                        .auto_comparable
-                        .iter()
-                        .filter_map(identity),
-                );
-                registries[module_idx].auto_encode.extend(
-                    snapshot[target]
-                        .auto_encode
-                        .iter()
-                        .filter_map(identity),
-                );
-                registries[module_idx].auto_decode.extend(
-                    snapshot[target]
-                        .auto_decode
-                        .iter()
-                        .filter_map(identity),
-                );
+                registries[module_idx]
+                    .auto_printable
+                    .extend(snapshot[target].auto_printable.iter().filter_map(identity));
+                registries[module_idx]
+                    .auto_debug
+                    .extend(snapshot[target].auto_debug.iter().filter_map(identity));
+                registries[module_idx]
+                    .auto_equatable
+                    .extend(snapshot[target].auto_equatable.iter().filter_map(identity));
+                registries[module_idx]
+                    .auto_comparable
+                    .extend(snapshot[target].auto_comparable.iter().filter_map(identity));
+                registries[module_idx]
+                    .auto_encode
+                    .extend(snapshot[target].auto_encode.iter().filter_map(identity));
+                registries[module_idx]
+                    .auto_decode
+                    .extend(snapshot[target].auto_decode.iter().filter_map(identity));
             }
             for selected in selective_imports[module_idx].values().flatten() {
                 let (target, leaf) = selected;
@@ -241,16 +223,22 @@ impl TraitRegistry {
                     continue;
                 };
                 if snapshot[*target].auto_printable.contains(leaf) {
-                    registries[module_idx].auto_printable.insert(identity.clone());
+                    registries[module_idx]
+                        .auto_printable
+                        .insert(identity.clone());
                 }
                 if snapshot[*target].auto_debug.contains(leaf) {
                     registries[module_idx].auto_debug.insert(identity.clone());
                 }
                 if snapshot[*target].auto_equatable.contains(leaf) {
-                    registries[module_idx].auto_equatable.insert(identity.clone());
+                    registries[module_idx]
+                        .auto_equatable
+                        .insert(identity.clone());
                 }
                 if snapshot[*target].auto_comparable.contains(leaf) {
-                    registries[module_idx].auto_comparable.insert(identity.clone());
+                    registries[module_idx]
+                        .auto_comparable
+                        .insert(identity.clone());
                 }
                 if snapshot[*target].auto_encode.contains(leaf) {
                     registries[module_idx].auto_encode.insert(identity.clone());
@@ -395,7 +383,9 @@ impl TraitRegistry {
                 .or_default()
                 .insert(COMPARABLE.to_string());
         }
-        if d.derives.iter().any(|(name, _)| name == Syntax::MARKER_NUMERIC)
+        if d.derives
+            .iter()
+            .any(|(name, _)| name == Syntax::MARKER_NUMERIC)
             && d.range.is_none()
         {
             for trait_name in [
@@ -457,9 +447,7 @@ impl TraitRegistry {
                         .collect();
                     (types, *span)
                 }
-                Item::Distinct(d)
-                    if d.derives.iter().any(|(name, _)| name == COMPARABLE) =>
-                {
+                Item::Distinct(d) if d.derives.iter().any(|(name, _)| name == COMPARABLE) => {
                     let span = d
                         .derives
                         .iter()
@@ -470,9 +458,10 @@ impl TraitRegistry {
                 }
                 _ => continue,
             };
-            if let Some(offender) = types.iter().find_map(|ty| {
-                self.partial_comparable_offender(ty, items, &mut HashSet::new())
-            }) {
+            if let Some(offender) = types
+                .iter()
+                .find_map(|ty| self.partial_comparable_offender(ty, items, &mut HashSet::new()))
+            {
                 diags.push(Generics::e0905(&offender, COMPARABLE, span, false));
             }
         }
@@ -494,31 +483,23 @@ impl TraitRegistry {
             Type::Float | Type::Float32 => Some(ty.name()),
             Type::List(inner) | Type::Option(inner) | Type::FixedList { elem: inner, .. } => {
                 let offender = self.partial_comparable_offender(inner, items, visiting);
-                offender.or_else(|| {
-                    (!Self::native_ordering_ready(ty)).then(|| ty.name())
-                })
+                offender.or_else(|| (!Self::native_ordering_ready(ty)).then(|| ty.name()))
             }
             Type::Result { ok, err } => {
                 let offender = self
                     .partial_comparable_offender(ok, items, visiting)
                     .or_else(|| self.partial_comparable_offender(err, items, visiting));
-                offender.or_else(|| {
-                    (!Self::native_ordering_ready(ty)).then(|| ty.name())
-                })
+                offender.or_else(|| (!Self::native_ordering_ready(ty)).then(|| ty.name()))
             }
             Type::Tuple(fields) => {
                 let offender = fields.iter().find_map(|(_, field)| {
                     self.partial_comparable_offender(field, items, visiting)
                 });
-                offender.or_else(|| {
-                    (!Self::native_ordering_ready(ty)).then(|| ty.name())
-                })
+                offender.or_else(|| (!Self::native_ordering_ready(ty)).then(|| ty.name()))
             }
             Type::Tagged { inner, .. } => {
                 let offender = self.partial_comparable_offender(inner, items, visiting);
-                offender.or_else(|| {
-                    (!Self::native_ordering_ready(ty)).then(|| ty.name())
-                })
+                offender.or_else(|| (!Self::native_ordering_ready(ty)).then(|| ty.name()))
             }
             Type::Named(name) => {
                 if name == Syntax::TYPE_FLOAT || name == "F32" {
@@ -556,15 +537,21 @@ impl TraitRegistry {
                         if !e.derives.iter().any(|(derive, _)| derive == COMPARABLE) {
                             Some(name.clone())
                         } else {
-                            e.variants.iter().find_map(|variant| match &variant.payload {
-                                crate::AST::VariantPayload::Unit => None,
-                                crate::AST::VariantPayload::Single(field, _) => {
-                                    self.partial_comparable_offender(field, items, visiting)
-                                }
-                                crate::AST::VariantPayload::Named(fields) => fields.iter().find_map(
-                                    |field| self.partial_comparable_offender(&field.ty, items, visiting),
-                                ),
-                            })
+                            e.variants
+                                .iter()
+                                .find_map(|variant| match &variant.payload {
+                                    crate::AST::VariantPayload::Unit => None,
+                                    crate::AST::VariantPayload::Single(field, _) => {
+                                        self.partial_comparable_offender(field, items, visiting)
+                                    }
+                                    crate::AST::VariantPayload::Named(fields) => {
+                                        fields.iter().find_map(|field| {
+                                            self.partial_comparable_offender(
+                                                &field.ty, items, visiting,
+                                            )
+                                        })
+                                    }
+                                })
                         }
                     }
                     Some(Item::Distinct(d)) => {
@@ -747,7 +734,11 @@ impl TraitRegistry {
             let wire_types: Vec<&Type> = s
                 .fields
                 .iter()
-                .filter(|f| !f.serde_markers.iter().any(|m| m.name == Syntax::MARKER_SKIP))
+                .filter(|f| {
+                    !f.serde_markers
+                        .iter()
+                        .any(|m| m.name == Syntax::MARKER_SKIP)
+                })
                 .map(|f| &f.ty)
                 .collect();
             self.serde_wire_params.insert(
@@ -907,8 +898,7 @@ impl TraitRegistry {
             let ret_ok = match trait_name {
                 Syntax::TRAIT_EQUATABLE => method.return_type == Some(Type::Bool),
                 Syntax::TRAIT_COMPARABLE => {
-                    method.return_type
-                        == Some(Type::Named(Syntax::TYPE_ORDERING.to_string()))
+                    method.return_type == Some(Type::Named(Syntax::TYPE_ORDERING.to_string()))
                 }
                 _ => method.return_type.as_ref() == Some(&owner_type),
             };
@@ -920,7 +910,10 @@ impl TraitRegistry {
             {
                 diags.push(e0907(trait_name, expected_method, method.name_span));
             }
-            for extra in methods.iter().filter(|candidate| !std::ptr::eq(*candidate, method)) {
+            for extra in methods
+                .iter()
+                .filter(|candidate| !std::ptr::eq(*candidate, method))
+            {
                 diags.push(e0907(trait_name, expected_method, extra.name_span));
             }
             return;
@@ -1039,11 +1032,7 @@ impl TraitRegistry {
                         || self
                             .trait_impls
                             .contains(&(name.clone(), trait_name.to_string()))
-                        || !self.auto_derive_dependencies_ready(
-                            item,
-                            trait_name,
-                            &foreign_supports,
-                        )
+                        || !self.auto_derive_dependencies_ready(item, trait_name, &foreign_supports)
                     {
                         continue;
                     }
@@ -1145,8 +1134,7 @@ impl TraitRegistry {
                     false
                 } else {
                     trait_name != EQUATABLE
-                        && (!matches!(trait_name, ENCODE | DECODE)
-                            || matches!(**key, Type::String))
+                        && (!matches!(trait_name, ENCODE | DECODE) || matches!(**key, Type::String))
                         && self.auto_derive_type_ready(
                             key,
                             trait_name,
@@ -1212,12 +1200,13 @@ impl TraitRegistry {
             // intentionally not Rust-Debug; the generated record body either
             // uses the field's redaction marker or Secret's own redacted hook.
             Type::Tagged {
-                marker: crate::AST::TagMarker::Internal(
-                    crate::AST::InternalTag::CoreCryptoNominal,
-                ),
+                marker: crate::AST::TagMarker::Internal(crate::AST::InternalTag::CoreCryptoNominal),
                 inner,
             } if trait_name == DEBUG
-                && matches!(inner.as_ref(), Type::Named(name) if name == "Secret") => true,
+                && matches!(inner.as_ref(), Type::Named(name) if name == "Secret") =>
+            {
+                true
+            }
             Type::Tagged { inner, .. } => {
                 if matches!(trait_name, ENCODE | DECODE) {
                     false
@@ -1230,19 +1219,14 @@ impl TraitRegistry {
             Type::InlineRange { base: inner, .. } => {
                 self.auto_derive_type_ready(inner, trait_name, type_params, foreign_supports)
             }
-            Type::Named(name) if type_params.iter().any(|param| param.name == *name) => {
-                type_params
-                    .iter()
-                    .find(|param| param.name == *name)
-                    .is_some_and(|param| param.bounds.iter().any(|bound| bound == trait_name))
-            }
+            Type::Named(name) if type_params.iter().any(|param| param.name == *name) => type_params
+                .iter()
+                .find(|param| param.name == *name)
+                .is_some_and(|param| param.bounds.iter().any(|bound| bound == trait_name)),
             Type::Named(name) => foreign_supports(name, trait_name)
                 .unwrap_or_else(|| self.implements_trait(name, trait_name)),
             Type::Float | Type::Float32 => trait_name != COMPARABLE,
-            Type::Int
-            | Type::Bool
-            | Type::String
-            | Type::Char => true,
+            Type::Int | Type::Bool | Type::String | Type::Char => true,
             Type::IntN { .. } => {
                 !matches!(trait_name, ENCODE | DECODE) || sized_int_has_datatree_form(ty)
             }
@@ -1294,8 +1278,10 @@ impl TraitRegistry {
             if trait_name == Syntax::TRAIT_COMPARABLE && type_name == Syntax::TYPE_FLOAT {
                 return false;
             }
-            if matches!(trait_name, Syntax::TRAIT_ADD | Syntax::TRAIT_SUB | Syntax::TRAIT_MUL | Syntax::TRAIT_DIV)
-                && !matches!(type_name, Syntax::TYPE_INT | Syntax::TYPE_FLOAT)
+            if matches!(
+                trait_name,
+                Syntax::TRAIT_ADD | Syntax::TRAIT_SUB | Syntax::TRAIT_MUL | Syntax::TRAIT_DIV
+            ) && !matches!(type_name, Syntax::TYPE_INT | Syntax::TYPE_FLOAT)
             {
                 return false;
             }
@@ -1349,8 +1335,7 @@ impl TraitRegistry {
                 Generics::is_builtin_trait(trait_name) && trait_name != CLOSE
             }
             Type::Float32 => {
-                Generics::is_builtin_trait(trait_name)
-                    && !matches!(trait_name, CLOSE | COMPARABLE)
+                Generics::is_builtin_trait(trait_name) && !matches!(trait_name, CLOSE | COMPARABLE)
             }
             Type::List(inner) | Type::Option(inner) | Type::FixedList { elem: inner, .. }
                 if trait_name == EQUATABLE =>
@@ -1358,7 +1343,10 @@ impl TraitRegistry {
                 self.type_implements_trait(inner, trait_name)
             }
             Type::List(inner) | Type::Option(inner) | Type::FixedList { elem: inner, .. }
-                if trait_name == COMPARABLE => Self::native_ordering_ready(inner),
+                if trait_name == COMPARABLE =>
+            {
+                Self::native_ordering_ready(inner)
+            }
             Type::Result { ok, err } if trait_name == EQUATABLE => {
                 self.type_implements_trait(ok, trait_name)
                     && self.type_implements_trait(err, trait_name)
@@ -1381,19 +1369,23 @@ impl TraitRegistry {
                     return true;
                 };
                 params.len() == args.len()
-                    && params.iter().zip(args).enumerate().all(|(index, (param, arg))| {
-                        param
-                            .bounds
-                            .iter()
-                            .all(|bound| self.type_implements_trait(arg, bound))
-                            && (!matches!(trait_name, EQUATABLE | COMPARABLE)
-                                || self.structural_params.get(name).is_some_and(|used| {
-                                    !used.contains(&index)
-                                        || self.type_implements_trait(arg, trait_name)
-                                })
-                                || (!self.structural_params.contains_key(name)
-                                    && self.type_implements_trait(arg, trait_name)))
-                    })
+                    && params
+                        .iter()
+                        .zip(args)
+                        .enumerate()
+                        .all(|(index, (param, arg))| {
+                            param
+                                .bounds
+                                .iter()
+                                .all(|bound| self.type_implements_trait(arg, bound))
+                                && (!matches!(trait_name, EQUATABLE | COMPARABLE)
+                                    || self.structural_params.get(name).is_some_and(|used| {
+                                        !used.contains(&index)
+                                            || self.type_implements_trait(arg, trait_name)
+                                    })
+                                    || (!self.structural_params.contains_key(name)
+                                        && self.type_implements_trait(arg, trait_name)))
+                        })
             }
             Type::TraitObject(bounds) => bounds.iter().any(|bound| bound == trait_name),
             Type::Tagged { inner, .. } if trait_name == COMPARABLE => {
@@ -1555,7 +1547,8 @@ impl TraitRegistry {
                 "typed-target error conversions obey the same orphan rule as trait impls (S28); \
                  only the default `Err` target may name a foreign source"
                     .to_string(),
-                "define one of these types locally, or convert the foreign source into `Err`".to_string(),
+                "define one of these types locally, or convert the foreign source into `Err`"
+                    .to_string(),
                 Some(span),
             ));
             return;
@@ -1609,7 +1602,10 @@ impl TraitRegistry {
                 root: false,
                 default: None,
                 variadic: false,
-                variadic_bound_list: None, declared_view_from_names: None, public_label: None, zone: crate::AST::ParamZone::Either,
+                variadic_bound_list: None,
+                declared_view_from_names: None,
+                public_label: None,
+                zone: crate::AST::ParamZone::Either,
             }],
             return_type: Some(Type::Named("Snapshot".to_string())),
             span: dummy,
@@ -1633,7 +1629,10 @@ impl TraitRegistry {
                     root: false,
                     default: None,
                     variadic: false,
-                    variadic_bound_list: None, declared_view_from_names: None, public_label: None, zone: crate::AST::ParamZone::Either,
+                    variadic_bound_list: None,
+                    declared_view_from_names: None,
+                    public_label: None,
+                    zone: crate::AST::ParamZone::Either,
                 },
                 crate::AST::Param {
                     name: "snap".to_string(),
@@ -1644,7 +1643,10 @@ impl TraitRegistry {
                     root: false,
                     default: None,
                     variadic: false,
-                    variadic_bound_list: None, declared_view_from_names: None, public_label: None, zone: crate::AST::ParamZone::Either,
+                    variadic_bound_list: None,
+                    declared_view_from_names: None,
+                    public_label: None,
+                    zone: crate::AST::ParamZone::Either,
                 },
             ],
             return_type: None,
@@ -1835,10 +1837,8 @@ impl TraitRegistry {
         // two-variant value; the Prelude's `JetTLSVersion` derives `Eq`, so
         // `peer.tls_version == .Tls13` is ordinary value equality.
         self.auto_equatable.insert("TLSVersion".to_string());
-        self.trait_impls.insert((
-            Syntax::TYPE_RANGE.to_string(),
-            DISPLAY.to_string(),
-        ));
+        self.trait_impls
+            .insert((Syntax::TYPE_RANGE.to_string(), DISPLAY.to_string()));
         // D-ENCSTREAM-SURFACE1=A: EncodingError Display is the exact stream error
         // projection law; Format/Kind/Cause/Error compare by value.
         self.trait_impls
@@ -1881,8 +1881,18 @@ impl TraitRegistry {
             AccessConvention::Move,
         );
         for ty in [
-            "FileReader", "FileWriter", "FileLock", "TcpStream", "UnixStream",
-            "TLSStream", "DBConnection", "DBScope", "Arena", "Bump", "Pool", "Fixed",
+            "FileReader",
+            "FileWriter",
+            "FileLock",
+            "TcpStream",
+            "UnixStream",
+            "TLSStream",
+            "DBConnection",
+            "DBScope",
+            "Arena",
+            "Bump",
+            "Pool",
+            "Fixed",
         ] {
             self.trait_impls
                 .insert((ty.to_string(), crate::Syntax::TRAIT_CLOSE.to_string()));
@@ -1935,7 +1945,9 @@ impl TraitRegistry {
             default: None,
             variadic: false,
             variadic_bound_list: None,
-            declared_view_from_names: None, public_label: None, zone: crate::AST::ParamZone::Either,
+            declared_view_from_names: None,
+            public_label: None,
+            zone: crate::AST::ParamZone::Either,
         };
         let sql_param = |name: &str| crate::AST::Param {
             name: name.to_string(),
@@ -1947,7 +1959,9 @@ impl TraitRegistry {
             default: None,
             variadic: false,
             variadic_bound_list: None,
-            declared_view_from_names: None, public_label: None, zone: crate::AST::ParamZone::Either,
+            declared_view_from_names: None,
+            public_label: None,
+            zone: crate::AST::ParamZone::Either,
         };
         let params_param = crate::AST::Param {
             name: "params".to_string(),
@@ -1959,7 +1973,9 @@ impl TraitRegistry {
             default: None,
             variadic: false,
             variadic_bound_list: None,
-            declared_view_from_names: None, public_label: None, zone: crate::AST::ParamZone::Either,
+            declared_view_from_names: None,
+            public_label: None,
+            zone: crate::AST::ParamZone::Either,
         };
         if !self.traits.contains_key(Syntax::TRAIT_DRIVER) {
             let mut methods = HashMap::new();
@@ -2030,10 +2046,8 @@ impl TraitRegistry {
                 },
             );
         }
-        self.trait_impls.insert((
-            "DBScope".to_string(),
-            Syntax::TRAIT_DRIVER.to_string(),
-        ));
+        self.trait_impls
+            .insert(("DBScope".to_string(), Syntax::TRAIT_DRIVER.to_string()));
     }
 
     /// D-NETIO-CONTRACT2=B: register one nominal byte-stream contract and the
@@ -2042,7 +2056,10 @@ impl TraitRegistry {
     pub fn register_synthetic_io(&mut self) {
         let dummy = Span { start: 0, end: 0 };
         let io_error = Type::Named(Syntax::TYPE_IO_ERROR.to_string());
-        let bytes = Type::List(Box::new(Type::IntN { signed: false, bits: 8 }));
+        let bytes = Type::List(Box::new(Type::IntN {
+            signed: false,
+            bits: 8,
+        }));
         let write_self = crate::AST::Param {
             name: Syntax::KW_SELF.to_string(),
             name_span: dummy,
@@ -2052,57 +2069,137 @@ impl TraitRegistry {
             root: false,
             default: None,
             variadic: false,
-            variadic_bound_list: None, declared_view_from_names: None, public_label: None, zone: crate::AST::ParamZone::Either,
+            variadic_bound_list: None,
+            declared_view_from_names: None,
+            public_label: None,
+            zone: crate::AST::ParamZone::Either,
         };
         if !self.traits.contains_key(Syntax::TRAIT_IO_READER) {
             let mut methods = HashMap::new();
-            methods.insert("read".to_string(), TraitMethodSig {
-                name: "read".to_string(), name_span: dummy,
-                params: vec![write_self.clone(), crate::AST::Param {
-                    name: "limit".to_string(), name_span: dummy, ty: Type::Int,
-                    ty_span: dummy, convention: AccessConvention::Move, root: false,
-                    default: None, variadic: false, variadic_bound_list: None, declared_view_from_names: None, public_label: None, zone: crate::AST::ParamZone::Either,
-                }],
-                return_type: Some(Type::Result { ok: Box::new(bytes.clone()), err: Box::new(io_error.clone()) }),
-                span: dummy, default_body: None, is_pure: false, declared_effects: None,
-                return_view_provenance: Default::default(),
-                declared_return_view_provenance: None,
-            });
-            self.local_traits.insert(Syntax::TRAIT_IO_READER.to_string());
-            self.traits.insert(Syntax::TRAIT_IO_READER.to_string(), TraitInfo { methods, assoc_types: Vec::new(), span: dummy });
+            methods.insert(
+                "read".to_string(),
+                TraitMethodSig {
+                    name: "read".to_string(),
+                    name_span: dummy,
+                    params: vec![
+                        write_self.clone(),
+                        crate::AST::Param {
+                            name: "limit".to_string(),
+                            name_span: dummy,
+                            ty: Type::Int,
+                            ty_span: dummy,
+                            convention: AccessConvention::Move,
+                            root: false,
+                            default: None,
+                            variadic: false,
+                            variadic_bound_list: None,
+                            declared_view_from_names: None,
+                            public_label: None,
+                            zone: crate::AST::ParamZone::Either,
+                        },
+                    ],
+                    return_type: Some(Type::Result {
+                        ok: Box::new(bytes.clone()),
+                        err: Box::new(io_error.clone()),
+                    }),
+                    span: dummy,
+                    default_body: None,
+                    is_pure: false,
+                    declared_effects: None,
+                    return_view_provenance: Default::default(),
+                    declared_return_view_provenance: None,
+                },
+            );
+            self.local_traits
+                .insert(Syntax::TRAIT_IO_READER.to_string());
+            self.traits.insert(
+                Syntax::TRAIT_IO_READER.to_string(),
+                TraitInfo {
+                    methods,
+                    assoc_types: Vec::new(),
+                    span: dummy,
+                },
+            );
         }
         if !self.traits.contains_key(Syntax::TRAIT_IO_WRITER) {
             let bytes_param = crate::AST::Param {
-                name: "bytes".to_string(), name_span: dummy, ty: bytes,
-                ty_span: dummy, convention: AccessConvention::Read, root: false,
-                default: None, variadic: false, variadic_bound_list: None, declared_view_from_names: None, public_label: None, zone: crate::AST::ParamZone::Either,
+                name: "bytes".to_string(),
+                name_span: dummy,
+                ty: bytes,
+                ty_span: dummy,
+                convention: AccessConvention::Read,
+                root: false,
+                default: None,
+                variadic: false,
+                variadic_bound_list: None,
+                declared_view_from_names: None,
+                public_label: None,
+                zone: crate::AST::ParamZone::Either,
             };
             let mut methods = HashMap::new();
-            methods.insert("write".to_string(), TraitMethodSig {
-                name: "write".to_string(), name_span: dummy,
-                params: vec![write_self.clone(), bytes_param.clone()],
-                return_type: Some(Type::Result { ok: Box::new(Type::Int), err: Box::new(io_error.clone()) }),
-                span: dummy, default_body: None, is_pure: false, declared_effects: None,
-                return_view_provenance: Default::default(),
-                declared_return_view_provenance: None,
-            });
-            methods.insert("write_all".to_string(), TraitMethodSig {
-                name: "write_all".to_string(), name_span: dummy,
-                params: vec![write_self, bytes_param],
-                return_type: Some(Type::Result { ok: Box::new(Type::Named("Unit".to_string())), err: Box::new(io_error) }),
-                span: dummy, default_body: None, is_pure: false, declared_effects: None,
-                return_view_provenance: Default::default(),
-                declared_return_view_provenance: None,
-            });
-            self.local_traits.insert(Syntax::TRAIT_IO_WRITER.to_string());
-            self.traits.insert(Syntax::TRAIT_IO_WRITER.to_string(), TraitInfo { methods, assoc_types: Vec::new(), span: dummy });
+            methods.insert(
+                "write".to_string(),
+                TraitMethodSig {
+                    name: "write".to_string(),
+                    name_span: dummy,
+                    params: vec![write_self.clone(), bytes_param.clone()],
+                    return_type: Some(Type::Result {
+                        ok: Box::new(Type::Int),
+                        err: Box::new(io_error.clone()),
+                    }),
+                    span: dummy,
+                    default_body: None,
+                    is_pure: false,
+                    declared_effects: None,
+                    return_view_provenance: Default::default(),
+                    declared_return_view_provenance: None,
+                },
+            );
+            methods.insert(
+                "write_all".to_string(),
+                TraitMethodSig {
+                    name: "write_all".to_string(),
+                    name_span: dummy,
+                    params: vec![write_self, bytes_param],
+                    return_type: Some(Type::Result {
+                        ok: Box::new(Type::Named("Unit".to_string())),
+                        err: Box::new(io_error),
+                    }),
+                    span: dummy,
+                    default_body: None,
+                    is_pure: false,
+                    declared_effects: None,
+                    return_view_provenance: Default::default(),
+                    declared_return_view_provenance: None,
+                },
+            );
+            self.local_traits
+                .insert(Syntax::TRAIT_IO_WRITER.to_string());
+            self.traits.insert(
+                Syntax::TRAIT_IO_WRITER.to_string(),
+                TraitInfo {
+                    methods,
+                    assoc_types: Vec::new(),
+                    span: dummy,
+                },
+            );
         }
-        self.trait_impls.insert(("TcpStream".to_string(), Syntax::TRAIT_IO_READER.to_string()));
-        self.trait_impls.insert(("TcpStream".to_string(), Syntax::TRAIT_IO_WRITER.to_string()));
-        self.trait_impls.insert(("UnixStream".to_string(), Syntax::TRAIT_IO_READER.to_string()));
-        self.trait_impls.insert(("UnixStream".to_string(), Syntax::TRAIT_IO_WRITER.to_string()));
-        self.trait_impls.insert(("TLSStream".to_string(), Syntax::TRAIT_IO_READER.to_string()));
-        self.trait_impls.insert(("TLSStream".to_string(), Syntax::TRAIT_IO_WRITER.to_string()));
+        self.trait_impls
+            .insert(("TcpStream".to_string(), Syntax::TRAIT_IO_READER.to_string()));
+        self.trait_impls
+            .insert(("TcpStream".to_string(), Syntax::TRAIT_IO_WRITER.to_string()));
+        self.trait_impls.insert((
+            "UnixStream".to_string(),
+            Syntax::TRAIT_IO_READER.to_string(),
+        ));
+        self.trait_impls.insert((
+            "UnixStream".to_string(),
+            Syntax::TRAIT_IO_WRITER.to_string(),
+        ));
+        self.trait_impls
+            .insert(("TLSStream".to_string(), Syntax::TRAIT_IO_READER.to_string()));
+        self.trait_impls
+            .insert(("TLSStream".to_string(), Syntax::TRAIT_IO_WRITER.to_string()));
     }
 
     /// D-ITER-HOOK / D-INDEX-HOOK: register Iterable/Iterator/Index/IndexMut hooks.
@@ -2121,7 +2218,10 @@ impl TraitRegistry {
                     root: false,
                     default: None,
                     variadic: false,
-                    variadic_bound_list: None, declared_view_from_names: None, public_label: None, zone: crate::AST::ParamZone::Either,
+                    variadic_bound_list: None,
+                    declared_view_from_names: None,
+                    public_label: None,
+                    zone: crate::AST::ParamZone::Either,
                 }],
                 return_type: Some(Type::Option(Box::new(Type::Named("Item".to_string())))),
                 span: dummy,
@@ -2157,7 +2257,10 @@ impl TraitRegistry {
                     root: false,
                     default: None,
                     variadic: false,
-                    variadic_bound_list: None, declared_view_from_names: None, public_label: None, zone: crate::AST::ParamZone::Either,
+                    variadic_bound_list: None,
+                    declared_view_from_names: None,
+                    public_label: None,
+                    zone: crate::AST::ParamZone::Either,
                 }],
                 return_type: Some(Type::Named("Iter".to_string())),
                 span: dummy,
@@ -2194,7 +2297,10 @@ impl TraitRegistry {
                         root: false,
                         default: None,
                         variadic: false,
-                        variadic_bound_list: None, declared_view_from_names: None, public_label: None, zone: crate::AST::ParamZone::Either,
+                        variadic_bound_list: None,
+                        declared_view_from_names: None,
+                        public_label: None,
+                        zone: crate::AST::ParamZone::Either,
                     },
                     crate::AST::Param {
                         name: "k".to_string(),
@@ -2205,7 +2311,10 @@ impl TraitRegistry {
                         root: false,
                         default: None,
                         variadic: false,
-                        variadic_bound_list: None, declared_view_from_names: None, public_label: None, zone: crate::AST::ParamZone::Either,
+                        variadic_bound_list: None,
+                        declared_view_from_names: None,
+                        public_label: None,
+                        zone: crate::AST::ParamZone::Either,
                     },
                 ],
                 return_type: Some(Type::Option(Box::new(Type::Named("Value".to_string())))),
@@ -2243,7 +2352,10 @@ impl TraitRegistry {
                         root: false,
                         default: None,
                         variadic: false,
-                        variadic_bound_list: None, declared_view_from_names: None, public_label: None, zone: crate::AST::ParamZone::Either,
+                        variadic_bound_list: None,
+                        declared_view_from_names: None,
+                        public_label: None,
+                        zone: crate::AST::ParamZone::Either,
                     },
                     crate::AST::Param {
                         name: "k".to_string(),
@@ -2254,7 +2366,10 @@ impl TraitRegistry {
                         root: false,
                         default: None,
                         variadic: false,
-                        variadic_bound_list: None, declared_view_from_names: None, public_label: None, zone: crate::AST::ParamZone::Either,
+                        variadic_bound_list: None,
+                        declared_view_from_names: None,
+                        public_label: None,
+                        zone: crate::AST::ParamZone::Either,
                     },
                     crate::AST::Param {
                         name: "v".to_string(),
@@ -2265,7 +2380,10 @@ impl TraitRegistry {
                         root: false,
                         default: None,
                         variadic: false,
-                        variadic_bound_list: None, declared_view_from_names: None, public_label: None, zone: crate::AST::ParamZone::Either,
+                        variadic_bound_list: None,
+                        declared_view_from_names: None,
+                        public_label: None,
+                        zone: crate::AST::ParamZone::Either,
                     },
                 ],
                 return_type: None,
@@ -2296,7 +2414,7 @@ impl TraitRegistry {
     /// codegen bridges it to `jet_encode`/`jet_decode`.
     ///
     ///   `Encode`:  `fn encode(self) => Data`         (one `self` param, returns `Data`)
-    ///   `Decode`:  `fn decode(tree: Data) => T ? [FieldError]`
+    ///   `Decode`:  `fn decode(tree: Data) => T ! [FieldError]`
     ///              (static — no `self`; one `Data` param; returns the owning type or
     ///               `[FieldError]`)
     fn check_serde_impl_methods(
@@ -2307,7 +2425,11 @@ impl TraitRegistry {
         span: Span,
         diags: &mut Vec<Diagnostic>,
     ) {
-        let verb = if trait_name == ENCODE { "encode" } else { "decode" };
+        let verb = if trait_name == ENCODE {
+            "encode"
+        } else {
+            "decode"
+        };
         let is_data = |ty: &Type| matches!(ty, Type::Named(n) if Syntax::is_data_type_name(n));
         let mut saw_verb = false;
         for m in methods {
@@ -2319,15 +2441,16 @@ impl TraitRegistry {
             }
             saw_verb = true;
             let has_self = m.params.first().is_some_and(|p| p.name == Syntax::KW_SELF);
-            let non_self: Vec<&crate::AST::Param> =
-                m.params.iter().filter(|p| p.name != Syntax::KW_SELF).collect();
+            let non_self: Vec<&crate::AST::Param> = m
+                .params
+                .iter()
+                .filter(|p| p.name != Syntax::KW_SELF)
+                .collect();
             let ok = if trait_name == ENCODE {
                 // `encode(self) => Data`: exactly `self`, no other params, returns a Data.
-                has_self
-                    && non_self.is_empty()
-                    && m.return_type.as_ref().is_some_and(is_data)
+                has_self && non_self.is_empty() && m.return_type.as_ref().is_some_and(is_data)
             } else {
-                // `decode(tree: Data) => T ? [FieldError]`: static, one `Data` param,
+                // `decode(tree: Data) => T ! [FieldError]`: static, one `Data` param,
                 // returns the owning type (or `Self`) or the canonical error list.
                 let ret_ok = matches!(
                     &m.return_type,
@@ -2370,7 +2493,10 @@ impl TraitRegistry {
                 root: false,
                 default: None,
                 variadic: false,
-                variadic_bound_list: None, declared_view_from_names: None, public_label: None, zone: crate::AST::ParamZone::Either,
+                variadic_bound_list: None,
+                declared_view_from_names: None,
+                public_label: None,
+                zone: crate::AST::ParamZone::Either,
             }],
             return_type: ret,
             span: dummy,
@@ -2394,25 +2520,45 @@ impl TraitRegistry {
     }
 
     fn register_synthetic_binary_trait(&mut self, trait_name: &str, method: &str, ret: Type) {
-        if self.traits.contains_key(trait_name) { return; }
+        if self.traits.contains_key(trait_name) {
+            return;
+        }
         let dummy = Span { start: 0, end: 0 };
         let param = |name: &str| crate::AST::Param {
-            name: name.to_string(), name_span: dummy, ty: Type::Named(String::new()),
-            ty_span: dummy, convention: AccessConvention::Read, root: false, default: None,
-            variadic: false, variadic_bound_list: None, declared_view_from_names: None, public_label: None, zone: crate::AST::ParamZone::Either,
+            name: name.to_string(),
+            name_span: dummy,
+            ty: Type::Named(String::new()),
+            ty_span: dummy,
+            convention: AccessConvention::Read,
+            root: false,
+            default: None,
+            variadic: false,
+            variadic_bound_list: None,
+            declared_view_from_names: None,
+            public_label: None,
+            zone: crate::AST::ParamZone::Either,
         };
         let sig = TraitMethodSig {
-            name: method.to_string(), name_span: dummy,
+            name: method.to_string(),
+            name_span: dummy,
             params: vec![param(Syntax::KW_SELF), param("rhs")],
-            return_type: Some(ret), span: dummy, default_body: None, is_pure: false,
-            declared_effects: None, return_view_provenance: Default::default(),
-        declared_return_view_provenance: None,
+            return_type: Some(ret),
+            span: dummy,
+            default_body: None,
+            is_pure: false,
+            declared_effects: None,
+            return_view_provenance: Default::default(),
+            declared_return_view_provenance: None,
         };
         self.local_traits.insert(trait_name.to_string());
-        self.traits.insert(trait_name.to_string(), TraitInfo {
-            methods: [(method.to_string(), sig)].into_iter().collect(),
-            assoc_types: Vec::new(), span: dummy,
-        });
+        self.traits.insert(
+            trait_name.to_string(),
+            TraitInfo {
+                methods: [(method.to_string(), sig)].into_iter().collect(),
+                assoc_types: Vec::new(),
+                span: dummy,
+            },
+        );
     }
 }
 
@@ -2426,8 +2572,7 @@ pub fn auto_derive_requested(
         .rev()
         .find(|marker| {
             marker.name == trait_name
-                || (matches!(trait_name, ENCODE | DECODE)
-                    && marker.name == Syntax::MARKER_CODABLE)
+                || (matches!(trait_name, ENCODE | DECODE) && marker.name == Syntax::MARKER_CODABLE)
         })
         .map_or(package_default, |marker| !marker.negated)
 }
@@ -2436,13 +2581,19 @@ pub fn auto_derive_requested(
 /// Keep this predicate in the foundation so auto-derive eligibility and the
 /// explicit serde checker make the same decision before codec expansion.
 pub fn sized_int_has_datatree_form(ty: &Type) -> bool {
-    !matches!(ty, Type::IntN { signed: false, bits: 64 })
+    !matches!(
+        ty,
+        Type::IntN {
+            signed: false,
+            bits: 64
+        }
+    )
 }
 
 pub fn struct_auto_derive_ok(s: &StructDef) -> bool {
     !s.is_single_use
         && s.reflection_fields()
-        .all(|field| field_auto_ok(&field.ty, &s.name))
+            .all(|field| field_auto_ok(&field.ty, &s.name))
 }
 
 pub fn enum_auto_derive_ok(e: &EnumDef) -> bool {
@@ -2469,12 +2620,12 @@ fn field_auto_ok(ty: &Type, owner: &str) -> bool {
         | Type::Tagged { inner, .. }
         | Type::FixedList { elem: inner, .. }
         | Type::InlineRange { base: inner, .. } => field_auto_ok(inner, owner),
-        Type::Map { key, value, .. } | Type::Result { ok: key, err: value } => {
-            field_auto_ok(key, owner) && field_auto_ok(value, owner)
-        }
-        Type::Tuple(fields) => fields
-            .iter()
-            .all(|(_, field)| field_auto_ok(field, owner)),
+        Type::Map { key, value, .. }
+        | Type::Result {
+            ok: key,
+            err: value,
+        } => field_auto_ok(key, owner) && field_auto_ok(value, owner),
+        Type::Tuple(fields) => fields.iter().all(|(_, field)| field_auto_ok(field, owner)),
         Type::Union(members) => members.iter().all(|member| field_auto_ok(member, owner)),
         // Recursive value types use invisible boxing. Their generated trait
         // implementation may call itself just like a hand-written recursive
@@ -2619,14 +2770,10 @@ pub fn emit_trait_def(
                     // impl side (emit_trait_method) renders the same receiver. `self` /
                     // `take self` stay `&self` / `self`.
                     match p.convention {
-                        AccessConvention::Write
-                            if borrows_receiver =>
-                        {
+                        AccessConvention::Write if borrows_receiver => {
                             format!("&{} mut self", generated_view_lifetime())
                         }
-                        AccessConvention::Read
-                            if borrows_receiver =>
-                        {
+                        AccessConvention::Read if borrows_receiver => {
                             format!("&{} self", generated_view_lifetime())
                         }
                         AccessConvention::Write => "&mut self".to_string(),
@@ -2637,22 +2784,22 @@ pub fn emit_trait_def(
                     // Match the convention applied by emit_trait_method / rust_param_type.
                     let base = rust_type_name_assoc(&p.ty, &assoc);
                     let mut rust_ty = match p.convention {
-                        AccessConvention::Read if p.ty.is_scalar() => {
-                            base
-                        }
+                        AccessConvention::Read if p.ty.is_scalar() => base,
                         AccessConvention::Read => format!("&{}", base),
                         AccessConvention::Write => format!("&mut {}", base),
                         AccessConvention::Move => base,
                     };
-                    if view_provenance.as_ref().is_some_and(|map| map.values().any(|provenance| {
-                        provenance.sources.iter().any(|source| {
-                            matches!(
-                                source.source,
-                                crate::AST::ViewSource::Parameter(index)
-                                    if index == param_index
-                            )
+                    if view_provenance.as_ref().is_some_and(|map| {
+                        map.values().any(|provenance| {
+                            provenance.sources.iter().any(|source| {
+                                matches!(
+                                    source.source,
+                                    crate::AST::ViewSource::Parameter(index)
+                                        if index == param_index
+                                )
+                            })
                         })
-                    })) {
+                    }) {
                         rust_ty = add_view_lifetime(rust_ty);
                     }
                     param_index += 1;
@@ -2722,7 +2869,13 @@ mod tests {
     #[test]
     fn sized_scalars_only_satisfy_builtin_traits() {
         let traits = TraitRegistry::default();
-        for ty in [Type::IntN { signed: false, bits: 8 }, Type::Float32] {
+        for ty in [
+            Type::IntN {
+                signed: false,
+                bits: 8,
+            },
+            Type::Float32,
+        ] {
             assert!(traits.type_implements_trait(&ty, PRINTABLE));
             assert!(!traits.type_implements_trait(&ty, "UserTrait"));
         }

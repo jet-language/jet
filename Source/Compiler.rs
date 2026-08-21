@@ -222,6 +222,7 @@ fn syntax_node_value(node: &SyntaxNode) -> CtValue {
         SyntaxNodeKind::UnitFamily => "unit_family",
         SyntaxNodeKind::Marker => "marker",
         SyntaxNodeKind::Fact => "fact",
+        SyntaxNodeKind::TemplateLoop => "template_loop",
     };
     ct_struct(
         "CompilerNode",
@@ -909,6 +910,7 @@ pub enum SyntaxNodeKind {
     UnitFamily,
     Marker,
     Fact,
+    TemplateLoop,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1216,6 +1218,7 @@ fn json_syntax_tree(tree: &SyntaxTree) -> String {
                     SyntaxNodeKind::UnitFamily => "unit_family",
                     SyntaxNodeKind::Marker => "marker",
                     SyntaxNodeKind::Fact => "fact",
+                    SyntaxNodeKind::TemplateLoop => "template_loop",
                 }),
                 node.name
                     .as_deref()
@@ -1419,6 +1422,9 @@ fn item_node(item: &AST::Item) -> SyntaxNode {
         ),
         AST::Item::MarkerDecl(m) => (SyntaxNodeKind::Marker, Some(m.name.clone()), m.name_span),
         AST::Item::FactDecl(f) => (SyntaxNodeKind::Fact, Some(f.name.clone()), f.name_span),
+        // D-STRUCT-ONCE1=A: a root declaration loop is a nameless template
+        // that sema expands; surface it by its own span.
+        AST::Item::TemplateLoop(l) => (SyntaxNodeKind::TemplateLoop, None, l.span),
     };
     SyntaxNode {
         kind,

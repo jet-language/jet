@@ -21,7 +21,7 @@ fn show() {
     print(r)
 }
 
-fn sign() -> String ? {
+fn sign() -> String ! {
     data := json.parse("{\"a\":1}")?
     r := json.canonical(data)
     return r

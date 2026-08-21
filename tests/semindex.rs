@@ -99,7 +99,7 @@ fn numeric_destination_conversions_and_parse_are_cataloged() {
         .lookup_qualified("F32.from_float")
         .expect("F32 narrowing catalog entry");
     assert!(
-        narrow.signature.ends_with("-> F32 ? String"),
+        narrow.signature.ends_with("-> F32 ! String"),
         "{}",
         narrow.signature
     );

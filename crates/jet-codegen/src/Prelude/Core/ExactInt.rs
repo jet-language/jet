@@ -439,6 +439,31 @@ impl JetWasmInt {
     }
 }
 
+// D-RANGE-EXACT1=A: range iteration must use the same exact whole-number
+// carrier as the rest of the Wasm TIR. Rust's `Range<JetWasmInt>` is not an
+// iterator, so the adapter materializes the sequence here; the Web emitter
+// only marshals the already-selected range bounds and stride into this Prelude
+// operation.
+fn jet_wasm_int_range(
+    start: JetWasmInt,
+    end: JetWasmInt,
+    exclusive: bool,
+    stride: Option<JetWasmInt>,
+) -> Vec<JetWasmInt> {
+    let stride = stride.unwrap_or_else(|| JetWasmInt::from_i64(1));
+    assert!(
+        stride > JetWasmInt::zero(),
+        "loop stride must be a positive Int (D-LOOP-ADVANCE2)"
+    );
+    let mut values = Vec::new();
+    let mut current = start;
+    while if exclusive { current < end } else { current <= end } {
+        values.push(current.clone());
+        current = current.add_ref(&stride);
+    }
+    values
+}
+
 impl std::fmt::Display for JetWasmInt {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str(&self.to_string_rep())

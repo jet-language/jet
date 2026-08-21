@@ -1549,7 +1549,7 @@ impl LowerCtx<'_, '_> {
                     Some(Type::Int)
                 }
                 // D-TEXTWIDTH1=B: the policy overload can reject a control
-                // character, so its return type is `Int ? TextError`. The
+                // character, so its return type is `Int ! TextError`. The
                 // DECLARING table is sema's `is_polymorphic_core_special` +
                 // `infer_core_call`, which now stamps that type onto the node,
                 // so `??`/`?` read it off `value.ty` and never reach here. This
@@ -12749,10 +12749,10 @@ impl LowerCtx<'_, '_> {
                 Ok(handle)
             }
             // D-FAIL-CARRIER1=A: one `Present` carries both the `T?` present
-            // side and the `T ? E` ok side, so the value alone cannot say which
+            // side and the `T ! E` ok side, so the value alone cannot say which
             // physical carrier its reader will use. The slot says it: `T?` is the
             // packed carrier (`pack_option_payload`; absent is the zero word
-            // below), and `T ? E` is the result arena (`lower_ct_result`, the
+            // below), and `T ! E` is the result arena (`lower_ct_result`, the
             // same `result_new_*` handle the runtime `Ok`/`Err` path builds).
             //
             // This used to be two arms, and the second — the result one — sat
@@ -12811,7 +12811,7 @@ impl LowerCtx<'_, '_> {
         }
     }
 
-    /// Build the `T ? E` result-arena carrier for one comptime outcome side.
+    /// Build the `T ! E` result-arena carrier for one comptime outcome side.
     ///
     /// `payload_slot` is the declared side type when the caller knows it (the
     /// `ok` type for `Present`, the `err` type for `Failed(Told)`); the payload's
@@ -13658,7 +13658,7 @@ impl LowerCtx<'_, '_> {
     pub(crate) fn service_core_arity(module: &str, method: &str) -> Option<usize> {
         match (module, method) {
             ("core.service", "tree" | "tree_show") => Some(1),
-            ("core.services", "runtime") => Some(2),
+            ("core.service" | "core.services", "runtime") => Some(2),
             (
                 "core.services",
                 "restart_one_for_one"
@@ -13707,6 +13707,9 @@ impl LowerCtx<'_, '_> {
             ("core.services", "commit_snapshot") => Some(2),
             ("core.services", "append_event") => Some(2),
             ("core.services", "workflow_start") => Some(3),
+            ("core.services", "workflow_sleep") => Some(2),
+            ("core.services", "workflow_activity_wait") => Some(3),
+            ("core.services", "workflow_all") => Some(2),
             ("core.services", "workflow_step") => Some(3),
             ("core.services", "workflow_activity") => Some(5),
             ("core.services", "workflow_activity_retry") => Some(4),
@@ -13810,8 +13813,21 @@ impl LowerCtx<'_, '_> {
             _ => 0,
         };
         let targets = self.lower_expr(args.last().expect("transform target argument"))?;
-        let inputs = if args.len() == 2 {
-            self.b.ins().iconst(types::I64, 0)
+        let method_code = match method {
+            "gradient" => 0,
+            "value_and_gradient" => 1,
+            "vjp" => 2,
+            "jvp" => 3,
+            _ => return Err(format!("jit core.compute.{method} is not a transform")),
+        };
+        let method_handle = self.b.ins().iconst(types::I64, method_code);
+        let base_arity = self.b.ins().iconst(types::I64, base_arity as i64);
+        let result_fields = self.b.ins().iconst(types::I64, result_fields as i64);
+        let value = if args.len() == 2 {
+            self.call_host(
+                self.host.compute.curried_new,
+                &[callable, targets, method_handle, base_arity, result_fields],
+            )
         } else {
             let list = self.call_host(self.host.coll.list_new, &[]);
             let push = self
@@ -13821,23 +13837,18 @@ impl LowerCtx<'_, '_> {
                 let value = self.lower_expr(arg)?;
                 self.b.ins().call(push, &[list, value]);
             }
-            list
+            self.call_host(
+                self.host.compute.transform,
+                &[
+                    callable,
+                    list,
+                    targets,
+                    method_handle,
+                    base_arity,
+                    result_fields,
+                ],
+            )
         };
-        let method_handle = self.runtime.heap.alloc_string(method.to_string());
-        let method_handle = self.b.ins().iconst(types::I64, method_handle);
-        let base_arity = self.b.ins().iconst(types::I64, base_arity as i64);
-        let result_fields = self.b.ins().iconst(types::I64, result_fields as i64);
-        let value = self.call_host(
-            self.host.compute.transform,
-            &[
-                callable,
-                inputs,
-                targets,
-                method_handle,
-                base_arity,
-                result_fields,
-            ],
-        );
         self.emit_trap_check()?;
         Ok(value)
     }
@@ -18645,9 +18656,36 @@ impl LowerCtx<'_, '_> {
                                 "start" => Ok(values[0]),
                                 "end" => Ok(values[1]),
                                 "exclusive" => Ok(values[2]),
-                                _ => Err(format!("jit field `{field}` on `Range`")),
+                            _ => Err(format!("jit field `{field}` on `Range`")),
                             };
                         });
+                    }
+                    // `VjpRun.grads` is exposed as the gradient value, but the
+                    // shared Prelude keeps the zero-argument continuation as
+                    // an opaque callable handle until this projection.  Match
+                    // the AOT and interpreter adapters: load the continuation,
+                    // then call it with no arguments.  Treating the stored
+                    // callable as a record value would turn its negative
+                    // handle into tensor handle zero.
+                    if field == "grads" {
+                        if let Type::Apply { name, args } = &recv.ty {
+                            if name == "VjpRun" && args.len() == 1 {
+                                let handle = self.lower_expr(recv)?;
+                                let type_name = record_type_key(&recv.ty)
+                                    .ok_or("jit VjpRun receiver type")?;
+                                let fn_ty = Type::Fn {
+                                    params: vec![],
+                                    ret: Some(Box::new(args[0].clone())),
+                                    effect_bound: None,
+                                    param_contract: None,
+                                    call_metadata: None,
+                                    return_view_provenance: None,
+                                };
+                                let callee = self
+                                    .lower_record_field(handle, &type_name, field, &fn_ty)?;
+                                return self.lower_fn_call(callee, &fn_ty, &[]);
+                            }
+                        }
                     }
                     let mut handle = self.lower_expr(recv)?;
                     if matches!(&recv.ty, Type::Named(name) if name == jet_foundation::Syntax::TYPE_ERR) {

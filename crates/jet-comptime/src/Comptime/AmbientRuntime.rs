@@ -7,48 +7,58 @@
 
 use std::cell::Cell;
 
-use crate::AST::{CtValue, Type};
-use crate::Diagnostics::{Diagnostic, Span};
 use crate::Comptime::DevSink;
+use crate::Diagnostics::{Diagnostic, Span};
+use crate::AST::{CtValue, Type};
 
-pub type AmbientCoreCall =
-    fn(
-        &str,
-        &str,
-        Vec<CtValue>,
-        Span,
-        Option<Type>,
-        Option<&mut DevSink>,
-    ) -> Option<Result<CtValue, Diagnostic>>;
+pub type AmbientCoreCall = fn(
+    &str,
+    &str,
+    Vec<CtValue>,
+    Span,
+    Option<Type>,
+    Option<&mut DevSink>,
+) -> Option<Result<CtValue, Diagnostic>>;
 pub type AmbientHandle =
     fn(&str, &mut CtValue, &mut [CtValue], Span) -> Option<Result<CtValue, Diagnostic>>;
+pub type AmbientExternCall =
+    fn(&str, Vec<CtValue>, Span, Option<Type>) -> Option<Result<CtValue, Diagnostic>>;
 
 thread_local! {
     static CORE_CALL: Cell<Option<AmbientCoreCall>> = const { Cell::new(None) };
     static HANDLE: Cell<Option<AmbientHandle>> = const { Cell::new(None) };
+    static EXTERN_CALL: Cell<Option<AmbientExternCall>> = const { Cell::new(None) };
 }
 
 /// Install ambient hooks for the duration of `body`, then clear them.
 pub fn with_ambient<R>(
     core_call: Option<AmbientCoreCall>,
     handle: Option<AmbientHandle>,
+    extern_call: Option<AmbientExternCall>,
     body: impl FnOnce() -> R,
 ) -> R {
     CORE_CALL.with(|slot| slot.set(core_call));
     HANDLE.with(|slot| slot.set(handle));
+    EXTERN_CALL.with(|slot| slot.set(extern_call));
     let out = body();
     CORE_CALL.with(|slot| slot.set(None));
     HANDLE.with(|slot| slot.set(None));
+    EXTERN_CALL.with(|slot| slot.set(None));
     out
 }
 
 /// Copy the current callbacks into a worker thread before evaluating a
 /// runtime fragment. The callbacks are function pointers, so this preserves
 /// the ambient authority without sharing mutable host state.
-pub fn ambient_hooks() -> (Option<AmbientCoreCall>, Option<AmbientHandle>) {
+pub fn ambient_hooks() -> (
+    Option<AmbientCoreCall>,
+    Option<AmbientHandle>,
+    Option<AmbientExternCall>,
+) {
     (
         CORE_CALL.with(|slot| slot.get()),
         HANDLE.with(|slot| slot.get()),
+        EXTERN_CALL.with(|slot| slot.get()),
     )
 }
 
@@ -90,5 +100,18 @@ pub fn try_handle(
     args: &mut [CtValue],
     span: Span,
 ) -> Option<Result<CtValue, Diagnostic>> {
-    HANDLE.with(|slot| slot.get()).and_then(|hook| hook(op, recv, args, span))
+    HANDLE
+        .with(|slot| slot.get())
+        .and_then(|hook| hook(op, recv, args, span))
+}
+
+pub fn try_extern_call(
+    wrapper: &str,
+    args: Vec<CtValue>,
+    span: Span,
+    resolved_ret: Option<Type>,
+) -> Option<Result<CtValue, Diagnostic>> {
+    EXTERN_CALL
+        .with(|slot| slot.get())
+        .and_then(|hook| hook(wrapper, args, span, resolved_ret))
 }

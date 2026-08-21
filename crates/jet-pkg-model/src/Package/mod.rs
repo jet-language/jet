@@ -18,7 +18,7 @@ mod Edit;
 pub use Blocks::{
     build_entry_source, dep_display, parse_policy_document, BuildOptimize, BuildPanic,
     AuthorityHolds, BuildProfileDef, DepSource, PackageEntry, PackageKind, ProviderAuthority,
-    ProvenanceRequirement, Target, TrustDecision, TrustPolicy,
+    ImportBoundary, ProvenanceRequirement, Target, TrustDecision, TrustPolicy,
 };
 pub use Convert::{new_template, to_manifest};
 pub use Discovery::{discover_module_in, DiscoveryError};
@@ -181,6 +181,8 @@ pub struct PackageFacts {
     /// D-RINGLAYER1=A: optional runtime ceiling (`core`/`alloc`/`hosted`).
     pub layer: Option<crate::Syntax::RuntimeLayer>,
     pub deps: BTreeMap<String, Blocks::DepSource>,
+    /// D-STRUCT-EDGE1=A: package-owned import edges this manifest denies.
+    pub boundaries: Vec<Blocks::ImportBoundary>,
     /// U10/D-TGT1: the `packages: { name: kind }` block.
     pub packages: Vec<Blocks::PackageEntry>,
     pub services: BTreeMap<String, ServiceFact>,
@@ -434,12 +436,13 @@ impl PackageFacts {
         let mut semantic = String::new();
         write!(
             &mut semantic,
-            "name={:?};version={:?};jet={:?};source={:?};deps={:?};services={:?};outputs={:?};environments={:?};defaults={:?};build_profiles={:?};settings={:?};configs={:?};members={:?};authority={:?};effects_enabled={:?};effects_allow={:?};effects_deny={:?};policy_contain={:?};policy_harden={:?};",
+            "name={:?};version={:?};jet={:?};source={:?};deps={:?};boundaries={:?};services={:?};outputs={:?};environments={:?};defaults={:?};build_profiles={:?};settings={:?};configs={:?};members={:?};authority={:?};effects_enabled={:?};effects_allow={:?};effects_deny={:?};policy_contain={:?};policy_harden={:?};",
             self.name,
             self.version,
             self.jet,
             self.source,
             self.deps,
+            self.boundaries,
             self.services,
             self.outputs,
             self.environments,
@@ -1703,6 +1706,15 @@ fn parse_common(
             "runtime" => return Err(PackageParseError::UnknownField(field.clone())),
             crate::Syntax::MANIFEST_BLOCK_DEPS => {
                 facts.deps = Blocks::parse_deps(record_body(&value, crate::Syntax::MANIFEST_BLOCK_DEPS)?)?
+            }
+            crate::Syntax::MANIFEST_BLOCK_BOUNDARIES if config => {
+                return Err(PackageParseError::UnknownField(field.clone()))
+            }
+            crate::Syntax::MANIFEST_BLOCK_BOUNDARIES => {
+                facts.boundaries = Blocks::parse_boundaries(record_body(
+                    &value,
+                    crate::Syntax::MANIFEST_BLOCK_BOUNDARIES,
+                )?)?
             }
             "packages" if config => return Err(PackageParseError::UnknownField(field.clone())),
             "packages" => facts.packages = Blocks::parse_packages(record_body(&value, "packages")?)?,

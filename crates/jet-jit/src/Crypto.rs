@@ -20,6 +20,7 @@ pub(crate) mod runtime {
     #[allow(unused_imports)]
     pub use jet_foundation::Outcome::*;
     include!("../../jet-codegen/src/Prelude/CoreLib/Top/CryptoEntropy.rs");
+    include!("../../jet-codegen/src/Prelude/CoreLib/Top/SHA256Raw.rs");
     include!("../../jet-codegen/src/Prelude/CoreLib/Top/SHAFamily.rs");
     use jet_crypto_entropy::{jet_crypto_entropy_fill, JetCryptoEntropyError};
     pub(crate) use jet_crypto_entropy::jet_crypto_entropy_fill as jet_crypto_entropy_fill_for_host;
@@ -29,9 +30,6 @@ pub(crate) mod runtime {
     include!("../../jet-pkg-model/src/Prelude/VaultKeyWrap.rs");
 
     use crate::Encoding::json_rt as jet_std;
-    fn jet_sha256_raw(data: &[u8]) -> [u8; 32] {
-        jet_crypto_email_sha256_impl(data)
-    }
     #[allow(unused_imports)]
     pub use jet_foundation::Outcome::*;
     include!("../../jet-codegen/src/Prelude/CoreLib/Top/Auth.rs");

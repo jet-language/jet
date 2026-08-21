@@ -50,6 +50,12 @@ fn item_has_comptime_evaluation(item: &Item) -> bool {
             .is_some_and(|body| body.iter().any(item_has_comptime_evaluation)),
         Item::ErrorConv(value) => stmts_have_comptime_evaluation(&value.body),
         Item::UserDerive(value) => derive_body_has_comptime_evaluation(&value.body),
+        // D-STRUCT-ONCE1=A: root declaration loops are compile-time templates;
+        // keep query-mode detection aligned with marker/derive loops.
+        Item::TemplateLoop(value) => {
+            expr_has_comptime_evaluation(&value.source)
+                || derive_body_has_comptime_evaluation(&value.body)
+        }
         Item::GenericModule(value) => value.body.iter().any(item_has_comptime_evaluation),
         _ => false,
     }

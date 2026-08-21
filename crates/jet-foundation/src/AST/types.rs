@@ -1,5 +1,5 @@
-use crate::AST::Expr;
 use crate::Diagnostics::Span;
+use crate::AST::Expr;
 
 /// D-DIMENSION-OPEN1=D: a normalized open physical dimension.
 ///
@@ -17,13 +17,7 @@ impl Dimension {
     }
 
     pub fn base(identity: impl Into<String>) -> Self {
-        Self(
-            std::iter::once((
-                identity.into(),
-                Measure::signed_literal("exponent", 1),
-            ))
-            .collect(),
-        )
+        Self(std::iter::once((identity.into(), Measure::signed_literal("exponent", 1))).collect())
     }
 
     pub fn multiply(&self, rhs: &Self) -> Option<Self> {
@@ -68,21 +62,21 @@ impl Dimension {
     }
 
     pub fn axes(&self) -> impl Iterator<Item = (&str, i32)> {
-        self.0
-            .iter()
-            .map(|(axis, exponent)| {
-                (
-                    axis.as_str(),
-                    Self::exponent_value(exponent)
-                        .expect("dimension exponent must be a concrete i32 measure"),
-                )
-            })
+        self.0.iter().map(|(axis, exponent)| {
+            (
+                axis.as_str(),
+                Self::exponent_value(exponent)
+                    .expect("dimension exponent must be a concrete i32 measure"),
+            )
+        })
     }
 
     /// D-TYPE2-MEASURE1=A: expose dimension exponents through the same measure
     /// projection used by lengths, shapes, and lanes.
     pub fn measure_exponents(&self) -> impl Iterator<Item = (&str, Measure)> {
-        self.0.iter().map(|(axis, exponent)| (axis.as_str(), exponent.clone()))
+        self.0
+            .iter()
+            .map(|(axis, exponent)| (axis.as_str(), exponent.clone()))
     }
 
     /// Stable identity used by API/type serialization.
@@ -140,7 +134,9 @@ impl Dimension {
 }
 
 fn escape_axis(axis: &str) -> String {
-    axis.replace('%', "%25").replace(';', "%3B").replace(':', "%3A")
+    axis.replace('%', "%25")
+        .replace(';', "%3B")
+        .replace(':', "%3A")
 }
 
 fn unescape_axis(axis: &str) -> Option<String> {
@@ -165,15 +161,23 @@ fn unescape_axis(axis: &str) -> Option<String> {
     Some(out)
 }
 
-
 /// One compile-time number attached to a type. The measure plane owns the
 /// resolved value; only literals, module value parameters, and declared
 /// combination rules can construct it.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Measure {
-    Literal { kind: String, value: u64 },
-    SignedLiteral { kind: String, value: i64 },
-    Symbol { kind: String, name: String },
+    Literal {
+        kind: String,
+        value: u64,
+    },
+    SignedLiteral {
+        kind: String,
+        value: i64,
+    },
+    Symbol {
+        kind: String,
+        name: String,
+    },
     Combined {
         kind: String,
         rule: MeasureRule,
@@ -263,14 +267,12 @@ impl Measure {
             .expect("symbolic measure reached runtime type lowering before specialization")
     }
 
-
     pub fn symbol_name(&self) -> Option<&str> {
         match self {
             Self::Symbol { name, .. } => Some(name),
             _ => None,
         }
     }
-
 
     pub fn combine(&self, rhs: &Self, rule: MeasureRule) -> Option<Self> {
         let (left_kind, right_kind) = (self.kind(), rhs.kind());
@@ -310,19 +312,13 @@ impl Measure {
         }
     }
 
-    pub fn resolve_symbols(
-        &self,
-        resolve: &impl Fn(&str) -> Option<u64>,
-    ) -> Self {
+    pub fn resolve_symbols(&self, resolve: &impl Fn(&str) -> Option<u64>) -> Self {
         match self {
             Self::Symbol { kind, name } => resolve(name)
                 .map(|value| Self::literal(kind, value))
                 .unwrap_or_else(|| self.clone()),
             Self::Combined {
-                rule,
-                left,
-                right,
-                ..
+                rule, left, right, ..
             } => left
                 .resolve_symbols(resolve)
                 .combine(&right.resolve_symbols(resolve), *rule)
@@ -376,7 +372,6 @@ impl std::fmt::Display for Measure {
     }
 }
 
-
 /// The exactness grade carried by a numeric type. Exactness is compile-time
 /// knowledge; the runtime carrier remains the ordinary numeric type.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -399,10 +394,10 @@ pub struct FunctionObligations {
     pub return_view_provenance: Option<super::ViewProvenanceMap>,
 }
 
-/// One typed wrapper policy on a callable value. Policy names are a closed
-/// value vocabulary; arguments are retained as their checked source shape so
-/// inspection can report the exact chain without making the backend interpret
-/// policy syntax.
+/// One typed wrapper policy on a callable value. Built-in names remain the
+/// compiler's initial vocabulary; package declarations add nominal names at
+/// sema. Arguments are retained as their checked source shape so inspection
+/// can report the exact chain without making a backend interpret policy syntax.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CallablePolicy {
     pub name: String,
@@ -417,13 +412,16 @@ pub struct CallablePolicyChain {
 }
 
 impl CallablePolicyChain {
-    pub const NAMES: &'static [&'static str] = &[
-        "cache",
-        "retry",
-        "trace",
-        "registration",
-        "route",
-    ];
+    pub const BUILTIN_NAMES: &'static [&'static str] =
+        &["cache", "retry", "trace", "registration", "route"];
+    /// Compatibility name for existing diagnostics/index consumers. The
+    /// accepted vocabulary is open through the bundle's user declarations;
+    /// this slice is only the built-in suggestion set.
+    pub const NAMES: &'static [&'static str] = Self::BUILTIN_NAMES;
+
+    pub fn is_builtin(name: &str) -> bool {
+        Self::BUILTIN_NAMES.contains(&name)
+    }
 
     /// Parse the one typed policy value used by both declaration markers and
     /// `apply(...)`. A policy is a call expression, never one of the retired
@@ -454,14 +452,11 @@ impl CallablePolicy {
         let Expr::Call(call) = expr else {
             return Err("a callable policy is a call such as `retry(3)`".to_string());
         };
-        if !CallablePolicyChain::NAMES.contains(&call.name.as_str()) {
-            return Err(format!(
-                "`{}` is not a callable policy; use one of {}",
-                call.name,
-                CallablePolicyChain::NAMES.join(", ")
-            ));
-        }
-        if call.args.iter().any(|arg| arg.label.is_some() || arg.spread) {
+        if call
+            .args
+            .iter()
+            .any(|arg| arg.label.is_some() || arg.spread)
+        {
             return Err(format!(
                 "`{}` policies take ordinary positional values",
                 call.name
@@ -561,9 +556,10 @@ impl FunctionObligations {
     pub fn satisfies(&self, required: &Self) -> bool {
         let effects_ok = match &required.effect_bound {
             None => true,
-            Some(required) => self.effect_bound.as_ref().is_some_and(|offered| {
-                offered.iter().all(|effect| required.contains(effect))
-            }),
+            Some(required) => self
+                .effect_bound
+                .as_ref()
+                .is_some_and(|offered| offered.iter().all(|effect| required.contains(effect))),
         };
         if !effects_ok {
             return false;
@@ -577,10 +573,11 @@ impl FunctionObligations {
             Some(required) => self.param_contract.as_ref().is_none_or(|offered| {
                 offered.len() == required.len()
                     && offered.iter().zip(required).all(|((on, oz), (rn, rz))| {
-                        on == rn && match (oz, rz) {
-                            (super::ParamZone::Either, _) => true,
-                            (offered, required) => offered == required,
-                        }
+                        on == rn
+                            && match (oz, rz) {
+                                (super::ParamZone::Either, _) => true,
+                                (offered, required) => offered == required,
+                            }
                     })
             }),
         };
@@ -688,11 +685,11 @@ impl KnowledgeVector {
         }
         self.entries.push(entry);
         self.entries.sort_by(|left, right| {
-            left.path
-                .cmp(&right.path)
-                .then_with(|| left.plane
-                .cmp(right.plane)
-                .then_with(|| left.fact.canonical().cmp(&right.fact.canonical())))
+            left.path.cmp(&right.path).then_with(|| {
+                left.plane
+                    .cmp(right.plane)
+                    .then_with(|| left.fact.canonical().cmp(&right.fact.canonical()))
+            })
         });
     }
 
@@ -796,12 +793,12 @@ impl KnowledgeVector {
     }
 
     pub fn obligations(&self) -> Option<&FunctionObligations> {
-        self.entries.iter().find_map(|entry| {
-            match (&entry.path.is_empty(), &entry.fact) {
+        self.entries
+            .iter()
+            .find_map(|entry| match (&entry.path.is_empty(), &entry.fact) {
                 (true, KnowledgeFact::Obligation(obligations)) => Some(obligations),
                 _ => None,
-            }
-        })
+            })
     }
 
     pub fn from_interval(lo: i64, hi: i64) -> Self {
@@ -875,7 +872,7 @@ pub enum InternalTag {
     /// already a raw C function pointer, not a boxed Jet closure.
     CppCallbackAbi,
     /// D-ALLOCFAIL1=A: the compiler-only mutable reference carrier returned by
-    /// `mem.*.try_alloc`. It stays transparent to Jet's `T ? AllocError`
+    /// `mem.*.try_alloc`. It stays transparent to Jet's `T ! AllocError`
     /// identity while preserving the allocator slot through every tier.
     AllocatorView,
 }
@@ -948,7 +945,8 @@ pub enum Type {
     Shared(Box<Type>),
     /// S32: `T?` optional value.
     Option(Box<Type>),
-    /// S34: `T ? E` fallible return. Internally lowered through Rust `Result<T, E>`.
+    /// S34 / D-ERRSIGIL1: `T ! E` fallible return. Internally lowered through
+    /// Rust `Result<T, E>`.
     Result {
         ok: Box<Type>,
         err: Box<Type>,
@@ -1190,7 +1188,10 @@ pub fn union_enum_name(members: &[Type]) -> String {
 }
 
 fn effect_names(row: &[(String, Span)]) -> String {
-    row.iter().map(|(name, _)| name.as_str()).collect::<Vec<_>>().join(", ")
+    row.iter()
+        .map(|(name, _)| name.as_str())
+        .collect::<Vec<_>>()
+        .join(", ")
 }
 
 fn fn_param_names(params: &[Type], contract: Option<&[(String, super::ParamZone)]>) -> String {
@@ -1207,7 +1208,10 @@ fn fn_param_names(params: &[Type], contract: Option<&[(String, super::ParamZone)
             .get(index)
             .map(|(label, _)| label.as_str())
             .filter(|label| !label.is_empty());
-        parts.push(label.map_or_else(|| param.name(), |label| format!("{label}: {}", param.name())));
+        parts.push(label.map_or_else(
+            || param.name(),
+            |label| format!("{label}: {}", param.name()),
+        ));
         if zone == Some(super::ParamZone::PositionalOnly)
             && contract
                 .get(index + 1)
@@ -1249,7 +1253,9 @@ impl Type {
 
     pub fn callable_policies(&self) -> Option<&CallablePolicyChain> {
         match self {
-            Type::Fn { call_metadata, .. } => call_metadata.as_ref().map(|metadata| &metadata.policies),
+            Type::Fn { call_metadata, .. } => {
+                call_metadata.as_ref().map(|metadata| &metadata.policies)
+            }
             _ => None,
         }
     }
@@ -1308,8 +1314,7 @@ impl Type {
         visit: &mut impl FnMut(&Type, &Type),
     ) -> Result<(), CompositeTypePairError> {
         match (left, right) {
-            (Type::List(left), Type::List(right))
-            | (Type::Option(left), Type::Option(right)) => {
+            (Type::List(left), Type::List(right)) | (Type::Option(left), Type::Option(right)) => {
                 visit(left, right);
                 Self::for_each_composite_pair(left, right, visit)
             }
@@ -1512,8 +1517,7 @@ impl Type {
             }
             Type::Apply { name, args } => {
                 for (index, arg) in args.iter().enumerate() {
-                    if matches!(name.as_str(), "Vec" | "Matrix")
-                        && matches!(arg, Type::Measure(_))
+                    if matches!(name.as_str(), "Vec" | "Matrix") && matches!(arg, Type::Measure(_))
                     {
                         continue;
                     }
@@ -1533,8 +1537,10 @@ impl Type {
                 }
             }
             Type::Named(name) => {
-                if matches!(name.as_str(), crate::Syntax::TYPE_DECIMAL | crate::Syntax::TYPE_FRACTION)
-                {
+                if matches!(
+                    name.as_str(),
+                    crate::Syntax::TYPE_DECIMAL | crate::Syntax::TYPE_FRACTION
+                ) {
                     vector.push(
                         crate::Registry::type_plane("Exactness"),
                         KnowledgeFact::Exactness(Exactness::Exact),
@@ -1661,20 +1667,14 @@ impl Type {
                         value: offered_value,
                         ..
                     },
-                ) => {
-                    nested(required_key, offered_key) && nested(required_value, offered_value)
-                }
-                (
-                    Type::Tuple(required_fields),
-                    Type::Tuple(offered_fields),
-                ) => {
+                ) => nested(required_key, offered_key) && nested(required_value, offered_value),
+                (Type::Tuple(required_fields), Type::Tuple(offered_fields)) => {
                     required_fields.len() == offered_fields.len()
-                        && required_fields
-                            .iter()
-                            .zip(offered_fields)
-                            .all(|((required_name, required), (offered_name, offered))| {
+                        && required_fields.iter().zip(offered_fields).all(
+                            |((required_name, required), (offered_name, offered))| {
                                 required_name == offered_name && nested(required, offered)
-                            })
+                            },
+                        )
                 }
                 (Type::FixedList { elem: required, .. }, Type::FixedList { elem: offered, .. })
                 | (Type::Quantity { base: required, .. }, Type::Quantity { base: offered, .. }) => {
@@ -1722,7 +1722,11 @@ impl Type {
     pub fn erased_carrier(&self) -> Type {
         match self {
             Type::List(inner) => Type::List(Box::new(inner.erased_carrier())),
-            Type::Map { key, key_span, value } => Type::Map {
+            Type::Map {
+                key,
+                key_span,
+                value,
+            } => Type::Map {
                 key: Box::new(key.erased_carrier()),
                 key_span: *key_span,
                 value: Box::new(value.erased_carrier()),
@@ -1738,9 +1742,7 @@ impl Type {
             Type::InlineRange { base, .. } => base.erased_carrier(),
             Type::Measure(_) => Type::Int,
             Type::Tagged { inner, .. } => inner.erased_carrier(),
-            Type::Fn {
-                params, ret, ..
-            } => Type::Fn {
+            Type::Fn { params, ret, .. } => Type::Fn {
                 params: params.iter().map(Type::erased_carrier).collect(),
                 ret: ret
                     .as_ref()
@@ -1760,9 +1762,9 @@ impl Type {
                     .map(|(name, ty)| (name.clone(), Box::new(ty.erased_carrier())))
                     .collect(),
             ),
-            Type::Union(members) => canonicalize_union(
-                members.iter().map(Type::erased_carrier).collect(),
-            ),
+            Type::Union(members) => {
+                canonicalize_union(members.iter().map(Type::erased_carrier).collect())
+            }
             _ => self.clone(),
         }
     }
@@ -1774,7 +1776,11 @@ impl Type {
     pub fn erased_inline_ranges(&self) -> Type {
         match self {
             Type::List(inner) => Type::List(Box::new(inner.erased_inline_ranges())),
-            Type::Map { key, key_span, value } => Type::Map {
+            Type::Map {
+                key,
+                key_span,
+                value,
+            } => Type::Map {
                 key: Box::new(key.erased_inline_ranges()),
                 key_span: *key_span,
                 value: Box::new(value.erased_inline_ranges()),
@@ -1821,12 +1827,9 @@ impl Type {
                 marker: marker.clone(),
                 inner: Box::new(inner.erased_inline_ranges()),
             },
-            Type::Union(members) => canonicalize_union(
-                members
-                    .iter()
-                    .map(Type::erased_inline_ranges)
-                    .collect(),
-            ),
+            Type::Union(members) => {
+                canonicalize_union(members.iter().map(Type::erased_inline_ranges).collect())
+            }
             Type::Quantity { base, dimension } => Type::Quantity {
                 base: Box::new(base.erased_inline_ranges()),
                 dimension: dimension.clone(),
@@ -1846,7 +1849,11 @@ impl Type {
             Type::Shared(inner) => format!("Shared<{}>", inner.carrier_identity_name()),
             Type::Option(inner) => format!("{}?", inner.carrier_identity_name()),
             Type::Result { ok, err } => {
-                format!("{} ? {}", ok.carrier_identity_name(), err.carrier_identity_name())
+                format!(
+                    "{} ! {}",
+                    ok.carrier_identity_name(),
+                    err.carrier_identity_name()
+                )
             }
             Type::Fn { params, ret, .. } => {
                 let params = params
@@ -1954,9 +1961,7 @@ impl Type {
             Type::Tagged { inner, .. } => inner.is_compute_tensor_family(),
             Type::Named(name) => name == "Tensor",
             Type::Apply { name, args } if name == "Tensor" => args.len() <= 1,
-            Type::Apply { name, args }
-                if matches!(name.as_str(), "Vec" | "Matrix") =>
-            {
+            Type::Apply { name, args } if matches!(name.as_str(), "Vec" | "Matrix") => {
                 let expected = if name == "Vec" { 1 } else { 2 };
                 args.len() == expected
                     // Sema retains the fixed Measure facts. TIR receives
@@ -1987,7 +1992,8 @@ impl Type {
             return true;
         }
         (matches!(want, Type::Named(name) if name == "Tensor") && got.is_compute_tensor_family())
-            || (matches!(got, Type::Named(name) if name == "Tensor") && want.is_compute_tensor_family())
+            || (matches!(got, Type::Named(name) if name == "Tensor")
+                && want.is_compute_tensor_family())
     }
 
     /// Recursively rewrite nominal leaves while preserving every container and
@@ -1997,7 +2003,11 @@ impl Type {
         match self {
             Type::Named(name) => map(name).map_or_else(|| self.clone(), Type::Named),
             Type::List(inner) => Type::List(Box::new(inner.map_named_types(map))),
-            Type::Map { key, key_span, value } => Type::Map {
+            Type::Map {
+                key,
+                key_span,
+                value,
+            } => Type::Map {
                 key: Box::new(key.map_named_types(map)),
                 key_span: *key_span,
                 value: Box::new(value.map_named_types(map)),
@@ -2008,7 +2018,14 @@ impl Type {
                 ok: Box::new(ok.map_named_types(map)),
                 err: Box::new(err.map_named_types(map)),
             },
-            Type::Fn { params, ret, effect_bound, param_contract, call_metadata, return_view_provenance } => Type::Fn {
+            Type::Fn {
+                params,
+                ret,
+                effect_bound,
+                param_contract,
+                call_metadata,
+                return_view_provenance,
+            } => Type::Fn {
                 params: params.iter().map(|ty| ty.map_named_types(map)).collect(),
                 ret: ret.as_ref().map(|ty| Box::new(ty.map_named_types(map))),
                 effect_bound: effect_bound.clone(),
@@ -2021,7 +2038,10 @@ impl Type {
                 args: args.iter().map(|ty| ty.map_named_types(map)).collect(),
             },
             Type::Tuple(fields) => Type::Tuple(
-                fields.iter().map(|(name, ty)| (name.clone(), Box::new(ty.map_named_types(map)))).collect(),
+                fields
+                    .iter()
+                    .map(|(name, ty)| (name.clone(), Box::new(ty.map_named_types(map))))
+                    .collect(),
             ),
             Type::FixedList { elem, len } => Type::FixedList {
                 elem: Box::new(elem.map_named_types(map)),
@@ -2036,9 +2056,9 @@ impl Type {
                 marker: marker.clone(),
                 inner: Box::new(inner.map_named_types(map)),
             },
-            Type::Union(members) => canonicalize_union(
-                members.iter().map(|m| m.map_named_types(map)).collect(),
-            ),
+            Type::Union(members) => {
+                canonicalize_union(members.iter().map(|m| m.map_named_types(map)).collect())
+            }
             Type::Quantity { base, dimension } => Type::Quantity {
                 base: Box::new(base.map_named_types(map)),
                 dimension: dimension.clone(),
@@ -2073,11 +2093,19 @@ impl Type {
             Type::Map { key, value, .. } => format!("[{}:{}]", key.name(), value.name()),
             Type::Shared(inner) => format!("Shared<{}>", inner.name()),
             Type::Option(inner) => format!("{}?", inner.name()),
-            Type::Result { ok, err } => format!("{} ? {}", ok.name(), err.name()),
-            Type::Fn { params, ret, effect_bound, param_contract, .. } => {
+            Type::Result { ok, err } => format!("{} ! {}", ok.name(), err.name()),
+            Type::Fn {
+                params,
+                ret,
+                effect_bound,
+                param_contract,
+                ..
+            } => {
                 let ps = fn_param_names(params, param_contract.as_deref());
                 match (effect_bound, ret) {
-                    (Some(row), Some(r)) => format!("fn({}) =[{}]=> {}", ps, effect_names(row), r.name()),
+                    (Some(row), Some(r)) => {
+                        format!("fn({}) =[{}]=> {}", ps, effect_names(row), r.name())
+                    }
                     (Some(row), None) => format!("fn({}) =[{}]=>", ps, effect_names(row)),
                     (None, Some(r)) => format!("fn({}) => {}", ps, r.name()),
                     (None, None) => format!("fn({})", ps),
@@ -2102,7 +2130,11 @@ impl Type {
                     return format!(
                         "`{}`<{}>",
                         name,
-                        dimensions.iter().map(u64::to_string).collect::<Vec<_>>().join(", ")
+                        dimensions
+                            .iter()
+                            .map(u64::to_string)
+                            .collect::<Vec<_>>()
+                            .join(", ")
                     );
                 }
                 let a = args.iter().map(|x| x.name()).collect::<Vec<_>>().join(", ");
@@ -2134,7 +2166,10 @@ impl Type {
                 format!("{} (a whole number from {} to {})", base.name(), lo, hi)
             }
             Type::Float32 => "F32 (a 32-bit decimal number)".to_string(),
-            Type::Tagged { marker: TagMarker::Internal(_), inner } => inner.show(),
+            Type::Tagged {
+                marker: TagMarker::Internal(_),
+                inner,
+            } => inner.show(),
             Type::Tagged { marker, inner } => format!("#{} {}", marker, inner.show()),
             Type::Union(members) => members
                 .iter()
@@ -2156,11 +2191,19 @@ impl Type {
             Type::Map { key, value, .. } => format!("[{}:{}]", key.name(), value.name()),
             Type::Shared(inner) => format!("Shared<{}>", inner.name()),
             Type::Option(inner) => format!("{}?", inner.name()),
-            Type::Result { ok, err } => format!("{} ? {}", ok.name(), err.name()),
-            Type::Fn { params, ret, effect_bound, param_contract, .. } => {
+            Type::Result { ok, err } => format!("{} ! {}", ok.name(), err.name()),
+            Type::Fn {
+                params,
+                ret,
+                effect_bound,
+                param_contract,
+                ..
+            } => {
                 let ps = fn_param_names(params, param_contract.as_deref());
                 match (effect_bound, ret) {
-                    (Some(row), Some(r)) => format!("fn({}) =[{}]=> {}", ps, effect_names(row), r.name()),
+                    (Some(row), Some(r)) => {
+                        format!("fn({}) =[{}]=> {}", ps, effect_names(row), r.name())
+                    }
                     (Some(row), None) => format!("fn({}) =[{}]=>", ps, effect_names(row)),
                     (None, Some(r)) => format!("fn({}) => {}", ps, r.name()),
                     (None, None) => format!("fn({})", ps),
@@ -2190,7 +2233,11 @@ impl Type {
                     return format!(
                         "{}<{}>",
                         name,
-                        dimensions.iter().map(u64::to_string).collect::<Vec<_>>().join(", ")
+                        dimensions
+                            .iter()
+                            .map(u64::to_string)
+                            .collect::<Vec<_>>()
+                            .join(", ")
                     );
                 }
                 let a = args.iter().map(|x| x.name()).collect::<Vec<_>>().join(", ");
@@ -2209,7 +2256,10 @@ impl Type {
             Type::IntN { signed, bits } => int_spelling(*signed, *bits),
             Type::InlineRange { base, lo, hi } => format!("{}({lo}..{hi})", base.name()),
             Type::Float32 => "F32".to_string(),
-            Type::Tagged { marker: TagMarker::Internal(_), inner } => inner.name(),
+            Type::Tagged {
+                marker: TagMarker::Internal(_),
+                inner,
+            } => inner.name(),
             Type::Tagged { marker, inner } => format!("#{} {}", marker, inner.name()),
             Type::Union(members) => members
                 .iter()
@@ -2255,8 +2305,9 @@ impl Type {
         match self {
             Type::Tagged { inner, .. } => inner.is_scalar(),
             Type::InlineRange { base, .. } => base.is_scalar(),
-            Type::Apply { name, args }
-                if name == crate::Syntax::TYPE_PTR && args.len() == 1 => true,
+            Type::Apply { name, args } if name == crate::Syntax::TYPE_PTR && args.len() == 1 => {
+                true
+            }
             _ => matches!(
                 self,
                 Type::Int | Type::Float | Type::Bool | Type::IntN { .. } | Type::Float32
@@ -2278,9 +2329,7 @@ impl Type {
     pub fn integer_range(&self) -> Option<(i128, i128)> {
         match self {
             Type::Int => None,
-            Type::IntN { .. } | Type::InlineRange { .. } => {
-                self.knowledge_vector().interval_i128()
-            }
+            Type::IntN { .. } | Type::InlineRange { .. } => self.knowledge_vector().interval_i128(),
             Type::Tagged { inner, .. } => inner.integer_range(),
             _ => None,
         }
@@ -2407,10 +2456,11 @@ impl Type {
 mod tests {
     use super::{
         numeric_type_from_name, AccessConvention, CallablePolicy, CallablePolicyChain, Dimension,
-        FunctionCallMetadata, InternalTag, KnowledgeFact, KnowledgeVector, Measure, TagMarker, Type,
+        FunctionCallMetadata, InternalTag, KnowledgeFact, KnowledgeVector, Measure, TagMarker,
+        Type,
     };
-    use crate::AST::{Expr, ParamZone, StrPart};
     use crate::Diagnostics::Span;
+    use crate::AST::{Expr, ParamZone, StrPart};
 
     fn core_secret() -> Type {
         Type::Tagged {
@@ -2454,7 +2504,7 @@ mod tests {
             ret: Some(Box::new(Type::Int)),
             effect_bound: None,
             param_contract: None,
-                call_metadata: None,
+            call_metadata: None,
             return_view_provenance: None,
         };
         let labelled = Type::Fn {
@@ -2462,7 +2512,7 @@ mod tests {
             ret: Some(Box::new(Type::Int)),
             effect_bound: None,
             param_contract: Some(vec![("force".to_string(), ParamZone::LabelOnly)]),
-                call_metadata: None,
+            call_metadata: None,
             return_view_provenance: None,
         };
 
@@ -2545,12 +2595,21 @@ mod tests {
             crate::ice!(None, "function value")
         };
         assert_eq!(params, vec![Type::List(Box::new(Type::String))]);
-        assert_eq!(ret.unwrap().as_ref(), &Type::Result {
-            ok: Box::new(Type::String),
-            err: Box::new(Type::Named("NetError".to_string())),
-        });
-        assert_eq!(effect_bound.as_ref().map(|row| row[0].0.as_str()), Some("Net"));
-        assert_eq!(param_contract, Some(vec![("users".to_string(), ParamZone::LabelOnly)]));
+        assert_eq!(
+            ret.unwrap().as_ref(),
+            &Type::Result {
+                ok: Box::new(Type::String),
+                err: Box::new(Type::Named("NetError".to_string())),
+            }
+        );
+        assert_eq!(
+            effect_bound.as_ref().map(|row| row[0].0.as_str()),
+            Some("Net")
+        );
+        assert_eq!(
+            param_contract,
+            Some(vec![("users".to_string(), ParamZone::LabelOnly)])
+        );
         assert_eq!(metadata.names, vec!["path"]);
         assert!(metadata.defaults[0].is_some());
         assert_eq!(metadata.variadic, vec![true]);
@@ -2599,7 +2658,10 @@ mod tests {
                     value: Box::new(Type::Option(Box::new(unit.clone()))),
                 },
                 Type::Tuple(vec![("value".into(), Box::new(unit.clone()))]),
-                Type::Apply { name: "Box".into(), args: vec![unit.clone()] },
+                Type::Apply {
+                    name: "Box".into(),
+                    args: vec![unit.clone()],
+                },
             ],
             ret: Some(Box::new(Type::Result {
                 ok: Box::new(unit),
@@ -2607,7 +2669,7 @@ mod tests {
             })),
             effect_bound: None,
             param_contract: None,
-                call_metadata: None,
+            call_metadata: None,
             return_view_provenance: None,
         };
         let length = nested.map_named_types(&|name| (name == "Unit").then(|| "length.Unit".into()));
@@ -2627,12 +2689,12 @@ mod tests {
             Dimension::base("Length"),
         );
         let vector = quantity.knowledge_vector();
-        assert!(vector.iter().any(|entry| {
-            matches!(&entry.fact, KnowledgeFact::Dimension(_))
-        }));
-        assert!(vector.iter().any(|entry| {
-            matches!(&entry.fact, KnowledgeFact::Interval { lo: 0, hi: 255 })
-        }));
+        assert!(vector
+            .iter()
+            .any(|entry| { matches!(&entry.fact, KnowledgeFact::Dimension(_)) }));
+        assert!(vector
+            .iter()
+            .any(|entry| { matches!(&entry.fact, KnowledgeFact::Interval { lo: 0, hi: 255 }) }));
         assert_eq!(
             quantity.erased_carrier(),
             Type::IntN {
@@ -2647,20 +2709,16 @@ mod tests {
                 args: vec![Type::Int]
             }
         );
-        assert!(
-            quantity
-                .identity()
-                .knowledge
-                .identity_key()
-                .contains("Type.Dimension")
-        );
-        assert!(
-            Type::List(Box::new(quantity.clone()))
-                .identity()
-                .knowledge
-                .identity_key()
-                .contains("Type.Dimension")
-        );
+        assert!(quantity
+            .identity()
+            .knowledge
+            .identity_key()
+            .contains("Type.Dimension"));
+        assert!(Type::List(Box::new(quantity.clone()))
+            .identity()
+            .knowledge
+            .identity_key()
+            .contains("Type.Dimension"));
         let length_key = Type::Map {
             key: Box::new(quantity.clone()),
             key_span: None,
@@ -2695,10 +2753,7 @@ mod tests {
             hi: 6,
         };
 
-        for (ty, expected) in [
-            (&width, (0_i128, 255_i128)),
-            (&range, (1_i128, 6_i128)),
-        ] {
+        for (ty, expected) in [(&width, (0_i128, 255_i128)), (&range, (1_i128, 6_i128))] {
             assert_eq!(ty.knowledge_vector().interval_i128(), Some(expected));
             assert_eq!(ty.integer_range(), Some(expected));
         }
@@ -2722,7 +2777,7 @@ mod tests {
             ret: Some(Box::new(Type::Int)),
             effect_bound: None,
             param_contract: Some(vec![("force".to_string(), zone)]),
-                call_metadata: None,
+            call_metadata: None,
             return_view_provenance: None,
         };
         let positional = callable(ParamZone::PositionalOnly);
@@ -2733,7 +2788,7 @@ mod tests {
             ret: Some(Box::new(Type::Int)),
             effect_bound: None,
             param_contract: None,
-                call_metadata: None,
+            call_metadata: None,
             return_view_provenance: None,
         };
 

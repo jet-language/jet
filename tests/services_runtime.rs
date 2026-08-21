@@ -835,6 +835,173 @@ fn run() {
 const WORKFLOW_OUTCOME_HISTORY: &str =
     "start@v1|activity:charge:charge-1@1/2|activity-retry:charge-1@2/2:Panicked(timeout)|activity-done:charge-1|activity-result:Finished\n";
 
+const WORKFLOW_WAIT_SOURCE: &str = r#"
+use core.service as service
+use core.testing as testing
+
+fn worker() {}
+
+fn run() {
+    temp := testing.temp_dir("service-workflow-wait")
+    path :: Path.from(temp).join("workflow.log").to_string()
+    tree := service.tree("checkout")
+    store :: service.state_store(path) ?? panic("state store")
+    tree.set_state_event_log(store, "workflow-events", 1, "reversible") ?? panic("state")
+    tree.worker("activities", worker, capacity: 1) ?? panic("worker")
+    tree.start() ?? panic("start")
+
+    w :: tree.workflow_start("checkout", 1) ?? panic("workflow")
+    duration :: Duration.milliseconds(0) ?? panic("duration")
+    w.sleep(duration) ?? panic("sleep")
+    activity :: w.activity("charge", "charge-1") ?? panic("activity")
+    w.all([activity]) ?? panic("all")
+    print("history:{tree.workflow_history(w) ?? panic("history")}")
+
+    replay :: tree.workflow_start("checkout", 1) ?? panic("replay")
+    replay.sleep(duration) ?? panic("replay sleep")
+    replay_activity :: replay.activity("charge", "charge-1") ?? panic("replay activity")
+    replay.all([replay_activity]) ?? panic("replay all")
+    print("replay:{tree.workflow_history(replay) ?? panic("replay history")}")
+}
+"#;
+
+const WORKFLOW_WAIT_HISTORY: &str = "start@v1|sleep:0|activity:charge:charge-1|all:charge-1\n";
+
+/// The typed wait methods publish their effects through the ordinary sema
+/// effect graph. No workflow source-text marker is needed for this check.
+#[test]
+fn workflow_wait_methods_publish_typed_effects() {
+    let root = common::unique_tmp("jet_service_workflow_wait_effects");
+    fs::create_dir_all(&root).unwrap();
+    let entry = root.join("main.jet");
+    fs::write(
+        &entry,
+        r#"
+fn time_wait(workflow: ServiceWorkflow, duration: Duration) :[Time]> {
+    workflow.sleep(duration) ?? return
+}
+
+fn activity_wait(workflow: ServiceWorkflow) :[IO]> {
+    workflow.activity("charge", "charge-1") ?? return
+    workflow.all(["charge-1"]) ?? return
+}
+
+fn run() {}
+"#,
+    )
+    .unwrap();
+    let (diagnostics, _, facts) =
+        jet::Driver::check_file_with_effect_facts(entry.to_str().unwrap(), None, false);
+    assert!(
+        !diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.severity == jet::Diagnostics::Severity::Error),
+        "typed workflow effects should satisfy their declared rows: {diagnostics:#?}"
+    );
+    assert!(facts.summaries["time_wait"].direct.contains("Time"));
+    assert!(facts.summaries["activity_wait"].direct.contains("IO"));
+}
+
+/// The workflow handle records each wait decision once and reuses it on a
+/// second body pass instead of sleeping or redelivering the activity.
+#[test]
+fn workflow_wait_methods_replay_their_history() {
+    if !have_rustc() {
+        return;
+    }
+    let (code, stdout) = build_and_run("services_workflow_wait", WORKFLOW_WAIT_SOURCE);
+    assert_eq!(code, 0);
+    assert_eq!(
+        stdout,
+        format!("history:{WORKFLOW_WAIT_HISTORY}replay:{WORKFLOW_WAIT_HISTORY}")
+    );
+
+    let (jit_code, jit_stdout, jit_stderr) = run_default_multi(
+        "services_workflow_wait_jit",
+        "main.jet",
+        &[("main.jet", WORKFLOW_WAIT_SOURCE)],
+    );
+    assert_eq!(jit_code, 0, "default workflow wait run failed: {jit_stderr}");
+    assert_eq!(jit_stdout, stdout, "default workflow wait replay diverged");
+
+    let (interpreter_code, interpreter_stdout, interpreter_stderr) =
+        interpreter_run("services_workflow_wait_interpreter", WORKFLOW_WAIT_SOURCE);
+    assert_eq!(
+        interpreter_code, 0,
+        "interpreter workflow wait run failed: {interpreter_stderr}"
+    );
+    assert_eq!(interpreter_stdout, stdout, "interpreter workflow wait replay diverged");
+}
+
+const WORKFLOW_SLEEP_CANCEL_SOURCE: &str = r#"
+use core.service as service
+use core.testing as testing
+
+fn worker() {}
+
+fn sleeping_workflow(store_path: String, ready: Sender<Int>) {
+    tree := service.tree("checkout")
+    store :: service.state_store(store_path) ?? panic("state store")
+    tree.set_state_event_log(store, "workflow-events", 1, "reversible") ?? panic("state")
+    tree.worker("activities", worker, capacity: 1) ?? panic("worker")
+    tree.start() ?? panic("start")
+    workflow :: tree.workflow_start("checkout", 1) ?? panic("workflow")
+    ready.send(1)
+    workflow.sleep(Duration.seconds(10) ?? panic("duration")) ?? panic("sleep completed")
+}
+
+fn run() {
+    temp :: testing.temp_dir("workflow-sleep-cancel")
+    store_path :: Path.from(temp).join("workflow.log").to_string()
+    (ready, started) :: channel<Int>()
+    task_handle :: task sleeping_workflow(~store_path, ready)
+    started.receive() ?? panic("workflow did not start")
+    task_handle.cancel()
+    result :: task_handle.join()
+    if result == {
+        .Err(_) -> print("cancelled")
+        .Ok(_) -> print("completed")
+    }
+
+    tree := service.tree("checkout")
+    store :: service.state_store(store_path) ?? panic("state store")
+    tree.set_state_event_log(store, "workflow-events", 1, "reversible") ?? panic("state")
+    tree.worker("activities", worker, capacity: 1) ?? panic("worker")
+    tree.start() ?? panic("restart")
+    print("history:{tree.workflow_history(1) ?? panic("history")}")
+}
+"#;
+
+/// Cancellation must stop the timer and leave a durable cancellation result
+/// for the next workflow body pass.
+#[test]
+fn workflow_sleep_cancellation_is_recorded() {
+    if !have_rustc() {
+        return;
+    }
+    let expected = "cancelled\nhistory:start@v1|sleep:10000000000|sleep-cancelled\n";
+
+    let (code, stdout) = build_and_run("services_workflow_sleep_cancel", WORKFLOW_SLEEP_CANCEL_SOURCE);
+    assert_eq!(code, 0);
+    assert_eq!(stdout, expected);
+
+    let (jit_code, jit_stdout, jit_stderr) = run_default_multi(
+        "services_workflow_sleep_cancel_jit",
+        "main.jet",
+        &[("main.jet", WORKFLOW_SLEEP_CANCEL_SOURCE)],
+    );
+    assert_eq!(jit_code, 0, "default workflow cancellation failed: {jit_stderr}");
+    assert_eq!(jit_stdout, stdout, "default workflow cancellation diverged");
+
+    let (interpreter_code, interpreter_stdout, interpreter_stderr) =
+        interpreter_run("services_workflow_sleep_cancel_interpreter", WORKFLOW_SLEEP_CANCEL_SOURCE);
+    assert_eq!(
+        interpreter_code, 0,
+        "interpreter workflow cancellation failed: {interpreter_stderr}"
+    );
+    assert_eq!(interpreter_stdout, stdout, "interpreter workflow cancellation diverged");
+}
+
 /// Activity retry and terminal workflow results must remain typed after a
 /// process restart, including an AOT/default cross-tier replay.
 #[test]

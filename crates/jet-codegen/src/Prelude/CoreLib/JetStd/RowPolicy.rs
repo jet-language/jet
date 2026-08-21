@@ -30,6 +30,35 @@
                 JetRowPolicyExpr::OwnerEqualsUser => "owner == user",
             }
         }
+
+        /// The compiled predicate consumed by the SQL transformer. The
+        /// expression enum is the one policy language; this method is its
+        /// single lowering to a bind-safe SQL predicate.
+        pub fn sql_predicate(self) -> &'static str {
+            match self {
+                JetRowPolicyExpr::AllowAll => "true",
+                JetRowPolicyExpr::OwnerEqualsUser => "owner = ?",
+            }
+        }
+
+        pub fn requires_owner_filter(self) -> bool {
+            matches!(self, JetRowPolicyExpr::OwnerEqualsUser)
+        }
+    }
+
+    /// Render the compiled policy facts for an active scope. This is audit
+    /// output, not a second parser: every field comes from the shared
+    /// `JetRowPolicyExpr` lowering above.
+    pub fn jet_db_policy_audit_line(
+        table: &str,
+        compiled: JetRowPolicyExpr,
+        user: &str,
+    ) -> String {
+        format!(
+            "DBPolicy(table={table}, user={user}, expr={}, predicate={})",
+            compiled.canonical(),
+            compiled.sql_predicate(),
+        )
     }
 
     pub fn jet_db_policy_validate_table(table: &str) -> Result<String, String> {

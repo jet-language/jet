@@ -1,7 +1,7 @@
 //! D-POOLID-API1=A: resident tier-0 `Pool<T>` generational-arena state.
 
-use crate::AST::{CtValue, Type};
 use crate::Diagnostics::{Diagnostic, Span};
+use crate::AST::{CtValue, Type};
 
 use super::super::Diagnostics::unsupported;
 
@@ -43,14 +43,16 @@ pub(super) fn apply(
     let mut changed = false;
     let value = match method {
         "add" => {
-            let value = args.first()
+            let value = args
+                .first()
                 .cloned()
                 .ok_or_else(|| unsupported("Pool.add without a value", span))?;
             let (index, generation) = match free.pop() {
                 Some(CtValue::Int(index)) => {
-                    let index = usize::try_from(index)
-                        .map_err(|_| unsupported("this Pool state", span))?;
-                    let generation = slots.get(index)
+                    let index =
+                        usize::try_from(index).map_err(|_| unsupported("this Pool state", span))?;
+                    let generation = slots
+                        .get(index)
                         .and_then(|slot| slot_generation(slot, "Vacant"))
                         .ok_or_else(|| unsupported("this Pool state", span))?;
                     slots[index] = occupied(generation, value);
@@ -67,17 +69,18 @@ pub(super) fn apply(
             id(index, generation)
         }
         "remove" => {
-            let removed = args.first().and_then(id_parts).and_then(|(index, generation)| {
-                let current = slots.get(index)?;
-                (slot_generation(current, "Occupied") == Some(generation))
-                    .then_some((index, generation))
-            });
+            let removed = args
+                .first()
+                .and_then(id_parts)
+                .and_then(|(index, generation)| {
+                    let current = slots.get(index)?;
+                    (slot_generation(current, "Occupied") == Some(generation))
+                        .then_some((index, generation))
+                });
             match removed {
                 Some((index, generation)) => {
-                    let old = std::mem::replace(
-                        &mut slots[index],
-                        vacant(generation.wrapping_add(1)),
-                    );
+                    let old =
+                        std::mem::replace(&mut slots[index], vacant(generation.wrapping_add(1)));
                     free.push(CtValue::Int(index as i64));
                     changed = true;
                     let CtValue::Enum { mut args, .. } = old else {
@@ -91,9 +94,15 @@ pub(super) fn apply(
                 }),
             }
         }
-        "ids" => CtValue::List(slots.iter().enumerate().filter_map(|(index, slot)| {
-            slot_generation(slot, "Occupied").map(|generation| id(index, generation))
-        }).collect()),
+        "ids" => CtValue::List(
+            slots
+                .iter()
+                .enumerate()
+                .filter_map(|(index, slot)| {
+                    slot_generation(slot, "Occupied").map(|generation| id(index, generation))
+                })
+                .collect(),
+        ),
         _ => return Err(unsupported("this Pool method", span)),
     };
     Ok(PoolOutcome {
@@ -113,10 +122,13 @@ fn pool_value(slots: Vec<CtValue>, free: Vec<CtValue>) -> CtValue {
 }
 
 fn list_field(fields: &[(String, CtValue)], wanted: &str) -> Vec<CtValue> {
-    fields.iter().find_map(|(name, value)| match (name.as_str(), value) {
-        (name, CtValue::List(values)) if name == wanted => Some(values.clone()),
-        _ => None,
-    }).unwrap_or_default()
+    fields
+        .iter()
+        .find_map(|(name, value)| match (name.as_str(), value) {
+            (name, CtValue::List(values)) if name == wanted => Some(values.clone()),
+            _ => None,
+        })
+        .unwrap_or_default()
 }
 
 fn id(index: usize, generation: u32) -> CtValue {
@@ -124,18 +136,27 @@ fn id(index: usize, generation: u32) -> CtValue {
         type_name: "Id".to_string(),
         fields: vec![
             ("index".to_string(), CtValue::Int(index as i64)),
-            ("generation".to_string(), CtValue::Int(i64::from(generation))),
+            (
+                "generation".to_string(),
+                CtValue::Int(i64::from(generation)),
+            ),
         ],
     }
 }
 
 fn id_parts(value: &CtValue) -> Option<(usize, u32)> {
-    let CtValue::Struct { type_name, fields } = value else { return None };
-    if type_name != "Id" { return None }
-    let int_field = |wanted: &str| fields.iter().find_map(|(name, value)| match value {
-        CtValue::Int(value) if name == wanted => Some(*value),
-        _ => None,
-    });
+    let CtValue::Struct { type_name, fields } = value else {
+        return None;
+    };
+    if type_name != "Id" {
+        return None;
+    }
+    let int_field = |wanted: &str| {
+        fields.iter().find_map(|(name, value)| match value {
+            CtValue::Int(value) if name == wanted => Some(*value),
+            _ => None,
+        })
+    };
     Some((
         usize::try_from(int_field("index")?).ok()?,
         u32::try_from(int_field("generation")?).ok()?,
@@ -159,8 +180,12 @@ fn vacant(generation: u32) -> CtValue {
 }
 
 fn slot_generation(slot: &CtValue, wanted: &str) -> Option<u32> {
-    let CtValue::Enum { variant, args, .. } = slot else { return None };
-    if variant != wanted { return None }
+    let CtValue::Enum { variant, args, .. } = slot else {
+        return None;
+    };
+    if variant != wanted {
+        return None;
+    }
     match args.first().map(|(_, value)| value) {
         Some(CtValue::Int(generation)) => u32::try_from(*generation).ok(),
         _ => None,

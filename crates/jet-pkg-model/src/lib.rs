@@ -77,6 +77,7 @@ pub mod Manifest;
 pub mod Merge;
 pub mod Package;
 pub mod Platform;
+pub mod ProviderFacts;
 // E4-JP15 / D-JPK-VARIANT1=D: closed typed variant axes + deterministic
 // selection. Pure data/matching — jetpack + BuildPlan action keys consume it.
 pub mod Variant;

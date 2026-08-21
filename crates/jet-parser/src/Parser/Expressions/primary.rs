@@ -170,8 +170,19 @@ impl<'a> Parser<'a> {
                     };
                 }
                 TokKind::Dollar => {
-                    let span = self.bump().span;
-                    return Err(self.retired_comptime_mark(span));
+                    let mark = self.bump();
+                    if !self.allow_environment_reads {
+                        return Err(self.environment_read_outside_config(mark.span));
+                    }
+                    let (name, name_span) = self.expect_ident("after `$`")?;
+                    if Syntax::is_comptime_name(name.as_str()) {
+                        return Err(self.invalid_environment_read(name_span));
+                    }
+                    return Ok(Expr::ComptimeName {
+                        name: format!("${name}"),
+                        span: Span::new(mark.span.start, name_span.end),
+                        value: None,
+                    });
                 }
                 TokKind::At => {
                     let span = self.bump().span;
@@ -216,7 +227,7 @@ impl<'a> Parser<'a> {
                     self.diags.push(Diagnostic::error(
                         "E0026",
                         format!("{} doesn't use `{}`", Syntax::LANG_NAME, foreign),
-                        "a function that can fail returns `T ? E` and signals failure with `Err(...)`"
+                        "a function that can fail returns `T ! E` and signals failure with `Err(...)`"
                             .to_string(),
                         format!("return `Err(...)` instead of `{}`", foreign),
                         Some(t.span),
@@ -919,9 +930,11 @@ impl<'a> Parser<'a> {
                             callable_tail_block_depth: None,
                             module_arg_expr_depth: None,
                             allow_lowercase_leading_dot: self.allow_lowercase_leading_dot,
+                            allow_environment_reads: self.allow_environment_reads,
                             migration_mode: self.migration_mode,
                             derive_template_depth: self.derive_template_depth,
                             policy_declarations: Vec::new(),
+                            user_policy_declarations: Vec::new(),
                             applied_rules: Vec::new(),
                             rule_facts: Vec::new(),
                             block_spans: Vec::new(),

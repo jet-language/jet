@@ -15,12 +15,12 @@ struct Reading {
 
 // One typed read of the request body, one typed JSON answer. The content type
 // is set for you, and the body cap still frames the read.
-fn store_reading(req: HTTPRequest) HTTPResponse ? HTTPError {
+fn store_reading(req: HTTPRequest) HTTPResponse ! HTTPError {
     reading :: req.json<Reading>() ?? return Ok(http_server.json(400, Reading{city: "bad body", degrees: 0}))
     return Ok(http_server.json(201, Reading{city: reading.city, degrees: reading.degrees + 1}))
 }
 
-fn run() ? HTTPError | IOError | NetError | TaskFailure {
+fn run() ! HTTPError | IOError | NetError | TaskFailure {
     files.create_dir_all("/tmp/jet_http_public")?
     files.write("/tmp/jet_http_public/index.html", "home")?
     files.write("/tmp/jet_http_public/.env", "TOKEN=private")?

@@ -129,12 +129,22 @@ fn boundary_scan(bundle: &ProgramBundle, debug_impure: bool) -> Option<Boundary>
                 }),
                 // An empty synthetic C module is only the resolution target for
                 // an unused `use c.[…]`; it carries no foreign call to execute.
-                // Keep the import runnable on tier 0, while real C surfaces
-                // retain the native-only boundary.
-                Item::CModule(module) if !module.functions.is_empty() => return Some(Boundary {
-                    feature: "a C library".to_string(),
-                    span: Some(module.span),
-                }),
+                // Supported hidden-bridge signatures are also runnable on tier
+                // 0: the evaluator marshals them through the same prepared
+                // `*_cabi` bridge as the resident JIT. Keep other C signatures
+                // on the native-only boundary until their adapter exists.
+                Item::CModule(module)
+                    if !module.functions.is_empty()
+                        && !module
+                            .functions
+                            .iter()
+                            .all(|function| function.hidden_c_bridge_compatible()) =>
+                {
+                    return Some(Boundary {
+                        feature: "a C library".to_string(),
+                        span: Some(module.span),
+                    });
+                }
                 Item::Func(function) => {
                     if function.is_unsafe {
                         return Some(Boundary {

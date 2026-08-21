@@ -158,7 +158,7 @@ impl CommandSpec {
 
 /// One canonical nested spelling and the real legacy dispatcher seam it reaches.
 /// `HandlerKey::Hangar` keeps the group because that handler consumes the group word
-/// itself (`hangar verify`, `hangar rollback`, `hangar generations`, `hangar du`, …).
+/// itself (`hangar path`, `hangar verify`, `hangar rollback`, `hangar generations`, `hangar du`, …).
 pub struct NestedCommandSpec {
     pub name: &'static str,
     /// Canonical spelling after the group name. Multiple forms use one line each.
@@ -174,7 +174,7 @@ pub struct NestedCommandSpec {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum HandlerKey {
     Publish, Yank, Keygen, Key, Vendor,
-    Graph, Query, ExplainBuild, Compiler, Impact, Dossier, Guarantees, Provenance, Digest, Semindex, Expand, Unsafe, Gates, Authority, Schema, Codemod, Audit, Sbom, Bind, Live,
+    Graph, Query, ExplainBuild, Compiler, Impact, Dossier, Guarantees, Provenance, Digest, InspectEnv, Semindex, Expand, Unsafe, Gates, Authority, Schema, Codemod, Audit, Sbom, Bind, Live,
     Logs, Search, Info, Outdated,
     Hangar,
     GcReport,
@@ -186,6 +186,7 @@ pub enum HandlerKey {
     Perf,
     Reserved,
     Facts,
+    Structure,
 }
 
 impl HandlerKey {
@@ -194,7 +195,7 @@ impl HandlerKey {
             Self::Publish => "publish", Self::Yank => "yank", Self::Keygen => "keygen",
             Self::Key => "key", Self::Vendor => "vendor", Self::Graph => "graph",
             Self::Query => "query", Self::ExplainBuild => "explain-build", Self::Compiler => "compiler", Self::Impact => "impact",
-            Self::Dossier => "dossier", Self::Guarantees => "guarantees", Self::Provenance => "provenance", Self::Digest => "digest", Self::Semindex => "semindex", Self::Expand => "expand", Self::Unsafe => "unsafe",
+            Self::Dossier => "dossier", Self::Guarantees => "guarantees", Self::Provenance => "provenance", Self::Digest => "digest", Self::InspectEnv => "inspect", Self::Semindex => "semindex", Self::Expand => "expand", Self::Unsafe => "unsafe",
             Self::Gates => "gates", Self::Authority => "authority",
             Self::Schema => "schema", Self::Codemod => "codemod", Self::Audit => "audit",
             Self::Sbom => "sbom", Self::Bind => "bind", Self::Live => "live",
@@ -211,11 +212,12 @@ impl HandlerKey {
             Self::Perf => "perf",
             Self::Reserved => "reserved",
             Self::Facts => "facts",
+            Self::Structure => "structure",
         }
     }
 
     pub const fn keeps_group(self) -> bool {
-        matches!(self, Self::Hangar | Self::GcReport | Self::Perf | Self::Env)
+        matches!(self, Self::Hangar | Self::GcReport | Self::Perf | Self::Env | Self::InspectEnv)
     }
 }
 
@@ -237,6 +239,7 @@ const INSPECT_ACTIONS: &[NestedCommandSpec] = &[
     NestedCommandSpec { name: "guarantees", usage: "guarantees [--json] <file.jet>", summary: "Show memory-safety guarantees by component", handler: HandlerKey::Guarantees, also_canonical_top_level: false },
     NestedCommandSpec { name: "provenance", usage: "provenance [--json] [<dependency>]", summary: "Read dependency provenance", handler: HandlerKey::Provenance, also_canonical_top_level: false },
     NestedCommandSpec { name: "digest", usage: "digest [--json] [--list-topics] [--topic <name>]", summary: "Write the one-file LLM surface digest", handler: HandlerKey::Digest, also_canonical_top_level: false },
+    NestedCommandSpec { name: "env", usage: "env [--json] [<env.jet|config.jet>]", summary: "List typed environment reads in a config surface", handler: HandlerKey::InspectEnv, also_canonical_top_level: false },
     NestedCommandSpec { name: "semindex", usage: "semindex <file.jet>", summary: "Search the code index", handler: HandlerKey::Semindex, also_canonical_top_level: false },
     NestedCommandSpec { name: "expand", usage: "expand [--facts <inline|memory|web|effects|layout|derive|callable-signature>] [--json] <file.jet>", summary: "Show expanded meaning of Jet code (use --json for canonical facts)", handler: HandlerKey::Expand, also_canonical_top_level: false },
     NestedCommandSpec { name: "unsafe", usage: "unsafe <file.jet>", summary: "Review unsafe code and its safeguards", handler: HandlerKey::Unsafe, also_canonical_top_level: false },
@@ -259,11 +262,13 @@ const INSPECT_ACTIONS: &[NestedCommandSpec] = &[
     // registered truth shows its home, its renderers, and the guard that
     // proves there is no second copy.
     NestedCommandSpec { name: "facts", usage: "facts [--json]", summary: "List every registered truth and its guard", handler: HandlerKey::Facts, also_canonical_top_level: false },
+    NestedCommandSpec { name: "structure", usage: "structure [--json] <file.jet>", summary: "Inspect liveness, lifecycle, and import-edge facts", handler: HandlerKey::Structure, also_canonical_top_level: false },
 ];
 // D-CLI-STORE2=A / D-JPK-STORECLI1=D: the physical store lives under
 // `hangar`. Archive verbs share Jetpack's signed, versioned archive format,
 // quarantine-first import, and atomic closure publication path.
 const HANGAR_ACTIONS: &[NestedCommandSpec] = &[
+    NestedCommandSpec { name: "path", usage: "path", summary: "Show the resolved user Hangar path", handler: HandlerKey::Hangar, also_canonical_top_level: false },
     NestedCommandSpec { name: "verify", usage: "verify", summary: "Check package-store integrity", handler: HandlerKey::Hangar, also_canonical_top_level: false },
     NestedCommandSpec { name: "repair", usage: "repair <entry> --from <archive.hangar>", summary: "Repair a damaged Hangar object from a signed archive", handler: HandlerKey::Hangar, also_canonical_top_level: false },
     NestedCommandSpec { name: "copy", usage: "copy <entry> --to <hangar-root>", summary: "Copy a verified closure between local Hangars", handler: HandlerKey::Hangar, also_canonical_top_level: false },
@@ -1828,6 +1833,7 @@ mod tests {
             ("inspect", "guarantees", Guarantees, "guarantees", false),
             ("inspect", "provenance", Provenance, "provenance", false),
             ("inspect", "digest", Digest, "digest", false),
+            ("inspect", "env", InspectEnv, "inspect", true),
             ("inspect", "semindex", Semindex, "semindex", false), ("inspect", "expand", Expand, "expand", false),
             ("inspect", "unsafe", Unsafe, "unsafe", false),
             ("inspect", "gates", Gates, "gates", false), ("inspect", "authority", Authority, "authority", false),
@@ -1838,7 +1844,9 @@ mod tests {
             ("inspect", "logs", Logs, "logs", false), ("inspect", "search", Search, "search", false),
             ("inspect", "info", Info, "info", false), ("inspect", "outdated", Outdated, "outdated", false),
             ("inspect", "reserved", Reserved, "reserved", false), ("inspect", "facts", Facts, "facts", false),
-            ("hangar", "verify", Hangar, "hangar", true), ("hangar", "repair", Hangar, "hangar", true),
+            ("inspect", "structure", Structure, "structure", false),
+            ("hangar", "path", Hangar, "hangar", true), ("hangar", "verify", Hangar, "hangar", true),
+            ("hangar", "repair", Hangar, "hangar", true),
             ("hangar", "copy", Hangar, "hangar", true), ("hangar", "import", Hangar, "hangar", true),
             ("hangar", "export", Hangar, "hangar", true), ("hangar", "dump", Hangar, "hangar", true),
             ("hangar", "restore", Hangar, "hangar", true), ("hangar", "sign", Hangar, "hangar", true),
@@ -1934,8 +1942,8 @@ mod tests {
     /// never also appear as its own separate top-level `COMMANDS` row — that
     /// would be the same command declared twice within the one table.
     /// (`keeps_group` actions like `hangar verify` legitimately share their
-    /// owning group's own row — `hangar` is one row with eleven actions, not
-    /// eleven rows.)
+    /// owning group's own row — `hangar` is one row with twelve actions, not
+    /// twelve rows.)
     #[test]
     fn no_command_declared_in_both_tables() {
         for group in command_groups() {

@@ -52,10 +52,7 @@ enum Quant {
     ZeroOrMore,
     OneOrMore,
     ZeroOrOne,
-    Range {
-        min: usize,
-        max: Option<usize>,
-    },
+    Range { min: usize, max: Option<usize> },
 }
 
 #[derive(Clone)]
@@ -296,10 +293,7 @@ impl Parser {
                     self.groups += 1;
                     let idx = self.groups;
                     self.names.push(Some(name));
-                    Ok(Atom::Group(
-                        Some(idx),
-                        Box::new(self.parse_alt(Some(')'))?),
-                    ))
+                    Ok(Atom::Group(Some(idx), Box::new(self.parse_alt(Some(')'))?)))
                 }
                 Some('=') | Some('!') => {
                     Err("lookaround is not supported; use a linear rewrite".to_string())
@@ -311,10 +305,7 @@ impl Parser {
         self.groups += 1;
         let idx = self.groups;
         self.names.push(None);
-        Ok(Atom::Group(
-            Some(idx),
-            Box::new(self.parse_alt(Some(')'))?),
-        ))
+        Ok(Atom::Group(Some(idx), Box::new(self.parse_alt(Some(')'))?)))
     }
 
     fn parse_group_name(&mut self) -> Result<String, String> {
@@ -411,9 +402,7 @@ impl Parser {
                 Some('w') => Ok(ClassItem::Word),
                 Some('s') => Ok(ClassItem::Space),
                 Some('p') => self.parse_unicode_class(),
-                Some('P') => {
-                    Err("negated Unicode classes belong outside `[]` today".to_string())
-                }
+                Some('P') => Err("negated Unicode classes belong outside `[]` today".to_string()),
                 Some(ch) => Ok(ClassItem::Char(escaped_literal(ch))),
                 None => Err("missing regex escape".to_string()),
             };

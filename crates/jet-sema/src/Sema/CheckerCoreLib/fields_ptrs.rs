@@ -12,6 +12,7 @@ impl<'a> Checker<'a> {
             alias_span: Span,
             span: Span,
         ) -> Option<Type> {
+            self.record_core_import_reference(module, alias_span);
             match (module, name) {
                 ("core.math", "pi" | "e" | "tau" | "infinity" | "nan") => Some(Type::Float),
                 // D-ALLOC1/D-ALLOC-C (ratified 2026-06-19): `mem.Arena`, `mem.Bump`,

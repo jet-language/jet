@@ -105,7 +105,16 @@ fn comptime_accepts_group_parameter_example() {
 
 #[test]
 fn repl_runs_group_parameter_example() {
-    let transcript = jet::REPL::run_transcript(&[SOURCE, "run()"], None);
+    // The canonical TIR task-group evaluator needs more than libtest's small
+    // worker stack. Keep the REPL assertion on the same stack budget as the
+    // evaluator's own task workers.
+    let transcript = std::thread::Builder::new()
+        .name("taskgroup-parameter-repl".into())
+        .stack_size(8 * 1024 * 1024)
+        .spawn(|| jet::REPL::run_transcript(&[SOURCE, "run()"], None))
+        .expect("spawn Group-parameter REPL test")
+        .join()
+        .expect("Group-parameter REPL test panicked");
     assert_eq!(transcript, format!("ok\n{EXPECTED}"));
 }
 

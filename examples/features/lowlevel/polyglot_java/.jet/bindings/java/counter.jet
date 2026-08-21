@@ -17,7 +17,7 @@ pub enum JavaError {
     Exception
 }
 
-pub fn new(arg0: Int) Handle ? JavaError {
+pub fn new(arg0: Int) Handle ! JavaError {
     value :: abi.new(arg0)
     if abi.take_error() != 0 :> return Err(JavaError.Exception)
     return Ok(Handle{value: value})
@@ -29,19 +29,19 @@ impl Handle.Close {
     fn close(^self) { abi.close(self.value) }
 }
 
-pub fn add(handle: Handle, arg0: Int) Int ? JavaError {
+pub fn add(handle: Handle, arg0: Int) Int ! JavaError {
     value :: abi.add(handle.value, arg0)
     if abi.take_error() != 0 :> return Err(JavaError.Exception)
     return Ok(value)
 }
 
-pub fn explode(handle: Handle, arg0: Int) Int ? JavaError {
+pub fn explode(handle: Handle, arg0: Int) Int ! JavaError {
     value :: abi.explode(handle.value, arg0)
     if abi.take_error() != 0 :> return Err(JavaError.Exception)
     return Ok(value)
 }
 
-pub fn twice(arg0: Float) Float ? JavaError {
+pub fn twice(arg0: Float) Float ! JavaError {
     value :: abi.twice(arg0)
     if abi.take_error() != 0 :> return Err(JavaError.Exception)
     return Ok(value)

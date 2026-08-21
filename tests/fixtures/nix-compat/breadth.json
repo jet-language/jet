@@ -1,0 +1,117 @@
+{
+  "schema": 1,
+  "oracle": {
+    "nix_version": "2.34.8",
+    "source_commit": "f3f1c3c5b8ad91850e0f7c590cf177f7ab022024",
+    "nixpkgs_rev": "b5aa0fbd538984f6e3d201be0005b4463d8b09f8",
+    "nixpkgs_nar_hash": "sha256-oPXCU/SSUokcGaJREHibG1CBX3+s/W7orDWQOZDsEeQ="
+  },
+  "fuzz_seeds": [0, 1, 2, 3, 4, 5, 6],
+  "values": [
+    {
+      "name": "attr_values_are_sorted_and_typed",
+      "system": "x86_64-linux",
+      "source": "{ devShells.x86_64-linux.default = pkgs.mkShell { packages = builtins.attrValues { first = pkgs.fd; second = pkgs.ripgrep; }; }; }",
+      "nix_expression": "let pkgs = { fd = \"fd\"; ripgrep = \"ripgrep\"; }; in { packages = builtins.attrValues { first = pkgs.fd; second = pkgs.ripgrep; }; }",
+      "nix_value": {"packages": ["fd", "ripgrep"]},
+      "jet_packages": ["fd", "ripgrep"],
+      "jet_unsupported": []
+    },
+    {
+      "name": "filtered_package_lists_preserve_literal_values",
+      "system": "x86_64-linux",
+      "source": "let names = [ pkgs.fd pkgs.ripgrep ]; in { devShells.x86_64-linux.default = pkgs.mkShell { packages = builtins.filter (name: name != \"fd\") names; }; }",
+      "nix_expression": "let names = [ \"fd\" \"ripgrep\" ]; in { packages = builtins.filter (name: name != \"fd\") names; }",
+      "nix_value": {"packages": ["ripgrep"]},
+      "jet_packages": ["ripgrep"],
+      "jet_unsupported": []
+    },
+    {
+      "name": "json_attrsets_follow_the_same_depth_limit",
+      "system": "x86_64-linux",
+      "source": "{ devShells.x86_64-linux.default = pkgs.mkShell { packages = builtins.attrValues (builtins.fromJSON \"{\\\"b\\\":\\\"ripgrep\\\",\\\"a\\\":\\\"fd\\\"}\"); }; }",
+      "nix_expression": "{ packages = builtins.attrValues (builtins.fromJSON \"{\\\"b\\\":\\\"ripgrep\\\",\\\"a\\\":\\\"fd\\\"}\"); }",
+      "nix_value": {"packages": ["fd", "ripgrep"]},
+      "jet_packages": ["fd", "ripgrep"],
+      "jet_unsupported": []
+    },
+    {
+      "name": "conditional_package_values_match_the_oracle",
+      "system": "x86_64-linux",
+      "source": "{ devShells.x86_64-linux.default = pkgs.mkShell { packages = if true then [ pkgs.fd ] else [ pkgs.ripgrep ]; }; }",
+      "nix_expression": "{ packages = if true then [ \"fd\" ] else [ \"ripgrep\" ]; }",
+      "nix_value": {"packages": ["fd"]},
+      "jet_packages": ["fd"],
+      "jet_unsupported": []
+    }
+  ],
+  "authority_values": [
+    {
+      "name": "cross_target_package_identity",
+      "system": "x86_64-linux",
+      "source": "{ devShells.x86_64-linux.default = pkgs.mkShell { packages = [ pkgs.pkgsCross.aarch64-multiplatform.foo ]; }; }",
+      "nix_expression": "let target = \"aarch64-linux\"; in { packages = []; cross_packages = [ (target + \"/foo\") ]; }",
+      "nix_value": {"packages": [], "cross_packages": ["aarch64-linux/foo"]},
+      "authority": {"@target:aarch64-multiplatform": "aarch64-linux"},
+      "jet_packages": [],
+      "jet_cross_packages": ["aarch64-linux/foo"],
+      "jet_unsupported": []
+    },
+    {
+      "name": "local_external_flake_package",
+      "system": "x86_64-linux",
+      "source": "{ devShells.x86_64-linux.default = pkgs.mkShell { packages = [ (builtins.getFlake \"path:./dep\").packages.x86_64-linux.default ]; }; }",
+      "nix_expression": "{ packages = [ \"fd\" ]; }",
+      "nix_value": {"packages": ["fd"]},
+      "authority": {"@flake:path:./dep": "{ packages.x86_64-linux.default = pkgs.fd; }"},
+      "jet_packages": ["fd"],
+      "jet_cross_packages": [],
+      "jet_unsupported": []
+    }
+  ],
+  "derivations": [
+    {
+      "name": "fixed_output_fetcher_context",
+      "system": "x86_64-linux",
+      "source": "builtins.derivationStrict { name = \"fetched\"; system = \"x86_64-linux\"; builder = \"/bin/sh\"; args = [ \"-c\" \"echo $src > $out\" ]; src = builtins.fetchurl { url = \"file:./source.txt\"; sha256 = \"03e21237b264daa4b7dc6bc5ada1c24ba9d646a29720c31d1c0ab09cc5b03867\"; name = \"source.txt\"; }; }",
+      "nix_value": {"input_sources": ["/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-source.txt"]},
+      "authority": {"@fetch:fetchurl\\nfile:./source.txt\\n03e21237b264daa4b7dc6bc5ada1c24ba9d646a29720c31d1c0ab09cc5b03867\\nsource.txt\\n": "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-source.txt"},
+      "jet_input_sources": ["/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-source.txt"]
+    }
+  ],
+  "errors": [
+    {
+      "name": "dynamic_package_list_stays_unsupported",
+      "system": "x86_64-linux",
+      "source": "{ devShells.x86_64-linux.default = pkgs.mkShell { packages = pkgs.lib.optionals true [ pkgs.fd ]; }; }",
+      "nix_expression": "let lib = { optionals = condition: values: if condition then values else []; }; in { packages = lib.optionals true [ \"fd\" ]; }",
+      "nix_value": {"packages": ["fd"]},
+      "jet_error": "unsupported foreign flake expression: `packages` must be a literal package list"
+    },
+    {
+      "name": "scalar_package_field_fails_closed",
+      "system": "x86_64-linux",
+      "source": "{ devShells.x86_64-linux.default = pkgs.mkShell { packages = 1; }; }",
+      "nix_expression": "{ packages = 1; }",
+      "nix_value": {"packages": 1},
+      "jet_error": "unsupported foreign flake expression: `packages` must be a literal package list"
+    },
+    {
+      "name": "non_package_list_item_fails_closed",
+      "system": "x86_64-linux",
+      "source": "{ devShells.x86_64-linux.default = pkgs.mkShell { packages = [ 1 ]; }; }",
+      "nix_expression": "{ packages = [ 1 ]; }",
+      "nix_value": {"packages": [1]},
+      "jet_error": "unsupported foreign flake expression: package expression has type integer"
+    }
+  ],
+  "budgets": {
+    "input_bytes": 1048576,
+    "tokens": 65536,
+    "expression_steps": 256,
+    "imports": 64,
+    "string_bytes": 1048576,
+    "memory_bytes": 16777216,
+    "latency_micros": 1000000
+  }
+}

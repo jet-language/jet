@@ -376,7 +376,8 @@ mod tests {
         );
         let signature = sign(&seed, b"");
         assert_eq!(signature, expected);
-        let public = bytes::<32>("d75a980182b10ab7d54bfed3c964073a0ee172f3daa62325af021a68f707511a");
+        let public =
+            bytes::<32>("d75a980182b10ab7d54bfed3c964073a0ee172f3daa62325af021a68f707511a");
         assert_eq!(verify_strict(&public, b"", &signature), Ok(true));
     }
 

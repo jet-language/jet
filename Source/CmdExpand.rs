@@ -14,6 +14,7 @@ use std::process::exit;
 use jet::ExitCodes;
 use jet::Sema::SemIndexEffectFacts;
 use jet::AST::{Item, ProgramBundle};
+use jet_foundation::Layout::TargetLayoutEngine;
 use jet_semindex::{ExpandLens, ExpandProjection, ExpandValue, SemIndex};
 
 /// One registered lens: name, one-line description for `--facts <unknown>`
@@ -674,6 +675,12 @@ struct LayoutRow {
 }
 
 fn collect_layout_rows(bundle: &ProgramBundle) -> Vec<LayoutRow> {
+    let layout_engine = TargetLayoutEngine::host(
+        bundle
+            .modules
+            .iter()
+            .flat_map(|module| module.items.iter()),
+    );
     let mut rows = Vec::new();
     for module in &bundle.modules {
         for item in &module.items {
@@ -681,12 +688,12 @@ fn collect_layout_rows(bundle: &ProgramBundle) -> Vec<LayoutRow> {
                 Item::Struct(def) => (
                     def.name.clone(),
                     def.name_span,
-                    jet::Comptime::build_struct_layout_info(def),
+                    jet::Comptime::build_struct_layout_info_with_engine(def, &layout_engine),
                 ),
                 Item::Enum(def) => (
                     def.name.clone(),
                     def.name_span,
-                    jet::Comptime::build_enum_layout_info(def),
+                    jet::Comptime::build_enum_layout_info_with_engine(def, &layout_engine),
                 ),
                 _ => continue,
             };

@@ -1204,38 +1204,45 @@ fn cmd_run_transcript(session: &Session) -> String {
             lex_diags.first().map(|d| &d.what)
         );
     }
-    let prog = match crate::Parser::parse(&toks) {
-        Ok(p) => p,
-        Err(ds) => {
-            return format!(
-                "error: could not build this value: {}\n",
-                ds.first().map(|d| d.what.as_str()).unwrap_or("?")
-            )
-        }
-    };
+    if let Err(ds) = crate::Parser::parse(&toks) {
+        return format!(
+            "error: could not build this value: {}\n",
+            ds.first().map(|d| d.what.as_str()).unwrap_or("?")
+        );
+    }
     // Find run() and run it through the interpreter with DEV_FUEL_BUDGET.
-    let mut func_defs: HashMap<String, Func> = HashMap::new();
-    for item in &prog.items {
-        if let Item::Func(f) = item {
-            func_defs.insert(f.name.clone(), f.clone());
+    let funcs: HashMap<String, &Func> = session
+        .func_defs
+        .iter()
+        .map(|(k, v)| (k.clone(), v))
+        .collect();
+    let structs: HashMap<String, &StructDef> = session
+        .struct_defs
+        .iter()
+        .map(|(k, v)| (k.clone(), v))
+        .collect();
+    let mut methods: HashMap<(String, String), &Func> = HashMap::new();
+    for (owner, definition) in &session.struct_defs {
+        for method in &definition.methods {
+            methods.insert((owner.clone(), method.name.clone()), method);
         }
     }
-    let funcs: HashMap<String, &Func> = func_defs.iter().map(|(k, v)| (k.clone(), v)).collect();
-    let Some(main) = func_defs.get("run") else {
+    let Some(main) = funcs.get("run").copied() else {
         return "note: no run in materialized session\n".to_string();
     };
-    let main_clone = main.clone();
     let base_dir = std::path::PathBuf::from(".");
     let mut sink = DevSink::new();
     // Use a very large fuel budget (but still finite) for :run.
     const RUN_FUEL: u64 = 1_000_000_000;
     match crate::Comptime::run_repl_main_with_fuel(
-        &main_clone,
+        main,
         &funcs,
         &base_dir,
         &mut sink,
         RUN_FUEL,
         &session.core_imports,
+        &methods,
+        &structs,
     ) {
         Ok(()) => sink.stdout,
         Err(d) => format!("error [{}]: {}\n", d.code, d.what),
@@ -1372,7 +1379,7 @@ fn read_input(stdin: &mut impl BufRead, color: bool, prompt: &str) -> Option<Str
 /// Detect whether the text starts with a keyword that only makes sense as a
 /// top-level item declaration (not a statement).
 fn looks_like_item(text: &str) -> bool {
-    let t = text.trim_start();
+    let t = skip_leading_comments(text);
     let t = t.strip_prefix("pub").map(|s| s.trim_start()).unwrap_or(t);
     let t = t.strip_prefix("pure").map(|s| s.trim_start()).unwrap_or(t);
     t.starts_with("fn ")
@@ -1383,6 +1390,35 @@ fn looks_like_item(text: &str) -> bool {
         || t.starts_with("impl ")
         || t.starts_with("const ")
         || t.starts_with("module ")
+}
+
+fn skip_leading_comments(mut text: &str) -> &str {
+    loop {
+        text = text.trim_start();
+        if let Some(rest) = text.strip_prefix("//") {
+            text = rest.split_once('\n').map_or("", |(_, rest)| rest);
+            continue;
+        }
+        let Some(mut rest) = text.strip_prefix("/*") else {
+            return text;
+        };
+        let mut depth = 1;
+        while depth > 0 {
+            if let Some(next) = rest.strip_prefix("/*") {
+                depth += 1;
+                rest = next;
+            } else if let Some(next) = rest.strip_prefix("*/") {
+                depth -= 1;
+                rest = next;
+            } else {
+                let Some(first) = rest.chars().next() else {
+                    return "";
+                };
+                rest = &rest[first.len_utf8()..];
+            }
+        }
+        text = rest;
+    }
 }
 
 pub(crate) fn is_item_input(text: &str) -> bool {
@@ -2025,6 +2061,7 @@ fn program_bundle(src: &str, mut prog: crate::AST::Program) -> crate::AST::Progr
             default_target: prog.default_target,
             html_path: prog.html_path,
             policy_declarations: prog.policy_declarations.clone(),
+            user_policy_declarations: prog.user_policy_declarations.clone(),
             block_spans: prog.block_spans.clone(),
             rule_facts: std::mem::take(&mut prog.rule_facts),
         }],

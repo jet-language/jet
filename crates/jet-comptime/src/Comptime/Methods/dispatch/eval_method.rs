@@ -1,6 +1,6 @@
+use super::super::super::Interpreter::reborrow_repl_authorizer;
 use super::*;
 use crate::AST::CtReport;
-use super::super::super::Interpreter::reborrow_repl_authorizer;
 use jet_foundation::Effects::core_effect;
 
 fn decode_path(path: &str) -> String {
@@ -138,7 +138,8 @@ impl<'a> Interp<'a> {
             }
             if let Expr::Field(base, type_name, _) = receiver {
                 if let Expr::Ident(alias, _) = base.as_ref() {
-                    if self.core_imports.get(alias).map(String::as_str) == Some("core.encoding.xml") {
+                    if self.core_imports.get(alias).map(String::as_str) == Some("core.encoding.xml")
+                    {
                         if type_name == "XMLLimits" {
                             return Ok(super::super::super::EncodingLite::xml_safe_limits_value());
                         }
@@ -197,10 +198,9 @@ impl<'a> Interp<'a> {
                     }
                 }
                 if crate::Syntax::numeric_conversion_source(method).is_some() && args.len() == 1 {
-                    let base = self
-                        .distinct_bases
-                        .get(type_name)
-                        .ok_or_else(|| unsupported("a distinct conversion without its base type", span))?;
+                    let base = self.distinct_bases.get(type_name).ok_or_else(|| {
+                        unsupported("a distinct conversion without its base type", span)
+                    })?;
                     let value = self.eval(&args[0].expr, scope)?;
                     let converted = super::super::super::Builtins::apply_static_type_method(
                         &base.name(),
@@ -230,7 +230,9 @@ impl<'a> Interp<'a> {
                     }
                     return match converted {
                         CtValue::Present(value) if range.is_some() => check_range(*value),
-                        CtValue::Failed(CtReport::Told(error)) if range.is_some() => Ok(CtValue::Failed(CtReport::Told(error))),
+                        CtValue::Failed(CtReport::Told(error)) if range.is_some() => {
+                            Ok(CtValue::Failed(CtReport::Told(error)))
+                        }
                         value => check_range(value),
                     };
                 }
@@ -240,9 +242,7 @@ impl<'a> Interp<'a> {
             if type_name == crate::Syntax::MEM_POOL && method == "new" {
                 return Ok(super::super::pool::new_value());
             }
-            if type_name == crate::Syntax::TYPE_BYTES
-                && matches!(method, "new" | "from")
-            {
+            if type_name == crate::Syntax::TYPE_BYTES && matches!(method, "new" | "from") {
                 let bytes = if method == "new" {
                     Vec::new()
                 } else {
@@ -304,9 +304,7 @@ impl<'a> Interp<'a> {
                     fields: vec![("items".to_string(), CtValue::List(items))],
                 });
             }
-            if type_name == crate::Syntax::TYPE_PRIORITY_QUEUE
-                && matches!(method, "new" | "from")
-            {
+            if type_name == crate::Syntax::TYPE_PRIORITY_QUEUE && matches!(method, "new" | "from") {
                 let items = if method == "new" {
                     Vec::new()
                 } else {
@@ -320,9 +318,7 @@ impl<'a> Interp<'a> {
                     fields: vec![("items".to_string(), CtValue::List(items))],
                 });
             }
-            if type_name == crate::Syntax::TYPE_RANK
-                && matches!(method, "new" | "from")
-            {
+            if type_name == crate::Syntax::TYPE_RANK && matches!(method, "new" | "from") {
                 let items = if method == "new" {
                     Vec::new()
                 } else {
@@ -390,10 +386,7 @@ impl<'a> Interp<'a> {
                     })),
                     None => CtValue::failed(Box::new(CtValue::Struct {
                         type_name: crate::Syntax::DURATION_RANGE_ERROR_TYPE.to_string(),
-                        fields: vec![(
-                            "reason".to_string(),
-                            CtValue::Str(reason.to_string()),
-                        )],
+                        fields: vec![("reason".to_string(), CtValue::Str(reason.to_string()))],
                     })),
                 });
             }
@@ -491,7 +484,8 @@ impl<'a> Interp<'a> {
                 // runtime call. Long host calls stay marked so the raw UI can
                 // explain why cancellation has not returned yet.
                 self.poll_repl_interrupt();
-                let _runtime_call = super::super::super::ReplRuntimeCallGuard::new(self.repl_interruptible);
+                let _runtime_call =
+                    super::super::super::ReplRuntimeCallGuard::new(self.repl_interruptible);
                 // Card #392 pass 5: `core.data`'s typed table/lazy pipeline — a
                 // generic call-site-typed surface built from ordinary Jet
                 // lambdas over dynamically-typed `CtValue` rows, so (unlike
@@ -504,10 +498,27 @@ impl<'a> Interp<'a> {
                     (module.as_str(), method),
                     (
                         "core.data",
-                        "csv" | "json" | "count" | "table" | "rows" | "series" | "values" | "schema"
-                            | "missing_count" | "lazy" | "lazy_filter" | "lazy_sort_by" | "collect"
-                            | "plan" | "filter" | "sort_by" | "group_count" | "group_sum"
-                            | "group_mean" | "inner_join" | "left_join",
+                        "csv"
+                            | "json"
+                            | "count"
+                            | "table"
+                            | "rows"
+                            | "series"
+                            | "values"
+                            | "schema"
+                            | "missing_count"
+                            | "lazy"
+                            | "lazy_filter"
+                            | "lazy_sort_by"
+                            | "collect"
+                            | "plan"
+                            | "filter"
+                            | "sort_by"
+                            | "group_count"
+                            | "group_sum"
+                            | "group_mean"
+                            | "inner_join"
+                            | "left_join",
                     )
                 ) {
                     let arg0_ty = args.first().and_then(|a| match &a.expr {
@@ -560,39 +571,39 @@ impl<'a> Interp<'a> {
                             name: type_name.clone(),
                             args: type_args.clone(),
                         }),
-                        Expr::TypedLit {
-                            head: Some(ty), ..
-                        } => Some(ty.clone()),
+                        Expr::TypedLit { head: Some(ty), .. } => Some(ty.clone()),
                         Expr::MethodCall {
                             resolved_ret: Some(ty),
                             ..
                         } => Some(ty.clone()),
                         _ => None,
                     });
-                    return Ok(match super::super::super::EncodingLite::cbor_encode_typed(
-                        value,
-                        root_ty.as_ref(),
-                        &struct_fields,
-                        method == "to_bytes_canonical",
-                    ) {
-                        Ok(bytes) => CtValue::Present(Box::new(CtValue::Bytes(bytes))),
-                        Err(reason) => CtValue::failed(Box::new(CtValue::Struct {
-                            type_name: "CBORError".to_string(),
-                            fields: vec![
-                                (
-                                    "kind".to_string(),
-                                    CtValue::Enum {
-                                        type_name: "CBORErrorKind".to_string(),
-                                        variant: "Unsupported".to_string(),
-                                        args: Vec::new(),
-                                    },
-                                ),
-                                ("byte_offset".to_string(), CtValue::Int(0)),
-                                ("path".to_string(), CtValue::Str("$".to_string())),
-                                ("reason".to_string(), CtValue::Str(reason)),
-                            ],
-                        })),
-                    });
+                    return Ok(
+                        match super::super::super::EncodingLite::cbor_encode_typed(
+                            value,
+                            root_ty.as_ref(),
+                            &struct_fields,
+                            method == "to_bytes_canonical",
+                        ) {
+                            Ok(bytes) => CtValue::Present(Box::new(CtValue::Bytes(bytes))),
+                            Err(reason) => CtValue::failed(Box::new(CtValue::Struct {
+                                type_name: "CBORError".to_string(),
+                                fields: vec![
+                                    (
+                                        "kind".to_string(),
+                                        CtValue::Enum {
+                                            type_name: "CBORErrorKind".to_string(),
+                                            variant: "Unsupported".to_string(),
+                                            args: Vec::new(),
+                                        },
+                                    ),
+                                    ("byte_offset".to_string(), CtValue::Int(0)),
+                                    ("path".to_string(), CtValue::Str("$".to_string())),
+                                    ("reason".to_string(), CtValue::Str(reason)),
+                                ],
+                            })),
+                        },
+                    );
                 }
                 // D-ENCXML-PROJECTION1: typed `decode`/`decode_bytes` → project → Decode.
                 if module == "core.encoding.xml"
@@ -641,15 +652,16 @@ impl<'a> Interp<'a> {
                             }
                         }
                     };
-                    let projected =
-                        match super::super::super::EncodingLite::xml_project_for_decode(&document) {
-                            Ok(tree) => tree,
-                            Err(error) => {
-                                return Ok(CtValue::failed(Box::new(decode_error_value(
-                                    error,
-                                    "XML value cannot be projected for typed decode",
-                                ))))
-                            }
+                    let projected = match super::super::super::EncodingLite::xml_project_for_decode(
+                        &document,
+                    ) {
+                        Ok(tree) => tree,
+                        Err(error) => {
+                            return Ok(CtValue::failed(Box::new(decode_error_value(
+                                error,
+                                "XML value cannot be projected for typed decode",
+                            ))))
+                        }
                     };
                     return match self.typed_decode_top(&type_args[0], &projected, span) {
                         Ok(value) => Ok(CtValue::Present(Box::new(value))),
@@ -666,7 +678,7 @@ impl<'a> Interp<'a> {
                             | "core.encoding.csv"
                             | "core.encoding.toml"
                             | "core.encoding.yaml",
-                            "decode",
+                        "decode",
                     )
                 ) && !type_args.is_empty()
                 {
@@ -689,7 +701,9 @@ impl<'a> Interp<'a> {
                     && matches!(method, "to_string" | "to_string_pretty")
                 {
                     if let Some(value) = argv.first() {
-                        if let Some(type_name) = super::super::super::TypedDecode::value_type_name(value) {
+                        if let Some(type_name) =
+                            super::super::super::TypedDecode::value_type_name(value)
+                        {
                             if self
                                 .methods
                                 .contains_key(&(type_name, "encode".to_string()))
@@ -713,9 +727,15 @@ impl<'a> Interp<'a> {
                 if module == "core.encoding.cbor" && method == "decode" && !type_args.is_empty() {
                     let bytes = match argv.first() {
                         Some(value) => as_bytes(value, span)?,
-                        None => return Err(unsupported("core.encoding.cbor.decode(): missing arg 0", span)),
+                        None => {
+                            return Err(unsupported(
+                                "core.encoding.cbor.decode(): missing arg 0",
+                                span,
+                            ))
+                        }
                     };
-                    let options = match super::super::super::EncodingLite::cbor_options(argv.get(1)) {
+                    let options = match super::super::super::EncodingLite::cbor_options(argv.get(1))
+                    {
                         Ok(options) => options,
                         Err(error) => {
                             return Ok(CtValue::failed(Box::new(decode_error_value(
@@ -724,7 +744,9 @@ impl<'a> Interp<'a> {
                             ))))
                         }
                     };
-                    let tree = match super::super::super::EncodingLite::cbor_decode(&bytes, &options, true) {
+                    let tree = match super::super::super::EncodingLite::cbor_decode(
+                        &bytes, &options, true,
+                    ) {
                         Ok(tree) => tree,
                         Err(error) => {
                             return Ok(CtValue::failed(Box::new(decode_error_value(
@@ -761,7 +783,10 @@ impl<'a> Interp<'a> {
                     );
                     return Err(Diagnostic::e3403(&api, Some(span)));
                 }
-                if !self.repl_mode && self.impure_depth == 0 && core_effect(&module, method).is_some() {
+                if !self.repl_mode
+                    && self.impure_depth == 0
+                    && core_effect(&module, method).is_some()
+                {
                     return Err(Diagnostic::error(
                         "E3410",
                         format!(
@@ -939,8 +964,7 @@ impl<'a> Interp<'a> {
                 };
                 let Some((a, b)) = a.zip(b) else {
                     return Ok(CtValue::absent(
-                        CtValue::resolved_option_element_type(resolved_ret)
-                            .unwrap_or(Type::Int),
+                        CtValue::resolved_option_element_type(resolved_ret).unwrap_or(Type::Int),
                     ));
                 };
                 let f = self.eval(&args[0].expr, scope)?;
@@ -965,9 +989,7 @@ impl<'a> Interp<'a> {
             let mut invoke = |callback: CtValue, values: Vec<CtValue>| {
                 self.call_inline_closure(&callback, values, span, scope)
             };
-            if let Some(result) =
-                eval_regex_replace_all_with(&recv, &argv, span, &mut invoke)
-            {
+            if let Some(result) = eval_regex_replace_all_with(&recv, &argv, span, &mut invoke) {
                 return result;
             }
             evaluated_receiver = Some(recv);
@@ -1002,12 +1024,7 @@ impl<'a> Interp<'a> {
                     let f = self.eval(&args[0].expr, scope)?;
                     let mut out = Vec::with_capacity(xs.len());
                     for x in xs {
-                        out.push(self.call_inline_closure(
-                            &f,
-                            vec![x.clone()],
-                            span,
-                            scope,
-                        )?);
+                        out.push(self.call_inline_closure(&f, vec![x.clone()], span, scope)?);
                     }
                     return Ok(CtValue::List(out));
                 }
@@ -1052,12 +1069,7 @@ impl<'a> Interp<'a> {
                     let f = self.eval(&args[0].expr, scope)?;
                     let mut keyed = Vec::with_capacity(xs.len());
                     for x in xs {
-                        let k = self.call_inline_closure(
-                            &f,
-                            vec![x.clone()],
-                            span,
-                            scope,
-                        )?;
+                        let k = self.call_inline_closure(&f, vec![x.clone()], span, scope)?;
                         keyed.push((k, x.clone()));
                     }
                     let mut sort_err = None;
@@ -1079,15 +1091,12 @@ impl<'a> Interp<'a> {
                 }
                 (CtValue::Present(inner), "map") => {
                     let f = self.eval(&args[0].expr, scope)?;
-                    let v = self.call_inline_closure(
-                        &f,
-                        vec![(**inner).clone()],
-                        span,
-                        scope,
-                    )?;
+                    let v = self.call_inline_closure(&f, vec![(**inner).clone()], span, scope)?;
                     return Ok(CtValue::Present(Box::new(v)));
                 }
-                (CtValue::Failed(CtReport::Clean(t)), "map") => return Ok(CtValue::absent(t.clone())),
+                (CtValue::Failed(CtReport::Clean(t)), "map") => {
+                    return Ok(CtValue::absent(t.clone()))
+                }
                 _ => {}
             }
             evaluated_receiver = Some(recv);
@@ -1258,14 +1267,8 @@ impl<'a> Interp<'a> {
                 }
                 (
                     CtValue::Struct { type_name, fields },
-                    method @ ("add"
-                        | "remove"
-                        | "has"
-                        | "union"
-                        | "to_list"
-                        | "len"
-                        | "is_empty"
-                        | "clear"),
+                    method @ ("add" | "remove" | "has" | "union" | "to_list" | "len" | "is_empty"
+                    | "clear"),
                 ) if type_name == crate::Syntax::TYPE_SET => {
                     let mut items = fields
                         .iter()
@@ -1346,13 +1349,8 @@ impl<'a> Interp<'a> {
                 }
                 (
                     CtValue::Struct { type_name, fields },
-                    method @ ("push"
-                        | "pop"
-                        | "peek"
-                        | "to_sorted_list"
-                        | "len"
-                        | "is_empty"
-                        | "clear"),
+                    method @ ("push" | "pop" | "peek" | "to_sorted_list" | "len" | "is_empty"
+                    | "clear"),
                 ) if type_name == crate::Syntax::TYPE_PRIORITY_QUEUE => {
                     let mut items = fields
                         .iter()
@@ -1412,15 +1410,8 @@ impl<'a> Interp<'a> {
                 }
                 (
                     CtValue::Struct { type_name, fields },
-                    method @ ("add"
-                        | "remove"
-                        | "has"
-                        | "count"
-                        | "len"
-                        | "is_empty"
-                        | "clear"
-                        | "to_list"
-                        | "copy"),
+                    method @ ("add" | "remove" | "has" | "count" | "len" | "is_empty" | "clear"
+                    | "to_list" | "copy"),
                 ) if type_name == crate::Syntax::TYPE_BITS => {
                     let mut bits = fields
                         .iter()
@@ -1441,9 +1432,9 @@ impl<'a> Interp<'a> {
                             _ => 0,
                         }),
                         "is_empty" => CtValue::Bool(bits.is_empty()),
-                        "has" => CtValue::Bool(
-                            bits.contains(&CtValue::Int(as_int(&argv[0], span)?)),
-                        ),
+                        "has" => {
+                            CtValue::Bool(bits.contains(&CtValue::Int(as_int(&argv[0], span)?)))
+                        }
                         "copy" => CtValue::Struct {
                             type_name: crate::Syntax::TYPE_BITS.to_string(),
                             fields: vec![("bits".to_string(), CtValue::List(bits.clone()))],
@@ -1488,16 +1479,8 @@ impl<'a> Interp<'a> {
                 }
                 (
                     CtValue::Struct { type_name, fields },
-                    method @ ("add"
-                        | "remove"
-                        | "has"
-                        | "first"
-                        | "last"
-                        | "union"
-                        | "to_list"
-                        | "len"
-                        | "is_empty"
-                        | "clear"),
+                    method @ ("add" | "remove" | "has" | "first" | "last" | "union" | "to_list"
+                    | "len" | "is_empty" | "clear"),
                 ) if type_name == crate::Syntax::TYPE_RANK => {
                     let mut items = fields
                         .iter()
@@ -1593,23 +1576,10 @@ impl<'a> Interp<'a> {
                 }
                 (
                     CtValue::Struct { type_name, fields },
-                    method @ ("push_front"
-                        | "push_back"
-                        | "pop_front"
-                        | "pop_back"
-                        | "peek_front"
-                        | "peek_back"
-                        | "len"
-                        | "is_empty"
-                        | "clear"
-                        | "capacity"
-                        | "contains"
-                        | "get"
-                        | "delete"
-                        | "to_list"
-                        | "join"
-                        | "reverse"
-                        | "split"),
+                    method @ ("push_front" | "push_back" | "pop_front" | "pop_back" | "peek_front"
+                    | "peek_back" | "len" | "is_empty" | "clear" | "capacity"
+                    | "contains" | "get" | "delete" | "to_list" | "join" | "reverse"
+                    | "split"),
                 ) if type_name == crate::Syntax::TYPE_QUEUE => {
                     let mut items = fields
                         .iter()
@@ -1731,16 +1701,8 @@ impl<'a> Interp<'a> {
                 }
                 (
                     CtValue::Struct { type_name, fields },
-                    method @ ("add"
-                        | "add_new"
-                        | "get"
-                        | "remove"
-                        | "has_key"
-                        | "keys"
-                        | "capacity"
-                        | "len"
-                        | "is_empty"
-                        | "clear"),
+                    method @ ("add" | "add_new" | "get" | "remove" | "has_key" | "keys"
+                    | "capacity" | "len" | "is_empty" | "clear"),
                 ) if type_name == crate::Syntax::TYPE_LRU => {
                     let capacity = fields
                         .iter()
@@ -1875,7 +1837,17 @@ impl<'a> Interp<'a> {
 
         // Mutating list/map methods on a named variable write back in place.
         const MUTATING: &[&str] = &[
-            "push", "pop", "insert", "add", "add_new", "remove", "extend", "clear", "reverse", "sort", "sort_desc",
+            "push",
+            "pop",
+            "insert",
+            "add",
+            "add_new",
+            "remove",
+            "extend",
+            "clear",
+            "reverse",
+            "sort",
+            "sort_desc",
         ];
         if MUTATING.contains(&method) && matches!(receiver, Expr::Ident(..) | Expr::Field(..)) {
             let mut container = match evaluated_receiver.take() {
@@ -2040,18 +2012,9 @@ impl<'a> Interp<'a> {
             }
             (
                 CtValue::Struct { type_name, fields },
-                method @ ("len"
-                    | "is_empty"
-                    | "clear"
-                    | "to_bytes"
-                    | "write_u8"
-                    | "write_u16_le"
-                    | "write_u16_be"
-                    | "write_u32_le"
-                    | "write_u32_be"
-                    | "write_u64_le"
-                    | "write_u64_be"
-                    | "write_bytes"),
+                method @ ("len" | "is_empty" | "clear" | "to_bytes" | "write_u8" | "write_u16_le"
+                | "write_u16_be" | "write_u32_le" | "write_u32_be" | "write_u64_le"
+                | "write_u64_be" | "write_bytes"),
             ) if type_name == crate::Syntax::TYPE_BYTES => {
                 let mut argv = Vec::with_capacity(args.len());
                 for arg in args {
@@ -2131,12 +2094,7 @@ impl<'a> Interp<'a> {
             .iter()
             .find_map(|arg| arg.flags.template_items.as_deref())
             .map(|items| {
-                crate::Comptime::format_template_body(
-                    items,
-                    scope,
-                    self.funcs,
-                    self.base_dir,
-                )
+                crate::Comptime::format_template_body(items, scope, self.funcs, self.base_dir)
             })
             .transpose()?;
         let mut argv = Vec::new();
@@ -2153,18 +2111,8 @@ impl<'a> Interp<'a> {
         match (&recv, method) {
             (
                 CtValue::Struct { type_name, fields },
-                method @ ("int"
-                    | "float"
-                    | "float_range"
-                    | "bool"
-                    | "normal"
-                    | "exponential"
-                    | "bytes"
-                    | "split"
-                    | "pick"
-                    | "weighted_pick"
-                    | "sample"
-                    | "shuffle"),
+                method @ ("int" | "float" | "float_range" | "bool" | "normal" | "exponential"
+                | "bytes" | "split" | "pick" | "weighted_pick" | "sample" | "shuffle"),
             ) if type_name == crate::Syntax::RNG_TYPE => {
                 if !matches!(receiver, Expr::Ident(..) | Expr::Field(..)) {
                     return Err(unsupported("Rng method on a temporary value", span));
@@ -2222,11 +2170,7 @@ impl<'a> Interp<'a> {
                     span,
                 )?;
                 if method != "locale" {
-                    self.write_back(
-                        receiver,
-                        fake_recv,
-                        scope,
-                    )?;
+                    self.write_back(receiver, fake_recv, scope)?;
                 }
                 return Ok(value);
             }
@@ -2273,16 +2217,14 @@ impl<'a> Interp<'a> {
         }
         // D-BUILDENTRY1: selected-root `BuildContext` is interpreter-owned.
         // Driver removes `fn build` before runtime codegen.
-        if let Some(result) =
-            super::super::super::Build::eval_program_build_method(
-                &recv,
-                method,
-                argv.clone(),
-                template_source.as_deref(),
-                span,
-                self.impure_depth > 0,
-            )
-        {
+        if let Some(result) = super::super::super::Build::eval_program_build_method(
+            &recv,
+            method,
+            argv.clone(),
+            template_source.as_deref(),
+            span,
+            self.impure_depth > 0,
+        ) {
             return result;
         }
         apply_method(&recv, method, argv, span)

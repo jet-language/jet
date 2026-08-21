@@ -264,7 +264,11 @@ fn expand_layout_human_and_json_are_deterministic() {
     for type_name in ["PlainPacket", "CPacket", "ColumnPacket", "PacketState"] {
         assert!(human.contains(&format!("{type_name}.@layout")), "{type_name}: {human}");
     }
-    assert!(human.contains("size=unknown") && human.contains("offset=unknown"));
+    assert!(human.contains("PlainPacket.@layout   kind=default size=unknown"));
+    assert!(human.contains("CPacket.@layout   kind=c size=8 alignment=4 stride=8"));
+    assert!(human.contains("fields=[count:U32(offset=0,size=4),flag:U8(offset=4,size=1)]"));
+    assert!(human.contains("ColumnPacket.@layout   kind=columnar size=32 alignment=8 stride=32"));
+    assert!(human.contains("fields=[count:Int(offset=0,size=8),label:String(offset=8,size=24)]"));
     assert!(human.contains("byte_facts=unavailable") && human.contains("E0959"));
     check_snapshot("expand_layout.txt", &human);
 
@@ -286,6 +290,7 @@ fn expand_layout_human_and_json_are_deterministic() {
     assert!(json.contains("\"kind\":\"c\"") && json.contains("\"kind\":\"columnar\""));
     assert!(json.contains("\"type\":\"PacketState\"") && json.contains("\"size\":null"));
     assert!(json.contains("\"offset\":null"));
+    assert!(json.contains("\"size\":8") && json.contains("\"offset\":4"));
     assert!(json.contains("\"byte_facts\":{\"diagnostic\""));
     assert!(json.contains("\"status\":\"unavailable\""));
     assert!(json.contains("\"code\":\"E0959\""));
@@ -600,8 +605,8 @@ fn stale_manifest_name_payload_jet_is_e1226() {
     );
 }
 
-/// `jetpack.toml` is a different, still-live file (D-JPK-FILES repo
-/// metadata) — it must NOT be mistaken for a retired manifest name.
+/// `jetpack.toml` is a retired Jetpack config file, not a package manifest;
+/// `jet build` must not mistake it for the E1226 manifest filename family.
 #[test]
 fn jetpack_toml_alone_is_not_e1226() {
     let dir = isolated_cwd("jetpacktoml_not_stale");
@@ -615,10 +620,10 @@ fn jetpack_toml_alone_is_not_e1226() {
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert!(
         !stderr.contains("E1226"),
-        "jetpack.toml is a different live file, not a retired manifest name:\n{stderr}"
+        "jetpack.toml must not be reported as an E1226 manifest name:\n{stderr}"
     );
     assert!(
-        stderr.contains("no file given and no `package.jet` found") || stderr.contains("E1225"),
+        stderr.contains("no file given and no `package.jet` found"),
         "should fall back to the generic no-manifest message:\n{stderr}"
     );
 }

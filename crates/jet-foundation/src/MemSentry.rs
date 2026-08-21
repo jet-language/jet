@@ -9,7 +9,10 @@
 use std::cell::{Cell, RefCell};
 use std::io::Write as IOWrite;
 use std::path::PathBuf;
-use std::sync::{atomic::{AtomicBool, Ordering}, Mutex, OnceLock};
+use std::sync::{
+    atomic::{AtomicBool, Ordering},
+    Mutex, OnceLock,
+};
 
 #[derive(Clone)]
 struct Gate {
@@ -187,9 +190,7 @@ impl Drop for JetSentryGuard {
 }
 
 fn runtime_available() -> bool {
-    cfg!(not(jet_release))
-        || HARDENED.load(Ordering::Relaxed)
-        || FENCE_DEPTH.with(Cell::get) != 0
+    cfg!(not(jet_release)) || HARDENED.load(Ordering::Relaxed) || FENCE_DEPTH.with(Cell::get) != 0
 }
 
 fn jet_sentry_scope_inner(
@@ -214,7 +215,10 @@ fn jet_sentry_scope_inner(
             reason: reason.to_string(),
         })
     });
-    JetSentryGuard { saved, saved_fence_depth }
+    JetSentryGuard {
+        saved,
+        saved_fence_depth,
+    }
 }
 
 pub fn jet_sentry_scope(enabled: bool, file: &str, line: u32, reason: &str) -> JetSentryGuard {
@@ -243,7 +247,10 @@ pub fn jet_sentry_policy_scope(enabled: bool) -> JetSentryGuard {
         std::mem::replace(&mut *gate, Some(current))
     });
     let saved_fence_depth = FENCE_DEPTH.with(Cell::get);
-    JetSentryGuard { saved, saved_fence_depth }
+    JetSentryGuard {
+        saved,
+        saved_fence_depth,
+    }
 }
 
 pub fn jet_sentry_set_hardened(enabled: bool) {
@@ -346,15 +353,20 @@ pub fn jet_sentry_check(
     let records = allocations()
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner());
-    let live = end.is_some_and(|end| records.iter().rev().any(|allocation| {
-        allocation.live
-            && start >= allocation.start
-            && end <= allocation.start.saturating_add(allocation.len)
-    }));
+    let live = end.is_some_and(|end| {
+        records.iter().rev().any(|allocation| {
+            allocation.live
+                && start >= allocation.start
+                && end <= allocation.start.saturating_add(allocation.len)
+        })
+    });
     // Provenance classification precedes alignment: an untracked address is R0801.
     let code_detail = if live {
         if start % alignment != 0 {
-            Some(("R0803", format!("address {start:#x} is not aligned to {alignment} bytes")))
+            Some((
+                "R0803",
+                format!("address {start:#x} is not aligned to {alignment} bytes"),
+            ))
         } else {
             None
         }
@@ -365,9 +377,15 @@ pub fn jet_sentry_check(
                 && start < allocation.start.saturating_add(allocation.len)
         });
         Some(if freed {
-            ("R0802", "the address belongs to quarantined storage".to_string())
+            (
+                "R0802",
+                "the address belongs to quarantined storage".to_string(),
+            )
         } else {
-            ("R0801", "no live allocation contains this address".to_string())
+            (
+                "R0801",
+                "no live allocation contains this address".to_string(),
+            )
         })
     }?;
     let name = gate_name(&gate);

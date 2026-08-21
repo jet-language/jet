@@ -15,8 +15,8 @@ fn codes(src: &str) -> Vec<String> {
 fn origin_facts_clear_only_after_typed_decode() {
     let rejected_before_decode = r#"
 use core.files as files
-fn run() {
-    raw :: files.read("config.json") ?? return
+fn run() ! {
+    raw :: files.read("config.json") ?? return Err("test")
     SQL.raw(raw)
 }
 "#;
@@ -35,9 +35,9 @@ struct Config {
     name: String
 }
 
-fn run() {
-    raw :: files.read("config.json") ?? return
-    config :: json.decode<Config>(raw) ?? return
+fn run() ! {
+    raw :: files.read("config.json") ?? return Err("test")
+    config :: json.decode<Config>(raw) ?? return Err("test")
     SQL.raw(config.name)
 }
 "#;
@@ -52,8 +52,8 @@ fn run() {
 fn origin_marked_text_rejects_raw_sinks() {
     let src = r#"
 use core.files as files
-fn run() {
-    raw :: files.read("payload.txt") ?? return
+fn run() ! {
+    raw :: files.read("payload.txt") ?? return Err("test")
     SQL.raw(raw)
     HTML.raw(raw)
     Sh.raw(raw)
@@ -72,8 +72,8 @@ fn origin_facts_clear_through_scrub_gate() {
     let src = r#"
 use core.files as files
 #Scrub(Input) fn clean(raw: #Input String) => String { return ~raw }
-fn run() {
-    raw :: files.read("payload.txt") ?? return
+fn run() ! {
+    raw :: files.read("payload.txt") ?? return Err("test")
     safe :: clean(raw)
     SQL.raw(safe)
 }
@@ -92,8 +92,8 @@ fn external_boundaries_seed_origin_facts() {
             "fs",
             r#"
 use core.files as files
-fn run() {
-    value :: files.read("payload.txt") ?? return
+fn run() ! {
+    value :: files.read("payload.txt") ?? return Err("test")
     SQL.raw(value)
 }
 "#,
@@ -102,8 +102,8 @@ fn run() {
             "env",
             r#"
 use core.sys as env
-fn run() {
-    value :: env.get("PAYLOAD") ?? return
+fn run() ! {
+    value :: env.get("PAYLOAD") ?? return Err("test")
     SQL.raw(value)
 }
 "#,
@@ -112,8 +112,8 @@ fn run() {
             "process",
             r#"
 use core.process as process
-fn run() {
-    result :: process.run(["echo", "payload"]) ?? return
+fn run() ! {
+    result :: process.run(["echo", "payload"]) ?? return Err("test")
     SQL.raw(result.output)
 }
 "#,
@@ -122,9 +122,9 @@ fn run() {
             "net",
             r#"
 use core.net as net
-fn run() {
-    stream :: net.tcp_connect("example.invalid:80") ?? return
-    value :: net.tcp_read_text(stream, 1) ?? return
+fn run() ! {
+    stream :: net.tcp_connect("example.invalid:80") ?? return Err("test")
+    value :: net.tcp_read_text(stream, 1) ?? return Err("test")
     SQL.raw(value)
 }
 "#,
@@ -156,10 +156,10 @@ fn declared_tag_sources_and_destinations_drive_dataflow() {
     let src = r#"
 use core.process as process
 tag Untrusted { from: [source], deny: [Exec] }
-fn source() => String :: "untrusted"
-fn run() {
+fn source() String :> "untrusted"
+fn run() ! {
     value := source()
-    process.run(["echo", value]) ?? return
+    process.run(["echo", value]) ?? return Err("test")
 }
 "#;
     assert_eq!(
@@ -173,9 +173,9 @@ fn tagged_return_types_drive_dataflow() {
     let src = r#"
 use core.process as process
 tag PII { deny: [Exec] }
-fn account_name() => #PII String :: "Ada"
-fn run() {
-    process.run(["echo", account_name()]) ?? return
+fn account_name() #PII String :> "Ada"
+fn run() ! {
+    process.run(["echo", account_name()]) ?? return Err("test")
 }
 "#;
     assert_eq!(
@@ -192,9 +192,9 @@ tag PII { deny: [Exec] }
 struct Row {
     secret: #PII String
 }
-fn run() {
-    row := Row.{ secret: "Ada" }
-    process.run(["echo", row.secret]) ?? return
+fn run() ! {
+    row := Row{ secret: "Ada" }
+    process.run(["echo", row.secret]) ?? return Err("test")
 }
 "#;
     assert_eq!(
@@ -210,11 +210,11 @@ use core.process as process
 tag Stored { from: [Store.read], deny: [Exec] }
 struct Store {
     value: String
-    fn read(self) => String :: self.value
+    fn read(self) String :> self.value
 }
-fn run() {
-    store := Store.{ value: "Ada" }
-    process.run(["echo", store.read()]) ?? return
+fn run() ! {
+    store := Store{ value: "Ada" }
+    process.run(["echo", store.read()]) ?? return Err("test")
 }
 "#;
     assert_eq!(
@@ -229,10 +229,10 @@ fn scrub_removes_only_its_named_tag() {
 use core.process as process
 tag PII { deny: [Exec] }
 #Scrub(PII)
-fn redact(value: #PII String) => String :: value
-fn run() {
+fn redact(value: #PII String) String :> value
+fn run() ! {
     value := redact(#PII #Input "secret")
-    process.run(["echo", value]) ?? return
+    process.run(["echo", value]) ?? return Err("test")
 }
 "#;
     assert_eq!(
@@ -247,9 +247,9 @@ fn run() {
 fn tainted_to_exec_sink_is_error() {
     let src = r#"
 use core.process as process
-fn run() {
+fn run() ! {
     name :: #Input "world; rm -rf /"
-    process.run(["echo", name]) ?? return
+    process.run(["echo", name]) ?? return Err("test")
 }
 "#;
     assert!(
@@ -265,10 +265,10 @@ fn sanitized_value_reaches_sink_ok() {
     let src = r#"
 use core.process as process
 #Scrub(Input) fn clean(raw: #Input String) => String { return raw.split(" ").to_list()[0] }
-fn run() {
+fn run() ! {
     name :: #Input "world; rm -rf /"
     safe := clean(name)
-    process.run(["echo", safe]) ?? return
+    process.run(["echo", safe]) ?? return Err("test")
 }
 "#;
     assert!(
@@ -284,10 +284,10 @@ fn run() {
 fn taint_propagates_through_binding() {
     let src = r#"
 use core.process as process
-fn run() {
+fn run() ! {
     raw :: #Input "evil"
     cmd := raw
-    process.run(["echo", cmd]) ?? return
+    process.run(["echo", cmd]) ?? return Err("test")
 }
 "#;
     assert!(
@@ -302,10 +302,10 @@ fn run() {
 fn taint_propagates_through_interpolation() {
     let src = r#"
 use core.process as process
-fn run() {
+fn run() ! {
     user :: #Input "bob"
     arg := "hello {user}"
-    process.run(["echo", arg]) ?? return
+    process.run(["echo", arg]) ?? return Err("test")
 }
 "#;
     assert!(
@@ -319,10 +319,10 @@ fn run() {
 fn reassign_to_clean_clears_taint() {
     let src = r#"
 use core.process as process
-fn run() {
+fn run() ! {
     x := #Input "evil"
     x = "safe-literal"
-    process.run(["echo", x]) ?? return
+    process.run(["echo", x]) ?? return Err("test")
 }
 "#;
     assert!(
@@ -337,8 +337,8 @@ fn run() {
 fn clean_value_at_sink_ok() {
     let src = r#"
 use core.process as process
-fn run() {
-    process.run(["echo", "hello"]) ?? return
+fn run() ! {
+    process.run(["echo", "hello"]) ?? return Err("test")
 }
 "#;
     assert!(
@@ -519,7 +519,7 @@ use core.auth as auth
 
 fn run() {
     token :: #Credential "a.b.c"
-    key :: [U8].{ 0, 1, 2 }
+    key :: [U8]{ 0, 1, 2 }
     _ := auth.verify_jwt(token, key: key, audience: "gateway")
     print(token)
 }
@@ -530,6 +530,33 @@ fn run() {
         1,
         "{found:?}"
     );
+}
+
+#[allow(dead_code)]
+mod auth_session_boundary {
+    // Exercise the shared Prelude seam directly; AOT, JIT, and comptime include it.
+    fn jet_crypto_entropy_bytes(length: usize) -> Result<Vec<u8>, ()> {
+        Ok(vec![0; length])
+    }
+
+    include!("../crates/jet-codegen/src/Prelude/CoreLib/Top/AuthSession.rs");
+
+    #[test]
+    fn magic_link_rejects_oversized_dns_labels() {
+        let valid = format!("user@{}.example", "a".repeat(63));
+        let invalid = format!("user@{}.example", "a".repeat(64));
+
+        assert!(jet_auth_delivery_capability(&valid).is_some());
+        assert!(
+            jet_auth_delivery_capability(&invalid).is_none(),
+            "a delivery identity with a 64-byte DNS label must be rejected"
+        );
+        assert!(jet_auth_register_user(invalid.clone(), "hash".to_string()).is_ok());
+        assert!(
+            jet_auth_magic_link_issue(invalid, 0, 1_000).is_err(),
+            "registered users with invalid delivery identities must not receive magic links"
+        );
+    }
 }
 
 /// A clean value (no taint) at `print` is fine — no E0722.
@@ -557,12 +584,12 @@ fn counted_loop_zero_iterations_keeps_pre_loop_taint() {
     let src = r#"
 use core.process as process
 #Scrub(Input) fn clean(raw: #Input String) => String { return raw.split(" ").to_list()[0] }
-fn run(n: Int) {
+fn run(n: Int) ! {
     value := #Input "world; rm -rf /"
     loop i := 0, i < n {
         value = clean(value)
     }
-    process.run(["echo", value]) ?? return
+    process.run(["echo", value]) ?? return Err("test")
 }
 "#;
     assert!(

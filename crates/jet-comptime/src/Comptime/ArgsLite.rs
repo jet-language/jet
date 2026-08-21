@@ -3,9 +3,9 @@
 mod native {
     use std::cell::RefCell;
 
-    use crate::AST::CtValue;
-    use crate::Diagnostics::{Diagnostic, Span};
     use crate::Comptime::Diagnostics::unsupported;
+    use crate::Diagnostics::{Diagnostic, Span};
+    use crate::AST::CtValue;
 
     #[allow(unexpected_cfgs)]
     mod job {
@@ -87,24 +87,24 @@ mod native {
 
     fn spec_id(recv: &CtValue) -> Option<i64> {
         match recv {
-            CtValue::Struct { type_name, fields } if type_name == "ArgsSpec" => fields
-                .iter()
-                .find_map(|(n, v)| match (n.as_str(), v) {
+            CtValue::Struct { type_name, fields } if type_name == "ArgsSpec" => {
+                fields.iter().find_map(|(n, v)| match (n.as_str(), v) {
                     ("id", CtValue::Int(i)) => Some(*i),
                     _ => None,
-                }),
+                })
+            }
             _ => None,
         }
     }
 
     fn parsed_id(recv: &CtValue) -> Option<i64> {
         match recv {
-            CtValue::Struct { type_name, fields } if type_name == "ParsedArgs" => fields
-                .iter()
-                .find_map(|(n, v)| match (n.as_str(), v) {
+            CtValue::Struct { type_name, fields } if type_name == "ParsedArgs" => {
+                fields.iter().find_map(|(n, v)| match (n.as_str(), v) {
                     ("id", CtValue::Int(i)) => Some(*i),
                     _ => None,
-                }),
+                })
+            }
             _ => None,
         }
     }
@@ -122,7 +122,11 @@ mod native {
             .and_then(|v| as_str(v, span))
     }
 
-    fn optional_str_arg(args: &[CtValue], i: usize, span: Span) -> Result<Option<String>, Diagnostic> {
+    fn optional_str_arg(
+        args: &[CtValue],
+        i: usize,
+        span: Span,
+    ) -> Result<Option<String>, Diagnostic> {
         match args.get(i) {
             Some(CtValue::Str(value)) => Ok(Some(value.clone())),
             Some(CtValue::Unit) | Some(CtValue::Failed(crate::AST::CtReport::Clean(_))) => Ok(None),
@@ -162,7 +166,10 @@ mod native {
                     Ok(s) => s,
                     Err(e) => return Some(Err(e)),
                 };
-                Ok(spec_value(replace_spec(id, jet_args_flag(spec, &name, &help))))
+                Ok(spec_value(replace_spec(
+                    id,
+                    jet_args_flag(spec, &name, &help),
+                )))
             }
             "ArgsSpecFlagShort" => {
                 let id = spec_id(recv)?;
@@ -311,16 +318,7 @@ mod native {
                             _ => JetArgValueKind::String,
                         };
                         jet_args_option_base(
-                            spec,
-                            &name,
-                            short,
-                            &help,
-                            &meta,
-                            default,
-                            env,
-                            required,
-                            repeat,
-                            value,
+                            spec, &name, short, &help, &meta, default, env, required, repeat, value,
                         )
                     }
                     Err(e) => return Some(Err(e)),
@@ -432,7 +430,10 @@ mod native {
                     Ok(s) => s,
                     Err(e) => return Some(Err(e)),
                 };
-                Ok(spec_value(replace_spec(id, jet_args_version(spec, &version))))
+                Ok(spec_value(replace_spec(
+                    id,
+                    jet_args_version(spec, &version),
+                )))
             }
             "ArgsSpecDescription" => {
                 let id = spec_id(recv)?;
@@ -475,7 +476,9 @@ mod native {
                     Err(e) => return Some(Err(e)),
                 };
                 match jet_args_parse(&spec, &argv) {
-                    Ok(parsed) => Ok(CtValue::Present(Box::new(parsed_value(push_parsed(parsed))))),
+                    Ok(parsed) => Ok(CtValue::Present(Box::new(parsed_value(push_parsed(
+                        parsed,
+                    ))))),
                     Err(msg) => Ok(CtValue::failed(Box::new(CtValue::Str(msg)))),
                 }
             }
@@ -495,10 +498,12 @@ mod native {
                     Ok(s) => s,
                     Err(e) => return Some(Err(e)),
                 };
-                Ok(match with_parsed(id, |p| jet_parsed_option(p, &name)).and_then(|r| r.ok()) {
-                    Some(s) => CtValue::Present(Box::new(CtValue::Str(s))),
-                    None => CtValue::absent(crate::AST::Type::String),
-                })
+                Ok(
+                    match with_parsed(id, |p| jet_parsed_option(p, &name)).and_then(|r| r.ok()) {
+                        Some(s) => CtValue::Present(Box::new(CtValue::Str(s))),
+                        None => CtValue::absent(crate::AST::Type::String),
+                    },
+                )
             }
             "ParsedArgsOptionInt" => {
                 let id = parsed_id(recv)?;
@@ -507,7 +512,8 @@ mod native {
                     Err(e) => return Some(Err(e)),
                 };
                 Ok(
-                    match with_parsed(id, |p| jet_parsed_option_int(p, &name)).and_then(|r| r.ok()) {
+                    match with_parsed(id, |p| jet_parsed_option_int(p, &name)).and_then(|r| r.ok())
+                    {
                         Some(n) => CtValue::Present(Box::new(CtValue::Int(n))),
                         None => CtValue::absent(crate::AST::Type::Int),
                     },
@@ -520,7 +526,9 @@ mod native {
                     Err(e) => return Some(Err(e)),
                 };
                 Ok(
-                    match with_parsed(id, |p| jet_parsed_option_float(p, &name)).and_then(|r| r.ok()) {
+                    match with_parsed(id, |p| jet_parsed_option_float(p, &name))
+                        .and_then(|r| r.ok())
+                    {
                         Some(n) => {
                             CtValue::Present(Box::new(CtValue::Float(crate::AST::CtFloat::f64(n))))
                         }

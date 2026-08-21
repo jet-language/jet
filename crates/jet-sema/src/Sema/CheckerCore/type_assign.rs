@@ -6,7 +6,7 @@ use crate::Sema::CheckerCoreLib::{
     phantom_fact_menu_diag, retired_acronym_spelling_diag,
 };
 use crate::Sema::Bundle::fn_types_compatible;
-use crate::Sema::{Checker, KnowledgeGate, KnowledgePlane};
+use crate::Sema::{Checker, KnowledgeGate, KnowledgePlane, TypeDef};
 use crate::Sema::Diagnostics::{
     option_used_where_plain_expected, result_used_where_plain_expected, soft_public_use,
     suggest_field, type_fix_hint, undeclared_value_tag,
@@ -113,6 +113,7 @@ impl<'a> Checker<'a> {
         }
 
         fn warn_soft_public_type_name(&mut self, name: &str, span: Span) {
+            self.warn_deprecated_type_name(name, span);
             let (owner, public_name) = if let Some((alias, leaf)) = name.rsplit_once('.') {
                 (self.imports.get(alias).copied(), leaf)
             } else {
@@ -141,6 +142,37 @@ impl<'a> Checker<'a> {
                 return;
             }
             self.diags.push(soft_public_use(public_name, span));
+        }
+
+        pub(crate) fn warn_deprecated_type_name(&mut self, name: &str, span: Span) {
+            let (import_ns, leaf) = self.struct_type_name_parts(name);
+            let Some(owner) = self.struct_owner_module(leaf, import_ns) else {
+                return;
+            };
+            let deprecation = if owner == self.module_idx {
+                self.registry.types.get(leaf).and_then(|definition| match definition {
+                    TypeDef::Struct { deprecation, .. }
+                    | TypeDef::Enum { deprecation, .. }
+                    | TypeDef::Distinct { deprecation, .. }
+                    | TypeDef::Alias { deprecation, .. } => deprecation.as_ref(),
+                })
+            } else {
+                self.modules
+                    .and_then(|modules| modules.get(owner))
+                    .and_then(|module| module.registry.types.get(leaf))
+                    .and_then(|definition| match definition {
+                        TypeDef::Struct { deprecation, .. }
+                        | TypeDef::Enum { deprecation, .. }
+                        | TypeDef::Distinct { deprecation, .. }
+                        | TypeDef::Alias { deprecation, .. } => deprecation.as_ref(),
+                    })
+            }
+            .cloned();
+            if let Some(deprecation) = deprecation {
+                let item = import_ns
+                    .map_or_else(|| leaf.to_string(), |namespace| format!("{namespace}.{leaf}"));
+                self.check_deprecation(&item, &deprecation, span);
+            }
         }
 
         pub(in crate::Sema) fn check_declared_type_rules(&mut self, ty: &Type, span: Span) {

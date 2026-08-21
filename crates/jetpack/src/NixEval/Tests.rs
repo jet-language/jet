@@ -135,10 +135,33 @@ fn private_derivation_materializer_matches_pinned_fixture_and_errors() {
             actual.drv_path(),
             expected.get("drvPath").unwrap().as_str().unwrap()
         );
-        assert_eq!(
-            actual.outputs().get("out").map(String::as_str),
-            Some(expected.get("out").unwrap().as_str().unwrap())
-        );
+        if let Some(outputs) = expected.get("outputs") {
+            let outputs = outputs.as_object().expect("fixture outputs object");
+            assert_eq!(actual.outputs().len(), outputs.len());
+            for (name, path) in outputs {
+                assert_eq!(
+                    actual.outputs().get(name).map(String::as_str),
+                    Some(path.as_str().unwrap())
+                );
+            }
+        } else if expected.get("dev").is_some() || expected.get("doc").is_some() {
+            let outputs = expected
+                .iter()
+                .filter(|(name, _)| name.as_str() != "drvPath")
+                .collect::<Vec<_>>();
+            assert_eq!(actual.outputs().len(), outputs.len());
+            for (name, path) in outputs {
+                assert_eq!(
+                    actual.outputs().get(name).map(String::as_str),
+                    Some(path.as_str().unwrap())
+                );
+            }
+        } else {
+            assert_eq!(
+                actual.outputs().get("out").map(String::as_str),
+                Some(expected.get("out").unwrap().as_str().unwrap())
+            );
+        }
     }
     for case in root
         .get("errors")

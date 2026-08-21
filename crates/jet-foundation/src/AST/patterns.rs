@@ -50,13 +50,13 @@ pub enum Pattern {
         span: Span,
     },
     Absent(Span),
-    /// S34: `Ok(binding)` pattern on `T ? E`.
+    /// S34: `Ok(binding)` pattern on `T ! E`.
     Ok {
         binding: String,
         binding_span: Span,
         span: Span,
     },
-    /// S34: `Err(binding)` pattern on `T ? E`.
+    /// S34: `Err(binding)` pattern on `T ! E`.
     Err {
         binding: String,
         binding_span: Span,
@@ -380,7 +380,11 @@ impl Pattern {
                         span: *span,
                         rename: None,
                     }),
-                    BinMatchPart::Lit(_) | BinMatchPart::Hole { spec: BinSpec::Rest, .. } => None,
+                    BinMatchPart::Lit(_)
+                    | BinMatchPart::Hole {
+                        spec: BinSpec::Rest,
+                        ..
+                    } => None,
                 })
                 .collect(),
             Pattern::Absent(_) | Pattern::Range { .. } => Vec::new(),

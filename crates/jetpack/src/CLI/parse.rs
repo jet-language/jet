@@ -438,7 +438,7 @@ pub fn main(args: Vec<String>) -> i32 {
                     reason: "reversible Hangar path migration".to_string(),
                     disposition: "Jetpack stopped before reading or changing package state."
                         .to_string(),
-                    fix: "Inspect the reported migration staging path, then retry the command."
+                    fix: "Inspect the reported Hangar path and migration staging path; move unsafe nodes aside without deleting them, then retry the command."
                         .to_string(),
                 },
             );

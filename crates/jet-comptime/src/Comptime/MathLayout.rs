@@ -1,9 +1,9 @@
 //! D-SIMD2 / D-LINALG1: comptime/REPL mirror of AOT `jet_math_*` + lane ops.
 //! Scalar-array fallback — same algorithms as `LinalgFns.rs` / `MathTaskMem.rs`.
 
-use crate::AST::{BinOp, CtFloat, Type};
 use crate::Diagnostics::{Diagnostic, Span};
 use crate::Syntax;
+use crate::AST::{BinOp, CtFloat, Type};
 
 use super::Diagnostics::{comptime_panic, overflow, unsupported};
 use crate::AST::CtValue;
@@ -187,7 +187,11 @@ pub fn integer_binop(
         BinOp::Mod if b == 0 => Err(comptime_panic(INTEGER_DIVIDE_ZERO, span)),
         BinOp::Mod => checked(floored_mod(a, b), "take the remainder of"),
         // D-MODSEM1=A: `MIN %% -1` is 0, which fits every width.
-        BinOp::Rem => Ok(CtValue::Int(integer_narrow(a.wrapping_rem(b), signed, bits))),
+        BinOp::Rem => Ok(CtValue::Int(integer_narrow(
+            a.wrapping_rem(b),
+            signed,
+            bits,
+        ))),
         // D-EXPSEM1=A: exact whole-number power, trapping outside the range,
         // in the same words every other tier uses.
         BinOp::Pow if b < 0 => Err(comptime_panic(INTEGER_POWER_NEGATIVE, span)),
@@ -200,11 +204,7 @@ pub fn integer_binop(
         BinOp::BitAnd => Ok(CtValue::Int(integer_narrow(a & b, signed, bits))),
         BinOp::BitOr => Ok(CtValue::Int(integer_narrow(a | b, signed, bits))),
         BinOp::BitXor => Ok(CtValue::Int(integer_narrow(a ^ b, signed, bits))),
-        BinOp::Shl => Ok(CtValue::Int(integer_narrow(
-            a << (b as u32),
-            signed,
-            bits,
-        ))),
+        BinOp::Shl => Ok(CtValue::Int(integer_narrow(a << (b as u32), signed, bits))),
         BinOp::Shr => {
             let value = if signed {
                 a >> (b as u32)
@@ -502,12 +502,7 @@ pub(super) fn apply_static(
 }
 
 fn to_array_list(type_name: &str, lanes: &[f64]) -> CtValue {
-    CtValue::List(
-        lanes
-            .iter()
-            .map(|n| float_value(type_name, *n))
-            .collect(),
-    )
+    CtValue::List(lanes.iter().map(|n| float_value(type_name, *n)).collect())
 }
 
 fn reduce_op(name: &str, lanes: &[f64], op: &str) -> Option<f64> {
@@ -623,7 +618,11 @@ pub(super) fn apply_method(
             if !(name == Syntax::LINALG_MAT3_TYPE || name == Syntax::LINALG_MAT4_TYPE) {
                 return Some(Err(unsupported("matmul on a matrix", span)));
             }
-            let n = if name == Syntax::LINALG_MAT3_TYPE { 3 } else { 4 };
+            let n = if name == Syntax::LINALG_MAT3_TYPE {
+                3
+            } else {
+                4
+            };
             Ok(from_lanes(name, &mat_mul(n, &vals, &other)))
         }
         ("transform", 1) => {
@@ -743,9 +742,9 @@ pub fn overflow_opt(
             Ok(CtValue::Int(narrow(clamped)))
         }
         Syntax::BUILTIN_CHECKED => match checked_op(op, a, b) {
-            Some(raw) if (lo..=hi).contains(&raw) => Ok(CtValue::Present(Box::new(CtValue::Int(
-                narrow(raw),
-            )))),
+            Some(raw) if (lo..=hi).contains(&raw) => {
+                Ok(CtValue::Present(Box::new(CtValue::Int(narrow(raw)))))
+            }
             _ => Ok(CtValue::absent(Type::IntN { signed, bits })),
         },
         _ => Err(overflow(mode, span)),

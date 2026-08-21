@@ -1,4 +1,3 @@
-use super::NEXT_CONTEXT;
 use super::actions_policy::{
     ActionKind, ActionSpec, BuildAction, BuildCapability, BuildPolicy, BuildResourcePool,
     LegacyWrapperKind, PolicyExplanation, PolicySetting,
@@ -6,16 +5,16 @@ use super::actions_policy::{
 use super::cache_cas::ContentDigest;
 use super::errors_keys::{closed_cycle, BuildError, NameKind};
 use super::handles::{
-    ActionHandle, ActionId, AssetBundleTarget, DocTarget, ExecutableTarget,
-    GeneratedModuleHandle, GeneratedModuleId, InstallTarget, LibraryTarget, PackageTarget,
-    PluginHandle, PluginId, ProbeHandle, ProbeId, PublishTarget, SigningIdentityHandle,
-    SigningIdentityId, TargetId, TargetRef, TestTarget, ToolchainHandle, ToolchainId,
+    ActionHandle, ActionId, AssetBundleTarget, DocTarget, ExecutableTarget, GeneratedModuleHandle,
+    GeneratedModuleId, InstallTarget, LibraryTarget, PackageTarget, PluginHandle, PluginId,
+    ProbeHandle, ProbeId, PublishTarget, SigningIdentityHandle, SigningIdentityId, TargetId,
+    TargetRef, TestTarget, ToolchainHandle, ToolchainId,
 };
 use super::plan_graph::BuildPlan;
 use super::plugins_modules::{
-    BUILD_PLUGIN_API_VERSION, BuildGeneratedModule, BuildPlugin, GeneratedModuleSpec,
-    PackagedPluginContribution, PackagedPluginTarget, PluginApplication, PluginContribution,
-    PluginTargetSpec, WasmComponentPluginSpec,
+    BuildGeneratedModule, BuildPlugin, GeneratedModuleSpec, PackagedPluginContribution,
+    PackagedPluginTarget, PluginApplication, PluginContribution, PluginTargetSpec,
+    WasmComponentPluginSpec, BUILD_PLUGIN_API_VERSION,
 };
 use super::provenance_toolchains::{
     BuildProbe, BuildProvenance, BuildSigningIdentity, BuildToolchain, ProbeSpec,
@@ -27,6 +26,7 @@ use super::validation::{
     validate_generated_module, validate_identity, validate_paths, validate_plugin_spec,
     validate_probe, validate_toolchain,
 };
+use super::NEXT_CONTEXT;
 use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::path::Path;
 use std::sync::atomic::Ordering;
@@ -363,10 +363,18 @@ impl BuildContext {
                 path: module.path.as_str().to_string(),
             });
         }
-        if self.generated_modules.iter().any(|old| old.name == module.name) {
+        if self
+            .generated_modules
+            .iter()
+            .any(|old| old.name == module.name)
+        {
             return Err(BuildError::DuplicateGeneratedModuleName(module.name));
         }
-        if self.generated_modules.iter().any(|old| old.path == module.path) {
+        if self
+            .generated_modules
+            .iter()
+            .any(|old| old.path == module.path)
+        {
             return Err(BuildError::DuplicateGeneratedModulePath(
                 module.path.as_str().to_string(),
             ));
@@ -424,9 +432,11 @@ impl BuildContext {
     ) -> Result<PluginApplication, BuildError> {
         let manifest_path = manifest_path.as_ref();
         let component_path = component_path.as_ref();
-        let (spec, manifest_digest) =
-            WasmComponentPluginSpec::load_packaged_with_manifest_digest(manifest_path, component_path)
-                .map_err(BuildError::PackagedPlugin)?;
+        let (spec, manifest_digest) = WasmComponentPluginSpec::load_packaged_with_manifest_digest(
+            manifest_path,
+            component_path,
+        )
+        .map_err(BuildError::PackagedPlugin)?;
         // Do this before instantiation. A denied component must not run guest
         // code merely to discover that its requested capability is forbidden.
         self.validate_plugin_policy(&spec, policy)?;
@@ -576,9 +586,7 @@ impl BuildContext {
                     .transpose()?;
                 let cache = match action.cache.as_str() {
                     "cached" => super::actions_policy::ActionCache::Cached,
-                    "phony" | "uncached-phony" => {
-                        super::actions_policy::ActionCache::UncachedPhony
-                    }
+                    "phony" | "uncached-phony" => super::actions_policy::ActionCache::UncachedPhony,
                     other => {
                         return Err(BuildError::PackagedPlugin(format!(
                             "action {name} has unknown cache mode {other}"
@@ -749,10 +757,7 @@ impl BuildContext {
             .ok_or_else(|| BuildError::PackagedPlugin(format!("unknown probe {name}")))
     }
 
-    fn named_signing_identity(
-        &self,
-        name: &str,
-    ) -> Result<SigningIdentityHandle, BuildError> {
+    fn named_signing_identity(&self, name: &str) -> Result<SigningIdentityHandle, BuildError> {
         self.signing_identities
             .iter()
             .find(|identity| identity.name == name)
@@ -889,11 +894,11 @@ impl BuildContext {
             return Err(BuildError::DuplicateActionName(name));
         }
         self.validate_action_spec(&name, &spec)?;
-        if let Some(module) = self.generated_modules.iter().find(|module| {
-            spec.outputs
-                .iter()
-                .any(|output| output == &module.path)
-        }) {
+        if let Some(module) = self
+            .generated_modules
+            .iter()
+            .find(|module| spec.outputs.iter().any(|output| output == &module.path))
+        {
             return Err(BuildError::GeneratedModuleCycle {
                 module: module.name.clone(),
                 path: module.path.as_str().to_string(),
@@ -991,12 +996,11 @@ impl BuildContext {
         }
         validate_action_output_owners(&self.actions)?;
         for module in &self.generated_modules {
-            if self.actions.iter().any(|action| {
-                action
-                    .outputs
-                    .iter()
-                    .any(|output| output == &module.path)
-            }) {
+            if self
+                .actions
+                .iter()
+                .any(|action| action.outputs.iter().any(|output| output == &module.path))
+            {
                 return Err(BuildError::GeneratedModuleCycle {
                     module: module.name.clone(),
                     path: module.path.as_str().to_string(),

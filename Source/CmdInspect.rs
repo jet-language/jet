@@ -1,6 +1,8 @@
 //! Read-only projections owned by `jet inspect`.
 
 use std::fmt::Write as _;
+use std::fs;
+use std::path::Path;
 use std::process::exit;
 
 use jet::Diagnostics::Diagnostic;
@@ -66,6 +68,74 @@ pub(crate) fn run_digest(args: &[String], json: bool) {
         None => llm_digest(),
     };
     emit_digest(&digest, json);
+}
+
+/// `jet inspect env [<env.jet|config.jet>]` — evaluate a config surface and
+/// project the typed `$NAME` reads without exposing their values.
+pub(crate) fn run_env(args: &[String], json: bool) {
+    let file = entry_file(args).unwrap_or_else(|| {
+        if Path::new(jet::Syntax::ENV_FILE).is_file() {
+            jet::Syntax::ENV_FILE.to_string()
+        } else {
+            jet::Syntax::CONFIG_FILE.to_string()
+        }
+    });
+    let source = match fs::read_to_string(&file) {
+        Ok(source) => source,
+        Err(error) => {
+            crate::cli_error!(
+                @fix "E2105",
+                format!("can't read config surface `{file}`: {error}"),
+                "pass a readable `env.jet` or `config.jet` file"
+            );
+            exit(jet::ExitCodes::USER_ERROR);
+        }
+    };
+    let path = Path::new(&file);
+    let base_dir = path
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+        .unwrap_or_else(|| Path::new("."));
+    let plan = match jet_env_model::ModuleEval::evaluate_env(&source, base_dir) {
+        Ok(plan) => plan,
+        Err(diagnostic) => {
+            eprint!(
+                "{}",
+                jet::render_diagnostics(&file, &source, std::slice::from_ref(&diagnostic))
+            );
+            exit(jet::ExitCodes::USER_ERROR);
+        }
+    };
+    if json {
+        let reads = plan
+            .environment_reads
+            .iter()
+            .map(|read| {
+                format!(
+                    "{{\"name\":\"{}\",\"type\":\"{}\"}}",
+                    json_escape(&read.name),
+                    json_escape(&read.ty)
+                )
+            })
+            .collect::<Vec<_>>()
+            .join(",");
+        println!(
+            "{{\"schema_version\":1,\"file\":\"{}\",\"reads\":[{}]}}",
+            json_escape(&file),
+            reads
+        );
+    } else {
+        println!("environment");
+        println!("file: {file}");
+        if plan.environment_reads.is_empty() {
+            println!("reads: none");
+        } else {
+            println!("reads:");
+            for read in &plan.environment_reads {
+                println!("  {}: {}", read.name, read.ty);
+            }
+        }
+    }
 }
 
 fn emit_digest(digest: &str, json: bool) {
@@ -202,8 +272,8 @@ fn llm_digest() -> String {
         "Bindings: `name :: value` is immutable; `name := value` is mutable; `name = value` reassigns a mutable binding.",
         "Functions: `fn name(parameter: Type) => Return { ... }`; expression bodies use `:: expression`.",
         "Visibility: declarations are private by default; prefix an item with `pub` for package use.",
-        "Types: `Int`, `Float`, `Bool`, `String`, `Char`; lists use `[T]`; optional values use `T?`; failures use `T ? E`.",
-        "Errors: handle `T?` or `T ? E` with `?? fallback`, `?`, or a pattern test. Use `Ok(value)`, `Err(error)`, `Val(value)`, and `None`.",
+        "Types: `Int`, `Float`, `Bool`, `String`, `Char`; lists use `[T]`; optional values use `T?`; failures use `T ! E`.",
+        "Errors: handle `T?` or `T ! E` with `?? fallback`, `?`, or a pattern test. Use `Ok(value)`, `Err(error)`, `Val(value)`, and `None`.",
         "Control: `if condition { ... } else { ... }`; collecting loops use `loop name, source { ... }`; exit with `break` and advance with `next`.",
         "Construction: use `Type{ field: value }`; list literals use `[T]{ value1, value2 }`.",
         "Calls and member access use `name(args)` and `value.member(args)`. Core imports use `use core.module as alias`.",

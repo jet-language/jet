@@ -61,6 +61,8 @@ const JS_EXECUTION_PRELUDE: &str = concat!(
     "\n",
     include_str!("../Prelude/Core/Values.js"),
     "\n",
+    include_str!("../Prelude/Core/ExactNumbers.js"),
+    "\n",
     include_str!("../Prelude/Core/Measurement.js"),
     "\n",
     include_str!("../Prelude/Core/Shared.js"),
@@ -406,6 +408,18 @@ fn validate_web_func_tir(
 ) {
     *cx.current_type_params.borrow_mut() = f.type_params.iter().map(|p| p.name.clone()).collect();
     let covered = TIR::tir_covers(f, cx);
+    if !covered
+        && matches!(
+            f.name.as_str(),
+            "describe" | "as_named" | "run" | "digit" | "wasm_digit"
+        )
+    {
+        eprintln!(
+            "[web-debug] coverage miss {}: {}",
+            f.name,
+            TIR::refusal::describe(cx)
+        );
+    }
     if covered {
         let tir = TIR::lower_web_func(f, cx);
         let supported = if !require_web_emit {
@@ -423,6 +437,22 @@ fn validate_web_func_tir(
                 && web_func_guarantees_return(f, &tir)
                 && web_wasm_abi_supported(f, &tir, bundle)
         };
+        if !supported
+            && matches!(
+                f.name.as_str(),
+                "describe" | "as_named" | "run" | "digit" | "wasm_digit"
+            )
+        {
+            eprintln!(
+                "[web-debug] emitter miss {} bucket {:?}: body {:?}",
+                f.name,
+                bucket,
+                tir.body
+                    .iter()
+                    .map(|stmt| format!("{:?}", std::mem::discriminant(stmt)))
+                    .collect::<Vec<_>>()
+            );
+        }
         if supported {
             cx.current_type_params.borrow_mut().clear();
             return;
@@ -835,7 +865,7 @@ fn web_wasm_expr_supported(
     if is_stream_type(&expr.ty) {
         return false;
     }
-    match &expr.kind {
+    let supported = match &expr.kind {
         TIR::TExprKind::CtLit(crate::AST::CtValue::List(_))
             if matches!(&expr.ty, Type::List(inner) if matches!(inner.as_ref(), Type::String)) => true,
         TIR::TExprKind::IntLit(..)
@@ -872,6 +902,10 @@ fn web_wasm_expr_supported(
             }
         }),
         TIR::TExprKind::Binary { lhs, rhs, .. } => web_wasm_expr_supported(lhs, bundle, file_prefix, reconstructions) && web_wasm_expr_supported(rhs, bundle, file_prefix, reconstructions),
+        TIR::TExprKind::PatternMatches { subj, pattern } => {
+            web_match_pattern_supported(pattern)
+                && web_wasm_expr_supported(subj, bundle, file_prefix, reconstructions)
+        }
         TIR::TExprKind::CoreCall {
             module,
             method,
@@ -912,6 +946,10 @@ fn web_wasm_expr_supported(
         | TIR::TExprKind::Print(operand) => {
             web_wasm_expr_supported(operand, bundle, file_prefix, reconstructions)
         }
+        TIR::TExprKind::ResourceNew(inner) => {
+            web_wasm_expr_supported(inner, bundle, file_prefix, reconstructions)
+        }
+        TIR::TExprKind::ResourceTake(_) => true,
         TIR::TExprKind::Borrow { place, .. } => {
             web_wasm_expr_supported(place, bundle, file_prefix, reconstructions)
         }
@@ -1057,6 +1095,8 @@ fn web_wasm_expr_supported(
                 web_wasm_expr_supported(base, bundle, file_prefix, reconstructions)
                     && web_wasm_expr_supported(index, bundle, file_prefix, reconstructions)
             }
+            TIR::THostCall::SwitchSubjectField { .. }
+            | TIR::THostCall::SwitchSubjectValue => true,
             _ => false,
         },
         TIR::TExprKind::EnumLit { payload, .. } => match payload {
@@ -1195,6 +1235,51 @@ fn web_wasm_expr_supported(
         }
         TIR::TExprKind::Unit => true,
         _ => false,
+    };
+    if !supported {
+        match &expr.kind {
+            TIR::TExprKind::CoreCall { module, method, args, .. } => eprintln!(
+                "[web-debug-expr] wasm CoreCall {module}::{method}/{}",
+                args.len()
+            ),
+            _ => eprintln!(
+                "[web-debug-expr] wasm {} {:?}",
+                web_tir_expr_kind_name(&expr.kind),
+                std::mem::discriminant(&expr.kind)
+            ),
+        }
+    }
+    supported
+}
+
+fn web_tir_expr_kind_name(kind: &TIR::TExprKind) -> &'static str {
+    use TIR::TExprKind as E;
+    match kind {
+        E::IfExpr { .. } => "IfExpr",
+        E::PatternMatches { .. } => "PatternMatches",
+        E::Binary { .. } => "Binary",
+        E::StrLit(_) => "StrLit",
+        E::Print(_) => "Print",
+        E::Call { .. } => "Call",
+        E::EnumLit { .. } => "EnumLit",
+        E::StructLit { .. } => "StructLit",
+        E::Field { .. } => "Field",
+        E::Local(_) => "Local",
+        E::IntLit(..) => "IntLit",
+        E::FloatLit(_) => "FloatLit",
+        E::BoolLit(_) => "BoolLit",
+        E::Clone(_) => "Clone",
+        E::Present(_) => "Present",
+        E::Ok(_) => "Ok",
+        E::Err(_) => "Err",
+        E::Try { .. } => "Try",
+        E::InlineBlock(_) => "InlineBlock",
+        E::HostCall(_) => "HostCall",
+        E::MethodCall { .. } => "MethodCall",
+        E::CoreCall { .. } => "CoreCall",
+        E::ResourceNew(_) => "ResourceNew",
+        E::ResourceTake(_) => "ResourceTake",
+        _ => "other",
     }
 }
 
@@ -1231,7 +1316,9 @@ fn web_stmts_supported(stmts: &[TIR::TStmt]) -> bool {
         TIR::TStmt::LineMarker(_) | TIR::TStmt::SourceSpan(_) | TIR::TStmt::Return(None) => true,
         TIR::TStmt::Let { init, .. } | TIR::TStmt::ExprStmt(init) | TIR::TStmt::Return(Some(init)) => web_expr_supported(init),
         TIR::TStmt::TupleDestructure { init, .. } => web_expr_supported(init),
-        TIR::TStmt::Assign { value, .. } => web_expr_supported(value),
+        TIR::TStmt::Assign { place, value, .. } => {
+            web_place_supported(place) && web_expr_supported(value)
+        }
         TIR::TStmt::Contract { contract } => {
             contract.disposition != TIR::TContractDisposition::Check
                 || (web_expr_supported(&contract.condition)
@@ -1356,6 +1443,13 @@ fn web_lambda_supported(lam: &TIR::TLambda) -> bool {
         TIR::TLambdaBody::Expr(expr) => web_expr_supported(expr),
         TIR::TLambdaBody::Block(body) => web_stmts_supported(body),
         TIR::TLambdaBody::SharedBlock(body) => web_stmts_supported(&body[..]),
+    }
+}
+
+fn web_place_supported(place: &TIR::TPlace) -> bool {
+    match place {
+        TIR::TPlace::Local(_) => true,
+        TIR::TPlace::Expr(expr) => web_expr_supported(expr),
     }
 }
 
@@ -1530,6 +1624,8 @@ fn web_overflow_opt_supported(prefix: &str, op: &str) -> bool {
 
 fn web_shared_host_call_supported(host: &TIR::THostCall) -> bool {
     match host {
+        TIR::THostCall::SwitchSubjectField { .. }
+        | TIR::THostCall::SwitchSubjectValue => true,
         TIR::THostCall::FixedListIndex { base, index, .. } => {
             web_expr_supported(base) && web_expr_supported(index)
         }
@@ -1586,19 +1682,31 @@ fn web_js_select_supported(builder: &TIR::TExpr) -> bool {
 
 fn web_expr_supported(expr: &TIR::TExpr) -> bool {
     use TIR::TExprKind as E;
-    match &expr.kind {
+    let supported = match &expr.kind {
         E::IntLit(..) | E::FloatLit(_) | E::BoolLit(_) | E::CharLit(_) | E::Local(_)
         | E::Unit | E::DefaultLit | E::CtLit(_) | E::Uninit => true,
         E::Todo { .. } => true,
         E::InlineBlock(stmts) => web_inline_block_supported(stmts),
         E::StrLit(parts) => parts.iter().all(|p| match p { TIR::TStrPart::Lit(_) => true, TIR::TStrPart::Interp(e, _) => web_expr_supported(e) }),
         E::Binary { lhs, rhs, .. } => web_expr_supported(lhs) && web_expr_supported(rhs),
+        E::PreciseBuiltin {
+            type_name,
+            func,
+            args,
+        } if web_complex_precise_supported(type_name, func, args.len()) => {
+            args.iter().all(web_expr_supported)
+        }
+        E::PatternMatches { subj, pattern } => {
+            web_match_pattern_supported(pattern) && web_expr_supported(subj)
+        }
         E::Unary { operand, .. }
         | E::Clone(operand)
         | E::ExplicitCopy(operand)
         | E::MaterializeView(operand)
         | E::DistinctRaw(operand)
         | E::Print(operand) => web_expr_supported(operand),
+        E::ResourceNew(inner) => web_expr_supported(inner),
+        E::ResourceTake(_) => true,
         E::Close(operand) => web_expr_supported(operand),
         E::Borrow { place, .. } => web_expr_supported(place),
         E::DistinctCtor { arg, .. } => web_expr_supported(arg),
@@ -1805,7 +1913,21 @@ fn web_expr_supported(expr: &TIR::TExpr) -> bool {
         } => web_expr_supported(label) && web_lambda_supported(executable),
         E::SelectWait { builder, .. } => web_js_select_supported(builder),
         _ => false,
+    };
+    if !supported {
+        match &expr.kind {
+            TIR::TExprKind::CoreCall { module, method, args, .. } => eprintln!(
+                "[web-debug-expr] js CoreCall {module}::{method}/{}",
+                args.len()
+            ),
+            _ => eprintln!(
+                "[web-debug-expr] js {} {:?}",
+                web_tir_expr_kind_name(&expr.kind),
+                std::mem::discriminant(&expr.kind)
+            ),
+        }
     }
+    supported
 }
 
 fn web_inline_block_supported(stmts: &[TIR::TStmt]) -> bool {
@@ -3759,7 +3881,7 @@ fn emit_wasm_fn(bundle: &ProgramBundle, f: &FuncWeb, export: bool, out: &mut Str
             Some(Type::Result { ok, .. }) => {
                 wasm_edge_ok_json_expr(ok, "value").ok_or_else(|| web_emit_error(f))?
             }
-            _ => unreachable!("fallible Wasm edge run has a Result return"),
+            _ => return Err(web_emit_error(f)),
         };
         out.push_str(&format!(
             "        match jet_wasm_{}({args}) {{\n            Ok(value) => {{ jet_wasm_store_ok({ok_json}); 0 }},\n            Err(error) => {{ jet_wasm_store_error(&error); 1 }}\n        }}\n    }})\n}}\n\n",
@@ -3904,7 +4026,10 @@ fn emit_wasm_fn(bundle: &ProgramBundle, f: &FuncWeb, export: bool, out: &mut Str
         f.file_prefix.as_deref(),
         &f.tir.web_param_reconstructions,
     )
-    .map_err(|()| web_emit_error(f))?;
+    .map_err(|()| {
+        eprintln!("[web-debug] wasm emit miss {}", f.name);
+        web_emit_error(f)
+    })?;
     if f.key == "run"
         && matches!(
             f.return_type.as_ref(),
@@ -4586,33 +4711,50 @@ fn emit_wasm_body(
                 )?;
             }
             TIR::TStmt::Range { var, start, end, step, exclusive, body, .. } => {
+                let exact_int = matches!((&start.ty, &end.ty), (Type::Int, Type::Int));
                 let start = wasm_emit_expr(start, funcs, file_prefix, reconstructions)?;
                 let end = wasm_emit_expr(end, funcs, file_prefix, reconstructions)?;
                 let loop_var = mangle(var);
                 let range_op = if *exclusive { ".." } else { "..=" };
-                match step {
-                    Some(step) => {
-                        let step = wasm_emit_expr(step, funcs, file_prefix, reconstructions)?;
-                        out.push_str(&format!("{pad}{{\n"));
-                        out.push_str(&jet_format!("{pad}    let {jet_prefix}loop_start = {start};\n"));
-                        out.push_str(&jet_format!("{pad}    let {jet_prefix}loop_end = {end};\n"));
-                        out.push_str(&jet_format!("{pad}    let {jet_prefix}loop_stride = {step};\n"));
-                        out.push_str(&jet_format!(
-                            "{pad}    assert!({jet_prefix}loop_stride > 0, jet_loop_stride_message());\n"
-                        ));
-                        out.push_str(&jet_format!(
-                            "{pad}    for {loop_var} in ({jet_prefix}loop_start{range_op}{jet_prefix}loop_end).step_by({jet_prefix}loop_stride as usize) {{\n"
-                        ));
-                        emit_wasm_body(body, out, indent + 2, funcs, file_prefix, reconstructions)?;
-                        out.push_str(&format!("{pad}    }}\n"));
-                        out.push_str(&format!("{pad}}}\n"));
-                    }
-                    None => {
-                        out.push_str(&format!(
-                            "{pad}for {loop_var} in ({start}){range_op}({end}) {{\n"
-                        ));
-                        emit_wasm_body(body, out, indent + 1, funcs, file_prefix, reconstructions)?;
-                        out.push_str(&format!("{pad}}}\n"));
+                if exact_int {
+                    let stride = step
+                        .as_ref()
+                        .map(|step| {
+                            wasm_emit_expr(step, funcs, file_prefix, reconstructions)
+                                .map(|step| format!("Some({step})"))
+                        })
+                        .transpose()?
+                        .unwrap_or_else(|| "None".to_string());
+                    out.push_str(&format!(
+                        "{pad}for {loop_var} in jet_wasm_int_range({start}, {end}, {exclusive}, {stride}) {{\n"
+                    ));
+                    emit_wasm_body(body, out, indent + 1, funcs, file_prefix, reconstructions)?;
+                    out.push_str(&format!("{pad}}}\n"));
+                } else {
+                    match step {
+                        Some(step) => {
+                            let step = wasm_emit_expr(step, funcs, file_prefix, reconstructions)?;
+                            out.push_str(&format!("{pad}{{\n"));
+                            out.push_str(&jet_format!("{pad}    let {jet_prefix}loop_start = {start};\n"));
+                            out.push_str(&jet_format!("{pad}    let {jet_prefix}loop_end = {end};\n"));
+                            out.push_str(&jet_format!("{pad}    let {jet_prefix}loop_stride = {step};\n"));
+                            out.push_str(&jet_format!(
+                                "{pad}    assert!({jet_prefix}loop_stride > 0, jet_loop_stride_message());\n"
+                            ));
+                            out.push_str(&jet_format!(
+                                "{pad}    for {loop_var} in ({jet_prefix}loop_start{range_op}{jet_prefix}loop_end).step_by({jet_prefix}loop_stride as usize) {{\n"
+                            ));
+                            emit_wasm_body(body, out, indent + 2, funcs, file_prefix, reconstructions)?;
+                            out.push_str(&format!("{pad}    }}\n"));
+                            out.push_str(&format!("{pad}}}\n"));
+                        }
+                        None => {
+                            out.push_str(&format!(
+                                "{pad}for {loop_var} in ({start}){range_op}({end}) {{\n"
+                            ));
+                            emit_wasm_body(body, out, indent + 1, funcs, file_prefix, reconstructions)?;
+                            out.push_str(&format!("{pad}}}\n"));
+                        }
                     }
                 }
             }
@@ -5209,15 +5351,9 @@ fn wasm_emit_expr(
                             crate::AST::StrFormat::Debug => value.push_str(&jet_format!(
                                 "{jet_prefix}s.push_str(&format!(\"{{:?}}\", {rendered})); "
                             )),
-                            crate::AST::StrFormat::Pretty => {
-                                unreachable!("Pretty interpolation lowers to core.text.fmt.pretty")
-                            }
-                            crate::AST::StrFormat::Fixed(_) => {
-                                unreachable!("Fixed interpolation lowers to core.text.fmt.decimal")
-                            }
-                            crate::AST::StrFormat::Unit(_) => {
-                                unreachable!("Unit interpolation lowers to a String")
-                            }
+                            crate::AST::StrFormat::Pretty
+                            | crate::AST::StrFormat::Fixed(_)
+                            | crate::AST::StrFormat::Unit(_) => return Err(()),
                         }
                     }
                 }
@@ -5235,6 +5371,15 @@ fn wasm_emit_expr(
             format!("({}).clone()", local.rust_place())
         }
         TIR::TExprKind::Local(local) => local.rust_place(),
+        TIR::TExprKind::PatternMatches { subj, pattern } => format!(
+            "matches!(&({}), {})",
+            wasm_emit_expr(subj, funcs, file_prefix, reconstructions)?,
+            wasm_match_arm_pattern(pattern)?,
+        ),
+        TIR::TExprKind::ResourceNew(inner) => {
+            wasm_emit_expr(inner, funcs, file_prefix, reconstructions)?
+        }
+        TIR::TExprKind::ResourceTake(place) => mangle(place),
         TIR::TExprKind::Uninit => match &expr.ty {
             Type::FixedList { elem, len, .. } => format!(
                 "jet_mem::JetUninitFixed::<{}, {len}>::new()",
@@ -5264,7 +5409,7 @@ fn wasm_emit_expr(
                         "sub" => "jet_complex_sub",
                         "mul" => "jet_complex_mul",
                         "div" => "jet_complex_div",
-                        _ => unreachable!(),
+                        _ => return Err(()),
                     };
                     format!("{helper}(&({}), &({}))", parts[0], parts[1])
                 }
@@ -5282,7 +5427,7 @@ fn wasm_emit_expr(
                         "sub" => "jet_wasm_fraction_sub",
                         "mul" => "jet_wasm_fraction_mul",
                         "div" => "jet_wasm_fraction_div",
-                        _ => unreachable!(),
+                        _ => return Err(()),
                     };
                     format!("{helper}(&({}), &({}))", parts[0], parts[1])
                 }
@@ -5380,7 +5525,7 @@ fn wasm_emit_expr(
             match op {
                 crate::AST::BinOp::Add => format!("({l}).saturating_add({r})"),
                 crate::AST::BinOp::Sub => format!("({l}).saturating_sub({r})"),
-                _ => unreachable!(),
+                _ => return Err(()),
             }
         }
         TIR::TExprKind::Binary { op, lhs, rhs, line, .. } => {
@@ -5642,6 +5787,13 @@ fn wasm_emit_expr(
                     _ => rendered_index,
                 };
                 format!("(({base})[({index} as usize)].clone())")
+            }
+            TIR::THostCall::SwitchSubjectField { field } => {
+                let subject = mangle_generated("switch_subject");
+                format!("((*{subject}).{})", mangle(field))
+            }
+            TIR::THostCall::SwitchSubjectValue => {
+                format!("(*{})", mangle_generated("switch_subject"))
             }
             _ => return Err(()),
         },
@@ -6366,7 +6518,10 @@ fn emit_js_fn(
         js_source_index(sources, &f.source_path)
     ));
     emit_tir_js_body(&f.tir.body, &mut body, all, f.file_prefix.as_deref(), 2)
-        .map_err(|()| web_emit_error(f))?;
+        .map_err(|()| {
+            eprintln!("[web-debug] js emit miss {}", f.name);
+            web_emit_error(f)
+        })?;
     let async_kw = if !f.is_generator && body.contains("await ") {
         "async "
     } else {
@@ -6574,10 +6729,14 @@ fn web_local(local: &TIR::TLocal) -> String {
     web_place(&local.rust_place())
 }
 
-fn web_tir_place(place: &TIR::TPlace) -> Result<String, ()> {
+fn web_tir_place(
+    place: &TIR::TPlace,
+    funcs: &[FuncWeb],
+    file_prefix: Option<&str>,
+) -> Result<String, ()> {
     match place {
         TIR::TPlace::Local(local) => Ok(web_local(local)),
-        TIR::TPlace::Expr(_) => Err(()),
+        TIR::TPlace::Expr(expr) => tir_js_expr(expr, funcs, file_prefix),
     }
 }
 
@@ -6963,13 +7122,28 @@ fn emit_tir_js_body(
     file_prefix: Option<&str>,
     indent: usize,
 ) -> Result<(), ()> {
-    let has_defer = body
+    let deferred_resources: Vec<&str> = body
         .iter()
-        .any(|stmt| matches!(stmt, TIR::TStmt::DeferClose { .. }));
-    if !has_defer {
-        return emit_tir_js_body_inner(body, out, funcs, file_prefix, indent, &mut Vec::new());
+        .filter_map(|stmt| match stmt {
+            TIR::TStmt::DeferClose { resource, .. } => Some(resource.as_str()),
+            _ => None,
+        })
+        .collect();
+    if deferred_resources.is_empty() {
+        return emit_tir_js_body_inner(
+            body,
+            out,
+            funcs,
+            file_prefix,
+            indent,
+            &mut Vec::new(),
+            &[],
+        );
     }
     let pad = "  ".repeat(indent);
+    for resource in &deferred_resources {
+        out.push_str(&format!("{pad}let {};\n", web_name(resource)));
+    }
     out.push_str(&format!("{pad}try {{\n"));
     let mut deferred = Vec::new();
     emit_tir_js_body_inner(
@@ -6979,6 +7153,7 @@ fn emit_tir_js_body(
         file_prefix,
         indent + 1,
         &mut deferred,
+        &deferred_resources,
     )?;
     out.push_str(&format!("{pad}}} finally {{\n"));
     for close in deferred.into_iter().rev() {
@@ -6995,6 +7170,7 @@ fn emit_tir_js_body_inner(
     file_prefix: Option<&str>,
     indent: usize,
     deferred: &mut Vec<String>,
+    deferred_resources: &[&str],
 ) -> Result<(), ()> {
     let pad = "  ".repeat(indent);
     let source_file = mangle_generated("source_file");
@@ -7010,7 +7186,14 @@ fn emit_tir_js_body_inner(
                     .source_marker;
                 out.push_str(&format!("{pad}{source_marker} line {line}\n"));
             }
-            TIR::TStmt::Let { name, init, .. } => out.push_str(&format!("{pad}let {} = {};\n", web_name(name), tir_js_expr(init, funcs, file_prefix)?)),
+            TIR::TStmt::Let { name, init, .. } => {
+                let value = tir_js_expr(init, funcs, file_prefix)?;
+                if deferred_resources.iter().any(|resource| *resource == name) {
+                    out.push_str(&format!("{pad}{} = {value};\n", web_name(name)));
+                } else {
+                    out.push_str(&format!("{pad}let {} = {value};\n", web_name(name)));
+                }
+            }
             TIR::TStmt::TupleDestructure {
                 tmp,
                 init,
@@ -7030,7 +7213,7 @@ fn emit_tir_js_body_inner(
                 }
             }
             TIR::TStmt::Assign { place, op, value, line, .. } => {
-                let target = web_tir_place(place)?;
+                let target = web_tir_place(place, funcs, file_prefix)?;
                 let v = tir_js_expr(value, funcs, file_prefix)?;
                 // D-EXPSEM1=A / D-FLOORDIV1=A: JavaScript's `**=` is the
                 // floating-point power and it has no rounding division at all,
@@ -7754,12 +7937,40 @@ fn tir_js_expr(expr: &TIR::TExpr, funcs: &[FuncWeb], file_prefix: Option<&str>) 
         E::CharLit(c) => json_quote(&c.to_string()),
         E::StrLit(parts) => tir_js_string(parts, funcs, file_prefix)?,
         E::Local(local) => web_local(local),
+        E::PatternMatches { subj, pattern } => {
+            let subject = tir_js_expr(subj, funcs, file_prefix)?;
+            let subject_name = mangle_generated("pattern_subject");
+            let test = js_pattern_test(&pattern.pattern, &subject_name)?;
+            format!(
+                "(() => {{ const {subject_name} = {subject}; return {test}; }})()"
+            )
+        }
+        E::ResourceNew(inner) => tir_js_expr(inner, funcs, file_prefix)?,
+        E::ResourceTake(place) => web_place(place),
         E::Unit | E::DefaultLit => "void 0".to_string(),
         E::CtLit(value) => tir_js_ct_value(value)?,
         E::Uninit => match &expr.ty {
             Type::FixedList { len, .. } => format!("Array({len})"),
             _ => "void 0".to_string(),
         },
+        E::PreciseBuiltin {
+            type_name,
+            func,
+            args,
+        } if web_complex_precise_supported(type_name, func, args.len()) => {
+            let prefix = match type_name.as_str() {
+                Syntax::TYPE_COMPLEX => "jet_complex",
+                Syntax::TYPE_FRACTION => "jet_fraction",
+                Syntax::TYPE_DECIMAL => "jet_decimal",
+                _ => return Err(()),
+            };
+            let args = args
+                .iter()
+                .map(|arg| tir_js_expr(arg, funcs, file_prefix))
+                .collect::<Result<Vec<_>, _>>()?
+                .join(", ");
+            format!("{prefix}_{func}({args})")
+        }
         E::HostCall(host) => match host.as_ref() {
             TIR::THostCall::OptionProbe { inner, kind } => {
                 let inner = format!("({})", tir_js_expr(inner, funcs, file_prefix)?);
@@ -7785,6 +7996,12 @@ fn tir_js_expr(expr: &TIR::TExpr, funcs: &[FuncWeb], file_prefix: Option<&str>) 
                 tir_js_expr(base, funcs, file_prefix)?,
                 tir_js_expr(index, funcs, file_prefix)?,
             ),
+            TIR::THostCall::SwitchSubjectField { field } => format!(
+                "({}).{}",
+                mangle_generated("switch_subject"),
+                web_name(field),
+            ),
+            TIR::THostCall::SwitchSubjectValue => mangle_generated("switch_subject"),
             TIR::THostCall::YieldSend { value } => {
                 format!("yield {}", tir_js_expr(value, funcs, file_prefix)?)
             }
@@ -7873,7 +8090,7 @@ fn tir_js_expr(expr: &TIR::TExpr, funcs: &[FuncWeb], file_prefix: Option<&str>) 
             match op {
                 crate::AST::BinOp::Add => format!("jet_time_add({l}, {r})"),
                 crate::AST::BinOp::Sub => format!("jet_time_sub({l}, {r})"),
-                _ => unreachable!(),
+                _ => return Err(()),
             }
         }
         // Float results (D-INTDIV1 `Int / Int` → Float, float arithmetic) leave
@@ -8132,7 +8349,7 @@ fn tir_js_expr(expr: &TIR::TExpr, funcs: &[FuncWeb], file_prefix: Option<&str>) 
             if is_measurement_type(&value.ty) {
                 format!("jetDom.print(jet_measurement_show({rendered}))")
             } else {
-                format!("jetDom.print({rendered})")
+                format!("jetDom.print(jet_show({rendered}))")
             }
         }
         E::MethodCall { recv, method, args, .. }
@@ -8626,7 +8843,12 @@ fn tir_core_call(
         if a.is_empty() {
             return Err(());
         }
-        return Ok(format!("jetDom.print({})", a.join(", ")));
+        let shown = a
+            .iter()
+            .map(|arg| format!("jet_show({arg})"))
+            .collect::<Vec<_>>()
+            .join(", ");
+        return Ok(format!("jetDom.print({shown})"));
     }
     if module == "prelude" && method == "keep" {
         if a.len() != 1 {

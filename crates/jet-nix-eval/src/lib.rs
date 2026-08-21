@@ -92,6 +92,9 @@ pub(crate) const EVALUATOR_TOKEN_LIMIT: usize = 65_536;
 pub(crate) const EVALUATOR_EXPRESSION_LIMIT: usize = 256;
 pub(crate) const EVALUATOR_IMPORT_LIMIT: usize = 64;
 pub(crate) const EVALUATOR_STRING_BYTES: usize = 1 << 20;
+pub(crate) const EVALUATOR_MEMORY_BYTES: usize = 16 << 20;
+#[cfg(test)]
+pub(crate) const EVALUATOR_LATENCY_MICROS: u64 = 1_000_000;
 
 /// The bounded compatibility inventory is part of the evaluator contract.
 /// A skipped surface has an explicit authority or semantic reason; it is not
@@ -173,27 +176,33 @@ pub const PINNED_INVENTORY: &[InventoryEntry] = &[
     },
     InventoryEntry {
         surface: "fixed-output-fetchers",
-        status: InventoryStatus::Skipped,
-        class: "skipped",
-        reason: "requires explicit fetch authority and verified bytes",
+        status: InventoryStatus::Covered,
+        class: "buildable",
+        reason: "explicit fetch authority returns verified canonical store paths",
     },
     InventoryEntry {
         surface: "cross-system-packages",
-        status: InventoryStatus::Skipped,
-        class: "skipped",
-        reason: "requires a declared target beyond host projection",
+        status: InventoryStatus::Covered,
+        class: "buildable",
+        reason: "explicit target authority projects pinned systems",
     },
     InventoryEntry {
         surface: "external-flakes",
-        status: InventoryStatus::Skipped,
-        class: "skipped",
-        reason: "remote resolution remains an explicit provider boundary",
+        status: InventoryStatus::Covered,
+        class: "evaluable",
+        reason: "explicit provider authority evaluates bounded external sources",
     },
     InventoryEntry {
         surface: "differential-fuzzing",
-        status: InventoryStatus::Skipped,
-        class: "skipped",
-        reason: "oracle-process fuzzing belongs to the host proof harness",
+        status: InventoryStatus::Covered,
+        class: "evaluable",
+        reason: "pinned seeded mutations compare native and Nix values",
+    },
+    InventoryEntry {
+        surface: "performance-budgets",
+        status: InventoryStatus::Covered,
+        class: "evaluable",
+        reason: "pinned input, memory, fuel, import, string, and host latency limits",
     },
     InventoryEntry {
         surface: "dynamic-derivations",
@@ -247,6 +256,7 @@ pub type ImportAuthority = alloc::rc::Rc<dyn Fn(&str) -> core::result::Result<St
 pub struct DevShellEvaluation {
     system: String,
     packages: Vec<String>,
+    cross_packages: Vec<String>,
     unsupported: Vec<String>,
 }
 
@@ -327,6 +337,14 @@ impl DevShellEvaluation {
         &self.packages
     }
 
+    /// Cross-package identities are kept separate from the native Jet package
+    /// list. Jet has no ratified cross-target package spelling, so the private
+    /// bridge records these identities as explicit projection facts instead of
+    /// emitting a guessed host package.
+    pub fn cross_packages(&self) -> &[String] {
+        &self.cross_packages
+    }
+
     pub fn unsupported(&self) -> &[String] {
         &self.unsupported
     }
@@ -362,7 +380,19 @@ pub fn evaluate_devshell(
     source: &str,
     system: &str,
 ) -> core::result::Result<DevShellEvaluation, EvaluationError> {
-    evaluate_devshell_with_import_authority(source, system, None)
+    evaluate_devshell_output(source, system, "default")
+}
+
+/// Evaluate one named devShell output without filesystem authority.
+///
+/// The selector is a flake output attribute, not a new Jet package model. The
+/// result stays the same typed devShell projection used by the default path.
+pub fn evaluate_devshell_output(
+    source: &str,
+    system: &str,
+    output: &str,
+) -> core::result::Result<DevShellEvaluation, EvaluationError> {
+    evaluate_devshell_output_with_import_authority(source, system, output, None)
 }
 
 /// Evaluate the bounded native devShell surface with an explicit, read-only
@@ -374,14 +404,29 @@ pub fn evaluate_devshell_with_import_authority(
     system: &str,
     import_authority: Option<ImportAuthority>,
 ) -> core::result::Result<DevShellEvaluation, EvaluationError> {
+    evaluate_devshell_output_with_import_authority(source, system, "default", import_authority)
+}
+
+/// Evaluate one named devShell output with explicit project-root authority.
+pub fn evaluate_devshell_output_with_import_authority(
+    source: &str,
+    system: &str,
+    output: &str,
+    import_authority: Option<ImportAuthority>,
+) -> core::result::Result<DevShellEvaluation, EvaluationError> {
     if source.len() > EVALUATOR_INPUT_BYTES {
         return Err(EvaluationError::InputTooLarge);
     }
     if !REQUIRED_SYSTEMS.contains(&system) {
         return Err(EvaluationError::UnsupportedSystem(system.to_string()));
     }
+    if output.is_empty() || output.split('.').any(|segment| segment.is_empty()) {
+        return Err(EvaluationError::Invalid(
+            "devShell output selector must be a non-empty attribute path".into(),
+        ));
+    }
 
-    Evaluator::evaluate_devshell(source, system, import_authority)
+    Evaluator::evaluate_devshell(source, system, output, import_authority)
 }
 
 /// Evaluate the bounded pure `builtins.derivation` surface.
@@ -402,7 +447,25 @@ pub fn evaluate_derivation(
         return Err(EvaluationError::UnsupportedSystem(system.to_string()));
     }
 
-    Evaluator::evaluate_derivation(source, system)
+    Evaluator::evaluate_derivation(source, system, None)
+}
+
+/// Evaluate a derivation with the same explicit, read-only authority used by
+/// the devShell projection. The authority may answer only bounded evaluator
+/// requests; it never becomes process, network, or ambient-store authority.
+pub fn evaluate_derivation_with_import_authority(
+    source: &str,
+    system: &str,
+    import_authority: Option<ImportAuthority>,
+) -> core::result::Result<DerivationEvaluation, EvaluationError> {
+    if source.len() > EVALUATOR_INPUT_BYTES {
+        return Err(EvaluationError::InputTooLarge);
+    }
+    if !REQUIRED_SYSTEMS.contains(&system) {
+        return Err(EvaluationError::UnsupportedSystem(system.to_string()));
+    }
+
+    Evaluator::evaluate_derivation(source, system, import_authority)
 }
 
 /// Evaluate one bounded packages.<system>.<attribute> derivation output.
@@ -420,7 +483,25 @@ pub fn evaluate_derivation_output(
     if !REQUIRED_SYSTEMS.contains(&system) {
         return Err(EvaluationError::UnsupportedSystem(system.to_string()));
     }
-    Evaluator::evaluate_derivation_output(source, system, attribute)
+    Evaluator::evaluate_derivation_output(source, system, attribute, None)
+}
+
+/// Evaluate one package output with explicit authority for fixed-output
+/// fetchers, cross-target selection, and bounded external flake sources.
+pub fn evaluate_derivation_output_with_import_authority(
+    source: &str,
+    system: &str,
+    attribute: &str,
+    import_authority: Option<ImportAuthority>,
+) -> core::result::Result<DerivationEvaluation, EvaluationError> {
+    if source.len() > EVALUATOR_INPUT_BYTES {
+        return Err(EvaluationError::InputTooLarge);
+    }
+    if !REQUIRED_SYSTEMS.contains(&system) {
+        return Err(EvaluationError::UnsupportedSystem(system.to_string()));
+    }
+
+    Evaluator::evaluate_derivation_output(source, system, attribute, import_authority)
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

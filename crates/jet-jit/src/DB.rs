@@ -295,8 +295,11 @@ fn jet_jit_db_execute(handle: i64, sql: i64, params: i64) -> i64 {
     };
     let values = values_from_list(params);
     let sql = clone_string(sql);
-    let (sql, values) = match wire::jet_db_apply_compiled_policy(&sql, &values, &table, compiled, &user) {
-        Ok(value) => value,
+    let (sql, values) = match wire::jet_db_apply_compiled_policy_with_proof(&sql, &values, &table, compiled, &user) {
+        Ok(application) => match application.into_parts() {
+            Ok(value) => value,
+            Err(error) => return result_err_msg(&error.message),
+        },
         Err(error) => return result_err_msg(&error.message),
     };
     let wire_s = wire::jet_db_encode_params(&values);
@@ -313,8 +316,11 @@ fn jet_jit_db_query(handle: i64, sql: i64, params: i64) -> i64 {
     };
     let values = values_from_list(params);
     let sql = clone_string(sql);
-    let (sql, values) = match wire::jet_db_apply_compiled_policy(&sql, &values, &table, compiled, &user) {
-        Ok(value) => value,
+    let (sql, values) = match wire::jet_db_apply_compiled_policy_with_proof(&sql, &values, &table, compiled, &user) {
+        Ok(application) => match application.into_parts() {
+            Ok(value) => value,
+            Err(error) => return result_err_msg(&error.message),
+        },
         Err(error) => return result_err_msg(&error.message),
     };
     let wire_s = wire::jet_db_encode_params(&values);
@@ -365,9 +371,9 @@ fn scoped_execute(
         });
     };
     let (sql, values) = if allow_schema {
-        wire::jet_db_apply_compiled_migration_policy(sql, params, &table, compiled, &user)?
+        wire::jet_db_apply_compiled_migration_policy_with_proof(sql, params, &table, compiled, &user)?.into_parts()?
     } else {
-        wire::jet_db_apply_compiled_policy(sql, params, &table, compiled, &user)?
+        wire::jet_db_apply_compiled_policy_with_proof(sql, params, &table, compiled, &user)?.into_parts()?
     };
     let result = runtime::jet_db_execute(base, &sql, &wire::jet_db_encode_params(&values));
     wire::jet_db_decode_execute_result(&result)
@@ -385,9 +391,9 @@ fn scoped_query(
         });
     };
     let (sql, values) = if allow_schema {
-        wire::jet_db_apply_compiled_migration_policy(sql, params, &table, compiled, &user)?
+        wire::jet_db_apply_compiled_migration_policy_with_proof(sql, params, &table, compiled, &user)?.into_parts()?
     } else {
-        wire::jet_db_apply_compiled_policy(sql, params, &table, compiled, &user)?
+        wire::jet_db_apply_compiled_policy_with_proof(sql, params, &table, compiled, &user)?.into_parts()?
     };
     let result = runtime::jet_db_query(base, &sql, &wire::jet_db_encode_params(&values));
     wire::jet_db_decode_query_result(&result)
@@ -647,4 +653,3 @@ host_fns! {
     dbvalue_bool: "jet_jit_dbvalue_bool" => jet_jit_dbvalue_bool: unary;
     dbvalue_is_null: "jet_jit_dbvalue_is_null" => jet_jit_dbvalue_is_null: unary_i8;
 }
-

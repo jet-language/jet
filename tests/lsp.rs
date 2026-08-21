@@ -2668,7 +2668,7 @@ fn lsp_definition_uses_build_graph_generated_source() {
     if !jet.exists() {
         return;
     }
-    let source = r#"fn build(b: BuildContext) => BuildPlan ? {
+    let source = r#"fn build(b: BuildContext) => BuildPlan ! {
     b.generate("made") {
         fn generated_value() => String :: "hi";
     }?
@@ -3468,7 +3468,7 @@ fn c44_lsp_types_derive_from_syntax() {
     // Result is the legacy fallible type (S34 teaching only) — excluded.
     assert!(
         !Syntax::JET_TYPE_LIST.contains(&Syntax::TYPE_RESULT),
-        "JET_TYPE_LIST must not contain legacy TYPE_RESULT; use T ? E syntax"
+        "JET_TYPE_LIST must not contain legacy TYPE_RESULT; use T ! E syntax"
     );
 }
 

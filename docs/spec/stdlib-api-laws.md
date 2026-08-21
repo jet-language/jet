@@ -4,6 +4,14 @@ Review rubric for all Core API additions. Every new function, method, or type
 must pass each law before landing. No exceptions; file a follow-up card for any
 existing drift found during review.
 
+The talks add two review questions: is this function honest—does its projected
+effect row plus signature tell the complete story? Does its body stay at one
+level of abstraction—if it zooms into character codes or hand-rolls a search,
+that work belongs in a named brick? These are review prompts, not new
+mechanisms; I8 is unchanged. The [2026-08-21 function-design canon mining
+report](../reference/prior-art.md#videos-talks--podcasts) records the Logan
+Smith video and its three linked sources.
+
 ---
 
 ## Law 1 — Naming
@@ -45,7 +53,7 @@ or source-qualified spelling for the same conversion.
 
 ## Law 2 — Fallibility
 
-- A function that can legitimately fail returns `T ? E`; never panics on expected failure.
+- A function that can legitimately fail returns `T ! E`; never panics on expected failure.
 - Panics are reserved for programmer error (index out of bounds on a known-size slice).
 - The error type must carry enough context to write a helpful error message without
   inspecting source code (no opaque integer codes).
@@ -64,8 +72,8 @@ or source-qualified spelling for the same conversion.
 
 ## Law 4 — Effects
 
-- I/O effects are declared with the right effect marker (`=[FS]=>`, `=[Net]=>`,
-  `=[Exec]=>`, etc.).
+- I/O effects are declared with the right effect row (`:[FS]>`, `:[Net]>`,
+  `:[Exec]>`, etc.).
 - Pure functions carry no effect markers; the compiler enforces this.
 - A function that performs multiple effects lists all of them; no hidden IO.
 - Comptime eligibility follows the shared effect fact: an empty effect set is
@@ -100,6 +108,14 @@ or source-qualified spelling for the same conversion.
   job. If one exists, extend or document it; do not add a second spelling.
 - Convenience shorthand methods are acceptable if they compose existing primitives
   without adding new behavior (e.g. `slice.first()` over `slice[0]?`).
+
+## Signature-honesty review rows
+
+| Row | Core API rule |
+| --- | --- |
+| Weakest-guarantee parameters | Ask only for the guarantee the function uses: unmarked read access for reading, `Iterable` for iteration, and a view for a window. Never require a concrete container when iteration is enough. If a strong guarantee is needed, require its proof type, such as a proven range, typestate, or unit, instead of a prose precondition. |
+| Calculate/do split | Separate calculation from effects. Expose an effect-free sibling that returns data, takes a callback, or returns an `Iter` when materializing costs too much. The effectful convenience wraps that sibling and uses the same Prelude operation. |
+| No hidden-lookup APIs | Take the value, not a name plus an ambient registry. Resolve a name at the caller, where the registry is explicit. |
 
 ### Print family (D-ONCE-PRINT1=A)
 
@@ -144,6 +160,9 @@ Required evidence: <example, diagnostic snapshot, and focused proof>
 - [ ] `L6` Every error path has the required diagnostic copy and UI snapshot.
 - [ ] `L7` A golden-tested example exists under `examples/features/`.
 - [ ] `L8` No duplicate API or overload family remains.
+- [ ] `Weakest-guarantee parameters` pass.
+- [ ] `Calculate/do split` passes.
+- [ ] `No hidden-lookup APIs` pass.
 - [ ] `C1` The actual call site is useful and was judged before the declaration.
 - [ ] `C2` Required values are positional; ambiguous or uncommon options are labeled.
 - [ ] `C3` The common dataflow reads left to right through methods and `?`.
@@ -151,7 +170,7 @@ Required evidence: <example, diagnostic snapshot, and focused proof>
 - [ ] `D2` Every magic default has one row here and an explicit override.
 - [ ] `D3` Defaulted labeled options replace option-only overloads.
 - [ ] `D4` Every policy option is a dedicated enum; no Boolean or bare-string flag remains.
-- [ ] `F1` Expected failure is `T ? E`, and propagation is one `?`.
+- [ ] `F1` Expected failure is `T ! E`, and propagation is one `?`.
 - [ ] `F2` Every lookup returns `T?`; no sentinel, empty-status, or follow-up status check remains.
 - [ ] `F3` Every failure says what happened, why, and how to fix it.
 - [ ] `T1` Domain values use domain types while obvious beginner literals work at the boundary.
@@ -265,7 +284,7 @@ and examples.
 | D2 | Every magic default appears in the defaults table and has an explicit override. |
 | D3 | Defaulted options replace overload families. |
 | D4 | Options use dedicated enums; Core does not use boolean or bare-string policy flags. |
-| F1 | Expected failure is `T ? E`; propagation costs `?`. |
+| F1 | Expected failure is `T ! E`; propagation costs `?`. |
 | F2 | A lookup returns `T?`; sentinel values are not an API contract. |
 | F3 | Every failure message states what happened, why, and how to fix it. |
 | T1 | Domain values use domain types while beginner literals remain accepted at the boundary. |

@@ -29,6 +29,9 @@ pub use jet_pkg_model::{
     JavaBind, JetLib, JSON, LintPolicy, Lock, Manifest, Package, PascalBind, Platform,
     PowerShellBind, RefSpec, ScriptDeps, TclBind, Variant,
 };
+pub use jet_pkg_model::ProviderFacts::{
+    ProviderConflict, ProviderFactValue, ProviderFacts, ProviderLoss, ProviderSelector,
+};
 // Card #367 slice 5: WorkspacePlan/WorkspaceMember + WorkspaceLock read path
 // now live in jet-pkg-model (L1). WorkspaceFile eval lives in jet-env-model
 // (L2). jetpack re-exports under the historical module paths via the thin
@@ -47,7 +50,6 @@ pub mod EnvHook;
 pub mod Image;
 pub mod JetOS;
 pub mod JetPin;
-pub mod ManifestTOML;
 pub mod MemberSelect;
 pub mod MigrationImport;
 // Card #367 slice 4: `ModuleEval` (the computed-modules evaluator + plan
@@ -65,6 +67,8 @@ pub mod PackageGraph;
 pub mod Provider;
 pub mod ProviderGraph;
 pub mod Recipe;
+/// E4-JP7 — package-facing view of the canonical remote builder scheduler.
+pub mod Remote;
 pub mod Replacement;
 pub mod RuntimePolicy;
 pub mod ScriptLock;
@@ -73,7 +77,6 @@ pub mod SemanticLock;
 pub mod Services;
 pub mod Shell;
 pub mod Store;
-pub mod TOML;
 pub mod Toolchain;
 pub mod Trust;
 pub mod TrustRoot;

@@ -8,8 +8,8 @@ use super::execution_runtime::BuildProbeFact;
 use super::handles::{ActionId, ProbeId, SigningIdentityId, TargetId, ToolchainId};
 use super::plan_graph::BuildPlan;
 use super::provenance_toolchains::{
-    BuildProbe, BuildProvenance, BuildSigningIdentity, BuildToolchain, ProbeKind,
-    ProvenanceSource, ReproducibilityClass, ToolchainRole,
+    BuildProbe, BuildProvenance, BuildSigningIdentity, BuildToolchain, ProbeKind, ProvenanceSource,
+    ReproducibilityClass, ToolchainRole,
 };
 use super::targets::BuildPath;
 use crate::SHA256;
@@ -34,7 +34,10 @@ pub enum BuildError {
     EmptyProbeName,
     DuplicateTargetName(String),
     DuplicateActionName(String),
-    CompilerPackageDependencyMissing { package: String, dependency: String },
+    CompilerPackageDependencyMissing {
+        package: String,
+        dependency: String,
+    },
     DuplicateToolchainName(String),
     DuplicateSigningIdentityName(String),
     DuplicateProbeName(String),
@@ -46,7 +49,10 @@ pub enum BuildError {
     EmptyProbeField(String),
     EmptyActionArgv(String),
     EmptyEnvName(String),
-    UndeclaredEnvName { action: String, key: String },
+    UndeclaredEnvName {
+        action: String,
+        key: String,
+    },
     CachedActionWithoutOutputs(String),
     PhonyActionWithoutCaps(String),
     PhonyActionWithOutputs(String),
@@ -86,7 +92,10 @@ pub enum BuildError {
     InvalidGeneratedModulePath(String),
     DuplicateGeneratedModuleName(String),
     DuplicateGeneratedModulePath(String),
-    GeneratedModuleCycle { module: String, path: String },
+    GeneratedModuleCycle {
+        module: String,
+        path: String,
+    },
     TargetDependencyCycle(DependencyCycle),
     ActionDependencyCycle(DependencyCycle),
 }
@@ -281,11 +290,10 @@ pub(super) fn canonical_action_key(
         w.bytes.extend_from_slice(&snapshot.byte_len.to_be_bytes());
     }
     w.str("dependency-artifact-snapshots");
-    for input in action
-        .inputs
-        .iter()
-        .filter(|path| path.as_str().starts_with(".jet/build-cache/package-artifacts/"))
-    {
+    for input in action.inputs.iter().filter(|path| {
+        path.as_str()
+            .starts_with(".jet/build-cache/package-artifacts/")
+    }) {
         w.str(input.as_str());
         if let Some(snapshot) = inputs
             .iter()
@@ -330,12 +338,12 @@ pub(super) fn canonical_action_key(
     contributions.sort_by(|left, right| {
         left.key
             .cmp(&right.key)
-        .then_with(|| left.layer.cmp(&right.layer))
-        .then_with(|| left.scope.cmp(&right.scope))
-        .then_with(|| left.source.cmp(&right.source))
-        .then_with(|| left.reason.cmp(&right.reason))
-        .then_with(|| left.force.cmp(&right.force))
-        .then_with(|| left.force_reason.cmp(&right.force_reason))
+            .then_with(|| left.layer.cmp(&right.layer))
+            .then_with(|| left.scope.cmp(&right.scope))
+            .then_with(|| left.source.cmp(&right.source))
+            .then_with(|| left.reason.cmp(&right.reason))
+            .then_with(|| left.force.cmp(&right.force))
+            .then_with(|| left.force_reason.cmp(&right.force_reason))
     });
     for contribution in contributions {
         w.str(&contribution.key);
@@ -439,11 +447,7 @@ fn declared_dep_outputs(plan: &BuildPlan, action: &BuildAction) -> Vec<String> {
         let Some(dep_target) = plan.targets.get(dep.id.0) else {
             continue;
         };
-        for path in dep_target
-            .outputs
-            .iter()
-            .chain(dep_target.inputs.iter())
-        {
+        for path in dep_target.outputs.iter().chain(dep_target.inputs.iter()) {
             outs.insert(path.as_str().to_string());
         }
         for dep_action in &dep_target.actions {
@@ -471,7 +475,9 @@ pub(super) fn canonical_effective_action_key(
     w.str("jet.effective-action-key.v1");
     w.str(base.as_str());
     w.str("effective-policy");
-    for grant in grants { encode_capability(&mut w, grant); }
+    for grant in grants {
+        encode_capability(&mut w, grant);
+    }
     // The resolved filesystem path is host-local and must not split an
     // otherwise identical remote action identity. The executable bytes remain
     // part of the key through their content digest.
@@ -483,11 +489,18 @@ pub(super) fn canonical_effective_action_key(
         w.bool(fact.success);
         w.str(&fact.detail);
         w.str(&format!("{:?}", fact.reproducibility));
-        w.str(&format!("{}:{}", fact.toolchain.context, fact.toolchain.id.0));
+        w.str(&format!(
+            "{}:{}",
+            fact.toolchain.context, fact.toolchain.id.0
+        ));
         w.str(fact.toolchain_provenance.as_str());
     }
     w.str("compiler-identity");
-    w.str(concat!(env!("CARGO_PKG_NAME"), "@", env!("CARGO_PKG_VERSION")));
+    w.str(concat!(
+        env!("CARGO_PKG_NAME"),
+        "@",
+        env!("CARGO_PKG_VERSION")
+    ));
     ActionKey(format!("act-sha256:{}", SHA256::sha256_hex(&w.bytes)))
 }
 

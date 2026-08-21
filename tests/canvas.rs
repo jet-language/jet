@@ -272,23 +272,23 @@ fn run() {
 }
 "#;
 
-const CANVAS_STRUCTURAL_WRITE_FIXTURE: &str = r#"fn run() ? {
+const CANVAS_STRUCTURAL_WRITE_FIXTURE: &str = r#"fn run() ! {
     print("start")
 }
 "#;
 
 const CANVAS_RAILS_FIXTURE: &str = r#"use core.mem as mem
 
-fn maybe() => Int ? String {
+fn maybe() => Int ! String {
     return Ok(1)
 }
 
-fn checked() => Int ? String {
+fn checked() => Int ! String {
     n :: maybe()?
     return Ok(n)
 }
 
-fn run() ? {
+fn run() ! {
     #Unsafe("Canvas proof rail fixture") {
         marker := 1
     }

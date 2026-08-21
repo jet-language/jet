@@ -3223,16 +3223,27 @@ impl<'a> EvalCtx<'a> {
                 Some(("Int", Some(CtValue::Int(value)))) => {
                     Ok(CtValue::Float(CtFloat::f64(*value as f64)))
                 }
-                Some(("Text", Some(CtValue::Str(value)))) => value
-                    .trim()
-                    .parse::<f64>()
-                    .map(|value| CtValue::Float(CtFloat::f64(value)))
-                    .map_err(|_| {
-                        decode_error(
-                            "",
-                            format!("expected Float, found text {:?}", value),
-                        )
-                    }),
+                Some(("Number", Some(CtValue::Str(value))))
+                | Some(("Text", Some(CtValue::Str(value)))) => {
+                    let value = match value.trim().parse::<f64>() {
+                        Ok(value) => value,
+                        Err(_) => {
+                            return Ok(CtValue::failed(Box::new(decode_error(
+                                "",
+                                format!("expected Float, found text {:?}", value),
+                            ))));
+                        }
+                    };
+                    if value.is_finite() {
+                        Ok(CtValue::Float(CtFloat::f64(value)))
+                    } else {
+                        Err(decode_error("", "expected Float, found out-of-range Float"))
+                    }
+                }
+                Some(("TypedText", Some(CtValue::Str(value)))) => Err(decode_error(
+                    "",
+                    format!("expected Float, found text {:?}", value),
+                )),
                 _ => Err(decode_error(
                     "",
                     format!("expected {}, found {}", ty.name(), datatree_kind_for(&tree)),
@@ -3242,6 +3253,24 @@ impl<'a> EvalCtx<'a> {
                 let value = match datatree_variant(&tree) {
                     Some(("Float", Some(CtValue::Float(value)))) => value.as_f64(),
                     Some(("Int", Some(CtValue::Int(value)))) => *value as f64,
+                    Some(("Number", Some(CtValue::Str(value))))
+                    | Some(("Text", Some(CtValue::Str(value)))) => {
+                        match value.trim().parse::<f64>() {
+                            Ok(value) => value,
+                            Err(_) => {
+                                return Ok(CtValue::failed(Box::new(decode_error(
+                                    "",
+                                    format!("expected F32, found text {:?}", value),
+                                ))));
+                            }
+                        }
+                    }
+                    Some(("TypedText", Some(CtValue::Str(value)))) => {
+                        return Ok(CtValue::failed(Box::new(decode_error(
+                            "",
+                            format!("expected F32, found text {:?}", value),
+                        ))));
+                    }
                     _ => {
                         return Ok(CtValue::failed(Box::new(decode_error(
                             "",
@@ -9641,7 +9670,25 @@ impl<'a> EvalCtx<'a> {
                 };
                 self.eval_call(&target, args, scope)
             }
-            TExprKind::ExternCall { .. } => Err(unsupported("expr `ExternCall`", self.span())),
+            TExprKind::ExternCall { wrapper, args } => {
+                // The evaluator carries CtValue values, so the ownership clone
+                // recorded on a non-scalar FFI read is already implicit in the
+                // value copy. Keep the call itself on the ambient bridge: the
+                // runtime adapter invokes the same generated `jet_ffi_*_cabi`
+                // symbol that the resident JIT uses, while the AOT emitter
+                // invokes its Rust-ABI `jet_ffi_*` twin.
+                let mut argv = Vec::with_capacity(args.len());
+                for arg in args {
+                    argv.push(self.eval_expr_child(&arg.value, scope)?);
+                }
+                crate::Comptime::try_ambient_extern_call(
+                    wrapper,
+                    argv,
+                    self.span(),
+                    Some(expr.ty.clone()),
+                )
+                .unwrap_or_else(|| Err(unsupported("expr `ExternCall`", self.span())))
+            }
         }
     }
 

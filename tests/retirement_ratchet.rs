@@ -25,7 +25,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use jet::Syntax::{
-    law_violations, rename_target, Retirement, RetirementKind, REF_PROVIDERS,
+    law_violations, rename_target, Retirement, RetirementKind, JETPACK_TOML, REF_PROVIDERS,
     RETIREMENTS,
 };
 
@@ -55,6 +55,7 @@ const CEILINGS: &[(&str, usize)] = &[
     // The two corelib archives and the seven out-of-scope engine fixtures
     // remain until their owning migration slices land.
     ("manifest-file", 2),
+    ("jetpack-file", 0),
     ("manifest-identity", 7),
     ("lint-policy-code", 0),
     ("auto-derive-policy", 0),
@@ -434,6 +435,15 @@ fn tally(row: &Retirement) -> (usize, usize) {
             let files = all_files();
             let count = |name: &str| files.iter().filter(|p| file_name(p) == name).count();
             (count(row.retired), count(row.canonical))
+        }
+        "jetpack-file" => {
+            let files = all_files();
+            let retired = files.iter().filter(|path| file_name(path) == JETPACK_TOML).count();
+            let canonical = files
+                .iter()
+                .filter(|path| matches!(file_name(path).as_str(), "package.jet" | "env.jet"))
+                .count();
+            (retired, canonical)
         }
         "manifest-identity" => {
             let mut retired = 0;
