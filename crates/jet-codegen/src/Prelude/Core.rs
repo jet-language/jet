@@ -1,8 +1,3 @@
-/// D-BENCH-KEEP1=A: the one measurement sink. It preserves the value while
-/// preventing an optimizing AOT build from erasing the measured work.
-pub fn jet_keep<T>(value: T) -> T {
-    std::hint::black_box(value)
-}
 
 /// D-PERSIST-DEVSTATE1=A: AOT's persistent slot is an interior-mutable
 /// Prelude cell. The generated module binding stays safe Rust; the execution

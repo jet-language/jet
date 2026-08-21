@@ -230,8 +230,8 @@ fn run() {
     print("READY")
     drop_scope :: event.scope()
     dropped :: event.async_result<Int, String>(AsyncPolicy.{ capacity: 1, overflow: .DropNewest }, .Collect) ?? panic("policy")
-    (started_tx, started_rx) :: tasks.channel<Int>()
-    (release_tx, release_rx) :: tasks.channel<Int>()
+    (started_tx, started_rx) :: channel<Int>()
+    (release_tx, release_rx) :: channel<Int>()
     dropped.on_priority(drop_scope, 23, (n: Int) => {
         started_tx.send(~n)
         released :: release_rx.receive() ?? panic("release")
@@ -254,8 +254,8 @@ fn run() {
 
     close_scope :: event.scope()
     closing :: event.async_result<Int, String>(AsyncPolicy.{ capacity: 1, overflow: .Block }, .Collect) ?? panic("policy")
-    (close_started_tx, close_started_rx) :: tasks.channel<Int>()
-    (close_release_tx, close_release_rx) :: tasks.channel<Int>()
+    (close_started_tx, close_started_rx) :: channel<Int>()
+    (close_release_tx, close_release_rx) :: channel<Int>()
     closing.on(close_scope, (n: Int) => {
         close_started_tx.send(~n)
         released :: close_release_rx.receive() ?? panic("release")

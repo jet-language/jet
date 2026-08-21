@@ -1,5 +1,5 @@
-//! D-CLAIM-BENCH1=A: measurement is a test mode; the old benchmark surface is
-//! retired and points at the measured-test spelling.
+//! D-CLAIM-BENCH1=A: measurement is a test mode; the retired command points
+//! at the measured-test spelling.
 
 use std::fs;
 use std::path::PathBuf;
@@ -89,7 +89,7 @@ fn plain_jet_test_fails_a_crashing_measure_claim() {
 }
 
 #[test]
-fn jet_bench_is_retired_with_measure_fix() {
+fn retired_measurement_command_teaches_test_measure() {
     let output = Command::new(jet_bin())
         .args(["bench"])
         .env("NO_COLOR", "1")

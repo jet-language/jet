@@ -2775,7 +2775,7 @@ impl<'a> Checker<'a> {
                 }
                 // D-EFF1 / D-AUTHORITY-SCOPE1: bare `#Caps(Net, DB) { … }`
                 // restricts effects. A named `#Caps(auth: FS, Net) { … }`
-                // also binds a scoped Abilities handle and uses the same
+                // also binds a scoped Authority handle and uses the same
                 // subset check for both forms.
                 Stmt::Caps {
                     caps,

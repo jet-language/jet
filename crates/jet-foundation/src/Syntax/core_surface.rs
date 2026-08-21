@@ -888,9 +888,10 @@ pub const TYPE_DECIMAL: &str = "Decimal";
 // D-NUMTYPE1=A: an exact ratio of two whole numbers, kept reduced.
 pub const TYPE_FRACTION: &str = "Fraction";
 
-/// D-AUTHORITY-NAME1=A: the one nameable Authority value at process, plugin,
-/// and session boundaries. It is the rights carrier; there is no alias.
-pub const TYPE_ABILITIES: &str = "Authority";
+/// D-AUTHORITY-NAME1=A / D-AUTHORITY-WORD2=E: the one nameable Abilities value
+/// at process, plugin, and session boundaries. The old Authority spelling is
+/// retired with no alias.
+pub const TYPE_ABILITIES: &str = "Abilities";
 
 /// D-BUILDENTRY1/D-BUILDTARGET1/D-BUILDACTION1: typed build-program values.
 /// These names are compiler-known only while the selected root `fn build`

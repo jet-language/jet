@@ -313,6 +313,30 @@ impl LowerCtx<'_, '_> {
         self.b.inst_results(call)[0]
     }
 
+    /// Marshal `keep` through a carrier-shaped host import whose body calls the
+    /// shared Prelude `jet_keep`. Returning the lowered value directly would
+    /// let Cranelift see through the measurement sink.
+    fn lower_keep(&mut self, arg: &TExpr) -> Result<Value, String> {
+        let value = self.lower_expr(arg)?;
+        let kept = match self.meta.clif_ty(&arg.ty) {
+            Some(ty) if ty == types::I64 => self.call_host(self.host.core.keep_i64, &[value]),
+            Some(ty) if ty == types::F64 => self.call_host(self.host.core.keep_f64, &[value]),
+            Some(ty) if ty == types::I8 => self.call_host(self.host.core.keep_i8, &[value]),
+            Some(ty) if ty == types::I32 => self.call_host(self.host.core.keep_i32, &[value]),
+            None if matches!(&arg.ty, Type::Named(name) if name == "Unit") => {
+                let host = self.host.core.keep_unit;
+                self.assert_host_arity(host, 0);
+                let func_ref = self.module.declare_func_in_func(host, self.b.func);
+                self.b.ins().call(func_ref, &[]);
+                self.b.ins().iconst(types::I8, 0)
+            }
+            Some(ty) => return Err(format!("jit keep unsupported carrier {ty:?}")),
+            None => return Err(format!("jit keep unsupported type {:?}", arg.ty)),
+        };
+        self.emit_trap_check()?;
+        Ok(kept)
+    }
+
     /// A call whose argument count disagrees with the host table's declared
     /// signature is invalid CLIF — Cranelift's verifier rejects it inside
     /// `define_function`, far from the lowering that built it. Invalid CLIF Jet
@@ -14181,12 +14205,10 @@ impl LowerCtx<'_, '_> {
                             return self.lower_compute_transform_call(method, args);
                         });
                     }
-                    // D-BENCH-KEEP1=A: Cranelift preserves the shared Prelude
-                    // identity semantics. The generic AOT black-box ABI cannot
-                    // be one fixed host signature for every Jet value, so this
-                    // tier only marshals the value through unchanged.
+                    // D-BENCH-KEEP1=A: marshal through the shared Prelude
+                    // black-box sink instead of returning the argument directly.
                     if module == "core.prelude" && method == "keep" && args.len() == 1 {
-                        return self.lower_expr(&args[0]);
+                        return self.lower_keep(&args[0]);
                     }
                     // D-INTBIG1: the generic Core row is the fixed-width fallback
                     // for core.math. Let the exact Int path below select the

@@ -22,18 +22,18 @@ Error [E0112]: `sign` needs Float or F32, not Int (a whole number)
  Why: sign classifies a floating-point value as negative, zero, or positive
  Fix: pass a Float or F32 value
 
-Error [E0112]: `pow` needs both arguments to have the same float type, but base is Float (a decimal number) and exponent is F32 (a 32-bit decimal number)
-  --> tests/ui/core_math_float_type_mismatch.jet:7:23
+Error [E0112]: `pow` needs Float or F32, not `Decimal`
+  --> tests/ui/core_math_float_type_mismatch.jet:7:14
     |
   7 |     math.pow(2.0, F32.from_float(2.0) ?? F32.from_int(0))
-    |                       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
- Why: D-FLOATW1: mixing float widths is not allowed — use the same width for both
- Fix: convert with `F32.from_float(value)` or `Float.from_f32(value)` to match
+    |              ^^^
+ Why: pow operates on floating-point numbers
+ Fix: pass a Float or F32 base
 
-Error [E0112]: `hypot` needs all arguments to have the same float type
-  --> tests/ui/core_math_float_type_mismatch.jet:8:25
+Error [E0112]: `hypot` needs Float or F32, not `Decimal`
+  --> tests/ui/core_math_float_type_mismatch.jet:8:16
     |
   8 |     math.hypot(2.0, F32.from_float(2.0) ?? F32.from_int(0))
-    |                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
- Why: D-FLOATW1: mixing float widths is not allowed
- Fix: convert the arguments to the same float width
+    |                ^^^
+ Why: this math function operates on floating-point numbers
+ Fix: pass Float or F32 values

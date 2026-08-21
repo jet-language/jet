@@ -739,7 +739,7 @@ fn channel_stress_1000_messages() {
 use core.tasks as tasks
 
 fn run() {
-(sender, ch) : tasks.channel<Int>()
+(sender, ch) : channel<Int>()
     producer :: task {
         loop i, 1..1000 {
             sender.send(i)
@@ -778,7 +778,7 @@ fn scheduler_spawn_1000_tasks() {
 use core.tasks as tasks
 
 fn run() {
-(sender, ch) :: tasks.channel<Int>()
+(sender, ch) :: channel<Int>()
     loop i, 1..1000 {
         dup :: ~sender
         task {
@@ -817,7 +817,7 @@ fn scheduler_spawn_10000_tasks() {
 use core.tasks as tasks
 
 fn run() {
-(sender, ch) :: tasks.channel<Int>()
+(sender, ch) :: channel<Int>()
     loop i, 1..10000 {
         dup :: ~sender
         task {
@@ -857,7 +857,7 @@ fn scheduler_spawn_100000_tasks_bench() {
 use core.tasks as tasks
 
 fn run() {
-(sender, ch) :: tasks.channel<Int>()
+(sender, ch) :: channel<Int>()
     loop i, 1..100000 {
         dup :: ~sender
         task {

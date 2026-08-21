@@ -6,6 +6,7 @@ mod common;
 mod tir_support;
 
 use tir_support::{build_and_run, build_and_run_full, compile, have_rustc, jit_run};
+use jet::Interpreter::{dev_iteration, RunOutcome};
 
 /// D-FAIL-ERROR1=A: the labelled/string shape builds a default `Err` value;
 /// one positional typed value in a result arm still wraps that value.
@@ -198,6 +199,53 @@ fn body_rules_example_matches_all_execution_tiers() {
     tir_support::assert_example_cli_tiers_agree(
         "basics/body_rules",
         include_str!("../examples/features/expected/basics/body_rules.out"),
+    );
+}
+
+/// D-LOOP-SUBJECT1=A / I9: bindingless collection loops use their item as the
+/// implicit subject, while the scalar example keeps its explicit binding.
+#[test]
+fn bindingless_loop_example_matches_all_execution_tiers() {
+    tir_support::assert_example_cli_tiers_agree(
+        "basics/loop_bindingless",
+        include_str!("../examples/features/expected/basics/loop_bindingless.out"),
+    );
+
+    let path = format!(
+        "{}/examples/features/basics/loop_bindingless.jet",
+        env!("CARGO_MANIFEST_DIR")
+    );
+    match dev_iteration(&path, false, true) {
+        RunOutcome::Ran {
+            exit_code,
+            stdout,
+            stderr,
+        } => {
+            assert_eq!(exit_code, 0);
+            assert_eq!(
+                stdout,
+                include_str!("../examples/features/expected/basics/loop_bindingless.out")
+            );
+            assert_eq!(stderr, "");
+        }
+        RunOutcome::Problems(diagnostics) => {
+            panic!("forced interpreter rejected bindingless loop example: {diagnostics:?}")
+        }
+    }
+}
+
+/// D-CONC-CHAN1 / D-CONC-CHAN2 / I9: plain-endpoint readiness tables, task
+/// waits, and the one Duration time rail agree on AOT, default `jet run`, and
+/// the forced interpreter against the executable example oracle.
+#[test]
+fn channel_select_examples_match_all_execution_tiers() {
+    tir_support::assert_example_cli_tiers_agree(
+        "concurrency/select_channel",
+        include_str!("../examples/features/expected/concurrency/select_channel.out"),
+    );
+    tir_support::assert_example_cli_tiers_agree(
+        "concurrency/select_generic",
+        include_str!("../examples/features/expected/concurrency/select_generic.out"),
     );
 }
 

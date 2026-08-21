@@ -1,12 +1,10 @@
 // D-EFFTREE1: ancestor matching is subsumption, but siblings don't subsume
 // each other. `read_only` declares the leaf `FS.Read`; calling something
 // declared `FS.Write` is still out of bound, same as any other E0740.
-fn load(path: String) =[FS.Read]=> String :: "contents of {path}"
-fn archive(path: String) =[FS.Write]=> String :: "archived {path}"
-fn read_only(path: String) =[FS.Read]=> {
-    archive(path)
-}
+fn load(path: String) String :[FS.Read]> "contents of {path}"
 
-fn run() {
-    read_only("app.conf")
-}
+fn archive(path: String) String :[FS.Write]> "archived {path}"
+
+fn read_only(path: String) :[FS.Read]> { archive(path) }
+
+fn run() { read_only("app.conf") }

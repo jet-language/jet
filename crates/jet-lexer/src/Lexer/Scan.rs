@@ -6,6 +6,20 @@ use crate::Syntax;
 use super::Tokens::{TokKind, Token};
 use super::{keyword, Lexer};
 
+fn describe_unrecognized_character(character: char) -> String {
+    match character {
+        '\0' => "\\0".to_string(),
+        '\t' => "\\t".to_string(),
+        character
+            if character.is_control()
+                || crate::Diagnostics::display_char_width(character) == 0 =>
+        {
+            format!("U+{:04X}", character as u32)
+        }
+        character => character.to_string(),
+    }
+}
+
 /// Raw lex with no S6-R terminator insertion. Used for interpolation
 /// sub-streams (`{expr}`), which are single expressions and need no terminator.
 pub fn lex_raw(src: &str) -> (Vec<Token>, Vec<Diagnostic>) {
@@ -439,8 +453,12 @@ impl<'a> Lexer<'a> {
                 other => {
                     self.diags.push(Diagnostic::error(
                         "E0001",
-                        format!("the character `{}` doesn't mean anything here (yet)", other),
-                        "check docs/spec/spec.md for what's supported so far".to_string(),
+                        format!(
+                            "the character `{}` doesn't mean anything here (yet)",
+                            describe_unrecognized_character(other)
+                        ),
+                        "unprintable characters are shown as `\\0`, `\\t`, or `U+XXXX` so you can identify them"
+                            .to_string(),
                         "remove it, or use supported syntax".to_string(),
                         Some(Span::new(start, self.pos(self.i + 1))),
                     ));

@@ -25,6 +25,10 @@ mod env_config_prelude {
     include!("../../jet-codegen/src/Prelude/Core/EnvConfig.rs");
 }
 
+mod keep_kernel {
+    include!("../../jet-codegen/src/Prelude/Core/Keep.rs");
+}
+
 trait JetShow {
     fn jet_show(&self) -> String;
 }
@@ -2800,10 +2804,12 @@ pub fn ambient_core_call(
             )));
         }
     }
-    // D-BENCH-KEEP1=A: the interpreter marshals the shared identity behavior;
-    // it does not invent a second sink implementation.
+    // D-BENCH-KEEP1=A: the interpreter marshals through the same Prelude
+    // `jet_keep` sink as generated AOT; black-boxing the CtValue prevents the
+    // ambient path from becoming an optimizer-visible identity.
     if module == "core.prelude" && method == "keep" {
-        return Some(Ok(args.first().cloned().unwrap_or(CtValue::Unit)));
+        let value = args.first().cloned().unwrap_or(CtValue::Unit);
+        return Some(Ok(keep_kernel::jet_keep(value)));
     }
     if module == "core.files" && matches!(method, "walk" | "walk_parallel") {
         return Some(ambient_fs_walk(&args, span));

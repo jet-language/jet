@@ -3306,11 +3306,10 @@ fn run() {
 #[test]
 fn write_window_cannot_cross_channel_boundary() {
     let src = r#"
-use core.tasks
 fn run() {
     xs := [1, 2, 3]
     edit :: &xs[0..1]
-    (sender, channel) :: tasks.channel<ViewMut<Int>>()
+    (sender, channel) :: channel<ViewMut<Int>>()
     sender.send(edit)
 }
 "#;

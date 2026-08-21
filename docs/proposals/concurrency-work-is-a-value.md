@@ -34,8 +34,8 @@ code.
 | One background task | imported spawn helper plus a lambda | `task work()` |
 | Task failure | string state and trace helpers | `h.join() ?? fallback` — the normal `?` rail |
 | Bounded worker pool | 49 lines of hand-made channel tokens | `task.group g(limit: 4) { … }` |
-| Drain a channel | `loop { v :: rx.receive() ?? break … }` | `loop v, rx { … }` |
-| Wait on two channels | `g.select().recv(a).recv(b).after(100ms, -1).wait()` | `if { v, a -> …  v, b -> …  after 100ms -> … }` (D-CONC-CHAN2=D) |
+| Drain a channel | a loop with a manual receive fallback | `loop v, rx { … }` |
+| Wait on two channels | a group-owned readiness builder | `if { v, a -> …  v, b -> …  after 100ms -> … }` (D-CONC-CHAN2=D) |
 | Read shared state | `config.read(c => c.name)` | `config.name` |
 | Change shared state | `config.edit(c => { c.hits += 1 })` | `config.hits += 1` |
 
@@ -192,17 +192,6 @@ D-CONC-OUTCOME1=A.
 
 ### 3. Channels and readiness waits — D-CONC-CHAN1=A, D-CONC-CHAN2=D
 
-**Retired.** A module call, a manual drain dance, and a builder chain.
-
-```jet
-(tx, rx) :: channel<Int>(capacity: 8)
-loop {
-    job :: rx.receive() ?? break
-    handle(job)
-}
-winner :: g.select().recv(ch1).recv(ch2).after(100ms, -1).wait()
-```
-
 **Ratified law.** Channels are builtin values. Draining is a loop. Waiting on
 several sources is a subjectless `if` table. It adds no branching keyword.
 D-CONC-CHAN2=D amends the readiness-table spelling selected by
@@ -226,9 +215,9 @@ if {
 - The dead `Channel` table entry and the `.read` arm (accepted today, silently
   dropped on every tier) are deleted.
 
-**Canonical:** `channel<T>()` is builtin and needs no import. The old
-`g.select()` builder, `tasks.channel`, and `.read` arm are retired and do not
-parse.
+**Canonical:** `channel<T>()` is builtin and needs no import. The former
+module constructor, fluent wait builder, and `.read` arm are retired and do
+not parse.
 D-CONC-CHAN1=A amends D-CONCSELECT1 and narrows D-TASKRUNTIME1's module
 surface. D-CONC-CHAN2=D makes the wait spelling the subjectless `if` table
 shown above.

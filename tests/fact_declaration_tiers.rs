@@ -232,11 +232,11 @@ fn measure_rows_share_one_registry_and_all_tiers() {
     let source = r#"
 use core.compute as compute
 
-fn vec_rank(value: Vec<3>) => Int {
+fn vec_rank(value: Vec<3>) Int {
     return compute.rank(value)
 }
 
-fn matrix_rank(value: Matrix<2, 3>) => Int {
+fn matrix_rank(value: Matrix<2, 3>) Int {
     return compute.rank(value)
 }
 

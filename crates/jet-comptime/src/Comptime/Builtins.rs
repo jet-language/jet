@@ -167,13 +167,13 @@ fn apply_authority_method(
     }
     if args.len() != 1 {
         return Some(Err(unsupported(
-            &format!("Authority.{method} expects one String right"),
+            &format!("Abilities.{method} expects one String right"),
             span,
         )));
     }
     let CtValue::Str(requested) = &args[0] else {
         return Some(Err(unsupported(
-            &format!("Authority.{method} expects a String right"),
+            &format!("Abilities.{method} expects a String right"),
             span,
         )));
     };
@@ -183,9 +183,9 @@ fn apply_authority_method(
             Ok(rights) => Ok(authority_value(rights)),
             Err(message) => Err(Diagnostic::error(
                 "E0712",
-                format!("this Authority value cannot narrow to `{requested}`"),
-                "the requested right is not held by this Authority value".to_string(),
-                format!("use a right already held by the Authority value: {message}"),
+                format!("this Abilities value cannot narrow to `{requested}`"),
+                "the requested right is not held by this Abilities value".to_string(),
+                format!("use a right already held by the Abilities value: {message}"),
                 Some(span),
             )),
         });

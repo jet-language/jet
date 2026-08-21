@@ -647,19 +647,19 @@ fn documented_cli_program_matches_aot_default_interpreter_and_goldens() {
 #[test]
 fn measured_test_cli_and_selected_claim_keep_aot_golden_contract() {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let source = root.join("examples/features/tooling/bench_target/main.jet");
-    let golden = fs::read(root.join("examples/features/expected/tooling/bench_target.out"))
+    let source = root.join("examples/features/tooling/test_target/main.jet");
+    let golden = fs::read(root.join("examples/features/expected/tooling/test_target.out"))
         .expect("read measured test target golden");
-    let scratch = common::Scratch::new("bench_cli_parity");
+    let scratch = common::Scratch::new("test_cli_parity");
     fs::copy(&source, scratch.join("main.jet")).expect("copy measured test target source");
     fs::copy(
-        root.join("examples/features/tooling/bench_target/package.jet"),
+        root.join("examples/features/tooling/test_target/package.jet"),
         scratch.join("package.jet"),
     )
     .expect("copy measured test target package");
     fs::copy(
-        root.join("examples/features/tooling/bench_target/bench_perf.jet"),
-        scratch.join("bench_perf.jet"),
+        root.join("examples/features/tooling/test_target/test_perf.jet"),
+        scratch.join("test_perf.jet"),
     )
     .expect("copy measured test target module");
 

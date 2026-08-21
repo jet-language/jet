@@ -1,3 +1,35 @@
+Error [E0066]: this function uses the retired effect-arrow spelling
+  --> tests/ui/cffi_callback_generic.jet:3:22
+    |
+  3 | fn identity<T>(x: T) =[]=> T :: ~x
+    |                      ^
+ Why: callable results use `:>`, and an explicit effect ceiling uses the same arrow
+ Fix: write `:[Effects]>`; use `:[]>` for an explicit purity bound
+
+Error [E0068]: This callable uses the retired result-arrow shape.
+  --> tests/ui/cffi_callback_generic.jet:3:22
+    |
+  3 | fn identity<T>(x: T) =[]=> T :: ~x
+    |                      ^
+ Why: a return type sits after the parameter list, and `:>` introduces the body; an effect ceiling follows the return type
+ Fix: write `fn name(...) Type :> body`, or `fn name(...) Type :[Effects]> { … }`
+
+Error [E0065]: This function uses the retired `::` body marker.
+  --> tests/ui/cffi_callback_generic.jet:3:30
+    |
+  3 | fn identity<T>(x: T) =[]=> T :: ~x
+    |                              ^^
+ Why: A one-expression function body uses `:>`; `::` binds a name, and `=` fills a slot inside a definition.
+ Fix: Replace `::` with `:>`; `jet fmt` applies this fix.
+
+Error [E0066]: this function uses the retired effect-arrow spelling
+  --> tests/ui/cffi_callback_generic.jet:5:25
+    |
+  5 |     fn call(cb: fn(I32) =[]=> I32, x: I32) => I32 = "call"
+    |                         ^
+ Why: callable results use `:>`, and an explicit effect ceiling uses the same arrow
+ Fix: write `:[Effects]>`; use `:[]>` for an explicit purity bound
+
 Error [E3203]: `fn(I32) =[]=> I32` is not a C-compatible type for a foreign function parameter or return.
   --> tests/ui/cffi_callback_generic.jet:8:25
     |

@@ -179,3 +179,25 @@ fn run() =[IO]=> Int {
         jet::format_source(&formatted).expect("formatted foreign source should reformat")
     );
 }
+
+#[test]
+fn interpolated_struct_literals_survive_retired_dot_migration() {
+    let source = r#"fn run() {
+    print("{NoDebug.{value: 2}:Debug}")
+    print("{Probe.{value: 2} == Probe.{value: 1}:Debug}")
+}
+"#;
+    let formatted = jet::format_source(source).expect("interpolated literals should format");
+    assert!(
+        formatted.contains(r#"print("{NoDebug{value: 2}:Debug}")"#),
+        "formatter dropped the interpolated struct literal:\n{formatted}"
+    );
+    assert!(
+        formatted.contains(r#"print("{Probe{value: 2} == Probe{value: 1}:Debug}")"#),
+        "formatter dropped the interpolated struct comparison:\n{formatted}"
+    );
+    assert_eq!(
+        formatted,
+        jet::format_source(&formatted).expect("formatted interpolations should reformat")
+    );
+}

@@ -780,7 +780,7 @@ fn compile_web_file_loads() {
 /// scope as native code and erases its sema-only handle before emission.
 #[test]
 fn web_named_caps_scope_uses_shared_tir() {
-    let source = "#Target(Web)\nfn run() {\n    #Caps(auth: IO) {\n        value :: 1 + 1\n    }\n}\n";
+    let source = "#Target(Web)\nfn run() {\n    #Caps(abilities: IO) {\n        value :: 1 + 1\n    }\n}\n";
     let out = jet::compile_web_with_path(source, "tests/fixtures/web_named_caps_scope.jet")
         .expect("web should accept the canonical #Caps scope")
         .web

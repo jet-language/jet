@@ -1,3 +1,4 @@
+mod common;
 mod tir_support;
 
 use std::fs;
@@ -54,7 +55,9 @@ authority: .{ holds: { deny: [FFI] } }
     };
     let diagnostics = EffectBudget::enforce(&[entry], &package);
     assert_eq!(diagnostics.len(), leaves.len());
-    assert!(diagnostics.iter().all(|diagnostic| diagnostic.code == "E1220"));
+    assert!(diagnostics
+        .iter()
+        .all(|diagnostic| diagnostic.code == "E1220"));
     for leaf in leaves {
         assert_eq!(
             diagnostics
@@ -68,9 +71,27 @@ authority: .{ holds: { deny: [FFI] } }
 }
 
 #[test]
+fn retired_flat_ffi_spellings_are_rejected_by_the_compiler() {
+    for root in [
+        "Go", "Java", "DotNet", "Fortran", "Cobol", "Tcl", "Lua", "Ada", "Pascal",
+        "Dart", "PowerShell", "Perl", "Ruby", "Php", "R", "Com", "Cpp", "Py", "Octave",
+    ] {
+        let source = format!("fn run() :[{root}]> {{}}\n");
+        let diagnostics = jet::compile(&source).expect_err("retired flat effect must not parse");
+        assert!(
+            diagnostics.iter().any(|diagnostic| diagnostic.code == "E0119"),
+            "expected E0119 for retired effect {root}, got {diagnostics:#?}"
+        );
+    }
+}
+
+#[test]
 fn i9_parser_accepts_the_ffi_leaf_row() {
     let (tokens, diagnostics) = jet::Lexer::lex(FFI_LEAF_SOURCE);
-    assert!(diagnostics.is_empty(), "parser lexed the FFI leaf differently: {diagnostics:#?}");
+    assert!(
+        diagnostics.is_empty(),
+        "parser lexed the FFI leaf differently: {diagnostics:#?}"
+    );
     let ast = jet::Parser::parse(&tokens).expect("parser accepts FFI.Py");
     assert!(!ast.items.is_empty(), "parser dropped the FFI leaf program");
 }
@@ -83,7 +104,10 @@ fn i9_sema_accepts_the_ffi_leaf_row() {
 #[test]
 fn i9_tir_erases_the_ffi_leaf_row() {
     let output = jet::compile(FFI_LEAF_SOURCE).expect("TIR accepts FFI.Py");
-    assert!(!output.rust.contains("FFI.Py"), "effect leaf leaked into Rust");
+    assert!(
+        !output.rust.contains("FFI.Py"),
+        "effect leaf leaked into Rust"
+    );
 }
 
 #[test]
@@ -101,11 +125,16 @@ fn i9_jit_runs_the_ffi_leaf_row() {
 }
 
 #[test]
+fn i9_interpreter_runs_the_ffi_leaf_row() {
+    let (code, stdout, stderr) =
+        tir_support::interpreter_run("ffi_leaf_interpreter", FFI_LEAF_SOURCE);
+    assert_eq!(code, 0, "interpreter stderr: {stderr}");
+    assert_eq!(stdout, "ffi leaf\n");
+}
+
+#[test]
 fn i9_dev_runs_the_ffi_leaf_row() {
-    let root = std::env::temp_dir().join(format!(
-        "jet_ffi_leaf_dev_{}",
-        std::process::id()
-    ));
+    let root = std::env::temp_dir().join(format!("jet_ffi_leaf_dev_{}", std::process::id()));
     let _ = fs::remove_dir_all(&root);
     fs::create_dir_all(&root).expect("dev scratch");
     let entry = root.join("main.jet");
@@ -117,7 +146,11 @@ fn i9_dev_runs_the_ffi_leaf_row() {
         .output()
         .expect("dev command");
     let _ = fs::remove_dir_all(&root);
-    assert!(output.status.success(), "dev stderr: {}", String::from_utf8_lossy(&output.stderr));
+    assert!(
+        output.status.success(),
+        "dev stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
     assert_eq!(String::from_utf8_lossy(&output.stdout), "ffi leaf\n");
 }
 
@@ -137,5 +170,8 @@ fn i9_repl_runs_the_ffi_leaf_row() {
 fn i9_web_accepts_the_ffi_leaf_row() {
     let output = jet::compile_web_with_path(FFI_LEAF_SOURCE, "ffi_leaf_web.jet")
         .expect("web accepts FFI.Py");
-    assert!(output.web.is_some(), "web tier dropped the FFI leaf program");
+    assert!(
+        output.web.is_some(),
+        "web tier dropped the FFI leaf program"
+    );
 }

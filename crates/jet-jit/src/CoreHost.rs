@@ -19,6 +19,10 @@ mod fs_walk_kernel {
     include!("../../jet-codegen/src/Prelude/Core/FSWalk.rs");
 }
 
+mod keep_kernel {
+    include!("../../jet-codegen/src/Prelude/Core/Keep.rs");
+}
+
 // #2027 / I8+I9: the resident host reaches the one signal mechanism through the
 // single in-binary instance of `Prelude/CoreLib/Top/Interrupt.rs` that the TIR
 // evaluator ambient also uses. A private `include!` here compiled a second
@@ -290,6 +294,28 @@ fn jet_jit_os_on_interrupt(callback_record: i64) {
 
 pub(crate) fn reset_jit_interrupts() {
     jit_os_interrupt::reset();
+}
+
+// D-BENCH-KEEP1=A: each wrapper is only a carrier-shaped ABI adapter. The
+// sink itself is the shared Prelude `jet_keep` used by generated AOT code.
+fn jet_jit_keep_i64(value: i64) -> i64 {
+    keep_kernel::jet_keep(value)
+}
+
+fn jet_jit_keep_f64(value: f64) -> f64 {
+    keep_kernel::jet_keep(value)
+}
+
+fn jet_jit_keep_i8(value: i8) -> i8 {
+    keep_kernel::jet_keep(value)
+}
+
+fn jet_jit_keep_i32(value: i32) -> i32 {
+    keep_kernel::jet_keep(value)
+}
+
+fn jet_jit_keep_unit() {
+    keep_kernel::jet_keep(());
 }
 
 // ── core.sys (Prelude facts; these functions only marshal values) ─────────────
@@ -1985,6 +2011,19 @@ host_fns! {
         sig_i64.returns.push(AbiParam::new(types::I64));
         let mut sig_f64 = Signature::new(cc);
         sig_f64.returns.push(AbiParam::new(types::F64));
+        let mut sig_keep_i64 = Signature::new(cc);
+        sig_keep_i64.params.push(AbiParam::new(types::I64));
+        sig_keep_i64.returns.push(AbiParam::new(types::I64));
+        let mut sig_keep_f64 = Signature::new(cc);
+        sig_keep_f64.params.push(AbiParam::new(types::F64));
+        sig_keep_f64.returns.push(AbiParam::new(types::F64));
+        let mut sig_keep_i8 = Signature::new(cc);
+        sig_keep_i8.params.push(AbiParam::new(types::I8));
+        sig_keep_i8.returns.push(AbiParam::new(types::I8));
+        let mut sig_keep_i32 = Signature::new(cc);
+        sig_keep_i32.params.push(AbiParam::new(types::I32));
+        sig_keep_i32.returns.push(AbiParam::new(types::I32));
+        let sig_keep_unit = Signature::new(cc);
         let mut sig_void = Signature::new(cc);
         let mut sig_void_str = Signature::new(cc);
         sig_void_str.params.push(AbiParam::new(types::I64));
@@ -2050,6 +2089,11 @@ host_fns! {
 
 
     }
+    keep_i64: "jet_jit_keep_i64" => jet_jit_keep_i64: sig_keep_i64;
+    keep_f64: "jet_jit_keep_f64" => jet_jit_keep_f64: sig_keep_f64;
+    keep_i8: "jet_jit_keep_i8" => jet_jit_keep_i8: sig_keep_i8;
+    keep_i32: "jet_jit_keep_i32" => jet_jit_keep_i32: sig_keep_i32;
+    keep_unit: "jet_jit_keep_unit" => jet_jit_keep_unit: sig_keep_unit;
     os_name: "jet_jit_os_name" => jet_jit_os_name: sig_str;
     os_family: "jet_jit_os_family" => jet_jit_os_family: sig_str;
     os_arch: "jet_jit_os_arch" => jet_jit_os_arch: sig_str;

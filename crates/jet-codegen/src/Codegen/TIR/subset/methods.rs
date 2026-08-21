@@ -68,7 +68,7 @@ pub(crate) fn method_call_in_subset(
                 .iter()
                 .all(|arg| expr_in_subset(&arg.expr, cx, locals));
     }
-    // D-AUTHORITY-NAME1=A / D-AUTHORITY-WORD2=E: the carried abilities value
+    // D-AUTHORITY-NAME1=A: the carried Authority value
     // has exactly one instance family. Keep both operations in TIR as ordinary
     // receiver calls; their policy lives in the shared Prelude helpers.
     if recv_type.as_deref() == Some(Syntax::TYPE_ABILITIES)

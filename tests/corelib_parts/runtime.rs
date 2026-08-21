@@ -281,8 +281,8 @@ fn run() {
     }
     scope :: event.scope()
     ev :: event.async_result<Int, String>(AsyncPolicy.{ capacity: 1, overflow: .Block }, .Collect) ?? panic("policy")
-    (started_tx, started_rx) :: tasks.channel<Int>()
-    (release_tx, release_rx) :: tasks.channel<Int>()
+    (started_tx, started_rx) :: channel<Int>()
+    (release_tx, release_rx) :: channel<Int>()
     ev.on(scope, (n: Int) => {
         started_tx.send(~n)
         released :: release_rx.receive() ?? panic("release")
@@ -340,8 +340,8 @@ fn panic_ignore_handler(n: Int) ? String {
 fn run() {
     newest_scope :: event.scope()
     newest :: event.async_result<Int, String>(AsyncPolicy.{ capacity: 1, overflow: .DropNewest }, .Collect) ?? panic("policy")
-    (newest_started_tx, newest_started_rx) :: tasks.channel<Int>()
-    (newest_release_tx, newest_release_rx) :: tasks.channel<Int>()
+    (newest_started_tx, newest_started_rx) :: channel<Int>()
+    (newest_release_tx, newest_release_rx) :: channel<Int>()
     newest.on(newest_scope, (n: Int) => {
         newest_started_tx.send(~n)
         released_newest :: newest_release_rx.receive() ?? panic("release")
@@ -360,8 +360,8 @@ fn run() {
 
     oldest_scope :: event.scope()
     oldest :: event.async_result<Int, String>(AsyncPolicy.{ capacity: 1, overflow: .DropOldest }, .Collect) ?? panic("policy")
-    (oldest_started_tx, oldest_started_rx) :: tasks.channel<Int>()
-    (oldest_release_tx, oldest_release_rx) :: tasks.channel<Int>()
+    (oldest_started_tx, oldest_started_rx) :: channel<Int>()
+    (oldest_release_tx, oldest_release_rx) :: channel<Int>()
     oldest.on(oldest_scope, (n: Int) => {
         oldest_started_tx.send(~n)
         released_oldest :: oldest_release_rx.receive() ?? panic("release")
@@ -380,8 +380,8 @@ fn run() {
 
     once_scope :: event.scope()
     once_event :: event.async_result<Int, String>(AsyncPolicy.{ capacity: 2, overflow: .Block }, .Collect) ?? panic("policy")
-    (once_started_tx, once_started_rx) :: tasks.channel<Int>()
-    (once_release_tx, once_release_rx) :: tasks.channel<Int>()
+    (once_started_tx, once_started_rx) :: channel<Int>()
+    (once_release_tx, once_release_rx) :: channel<Int>()
     once_event.on_priority(once_scope, 10, (n: Int) => {
         if n == 1 {
             once_started_tx.send(~n)
@@ -465,8 +465,8 @@ use core.time as time
 fn owner_teardown_task() => Task<DispatchReport<String>> {
     owner_scope :: event.scope()
     ev :: event.async_result<Int, String>(AsyncPolicy.{ capacity: 1, overflow: .Block }, .Collect) ?? panic("policy")
-    (started_tx, started_rx) :: tasks.channel<Int>()
-    (release_tx, release_rx) :: tasks.channel<Int>()
+    (started_tx, started_rx) :: channel<Int>()
+    (release_tx, release_rx) :: channel<Int>()
     ev.on(owner_scope, (n: Int) => {
         started_tx.send(~n)
         held_sender :: ~release_tx
@@ -481,8 +481,8 @@ fn owner_teardown_task() => Task<DispatchReport<String>> {
 fn run() {
     cancel_scope :: event.scope()
     cancelled :: event.async_result<Int, String>(AsyncPolicy.{ capacity: 1, overflow: .Block }, .Collect) ?? panic("policy")
-    (cancel_started_tx, cancel_started_rx) :: tasks.channel<Int>()
-    (cancel_release_tx, cancel_release_rx) :: tasks.channel<Int>()
+    (cancel_started_tx, cancel_started_rx) :: channel<Int>()
+    (cancel_release_tx, cancel_release_rx) :: channel<Int>()
     cancelled.on(cancel_scope, (n: Int) => {
         cancel_started_tx.send(~n)
         released :: cancel_release_rx.receive() ?? panic("release")
@@ -503,8 +503,8 @@ fn run() {
 
     queued_scope :: event.scope()
     queued_deadline :: event.async_result<Int, String>(AsyncPolicy.{ capacity: 1, overflow: .Block }, .Collect) ?? panic("policy")
-    (queued_started_tx, queued_started_rx) :: tasks.channel<Int>()
-    (queued_release_tx, queued_release_rx) :: tasks.channel<Int>()
+    (queued_started_tx, queued_started_rx) :: channel<Int>()
+    (queued_release_tx, queued_release_rx) :: channel<Int>()
     queued_deadline.on(queued_scope, (n: Int) => {
         queued_started_tx.send(~n)
         released :: queued_release_rx.receive() ?? panic("release")
@@ -521,8 +521,8 @@ fn run() {
 
     pending_scope :: event.scope()
     pending_deadline :: event.async_result<Int, String>(AsyncPolicy.{ capacity: 1, overflow: .Block }, .Collect) ?? panic("policy")
-    (pending_started_tx, pending_started_rx) :: tasks.channel<Int>()
-    (pending_release_tx, pending_release_rx) :: tasks.channel<Int>()
+    (pending_started_tx, pending_started_rx) :: channel<Int>()
+    (pending_release_tx, pending_release_rx) :: channel<Int>()
     pending_deadline.on(pending_scope, (n: Int) => {
         pending_started_tx.send(~n)
         released :: pending_release_rx.receive() ?? panic("release")
@@ -595,8 +595,8 @@ use core.tasks as tasks
 use core.time as time
 
 fn run() {
-    (cancel_gate_started_tx, cancel_gate_started_rx) :: tasks.channel<Int>()
-    (cancel_gate_release_tx, cancel_gate_release_rx) :: tasks.channel<Int>()
+    (cancel_gate_started_tx, cancel_gate_started_rx) :: channel<Int>()
+    (cancel_gate_release_tx, cancel_gate_release_rx) :: channel<Int>()
     cancel_gate :: task {
         cancel_gate_started_tx.send(1)
         released :: cancel_gate_release_rx.receive() ?? panic("cancel gate")
@@ -618,8 +618,8 @@ fn run() {
     }
     print("cancel counts={cancel_event.queued_count()},{cancel_event.running_count()},{cancel_event.blocked_count()}")
 
-    (close_gate_started_tx, close_gate_started_rx) :: tasks.channel<Int>()
-    (close_gate_release_tx, close_gate_release_rx) :: tasks.channel<Int>()
+    (close_gate_started_tx, close_gate_started_rx) :: channel<Int>()
+    (close_gate_release_tx, close_gate_release_rx) :: channel<Int>()
     close_gate :: task {
         close_gate_started_tx.send(1)
         released :: close_gate_release_rx.receive() ?? panic("close gate")

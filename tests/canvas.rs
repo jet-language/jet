@@ -375,7 +375,7 @@ fn work() => Int {
 }
 
 fn run() {
-    (sender, ch) :: tasks.channel<Int>()
+    (sender, ch) :: channel<Int>()
     task.group g {
         t :: task {
             sender.send(work())
@@ -582,7 +582,7 @@ fn canvas_graph_json_is_stable_and_typed() {
     assert!(json.contains("\"from_source_span\":"));
     assert!(json.contains("\"to_source_span\":"));
     assert!(json.contains("\"type\":\"exec\""));
-    assert!(json.contains("\"capability\":\"control\""));
+    assert!(json.contains("\"ability\":\"control\""));
     assert!(json.contains("\"inline_exprs\""));
     assert!(json.contains("total > 10"));
     let square_call = first_node_id_containing(&json, ":call:square");

@@ -1774,7 +1774,7 @@ fn concurrency_spec_states_deadlock_stance() {
         1,
         "architecture must link the canonical Deadlock section"
     );
-    for mechanism in ["M:N scheduler", "`task`", "`task.group`", "`tasks.channel`"] {
+    for mechanism in ["M:N scheduler", "`task`", "`task.group`", "`channel`"] {
         assert!(
             architecture.contains(mechanism),
             "architecture must name concurrency mechanism `{mechanism}`"

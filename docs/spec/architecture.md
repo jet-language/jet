@@ -154,7 +154,7 @@ pure `freeze(x)` evaluation is still a value operation.
 These boundary guarantees do not imply deadlock freedom. See the [Deadlock stance](spec.md#deadlock-stance)
 for the narrow `#Transact` lock-order guarantee and the non-guarantee for
 arbitrary task and channel wait cycles. The M:N scheduler parks tasks at
-`tasks.channel` waits; `task` and `task.group` handles define join duties. These
+`channel` waits; `task` and `task.group` handles define join duties. These
 mechanisms do not detect arbitrary wait cycles.
 
 Code inside an `#Unsafe("reason")` region, a foreign implementation, or a

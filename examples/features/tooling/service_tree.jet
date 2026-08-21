@@ -1,14 +1,14 @@
-// D-SERVICE1=D (#444): typed builders promote named workers into a supervised
-// service tree. The endpoint method uses the same bounded mailbox as the tree.
+// D-SERVICE1=D (#444): the typed tree declaration promotes an ordinary
+// function into a named worker. Mailbox delivery and supervision are later
+// slices; this example proves the topology crosses the production boundary.
 use core.service as service
 
+fn echo() { print("") }
+
 fn run() {
-    tree := service.tree("app")
-    api :: tree.worker("api", capacity: 2) ?? panic("worker")
-    tree.start() ?? panic("start")
-    api.send("ping") ?? panic("send")
-    print(api.show())
-    print(api.receive() ?? panic("receive"))
-    print(tree.observe())
-    tree.stop() ?? panic("stop")
+    handler :: echo
+    tree :: service.tree((root) :> {
+        root.worker("echo", handler)
+    })
+    print(service.tree_show(tree))
 }

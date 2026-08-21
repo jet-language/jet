@@ -25,8 +25,8 @@ fn probe_work() {{
 
 fn run() {{
     // Channel setup before arena so spawn panic cannot capture the arena view.
-    (ready_sender, ready) :: tasks.channel<Int>()
-    (hold_sender, blocked) :: tasks.channel<Int>(1)
+    (ready_sender, ready) :: channel<Int>()
+    (hold_sender, blocked) :: channel<Int>(1)
     child :: task {{
         ready_sender.send(1)
         time.sleep(700ms)

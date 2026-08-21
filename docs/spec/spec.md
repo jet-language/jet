@@ -1059,7 +1059,7 @@ The ratified rules are instances of this same grid:
 | literal | comptime / typed literal | D-UNIFYLIT1 and E0152 reject unchecked typed-head text |
 | manifest | build / manifest | D-CONF names the accepted fields and manifest diagnostics reject other shapes |
 | dependency | build / dependency | E1204 binds the resolved bytes to the lockfile hash; the trust commands record the grant decision |
-| link | link / foreign signature | D-FFI-UNIFY1 gives a foreign declaration one binder descriptor and one effect root |
+| link | link / foreign signature | D-FFI-UNIFY1 gives a foreign declaration one binder descriptor and one effect leaf |
 | schema binder | link / foreign signature | D-BOUND-BIND1 turns a JSON, CSV, SQL DDL, XML, or proto schema into visible ordinary Jet source, hashed and stamped in its header |
 | wire | run / wire value | D-SERDE1 and D-ENC1 use DataTree and one typed codec path |
 | validation | run / wire value | D-VALIDATE1 accumulates FieldError values; D-VALIDATE-DECODE1 gives decode failures one shape |
@@ -1395,7 +1395,7 @@ linker, so the Go runtime is part of the native program rather than a sidecar.
 foreign function consumes it, preventing Jet from reusing a released
 `runtime/cgo.Handle`. The binder accepts handles only on a 64-bit host ABI and
 supervises compilation with a 60-second deadline plus bounded diagnostic
-capture. Calls through generated `go.*` caches contribute the `Go` effect root;
+capture. Calls through generated `go.*` caches contribute the `FFI.Go` effect leaf;
 ordinary C externs remain maximally effectful. Unsupported signatures fail before compilation. Go compiler failures
 are laundered through **E3208** and never expose raw foreign source frames
 (I2/I4).
@@ -1412,7 +1412,7 @@ must use `value`. Fixed-shape input arrays of those elements must use
 column-major order. The generated public wrapper records every extent and
 rejects a list whose length does not exactly match the shape before passing its
 pointer across the private C ABI seam. Generated `fortran.*` calls contribute
-the `Fortran` effect root. Unsupported declarations and compiler failures are
+the `FFI.Fortran` effect leaf. Unsupported declarations and compiler failures are
 laundered through **E3208** rather than exposing `gfortran` diagnostics.
 
 Example: `examples/features/lowlevel/polyglot_fortran/`.
@@ -1446,7 +1446,7 @@ consumes Jet ownership and releases the global reference. Remaining references
 are released during JVM teardown. Constructors and value-returning methods are
 fallible with `JavaError.Exception`; the bridge clears the Java exception and
 returns only the typed Jet error, never a Java stack or foreign source frame.
-Generated calls carry the `Java` effect root. `javac`, `javap`, `cc`, and `ar`
+Generated calls carry the `FFI.Java` effect leaf. `javac`, `javap`, `cc`, and `ar`
 run under a 60-second deadline with 64-KiB diagnostic capture. Cache provenance
 binds the source, discovered bytecode surface, class cache path, and schema with
 SHA-256. Tool failures use **E3208** what/why/fix copy.
@@ -1471,7 +1471,7 @@ values backed by a 1,024-slot generation-checked `GCHandle` table.
 `DotNetError.ResourceLimit`; managed exceptions become
 `DotNetError.Exception`; invalid, stale, or released handles become
 `DotNetError.InvalidHandle`, with foreign exception text never exposed. Calls
-carry the `DotNet` effect root. SDK, C compiler, and
+carry the `FFI.DotNet` effect leaf. SDK, C compiler, and
 archive tools run under a 60-second deadline with 64-KiB output capture.
 Provenance binds source, reflected surface, hostfxr identity, and schema with
 SHA-256. Tool failures use the snapshotted **E3208** diagnostic.
@@ -1493,7 +1493,7 @@ deletes any remaining interpreters before Tcl finalization. String results are
 copied through a 64-KiB thread-local boundary and reject embedded NUL or
 oversize values. Integer and float entrypoints use Tcl's typed object parsers.
 Tcl failures become `TclError.Eval`; raw Tcl result text and stack frames never
-cross the boundary. Calls carry the `Tcl` effect root.
+cross the boundary. Calls carry the `FFI.Tcl` effect leaf.
 
 Evaluation is synchronous. A long-running Tcl command blocks its calling Jet
 thread until Tcl returns. This vertical exposes no cancellation claim and does
@@ -1518,7 +1518,7 @@ booleans, integers, floats, text, lists, and string-keyed maps retain their data
 meaning. Cyclic tables, unsupported keys and values, nesting beyond 64 levels,
 and input or output at least 1 MiB fail at the boundary. Lua errors become the
 closed `LuaError` variants; exception text, paths, and stack frames never cross.
-Calls carry the `Lua` effect root.
+Calls carry the `FFI.Lua` effect leaf.
 
 Sibling `<name>_view(session, deadline_ms)` adapters require the Lua function to
 return a table and pin that table in the owning session's registry. `TableView`
@@ -1552,7 +1552,7 @@ than being guessed.
 
 Scalar subtypes with `range LOW .. HIGH` become pre-call checks in generated
 Jet wrappers. A value outside the Ada range returns `AdaError.Constraint`
-before the C-ABI export executes. Calls carry the `Ada` effect. Generated
+before the C-ABI export executes. Calls carry the `FFI.Ada` effect leaf. Generated
 bridges run GNAT elaboration once and finalization at process exit.
 
 GNAT, binder, C compiler, and archiver processes have a 60-second deadline and
@@ -1574,7 +1574,7 @@ Class pointers never reach Jet. A generated C bridge owns them in a bounded
 type. Methods borrow that type. `<class>_close(^handle)` consumes it. Closing a
 stale identity is rejected by the table before the Pascal destructor runs;
 process teardown destroys any remaining owned objects before FreePascal library
-finalization. Calls carry the `Pascal` effect.
+finalization. Calls carry the `FFI.Pascal` effect leaf.
 
 FreePascal, C compiler, and archiver processes have a 60-second deadline and
 64-KiB output bounds. Compiler failures use laundered **E3208** what/why/fix
@@ -1604,7 +1604,7 @@ optional, named, generic, object, string, async, or overloaded shapes fail
 binding rather than being guessed. Generated Jet wrappers return
 `DartError.NotInitialized` until the Dart host initializes API DL and
 `DartError.CallbackUnavailable` until a callback is registered. Calls carry
-the `Dart` effect.
+the `FFI.Dart` effect leaf.
 
 `NativeCallable.isolateLocal` makes this vertical synchronous and
 isolate-thread-affine. Flutter uses the same generated Dart host and deploys
@@ -1636,7 +1636,7 @@ result channel. Requests and responses are capped at 1 MiB and JSON depth 64.
 The bridge validates frame lengths and response envelopes before the generated
 Jet wrapper exposes a value. PowerShell exceptions become
 `PowerShellError.CommandFailed`; raw error records, script paths, stderr, and
-stack traces never cross the boundary. Calls carry the `PowerShell` effect.
+stack traces never cross the boundary. Calls carry the `FFI.PowerShell` effect leaf.
 
 Each call declares a 1–300000 ms deadline. Expiry kills and reaps the whole
 worker process group and invalidates its session. `cancel(session)` performs
@@ -1669,7 +1669,7 @@ objects retain their JSON data meaning. The binary protocol length-frames each
 request and response, checks response identities, limits frames to 1 MiB, and
 never treats stdout text as a result. Perl exceptions become
 `PerlError.CommandFailed`; stderr, script paths, stack traces, and exception
-text stay inside the worker. Calls carry the `Perl` effect.
+text stay inside the worker. Calls carry the `FFI.Perl` effect leaf.
 
 Calls require a 1–300000 ms deadline. Expiry or `cancel(session)` kills and
 reaps the worker process group and invalidates the generation-tagged handle.
@@ -1695,7 +1695,7 @@ through Ruby's standard `JSON` library. The binary protocol length-frames every
 request and response, verifies response identities, limits frames to 1 MiB, and
 never treats stdout text as a result. Ruby exceptions become
 `RubyError.CommandFailed`; exception text, stack traces, stderr, and paths stay
-inside the worker. Calls carry the `Ruby` effect.
+inside the worker. Calls carry the `FFI.Ruby` effect leaf.
 
 Calls require a 1–300000 ms deadline. Expiry or `cancel(session)` kills and
 reaps the worker process group and invalidates the generation-tagged handle.

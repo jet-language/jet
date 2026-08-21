@@ -57,7 +57,7 @@ Provider importers lower Jet registry, npm, Cargo, PyPI, SwiftPM, Maven,
 NuGet, Conan, vcpkg, Homebrew, GitHub, and binary metadata into one fact
 report. Unsupported, ambiguous, or missing identity facts remain explicit loss
 records; they do not become invented defaults. Core, Nix, local path, Jet
-registry, and verified binary paths expose byte/lock capabilities. The foreign
+registry, and verified binary paths expose byte/lock abilities. The foreign
 ecosystem importers expose metadata facts until a dedicated verified transport
 adapter exists; they do not claim network fetch or offline substitution.
 
@@ -269,7 +269,7 @@ flag, or environment variable. Local paths and `file://` mirrors use the
 canonical signed NAR path. HTTP(S), SSH/ssh-ng, S3-compatible, Hangar, and
 Nix-store endpoints use host-owned adapters and preserve the same narinfo,
 NAR digest, and output identity. A missing host adapter is an explicit
-capability error; it never pretends to transfer bytes.
+ability error; it never pretends to transfer bytes.
 
 ```text
 jet cache bind public file:///srv/jet-cache --credential keychain:jet/public --yes
@@ -414,7 +414,7 @@ Build hooks lower to a finite action graph. Fetches need exact hashes. Exec
 steps use declared tool paths. Install paths stay under the output root.
 Successful outputs publish atomically and failed stages are removed. An
 approval binds the package, provider/source, staged source digest, platform,
-exact recipe digest, and declared capabilities. A change in any of these facts
+exact recipe digest, and declared abilities. A change in any of these facts
 needs a new approval; `--trust` is one-shot and CI accepts only an exact
 repository grant. Hook processes receive no caller environment or credentials,
 only the declared deterministic build values and the private output channel.

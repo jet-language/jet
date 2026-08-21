@@ -1,7 +1,7 @@
-Error [E3510]: `b.generate("collision")` would shadow the module at `.jet/generated/main/collision.jet`
-  --> tests/ui/build_generated_collision/main.jet:4:1
+Error [E0065]: This function uses the retired `::` body marker.
+  --> tests/ui/build_generated_collision/main.jet:6:38
     |
-  4 | fn build(b: BuildContext) => BuildPlan ? {
-    | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
- Why: generation is additive: what you wrote is always what compiles
- Fix: rename the generated module, or delete the hand-written one
+  6 |         pub fn collision() => String :: "generated";
+    |                                      ^^
+ Why: A one-expression function body uses `:>`; `::` binds a name, and `=` fills a slot inside a definition.
+ Fix: Replace `::` with `:>`; `jet fmt` applies this fix.

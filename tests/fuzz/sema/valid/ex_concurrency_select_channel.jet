@@ -1,15 +1,17 @@
-// 168 — D-CONCSELECT1=A: fluent scoped select wakes one recv arm.
-use core.tasks as tasks
+// 168 — D-CONC-CHAN1=A / D-CONC-CHAN2=D: plain endpoint readiness table.
+
+fn wait(ch1: Receiver<Int>, ch2: Receiver<Int>) {
+    if {
+        value, ch1 :> print(value)
+        value, ch2 :> print(value)
+    }
+}
 
 fn run() {
-    task.group g {
-        (s1, ch1) :: tasks.channel<Int>()
-        (s2, ch2) :: tasks.channel<Int>()
-        s1.send(11)
-        winner :: g.select().recv(ch1).recv(ch2).wait()
-        print(winner)
-        s2.send(22)
-        winner2 :: g.select().recv(ch1).recv(ch2).wait()
-        print(winner2)
-    }
+    (s1, ch1) :: channel<Int>()
+    (s2, ch2) :: channel<Int>()
+    s1.send(11)
+    s2.send(22)
+    worker :: task wait(ch1, ch2)
+    worker.join() ?? panic("readiness worker failed")
 }

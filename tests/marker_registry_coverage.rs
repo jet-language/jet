@@ -12,7 +12,7 @@ mod common;
 use jet_foundation::Policy::{
     self, AppliedRule, RuleArgType, RuleSite, RuleStatus,
 };
-use jet_foundation::Registry;
+use jet_foundation::{Registry, Syntax};
 
 /// Sites that describe a position with no source spelling of its own.
 /// `Package` is `package.jet` manifest scope, `Impl` and `Operation` are
@@ -78,7 +78,7 @@ fn spelling(row: &AppliedRule) -> String {
     if row.name == "Env" {
         args[0] = "\"PORT\"".to_string();
     }
-    if row.name == "Caps" {
+    if row.name == Syntax::KW_CAPS {
         args[0] = "IO".to_string();
     }
     if row.name == "Target" {

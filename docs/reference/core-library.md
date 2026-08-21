@@ -2665,10 +2665,8 @@ fn run() {
 Channels carry one type:
 
 ```jet
-use core.tasks as tasks
-
 fn run() {
-(sender, ch) :: channel<Int>()
+    (sender, ch) :: channel<Int>()
     handle :: task {
         sender.send(42)
     }
@@ -2678,7 +2676,7 @@ fn run() {
 ```
 
 `channel<T>()` returns the send/receive pair directly (D-CONC-CHAN1) —
-destructure it with `(tx, rx) := channel<T>()`. The bounded form follows
+destructure it with `(tx, rx) :: channel<T>()`. The bounded form follows
 the [Bounded buffering law](../spec/spec.md#bounded-buffering-law). A second sender is `~tx`
 (D-SHAPE-COPY1's copy sigil makes a cheap handle duplicate;
 there's no combined channel value).
@@ -2720,9 +2718,15 @@ and `ProcessChild.wait()`) observe the inherited budget and report runtime
 `task.group` remains the structured default: it owns child tasks until scope
 exit. A numeric limit below one is clamped to one before a child starts. Inside
 one, use `task.all`, `task.race`, and `task.any`; `race`/`any` cancel losers.
-The group handle's `select()` races receivers and timers: `.recv(rx)` waits for a channel
-value, `.after(duration: Duration)` is a unit timer arm, and `.after(duration: Duration, value: fallback)`
-is a typed timeout arm that can be mixed with same-`T` receive arms.
+Readiness waits are subjectless `if` tables on plain endpoints; no group owns
+them. A comma head binds the received value, and `after` takes a `Duration`:
+
+```jet
+if {
+    value, receiver :> handle(value)
+    after 100ms :> retry()
+}
+```
 
 ### `core.prelude` — always-available helpers
 
@@ -3792,42 +3796,38 @@ Backend facts for Core modules (ownership/effects/failure/platform) live in
 
 ---
 
-## `core.service` — typed tree declaration (D-SERVICE1=D)
+## `core.service` — typed service tree (D-SERVICE1=D)
 
-The shipped slice is the typed topology boundary. `service.tree(…)` takes one
-inline declaration block. Sema checks the block shape, worker names, and named
-handler values. TIR carries the checked declarations to the shared Prelude,
-which constructs the real `ServiceTree`; no user-visible string-keyed tree
-constructor remains.
+`service.tree(name)` creates the one public topology handle. Add a named worker
+with a bounded mailbox, then operate on that worker through its typed endpoint:
 
 ```jet
 use core.service as service
 
-fn echo() { print("") }
-
 fn run() {
-    handler :: echo
-    tree :: service.tree((root) :> {
-        root.worker("echo", handler)
-    })
-    print(service.tree_show(tree))
+    tree := service.tree("app")
+    api :: tree.worker("api", capacity: 2) ?? panic("worker")
+    tree.start() ?? panic("start")
+    api.send("ping") ?? panic("send")
+    print(api.receive() ?? panic("receive"))
+    tree.stop() ?? panic("stop")
 }
 ```
 
-This slice records the root topology and handler identity. `tree_show` exposes
-the declared `echo:handler` mapping, so the value crossed sema and TIR into the
-real Prelude tree. It does not start a worker or invoke its handler. The
-Prelude still supplies the ratified default policy row shown by `tree_show`:
-`OneForOne` with a bounded five-per-minute restart budget and `AtMostOnce`
-delivery metadata.
+Sema checks worker names, capacity types, endpoint identity, delivery keys,
+policy values, state-store values, workflow IDs, and directory endpoint types.
+The AOT emitter, JIT, and interpreter lower these methods to the same Prelude
+operations; `core.services` remains a private adapter and is not a second
+string-keyed topology surface.
 
-The remaining D-SERVICE1 tree work is unstarted: nested groups, typed
-endpoints and mailboxes, send/receive backpressure, cancellation and drain,
-delivery/retry/idempotency, durable state, identity/discovery, authenticated
-clusters and partitions, placement, rolling handoff/rollback, and
-observability/chaos proof. The old `core.services` examples and runtime tests
-need migration to those typed successor slices; they are not compatibility
-consumers of this surface.
+The public tree fronts now cover worker creation, restart and delivery policy,
+start/stop, live and durable send, receive, mailbox/restart inspection, worker
+failure and drain, dead-letter/event counters, state adapters, snapshots and
+events, workflow start/step/history, directory register/resolve, generation
+handoff/rollback, upgrade receipts, chaos failure, observation, and display.
+`ServiceEndpoint` fronts send, receive, and display. Supervisor group storage,
+authority-runtime retry operations, and deployment remain private follow-up
+substrate.
 
 ---
 

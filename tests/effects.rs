@@ -181,7 +181,7 @@ fn run() :[!Mem.Alloc(above: {bound})]> {{
 }
 
 /// I3: a `#Caps(…)` region lowers to a plain lexical block — the generated Rust
-/// carries no effect machinery (no `Caps`, no `#(`, no effect runtime), and the
+/// carries no effect machinery (no marker, no `#(`, no effect runtime), and the
 /// body runs unchanged.
 #[test]
 fn caps_region_erases_to_plain_block() {
@@ -524,7 +524,7 @@ fn run() { print(readit("x")); }
     );
 }
 
-/// A `#Caps(…)` region whose body stays within the cap set compiles clean.
+/// A `#Caps(…)` region whose body stays within the ability set compiles clean.
 #[test]
 fn caps_region_within_set_ok() {
     let src = r#"
@@ -542,7 +542,7 @@ fn run() {
     );
 }
 
-/// An effect used inside a `#Caps(…)` region but not in its cap list is E0712.
+/// An effect used inside a `#Caps(…)` region but not in its ability list is E0712.
 #[test]
 fn caps_region_out_of_set_is_e0712() {
     let src = r#"
@@ -852,7 +852,7 @@ fn run() {
 }
 
 /// I3: a named `#Caps(…)` region lowers to a plain lexical block — the generated
-/// Rust carries no capability machinery (no handle value or revoke), no effect
+/// Rust carries no ability machinery (no handle value or revoke), no effect
 /// annotation, and NO `unsafe`. The body runs unchanged.
 #[test]
 fn grant_region_erases_to_plain_block() {

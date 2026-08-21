@@ -83,9 +83,9 @@ D-IFDIST1 (`if user == { .active -> … }`). Not a lambda; the body stays an
 inline arm.
 
 ```jet
-names :: loop users, if .active -> .name             // 11 tokens
+names :: loop users if .active :> .name              // 11 tokens
 squares :: loop nums -> .value * .value
-totals :: loop orders, if .paid -> .total ?? 0
+totals :: loop orders if .paid :> .total ?? 0
 ```
 
 11 tokens against Python's 15 on the guarded task; 7 against 11 on the plain
@@ -133,7 +133,7 @@ in both of its spellings, without touching arrow law, eagerness, or types.
 
 ## Passes
 
-- **Beginner:** `loop users, if .active -> .name` reads as the sentence it is.
+- **Beginner:** `loop users if .active :> .name` reads as the sentence it is.
   No lambda concept, no capture rules, `?`/`next`/`break` all work. The comma
   law holds everywhere.
 - **Expert:** named bindings remain for nesting and clarity; the chain plane

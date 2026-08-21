@@ -3,21 +3,19 @@ struct Token {
 }
 
 impl Token.Encode {
-    fn encode(self) => DataTree :: DataTree.Text(~self.raw)
+    fn encode(self) DataTree :> DataTree.Text(~self.raw)
 }
 
 impl Token.Decode {
-    fn decode(tree: DataTree) => Token ? [FieldError] {
+    fn decode(tree: DataTree) Token ? [FieldError] {
         raw :: tree.text()?
-        return Ok(Token.{ raw: raw })
+        return Ok(Token{raw: raw})
     }
 }
 
 #Codable
 struct Row {
-    value: Token | Int
+    value: Int | Token
 }
 
-fn run() {
-    print("x")
-}
+fn run() { print("x") }

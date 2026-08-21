@@ -1,3 +1,15 @@
-Error [E3505]: build sandbox is unavailable
- Why: Jet refuses to run typed build actions without the required bubblewrap isolation
- Fix: install bubblewrap or run on a supported build worker; there is no ambient fallback
+Error [E0066]: this function uses the retired effect-arrow spelling
+  --> tests/ui/build_action_failed.jet:3:27
+    |
+  3 | fn build(b: BuildContext) =[Exec]=> BuildPlan ? {
+    |                           ^
+ Why: callable results use `:>`, and an explicit effect ceiling uses the same arrow
+ Fix: write `:[Effects]>`; use `:[]>` for an explicit purity bound
+
+Error [E0068]: This callable uses the retired result-arrow shape.
+  --> tests/ui/build_action_failed.jet:3:27
+    |
+  3 | fn build(b: BuildContext) =[Exec]=> BuildPlan ? {
+    |                           ^
+ Why: a return type sits after the parameter list, and `:>` introduces the body; an effect ceiling follows the return type
+ Fix: write `fn name(...) Type :> body`, or `fn name(...) Type :[Effects]> { … }`

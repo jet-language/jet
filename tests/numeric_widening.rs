@@ -571,3 +571,32 @@ fn run() {
         "44\n255\n0\n0\n",
     );
 }
+
+#[test]
+fn exact_and_approximate_widening_requires_approx_for_narrowing() {
+    let success = r#"
+fn take_float(value: Float) Float {
+    return value
+}
+
+fn run() {
+    exact :: Int{9007199254740992}
+    lossy :: Int{9007199254740993}
+    print(take_float(exact) == 9007199254740992.0)
+    print(take_float(approx(lossy)) == 9007199254740992.0)
+}
+"#;
+    assert_all_tiers("exact_approximate_widening", success, 0, "true\ntrue\n");
+
+    let narrowing = r#"
+fn take_float(value: Float) Float {
+    return value
+}
+
+fn run() {
+    lossy :: Int{9007199254740993}
+    take_float(lossy)
+}
+"#;
+    assert_trap_all_tiers("exact_narrowing_requires_approx", narrowing);
+}

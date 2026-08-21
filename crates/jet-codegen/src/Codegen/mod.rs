@@ -156,8 +156,10 @@ const PRELUDE_PARTS: &[&str] = &[
     // every other part builds outcomes on top of it.
     include_str!("../../../jet-foundation/src/Outcome.rs"),
     include_str!("../Prelude/FaultInjection.rs"),
+    // D-BENCH-KEEP1=A: every engine includes the same black-box sink source;
+    // resident adapters only marshal their carrier into this function.
+    include_str!("../Prelude/Core/Keep.rs"),
     include_str!("../Prelude/Job.rs"),
-    include_str!("../Prelude/Core/Option.rs"),
     include_str!("../Prelude/Core/FixedList.rs"),
     // D-SOA-TIER1=A: THE shared column store and the one gather read, plus the
     // Prelude-owned `[S]` facade over it. Right after FixedList because the
@@ -2939,6 +2941,8 @@ mod tests {
             std::fs::read_to_string(root.join("../jet-foundation/src/Outcome.rs")).unwrap();
         let fault_injection =
             std::fs::read_to_string(root.join("src/Prelude/FaultInjection.rs")).unwrap();
+        let keep =
+            std::fs::read_to_string(root.join("src/Prelude/Core/Keep.rs")).unwrap();
         let job = std::fs::read_to_string(root.join("src/Prelude/Job.rs")).unwrap();
         let option = std::fs::read_to_string(root.join("src/Prelude/Core/Option.rs")).unwrap();
         let fixed_list =
@@ -3021,6 +3025,7 @@ mod tests {
         for (relative, source) in [
             ("../jet-foundation/src/Outcome.rs", outcome.as_str()),
             ("src/Prelude/FaultInjection.rs", fault_injection.as_str()),
+            ("src/Prelude/Core/Keep.rs", keep.as_str()),
             ("src/Prelude/Job.rs", job.as_str()),
             ("src/Prelude/Core/Option.rs", option.as_str()),
             ("src/Prelude/Core/FixedList.rs", fixed_list.as_str()),
@@ -3291,6 +3296,7 @@ mod tests {
             [
                 outcome.as_str(),
                 fault_injection.as_str(),
+                keep.as_str(),
                 job.as_str(),
                 option.as_str(),
                 fixed_list.as_str(),
@@ -3346,6 +3352,7 @@ mod tests {
             expected.push_str(
                 &[
                     fault_injection.as_str(),
+                    keep.as_str(),
                     job.as_str(),
                     option.as_str(),
                     fixed_list.as_str(),

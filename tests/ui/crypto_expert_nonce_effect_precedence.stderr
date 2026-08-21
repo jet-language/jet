@@ -1,3 +1,19 @@
+Error [E0066]: this function uses the retired effect-arrow spelling
+  --> tests/ui/crypto_expert_nonce_effect_precedence.jet:9:14
+    |
+  9 | fn protect() =[]=> Int {
+    |              ^
+ Why: callable results use `:>`, and an explicit effect ceiling uses the same arrow
+ Fix: write `:[Effects]>`; use `:[]>` for an explicit purity bound
+
+Error [E0068]: This callable uses the retired result-arrow shape.
+  --> tests/ui/crypto_expert_nonce_effect_precedence.jet:9:14
+    |
+  9 | fn protect() =[]=> Int {
+    |              ^
+ Why: a return type sits after the parameter list, and `:>` introduces the body; an effect ceiling follows the return type
+ Fix: write `fn name(...) Type :> body`, or `fn name(...) Type :[Effects]> { … }`
+
 Error [E3401]: `protect` calls the impure function `next_byte`
   --> tests/ui/crypto_expert_nonce_effect_precedence.jet:11:148
     |

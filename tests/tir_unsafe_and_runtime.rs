@@ -1080,7 +1080,7 @@ fn run() {
 }
 
 /// c109 Phase 21 / D-TUPLE-DESTRUCT1: the full channel surface —
-/// `tasks.channel<T>()` producer returning `(Sender<T>, Receiver<T>)`,
+/// `channel<T>()` producer returning `(Sender<T>, Receiver<T>)`,
 /// `sender.clone()` (a second sender), `Sender.send(v)` (inside a `task` body),
 /// `Task.join()`, and `Receiver.receive() ?? panic(..)`
 /// (`Result<T, Closed>` unwrap).
@@ -1090,9 +1090,8 @@ fn channel_send_receive() {
         return;
     }
     let src = r#"
-use core.tasks as tasks
 fn run() {
-(s1, ch) :: tasks.channel<Int>()
+(s1, ch) :: channel<Int>()
     s2 :: ~s1
     t1 :: task {
         s1.send(30)
@@ -1122,14 +1121,15 @@ fn taskgroup_select_receives_from_real_channel() {
         return;
     }
     let src = "\
-use core.tasks as tasks
 fn run() {
-    task.group g {
-        (sender, receiver) :: tasks.channel<Int>()
+    (sender, receiver) :: channel<Int>()
+    task :: task {
         sender.send(42)
-        value :: g.select().recv(receiver).wait()
-        print(value)
+        if {
+            value, receiver :> print(value)
+        }
     }
+    task.join() ?? panic("task failed")
 }
 ";
     let (code, stdout) = build_and_run("tir_taskgroup_select", src);

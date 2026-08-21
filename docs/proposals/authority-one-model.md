@@ -10,7 +10,7 @@ targets; implementation cards still own migration to shipped code.
 
 Jet answers one question in at least nine different places: **who may do what,
 in what scope, granted how**. The effect system answers it for functions. The
-`#Caps` and `#Grant` markers answer it for blocks. The `#Policy` ladder answers
+`#Caps` marker answers it for blocks. The `#Policy` ladder answers
 it for non-memory policy and unsafe floors; memory denials ride the effect row.
 The package effect budget answers it for
 dependencies. The build-effect gate answers it for build plans. Comptime
@@ -71,7 +71,7 @@ vocabulary at every checkpoint.
   function, a module, a package, a build plan, a process, a plugin, a REPL
   session, a machine user.
 - **Holds** — the set of rights a scope may use. Today spelled many ways:
-  an effect bound, a `#Caps` list, a `#Grant` list, a `policy:` floor, an
+  an effect bound, a `#Caps` list, a `policy:` floor, an
   `effects: { allow: … }` budget, an `--allow-*` flag, a trust grant.
 - **Uses** — the set of rights code inside a scope actually exercises. Today:
   the inferred effect row.
@@ -114,7 +114,7 @@ and four manifest schemas:
 | # | Mechanism | Home | Vocabulary | Defect |
 |---|-----------|------|-----------|--------|
 | 1 | Effect rows on functions | `crates/jet-sema/src/Sema/Effects.rs` | `Effect`, 28 variants | Spec (D-EFF4/5, `syntax-decisions.md:1865`) says ten roots; `Facts.rs:24-28` ships 28; module comment says "ten… twelve" |
-| 2 | `#Caps` / `#Grant` blocks | `Sema/CheckerCore/statements.rs:2530-2595` | same 28 | Handle type `Capability` unnameable; second scoping mechanism over the same vocabulary |
+| 2 | `#Caps` blocks | `Sema/CheckerCore/statements.rs:2530-2595` | same 28 | Named handle was unnameable; duplicate scope marker over the same vocabulary |
 | 3 | `#Policy` ladder | `crates/jet-foundation/src/Policy.rs:6-136` | `PolicyKey`, 6 variants | Second tighten-only ladder, own lattice, own error enum (E0355), independent of `effect_covers` |
 | 4 | `#Unsafe` obligations | `Sema/UnsafeObligations.rs` | `ObligationMode`, 6 variants | Rides ladder #3, not plane #1; reason string checked only for presence |
 | 5 | Package effect budget | `crates/jet-pkg-model/src/EffectBudget.rs` | same 28 | Own allow/deny/grants schema (E1220/E1221); E1221 explain-text still says "ten-effect vocabulary" |
@@ -180,7 +180,7 @@ evidence the model is right:
   never authorize an unsafe operation" (D-PACKAGE-POLICY-SCOPE1).
 - Tighten-only combine on the policy ladder (D-MARK-SCOPE1).
 - Declared effect bounds are checked as supersets of inferred use (E0740);
-  `#Caps` overflow is an error (E0741); prohibition is transitive (E0749).
+  `#Caps` overflow is an error (E0712); prohibition is transitive (E0749).
 - A grant handle may not escape its scope (E0711).
 - Plugins hold the empty set by construction (D-PLUGIN1); package sandboxes
   deny by default (D-JPK-SANDBOX2); installed apps "start with almost no
@@ -202,8 +202,8 @@ The "ohhh" connections, spelled out:
    problem Jet already solved: the compiler writes the minimal policy, and
    humans only decide the exceptions.
 3. **The package budget is `#Caps` at package scope.** `effects: { allow: … }`
-   and `#Caps(…)` are the same narrowing at two rungs of one ladder;
-   `grants:` and `#Grant` are the same delegation, and both already share
+   and `#Caps(…)` are the same narrowing at two rungs of one ladder; a named
+   `#Caps` head is the block-scoped rights handle, and both already share
    `effect_covers`.
 4. **`BuildEffect` is `Effect` with the compiler looking the other way.** The
    build.rs / npm-install-script hole is exactly a second authority system
@@ -369,7 +369,7 @@ the implementation migration.)
 ```jet
 fn handle(req: Request) =[Net, DB.Read]=> Response {
     #Caps(DB.Read) {
-        // Net is out of reach here; a stray net.get is E0741
+        // Net is out of reach here; a stray net.get is E0712
         db.query(req.id)
     }
     respond(req)
@@ -453,7 +453,8 @@ Only what wins on merit; nothing stays because it shipped.
   carries it.
 - Memory floor words retire under D-AUTHORITY-MEM1=B; denials use
   `:[!Mem.Alloc]>`, with `Mem.Alloc(above: N)` from D-AUTHORITY-MEM2=A.
-- All diagnostic meanings; codes stay (E0740/E0741/E0711/E0712/E1220/E3112…).
+- All diagnostic meanings; codes stay (E0740/E0711/E0712/E1220/E3112…); E0741
+  remains only as the retired duplicate tombstone.
 - Frozen walls: no top type, no HKT, no macros, comptime never creates types,
   facts never select runtime types or dispatch (the reified authority value is
   ordinary data, never a dispatch input), I1-I9 (I1, I3, I9 are strengthened:

@@ -1192,7 +1192,7 @@ fn announce(label: String, n: Int) =[IO]=> {
     print(\"{label}: {n}\")
 }
 fn run() {
-    #Caps(auth: IO) {
+    #Caps(abilities: IO) {
         announce(\"answer\", 42)
     }
 }

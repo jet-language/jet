@@ -63,7 +63,7 @@ use std::collections::HashSet;
                         "E0801",
                         format!("tell me the type of `{}`", p.name),
                         "this lambda parameter has no type to go on".to_string(),
-                        format!("write `({}: Int) => …` (or whatever type fits)", p.name),
+                        format!("write `({}: Int) :> …` (or whatever type fits)", p.name),
                         Some(p.name_span),
                     ));
                     Type::Int

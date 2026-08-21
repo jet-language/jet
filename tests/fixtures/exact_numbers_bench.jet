@@ -1,0 +1,38 @@
+// D-TYPE2-DEFAULT1=A: benchmark the explicit machine Float path beside the
+// exact Int word path and its spill boundary.
+fn float_path() Float {
+    total := Float{0.0}
+    loop i, 0..<1000 :> total += 1.0
+    return total
+}
+
+fn exact_word_path() Int {
+    total := Int{0}
+    loop i, 0..<1000 :> total += 1
+    return total
+}
+
+fn exact_spill_path() Int {
+    value :: 4611686018427387903
+    return value + 1
+}
+
+fn run() {}
+
+#Test("Float machine path") {
+    .measure {
+        assert_eq(float_path(), Float{1000.0})
+    }
+}
+
+#Test("exact Int word path") {
+    .measure {
+        assert_eq(exact_word_path(), 1000)
+    }
+}
+
+#Test("exact Int spill path") {
+    .measure {
+        assert_eq(exact_spill_path().to_string(), "4611686018427387904")
+    }
+}

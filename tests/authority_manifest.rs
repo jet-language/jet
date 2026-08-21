@@ -164,6 +164,31 @@ fn i9_tir_receives_the_authority_project() {
 }
 
 #[test]
+fn i9_interpreter_runs_the_authority_project() {
+    let root = authority_project("interpreter");
+    let entry = root.join("run.jet");
+    let mut bundle = jet::Loader::load_entry(entry.to_str().unwrap())
+        .expect("interpreter front end accepts authority project");
+    let diagnostics = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
+    assert!(diagnostics.is_empty(), "interpreter sema changed authority meaning: {diagnostics:#?}");
+
+    match jet::Interpreter::run_checked(&bundle, true) {
+        jet::Interpreter::RunOutcome::Ran {
+            stdout,
+            stderr,
+            exit_code,
+        } => {
+            assert_eq!(exit_code, 0, "interpreter stderr: {stderr}");
+            assert_eq!(stdout, "authority\n");
+        }
+        jet::Interpreter::RunOutcome::Problems(diagnostics) => {
+            panic!("interpreter rejected the authority project: {diagnostics:?}")
+        }
+    }
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
 fn i9_aot_runs_the_authority_project() {
     let root = authority_project("aot");
     let output = run_authority_cli(&root, &["run", "--release", "run.jet"]);

@@ -162,7 +162,7 @@ dispatch-shaped calls all project as `kind:"function"`; enum construction stays
 `kind:"variant"`. Exec pins use `type:"exec"`.
 
 Each pin carries `pin_id`, `node_id`, `name`, `direction`, `type`, optional
-`role`, optional `pattern_source`, `capability`, `fallible`,
+`role`, optional `pattern_source`, `ability`, `fallible`,
 `effect_grant_need`, and `source_span`. Pattern-match branch and dispatch arm
 exec pins use `role:"arm"` plus `pattern_source` so Canvas can render one
 labeled output row per source arm; editable arms also carry
@@ -201,7 +201,7 @@ behavior that old clients would silently miss.
 
 Rails are display facts only. They project Jet semantics already proven by the
 front end: control flow, data flow, fallible propagation, async/task scopes,
-effects/capabilities, unsafe/proof regions, and runtime debug overlays. A rail
+effects/abilities, unsafe/proof regions, and runtime debug overlays. A rail
 never adds behavior.
 
 ## Debug Session V1

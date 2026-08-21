@@ -1,11 +1,11 @@
 use core.tasks
 
 fn run() {
-    greet :: () => {
+    greet :: () :> {
         print("hi")
     }
     // E1102 fires: this closure cannot cross a channel send either — the same
     // rule as a spawned task.
-    (sender, ch) :: tasks.channel<fn()>()
+    (sender, ch) :: channel<fn()>()
     sender.send(greet)
 }

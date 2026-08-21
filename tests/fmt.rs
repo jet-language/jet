@@ -2584,6 +2584,18 @@ fn run() {
         !once.contains("__jet_"),
         "formatter must hide compiler-generated machine labels: {once}"
     );
+
+    let guard_src = "fn run() {\n    values :: loop u, users if u.active :> u.name\n}\n";
+    let guard_once = jet::format_source(guard_src).expect("guarded loop should format");
+    assert_eq!(
+        guard_once, guard_src,
+        "canonical guard spelling must round-trip byte-for-byte"
+    );
+    assert_eq!(
+        jet::format_source(&guard_once).expect("formatted guarded loop should reformat"),
+        guard_once,
+        "canonical guard formatting must be stable"
+    );
 }
 
 #[test]

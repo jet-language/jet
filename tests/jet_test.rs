@@ -1023,11 +1023,11 @@ fn jet_test_coverage_reports_branch_taken_and_not_taken_in_text_and_json() {
 }
 
 #[test]
-fn benchmark_target_does_not_reintroduce_retired_command() {
-    // D-CLAIM-BENCH1=A: the old package target cannot revive `jet bench`.
+fn test_target_does_not_reintroduce_retired_command() {
+    // D-CLAIM-BENCH1=A: the ordinary test target cannot revive the retired command.
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let jet = jet_bin();
-    let example = root.join("examples/features/tooling/bench_target/main.jet");
+    let example = root.join("examples/features/tooling/test_target/main.jet");
     let out = Command::new(&jet)
         .args(["bench", example.to_str().unwrap()])
         .output()

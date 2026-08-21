@@ -3,27 +3,77 @@ use super::super::{
 };
 
 impl<'a> Parser<'a> {
-        /// S46: `(` … `) :>` without scanning nested `(` for the `:>` probe.
+        /// S46: recognize `(` … `) :>` only when the contents have lambda
+        /// parameter shape. A condition such as `(a > b) :>` is an
+        /// if-expression condition, not a lambda parameter list.
         pub(super) fn after_lparen_is_lambda(&self) -> bool {
             let mut i = self.pos + 1;
-            let mut depth = 1usize;
-            while i < self.toks.len() {
-                match &self.toks[i].kind {
-                    TokKind::LParen => depth += 1,
-                    TokKind::RParen => {
-                        depth = depth.saturating_sub(1);
-                        if depth == 0 {
-                            return matches!(
-                                self.toks.get(i + 1).map(|t| &t.kind),
-                                Some(kind) if Parser::at_unified_arrow_token(kind)
-                            );
-                        }
-                    }
-                    _ => {}
+            if matches!(self.toks.get(i).map(|token| &token.kind), Some(TokKind::RParen)) {
+                return matches!(
+                    self.toks.get(i + 1).map(|token| &token.kind),
+                    Some(kind) if Parser::at_unified_arrow_token(kind)
+                );
+            }
+            loop {
+                if !matches!(self.toks.get(i).map(|token| &token.kind), Some(TokKind::Ident(_))) {
+                    return false;
                 }
                 i += 1;
+                if matches!(self.toks.get(i).map(|token| &token.kind), Some(TokKind::Colon)) {
+                    i += 1;
+                    let type_start = i;
+                    let mut paren_depth = 0usize;
+                    let mut bracket_depth = 0usize;
+                    let mut brace_depth = 0usize;
+                    let mut angle_depth = 0usize;
+                    while let Some(token) = self.toks.get(i) {
+                        match &token.kind {
+                            TokKind::LParen => paren_depth += 1,
+                            TokKind::RParen if paren_depth > 0 => paren_depth -= 1,
+                            TokKind::LBracket => bracket_depth += 1,
+                            TokKind::RBracket if bracket_depth > 0 => bracket_depth -= 1,
+                            TokKind::LBrace => brace_depth += 1,
+                            TokKind::RBrace if brace_depth > 0 => brace_depth -= 1,
+                            TokKind::Lt => angle_depth += 1,
+                            TokKind::Gt if angle_depth > 0 => angle_depth -= 1,
+                            TokKind::Shr if angle_depth > 0 => angle_depth = angle_depth.saturating_sub(2),
+                            TokKind::Comma
+                                if paren_depth == 0
+                                    && bracket_depth == 0
+                                    && brace_depth == 0
+                                    && angle_depth == 0 =>
+                            {
+                                break;
+                            }
+                            TokKind::RParen
+                                if paren_depth == 0
+                                    && bracket_depth == 0
+                                    && brace_depth == 0
+                                    && angle_depth == 0 =>
+                            {
+                                break;
+                            }
+                            _ => {}
+                        }
+                        i += 1;
+                    }
+                    if i == type_start {
+                        return false;
+                    }
+                }
+                match self.toks.get(i).map(|token| &token.kind) {
+                    Some(TokKind::RParen) => {
+                        return matches!(
+                            self.toks.get(i + 1).map(|token| &token.kind),
+                            Some(kind) if Parser::at_unified_arrow_token(kind)
+                        );
+                    }
+                    Some(TokKind::Comma) => {
+                        i += 1;
+                    }
+                    _ => return false,
+                }
             }
-            false
         }
     
         /// Retired S47 spelling. Consume `take(a, b)` so the parser can teach

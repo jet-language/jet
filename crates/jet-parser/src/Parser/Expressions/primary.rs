@@ -937,10 +937,27 @@ impl<'a> Parser<'a> {
                         }
                         let e = sub.expr()?;
                         if !sub.diags.is_empty() {
-                            let mut ds = sub.diags;
-                            let first = ds.remove(0);
-                            self.diags.extend(ds);
-                            return Err(first);
+                            let mut ds = std::mem::take(&mut sub.diags);
+                            // Interpolation expressions use a nested parser.  A
+                            // retired spelling such as `Type.{fields}` records
+                            // its teaching diagnostic in that parser, but the
+                            // recovered expression is still complete and must
+                            // reach the formatter.  Returning the diagnostic
+                            // here drops the whole containing statement during
+                            // statement recovery, so `jet fmt` can silently
+                            // delete user code.
+                            if self.migration_mode
+                                && ds.iter().all(|diag| {
+                                    diag.severity == crate::Diagnostics::Severity::Lint
+                                        || super::super::is_teaching_parse_diag(&diag.code)
+                                })
+                            {
+                                self.diags.extend(ds);
+                            } else {
+                                let first = ds.remove(0);
+                                self.diags.extend(ds);
+                                return Err(first);
+                            }
                         }
                         let mut debug_label: Option<String> = None;
                         if matches!(sub.peek().kind, TokKind::Eq) {

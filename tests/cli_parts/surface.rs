@@ -496,9 +496,9 @@ fn test_help_exposes_measurement_and_retired_command_teaches_it() {
     assert!(test_help.contains("--measure"), "test help omitted measurement mode: {test_help}");
     assert!(test_help.contains("--show-default"), "test help missing command override escape hatch: {test_help}");
     let retired = Command::new(jet()).args(["bench", "--help"]).env("NO_COLOR", "1").output().unwrap();
-    assert!(!retired.status.success(), "retired jet bench unexpectedly succeeded");
+    assert!(!retired.status.success(), "retired measurement command unexpectedly succeeded");
     let retired = String::from_utf8_lossy(&retired.stderr);
-    assert!(retired.contains("jet test --measure"), "retired bench did not teach measurement: {retired}");
+    assert!(retired.contains("jet test --measure"), "retired command did not teach measurement: {retired}");
 }
 
 /// I8: this test owns exactly ONE fact — that every user-visible surface names

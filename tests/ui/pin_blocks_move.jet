@@ -1,11 +1,13 @@
 use core.mem
 
-struct Node { payload: Int }
+struct Node {
+    payload: Int
+}
 
-fn consume(n: ^Node) => Int { return n.payload }
+fn consume(n: ^Node) Int { return n.payload }
 
 fn run() {
-    node := Node.{payload: 7}
+    node := Node{payload: 7}
     pinned :: mem.pin(&node)
     taken :: consume(^node)
     print("{taken} {(pinned.payload)}")

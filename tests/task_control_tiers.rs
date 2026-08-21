@@ -110,7 +110,7 @@ use core.tasks as tasks
 use core.time as time
 
 fn run() {{
-    (sender, receiver) :: tasks.channel<Int>()
+    (sender, receiver) :: channel<Int>()
     second_sender :: ~sender
     task.group limited(limit: {limit}) {{
         first :: task {{

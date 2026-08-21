@@ -422,6 +422,7 @@ renumbered, and no new `W` code may be allocated.
 | E0377 | parse | teaching: retired `#Known`, `#Known if` and the `#Known` block; write the mark on the name (D-META-STAGE1=B, D-ONCE-AT1=D) |
 | E0378 | parse | teaching: retired alias binding `=`; write `::` (D-ALIAS-OP1=B) |
 | E0379 | parse | teaching: a guard follows its source with no comma (D-LOOP-GUARD1=A) |
+| E0380 | sema | bindingless loop requires a named binding for a scalar source or a nested loop |
 | E0381 | parse | ordinary `marker Name(...)` fact stated as an `on` clause or a second parameter list, not an `@`-marked named parameter (D-META-FORM1=A, D-ONCE-AT1=D) |
 | L0301 | sema  | unreachable dispatch pattern arm (lint)   |
 | L0302 | sema  | a closed-enum arm table would be clearer with a named subject (lint) |
@@ -509,7 +510,7 @@ renumbered, and no new `W` code may be allocated.
 | E0741 | sema  | retired duplicate of the unified `#Caps` ability check (D-AUTHORITY-SCOPE1) |
 | E0742 | sema  | a trait-method impl uses effects beyond the trait method's declared bound (D-EFF3) |
 | E0743 | sema  | dynamic trait dispatch has no declared effect bound under an enclosing effect ceiling (D-EFF3) |
-| E0711 | sema  | the `Abilities` handle bound by a named `#Caps(…)` region escapes its scope — returned, stored, or captured (D-AUTHORITY-SCOPE1) |
+| E0711 | sema  | the `Authority` handle bound by a named `#Caps(…)` region escapes its scope — returned, stored, or captured (D-AUTHORITY-SCOPE1) |
 | E0712 | sema  | an effect used inside a `#Caps(…)` region has no ability — it isn't in the ability list (D-AUTHORITY-SCOPE1) |
 | E0721 | sema  | a tagged value reaches a destination denied by that tag declaration (D-TAG-SURFACE1) |
 | E0722 | sema  | a `#Credential` value reaches a log, display, or serialization destination (D-TAG-SURFACE1) |
@@ -1156,7 +1157,7 @@ CLI.
 | L1101 | A bound `Task` still owes `join` (D-CONC-JOIN1, D-FACT-WORD1=A). | The program may end before that task finishes; a task's duty is discharged by joining it or using its result. | Join it with `.join()`, use its result, or write `.detach()` to let it go free. |
 | E0040 | `async` or `await` was written. | Jet uses blocking tasks and channels rather than async syntax. | Write `task work()` or use `task.all { work_a(), work_b() }`. |
 | E0041 (`Mutex`/`RwLock`/`mutex`/`lock`) | `` `<name>` is not in Jet; share data through channels `` | Jet avoids shared mutable state: tasks communicate by sending messages, not sharing memory. | Import `core.tasks as tasks`, create a channel, and use `sender.send`/`channel.receive`. |
-| E0041 (`Semaphore`/`semaphore`) | `` `<name>` is not in Jet; use a bounded channel as a token pool `` | each received token admits one worker until that worker sends the token back | create `tasks.channel<Int>(capacity: N)`, seed N tokens, receive one before work, and send it back afterward |
+| E0041 (`Semaphore`/`semaphore`) | `` `<name>` is not in Jet; use a bounded channel as a token pool `` | each received token admits one worker until that worker sends the token back | create `channel<Int>(capacity: N)`, seed N tokens, receive one before work, and send it back afterward |
 
 ## Tier-2 reference diagnostics (E2-M5, D-DYNARRAY1 `View<T>`, D-MEM1 S5 string views)
 
@@ -1255,7 +1256,7 @@ output is machine-parseable with `--json`.
 | E1218 | Publishing `{new}` after `{old}` is a {bump} bump but breaks the public API item `{item}`. | A {bump} bump promises callers no breaking changes under SemVer, but the public API changed since `{old}`. This is the local publish-time gate; the registry re-checks live with E2601 on receipt. | Bump to `{next_major}.0.0` (a major release), or restore `{item}` (a deprecated shim counts). Use `--force` to publish anyway with an explicit warning banner. |
 | E1219 | `--profile={name}` is not a defined build profile. | Blessed profiles `release`, `debug`, and `ci` have built-in defaults. Any other name must be declared in your `package.jet` `build { }` block as `{name}: Build{ optimize: … }`. | Use `--release` for the release profile, `--profile=debug` for debug, `--profile=ci` for CI, or add `{name}: Build{ optimize: full }` (or `none`/`basic`) to the `build { }` block in `package.jet`. |
 | E1220 | `{dep}` uses the `{effect}` effect, which this package's budget doesn't allow. | An `authority.holds` budget fails the build when any dependency reaches an effect you didn't list; a denied `Panic` row names the stop site. | For an ordinary effect, add `{effect}` to `authority.holds.allow` or grant it to `{dep}` in `authority.grants`; for deny-only `Panic`, return a fallible result or add facts/`#Pre`/refinement proof. |
-| E1221 | `package.jet` has a malformed `authority:` block. | `authority: .{ holds: { allow: […], deny: […] }, grants: { "dep": […] }, trust: { … }, providers: { … } }` is the one package authority block; rights use the thirteen grantable roots, FFI language leaves such as `FFI.Go`, and deny-only `Panic`/`Mem`. | Fix the authority field or right name; see docs/spec/syntax-decisions.md D-AUTHORITY-MANIFEST1. |
+| E1221 | `package.jet` has a malformed `authority:` block. | `authority: .{ holds: { allow: […], deny: […] }, grants: { "dep": […] }, trust: { … }, providers: { … } }` is the one package authority block; rights use the thirteen grantable roots, the `FFI` parent and its language leaves including `FFI.Go`, `FFI.Py`, and `FFI.Octave`, and deny-only `Panic`/`Mem`. | Fix the authority field or right name; see docs/spec/syntax-decisions.md D-AUTHORITY-MANIFEST1. |
 
 ## First-party ring library diagnostics (E2-M9, D-LR1–4)
 
@@ -1583,6 +1584,7 @@ already-freed arena), these track the views themselves.
 | E0377 | `#Known` is retired. | Compile time has one mark, `@`, and the mark belongs to the name, so it is written at every mention. | Write `@name :: …` for a binding, `@if <condition> { … }` for a compile-time branch, and `@ { … }` for a compile-time block. |
 | E0378 | This alias declaration uses the retired `=` binding. | `::` defines a name; `=` fills a slot inside an existing declaration (D-ALIAS-OP1=B). | Replace `=` with `::`. |
 | E0379 | A guard follows its source with no comma. | The guard self-announces with `if`, so the loop head only uses commas between positional clauses. | Remove the comma before `if`. |
+| E0380 | This loop needs a named source binding. | An implicit subject is one collection item; a scalar source or nested loop needs a distinct named binding. | Write `loop item, source -> ...`; give nested loops named bindings. |
 | E0376 | C-style counter loop headers are retired. | A three-slot loop header is binding, source, and step rule — not init, condition, and assignment (D-LOOP-HEADER3=D). | Write `loop i, 0..<n { … }` or `loop i, 0..n, 2 { … }`; keep `loop name := value, condition { … }` for mutable state. |
 | E0381 | A fact about an ordinary `marker` declaration (its legal sites, whether it repeats) was written as a trailing `on` clause or a second parameter list. | Ordinary marker arguments and facts share one named-parameter list; checked text heads use the separate `marker Name on [.Text] { check … hole … }` form (D-BOUND-SINK1=A). | For an ordinary marker, use `@sites: […]` or `@repeatable: true`; for a checked text head, write `marker Name on [.Text] { check … hole … }`. |
 
@@ -1610,7 +1612,7 @@ so these are compile-time-only diagnostics. An unknown effect name in a
 | E0742 | This `{method}` impl uses the effect `{effect}`, which the trait doesn't allow. | A trait method may declare an effect upper bound (`fn hash(self) =[]=>`, `fn render(self) =[GPU]=>`); every implementation's inferred effects must fit inside it, so the bound holds for all impls (D-EFF3). | Remove the offending work from the impl, or widen the bound on the trait method. |
 | E0743 | Dynamic call `{trait}::{method}` has no effect bound. | A trait value can select any implementation at runtime, so an enclosing effect ceiling needs the trait method's declared upper bound (D-EFF3). | Declare an effect row on the trait method, such as `=[]=>` for pure dispatch, or move the dynamic call outside the bounded function. |
 | E0745 | *Retired by D-SHAPE8=A.* | This code diagnosed the former contradiction between `#Pure fn` and a non-empty `#(…)` effect list. Both spellings are now rejected earlier by E0066. | Use one canonical effect arrow: `=[]=>` for an empty row or `=[Effects]=>` for a bounded row. |
-| E0711 | The `Abilities` handle `{handle}` can't escape its `#Caps` block. | `#Caps(…)` revokes the `Abilities` at scope end (RAII); returning, storing, or capturing the handle would let revoked ability outlive the scope. | Use the handle only inside the `#Caps` block, or perform the work that needs it there. |
+| E0711 | The `Authority` handle `{handle}` can't escape its `#Caps` block. | `#Caps(…)` revokes the `Authority` at scope end (RAII); returning, storing, or capturing the handle would let revoked rights outlive the scope. | Use the handle only inside the `#Caps` block, or perform the work that needs it there. |
 | E0712 | This `#Caps` region uses the effect `{effect}`, which it has no ability for. | `#Caps(…)` allows exactly the listed effects; an effect reached inside — even transitively through a call — that the list omits has no ability backing it. | Add the named effect to the `#Caps(…)` list, or move that work outside the region. |
 | E0721 | A `{tag}` value is denied at `{api}`. | The declaration for `{tag}` lists a destination that covers `{api}`. The tag spreads with derived data until an exact-tag scrubber removes it. | Remove the destination use, change the declaration if its policy is wrong, or pass the value through `#Scrub({tag})`. |
 | E0722 | A `Credential` value is denied at `{sink}`. | The Prelude `Credential` tag denies logging, display, and serialization destinations because they would leak a secret. | Log a non-secret field, or pass the value through a matching `#Scrub(Credential)` function. |
@@ -2298,11 +2300,11 @@ pointer to `docs/spec/syntax-decisions.md`.
 
 ### E0928 — `#Job fn` uses a reserved or colliding name (D-JPK-TASKRUN1, D-JOB-SUBCMD1, D-CMD-OVERRIDE1=C)
 
-`run`, `dev`, `build`, `test`, and `bench` already name Jet's built-in entry points.
+`run`, `dev`, `build`, and `test` already name Jet's built-in entry points.
 CLI command and flag names are reserved too, and two jobs cannot share one
 name in the same scope. A `#Job fn` picks a *user-chosen* verb beside them — reusing a reserved name
 is a collision, not a task.
 
 | What | Why | Fix |
 |------|-----|-----|
-| `` `{name}` is a built-in lifecycle verb, not a job name ``. | `run`/`dev`/`build`/`test`/`bench` already name Jet's built-in entry points. | Rename it, e.g. `#Job fn build_assets()`, or drop `#Job` if this is the lifecycle entry. |
+| `` `{name}` is a built-in lifecycle verb, not a job name ``. | `run`/`dev`/`build`/`test` already name Jet's built-in entry points. | Rename it, e.g. `#Job fn build_assets()`, or drop `#Job` if this is the lifecycle entry. |

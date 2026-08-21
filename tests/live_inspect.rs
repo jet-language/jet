@@ -30,10 +30,10 @@ fn live_inspector_reads_running_tasks_channels_and_resources_without_payloads() 
 use core.time as time
 
 fn run() {
-    (secret_sender, _secrets) :: tasks.channel<String>(1)
+    (secret_sender, _secrets) :: channel<String>(1)
     secret_sender.send("TOP_SECRET_CHANNEL_PAYLOAD")
-    (ready_sender, ready) :: tasks.channel<Int>()
-    (_sender, blocked) :: tasks.channel<Int>(1)
+    (ready_sender, ready) :: channel<Int>()
+    (_sender, blocked) :: channel<Int>(1)
     child :: task {
         ready_sender.send(1)
         blocked.receive() ?? panic("closed")

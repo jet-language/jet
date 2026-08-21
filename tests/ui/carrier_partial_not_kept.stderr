@@ -1,3 +1,19 @@
+Error [E0320]: struct construction uses `ImportErr{…}`, not `ImportErr.{…}`
+  --> tests/ui/carrier_partial_not_kept.jet:8:48
+    |
+  8 |     if rows.len() == 0 -> return Err(ImportErr.{broken: 1})
+    |                                                ^
+ Why: literal heads place no dot before their brace (D-LIT-DOT1)
+ Fix: write `ImportErr{…}`
+
+Error [E0320]: typed collection construction uses `[T]{…}`, not `[T].{…}`
+  --> tests/ui/carrier_partial_not_kept.jet:13:35
+    |
+ 13 |     spotty :: import_rows([String].{})
+    |                                   ^
+ Why: D-LIT-DOT1 drops the constructor dot from every literal head
+ Fix: write `[T]{…}`
+
 Error [E0302]: `ImportErr` has no field `partial`
   --> tests/ui/carrier_partial_not_kept.jet:14:19
     |

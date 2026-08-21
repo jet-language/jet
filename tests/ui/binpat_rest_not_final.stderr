@@ -1,3 +1,19 @@
+Error [E0320]: typed collection construction uses `[T]{…}`, not `[T].{…}`
+  --> tests/ui/binpat_rest_not_final.jet:2:17
+    |
+  2 |     data :: [U8].{ 1, 2 }
+    |                 ^
+ Why: D-LIT-DOT1 drops the constructor dot from every literal head
+ Fix: write `[T]{…}`
+
+Error [E0320]: typed pattern construction uses `[U8]{…}`, not `[U8].{…}`
+  --> tests/ui/binpat_rest_not_final.jet:4:13
+    |
+  4 |         [U8].{"{rest:...}{tail:U8}"} -> { print("x") }
+    |             ^
+ Why: D-LIT-DOT1 drops the constructor dot from every literal head
+ Fix: write `[U8]{…}`
+
 Error [E1009]: a `{...}` rest capture must be the last part of a binary pattern
   --> tests/ui/binpat_rest_not_final.jet:4:17
     |

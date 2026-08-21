@@ -2634,16 +2634,23 @@ impl<'a> EvalCtx<'a> {
             .iter()
             .map(|channel| channel.select_inner())
             .collect();
-        // The scheduler takes unsigned nanoseconds; a Duration is stored signed.
-        let after_ns = after_values
+        // The scheduler door takes millisecond delays; Duration stays the
+        // canonical signed nanosecond carrier until this adapter boundary.
+        // Use the shared Prelude conversion/default instead of rebuilding the
+        // time policy in the interpreter.
+        let after_ms = after_values
             .iter()
-            .map(|(duration_ns, _)| (*duration_ns).max(0) as u64)
+            .map(|(duration_ns, _)| {
+                crate::scheduler::jet_task_delay_ms_defaulted(
+                    crate::scheduler::jet_std_time_duration_to_millis(*duration_ns),
+                )
+            })
             .collect();
         let _deadline = self
             .context_deadline
             .map(crate::scheduler::jet_ctx_push_deadline);
         let outcome = self.scheduler_wait("select wait", || {
-            crate::scheduler::jet_scheduler_select(recvs, after_ns)
+            crate::scheduler::jet_scheduler_select(recvs, after_ms)
         })?;
         drop(_deadline);
         self.task_wait_cancel_check()?;

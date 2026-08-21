@@ -98,3 +98,18 @@ fn run() {
         "1.0 ± 3.1315131919070317e-10\n",
     );
 }
+
+#[test]
+fn exact_default_numbers_match_all_tiers() {
+    let source = r#"
+fn run() {
+    third :: 1 / 3
+    print(third)
+    print(third * 3 == 1)
+    print(0.1 + 0.2 == 0.3)
+    fast :: Float{19.99}
+    print(fast)
+}
+"#;
+    tir_support::assert_tiers_agree("exact_default_numbers", source, "1/3\ntrue\ntrue\n19.99\n");
+}

@@ -1711,7 +1711,7 @@ pub fn core_call_projection_in<'a>(
         return Err(CoreCallProjectionError::Uncovered { projection });
     }
     // D-AUTHORITY-WORD2=E: boundary calls may carry one extra ordinary
-    // Abilities value. Keep the original one-argument convenience form for
+    // Authority value. Keep the original one-argument convenience form for
     // existing process/plugin calls; sema validates the added value's type.
     let authority_boundary_form = actual_arity == row.signature.arity + 1
         && ((module == "core.process" && member == "run")
