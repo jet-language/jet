@@ -194,7 +194,25 @@ pub fn effect_covers(bound: &str, e: &str) -> bool {
 /// entries subsume their whole subtree (D-EFFTREE1). Used at every "is the
 /// inferred set within its declared bound" check (E0740/E0741/E0712/E0747/E0742).
 pub fn effects_uncovered(inferred: &EffectSet, bound_set: &EffectSet) -> EffectSet {
-    jet_foundation::Authority::uncovered(inferred, bound_set)
+    // D-PANICROOT1=A: Panic is deny-only. It remains in the inferred row for
+    // diagnostics, reachability, and `=[!Panic]=>`, but never requires a
+    // positive function bound or a `#Caps`/`#Grant` capability.
+    // D-AUTHORITY-MEM1=B: memory is deny-only in the same way. Memory events
+    // publish `Mem.Alloc`/`Mem.Rc` into the inferred row so `:[!Mem.Alloc]>`
+    // and manifest `effects.deny` can match them, but a positive ceiling never
+    // has to enumerate them: allocation is not a right you request, it is one
+    // you can be refused. Without this, every `:[IO]>` function that formats a
+    // string reported E0740 for `Mem.Alloc`.
+    let deny_only = |effect: &str| {
+        let root = effect_root(effect);
+        root == Effect::Panic.name() || root == "Mem"
+    };
+    let grantable = inferred
+        .iter()
+        .filter(|effect| !deny_only(effect))
+        .cloned()
+        .collect();
+    jet_foundation::Authority::uncovered(&grantable, bound_set)
 }
 
 /// The subset of `inferred` covered by any entry of `set` — used for
@@ -714,12 +732,13 @@ pub struct RegionAccum {
     pub direct: EffectSet,
     pub edges: BTreeSet<String>,
     pub maximal: bool,
-    /// D-SCAP1: true for a `#Grant(…)` region (authorizes the listed effects via
-    /// a handle), false for a `#Caps(…)` region (restricts to the listed set).
-    /// Both share the subset machinery; the flag selects the diagnostic — an
-    /// out-of-set effect is E0712 (no capability) for a grant, E0741 (out of the
-    /// restriction) for caps.
+    /// D-SCAP1 / D-AUTHORITY-SCOPE1: true for a handle-bearing region
+    /// (authorizes the listed effects via a handle), false for bare `#Caps`
+    /// (restricts to the listed set). Both share subset machinery; `marker`
+    /// keeps diagnostics on the written surface while `grant` selects E0712
+    /// versus E0741.
     pub grant: bool,
+    pub marker: &'static str,
 }
 
 /// D-EFF1: a `#Caps(…) { … }` region's accumulated effects, checked (transitively)
@@ -731,10 +750,12 @@ pub struct RegionSummary {
     pub direct: EffectSet,
     pub edges: BTreeSet<String>,
     pub maximal: bool,
-    /// Span of the `#Caps(…)` / `#Grant(…)` list, for the diagnostic.
+    /// Span of the `#Caps(…)` / retired `#Grant(…)` list, for the diagnostic.
     pub caps_span: Span,
-    /// D-SCAP1: a `#Grant(…)` region (E0712 on overflow) vs `#Caps(…)` (E0741).
+    /// D-SCAP1 / D-AUTHORITY-SCOPE1: a handle-bearing region (E0712 on
+    /// overflow) vs bare `#Caps(…)` (E0741).
     pub grant: bool,
+    pub marker: &'static str,
 }
 
 fn add_seed(seeds: &mut BTreeMap<String, BTreeSet<String>>, node: &str, fact: &str) {
@@ -1345,7 +1366,7 @@ pub fn e0740(fn_name: &str, over: &EffectSet, declared: &EffectSet, span: Span) 
     let decl = if declared.is_empty() {
         "no effects".to_string()
     } else {
-        format!("`=[{}]=>`", show_set(declared))
+        format!("`:[{}]>`", show_set(declared))
     };
     Diagnostic::error(
         "E0740",
@@ -1438,7 +1459,12 @@ pub fn check_region_caps(
             if !over.is_empty() {
                 failed_diagnostic_phases.insert(key.clone());
                 if region.grant {
-                    diags.push(e0712(&over, &region.caps, region.caps_span));
+                    diags.push(e0712(
+                        &over,
+                        &region.caps,
+                        region.caps_span,
+                        region.marker,
+                    ));
                 } else {
                     diags.push(e0741(&over, &region.caps, region.caps_span));
                 }
@@ -1725,7 +1751,7 @@ fn expr_handle_escape(e: &crate::AST::Expr, handle: &str) -> Option<Span> {
 /// E0741: `#Grant(…)` *authorizes* exactly the listed effects through its handle,
 /// so an effect reached inside (even through a call) that the grant omits has no
 /// capability to perform it.
-pub fn e0712(over: &EffectSet, caps: &EffectSet, span: Span) -> Diagnostic {
+pub fn e0712(over: &EffectSet, caps: &EffectSet, span: Span, marker: &str) -> Diagnostic {
     let over_list = show_set(over);
     let caps_list = if caps.is_empty() {
         "no effects".to_string()
@@ -1736,15 +1762,15 @@ pub fn e0712(over: &EffectSet, caps: &EffectSet, span: Span) -> Diagnostic {
         "E0712",
         format!(
             "this `#{}` region uses the effect `{}`, which it has no authority for",
-            crate::Syntax::KW_GRANT, over_list
+            marker, over_list
         ),
         format!(
             "`#{}(…)` grants only {}; an effect reached inside — even through a call — needs authority in scope to perform it",
-            crate::Syntax::KW_GRANT, caps_list
+            marker, caps_list
         ),
         format!(
             "add `{}` to the `#{}(…)` list, or move that work outside the grant",
-            over_list, crate::Syntax::KW_GRANT
+            over_list, marker
         ),
         Some(span),
     )
@@ -1754,15 +1780,15 @@ pub fn e0712(over: &EffectSet, caps: &EffectSet, span: Span) -> Diagnostic {
 /// its scope — returned, stored in an outer binding, or captured by an escaping
 /// value. The capability is revoked at scope end (RAII, S63), so a reference that
 /// outlives the block would name a revoked authority.
-pub fn e0711(handle: &str, span: Span) -> Diagnostic {
+pub fn e0711(handle: &str, marker: &str, span: Span) -> Diagnostic {
     Diagnostic::error(
         "E0711",
-        format!("the `Authority` handle `{}` can't escape its `#{}` block", handle, crate::Syntax::KW_GRANT),
+        format!("the `Authority` handle `{}` can't escape its `#{}` block", handle, marker),
         format!(
             "`#{}(…)` revokes the `Authority` at the end of its block (RAII); returning, storing, or sharing `{}` would let a revoked authority outlive the grant",
-            crate::Syntax::KW_GRANT, handle
+            marker, handle
         ),
-        format!("use `{}` only inside the `#{}` block, or perform the work there", handle, crate::Syntax::KW_GRANT),
+        format!("use `{}` only inside the `#{}` block, or perform the work there", handle, marker),
         Some(span),
     )
 }

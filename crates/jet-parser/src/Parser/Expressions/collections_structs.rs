@@ -28,7 +28,7 @@ impl<'a> Parser<'a> {
     /// D-LIT-DOT1: a non-empty brace in value position is an inferred literal.
     /// Empty braces remain block syntax; `allow_struct_lit` supplies the
     /// value-position distinction at the caller.
-    pub(super) fn brace_starts_inferred_literal(&self) -> bool {
+    pub(crate) fn brace_starts_inferred_literal(&self) -> bool {
         matches!(self.peek().kind, TokKind::LBrace)
             && !matches!(self.peek2().kind, TokKind::RBrace)
     }
