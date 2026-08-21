@@ -47,6 +47,13 @@ pub mod Job {
     include!("../../jet-codegen/src/Prelude/Job.rs");
 }
 
+/// The dev watcher sleeps through the same Prelude TimerWheel as language
+/// timers. This is only the host adapter; timer ownership stays in
+/// `Prelude/Scheduler.rs`.
+pub fn scheduler_sleep_ms(millis: u64) {
+    jet_codegen::scheduler::jet_scheduler_sleep_ms(millis);
+}
+
 #[allow(unused_imports)]
 pub(crate) use jet_foundation::EncodingErrors as jet_encoding_errors;
 pub(crate) mod jet_json_number {
@@ -316,6 +323,7 @@ pub fn with_program_args<R>(args: &[String], run: impl FnOnce() -> R) -> R {
 /// Install the runtime ambient adapters around an explicitly forced
 /// interpreter run, matching whole-program deopt.
 pub fn with_interpreter_ambient<R>(body: impl FnOnce() -> R) -> R {
+    jet_codegen::scheduler::jet_observe_runtime_start();
     jet_codegen::Comptime::with_ambient(
         Some(ambient_interp::ambient_core_call),
         Some(ambient_interp::ambient_handle),

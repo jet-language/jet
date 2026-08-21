@@ -238,7 +238,7 @@ fn emit_struct_command_entry(
         cx.root_prefix, cx.package_hardened
     );
     let dispatch = job_dispatch
-        .map(|name| format!("    if {name}(&__argv) {{ return; }}\n"))
+        .map(|name| format!("    if {name}(&__argv, false) {{ return; }}\n"))
         .unwrap_or_default();
     let version_check = version
         .filter(|_| schema.standard)
@@ -1159,7 +1159,7 @@ fn emit_direct_cli_entry(
         cx.root_prefix, cx.package_hardened
     );
     let dispatch = job_dispatch
-        .map(|name| format!("    if {name}(&__argv) {{ return; }}\n"))
+        .map(|name| format!("    if {name}(&__argv, {service_target}) {{ return; }}\n"))
         .unwrap_or_default();
     let version_check = if schema.standard {
         version.map_or_else(String::new, |version| {
@@ -1246,7 +1246,7 @@ pub(crate) fn emit_cli_entry_if_needed(
         );
         let dispatch = job_dispatch
             .as_deref()
-            .map(|name| format!("    let __argv = jet_std_io_args();\n    if {name}(&__argv) {{ return; }}\n"))
+            .map(|name| format!("    let __argv = jet_std_io_args();\n    if {name}(&__argv, {service_target}) {{ return; }}\n"))
             .unwrap_or_default();
         out.push_str(&format!("fn main() {{\n    jet_std_env_init();\n{sentry_init}    jet_gc::runtime_or_exit(jet_gc::initialize_trace());\n{dispatch}{invoke}}}\n\n"));
         return;
@@ -1344,7 +1344,7 @@ pub(crate) fn emit_cli_entry_if_needed(
             );
             let dispatch = job_dispatch
                 .as_deref()
-                .map(|name| format!("    if {name}(&__argv) {{ return; }}\n"))
+                .map(|name| format!("    if {name}(&__argv, {service_target}) {{ return; }}\n"))
                 .unwrap_or_default();
             let dispatch = format!("{sentry_init}{dispatch}");
             let spec_init = version
@@ -1412,13 +1412,22 @@ fn emit_job_dispatch(
             crate::AST::JobScope::Ship => "JetJobScope::Ship",
             crate::AST::JobScope::Internal => "JetJobScope::Internal",
         };
+        let schedule = match function.every.as_ref().and_then(|marker| marker.resolved) {
+            Some(crate::AST::EverySchedule::Duration { nanos }) => {
+                format!("Some(JetJobSchedule::Duration {{ nanos: {nanos} }})")
+            }
+            Some(crate::AST::EverySchedule::WallClockTime { hour, minute }) => format!(
+                "Some(JetJobSchedule::WallClockTime {{ hour: {hour}, minute: {minute} }})"
+            ),
+            None => "None".to_string(),
+        };
         entries.push_str(&format!(
-            "        JetJobEntry {{ name: {name:?}, scope: {scope}, invoke: {wrapper} }},\n",
+            "        JetJobEntry {{ name: {name:?}, scope: {scope}, schedule: {schedule}, invoke: {wrapper} }},\n",
             name = function.name,
         ));
     }
     out.push_str(&format!(
-        "fn {dispatch}(__argv: &[String]) -> bool {{\n    let __jobs = [\n{entries}    ];\n    jet_job_dispatch(__argv, &__jobs)\n}}\n\n",
+        "fn {dispatch}(__argv: &[String], __service: bool) -> bool {{\n    let __jobs = [\n{entries}    ];\n    if jet_job_dispatch(__argv, &__jobs) {{\n        return true;\n    }}\n    if __service {{\n        let mut __clock = JetJobClock::new();\n        jet_job_service_tick(\n            &mut __clock,\n            &__jobs,\n            __argv.first().map(String::as_str).unwrap_or(\"program\"),\n        );\n    }}\n    false\n}}\n\n",
         dispatch = dispatch,
         entries = entries,
     ));

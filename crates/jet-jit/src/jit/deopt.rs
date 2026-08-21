@@ -401,6 +401,7 @@ fn run_whole_interp_configured(bundle: &ProgramBundle, plan: &TierPlan) -> RunOu
     let mut sink = DevSink::new();
     // Per-run buffer, cleared like the sink (see `resident_invoke`).
     jet_foundation::Outcome::jet_journey_reset();
+    jet_codegen::scheduler::jet_observe_runtime_start();
     let outcome = jet_codegen::Comptime::with_ambient(
         Some(crate::ambient_interp::ambient_core_call),
         Some(crate::ambient_interp::ambient_handle),

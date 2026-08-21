@@ -133,6 +133,14 @@ pub fn run_checked(bundle: &ProgramBundle, try_anyway: bool) -> RunOutcome {
     if let Err(diagnostics) = jet_jit::bind_interpreter_ffi(bundle) {
         return RunOutcome::Problems(diagnostics);
     }
+    let (scheduled_stdout, scheduled_stderr) = if bundle_has_service_output(bundle) {
+        match run_scheduled_jobs_once(bundle, try_anyway) {
+            Ok(output) => output,
+            Err(outcome) => return outcome,
+        }
+    } else {
+        (String::new(), String::new())
+    };
     let mut sink = crate::Comptime::DevSink::new();
     // Per-run buffer, cleared like the sink: the E3002 journey now drains at the
     // report edge, so a recovered failure must not leak into a later run.
@@ -163,19 +171,19 @@ pub fn run_checked(bundle: &ProgramBundle, try_anyway: bool) -> RunOutcome {
                 sink.stderr
                     .push_str(&jet_foundation::Outcome::jet_journey_report(&rendered));
                 RunOutcome::Ran {
-                    stdout: sink.stdout,
-                    stderr: sink.stderr,
+                    stdout: format!("{scheduled_stdout}{}", sink.stdout),
+                    stderr: format!("{scheduled_stderr}{}", sink.stderr),
                     exit_code: 1,
                 }
             }
             Ok(_) => RunOutcome::Ran {
-                stdout: sink.stdout,
-                stderr: sink.stderr,
+                stdout: format!("{scheduled_stdout}{}", sink.stdout),
+                stderr: format!("{scheduled_stderr}{}", sink.stderr),
                 exit_code: sink.exit_code.unwrap_or(0),
             },
             Err(d) if sink.exit_code.is_some() || d.code == "SOFT_EXIT" => RunOutcome::Ran {
-                stdout: sink.stdout,
-                stderr: sink.stderr,
+                stdout: format!("{scheduled_stdout}{}", sink.stdout),
+                stderr: format!("{scheduled_stderr}{}", sink.stderr),
                 exit_code: sink
                     .exit_code
                     .unwrap_or_else(|| d.what.parse().unwrap_or(0)),
@@ -384,6 +392,73 @@ pub fn scheduled_jobs(bundle: &ProgramBundle) -> Vec<(String, crate::AST::EveryS
             _ => None,
         })
         .collect()
+}
+
+/// D-SCHEDULE1: the service/runtime first tick consumes the same checked
+/// `EverySchedule` facts as `jet dev`. This adapter only converts the AST
+/// carrier to the Prelude carrier; due arithmetic belongs to `jet_job_schedule_due`.
+pub fn scheduled_job_names_once(bundle: &ProgramBundle) -> Vec<String> {
+    let jobs = scheduled_jobs(bundle);
+    let schedules = jobs
+        .iter()
+        .map(|(name, schedule)| (name.as_str(), prelude_schedule(*schedule)))
+        .collect::<Vec<_>>();
+    let mut clock = jet_jit::Job::JetJobClock::new();
+    jet_jit::Job::jet_job_schedule_due(&mut clock, &schedules)
+}
+
+fn bundle_has_service_output(bundle: &ProgramBundle) -> bool {
+    bundle
+        .modules
+        .get(bundle.entry)
+        .is_some_and(|module| {
+            module.items.iter().any(|item| {
+                matches!(
+                    item,
+                    Item::Const(value)
+                        if value
+                            .resolved_output
+                            .as_ref()
+                            .is_some_and(|output| {
+                                output.selected
+                                    && output.kind == crate::AST::OutputKind::Service
+                            })
+                )
+            })
+        })
+}
+
+fn prelude_schedule(schedule: crate::AST::EverySchedule) -> jet_jit::Job::JetJobSchedule {
+    match schedule {
+        crate::AST::EverySchedule::Duration { nanos } => {
+            jet_jit::Job::JetJobSchedule::Duration { nanos }
+        }
+        crate::AST::EverySchedule::WallClockTime { hour, minute } => {
+            jet_jit::Job::JetJobSchedule::WallClockTime { hour, minute }
+        }
+    }
+}
+
+fn run_scheduled_jobs_once(
+    bundle: &ProgramBundle,
+    try_anyway: bool,
+) -> Result<(String, String), RunOutcome> {
+    let mut stdout = String::new();
+    let mut stderr = String::new();
+    for name in scheduled_job_names_once(bundle) {
+        match run_named_job(bundle, &name, try_anyway) {
+            RunOutcome::Ran {
+                stdout: job_stdout,
+                stderr: job_stderr,
+                ..
+            } => {
+                stdout.push_str(&job_stdout);
+                stderr.push_str(&job_stderr);
+            }
+            problems @ RunOutcome::Problems(_) => return Err(problems),
+        }
+    }
+    Ok((stdout, stderr))
 }
 
 /// c139 JIT-parity fix (2026-07-03): the dev interpreter IS the comptime
@@ -692,11 +767,63 @@ fn run_jit_once_on_compiler_stack(
             let mut args = Vec::with_capacity(runtime_args.len() + 1);
             args.push(selected.map_or_else(|| file.to_string(), |name| format!("{file} {name}")));
             args.extend(runtime_args.iter().map(|arg| (*arg).to_string()));
+            let mut scheduled_stdout = String::new();
+            let mut scheduled_stderr = String::new();
+            if selected.is_none() && bundle_has_service_output(&bundle) {
+                for name in scheduled_job_names_once(&bundle) {
+                    let job_bundle = match checked_bundle_with_entry(
+                        file,
+                        gates,
+                        Some(&name),
+                        "dev",
+                        setting_overrides,
+                    ) {
+                        Ok(job_bundle) => job_bundle,
+                        Err(diags) => return RunOutcome::Problems(diags),
+                    };
+                    let job_args = vec![format!("{file} {name}")];
+                    let job_outcome = jet_jit::with_program_args(&job_args, || {
+                        use crate::JitBackend::JitBackend;
+                        let mut backend = jet_jit::CraneliftBackend::new();
+                        backend.run(&job_bundle, false)
+                    });
+                    match job_outcome {
+                        RunOutcome::Ran {
+                            stdout,
+                            stderr,
+                            exit_code,
+                        } => {
+                            scheduled_stdout.push_str(&stdout);
+                            scheduled_stderr.push_str(&stderr);
+                            if exit_code != 0 {
+                                return RunOutcome::Ran {
+                                    stdout: scheduled_stdout,
+                                    stderr: scheduled_stderr,
+                                    exit_code,
+                                };
+                            }
+                        }
+                        RunOutcome::Problems(diags) => return RunOutcome::Problems(diags),
+                    }
+                }
+            }
             let outcome = jet_jit::with_program_args(&args, || {
                 use crate::JitBackend::JitBackend;
                 let mut backend = jet_jit::CraneliftBackend::new();
                 backend.run(&bundle, false)
             });
+            let outcome = match outcome {
+                RunOutcome::Ran {
+                    stdout,
+                    stderr,
+                    exit_code,
+                } => RunOutcome::Ran {
+                    stdout: format!("{scheduled_stdout}{stdout}"),
+                    stderr: format!("{scheduled_stderr}{stderr}"),
+                    exit_code,
+                },
+                RunOutcome::Problems(diags) => RunOutcome::Problems(diags),
+            };
             if selected.is_none()
                 && setting_overrides.is_empty()
                 && matches!(outcome, RunOutcome::Ran { .. })

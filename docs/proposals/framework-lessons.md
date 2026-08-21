@@ -58,9 +58,9 @@ an implementation boundary; it does not keep that behavior as an option.
   unshipped.
 - D-OBSERVE-LIVE1 renders only typed, bounded task, channel, effect, and
   resource facts. Payloads and process memory remain outside the schema. The
-  producer is reachable only from the AOT generated runtime (`Prelude/EnvInit.rs`
-  calls it; no JIT, ambient, or comptime bridge exists), so `jet run --observe`
-  on the default resident tier publishes nothing — an I9 gap, not a boundary.
+  AOT generated runtime, resident Cranelift tier, and whole-program interpreter
+  all call the same Prelude `jet_observe_runtime_start` entry, so
+  `jet run --observe` on the default resident tier publishes the shared facts.
   Two named pieces of the ratified text are also absent and stay owed rather
   than being written down as narrower law: GC statistics are not in the producer
   or reader schema, and Canvas projects only the `event_observations` sequence

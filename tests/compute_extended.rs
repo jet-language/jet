@@ -129,19 +129,19 @@ fn f32_simd_matmul_keeps_vjp_and_jvp_on_the_cpu_oracle() {
         r#"
 use core.compute as compute
 
-fn tiled_loss(left: Tensor, right: Tensor) :> Tensor {
+fn tiled_loss(left: Tensor, right: Tensor) Tensor {
     return compute.matmul_f32_tile(left, right) ?? panic("tiled_loss")
 }
 
 fn run() {
-    left :: compute.matrix(1, 1, 2.0) ?? panic("left")
-    right :: compute.matrix(1, 1, 3.0) ?? panic("right")
+    left :: compute.full([1, 1], 2.0) ?? panic("left")
+    right :: compute.full([1, 1], 3.0) ?? panic("right")
     (grad_left, grad_right) :: compute.gradient(tiled_loss, ~left, ~right)
     print("grad_left:{compute.to_list(grad_left)}")
     print("grad_right:{compute.to_list(grad_right)}")
 
-    tangent_left :: compute.matrix(1, 1, 1.0) ?? panic("tangent_left")
-    tangent_right :: compute.matrix(1, 1, 1.0) ?? panic("tangent_right")
+    tangent_left :: compute.full([1, 1], 1.0) ?? panic("tangent_left")
+    tangent_right :: compute.full([1, 1], 1.0) ?? panic("tangent_right")
     tiled_jvp :: compute.jvp(tiled_loss)
     (value, tangent) :: tiled_jvp(left, right, tangent_left, tangent_right)
     print("value:{compute.to_list(value)}")
@@ -288,7 +288,7 @@ fn raw_kernel_contract_cannot_be_forged_without_a_provider() {
 #[test]
 fn safe_kernel_proof_reaches_tir_without_rederivation() {
     let compiled = jet::compile(
-        "#Kernel(.parallel) fn add(left: Int, right: Int) => Int :: left + right;\nfn run() { print(add(1, 2)) }\n",
+        "#Kernel(.parallel) fn add(left: Int, right: Int) Int :> left + right;\nfn run() { print(add(1, 2)) }\n",
     )
     .expect("the checked kernel should compile");
     assert!(
@@ -314,7 +314,7 @@ use core.data as data
 use core.compute as compute
 
 fn run() {
-    series :: data.series([1.0, 2.0, 3.0])
+    series :: data.series([Float]{1.0, 2.0, 3.0})
     values :: data.values(series)
     tensor :: compute.from_list(values) ?? panic("tensor")
     doubled :: compute.mul(tensor, compute.full([3], 2.0) ?? panic("factor")) ?? panic("doubled")

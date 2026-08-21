@@ -52,6 +52,7 @@ struct JetObserveRegistry {
 
 static JET_OBSERVE: std::sync::OnceLock<Option<std::sync::Arc<JetObserveRegistry>>> =
     std::sync::OnceLock::new();
+static JET_OBSERVE_STARTED: std::sync::OnceLock<()> = std::sync::OnceLock::new();
 static JET_OBSERVE_ARENAS: std::sync::atomic::AtomicUsize =
     std::sync::atomic::AtomicUsize::new(0);
 static JET_OBSERVE_ARENA_ALLOCS: std::sync::atomic::AtomicUsize =
@@ -192,8 +193,11 @@ fn jet_observe_event(mut event: JetObserveEvent) {
     events.push_back(event);
 }
 
-fn jet_observe_runtime_start() {
+pub fn jet_observe_runtime_start() {
     let Some(registry) = jet_observe_registry().cloned() else { return };
+    if JET_OBSERVE_STARTED.set(()).is_err() {
+        return;
+    }
     registry.tasks.lock().unwrap().insert(1, JetObserveTask {
         parent: 0, state: "running", wait: String::new(), deadline_ms: None, cancelled: false,
     });

@@ -394,6 +394,7 @@ pub(crate) fn resident_invoke() -> Result<RunOutcome, String> {
         jet_foundation::Outcome::jet_journey_reset();
         let ptr: *mut JitRuntime = runtime;
         Concurrency::set_active_runtime(Some(ptr));
+        jet_codegen::scheduler::jet_observe_runtime_start();
         jet_codegen::scheduler::jet_scheduler_task_completion_begin();
         let entry_app = if main_returns_result {
             let entry: extern "C" fn() -> i64 = unsafe { std::mem::transmute(code) };

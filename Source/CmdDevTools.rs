@@ -246,7 +246,7 @@ pub(crate) fn run_dev(
     let mut failed_claims = Vec::new();
 
     loop {
-        std::thread::sleep(std::time::Duration::from_millis(120));
+        jet_jit::scheduler_sleep_ms(120);
         while let Ok(byte) = input.try_recv() {
             let Some(action) = dev_session_action(byte) else {
                 continue;
@@ -446,62 +446,46 @@ fn run_due_jobs(
 /// timezone-aware calendars out to "the runtime API or jetos timers"; this
 /// is the lightweight dev-loop convenience tier, not that.
 pub(crate) struct JobClock {
-    last_interval_run: std::collections::HashMap<String, std::time::Instant>,
-    last_daily_run_day: std::collections::HashMap<String, u64>,
+    inner: jet_jit::Job::JetJobClock,
 }
 
 impl JobClock {
     pub(crate) fn new() -> Self {
         JobClock {
-            last_interval_run: std::collections::HashMap::new(),
-            last_daily_run_day: std::collections::HashMap::new(),
+            inner: jet_jit::Job::JetJobClock::new(),
         }
     }
 
     /// Which job names are due right now — records the firing so the same
     /// job doesn't fire again on the very next tick.
     pub(crate) fn due(&mut self, jobs: &[(String, jet::AST::EverySchedule)]) -> Vec<String> {
-        let unix_secs = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_secs();
-        self.due_at(jobs, unix_secs)
+        let schedules = jobs
+            .iter()
+            .map(|(name, schedule)| (name.as_str(), prelude_schedule(*schedule)))
+            .collect::<Vec<_>>();
+        jet_jit::Job::jet_job_schedule_due(&mut self.inner, &schedules)
     }
 
     /// The testable core of `due`: `unix_secs` is injected so the day/window
     /// arithmetic can be checked without racing real wall-clock time.
+    #[allow(dead_code)]
     fn due_at(&mut self, jobs: &[(String, jet::AST::EverySchedule)], unix_secs: u64) -> Vec<String> {
-        let now = std::time::Instant::now();
-        let day = unix_secs / 86_400;
-        let secs_of_day = unix_secs % 86_400;
-        let mut fired = Vec::new();
-        for (name, schedule) in jobs {
-            match *schedule {
-                jet::AST::EverySchedule::Duration { nanos } => {
-                    let due = match self.last_interval_run.get(name) {
-                        None => true,
-                        Some(last) => now.duration_since(*last).as_nanos() >= nanos as u128,
-                    };
-                    if due {
-                        self.last_interval_run.insert(name.clone(), now);
-                        fired.push(name.clone());
-                    }
-                }
-                jet::AST::EverySchedule::WallClockTime { hour, minute } => {
-                    let target_secs = hour as u64 * 3600 + minute as u64 * 60;
-                    // Due once inside the matching minute — a 120ms poll tick
-                    // easily lands inside a 60-second window.
-                    let in_window =
-                        secs_of_day >= target_secs && secs_of_day < target_secs + 60;
-                    let already_ran_today = self.last_daily_run_day.get(name) == Some(&day);
-                    if in_window && !already_ran_today {
-                        self.last_daily_run_day.insert(name.clone(), day);
-                        fired.push(name.clone());
-                    }
-                }
-            }
+        let schedules = jobs
+            .iter()
+            .map(|(name, schedule)| (name.as_str(), prelude_schedule(*schedule)))
+            .collect::<Vec<_>>();
+        self.inner.due_at(&schedules, unix_secs)
+    }
+}
+
+fn prelude_schedule(schedule: jet::AST::EverySchedule) -> jet_jit::Job::JetJobSchedule {
+    match schedule {
+        jet::AST::EverySchedule::Duration { nanos } => {
+            jet_jit::Job::JetJobSchedule::Duration { nanos }
         }
-        fired
+        jet::AST::EverySchedule::WallClockTime { hour, minute } => {
+            jet_jit::Job::JetJobSchedule::WallClockTime { hour, minute }
+        }
     }
 }
 

@@ -7,10 +7,114 @@ pub enum JetJobScope {
     Internal,
 }
 
+/// D-SCHEDULE1: the checked `EverySchedule` value carried into the runtime.
+/// The generated table stores this value instead of re-reading marker text;
+/// every consumer uses the same resolved duration or wall-clock minute.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum JetJobSchedule {
+    Duration { nanos: i64 },
+    WallClockTime { hour: u8, minute: u8 },
+}
+
+/// One shared due clock for dev and service lifecycle consumers. The timer
+/// wake-up itself belongs to `Prelude/Scheduler.rs`; this value owns only the
+/// schedule decision and last-fire facts.
+pub struct JetJobClock {
+    last_interval_run: std::collections::HashMap<String, std::time::Instant>,
+    last_daily_run_day: std::collections::HashMap<String, u64>,
+}
+
+impl JetJobClock {
+    pub fn new() -> Self {
+        Self {
+            last_interval_run: std::collections::HashMap::new(),
+            last_daily_run_day: std::collections::HashMap::new(),
+        }
+    }
+
+    /// Return the names due at the current wall time. A duration schedule fires
+    /// immediately on its first check, then after its resolved interval.
+    pub fn due(&mut self, jobs: &[(&str, JetJobSchedule)]) -> Vec<String> {
+        let unix_secs = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs();
+        self.due_at(jobs, unix_secs)
+    }
+
+    /// Testable due decision with the wall-clock seconds supplied by the
+    /// caller. The monotonic instant still measures duration intervals.
+    pub fn due_at(&mut self, jobs: &[(&str, JetJobSchedule)], unix_secs: u64) -> Vec<String> {
+        let now = std::time::Instant::now();
+        let day = unix_secs / 86_400;
+        let secs_of_day = unix_secs % 86_400;
+        let mut fired = Vec::new();
+        for (name, schedule) in jobs {
+            match *schedule {
+                JetJobSchedule::Duration { nanos } => {
+                    let due = match self.last_interval_run.get(*name) {
+                        None => true,
+                        Some(last) => now.duration_since(*last).as_nanos() >= nanos.max(0) as u128,
+                    };
+                    if due {
+                        self.last_interval_run.insert((*name).to_string(), now);
+                        fired.push((*name).to_string());
+                    }
+                }
+                JetJobSchedule::WallClockTime { hour, minute } => {
+                    let target_secs = hour as u64 * 3600 + minute as u64 * 60;
+                    let in_window =
+                        secs_of_day >= target_secs && secs_of_day < target_secs + 60;
+                    let already_ran_today = self.last_daily_run_day.get(*name) == Some(&day);
+                    if in_window && !already_ran_today {
+                        self.last_daily_run_day.insert((*name).to_string(), day);
+                        fired.push((*name).to_string());
+                    }
+                }
+            }
+        }
+        fired
+    }
+}
+
+#[derive(Clone, Copy)]
 pub struct JetJobEntry {
     pub name: &'static str,
     pub scope: JetJobScope,
+    pub schedule: Option<JetJobSchedule>,
     pub invoke: fn(&str, &[String]),
+}
+
+/// One service-runtime tick. The service lifecycle owns when this is called;
+/// the due arithmetic remains in `JetJobClock`, and invocation remains the
+/// checked job table's callback. There is no second timer loop here.
+pub fn jet_job_service_tick(clock: &mut JetJobClock, jobs: &[JetJobEntry], program: &str) {
+    let schedules = jobs
+        .iter()
+        .filter(|job| jet_job_schedule_enabled(job.scope))
+        .filter_map(|job| job.schedule.map(|schedule| (job.name, schedule)))
+        .collect::<Vec<_>>();
+    for name in jet_job_schedule_due(clock, &schedules) {
+        if let Some(job) = jobs.iter().find(|job| job.name == name.as_str()) {
+            (job.invoke)(program, &[]);
+        }
+    }
+}
+
+/// Shared schedule decision used by AOT, the resident JIT adapter, the TIR
+/// evaluator, and `jet dev`.
+pub fn jet_job_schedule_due(
+    clock: &mut JetJobClock,
+    jobs: &[(&str, JetJobSchedule)],
+) -> Vec<String> {
+    clock.due(jobs)
+}
+
+fn jet_job_schedule_enabled(scope: JetJobScope) -> bool {
+    match scope {
+        JetJobScope::Dev => !cfg!(jet_release),
+        JetJobScope::Ship | JetJobScope::Internal => true,
+    }
 }
 
 fn jet_args_program_name(prog: &str) -> String {

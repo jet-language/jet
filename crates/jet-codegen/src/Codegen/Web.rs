@@ -437,12 +437,7 @@ fn validate_web_func_tir(
                 && web_func_guarantees_return(f, &tir)
                 && web_wasm_abi_supported(f, &tir, bundle)
         };
-        if !supported
-            && matches!(
-                f.name.as_str(),
-                "describe" | "as_named" | "run" | "digit" | "wasm_digit"
-            )
-        {
+        if !supported {
             eprintln!(
                 "[web-debug] emitter miss {} bucket {:?}: body {:?}",
                 f.name,
@@ -866,15 +861,13 @@ fn web_wasm_expr_supported(
         return false;
     }
     let supported = match &expr.kind {
-        TIR::TExprKind::CtLit(crate::AST::CtValue::List(_))
-            if matches!(&expr.ty, Type::List(inner) if matches!(inner.as_ref(), Type::String)) => true,
+        TIR::TExprKind::CtLit(value) => !matches!(value, crate::AST::CtValue::Closure(_)),
         TIR::TExprKind::IntLit(..)
         | TIR::TExprKind::FloatLit(_)
         | TIR::TExprKind::BoolLit(_)
         | TIR::TExprKind::Local(_) => true,
         TIR::TExprKind::Todo { .. } => true,
-        TIR::TExprKind::CtLit(crate::AST::CtValue::Int(_)
-        | crate::AST::CtValue::BigInt(_)) => true,
+        TIR::TExprKind::Unreachable { .. } => true,
         TIR::TExprKind::InlineBlock(stmts) => {
             web_wasm_inline_block_supported(stmts, bundle, file_prefix, reconstructions)
         }
@@ -1686,6 +1679,7 @@ fn web_expr_supported(expr: &TIR::TExpr) -> bool {
         E::IntLit(..) | E::FloatLit(_) | E::BoolLit(_) | E::CharLit(_) | E::Local(_)
         | E::Unit | E::DefaultLit | E::CtLit(_) | E::Uninit => true,
         E::Todo { .. } => true,
+        E::Unreachable { .. } => true,
         E::InlineBlock(stmts) => web_inline_block_supported(stmts),
         E::StrLit(parts) => parts.iter().all(|p| match p { TIR::TStrPart::Lit(_) => true, TIR::TStrPart::Interp(e, _) => web_expr_supported(e) }),
         E::Binary { lhs, rhs, .. } => web_expr_supported(lhs) && web_expr_supported(rhs),
@@ -3116,7 +3110,7 @@ fn emit_wasm_user_types(bundle: &ProgramBundle, out: &mut String) -> WebEmitResu
             .map(|member| {
                 Some(format!(
                     "    {}({}),\n",
-                    crate::AST::union_member_tag(member),
+                    mangle_path(&crate::AST::union_member_tag(member)),
                     wasm_internal_ty(member, bundle)?
                 ))
             })
@@ -4333,12 +4327,7 @@ fn wasm_edge_ok_json_expr(ty: &Type, value: &str) -> Option<String> {
 }
 
 fn wasm_enum_head(enum_type: &str, variant: &str) -> String {
-    let variant = if enum_type.starts_with("__JetUnion_") {
-        variant.to_string()
-    } else {
-        mangle_path(variant)
-    };
-    format!("{}::{variant}", mangle_path(enum_type))
+    format!("{}::{}", mangle_path(enum_type), mangle_path(variant))
 }
 
 fn wasm_emit_enum_arg(
@@ -4440,6 +4429,169 @@ fn wasm_if_let_pattern(pattern: &TIR::TPattern) -> Result<String, ()> {
     // Binding-position patterns for `if let` — same spelling as match arms for
     // Result/Option; variants keep the enum head form.
     wasm_match_arm_pattern(pattern)
+}
+
+/// Marshal a TIR comptime value into the Wasm Rust carrier types. The value is
+/// already a shared comptime/TIR fact; this function only changes its literal
+/// spelling for the Wasm adapter (I9).
+fn wasm_emit_ct_value(value: &crate::AST::CtValue, ty: &Type) -> Result<String, ()> {
+    use crate::AST::{CtReport, CtValue};
+
+    let ty = ty.without_user_tags();
+    Ok(match value {
+        CtValue::Int(n) if matches!(ty, Type::Int) => {
+            format!("JetWasmInt::from_i64({n})")
+        }
+        CtValue::Int(n) => n.to_string(),
+        CtValue::Float(value) => value.clone().serialize(),
+        CtValue::Bool(value) => value.to_string(),
+        CtValue::Char(value) => format!("{:?}", value),
+        CtValue::Str(value) => format!("{:?}.to_string()", value),
+        CtValue::BigInt(value) => format!(
+            "JetWasmInt::from_decimal({:?}).expect(\"valid exact integer literal\")",
+            value.to_string_rep()
+        ),
+        CtValue::Bytes(values) => format!(
+            "vec![{}]",
+            values
+                .iter()
+                .map(|value| format!("{value}u8"))
+                .collect::<Vec<_>>()
+                .join(", ")
+        ),
+        CtValue::List(values) => {
+            let inferred;
+            let elem_ty = match ty {
+                Type::List(elem) | Type::FixedList { elem, .. } => elem.as_ref(),
+                _ => {
+                    inferred = value.jet_type();
+                    match &inferred {
+                        Type::List(elem) => elem.as_ref(),
+                        _ => return Err(()),
+                    }
+                }
+            };
+            let values = values
+                .iter()
+                .map(|value| wasm_emit_ct_value(value, elem_ty))
+                .collect::<Result<Vec<_>, _>>()?
+                .join(", ");
+            if matches!(ty, Type::FixedList { .. }) {
+                format!("[{values}]")
+            } else {
+                format!("vec![{values}]")
+            }
+        }
+        CtValue::Map(values) => {
+            let inferred;
+            let (key_ty, value_ty) = match ty {
+                Type::Map { key, value, .. } => (key.as_ref(), value.as_ref()),
+                _ => {
+                    inferred = value.jet_type();
+                    match &inferred {
+                        Type::Map { key, value, .. } => (key.as_ref(), value.as_ref()),
+                        _ => return Err(()),
+                    }
+                }
+            };
+            let entries = values
+                .iter()
+                .map(|(key, value)| {
+                    let key = key.to_value();
+                    Ok(format!(
+                        "({}, {})",
+                        wasm_emit_ct_value(&key, key_ty)?,
+                        wasm_emit_ct_value(value, value_ty)?
+                    ))
+                })
+                .collect::<Result<Vec<_>, ()>>()?
+                .join(", ");
+            format!("std::collections::BTreeMap::from([{entries}])")
+        }
+        CtValue::Struct { type_name, fields } => {
+            if type_name == Syntax::TYPE_FRACTION {
+                let fraction = jet_foundation::Numeric::CtFraction::from_value(value).map_err(|_| ())?;
+                format!(
+                    "jet_wasm_fraction_from_parts(JetWasmInt::from_i64({}), JetWasmInt::from_i64({}))",
+                    fraction.numerator, fraction.denominator
+                )
+            } else if type_name == Syntax::TYPE_DECIMAL {
+                let decimal = jet_foundation::Numeric::CtDecimal::from_value(value).map_err(|_| ())?;
+                format!(
+                    "jet_wasm_decimal_from_str(&{:?}.to_string())",
+                    decimal.to_string_rep()
+                )
+            } else {
+                let fields = fields
+                    .iter()
+                    .filter(|(name, _)| !crate::Syntax::is_memo_storage_name(name))
+                    .map(|(name, value)| {
+                        let field_ty = value.jet_type();
+                        Ok(format!(
+                            "{}: {}",
+                            mangle(name),
+                            wasm_emit_ct_value(value, &field_ty)?
+                        ))
+                    })
+                    .collect::<Result<Vec<_>, ()>>()?
+                    .join(", ");
+                format!("{} {{ {fields} }}", mangle_path(type_name))
+            }
+        }
+        CtValue::Enum {
+            type_name,
+            variant,
+            args,
+        } => {
+            let head = wasm_enum_head(type_name, variant);
+            if args.is_empty() {
+                head
+            } else if args.iter().all(|(name, _)| name.is_none()) {
+                let args = args
+                    .iter()
+                    .map(|(_, value)| {
+                        let value_ty = value.jet_type();
+                        wasm_emit_ct_value(value, &value_ty)
+                    })
+                    .collect::<Result<Vec<_>, _>>()?
+                    .join(", ");
+                format!("{head}({args})")
+            } else {
+                let fields = args
+                    .iter()
+                    .filter_map(|(name, value)| {
+                        name.as_ref().map(|name| {
+                            let value_ty = value.jet_type();
+                            Ok(format!(
+                                "{}: {}",
+                                mangle(name),
+                                wasm_emit_ct_value(value, &value_ty)?
+                            ))
+                        })
+                    })
+                    .collect::<Result<Vec<_>, ()>>()?
+                    .join(", ");
+                format!("{head} {{ {fields} }}")
+            }
+        }
+        CtValue::Present(value) => {
+            let inferred = match ty {
+                Type::Option(inner) | Type::Result { ok: inner, .. } => inner.as_ref(),
+                _ => &value.jet_type(),
+            };
+            format!("Ok({})", wasm_emit_ct_value(value, inferred)?)
+        }
+        CtValue::Failed(CtReport::Clean(_)) => "Err(JetAbsent)".to_string(),
+        CtValue::Failed(CtReport::Told(value)) => {
+            let inferred = match ty {
+                Type::Result { err, .. } => err.as_ref(),
+                _ => &value.jet_type(),
+            };
+            format!("Err({})", wasm_emit_ct_value(value, inferred)?)
+        }
+        CtValue::Unit => "()".to_string(),
+        CtValue::Closure(_) => return Err(()),
+    })
 }
 
 fn emit_wasm_if_head(
@@ -5299,26 +5451,16 @@ fn wasm_emit_expr(
             line,
             expected_type,
         ),
+        TIR::TExprKind::Unreachable { line } => format!(
+            "jet_runtime_stop(\"E3001\", {}, {}, \"exhaustive dispatch (sema-proved, E0307)\")",
+            mangle_generated("source_file"),
+            line,
+        ),
         TIR::TExprKind::IntLit(n, _) if matches!(&expr.ty, Type::Int) => {
             format!("JetWasmInt::from_i64({n})")
         }
         TIR::TExprKind::IntLit(n, _) => n.to_string(),
-        TIR::TExprKind::CtLit(crate::AST::CtValue::Int(n))
-            if matches!(&expr.ty, Type::Int) => format!("JetWasmInt::from_i64({n})"),
-        TIR::TExprKind::CtLit(crate::AST::CtValue::Int(n)) => n.to_string(),
-        TIR::TExprKind::CtLit(crate::AST::CtValue::BigInt(value)) => format!(
-            "JetWasmInt::from_decimal({:?}).expect(\"valid exact integer literal\")",
-            value.to_string_rep()
-        ),
-        TIR::TExprKind::CtLit(crate::AST::CtValue::List(values))
-            if matches!(&expr.ty, Type::List(inner) if matches!(inner.as_ref(), Type::String)) => format!(
-            "vec![{}]",
-            values
-                .iter()
-                .map(crate::AST::CtValue::serialize)
-                .collect::<Vec<_>>()
-                .join(", ")
-        ),
+        TIR::TExprKind::CtLit(value) => wasm_emit_ct_value(value, &expr.ty)?,
         TIR::TExprKind::FloatLit(n) => {
             if matches!(&expr.ty, Type::Float32) {
                 CtFloat::f32(*n as f32).serialize()
@@ -7928,6 +8070,11 @@ fn tir_js_expr(expr: &TIR::TExpr, funcs: &[FuncWeb], file_prefix: Option<&str>) 
             mangle_generated("source_file"),
             line,
             json_quote(expected_type),
+        ),
+        E::Unreachable { line } => format!(
+            "jet_runtime_stop(\"E3001\", {}, {}, \"exhaustive dispatch (sema-proved, E0307)\")",
+            mangle_generated("source_file"),
+            line,
         ),
         // Whole numbers are JS BigInt on this tier (I9 / #1485): a plain
         // numeric literal is only exact to 2^53.
