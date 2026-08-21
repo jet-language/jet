@@ -122,6 +122,27 @@ removal → changelog. https://podscripts.co/podcasts/the-standup-with-theprimea
 
 **Onboarding reference** (Tower card note) — https://youtu.be/OPuztQfM3Fg
 
+**Function-design canon batch (mined 2026-08-21).** One video plus its three
+linked sources, mined together for function/API design law. Findings: rubric
+rows and review vocabulary (card #2137), E0150 free-function wording (#2138),
+sequence-algorithm gaps (#2139), stored invariant facts design (#2140), and
+independent corroboration of D-DEVR-TWICE1 logged on card #2062.
+
+- Logan Smith — How to write the perfect function: honest/dishonest signatures,
+  inject dishonesty at the top, signature empathy, invariant-bearing types, one
+  level of abstraction per body. Jet ships the enforcement the talk wishes for
+  (effect rows, `#Abilities`, typestate, labels).
+  https://www.youtube.com/watch?v=2OMRWPOSw9s
+- Tony Van Eerd — Value Oriented Programming Part 1 (CppNow 2023): complecting,
+  separate calculating from doing, narrow value arguments, non-member functions,
+  strong IDs, sink arguments. https://www.youtube.com/watch?v=b4p_tcLYDV0
+- Sean Parent — C++ Seasoning (GoingNative 2013): no raw loops / synchronization
+  / owning pointers; rotate, gather, task dataflow, value-semantic polymorphism.
+  https://www.youtube.com/watch?v=W2tWOdzgXHA
+- Robert C. Martin — The Single Responsibility Principle (2014): reasons to
+  change are people; gather what changes together, separate what does not.
+  https://blog.cleancoder.com/uncle-bob/2014/05/08/SingleReponsibilityPrinciple.html
+
 ---
 
 ## Programming languages

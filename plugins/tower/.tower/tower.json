@@ -2,8 +2,8 @@
   "meta": {
     "version": 4,
     "project": "Jet",
-    "nextNum": 2137,
-    "rev": 40630,
+    "nextNum": 2141,
+    "rev": 40636,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -31,7 +31,7 @@
         "radar:e12"
       ]
     },
-    "completionCursor": "2026-08-21T14:32:41.189Z"
+    "completionCursor": "2026-08-21T14:53:47.198Z"
   },
   "epochs": [
     {
@@ -135526,6 +135526,11 @@
       "assignee": null,
       "log": [
         {
+          "at": "2026-08-21",
+          "by": "fable",
+          "text": "Independent corroboration for D-DEVR-TWICE1 (never-pay-twice): Logan Smith's 2026-08-20 function-design video (mined 2026-08-21) independently imagines a test framework that skips rerunning tests for local-reasoning functions unchanged since the last run, and notes most languages cannot verify local reasoning ([04:47]). Jet's inferred effect rows plus receipts make exactly that product buildable."
+        },
+        {
           "at": "2026-08-20",
           "by": "fable-e3-burndown",
           "text": "Closed. The audit shipped its proposal, its thirteen ratified ballots, its adversarial delta review, and now its outcomes are law in the spec and work on the board as e10 cards tagged receipt-slate."
@@ -135593,8 +135598,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-19T11:53:20.866Z",
-      "updated": "2026-08-20T19:19:31.660Z",
-      "updatedBy": "fable-e3-burndown",
+      "updated": "2026-08-21T14:56:13.843Z",
+      "updatedBy": "fable",
       "completedAt": "2026-08-20T19:19:31.660Z"
     },
     {
@@ -139989,6 +139994,106 @@
       "created": "2026-08-21T14:53:09.265Z",
       "updated": "2026-08-21T14:53:09.265Z",
       "updatedBy": "orchestrator"
+    },
+    {
+      "id": "c05rc0xv",
+      "num": 2137,
+      "title": "Function-design canon: adopt signature-honesty rows into the Core API rubric",
+      "body": "Source: mining run 2026-08-21 of Logan Smith, \"How to write the perfect function\" (https://www.youtube.com/watch?v=2OMRWPOSw9s), plus its linked sources: Tony Van Eerd's CppNow 2023 talk, Sean Parent's \"C++ Seasoning\", and Uncle Bob's SRP article. The three talks agree on a small set of function-design laws that Jet already enforces mechanically (effect rows, capability sigils, typestate, argument labels). Three of their laws are review doctrine that our Core API rubric does not yet state.\n\nAdd three law rows to docs/spec/stdlib-api-laws.md:\n\n1. Weakest-guarantee parameters. A Core function asks only for the guarantee it uses: unmarked read access for reading, Iterable for iteration, a view for a window — never a concrete container when iteration suffices. When a function does need a strong guarantee (a proven range, a typestate, a unit), it demands the proof type instead of documenting a precondition in prose. Evidence: all three talks converge on this (span/iterable vs vector; orientation+tolerance vs Projector; algorithm range contracts).\n\n2. Calculate/do split. A Core API that both computes a result and performs an effect must expose the effect-free computing sibling; the effectful convenience wraps it. The pure sibling returns the data (or takes a callback / returns an Iter when materializing is too dear). Evidence: Van Eerd's \"separate calculating from doing\"; Logan's honest-core/dishonest-skin; matches our one-Prelude I9 shape.\n\n3. No hidden-lookup APIs. A Core function takes the value, not a name plus an ambient registry; resolution from a name happens at the caller, where the registry is explicit. Evidence: the video's dishonest-accessor and asset-manager examples; matches our effects/Abilities model.\n\nAlso in the same doc pass: Law 4 still spells effect rows with the retired arrow (=[FS]=>, docs/spec/stdlib-api-laws.md:67). The ratified spelling is the unified arrow effect row :[FS]> (D-SHAPE8=A, D-ARROW-CONTROL1=A). Greenfield law says no retired spellings survive in current docs.\n\nFinally, add a short review-vocabulary paragraph to the rubric preamble naming the two review questions the talks give us: (a) is this function honest — is the projected effect row plus signature the complete story; (b) does the body stay at one level of abstraction — a body that zooms into character codes or hand-rolls a search belongs in a named brick. These are review prompts, not new mechanisms (I8 untouched).\n\nNo new syntax. No owner gate: rubric rows ride D-STDRUBRIC1's existing review law.",
+      "kind": "task",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P2",
+      "plan": "1) Add the three law rows to docs/spec/stdlib-api-laws.md. 2) Fix the Law 4 arrow spelling. 3) Add the review vocabulary paragraph. 4) Cross-link the mining report.",
+      "checkSteps": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [],
+      "refs": [],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-08-21T14:55:08.738Z",
+      "updated": "2026-08-21T14:55:08.738Z",
+      "updatedBy": "fable"
+    },
+    {
+      "id": "c03i6njo",
+      "num": 2138,
+      "title": "E0150 on a free function names the function in the owner slot instead of the tracked value's type",
+      "body": "Live repro (2026-08-21, debug jet, probe file ~/.cache/jet-test-scratch/mine-probes/normalized.jet):\n\n  state Vec3 { Raw, Unit }\n  #State(Unit) fn bounce_ready(normal: Vec3) Bool :> true\n  ...\n  print(\"{bounce_ready(v)}\")   // v is in state Raw\n\nemits:\n\n  Error [E0150]: `bounce_ready` needs `bounce_ready` in state `Unit`, but `v` is in state `Raw`\n\nThe owner slot repeats the function name. For a method the same slot carries the receiver type (e.g. `Reservation`), which reads correctly. For a free function the message should name the tracked value's type (`Vec3`) or the tracked local (`v`): \"`bounce_ready` needs `v` (`Vec3`) in state `Unit`\". The Why/Fix lines are right (the fix correctly names `normalize` as the transition to reach `Unit`).\n\nCause: crates/jet-sema/src/Sema/State.rs free-function path passes the function name as both `owner` and `op` into `check_state` (see the Expr::Call arm, ~line 725: `self.check_state(&local, cur.as_deref(), req, name, name, span)`), while the method path passes the receiver type.\n\nI4: diagnostics are product copy; this needs the wording fix plus a UI snapshot for the free-function case (the existing typestate_wrong_state snapshot covers only the method case).",
+      "kind": "bug",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [],
+      "refs": [],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-08-21T14:55:21.662Z",
+      "updated": "2026-08-21T14:55:21.662Z",
+      "updatedBy": "fable"
+    },
+    {
+      "id": "c02tdxr6",
+      "num": 2139,
+      "title": "Sequence algorithm gaps: rotate/slide, gather, and sorted-list search",
+      "body": "Source: Sean Parent, \"C++ Seasoning\" (GoingNative 2013), mined 2026-08-21. Parent's no-raw-loops catalog rests on a small set of permutation and search algorithms that make UI/reordering code loop-free: rotate (move a contiguous selection; his `slide`), double stable_partition (move a disjoint selection; his `gather`), and lower_bound/binary search over a sorted sequence.\n\nCurrent Jet list surface (docs/reference/core-library.md:209): rich map/filter/sort/dedup/chunks/windows/group_by/partition/scan/fold family, but no rotate, no gather/slide equivalents, and no binary search over an already-sorted list (`is_sorted` exists; `Rank<T>` covers ordered-set membership but not positional search in a plain sorted list). `partition` exists; whether it documents stability is unverified.\n\nDeliverable: audit whether these jobs are (a) already expressible one-liner compositions, (b) worth adding as named List methods, or (c) correctly declined per D-STR-DECLINE1-style reasoning. Any addition goes through the D-STDRUBRIC1 review and the D-ONCE-VERB1 verb table — no new syntax, no owner gate unless a naming ballot is warranted. Include the stability guarantee of `partition`/`sort` in the reference doc either way (Parent's gather depends on stable partitioning).\n\nAgent angle: these algorithms are exactly the vocabulary that lets an agent express reorder/regroup edits without raw index loops, which is where off-by-one repair cycles come from.",
+      "kind": "feature",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P3",
+      "plan": null,
+      "checkSteps": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [],
+      "refs": [],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-08-21T14:55:36.858Z",
+      "updated": "2026-08-21T14:55:36.858Z",
+      "updatedBy": "fable"
+    },
+    {
+      "id": "c0earl6i",
+      "num": 2140,
+      "title": "Stored invariant facts: typestate is flow-only, ranges are numeric-only — design the missing middle",
+      "body": "Source: mining run 2026-08-21 (Logan Smith's NormalizedVec3 argument plus its comment thread). The video's strongest type-design move is an invariant-bearing wrapper: a value whose construction establishes a predicate (unit length), so every consumer drops its runtime check and generic code can specialize (normalize of an already-normalized vector collapses to a no-op).\n\nWhat Jet ships today (probed live):\n- Flow typestate covers the pattern for locals, including free-function first parameters: state Vec3 { Raw, Unit } + #Transition(Raw, Unit) fn normalize + #State(Unit) fn bounce_ready(normal: Vec3) rejects the unnormalized call with E0150 and a fix-it naming the transition. Zero runtime cost.\n- distinct + inline range refinements (D-TYPE2-REFINE1/SPELL1) cover numeric interval invariants as real types usable in fields.\n- The smart-constructor pattern (private field + pub fallible constructor) works under S18 visibility.\n\nThe gap: the fact does not survive storage. crates/jet-sema/src/Sema/State.rs is explicit that when a value escapes into a field, a non-local receiver, or a loop-carried position the checker goes silent, so a struct field or list element cannot carry `Unit`; and a smart-constructor wrapper is opaque to the fact planes, so no #Pre discharge, no specialization, and no reflection row comes from it. Ranges are the only predicate that is a first-class stored fact.\n\nDeliverable: a short design note with ballot-ready options for letting a nominal type carry a declared predicate fact that (a) is establishable only through checked constructors/transitions, (b) survives fields and containers, (c) discharges #Pre/refinement obligations at call sites, and (d) erases at runtime (I3). Candidate directions to weigh, not decide: state-carrying field types; distinct-with-fact wrappers over non-numeric carriers; registering user predicates on the D-TYPE2-PLANE1 registry. Owner gate: any surface here is new semantics — this card produces the note and ballots, not code.\n\nCaution from the same source: the video's own cross(unit, unit) -> unit overload is mathematically false (magnitude is sin(theta); ~11 comments correct it, uploader concedes). Any fact-producing API must carry a proof obligation, not an author's assertion — which is exactly what the plane registry gives us and vibes-based newtype design does not.",
+      "kind": "feature",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [],
+      "refs": [],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-08-21T14:55:57.143Z",
+      "updated": "2026-08-21T14:55:57.144Z",
+      "updatedBy": "fable"
     }
   ],
   "decisions": [
@@ -186922,6 +187027,48 @@
   ],
   "events": [
     {
+      "at": "2026-08-21T14:56:13.853Z",
+      "by": "fable",
+      "action": "card.update",
+      "ref": "c0xffwib",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-08-21T14:55:57.144Z",
+      "by": "fable",
+      "action": "card.add",
+      "ref": "c0earl6i",
+      "note": "Stored invariant facts: typestate is flow-only, ranges are numeric-only — design the missing middle"
+    },
+    {
+      "at": "2026-08-21T14:55:36.858Z",
+      "by": "fable",
+      "action": "card.add",
+      "ref": "c02tdxr6",
+      "note": "Sequence algorithm gaps: rotate/slide, gather, and sorted-list search"
+    },
+    {
+      "at": "2026-08-21T14:55:21.662Z",
+      "by": "fable",
+      "action": "card.add",
+      "ref": "c03i6njo",
+      "note": "E0150 on a free function names the function in the owner slot instead of the tracked value's type"
+    },
+    {
+      "at": "2026-08-21T14:55:08.738Z",
+      "by": "fable",
+      "action": "card.add",
+      "ref": "c05rc0xv",
+      "note": "Function-design canon: adopt signature-honesty rows into the Core API rubric"
+    },
+    {
+      "at": "2026-08-21T14:53:47.198Z",
+      "by": "owner",
+      "action": "done.clear",
+      "ref": null,
+      "note": "2026-08-21T14:53:47.198Z"
+    },
+    {
       "at": "2026-08-21T14:53:09.265Z",
       "by": "orchestrator",
       "action": "card.add",
@@ -190378,48 +190525,6 @@
       "action": "card.criteria-meet",
       "ref": "c075z2hs",
       "note": "#8"
-    },
-    {
-      "at": "2026-08-21T00:39:27.854Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c075z2hs",
-      "note": "#7"
-    },
-    {
-      "at": "2026-08-21T00:39:27.198Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c075z2hs",
-      "note": "#2"
-    },
-    {
-      "at": "2026-08-21T00:39:26.415Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c075z2hs",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-21T00:39:25.916Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0xsk2wa",
-      "note": "#2"
-    },
-    {
-      "at": "2026-08-21T00:39:25.410Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0xsk2wa",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-21T00:39:24.920Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0oeuws4",
-      "note": "#9"
     }
   ],
   "nextNum": 368,
