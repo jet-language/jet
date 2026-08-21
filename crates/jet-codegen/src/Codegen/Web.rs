@@ -836,6 +836,8 @@ fn web_wasm_expr_supported(
         return false;
     }
     match &expr.kind {
+        TIR::TExprKind::CtLit(crate::AST::CtValue::List(_))
+            if matches!(&expr.ty, Type::List(inner) if matches!(inner.as_ref(), Type::String)) => true,
         TIR::TExprKind::IntLit(..)
         | TIR::TExprKind::FloatLit(_)
         | TIR::TExprKind::BoolLit(_)
@@ -5165,6 +5167,15 @@ fn wasm_emit_expr(
         TIR::TExprKind::CtLit(crate::AST::CtValue::BigInt(value)) => format!(
             "JetWasmInt::from_decimal({:?}).expect(\"valid exact integer literal\")",
             value.to_string_rep()
+        ),
+        TIR::TExprKind::CtLit(crate::AST::CtValue::List(values))
+            if matches!(&expr.ty, Type::List(inner) if matches!(inner.as_ref(), Type::String)) => format!(
+            "vec![{}]",
+            values
+                .iter()
+                .map(crate::AST::CtValue::serialize)
+                .collect::<Vec<_>>()
+                .join(", ")
         ),
         TIR::TExprKind::FloatLit(n) => {
             if matches!(&expr.ty, Type::Float32) {
