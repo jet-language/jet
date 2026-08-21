@@ -30,7 +30,6 @@ fn gather_paths() [String] {
 }
 
 fn scan_parallel(paths: [String]) [String] {
-    expected :: paths.len()
     (sender, ch) :: channel<String>()
     workers := [Task<()>]{}
     loop file_path, paths {
@@ -44,12 +43,9 @@ fn scan_parallel(paths: [String]) [String] {
         worker :: workers.pop() ?? panic("missing worker")
         worker.join() ?? panic("worker failed")
     }
+    sender.close()
     results := [String]{}
-    got := 0
-    loop got < expected {
-        results.push(ch.receive() ?? panic("channel closed early"))
-        got += 1
-    }
+    loop value, ch :> results.push(value)
     results.sort()
     return results
 }

@@ -597,10 +597,7 @@ pub fn check_autodiff_purity(
             memo.insert(name.to_string(), false);
             return false;
         };
-        let local_panic = summary
-            .direct
-            .iter()
-            .any(|effect| effect_root(effect) == Effect::Panic.name());
+        let local_panic = summary.autodiff_safe_panic || summary.autodiff_unsafe_panic;
         let mut safe = !local_panic
             || (summary.autodiff_safe_panic && !summary.autodiff_unsafe_panic);
         if summary.edges.contains("__jet_panic__") && !local_panic {

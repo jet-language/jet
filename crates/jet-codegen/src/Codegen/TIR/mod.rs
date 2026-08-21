@@ -4467,8 +4467,11 @@ pub enum TExprKind {
         value: Option<Box<TExpr>>,
     },
     /// D-SELECT-GENERIC1=A: `.wait()` returns the selected arm's `T` payload.
+    /// D-CONC-CHAN2=D: a readiness table with `else` uses the same tagged door
+    /// without parking; `nonblocking` is compiler-owned, not user syntax.
     SelectWait {
         builder: Box<TExpr>,
+        nonblocking: bool,
     },
     /// c109 Phase 13: a fn-typed-VALUE form. Either a bare function name used as a
     /// value (`Expr::Ident` resolving to a top-level fn) or a call THROUGH a fn-value

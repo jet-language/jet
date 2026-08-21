@@ -175,6 +175,7 @@ pub(crate) fn inject(bundle: &mut ProgramBundle) {
                 alias,
                 alias_span: zero,
                 span: zero,
+                item_spans: Vec::new(),
                 is_pub: false,
                 is_package_pub: false,
                 inline_version: None,

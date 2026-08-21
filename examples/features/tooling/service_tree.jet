@@ -1,14 +1,12 @@
-// D-SERVICE1=D (#444): the typed tree declaration promotes an ordinary
-// function into a named worker. Mailbox delivery and supervision are later
-// slices; this example proves the topology crosses the production boundary.
+// D-SERVICE1=D (#444): a typed tree promotes an ordinary function into a
+// named worker. Mailbox delivery and supervision are later slices; this
+// example proves the topology crosses the production boundary.
 use core.service as service
 
 fn echo() { print("") }
 
 fn run() {
-    handler :: echo
-    tree :: service.tree((root) :> {
-        root.worker("echo", handler)
-    })
-    print(service.tree_show(tree))
+    tree := service.tree("app")
+    tree.worker("echo", echo, capacity: 1) ?? panic("worker")
+    print(tree.show())
 }

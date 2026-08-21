@@ -13,18 +13,32 @@ const SOCKET_SURFACES: &[&str] = &[
     "core.email",
 ];
 
+const WASIP2_UNSUPPORTED_SURFACES: &[&str] = &[
+    "core.net.tls",
+    "core.net.ws",
+    "core.http.client",
+    "core.email",
+];
+
 /// D-WASISRV1=A: reject a reachable Core socket surface before codegen when
 /// the selected target has no socket runtime that the Prelude can use.
 pub fn check_target_surface(bundle: &ProgramBundle, target: &str) -> Vec<Diagnostic> {
     let socket_target = socket_target_supported(target);
-    let wasip2_ws_unsupported = target == Syntax::BUILD_TARGET_WASI_SERVER
-        && has_reachable_surface(bundle, "core.net.ws");
+    let wasip2 = target == Syntax::BUILD_TARGET_WASI_SERVER;
+    let wasip2_unsupported_surfaces = if wasip2 {
+        wasip2_unsupported_surfaces(bundle)
+    } else {
+        BTreeSet::new()
+    };
     let wasip2_unsupported = if target == Syntax::BUILD_TARGET_WASI_SERVER {
         wasip2_unsupported_operations(bundle)
     } else {
         BTreeSet::new()
     };
-    if socket_target && wasip2_unsupported.is_empty() && !wasip2_ws_unsupported {
+    if socket_target
+        && wasip2_unsupported.is_empty()
+        && wasip2_unsupported_surfaces.is_empty()
+    {
         return Vec::new();
     }
 
@@ -51,36 +65,37 @@ pub fn check_target_surface(bundle: &ProgramBundle, target: &str) -> Vec<Diagnos
                         Some(span),
                     ));
                 }
-                if surface == "core.net.ws" && wasip2_ws_unsupported {
+                if wasip2_unsupported_surfaces.contains(surface) {
                     let operation_key = (
                         module.display.clone(),
                         span.start,
                         span.end,
-                        "E3305:core.net.ws".to_string(),
+                        format!("E3305:{surface}"),
                     );
                     if seen.insert(operation_key) {
                         diagnostics.push(Diagnostic::from_row(
                             "E3305",
-                            &[("operation", "core.net.ws"), ("target", target)],
+                            &[("operation", surface), ("target", target)],
                             Some(span),
                         ));
                     }
                 }
-                if surface == "core.net" {
-                    for operation in &wasip2_unsupported {
-                        let operation_key = (
-                            module.display.clone(),
-                            span.start,
-                            span.end,
-                            format!("E3305:{operation}"),
-                        );
-                        if seen.insert(operation_key) {
-                            diagnostics.push(Diagnostic::from_row(
-                                "E3305",
-                                &[("operation", operation.as_str()), ("target", target)],
-                                Some(span),
-                            ));
-                        }
+                for operation in &wasip2_unsupported {
+                    if operation_surface(operation) != Some(surface) {
+                        continue;
+                    }
+                    let operation_key = (
+                        module.display.clone(),
+                        span.start,
+                        span.end,
+                        format!("E3305:{operation}"),
+                    );
+                    if seen.insert(operation_key) {
+                        diagnostics.push(Diagnostic::from_row(
+                            "E3305",
+                            &[("operation", operation.as_str()), ("target", target)],
+                            Some(span),
+                        ));
                     }
                 }
             }
@@ -89,17 +104,24 @@ pub fn check_target_surface(bundle: &ProgramBundle, target: &str) -> Vec<Diagnos
     diagnostics
 }
 
-fn has_reachable_surface(bundle: &ProgramBundle, expected: &str) -> bool {
-    bundle.modules.iter().any(|module| {
-        walk_imports(module).into_iter().any(|(_, import)| {
-            import
-                .walk_bindings()
-                .into_iter()
-                .any(|binding| {
-                    socket_surface(&binding.path()).is_some_and(|surface| surface == expected)
-                })
-        })
-    })
+fn wasip2_unsupported_surfaces(bundle: &ProgramBundle) -> BTreeSet<String> {
+    let mut surfaces = BTreeSet::new();
+    for module in &bundle.modules {
+        for (_, import) in walk_imports(module) {
+            for binding in import.walk_bindings() {
+                if let Some(surface) = socket_surface(&binding.path()) {
+                    if WASIP2_UNSUPPORTED_SURFACES.contains(&surface) {
+                        surfaces.insert(surface.to_string());
+                    }
+                }
+            }
+        }
+    }
+    surfaces
+}
+
+fn operation_surface(operation: &str) -> Option<&str> {
+    operation.rsplit_once('.').map(|(surface, _)| surface)
 }
 
 fn socket_surface(path: &str) -> Option<&'static str> {
@@ -122,8 +144,30 @@ fn wasip2_unsupported_operations(bundle: &ProgramBundle) -> BTreeSet<String> {
         .iter()
         .filter_map(|usage| {
             let (module, call) = usage.split_once("::")?;
-            let unsupported = module == "core.net"
-                && (call == "tcp_ready" || call == "udp_ready" || call.starts_with("unix_"));
+            let unsupported = match module {
+                "core.net" => {
+                    matches!(
+                        call,
+                        "tcp_connect_happy"
+                            | "tcp_ready"
+                            | "udp_ready"
+                            | "tls_connect"
+                            | "tls_read"
+                            | "tls_write"
+                            | "tls_close"
+                            | "dns_a"
+                            | "dns_aaaa"
+                            | "dns_txt"
+                            | "dns_ptr"
+                            | "dns_srv"
+                    ) || call.starts_with("unix_")
+                }
+                "core.http" => matches!(call, "get" | "post" | "request"),
+                "core.http.server" => call == "tls",
+                "core.net.tls" => true,
+                "core.http.client" | "core.email" => true,
+                _ => false,
+            };
             unsupported.then(|| format!("{module}.{call}"))
         })
         .collect()

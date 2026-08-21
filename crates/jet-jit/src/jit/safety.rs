@@ -2956,7 +2956,7 @@ fn resident_safe_expr_recursive(expr: &TExpr, callees: &HashSet<String>) -> bool
                     matches!(&v.ty, Type::Int) && resident_safe_expr(v, callees)
                 })
         }
-        TExprKind::SelectWait { builder } => {
+        TExprKind::SelectWait { builder, .. } => {
             jit_value_type(&expr.ty) && resident_safe_select_wait(builder, callees)
         }
         TExprKind::AmbientInput { prompt } => {

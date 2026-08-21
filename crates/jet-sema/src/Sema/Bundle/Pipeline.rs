@@ -2007,7 +2007,7 @@ fn check_bundle_opts_for_output_inner(
                             diags.push(crate::Sema::CheckerCoreLib::unknown_core_item(
                                 &core_prefix,
                                 orig,
-                                *module_alias_span,
+                                binding.item_span.unwrap_or(*module_alias_span),
                             ));
                         } else {
                             diags.push(crate::Sema::CheckerCoreLib::unknown_core_module(

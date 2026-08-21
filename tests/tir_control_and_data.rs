@@ -234,6 +234,66 @@ fn bindingless_loop_example_matches_all_execution_tiers() {
     }
 }
 
+/// D-LOOP-GUARD1 / D-LOOP-SUBJECT1 / D-SUBJECT-CALL1 / I9: named guards,
+/// bindingless subjects, and call-chain shorthand share one result across AOT,
+/// default `jet run`, and the forced interpreter.
+#[test]
+fn comprehension_forms_example_matches_all_execution_tiers() {
+    tir_support::assert_example_cli_tiers_agree(
+        "basics/comprehension_forms",
+        include_str!("../examples/features/expected/basics/comprehension_forms.out"),
+    );
+
+    let path = format!(
+        "{}/examples/features/basics/comprehension_forms.jet",
+        env!("CARGO_MANIFEST_DIR")
+    );
+    match dev_iteration(&path, false, true) {
+        RunOutcome::Ran {
+            exit_code,
+            stdout,
+            stderr,
+        } => {
+            assert_eq!(exit_code, 0);
+            assert_eq!(
+                stdout,
+                include_str!("../examples/features/expected/basics/comprehension_forms.out")
+            );
+            assert_eq!(stderr, "");
+        }
+        RunOutcome::Problems(diagnostics) => {
+            panic!("forced interpreter rejected comprehension forms example: {diagnostics:?}")
+        }
+    }
+}
+
+/// D-LOOP-GUARD1 / I9: the loop-values example keeps its guarded yielding loop
+/// byte-identical through AOT, default `jet run`, and forced interpretation.
+#[test]
+fn loop_values_example_matches_all_execution_tiers() {
+    let expected = include_str!("../examples/features/expected/basics/loop_values.out");
+    tir_support::assert_example_cli_tiers_agree("basics/loop_values", expected);
+
+    let path = format!(
+        "{}/examples/features/basics/loop_values.jet",
+        env!("CARGO_MANIFEST_DIR")
+    );
+    match dev_iteration(&path, false, true) {
+        RunOutcome::Ran {
+            exit_code,
+            stdout,
+            stderr,
+        } => {
+            assert_eq!(exit_code, 0);
+            assert_eq!(stdout, expected);
+            assert_eq!(stderr, "");
+        }
+        RunOutcome::Problems(diagnostics) => {
+            panic!("forced interpreter rejected loop_values example: {diagnostics:?}")
+        }
+    }
+}
+
 /// D-CONC-CHAN1 / D-CONC-CHAN2 / I9: plain-endpoint readiness tables, task
 /// waits, and the one Duration time rail agree on AOT, default `jet run`, and
 /// the forced interpreter against the executable example oracle.

@@ -6085,6 +6085,7 @@ fn swap_command_entry_point(
             alias: alias.clone(),
             alias_span: zero,
             span: zero,
+            item_spans: Vec::new(),
             is_pub: false,
             is_package_pub: false,
             inline_version: None,

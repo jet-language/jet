@@ -4382,6 +4382,7 @@ impl LowerCtx<'_, '_> {
     /// Return the local updated by the one pure integer reduction shape that
     /// can keep its list buffer borrowed for the whole native loop.
     fn direct_int_sum_target(var: &str, body: &[TStmt]) -> Option<String> {
+        let trace = std::env::var_os("JET_TRACE_CARD2058").is_some();
         let mut target_name = None;
         for stmt in body {
             let TStmt::Assign {
@@ -4394,15 +4395,63 @@ impl LowerCtx<'_, '_> {
                 if matches!(stmt, TStmt::SourceSpan(_) | TStmt::LineMarker(_)) {
                     continue;
                 }
+                if trace {
+                    let kind = match stmt {
+                        TStmt::Assign {
+                            place: TPlace::Expr(_),
+                            ..
+                        } => "assign_expr",
+                        TStmt::Assign {
+                            place: TPlace::Local(_),
+                            ..
+                        } => "assign_local_unmatched",
+                        TStmt::GcEdit { .. } => "gc_edit",
+                        TStmt::Let { .. } => "let",
+                        TStmt::ExprStmt(_) => "expr_stmt",
+                        TStmt::If { .. } => "if",
+                        TStmt::LineMarker(_) => "line_marker",
+                        TStmt::SourceSpan(_) => "source_span",
+                        _ => "other",
+                    };
+                    if let TStmt::Assign {
+                        place: TPlace::Local(target),
+                        op,
+                        value,
+                        ..
+                    } = stmt
+                    {
+                        eprintln!(
+                            "[card2058] direct target var={var} reject=non_assign kind={kind} op={op:?} target={target:?} value_ty={:?}",
+                            value.ty,
+                        );
+                    } else {
+                        eprintln!("[card2058] direct target var={var} reject=non_assign kind={kind}");
+                    }
+                }
                 return None;
             };
             if target.deref || !matches!(value.ty, Type::Int) {
+                if trace {
+                    eprintln!(
+                        "[card2058] direct target var={var} reject=target_or_value target={target:?} value_ty={:?}",
+                        value.ty,
+                    );
+                }
                 return None;
             }
             let TExprKind::Local(rhs) = &value.kind else {
+                if trace {
+                    eprintln!("[card2058] direct target var={var} reject=rhs_not_local");
+                }
                 return None;
             };
             if rhs.deref || rhs.name != var || target_name.is_some() {
+                if trace {
+                    eprintln!(
+                        "[card2058] direct target var={var} reject=rhs_shape rhs={rhs:?} already={}",
+                        target_name.is_some(),
+                    );
+                }
                 return None;
             }
             target_name = Some(target.rust_name());
@@ -6229,6 +6278,18 @@ impl LowerCtx<'_, '_> {
                         return in_own_frame(|| -> Result<(), String> {
                             return Err("jit for-in by-value stream unsupported".to_string());
                         });
+                    }
+                    if std::env::var_os("JET_TRACE_CARD2058").is_some() {
+                        eprintln!(
+                            "[card2058] for-in var={var} ty={:?} var2={} step={} method_none={} columnar={} by_value={} target={:?}",
+                            collection.ty,
+                            var2.is_none(),
+                            step.is_none(),
+                            method_kind.is_none(),
+                            !*columnar,
+                            !*by_value,
+                            Self::direct_int_sum_target(var, body),
+                        );
                     }
                     if var2.is_none()
                         && step.is_none()
@@ -18162,7 +18223,10 @@ impl LowerCtx<'_, '_> {
                     self.lower_expr(duration)
                 })
             }
-            TExprKind::SelectWait { builder } => {
+            TExprKind::SelectWait {
+                builder,
+                nonblocking,
+            } => {
                 in_own_frame(|| -> Result<Value, String> {
                     let (recvs, afters) = collect_select_arms_jit(builder);
                     let mut recv_vals = Vec::new();
@@ -18183,7 +18247,11 @@ impl LowerCtx<'_, '_> {
                     let recv_list = self.lower_i64_value_list(&recv_vals)?;
                     let after_list = self.lower_i64_value_list(&after_flat)?;
                     let host = if matches!(&expr.ty, Type::Tuple(_)) {
-                        self.host.conc.select_wait_tagged
+                        if *nonblocking {
+                            self.host.conc.select_try_wait_tagged
+                        } else {
+                            self.host.conc.select_wait_tagged
+                        }
                     } else {
                         self.host.conc.select_wait
                     };

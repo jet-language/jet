@@ -35,10 +35,12 @@ fn run() {
 
 const AUTHORITY_VALUE_SOURCE: &str = r#"
 fn run() {
-    abilities :: Abilities.workspace()
-    narrowed :: abilities.with("FS.Read")
-    released :: narrowed.without("FS.Read")
-    print("abilities")
+    #Abilities(scope: IO) {
+        abilities :: Abilities.workspace()
+        narrowed :: abilities.with("FS.Read")
+        released :: narrowed.without("FS.Read")
+        print("abilities")
+    }
 }
 "#;
 
@@ -101,7 +103,7 @@ fn run() {
 
 #[test]
 fn authority_parser_accepts_the_named_value() {
-    let (tokens, diagnostics) = jet::Lexer::lex("fn run() { value :: Abilities.workspace() }");
+    let (tokens, diagnostics) = jet::Lexer::lex("fn run() { #Abilities(scope: IO) { value :: Abilities.workspace() } }");
     assert!(diagnostics.is_empty(), "{diagnostics:#?}");
     jet::Parser::parse(&tokens).expect("parser must accept Abilities");
 }

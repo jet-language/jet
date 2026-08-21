@@ -6104,7 +6104,10 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
         | TExprKind::SelectAfter { .. } => {
             unreachable!("retired fluent select builder reached AOT emission")
         }
-        TExprKind::SelectWait { builder } => {
+        TExprKind::SelectWait {
+            builder,
+            nonblocking,
+        } => {
             let (recvs, _) = collect_select_arms(builder, cx);
             let recv_list = if recvs.is_empty() {
                 "&[]".to_string()
@@ -6117,10 +6120,12 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
             } else {
                 format!("vec![{}]", durations.join(", "))
             };
-            format!(
-                "{}jet_std::jet_select_wait_tagged({}, {})",
-                cx.root_prefix, recv_list, after_list
-            )
+            let door = if *nonblocking {
+                "jet_select_try_wait_tagged"
+            } else {
+                "jet_select_wait_tagged"
+            };
+            format!("{}jet_std::{door}({}, {})", cx.root_prefix, recv_list, after_list)
         }
         // c109 Phase 13: a fn-typed value. A bare fn-name value echoes the
         // already-rendered `Box::new(move |…| …) as <fn-type>` wrapper; a call through

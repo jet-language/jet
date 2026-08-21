@@ -661,6 +661,8 @@ pub fn ref_error(theme: &Theme, err: &RefError) {
         ),
         // E1231: a bare/path ref matched no workspace member.
         RefError::UnknownMember { query, suggestions } => {
+            // No typed edit: this is a rendered package-reference error, not a
+            // source diagnostic, and it carries no report file/span.
             let did_you_mean = if suggestions.is_empty() {
                 "check `workspace.jet` — that name isn't in the member index.".to_string()
             } else {

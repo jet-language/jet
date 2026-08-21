@@ -120,17 +120,48 @@ fn run() {
         [U8]{"{value:U16be}"} :> { print("aligned={value}") }
         else :> { print("aligned=miss") }
     }
-    non_power :: [U8]{0x01, 0x02, 0x03}
-    if non_power == {
+    non_power24 :: [U8]{0x01, 0x02, 0x03}
+    if non_power24 == {
         [U8]{"{be:U24be}"} :> { print("wide={be}") }
         else :> { print("wide=miss") }
+    }
+    if non_power24 == {
+        [U8]{"{le:U24le}"} :> { print("wide-le={le}") }
+        else :> { print("wide-le=miss") }
+    }
+    non_power40 :: [U8]{0x01, 0x02, 0x03, 0x04, 0x05}
+    if non_power40 == {
+        [U8]{"{be:U40be}"} :> { print("wide40={be}") }
+        else :> { print("wide40=miss") }
+    }
+    if non_power40 == {
+        [U8]{"{le:U40le}"} :> { print("wide40-le={le}") }
+        else :> { print("wide40-le=miss") }
+    }
+    non_power48 :: [U8]{0x01, 0x02, 0x03, 0x04, 0x05, 0x06}
+    if non_power48 == {
+        [U8]{"{be:U48be}"} :> { print("wide48={be}") }
+        else :> { print("wide48=miss") }
+    }
+    if non_power48 == {
+        [U8]{"{le:U48le}"} :> { print("wide48-le={le}") }
+        else :> { print("wide48-le=miss") }
+    }
+    non_power56 :: [U8]{0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07}
+    if non_power56 == {
+        [U8]{"{be:U56be}"} :> { print("wide56={be}") }
+        else :> { print("wide56=miss") }
+    }
+    if non_power56 == {
+        [U8]{"{le:U56le}"} :> { print("wide56-le={le}") }
+        else :> { print("wide56-le=miss") }
     }
 }
 "#;
     assert_tiers_agree(
         "tir_binary_pattern_width_classes",
         src,
-        "sub=10/11\naligned=258\nwide=66051\n",
+        "sub=10/11\naligned=258\nwide=66051\nwide-le=197121\nwide40=4328719365\nwide40-le=21542142465\nwide48=1108152157446\nwide48-le=6618611909121\nwide56=283686952306183\nwide56-le=1976943448883713\n",
     );
 }
 

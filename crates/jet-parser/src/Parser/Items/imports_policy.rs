@@ -199,6 +199,7 @@ impl<'a> Parser<'a> {
                         alias,
                         alias_span,
                         span: Span::new(start.start, end),
+                        item_spans: Vec::new(),
                         is_pub: false,
                         is_package_pub: false,
                         inline_version: None,
@@ -237,6 +238,7 @@ impl<'a> Parser<'a> {
                                 alias: item.clone(),
                                 alias_span: item_span,
                                 span: Span::new(start.start, end),
+                                item_spans: vec![item_span],
                                 is_pub: false,
                                 is_package_pub: false,
                                 inline_version: None,
@@ -273,6 +275,7 @@ impl<'a> Parser<'a> {
                             alias,
                             alias_span,
                             span: Span::new(start.start, end),
+                            item_spans: Vec::new(),
                             is_pub: false,
                             is_package_pub: false,
                             inline_version,
@@ -387,6 +390,7 @@ impl<'a> Parser<'a> {
                 alias,
                 alias_span,
                 span: Span::new(start.start, end),
+                item_spans: Vec::new(),
                 is_pub: false,
                 is_package_pub: false,
                 // A dotted module path (`use core.files;`) never takes U11's `#version`
@@ -415,14 +419,17 @@ impl<'a> Parser<'a> {
                 ));
             }
             let mut items = Vec::new();
+            let mut item_spans = Vec::new();
             while !matches!(self.peek().kind, TokKind::RBracket | TokKind::Eof) {
-                let (first, _) = self.expect_ident("inside `use prefix.[…]`")?;
+                let (first, first_span) = self.expect_ident("inside `use prefix.[…]`")?;
                 let mut item = first;
+                let mut item_end = first_span.end;
                 while matches!(self.peek().kind, TokKind::Dot) {
                     self.bump();
-                    let (part, _) = self.expect_ident("after `.` in an import list")?;
+                    let (part, part_span) = self.expect_ident("after `.` in an import list")?;
                     item.push('.');
                     item.push_str(&part);
+                    item_end = part_span.end;
                 }
                 let alias = if matches!(
                     &self.peek().kind,
@@ -435,6 +442,7 @@ impl<'a> Parser<'a> {
                     None
                 };
                 items.push((item, alias));
+                item_spans.push(Span::new(first_span.start, item_end));
                 if matches!(self.peek().kind, TokKind::Comma) {
                     self.bump();
                     if matches!(self.peek().kind, TokKind::RBracket | TokKind::Eof) {
@@ -466,6 +474,7 @@ impl<'a> Parser<'a> {
                 alias: module_alias,
                 alias_span: module_alias_span,
                 span: Span::new(start.start, end),
+                item_spans,
                 is_pub: false,
                 is_package_pub: false,
                 inline_version: None,

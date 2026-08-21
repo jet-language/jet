@@ -300,6 +300,7 @@ fn ui_snapshots() {
         });
         let cli_e0043 = src.lines().any(|line| line.trim() == "// @cli_e0043");
         let cli_e1219 = src.lines().any(|line| line.trim() == "// @cli_e1219");
+        let cli_e2101 = src.lines().any(|line| line.trim() == "// @cli_e2101");
         let typed_settings_cli = src
             .lines()
             .any(|line| line.trim() == "// @typed_settings_cli");
@@ -351,6 +352,8 @@ fn ui_snapshots() {
             run_cli_e0043_snapshot()
         } else if cli_e1219 {
             run_cli_e1219_snapshot(&file_arg)
+        } else if cli_e2101 {
+            run_cli_e2101_snapshot()
         } else if jetpack_hangar_digest_mismatch {
             run_jetpack_hangar_digest_mismatch_snapshot()
         } else if jetpack_retired_environment_flag {
@@ -633,6 +636,18 @@ fn run_cli_e1219_snapshot(file: &str) -> String {
     assert!(!output.status.success(), "E1219 command must fail");
     let mut rendered = String::from_utf8(output.stdout).expect("E1219 stdout is UTF-8");
     rendered.push_str(&String::from_utf8(output.stderr).expect("E1219 stderr is UTF-8"));
+    rendered
+}
+
+fn run_cli_e2101_snapshot() -> String {
+    let output = Command::new(env!("CARGO_BIN_EXE_jet"))
+        .args(["bench", "--color=never"])
+        .env("NO_COLOR", "1")
+        .output()
+        .expect("run E2101 retired benchmark command fixture");
+    assert!(!output.status.success(), "retired benchmark command must fail");
+    let mut rendered = String::from_utf8(output.stdout).expect("E2101 stdout is UTF-8");
+    rendered.push_str(&String::from_utf8(output.stderr).expect("E2101 stderr is UTF-8"));
     rendered
 }
 

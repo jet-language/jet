@@ -668,7 +668,7 @@ fn jit_select_arm_counts_lowered(bundle: &ProgramBundle) -> Option<(usize, usize
         {
             for inner in body {
                 if let TStmt::Let { init, .. } = inner {
-                    if let TExprKind::SelectWait { builder } = &init.kind {
+                    if let TExprKind::SelectWait { builder, .. } = &init.kind {
                         let (r, a) = collect_select_arms_jit(builder);
                         let _ = &names;
                         return Some((r.len(), a.len()));

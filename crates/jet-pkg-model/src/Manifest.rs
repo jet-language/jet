@@ -558,7 +558,7 @@ fn e1221(_file: &str, detail: &str) -> Diagnostic {
         ),
         detail.to_string(),
         format!(
-            "`{}: .{{ holds: {{ allow: […], deny: […] }}, grants: {{ \"dep\": […] }}, trust: {{ … }}, providers: {{ … }} }}` is the one package authority block and its rights must use the closed vocabulary",
+            "`{}: .{{ holds: {{ allow: […], deny: […] }}, grants: {{ \"dep\": […] }}, trust: {{ … }}, providers: {{ … }} }}` is the one package authority block; rights use the thirteen grantable roots, `FFI` and its language leaves (`FFI.Go`, `FFI.Py`, `FFI.Octave`), plus deny-only `Panic`/`Mem`",
             Syntax::MANIFEST_BLOCK_AUTHORITY,
         ),
         None,

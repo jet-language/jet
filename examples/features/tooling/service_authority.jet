@@ -2,6 +2,8 @@
 use core.service as service
 use core.testing as testing
 
+fn orders_worker() {}
+
 fn receipt_id(receipt: ServiceReceipt) String {
     if receipt == {
         .Enqueued(id) :> { return id }
@@ -31,7 +33,7 @@ fn run() {
     tree.set_delivery(service.delivery_durable()) ?? panic("delivery")
     state :: service.state_store(store) ?? panic("state store")
     tree.set_state_event_log(state, "authority-events", 1, "reversible") ?? panic("state")
-    endpoint :: tree.worker("orders", capacity: 2) ?? panic("worker")
+    endpoint :: tree.worker("orders", orders_worker, capacity: 2) ?? panic("worker")
     tree.start() ?? panic("start")
 
     first :: tree.send_durable(endpoint, "order", key: "order-1") ?? panic("first")

@@ -45,6 +45,7 @@ pub struct WebArtifacts {
 const DOM_RUNTIME: &str = include_str!("../Prelude/DomRuntime.js");
 const JS_EXECUTION_PRELUDE: &str = concat!(
     include_str!("../Prelude/Core/RuntimeStop.js"),
+    include_str!("../Prelude/Core/Keep.js"),
     include_str!("../Prelude/Core/Task.js"),
     "\n",
     include_str!("../Prelude/Core/Option.js"),
@@ -873,6 +874,14 @@ fn web_wasm_expr_supported(
             args,
             ..
         } if module == "core.reflect" && method == "of" && args.len() == 1 => {
+            web_wasm_expr_supported(&args[0], bundle, file_prefix, reconstructions)
+        }
+        TIR::TExprKind::CoreCall {
+            module,
+            method,
+            args,
+            ..
+        } if module == "core.prelude" && method == "keep" && args.len() == 1 => {
             web_wasm_expr_supported(&args[0], bundle, file_prefix, reconstructions)
         }
         TIR::TExprKind::CoreCall { module, method, args, .. }
@@ -5248,6 +5257,17 @@ fn wasm_emit_expr(
             method,
             args,
             ..
+        } if module == "core.prelude" && method == "keep" && args.len() == 1 => {
+            format!(
+                "jet_keep({})",
+                wasm_emit_expr(&args[0], funcs, file_prefix, reconstructions)?
+            )
+        }
+        TIR::TExprKind::CoreCall {
+            module,
+            method,
+            args,
+            ..
         } if module == "core.time" && method == "instant" && args.is_empty() => {
             "jet_time_monotonic_now_ns()".to_string()
         }
@@ -8283,6 +8303,12 @@ fn tir_core_call(
         }
         return Ok(format!("jetDom.print({})", a.join(", ")));
     }
+    if module == "prelude" && method == "keep" {
+        if a.len() != 1 {
+            return Err(());
+        }
+        return Ok(format!("jet_keep({})", a[0]));
+    }
     let required = web_core_arity(module, method);
     if let Some(required) = required {
         if a.len() != required {
@@ -8348,6 +8374,9 @@ fn tir_core_call(
 
 fn web_core_arity(module: &str, method: &str) -> Option<usize> {
     let module = module.strip_prefix("core.").unwrap_or(module);
+    if module == "prelude" && method == "keep" {
+        return Some(1);
+    }
     let storage = module.ends_with("storage.local") || module.ends_with("storage.session");
     match (storage, method) {
         (true, "get" | "remove") => Some(1),
@@ -8420,6 +8449,8 @@ const WASM_ARITH_PRELUDE: &str = concat!(
     "    unsafe { jet_web_print(text.as_ptr() as u32, text.len() as u32); }\n",
     "}\n\n",
     include_str!("../Prelude/Core/Measurement.rs"),
+    "\n",
+    include_str!("../Prelude/Core/Keep.rs"),
     "\n",
     "#[derive(Clone, Copy, Debug, PartialEq)]\n\
      struct JetMeasurement { value: f64, uncertainty: f64 }\n\

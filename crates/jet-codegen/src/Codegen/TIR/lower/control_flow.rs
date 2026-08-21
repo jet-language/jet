@@ -1134,6 +1134,7 @@ fn lower_readiness_switch<'a>(
                     ty: result_ty.clone(),
                     kind: TExprKind::SelectWait {
                         builder: Box::new(builder),
+                        nonblocking: else_body.is_some(),
                     },
                 },
                 gc_promotion: None,

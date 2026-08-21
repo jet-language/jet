@@ -137,6 +137,8 @@ pub(crate) fn unknown_core_item(module: &str, name: &str, span: Span) -> Diagnos
 /// E1004 for a name that lives one level down the Core tree: either
 /// `{module}.{name}` is itself a submodule, or `name` is an item of one.
 fn submodule_path_hint(module: &str, name: &str, span: Span) -> Option<Diagnostic> {
+    // No typed edit: this hint changes the import path shape (and may require
+    // adding a member), rather than replacing one token with one candidate.
     const WHY: &str = "Core is one nested tree, so a name under this module can belong to a submodule instead of the module itself";
     let nested = format!("{module}.{name}");
     if Syntax::is_known_core_module(&nested) {

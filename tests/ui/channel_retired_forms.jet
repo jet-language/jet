@@ -1,0 +1,13 @@
+use core.tasks as tasks
+
+fn takes_channel(value: Channel<Int>) {}
+
+fn run() {
+    (sender, receiver) :: channel<Int>()
+    _ :: tasks.channel<Int>()
+    task.group g {
+        _ :: g.select()
+        _ :: g.select().read(receiver)
+    }
+    sender.close()
+}

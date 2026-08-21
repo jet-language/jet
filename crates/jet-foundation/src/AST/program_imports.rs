@@ -77,6 +77,10 @@ pub struct ImportDecl {
     pub alias: String,
     pub alias_span: Span,
     pub span: Span,
+    /// Source span for each member in an unqualified import list. Other import
+    /// forms leave this empty; keeping it beside `items` preserves the lossless
+    /// member shape without changing the semantic `(name, alias)` pairs.
+    pub item_spans: Vec<Span>,
     /// D-MOD3/4: true for `pub use alias.Item` re-exports.
     pub is_pub: bool,
     /// D-PUBPKG1=A: true for `pub(package) use …` — package-scoped re-export.
@@ -230,6 +234,7 @@ pub struct ImportBinding<'a> {
     /// An explicit member alias, when the source supplied one.
     pub alias: Option<&'a str>,
     pub module_alias_span: Span,
+    pub item_span: Option<Span>,
     pub items_span: Option<Span>,
     pub import_span: Span,
     pub is_pub: bool,
@@ -315,6 +320,7 @@ impl ImportDecl {
                 local: self.import_alias(),
                 alias: (!self.alias.is_empty()).then_some(self.alias.as_str()),
                 module_alias_span: *path_span,
+                item_span: None,
                 items_span: None,
                 import_span: self.span,
                 is_pub: self.is_pub,
@@ -328,12 +334,14 @@ impl ImportDecl {
                 ..
             } => items
                 .iter()
-                .map(|(original, alias)| ImportBinding {
+                .enumerate()
+                .map(|(index, (original, alias))| ImportBinding {
                     module_alias,
                     original: Some(original),
                     local: member_import_local(original, alias.as_deref()),
                     alias: alias.as_deref(),
                     module_alias_span: *module_alias_span,
+                    item_span: self.item_spans.get(index).copied(),
                     items_span: Some(*items_span),
                     import_span: self.span,
                     is_pub: self.is_pub,

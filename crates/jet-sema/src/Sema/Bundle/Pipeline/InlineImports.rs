@@ -231,7 +231,7 @@ pub(super) fn resolve_inline_module_imports(
                                         diags.push(crate::Sema::CheckerCoreLib::unknown_core_item(
                                             &core_prefix,
                                             &orig,
-                                            module_alias_span,
+                                            binding.item_span.unwrap_or(module_alias_span),
                                         ));
                                     } else {
                                         diags.push(crate::Sema::CheckerCoreLib::unknown_core_module(

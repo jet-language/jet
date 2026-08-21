@@ -1244,7 +1244,7 @@ fn eval_expr_children(expr: &TExpr) -> Vec<&TExpr> {
         | TExprKind::TaskGroupAll { tasks: arg }
         | TExprKind::TaskGroupRace { tasks: arg }
         | TExprKind::TaskGroupAny { tasks: arg }
-        | TExprKind::SelectWait { builder: arg } => vec![arg.as_ref()],
+        | TExprKind::SelectWait { builder: arg, .. } => vec![arg.as_ref()],
         TExprKind::AmbientInput { prompt } => prompt
             .as_ref()
             .map(|expr| vec![expr.as_ref()])
@@ -9519,10 +9519,17 @@ impl<'a> EvalCtx<'a> {
                     .unwrap_or(CtValue::Unit);
                 self.eval_select_after(builder, duration_ns, value)
             }
-            TExprKind::SelectWait { builder } => {
+            TExprKind::SelectWait {
+                builder,
+                nonblocking,
+            } => {
                 let builder = self.eval_expr_child(builder, scope)?;
                 if matches!(&expr.ty, Type::Tuple(_)) {
-                    self.eval_select_wait_tagged(builder)
+                    if *nonblocking {
+                        self.eval_select_try_wait_tagged(builder)
+                    } else {
+                        self.eval_select_wait_tagged(builder)
+                    }
                 } else {
                     self.eval_select_wait(builder)
                 }

@@ -2612,6 +2612,21 @@ impl<'a> EvalCtx<'a> {
         &self,
         builder: CtValue,
     ) -> Result<CtValue, Diagnostic> {
+        self.eval_select_wait_tagged_mode(builder, false)
+    }
+
+    pub(super) fn eval_select_try_wait_tagged(
+        &self,
+        builder: CtValue,
+    ) -> Result<CtValue, Diagnostic> {
+        self.eval_select_wait_tagged_mode(builder, true)
+    }
+
+    fn eval_select_wait_tagged_mode(
+        &self,
+        builder: CtValue,
+        nonblocking: bool,
+    ) -> Result<CtValue, Diagnostic> {
         let (receiver_ids, after_values) = Self::select_builder_parts(&builder)
             .ok_or_else(|| unsupported("select builder", self.span()))?;
         if receiver_ids.is_empty() && after_values.is_empty() {
@@ -2649,21 +2664,31 @@ impl<'a> EvalCtx<'a> {
         let _deadline = self
             .context_deadline
             .map(crate::scheduler::jet_ctx_push_deadline);
-        let outcome = self.scheduler_wait("select wait", || {
-            crate::scheduler::jet_scheduler_select(recvs, after_ms)
-        })?;
+        let outcome = if nonblocking {
+            crate::scheduler::jet_scheduler_try_select(recvs, after_ms)
+        } else {
+            Some(self.scheduler_wait("select wait", || {
+                crate::scheduler::jet_scheduler_select(recvs, after_ms)
+            })?)
+        };
         drop(_deadline);
-        self.task_wait_cancel_check()?;
+        if !nonblocking {
+            self.task_wait_cancel_check()?;
+        }
         let (arm, value) = match outcome {
-            crate::scheduler::JetSelectOutcome::Recv { arm, value } => {
+            Some(crate::scheduler::JetSelectOutcome::Recv { arm, value }) => {
                 (arm as i64, CtValue::Present(Box::new(value)))
             }
-            crate::scheduler::JetSelectOutcome::After { arm } => {
+            Some(crate::scheduler::JetSelectOutcome::After { arm }) => {
                 (receiver_ids.len() as i64 + arm as i64, CtValue::absent(Type::Named("Unit".to_string())))
             }
-            crate::scheduler::JetSelectOutcome::Closed => {
+            Some(crate::scheduler::JetSelectOutcome::Closed) | None if nonblocking => {
+                (-1, CtValue::absent(Type::Named("Unit".to_string())))
+            }
+            Some(crate::scheduler::JetSelectOutcome::Closed) => {
                 return Err(unsupported("select closed", self.span()));
             }
+            None => unreachable!("blocking select must return an outcome"),
         };
         Ok(CtValue::Struct {
             type_name: "tuple".to_string(),
@@ -4568,6 +4593,7 @@ fn run_named_func_on_program_edition(
         )
     })?;
     let core_imports = HashMap::new();
+    let task_control = crate::scheduler::jet_scheduler_current_task_control();
     let shared_sink = Arc::new(Mutex::new(std::mem::take(sink)));
     let mut ctx = EvalCtx {
         funcs,
@@ -4615,8 +4641,12 @@ fn run_named_func_on_program_edition(
         shared_transactions: Vec::new(),
         spawn_lambdas: &program.spawn_lambdas,
         task_sender: None,
-        task_cancel: None,
-        task_paused: None,
+        task_cancel: task_control
+            .as_ref()
+            .map(|control| control.cancelled.clone()),
+        task_paused: task_control
+            .as_ref()
+            .map(|control| control.paused.clone()),
         context_deadline: None,
         shield_depth: 0,
         yield_consumer: None,

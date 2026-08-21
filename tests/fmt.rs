@@ -1459,7 +1459,7 @@ fn fmt_concurrency_spellings_that_parse_today() {
     joined :: handle.join()
     cancelled :: .Cancelled
     deadline :: .DeadlineBlown
-    loop value, rx {
+    loop value, rx :> {
         tx.send(value)
     }
     return .Panicked("boom")

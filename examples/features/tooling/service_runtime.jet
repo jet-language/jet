@@ -2,6 +2,9 @@
 use core.service as service
 use core.testing as testing
 
+fn worker_a() {}
+fn worker_b() {}
+
 fn run() {
     tree := service.tree("app")
     tree.set_delivery(service.delivery_durable()) ?? panic("delivery")
@@ -9,8 +12,8 @@ fn run() {
     state_store :: Path.from(temp).join("state.log").to_string()
     store :: service.state_store(state_store) ?? panic("state store")
     tree.set_state_event_log(store, "app-events", 1, "reversible") ?? panic("state")
-    a :: tree.worker("a", capacity: 2) ?? panic("a")
-    b :: tree.worker("b", capacity: 2) ?? panic("b")
+    a :: tree.worker("a", worker_a, capacity: 2) ?? panic("a")
+    b :: tree.worker("b", worker_b, capacity: 2) ?? panic("b")
     tree.set_restart(service.restart_rest_for_one()) ?? panic("restart")
     tree.start() ?? panic("start")
 

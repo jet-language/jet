@@ -995,7 +995,7 @@ impl<'a> Checker<'a> {
             // infers its argument and returns that exact type; no engine gets
             // a second signature or value policy.
             if module == "core.prelude" && name == "keep" {
-                if !matches!(args.len(), 1 | 2) {
+                if args.len() != 1 {
                     self.diags.push(wrong_core_arity(name, 1, args.len(), span));
                 }
                 let value_type = args

@@ -512,6 +512,24 @@
         }
     }
 
+    /// D-CONC-CHAN2=D: probe a readiness table with an `else` arm. `-1` means
+    /// that no receive or timer arm is ready, including a closed-only table.
+    pub fn jet_select_try_wait_tagged<T: Send + 'static>(
+        recvs: &[&JetReceiver<T>],
+        after_ns: Vec<i64>,
+    ) -> (i64, Option<T>) {
+        let inners: Vec<_> = recvs.iter().map(|receiver| receiver.inner.select_inner()).collect();
+        let after_ms = after_ns
+            .into_iter()
+            .map(|ns| super::jet_task_delay_ms_defaulted(super::jet_std_time_duration_to_millis(ns)))
+            .collect();
+        match super::jet_scheduler_try_select(inners, after_ms) {
+            Some(super::JetSelectOutcome::Recv { arm, value }) => (arm as i64, Some(value)),
+            Some(super::JetSelectOutcome::After { arm }) => ((recvs.len() + arm) as i64, None),
+            Some(super::JetSelectOutcome::Closed) | None => (-1, None),
+        }
+    }
+
     /// D-TUPLE-DESTRUCT1: `channel<T>()` — mirrors Rust's `mpsc::channel()`:
     /// returns the `(Sender<T>, Receiver<T>)` pair directly (no combined "Channel"
     /// handle, and no `.sender()` method — a second sender is `tx.clone()`).

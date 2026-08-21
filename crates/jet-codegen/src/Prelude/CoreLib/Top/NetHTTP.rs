@@ -798,6 +798,14 @@ fn jet_net_error_surface_parts(error: JetNetError) -> JetNetErrorSurfaceParts {
 }
 
 fn jet_net_tcp_stream(inner: std::net::TcpStream) -> Result<JetTCPStream, JetNetError> {
+    // WASI Preview 2 exposes blocking std::net operations through
+    // wasi:sockets. It has no native Jet scheduler/poller to register with;
+    // keep the shared Prelude contract and let the socket adapter block.
+    #[cfg(all(target_os = "wasi", target_env = "p2", target_arch = "wasm32"))]
+    inner
+        .set_nonblocking(false)
+        .map_err(|error| jet_net_io_error("tcp socket setup", None, error))?;
+    #[cfg(not(all(target_os = "wasi", target_env = "p2", target_arch = "wasm32")))]
     inner
         .set_nonblocking(true)
         .map_err(|error| jet_net_io_error("tcp scheduler registration", None, error))?;
@@ -870,22 +878,39 @@ fn jet_net_wait_for_connect(
 }
 
 fn jet_net_connect_addr_worker(addr: std::net::SocketAddr) -> Result<JetTCPStream, JetNetError> {
-    let address = addr.to_string();
     if matches!(jet_deadline_remaining_ms(), Some(ms) if ms <= 0) {
         return Err(jet_net_deadline_timeout("tcp connect"));
     }
     let timeout = jet_deadline_remaining_ms().map(|ms| {
         std::time::Duration::from_millis(ms.max(1) as u64)
     });
-    let (sender, receiver) = std::sync::mpsc::sync_channel(1);
-    std::thread::spawn(move || {
+
+    #[cfg(all(target_os = "wasi", target_env = "p2", target_arch = "wasm32"))]
+    {
+        let address = addr.to_string();
         let result = match timeout {
             Some(timeout) => std::net::TcpStream::connect_timeout(&addr, timeout),
             None => std::net::TcpStream::connect(addr),
         };
-        let _ = sender.send(result);
-    });
-    jet_net_wait_for_connect(receiver, Some(address))
+        return result
+            .map_err(|error| jet_net_io_error("tcp connect", Some(address), error))
+            .and_then(jet_net_tcp_stream);
+    }
+
+    #[cfg(not(all(target_os = "wasi", target_env = "p2", target_arch = "wasm32")))]
+    let address = addr.to_string();
+    #[cfg(not(all(target_os = "wasi", target_env = "p2", target_arch = "wasm32")))]
+    {
+        let (sender, receiver) = std::sync::mpsc::sync_channel(1);
+        std::thread::spawn(move || {
+            let result = match timeout {
+                Some(timeout) => std::net::TcpStream::connect_timeout(&addr, timeout),
+                None => std::net::TcpStream::connect(addr),
+            };
+            let _ = sender.send(result);
+        });
+        jet_net_wait_for_connect(receiver, Some(address))
+    }
 }
 
 fn jet_net_scheduler_wait(
@@ -1620,6 +1645,7 @@ fn jet_net_socket_to_string(addr: &JetSocketAddr) -> String {
 fn jet_net_tcp_listen_addr(addr: &JetSocketAddr) -> Result<JetTCPListener, JetNetError> {
     let inner = std::net::TcpListener::bind(addr.inner)
         .map_err(|e| jet_net_io_error("tcp listen", Some(addr.inner.to_string()), e))?;
+    #[cfg(not(all(target_os = "wasi", target_env = "p2", target_arch = "wasm32")))]
     inner.set_nonblocking(true)
         .map_err(|e| jet_net_io_error("tcp listen", Some(addr.inner.to_string()), e))?;
     Ok(JetTCPListener { inner })
@@ -1745,12 +1771,48 @@ fn jet_net_tcp_peer_socket_addr(stream: &JetTCPStream) -> Result<JetSocketAddr, 
 fn jet_net_tcp_listen(addr: &String) -> Result<JetTCPListener, JetNetError> {
     let inner = std::net::TcpListener::bind(addr.as_str())
         .map_err(|e| jet_net_io_error("tcp listen", Some(addr.clone()), e))?;
+    #[cfg(not(all(target_os = "wasi", target_env = "p2", target_arch = "wasm32")))]
     inner.set_nonblocking(true)
         .map_err(|e| jet_net_io_error("tcp listen", Some(addr.clone()), e))?;
     Ok(JetTCPListener { inner })
 }
 
 fn jet_net_tcp_accept(listener: &JetTCPListener) -> Result<JetTCPStream, JetNetError> {
+    #[cfg(all(target_os = "wasi", target_env = "p2", target_arch = "wasm32"))]
+    {
+        listener
+            .inner
+            .set_nonblocking(true)
+            .map_err(|error| jet_net_io_error("tcp accept setup", None, error))?;
+        loop {
+            match listener.inner.accept() {
+                Ok((stream, _)) => return jet_net_tcp_stream(stream),
+                Err(error)
+                    if matches!(
+                        error.kind(),
+                        std::io::ErrorKind::WouldBlock | std::io::ErrorKind::Interrupted
+                    ) =>
+                {
+                    if matches!(jet_deadline_remaining_ms(), Some(ms) if ms <= 0) {
+                        return Err(jet_net_deadline_timeout("tcp accept"));
+                    }
+                    if jet_scheduler_wait_point_cancelled() {
+                        return Err(JetNetError::Cancelled(jet_net_detail(
+                            "tcp accept",
+                            None,
+                            None,
+                            "tcp accept cancelled".to_string(),
+                            None,
+                        )));
+                    }
+                    std::thread::sleep(std::time::Duration::from_millis(2));
+                }
+                Err(error) => return Err(jet_net_io_error("tcp accept", None, error)),
+            }
+        }
+    }
+
+    #[cfg(not(all(target_os = "wasi", target_env = "p2", target_arch = "wasm32")))]
     loop {
         match listener.inner.accept() {
             Ok((stream, _)) => return jet_net_tcp_stream(stream),
@@ -1772,13 +1834,23 @@ fn jet_net_tcp_accept_deadline(listener: &JetTCPListener, deadline: &jet_std::Du
 }
 
 fn jet_net_tcp_connect(addr: &String) -> Result<JetTCPStream, JetNetError> {
-    let address = addr.clone();
-    let worker_address = address.clone();
-    let (sender, receiver) = std::sync::mpsc::sync_channel(1);
-    std::thread::spawn(move || {
-        let _ = sender.send(std::net::TcpStream::connect(worker_address.as_str()));
-    });
-    jet_net_wait_for_connect(receiver, Some(address))
+    #[cfg(all(target_os = "wasi", target_env = "p2", target_arch = "wasm32"))]
+    {
+        return std::net::TcpStream::connect(addr.as_str())
+            .map_err(|error| jet_net_io_error("tcp connect", Some(addr.clone()), error))
+            .and_then(jet_net_tcp_stream);
+    }
+
+    #[cfg(not(all(target_os = "wasi", target_env = "p2", target_arch = "wasm32")))]
+    {
+        let address = addr.clone();
+        let worker_address = address.clone();
+        let (sender, receiver) = std::sync::mpsc::sync_channel(1);
+        std::thread::spawn(move || {
+            let _ = sender.send(std::net::TcpStream::connect(worker_address.as_str()));
+        });
+        jet_net_wait_for_connect(receiver, Some(address))
+    }
 }
 
 fn jet_net_tcp_read(stream: &mut JetTCPStream) -> Result<String, JetNetError> {
@@ -2161,6 +2233,7 @@ fn jet_net_getservbyport(port: i64) -> Result<String, JetNetError> {
 fn jet_net_udp_bind(addr: &String) -> Result<JetUDPSocket, JetNetError> {
     let inner = std::net::UdpSocket::bind(addr.as_str())
         .map_err(|e| jet_net_io_error("udp bind", Some(addr.clone()), e))?;
+    #[cfg(not(all(target_os = "wasi", target_env = "p2", target_arch = "wasm32")))]
     inner.set_nonblocking(true)
         .map_err(|e| jet_net_io_error("udp bind", Some(addr.clone()), e))?;
     let inner = std::sync::Arc::new(inner);
@@ -2176,6 +2249,7 @@ fn jet_net_udp_bind(addr: &String) -> Result<JetUDPSocket, JetNetError> {
 fn jet_net_udp_bind_addr(addr: &JetSocketAddr) -> Result<JetUDPSocket, JetNetError> {
     let inner = std::net::UdpSocket::bind(addr.inner)
         .map_err(|e| jet_net_io_error("udp bind", Some(addr.inner.to_string()), e))?;
+    #[cfg(not(all(target_os = "wasi", target_env = "p2", target_arch = "wasm32")))]
     inner.set_nonblocking(true)
         .map_err(|e| jet_net_io_error("udp bind", Some(addr.inner.to_string()), e))?;
     let inner = std::sync::Arc::new(inner);
@@ -2186,6 +2260,27 @@ fn jet_net_udp_bind_addr(addr: &JetSocketAddr) -> Result<JetUDPSocket, JetNetErr
         #[cfg(unix)]
         scheduler: jet_net_scheduler_handle(inner.as_ref()),
     })
+}
+
+#[cfg(all(target_os = "wasi", target_env = "p2", target_arch = "wasm32"))]
+fn jet_net_udp_apply_timeout(
+    socket: &JetUDPSocket,
+    read: bool,
+    operation: &str,
+) -> Result<(), JetNetError> {
+    let Some(remaining) = jet_deadline_remaining_ms() else {
+        return Ok(());
+    };
+    if remaining <= 0 {
+        return Err(jet_net_deadline_timeout(operation));
+    }
+    let timeout = Some(std::time::Duration::from_millis(remaining as u64));
+    let result = if read {
+        socket.inner.set_read_timeout(timeout)
+    } else {
+        socket.inner.set_write_timeout(timeout)
+    };
+    result.map_err(|error| jet_net_io_error(&format!("{} timeout setup", operation), None, error))
 }
 
 fn jet_net_udp_open(socket: &JetUDPSocket, operation: &str) -> Result<(), JetNetError> {
@@ -2223,6 +2318,8 @@ fn jet_net_udp_recv_from(socket: &JetUDPSocket, limit: i64) -> Result<JetUDPPack
         return Err(JetNetError::InvalidInput(jet_net_detail("udp receive", None, None, "udp receive limit must be positive".to_string(), None)));
     }
     let _deadline = jet_net_operation_deadline(*socket.timeout_ms.lock().unwrap());
+    #[cfg(all(target_os = "wasi", target_env = "p2", target_arch = "wasm32"))]
+    jet_net_udp_apply_timeout(socket, true, "udp receive")?;
     let cap = std::cmp::min(limit as usize, 1 << 20);
     let mut buf = vec![0u8; 65535];
     loop {
@@ -2268,6 +2365,8 @@ fn jet_net_udp_send_slice(
 ) -> Result<i64, JetNetError> {
     jet_net_udp_open(socket, "udp send")?;
     let _deadline = jet_net_operation_deadline(*socket.timeout_ms.lock().unwrap());
+    #[cfg(all(target_os = "wasi", target_env = "p2", target_arch = "wasm32"))]
+    jet_net_udp_apply_timeout(socket, false, "udp send")?;
     loop {
         match socket.inner.send_to(data, addr.inner) {
             Ok(n) if n == data.len() => return Ok(n as i64),
@@ -2291,6 +2390,8 @@ fn jet_net_udp_receive(socket: &JetUDPSocket, limit: i64) -> Result<JetUDPPacket
         )));
     }
     let _deadline = jet_net_operation_deadline(*socket.timeout_ms.lock().unwrap());
+    #[cfg(all(target_os = "wasi", target_env = "p2", target_arch = "wasm32"))]
+    jet_net_udp_apply_timeout(socket, true, "udp receive")?;
     let cap = std::cmp::min(limit as usize, 65535);
     let mut bytes = vec![0u8; 65535];
     let (original_len, addr) = loop {

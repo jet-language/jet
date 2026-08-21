@@ -398,6 +398,24 @@ fn registered_config_and_cli_snapshots_keep_row_identity() {
     );
 }
 
+#[test]
+fn retired_bench_command_snapshot_keeps_registered_teaching_code() {
+    let row = jet_foundation::Registry::diagnostic("E2101")
+        .expect("retired command route must stay registered");
+    assert_eq!(
+        row.status,
+        jet_foundation::Registry::DiagnosticStatus::Retired,
+        "E2101 must remain a retired teaching diagnostic"
+    );
+    let snapshot = read(&root().join("tests/ui/bench_command_retired_e2101.stderr"));
+    assert!(snapshot.contains("Error [E2101]"), "snapshot lost E2101: {snapshot}");
+    assert!(snapshot.contains("`bench`"), "snapshot lost retired spelling: {snapshot}");
+    assert!(
+        snapshot.contains("jet test --measure"),
+        "snapshot lost canonical fix: {snapshot}"
+    );
+}
+
 /// Whether a code is marked retired in the typed row source.
 fn is_retired(code: &str, _diag_md: &str) -> bool {
     jet_foundation::Registry::diagnostic(code).is_some_and(|row| {

@@ -619,6 +619,10 @@ pub fn jet_scheduler_set_task_control(c: Option<Arc<JetTaskControl>>) {
     TASK_CONTROL.with(|t| *t.borrow_mut() = c);
 }
 
+pub fn jet_scheduler_current_task_control() -> Option<Arc<JetTaskControl>> {
+    current_task_control()
+}
+
 fn current_task_control() -> Option<Arc<JetTaskControl>> {
     TASK_CONTROL.with(|t| t.borrow().clone())
 }
@@ -2515,6 +2519,36 @@ pub(crate) fn jet_scheduler_select<T: Send>(
     }
 }
 
+/// D-CONC-CHAN2=D: probe one readiness table without parking. `None` means no
+/// receive or timer arm is ready yet; `Closed` remains explicit so a caller
+/// with an `else` arm can treat a closed endpoint as non-ready without changing
+/// the blocking select's close and cancellation behavior.
+pub(crate) fn jet_scheduler_try_select<T: Send>(
+    recvs: Vec<Arc<ChannelInner<T>>>,
+    after_ms: Vec<u64>,
+) -> Option<JetSelectOutcome<T>> {
+    assert!(
+        !recvs.is_empty() || !after_ms.is_empty(),
+        "select: no arms registered"
+    );
+
+    for (i, ch) in recvs.iter().enumerate() {
+        if let Some(v) = ch.try_pop() {
+            return Some(JetSelectOutcome::Recv { arm: i, value: v });
+        }
+    }
+    if let Some((i, _)) = after_ms.iter().enumerate().find(|(_, ms)| **ms == 0) {
+        return Some(JetSelectOutcome::After { arm: i });
+    }
+    if after_ms.is_empty()
+        && !recvs.is_empty()
+        && recvs.iter().all(|ch| ch.is_closed_and_empty())
+    {
+        return Some(JetSelectOutcome::Closed);
+    }
+    None
+}
+
 // ── Scheduler metrics (Tower #126 observability) ─────────────────────────────
 
 static METRIC_PARKED: AtomicUsize = AtomicUsize::new(0);
@@ -2939,6 +2973,25 @@ pub fn jet_scheduler_select_int_channels_tagged(
         JetSelectOutcome::Recv { arm, value } => (arm as i64, Some(value)),
         JetSelectOutcome::After { arm } => ((channels.len() + arm) as i64, None),
         JetSelectOutcome::Closed => jet_scheduler_fatal("select closed"),
+    }
+}
+
+/// D-CONC-CHAN2=D: nonblocking readiness for a table with `else`. The
+/// sentinel arm `-1` is an ABI detail consumed by TIR; the Prelude owns the
+/// same immediate receive/timer/closed policy as the interpreter and AOT.
+pub fn jet_scheduler_try_select_int_channels_tagged(
+    channels: &[JetSchedulerChannel<i64>],
+    after_ns: Vec<i64>,
+) -> (i64, Option<i64>) {
+    let recvs: Vec<_> = channels.iter().map(|channel| channel.select_inner()).collect();
+    let after_ms = after_ns
+        .into_iter()
+        .map(|ns| jet_task_delay_ms_defaulted(jet_std_time_duration_to_millis(ns)))
+        .collect();
+    match jet_scheduler_try_select(recvs, after_ms) {
+        Some(JetSelectOutcome::Recv { arm, value }) => (arm as i64, Some(value)),
+        Some(JetSelectOutcome::After { arm }) => ((channels.len() + arm) as i64, None),
+        Some(JetSelectOutcome::Closed) | None => (-1, None),
     }
 }
 

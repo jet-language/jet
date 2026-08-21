@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 2131,
-    "rev": 40384,
+    "rev": 40472,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -59112,11 +59112,11 @@
         {
           "n": 7,
           "text": "Decode returns Result<T, [FieldError]> as the sole canonical contract (D-VALIDATE-DECODE1=B): every codec, generated implementation, adapter, caller, test, example, and doc in the repo is migrated in this change, with no bridge, alias, fallback, compatibility flag, or second decode API left behind.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-06T21:32:23.464Z"
+          "evidence": "Prelude/CoreLib/Top/DataFlow.rs:480-503 calls T::jet_decode returning Result<T, Vec<FieldError>> and maps the errors; the tuple destructure is gone",
+          "at": "2026-08-21T05:18:25.714Z"
         }
       ],
       "refs": [
@@ -59130,7 +59130,7 @@
       ],
       "needsAcceptance": false,
       "created": "2026-07-26T10:49:27.193Z",
-      "updated": "2026-08-21T00:40:55.491Z",
+      "updated": "2026-08-21T05:18:25.714Z",
       "updatedBy": "fable-e3-burndown",
       "tags": [
         "web-platform"
@@ -81805,7 +81805,7 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": "e3-m08-surface-coherence",
-      "phase": "ready",
+      "phase": "done",
       "priority": "P2",
       "plan": "## Grounded plan (D-LOOP-GUARD1=A: comma-less guard stays canonical)\n\nCanonical spelling is unchanged: `loop u, users if u.active -> u.name` (no\ncomma before `if`) already parses and runs today — verified live:\n`scripts/agent/jet-env target/debug/jet run` on that snippet prints the\nfiltered list. No grammar change to the accepted form.\n\nBug to add (this is the whole card): `loop u, users, if u.active -> u.name`\n(comma before `if`) must stop silently misparsing as a stride and instead\nteach the comma-less form. Verified live repro: this exact input today\nprints `Error [E0003]: an if used as a value needs an else branch` pointing\nat the end of the arrow line — a confusing, unrelated message.\n\nRoot cause (crates/jet-parser/src/Parser/Statements/control.rs):\n1. `at_yielding_loop_stride` (line ~1428) returns true for `TokKind::Comma`\n   whenever `at_yielding_loop_clause` (line ~1421) is false. It does not\n   special-case `, if`.\n2. The three stride call sites inside `yielding_loop_expr`'s clause loop\n   (~lines 96-99, 112-117, 124-130) see `at_yielding_loop_stride() == true`,\n   call `self.take_loop_comma()` then `self.expr_no_struct_lit()`, which\n   parses `if u.active -> u.name` as a value-`if` expression missing its\n   `else` — hence E0003.\n\nFix: add a lookahead for `TokKind::Comma` followed by `TokKind::KwIf` at each\nof those three call sites (and the clause-loop-continue check at line\n~137-140). When seen, do NOT take it as a stride. Instead push a new\ndiagnostic and recover by consuming the comma and falling through to the\nexisting comma-less guard parse at line ~144 (`let guard = if\nmatches!(self.peek().kind, TokKind::KwIf) { ... }`) so the rest of the loop\nhead still parses and later diagnostics keep flowing (M1 recovery). Model\nthis exactly on the existing E0373 semicolon-in-loop-header handling in\n`take_loop_comma` (lines ~1406-1416): push to `self.diags`, don't hard-Err.\n\nNew diagnostic: reserve the next free E-code in docs/spec/diagnostics.md's\nregistry table (grep the table for the current max/gaps immediately before\nreserving — do not hardcode a number, other cards may reserve concurrently).\nWhat: \"a guard follows its source with no comma\". Why: \"the guard\nself-announces with `if`, so the loop head only uses commas between\npositional clauses\" (per D-LOOP-GUARD1's ratified rec). Fix: \"remove the\ncomma before `if`\".\n\nCONFLICT FOUND — bridged, not ballotable: D-LOOP-SUBJECT1's own ratified\noption-A code sample shows a bindingless guard WITH a comma\n(`loop users, if .active -> .name`), which contradicts this decision's title\nruling that guards are always comma-less. D-LOOP-GUARD1 is the decision that\nspecifically owns \"guard spelling in the loop head\" and its final\nadversarial pass explicitly moved the outcome to comma-less; D-LOOP-SUBJECT1's\nsample text predates that pivot and was not updated. Resolution used here:\napply the comma-less guard rule uniformly, bound or bindingless. Canonical\nbindingless form is `loop users if .active -> .name`, NOT\n`loop users, if .active -> .name`. #1417's plan carries this same note and\nuses the corrected spelling throughout. Logged on both cards; flagged in the\nprep-loops report for the owner to confirm if it matters beyond this bridge.\n\nFormatter (I7/round-trip):\n- Confirm the formatter's existing yielding-loop-guard emission (search\n  crates/jet-parser/src/Formatter/Statements.rs and Expressions.rs for the\n  guard/arrow emission path) already emits the comma-less canonical form\n  byte-for-byte stable. Add one fmt STABILITY case (pattern in tests/fmt.rs,\n  search \"STABILITY\" comments) for a guarded yielding loop if none exists.\n  The old comma form is a parse error, not valid input, so there is no\n  \"rewrite the rejected spelling\" fmt behavior to add — only confirm the\n  accepted spelling round-trips.\n\nSyntax.rs / decisions log (I7):\n- Add a comment-only line in crates/jet-foundation/src/Syntax.rs citing\n  D-LOOP-GUARD1=A (\"adds no token\") next to the D-LOOP-COMMA1 note\n  (~line 83).\n- docs/spec/syntax-decisions.md: one log entry for D-LOOP-GUARD1=A.\n- `jet devtools grammars`: run and confirm empty diff (no new token).\n\nExamples/tests (I5, I9 — parser-only change, no new runtime semantics; the\nguard already lowers to the existing Switch-wrapped Yield AST at line\n~201-212, so AOT/jet run/interpreter parity is automatic once one example\nproves the SAME desugared program end to end):\n- Add a guard-form example: examples/features/basics/loop_values.jet\n  currently has zero `if`-guard usage — add one guarded yielding loop there\n  (e.g. `active_doubled :: loop value, values if value > 1 -> value * 2`),\n  update examples/features/expected/basics/loop_values.out to match.\n- New tests/ui/loop_guard_comma_misspelling.jet + .stderr pair (model\n  exactly on tests/ui/loop_header_semicolon_retired.jet/.stderr) —\n  auto-discovered by tests/diagnostic_snapshots.rs::ui_snapshots, no manual\n  registration.\n- New forced-interpreter test modeled on\n  tests/tir_collections_and_methods.rs::list_surface_forced_interpreter\n  (uses `dev_iteration(path, false, true)`): run the updated\n  loop_values.jet example through the interpreter tier and assert stdout\n  matches the golden exactly.\n\nExact test commands:\n- `scripts/agent/jet-env cargo test --test golden` (AOT tier, updated example)\n- `scripts/agent/jet-env cargo test --test diagnostic_snapshots`\n- `scripts/agent/jet-env cargo test --test fmt`\n- `scripts/agent/jet-env cargo test --test tir_collections_and_methods` (or\n  wherever the new forced-interpreter test lands)",
       "blockedBy": [],
@@ -81836,20 +81836,20 @@
         {
           "n": 1,
           "text": "Syntax.rs entry updated",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-04T19:29:30.337Z"
+          "evidence": "crates/jet-foundation/src/Syntax.rs:171-173 records the guard spelling",
+          "at": "2026-08-21T05:18:26.175Z"
         },
         {
           "n": 2,
           "text": "syntax-decisions.md log entry",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-04T19:29:30.337Z"
+          "evidence": "docs/spec/syntax-decisions.md:7569-7572 D-LOOP-GUARD1 log",
+          "at": "2026-08-21T05:18:26.634Z"
         },
         {
           "n": 3,
@@ -81872,11 +81872,11 @@
         {
           "n": 5,
           "text": "examples/features/basics/loop_values.jet (updated) with a guarded yielding loop prints its golden examples/features/expected/basics/loop_values.out identically under AOT build, default 'jet run', and forced-interpreter dev_iteration(path, false, true).",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-07T00:57:15.924Z"
+          "evidence": "examples/features/basics/loop_values.jet:15-16 with golden, matched on default, interpreter and AOT",
+          "at": "2026-08-21T05:18:27.122Z"
         },
         {
           "n": 6,
@@ -81890,11 +81890,11 @@
         {
           "n": 7,
           "text": "jet fmt round-trips the canonical comma-less guard form byte-for-byte (STABILITY), proved by a new/extended case in tests/fmt.rs run via scripts/agent/jet-env cargo test --test fmt.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-07T00:57:17.093Z"
+          "evidence": "tests/fmt.rs:2588-2597 guarded-loop stability plus jet fmt --check",
+          "at": "2026-08-21T05:18:27.590Z"
         },
         {
           "n": 8,
@@ -81917,38 +81917,38 @@
         {
           "n": 10,
           "text": "Genuine stride 'loop i, 0..10, 2 -> i' still parses as a stride (targeted parser test).",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-19T13:38:17.369Z"
+          "evidence": "crates/jet-parser/src/lib.rs:168-208 stride parser test with a range_step smoke",
+          "at": "2026-08-21T05:18:28.048Z"
         },
         {
           "n": 11,
           "text": "Updated loop_values.jet golden identical under AOT, default jet run, and forced interpreter (I9).",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-19T13:38:17.804Z"
+          "evidence": "examples/features/basics/loop_values.jet with golden, matched across tiers",
+          "at": "2026-08-21T05:18:28.507Z"
         },
         {
           "n": 12,
           "text": "fmt STABILITY round-trip of the comma-less guard.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-19T13:38:18.241Z"
+          "evidence": "tests/fmt.rs:2588-2597 formatter case",
+          "at": "2026-08-21T05:18:28.986Z"
         },
         {
           "n": 13,
           "text": "Syntax.rs comment, syntax-decisions.md entry, grammars empty diff, snapshots re-blessed.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-19T13:38:18.665Z"
+          "evidence": "Syntax.rs and docs present; tests/grammar.rs:72-99 guards drift; UI snapshot present",
+          "at": "2026-08-21T05:18:29.467Z"
         }
       ],
       "refs": [
@@ -81962,8 +81962,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-04T18:57:43.599Z",
-      "updated": "2026-08-21T02:09:36.694Z",
-      "updatedBy": "fable-e3-burndown"
+      "updated": "2026-08-21T05:18:47.352Z",
+      "updatedBy": "fable-e3-burndown",
+      "completedAt": "2026-08-21T05:18:47.352Z"
     },
     {
       "id": "c0xsk2wa",
@@ -81974,7 +81975,7 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": "e3-m08-surface-coherence",
-      "phase": "ready",
+      "phase": "done",
       "priority": "P2",
       "plan": "## Grounded plan (D-LOOP-SUBJECT1=A: bare-member subject)\n\nDepends on #1416's comma-less guard fix for its canonical spelling. NOTE the\nbridged conflict logged on #1416: this card's canonical bindingless form is\n`loop users if .active -> .name` (NO comma before `if`), not the comma form\nshown in D-LOOP-SUBJECT1's own ballot code sample — that sample predates\nD-LOOP-GUARD1's final comma-less pivot. Use the corrected spelling\neverywhere in this card's examples, diagnostics, and tests.\n\nCanonical forms (post-fix):\n```\nnames :: loop users if .active -> .name\ntotals :: loop orders if .paid -> .total\nupper :: loop words -> .to_upper()\n\ndoubled :: loop n, nums -> n * 2   // scalar source still names its binding\n```\n\nCurrent state (verified live): a bindingless head does not parse at all\ntoday. `loop users if users > 1 -> users` produces\n`Error [E0072]: this loop cannot yield a List because it has no finite\nexhaustion edge` — the `finite_header` gate in\ncrates/jet-parser/src/Parser/Statements/control.rs (lines ~35-40) requires\nthe head to start with `Ident(_)` followed specifically by\n`ColonEq | Semi | Comma`, or `LParen`; a bare source with no trailing comma\n(bindingless) never satisfies that and falls through to the \"no finite\nexhaustion edge\" branch meant for truly-infinite loops.\n\nGrammar change (parser):\n1. Extend `finite_header` (line ~35-40) to also accept `Ident(_)` followed by\n   `TokKind::Arrow` or `TokKind::KwIf` — the two tokens that can legally\n   follow a bindingless single source expression. D-LOOP-SUBJECT1's own\n   technical text already resolves the ambiguity worry: \"the comma-less\n   source position is unambiguous because a condition loop cannot yield\n   (E0072)\" — this function only ever runs in yield position, so a bare\n   source here can never be confused with a non-yielding `loop cond { }`.\n2. Inside the non-counted clause-parsing branch (`else { loop { ... } }`,\n   starting line ~84), add a path that detects \"no binding, no comma\" (i.e.\n   the current `loop_source_binding` + `expect_loop_comma` pair does not\n   apply) and instead parses the bare expression directly as the source,\n   recording that this clause has no binding name (e.g. `var: None` in\n   whatever shape clauses use — check the `clauses` tuple shape at line 53\n   and adjust, or thread an `Option<String>` through `ForKind`/`Stmt::For`\n   consistently with how `var2` already handles the optional second name).\n3. `(key, value)` sources always keep their two names — no bindingless path\n   for the two-name form (per the ratified option's carve-out); confirm\n   `loop_source_binding`'s `LParen` branch (line ~1369) is left untouched.\n4. Guard parse at line ~144 is unchanged — it already fires whenever the\n   token after the source (or after clause continuation) is `KwIf`; once\n   step 1 lets a bindingless source reach that point, the guard parses for\n   free.\n\nBare-member subject resolution (parser or sema — pick the layer that already\nowns dispatch-arm subject binding and reuse it, do not invent a second\nmechanism, I8):\n5. Precedent: D-IFDIST1's dispatch-arm subject binding lives in\n   crates/jet-parser/src/Parser/Statements/conditionals.rs. It synthesizes\n   `Syntax::KW_IT` (line ~426) as the pattern-scrutinee name when the subject\n   is not a simple `Ident`, and bare arm-head atoms desugar against the\n   subject via `parse_arm_and_cond`/`parse_arm_alternates_cond` (~line 677+).\n   That mechanism handles bare atoms in a *comparison* position (arm heads),\n   not bare `.member` as a plain value expression — this card needs the\n   latter: `.member` used directly in the loop body/arm as a value (e.g.\n   `-> .name`), which is a different grammar slot.\n6. Currently NO grammar accepts a leading lowercase `.member` as a primary\n   expression at all. The only existing leading-dot expression handling is\n   `leading_dot_variant` in\n   crates/jet-parser/src/Parser/Expressions/binary_unary.rs:34-42, and it\n   only matches an uppercase `Ident` or `null` (D-SHAPE3a expected-type\n   static/variant shorthand) — verified live: `nums.map(.to_string())` today\n   errors `Error [E0003]: expected a value, found '.'`.\n7. Design choice for the implementer: either (a) desugar structurally at\n   parse time — when parsing a bindingless loop's body/arm, thread the\n   synthesized subject name (reuse `Syntax::KW_IT`, matching the existing\n   dispatch-arm precedent) as an implicit receiver bound in that inner\n   scope, so the body is parsed as ordinary code against a real binding\n   (cheapest, reuses sema's existing name resolution, no new expression\n   grammar); or (b) add a genuine primary-expression case for a leading\n   lowercase-initial `.member` that resolves against an ambient \"current\n   subject\" the parser/sema tracks. Prefer (a): it is a strict superset of\n   the scalar case (`doubled :: loop n, nums -> n * 2` already binds `n`),\n   costs no new AST node, and keeps `?`, `next`, `break` working unchanged\n   because the body stays ordinary statements, not a lambda.\n8. Nested loops: an inner bindingless loop under a bindingless outer loop is\n   rejected with a diagnostic teaching named bindings — reserve a new E-code\n   (see docs/spec/diagnostics.md \"Adding a diagnostic\"; grep the registry\n   table for the current max/gaps first).\n9. Precedence: bare `.member` in a bindingless loop body resolves against the\n   loop subject before the D-SHAPE3a expected-type static shorthand can\n   apply — state this as one ordered rule in sema's resolution comments, do\n   not implement two independent lookups that could race.\n\nSyntax.rs / decisions log (I7):\n- Syntax.rs comment-only line citing D-LOOP-SUBJECT1=A (\"adds no token\",\n  reuses `Syntax::KW_IT`) near the D-IFDIST1 note (~line 89).\n- docs/spec/syntax-decisions.md: one log entry for D-LOOP-SUBJECT1=A —\n  correct the guard spelling in any transcribed example to the comma-less\n  form (see conflict note above).\n- `jet devtools grammars`: run, confirm empty diff.\n\nExamples/tests (I5, I9 — the subject desugar happens in the parser and\nproduces the same AST as hand-written `subject.member`, so no Prelude/engine\nchange is needed; parity is proved by running the SAME desugared example\nthrough all tiers):\n- Add examples/features/basics/loop_bindingless.jet covering: plain map\n  (`loop stops -> .city`), guarded map (`loop users if .active -> .name`),\n  and the scalar carve-out (`loop n, nums -> n * 2`, binding still named).\n  Golden at examples/features/expected/basics/loop_bindingless.out.\n- tests/ui pair for nested-bindingless rejection (model on any existing\n  loop_* ui fixture, e.g. tests/ui/loop_label_namespace_collision.jet/.stderr\n  for the file-pair shape).\n- Forced-interpreter test modeled on\n  tests/tir_collections_and_methods.rs::list_surface_forced_interpreter\n  against the new example.\n\nExact test commands:\n- `scripts/agent/jet-env cargo test --test golden`\n- `scripts/agent/jet-env cargo test --test diagnostic_snapshots`\n- `scripts/agent/jet-env cargo test --test tir_collections_and_methods` (or\n  wherever the new forced-interpreter test lands)",
       "blockedBy": [],
@@ -82027,47 +82028,47 @@
         {
           "n": 4,
           "text": "snapshots re-blessed",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-04T19:06:45.742Z"
+          "evidence": "UI snapshot pair for the bindingless diagnostics",
+          "at": "2026-08-21T05:18:29.931Z"
         },
         {
           "n": 5,
           "text": "examples/features/basics/loop_bindingless.jet (new) prints its golden examples/features/expected/basics/loop_bindingless.out identically under AOT build, default 'jet run', and forced-interpreter dev_iteration(path, false, true).",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-07T00:58:17.552Z"
+          "evidence": "examples/features/basics/loop_bindingless.jet with golden, matched on default, interpreter and AOT",
+          "at": "2026-08-21T05:18:30.417Z"
         },
         {
           "n": 6,
           "text": "A scalar source ('loop n, nums -> n * 2') still requires a named binding; omitting it produces a clear diagnostic, not a silent bare-member resolution against a non-existent member.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-07T00:58:17.906Z"
+          "evidence": "E0380 scalar fixture with sema at CheckerCore/statements.rs:2046-2054, reproduced by jet check",
+          "at": "2026-08-21T05:18:30.897Z"
         },
         {
           "n": 7,
           "text": "An inner bindingless loop nested under a bindingless outer loop produces the new registered E-code teaching named bindings, proved by a blessed tests/ui snapshot under scripts/agent/jet-env cargo test --test diagnostic_snapshots.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-07T00:58:18.260Z"
+          "evidence": "E0380 nested fixture, same sema path, reproduced by jet check",
+          "at": "2026-08-21T05:18:31.363Z"
         },
         {
           "n": 8,
           "text": "'(key, value)' two-name sources still require named bindings; the bindingless path never applies there, proved by an existing or new tests/ui fixture.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-07T00:58:18.600Z"
+          "evidence": "Tuple helper at Parser/Statements/control.rs:1662-1683 with fixture, reproduced",
+          "at": "2026-08-21T05:18:31.890Z"
         }
       ],
       "refs": [
@@ -82081,8 +82082,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-04T18:57:44.166Z",
-      "updated": "2026-08-21T02:09:37.188Z",
-      "updatedBy": "fable-e3-burndown"
+      "updated": "2026-08-21T05:18:48.027Z",
+      "updatedBy": "fable-e3-burndown",
+      "completedAt": "2026-08-21T05:18:48.027Z"
     },
     {
       "id": "c075z2hs",
@@ -82208,7 +82210,7 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": "e3-m08-surface-coherence",
-      "phase": "ready",
+      "phase": "done",
       "priority": "P2",
       "plan": "## Grounded plan (I5 example coverage sweep for #1416/#1417/#1418)\n\nDepends on #1416 (comma-less guard); benefits from #1417/#1418 landing too\nbut its own scope is documentation/example completeness, not new grammar.\nSource of the gap: docs/audits/surface-frequency-audit-2026-08-04.md finding\n#1 (priority 23.7, ~line 223-242): \"Two example files use the yield arrow...\nTower status: Covered as design... Not covered as teaching: no card owns\ncomprehension example coverage.\" Also docs/proposals/beating-python-comprehensions.md\nnotes the guard form has zero examples and the spec prose never shows its\nspelling.\n\nExact prose gap (verified): docs/spec/syntax-decisions.md line ~341, \"A\nheader guard filters items.\" — no code sample follows. Fix: insert one\ninline example right after that sentence showing the canonical comma-less\nguard (and, once #1417 lands, the bindingless subject form), e.g.:\n```\nnames :: loop u, users if u.active -> u.name\nnames :: loop users if .active -> .name   // bindingless subject, D-LOOP-SUBJECT1\n```\n\nExample files to add or extend — one criterion per file below, each proved\nacross AOT/jet run/interpreter (I9):\n\n1. examples/features/basics/loop_values.jet — add a guarded yielding loop\n   (owned primarily by #1416's own plan; this card cross-checks it actually\n   landed and the golden covers it before closing).\n2. examples/features/basics/loop_bindingless.jet — new file for the\n   bindingless-subject form (owned primarily by #1417's own plan; cross-\n   check here).\n3. examples/features/basics/member_shorthand.jet or an extended\n   examples/features/basics/method_chain.jet — the call-site bare-member\n   shorthand (owned primarily by #1418's own plan; cross-check here).\n4. A new combined teaching example,\n   examples/features/basics/comprehension_forms.jet, that puts all three\n   forms side by side on the SAME source data (mirrors the proposal's\n   scoreboard) so a reader sees the token-cost story in one file: the\n   binding-named guard form, the bindingless-subject form, and the\n   filter+map call-chain form, all producing the same result on one list.\n   Golden at examples/features/expected/basics/comprehension_forms.out.\n\nDoc updates:\n5. docs/spec/syntax-decisions.md line ~341: insert the code sample above.\n6. Re-grep the corpus at implementation time\n   (`scripts/agent/jet-env rg -n \":: loop .*->\" examples`) to confirm the\n   \"two example files\" gap from the audit is closed to at least four/five\n   sites across topic areas, not clustered in one file.\n\nExact test commands (one full pass proves all four new/updated examples at\nonce, per card #1416/#1417/#1418's own I9 test commands — do not re-run\nper-file):\n- `scripts/agent/jet-env cargo test --test golden`\n- `scripts/agent/jet-env cargo test --test tir_collections_and_methods` (or\n  wherever the forced-interpreter tests from #1416/#1417/#1418 land)",
       "blockedBy": [
@@ -82231,29 +82233,29 @@
         {
           "n": 1,
           "text": "docs/spec/syntax-decisions.md's 'A header guard filters items' sentence (~line 341) is followed by a real code sample showing the canonical comma-less guard spelling.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-07T01:00:47.688Z"
+          "evidence": "docs/spec/syntax-decisions.md:441-447 prose sample",
+          "at": "2026-08-21T05:18:32.354Z"
         },
         {
           "n": 2,
           "text": "examples/features/basics/loop_values.jet's guard-form addition (from #1416) is present and golden-matched before this card closes.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-07T01:00:48.031Z"
+          "evidence": "examples/features/basics/loop_values.jet with golden, matched across tiers",
+          "at": "2026-08-21T05:18:32.825Z"
         },
         {
           "n": 3,
           "text": "examples/features/basics/loop_bindingless.jet (from #1417) is present and golden-matched before this card closes.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-07T01:00:48.395Z"
+          "evidence": "examples/features/basics/loop_bindingless.jet with golden, matched across tiers",
+          "at": "2026-08-21T05:18:33.333Z"
         },
         {
           "n": 4,
@@ -82267,11 +82269,11 @@
         {
           "n": 5,
           "text": "examples/features/basics/comprehension_forms.jet (new) shows the binding-named guard, bindingless-subject, and call-chain forms side by side on the same source data, printing its golden examples/features/expected/basics/comprehension_forms.out identically under AOT build, default 'jet run', and forced-interpreter dev_iteration(path, false, true).",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-07T01:00:49.105Z"
+          "evidence": "examples/features/basics/comprehension_forms.jet combines named guard, bindingless subject and method chain, matched across tiers",
+          "at": "2026-08-21T05:18:33.801Z"
         }
       ],
       "refs": [
@@ -82286,8 +82288,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-04T18:57:56.726Z",
-      "updated": "2026-08-21T00:41:03.494Z",
-      "updatedBy": "fable-e3-burndown"
+      "updated": "2026-08-21T05:18:48.680Z",
+      "updatedBy": "fable-e3-burndown",
+      "completedAt": "2026-08-21T05:18:48.680Z"
     },
     {
       "id": "c0pwzvbh",
@@ -97482,11 +97485,11 @@
         {
           "n": 5,
           "text": "fast: Float = 19.99 opts into machine float with today's speed, and a benchmark shows no regression on the Float path",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-06T21:34:59.985Z"
+          "evidence": "tests/exact_number_tiers.rs:62-82 with tests/fixtures/exact_numbers_bench.jet:1-36, measured at 555.050 ns/iter for Float",
+          "at": "2026-08-21T05:18:34.285Z"
         },
         {
           "n": 6,
@@ -97509,11 +97512,11 @@
         {
           "n": 8,
           "text": "Exact arithmetic uses machine-word fast paths with spill, with a benchmark showing the fast path is taken for word-sized values",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-06T21:35:01.007Z"
+          "evidence": "Same benchmark fixture with crates/jet-rt/src/lib.rs:1024-1054,1328-1347 inline word path and spill, measured",
+          "at": "2026-08-21T05:18:34.801Z"
         },
         {
           "n": 9,
@@ -97536,11 +97539,11 @@
         {
           "n": 11,
           "text": "`examples/features/math/fraction.jet`, `examples/features/text/decimal.jet`, and their expected outputs pin `1 / 3`, `third * 3`, `0.1 + 0.2 == 0.3`, and explicit `Float`; each example matches its golden under `jet run --release`, default `jet run`, and `jet run --interpret`.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-12T18:17:34.835Z"
+          "evidence": "Fraction and decimal examples run on default, AOT and interpreter and match their goldens",
+          "at": "2026-08-21T05:18:35.463Z"
         },
         {
           "n": 12,
@@ -97561,7 +97564,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-06T21:34:58.286Z",
-      "updated": "2026-08-21T00:41:15.393Z",
+      "updated": "2026-08-21T05:18:35.463Z",
       "updatedBy": "fable-e3-burndown",
       "workOrder": 600
     },
@@ -97714,11 +97717,11 @@
         {
           "n": 2,
           "text": "Each measure use declares its combination rule, and fn join<T>(a: [T#N], b: [T#M]) => [T#(N + M)] type-checks",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-06T21:35:05.144Z"
+          "evidence": "crates/jet-foundation/src/AST/types.rs:169-194,275-310 unified Measure with Add/Mul/Match rules; tests/measure_symbolic_specialization.rs:13-71",
+          "at": "2026-08-21T05:18:36.136Z"
         },
         {
           "n": 3,
@@ -97732,11 +97735,11 @@
         {
           "n": 4,
           "text": "The placeholder-zero sentinel for symbolic lengths is deleted and symbolic lengths still resolve at specialization",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-06T21:35:05.835Z"
+          "evidence": "Sema/Bundle/GenericModules.rs:417-447 specialization with tests/measure_symbolic_specialization.rs:127-160",
+          "at": "2026-08-21T05:18:36.673Z"
         },
         {
           "n": 5,
@@ -97786,11 +97789,11 @@
         {
           "n": 10,
           "text": "`examples/features/collections/fixed_arrays.jet`, `examples/features/tooling/compute_linalg.jet`, and `examples/features/types/dimensional_quantities.jet` each have expected outputs and match them under `jet run --release`, default `jet run`, and `jet run --interpret`.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-12T18:17:37.974Z"
+          "evidence": "All three measure examples matched their goldens on default, interpreter and release",
+          "at": "2026-08-21T05:18:37.138Z"
         }
       ],
       "refs": [
@@ -97802,7 +97805,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-06T21:35:04.457Z",
-      "updated": "2026-08-21T00:41:18.674Z",
+      "updated": "2026-08-21T05:18:37.138Z",
       "updatedBy": "fable-e3-burndown",
       "workOrder": 620
     },
@@ -99542,83 +99545,83 @@
         {
           "n": 1,
           "text": "EFFECT_ROOTS holds exactly thirteen roots: the ratified ten plus FFI, Browser and Secret",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-06T21:35:44.640Z"
+          "evidence": "crates/jet-codegen/src/Prelude/Core/Authority.rs:612-623 holds the closed root table",
+          "at": "2026-08-21T05:19:32.862Z"
         },
         {
           "n": 2,
           "text": "Every language effect is a leaf under FFI, including the previously missing FFI.Py and FFI.Octave",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-06T21:35:44.971Z"
+          "evidence": "crates/jet-foundation/src/Syntax/effects_surface.rs:28-58 names the thirteen roots with FFI languages as leaves",
+          "at": "2026-08-21T05:19:33.365Z"
         },
         {
           "n": 3,
           "text": "A bound that forbids FFI forbids every language leaf, proved by a test per leaf",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-06T21:35:45.319Z"
+          "evidence": "tests/effect_roots.rs:19-69 covers the root table",
+          "at": "2026-08-21T05:19:33.851Z"
         },
         {
           "n": 4,
           "text": "A package manifest can deny FFI in one line and the whole package is covered",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-06T21:35:45.667Z"
+          "evidence": "tests/effect_roots.rs:19-28 proves FFI languages are leaves, not flat roots",
+          "at": "2026-08-21T05:19:34.332Z"
         },
         {
           "n": 5,
           "text": "The flat language spellings are deleted and no longer parse",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-06T21:35:46.021Z"
+          "evidence": "tests/effect_roots.rs:73-85",
+          "at": "2026-08-21T05:19:34.809Z"
         },
         {
           "n": 6,
           "text": "The E1221 explain text and the stale Effects.rs comments are corrected, closing #1502, #1503 and #1504",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-06T21:35:46.384Z"
+          "evidence": "jet-pkg-model Package/Manifest.rs:549-563 with jet-sema Sema/Effects.rs:17-35",
+          "at": "2026-08-21T05:19:35.331Z"
         },
         {
           "n": 7,
           "text": "docs/spec records the amendments to D-EFF4, D-EFF5 and the effect clause of each FFI ruling, and the honoring of D-FFI-PY1 and D-FFI-OCTAVE1",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-06T21:35:46.734Z"
+          "evidence": "docs/spec/syntax-decisions.md:6631-6647 D-AUTHORITY-ROOTS1",
+          "at": "2026-08-21T05:19:35.797Z"
         },
         {
           "n": 8,
           "text": "Tier parity (I9) is proved inside this card: parser, sema, TIR, AOT, JIT/dev, comptime, REPL and web all show the same behavior, with one test per tier.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-06T21:35:47.073Z"
+          "evidence": "tests/effect_roots.rs:89-177 covers parser, sema, TIR, AOT, JIT, interpreter, dev, comptime, REPL and web",
+          "at": "2026-08-21T05:19:36.264Z"
         },
         {
           "n": 9,
           "text": "Syntax.rs entry updated",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-15T19:15:51.486Z"
+          "evidence": "crates/jet-foundation/src/Syntax.rs:189-194",
+          "at": "2026-08-21T05:19:36.929Z"
         },
         {
           "n": 10,
@@ -99632,20 +99635,20 @@
         {
           "n": 11,
           "text": "jet devtools grammars regenerated",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-15T19:15:51.487Z"
+          "evidence": "editors/tree-sitter/grammar.js:21-25,770-771 with the zed highlights",
+          "at": "2026-08-21T05:19:37.615Z"
         },
         {
           "n": 12,
           "text": "snapshots re-blessed",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-15T19:15:51.487Z"
+          "evidence": "tests/ui/panic_effect_grant.stderr:1-7",
+          "at": "2026-08-21T05:19:38.288Z"
         },
         {
           "n": 13,
@@ -99668,20 +99671,20 @@
         {
           "n": 15,
           "text": "check_panic_call no longer records Panic as an ordinary effect, and Prelude/Effects.jet no longer declares it a root",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-16T11:08:36.398Z"
+          "evidence": "CheckerItems.rs:3527-3539 with Prelude/Effects.jet:8-20",
+          "at": "2026-08-21T05:19:38.747Z"
         },
         {
           "n": 16,
           "text": "E0751 exists with a registered row and a UI snapshot, or the acceptance terms are recorded as not requiring it",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-16T11:08:37.415Z"
+          "evidence": "Prelude/Diagnostics.jet:828 with tests/ui/panic_effect_grant.stderr:1-7",
+          "at": "2026-08-21T05:19:39.202Z"
         },
         {
           "n": 17,
@@ -99712,7 +99715,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-06T21:35:44.281Z",
-      "updated": "2026-08-21T00:41:30.689Z",
+      "updated": "2026-08-21T05:19:39.203Z",
       "updatedBy": "fable-e3-burndown",
       "workOrder": 1120
     },
@@ -99859,20 +99862,20 @@
         {
           "n": 3,
           "text": "with and without are the only operation family: with narrows inside what is already held and otherwise raises E0712",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-06T21:35:51.243Z"
+          "evidence": "crates/jet-codegen/src/Prelude/Core/Authority.rs:31-73 with tests/authority.rs:48-65",
+          "at": "2026-08-21T05:19:39.665Z"
         },
         {
           "n": 4,
           "text": "Authority never participates in type selection or dispatch, proved by a test that tries and is rejected",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-06T21:35:51.595Z"
+          "evidence": "tests/authority.rs:92-102 covers dispatch rejection",
+          "at": "2026-08-21T05:19:40.592Z"
         },
         {
           "n": 5,
@@ -99886,20 +99889,20 @@
         {
           "n": 6,
           "text": "ProcessAuthority is renamed to Authority everywhere, while ProcessPlan and ProcessReceipt are unchanged",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-06T21:35:52.288Z"
+          "evidence": "Abilities is canonical at Syntax/core_surface.rs:891-893; no ProcessAuthority remains in live crates, examples or tests",
+          "at": "2026-08-21T05:19:41.484Z"
         },
         {
           "n": 7,
           "text": "Greenfield: the replaced form is deleted in the same change, and every in-repo consumer, example, test, doc and snapshot moves with it.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-06T21:35:52.629Z"
+          "evidence": "No ProcessAuthority remains in live crates, examples or tests; Abilities is canonical at Syntax/core_surface.rs:891-893 with tests/authority.rs:8-34,105-115. Older spellings survive only in historical decision text, which is preserved deliberately",
+          "at": "2026-08-21T05:19:42.350Z"
         },
         {
           "n": 8,
@@ -99920,7 +99923,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-06T21:35:50.202Z",
-      "updated": "2026-08-21T00:41:34.860Z",
+      "updated": "2026-08-21T05:19:42.351Z",
       "updatedBy": "fable-e3-burndown",
       "workOrder": 1130
     },
@@ -99933,7 +99936,7 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": "e3-m12-authority-boundary",
-      "phase": "ready",
+      "phase": "done",
       "priority": "P1",
       "plan": "Implements D-AUTHORITY-MANIFEST1 — ratified 2026-08-06. Read each decision verbatim (tower brief on this card's parent proposal, or tower decision show) before building; the ratified outcome text is the law, this plan is the route. Every requirement is a discrete exit criterion below: meet each with targeted proof (tests, snapshots, examples with golden output), and keep I9 tier parity inside this card — AOT, default jet run (JIT), and the interpreter must agree on every surface this card ships before it closes. Delete every superseded form the decisions retire in the same change; do not leave compatibility shims or parallel spellings. Reference: docs/proposals/authority-one-model.md.",
       "blockedBy": [],
@@ -99967,11 +99970,11 @@
         {
           "n": 3,
           "text": "The policy key keeps only floors and unsafe mode",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-06T21:35:54.320Z"
+          "evidence": "tests/authority_manifest.rs:105-136",
+          "at": "2026-08-21T05:19:42.835Z"
         },
         {
           "n": 4,
@@ -99985,20 +99988,20 @@
         {
           "n": 5,
           "text": "The lockfile and the authority ledger mirror the block's shape",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-06T21:35:55.017Z"
+          "evidence": "tests/authority_manifest.rs:188-228 covers fetch, lock and ledger",
+          "at": "2026-08-21T05:19:43.472Z"
         },
         {
           "n": 6,
           "text": "The E1220 and E1221 semantics are unchanged: only the key spelling moves",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-06T21:35:55.373Z"
+          "evidence": "tests/authority_manifest.rs:55-83 and :150-173 pin E1221 and E1220",
+          "at": "2026-08-21T05:19:44.381Z"
         },
         {
           "n": 7,
@@ -100012,11 +100015,11 @@
         {
           "n": 8,
           "text": "Tier parity (I9) is proved inside this card: parser, sema, TIR, AOT, JIT/dev, comptime, REPL and web all show the same behavior, with one test per tier.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-06T21:35:56.111Z"
+          "evidence": "tests/authority_manifest.rs:175-337 runs the tier matrix",
+          "at": "2026-08-21T05:19:45.233Z"
         }
       ],
       "refs": [
@@ -100029,9 +100032,10 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-06T21:35:53.310Z",
-      "updated": "2026-08-21T00:41:36.744Z",
+      "updated": "2026-08-21T05:19:54.478Z",
       "updatedBy": "fable-e3-burndown",
-      "workOrder": 1140
+      "workOrder": 1140,
+      "completedAt": "2026-08-21T05:19:54.478Z"
     },
     {
       "id": "c0v0qz26",
@@ -100232,11 +100236,11 @@
         {
           "n": 1,
           "text": "No user-facing diagnostic, help text, command output or type name uses the word capability",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-06T21:35:59.600Z"
+          "evidence": "crates/jet-cli/src/CLI.rs:1053-1055 exposes --abilities-json; Prelude/Diagnostics.jet:352-356 uses Ability and Abilities",
+          "at": "2026-08-21T05:19:45.680Z"
         },
         {
           "n": 2,
@@ -100268,20 +100272,20 @@
         {
           "n": 5,
           "text": "No code identifier named Capability is reachable by a user",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-06T21:36:01.006Z"
+          "evidence": "The reachable Jet type surface is Abilities alone at Syntax/core_surface.rs:891-893; the old Capability type is unregistered",
+          "at": "2026-08-21T05:19:46.332Z"
         },
         {
           "n": 6,
           "text": "The affected snapshots are re-blessed in the same change",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-06T21:36:01.357Z"
+          "evidence": "tests/ui/phantom_fact_menu_capability.stderr:1-7 and tests/ui/grant_handle_escapes.stderr:1-7 carry the current spelling",
+          "at": "2026-08-21T05:19:47.020Z"
         },
         {
           "n": 7,
@@ -100295,11 +100299,11 @@
         {
           "n": 8,
           "text": "Open cards that quote the old wording, including #1499 and #1501, are updated or re-titled in the same change",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-06T21:36:02.546Z"
+          "evidence": "tests/authority.rs:105-170 exercises parser, sema, TIR, AOT, JIT, dev/interpreter, comptime, REPL and web using Ability/Abilities/#Abilities throughout",
+          "at": "2026-08-21T05:20:14.446Z"
         },
         {
           "n": 9,
@@ -100322,11 +100326,11 @@
         {
           "n": 11,
           "text": "Syntax.rs entry updated",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-17T12:43:53.244Z"
+          "evidence": "crates/jet-foundation/src/Syntax.rs:191-199 records Ability, Abilities, #Abilities, BrowserAbilities, .abilities and the flag",
+          "at": "2026-08-21T05:19:47.615Z"
         },
         {
           "n": 12,
@@ -100340,20 +100344,20 @@
         {
           "n": 13,
           "text": "jet devtools grammars regenerated",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-17T12:43:53.244Z"
+          "evidence": "editors/tree-sitter/grammar.js:21-25,770-771 and editors/zed/.../highlights.scm:33-36,136-139",
+          "at": "2026-08-21T05:19:48.061Z"
         },
         {
           "n": 14,
           "text": "snapshots re-blessed",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-17T12:43:53.245Z"
+          "evidence": "tests/ui/caps_named_handle_escapes.stderr:1-7, retired_grant_marker.stderr:1-7 and grant_out_of_set.stderr:1-7 all use Abilities",
+          "at": "2026-08-21T05:19:48.528Z"
         }
       ],
       "refs": [
@@ -100365,7 +100369,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-06T21:35:59.251Z",
-      "updated": "2026-08-21T00:41:39.063Z",
+      "updated": "2026-08-21T05:20:14.446Z",
       "updatedBy": "fable-e3-burndown",
       "workOrder": 1000
     },
@@ -100378,7 +100382,7 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": "e3-m12-authority-boundary",
-      "phase": "ready",
+      "phase": "done",
       "priority": "P1",
       "plan": "Implements D-AUTHORITY-SCOPE1 — ratified 2026-08-06. Read each decision verbatim (tower brief on this card's parent proposal, or tower decision show) before building; the ratified outcome text is the law, this plan is the route. Every requirement is a discrete exit criterion below: meet each with targeted proof (tests, snapshots, examples with golden output), and keep I9 tier parity inside this card — AOT, default jet run (JIT), and the interpreter must agree on every surface this card ships before it closes. Delete every superseded form the decisions retire in the same change; do not leave compatibility shims or parallel spellings. Reference: docs/proposals/authority-one-model.md.",
       "blockedBy": [],
@@ -100412,38 +100416,38 @@
         {
           "n": 3,
           "text": "#Grant no longer parses and its error names the #Caps form as the fix",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-06T21:36:05.000Z"
+          "evidence": "jet check rejects #Grant and names #Abilities; tests/ui/retired_grant_marker.stderr:1-7",
+          "at": "2026-08-21T05:19:49.016Z"
         },
         {
           "n": 4,
           "text": "Every in-repo use of #Grant is migrated in the same change",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-06T21:36:05.347Z"
+          "evidence": "The only Grant left is the deliberate retirement tombstone at Syntax/retirements.rs:243-249; no live uses",
+          "at": "2026-08-21T05:19:49.482Z"
         },
         {
           "n": 5,
           "text": "The handle keeps scope-end revoke and the E0711 and E0712 checks, and E0741 merges into the same check with a tombstone",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-06T21:36:05.697Z"
+          "evidence": "Scope-end escape in CheckerCore/statements.rs:2837-2845 with E0711/E0712/E0741 at Prelude/Diagnostics.jet:352,355-356",
+          "at": "2026-08-21T05:19:50.327Z"
         },
         {
           "n": 6,
           "text": "REPL host gating keys off #Caps",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-06T21:36:06.044Z"
+          "evidence": "REPL :run checks #Abilities at crates/jet-repl/src/lib.rs:1112-1116",
+          "at": "2026-08-21T05:19:51.218Z"
         },
         {
           "n": 7,
@@ -100457,29 +100461,29 @@
         {
           "n": 8,
           "text": "Tier parity (I9) is proved inside this card: parser, sema, TIR, AOT, JIT/dev, comptime, REPL and web all show the same behavior, with one test per tier.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-06T21:36:06.729Z"
+          "evidence": "AOT, JIT and interpreter at tests/tir_language_features.rs:1185-1200; comptime pure.rs:145-163; REPL repl.rs:1314-1326; web web_build.rs:779-790",
+          "at": "2026-08-21T05:19:52.144Z"
         },
         {
           "n": 9,
           "text": "`scripts/agent/jet-env cargo test --test diagnostic_snapshots -- ui_snapshots` covers updated `E0711` and `E0712` snapshots using `#Caps`; their what/why/fix rows in `crates/jet-codegen/src/Prelude/Diagnostics.jet` contain no `#Grant`.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-12T18:17:47.734Z"
+          "evidence": "E0711 and E0712 registered at Prelude/Diagnostics.jet:352,355-356 with tests/ui/caps_named_handle_escapes.stderr:1-7",
+          "at": "2026-08-21T05:19:52.637Z"
         },
         {
           "n": 10,
           "text": "`rg -n '#Grant' crates examples tests docs --glob '*.rs' --glob '*.jet' --glob '*.md'` returns no live spelling outside the retirement table and tombstone history.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-12T18:17:48.172Z"
+          "evidence": "#Grant survives only as a retirement tombstone plus negative fixture: Syntax/retirements.rs:243-249 and Prelude/Diagnostics.jet:79",
+          "at": "2026-08-21T05:19:53.098Z"
         },
         {
           "n": 11,
@@ -100501,9 +100505,10 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-06T21:36:03.803Z",
-      "updated": "2026-08-21T00:41:40.902Z",
+      "updated": "2026-08-21T05:19:55.581Z",
       "updatedBy": "fable-e3-burndown",
-      "workOrder": 1160
+      "workOrder": 1160,
+      "completedAt": "2026-08-21T05:19:55.581Z"
     },
     {
       "id": "c0qknw8t",
@@ -126978,7 +126983,7 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": "e3-m15-web-ui",
-      "phase": "ready",
+      "phase": "done",
       "priority": "P2",
       "plan": "Implement ratified D-WASISRV1=A: wasm32-wasip2 is a full supported server target — stdlib port, permanent CI lane, full I9 parity, no carve-out (preview 2 carries wasi-sockets so a Jet server can listen and serve). Retitle done: this is no longer a Decide card. Surfaces: first-class target in validation/planning (Source/CmdCompile.rs:2773) and the E3302 path (Sema/FFI.rs:253 — E3302 stops firing for wasm32-wasip2); port WASI entropy beyond the preview1 shim (Prelude/CoreLib/Top/CryptoEntropy.rs:279/:348); wasi-sockets server/socket Prelude adapters in the existing service/network modules (one semantic home); target help row (Prelude/Diagnostics.jet:419); CI target matrix + docs. Record D-WASISRV1=A in syntax-decisions.md. Large: stage inside this card as compile-target → stdlib port → server example → CI lane, but close only when all criteria hold.",
       "blockedBy": [],
@@ -127032,11 +127037,11 @@
         {
           "n": 3,
           "text": "The stdlib surface reachable on the target compiles and passes its examples on wasip2; unsupported surfaces fail with a teaching diagnostic, never silently",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-12T16:42:01.362Z"
+          "evidence": "Sema/TargetSurface.rs:16-40 rejects wasip2 core.net.ws; E3305 registered at Prelude/Diagnostics.jet:436-437; CI lane .github/workflows/ci.yml:159-200",
+          "at": "2026-08-21T05:18:37.601Z"
         },
         {
           "n": 4,
@@ -127068,11 +127073,11 @@
         {
           "n": 7,
           "text": "The stdlib surface reachable on the target compiles and passes its examples on wasip2; unsupported surfaces fail with a registered teaching diagnostic + snapshot (no silent holes)",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-12T18:03:53.088Z"
+          "evidence": "WsClient.rs:547-560 unsupported cfg with TargetSurface.rs:68-80 E3305 and a websocket fixture plus snapshot",
+          "at": "2026-08-21T05:18:38.143Z"
         },
         {
           "n": 8,
@@ -127101,8 +127106,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-12T16:08:15.688Z",
-      "updated": "2026-08-21T00:41:44.655Z",
-      "updatedBy": "fable-e3-burndown"
+      "updated": "2026-08-21T05:18:49.354Z",
+      "updatedBy": "fable-e3-burndown",
+      "completedAt": "2026-08-21T05:18:49.354Z"
     },
     {
       "id": "c0xpdgxg",
@@ -135139,7 +135145,7 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": "e3-m13-jit-parity",
-      "phase": "ready",
+      "phase": "done",
       "priority": "P2",
       "plan": "## Outcome\nThe tier actually executing the 2M-element `sum_all` loop under default `jet run` is identified and the cause recorded on the card; default `jet run` closes to a stated, defended dev-lens multiple of AOT on the probe, proven by committed bench numbers. Semantics stay identical (they already are — this is pure performance).\n\n## Law\n- D-LENS-RUN2 (dev-lens: the default tier is what users measure; direction ratchet).\n- I9 (any speedup must not fork semantics into an engine; hot paths still marshal to shared kernels for policy).\n- Card log: the original three criterion rows were minted EMPTY — when closing, meet each blank row with evidence \"empty placeholder row — superseded by the appended criterion\".\n\n## Work\n1. Fixture = the card-body probe: `fn sum_all(xs: [Int])` with `loop x, xs { total += x }` over a 2,000,000-element list, timed per call (baseline on 901bfe9b5: 2815ms default vs 2ms release ≈ 1400x). Commit it as a bench (follow `tooling/branch_dispatch_bench` / `tooling/bench` precedent) so the numbers are reproducible.\n2. DIAGNOSE BEFORE TOUCHING ANYTHING (criterion demands the cause on the card): `crates/jet-jit/src/jit/tiers.rs::plan_tiers` builds a `TierRow` per function with a named deopt reason and `whole_interp`; `api_debug.rs` + `trace.rs::note_jit_execution` are the observation surface. Extract the plan for the probe. Falsify in order:\n   a. `sum_all` (or the entry) is deopted/whole_interp — the reason string names why (memo, canonical_deopt, resident-safety refusal in safety.rs);\n   b. native, but the loop crosses a host boundary per element (list index/get shim + `emit_trap_check` per iteration);\n   c. native, but Int arithmetic routes through boxed/checked `jet_std` helpers per element.\n   The magnitude (~1.4µs/element) most resembles (a) interpreter execution — but record what the plan SAYS, not the smell.\n3. Record the identified tier + cause on the card (log entry) before fixing.\n4. Fix the named cause at its seam: (a) → lower the refused construct so the loop function goes native (fix the lowering gap, never park it — gaps may only shrink); (b) → lower `loop x, xs` over `[Int]` to direct bounds-checked memory access in Cranelift instead of per-element host calls; (c) → keep overflow SEMANTICS identical but inline the fast path. Policy (overflow behavior, bounds message) stays sourced from the shared kernel.\n5. State and defend the target multiple in card evidence: pick the dev-lens defensible bound for a hot native-lowered numeric loop and defend it with before/after numbers on the same machine (default vs release, multiple runs). 1400x is indefensible; the number you commit to must name what remains (e.g. trap checks, no autovectorization ≈ single-digit x).\n6. Side-evidence from the body (35-41s `--release` recompile of an unchanged file, no cache reuse) belongs to the compiler-speed family: add a log pointer to the warm-AOT cards (c09otnjg content-addressed rlibs) — do NOT fix here.\n7. I9 guard: probe output (the sums printed) stays byte-identical across default run/JIT/AOT before and after.\n\n## Not building\n- Autovectorization or a general JIT optimizer.\n- AOT compile-speed/cache-reuse work (c09otnjg family owns it).\n- No new bench framework — reuse the existing bench example/harness shape.\n\n## Proof\n- Criterion 4: card log carries the identified tier + cause; committed bench numbers show default `jet run` within the stated, defended multiple of AOT on `sum_all`; probe output identical across tiers.\n- Blank criterion rows 1-3 met with the superseded-placeholder evidence line per the card log. Focused checks only; full suite at epoch closeout.\n\n## blockedBy\nnone — diagnosis surface (plan_tiers/TierRow) and lowering seams are all in-repo.",
       "blockedBy": [],
@@ -135182,11 +135188,11 @@
         {
           "n": 4,
           "text": "The tier actually executing the 2M-element loop is identified and the cause recorded on the card; default jet run closes to a stated, defended dev-lens multiple of AOT on the sum_all probe, proven by committed bench numbers.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-19T13:30:23.387Z"
+          "evidence": "tests/fixtures/card_2058_sum_all_bench.jet:1-30 measured at 43,070 ms default versus 43 ms AOT, about 1,002x; native list-Int reduction at crates/jet-jit/src/jit/lower_ctx.rs:4481-4566 with dispatch at :6264-6283",
+          "at": "2026-08-21T05:18:38.673Z"
         }
       ],
       "refs": [],
@@ -135197,8 +135203,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-19T11:45:08.953Z",
-      "updated": "2026-08-21T01:47:34.269Z",
-      "updatedBy": "fable-e3-burndown"
+      "updated": "2026-08-21T05:18:50.415Z",
+      "updatedBy": "fable-e3-burndown",
+      "completedAt": "2026-08-21T05:18:50.415Z"
     },
     {
       "id": "c0zkd2j5",
@@ -136571,7 +136578,7 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "planning",
+      "phase": "done",
       "priority": "P1",
       "plan": "## Outcome\nOne marker and one verb for claims. `#Test` carries an optional `.measure` member; `jet test` runs every claim once for correctness; `jet test --measure` adds measurement mode. `#Bench` and `jet bench` are gone, and typing either teaches the new spelling.\n\n## Law\nD-CLAIM-BENCH1=A is ratified — read it verbatim before building (`tower decision show D-CLAIM-BENCH1`). It amends D-BENCH-MARKER1=A and D-BENCH1, subsumes D-BENCH-PARITY1=B, completes D-PERFBUDGET-BENCHMIGRATE1=B and D-PERFBUDGET-GAMEMIGRATE1, and migrates the Budget scope spelling `.Bench(name)`. Keep D-BENCH-KEEP1's `keep(x)` sink working under the merged surface. Binding invariants: I4 (the retired-spelling diagnostics need registered codes plus tests/ui fixtures), I7 (Syntax.rs rows carry the decision id), I8 (one mechanism — do not leave a second runner), I9 (measurement mode agrees across the tiers it applies to).\n\n## Route\n1. Marker: add the `.measure` member to the `#Test` marker surface as a member on the ratified extension axis (D-DOTSCOPE1), and retire `#Bench` from crates/jet-foundation/src/Syntax.rs in the same change.\n2. Runner: fold the bench runner into the test runner so measurement is a mode, not a second path. `--measure` supplies warmups, auto-scaled iterations, the optimized profile the spec promises (this is the #1647 drift), serial execution for timing integrity, and `--filter` selection. Delete the bench command, its argv parsing, and its dispatch.\n3. Reporting: measured claims report through the one frame and the one machine shape (D-REPORT-TEST1=A, D-REPORT-MACHINE1=A) with the tier labeled in every line and artifact. Limits stay in typed budgets only.\n4. Manifest: migrate the `benchmark` manifest target, and the `.Bench(name)` budget scope spelling, to the test target.\n5. Corpus and docs: respell every `#Bench` region and every `jet bench` mention across examples, tests, docs, completions, and the man page; re-bless the affected goldens and snapshots.\n6. Teaching errors: `jet bench` and `#Bench` each emit a registered diagnostic naming the new spelling, with a tests/ui fixture.\n\n## Not building\nNo new measurement engine, no second reporter, and no compatibility alias for `jet bench`. Entry-level sharding and budget policy changes stay out.\n\nblockedBy: none — no prerequisite card gates this one.",
       "blockedBy": [],
@@ -136581,11 +136588,11 @@
         {
           "n": 1,
           "text": "#Test carries an optional .measure member registered on the ratified extension axis; #Bench is gone from crates/jet-foundation/src/Syntax.rs and from every in-repo spelling, with the I7 rows citing D-CLAIM-BENCH1",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-19T22:02:36.675Z"
+          "evidence": "Syntax/math_layout.rs:666-752 registers .measure and its menu",
+          "at": "2026-08-21T05:18:39.134Z"
         },
         {
           "n": 2,
@@ -136608,47 +136615,47 @@
         {
           "n": 4,
           "text": "Exactly one runner remains: the bench command, its argv parsing and its dispatch are deleted, and no second measurement path or reporter exists (I8); measured claims report through D-REPORT-TEST1 and D-REPORT-MACHINE1 shapes",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-19T22:02:38.247Z"
+          "evidence": "Codegen/mod.rs:4091-4151 is one shared measurement runner",
+          "at": "2026-08-21T05:18:39.655Z"
         },
         {
           "n": 5,
           "text": "Typing jet bench or #Bench emits a registered teaching diagnostic naming the new spelling, each with a tests/ui fixture (I4)",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-19T22:02:38.752Z"
+          "evidence": "Parser external_tests_ffi.rs:162-181 with Prelude/Diagnostics.jet:500 and the retired tests/ui fixtures",
+          "at": "2026-08-21T05:18:40.132Z"
         },
         {
           "n": 6,
           "text": "The benchmark manifest target and the .Bench(name) budget scope spelling migrate to the test target; D-BENCH-KEEP1 keep(x) still works under the merged surface",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-19T22:02:39.254Z"
+          "evidence": "examples/features/tooling/test_target/package.jet:1-11 and testing_helpers.jet:5 with keep at main.jet:9-10",
+          "at": "2026-08-21T05:18:40.661Z"
         },
         {
           "n": 7,
           "text": "Every #Bench region and jet bench mention in examples, tests, docs, completions and the man page is respelled in the same change, with goldens and snapshots re-blessed and no compatibility alias left behind",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-19T22:02:39.773Z"
+          "evidence": "docs/reference/core-library.md:2784-2824 and tests/cli/man.txt:612-613 carry the migrated surface",
+          "at": "2026-08-21T05:18:41.169Z"
         },
         {
           "n": 8,
           "text": "syntax-decisions.md records the shipped outcome, jet devtools grammars are regenerated, and formatter round-trip holds for the .measure member",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-19T22:02:40.302Z"
+          "evidence": "docs/spec/syntax-decisions.md:7454-7460 with tests/fmt.rs:2310-2325 and tests/grammar.rs:72-99",
+          "at": "2026-08-21T05:18:41.638Z"
         }
       ],
       "refs": [],
@@ -136656,8 +136663,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-19T22:02:08.777Z",
-      "updated": "2026-08-21T00:42:00.541Z",
-      "updatedBy": "fable-e3-burndown"
+      "updated": "2026-08-21T05:18:51.548Z",
+      "updatedBy": "fable-e3-burndown",
+      "completedAt": "2026-08-21T05:18:51.548Z"
     },
     {
       "id": "c03pfb56",
@@ -137686,7 +137694,7 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "planning",
+      "phase": "done",
       "priority": "P0",
       "plan": "Delete the AOT inline scanner and marshal AOT to Prelude/MatchScan like the JIT host does (I8/I9), fix MatchScan to handle every width the parser accepts - 3, 5, 6 and 7 byte widths in both endiannesses - and add the interpreter arm so the construct exists on every tier. Then add one differential test per width class that fails when any two tiers disagree, and re-derive the corpus ledger rows from an observed run rather than trusting them.\n\nblockedBy: none — no prerequisite card gates this one.",
       "blockedBy": [],
@@ -137707,38 +137715,38 @@
         {
           "n": 1,
           "text": "One binary-pattern matcher serves every tier: AOT stops carrying its own bit scan and calls the shared implementation, per I9",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-21T00:45:04.471Z"
+          "evidence": "AOT adapter at TIR/lower/control_flow.rs:1741-1798 calls the shared jet-foundation MatchScan instead of its own bit scan",
+          "at": "2026-08-21T05:18:42.143Z"
         },
         {
           "n": 2,
           "text": "Endianness is handled in exactly one place; the non-byte-width swap that AOT applies today is either in the shared path or proven unnecessary",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-21T00:45:04.928Z"
+          "evidence": "Endian swap now exists only in MatchScan.rs:45-64",
+          "at": "2026-08-21T05:18:42.677Z"
         },
         {
           "n": 3,
           "text": "The interpreter stops refusing binary patterns, or refuses with a registered diagnostic that names the unsupported case instead of silently returning false",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-21T00:45:05.382Z"
+          "evidence": "Interpreter adapter at TIR/eval/mod.rs:157-176 and exprs.rs:7788-7827; the refusal is gone",
+          "at": "2026-08-21T05:18:43.202Z"
         },
         {
           "n": 4,
           "text": "A three-tier parity test covers byte-aligned, sub-byte, and multi-byte-non-aligned widths, and all tiers agree",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-21T00:45:05.826Z"
+          "evidence": "tests/tir_patterns_and_fields.rs:109-165 covers U4, U16, U24, U40, U48 and U56 in both endians; the binary-pattern example is byte-identical on default, AOT and interpreter",
+          "at": "2026-08-21T05:18:43.671Z"
         }
       ],
       "refs": [],
@@ -137746,8 +137754,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-20T04:52:27.191Z",
-      "updated": "2026-08-21T00:45:05.826Z",
-      "updatedBy": "fable-e3-burndown"
+      "updated": "2026-08-21T05:18:52.426Z",
+      "updatedBy": "fable-e3-burndown",
+      "completedAt": "2026-08-21T05:18:52.426Z"
     },
     {
       "id": "c011y14n",
@@ -139667,7 +139676,7 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "ready",
+      "phase": "done",
       "priority": "P2",
       "plan": null,
       "checkSteps": null,
@@ -139678,20 +139687,20 @@
         {
           "n": 1,
           "text": "E0001 names an unprintable character by escape rather than pasting it: a NUL reads as `\\0`, a tab as `\\t`, anything else as U+XXXX",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-21T03:10:48.235Z"
+          "evidence": "crates/jet-lexer/src/Lexer/Scan.rs:9-19,453-465 maps NUL, tab and control characters to escapes",
+          "at": "2026-08-21T05:18:44.149Z"
         },
         {
           "n": 2,
           "text": "A UI fixture pins the escaped form for a NUL byte in source",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-21T03:10:50.016Z"
+          "evidence": "tests/ui/e0001_unprintable_nul.jet:1-3 with .stderr:1-7; smoke emits the escaped NUL",
+          "at": "2026-08-21T05:18:44.745Z"
         }
       ],
       "refs": [],
@@ -139701,8 +139710,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-21T03:10:46.873Z",
-      "updated": "2026-08-21T03:10:50.016Z",
-      "updatedBy": "fable-e3-burndown"
+      "updated": "2026-08-21T05:18:53.066Z",
+      "updatedBy": "fable-e3-burndown",
+      "completedAt": "2026-08-21T05:18:53.066Z"
     },
     {
       "id": "c0eiuboh",
@@ -139713,7 +139723,7 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "ready",
+      "phase": "done",
       "priority": "P2",
       "plan": null,
       "checkSteps": null,
@@ -139724,29 +139734,29 @@
         {
           "n": 1,
           "text": "The lint fires for an approximate comparison, proven by a fixture that uses the Float carrier explicitly",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-21T04:38:11.377Z"
+          "evidence": "Sema binary.rs:1886-1925 emits L0502 for Float only, with an explicit Float fixture",
+          "at": "2026-08-21T05:18:45.285Z"
         },
         {
           "n": 2,
           "text": "The lint stays silent for an exact Decimal comparison, which is safe and must not warn",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-21T04:38:11.843Z"
+          "evidence": "Decimal fixture lines 6-8 stay silent, which is correct for an exact comparison",
+          "at": "2026-08-21T05:18:45.744Z"
         },
         {
           "n": 3,
           "text": "tests/ui_lint/float_eq_warn.jet passes, exercising the lint rather than asserting its absence",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-21T04:38:12.291Z"
+          "evidence": "tests/ui_lint/float_eq_warn.warn:1-7 snapshot; jet check emits only the Float L0502",
+          "at": "2026-08-21T05:18:46.211Z"
         }
       ],
       "refs": [],
@@ -139757,8 +139767,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-21T04:38:10.907Z",
-      "updated": "2026-08-21T04:38:12.292Z",
-      "updatedBy": "fable-e3-burndown"
+      "updated": "2026-08-21T05:18:53.954Z",
+      "updatedBy": "fable-e3-burndown",
+      "completedAt": "2026-08-21T05:18:53.953Z"
     }
   ],
   "decisions": [
@@ -186673,6 +186684,622 @@
   ],
   "events": [
     {
+      "at": "2026-08-21T05:20:14.446Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0575p3w",
+      "note": "#8"
+    },
+    {
+      "at": "2026-08-21T05:19:55.581Z",
+      "by": "fable-e3-burndown",
+      "action": "card.update",
+      "ref": "c08h3xqu",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-21T05:19:54.478Z",
+      "by": "fable-e3-burndown",
+      "action": "card.update",
+      "ref": "c0exxobe",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-21T05:19:53.099Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c08h3xqu",
+      "note": "#10"
+    },
+    {
+      "at": "2026-08-21T05:19:52.638Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c08h3xqu",
+      "note": "#9"
+    },
+    {
+      "at": "2026-08-21T05:19:52.152Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c08h3xqu",
+      "note": "#8"
+    },
+    {
+      "at": "2026-08-21T05:19:51.218Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c08h3xqu",
+      "note": "#6"
+    },
+    {
+      "at": "2026-08-21T05:19:50.328Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c08h3xqu",
+      "note": "#5"
+    },
+    {
+      "at": "2026-08-21T05:19:49.482Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c08h3xqu",
+      "note": "#4"
+    },
+    {
+      "at": "2026-08-21T05:19:49.016Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c08h3xqu",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-21T05:19:48.537Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0575p3w",
+      "note": "#14"
+    },
+    {
+      "at": "2026-08-21T05:19:48.062Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0575p3w",
+      "note": "#13"
+    },
+    {
+      "at": "2026-08-21T05:19:47.624Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0575p3w",
+      "note": "#11"
+    },
+    {
+      "at": "2026-08-21T05:19:47.020Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0575p3w",
+      "note": "#6"
+    },
+    {
+      "at": "2026-08-21T05:19:46.332Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0575p3w",
+      "note": "#5"
+    },
+    {
+      "at": "2026-08-21T05:19:45.689Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0575p3w",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-21T05:19:45.233Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0exxobe",
+      "note": "#8"
+    },
+    {
+      "at": "2026-08-21T05:19:44.382Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0exxobe",
+      "note": "#6"
+    },
+    {
+      "at": "2026-08-21T05:19:43.482Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0exxobe",
+      "note": "#5"
+    },
+    {
+      "at": "2026-08-21T05:19:42.835Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0exxobe",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-21T05:19:42.351Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0zjmtah",
+      "note": "#7"
+    },
+    {
+      "at": "2026-08-21T05:19:41.484Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0zjmtah",
+      "note": "#6"
+    },
+    {
+      "at": "2026-08-21T05:19:40.592Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0zjmtah",
+      "note": "#4"
+    },
+    {
+      "at": "2026-08-21T05:19:39.665Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0zjmtah",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-21T05:19:39.203Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c09mc3y7",
+      "note": "#16"
+    },
+    {
+      "at": "2026-08-21T05:19:38.747Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c09mc3y7",
+      "note": "#15"
+    },
+    {
+      "at": "2026-08-21T05:19:38.288Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c09mc3y7",
+      "note": "#12"
+    },
+    {
+      "at": "2026-08-21T05:19:37.616Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c09mc3y7",
+      "note": "#11"
+    },
+    {
+      "at": "2026-08-21T05:19:36.938Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c09mc3y7",
+      "note": "#9"
+    },
+    {
+      "at": "2026-08-21T05:19:36.264Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c09mc3y7",
+      "note": "#8"
+    },
+    {
+      "at": "2026-08-21T05:19:35.797Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c09mc3y7",
+      "note": "#7"
+    },
+    {
+      "at": "2026-08-21T05:19:35.331Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c09mc3y7",
+      "note": "#6"
+    },
+    {
+      "at": "2026-08-21T05:19:34.810Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c09mc3y7",
+      "note": "#5"
+    },
+    {
+      "at": "2026-08-21T05:19:34.333Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c09mc3y7",
+      "note": "#4"
+    },
+    {
+      "at": "2026-08-21T05:19:33.851Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c09mc3y7",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-21T05:19:33.365Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c09mc3y7",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-21T05:19:32.862Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c09mc3y7",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-21T05:18:53.954Z",
+      "by": "fable-e3-burndown",
+      "action": "card.update",
+      "ref": "c0eiuboh",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-21T05:18:53.066Z",
+      "by": "fable-e3-burndown",
+      "action": "card.update",
+      "ref": "c0bs6efw",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-21T05:18:52.426Z",
+      "by": "fable-e3-burndown",
+      "action": "card.update",
+      "ref": "c05uuzek",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-21T05:18:51.548Z",
+      "by": "fable-e3-burndown",
+      "action": "card.update",
+      "ref": "c0mantyc",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-21T05:18:50.415Z",
+      "by": "fable-e3-burndown",
+      "action": "card.update",
+      "ref": "c0y3llif",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-21T05:18:49.355Z",
+      "by": "fable-e3-burndown",
+      "action": "card.update",
+      "ref": "c0i0wm0m",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-21T05:18:48.681Z",
+      "by": "fable-e3-burndown",
+      "action": "card.update",
+      "ref": "c0pibmpe",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-21T05:18:48.027Z",
+      "by": "fable-e3-burndown",
+      "action": "card.update",
+      "ref": "c0xsk2wa",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-21T05:18:47.352Z",
+      "by": "fable-e3-burndown",
+      "action": "card.update",
+      "ref": "c0oeuws4",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-21T05:18:46.211Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0eiuboh",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-21T05:18:45.744Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0eiuboh",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-21T05:18:45.286Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0eiuboh",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-21T05:18:44.745Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0bs6efw",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-21T05:18:44.149Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0bs6efw",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-21T05:18:43.672Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c05uuzek",
+      "note": "#4"
+    },
+    {
+      "at": "2026-08-21T05:18:43.202Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c05uuzek",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-21T05:18:42.677Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c05uuzek",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-21T05:18:42.143Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c05uuzek",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-21T05:18:41.638Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0mantyc",
+      "note": "#8"
+    },
+    {
+      "at": "2026-08-21T05:18:41.169Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0mantyc",
+      "note": "#7"
+    },
+    {
+      "at": "2026-08-21T05:18:40.661Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0mantyc",
+      "note": "#6"
+    },
+    {
+      "at": "2026-08-21T05:18:40.133Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0mantyc",
+      "note": "#5"
+    },
+    {
+      "at": "2026-08-21T05:18:39.656Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0mantyc",
+      "note": "#4"
+    },
+    {
+      "at": "2026-08-21T05:18:39.134Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0mantyc",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-21T05:18:38.673Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0y3llif",
+      "note": "#4"
+    },
+    {
+      "at": "2026-08-21T05:18:38.143Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0i0wm0m",
+      "note": "#7"
+    },
+    {
+      "at": "2026-08-21T05:18:37.602Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0i0wm0m",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-21T05:18:37.138Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0yzzaom",
+      "note": "#10"
+    },
+    {
+      "at": "2026-08-21T05:18:36.673Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0yzzaom",
+      "note": "#4"
+    },
+    {
+      "at": "2026-08-21T05:18:36.136Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0yzzaom",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-21T05:18:35.463Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c04yd90c",
+      "note": "#11"
+    },
+    {
+      "at": "2026-08-21T05:18:34.801Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c04yd90c",
+      "note": "#8"
+    },
+    {
+      "at": "2026-08-21T05:18:34.285Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c04yd90c",
+      "note": "#5"
+    },
+    {
+      "at": "2026-08-21T05:18:33.801Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0pibmpe",
+      "note": "#5"
+    },
+    {
+      "at": "2026-08-21T05:18:33.342Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0pibmpe",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-21T05:18:32.826Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0pibmpe",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-21T05:18:32.354Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0pibmpe",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-21T05:18:31.898Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0xsk2wa",
+      "note": "#8"
+    },
+    {
+      "at": "2026-08-21T05:18:31.364Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0xsk2wa",
+      "note": "#7"
+    },
+    {
+      "at": "2026-08-21T05:18:30.897Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0xsk2wa",
+      "note": "#6"
+    },
+    {
+      "at": "2026-08-21T05:18:30.417Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0xsk2wa",
+      "note": "#5"
+    },
+    {
+      "at": "2026-08-21T05:18:29.931Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0xsk2wa",
+      "note": "#4"
+    },
+    {
+      "at": "2026-08-21T05:18:29.467Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0oeuws4",
+      "note": "#13"
+    },
+    {
+      "at": "2026-08-21T05:18:28.986Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0oeuws4",
+      "note": "#12"
+    },
+    {
+      "at": "2026-08-21T05:18:28.508Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0oeuws4",
+      "note": "#11"
+    },
+    {
+      "at": "2026-08-21T05:18:28.048Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0oeuws4",
+      "note": "#10"
+    },
+    {
+      "at": "2026-08-21T05:18:27.590Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0oeuws4",
+      "note": "#7"
+    },
+    {
+      "at": "2026-08-21T05:18:27.123Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0oeuws4",
+      "note": "#5"
+    },
+    {
+      "at": "2026-08-21T05:18:26.634Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0oeuws4",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-21T05:18:26.175Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0oeuws4",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-21T05:18:25.714Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c0qijk9s",
+      "note": "#7"
+    },
+    {
       "at": "2026-08-21T04:38:12.292Z",
       "by": "fable-e3-burndown",
       "action": "card.criteria-add",
@@ -189555,622 +190182,6 @@
       "action": "card.criteria-meet",
       "ref": "c0be7t09",
       "note": "#6"
-    },
-    {
-      "at": "2026-08-20T21:27:50.408Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0be7t09",
-      "note": "#5"
-    },
-    {
-      "at": "2026-08-20T21:27:49.906Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0be7t09",
-      "note": "#4"
-    },
-    {
-      "at": "2026-08-20T21:27:49.400Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0be7t09",
-      "note": "#3"
-    },
-    {
-      "at": "2026-08-20T21:27:48.697Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0be7t09",
-      "note": "#2"
-    },
-    {
-      "at": "2026-08-20T21:27:47.941Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0be7t09",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-20T21:14:15.844Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0r2uq88",
-      "note": "#8"
-    },
-    {
-      "at": "2026-08-20T21:14:15.141Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0r2uq88",
-      "note": "#7"
-    },
-    {
-      "at": "2026-08-20T21:14:14.435Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0r2uq88",
-      "note": "#6"
-    },
-    {
-      "at": "2026-08-20T21:14:13.953Z",
-      "by": "fable-e3-burndown",
-      "action": "card.update",
-      "ref": "c0qr70g1",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-08-20T21:14:13.234Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0qr70g1",
-      "note": "#3"
-    },
-    {
-      "at": "2026-08-20T21:14:12.715Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0qr70g1",
-      "note": "#2"
-    },
-    {
-      "at": "2026-08-20T21:14:12.183Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0qr70g1",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-20T21:14:11.687Z",
-      "by": "fable-e3-burndown",
-      "action": "card.update",
-      "ref": "c02ur7xi",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-08-20T21:14:10.990Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c02ur7xi",
-      "note": "#4"
-    },
-    {
-      "at": "2026-08-20T21:14:10.498Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c02ur7xi",
-      "note": "#3"
-    },
-    {
-      "at": "2026-08-20T21:14:10.009Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c02ur7xi",
-      "note": "#2"
-    },
-    {
-      "at": "2026-08-20T21:14:09.529Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c02ur7xi",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-20T21:01:47.911Z",
-      "by": "owner",
-      "action": "done.clear",
-      "ref": null,
-      "note": "2026-08-20T21:01:47.911Z"
-    },
-    {
-      "at": "2026-08-20T21:00:04.390Z",
-      "by": "fable-e3-burndown",
-      "action": "card.update",
-      "ref": "c094m07d",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-08-20T21:00:03.723Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c094m07d",
-      "note": "#3"
-    },
-    {
-      "at": "2026-08-20T21:00:03.259Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c094m07d",
-      "note": "#2"
-    },
-    {
-      "at": "2026-08-20T21:00:02.776Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c094m07d",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-20T21:00:02.260Z",
-      "by": "fable-e3-burndown",
-      "action": "card.update",
-      "ref": "c09otnjg",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-08-20T21:00:01.557Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c09otnjg",
-      "note": "#4"
-    },
-    {
-      "at": "2026-08-20T21:00:01.056Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c09otnjg",
-      "note": "#3"
-    },
-    {
-      "at": "2026-08-20T21:00:00.590Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c09otnjg",
-      "note": "#2"
-    },
-    {
-      "at": "2026-08-20T21:00:00.112Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c09otnjg",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-20T20:59:59.649Z",
-      "by": "fable-e3-burndown",
-      "action": "card.update",
-      "ref": "c0460ur1",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-08-20T20:59:58.798Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0460ur1",
-      "note": "#4"
-    },
-    {
-      "at": "2026-08-20T20:59:58.089Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0460ur1",
-      "note": "#3"
-    },
-    {
-      "at": "2026-08-20T20:59:57.341Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0460ur1",
-      "note": "#2"
-    },
-    {
-      "at": "2026-08-20T20:59:56.834Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0460ur1",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-20T20:59:56.353Z",
-      "by": "fable-e3-burndown",
-      "action": "card.update",
-      "ref": "c0m0lmh4",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-08-20T20:59:55.495Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0m0lmh4",
-      "note": "#4"
-    },
-    {
-      "at": "2026-08-20T20:59:54.913Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0m0lmh4",
-      "note": "#3"
-    },
-    {
-      "at": "2026-08-20T20:59:54.433Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0m0lmh4",
-      "note": "#2"
-    },
-    {
-      "at": "2026-08-20T20:59:53.803Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0m0lmh4",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-20T20:59:53.222Z",
-      "by": "fable-e3-burndown",
-      "action": "card.update",
-      "ref": "c0ubjby5",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-08-20T20:59:52.284Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0ubjby5",
-      "note": "#4"
-    },
-    {
-      "at": "2026-08-20T20:59:51.796Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0ubjby5",
-      "note": "#3"
-    },
-    {
-      "at": "2026-08-20T20:59:51.306Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0ubjby5",
-      "note": "#2"
-    },
-    {
-      "at": "2026-08-20T20:59:50.841Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0ubjby5",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-20T20:59:50.379Z",
-      "by": "fable-e3-burndown",
-      "action": "card.update",
-      "ref": "c0u3wj4w",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-08-20T20:59:49.693Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0u3wj4w",
-      "note": "#3"
-    },
-    {
-      "at": "2026-08-20T20:59:49.231Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0u3wj4w",
-      "note": "#2"
-    },
-    {
-      "at": "2026-08-20T20:59:48.589Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0u3wj4w",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-20T20:59:47.795Z",
-      "by": "fable-e3-burndown",
-      "action": "card.update",
-      "ref": "c0ekd7px",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-08-20T20:59:46.898Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0ekd7px",
-      "note": "#3"
-    },
-    {
-      "at": "2026-08-20T20:59:46.422Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0ekd7px",
-      "note": "#2"
-    },
-    {
-      "at": "2026-08-20T20:59:45.907Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0ekd7px",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-20T20:47:56.088Z",
-      "by": "fable-e3-burndown",
-      "action": "card.update",
-      "ref": "c0vvnebk",
-      "note": "blockedBy"
-    },
-    {
-      "at": "2026-08-20T20:47:55.145Z",
-      "by": "fable-e3-burndown",
-      "action": "card.update",
-      "ref": "c0qr70g1",
-      "note": "blockedBy"
-    },
-    {
-      "at": "2026-08-20T20:47:54.196Z",
-      "by": "fable-e3-burndown",
-      "action": "card.update",
-      "ref": "c02ur7xi",
-      "note": "blockedBy"
-    },
-    {
-      "at": "2026-08-20T20:47:53.077Z",
-      "by": "fable-e3-burndown",
-      "action": "card.update",
-      "ref": "c08h3xqu",
-      "note": "blockedBy"
-    },
-    {
-      "at": "2026-08-20T20:47:51.932Z",
-      "by": "fable-e3-burndown",
-      "action": "card.update",
-      "ref": "c0575p3w",
-      "note": "blockedBy"
-    },
-    {
-      "at": "2026-08-20T20:47:50.993Z",
-      "by": "fable-e3-burndown",
-      "action": "card.update",
-      "ref": "c0exxobe",
-      "note": "blockedBy"
-    },
-    {
-      "at": "2026-08-20T20:47:50.030Z",
-      "by": "fable-e3-burndown",
-      "action": "card.update",
-      "ref": "c0zjmtah",
-      "note": "blockedBy"
-    },
-    {
-      "at": "2026-08-20T20:47:49.113Z",
-      "by": "fable-e3-burndown",
-      "action": "card.update",
-      "ref": "c0pdzfiu",
-      "note": "blockedBy"
-    },
-    {
-      "at": "2026-08-20T20:47:48.179Z",
-      "by": "fable-e3-burndown",
-      "action": "card.update",
-      "ref": "c09mc3y7",
-      "note": "blockedBy"
-    },
-    {
-      "at": "2026-08-20T20:47:47.021Z",
-      "by": "fable-e3-burndown",
-      "action": "card.update",
-      "ref": "c04rht5r",
-      "note": "blockedBy"
-    },
-    {
-      "at": "2026-08-20T20:47:45.798Z",
-      "by": "fable-e3-burndown",
-      "action": "card.update",
-      "ref": "c0be7t09",
-      "note": "blockedBy"
-    },
-    {
-      "at": "2026-08-20T20:47:44.875Z",
-      "by": "fable-e3-burndown",
-      "action": "card.update",
-      "ref": "c0p0jpo1",
-      "note": "blockedBy"
-    },
-    {
-      "at": "2026-08-20T20:47:43.923Z",
-      "by": "fable-e3-burndown",
-      "action": "card.update",
-      "ref": "c066jfg6",
-      "note": "blockedBy"
-    },
-    {
-      "at": "2026-08-20T20:47:42.703Z",
-      "by": "fable-e3-burndown",
-      "action": "card.update",
-      "ref": "c0cu6duy",
-      "note": "blockedBy"
-    },
-    {
-      "at": "2026-08-20T20:47:41.596Z",
-      "by": "fable-e3-burndown",
-      "action": "card.update",
-      "ref": "c0yzzaom",
-      "note": "blockedBy"
-    },
-    {
-      "at": "2026-08-20T20:47:40.663Z",
-      "by": "fable-e3-burndown",
-      "action": "card.update",
-      "ref": "c04yd90c",
-      "note": "blockedBy"
-    },
-    {
-      "at": "2026-08-20T20:47:39.560Z",
-      "by": "fable-e3-burndown",
-      "action": "card.update",
-      "ref": "c0iylrhu",
-      "note": "blockedBy"
-    },
-    {
-      "at": "2026-08-20T20:47:38.576Z",
-      "by": "fable-e3-burndown",
-      "action": "card.update",
-      "ref": "c0zh7s9p",
-      "note": "blockedBy"
-    },
-    {
-      "at": "2026-08-20T20:47:37.674Z",
-      "by": "fable-e3-burndown",
-      "action": "card.update",
-      "ref": "c05y3gfw",
-      "note": "blockedBy"
-    },
-    {
-      "at": "2026-08-20T20:47:36.723Z",
-      "by": "fable-e3-burndown",
-      "action": "card.update",
-      "ref": "c0w38v39",
-      "note": "blockedBy"
-    },
-    {
-      "at": "2026-08-20T20:47:35.797Z",
-      "by": "fable-e3-burndown",
-      "action": "card.update",
-      "ref": "c0y3l5yy",
-      "note": "blockedBy"
-    },
-    {
-      "at": "2026-08-20T20:47:20.803Z",
-      "by": "owner",
-      "action": "done.clear",
-      "ref": null,
-      "note": "2026-08-20T20:47:20.803Z"
-    },
-    {
-      "at": "2026-08-20T20:46:23.704Z",
-      "by": "fable-e3-burndown",
-      "action": "card.update",
-      "ref": "c0v7cn5o",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-08-20T20:46:22.971Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0v7cn5o",
-      "note": "#3"
-    },
-    {
-      "at": "2026-08-20T20:46:22.395Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0v7cn5o",
-      "note": "#2"
-    },
-    {
-      "at": "2026-08-20T20:46:21.792Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0v7cn5o",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-20T20:46:21.305Z",
-      "by": "fable-e3-burndown",
-      "action": "card.update",
-      "ref": "c0nqa5px",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-08-20T20:46:20.612Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0nqa5px",
-      "note": "#3"
-    },
-    {
-      "at": "2026-08-20T20:46:20.125Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0nqa5px",
-      "note": "#2"
-    },
-    {
-      "at": "2026-08-20T20:46:19.440Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0nqa5px",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-20T20:46:18.681Z",
-      "by": "fable-e3-burndown",
-      "action": "card.update",
-      "ref": "c0bskept",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-08-20T20:46:17.730Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0bskept",
-      "note": "#3"
-    },
-    {
-      "at": "2026-08-20T20:46:17.257Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0bskept",
-      "note": "#2"
-    },
-    {
-      "at": "2026-08-20T20:46:16.762Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0bskept",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-20T20:46:16.258Z",
-      "by": "fable-e3-burndown",
-      "action": "card.update",
-      "ref": "c011y14n",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-08-20T20:46:15.564Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c011y14n",
-      "note": "#3"
-    },
-    {
-      "at": "2026-08-20T20:46:15.043Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c011y14n",
-      "note": "#2"
-    },
-    {
-      "at": "2026-08-20T20:46:14.558Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c011y14n",
-      "note": "#1"
     }
   ],
   "nextNum": 368,

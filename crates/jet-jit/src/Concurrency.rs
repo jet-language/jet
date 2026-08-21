@@ -8,6 +8,7 @@ use jet_codegen::scheduler::{
     jet_scheduler_panic_should_unwind,
     jet_scheduler_select_int_channels_timed, jet_scheduler_shield_enter,
     jet_scheduler_select_int_channels_tagged,
+    jet_scheduler_try_select_int_channels_tagged,
     jet_scheduler_shield_leave_status, jet_scheduler_sleep_ms,
     jet_scheduler_task_completion_register,
     jet_std_time_duration_to_millis,
@@ -899,9 +900,16 @@ where
     let inherited_deadline = jet_ctx_deadline_ms();
     let deopt_state = super::deopt::capture_deopt_state();
     let control = JetTaskControl::new();
+    // Register the handle before the child can enter deopt. Otherwise the
+    // child can own RUNTIME_ACCESS while `store_task` is assigning its slot;
+    // the parent then cannot reach the cancel call that should interrupt that
+    // deopt wait point (#1997).
+    let start_gate = ParkSlot::new();
+    let worker_start = start_gate.clone();
     let permit = take_pending_task_group_permit();
     let join = jet_scheduler_spawn_blocking_with_control(
         move || {
+            worker_start.park(None);
             let _task_scope = enter_jit_task();
             let _deopt_state = super::deopt::install_deopt_state(deopt_state);
             let _permit = permit;
@@ -941,7 +949,9 @@ where
         },
         control.clone(),
     );
-    store_task(join, control)
+    let task = store_task(join, control);
+    start_gate.wake();
+    task
 }
 
 fn jet_jit_shield_enter() {
@@ -1286,6 +1296,38 @@ fn jet_jit_select_wait_tagged(recv_list: i64, after_list: i64) -> i64 {
     })
 }
 
+/// D-CONC-CHAN2=D: JIT marshalling for a nonblocking readiness table. The
+/// Prelude returns the `-1` no-ready sentinel; this host only stores the same
+/// tagged record used by the blocking door.
+fn jet_jit_select_try_wait_tagged(recv_list: i64, after_list: i64) -> i64 {
+    let prepared = with_runtime_mut(|rt| {
+        let ch_ids = task_ids_from_list(rt, recv_list);
+        let after_ns = task_ids_from_list(rt, after_list);
+        let mut channels: Vec<JetSchedulerChannel<i64>> = Vec::with_capacity(ch_ids.len());
+        for &id in &ch_ids {
+            let Some(channel) = rt.channels.get(id as usize).cloned() else {
+                rt.set_host_fault("jit select: bad channel handle");
+                return None;
+            };
+            channels.push(channel);
+        }
+        Some((channels, after_ns))
+    });
+    let Some((channels, after_ns)) = prepared else {
+        host_fault("jit tagged try-select without active runtime");
+        return JitWaitStatus::Panicked as i64;
+    };
+    wait_status(|| {
+        let (arm, value) = jet_scheduler_try_select_int_channels_tagged(&channels, after_ns);
+        with_runtime_mut(|rt| {
+            let result = rt.heap.alloc_record(2);
+            let _ = rt.heap.record_set_int(result, 0, arm);
+            let _ = rt.heap.record_set_int(result, 1, value.unwrap_or(0));
+            result
+        })
+    })
+}
+
 /// `tasks.after(duration, value)` — one-shot timer channel that receives `value`.
 fn jet_jit_after_value(duration_ns: i64, value: i64) -> i64 {
     // Sender is stashed in `rt.senders` so `with_runtime_mut` stays `Default`-safe.
@@ -1453,6 +1495,7 @@ host_fns! {
     task_any: "jet_jit_task_any" => jet_jit_task_any: sig_i64;
     select_wait: "jet_jit_select_wait" => jet_jit_select_wait: sig_i64_i64;
     select_wait_tagged: "jet_jit_select_wait_tagged" => jet_jit_select_wait_tagged: sig_i64_i64;
+    select_try_wait_tagged: "jet_jit_select_try_wait_tagged" => jet_jit_select_try_wait_tagged: sig_i64_i64;
     after_value: "jet_jit_after_value" => jet_jit_after_value: sig_i64_i64;
     interval: "jet_jit_interval" => jet_jit_interval: sig_i64;
     shield_enter: "jet_jit_shield_enter" => jet_jit_shield_enter: sig_void;
