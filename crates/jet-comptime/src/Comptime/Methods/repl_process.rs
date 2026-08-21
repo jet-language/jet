@@ -3,7 +3,7 @@
 use crate::Diagnostics::{Diagnostic, Span};
 use super::super::Diagnostics::unsupported;
 use crate::AST::{CtValue, Type};
-use jet_foundation::Authority::{answer, parse_right, Holds, Verdict};
+use jet_foundation::Authority::{answer, Holds, Verdict};
 use jet_foundation::Effects::{core_effect, is_nondeterministic_core, Effect};
 use super::core_calls::{
     apply_core_call_with_type, apply_impure_core_call_with_type, as_string, io_error_value,
@@ -120,7 +120,7 @@ pub fn apply_repl_authorized_core_call(
     span: Span,
     base_dir: &std::path::Path,
     sink: Option<&mut super::super::Interpreter::DevSink>,
-    grants: &[String],
+    grants: &[CtValue],
     authorizer: Option<&mut dyn super::super::ReplAuthorizer>,
 ) -> Result<CtValue, Diagnostic> {
     apply_repl_authorized_core_call_with_type(
@@ -143,7 +143,7 @@ pub fn apply_repl_authorized_core_call_with_type(
     span: Span,
     base_dir: &std::path::Path,
     sink: Option<&mut super::super::Interpreter::DevSink>,
-    grants: &[String],
+    grants: &[CtValue],
     authorizer: Option<&mut dyn super::super::ReplAuthorizer>,
     resolved_ret: Option<&Type>,
 ) -> Result<CtValue, Diagnostic> {
@@ -189,7 +189,25 @@ pub fn apply_repl_authorized_core_call_with_type(
         ));
     };
     authorizer.preflight(&request, span)?;
-    let held: Holds = grants.iter().filter_map(|grant| parse_right(grant)).collect();
+    // The two-argument boundary form carries the actual named Abilities value.
+    // One-argument REPL calls use the active lexical authority values, which
+    // are the same CtValue carrier rather than a copied list of right names.
+    let boundary_authority = args.len() == 2
+        && matches!(
+            (module, method),
+            ("core.process", "run") | ("core.plugin", "load")
+        );
+    let held = if boundary_authority {
+        args.get(1)
+            .and_then(super::super::Builtins::authority_holds)
+            .unwrap_or_default()
+    } else {
+        grants
+            .iter()
+            .filter_map(super::super::Builtins::authority_holds)
+            .flatten()
+            .collect::<Holds>()
+    };
     let denied = Holds::new();
     let granted = answer(&held, &denied, &request.root) == Verdict::Allowed;
     if !granted {

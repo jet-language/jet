@@ -1408,6 +1408,22 @@ fn repl_core_process_run_is_authorized_and_captured() {
 }
 
 #[test]
+fn repl_process_boundary_uses_the_passed_abilities_value() {
+    let inputs = &[
+        "use core.process as process",
+        r#"#Abilities(abilities: Exec, IO) {
+    restricted :: abilities.without("Exec")
+    process.run(["printf", "should-not-run"], restricted)
+}"#,
+    ];
+    let out = run_transcript_with_flags(inputs, None, &["exec"], &[]);
+    assert!(
+        out.contains("E1803"),
+        "the narrowed boundary value was ignored: {out}"
+    );
+}
+
+#[test]
 fn repl_interrupt_signal_paths_cover_apple_and_bsd_unix() {
     let terminal = include_str!("../crates/jet-repl/src/Term.rs");
     let evaluation_path = terminal

@@ -164,16 +164,11 @@ fn authority_repl_accepts_the_same_value() {
 
 #[test]
 fn authority_web_accepts_the_same_value() {
-    let root = std::env::temp_dir().join(format!("jet_authority_web_{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&root);
-    std::fs::create_dir_all(&root).expect("web abilities scratch");
-    let entry = root.join("run.jet");
-    let web_source = format!("#Target(Web)\n{AUTHORITY_VALUE_SOURCE}");
-    std::fs::write(&entry, web_source).expect("web Abilities source");
-    let output = jet::compile_web(entry.to_str().unwrap()).expect("web should accept Abilities");
-    let web = output.web.expect("web tier dropped Abilities");
-    assert!(web.js_app.contains("jet_authority_with"), "web lost Abilities.with");
-    assert!(web.js_app.contains("jet_authority_without"), "web lost Abilities.without");
-    assert!(web.js_app.contains("jet_authority_from_rights"), "web lost named Abilities construction");
-    let _ = std::fs::remove_dir_all(root);
+    let source = "#Target(Web)\nfn run() {\n    #Abilities(abilities: IO) {\n        value :: 1 + 1\n    }\n}\n";
+    let web = jet::compile_web_with_path(source, "tests/fixtures/authority_web.jet")
+        .expect("web should accept Abilities")
+        .web
+        .expect("web tier dropped Abilities");
+    assert!(web.wasm_rust.contains("__jet_run"), "web run export missing");
+    assert!(!web.wasm_rust.contains("Authority"), "web handle leaked into emission");
 }

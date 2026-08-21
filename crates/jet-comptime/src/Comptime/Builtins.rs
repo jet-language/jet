@@ -131,12 +131,14 @@ fn authority_value(rights: std::collections::BTreeSet<String>) -> CtValue {
     }
 }
 
-fn authority_rights(value: &CtValue) -> std::collections::BTreeSet<String> {
+pub(crate) fn authority_holds(
+    value: &CtValue,
+) -> Option<jet_foundation::Authority::Holds> {
     let CtValue::Struct { type_name, fields } = value else {
-        return std::collections::BTreeSet::new();
+        return None;
     };
     if type_name != crate::Syntax::TYPE_ABILITIES {
-        return std::collections::BTreeSet::new();
+        return None;
     }
     fields
         .iter()
@@ -149,10 +151,13 @@ fn authority_rights(value: &CtValue) -> std::collections::BTreeSet<String> {
                         _ => None,
                     })
                     .collect(),
-                _ => std::collections::BTreeSet::new(),
+                _ => jet_foundation::Authority::Holds::new(),
             })
         })
-        .unwrap_or_default()
+}
+
+fn authority_rights(value: &CtValue) -> std::collections::BTreeSet<String> {
+    authority_holds(value).unwrap_or_default()
 }
 
 fn apply_authority_method(

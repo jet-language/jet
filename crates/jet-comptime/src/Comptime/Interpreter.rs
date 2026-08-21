@@ -179,9 +179,10 @@ pub(super) struct Interp<'a> {
     /// E2-M18 / c133: true only in `run_repl_step` — enables REPL-specific
     /// diagnostics for native-only Core modules (E1802-style wording).
     pub(super) repl_mode: bool,
-    /// Active lexical `#Abilities` effect names in REPL mode. Sema proves the
-    /// region statically; this copy gates host authorization dynamically.
-    pub(super) repl_grants: Vec<String>,
+    /// Active lexical `#Abilities` values in REPL mode. Sema proves the
+    /// region statically; this same named carrier gates host authorization
+    /// dynamically.
+    pub(super) repl_grants: Vec<CtValue>,
     /// Host invocation policy callback. Called after concrete arguments are
     /// known and before any ambient operation executes.
     pub(super) repl_authorizer: Option<&'a mut dyn ReplAuthorizer>,
@@ -340,7 +341,7 @@ impl<'a> Interp<'a> {
         }
         // TIR keeps a named `#Abilities` value as an ordinary local. Keep the
         // same value in the REPL host frame before the bridge evaluates a body;
-        // the grant list remains the authorization context for effectful calls.
+        // boundary authorization consumes this carrier directly.
         if self.repl_mode
             && stmts
                 .iter()
@@ -510,20 +511,17 @@ impl<'a> Interp<'a> {
                 ..
             } = stmt
             {
+                let authority = super::Builtins::authority_value_from_rights(
+                    caps.iter().map(|(name, _)| name.clone()).collect(),
+                );
                 let previous_binding = binding.as_ref().map(|name| {
                     (
                         name.clone(),
-                        scope.insert(
-                            name.clone(),
-                            super::Builtins::authority_value_from_rights(
-                                caps.iter().map(|(name, _)| name.clone()).collect(),
-                            ),
-                        ),
+                        scope.insert(name.clone(), authority.clone()),
                     )
                 });
                 let old_len = self.repl_grants.len();
-                self.repl_grants
-                    .extend(caps.iter().map(|(name, _)| name.clone()));
+                self.repl_grants.push(authority);
                 self.impure_depth += 1;
                 let result = self.exec_block(body, scope);
                 self.impure_depth -= 1;

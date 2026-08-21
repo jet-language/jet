@@ -1095,9 +1095,9 @@ pub(super) struct EvalCtx<'a> {
     /// Keep calls inside a codec-sensitive named deopt on canonical TIR.
     pub(super) prefer_tir_calls: bool,
     pub(super) repl_mode: bool,
-    /// Lexical REPL capabilities forwarded from the frontend. Authorization
+    /// Lexical REPL Abilities values forwarded from the frontend. Authorization
     /// decisions remain in the shared Comptime host seam.
-    pub(super) repl_grants: Vec<String>,
+    pub(super) repl_grants: Vec<CtValue>,
     pub(super) repl_authorizer: Option<&'a mut dyn Comptime::ReplAuthorizer>,
     pub(super) pending_return: Option<CtValue>,
     pub(super) preserve_allocator_view: bool,
@@ -1500,7 +1500,7 @@ struct EvalTaskConfig<'a> {
     runtime_execution: bool,
     prefer_tir_calls: bool,
     repl_mode: bool,
-    repl_grants: Vec<String>,
+    repl_grants: Vec<CtValue>,
     struct_fields: HashMap<String, Vec<(String, bool)>>,
     memo_dependencies: HashMap<String, HashMap<String, Vec<String>>>,
     reflection_fields: HashMap<String, Vec<ReflectionField>>,

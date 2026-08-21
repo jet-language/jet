@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 2131,
-    "rev": 40498,
+    "rev": 40500,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -99174,6 +99174,11 @@
         {
           "at": "2026-08-21",
           "by": "fable-e3-burndown",
+          "text": "c5 root cause confirmed and a second defect found underneath it. looks_like_item at crates/jet-repl/src/lib.rs:1374-1386 only inspects the trimmed start, so a source opening with comments (the shared SOURCE constant does) is classified as statements and fails E0003/E0102. I tried teaching the classifier to skip leading line and block comments; the classification became correct and the test then died with a stack overflow (SIGABRT) inside the item path. So there are two bugs stacked: the classifier misreads commented item sources, and the item path recurses without bound on this input. I reverted the classifier change because a clean E0003 is better for a user than a crash. Fixing c5 means fixing the recursion first, then the classifier."
+        },
+        {
+          "at": "2026-08-21",
+          "by": "fable-e3-burndown",
           "text": "c5 has one precise blocker. tests/taskgroup_parameter_tiers.rs is registered at tests/suites.txt:256 and runs 18 tests, 17 passing. The one failure is repl_runs_group_parameter_example at :107-110: jet::REPL::run_transcript rejects the shared SOURCE constant with E0003 on the struct and fn, then E0102 for a missing run, because SOURCE opens with leading comments. Every other tier accepts the identical text, so this is a REPL front-end intake defect rather than anything about Group parameters. Fix the REPL intake and c5 closes."
         },
         {
@@ -99280,7 +99285,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-06T21:35:36.629Z",
-      "updated": "2026-08-21T06:12:18.871Z",
+      "updated": "2026-08-21T06:24:15.029Z",
       "updatedBy": "fable-e3-burndown",
       "workOrder": 710
     },
@@ -100230,6 +100235,11 @@
       "assignee": null,
       "log": [
         {
+          "at": "2026-08-21",
+          "by": "fable-e3-burndown",
+          "text": "c9 has one precise blocker and it is not about the rename. Targeted cargo test --test authority now passes 22 of 23: parser, sema, TIR, AOT, JIT, dev/interpreter, comptime and REPL are all green on Ability/Abilities/#Abilities. The single failure is web, E-WEB-TIR-UNSUPPORTED for run at tests/authority.rs:169. The independent canonical test tests/web_build.rs:785 fails identically on #Target(Web) plus #Abilities(abilities: IO), so web TIR cannot lower ANY #Abilities scope today. That is a web-lowering gap, not a spelling gap. Two fixture repairs landed en route: tests/authority.rs:38 now grants IO because the region prints, and :166-174 uses the canonical explicit web-path fixture."
+        },
+        {
           "at": "2026-08-12",
           "by": "fable-e3-audit",
           "text": "audit #1869: cleared settled blockers (#1501 done); live blockers kept"
@@ -100382,7 +100392,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-06T21:35:59.251Z",
-      "updated": "2026-08-21T05:48:45.083Z",
+      "updated": "2026-08-21T06:30:14.851Z",
       "updatedBy": "fable-e3-burndown",
       "workOrder": 1000
     },
@@ -186700,6 +186710,20 @@
   ],
   "events": [
     {
+      "at": "2026-08-21T06:30:14.852Z",
+      "by": "fable-e3-burndown",
+      "action": "card.update",
+      "ref": "c0575p3w",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-08-21T06:24:15.029Z",
+      "by": "fable-e3-burndown",
+      "action": "card.update",
+      "ref": "c0r2uq88",
+      "note": "logEntry"
+    },
+    {
       "at": "2026-08-21T06:12:18.871Z",
       "by": "fable-e3-burndown",
       "action": "card.update",
@@ -190184,20 +190208,6 @@
       "action": "card.criteria-meet",
       "ref": "c0hipgvn",
       "note": "#1"
-    },
-    {
-      "at": "2026-08-20T21:43:50.136Z",
-      "by": "fable-e3-burndown",
-      "action": "card.update",
-      "ref": "c0615ffl",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-08-20T21:43:49.443Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0615ffl",
-      "note": "#4"
     }
   ],
   "nextNum": 368,

@@ -374,7 +374,7 @@ pub struct ExprEvalRequest<'a> {
     pub fuel: u64,
     pub sink: Option<&'a mut DevSink>,
     pub repl_mode: bool,
-    pub repl_grants: &'a [String],
+    pub repl_grants: &'a [CtValue],
     pub repl_authorizer: Option<&'a mut dyn ReplAuthorizer>,
     /// D-CTEFFECT1 Tier-1 inputs recorded by the canonical host surface.
     pub embed_inputs: Option<&'a mut Vec<ComptimeInput>>,
@@ -400,7 +400,7 @@ pub struct BlockEvalRequest<'a> {
     pub fuel: u64,
     pub sink: Option<&'a mut DevSink>,
     pub repl_mode: bool,
-    pub repl_grants: &'a [String],
+    pub repl_grants: &'a [CtValue],
     pub repl_authorizer: Option<&'a mut dyn ReplAuthorizer>,
     pub gates: jet_foundation::Policy::GateSet,
     pub impure_depth: usize,

@@ -1698,6 +1698,15 @@ fn builtin_codec_decode(tree: CtValue, name: &str) -> CtValue {
             ))),
         },
         "Decimal" => match datatree_variant(&tree) {
+            Some(("Number", Some(CtValue::Str(text)))) => {
+                match jet_foundation::Numeric::CtDecimal::from_json_number(text) {
+                    Ok(decimal) => CtValue::Present(Box::new(decimal.to_value())),
+                    Err(error) => CtValue::failed(Box::new(decode_error(
+                        "",
+                        format!("expected Decimal: {error}"),
+                    ))),
+                }
+            }
             Some(("Text", Some(CtValue::Str(text)))) => {
                 match codec_rt::jet_codec_decimal_decode_text(text) {
                     Ok(decimal) => CtValue::Present(Box::new(decimal.to_value())),
@@ -3125,6 +3134,37 @@ impl<'a> EvalCtx<'a> {
                         .ok_or_else(|| {
                             decode_error("", format!("expected {}, found out-of-range Int", ty.name()))
                         }),
+                    Some(("Number", Some(CtValue::Str(value)))) => {
+                        match jet_foundation::Numeric::CtBigInt::from_json_number(value) {
+                            Ok(value) => {
+                                let value = exact_int_value(value);
+                                if matches!(ty, Type::Int) {
+                                    Ok(value)
+                                } else {
+                                    match value {
+                                        CtValue::Int(value) => Ok(CtValue::Int(value)),
+                                        CtValue::BigInt(value) => value
+                                            .try_i64()
+                                            .map(CtValue::Int)
+                                            .ok_or_else(|| {
+                                                decode_error(
+                                                    "",
+                                                    format!(
+                                                        "expected {}, found out-of-range Int",
+                                                        ty.name()
+                                                    ),
+                                                )
+                                            }),
+                                        _ => unreachable!(),
+                                    }
+                                }
+                            }
+                            Err(_) => Err(decode_error(
+                                "",
+                                format!("expected {}, found number {value}", ty.name()),
+                            )),
+                        }
+                    }
                     Some(("Float", Some(CtValue::Float(value))))
                         if value.as_f64().fract() == 0.0 =>
                     {
@@ -3237,7 +3277,10 @@ impl<'a> EvalCtx<'a> {
                 )),
             },
             Type::String => match datatree_variant(&tree) {
-                Some(("Text", Some(CtValue::Str(value)))) => Ok(CtValue::Str(value.clone())),
+                Some(("Text", Some(CtValue::Str(value))))
+                | Some(("TypedText", Some(CtValue::Str(value)))) => {
+                    Ok(CtValue::Str(value.clone()))
+                }
                 Some(("Int", Some(CtValue::Int(value)))) => Ok(CtValue::Str(value.to_string())),
                 Some(("Int", Some(CtValue::BigInt(value)))) => {
                     Ok(CtValue::Str(value.to_string_rep()))
@@ -5624,6 +5667,7 @@ impl<'a> EvalCtx<'a> {
                     .or_else(|| scope.get(&local.name).cloned())
                     .or_else(|| self.globals.get(&local.name).cloned())
                     .ok_or_else(|| {
+                        eprintln!("CARD1560 local={} scope={:?}", local.name, scope.keys().collect::<Vec<_>>());
                         unsupported(&format!("unbound `{}`", local.name), self.span())
                     })?;
                 if local.deref {
@@ -5691,11 +5735,32 @@ impl<'a> EvalCtx<'a> {
                 // would be wrong.
                 let bound: Vec<(String, Option<CtValue>)> = prefix
                     .iter()
-                    .filter_map(|stmt| match stmt {
+                    .flat_map(|stmt| match stmt {
                         crate::Codegen::TIR::TStmt::Let { name, .. } => {
-                            Some((name.clone(), scope.get(name).cloned()))
+                            vec![(name.clone(), scope.get(name).cloned())]
                         }
-                        _ => None,
+                        crate::Codegen::TIR::TStmt::TupleDestructure { binds, .. }
+                        | crate::Codegen::TIR::TStmt::StructDestructure { binds, .. } => binds
+                            .iter()
+                            .map(|(local, _)| {
+                                let name = local
+                                    .strip_prefix(crate::Syntax::GENERATED_NAME_PREFIX)
+                                    .unwrap_or(local)
+                                    .to_string();
+                                (name.clone(), scope.get(&name).cloned())
+                            })
+                            .collect(),
+                        crate::Codegen::TIR::TStmt::ListDestructure { elems, .. } => elems
+                            .iter()
+                            .map(|local| {
+                                let name = local
+                                    .strip_prefix(crate::Syntax::GENERATED_NAME_PREFIX)
+                                    .unwrap_or(local)
+                                    .to_string();
+                                (name.clone(), scope.get(&name).cloned())
+                            })
+                            .collect(),
+                        _ => Vec::new(),
                     })
                     .collect();
                 let restore = |scope: &mut HashMap<String, CtValue>| {

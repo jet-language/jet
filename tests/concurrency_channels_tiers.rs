@@ -13,7 +13,7 @@ const SOURCE: &str = include_str!("../examples/features/concurrency/select_chann
 const EXPECTED: &str = include_str!("../examples/features/expected/concurrency/select_channel.out");
 
 const COMPTIME_SOURCE: &str = r#"
-fn choose() => Int {
+fn choose() Int {
     (sender, receiver) :: channel<Int>()
     sender.send(7)
     result := 0
