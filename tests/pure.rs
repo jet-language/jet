@@ -121,6 +121,26 @@ fn good() =[]=> Int {
     }
     return 42;
 }
+
+/// D-AUTHORITY-SCOPE1 / I9: comptime uses the same named `#Caps` scope as
+/// runtime tiers. The Authority handle is sema-only and the comptime block
+/// still contributes no runtime scope machinery.
+#[test]
+fn comptime_named_caps_scope_is_plain_block() {
+    let src = r#"
+@ {
+    #Caps(auth: IO) {
+        @answer :: 42
+    }
+}
+fn run() {
+    print("{@answer}");
+}
+"#;
+    let output = jet::compile(src).expect("comptime should accept named #Caps");
+    assert!(output.rust.contains("42"), "comptime binding was not emitted");
+    assert!(!output.rust.contains("Authority"), "comptime handle leaked into codegen");
+}
 fn run() {
     print("{good()}");
 }

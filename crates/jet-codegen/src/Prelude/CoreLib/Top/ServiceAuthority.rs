@@ -769,22 +769,25 @@ pub fn jet_services_authority_take_pending(
     let queue = pending.entry(key).or_default();
     let store_identity = service_authority_store_identity(&store);
     for entry in &entries {
+        let queued = queue.iter().any(|(queued_id, _, queued_store)| {
+            queued_id == &entry.id
+                && service_authority_store_identity(queued_store) == store_identity
+        });
         if entry.authority.is_empty()
             || entry.tree != endpoint.tree
             || entry.worker != endpoint.worker
             || !service_authority_entry_routes_to_endpoint(&runtime, entry, endpoint)
             || entry.dead
             || (entry.delivered_to_worker && entry.delivered)
-            || entry.retained_until.is_some()
+            // A retained receipt is eligible only after retry explicitly
+            // places it back in the bounded pending queue.
+            || (entry.retained_until.is_some() && !queued)
             || service_authority_entry_expired(entry, service_authority_now())
             || skip_ids.iter().any(|id| id == &entry.id)
         {
             continue;
         }
-        if queue.iter().any(|(queued_id, _, queued_store)| {
-            queued_id == &entry.id
-                && service_authority_store_identity(queued_store) == store_identity
-        }) {
+        if queued {
             continue;
         }
         if queue.len() >= SERVICE_AUTH_MAX_PENDING {

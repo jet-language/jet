@@ -776,6 +776,35 @@ fn compile_web_file_loads() {
     assert!(out.web.is_some());
 }
 
+/// D-AUTHORITY-SCOPE1 / I9: the web TIR path accepts the same named `#Caps`
+/// scope as native code and erases its sema-only handle before emission.
+#[test]
+fn web_named_caps_scope_uses_shared_tir() {
+    let source = "#Target(Web)\nfn run() {\n    #Caps(auth: IO) {\n        value :: 1 + 1\n    }\n}\n";
+    let out = jet::compile_web_with_path(source, "tests/fixtures/web_named_caps_scope.jet")
+        .expect("web should accept the canonical #Caps scope")
+        .web
+        .expect("web output");
+    assert!(out.wasm_rust.contains("__jet_run"), "web run export missing");
+    assert!(!out.wasm_rust.contains("Authority"), "web handle leaked into emission");
+}
+
+#[test]
+fn web_shared_values_use_the_shared_transaction_prelude() {
+    let source = include_str!("fixtures/web_shared_transaction.jet");
+    let web = jet::compile_web_with_path(source, "tests/fixtures/web_shared_transaction.jet")
+        .expect("shared web fixture")
+        .web
+        .expect("shared web fixture must emit web artifacts");
+
+    assert!(web.js_app.contains("jet_shared_new({"));
+    assert!(web.js_app.matches("jet_shared_read(").count() > 1);
+    assert!(web.js_app.matches("jet_shared_edit(").count() > 1);
+    assert!(web.js_app.matches("jet_stm_begin(").count() > 1);
+    assert!(web.js_app.matches("jet_shared_edit_txn(").count() > 1);
+    assert!(web.js_app.matches("jet_stm_commit(").count() > 1);
+}
+
 fn source_map_string_field<'a>(map: &'a str, field: &str) -> &'a str {
     let prefix = format!("\"{field}\":\"");
     let value = map

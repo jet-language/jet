@@ -51,6 +51,37 @@ fn unit_ratio_as_f64(value: &crate::AST::UnitRatio) -> f64 {
     numerator / denominator
 }
 
+// D-TYPE2-DEFAULT1: rational math crosses into the approximate world through
+// the existing precise Fraction Prelude bridge before the libm call.
+fn exact_rational_math_approx(method: &str) -> bool {
+    matches!(
+        method,
+        "sqrt"
+            | "sin"
+            | "cos"
+            | "tan"
+            | "asin"
+            | "acos"
+            | "atan"
+            | "sinh"
+            | "cosh"
+            | "tanh"
+            | "exp"
+            | "ln"
+            | "log2"
+            | "log10"
+            | "acosh"
+            | "asinh"
+            | "atanh"
+            | "cbrt"
+            | "exp2"
+            | "exp_m1"
+            | "ln_1p"
+            | "degrees"
+            | "radians"
+    )
+}
+
 fn progress_return_ty(args: &[TExpr]) -> Type {
     if matches!(args.first().map(|arg| &arg.ty), Some(Type::String)) {
         return Type::Result {
@@ -1430,6 +1461,34 @@ fn lower_method_call_impl(
             if module == "core.text.fmt" && method == "pretty" && index == 0 {
                 return lower_debug_text(lower_expr(expr, cx, env));
             }
+
+            if module == "core.math" && index == 0 && exact_rational_math_approx(method) {
+                let value = lower_expr(expr, cx, env);
+                // Both exact carriers cross here, matching the checker: the
+                // checker admits Fraction and Decimal at these irrational-result
+                // functions, so lowering must convert both or the tiers disagree
+                // with the type it already accepted.
+                let exact = match &value.ty {
+                    Type::Named(type_name) if type_name == Syntax::TYPE_FRACTION => {
+                        Some(Syntax::TYPE_FRACTION)
+                    }
+                    Type::Named(type_name) if type_name == Syntax::TYPE_DECIMAL => {
+                        Some(Syntax::TYPE_DECIMAL)
+                    }
+                    _ => None,
+                };
+                if let Some(type_name) = exact {
+                    return TExpr {
+                        ty: Type::Float,
+                        kind: TExprKind::PreciseBuiltin {
+                            type_name: type_name.to_string(),
+                            func: "to_float".to_string(),
+                            args: vec![value],
+                        },
+                    };
+                }
+                return value;
+            }
             lower_expr(expr, cx, env)
         };
 
@@ -2002,113 +2061,6 @@ fn lower_method_call_impl(
                 },
             };
         });
-    }
-    if recv_type.as_deref() == Some(Syntax::TYPE_TASKGROUP)
-        && method == Syntax::TASKGROUP_SELECT_METHOD
-        && args.is_empty()
-    {
-        return in_own_frame(|| {
-            return TExpr {
-                ty: Type::Apply {
-                    name: Syntax::TYPE_SELECT_BUILDER.to_string(),
-                    args: vec![],
-                },
-                kind: TExprKind::SelectStart,
-            };
-        });
-    }
-    if recv_type
-        .as_deref()
-        .is_some_and(|rt| rt == Syntax::TYPE_SELECT_BUILDER || rt.starts_with("SelectBuilder<"))
-    {
-        let builder = lower_expr(receiver, cx, env);
-        match method {
-            Syntax::SELECT_RECV_METHOD if args.len() == 1 => {
-                return in_own_frame(|| {
-                    let channel = lower_expr(&args[0].expr, cx, env);
-                    let elem = match &builder.ty {
-                        Type::Apply { name, args, .. }
-                            if name == Syntax::TYPE_SELECT_BUILDER && args.len() == 1 =>
-                        {
-                            args[0].clone()
-                        }
-                        _ => unit_type(),
-                    };
-                    return TExpr {
-                        ty: Type::Apply {
-                            name: Syntax::TYPE_SELECT_BUILDER.to_string(),
-                            args: vec![elem],
-                        },
-                        kind: TExprKind::SelectRecv {
-                            builder: Box::new(builder),
-                            channel: Box::new(channel),
-                        },
-                    };
-                });
-            }
-            Syntax::SELECT_AFTER_METHOD if args.len() == 1 || args.len() == 2 => {
-                return in_own_frame(|| {
-                    let duration = lower_expr(&args[0].expr, cx, env);
-                    let value = args
-                        .get(1)
-                        .map(|arg| Box::new(lower_expr(&arg.expr, cx, env)));
-                    let ty = if let Some(value) = value.as_ref() {
-                        match &builder.ty {
-                            Type::Apply { name, args, .. }
-                                if name == Syntax::TYPE_SELECT_BUILDER && args.len() == 1 =>
-                            {
-                                builder.ty.clone()
-                            }
-                            _ => Type::Apply {
-                                name: Syntax::TYPE_SELECT_BUILDER.to_string(),
-                                args: vec![value.ty.clone()],
-                            },
-                        }
-                    } else {
-                        builder.ty.clone()
-                    };
-                    return TExpr {
-                        ty,
-                        kind: TExprKind::SelectAfter {
-                            builder: Box::new(builder),
-                            duration: Box::new(duration),
-                            value,
-                        },
-                    };
-                });
-            }
-            Syntax::SELECT_READ_METHOD if args.len() == 1 => {
-                return in_own_frame(|| {
-                    let stream = lower_expr(&args[0].expr, cx, env);
-                    return TExpr {
-                        ty: builder.ty.clone(),
-                        kind: TExprKind::SelectRead {
-                            builder: Box::new(builder),
-                            stream: Box::new(stream),
-                        },
-                    };
-                });
-            }
-            Syntax::SELECT_WAIT_METHOD if args.is_empty() => {
-                return in_own_frame(|| {
-                    let ret = match &builder.ty {
-                        Type::Apply { name, args, .. }
-                            if name == Syntax::TYPE_SELECT_BUILDER && args.len() == 1 =>
-                        {
-                            args[0].clone()
-                        }
-                        _ => unit_type(),
-                    };
-                    return TExpr {
-                        ty: ret,
-                        kind: TExprKind::SelectWait {
-                            builder: Box::new(builder),
-                        },
-                    };
-                });
-            }
-            _ => {}
-        }
     }
     // D-TXN3/D-TXN4: `<handle>.on_commit(() => { … })` on a `#Transact` handle.
     // The gate proved `recv_type == Some("Transaction")` and a single literal
@@ -3674,7 +3626,7 @@ fn lower_method_call_impl(
                     ok: Box::new(Type::Named("ProcessChild".to_string())),
                     err: Box::new(Type::Named("IOError".to_string())),
                 },
-                (Some("ProcessSpec"), "capabilities") => Type::Apply {
+                (Some("ProcessSpec"), "abilities") => Type::Apply {
                     name: "Set".to_string(),
                     args: vec![Type::String],
                 },
@@ -4017,7 +3969,7 @@ fn lower_method_call_impl(
                     ok: Box::new(Type::List(Box::new(Type::Named("U8".to_string())))),
                     err: Box::new(Type::Named("WsError".to_string())),
                 },
-                ("Browser", "capabilities") => Type::Named("BrowserCapabilities".to_string()),
+                ("Browser", "abilities") => Type::Named("BrowserAbilities".to_string()),
                 ("Browser", "context") => Type::Result {
                     ok: Box::new(Type::Named("BrowserContext".to_string())),
                     err: Box::new(Type::Named("BrowserError".to_string())),
@@ -4084,7 +4036,7 @@ fn lower_method_call_impl(
                     | "get_by_test_id" | "get_by_css") => Type::Named("BrowserLocator".to_string()),
                 ("BrowserEvent", "kind" | "request_id" | "request_method" | "url_hash"
                     | "download_id" | "suggested_filename_hash")
-                | ("BrowserCapabilities", "profile")
+                | ("BrowserAbilities", "profile")
                 | ("BrowserTrace", "summary")
                 | ("BrowserReceipt", "summary")
                 | ("BrowserLocked", "engine" | "version" | "binary" | "protocol") => Type::String,
@@ -4094,7 +4046,7 @@ fn lower_method_call_impl(
                     err: Box::new(Type::Named("BrowserError".to_string())),
                 },
                 ("BrowserEvent", "is_blocked")
-                | ("BrowserCapabilities", "bidi" | "cdp")
+                | ("BrowserAbilities", "bidi" | "cdp")
                 | ("BrowserTrace", "redacted")
                 | ("BrowserReceipt", "redacted" | "isolated" | "cleaned")
                 | ("BrowserPrivacy", "isolated_profiles" | "redact_receipts" | "shared_profiles") => {
@@ -4168,7 +4120,7 @@ fn lower_method_call_impl(
                         | "BrowserTrace"
                         | "BrowserReceipt"
                         | "BrowserPrivacy"
-                        | "BrowserCapabilities"
+                        | "BrowserAbilities"
                         | "BrowserProtocol"
                         | "BrowserLocked"
                 )
@@ -5083,7 +5035,7 @@ fn lower_method_call_impl(
         {
             let known = matches!(
                 (handle.as_str(), method, args.len()),
-                ("Decimal", "add" | "sub" | "mul", 1)
+                ("Decimal", "add" | "sub" | "mul" | "equal", 1)
                     | ("Decimal", "to_string", 0)
                     | ("Fraction", "add" | "sub" | "mul" | "div" | "equal", 1)
                     | ("Fraction", "numerator" | "denominator" | "to_string" | "to_float" | "is_zero", 0)
@@ -5498,6 +5450,34 @@ fn lower_method_call_impl(
             }
         }
     }
+    // D-AUTHORITY-NAME1=A / D-AUTHORITY-WORD2=E: keep the two authority
+    // operations as a receiver call whose implementation is supplied by the
+    // shared Prelude. This is ordinary data, not a type/dispatch input.
+    if recv_type.as_deref() == Some(Syntax::TYPE_ABILITIES)
+        && matches!(method, "with" | "without")
+        && args.len() == 1
+    {
+        return in_own_frame(|| {
+            let recv = lower_expr(receiver, cx, env);
+            let targs = args
+                .iter()
+                .map(|arg| lower_one_call_arg(arg, None, env, cx))
+                .collect();
+            TExpr {
+                ty: resolved_ret
+                    .cloned()
+                    .unwrap_or_else(|| Type::Named(Syntax::TYPE_ABILITIES.to_string())),
+                kind: TExprKind::MethodCall {
+                    recv: Box::new(recv),
+                    method: TMethodRef::bare(method),
+                    type_args: type_args.to_vec(),
+                    args: targs,
+                    source_first_string_literal: first_string_literal_arg(args),
+                    operator_line: None,
+                },
+            }
+        });
+    }
     // c109 Phase 7: a STATIC method call `Type.make(args)`. The gate
     // (`static_method_call_in_subset`) proved the receiver is a covered type-name
     // ident and `method` is a registered static method. Mirror the AST path
@@ -5506,14 +5486,14 @@ fn lower_method_call_impl(
         return in_own_frame(|| {
             // D-AUTHORITY-NAME1=A: keep construction as a Prelude static call
             // so every engine receives the same named rights carrier.
-            if type_name == Syntax::TYPE_AUTHORITY
+            if type_name == Syntax::TYPE_ABILITIES
                 && method == "workspace"
                 && args.is_empty()
             {
                 return TExpr {
                     ty: resolved_ret
                         .cloned()
-                        .unwrap_or_else(|| Type::Named(Syntax::TYPE_AUTHORITY.to_string())),
+                        .unwrap_or_else(|| Type::Named(Syntax::TYPE_ABILITIES.to_string())),
                     kind: TExprKind::StaticCall {
                         owner: rooted_owner("JetAuthority"),
                         owner_type: None,
@@ -6699,7 +6679,7 @@ fn lower_method_call_impl(
                 {
                     let known = matches!(
                         (n.as_str(), method, args.len()),
-                        ("Decimal", "add" | "sub" | "mul", 1)
+                        ("Decimal", "add" | "sub" | "mul" | "equal", 1)
                             | ("Decimal", "to_string", 0)
                             | ("Fraction", "add" | "sub" | "mul" | "div" | "equal", 1)
                             | (

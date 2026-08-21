@@ -1,4 +1,4 @@
-// D-EFFBUDGET1: an `effects:` block turns on whole-dependency-graph
+// D-EFFBUDGET1: an `authority.holds` block turns on whole-dependency-graph
 // enforcement. `jet build` fails naming the exact dependency and effect when
 // a transitive dependency reaches an effect outside `allow`, unless it is
 // covered by `authority.grants`. Manifest keys only — no language grammar.
@@ -7,14 +7,10 @@ version: "0.1.0"
 edition: "2026"
 // This package's own code (and its dependency graph) may use `FS` and `Time`.
 // Every `jet build` also prints a one-line effect summary unconditionally,
-// even with no `effects:` block at all — this block only turns on the
+// even with no `authority.holds` block at all — this block only turns on the
 // build-failing enforcement.
-effects: {
-    allow: [FS, Time],
-}
-// An audited per-dependency escape lives in the authority block. If a
-// dependency needed `Net`, its grant would be recorded in `.jet/lock`.
 authority: .{
+    holds: { allow: [FS, Time] },
     grants: {
     },
 }

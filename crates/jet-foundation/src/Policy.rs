@@ -788,10 +788,10 @@ pub fn explain<R: ExplainableResolution>(resolution: &R) -> String {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum RuleSite { Package, File, Module, Function, Method, Block, Statement, Expression, Type, Impl, Declaration, Constant, Field, Variant, Parameter, Test, Bench, Operation, Text }
+pub enum RuleSite { Package, File, Module, Function, Method, Block, Statement, Expression, Type, Impl, Declaration, Constant, Field, Variant, Parameter, Test, Operation, Text }
 
 impl RuleSite {
-    pub const ALL: [Self; 19] = [
+    pub const ALL: [Self; 18] = [
         Self::Package,
         Self::File,
         Self::Module,
@@ -808,7 +808,6 @@ impl RuleSite {
         Self::Variant,
         Self::Parameter,
         Self::Test,
-        Self::Bench,
         Self::Operation,
         Self::Text,
     ];
@@ -831,7 +830,6 @@ impl RuleSite {
             Self::Variant => "Variant",
             Self::Parameter => "Parameter",
             Self::Test => "Test",
-            Self::Bench => "Bench",
             Self::Operation => "Operation",
             Self::Text => "Text",
         }
@@ -839,7 +837,7 @@ impl RuleSite {
 }
 
 /// D-META-FORM1=A: `@sites` on a `marker` declaration takes `[Site]`, so the
-/// nineteen attachment points are published as an ordinary `core.compiler.lang` enum
+/// eighteen attachment points are published as an ordinary `core.compiler.lang` enum
 /// beside the other marker-argument menus (D-RULEARG-TYPES1=A). `RuleSite::ALL`
 /// stays the one source; `site_variants_match_the_enum` proves this list is it.
 pub const SITE_VARIANTS: &[&str] = &[
@@ -859,7 +857,6 @@ pub const SITE_VARIANTS: &[&str] = &[
     "Variant",
     "Parameter",
     "Test",
-    "Bench",
     "Operation",
     "Text",
 ];
@@ -923,7 +920,7 @@ pub struct RuleArgDeclaration {
     pub name: &'static str,
     pub variants: &'static [&'static str],
     /// Which segment of a written path names the variant. `core.compiler.lang.Target.Web`
-    /// and `Capability.FS` are read from the front because their variants own
+    /// and `Ability.FS` are read from the front because their variants own
     /// nested names; every other menu reads the last segment.
     pub variant_segment: VariantSegment,
 }
@@ -942,7 +939,7 @@ pub struct CompanionSite {
 fn canonical_rule_arg_variants(name: &str) -> Option<&'static [&'static str]> {
     Some(match name {
         "ABI" => &["system", "cdecl", "stdcall", "fastcall", "win64", "sysv64"],
-        "Capability" => crate::Authority::EFFECT_ROOTS.as_slice(),
+        "Ability" => crate::Authority::EFFECT_ROOTS.as_slice(),
         "FfiLanguage" => &["c", "cpp", "asm"],
         "InlineMode" => &["Hint", "Always", "Never"],
         "JobScope" => crate::Syntax::JOB_SCOPE_VARIANTS,
@@ -1027,12 +1024,12 @@ pub static RULE_ARG_DECLARATIONS: LazyLock<Vec<RuleArgDeclaration>> = LazyLock::
         .collect()
 });
 
-/// D-RULEARG-TYPES1=A: `Capability` and `Target` variants own nested names
+/// D-RULEARG-TYPES1=A: `Ability` and `Target` variants own nested names
 /// (`FS.read`, `Web.dom`), so the written path names its variant in the first
 /// segment after the enum. Every other menu names it in the last.
 const fn canonical_variant_segment(name: &str) -> VariantSegment {
     match name.as_bytes() {
-        b"Capability" | b"Target" => VariantSegment::First,
+        b"Ability" | b"Target" => VariantSegment::First,
         _ => VariantSegment::Last,
     }
 }
@@ -1434,12 +1431,28 @@ pub fn marker_unknown_error(
             Some(span),
         );
     }
-    let nearest = vocabulary
-        .iter()
-        .map(|candidate| (candidate, crate::Syntax::edit_distance(name, candidate)))
-        .filter(|(_, distance)| *distance <= 2)
-        .min_by_key(|(_, distance)| *distance)
-        .map(|(candidate, _)| candidate.clone());
+    let mut nearest: Option<(String, usize)> = None;
+    let mut ambiguous = false;
+    for candidate in vocabulary {
+        let distance = crate::Syntax::edit_distance(name, candidate);
+        if distance == 0 || distance > 2 {
+            continue;
+        }
+        match nearest.as_ref() {
+            None => nearest = Some((candidate.clone(), distance)),
+            Some((_, nearest_distance)) if distance < *nearest_distance => {
+                nearest = Some((candidate.clone(), distance));
+                ambiguous = false;
+            }
+            Some((nearest_candidate, nearest_distance)) if distance == *nearest_distance => {
+                ambiguous |= nearest_candidate != candidate;
+            }
+            _ => {}
+        }
+    }
+    let nearest = nearest
+        .filter(|_| !ambiguous)
+        .map(|(candidate, _)| candidate);
     let fix = nearest.as_ref().map_or_else(
         || {
             "check the spelling, or see docs/spec/syntax-decisions.md for the full applied-rule list."
@@ -1616,7 +1629,7 @@ mod tests {
     fn site_variants_match_the_enum() {
         use super::RuleSite;
 
-        assert_eq!(super::SITE_VARIANTS.len(), 19);
+        assert_eq!(super::SITE_VARIANTS.len(), 18);
         let published: Vec<&str> = RuleSite::ALL.iter().map(|site| site.name()).collect();
         assert_eq!(published, super::SITE_VARIANTS);
 
@@ -1637,7 +1650,6 @@ mod tests {
             ("Policy", RuleSite::Module),
             ("HTML", RuleSite::File),
             ("Test", RuleSite::Test),
-            ("Bench", RuleSite::Bench),
             ("Job", RuleSite::Function),
             ("Doc", RuleSite::Type),
             ("Doc", RuleSite::Variant),
@@ -1653,8 +1665,6 @@ mod tests {
             ("Job", RuleSite::Method),
             ("HTML", RuleSite::Module),
             ("Inline", RuleSite::File),
-            ("Bench", RuleSite::Test),
-            ("Test", RuleSite::Bench),
             ("Codable", RuleSite::Function),
             ("Doc", RuleSite::Function),
         ];
@@ -1742,7 +1752,7 @@ mod tests {
             variants("NamingCase"),
             &["camel", "snake", "pascal", "kebab", "screaming"]
         );
-        assert_eq!(variants("Capability"), crate::Authority::EFFECT_ROOTS.as_slice());
+        assert_eq!(variants("Ability"), crate::Authority::EFFECT_ROOTS.as_slice());
     }
 
     /// D-MARK-FORM1=A / D-MARK-REPEAT1=A / D-VERDICT-1455-1: the facts the
@@ -1789,7 +1799,7 @@ mod tests {
 
         // Which path segment names a variant is declaration data.
         assert_eq!(
-            super::rule_arg_declaration("Capability").unwrap().variant_segment,
+            super::rule_arg_declaration("Ability").unwrap().variant_segment,
             super::VariantSegment::First
         );
         assert_eq!(

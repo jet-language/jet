@@ -66,17 +66,35 @@ fn builtin_math_family_has_named_field_parity_on_both_lenses() {
 #[test]
 fn measured_values_propagate_first_order_uncertainty() {
     let source = r#"
+use core.math as math
+
 fn run() {
     gravity :: measurement(9.8, uncertainty: 0.1)
     time :: measurement(2.0, uncertainty: 0.05)
     squared_time :: time * time
     height :: measurement(0.5, uncertainty: 0.0) * gravity * squared_time
     print(height)
+    print(math.sqrt(gravity))
 }
 "#;
     tir_support::assert_tiers_agree(
         "measurement_first_order_uncertainty",
         source,
-        "19.6 ± 0.7212489168102787\n",
+        "19.6 ± 0.7212489168102787\n3.1304951684997055 ± 0.015971914124998498\n",
+    );
+}
+
+#[test]
+fn measured_unit_scale_produces_measured_conversion() {
+    let source = r#"
+fn run() {
+    mass :: Kilogram.from_dalton_rounded(6.022140762e26dalton, .NearestEven, digits: 0) ?? panic("measured conversion")
+    print(mass)
+}
+"#;
+    tir_support::assert_tiers_agree(
+        "measurement_unit_conversion",
+        source,
+        "1.0 ± 3.1315131919070317e-10\n",
     );
 }

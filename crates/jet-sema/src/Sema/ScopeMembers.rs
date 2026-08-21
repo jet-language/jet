@@ -153,7 +153,6 @@ fn statement_has_assertion(statement: &Stmt) -> bool {
         | Stmt::Policy { .. }
         | Stmt::Layout { .. }
         | Stmt::Caps { .. }
-        | Stmt::Grant { .. }
         | Stmt::ComptimeBlock { .. }
         | Stmt::Live { .. }
         | Stmt::Transact { .. }
@@ -203,7 +202,6 @@ pub(crate) fn statement_bodies(statement: &Stmt) -> Vec<&[Stmt]> {
         | Stmt::TaskGroup { body, .. }
         | Stmt::Layout { body, .. }
         | Stmt::Caps { body, .. }
-        | Stmt::Grant { body, .. }
         | Stmt::ComptimeBlock { body, .. }
         | Stmt::ContextBlock { body, .. }
         | Stmt::Live { body, .. }
@@ -877,7 +875,6 @@ fn child_bodies(s: &Stmt) -> Vec<&[Stmt]> {
         | Stmt::TaskGroup { body, .. }
         | Stmt::Layout { body, .. }
         | Stmt::Caps { body, .. }
-        | Stmt::Grant { body, .. }
         | Stmt::ComptimeBlock { body, .. }
         | Stmt::ContextBlock { body, .. }
         | Stmt::Live { body, .. }

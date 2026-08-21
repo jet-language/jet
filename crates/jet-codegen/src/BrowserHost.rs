@@ -301,10 +301,10 @@ pub(crate) fn eval_method(
         .with(|values| values.borrow().get(&id).cloned())
         .ok_or_else(|| host_error(kind, span))?;
     Ok(match (&value, method) {
-            (BrowserHostValue::Browser(browser), "capabilities") => {
-                let caps = jet_browser_capabilities(browser);
+            (BrowserHostValue::Browser(browser), "abilities") => {
+                let caps = jet_browser_abilities(browser);
                 CtValue::Struct {
-                    type_name: "BrowserCapabilities".to_string(),
+                    type_name: "BrowserAbilities".to_string(),
                     fields: vec![
                         ("bidi".to_string(), CtValue::Bool(caps.bidi)),
                         ("cdp".to_string(), CtValue::Bool(caps.cdp)),
@@ -604,7 +604,7 @@ pub(crate) fn eval_value_method(
             | "suggested_filename_hash") => field(recv, kind, method).cloned(),
         ("BrowserEvent", "is_blocked") => field(recv, kind, "is_blocked").cloned(),
         ("BrowserEvent", "status_code") => field(recv, kind, "status_code").cloned(),
-        ("BrowserCapabilities", "bidi" | "cdp" | "profile") => {
+        ("BrowserAbilities", "bidi" | "cdp" | "profile") => {
             field(recv, kind, method).cloned()
         }
         ("BrowserTrace", "entry_count") => field(recv, kind, "entries").and_then(|value| {

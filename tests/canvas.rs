@@ -304,7 +304,7 @@ const CANVAS_SHIELD_FIXTURE: &str = r#"fn run() {
 "#;
 
 const CANVAS_POLICY_FIXTURE: &str = r#"fn run() {
-    #Policy(arena_bounded(8192)) {
+    #Policy(copies: .Explicit) {
         print("bounded")
     }
 }
@@ -3787,7 +3787,7 @@ fn canvas_projects_policy_region() {
 
     for field in [
         "\"kind\":\"policy\"",
-        "\"title\":\"#Policy(arena_bounded)\"",
+        "\"title\":\"#Policy(copies)\"",
         "\"source_span\":{\"start\":",
         "\"title\":\"print\"",
         "\"title\":\"\\\"bounded\\\"\"",

@@ -1301,7 +1301,7 @@ fn canonical_time_timeout_and_sleep_spellings_compile() {
 use core.time.[sleep]
 
 fn run() {
-    #Grant(caps: Time, Panic) {
+    #Caps(caps: Time) {
         wait :: 500ms
         task.timeout(wait)
         sleep(500ms)

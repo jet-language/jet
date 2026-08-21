@@ -33,7 +33,15 @@ Error [E0915]: the one-pass source `Stream`<Int> has no `Display` implementation
 Error [E0112]: `print` doesn't know how to show `Box`<Int>
   --> tests/ui/print_lazy_iter_view.jet:29:11
     |
- 29 |     print(Box<Int>.{value: 1})
-    |           ^^^^^^^^^^^^^^^^^^^
+ 29 |     print(Box<Int>{value: 1})
+    |           ^^^^^^^^^^^^^^^^^^
  Why: print shows values that have a display
  Fix: print one of its parts instead
+
+Error [E0112]: `print` cannot show the one-pass source `Iter`<Int>
+  --> tests/ui/print_lazy_iter_view.jet:31:11
+    |
+ 31 |     print(lazy_nums)
+    |           ^^^^^^^^^
+ Why: reading this value consumes it, so showing it would spend the only pass
+ Fix: materialize it first: add `.to_list()` before printing; `.lazy()` or another Iter source enters the one-pass plane

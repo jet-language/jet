@@ -654,7 +654,7 @@ pub const BUILTIN_FETCH: &str = "fetch";
 /// S43 (ratified M6; PascalCase marker D-CASING1 follow-on 2026-06-21):
 /// top-level test-declaration block, written as the marker `#Test("name") { … }`.
 /// D-TESTPAREN1=A (ratified 2026-06-26): the name is now a parenthesized string
-/// argument, matching the `#Caps(…)` / `#Grant(…)` marker family.
+/// argument, matching the `#Caps(…)` marker family.
 /// D-TESTFAULT1=A (ratified 2026-08-12): the optional `faults: [Effect]`
 /// argument names effect-root call sites for the deterministic test harness.
 /// The bare lowercase `test` keyword (FOREIGN_TEST) is the retired spelling,
@@ -662,10 +662,6 @@ pub const BUILTIN_FETCH: &str = "fetch";
 pub const KW_TEST: &str = "Test";
 pub const TEST_FAULTS_PARAM: &str = "faults";
 pub const TEST_EXPECTED_FAIL_PARAM: &str = "expected_fail";
-
-/// D-CLAIM-BENCH1=A: retained only so the parser can teach the retired marker;
-/// measured claims use `#Test("name") { .measure { … } }`.
-pub const KW_BENCH: &str = "Bench";
 
 /// D-DOTSCOPE1 (ratified 2026-07-02): scope-member vocabulary for `#Test`.
 /// Inside a `#Test { … }` body a statement-position `.name { … }` /
@@ -698,14 +694,14 @@ pub const JOB_SCOPE_VARIANTS: &[&str] = &["Dev", "Ship", "Internal"];
 /// reuse — they already name Jet's built-in entry points (`fn run`/`fn dev`/
 /// `fn build`/`fn test`).
 /// Sema rejects a collision as E0928.
-pub const JOB_RESERVED_LIFECYCLE: &[&str] = &["run", "dev", "build", "test", "bench"];
+pub const JOB_RESERVED_LIFECYCLE: &[&str] = &["run", "dev", "build", "test"];
 
 /// D-JOB-SUBCMD1=C: bare names reserved by Jet's command and flag surface.
 /// Job dispatch claims the first argv word before ordinary CLI parsing.
 pub const JOB_RESERVED_CLI: &[&str] = &[
     // Commands which users can type after `jet`.
     "help", "version", "jobs", "check", "build", "run", "dev", "serve", "debug", "test",
-    "bench", "repl", "new", "add", "remove", "fetch", "update", "fmt", "fix",
+    "repl", "new", "add", "remove", "fetch", "update", "fmt", "fix",
     "lint", "emit", "eval", "fuzz", "env", "clean", "trust", "self", "inspect",
     "registry", "hangar", "project", "diff", "merge", "prove", "notebook", "import",
     "explain", "cache", "remote", "image", "os", "init", "split", "fold", "lock", "store",
@@ -724,7 +720,7 @@ pub const JOB_RESERVED_CLI: &[&str] = &[
     "before", "spdx", "cyclonedx", "advisory_db", "vendor_dir", "sbom", "verbose",
     "online", "dry_run", "edition", "try_anyway", "interpret", "trace_tiers",
     "restart", "swap", "watch", "measure", "record", "replay", "project", "pure", "freestanding", "gate", "target",
-    "preset", "explain_partition", "capabilities_json", "update_snapshots",
+    "preset", "explain_partition", "abilities_json", "update_snapshots",
     "coverage", "rust", "emit_generated", "u", "release", "profile", "builder", "a11y",
     "scope", "filter", "shuffle", "serial", "iterations", "time", "seed", "corpus",
     "lens", "facts", "annotations", "baseline", "bootstrap", "accept_regression", "reason",

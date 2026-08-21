@@ -55,7 +55,7 @@ Jet already builds receipts. It builds them seven different ways, one per corner
 | 6 | Store realization | connected receipt: inputs → action → digest → proof → generation | D-ECO-RECEIPT2=A, sd:4197 | Ratified, schema unpicked, "fragmented across #420, #422, #424, #425, #431" (spec's own words) |
 | 7 | Build actions | automatic action cache, keys named down to env and tool digest | D-BUILDCACHE1=A, sd:4376 | Ratified, unbuilt — hence the 33 s warm tax |
 | 8 | Tier parity | `tests/jit_gaps.txt` hand ledger, watched by the `jit_coverage_audit` observer | tests/ | The ledger declared 0 gaps while the observer found 51; the observer now ratchets both directions (#1998), but the ledger is still hand-written |
-| 9 | Feature claims | `docs/spec/feature-claim-manifest.json` | docs/spec/ | Hand-maintained beside the code it describes |
+| 9 | Feature claims | `docs/spec/feature-claims.json` | docs/spec/ | Hand-maintained beside the code it describes |
 | 10 | LLM surface digest | `llms.text` rendered by `jet inspect digest`, CI byte-compares | `Source/CmdInspect.rs:12-99` | None — the second model row: a ledger that cannot lie |
 | 11 | Card evidence | prose rows on Tower cards | `.tower/` | Destroyed by a git reset once; drifts both directions (#12 vs shipped DAP) |
 | 12 | Schema history | `.jet/cache/schema/` snapshots, E0910 gate | `Source/CmdSchema.rs` | Solid but private to one verb |

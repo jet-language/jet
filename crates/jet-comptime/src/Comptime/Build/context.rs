@@ -6,7 +6,7 @@ use super::actions_policy::{
 use super::cache_cas::ContentDigest;
 use super::errors_keys::{closed_cycle, BuildError, NameKind};
 use super::handles::{
-    ActionHandle, ActionId, AssetBundleTarget, BenchTarget, DocTarget, ExecutableTarget,
+    ActionHandle, ActionId, AssetBundleTarget, DocTarget, ExecutableTarget,
     GeneratedModuleHandle, GeneratedModuleId, InstallTarget, LibraryTarget, PackageTarget,
     PluginHandle, PluginId, ProbeHandle, ProbeId, PublishTarget, SigningIdentityHandle,
     SigningIdentityId, TargetId, TargetRef, TestTarget, ToolchainHandle, ToolchainId,
@@ -261,18 +261,6 @@ impl BuildContext {
     ) -> Result<TestTarget, BuildError> {
         let id = self.push_target(name, TargetKind::Test, spec)?;
         Ok(TestTarget {
-            id,
-            context: self.context,
-        })
-    }
-
-    pub fn add_bench(
-        &mut self,
-        name: impl Into<String>,
-        spec: TargetSpec,
-    ) -> Result<BenchTarget, BuildError> {
-        let id = self.push_target(name, TargetKind::Bench, spec)?;
-        Ok(BenchTarget {
             id,
             context: self.context,
         })
@@ -1168,7 +1156,6 @@ fn parse_packaged_target_kind(value: &str) -> Result<TargetKind, BuildError> {
         "executable" => Ok(TargetKind::Executable),
         "library" => Ok(TargetKind::Library),
         "test" => Ok(TargetKind::Test),
-        "bench" => Ok(TargetKind::Bench),
         "asset-bundle" => Ok(TargetKind::AssetBundle),
         "doc" => Ok(TargetKind::Doc),
         "install" => Ok(TargetKind::Install),

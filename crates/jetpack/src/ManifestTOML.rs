@@ -49,7 +49,8 @@ pub struct RepoMeta {
     pub version: Option<String>,
 }
 
-/// A parse error — E1214 (malformed line) or E1215 (unknown name).
+/// A parse error — E1214 (malformed line) or E1215 (unknown name). E1215 keeps
+/// only a line number, so its did-you-mean text has no safe byte-span edit.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TOMLError {
     pub code: &'static str,

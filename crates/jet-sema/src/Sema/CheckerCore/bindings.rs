@@ -156,17 +156,17 @@ pub(crate) fn check_meta_attr_fields(meta: &MetaAttr) -> Vec<Diagnostic> {
                 } else {
                     None
                 };
-                let fix = suggestion.map_or_else(
-                    || {
-                        format!(
-                            "use `{}`, `{}`, or `{}`",
-                            Syntax::META_FIELD_CATEGORY,
-                            Syntax::META_FIELD_TUNABLE,
-                            Syntax::META_FIELD_MATURITY
-                        )
-                    },
-                    |suggestion| format!("did you mean `{suggestion}`?"),
-                );
+                // Borrow the suggestion for the prose so the edit below can
+                // still own it.
+                let fix = match suggestion.as_ref() {
+                    Some(suggestion) => format!("did you mean `{suggestion}`?"),
+                    None => format!(
+                        "use one of `{}`, `{}`, `{}`",
+                        Syntax::META_FIELD_CATEGORY,
+                        Syntax::META_FIELD_TUNABLE,
+                        Syntax::META_FIELD_MATURITY
+                    ),
+                };
                 let mut diagnostic = Diagnostic::error(
                     "E0345",
                     format!("`#Meta` does not have a `{}` field", name),

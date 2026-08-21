@@ -358,6 +358,8 @@ pub fn update_lock_provenance(
     entries: &[PackageEffects],
     manifest: &PackageFacts,
 ) {
+    lock.authority = (manifest.authority != crate::Package::PackageAuthority::default())
+        .then(|| manifest.authority.clone());
     for pkg in &mut lock.packages {
         let key = if pkg.source == crate::Lock::LockSource::Root {
             "root"
@@ -401,7 +403,7 @@ pub fn e1220_panic(dep: &str, panic_site: &str, span: Option<Span>) -> Diagnosti
         format!(
             "the package denies stops from `{panic_site}`; a dependency that can stop cannot cross this budget boundary"
         ),
-        "return a fallible result for expected failure, add facts or a `#Pre`/refinement proof for a programmer-error stop, or allow/grant Panic to this dependency".to_string(),
+        "return a fallible result for expected failure, or add facts or a `#Pre`/refinement proof for a programmer-error stop; `Panic` is deny-only and cannot be allowed or granted".to_string(),
         span,
     )
 }

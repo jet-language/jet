@@ -271,9 +271,6 @@ fn stmt_names(stmts: &[Stmt], out: &mut Vec<Diagnostic>) {
             | Stmt::Layout { name, name_span, body, .. } => {
                 snake(name, *name_span, "local", out); stmt_names(body, out);
             }
-            Stmt::Grant { binding, binding_span, body, .. } => {
-                snake(binding, *binding_span, "local", out); stmt_names(body, out);
-            }
             Stmt::Transact { name, name_span, body, .. } => {
                 if let (Some(name), Some(span)) = (name, name_span) { snake(name, *span, "local", out); }
                 stmt_names(body, out);
@@ -290,9 +287,17 @@ fn stmt_names(stmts: &[Stmt], out: &mut Vec<Diagnostic>) {
                 for arg in args { expr_names(arg, out); }
                 stmt_names(body, out);
             }
+            // D-AUTHORITY-SCOPE1=A: the optional name-before-list head binds
+            // the scoped Authority handle.
+            Stmt::Caps { binding, binding_span, body, .. } => {
+                if let (Some(name), Some(span)) = (binding, binding_span) {
+                    snake(name, *span, "local", out);
+                }
+                stmt_names(body, out);
+            }
             Stmt::Unsafe { body, .. } | Stmt::Impure { body, .. } | Stmt::Reactive { body, .. }
             | Stmt::Shield { body, .. } | Stmt::Switched { body, .. }
-            | Stmt::Policy { body, .. } | Stmt::Caps { body, .. } | Stmt::ComptimeBlock { body, .. }
+            | Stmt::Policy { body, .. } | Stmt::ComptimeBlock { body, .. }
             | Stmt::Live { body, .. } | Stmt::AssumeDet { body, .. } => stmt_names(body, out),
             Stmt::BreakValue(value, _) | Stmt::BreakLabelValue(_, _, value, _) => {
                 expr_names(value, out)

@@ -190,7 +190,7 @@ fn returned_function_call_example_matches_all_execution_tiers() {
         include_str!("../examples/features/expected/functions/returned_function_call.out"),
     );
 }
-/// D-ONELINE-BODY1=B / D-LOOP-STMT-ARROW1=C / I9: the body-rule example
+/// D-BODY-LAST1=B / D-SIG-SHAPE1=B / D-LOOP-STMT-ARROW1=C / I9: the body-rule example
 /// produces byte-identical output through AOT, default `jet run`, and the
 /// forced interpreter.
 #[test]

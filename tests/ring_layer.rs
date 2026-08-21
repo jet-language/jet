@@ -275,6 +275,7 @@ fn lock_roundtrip_layer_metadata() {
         version: 1,
         packages: vec![pkg],
         root_dependencies: vec![],
+        authority: None,
         workspace_members: vec![],
         workspace_source_digest: None,
         workspace_overlay_policy: Default::default(),

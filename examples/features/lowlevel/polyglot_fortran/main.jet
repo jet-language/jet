@@ -1,10 +1,9 @@
 // Run `jet inspect bind fortran matrix.f90 --pkg matrix`, then `jet run main.jet`.
 use fortran.matrix as matrix
 
-// Panic is declared: the generated wrapper's column-major extent guard stops
-// the program when the flat list is not exactly 2x3 (D-NOPANIC1=D), and an
-// effect a body can reach must appear in the row it declares.
-fn run() :[Fortran, IO, Panic]> {
-    values :: [1.0, 2.0, 3.0, 4.0, 5.0, 6.0]
+// The generated wrapper's column-major extent guard stops locally when the
+// flat list is not exactly 2x3; the caller supplies a valid 2x3 list.
+fn run() :[FFI.Fortran, IO]> {
+    values :: [Float]{1.0, 2.0, 3.0, 4.0, 5.0, 6.0}
     print(matrix.probe(values))
 }

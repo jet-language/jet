@@ -69,9 +69,10 @@ that row. They are not alternate homes.
    raise site from the source span and replacement token. The diagnostic model
    carries that typed edit unchanged; changing the human Fix sentence must not
    change `fix_edits`.
-   The registry also supplies the edit's `applicability`: `safe` means the
-   proved progress rule from D-REPORT-FIXGRADE1=D; `suggested` means an editor
-   may show it, but unattended `jet fix` does not apply it.
+   The registry also supplies `fix_edits[].safety` from D-REPORT-FIXGRADE1=D;
+   an edit has no default class. Its `applicability` is `safe` for the two
+   auto-apply classes and `suggested` for the remaining classes. An editor may
+   show a suggested edit, but unattended `jet fix` does not apply it.
 5. Add the failing `tests/ui` source and exact `.stderr` snapshot first. The
    diagnostic points at the user's actionable token, reports alongside other
    recoverable errors, and includes no raw rustc text. Every report row has a
@@ -89,8 +90,8 @@ that row. They are not alternate homes.
    reserved. The guard must reject duplicate homes, unregistered codes, missing
    What/Why/Fix fields, false locations, and fixes that do not apply to the
    named span. A report must keep one code and one meaning from AOT through
-   `jet run` and the interpreter; do not park a missing tier in
-   `tests/jit_gaps.txt`. Update relevant spec/docs, then run
+   `jet run` and the interpreter; do not park a missing tier in a hand ledger.
+   Update relevant spec/docs, then run
    `scripts/agent/jet-env cargo test --test diagnostics_coverage` and the
    feature's focused test. `tests/diagnostic_snapshots.rs` and
    `tests/diagnostics_coverage.rs` are the executable proof.
@@ -156,7 +157,7 @@ renumbered, and no new `W` code may be allocated.
 | `` `defer` only schedules a consuming resource close ``. | Jet has no general deferred-action mechanism; resource cleanup stays explicit and ownership-checked. | Write `defer close(^resource)` with the move marker `^`. |
 | `` `fun` is a function declaration keyword; Jet writes `fn` ``. | Jet uses one function declaration spelling so every declaration has one shape. | Replace `fun` with `fn`; the same rule covers `func`, `def`, and `function`. |
 | `` `var` is a foreign binding keyword; Jet writes `:=` ``. | Jet puts binding mutability on `:=` or `::`, not on a declaration keyword. | Write `name := value`; `let`, `const`, and `val` use `name :: value`. |
-| `a function return type uses :`. | Jet uses `:` for parameter and field types; callable results use `=>`. | Replace `:` with `=>` before the return type. |
+| `a function return type uses :`. | Jet uses `:` for parameter and field types; callable results use `:>`. | Replace `:` with `:>` before the return type. |
 
 ## Error code registry
 
@@ -216,7 +217,7 @@ renumbered, and no new `W` code may be allocated.
 | E0053 | parse | *retired by D-S14-PAUSE* (was: bare `pure` teaching) |
 | E0054 | parse | *retired by D-S14-PAUSE* (was: bare `todo` teaching) |
 | E0055 | parse | teaching: `#Audit("…")` retired → reason is now the argument of `#Unsafe("…")` (D-UNSAFE2) |
-| E0056 | parse | *retired by D-S14-PAUSE* (was: `mut` capability keyword teaching) |
+| E0056 | parse | *retired by D-S14-PAUSE* (was: `mut` permission keyword teaching) |
 | E0057 | parse | retired `take(...)` closure capture prefix; captures are implicit (D-ARROW-CONTROL1) |
 | E0058 | parse | *retired by D-MEM1/S3* (was: `view` return keyword teaching → the write-access marker `&`; raw-reference return spelling `-> &T` no longer exists to point at) |
 | E0059 | parse | teaching: bare `sanitizer fn` → `#Scrub(Tag) fn` (D-TAG-SURFACE1) |
@@ -224,22 +225,23 @@ renumbered, and no new `W` code may be allocated.
 | E0062 | retired | former legacy applied-rule wrong-sigil diagnostic; D-SHAPE2 cleanly rejects `#Rule` as non-grammar |
 | E0063 | parse | teaching: applied rules use `#`, not the compile-time/fact-read prefix `@` (D-VERDICT-732-1, amended by D-ONCE-AT1=D) |
 | E0064 | parse | `#FFI(<lang>) fn` body is not one triple-quoted raw foreign-source string (D-FFI-INLINE1/D-FFI-RAWBODY1) |
-| E0065 | parse | retired function body marker `=`; use `::` (D-ONELINE-BODY1=B) |
-| E0066 | parse | retired function effect syntax; use exact `=[Effects]=>` or `=[]=>` (D-SHAPE8, D-ARROW-CONTROL1) |
+| E0065 | parse | retired function body marker `::` or legacy `=`; use `:>` (D-BODY-LAST1=B, D-SIG-SHAPE1=B) |
+| E0066 | parse | retired function effect syntax; use `:[Effects]>` or `:[]>` (D-SHAPE8, D-ARROW-UNIFY1) |
 | E0067 | lex | source-written `__name` is reserved for Jet and generated tooling; visible machine names use `__jet_` (D-SHAPE-DUNDER2=A, D-NAME-SIGIL1=A) |
-| E0070 | parse | a callable result uses retired `->`; use `=>` (D-ARROW-CONTROL1) |
+| E0068 | parse | retired callable result shape; put the return type before the body arrow (D-SIG-SHAPE1=B) |
+| E0070 | parse | a callable, arm, or lambda uses a retired arrow; use `:>` (D-ARROW-UNIFY1) |
 | E0071 | parse/sema | *retired by D-ONELINE-BODY1=B* (was: effect-only result-arrow teaching) |
 | E0072 | sema | a non-finite collecting loop uses a collection arrow (D-LOOPEVAL1) |
 | E0073 | sema | a collecting loop path produces no item or `()` (D-LOOPEVAL1) |
 | E0074 | sema | collecting loop item types do not agree (D-LOOPEVAL1, D-COMPREHENSION1) |
 | E0075 | sema | a collecting loop uses a break payload instead of its List result (D-LOOPSTATE1) |
 | E0076 | sema | ordinary-loop exits omit a result or use incompatible payload types (D-LOOPSTATE1) |
-| E0077 | parse | a scoped grant uses the retired body-binding arrow (D-ARROW-CONTROL1) |
+| E0077 | parse | a scoped grant uses the retired body-binding form (D-ARROW-UNIFY1) |
 | E0078 | sema | a finite value loop is missing its exhaustion route, or uses bare immediate `?? next`/`?? break` (D-CHOOSE-FIND1) |
 | E0079 | sema | effect-only loop uses a result exit (D-LOOPSTATE1) |
 | E0984 | parse | *retired by D-S14-PAUSE* (was: `when` teaching) |
 | E0985 | parse | *retired by D-S14-PAUSE* (was: `val`/`var` binding teaching) |
-| E0986 | parse | callable `=>`, `=[Effects]=>`, `::`, or `{` split incorrectly from the declaration head (S6-R, D-ONELINE-BODY1=B) |
+| E0986 | parse | callable `:>`, `:[Effects]>`, `::`, or `{` split incorrectly from the declaration head (S6-R, D-ONELINE-BODY1=B) |
 | E0998 | parse | teaching: retired explicit binding forms → `: Type ::` / `: Type :=` (D-BIND4) |
 | E0992 | parse | teaching: implicit dispatch — a multi-arm `if` needs a comparison between the subject and `{` (D-IF3 / D-IFDIST1) |
 | E0993 | parse | ~~retired by D-MATCHARM1=A~~ — predicate/Bool arm heads are now allowed |
@@ -307,7 +309,7 @@ renumbered, and no new `W` code may be allocated.
 | E0164 | sema  | compound assignment can't target an indexed slot (S17) |
 | E0165 | parse | compound assignment target is not an assignable place (S17) |
 | E0154 | parse | protocol line does not use sender form `client:` or `server:` (D-PROTO2, D-ARROW-CONTROL1) |
-| E0805 | sema  | `yield` used outside a function declared `=> Stream<T>` (D-STREAMYIELD1) |
+| E0805 | sema  | `yield` used outside a function declared `:> Stream<T>` (D-STREAMYIELD1) |
 | E0806 | sema  | a generator's `return` carries a value (D-STREAMYIELD1) |
 | E0807 | sema  | a `yield`ed value's type doesn't match the stream's element type (D-STREAMYIELD1) |
 | L0151 | sema  | typestate: a declared state has no outgoing `#Transition(S, …)` — a dead-end state (D-STATE-DECL, warning) |
@@ -359,13 +361,13 @@ renumbered, and no new `W` code may be allocated.
 | E0317 | sema  | D-PATO: or-pattern alternatives bind different names or types |
 | E0318 | parse | C25/D-RANGE2: `..=` in an arm head — Jet's `..` is already inclusive; write `lo..hi` |
 | E0319 | parse | C25/D-RANGE2: `step` in an arm head — `step` is a loop modifier, not an arm construct |
-| E0320 | parse | teaching: `Type { … }` dotless construction → `Type.{ … }` (D-DOTCTOR1) |
+| E0320 | parse | teaching: dotted literal construction → dotless `Type{ … }` / `{ … }` (D-LIT-DOT1) |
 | E0321 | parse | teaching: `impl Type: Trait` old colon separator → `impl Type.Trait` (D-IMPLDOT1) |
 | E0322 | parse | assignment `=` in `if` condition — did you mean `==`? (D-ASSIGNCOND1) |
 | E0323 | parse | `namespace` keyword not in Jet — use `module name { }` for in-file grouping (D-NAMESPACE1) |
 | E0324 | sema  | type alias without type parameters — use `struct` for a distinct primitive name (D-TYPEALIAS1) |
 | E0325 | parse | teaching: external inherent method `~~` connector → `.` (D-EXTMETH1) |
-| E0326 | sema  | a partial struct destructure (`.{ … }`) with no trailing `..` (D-DESTRUCT1) |
+| E0326 | sema  | a partial struct destructure (`{ … }`) with no trailing `..` (D-DESTRUCT1) |
 | E0327 | sema  | a redundant `..` on a destructure that already names every field (D-DESTRUCT1) |
 | E0328 | parse | ~~retired by D-IFDIST1=A~~ — `\|` binds tighter than `&&`/`\|\|` in arm heads; mixing needs no parens |
 | E0329 | parse | direct braceless nesting in an arm table without a named subject (D-IFGUARD1=A) |
@@ -374,7 +376,7 @@ renumbered, and no new `W` code may be allocated.
 | E0332 | sema  | a group name used as a value (D-TAG1) |
 | E0333 | parse | a chained comparison changes direction (`a < b > c`) (D-CHAINCMP1) |
 | E0334 | sema  | reserved (was trailing-block type mismatch under D-TRAILBLOCK1; superseded by D-TRAILBLOCK2=A) |
-| E0335 | parse | a bare `{ }` after a call — pass code with `() => { … }` inside the parentheses (D-TRAILBLOCK2=A) |
+| E0335 | parse | a bare `{ }` after a call — pass code with `() :> { … }` inside the parentheses (D-TRAILBLOCK2=A) |
 | E0336 | sema  | `#Patchable` on a generic struct (D-PATCH1) |
 | E0337 | sema  | `#Patchable` struct has a function-typed field (D-PATCH1) |
 | E0338 | sema  | a cycle among computed-field formulas, including self-reference (D-FIELDPOL1) |
@@ -419,6 +421,7 @@ renumbered, and no new `W` code may be allocated.
 | E0376 | parse | teaching: C-style counter loop `init, cond, step` retired (D-LOOP-HEADER3=D) |
 | E0377 | parse | teaching: retired `#Known`, `#Known if` and the `#Known` block; write the mark on the name (D-META-STAGE1=B, D-ONCE-AT1=D) |
 | E0378 | parse | teaching: retired alias binding `=`; write `::` (D-ALIAS-OP1=B) |
+| E0379 | parse | teaching: a guard follows its source with no comma (D-LOOP-GUARD1=A) |
 | E0381 | parse | ordinary `marker Name(...)` fact stated as an `on` clause or a second parameter list, not an `@`-marked named parameter (D-META-FORM1=A, D-ONCE-AT1=D) |
 | L0301 | sema  | unreachable dispatch pattern arm (lint)   |
 | L0302 | sema  | a closed-enum arm table would be clearer with a named subject (lint) |
@@ -440,13 +443,13 @@ renumbered, and no new `W` code may be allocated.
 | E0417 | parse | conflicting `pub` and `priv` on one item (D-VISDEFAULT2) |
 | E0418 | parse | teaching: `#PublicFile` → `#PubFile` (D-VISDEFAULT2) |
 | E0419 | sema  | `#MustUse` result ignored as a bare statement (D-MUSTUSE1) |
-| E0420 | sema  | `Type.{ uninit }` binding read before it is given a value (D-UNINIT-SENTINEL2) |
-| E0421 | parse | bare `:= uninit` needs a typed-literal head `Type.{ uninit }` (D-UNINIT-SENTINEL2) |
+| E0420 | sema  | `Type{ uninit }` binding read before it is given a value (D-UNINIT-SENTINEL2) |
+| E0421 | parse | bare `:= uninit` needs a typed-literal head `Type{ uninit }` (D-UNINIT-SENTINEL2) |
 | E0422 | parse | *retired by D-UNINIT-SENTINEL1* (was: `#Uninit` binding cannot have an initializer — structurally inapplicable now that `uninit` is the initializer) |
-| E0423 | sema  | `Type.{ uninit }` binding's type is not plain data (D-UNINIT1, reworded) |
-| E0424 | sema  | `Type.{ uninit }` used without `use core.mem` (D-UNINIT1, reworded) |
+| E0423 | sema  | `Type{ uninit }` binding's type is not plain data (D-UNINIT1, reworded) |
+| E0424 | sema  | `Type{ uninit }` used without `use core.mem` (D-UNINIT1, reworded) |
 | E0425 | sema  | *reserved — rustc unresolved-name code; never a Jet diagnostic (I2)* |
-| E0426 | parse | teaching: retired `#Uninit name: Type` marker → `name := Type.{ uninit }` (D-UNINIT-SENTINEL2) |
+| E0426 | parse | teaching: retired `#Uninit name: Type` marker → `name := Type{ uninit }` (D-UNINIT-SENTINEL2) |
 | E0427 | parse | *retired by D-MEM1/S3* (was: teaching retired `#Ref(owner) name: T` field form → raw-reference spelling `name: &T`, D-REF-SHORTHAND1; stored-ref fields no longer exist) |
 | E0428 | parse | *retired by D-MARK-REPEAT1=A* (was: duplicate `#NoPrelude` marker in one file) |
 | E0429 | sema  | readable Core prelude name used under `#NoPrelude` (D-PRELUDEX1) |
@@ -454,7 +457,7 @@ renumbered, and no new `W` code may be allocated.
 | E0431 | parse | retired `Void` result type; use `()` (D-VOID1) |
 | E0432 | parse | retired `Error` type name; use `Err` (D-FAIL-ERROR1) |
 | E0501 | sema  | empty `[]` needs a context type           |
-| E0502 | sema  | type can't be a map key                   |
+| E0502 | sema  | type can't be a map key (D-MAP-KEY1)     |
 | E0503 | sema  | strings aren't indexable with `[ ]`       |
 | E0504 | sema  | mixed-type list/map literal               |
 | E0505 | sema  | wrong index/key type or bad slice target  |
@@ -502,12 +505,12 @@ renumbered, and no new `W` code may be allocated.
 | E0703 | jet   | `cargo` not installed (needed for `extern rust` crates) |
 | E0704 | jet   | foreign crate fetch/build failed (cargo detail indented) |
 | E0705 | jet   | `= "rust::path"` doesn't match the Jet signature |
-| E0740 | sema  | a function's inferred effects exceed its declared `=[…]=>` bound (D-EFF1) |
-| E0741 | sema  | an effect used inside a `#Caps(…)` region is not in its cap list (D-EFF1) |
+| E0740 | sema  | a function's inferred effects exceed its declared `:[…]>` bound (D-EFF1) |
+| E0741 | sema  | retired duplicate of the unified `#Caps` ability check (D-AUTHORITY-SCOPE1) |
 | E0742 | sema  | a trait-method impl uses effects beyond the trait method's declared bound (D-EFF3) |
 | E0743 | sema  | dynamic trait dispatch has no declared effect bound under an enclosing effect ceiling (D-EFF3) |
-| E0711 | sema  | the `Authority` handle bound by a `#Grant(…)` region escapes its scope — returned, stored, or captured (D-SCAP1) |
-| E0712 | sema  | an effect used inside a `#Grant(…)` region has no authority — it isn't in the grant's list (D-SCAP1) |
+| E0711 | sema  | the `Abilities` handle bound by a named `#Caps(…)` region escapes its scope — returned, stored, or captured (D-AUTHORITY-SCOPE1) |
+| E0712 | sema  | an effect used inside a `#Caps(…)` region has no ability — it isn't in the ability list (D-AUTHORITY-SCOPE1) |
 | E0721 | sema  | a tagged value reaches a destination denied by that tag declaration (D-TAG-SURFACE1) |
 | E0722 | sema  | a `#Credential` value reaches a log, display, or serialization destination (D-TAG-SURFACE1) |
 | E0725 | sema  | a `#Replayable` function reaches ambient `Time`/`Rand`/`Net`/`IO` (D-REPLAY1) |
@@ -519,10 +522,11 @@ renumbered, and no new `W` code may be allocated.
 | E0736 | sema  | `#Scrub(Tag)` does not consume that tagged type and return an untagged result (D-TAG-SURFACE1) |
 | E0745 | retired | *retired by D-SHAPE8=A* (was: `#Pure fn` combined with a non-empty `#(…)` effect list) |
 | E0746 | sema  | an irreversible effect (Net/FS/Exec/FFI) used directly inside a `#Transact { … }` block — can't be rolled back (D-TXN2, D-BOUND-UNDO1) |
-| E0747 | sema  | a callback argument exceeds its parameter's effect bound (`fn(…) =[]=>` / `fn(…) =[E]=>`) (D-EFF2) |
-| E0748 | sema  | `=[via f]=>` names a non-existent parameter, or one that isn't a function type (D-EFF2) |
-| E0749 | sema  | a function reaches an effect it prohibits with `=[!E]=>` in its own call graph, including a denied `Panic` stop (D-PROP1=A, D-NOPANIC1=D) |
+| E0747 | sema  | a callback argument exceeds its parameter's effect bound (`fn(…) :[]>` / `fn(…) :[E]>`) (D-EFF2) |
+| E0748 | sema  | `:[via f]>` names a non-existent parameter, or one that isn't a function type (D-EFF2) |
+| E0749 | sema  | a function reaches an effect it prohibits with `:[!E]>` in its own call graph, including a denied `Panic` stop (D-PROP1=A, D-NOPANIC1=D) |
 | E0750 | sema  | an effect declaration lacks a leaf, or a dotted effect under a checked root is not a declared package-view leaf (D-EFFECT-DECL1=A) |
+| E0751 | sema  | Panic is a deny-only effect row (D-PANICROOT1=A) |
 | E-WEB-ABI-TYPE | sema | a JS/WASM boundary type is not ABI-safe (D-JSBIND1) |
 | E-WEB-CROSS-PARTITION | sema | a function in one web bucket calls a function in another (D-WASM1) |
 | E-WEB-TARGET-BROWSER | sema | a Wasm-pinned function also carries the `Browser` effect (D-WASM1) |
@@ -545,6 +549,7 @@ renumbered, and no new `W` code may be allocated.
 | E0769 | sema   | a label-only parameter, declared after `*`, was passed by position (D-APILABEL1) |
 | E0770 | parser | two parameters publish the same call label, so the second could never be called (D-APILABEL1) |
 | E0771 | sema   | a function value's public call labels or parameter zones do not satisfy the expected function type (D-APILABEL1) |
+| E0772 | sema   | a call matches more than one callable body, so positional binding cannot choose safely (D-CALLPOS1) |
 | E3001 | runtime | program-side runtime breach with Jet source location, function name, source-line context box, and (in debug builds) safe local values (E2-M12, D-OBS1/D-OBS2) |
 | E3002 | runtime | error-return journey frame on a `?`-propagated failure, with an optional hop note (E2-M12, D-OBS1, D-FAIL-CTX1) |
 | E3003 | runtime | deadline exceeded at a wait/IO point while a `#Context(deadline: …)` budget is active (D-DEADLINE1) |
@@ -591,6 +596,8 @@ renumbered, and no new `W` code may be allocated.
 | E3301 | sema  | OS-dependent std API called in a `--freestanding` build |
 | E3302 | jet   | target triple unknown or toolchain component missing |
 | E3303 | sema  | freestanding build allocates memory with no global allocator |
+| E3304 | sema  | selected target does not provide the runtime boundary for a reachable Core socket surface |
+| E3305 | sema  | selected target does not provide a runtime adapter for a reachable Core socket operation |
 | E3410 | sema  | Tier-2 comptime effect (`core.files`/`core.sys`/`core.term`/`core.process`) called outside a `#Impure` gate (D-CTEFFECT1) |
 | E3411 | sema  | Tier-2 comptime effect inside `#Impure` gate but `--gate impure=allow` not passed (D-CTEFFECT1 / D-ONCE-GATE1=A) |
 | E3415 | sema  | audited gate denied by effective organization or package policy (D-ONCE-GATE1=A) |
@@ -616,7 +623,7 @@ renumbered, and no new `W` code may be allocated.
 | E3403 | sema  | non-deterministic construct in pure evaluation (e.g. time/random) |
 | E1801 | repl  | per-input fuel cap hit — snippet ran more than ~10M interpreter steps |
 | E1802 | repl  | hard-rejected feature in the REPL (FFI, tasks, `#Unsafe`, OS-level APIs) |
-| E1803 | repl  | a REPL Core effect lacks lexical or invocation authority, or its exact operation/resource was denied |
+| E1803 | repl  | a REPL Core effect lacks lexical or invocation ability, or its exact operation/resource was denied |
 | E0801 | sema  | lambda parameter type unknown |
 | E0803 | sema  | calling a value that isn't a function |
 | E-CALL-VALUE | parse | function values use `.call(…)`, not the retired adjacent-call spelling `)(` (D-CALLVALUE1=B) |
@@ -640,7 +647,7 @@ renumbered, and no new `W` code may be allocated.
 | E0909 | sema  | generic instantiation too deep |
 | E0910 | sema  | `#PublishedSchema` struct made a breaking shape change (drop / type-change / add-without-default) with no migration to bridge it, or a declared migration op is nonsensical |
 | E0911 | parse | migration block uses an unknown verb (`drop`→`remove`, `reorder` not needed) |
-| E0912 | sema  | *retired by D-MEM1/S2* (was: frozen public capability signature drift under `library { api: stable/explicit }`, D-CAP8/c129; the `api:` field and capability freeze are gone — `ApiFreeze`'s snapshot survives as unconditional pub-fn semver diffing, E1218/E2601) |
+| E0912 | sema  | *retired by D-MEM1/S2* (was: frozen public API signature drift under `library { api: stable/explicit }`, D-CAP8/c129; the `api:` field and API freeze are gone — `ApiFreeze`'s snapshot survives as unconditional pub-fn semver diffing, E1218/E2601) |
 | E0913 | sema  | trait impl missing associated type (D-LIB2) |
 | E0914 | parse | unknown interpolation selector after `:` (D-DISPLAYDBG2/D-FMT-INTERP1/D-QUANTITY-PRINT1) |
 | E0915 | sema  | bare `{value}` on a type without `Display` (D-DISPLAY-SHAPE) |
@@ -649,12 +656,12 @@ renumbered, and no new `W` code may be allocated.
 | E0918 | sema  | `#Inline(Always) fn` had its address taken instead of being called directly (D-METHODMACRO1) |
 | E0919 | sema  | `#Inline(Always) fn` body exceeds the checked promise's statement ceiling (D-METHODMACRO1) |
 | E0920 | retired | `#InlineAlways` condensed into `#Inline(Always)`; one marker cannot conflict with itself |
-| E0921 | sema  | a reachable call violates an effective `no_alloc`, `zero_rc`, or `arena_bounded(N)` memory fact; reports the source operation, full call path, effective declaration, and declaration provenance (D-MEM-FACTS1) |
+| E0921 | sema  | a reachable call violates a `!Mem.Alloc`, `!Mem.Rc`, or bounded `!Mem.Alloc(above: N)` denial; reports the source operation, full call path, denial, and provenance (D-MEM-FACTS1/D-AUTHORITY-MEM1) |
 | E0922 | sema | body-level `derive Debug;` remains retired; use the signed type marker or a hand implementation (D-AUTODERIVE-SYNTAX1=D) |
 | E0929 | parse | body-level `derive X;` is retired; request the derive with `#X` and reserve `derive` for provider definitions (D-ONCE-DERIVE1=A) |
 | E0925 | parse | `#Job`/`#Every(…)` written somewhere D-SCHEDULE1 doesn't place them — a method, or `#Every(…)` without `#Job` (card #505) |
 | E0926 | sema  | `#Every(…)`'s argument isn't a valid schedule — bad canonical Time unit, non-positive or out-of-range duration, or malformed/out-of-range `"HH:MM"` (D-SCHEDULE1, card #505) |
-| E0927 | sema  | a `#Name`/`#Name` marker isn't in the registered vocabulary for its plane — a typo, or a spelling no longer supported (card #518) |
+| E0927 | parse/sema | `#Bench` is a retired claim spelling; measurement is a mode of `#Test` (D-CLAIM-BENCH1=A) |
 | E0930 | parse | marker arguments do not match the typed signature in the shared marker registry (D-MARKSIG1=A) |
 | E0938 | sema | `#Memo` requires a pure function (D-MEMO1=A) |
 | E0939 | sema | `#Memo` argument is not hashable (D-MEMO1=A) |
@@ -704,10 +711,10 @@ renumbered, and no new `W` code may be allocated.
 | E1004 | sema  | unknown item in core module |
 | E1005 | sema  | overflow opt-in not wrapping a single integer op |
 | E1006 | sema  | `use core.*` import or emitted helper exceeds package `runtime:` ceiling (D-RINGLAYER1) |
-| E1007 | parse | malformed bit width in an `[U8].{"…"}` binary pattern hole — not `U<1..64>[be\|le]` or `...` (D-BINPAT1 / D-UNIFYLIT1) |
+| E1007 | parse | malformed bit width in an `[U8]{"…"}` binary pattern hole — not `U<1..64>[be\|le]` or `...` (D-BINPAT1 / D-UNIFYLIT1) |
 | E1008 | parse | binary pattern read needs/misuses an endian suffix — multi-byte read without `be`/`le`, or `le`/`be` on a single-byte or non-byte-multiple read (D-BINPAT1) |
 | E1009 | parse | a `{name:...}` rest capture isn't the last part of a binary pattern (D-BINPAT1) |
-| E1010 | sema  | an `[U8].{"…"}` binary pattern matched against a subject that isn't `[U8]` (D-BINPAT1 / D-UNIFYLIT1) |
+| E1010 | sema  | an `[U8]{"…"}` binary pattern matched against a subject that isn't `[U8]` (D-BINPAT1 / D-UNIFYLIT1) |
 | E1011 | sema  | fixed bytes or a rest capture in a binary pattern don't start on a byte boundary (D-BINPAT1) |
 | E1301 | sema  | `ArgsSpec.flag` or `ParsedArgs.flag` called with wrong arity (D-ARGS1) |
 | E1302 | sema  | `ArgsSpec.option` or `ParsedArgs.option` called with wrong arity (D-ARGS1) |
@@ -749,7 +756,7 @@ renumbered, and no new `W` code may be allocated.
 | E1107 | sema  | `columnar [T]` per-container layout prefix is reserved (D-SOA2C) |
 | E1108 | sema  | list method not yet supported on a `#Layout(columnar)` list (D-SOA1) |
 | E1109 | sema  | partial `#Layout(columnar: …)` is deferred — whole-struct only in v1 (D-SOA2B) |
-| E1110 | sema  | `task` has no lexical or parameter task group, uses the wrong lexical group, or lets `TaskGroup` escape (D-CONC-SPAWN1, D-TASKGROUP-PARAM1) |
+| E1110 | sema  | `task` has no lexical or parameter task group, uses the wrong lexical group, or lets `Group` escape (D-CONC-SPAWN1, D-TASKGROUP-PARAM1) |
 | E1111 | sema  | *retired by D-CONC-CROSS1; parallel crossings use E1101/E1102* |
 | E1112 | sema  | a task combinator has no task branch (D-CONCSELECT1) |
 | E1130 | sema/parse | *retired by D-CONC-CROSS1; kernel proof crossings use E1102 and duplicate markers use E0003* |
@@ -780,13 +787,13 @@ renumbered, and no new `W` code may be allocated.
 | E1217 | jet   | a dependency in `package.jet` has no locked revision — `--locked`/publish needs every dep pinned (D-SUPPLY1) |
 | E1218 | jet   | a breaking public-API change is published under a non-major version bump (D-SUPPLY1) |
 | E1219 | jet   | unknown build profile name passed to `--profile` (D-BUILDPROFILE1) |
-| E1220 | jet   | a transitive dependency uses an effect outside the `package.jet` `effects:` budget (Panic names the stop site) (D-EFFBUDGET1, D-NOPANIC1=D) |
-| E1221 | jet   | a malformed `effects:`/`grants:` block in `package.jet` (D-EFFBUDGET1) |
+| E1220 | jet   | a transitive dependency uses an effect outside the `package.jet` `authority.holds` budget (Panic names the stop site) (D-EFFBUDGET1, D-NOPANIC1=D) |
+| E1221 | jet   | a malformed `authority:` block in `package.jet` (D-AUTHORITY-MANIFEST1) |
 | E1225 | jet   | `jetpack.toml` uses the retired `[packages]` monorepo index (D-WORKSPACE1) |
 | E1226 | jet   | a retired manifest filename (`pkg.jet`/`pack.jet`/`payload.jet`/`jet.toml`) found where `package.jet` belongs (D-ECO-FILEROOT1) |
 | E1227 | jet   | `jet` and the `jetpack`/`jetos` engine binary disagree on protocol version (D-JPK-DISPATCH1) |
 | E1228 | jet   | an engine verb needs an engine binary (`jetpack`/`jetos`) that isn't installed (D-JPK-DISPATCH1) |
-| E1229 | jet   | a role-module contribution uses the retired `module name { ns.path: Type.{ } }` form (D-JPK-MODBODY1) |
+| E1229 | jet   | a role-module contribution uses the retired `module name { ns.path: Type{ } }` form (D-JPK-MODBODY1) |
 | E1230 | jet   | a bare/path-form ref matched more than one workspace member (D-MONOREF1) |
 | E1231 | jet   | a bare/path-form ref matched no workspace member (D-MONOREF1) |
 | E1232 | jet   | a monorepo source could not be fetched — sparse subtree checkout and full-clone fallback both failed (D-MONOREF1) |
@@ -900,10 +907,10 @@ renumbered, and no new `W` code may be allocated.
 | E2914 | sema  | `#Reactive fn` must not return a value (D-REACTCORE1) |
 | E2930 | sema  | an interactive `UiAriaRole` node has an empty accessible label, lint-only (D-A11YGATE1) |
 | E2931 | sema  | two interactive nodes in an inline focus group share an accessible label, lint-only (D-A11YGATE1) |
-| E2932 | sema  | a `Layout.{ … }` constraint mixes a horizontal and vertical value (D-LAYOUT1 / D-LAYOUT-GATES1) |
-| E2933 | sema  | an element inside `Layout.{ … }` doesn't produce a `Constraint` (D-LAYOUT1 / D-LAYOUT-CTOR1) |
-| E2934 | sema  | a `Layout.{ … }` constraint exactly duplicates an earlier one in the same body, lint-only (D-LAYOUT1) |
-| E2935 | parse | teaching: retired `layout NAME { … }` → `name :: Layout.{ … }` (D-LAYOUT-CTOR1) |
+| E2932 | sema  | a `Layout{ … }` constraint mixes a horizontal and vertical value (D-LAYOUT1 / D-LAYOUT-GATES1) |
+| E2933 | sema  | an element inside `Layout{ … }` doesn't produce a `Constraint` (D-LAYOUT1 / D-LAYOUT-CTOR1) |
+| E2934 | sema  | a `Layout{ … }` constraint exactly duplicates an earlier one in the same body, lint-only (D-LAYOUT1) |
+| E2935 | parse | teaching: retired `layout NAME { … }` → `name :: Layout{ … }` (D-LAYOUT-CTOR1) |
 | E2936 | sema  | teaching: retired `LayoutHandle` → `Layout` (D-LAYOUT-CTOR1) |
 
 Contextual fixes for the two general lookup codes are part of their registered
@@ -918,30 +925,32 @@ copy:
 
 ## Callable and control syntax diagnostics
 
-These diagnostics cover the body rules ratified by D-ONELINE-BODY1=B and
-D-ARROW-CONTROL1,
+These diagnostics cover the body rules ratified by D-BODY-LAST1=B and
+D-SIG-SHAPE1=B, plus the existing control rules in D-ARROW-CONTROL1,
 D-LOOPEVAL1, D-LOOPSTATE1, and D-COMPREHENSION1.
 
 | Code | What | Why | Fix |
 |------|------|-----|-----|
-| E0065 | This function uses the retired `=` body marker. | `::` separates a one-line function body; `=` fills a slot inside a definition. | Replace `=` with `::`; `jet fmt` applies this fix. |
+| E0065 | This function uses the retired `::` or legacy `=` body marker. | A one-expression function body uses `:>`; `::` binds a name, and `=` fills a slot inside a definition. | Replace the marker with `:>`; `jet fmt` applies this fix. |
 | E0057 | This closure uses the retired `take(...)` capture prefix. | Escaping closures infer ownership. Copyable values copy at closure creation, and other owned values move. A capture prefix cannot create a second owner. | Remove `take(...)` and use the captured names directly. |
-| E0066 | This function uses the retired effect-arrow spelling. | Callable results use `=>`. An explicit effect ceiling belongs inside that callable arrow. | Replace it with `=[Effects]=>`, or write `=[]=>` for an empty effect ceiling. |
-| E0070 | This callable result uses `->`. | `=>` defines callable results. `->` is reserved for selected or yielded control values. | Replace `->` with `=>`. For an effect ceiling, write `=[Effects]=>`. |
+| E0066 | This function uses the retired effect-arrow spelling. | Callable results use `:>`, and an explicit effect ceiling uses the same unified arrow. | Replace it with `:[Effects]>`, or write `:[]>` for an empty effect ceiling. |
+| E0068 | This callable uses the retired result-arrow shape. | A return type sits after the parameter list, and `:>` introduces the body. An effect ceiling follows the return type. | Write `fn name(...) Type :> body`, or `fn name(...) Type :[Effects]> { … }`. |
+| E0070 | This callable, arm, or lambda uses a retired `->` or `=>` arrow. | All arrow positions use `:>`. | Replace the retired arrow with `:>`. For an effect ceiling, write `:[Effects]>`. |
 | E0071 | This retired effect-only result-arrow teaching is no longer emitted. | Effect-only one-line bodies use `->` for one statement; braces hold multiple statements or a scope. | Follow the current one-line body rule. |
 | E0072 | This collecting loop cannot return a List because it has no finite exhaustion edge. | A collecting loop must finish after a statically finite source or C-style condition. Bare infinite and condition-only loops do not provide that boundary. | Remove `->`, or iterate a finite source. Return one final value from an ordinary loop with `break value`. |
 | E0073 | This collecting loop path produces no item. | Every accepted iteration must contribute one non-unit value unless `next` explicitly omits it. | Return a value on this path, or use `next` to omit the item. Remove `->` if the loop only performs effects. |
 | E0074 | This collecting loop produces incompatible item types. | One collecting loop builds one `[T]`, so every contributed item must have the same type. | Convert the items to one type, or split the operations into separate loops. |
 | E0075 | This collecting loop cannot use a break payload. | Its result is already the accumulated `[T]`. A second payload would give the same exit two result channels. | Write `break` to return the accumulated list, or return one final value from an ordinary loop. |
 | E0076 | This result loop has a missing or incompatible break payload. | An ordinary loop used as a value has one final result type. Every exit that targets it must provide that type. | Add the missing payload and make every payload the same type, or target an inner effect-only loop. |
-| E0077 | This scoped grant uses the retired body binding. | The `Authority` handle belongs in the grant header. `->` is reserved for selected or yielded values. | Write `#Grant(caps: FS, Net) { ... }`. |
+| E0077 | The `#Grant` scope marker is retired. | `#Caps` now narrows a block and binds an `Abilities` handle when its head has a name. | Write `#Caps(abilities: FS, Net) { ... }`. |
 | E0078 | This finite value loop needs a written exhaustion route, or cannot use an immediate `?? next`/`?? break` route. | A finite source can end without a matching `break`; `next` and `break` after the closing brace would control the loop that just closed instead of naming a target. | Add `?? fallback` after the closing `}`, or write a labeled search such as `found :: loop { ... break(found, value) }`. |
 | E0079 | This effect-only loop uses a result exit. | A break payload makes an effect-only loop a value expression. | Bind the loop with `::`, or remove the payload. |
-| E0986 | This callable marker is detached from its declaration head. | Layout must keep `=>`, `=[Effects]=>`, `::`, or the opening brace attached to the function head so the declaration boundary is unambiguous. | Move the marker or opening brace onto the same logical line as the closing `)`. |
+| E0986 | This callable marker is detached from its declaration head. | Layout must keep `:>`, `:[Effects]>`, `::`, or the opening brace attached to the function head so the declaration boundary is unambiguous. | Move the marker or opening brace onto the same logical line as the closing `)`. |
 | E0987 | No enclosing loop is named `{name}`. | `break(name)` and `next(name)` can target only a visible `name :: loop`. Loop names are compile-time control targets. | Correct the name, or add `name ::` before the intended enclosing loop. |
 | E0988 | This uses a retired loop-label or dot-exit form. | Named exits are keyword-led: `break(name)`, `break(name, value)`, and `next(name)`. A loop name is not a runtime object. | Replace the dot or `@` form with the matching target-argument exit. Keep the declaration as `name :: loop`. |
 | E0335 | A bare `{ }` follows a call. | Code arguments are ordinary `() => { … }` lambdas inside the call's parentheses (D-TRAILBLOCK2). Trailing `{ }` sugar after a call is gone. | Write `callee(() => { … })`. Put each statement on its own line inside the block. |
 | E-CALL-VALUE | A function value is invoked with the retired adjacent-call spelling. | Named functions and direct field, index, or lambda calls keep their spelling; a returned call result uses `.call(…)` so the value and invocation stay explicit (D-CALLVALUE1=B). | Write `callee.call(…)`. |
+| E0772 | This call to `{callee}` matches more than one callable body. | The call binds to multiple candidate signatures, so positional mapping cannot choose a body safely. | Name the arguments to choose one candidate: `{callee}({rewrite})`. |
 | E0366 | A pattern arm sits under a non-`==` distributed `if` table. | Structural patterns bind under `if subject == { … }` only. Other markers (`<`, `!=`, …) distribute bare values, not shapes. | Write `if subject == { … }` for pattern arms, or use a Bool head. |
 
 ## Editions and release policy (E2-M2)
@@ -1028,7 +1037,7 @@ membership, generation, managed-file, service, or task state is applied.
 | E1330 | job metadata or a job path is invalid | Job packages, cache inputs/outputs, cwd, and limits must be deterministic and project-contained. | Use the typed metadata shape and project-relative paths without `..`. |
 | E1331 | an environment import escapes its root | One environment graph cannot import files outside its project boundary. | Use a relative import directory without `..` or an escaping symlink. |
 | E1332 | preset or generation definitions conflict | Composition cannot silently choose one definition's packages, variables, parents, or collision choices over another's. | Merge equal facts or give them different names. |
-| E1333 | a typed environment fact is invalid | Language packs use one catalog with explicit host, platform, license, and required-tool facts. Dotenv paths stay inside the project, and expert allowlists make secret handling explicit. | Fix the language selection/catalog fact, or use a project-relative file and `Dotenv.{ file, allow, secrets }` with valid variable names. |
+| E1333 | a typed environment fact is invalid | Language packs use one catalog with explicit host, platform, license, and required-tool facts. Dotenv paths stay inside the project, and expert allowlists make secret handling explicit. | Fix the language selection/catalog fact, or use a project-relative file and `Dotenv{ file, allow, secrets }` with valid variable names. |
 | E1334 | an explicit workspace member is not a Package directory | Workspace membership names existing Package roots; a missing or manifest-free directory cannot become a stable graph node. | Create `package.jet`, correct the path, or use `find("./packages")`. |
 | E1335 | an environment integration or package-generation provider fact is conflicting or lossy | Integrations and package generations lower into shared typed facts; one graph cannot choose two policies or silently discard package identity, provider, or collision input. | Merge the declarations, use a supported package ref, or select a provider retained by the generation. |
 | E1336 | an environment image cannot project a service or verified package output | D-ENV-IMAGE1 keeps image layers tied to one verified Hangar package output. A service needs the typed supervisor, and an absent, empty, conflicting, or unsafe package `bin` projection cannot be copied into an image. | Run the declared service through `jetpack services`, or realize one executable package output and run `jet image` again. |
@@ -1130,7 +1139,7 @@ CLI.
 | E1107 | The per-container layout prefix `columnar [T]` was written in a type. | A per-use columnar override isn't built yet — only the whole-struct form `#Layout(columnar) struct …` ships in v1 (D-SOA2C reserves this spelling). | Put `#Layout(columnar)` on the `struct` declaration instead. |
 | E1108 | A list method (e.g. `.map`, `.filter`, `.sort`, `.pop`, `.remove`, `.get`) was called on a `#Layout(columnar)` list. | v1 columnar lists support the core surface — indexing, field access, `len`, `is_empty`, `push`, and iteration; the rest is deferred rather than silently miscompiled. | Drop `#Layout(columnar)` from the struct to use the full list API, or rewrite the operation with indexing and a loop. |
 | E1109 | A partial columnar annotation `#Layout(columnar: f, g)` was written. | v1 supports whole-struct columnar only — every field becomes a column; per-field columnar needs new ownership/aliasing surface (D-SOA2B, deferred). | Write `#Layout(columnar)` to convert the whole struct. |
-| E1110 | `task` has no lexical or parameter task group, uses the wrong lexical group, or `TaskGroup` is stored or captured by an escaping lambda. | Structured spawning uses the active lexical `task.group` or a direct `TaskGroup` parameter. A group may flow down the call stack, but it cannot become stored state or escape its scope. | Write `task work()` in the active group, or pass the group to `fn helper(group: TaskGroup)`; do not store or capture it. |
+| E1110 | `task` has no lexical or parameter task group, uses the wrong lexical group, or `Group` is stored or captured by an escaping lambda. | Structured spawning uses the active lexical `task.group` or a direct `Group` parameter. A group may flow down the call stack, but it cannot become stored state or escape its scope. | Write `task work()` in the active group, or pass the group to `fn helper(group: Group)`; do not store or capture it. |
 | E1111 | *retired by D-CONC-CROSS1; parallel crossings use E1101/E1102* | the registered sema rule applies here | follow the guidance for E1111 |
 | E1112 | `{method}` needs at least one task branch | a task combinator must have a child to join or select | write {method} {{ work() }} with one or more branches |
 | E1113 | `{name}` cannot {action}; it was frozen at {freeze_site} | `freeze(...)` creates a deeply immutable owned snapshot so a task can read it without a race. A write through any field or index would change that snapshot. | create a new value, freeze a new snapshot, or use `Shared`/`Cell` when shared mutation is intentional |
@@ -1203,6 +1212,7 @@ block reserved for M6.
 | E2413 | retired (D-SERDE12) — generic `#Codable` is first-class; the derive auto-injects `Encode`/`Decode` bounds on the wire-reaching type params (D-SERDE9/D-SERDE10). A non-codable type argument fails at the use site (E0905), not the definition. | — | — |
 | E2414 | A field's `=` default must be a compile-time constant. | A decode/CLI/construction default fills a missing field, so it is baked into the program and its value has to be known at compile time (D-SERDE5, D-FIELDDEF1=C). An expression that can only be computed at runtime has no fixed value to bake, and every tier must agree (I9). | Use a literal or a `comptime`-evaluable expression, e.g. `port: Int = 8080`, `env: String = "prod"`, or `ports: [Int] = [80, 443]`. |
 | E2415 | union `{Union}` can't be decoded — `{A}` and `{B}` share wire shape `{shape}`. | Anonymous-union decode (D-UNIONTYPE1=A) picks a member by primary wire shape; two members with the same shape would force an arbitrary declaration order. | Use a named enum with an explicit tag, or change the members so each has a distinct wire shape. |
+| E2416 | `env.decode` could not build the typed config; the error names the source environment variable and field path. | Runtime config decoding uses the shared `__jet_Decode` codec, so a bad value, missing field, or unknown field is reported at its typed path while secret values stay redacted (D-CONFIG-ENV1). | Fix the named environment variable or field path, or adjust `prefix:`, `file:`, and `allow:` so the intended source reaches the typed record. |
 | L2401 | Public function `{fn}` has a positional `Bool` parameter `{param}`. | Positional booleans are easy to transpose: `connect(host, true, false)` is a guessing game. Labels (S61) make the intent clear at the call site. | Callers can use `{param}: true` to document intent; or give the parameter a default value so it can be omitted. No action required — this is advisory. |
 | L0520 | `` `{type}` has no `Display` impl — bare `{}` will require one soon ``. | Bare `{value}` interpolation is moving to the explicit `Display` hook (D-DISPLAY-SHAPE); auto-printable structs still compile via a temporary `jet_show` fallback. | Add `impl {type}.Display { fn display(self) => String { … } }`, or use `{value:Debug}` for debug output. |
 
@@ -1243,9 +1253,9 @@ output is machine-parseable with `--json`.
 | E2607 | `{source}` is malformed: `{detail}`. | Supply-chain metadata is security-sensitive, so Jet rejects ambiguous or partial records instead of silently skipping them. | Fix the malformed record and retry; use the parser contract in `spec.md` and UTF-8 text. |
 | E1217 | `{dep}` is in `package.jet` but has no locked revision. | A `--locked` build (and `jet registry publish`) requires every dependency to be pinned in the lockfile to a resolved version, so the build is reproducible. The dep is declared but not pinned. | Run `jet fetch` to resolve and pin `{dep}`, then commit the lockfile. |
 | E1218 | Publishing `{new}` after `{old}` is a {bump} bump but breaks the public API item `{item}`. | A {bump} bump promises callers no breaking changes under SemVer, but the public API changed since `{old}`. This is the local publish-time gate; the registry re-checks live with E2601 on receipt. | Bump to `{next_major}.0.0` (a major release), or restore `{item}` (a deprecated shim counts). Use `--force` to publish anyway with an explicit warning banner. |
-| E1219 | `--profile={name}` is not a defined build profile. | Blessed profiles `release`, `debug`, and `ci` have built-in defaults. Any other name must be declared in your `package.jet` `build { }` block as `{name}: Build.{ optimize: … }`. | Use `--release` for the release profile, `--profile=debug` for debug, `--profile=ci` for CI, or add `{name}: Build.{ optimize: full }` (or `none`/`basic`) to the `build { }` block in `package.jet`. |
-| E1220 | `{dep}` uses the `{effect}` effect, which this package's budget doesn't allow. | An `effects:` budget fails the build when any dependency reaches an effect you didn't list; a denied `Panic` row names the stop site. | Add `{effect}` to `allow`, grant it to `{dep}` in `grants:`, or for `Panic` return a fallible result or add facts/`#Pre`/refinement proof. |
-| E1221 | `package.jet` has a malformed `effects:`/`grants:` block. | `effects: { allow: […], deny: […] }` and `grants: { "dep": […] }` only take effect names from the closed vocabulary declared in `Prelude/Effects.jet`, as lists. | Fix the field name or effect name; see docs/spec/syntax-decisions.md. |
+| E1219 | `--profile={name}` is not a defined build profile. | Blessed profiles `release`, `debug`, and `ci` have built-in defaults. Any other name must be declared in your `package.jet` `build { }` block as `{name}: Build{ optimize: … }`. | Use `--release` for the release profile, `--profile=debug` for debug, `--profile=ci` for CI, or add `{name}: Build{ optimize: full }` (or `none`/`basic`) to the `build { }` block in `package.jet`. |
+| E1220 | `{dep}` uses the `{effect}` effect, which this package's budget doesn't allow. | An `authority.holds` budget fails the build when any dependency reaches an effect you didn't list; a denied `Panic` row names the stop site. | For an ordinary effect, add `{effect}` to `authority.holds.allow` or grant it to `{dep}` in `authority.grants`; for deny-only `Panic`, return a fallible result or add facts/`#Pre`/refinement proof. |
+| E1221 | `package.jet` has a malformed `authority:` block. | `authority: .{ holds: { allow: […], deny: […] }, grants: { "dep": […] }, trust: { … }, providers: { … } }` is the one package authority block; rights use the thirteen grantable roots, FFI language leaves such as `FFI.Go`, and deny-only `Panic`/`Mem`. | Fix the authority field or right name; see docs/spec/syntax-decisions.md D-AUTHORITY-MANIFEST1. |
 
 ## First-party ring library diagnostics (E2-M9, D-LR1–4)
 
@@ -1313,7 +1323,7 @@ server built on top. E28xx is the block for M10.
 
 ## Testing and tooling diagnostics (E2-M11)
 
-Quality workflows: doctests, snapshot testing, `todo` typed holes, `jet bench`, and authority summaries. E29xx is the block for M11.
+Quality workflows: doctests, snapshot testing, `todo` typed holes, measured claims via `jet test --measure`, and authority summaries. E29xx is the block for M11.
 
 | Code | What | Why | Fix |
 |------|------|-----|-----|
@@ -1342,7 +1352,7 @@ Quality workflows: doctests, snapshot testing, `todo` typed holes, `jet bench`, 
 | E2911 | `reactive.{kind}` needs a zero-parameter lambda, got {n} parameter(s). | The body of a derived/effect takes no arguments — it reads the signals it depends on via `.get()` (D-REACT1=B). | Drop the parameters: `reactive.{kind}(() => { … })`. |
 | E2912 | `reactive.derived` must compute and return a value. | A derived value is recomputed from its signals, so its lambda has to return the new value (D-REACT1=B). A body that returns nothing is a side effect, not a value. | Return a value from the body, or use `reactive.effect(() => { … })` for a side effect. |
 | E2913 | a reactive {kind} can't hold a {type}. | Signals and derived values hold ordinary data so it can be copied to dependents (D-REACT1=B). A function value isn't reactive data — wrap behaviour in an effect instead. | Use a data value (number, text, list, struct, …); put behaviour in `reactive.effect`. |
-| L2901 | This `#Test` block has no assertions. | A test with no `require`, `require_eq`, or `expect(…).snapshot()` call cannot find bugs — it always passes. | Add at least one assertion, or remove the test if it only exercises compilation. |
+| L2901 | This `#Test` block has no assertions. | A test with no `assert`, `assert_eq`, or `expect(…).snapshot()` call cannot find bugs — it always passes. | Add at least one assertion, or remove the test if it only exercises compilation. |
 
 ## Scope member diagnostics (D-DOTSCOPE1)
 
@@ -1426,9 +1436,9 @@ implemented.
 | Code | What | Why | Fix |
 |------|------|-----|-----|
 | E2932 | layout constraint mixes a horizontal and vertical value (`{lt}` and `{rt}`) | `left`/`right`/`width` are horizontal (`HVar`); `top`/`bottom`/`height` are vertical (`VVar`) — combining or comparing across axes is caught at compile time instead of producing a nonsensical layout. | Compare or combine values from the same axis (a `LengthVar`, or a plain number, fits either axis). |
-| E2933 | this element inside `{name} :: Layout.{{ … }}` doesn't produce a constraint (found `{ty}`) | Every element directly inside a `Layout.{ … }` body must be a `>=`/`<=`/`==` comparison of layout values (a `Constraint`), comma-separated like other typed-literal element bodies. | Write a comparison, e.g. `label.width >= 80.0`. |
-| E2934 | this constraint repeats one already written in this `Layout.{{ … }}` body | An exact duplicate constraint doesn't tighten the layout — it's almost always a copy-paste leftover. | Remove the duplicate line, or change it if a different constraint was meant. |
-| E2935 | `` `layout` is retired `` | Constraint layouts use typed-literal construction. | Write `` `{name} :: Layout.{{ … }}` ``. |
+| E2933 | this element inside `{name} :: Layout{{ … }}` doesn't produce a constraint (found `{ty}`) | Every element directly inside a `Layout{ … }` body must be a `>=`/`<=`/`==` comparison of layout values (a `Constraint`), comma-separated like other typed-literal element bodies. | Write a comparison, e.g. `label.width >= 80.0`. |
+| E2934 | this constraint repeats one already written in this `Layout{{ … }}` body | An exact duplicate constraint doesn't tighten the layout — it's almost always a copy-paste leftover. | Remove the duplicate line, or change it if a different constraint was meant. |
+| E2935 | `` `layout` is retired `` | Constraint layouts use typed-literal construction. | Write `` `{name} :: Layout{{ … }}` ``. |
 | E2936 | the constraint-layout type is named `Layout`, not `LayoutHandle` | One name for the solver/container value (I8). | Write `Layout` instead of `LayoutHandle`. |
 
 ## Debugging and observability diagnostics (E2-M12, D-OBS1–3)
@@ -1442,7 +1452,7 @@ safe-locals policy.
 
 | Code | What | Why | Fix |
 |------|------|-----|-----|
-| E3001 | `panic: {msg}` | The program hit a `panic`, `require`, or `require_eq` call that failed, a bounds/key check triggered at runtime, or another program-side stop. The shared report boundary owns the program-side stop; an unhandled entry error is a returned report, not E3001. Jet file and line are shown in Jet terms — never generated-Rust terms (I2). | Fix the logic that led to the failure. Program-side stops exit 70 through the shared boundary; unhandled entry errors print their report and exit 1; exit 101 is reserved for Jet defects. |
+| E3001 | `panic: {msg}` | The program hit a `panic`, `assert`, or `assert_eq` call that failed, a bounds/key check triggered at runtime, or another program-side stop. The shared report boundary owns the program-side stop; an unhandled entry error is a returned report, not E3001. Jet file and line are shown in Jet terms — never generated-Rust terms (I2). | Fix the logic that led to the failure. Program-side stops exit 70 through the shared boundary; unhandled entry errors print their report and exit 1; exit 101 is reserved for Jet defects. |
 | E3002 | `Trail [E3002] (N hops via ?, origin first):` followed by one numbered `{fn} ({file}:{line})` line per hop, each with its note after an em dash and `×N` when the same hop repeats. | Each failed `?` joins the failure's trail, so the report can show where the failure started and which callers forwarded it. | Read the root failure above the trail first — it says what went wrong. Then read the trail from hop 1, the origin, down to the last hop at the entry. |
 | E3003 | `deadline exceeded while waiting in {wait_kind}`. | A wait/IO point observed an active `#Context(deadline: …)` budget and the remaining time reached zero before the operation completed. | Raise the deadline budget, shorten the work before the wait point, or remove/adjust the ambient deadline for this scope. |
 | E3004 | `task cancelled at a cooperative wait point`. | The task control plane requested cancellation before this wait completed. | Handle `TaskFailure.Cancelled`, or use `#Shield` around a cancellation-sensitive wait. |
@@ -1456,7 +1466,7 @@ safe-locals policy.
 
 ## Uninitialized binding diagnostics (D-UNINIT-SENTINEL2)
 
-`name := Type.{ uninit }` opts out of automatic zero-fill for a single binding.
+`name := Type{ uninit }` opts out of automatic zero-fill for a single binding.
 It is gated by `use core.mem` (E0424) and restricted to plain-data types (E0423).
 The compiler proves, by forward dataflow, that every read follows a write on
 all control-flow paths (E0420). Codegen lowers to
@@ -1470,11 +1480,11 @@ parse error (E0426) pointing at the new spelling —
 
 | Code | What | Why | Fix |
 |------|------|-----|-----|
-| E0420 | `` `{name}` may be read before it is given a value ``. | `` `{name}` was declared with `Type.{ uninit }`, so no value is available until you write to it — this read could see garbage ``. | Write to `{name}` on every path before reading it (e.g. fill it via `mut {name}`). |
-| E0421 | `` `uninit` needs a typed-literal head ``. | An uninitialized binding has no value to infer its type from, so the type must head the literal. | Write `` `{name} := <Type>.{ uninit }` ``, e.g. `` `buffer := [U8#4096].{ uninit }` ``. |
+| E0420 | `` `{name}` may be read before it is given a value ``. | `` `{name}` was declared with `Type{ uninit }`, so no value is available until you write to it — this read could see garbage ``. | Write to `{name}` on every path before reading it (e.g. fill it via `mut {name}`). |
+| E0421 | `` `uninit` needs a typed-literal head ``. | An uninitialized binding has no value to infer its type from, so the type must head the literal. | Write `` `{name} := <Type>{ uninit }` ``, e.g. `` `buffer := [U8#4096]{ uninit }` ``. |
 | E0423 | `` `uninit` needs a plain-data type ``. | The named type may own heap memory or need cleanup, so leaving it uninitialized is unsafe. | Use plain data — a number, `Bool`, `Char`, `U8`, or a fixed array of those (e.g. `[4096]U8`). |
 | E0424 | `` `uninit` needs the low-level memory tier ``. | `` `uninit` skips the automatic zero-fill — an expert-tier operation ``. | Add `use core.mem` at the top of this file to opt in. |
-| E0426 | `` `#Uninit` is retired ``. | Uninitialized storage is a fact about the value — it now reads `` `name := Type.{ uninit }` ``. | Write `` `{name} := <Type>.{ uninit }` ``. |
+| E0426 | `` `#Uninit` is retired ``. | Uninitialized storage is a fact about the value — it now reads `` `name := Type{ uninit }` ``. | Write `` `{name} := <Type>{ uninit }` ``. |
 | E0429 | `` `{name}` is not ambient here — this file opted out with `#NoPrelude` ``. | `` `#NoPrelude` disables every readable Core prelude name ``. | Write a qualified Core call, or remove `#NoPrelude`. |
 | E0430 | `` `#Shield` takes no arguments ``. | A shield region protects whatever runs inside it; there is nothing to configure (D-SHIELDNAME1). | Write `#Shield { … }`. |
 | E0431 | `` `Void` is retired ``. | `()` is the one public no-information result type; non-returning paths are compiler facts under D-NEVER1. | Replace `Void` with `()`. |
@@ -1496,7 +1506,7 @@ operations that can violate memory safety. Ordinary Jet never reaches these.
 | E3106 | This unsafe gate must choose a permitted obligation mode. | `.PerSite` requires `.Track`/`.Skip`, and `.Skip` has no ambient meaning outside `.PerSite`. | Add `obligations: .Track`, or use `.Skip` only under a package `.PerSite` policy. |
 | E3107 | `{operation}` is missing unsafe obligations: `{obligations}`. | Effective `.Obligations` policy requires a typed proof immediately after each low-level operation. | Add `assert valid_ptr, aligned, no_alias`, reduced to the operation-specific required subset. |
 | E3108 | Invalid unsafe option or obligation assertion. | Unsafe proof vocabulary is closed and site-bound. | Use only `obligations: .Track`/`.Skip` and `valid_ptr`, `aligned`, `no_alias` inside `#Unsafe`. |
-| E3109 | Configured organization gate policy cannot be used. | Admin policy never fails open when its explicit input is unreadable or malformed. | Fix `JET_ORG_UNSAFE_POLICY` and its manifest-shaped `policy: .{ unsafe: .Obligations, impure: .GateOnly, nondeterministic: .GateOnly }` file, or remove the variable. |
+| E3109 | Configured organization gate policy cannot be used. | Admin policy never fails open when its explicit input is unreadable or malformed. | Fix `JET_ORG_UNSAFE_POLICY` and its manifest-shaped `policy: { unsafe: .Obligations, impure: .GateOnly, nondeterministic: .GateOnly }` file, or remove the variable. |
 | E3112 | This `#Unsafe` block/function has no reason. | Every gated region/function must record why it cannot break memory safety; the audit sentence is mandatory. | Add the reason: `#Unsafe("why this is safe") { … }` or `#Unsafe("why this is safe") fn ...`. |
 | L3102 | This `#Impure` block has no reason. | Every comptime effect gate records, in one line, why ambient I/O is needed. | Add the reason: `#Impure("reading build config") { … }`. |
 
@@ -1540,7 +1550,7 @@ already-freed arena), these track the views themselves.
 | E0350 | Jet does not have an `Any` type. | A value should keep a precise shape: use an enum for known variants, generics or traits for abstraction, `T?` for absence, and `DataTree` for parsed dynamic data. | Replace `Any` with the specific mechanism for this value. |
 | E0351 | The value tree is named `DataTree`, not `Data`. | `DataTree` is the one name a hand codec constructs and returns and every format's `parse` yields; its variants are `.Null`, `.Bool`, `.Int`, `.Float`, `.Text`, `.Array`, and `.Object`. | Write `DataTree` instead of `Data`. |
 | E0352 | `#Meta` maturity needs a known maturity value. | Maturity metadata is a closed documentation scale. | Write `maturity: .Experimental`, `.Tested`, or `.Hardened`. |
-| E0355 | A scoped policy is unknown, conflicts, widens an inherited constraint, or is attached at a prohibited scope. | One compiler-owned matrix resolves package → module → function → block while keeping the full declaration chain. Audited authority stays at its sound site. | Use `#Policy(no_alloc)`, `#Policy(zero_rc)`, `#Policy(arena_bounded(bytes))`, `#Policy(copies: .Explicit)`, or `#Policy(gc)`; package policy may only tighten, including `unsafe: .Forbid`. |
+| E0355 | A scoped policy is unknown, conflicts, widens an inherited constraint, or is attached at a prohibited scope. | One compiler-owned matrix resolves package → module → function → block while keeping the full declaration chain. Audited authority stays at its sound site. | Use `#Policy(gc)`, `#Policy(explicit_units)`, `#Policy(copies: .Explicit)`, or `#Policy(sentries: .Off)`; write memory floors as `!Mem.*` effect denials. |
 | E0356 | `.new(...)` needs one known receiver type here. | The inferred constructor uses the surrounding expected type; Jet does not search a global constructor registry. | Add a type annotation or write the full `Type.new(...)` form. |
 | E0357 | `{category}` `{name}` must use its category's canonical casing. | Jet has one enforced two-tier law: type-like names are PascalCase and value-like names are snake_case. | Rename it to the spelling shown by the diagnostic. |
 | E0358 | `{old}` is spelled `{canonical}`. | Jet keeps acronyms fully capitalized inside PascalCase names (D-ACRO-CASE1=A, D-ACRO-LEX1=A). | Write the capitalized spelling shown by the diagnostic. |
@@ -1555,8 +1565,8 @@ already-freed arena), these track the views themselves.
 | E0362 | Compound assignment can't target a nested operator field. | Hooked compound assignment must read and write one stable place exactly once; nested field places are not yet represented by the operator assignment spine. | Bind the inner value, update it, then assign the whole inner value back. |
 | L0503 | prefer `{place} {op=} …` instead of repeating the left side | compound assignment updates a place in one step without restating it | write `{place} {op=} …` |
 | L0507 | prefer an ordered arm table for this branch | one ordered arm table is Jet's normal form for multi-line and chained choices | write `if { condition -> body else -> body }` |
-| L0508 | This arrow loop body computes a value and drops it. | A statement-position loop arrow discards its body's value; use a value loop to collect results or a write handle to update the source. | Bind the loop with `::` to collect its values, or write `loop v, &values -> v *= 2` to update in place. |
-| L0509 | auto-derive refusal is a named package policy entry | `auto_derive` is registered on the shared `policy.lints.deny` surface; the policy itself emits no warning. | write `policy: .{ lints: .{ deny: [auto_derive] } }` in `package.jet` |
+| L0508 | This arrow loop body computes a value and drops it. | A statement-position loop arrow discards its body's value; the loop takes write access (&) for items when it updates the source. | Bind the loop with `::` to collect its values, or write `loop v, &values -> v *= 2` so it takes write access (&) for items. |
+| L0509 | auto-derive refusal is a named package policy entry | `auto_derive` is registered on the shared `policy.lints.deny` surface; the policy itself emits no warning. | write `policy: { lints: { deny: [auto_derive] } }` in `package.jet` |
 | L0510 | declaration replaces a readable Core prelude alias (D-NAME-ALIAS1) | user declarations win over the compiler-opened alias, but the replacement is worth seeing | keep the declaration, or rename it to use the prelude alias |
 | E0363 | `{Type}` can't be a union member. | Anonymous unions (D-UNIONTYPE1=A) hold concrete closed member types only — not type parameters, trait objects, or function types. | Use a named enum when a member needs an open shape. |
 | E0364 | This range includes `{xs}.len()`, one past the last index. | An inclusive range that ends at a list's length runs one step too far when the body indexes that list. | Write `loop (i, item), xs` — or `loop i, xs.indexes()` — or `0..<xs.len()`. |
@@ -1572,6 +1582,7 @@ already-freed arena), these track the views themselves.
 | E0375 | `#Default` on a field is retired. | Field absence and construction defaults use the same `=` spelling as parameter defaults (D-FIELDDEF1=C). | Write `field: T = expr` instead of `#Default(expr)`. |
 | E0377 | `#Known` is retired. | Compile time has one mark, `@`, and the mark belongs to the name, so it is written at every mention. | Write `@name :: …` for a binding, `@if <condition> { … }` for a compile-time branch, and `@ { … }` for a compile-time block. |
 | E0378 | This alias declaration uses the retired `=` binding. | `::` defines a name; `=` fills a slot inside an existing declaration (D-ALIAS-OP1=B). | Replace `=` with `::`. |
+| E0379 | A guard follows its source with no comma. | The guard self-announces with `if`, so the loop head only uses commas between positional clauses. | Remove the comma before `if`. |
 | E0376 | C-style counter loop headers are retired. | A three-slot loop header is binding, source, and step rule — not init, condition, and assignment (D-LOOP-HEADER3=D). | Write `loop i, 0..<n { … }` or `loop i, 0..n, 2 { … }`; keep `loop name := value, condition { … }` for mutable state. |
 | E0381 | A fact about an ordinary `marker` declaration (its legal sites, whether it repeats) was written as a trailing `on` clause or a second parameter list. | Ordinary marker arguments and facts share one named-parameter list; checked text heads use the separate `marker Name on [.Text] { check … hole … }` form (D-BOUND-SINK1=A). | For an ordinary marker, use `@sites: […]` or `@repeatable: true`; for a checked text head, write `marker Name on [.Text] { check … hole … }`. |
 
@@ -1594,13 +1605,13 @@ so these are compile-time-only diagnostics. An unknown effect name in a
 
 | Code | What | Why | Fix |
 |------|------|-----|-----|
-| E0740 | `{fn}` uses the effect `{effect}`, which its signature doesn't allow. | A `=[…]=>` list is an upper bound on what the body may do; the inferred effects must be a subset. An effect the body reaches that the bound omits breaks that contract. | Add the named effect to the `=[…]=>` list, or stop using it (drop the Core call that introduces it, or move it out of this function). |
-| E0741 | This `#Caps` region uses the effect `{effect}`, which it doesn't allow. | `#Caps(…)` restricts a region to a fixed set of effects; anything reached inside — even transitively through a call — must be in that set, so the region is a hard local ceiling. | Add the named effect to the `#Caps(…)` list, or move that work outside the region. |
+| E0740 | `{fn}` uses the effect `{effect}`, which its signature doesn't allow. | A `:[…]>` list is an upper bound on what the body may do; the inferred effects must be a subset. An effect the body reaches that the bound omits breaks that contract. | Add the named effect to the `:[…]>` list, or stop using it (drop the Core call that introduces it, or move it out of this function). |
+| E0741 | *Retired by D-AUTHORITY-SCOPE1.* | The unified `#Caps` subset check reports E0712 for bare and named regions. | Fix the E0712 diagnostic, then add the effect to the `#Caps(…)` list or move the work outside the region. |
 | E0742 | This `{method}` impl uses the effect `{effect}`, which the trait doesn't allow. | A trait method may declare an effect upper bound (`fn hash(self) =[]=>`, `fn render(self) =[GPU]=>`); every implementation's inferred effects must fit inside it, so the bound holds for all impls (D-EFF3). | Remove the offending work from the impl, or widen the bound on the trait method. |
 | E0743 | Dynamic call `{trait}::{method}` has no effect bound. | A trait value can select any implementation at runtime, so an enclosing effect ceiling needs the trait method's declared upper bound (D-EFF3). | Declare an effect row on the trait method, such as `=[]=>` for pure dispatch, or move the dynamic call outside the bounded function. |
 | E0745 | *Retired by D-SHAPE8=A.* | This code diagnosed the former contradiction between `#Pure fn` and a non-empty `#(…)` effect list. Both spellings are now rejected earlier by E0066. | Use one canonical effect arrow: `=[]=>` for an empty row or `=[Effects]=>` for a bounded row. |
-| E0711 | The `Authority` handle `{handle}` can't escape its `#Grant` block. | `#Grant(…)` grants an `Authority` into a lexical scope and revokes it at scope end (RAII, S63); returning, storing, or capturing the handle would let a revoked authority outlive the block (D-SCAP1). | Use the handle only inside the `#Grant` block, or perform the work that needs it there. |
-| E0712 | This `#Grant` region uses the effect `{effect}`, which it has no authority for. | `#Grant(…)` authorizes exactly the listed effects through its handle; the dual of `#Caps`, an effect reached inside — even transitively through a call — that the grant omits has no authority backing it (D-SCAP1). | Add the named effect to the `#Grant(…)` list, or move that work outside the grant. |
+| E0711 | The `Abilities` handle `{handle}` can't escape its `#Caps` block. | `#Caps(…)` revokes the `Abilities` at scope end (RAII); returning, storing, or capturing the handle would let revoked ability outlive the scope. | Use the handle only inside the `#Caps` block, or perform the work that needs it there. |
+| E0712 | This `#Caps` region uses the effect `{effect}`, which it has no ability for. | `#Caps(…)` allows exactly the listed effects; an effect reached inside — even transitively through a call — that the list omits has no ability backing it. | Add the named effect to the `#Caps(…)` list, or move that work outside the region. |
 | E0721 | A `{tag}` value is denied at `{api}`. | The declaration for `{tag}` lists a destination that covers `{api}`. The tag spreads with derived data until an exact-tag scrubber removes it. | Remove the destination use, change the declaration if its policy is wrong, or pass the value through `#Scrub({tag})`. |
 | E0722 | A `Credential` value is denied at `{sink}`. | The Prelude `Credential` tag denies logging, display, and serialization destinations because they would leak a secret. | Log a non-secret field, or pass the value through a matching `#Scrub(Credential)` function. |
 | E0725 | `{fn}` is `#Replayable` but reaches `{effect}`. | `#Replayable` code must replay from explicit inputs; ambient time, randomness, network, or console IO would make the same replay diverge. | Inject a deterministic clock/RNG or mockable input, pass recorded data in, or move the ambient effect outside the replayable function. |
@@ -1608,6 +1619,7 @@ so these are compile-time-only diagnostics. An unknown effect name in a
 | E0747 | This callback uses the effect `{effect}`, which the parameter doesn't allow. | A `fn(…) =[]=>` parameter demands a pure callback, and a `fn(…) =[E]=>` parameter bounds the callback to the listed effects; the actual callback's inferred effects must be a subset (D-EFF2). The bound is checked at the call site, so an impure callback is rejected before it runs. | Pass a callback within the bound (a `fn … =[]=>` for a pure parameter), or widen the parameter's effect bound. |
 | E0748 | `=[via {param}]=>` on `{fn}` names no such parameter or a parameter that isn't a callback. | `=[via f]=>` publishes a function's effects as a tight pass-through of its callback parameter `f` (D-EFF2); `f` must be a parameter of the function whose type is a `fn(…)`. | Point `via` at a function-typed parameter, or drop the `=[via …]=>` annotation. |
 | E0750 | `{effect}` is not a declared effect leaf. | This package view has declared leaves under the same root, so dotted effect names must match one of those declarations exactly. | Use the suggested declared leaf, add an `effect {effect}` declaration, or use the bare root. |
+| E0751 | `Panic` can't be granted, only denied. | `Panic` is a deny-only effect row; no positive effect bound or ability can grant it. | drop `Panic` from the list, or write `:[!Panic]>`. |
 
 ## Web backend partition diagnostics (c123, D-WASM1 / D-JSBIND1)
 
@@ -1759,8 +1771,10 @@ Error [E0150]: `check_in` needs `Reservation` in state `Confirmed`, but `r` is i
 | Code | What | Why | Fix |
 |------|------|-----|-----|
 | E3301 | `{api}` is not available in a freestanding build. | `--freestanding` targets have no OS; only `core`-level APIs are available. | Embed data at compile time with `@embed("file")`, or build without `--freestanding`. |
-| E3302 | Target `{triple}` is not available. | rustc doesn't have the standard library for this target compiled in, or the target triple is not recognised. | Run `jet self doctor --target=<triple>` to see what's missing, or `rustup target add <triple>` to install it. |
+| E3302 | Target `{triple}` is not available. | rustc doesn't have the standard library for this target compiled in, or the target triple is not recognised. `wasm32-wasip2` is the supported WASI Preview 2 server Component target. | Run `jet self doctor --target=<triple>` to see what's missing, or `rustup target add <triple>` to install it; use `wasm32-wasip2` for a WASI Preview 2 server. |
 | E3303 | This freestanding program allocates memory but has no global allocator configured. | `--freestanding` builds cannot use the OS heap; a custom allocator is required. | Add `use core.mem;` and configure an arena or fixed allocator with `mem.set_allocator(…)`. |
+| E3304 | `{module}` is not available for target `{target}`. | `{module}` needs native sockets or WASI Preview 2 sockets, and this target provides neither runtime boundary. | Build for `wasm32-wasip2` or a supported native target, or remove the `{module}` import. |
+| E3305 | `{operation}` is not available for target `{target}`. | The selected target has no Prelude adapter for `{operation}`; WASI Preview 2 provides TCP/UDP sockets but not this operation. | Use a supported TCP/UDP operation, or build for a native target. |
 
 ## Pure evaluation diagnostics (E2-M16)
 
@@ -1780,7 +1794,7 @@ REPL step number in place of a file span (`<repl:N>`).
 |------|------|-----|-----|
 | E1801 | This snippet ran more than `{N}` interpreter steps without finishing. | The REPL interpreter caps each input to avoid hanging your session; this almost always means a loop that never ends. | Check any loops for a condition that never becomes false. Use `:run` to allow unbounded execution (compiles and runs instead of interpreting). |
 | E1802 | The REPL interpreter can't run `{feature}`. | The REPL is an interpreter for learning Jet; some features — FFI, tasks/channels, `#Unsafe`, and OS-level APIs — require the real compiler. | Run `jet run <file.jet>` or `jet build <file.jet>` to use the full compiler. |
-| E1803 | `{Root}.{Operation}` for `{resource}` was denied. | REPL host effects require both an enclosing `#Grant` and runtime invocation authority; denied operations stop before touching host state. | Approve the exact operation interactively, or restart with the matching `jet repl --allow-{root}` flag. `--deny-{root}` always wins. |
+| E1803 | `{Root}.{Operation}` for `{resource}` was denied. | REPL host effects require both an enclosing `#Caps` and runtime invocation ability; denied operations stop before touching host state. | Approve the exact operation interactively, or restart with the matching `jet repl --allow-{root}` flag. `--deny-{root}` always wins. |
 
 ## CLI diagnostics (E2-M3 developer command UX)
 
@@ -2006,7 +2020,8 @@ Every diagnostic report has these fields:
 | `file` | string or null | Source path when one exists. |
 | `line` / `col` | integer or null | One-based source position. |
 | `span` | object or null | Byte range with `start` and `end`. |
-| `fix_edits` | array | Machine-projected replacements; use `applicability` to decide whether an unattended tool may apply them. |
+| `fix_edits` | array | Machine-projected replacements. Each edit has `file`, `span`, `new_text`, and `safety`. |
+| `fix_edits[].safety` | string | One class from D-REPORT-FIXGRADE1. The grade is required for every edit. |
 | `cause` | array of strings | Ordered report-code chain that caused this report; root reports use `[]`. |
 | `clears` | integer | Count of reports in this batch whose cause chain names this report; transitive dependents count once. |
 
@@ -2031,7 +2046,7 @@ The clean-check success object has these additional fields:
 Example; real output stays on one line:
 
 ```json
-{"schema":"jet.report/v1","moment":"compile","severity":"error","code":"E0037","what":"Jet calls it `print`, not `println`","why":"...","fix":"replace `println` with `print`","applicability":"safe","detail":null,"file":"/workspace/hello.jet","line":2,"col":5,"span":{"start":16,"end":23},"fix_edits":[{"file":"/workspace/hello.jet","span":{"start":16,"end":23},"new_text":"print"}],"cause":[],"clears":0}
+{"schema":"jet.report/v1","moment":"compile","severity":"error","code":"E0037","what":"Jet calls it `print`, not `println`","why":"...","fix":"replace `println` with `print`","applicability":"safe","detail":null,"file":"/workspace/hello.jet","line":2,"col":5,"span":{"start":16,"end":23},"fix_edits":[{"file":"/workspace/hello.jet","span":{"start":16,"end":23},"new_text":"print","safety":"behavior-preserving"}],"cause":[],"clears":0}
 ```
 
 A clean check prints:
@@ -2056,14 +2071,16 @@ its legacy diagnostic envelope.
 
 LSP diagnostics use the registered row's `what` as the LSP `message`. Every
 diagnostic also carries the complete `jet.report/v1` object in `data`, including
-`why`, `fix`, `applicability`, `fix_edits`, and `cause`. The `codeDescription.href` value is
+`why`, `fix`, `applicability`, `fix_edits`, and `cause`. Each `fix_edits` entry
+also carries its safety class. The `codeDescription.href` value is
 `jet://explain/<CODE>`, so an editor can open the same explanation as `jet explain`.
 
 When a report's `cause` names another report with a source span, LSP adds that
 report as standard `relatedInformation`. LSP code actions use the same
 row-owned `fix_edits` projection as `jet fix`; they show both `safe` and
 `suggested` actions and do not parse diagnostic prose or maintain an
-editor-only edit path. `jet fix` applies only `safe` edits.
+editor-only edit path. `jet fix` applies formatting and behavior-preserving
+edits by default. `jet fix --all` applies every safety class.
 
 ### E0910 — Published schema breaking change
 
@@ -2155,22 +2172,21 @@ be expressed.
 
 ### E0921 — transitive memory-fact violation (D-MEM-FACTS1)
 
-`no_alloc`, `zero_rc`, and `arena_bounded(N)` are explicit memory facts on the
-D-MARK-SCOPE1 package/module/function/block ladder. Sema checks every reachable
-call, including dependency code, against the effective inherited facts. A
-violation points to the source allocation or other incompatible operation,
-prints the full call path, and names both the effective fact declaration and
-its provenance. Open-world dispatch must have a sealed target set or a signed
-dependency summary; otherwise the strict fact is unprovable and rejected.
+`!Mem.Alloc`, `!Mem.Rc`, and `!Mem.Alloc(above: N)` are effect-row
+prohibitions. Sema checks every reachable call, including dependency code,
+against the function's denial. A violation points to the source allocation or
+other incompatible operation, prints the full call path, and names the denial
+and its provenance. Open-world dispatch must have a sealed target set or a
+signed dependency summary; otherwise the strict fact is unprovable and
+rejected.
 
 | What | Why | Fix |
 |------|-----|-----|
-| `{operation}` at `{source}` violates the effective `{fact}` declared at `{declaration}`. | `{source}` is reachable through `{call_path}` from code governed by `{fact}`; the diagnostic includes the declaration's package/module/function/block provenance. | Remove or replace the incompatible operation, call an implementation whose transitive facts satisfy the contract, or move the call outside the fact-bearing scope. |
-| `{fact}` cannot be proved through the open dispatch at `{source}`. | A strict transitive fact cannot assume that an unknown future target avoids allocation, reference counting, or excess arena use. | Seal the target set, consume a signed dependency summary that proves the fact, or move the dispatch outside the fact-bearing scope. |
+| `{operation}` at `{source}` violates the denial `{fact}` declared at `{declaration}`. | `{source}` is reachable through `{call_path}` from code governed by `{fact}`; the diagnostic includes the signature provenance. | Remove or replace the incompatible operation, call an implementation whose transitive facts satisfy the denial, or move the call outside the denial. |
+| `{fact}` cannot be proved through the open dispatch at `{source}`. | A strict transitive denial cannot assume that an unknown future target avoids allocation, reference counting, or excess arena use. | Seal the target set, consume a signed dependency summary that proves the denial, or move the dispatch outside the denial. |
 
-Implementation note: card #644 owns migration from the shipped local
-`no_alloc` denylist to this controlling transitive E0921 contract. No E0922 is
-allocated for that migration.
+Implementation note: D-AUTHORITY-MEM1/B and D-AUTHORITY-MEM2/A tombstone the
+friendly floor words. No E0922 is allocated for that migration.
 
 ### E0922 — body-level `derive Debug` is retired
 
@@ -2240,6 +2256,7 @@ them:
 | `` `#Suppress` is retired — it no longer does anything ``. | a block-scoped suppression marker isn't the discard mechanism anymore. | Call `.drop("reason")` on the unused value instead (D-MARK-DISCARD1=A). |
 | `` `#Uninit` is retired — it no longer does anything ``. | stored uninitialized-sentinel fields were removed outright. | Give the field a real initial value (D-UNINIT-SENTINEL1). |
 | `` `#Ref` is retired — it no longer does anything ``. | stored-reference fields were deleted outright. | Keep an owned value instead (D-MEM1/S3). |
+| `` `#Bench` is a retired claim spelling ``. | measurement is a mode of `#Test`, so Jet has one claim family. | Write `#Test("name") { .measure { … } }` and run `jet test --measure` (D-CLAIM-BENCH1=A). |
 
 Anything else unrecognized gets an ordinary "did you mean `X`?" (edit
 distance ≤ 2 against the plane's vocabulary) or, with no close match, a

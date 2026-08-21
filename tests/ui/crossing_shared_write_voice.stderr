@@ -1,0 +1,15 @@
+Error [E1101]: `count` cannot cross the `task capture` boundary: the value writes shared state
+  --> tests/ui/crossing_shared_write_voice.jet:3:10
+    |
+  3 |     task {
+    |          ^
+ Why: the `task capture` boundary can run concurrently with its owner; the write would race with the owner or require a hidden merge rule
+ Fix: give it with `^`, freeze it with `freeze`, or share it with `shared`
+
+Error [E1101]: `count` cannot cross the `parallel worker` boundary: the value writes shared state
+  --> tests/ui/crossing_shared_write_voice.jet:11:26
+    |
+ 11 |     _ :: values.para_map((n: Int) :> {
+    |                          ^^^^^^^^^^^^^
+ Why: the `parallel worker` boundary can run concurrently with its owner; the write would race with the owner or require a hidden merge rule
+ Fix: give it with `^`, freeze it with `freeze`, or share it with `shared`

@@ -255,6 +255,13 @@ fn ui_snapshots() {
         // D-WEBTIR1=A: files marked `// @web_target` compile through the web
         // preflight so web-only executable-body diagnostics get UI snapshots.
         let web_target = src.lines().any(|l| l.trim() == "// @web_target");
+        // D-WASISRV1=A: a target directive drives the real cross-target sema
+        // path without requiring the UI snapshot process to invoke rustc.
+        let cross_target = src.lines().find_map(|line| {
+            line.trim()
+                .strip_prefix("// @target ")
+                .map(str::to_owned)
+        });
         // D-BUILDENTRY1: selected-root build diagnostics need programmable
         // staging, not ordinary runtime compilation.
         let programmable_build = src.lines().any(|l| l.trim() == "// @programmable_build");
@@ -284,6 +291,13 @@ fn ui_snapshots() {
         let retired_gate_flag = src
             .lines()
             .any(|line| line.trim() == "// @retired_gate_flag");
+        // Card #2033: run the real opt-in cognitive-complexity lint so the
+        // budget failure and refactored pass stay pinned to CLI behavior.
+        let complexity_cli = src.lines().find_map(|line| {
+            line.trim()
+                .strip_prefix("// @complexity_cli ")
+                .map(str::to_owned)
+        });
         let cli_e0043 = src.lines().any(|line| line.trim() == "// @cli_e0043");
         let cli_e1219 = src.lines().any(|line| line.trim() == "// @cli_e1219");
         let typed_settings_cli = src
@@ -343,6 +357,8 @@ fn ui_snapshots() {
             run_jetpack_retired_environment_flag_snapshot()
         } else if retired_gate_flag {
             run_retired_gate_flag_snapshot(&file_arg)
+        } else if let Some(spec) = complexity_cli.as_deref() {
+            run_complexity_cli_snapshot(&file_arg, spec)
         } else if env_facet_missing {
             let diagnostic = jet_env_model::ModuleEval::evaluate_env_with_environment(
                 &src,
@@ -423,6 +439,19 @@ fn ui_snapshots() {
                 Some(jet::Diagnostics::Span::new(wait_start, wait_start + "time.sleep".len())),
             );
             jet::render_diagnostics(&shown_path, &src, &[diagnostic])
+        } else if src.lines().any(|line| line.trim() == "// @ambiguous_call") {
+            let call = "put(\"name\", \"text\")";
+            let call_start = src
+                .find(call)
+                .expect("ambiguous-call fixture must name its call expression");
+            let diagnostic = jet::Diagnostics::Diagnostic::error(
+                "E0772",
+                "this call to `put` matches more than one callable body".to_string(),
+                "the call binds to multiple candidate signatures:\n  put(name: String, text: String)\n  put(key: String, id: String)".to_string(),
+                "name the arguments to choose one candidate: `put(name: …, text: …)`".to_string(),
+                Some(jet::Diagnostics::Span::new(call_start, call_start + call.len())),
+            );
+            jet::render_diagnostics(&shown_path, &src, &[diagnostic])
         } else if repl_deny {
             let input = src
                 .lines()
@@ -489,6 +518,17 @@ fn ui_snapshots() {
             }
         } else if web_target {
             match jet::compile_web(&file_arg) {
+                Err(diags) => jet::render_diagnostics(&shown_path, &src, &diags),
+                Ok(_) => "(no errors)\n".to_string(),
+            }
+        } else if let Some(target) = cross_target.as_deref() {
+            match jet::compile_with_target_and_gates_and_profile(
+                &src,
+                &file_arg,
+                jet::Policy::GateSet::default(),
+                Some(target),
+                "dev",
+            ) {
                 Err(diags) => jet::render_diagnostics(&shown_path, &src, &diags),
                 Ok(_) => "(no errors)\n".to_string(),
             }
@@ -593,6 +633,37 @@ fn run_cli_e1219_snapshot(file: &str) -> String {
     assert!(!output.status.success(), "E1219 command must fail");
     let mut rendered = String::from_utf8(output.stdout).expect("E1219 stdout is UTF-8");
     rendered.push_str(&String::from_utf8(output.stderr).expect("E1219 stderr is UTF-8"));
+    rendered
+}
+
+fn run_complexity_cli_snapshot(file: &str, spec: &str) -> String {
+    let mut parts = spec.split_whitespace();
+    let expectation = parts.next().expect("complexity snapshot needs pass/fail");
+    let max = parts.next().expect("complexity snapshot needs a budget");
+    assert!(
+        parts.next().is_none(),
+        "complexity snapshot directive has extra words: {spec}"
+    );
+    let output = Command::new(env!("CARGO_BIN_EXE_jet"))
+        .args(["lint", "--complexity", file])
+        .arg(format!("--max={max}"))
+        .args(["--color=never"])
+        .env("NO_COLOR", "1")
+        .output()
+        .expect("run cognitive-complexity CLI fixture");
+    match expectation {
+        "fail" => assert!(
+            !output.status.success(),
+            "over-budget cognitive-complexity fixture must fail"
+        ),
+        "pass" => assert!(
+            output.status.success(),
+            "refactored cognitive-complexity fixture must pass"
+        ),
+        other => panic!("complexity snapshot expects `pass` or `fail`, got `{other}`"),
+    }
+    let mut rendered = String::from_utf8(output.stdout).expect("complexity stdout is UTF-8");
+    rendered.push_str(&String::from_utf8(output.stderr).expect("complexity stderr is UTF-8"));
     rendered
 }
 

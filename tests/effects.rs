@@ -28,8 +28,8 @@ use core.files as fs
     fs.write("fault-loop.txt", "x") ?? return
     values := List.try_with_capacity(1) ?? return
     values.try_push(1) ?? return
-    require(values.len() == 1)
-    require(true)
+    assert(values.len() == 1)
+    assert(true)
 }
 
 fn run() {}
@@ -132,7 +132,7 @@ fn reserve() {{
     close(^arena)
 }}
 
-#Policy(arena_bounded({bound})) fn run() {{
+fn run() :[!Mem.Alloc(above: {bound})]> {{
     loop item, [1, 2, 3, 4, 5], {stride} {{
         print(item)
         reserve()
@@ -149,7 +149,7 @@ fn reserve() {{
             .any(|diagnostic| diagnostic.severity == jet::Diagnostics::Severity::Error),
         "five items at stride two execute three 4-byte calls:\n{diagnostics:#?}"
     );
-    let run_12 = ("main::run".to_string(), jet::Sema::MemoryFact::ArenaBounded(12));
+    let run_12 = ("main::run".to_string(), jet::Sema::MemoryFact::MemAllocBounded(12));
     assert_eq!(
         facts.memory_projections.get(&run_12),
         Some(&jet::Sema::MemoryProjection::Proven)
@@ -161,14 +161,14 @@ fn reserve() {{
     assert!(matches!(
         facts.memory_projections.get(&(
             "main::run".to_string(),
-            jet::Sema::MemoryFact::ArenaBounded(11)
+            jet::Sema::MemoryFact::MemAllocBounded(11)
         )),
         Some(jet::Sema::MemoryProjection::Violated { .. })
     ));
 
     let dynamic = source(12, "stride").replace(
-        "#Policy(arena_bounded(12)) fn run() {",
-        "#Policy(arena_bounded(12)) fn run() {\n    stride := 2",
+        "fn run() :[!Mem.Alloc(above: 12)]> {",
+        "fn run() :[!Mem.Alloc(above: 12)]> {\n    stride := 2",
     );
     let (diagnostics, facts) = check("jet_stride_arena_dynamic", &dynamic);
     assert!(diagnostics.iter().any(|diagnostic| diagnostic.code == "E0921"));
@@ -485,7 +485,7 @@ fn run() {
 }
 "#;
     assert!(
-        codes(src).iter().any(|c| c == "E0741"),
+        codes(src).iter().any(|c| c == "E0712"),
         "lambda FS should surface in region: {:?}",
         codes(src)
     );
@@ -542,9 +542,9 @@ fn run() {
     );
 }
 
-/// An effect used inside a `#Caps(…)` region but not in its cap list is E0741.
+/// An effect used inside a `#Caps(…)` region but not in its cap list is E0712.
 #[test]
-fn caps_region_out_of_set_is_e0741() {
+fn caps_region_out_of_set_is_e0712() {
     let src = r#"
 use core.files as fs
 fn run() {
@@ -555,16 +555,16 @@ fn run() {
 }
 "#;
     assert!(
-        codes(src).iter().any(|c| c == "E0741"),
-        "expected E0741, got {:?}",
+        codes(src).iter().any(|c| c == "E0712"),
+        "expected E0712, got {:?}",
         codes(src)
     );
 }
 
 /// A `#Caps(…)` region restriction is transitive: an effect reached only through
-/// a call still trips E0741.
+/// a call still trips E0712.
 #[test]
-fn caps_region_transitive_is_e0741() {
+fn caps_region_transitive_is_e0712() {
     let src = r#"
 use core.files as fs
 fn helper(p: String) => String { return fs.read(p) ?? ""; }
@@ -576,8 +576,8 @@ fn run() {
 }
 "#;
     assert!(
-        codes(src).iter().any(|c| c == "E0741"),
-        "transitive FS should trip E0741: {:?}",
+        codes(src).iter().any(|c| c == "E0712"),
+        "transitive FS should trip E0712: {:?}",
         codes(src)
     );
 }
@@ -605,19 +605,19 @@ effect Log.Audit
 fn audit() =[Log.Audit]=> {}
 fn run() {
     #Caps(Log.Audit) { audit() }
-    #Grant(caps: Log.Audit) { audit() }
+    #Caps(caps: Log.Audit) { audit() }
 }
 "#;
     assert!(
         codes(valid).is_empty(),
-        "declared leaves should work in rows, caps, and grants: {:?}",
+        "declared leaves should work in rows and caps: {:?}",
         codes(valid)
     );
 
     for source in [
         "effect Log.Audit\nfn audit() =[Log.Aduut]=> {}\nfn run() {}\n",
         "effect Log.Audit\nfn run() { #Caps(Log.Aduut) {} }\n",
-        "effect Log.Audit\nfn run() { #Grant(caps: Log.Aduut) {} }\n",
+        "effect Log.Audit\nfn run() { #Caps(caps: Log.Aduut) {} }\n",
     ] {
         let diagnostics = jet::compile(source).expect_err("typo under a checked root must fail");
         let error = diagnostics
@@ -733,14 +733,14 @@ fn dependency_effect_declaration_joins_the_package_view() {
 
 // ── Scoped capabilities (D-SCAP1) ─────────────────────────────────────────────
 
-/// D-SCAP1: a `#Grant(caps: FS) { … }` whose body stays within the granted set
-/// compiles clean — the grant authorizes the listed effects.
+/// D-AUTHORITY-SCOPE1: a named `#Caps(caps: FS) { … }` whose body stays within
+/// the listed set compiles clean.
 #[test]
 fn grant_within_set_ok() {
     let src = r#"
 use core.files as fs
 fn run() {
-    #Grant(caps: FS, IO) {
+    #Caps(caps: FS, IO) {
         text :: fs.read("x") ?? "";
         print(text);
     }
@@ -753,14 +753,14 @@ fn run() {
     );
 }
 
-/// D-SCAP1: an effect used inside a `#Grant(…)` that the grant doesn't authorize
-/// has no capability — E0712 (the dual of E0741).
+/// D-AUTHORITY-SCOPE1: an effect used inside a named `#Caps(…)` that the list
+/// doesn't authorize has no authority — E0712.
 #[test]
 fn grant_out_of_set_is_e0712() {
     let src = r#"
 use core.files as fs
 fn run() {
-    #Grant(caps: Net) {
+    #Caps(caps: Net) {
         text :: fs.read("x") ?? "";
         print(text);
     }
@@ -773,7 +773,7 @@ fn run() {
     );
 }
 
-/// D-SCAP1: the grant restriction is transitive — an effect reached only through
+/// D-AUTHORITY-SCOPE1: the named `#Caps` restriction is transitive — an effect reached only through
 /// a call still trips E0712.
 #[test]
 fn grant_transitive_is_e0712() {
@@ -781,7 +781,7 @@ fn grant_transitive_is_e0712() {
 use core.files as fs
 fn helper(p: String) => String { return fs.read(p) ?? ""; }
 fn run() {
-    #Grant(caps: IO) {
+    #Caps(caps: IO) {
         text :: helper("x");
         print(text);
     }
@@ -794,13 +794,13 @@ fn run() {
     );
 }
 
-/// D-SCAP1: the capability handle may not escape its grant — aliasing it to
+/// D-AUTHORITY-SCOPE1: the Authority handle may not escape its block — aliasing it to
 /// another binding is E0711.
 #[test]
 fn grant_handle_alias_is_e0711() {
     let src = r#"
 fn run() {
-    #Grant(caps: IO) {
+    #Caps(caps: IO) {
         alias :: caps;
         print("hi");
     }
@@ -814,12 +814,12 @@ fn run() {
 }
 
 /// D-SCAP1: not naming the handle anywhere (never escaping it) compiles clean —
-/// the grant is the authorizing context, the handle need not be used.
+/// the named `#Caps` block is the authorizing context, the handle need not be used.
 #[test]
 fn grant_unused_handle_ok() {
     let src = r#"
 fn run() {
-    #Grant(caps: IO) {
+    #Caps(caps: IO) {
         print("granted");
     }
 }
@@ -831,13 +831,13 @@ fn run() {
     );
 }
 
-/// D-SCAP1: an unknown effect name in a `#Grant(…)` list is E0119 (shared with
-/// `#Caps`/`#(…)`), and suppresses the E0712 subset check.
+/// D-AUTHORITY-SCOPE1: an unknown effect name in a `#Caps(…)` list is E0119 and
+/// suppresses the E0712 subset check.
 #[test]
 fn grant_unknown_effect_is_e0119() {
     let src = r#"
 fn run() {
-    #Grant(caps: Bogus) {
+    #Caps(caps: Bogus) {
         print("hi");
     }
 }
@@ -851,14 +851,14 @@ fn run() {
     );
 }
 
-/// I3: a `#Grant(…)` region lowers to a plain lexical block — the generated Rust
-/// carries no capability machinery (no handle value, no grant/revoke), no effect
+/// I3: a named `#Caps(…)` region lowers to a plain lexical block — the generated
+/// Rust carries no capability machinery (no handle value or revoke), no effect
 /// annotation, and NO `unsafe`. The body runs unchanged.
 #[test]
 fn grant_region_erases_to_plain_block() {
     let src = r#"
 fn run() {
-    #Grant(caps: IO) {
+    #Caps(caps: IO) {
         print("inside");
     }
     print("outside");
@@ -870,7 +870,7 @@ fn run() {
         "generated Rust must not mention grant:\n{rust}"
     );
     assert!(
-        !rust.contains("Capability"),
+        !rust.contains("Ability"),
         "generated Rust must not mention the handle type:\n{rust}"
     );
     assert!(
@@ -887,15 +887,14 @@ fn run() {
     );
 }
 
-/// I3 (D-SCAP1): a `#Grant(…)` region lowers to the SAME plain Rust block as the
-/// already-erased `#Caps(…)` region — the grant carries no machinery `#Caps`
-/// doesn't, so swapping `#Grant(h: E) { … }` for `#Caps(E) { … }` is identical
-/// generated code (the handle is sema-only and erased).
+/// I3 (D-AUTHORITY-SCOPE1): a named `#Caps(…)` region lowers to the SAME plain
+/// Rust block as the already-erased bare `#Caps(…)` region — the handle is
+/// sema-only and erased.
 #[test]
 fn grant_lowers_like_caps_region() {
     let granted = r#"
 fn run() {
-    #Grant(caps: IO) {
+    #Caps(caps: IO) {
         print("a");
         print("b");
     }
@@ -913,7 +912,7 @@ fn run() {
     let b = jet::compile(caps).expect("caps compiles").rust;
     assert_eq!(
         a, b,
-        "#Grant region must lower identically to the erased #Caps region (I3)"
+        "named #Caps region must lower identically to the erased #Caps region (I3)"
     );
 }
 

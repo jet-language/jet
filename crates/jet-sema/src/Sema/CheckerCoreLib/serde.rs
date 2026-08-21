@@ -111,13 +111,23 @@ impl<'a> Checker<'a> {
                 // same typed Decode rail as an ordinary named type.
                 Type::Tagged { inner, .. }
                     if matches!(inner.as_ref(), Type::Named(name) if name == "Secret") => true,
-                Type::Named(n) => n == "Decimal"
-                    || n == "DataTree"
-                    || n == "Secret"
-                    || matches!(n.as_str(), "Date" | "LocalDate" | "LocalTime" | "DateTime" | "Duration")
-                    || self.serde_trait_impl(n, crate::Generics::DECODE)
-                    || self.type_param_scope.iter().any(|p|
-                        p.name == *n && p.bounds.iter().any(|b| b == crate::Generics::DECODE)),
+                Type::Named(n) => {
+                    let core_secret = n == "Secret"
+                        || n.split_once('.').is_some_and(|(alias, leaf)| {
+                            leaf == "Secret"
+                                && self
+                                    .core_imports
+                                    .get(alias)
+                                    .is_some_and(|module| module == "core.crypto")
+                        });
+                    n == "Decimal"
+                        || n == "DataTree"
+                        || core_secret
+                        || matches!(n.as_str(), "Date" | "LocalDate" | "LocalTime" | "DateTime" | "Duration")
+                        || self.serde_trait_impl(n, crate::Generics::DECODE)
+                        || self.type_param_scope.iter().any(|p|
+                            p.name == *n && p.bounds.iter().any(|b| b == crate::Generics::DECODE))
+                }
                 Type::Apply { name, args } => {
                     self.serde_apply_ok(name, args, crate::Generics::DECODE, &|t| {
                         self.is_decodable(t)

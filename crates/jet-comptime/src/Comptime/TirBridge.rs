@@ -247,7 +247,6 @@ fn collect_reflected_shapes(
             | Stmt::TaskGroup { body, .. }
             | Stmt::Layout { body, .. }
             | Stmt::Caps { body, .. }
-            | Stmt::Grant { body, .. }
             | Stmt::ComptimeBlock { body, .. }
             | Stmt::ContextBlock { body, .. }
             | Stmt::Live { body, .. }

@@ -2,6 +2,9 @@
 
 use std::collections::BTreeMap;
 
+/// The arena only marshals resident values into the shared Prelude carrier.
+pub use jet_foundation::Prelude::JetMapKey;
+
 #[allow(dead_code)]
 mod uninit_semantics {
     include!("../../jet-codegen/src/Prelude/Uninit.rs");
@@ -60,18 +63,6 @@ pub fn string_before(s: &str, sep: &str) -> String {
     }
 }
 
-/// Structural key carrier for the JIT map adapter. The key's shape is fixed
-/// by sema; this carrier preserves field order and value order while the
-/// Prelude-backed map owns lookup semantics.
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
-pub enum JetMapKey {
-    Int(i64),
-    String(String),
-    Bool(bool),
-    Char(char),
-    Record(Vec<JetMapKey>),
-}
-
 #[derive(Clone, Debug, PartialEq)]
 pub enum JetVal {
     /// JIT value carrier for sema-proved uninitialized fixed-list storage.
@@ -104,6 +95,11 @@ pub enum JetVal {
     /// packed value word used by the JIT ABI.
     Map(BTreeMap<JetMapKey, (i64, i64)>),
     Record(Vec<JetVal>),
+    /// A record handle stored in another record. Keeping the distinction from
+    /// `Int` lets recursive map-key marshalling follow the declared field
+    /// shape without mistaking an integer that happens to equal an arena index
+    /// for a nested record.
+    RecordRef(i64),
     // D-INTBIG1: exact Int spill carrier. Reuses `CtBigInt` (jet-foundation)
     // limb-for-limb so a JIT-computed spilled Int prints byte-identical to the
     // AOT and comptime exact integer paths (R12 parity).
@@ -263,21 +259,36 @@ impl JetArena {
     }
 
     /// Convert a generated tuple/struct record into the structural key used by
-    /// the JIT map adapter. Sema excludes floats and aggregate containers from
-    /// this resident path, so every field is a scalar value here.
+    /// the JIT map adapter. Record references recurse through the same
+    /// structural carrier; the shared Prelude `jet_map_key_cmp` supplies the
+    /// ordered value comparison without a second map policy.
     fn composite_key(&self, key_id: i64) -> Option<JetMapKey> {
         let JetVal::Record(fields) = self.values.get(key_id as usize)? else {
             return None;
         };
         fields
             .iter()
-            .map(|field| match field {
-                JetVal::Int(value) => Some(JetMapKey::Int(*value)),
-                JetVal::String(value) => Some(JetMapKey::String(value.clone())),
-                JetVal::Bool(value) => Some(JetMapKey::Bool(*value)),
-                JetVal::Char(value) => Some(JetMapKey::Char(*value)),
-                _ => None,
-            })
+            .map(|field| self.composite_key_field(field))
+            .collect::<Option<Vec<_>>>()
+            .map(JetMapKey::Record)
+    }
+
+    fn composite_key_field(&self, field: &JetVal) -> Option<JetMapKey> {
+        let fields = match field {
+            JetVal::Int(value) => return Some(JetMapKey::Int(*value)),
+            JetVal::String(value) => return Some(JetMapKey::String(value.clone())),
+            JetVal::Bool(value) => return Some(JetMapKey::Bool(*value)),
+            JetVal::Char(value) => return Some(JetMapKey::Char(*value)),
+            JetVal::RecordRef(handle) => match self.values.get(*handle as usize)? {
+                JetVal::Record(fields) => fields,
+                _ => return None,
+            },
+            JetVal::Record(fields) => fields,
+            _ => return None,
+        };
+        fields
+            .iter()
+            .map(|field| self.composite_key_field(field))
             .collect::<Option<Vec<_>>>()
             .map(JetMapKey::Record)
     }
@@ -777,6 +788,13 @@ impl JetArena {
         self.record_set(record, index, JetVal::String(value))
     }
 
+    pub fn record_set_record(&mut self, record: i64, index: i64, value: i64) -> Option<()> {
+        if !matches!(self.values.get(value as usize), Some(JetVal::Record(_))) {
+            return None;
+        }
+        self.record_set(record, index, JetVal::RecordRef(value))
+    }
+
     /// Whole-record write-through for `(*self) = …` / D-MUTSELF1 (keeps the
     /// caller's handle identity; replaces field slots from `src`).
     pub fn record_assign_from(&mut self, dst: i64, src: i64) -> Option<()> {
@@ -813,7 +831,7 @@ impl JetArena {
             .map(|value| match value {
                 // A struct element is an arena record reached through its
                 // handle; `Record` in place is the same row already inline.
-                JetVal::Int(handle) => match self.values.get(*handle as usize) {
+                JetVal::Int(handle) | JetVal::RecordRef(handle) => match self.values.get(*handle as usize) {
                     Some(JetVal::Record(fields)) => Some(fields.clone()),
                     _ => None,
                 },
@@ -836,6 +854,7 @@ impl JetArena {
     pub fn record_get_int(&self, record: i64, index: i64) -> Option<i64> {
         match self.record_get(record, index) {
             Some(JetVal::Int(value)) => Some(*value),
+            Some(JetVal::RecordRef(value)) => Some(*value),
             _ => None,
         }
     }

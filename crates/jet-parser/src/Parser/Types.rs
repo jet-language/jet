@@ -174,6 +174,11 @@ impl<'a> Parser<'a> {
         )
     }
 
+    pub(in crate::Parser) fn return_type_has_value(ty: &Type) -> bool {
+        !matches!(ty, Type::Named(name) if name == Syntax::INTERNAL_UNIT_TYPE)
+            && !Self::is_unit_fallible_type(ty)
+    }
+
     pub(in crate::Parser) fn retired_unit_fallible_signature(span: Span) -> Diagnostic {
         Diagnostic::error(
             "E0003",

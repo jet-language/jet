@@ -332,7 +332,7 @@ graph. D-E4EXIT1=C makes that part of the Epoch 5 exit bar, and the 2026-07-06
 ballots ratified the graph shape:
 
 - **D-BUILDTARGET1=A / #219:** targets are registered with
-  `b.add_executable`, `b.add_library`, `b.add_test`, `b.add_bench`,
+  `b.add_executable`, `b.add_library`, `b.add_test`,
   `b.add_asset_bundle`, `b.add_doc`, `b.add_install`, `b.add_package`, and
   `b.add_publish`; each returns a typed handle.
 - **D-BUILDACTION1=A / #220:** `b.action(name, inputs, outputs, run, caps)`;

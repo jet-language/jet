@@ -400,6 +400,7 @@ fn normalize_member_prefix(path: &str) -> String {
 }
 
 fn e1231_unknown_member(query: &str, plan: &WorkspacePlan) -> Diagnostic {
+    // No typed edit: `-p` is an argv selector, not a Jet source span.
     let labels: Vec<String> = plan.members.iter().map(|m| m.name.clone()).collect();
     let suggestions = nearest(query, &labels);
     let fix = if suggestions.is_empty() {

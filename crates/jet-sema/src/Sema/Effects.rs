@@ -13,7 +13,12 @@
 //! (E0740 out-of-set against a declared effect-arrow bound). Casing is
 //! PascalCase per D-CASING1.
 //!
-//! D-WASM1=A amends D-EFF4 with `Browser` — DOM / browser API use (c123).
+//! D-AUTHORITY-ROOTS1=A amends D-EFF4/D-EFF5: the grantable roots are thirteen:
+//! the ten ratified roots plus `FFI`, `Browser`, and `Secret`. Foreign languages are
+//! leaves under `FFI` (`FFI.Go`, `FFI.Py`, `FFI.Octave`, ...), so `FFI` is the
+//! one bound that covers every foreign call.
+//!
+//! D-WASM1=A adds `Browser` — DOM / browser API use (c123).
 //!
 //! U13 (D-JPK-SECRETCRYPTO1, card c9jetpackgates) amends D-EFF4/5 with
 //! `Secret` — reading a decrypted repo secret (`core.crypto.vault.get`). Modeled as a
@@ -26,8 +31,8 @@
 //! by default even with a matching declared bound absent — see
 //! `check_secret_grants`.
 //!
-//! D-EFFTREE1 (ratified 2026-07-03) amends D-EFF4/5: the canonical names in
-//! `jet-foundation::Authority` become tree **roots**. A user-written effect
+//! D-EFFTREE1 (ratified 2026-07-03) amends D-EFF4/5: the thirteen grantable
+//! names in `jet-foundation::Authority` become tree **roots**. A user-written effect
 //! name may now be a dotted path
 //! rooted at one of them (`FS.Read`, `Net.HTTP.Get`) — the root is validated
 //! against the closed vocabulary (E0119 otherwise); further segments are an
@@ -37,8 +42,8 @@
 //! **Ancestor matching is subsumption**: a bound entry covers any effect at or
 //! below it in the tree (`effect_covers`) — the same ancestor-subtree rule as
 //! D-TAG1's nested variant groups (CheckerCore.rs's switch-arm coverage:
-//! `variant.starts_with(&format!("{c}."))`). `Effect` itself stays the closed
-//! root enum, used for classification by the small set of call sites
+//! `variant.starts_with(&format!("{c}."))`). `Effect` stays the typed root and
+//! deny-row enum, used for classification by the small set of call sites
 //! (D-TXN2, D-TAINT1, D-WASM1) that only ever care about a whole root
 //! regardless of leaf.
 
@@ -80,6 +85,22 @@ pub fn parse_effect_name(name: &str) -> Option<String> {
         return Some(base);
     }
     jet_foundation::Authority::parse_right(name)
+}
+
+/// D-PANICROOT1=A: `Panic` is a deny-only row. It remains parseable so a
+/// prohibition can name it, but no positive ceiling, ability, or grant may
+/// claim it.
+pub fn reject_positive_deny_only_effect(name: &str, span: Span) -> Option<Diagnostic> {
+    (effect_root(name) == Effect::Panic.name()).then(|| {
+        Diagnostic::error(
+            "E0751",
+            "`Panic` can't be granted, only denied".to_string(),
+            "`Panic` is a deny-only effect row; no positive effect bound or capability can grant it"
+                .to_string(),
+            "drop `Panic` from the list, or write `:[!Panic]>`".to_string(),
+            Some(span),
+        )
+    })
 }
 
 /// D-AUTHORITY-MEM2: decode the one parameterized memory right. `None` is the
@@ -131,18 +152,28 @@ pub fn resolve_effect_name(
     if declaration.members.is_empty() || declaration.members.contains(member) {
         return Ok(name.to_string());
     }
-    let suggestion = declaration
-        .members
-        .iter()
-        .map(|candidate| {
-            (
-                crate::Syntax::edit_distance(member, candidate),
-                format!("{root}.{candidate}"),
-            )
-        })
-        .min_by(|left, right| left.cmp(right))
-        .filter(|(distance, _)| *distance > 0 && *distance <= 3)
-        .map(|(_, candidate)| candidate);
+    let mut best: Option<(String, usize)> = None;
+    let mut ambiguous = false;
+    for candidate in &declaration.members {
+        let distance = crate::Syntax::edit_distance(member, candidate);
+        if distance == 0 || distance > 3 {
+            continue;
+        }
+        match best.as_ref() {
+            None => best = Some((candidate.clone(), distance)),
+            Some((_, best_distance)) if distance < *best_distance => {
+                best = Some((candidate.clone(), distance));
+                ambiguous = false;
+            }
+            Some((best_candidate, best_distance)) if distance == *best_distance => {
+                ambiguous |= best_candidate != candidate;
+            }
+            _ => {}
+        }
+    }
+    let suggestion = best
+        .filter(|_| !ambiguous)
+        .map(|(candidate, _)| format!("{root}.{candidate}"));
     Err(suggestion)
 }
 
@@ -192,14 +223,14 @@ pub fn effect_covers(bound: &str, e: &str) -> bool {
 /// The subset of `inferred` NOT covered by any entry of `bound_set` — the
 /// tree-aware replacement for a flat `BTreeSet::difference` now that ancestor
 /// entries subsume their whole subtree (D-EFFTREE1). Used at every "is the
-/// inferred set within its declared bound" check (E0740/E0741/E0712/E0747/E0742).
+/// inferred set within its declared bound" check (E0740/E0712/E0747/E0742).
 pub fn effects_uncovered(inferred: &EffectSet, bound_set: &EffectSet) -> EffectSet {
     // D-PANICROOT1=A: Panic is deny-only. It remains in the inferred row for
     // diagnostics, reachability, and `=[!Panic]=>`, but never requires a
-    // positive function bound or a `#Caps`/`#Grant` capability.
+    // positive function bound or a `#Abilities` authority.
     // D-AUTHORITY-MEM1=B: memory is deny-only in the same way. Memory events
     // publish `Mem.Alloc`/`Mem.Rc` into the inferred row so `:[!Mem.Alloc]>`
-    // and manifest `effects.deny` can match them, but a positive ceiling never
+    // and manifest `authority.holds.deny` can match them, but a positive ceiling never
     // has to enumerate them: allocation is not a right you request, it is one
     // you can be refused. Without this, every `:[IO]>` function that formats a
     // string reported E0740 for `Mem.Alloc`.
@@ -255,8 +286,8 @@ impl<'a> super::Checker<'a> {
     }
 
     /// D-EFF1: record an effect this function reaches directly — into the
-    /// function's set and every open `#Caps(…)` region (which must account for
-    /// effects reached inside it, E0741).
+    /// function's set and every open `#Abilities(…)` region (which must account for
+    /// effects reached inside it, E0712).
     pub(crate) fn record_effect(&mut self, e: &str, span: Span) {
         self.fx_direct.insert(e.to_string());
         self.fx_direct_spans.entry(e.to_string()).or_insert(span);
@@ -266,7 +297,7 @@ impl<'a> super::Checker<'a> {
     }
 
     /// D-EFF1: record a call-graph edge to a user function `name` — into the
-    /// function's edges and every open `#Caps(…)` region.
+    /// function's edges and every open `#Abilities(…)` region.
     pub(crate) fn record_edge(&mut self, name: String, span: Span) {
         let inline_edge = self.code_modules.values().find_map(|module| {
             let prefix = jet_foundation::Names::member_name(module, "");
@@ -303,7 +334,7 @@ impl<'a> super::Checker<'a> {
     }
 
     /// D-EFF1: record that a foreign (`extern`) call was reached — forcing the
-    /// maximal set on the function and every open `#Caps(…)` region.
+    /// maximal set on the function and every open `#Abilities(…)` region.
     pub(crate) fn record_maximal(&mut self, span: Span) {
         self.fx_maximal = true;
         self.fx_maximal_span.get_or_insert(span);
@@ -360,6 +391,10 @@ impl<'a> super::Checker<'a> {
             }
             match parse_effect_name(name) {
                 Some(e) => {
+                    if let Some(diagnostic) = reject_positive_deny_only_effect(&e, *nspan) {
+                        self.diags.push(diagnostic);
+                        return;
+                    }
                     bound.insert(e);
                 }
                 None => {
@@ -508,8 +543,8 @@ pub struct EffectSummary {
     /// This synthetic node is a trait method with no declared dispatch bound.
     /// Any caller that promises an effect ceiling receives E0743.
     pub unbounded_trait_dispatch: bool,
-    /// D-EFF1: `#Caps(…)` restriction regions found in this body (checked against
-    /// their transitive inferred set in the post-pass — E0741).
+    /// D-EFF1: `#Abilities(…)` restriction regions found in this body (checked against
+    /// their transitive inferred set in the post-pass — E0712).
     pub regions: Vec<RegionSummary>,
     /// D-EFF2 (callback param bound): obligations recorded at each call to a
     /// higher-order fn whose function-typed parameter carries an effect bound
@@ -523,7 +558,7 @@ pub struct EffectSummary {
     /// Core compute consumers seen in each body; the autodiff post-pass uses
     /// this to reject operations that cannot preserve a Tensor trace.
     pub compute_calls: Vec<ComputeCallFact>,
-    /// D-AUTODIFF1/D-NOPANIC1: provenance for Panic sites. The safe form is
+    /// D-AUTODIFF1/D-PANICROOT1: provenance for Panic sites. The safe form is
     /// only the explicit fallback of a Tensor-returning `core.compute` call;
     /// arbitrary/direct Panic remains outside the pure Tensor contract.
     pub autodiff_safe_panic: bool,
@@ -605,7 +640,7 @@ pub fn check_autodiff_purity(
                 .filter(|effect| effect_root(effect) != Effect::GPU.name())
                 .cloned()
                 .collect::<EffectSet>();
-            // D-NOPANIC1 remains in the solved effect row. A differentiated
+            // D-PANICROOT1 keeps Panic in the solved deny row. A differentiated
             // Tensor function may preserve the same partial domain only when
             // every reachable stop is the explicit fallback of a checked
             // Tensor-returning Core compute operation. Direct or unrelated
@@ -723,7 +758,7 @@ pub struct CallbackObligation {
     pub span: Span,
 }
 
-/// D-EFF1: an open `#Caps(…)` region's running accumulator while the checker
+/// D-EFF1: an open `#Abilities(…)` region's running accumulator while the checker
 /// walks its body. Sealed into a `RegionSummary` when the region closes.
 #[derive(Debug, Clone)]
 pub struct RegionAccum {
@@ -732,16 +767,9 @@ pub struct RegionAccum {
     pub direct: EffectSet,
     pub edges: BTreeSet<String>,
     pub maximal: bool,
-    /// D-SCAP1 / D-AUTHORITY-SCOPE1: true for a handle-bearing region
-    /// (authorizes the listed effects via a handle), false for bare `#Caps`
-    /// (restricts to the listed set). Both share subset machinery; `marker`
-    /// keeps diagnostics on the written surface while `grant` selects E0712
-    /// versus E0741.
-    pub grant: bool,
-    pub marker: &'static str,
 }
 
-/// D-EFF1: a `#Caps(…) { … }` region's accumulated effects, checked (transitively)
+/// D-EFF1: a `#Abilities(…) { … }` region's accumulated effects, checked (transitively)
 /// against the declared cap set in the post-pass.
 #[derive(Debug, Clone)]
 pub struct RegionSummary {
@@ -750,12 +778,8 @@ pub struct RegionSummary {
     pub direct: EffectSet,
     pub edges: BTreeSet<String>,
     pub maximal: bool,
-    /// Span of the `#Caps(…)` / retired `#Grant(…)` list, for the diagnostic.
+    /// Span of the `#Abilities(…)` list, for the diagnostic.
     pub caps_span: Span,
-    /// D-SCAP1 / D-AUTHORITY-SCOPE1: a handle-bearing region (E0712 on
-    /// overflow) vs bare `#Caps(…)` (E0741).
-    pub grant: bool,
-    pub marker: &'static str,
 }
 
 fn add_seed(seeds: &mut BTreeMap<String, BTreeSet<String>>, node: &str, fact: &str) {
@@ -810,9 +834,8 @@ pub fn solve_reachability(
 
     let mut panic = BTreeMap::new();
     add_seed(&mut panic, "__jet_panic__", "panic");
-    // D-NOPANIC1=D: the existing stop sentinel is also a normal deniable
-    // effect fact. It stays on this one projection, so callers and manifests
-    // see the same transitive row as the legacy `reaches_panic` consumer.
+    // D-PANICROOT1=A: the stop sentinel projects Panic for denial and
+    // reachability, but Panic is not recorded as an ordinary direct effect.
     add_seed(&mut effects, "__jet_panic__", Effect::Panic.name());
 
     let mut taint = BTreeMap::new();
@@ -1133,6 +1156,9 @@ pub fn apply_effect_via(
                     }
                     match parse_effect_name(n) {
                         Some(e) => {
+                            if reject_positive_deny_only_effect(&e, *ns).is_some() {
+                                continue;
+                            }
                             via_spans.entry(e.clone()).or_insert(*ns);
                             via_set.insert(e);
                         }
@@ -1413,7 +1439,7 @@ pub fn e0749(fn_name: &str, reached: &EffectSet, prohibited: &EffectSet, span: S
     )
 }
 
-/// E0749 / D-NOPANIC1=D: a denied Panic row names the reachable function
+/// E0749 / D-PANICROOT1=A: a denied Panic row names the reachable function
 /// where the stop enters the call graph and gives the three legal exits.
 pub fn e0749_panic(
     fn_name: &str,
@@ -1435,9 +1461,9 @@ pub fn e0749_panic(
     )
 }
 
-/// D-EFF1: check every `#Caps(…)` region across the program against its
+/// D-EFF1: check every `#Abilities(…)` region across the program against its
 /// transitive inferred effect set (region.direct ∪ maximal ∪ ⋃ solved[edge]).
-/// An effect used inside a region that its cap list omits is E0741.
+/// An effect used inside a region that its cap list omits is E0712.
 pub fn check_region_caps(
     summaries: &HashMap<String, EffectSummary>,
     solved: &HashMap<String, EffectSet>,
@@ -1458,49 +1484,26 @@ pub fn check_region_caps(
             let over: EffectSet = effects_uncovered(&inferred, &region.caps);
             if !over.is_empty() {
                 failed_diagnostic_phases.insert(key.clone());
-                if region.grant {
-                    diags.push(e0712(
-                        &over,
-                        &region.caps,
-                        region.caps_span,
-                        region.marker,
-                    ));
-                } else {
-                    diags.push(e0741(&over, &region.caps, region.caps_span));
-                }
+                diags.push(e0712(
+                    &over,
+                    &region.caps,
+                    region.caps_span,
+                    crate::Syntax::KW_CAPS,
+                ));
             }
         }
     }
 }
 
-/// E0741: an effect used inside a `#Caps(…)` region is not in its cap list.
-pub fn e0741(over: &EffectSet, caps: &EffectSet, span: Span) -> Diagnostic {
-    let over_list = show_set(over);
-    let caps_list = if caps.is_empty() {
-        "no effects".to_string()
-    } else {
-        format!("`{}`", show_set(caps))
-    };
-    Diagnostic::error(
-        "E0741",
-        format!("this `#{}` region uses the effect `{}`, which it doesn't allow", crate::Syntax::KW_CAPS, over_list),
-        format!(
-            "`#{}(…)` restricts the region to {}; an effect reached inside — even through a call — must be in that list",
-            crate::Syntax::KW_CAPS, caps_list
-        ),
-        format!("add `{}` to the `#{}(…)` list, or move that work outside the region", over_list, crate::Syntax::KW_CAPS),
-        Some(span),
-    )
-}
-
-/// D-SCAP1: detect whether the capability handle `handle` bound by a `#Grant(…)`
+/// D-AUTHORITY-SCOPE1: detect whether the authority handle `handle` bound by a
+/// named `#Abilities(…)` region
 /// region escapes its block — returned, stored, passed, captured, or otherwise
 /// used as a value that outlives the scope. Returns the span of the first escape,
 /// or `None` if the handle is only ever used in place (as the receiver of a
 /// method call / field access / `?` on itself). The receiver of `handle.read(…)`
-/// is an in-place use (performing the granted effect); everything else — `return
+/// is an in-place use (performing the authorized effect); everything else — `return
 /// handle`, `x :: handle`, `f(handle)`, `[handle]`, a struct field, an `or`
-/// fallback — lets the revoked authority leak past the grant (E0711).
+/// fallback — lets the revoked authority leak past the scope (E0711).
 pub fn grant_handle_escape(body: &[crate::AST::Stmt], handle: &str) -> Option<Span> {
     body.iter().find_map(|s| stmt_handle_escape(s, handle))
 }
@@ -1567,7 +1570,6 @@ fn stmt_handle_escape(stmt: &crate::AST::Stmt, handle: &str) -> Option<Span> {
         | Stmt::TaskGroup { body, .. }
         | Stmt::Layout { body, .. }
         | Stmt::Caps { body, .. }
-        | Stmt::Grant { body, .. }
         | Stmt::Transact { body, .. }
         | Stmt::AssumeDet { body, .. }
         | Stmt::ScopeMember { body, .. }
@@ -1613,7 +1615,7 @@ fn expr_handle_escape(e: &crate::AST::Expr, handle: &str) -> Option<Span> {
         Expr::Ident(n, span) if n == handle => Some(*span),
         Expr::Ident(_, _) => None,
         // A method call / field / `?` / deref / index whose receiver is the bare
-        // handle is an in-place use (performing the granted effect) — NOT an
+        // handle is an in-place use (performing the authorized effect) — NOT an
         // escape; but the call's args and the index are still scanned.
         Expr::MethodCall { receiver, args, .. } if is_bare_handle(receiver, handle) => {
             args.iter().find_map(|a| expr_handle_escape(&a.expr, handle))
@@ -1716,7 +1718,7 @@ fn expr_handle_escape(e: &crate::AST::Expr, handle: &str) -> Option<Span> {
         }
         Expr::PtrFromAddr { addr, .. } => expr_handle_escape(addr, handle),
         // A lambda that captures the handle smuggles it out — the closure can
-        // outlive the grant. Count a reference unless a lambda param shadows the
+        // outlive the scope. Count a reference unless a lambda param shadows the
         // handle name (then it's a different binding, not a capture).
         Expr::Lambda(l) => {
             let shadowed = l.params.iter().any(|p| p.name == handle)
@@ -1746,11 +1748,8 @@ fn expr_handle_escape(e: &crate::AST::Expr, handle: &str) -> Option<Span> {
     }
 }
 
-/// E0712 (D-SCAP1): an effect used inside a `#Grant(…)` region that the grant
-/// doesn't authorize — there is no capability in scope backing it. The dual of
-/// E0741: `#Grant(…)` *authorizes* exactly the listed effects through its handle,
-/// so an effect reached inside (even through a call) that the grant omits has no
-/// capability to perform it.
+/// E0712 (D-AUTHORITY-SCOPE1): an effect used inside a `#Abilities(…)` region is not
+/// in the region's list. The same check covers bare and named regions.
 pub fn e0712(over: &EffectSet, caps: &EffectSet, span: Span, marker: &str) -> Diagnostic {
     let over_list = show_set(over);
     let caps_list = if caps.is_empty() {
@@ -1765,27 +1764,27 @@ pub fn e0712(over: &EffectSet, caps: &EffectSet, span: Span, marker: &str) -> Di
             marker, over_list
         ),
         format!(
-            "`#{}(…)` grants only {}; an effect reached inside — even through a call — needs authority in scope to perform it",
+            "`#{}(…)` allows only {}; an effect reached inside — even through a call — must be in that list",
             marker, caps_list
         ),
         format!(
-            "add `{}` to the `#{}(…)` list, or move that work outside the grant",
+            "add `{}` to the `#{}(…)` list, or move that work outside the region",
             over_list, marker
         ),
         Some(span),
     )
 }
 
-/// E0711 (D-SCAP1): the `Authority` handle bound by a `#Grant(…)` region escapes
+/// E0711 (D-AUTHORITY-SCOPE1): the `Authority` handle bound by a named `#Abilities(…)` region escapes
 /// its scope — returned, stored in an outer binding, or captured by an escaping
-/// value. The capability is revoked at scope end (RAII, S63), so a reference that
-/// outlives the block would name a revoked authority.
+/// value. The abilities are revoked at scope end (RAII, S63), so a reference
+/// that outlives the block would name revoked abilities.
 pub fn e0711(handle: &str, marker: &str, span: Span) -> Diagnostic {
     Diagnostic::error(
         "E0711",
         format!("the `Authority` handle `{}` can't escape its `#{}` block", handle, marker),
         format!(
-            "`#{}(…)` revokes the `Authority` at the end of its block (RAII); returning, storing, or sharing `{}` would let a revoked authority outlive the grant",
+            "`#{}(…)` revokes the `Authority` at the end of its block (RAII); returning, storing, or sharing `{}` would let revoked authority outlive the scope",
             marker, handle
         ),
         format!("use `{}` only inside the `#{}` block, or perform the work there", handle, marker),
@@ -1793,7 +1792,7 @@ pub fn e0711(handle: &str, marker: &str, span: Span) -> Diagnostic {
     )
 }
 
-/// E0119: a `#(…)` or `#Caps(…)` list names something that isn't a known effect.
+/// E0119: a `#(…)` or `#Abilities(…)` list names something that isn't a known effect.
 pub fn unknown_effect(name: &str, span: Span) -> Diagnostic {
     Diagnostic::error(
         "E0119",
@@ -1871,8 +1870,9 @@ pub fn check_trait_obligations(
 /// E1264. A helper fn two calls deep from the actual `core.crypto.vault.get` still
 /// requires the grant on itself — the same call-graph reach E0740 checks —
 /// but this deliberately uses the dedicated `secret` row rather than the
-/// general `effects` row: foreign calls seed every effect, but do not prove a
-/// secret read.
+/// general `effects` row: unannotated foreign calls seed every grantable root,
+/// while language-tagged calls seed their `FFI.*` leaf; neither proves a
+/// specific secret read.
 pub(crate) fn check_secret_grants(
     items: &[crate::AST::Item],
     module_alias: &str,

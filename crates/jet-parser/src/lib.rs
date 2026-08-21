@@ -122,14 +122,21 @@ mod generic_module_tests {
 
     #[test]
     fn retired_memory_policy_names_point_to_effect_denials() {
-        let source = "#Policy(no_alloc)\nfn run() {}\n";
-        let (tokens, lexer_diagnostics) = Lexer::lex(source);
-        assert!(lexer_diagnostics.is_empty(), "{lexer_diagnostics:?}");
-        let diagnostics = Parser::parse(&tokens).expect_err("memory floor words are retired");
-        assert!(diagnostics.iter().any(|diagnostic| {
-            diagnostic.code == "E0355"
-                && diagnostic.fix.contains("!Mem.Alloc")
-        }));
+        for (source, replacement) in [
+            ("#Policy(no_alloc)\nfn run() {}\n", "!Mem.Alloc"),
+            ("#Policy(zero_rc)\nfn run() {}\n", "!Mem.Rc"),
+            (
+                "#Policy(arena_bounded(65536))\nfn run() {}\n",
+                "!Mem.Alloc(above: 65536)",
+            ),
+        ] {
+            let (tokens, lexer_diagnostics) = Lexer::lex(source);
+            assert!(lexer_diagnostics.is_empty(), "{lexer_diagnostics:?}");
+            let diagnostics = Parser::parse(&tokens).expect_err("memory floor words are retired");
+            assert!(diagnostics.iter().any(|diagnostic| {
+                diagnostic.code == "E0355" && diagnostic.fix.contains(replacement)
+            }));
+        }
     }
 
     #[test]

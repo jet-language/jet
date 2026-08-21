@@ -47,7 +47,6 @@ macro_rules! target_handle {
 target_handle!(ExecutableTarget);
 target_handle!(LibraryTarget);
 target_handle!(TestTarget);
-target_handle!(BenchTarget);
 target_handle!(AssetBundleTarget);
 target_handle!(DocTarget);
 target_handle!(InstallTarget);

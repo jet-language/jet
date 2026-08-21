@@ -1211,8 +1211,8 @@ fn manifest_parse_e1209_reserved_nonempty() {
 #[test]
 fn manifest_parse_effects_block() {
     let raw = min_manifest("app", "0.1.0")
-        + "\neffects: .{\n    allow: [FS, Time],\n    deny: [Net, Panic],\n}\n";
-    let pm = jetpack::Package::PackageFacts::parse(&raw, "test").expect("effects block should parse");
+        + "\nauthority: .{\n    holds: { allow: [FS, Time], deny: [Net, Panic] },\n}\n";
+    let pm = jetpack::Package::PackageFacts::parse(&raw, "test").expect("authority holds should parse");
     assert!(pm.effects_enabled);
     assert_eq!(
         pm.effects_allow,
@@ -1227,7 +1227,7 @@ fn manifest_parse_effects_block() {
 #[test]
 fn manifest_panic_budget_names_the_dependency_stop_site() {
     let raw = min_manifest("app", "0.1.0")
-        + "\neffects: .{\n    deny: [Panic],\n}\n";
+        + "\nauthority: .{ holds: { deny: [Panic] } }\n";
     let manifest = jetpack::Package::PackageFacts::parse(&raw, "test")
         .expect("Panic should be a manifest effect root");
     let entries = [jetpack::EffectBudget::PackageEffects {
@@ -1248,11 +1248,53 @@ fn manifest_panic_budget_names_the_dependency_stop_site() {
 
 #[test]
 fn manifest_parse_grants_block() {
-    let raw = min_manifest("app", "0.1.0") + "\ngrants: .{\n    \"pdf-lib\": [Net],\n}\n";
+    let raw = min_manifest("app", "0.1.0")
+        + "\nauthority: .{ grants: { \"pdf-lib\": [Net] } }\n";
     let pm = jetpack::Package::PackageFacts::parse(&raw, "test").expect("grants block should parse");
     assert_eq!(
         pm.grants,
         vec![("pdf-lib".to_string(), vec!["Net".to_string()])]
+    );
+}
+
+#[test]
+fn manifest_parse_authority_block_holds_grants_trust_and_providers() {
+    let raw = min_manifest("app", "0.1.0")
+        + r#"
+authority: .{
+    holds: { allow: [Net, DB.Read], deny: [Exec] },
+    grants: { "image-codec": [FS.Read] },
+    trust: { default: prompt, ci: { prompt: deny }, services: { stripe: allow } },
+    providers: { nix: { registry: "nixpkgs", deny: ["openssl-1.0"] } },
+}
+"#;
+    let pm = jetpack::Package::PackageFacts::parse(&raw, "test")
+        .expect("one authority block should parse");
+    assert_eq!(
+        pm.authority.holds.allow,
+        Some(vec!["Net".to_string(), "DB.Read".to_string()])
+    );
+    assert_eq!(pm.authority.holds.deny, Some(vec!["Exec".to_string()]));
+    assert_eq!(
+        pm.authority.grants,
+        vec![("image-codec".to_string(), vec!["FS.Read".to_string()])]
+    );
+    assert_eq!(pm.grants, pm.authority.grants);
+    assert_eq!(pm.effects_allow, pm.authority.holds.allow);
+    assert_eq!(pm.effects_deny, pm.authority.holds.deny);
+    assert_eq!(
+        pm.authority
+            .trust
+            .as_ref()
+            .and_then(|trust| trust.default),
+        Some(jetpack::Package::TrustDecision::Prompt)
+    );
+    assert_eq!(pm.authority.providers.len(), 1);
+    assert_eq!(pm.authority.providers[0].provider, "nix");
+    assert_eq!(pm.authority.providers[0].registry, "nixpkgs");
+    assert_eq!(
+        pm.authority.providers[0].deny,
+        vec!["openssl-1.0".to_string()]
     );
 }
 
@@ -1290,7 +1332,7 @@ fn manifest_authority_trust_rejects_unknown_decision() {
         jetpack::Package::PackageFacts::parse(&raw, "test").expect_err("unknown trust decision should fail");
     assert!(matches!(
         err,
-        jetpack::Package::PackageParseError::Composition(_)
+        jetpack::Package::PackageParseError::BadEffectsBlock(_)
     ));
 }
 
@@ -1304,7 +1346,7 @@ fn manifest_no_effects_block_disables_enforcement() {
 
 #[test]
 fn manifest_parse_effects_e1221_unknown_effect() {
-    let raw = min_manifest("app", "0.1.0") + "\neffects: .{\n    allow: [NotAnEffect],\n}\n";
+    let raw = min_manifest("app", "0.1.0") + "\nauthority: .{ holds: { allow: [NotAnEffect] } }\n";
     let err = jetpack::Package::PackageFacts::parse(&raw, "test")
         .expect_err("unknown effect name should fail E1221");
     let diag = jet::Manifest::parse(&PathBuf::from("package.jet"), &raw)
@@ -1318,7 +1360,7 @@ fn manifest_parse_effects_e1221_unknown_effect() {
 
 #[test]
 fn manifest_parse_effects_e1221_unknown_field() {
-    let raw = min_manifest("app", "0.1.0") + "\neffects: {\n    nope: [FS],\n}\n";
+    let raw = min_manifest("app", "0.1.0") + "\nauthority: .{ holds: { nope: [FS] } }\n";
     let diag = jet::Manifest::parse(&PathBuf::from("package.jet"), &raw)
         .expect_err("unknown effects field should fail E1221");
     assert_eq!(diag.code, "E1221");
@@ -1326,14 +1368,14 @@ fn manifest_parse_effects_e1221_unknown_field() {
 
 #[test]
 fn effect_budget_load_ok_reports_via_compile_with_path() {
-    // A project with a well-formed `effects:` block and no dependencies
+    // A project with a well-formed `authority.holds` block and no dependencies
     // reaching a disallowed effect should compile fine end to end — the
     // manifest gate (Loader/Manifest::parse) never rejects a valid budget.
     let tmp = tmp_dir("effbudget_ok");
     write(
         &tmp,
         "package.jet",
-        &(min_manifest("app", "0.1.0") + "\neffects: {\n    allow: [IO],\n}\n"),
+        &(min_manifest("app", "0.1.0") + "\nauthority: .{ holds: { allow: [IO] } }\n"),
     );
     let entry = tmp.join("run.jet");
     fs::write(&entry, "fn run() { print(\"hi\"); }\n").unwrap();
@@ -1341,7 +1383,7 @@ fn effect_budget_load_ok_reports_via_compile_with_path() {
     let result = jet::compile_with_path("", &entry.to_string_lossy());
     assert!(
         result.is_ok(),
-        "a well-formed effects: budget should not block compilation:\n{}",
+        "a well-formed authority.holds budget should not block compilation:\n{}",
         result
             .err()
             .map(|d| jet::render_diagnostics("run.jet", "", &d))
@@ -1410,7 +1452,7 @@ fn cli_build_enforces_effect_budget_e1220() {
         &tmp,
         "package.jet",
         &(manifest_with_deps("app", "0.1.0", "    netdep: ./netdep,")
-            + "\neffects: {\n    allow: [FS],\n}\n"),
+            + "\nauthority: .{ holds: { allow: [FS] } }\n"),
     );
     write(
         &tmp,
@@ -1447,7 +1489,7 @@ fn cli_build_rejects_undeclared_effect_budget_leaf() {
         &tmp,
         "package.jet",
         &(min_manifest("app", "0.1.0")
-            + "\neffects: {\n    allow: [FS.Raed],\n}\n"),
+            + "\nauthority: .{ holds: { allow: [FS.Raed] } }\n"),
     );
     write(&tmp, "run.jet", "fn run() {}\n");
 
@@ -1991,6 +2033,7 @@ fn lock_file_content_hash_roundtrip() {
         version: 1,
         packages: vec![pkg],
         root_dependencies: vec!["foo".into()],
+        authority: None,
         workspace_members: vec![LockedWorkspaceMember {
             name: "hello".into(),
             path: "packages/hello".into(),
@@ -3298,6 +3341,7 @@ fn make_test_lock(name: &str, version: &str, fp: &str) -> jet::Lock::LockFile {
             provenance: None,
         }],
         root_dependencies: vec![name.into()],
+        authority: None,
         workspace_members: vec![],
         workspace_source_digest: None,
         workspace_overlay_policy: Default::default(),
@@ -3403,6 +3447,7 @@ fn e1217_missing_locked_revision() {
         version: 1,
         packages: vec![],
         root_dependencies: vec![],
+        authority: None,
         workspace_members: vec![],
         workspace_source_digest: None,
         workspace_overlay_policy: Default::default(),

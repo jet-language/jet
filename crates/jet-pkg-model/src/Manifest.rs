@@ -196,14 +196,29 @@ pub fn version_banner() -> String {
 #[cfg(test)]
 mod tests {
     use super::{
-        edition_is_supported, latest_edition, version_banner, SUPPORTED_EDITIONS,
+        edition_is_supported, latest_edition, parse, version_banner, SUPPORTED_EDITIONS,
     };
+    use crate::Package::PackageParseError;
+    use std::path::Path;
 
     #[test]
     fn latest_edition_is_last_supported_and_drives_banner() {
         assert_eq!(SUPPORTED_EDITIONS.last().copied(), Some(latest_edition()));
         assert!(edition_is_supported(latest_edition()));
         assert!(version_banner().contains(&format!("newest: {}", latest_edition())));
+    }
+
+    #[test]
+    fn malformed_authority_outer_value_uses_e1221() {
+        for authority in ["authority: []", "authority: .{}\nauthority: .{}"] {
+            let raw = format!("name: \"demo\"\nversion: \"0.1.0\"\n{authority}\n");
+            let error = crate::Package::PackageFacts::parse(&raw, "package.jet")
+                .expect_err("malformed authority must be rejected");
+            assert!(matches!(error, PackageParseError::BadEffectsBlock(_)));
+            let diagnostic = parse(Path::new("package.jet"), &raw)
+                .expect_err("malformed authority must use the authority diagnostic family");
+            assert_eq!(diagnostic.code, "E1221");
+        }
     }
 }
 
@@ -612,12 +627,11 @@ fn e1210(_file: &str, detail: &str) -> Diagnostic {
         format!("`{}` lists an unknown target", Syntax::PACKAGE_FILE),
         detail.to_string(),
         format!(
-            "use a shipped target: `{}`, `{}`, `{}`, `{}`, `{}`, or `{}`",
+            "use a shipped target: `{}`, `{}`, `{}`, `{}`, or `{}`",
             Syntax::TARGET_LIBRARY,
             Syntax::TARGET_EXECUTABLE,
             Syntax::TARGET_TEST,
             Syntax::TARGET_EXAMPLE,
-            Syntax::TARGET_BENCHMARK,
             Syntax::TARGET_SANDBOX,
         ),
         None,

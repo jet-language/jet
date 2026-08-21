@@ -171,7 +171,7 @@ fn run() {
 }
 ```
 
-The replacement preserves labels, defaults, access, zones, effects, errors, variadics, and returned-view provenance — the exact list the 2026-08-03 field audit said was impossible. What remains is the door: `PolicySetting` is a compiler-known type ("write it only inside `#Policy(no_alloc)` …", Sema core_types.rs:174), so users **apply** policies but cannot **author** one. A team that needs `audit(...)` or `cache_for(30s)` files a compiler request — the same closed-table shape as the deprecation machinery in Element 2. `#Context` keys (`deadline:`, `allocator:`) are compiler-known the same way. The ballot (D-STRUCT-POLICY1, recast) asks one question: does the policy vocabulary open, and through which door — user-declared settings riding the checked `marker`-body machinery that already ships (D-META-USER1=A), or a Core-grown vocabulary where each new setting is its own ballot, or closed on purpose. The ballot explicitly does **not** reopen the `#Policy`/`apply` spelling; it extends D-CALLPOLICY1's vocabulary and names that as its scope.
+The replacement preserves labels, defaults, access, zones, effects, errors, variadics, and returned-view provenance — the exact list the 2026-08-03 field audit said was impossible. What remains is the door: `PolicySetting` is a compiler-known type ("write it only inside a compiler-owned `#Policy(...)` wrapper", Sema core_types.rs:174), so users **apply** policies but cannot **author** one. A team that needs `audit(...)` or `cache_for(30s)` files a compiler request — the same closed-table shape as the deprecation machinery in Element 2. `#Context` keys (`deadline:`, `allocator:`) are compiler-known the same way. The ballot (D-STRUCT-POLICY1, recast) asks one question: does the policy vocabulary open, and through which door — user-declared settings riding the checked `marker`-body machinery that already ships (D-META-USER1=A), or a Core-grown vocabulary where each new setting is its own ballot, or closed on purpose. The ballot explicitly does **not** reopen the `#Policy`/`apply` spelling; it extends D-CALLPOLICY1's vocabulary and names that as its scope.
 
 Rungs today, unchanged by any outcome: beginner types nothing; intermediate applies `#Policy(retry(3))`; expert replaces chains with `apply` and reads the callable-signature lens (`jet inspect` shows the complete checked contract, D-CALLPOLICY1=E). The open door would add one rung above: declare a setting, checked like any marker body. Adjacent and unblocked by this ballot: `&`/`^` functions as values (the DIP drift in the scorecard) and the un-typed rights value (card c0zjmtah).
 
@@ -209,8 +209,12 @@ Family-specific rows (`inch`/`foot`, `celsius`, `hectare`, `psi`, `electronvolt`
 // proposed: the real 4×3 bench matrix, both subjects, today's exact expected values
 cases :: [.{n: 64, c: 1, expect: 66496}, .{n: 64, c: 32, expect: 31573635}, /* ...10 more rows from today's file */]
 @loop case, cases {
-    #Bench("map n{case.n} c{case.c}")      { require_eq(map_case(case.n, case.c), case.expect) }
-    #Bench("para_map n{case.n} c{case.c}") { require_eq(para_map_case(case.n, case.c), case.expect) }
+    #Test("map n{case.n} c{case.c}") {
+        .measure { assert_eq(map_case(case.n, case.c), case.expect) }
+    }
+    #Test("para_map n{case.n} c{case.c}") {
+        .measure { assert_eq(para_map_case(case.n, case.c), case.expect) }
+    }
 }
 ```
 

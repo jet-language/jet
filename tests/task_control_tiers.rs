@@ -89,8 +89,8 @@ fn lose(state: Shared<Mark>) => Int {
 }
 
 fn run() {
-    race_state :: shared Mark.{ step: 0 }
-    any_state :: shared Mark.{ step: 0 }
+    race_state :: shared Mark{ step: 0 }
+    any_state :: shared Mark{ step: 0 }
     task.group workers {
         race_result :: (task.race { win(race_state), lose(race_state) }) ?? 0
         any_result :: (task.any { win(any_state), lose(any_state) }) ?? 0

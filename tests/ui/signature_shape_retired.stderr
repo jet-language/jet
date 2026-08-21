@@ -1,0 +1,15 @@
+Error [E0068]: This callable uses the retired result-arrow shape.
+  --> tests/ui/signature_shape_retired.jet:1:10
+    |
+  1 | fn old() :> Int { 1 }
+    |          ^^
+ Why: A return type sits after the parameter list, and `:>` introduces the body. An effect ceiling follows the return type.
+ Fix: Write `fn name(...) Type :> body`, or `fn name(...) Type :[Effects]> { … }`.
+
+Error [E0068]: This callable uses the retired result-arrow shape.
+  --> tests/ui/signature_shape_retired.jet:2:17
+    |
+  2 | fn old_effect() :[IO]> Int { 1 }
+    |                 ^
+ Why: A return type sits after the parameter list, and `:>` introduces the body. An effect ceiling follows the return type.
+ Fix: Write `fn name(...) Type :> body`, or `fn name(...) Type :[Effects]> { … }`.

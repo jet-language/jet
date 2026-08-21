@@ -41,6 +41,36 @@ fn autodiff_sparse_simd_and_streams_use_real_paths() {
 }
 
 #[test]
+fn f32_simd_matmul_keeps_vjp_and_jvp_on_the_cpu_oracle() {
+    assert_tiers_agree(
+        "compute_f32_simd_autodiff",
+        r#"
+use core.compute as compute
+
+fn tiled_loss(left: Tensor, right: Tensor) :> Tensor {
+    return compute.matmul_f32_tile(left, right) ?? panic("tiled_loss")
+}
+
+fn run() {
+    left :: compute.matrix(1, 1, 2.0) ?? panic("left")
+    right :: compute.matrix(1, 1, 3.0) ?? panic("right")
+    (grad_left, grad_right) :: compute.gradient(tiled_loss, ~left, ~right)
+    print("grad_left:{compute.to_list(grad_left)}")
+    print("grad_right:{compute.to_list(grad_right)}")
+
+    tangent_left :: compute.matrix(1, 1, 1.0) ?? panic("tangent_left")
+    tangent_right :: compute.matrix(1, 1, 1.0) ?? panic("tangent_right")
+    tiled_jvp :: compute.jvp(tiled_loss)
+    (value, tangent) :: tiled_jvp(left, right, tangent_left, tangent_right)
+    print("value:{compute.to_list(value)}")
+    print("tangent:{compute.to_list(tangent)}")
+}
+"#,
+        "grad_left:[3.0]\ngrad_right:[2.0]\nvalue:[6.0]\ntangent:[5.0]\n",
+    );
+}
+
+#[test]
 fn ml_serialization_and_placement_failures_stay_in_the_same_tier() {
     let ml_source = include_str!("../examples/features/tooling/compute_ml.jet");
     let ml_output = include_str!("../examples/features/expected/tooling/compute_ml.out");

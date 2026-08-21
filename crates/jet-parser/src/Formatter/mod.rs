@@ -1141,7 +1141,6 @@ fn stmt_end(stmt: &Stmt) -> usize {
         Stmt::TaskGroup { body, span, .. } => body.last().map(stmt_end).unwrap_or(span.end),
         Stmt::Layout { body, span, .. } => body.last().map(stmt_end).unwrap_or(span.end),
         Stmt::Caps { body, span, .. } => body.last().map(stmt_end).unwrap_or(span.end),
-        Stmt::Grant { body, span, .. } => body.last().map(stmt_end).unwrap_or(span.end),
         Stmt::ComptimeBlock { body, span, .. } => body.last().map(stmt_end).unwrap_or(span.end),
         Stmt::ComptimeIf {
             else_body,
@@ -1631,7 +1630,6 @@ fn stmt_start(stmt: &Stmt) -> usize {
         Stmt::TaskGroup { span, .. } => span.start,
         Stmt::Layout { span, .. } => span.start,
         Stmt::Caps { span, .. } => span.start,
-        Stmt::Grant { span, .. } => span.start,
         Stmt::ComptimeBlock { span, .. } => span.start,
         Stmt::ComptimeIf { span, .. } => span.start,
         Stmt::ComptimeSwitch { span, .. } => span.start,

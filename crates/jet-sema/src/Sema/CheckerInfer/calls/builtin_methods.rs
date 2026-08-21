@@ -1,6 +1,6 @@
 use crate::AST::{Call, CallArg, Expr, StrPart, Type};
 use crate::Collections;
-use crate::Diagnostics::{Diagnostic, Span};
+use crate::Diagnostics::{Diagnostic, Span, TextEdit};
 use crate::Sema::Captures::{lambda_body_refs_name, lambda_collect_captures};
 use crate::Sema::Bundle::fn_types_compatible;
 use crate::Sema::{Checker, SendCrossing, SendProblemKind, SendabilityProblem};
@@ -409,7 +409,7 @@ impl<'a> Checker<'a> {
                                     .map(|fact| (*fact).to_string())
                                     .collect::<Vec<_>>();
                                 if let Some(fact) = suggest_field(key, &candidates) {
-                                    self.diags.push(Diagnostic::error(
+                                    let mut diagnostic = Diagnostic::error(
                                         "E0302",
                                         format!(
                                             "terminal fact key `{key}` looks like `{fact}`"
@@ -418,7 +418,12 @@ impl<'a> Checker<'a> {
                                             .to_string(),
                                         format!("write `TerminalFact.{fact}`"),
                                         Some(arg.span),
-                                    ));
+                                    );
+                                    diagnostic = diagnostic.with_edit(TextEdit {
+                                        span: arg.span,
+                                        new_text: format!("TerminalFact.{fact}"),
+                                    });
+                                    self.diags.push(diagnostic);
                                 }
                             }
                         }

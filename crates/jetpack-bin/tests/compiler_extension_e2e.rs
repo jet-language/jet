@@ -17,7 +17,7 @@
 
 use jet_pkg_model::CompilerExtension::{
     decode_and_validate_response, message_exposes_rustc, parse_analyze_result, parse_load_result,
-    AnalyzeResponse, Capability, ExtensionSession, Finding, ProtocolError, SessionPhase, SpanFact,
+    AnalyzeResponse, Ability, ExtensionSession, Finding, ProtocolError, SessionPhase, SpanFact,
     SymbolFact, TypeFact, TypedSnapshot,
 };
 #[path = "../../jet-pkg-model/src/Prelude/CompilerExtension.rs"]
@@ -38,7 +38,7 @@ fn fixture(name: &str) -> PathBuf {
 
 fn snapshot_with_symbol(name: &str) -> TypedSnapshot {
     TypedSnapshot::new(
-        Capability::v1_defaults().to_vec(),
+        Ability::v1_defaults().to_vec(),
         vec![TypeFact {
             id: "t1".into(),
             repr: "Int".into(),
@@ -143,7 +143,7 @@ fn custom_lint_ignores_snapshot_without_x_fact() {
 #[test]
 fn custom_lint_ignores_empty_snapshot() {
     let snapshot = TypedSnapshot::new(
-        Capability::v1_defaults().to_vec(),
+        Ability::v1_defaults().to_vec(),
         Vec::new(),
         Vec::new(),
         vec![SpanFact {

@@ -43,6 +43,10 @@ mod disjoint_semantics {
     }
 }
 
+mod authority_semantics {
+    include!("../../jet-codegen/src/Prelude/Core/Authority.rs");
+}
+
 // The resident collection ABI owns only handle conversion.  The operation
 // itself must stay in the same Prelude source embedded by AOT and evaluated by
 // tier 0 (I9).  This small module supplies the Prelude's sibling types that
@@ -3560,6 +3564,59 @@ fn sorted_string_values(rt: &crate::JitRuntime, values: &BTreeSet<i64>) -> BTree
     sorted_string_ids(rt, values).into_keys().collect()
 }
 
+fn authority_rights(rt: &crate::JitRuntime, authority: i64) -> BTreeSet<String> {
+    let rights_handle = rt.heap.record_get_int(authority, 0).unwrap_or(0);
+    rt.sorted_sets
+        .get((rights_handle as usize).wrapping_sub(1))
+        .map(|rights| sorted_string_values(rt, rights))
+        .unwrap_or_default()
+}
+
+fn authority_record(rt: &mut crate::JitRuntime, rights: BTreeSet<String>) -> i64 {
+    let ids = rights
+        .iter()
+        .map(|right| rt.heap.alloc_string(right.clone()))
+        .collect::<BTreeSet<_>>();
+    let rights_handle = sorted_set_handle(rt, ids, true);
+    let authority = rt.heap.alloc_record(1);
+    let _ = rt.heap.record_set_int(authority, 0, rights_handle);
+    authority
+}
+
+/// D-AUTHORITY-NAME1=A: the JIT host is only a handle
+/// adapter. The rights policy comes from the shared Prelude source above.
+fn jet_jit_authority_workspace() -> i64 {
+    Concurrency::with_runtime_mut(|rt| {
+        authority_record(rt, authority_semantics::jet_authority_workspace_rights())
+    })
+}
+
+fn jet_jit_authority_with(authority: i64, requested: i64) -> i64 {
+    Concurrency::with_runtime_mut(|rt| {
+        let held = authority_rights(rt, authority);
+        let requested = rt.heap.clone_string(requested).unwrap_or_default();
+        match authority_semantics::jet_authority_with_right(&held, &requested) {
+            Ok(rights) => authority_record(rt, rights),
+            Err(message) => {
+                let line = rt.current_line;
+                rt.set_runtime_stop("E0712", line, &message);
+                0
+            }
+        }
+    })
+}
+
+fn jet_jit_authority_without(authority: i64, requested: i64) -> i64 {
+    Concurrency::with_runtime_mut(|rt| {
+        let held = authority_rights(rt, authority);
+        let requested = rt.heap.clone_string(requested).unwrap_or_default();
+        authority_record(
+            rt,
+            authority_semantics::jet_authority_without_right(&held, &requested),
+        )
+    })
+}
+
 fn canonical_string_set(
     rt: &crate::JitRuntime,
     values: impl IntoIterator<Item = i64>,
@@ -5530,6 +5587,9 @@ host_fns! {
     bag_count: "jet_jit_bag_count" => jet_jit_bag_count: sig_get_opt;
     bag_len: "jet_jit_bag_len" => jet_jit_bag_len: sig_len;
     sorted_set_new: "jet_jit_sorted_set_new" => jet_jit_sorted_set_new: sig_sorted_set_new;
+    authority_workspace: "jet_jit_authority_workspace" => jet_jit_authority_workspace: sig_new;
+    authority_with: "jet_jit_authority_with" => jet_jit_authority_with: sig_get_opt;
+    authority_without: "jet_jit_authority_without" => jet_jit_authority_without: sig_get_opt;
     sorted_set_len: "jet_jit_sorted_set_len" => jet_jit_sorted_set_len: sig_len;
     sorted_set_has: "jet_jit_sorted_set_has" => jet_jit_sorted_set_has: sig_list_eq;
     sorted_set_from: "jet_jit_sorted_set_from" => jet_jit_sorted_set_from: sig_set_from;

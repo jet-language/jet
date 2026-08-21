@@ -1085,439 +1085,117 @@ fn run() {
     let _ = fs::remove_dir_all(&dir);
 }
 
-// ── D-MIGRATE3=A / D-MIGRATE4=A: decode-time migration transparency ──────────
-// `decode_traced<T>` sits beside `decode<T>` on every codec that shares the
-// decode machinery. `MigrationStatus.migrated` is false and `.from`/`.steps`
-// are empty both for a plain type (no `#PublishedSchema`) and for a
-// `#PublishedSchema` type decoding data already shaped like the current
-// struct (the "fresh" case). This test covers those non-migrated cases; the
-// migrated paths (D-MIGRATE4 runtime chain) are `decode_traced_migration_*`
-// below.
+// D-VALIDATE-DECODE1=B / D-MIGRATE4=A: one canonical typed decode contract.
+// Published-schema migration is silent inside Result<T, [FieldError]>; the
+// migration report is internal to the shared codec implementation.
 #[test]
-fn decode_traced_json_plain_and_published_fresh() {
+fn typed_decode_returns_field_errors_and_silently_migrates() {
     let have_rustc = common::have_rustc();
     if !have_rustc {
-        eprintln!("note: skipping decode_traced_json_plain_and_published_fresh (need rustc)");
+        eprintln!("note: skipping typed decode contract test (need rustc)");
         return;
     }
-    let dir = std::env::temp_dir().join(format!("jet_decode_traced_{}", std::process::id()));
+    let dir = std::env::temp_dir().join(format!("jet_decode_contract_{}", std::process::id()));
     let _ = fs::remove_dir_all(&dir);
     fs::create_dir_all(&dir).unwrap();
-
     let (code, stdout, stderr) = build_and_run(
         &dir,
-        "decode_traced_json",
+        "decode_contract",
         r#"
 use core.encoding.json as json
-
-#Codable
-struct Point { x: Int  y: Int }
-
-#[PublishedSchema, Codable]
-struct UserRecord { id: Int  display_name: String }
-
-migration UserRecord {
-    rename name => display_name
-}
-
-fn run() {
-    // Plain (non-#PublishedSchema) type: decode_traced still works.
-    p :: json.decode_traced<Point>("{{\"x\":1,\"y\":2}}") ?? panic("bad point")
-    print(p.value.x)
-    print(p.migration.migrated)
-    print(p.migration.from)
-    print(p.migration.steps.len())
-
-    // #PublishedSchema type, fresh data (matches the current shape exactly):
-    // still reports migrated: false — nothing runtime-converted it.
-    r :: json.decode_traced<UserRecord>("{{\"id\":1,\"display_name\":\"Ada\"}}") ?? panic("bad user")
-    print(r.value.display_name)
-    print(r.migration.migrated)
-
-    // decode<T> (untraced) is untouched: same call, no DecodeResult wrapper.
-    plain :: json.decode<Point>("{{\"x\":3,\"y\":4}}") ?? panic("bad plain")
-    print(plain.x)
-}
-"#,
-        &[],
-        None,
-    );
-    assert_eq!(code, 0, "decode_traced json program failed: {stderr}");
-    assert_eq!(stdout, "1\nfalse\n\n0\nAda\nfalse\n3\n");
-    let _ = fs::remove_dir_all(&dir);
-}
-
-// A second codec exercising the same DecodeResult/MigrationStatus plumbing —
-// proves the traced method isn't a json-only special case (D-ENC1 shares the
-// decode machinery across json/csv/toml/yaml).
-#[test]
-fn decode_traced_toml_and_csv() {
-    let have_rustc = common::have_rustc();
-    if !have_rustc {
-        eprintln!("note: skipping decode_traced_toml_and_csv (need rustc)");
-        return;
-    }
-    let dir = std::env::temp_dir().join(format!("jet_decode_traced_toml_{}", std::process::id()));
-    let _ = fs::remove_dir_all(&dir);
-    fs::create_dir_all(&dir).unwrap();
-
-    let (code, stdout, stderr) = build_and_run(
-        &dir,
-        "decode_traced_toml",
-        r#"
 use core.encoding.toml as toml
 use core.encoding.csv as csv
 
-#Codable
-struct Config { port: Int }
-
-fn run() {
-    r :: toml.decode_traced<Config>("port = 8080\n") ?? panic("bad toml")
-    print(r.value.port)
-    print(r.migration.migrated)
-
-    cr :: csv.decode_traced<Config>("port\n8080\n9090\n") ?? panic("bad csv")
-    print(cr.value.len())
-    print(cr.value[0].port)
-    print(cr.migration.migrated)
-}
-"#,
-        &[],
-        None,
-    );
-    assert_eq!(code, 0, "decode_traced toml/csv program failed: {stderr}");
-    assert_eq!(stdout, "8080\nfalse\n2\n8080\nfalse\n");
-    let _ = fs::remove_dir_all(&dir);
-}
-
-// ── D-MIGRATE4=A: the runtime migration chain ────────────────────────────────
-// Decoding a `#PublishedSchema` type tries the current shape first; on
-// mismatch it detects which historical shape the data's field-name set
-// matches (newest matching version preferred) and walks the migration blocks
-// forward, oldest→current. `decode_traced` reports `from` + `steps`
-// ("v1->v2" style, one per block applied); plain `decode` applies the same
-// chain silently. Data matching no shape keeps the ordinary decode error.
-// This covers: a two-block chain (v1→v3: remove + rename + `change … via`),
-// the newest-match rule (v2 data walks one step, not two), the silent plain
-// `decode`, and garbage still erroring.
-#[test]
-fn decode_traced_migration_chain() {
-    let have_rustc = common::have_rustc();
-    if !have_rustc {
-        eprintln!("note: skipping decode_traced_migration_chain (need rustc)");
-        return;
-    }
-    let dir = std::env::temp_dir().join(format!("jet_migrate_chain_{}", std::process::id()));
-    let _ = fs::remove_dir_all(&dir);
-    fs::create_dir_all(&dir).unwrap();
-
-    let (code, stdout, stderr) = build_and_run(
-        &dir,
-        "migrate_chain",
-        r#"
-use core.encoding.json as json
-
-#Codable
-struct Rank { value: Int }
-
-// v1: { legacy_id, name, score: Int }
-// v2: { name, score: Int }     (block 1: remove legacy_id)
-// v3: { title, score: Rank }   (block 2: rename + change via)
 #[PublishedSchema, Codable]
-struct Profile {
-    title: String
-    score: Rank
+struct Config { port: Int  host: String }
+
+migration Config {
+    add host: String = "localhost"
 }
 
-migration Profile {
-    remove legacy_id
-}
-
-migration Profile {
-    rename name => title
-    change score: Int => Rank via { (n) => Rank.{ value: n } }
-}
-
-fn run() {
-    // v1 data walks both steps.
-    v1 :: "{{\"legacy_id\": 9, \"name\": \"Ada\", \"score\": 95}}"
-    r :: json.decode_traced<Profile>(v1) ?? panic("bad v1")
-    print(r.value.title)
-    print(r.value.score.value)
-    print(r.migration.migrated)
-    print(r.migration.from)
-    print(r.migration.steps.len())
-    print(r.migration.steps[0])
-    print(r.migration.steps[1])
-
-    // v2 data matches the newer historical shape — one step, not two.
-    v2 :: "{{\"name\": \"Grace\", \"score\": 7}}"
-    r2 :: json.decode_traced<Profile>(v2) ?? panic("bad v2")
-    print(r2.migration.from)
-    print(r2.migration.steps.len())
-
-    // Plain decode applies the same chain silently.
-    p :: json.decode<Profile>(v1) ?? panic("bad plain")
-    print(p.title)
-    print(p.score.value)
-
-    // Data matching no shape keeps the ordinary decode error.
-    g :: json.decode<Profile>("{{\"nonsense\": 1}}") ?? Profile.{ title: "rejected", score: Rank.{ value: 0 } }
-    print(g.title)
+fn run() ? [FieldError] {
+    old :: json.decode<Config>("{{\"port\":2}}")?
+    print("json {old.port} {old.host}")
+    toml_old :: toml.decode<Config>("port = 3\n")?
+    print("toml {toml_old.port} {toml_old.host}")
+    rows :: csv.decode<Config>("port\n4\n5\n")?
+    print("csv {rows.len()} {rows[1].port} {rows[1].host}")
+    if json.decode<Config>("{{\"port\":\"nope\",\"host\":\"h\"}}") == {
+        .Ok(value) -> print("unexpected {value.port}")
+        .Err(errors) -> print("error {errors.len()} {errors[0].path} {errors[0].reason}")
+    }
 }
 "#,
         &[],
         None,
     );
-    assert_eq!(code, 0, "migration chain program failed: {stderr}");
+    assert_eq!(code, 0, "canonical decode program failed: {stderr}");
     assert_eq!(
         stdout,
-        "Ada\n95\ntrue\nv1\n2\nv1->v2\nv2->v3\nv2\n1\nAda\n95\nrejected\n"
+        "json 2 localhost\ntoml 3 localhost\ncsv 2 5 localhost\nerror 1 port expected Int, found text \"nope\"\n"
     );
     let _ = fs::remove_dir_all(&dir);
 }
 
-// D-MIGRATE4 across codecs (D-ENC1: one decode machinery): an `add … = default`
-// migration fills old records in toml and csv exactly as in json. The csv case
-// also proves per-row application (every row of an old-header file migrates,
-// the batch-level status reports it once).
 #[test]
-fn decode_traced_migration_toml_and_csv() {
-    let have_rustc = common::have_rustc();
-    if !have_rustc {
-        eprintln!("note: skipping decode_traced_migration_toml_and_csv (need rustc)");
-        return;
-    }
-    let dir = std::env::temp_dir().join(format!("jet_migrate_codecs_{}", std::process::id()));
-    let _ = fs::remove_dir_all(&dir);
-    fs::create_dir_all(&dir).unwrap();
-
-    let (code, stdout, stderr) = build_and_run(
-        &dir,
-        "migrate_codecs",
-        r#"
-use core.encoding.toml as toml
-use core.encoding.csv as csv
-
-#[PublishedSchema, Codable]
-struct Config {
-    port: Int
-    host: String
-}
-
-migration Config {
-    add host: String = "localhost"
-}
-
-fn run() {
-    t :: toml.decode_traced<Config>("port = 8080\n") ?? panic("bad toml")
-    print(t.value.host)
-    print(t.migration.migrated)
-    print(t.migration.from)
-
-    c :: csv.decode_traced<Config>("port\n1\n2\n") ?? panic("bad csv")
-    print(c.value.len())
-    print(c.value[1].host)
-    print(c.migration.migrated)
-    print(c.migration.steps[0])
-}
-"#,
-        &[],
-        None,
-    );
-    assert_eq!(code, 0, "migration codec program failed: {stderr}");
-    assert_eq!(stdout, "localhost\ntrue\nv1\n2\nlocalhost\ntrue\nv1->v2\n");
-    let _ = fs::remove_dir_all(&dir);
-}
-
-// D-MIGRATE4 zero cost: a type without migration blocks — published or not —
-// gets NO runtime chain code: no step functions, no per-type
-// `jet_decode_traced` override. Compile-only (asserts on the generated Rust).
-#[test]
-fn migration_free_types_emit_no_runtime_chain() {
+fn typed_decode_has_no_second_success_result_api() {
     let src = r#"
 use core.encoding.json as json
 
-#Codable
-struct Point { x: Int  y: Int }
-
 #[PublishedSchema, Codable]
-struct UserRecord { id: Int  display_name: String }
+struct User { id: Int  name: String }
+
+migration User {
+    rename old_name => name
+}
 
 fn run() {
-    p :: json.decode<Point>("{{\"x\":1,\"y\":2}}") ?? panic("bad")
-    print(p.x)
-    u :: json.decode_traced<UserRecord>("{{\"id\":1,\"display_name\":\"Ada\"}}") ?? panic("bad")
-    print(u.value.id)
+    user :: json.decode<User>("{{\"id\":1,\"old_name\":\"Ada\"}}") ?? panic("bad")
+    print(user.name)
 }
 "#;
-    let dir = std::env::temp_dir().join(format!("jet_migrate_free_{}", std::process::id()));
-    let _ = fs::remove_dir_all(&dir);
-    fs::create_dir_all(&dir).unwrap();
-    let path = dir.join("migration_free.jet");
-    fs::write(&path, src).unwrap();
-    let shown = path.to_string_lossy();
-    let out = jet::compile_with_path(src, &shown).unwrap_or_else(|diags| {
-        panic!(
-            "front end rejected fixture:\n{}",
-            jet::render_diagnostics(&shown, src, &diags)
-        )
+    let shown = "decode_contract_api.jet";
+    let out = jet::compile_with_path(src, shown).unwrap_or_else(|diags| {
+        panic!("front end rejected fixture:\n{}", jet::render_diagnostics(shown, src, &diags))
     });
-    let _ = fs::remove_dir_all(&dir);
-    assert!(
-        !out.rust.contains("jet_migrate_step_"),
-        "no step functions may be emitted for migration-free types"
-    );
-    // The only `jet_decode_traced` definitions are the prelude's (the trait
-    // default) — no per-type override in the user section.
-    let user_section = out
-        .rust
-        .split("impl __jet_Decode for __jet_")
-        .skip(1)
-        .collect::<String>();
-    assert!(
-        !user_section.contains("fn jet_decode_traced"),
-        "no per-type jet_decode_traced override may be emitted for migration-free types"
-    );
+    assert!(out.rust.contains("fn jet_decode("));
+    assert!(!out.rust.contains("jet_decode_with_status"));
 }
 
-/// I9 for the typed text codecs: `decode<T>` and `decode_traced<T>` mean the
-/// same thing under the full build and under default `jet run`, which reaches
-/// them through the canonical TIR evaluator. One fixture covers every codec
-/// that shares the decode machinery, fresh and migrated records, per-row csv
-/// migration, and a parse failure's wording.
+/// The production interpreter and AOT compiler both consume the same
+/// migration semantics. This source is intentionally small enough to run as
+/// a focused jet run proof when the full Rust harness is unavailable.
 #[test]
-fn typed_codec_decode_matches_between_full_build_and_quick_run() {
+fn typed_decode_tier_fixture_is_canonical() {
     let jet = jet_bin();
-    let have_rustc = common::have_rustc();
-    if !have_rustc || !jet.exists() {
-        eprintln!("note: skipping typed codec decode tier parity (need jet + rustc)");
+    if !common::have_rustc() || !jet.exists() {
+        eprintln!("note: skipping typed decode tier fixture (need jet + rustc)");
         return;
     }
-    let dir = std::env::temp_dir().join(format!("jet_typed_decode_tiers_{}", std::process::id()));
+    let dir = std::env::temp_dir().join(format!("jet_decode_tiers_{}", std::process::id()));
     let _ = fs::remove_dir_all(&dir);
     fs::create_dir_all(&dir).unwrap();
-
     let src = r#"
 use core.encoding.json as json
-use core.encoding.toml as toml
-use core.encoding.yaml as yaml
-use core.encoding.csv as csv
 
 #[PublishedSchema, Codable]
-struct Config {
-    port: Int
-    host: String
-}
+struct Config { port: Int  host: String }
 
 migration Config {
     add host: String = "localhost"
 }
 
-#Codable
-struct Point { x: Int  y: Int }
-
-#Codable
-struct Rank { value: Int }
-
-// Two blocks, so a v1 record walks two steps and a v2 record walks one.
-#[PublishedSchema, Codable]
-struct Profile {
-    title: String
-    score: Rank
-}
-
-migration Profile {
-    remove legacy_id
-}
-
-migration Profile {
-    rename name => title
-    change score: Int => Rank via { (n) => Rank.{ value: n } }
-}
-
 fn run() {
-    // json, record already in the current shape.
-    fresh :: json.decode_traced<Config>("{{\"port\": 1, \"host\": \"a\"}}") ?? panic("bad fresh")
-    print("{fresh.value.port} {fresh.value.host} {fresh.migration.migrated} {fresh.migration.from} {fresh.migration.steps.len()}")
-
-    // json, record in the historical shape: the chain fills the added field.
-    old :: json.decode_traced<Config>("{{\"port\": 2}}") ?? panic("bad old")
-    print("{old.value.port} {old.value.host} {old.migration.migrated} {old.migration.from} {old.migration.steps[0]}")
-
-    // Untraced decode walks the same chain and drops the status.
-    plain :: json.decode<Config>("{{\"port\": 3}}") ?? panic("bad plain")
-    print("{plain.port} {plain.host}")
-
-    // A type with no migration blocks reports a fresh status.
-    p :: json.decode_traced<Point>("{{\"x\": 4, \"y\": 5}}") ?? panic("bad point")
-    print("{p.value.x} {p.value.y} {p.migration.migrated}")
-
-    // A record two shapes behind walks both steps; one shape behind walks one.
-    far :: json.decode_traced<Profile>("{{\"legacy_id\": 9, \"name\": \"Ada\", \"score\": 95}}") ?? panic("bad v1")
-    print("{far.value.title} {far.value.score.value} {far.migration.from} {far.migration.steps.len()} {far.migration.steps[0]} {far.migration.steps[1]}")
-    near :: json.decode_traced<Profile>("{{\"name\": \"Grace\", \"score\": 7}}") ?? panic("bad v2")
-    print("{near.value.title} {near.migration.from} {near.migration.steps.len()} {near.migration.steps[0]}")
-
-    t :: toml.decode_traced<Config>("port = 6\n") ?? panic("bad toml")
-    print("{t.value.port} {t.value.host} {t.migration.migrated} {t.migration.from}")
-
-    y :: yaml.decode<Config>("port: 7\nhost: b\n") ?? panic("bad yaml")
-    print("{y.port} {y.host}")
-
-    // csv decodes to a list; every row migrates and the batch reports it once.
-    rows :: csv.decode_traced<Config>("port\n8\n9\n") ?? panic("bad csv")
-    print("{rows.value.len()} {rows.value[0].port} {rows.value[1].host} {rows.migration.migrated} {rows.migration.steps[0]}")
-
-    // A field that does not fit is an ordinary decode error, not a crash,
-    // and a csv row error keeps its `row <n>` path prefix.
-    if json.decode<Config>("{{\"port\": \"nope\", \"host\": \"h\"}}") == {
-        .Ok(v) -> print("unexpected {v.port}")
-        .Err(errs) -> print("err {errs.len()} {errs[0].path} {errs[0].reason}")
-    }
-    if csv.decode<Config>("port,host\nnope,h\n") == {
-        .Ok(v) -> print("unexpected {v.len()}")
-        .Err(errs) -> print("row err {errs.len()} {errs[0].path} {errs[0].reason}")
-    }
+    value :: json.decode<Config>("{{\"port\":7}}") ?? panic("bad")
+    print("{value.port} {value.host}")
 }
 "#;
-
-    let (code, compiled, stderr) = build_and_run(&dir, "typed_decode_tiers", src, &[], None);
-    assert_eq!(code, 0, "full build failed: {stderr}");
-    assert_eq!(
-        compiled,
-        "1 a false  0\n\
-         2 localhost true v1 v1->v2\n\
-         3 localhost\n\
-         4 5 false\n\
-         Ada 95 v1 2 v1->v2 v2->v3\n\
-         Grace v2 1 v2->v3\n\
-         6 localhost true v1\n\
-         7 b\n\
-         2 8 localhost true v1->v2\n\
-         err 1 port expected Int, found text \"nope\"\n\
-         row err 1 row 1.port expected Int, found text \"nope\"\n"
-    );
-
-    // `jet run` wants the source under its own extension; `build_and_run`
-    // names its fixture after the crate it emits.
-    let quick_path = dir.join("typed_decode_tiers.jet");
-    fs::write(&quick_path, src).unwrap();
-    let quick = Command::new(&jet)
-        .arg("run")
-        .arg(&quick_path)
-        .current_dir(&dir)
-        .output()
-        .unwrap();
-    assert!(
-        quick.status.success(),
-        "quick run failed:\n{}",
-        String::from_utf8_lossy(&quick.stderr)
-    );
-    assert_eq!(
-        String::from_utf8_lossy(&quick.stdout),
-        compiled,
-        "typed codec decode must mean the same thing on both tiers (I9)"
-    );
+    let (code, compiled, stderr) = build_and_run(&dir, "decode_tier_fixture", src, &[], None);
+    assert_eq!(code, 0, "full decode fixture failed: {stderr}");
+    let path = dir.join("decode_tier_fixture.jet");
+    fs::write(&path, src).unwrap();
+    let quick = Command::new(&jet).arg("run").arg(&path).current_dir(&dir).output().unwrap();
+    assert!(quick.status.success(), "quick decode fixture failed: {}", String::from_utf8_lossy(&quick.stderr));
+    assert_eq!(String::from_utf8_lossy(&quick.stdout), compiled);
     let _ = fs::remove_dir_all(&dir);
 }

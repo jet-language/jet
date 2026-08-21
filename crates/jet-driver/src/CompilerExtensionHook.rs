@@ -14,7 +14,7 @@ use crate::AST::{Func, Item, ProgramBundle};
 use crate::Diagnostics::{Diagnostic, Severity, Span};
 use crate::Sema::SemIndexEffectFacts;
 use jet_pkg_model::CompilerExtension::{
-    self, decode_and_validate_response, message_exposes_rustc, AnalyzeResponse, Capability,
+    self, decode_and_validate_response, message_exposes_rustc, AnalyzeResponse, Ability,
     Finding, ProtocolError, SpanFact, SymbolFact, TypeFact, TypedSnapshot,
     ENV_COMPILER_EXTENSION, HOST_PROCESS_TIMEOUT_MS, HOST_SUBCOMMAND, MAX_SNAPSHOT_BYTES,
 };
@@ -32,7 +32,7 @@ const MAX_HOST_STDERR_BYTES: usize = 64 * 1024;
 ///
 /// `effect_facts` carries solved post-sema effects when the caller ran
 /// `check_bundle_with_effect_facts`. When absent, `ReadEffects` is omitted
-/// from advertised capabilities — never invent `"pure"` or other placeholders.
+/// from advertised abilities — never invent `"pure"` or other placeholders.
 /// Any sema error suppresses guest execution; extensions observe valid programs only.
 pub fn post_sema_diagnostics(
     bundle: &ProgramBundle,
@@ -288,9 +288,9 @@ pub fn snapshot_from_bundle(
 ) -> Result<TypedSnapshot, CompilerExtension::ProtocolError> {
     let module = &bundle.modules[bundle.entry];
     let file = module.display.clone();
-    let mut capabilities = Capability::v1_defaults().to_vec();
+    let mut abilities = Ability::v1_defaults().to_vec();
     if effect_facts.is_none() {
-        capabilities.retain(|c| *c != Capability::ReadEffects);
+        abilities.retain(|c| *c != Ability::ReadEffects);
     }
     let mut types = Vec::new();
     let mut symbols = Vec::new();
@@ -331,10 +331,10 @@ pub fn snapshot_from_bundle(
     if symbols.is_empty() {
         // Guests may still run; provide a file-level span so span_id refs can resolve.
         // No invented type/effect facts — drop read caps that would lie.
-        capabilities.retain(|c| {
-            *c != Capability::ReadTypes
-                && *c != Capability::ReadSymbols
-                && *c != Capability::ReadEffects
+        abilities.retain(|c| {
+            *c != Ability::ReadTypes
+                && *c != Ability::ReadSymbols
+                && *c != Ability::ReadEffects
         });
         types.clear();
         spans.push(SpanFact {
@@ -344,7 +344,7 @@ pub fn snapshot_from_bundle(
             end: 0,
         });
     }
-    TypedSnapshot::new(capabilities, types, symbols, spans)
+    TypedSnapshot::new(abilities, types, symbols, spans)
 }
 
 fn fn_type_repr(func: &Func) -> String {
@@ -627,7 +627,7 @@ mod tests {
         let bundle = bundle.expect("bundle");
         let snap = snapshot_from_bundle(&bundle, Some(&facts)).expect("snapshot");
         assert!(
-            snap.capabilities.contains(&Capability::ReadEffects),
+            snap.abilities.contains(&Ability::ReadEffects),
             "facts present → advertise ReadEffects"
         );
         let run = snap
@@ -670,9 +670,9 @@ mod tests {
         let bundle = bundle.expect("bundle");
         let snap = snapshot_from_bundle(&bundle, None).expect("snapshot");
         assert!(
-            !snap.capabilities.contains(&Capability::ReadEffects),
+            !snap.abilities.contains(&Ability::ReadEffects),
             "None facts must omit ReadEffects; caps={:?}",
-            snap.capabilities
+            snap.abilities
         );
         for sym in &snap.symbols {
             assert!(
@@ -791,9 +791,9 @@ mod tests {
         );
         let snap = snapshot_from_bundle(&bundle_check, Some(&facts_c)).unwrap();
         assert!(
-            snap.capabilities.contains(&Capability::ReadEffects),
+            snap.abilities.contains(&Ability::ReadEffects),
             "fact-bearing snapshots must advertise ReadEffects; caps={:?}",
-            snap.capabilities
+            snap.abilities
         );
     }
 

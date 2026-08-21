@@ -312,7 +312,7 @@ impl<'a> Parser<'a> {
                 }
                 _ => {
                     let arm_start = self.peek().span;
-                    let cond = self.expr_no_struct_lit()?;
+                    let cond = self.subjectless_arm_head()?;
                     self.expect_unified_arrow("after a guard condition")?;
                     let body = self.guard_arm_body()?;
                     let end = body.last().map(Stmt::span).map_or(cond.span().end, |s| s.end);
@@ -330,6 +330,38 @@ impl<'a> Parser<'a> {
             else_body,
             span,
         })
+    }
+
+    /// D-CONC-CHAN2=D: a subjectless readiness arm is a binding/source pair
+    /// (`value, receiver`) or a contextual `after duration` head. Keep the
+    /// source expression in the existing one-field tuple carrier; sema and
+    /// TIR recognize this exact parser-created shape.
+    fn subjectless_arm_head(&mut self) -> Result<Expr, Diagnostic> {
+        if let (TokKind::Ident(binding), TokKind::Comma) =
+            (&self.peek().kind, &self.peek2().kind)
+        {
+            let binding = binding.clone();
+            let start = self.bump().span;
+            self.bump();
+            let source = self.expr_no_struct_lit()?;
+            let span = Span::new(start.start, source.span().end);
+            return Ok(Expr::TupleLit(
+                vec![(binding, source)],
+                span,
+                None,
+            ));
+        }
+        if matches!(&self.peek().kind, TokKind::Ident(name) if name == Syntax::READINESS_AFTER) {
+            let start = self.bump().span;
+            let duration = self.expr_no_struct_lit()?;
+            let span = Span::new(start.start, duration.span().end);
+            return Ok(Expr::TupleLit(
+                vec![(Syntax::INTERNAL_SELECT_AFTER_FIELD.to_string(), duration)],
+                span,
+                None,
+            ));
+        }
+        self.expr_no_struct_lit()
     }
 
     fn guard_arm_body(&mut self) -> Result<Vec<Stmt>, Diagnostic> {
@@ -1167,7 +1199,7 @@ impl<'a> Parser<'a> {
                     ));
                 }
                 _ => {
-                    let cond = self.expr_no_struct_lit()?;
+                    let cond = self.subjectless_arm_head()?;
                     self.expect_unified_arrow("after a value guard condition")?;
                     let (body, value) = self.guard_value_body()?;
                     arms.push((cond, body, value));

@@ -421,6 +421,9 @@ fn jet_decimal_sub(a: &jet_std::JetDecimal, b: &jet_std::JetDecimal) -> jet_std:
 fn jet_decimal_mul(a: &jet_std::JetDecimal, b: &jet_std::JetDecimal) -> jet_std::JetDecimal {
     a.mul(b)
 }
+fn jet_decimal_equal(a: &jet_std::JetDecimal, b: &jet_std::JetDecimal) -> bool {
+    a == b
+}
 fn jet_decimal_to_string(a: &jet_std::JetDecimal) -> String {
     a.to_string_rep()
 }

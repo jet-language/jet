@@ -1,4 +1,4 @@
-//! Tower #438 CLI/runtime smoke for D-WEBAPP1 / D-WEBAUTHOR1.
+//! Cards #1274/#1703 CLI/runtime smoke for D-WEBAPP1 / D-WEBAUTHOR1.
 #![allow(non_snake_case)]
 
 mod common;
@@ -86,8 +86,14 @@ fn spawn_server(args: &[&str], port: u16) -> ServerChild {
     spawn_server_with_program(&jet_bin(), args, port)
 }
 
-#[test]
-fn app_graph_facts_json() {
+fn response_body(response: &str) -> &str {
+    response
+        .split_once("\r\n\r\n")
+        .map(|(_, body)| body)
+        .expect("HTTP response body")
+}
+
+fn web_graph_facts_json() -> String {
     let (code, stdout, stderr) = run_jet(&[
         "explain",
         "--web-graph",
@@ -95,6 +101,18 @@ fn app_graph_facts_json() {
         "examples/features/web/web_app.jet",
     ]);
     assert_eq!(code, 0, "stderr={stderr}\nstdout={stdout}");
+    stdout.replace(
+        &repo_root()
+            .join("examples/features/web/web_app.jet")
+            .display()
+            .to_string(),
+        "examples/features/web/web_app.jet",
+    )
+}
+
+#[test]
+fn app_graph_facts_json() {
+    let stdout = web_graph_facts_json();
     assert!(stdout.contains("\"shared_tir\": true"), "{stdout}");
     assert!(stdout.contains("\"path\": \"/\""), "{stdout}");
     assert!(stdout.contains("csp-default"), "{stdout}");
@@ -156,6 +174,12 @@ fn web_app_run_serves_pages_actions_and_assets() {
     assert!(page.starts_with("HTTP/1.1 200"), "{page}");
     assert!(page.contains("<title>Home</title>"), "{page}");
     assert!(page.contains("hello from csr"), "{page}");
+    let expected = include_str!("../examples/features/expected/web/web_app.harness.out");
+    let (expected_page, expected_facts) = expected
+        .split_once("\n\n--- facts_json ---\n")
+        .expect("web app golden sections");
+    assert_eq!(response_body(&page), expected_page);
+    assert_eq!(web_graph_facts_json(), expected_facts);
 
     let action = request(port, "POST", "/actions/save");
     assert!(action.starts_with("HTTP/1.1 200"), "{action}");

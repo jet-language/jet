@@ -424,12 +424,12 @@ fn prove_uses_structured_test_evidence_and_continues_after_failure() {
     let root = workspace("test_continuation");
     fs::write(
         root.join("a_fail.jet"),
-        "#Test(\"first fails\") {\n    require(false, \"intentional\")\n}\n",
+        "#Test(\"first fails\") {\n    assert(false, \"intentional\")\n}\n",
     )
     .unwrap();
     fs::write(
         root.join("b_pass.jet"),
-        "#Test(\"later passes\") {\n    require(true)\n}\n",
+        "#Test(\"later passes\") {\n    assert(true)\n}\n",
     )
     .unwrap();
     let out = Command::new(jet())
@@ -467,7 +467,7 @@ fn prove_captures_contract_results_and_runtime_panics_structurally() {
     let root = workspace("contract_runtime");
     fs::write(
         root.join("a_contract_pass.jet"),
-        "#Pre(value > 0, \"positive\") fn checked(value: Int) => Int { return value }\n#Test(\"contract pass\") { require_eq(checked(1), 1) }\n",
+        "#Pre(value > 0, \"positive\") fn checked(value: Int) => Int { return value }\n#Test(\"contract pass\") { assert_eq(checked(1), 1) }\n",
     ).unwrap();
     fs::write(
         root.join("b_contract_fail.jet"),
@@ -479,7 +479,7 @@ fn prove_captures_contract_results_and_runtime_panics_structurally() {
     ).unwrap();
     fs::write(
         root.join("d_later.jet"),
-        "#Test(\"later still runs\") { require(true) }\n",
+        "#Test(\"later still runs\") { assert(true) }\n",
     ).unwrap();
 
     let out = Command::new(jet()).current_dir(&root).args(["prove", ".", "--json"]).output().unwrap();
@@ -499,9 +499,9 @@ fn prove_captures_contract_results_and_runtime_panics_structurally() {
 #[test]
 fn prove_reports_real_property_cases_shrinks_and_continues() {
     let root = workspace("properties");
-    fs::write(root.join("a_pass.jet"), "#Test fn identity(n: Int) { require_eq(n, n) }\n").unwrap();
-    fs::write(root.join("b_shrink.jet"), "#Test fn always_small(n: Int) { require(n < 50) }\n").unwrap();
-    fs::write(root.join("c_later.jet"), "#Test(\"later unit\") { require(true) }\n").unwrap();
+    fs::write(root.join("a_pass.jet"), "#Test fn identity(n: Int) { assert_eq(n, n) }\n").unwrap();
+    fs::write(root.join("b_shrink.jet"), "#Test fn always_small(n: Int) { assert(n < 50) }\n").unwrap();
+    fs::write(root.join("c_later.jet"), "#Test(\"later unit\") { assert(true) }\n").unwrap();
 
     let out = Command::new(jet()).current_dir(&root).args(["prove", ".", "--json"]).output().unwrap();
     assert_eq!(out.status.code(), Some(1), "stderr={} stdout={}", String::from_utf8_lossy(&out.stderr), String::from_utf8_lossy(&out.stdout));
@@ -519,7 +519,7 @@ fn prove_reports_real_doctests_and_continues() {
     let root = workspace("doctests");
     fs::write(root.join("a_pass.jet"), "/// ```jet\n/// 2 + 2 // => 4\n/// ```\nfn value() => Int { return 4 }\n").unwrap();
     fs::write(root.join("b_fail.jet"), "/// ```jet\n/// 2 + 2 // => 5\n/// ```\nfn value() => Int { return 4 }\n").unwrap();
-    fs::write(root.join("c_later.jet"), "#Test(\"later unit\") { require(true) }\n").unwrap();
+    fs::write(root.join("c_later.jet"), "#Test(\"later unit\") { assert(true) }\n").unwrap();
     let out = Command::new(jet()).current_dir(&root).args(["prove", ".", "--json"]).output().unwrap();
     assert_eq!(out.status.code(), Some(1), "stderr={} stdout={}", String::from_utf8_lossy(&out.stderr), String::from_utf8_lossy(&out.stdout));
     assert!(out.stderr.is_empty());
@@ -579,7 +579,7 @@ fn prove_lens_shows_failed_unselected_evidence() {
     let root = workspace("lens_projection");
     fs::write(
         root.join("main.jet"),
-        "#Test(\"outside\") { require(false, \"lens failure\") }\n",
+        "#Test(\"outside\") { assert(false, \"lens failure\") }\n",
     )
     .unwrap();
     let out = Command::new(jet())
@@ -721,7 +721,7 @@ fn prove_replay_rejects_schema_and_identity_changes_as_typed_failures() {
     assert!(String::from_utf8_lossy(&schema.stdout).contains("\"code\":\"E3620\""));
 
     fs::write(&artifact_path, original).unwrap();
-    fs::write(root.join("main.jet"), "fn run() { require(false) }\n").unwrap();
+    fs::write(root.join("main.jet"), "fn run() { assert(false) }\n").unwrap();
     let identity = Command::new(jet())
         .current_dir(&root)
         .args(["prove", "main.jet", "--replay", artifact, "--json"])

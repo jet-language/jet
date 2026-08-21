@@ -107,11 +107,27 @@ pub(crate) fn collect_used_core(
             match item {
                 Item::Func(f) => collect_core_stmts(&f.body, &module_imports, &mut used, &mut spans, &mut ffi_cb),
                 Item::Struct(s) => {
+                    for field in &s.fields {
+                        collect_core_type_usage(&field.ty, &mut used, &mut spans, Some(field.ty_span));
+                    }
                     for m in &s.methods {
                         collect_core_stmts(&m.body, &module_imports, &mut used, &mut spans, &mut ffi_cb);
                     }
                 }
                 Item::Enum(e) => {
+                    for variant in &e.variants {
+                        match &variant.payload {
+                            crate::AST::VariantPayload::Single(ty, span) => {
+                                collect_core_type_usage(ty, &mut used, &mut spans, Some(*span));
+                            }
+                            crate::AST::VariantPayload::Named(fields) => {
+                                for field in fields {
+                                    collect_core_type_usage(&field.ty, &mut used, &mut spans, Some(field.ty_span));
+                                }
+                            }
+                            crate::AST::VariantPayload::Unit => {}
+                        }
+                    }
                     for m in &e.methods {
                         collect_core_stmts(&m.body, &module_imports, &mut used, &mut spans, &mut ffi_cb);
                     }
@@ -211,6 +227,70 @@ fn note_core_usage(
     used.insert(key.clone());
     if let Some(s) = span {
         spans.entry(key).or_insert(s);
+    }
+}
+
+fn collect_core_type_usage(
+    ty: &Type,
+    used: &mut HashSet<String>,
+    spans: &mut HashMap<String, crate::Diagnostics::Span>,
+    span: Option<crate::Diagnostics::Span>,
+) {
+    match ty {
+        // D-CONFIG-ENV1: a type-only crypto carrier still needs the hidden
+        // RustCrypto bridge. Most call-site paths carry the internal nominal
+        // tag, but field-marker plumbing can leave the qualified leaf visible
+        // here; preserve the same reachability fact for both spellings.
+        Type::Named(name)
+            if matches!(
+                name.rsplit('.').next(),
+                Some(
+                    "Secret"
+                        | "SigningKey"
+                        | "X25519SecretKey"
+                        | "SharedSecret"
+                )
+            ) => {
+                note_core_usage(used, spans, "core.crypto::__nominal__", span);
+            }
+        Type::Tagged { marker, inner }
+            if matches!(
+                marker,
+                crate::AST::TagMarker::Internal(crate::AST::InternalTag::CoreCryptoNominal)
+            ) => {
+                note_core_usage(used, spans, "core.crypto::__nominal__", span);
+                collect_core_type_usage(inner, used, spans, span);
+            }
+        Type::Tagged { inner, .. }
+        | Type::List(inner)
+        | Type::Option(inner)
+        | Type::Shared(inner)
+        | Type::FixedList { elem: inner, .. }
+        | Type::InlineRange { base: inner, .. } => collect_core_type_usage(inner, used, spans, span),
+        Type::Map { key, value, .. } | Type::Result { ok: key, err: value } => {
+            collect_core_type_usage(key, used, spans, span);
+            collect_core_type_usage(value, used, spans, span);
+        }
+        Type::Fn { params, ret, .. } => {
+            for param in params {
+                collect_core_type_usage(param, used, spans, span);
+            }
+            if let Some(ret) = ret {
+                collect_core_type_usage(ret, used, spans, span);
+            }
+        }
+        Type::Tuple(fields) => {
+            for (_, field) in fields {
+                collect_core_type_usage(field, used, spans, span);
+            }
+        }
+        Type::Apply { args, .. } | Type::Union(args) => {
+            for arg in args {
+                collect_core_type_usage(arg, used, spans, span);
+            }
+        }
+        Type::Quantity { base, .. } => collect_core_type_usage(base, used, spans, span),
+        _ => {}
     }
 }
 
@@ -402,7 +482,6 @@ pub(crate) fn collect_core_stmts(
         | Stmt::Policy { body, .. }
             | Stmt::Layout { body, .. }
             | Stmt::Caps { body, .. }
-            | Stmt::Grant { body, .. }
             | Stmt::Transact { body, .. }
             | Stmt::AssumeDet { body, .. } => collect_core_stmts(body, imports, used, spans, ffi_cb),
             // D-SHIELDNAME1=A: parsed syntax, not raw source text, owns the

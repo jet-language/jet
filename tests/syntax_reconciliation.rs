@@ -146,7 +146,6 @@ const FORBIDDEN: &[&str] = &[
     "List<",
     "List[",
     "Map<",
-    "#Bench \"",
     "#[Serialize",
     "Serialize]",
     "#[Deserialize",
@@ -461,8 +460,8 @@ fn marker_plane_matrix_covers_current_marker_families() {
         "#",
         "the applied-rule registry must stay on the canonical `#` plane"
     );
-    assert_eq!(jet::Syntax::EFFECT_ARROW_OPEN, "=[");
-    assert_eq!(jet::Syntax::EFFECT_ARROW_CLOSE, "]=>");
+    assert_eq!(jet::Syntax::EFFECT_ARROW_OPEN, ":[");
+    assert_eq!(jet::Syntax::EFFECT_ARROW_CLOSE, "]>");
     assert!(
         decisions.contains("**D-SHAPE8=A — Effects inside the arrow** *(ratified 2026-07-14,")
             && decisions.contains("owner-amended by D-ARROW-CONTROL1 on 2026-07-26; card #543)*:"),
@@ -509,12 +508,11 @@ fn marker_plane_matrix_covers_current_marker_families() {
         "Numeric",
         "Printable",
         "CodableAsBase",
-        "Caps",
+        "Abilities",
         "Grant",
         "Unsafe",
         "Impure",
         "Test",
-        "Bench",
         "Scrub",
         "Job",
         "Replayable",
@@ -537,7 +535,6 @@ fn marker_plane_matrix_covers_current_marker_families() {
         "MARKER_CODABLE",
         "APPLIED_RULES",
         "KW_CAPS",
-        "KW_GRANT",
         "KW_COMPTIME",
         "KW_DERIVE",
         "MARKER_TRACK",

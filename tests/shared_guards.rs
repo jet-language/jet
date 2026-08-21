@@ -121,12 +121,13 @@ struct Counter {
 
 fn increment(counter: Shared<Counter>) {
     #Transact(tx) {
+        print("transaction-body")
         counter.value += 1
     }
 }
 
 fn run() {
-    counter := shared Counter.{ value: 0 }
+    counter := shared Counter{ value: 0 }
     task.group workers {
         first := task increment(counter)
         second := task increment(counter)
@@ -159,11 +160,11 @@ fn split_pair(handle: Shared<Pair>) {
 }
 
 fn run() {
-    mapped := shared Pair.{ left: 1, right: 2 }
+    mapped := shared Pair{ left: 1, right: 2 }
     map_left(mapped)
     print(mapped.left + mapped.right)
 
-    split := shared Pair.{ left: 3, right: 4 }
+    split := shared Pair{ left: 3, right: 4 }
     split_pair(split)
     print(split.left + split.right)
 }
@@ -348,7 +349,7 @@ fn concurrent_transaction_deltas_apply_to_fresh_locked_state_on_all_tiers() {
     with_compiler_stack(|| {
         assert_native_and_default(
             TRANSACTION_DELTAS,
-            "2\n",
+            "transaction-body\ntransaction-body\n2\n",
             "jet_shared_guard_transaction_deltas",
         )
     });

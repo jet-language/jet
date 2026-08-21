@@ -21,4 +21,23 @@ fn run() {
         [U8]{"{version:U4}{ihl:U4}{tos:U8}{len:U16be}{rest:...}"} :> { print("unexpected match") }
         else :> { print("too short to decode") }
     }
+
+    // D-BINPAT1 / #2100: parity covers sub-byte and non-power-of-two byte
+    // widths in both byte orders. These widths used to answer differently
+    // between AOT and the shared JIT/interpreter matcher.
+    nibble :: [U8]{0xAB}
+    if nibble == {
+        [U8]{"{hi:U4}{lo:U4}"} :> { print("U4={hi}/{lo}") }
+        else :> { print("U4 mismatch") }
+    }
+    wide_be :: [U8]{0x01, 0x02, 0x03}
+    if wide_be == {
+        [U8]{"{value:U24be}"} :> { print("U24be={value}") }
+        else :> { print("U24be mismatch") }
+    }
+    wide_le :: [U8]{0x01, 0x02, 0x03}
+    if wide_le == {
+        [U8]{"{value:U24le}"} :> { print("U24le={value}") }
+        else :> { print("U24le mismatch") }
+    }
 }

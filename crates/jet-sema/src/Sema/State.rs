@@ -562,7 +562,6 @@ impl<'a> StateCtx<'a> {
             | Stmt::TaskGroup { body, .. }
             | Stmt::Layout { body, .. }
             | Stmt::Caps { body, .. }
-            | Stmt::Grant { body, .. }
             | Stmt::Transact { body, .. }
             | Stmt::AssumeDet { body, .. }
             | Stmt::ScopeMember { body, .. }
@@ -1029,7 +1028,27 @@ mod tests {
 /// state name that is not in the `state TypeName { … }` declaration for that type.
 /// Includes a typo suggestion when the edit distance is ≤ 2.
 pub fn e0151(state: &str, type_name: &str, candidates: &[&str], span: Span) -> Diagnostic {
-    let suggestion = candidates.first().copied();
+    let candidate_name = state.rsplit('.').next().unwrap_or(state);
+    let mut best: Option<(&str, usize)> = None;
+    let mut ambiguous = false;
+    for &candidate in candidates {
+        let distance = edit_distance(candidate_name, candidate);
+        if distance == 0 || distance > 2 {
+            continue;
+        }
+        match best {
+            None => best = Some((candidate, distance)),
+            Some((_, best_distance)) if distance < best_distance => {
+                best = Some((candidate, distance));
+                ambiguous = false;
+            }
+            Some((best_candidate, best_distance)) if distance == best_distance => {
+                ambiguous |= best_candidate != candidate;
+            }
+            _ => {}
+        }
+    }
+    let suggestion = best.filter(|_| !ambiguous).map(|(candidate, _)| candidate);
     let fix = if let Some(c) = suggestion {
         format!("did you mean `{c}`?  Check the `state {type_name} {{ … }}` block for valid names")
     } else {

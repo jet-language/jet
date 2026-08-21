@@ -20,7 +20,6 @@
 //
 marker Policy(settings: ...PolicySetting, @sites: [.Package, .Module, .Function, .Method, .Block], @inherits: true, @resolution: .Tighten, @scopes: [.Package, .Module, .Function, .Block])
 marker Unsafe(reason: String, obligations: ObligationMode = .None, @sites: [.Function, .Method, .Block, .Operation])
-marker Grant(capabilities: ...Capability, @sites: [.Block, .Operation])
 marker Scrub(tag: Ident, @sites: [.Function, .Method])
 marker Pure(@sites: [.Function, .Method], @retired: "=[]=>")
 marker Memo(bound: MemoBound = .Default, @sites: [.Function, .Field])
@@ -76,7 +75,7 @@ marker Meta(category: String = "", tunable: Bool = false, maturity: Maturity = .
 marker Todo(@sites: [.Expression])
 marker Shield(@sites: [.Block])
 marker Impure(reason: String = none, @sites: [.Block])
-marker Caps(capabilities: ...Capability, @sites: [.Block])
+marker Caps(abilities: ...Ability, @sites: [.Block])
 marker Transact(name: Ident, @sites: [.Block])
 marker Region(name: Ident, @sites: [.Block])
 marker Live(@sites: [.Block])
@@ -88,10 +87,6 @@ marker DebugOnly(@sites: [.Statement, .Block])
 // D-TESTFAULT1=A: test-only effect substitution is configured by one typed
 // marker argument; the harness owns fail-nth scheduling.
 marker Test(name: String = "function name", faults: [Effect] = [], expected_fail: Bool = false, @sites: [.Test])
-// D-CLAIM-BENCH1=A: region benchmarks are test claims with a `.measure`
-// member now. Keep the old row only so the shared marker reader emits the
-// standard retired-marker teaching diagnostic.
-marker Bench(name: String, @sites: [.Bench], @retired: "#Test(\"name\") { .measure { … } }")
 marker Target(target: Target, @sites: [.File, .Module, .Function])
 marker Root(@sites: [.Parameter])
 marker HTML(path: String = none, @sites: [.File, .Block])

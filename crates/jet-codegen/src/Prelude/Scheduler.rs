@@ -2923,6 +2923,25 @@ pub fn jet_scheduler_select_int_channels<T: Send>(
     )
 }
 
+/// D-CONC-CHAN1: the tagged arm result used by subjectless readiness tables.
+/// Channel/timer registration, arm choice, close, and cancellation stay in
+/// this Prelude door; AOT and JIT only marshal their endpoint handles here.
+pub fn jet_scheduler_select_int_channels_tagged(
+    channels: &[JetSchedulerChannel<i64>],
+    after_ns: Vec<i64>,
+) -> (i64, Option<i64>) {
+    let recvs: Vec<_> = channels.iter().map(|channel| channel.select_inner()).collect();
+    let after_ms = after_ns
+        .into_iter()
+        .map(|ns| jet_task_delay_ms_defaulted(jet_std_time_duration_to_millis(ns)))
+        .collect();
+    match jet_scheduler_select(recvs, after_ms) {
+        JetSelectOutcome::Recv { arm, value } => (arm as i64, Some(value)),
+        JetSelectOutcome::After { arm } => ((channels.len() + arm) as i64, None),
+        JetSelectOutcome::Closed => jet_scheduler_fatal("select closed"),
+    }
+}
+
 /// Submit `f` to the M:N pool and return a join handle.
 pub fn jet_scheduler_spawn<F, T>(f: F) -> JetSchedulerJoin<T>
 where

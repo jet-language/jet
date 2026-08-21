@@ -960,7 +960,6 @@ const DIAGNOSTIC_COVERAGE_ALLOWLIST: &[(&str, &str, &str)] = &[
     ("E3504", "left-only", "Tower #2093"),
     ("L0204", "left-only", "Tower #2093"),
     ("L0205", "left-only", "Tower #2093"),
-    ("L2902", "left-only", "Tower #2093"),
     ("L3102", "left-only", "Tower #2093"),
     // RIGHT-only: existing report openers for retired/reserved rows.
     ("E0060", "right-only", "Tower #2093"),
@@ -1389,6 +1388,30 @@ fn check_json_snapshots_for_edits(path: &PathBuf, failures: &mut Vec<String>) {
             if !has_applicability {
                 failures.push(format!(
                     "{}:{} — machine edit has no closed applicability grade",
+                    path.display(),
+                    line + 1
+                ));
+            }
+            let has_safety = matches!(
+                jet_foundation::JSON::json_get(&report, "fix_edits"),
+                Some(jet_foundation::JSON::JSONValue::Array(edits))
+                    if edits.iter().all(|edit| matches!(
+                        jet_foundation::JSON::json_get(edit, "safety"),
+                        Some(jet_foundation::JSON::JSONValue::String(value))
+                            if [
+                                jet_foundation::Report::FixSafety::Formatting,
+                                jet_foundation::Report::FixSafety::BehaviorPreserving,
+                                jet_foundation::Report::FixSafety::ApiChanging,
+                                jet_foundation::Report::FixSafety::TargetChanging,
+                                jet_foundation::Report::FixSafety::NeedsReview,
+                            ]
+                            .iter()
+                            .any(|grade| grade.as_str() == value.as_str())
+                    ))
+            );
+            if !has_safety {
+                failures.push(format!(
+                    "{}:{} — machine edit has no closed safety grade",
                     path.display(),
                     line + 1
                 ));

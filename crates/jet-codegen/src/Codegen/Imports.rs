@@ -257,7 +257,10 @@ pub(crate) fn update_cloneability_with_foreign_types(cx: &mut Cx, items: &[Item]
     for item in items {
         match item {
             Item::Struct(s) => {
-                if !cx.cloneable.contains(&s.name) && type_is_cloneable_struct(s, &cx.type_names) {
+                if !cx.cloneable.contains(&s.name)
+                    && type_is_cloneable_struct(s, &cx.type_names)
+                    && !cx.type_contains_secret(&Type::Named(s.name.clone()))
+                {
                     cx.cloneable.insert(s.name.clone());
                 }
                 if !cx.hashable.contains(&s.name) && type_is_hashable_struct(s, &cx.hashable) {
@@ -265,7 +268,10 @@ pub(crate) fn update_cloneability_with_foreign_types(cx: &mut Cx, items: &[Item]
                 }
             }
             Item::Enum(e) => {
-                if !cx.cloneable.contains(&e.name) && type_is_cloneable_enum(e, &cx.type_names) {
+                if !cx.cloneable.contains(&e.name)
+                    && type_is_cloneable_enum(e, &cx.type_names)
+                    && !cx.type_contains_secret(&Type::Named(e.name.clone()))
+                {
                     cx.cloneable.insert(e.name.clone());
                 }
                 if !cx.hashable.contains(&e.name) && type_is_hashable_enum(e, &cx.hashable) {

@@ -697,7 +697,7 @@ may accept; guests never mutate compiler facts or expose rustc (I2/I3).
   | `core.reflect` | Intrinsic | Compiler-owned type metadata construction. |
   | `core.regex` | Kernel | The generated regex engine exposes one shared matching and validation kernel. |
   | `core.units` | Kernel | `Prelude/Core/Measurement.rs`; all tiers marshal `(value, uncertainty)`. |
-  | `core.services` | Kernel | `ServiceAuthority.rs` and `Services.rs`; `ServicesLite` marshals values. |
+  | `core.service` | Kernel | Typed tree declarations use `Services.rs`; `ServicesLite` marshals the shipped topology slice. Mailboxes and the remaining service tree are unstarted. |
   | `core.data.sketch.cms` | Kernel | `Prelude/Core/Sketch.rs`; comptime and JIT marshal state. |
   | `core.data.sketch.hll` | Kernel | `Prelude/Core/Sketch.rs`; comptime and JIT marshal state. |
   | `core.data.sketch.reservoir` | Kernel | `Prelude/Core/Sketch.rs`; comptime and JIT marshal state. |

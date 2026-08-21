@@ -12,7 +12,8 @@ use super::core_types::{encoding_error_ty, json_error_ty, json_ty, u8_ty, unit_t
 pub fn is_polymorphic_core_special(module: &str, name: &str) -> bool {
     matches!(
         (module, name),
-        ("core.math", "abs")
+        ("core.prelude", "keep")
+            | ("core.math", "abs")
             | ("core.math", "min")
             | ("core.math", "max")
             | ("core.text.fmt", "pretty")

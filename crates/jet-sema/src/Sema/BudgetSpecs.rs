@@ -158,7 +158,7 @@ struct AttachmentCatalog {
     services: std::collections::BTreeSet<String>,
     targets: std::collections::BTreeSet<String>,
     scenes: std::collections::BTreeSet<String>,
-    benches: std::collections::BTreeSet<String>,
+    tests: std::collections::BTreeSet<String>,
 }
 
 impl AttachmentCatalog {
@@ -167,7 +167,7 @@ impl AttachmentCatalog {
         self.services.extend(other.services);
         self.targets.extend(other.targets);
         self.scenes.extend(other.scenes);
-        self.benches.extend(other.benches);
+        self.tests.extend(other.tests);
     }
 }
 
@@ -180,7 +180,7 @@ fn attachment_catalog(items: &[Item]) -> AttachmentCatalog {
                 Stmt::ScopeMember { name, .. } if name == crate::Syntax::SCOPE_TEST_MEASURE
             )) {
                 if let Some(name) = &test.name {
-                    catalog.benches.insert(name.clone());
+                    catalog.tests.insert(name.clone());
                 }
             }
             continue;
@@ -271,7 +271,7 @@ fn validate_resolution(specs: &[BudgetSpec], catalog: &AttachmentCatalog, diags:
                 "Env" => catalog.envs.contains(name),
                 "Service" => catalog.services.contains(name),
                 "Scene" => catalog.scenes.contains(name),
-                "Bench" => catalog.benches.contains(name),
+                "Test" => catalog.tests.contains(name),
                 "Target" => catalog.targets.contains(name)
                     || (spec.metric.starts_with("CompileTime(") && provider_kind(&spec.provider) == "CompilerProbe"),
                 _ => true,
@@ -284,8 +284,8 @@ fn validate_resolution(specs: &[BudgetSpec], catalog: &AttachmentCatalog, diags:
         if let Some((kind, name)) = named_key(&spec.provider) {
             let found = match kind {
                 "BuildArtifact" => catalog.targets.contains(name) || name == "Package",
-                "AllocationProbe" => catalog.services.contains(name) || catalog.scenes.contains(name) || catalog.benches.contains(name),
-                "BenchMeasurement" => catalog.benches.contains(name),
+                "AllocationProbe" => catalog.services.contains(name) || catalog.scenes.contains(name) || catalog.tests.contains(name),
+                "BenchMeasurement" => catalog.tests.contains(name),
                 "ServiceProbe" => catalog.services.contains(name),
                 "SceneProbe" => catalog.scenes.contains(name),
                 "CompilerProbe" => true,
@@ -521,10 +521,10 @@ fn elaborate(role: &str, entry: &BudgetDecl, workloads: &BTreeMap<String, Compil
 }
 
 fn closed_scope(name: &str, expr: &Expr) -> Result<String, Diagnostic> {
-    let key = enum_key(expr).ok_or_else(|| invalid(name, "`scope` must be one closed scope value", "use `.Package`, `.Target(name)`, `.Env(name)`, `.Service(name)`, `.Scene(name)`, or `.Bench(name)`", expr.span()))?;
+    let key = enum_key(expr).ok_or_else(|| invalid(name, "`scope` must be one closed scope value", "use `.Package`, `.Target(name)`, `.Env(name)`, `.Service(name)`, `.Scene(name)`, or `.Test(name)`", expr.span()))?;
     match (enum_variant(expr).as_deref(), named_key(&key)) {
         (Some("Package"), None) => Ok(key),
-        (Some("Env" | "Service" | "Scene" | "Bench" | "Target"), Some((_, value))) if !value.is_empty() => Ok(key),
+        (Some("Env" | "Service" | "Scene" | "Test" | "Target"), Some((_, value))) if !value.is_empty() => Ok(key),
         _ => Err(invalid(name, "`scope` must be one closed scope value with the required name", "use `.Package` or a named scope such as `.Service(\"api\")`", expr.span())),
     }
 }

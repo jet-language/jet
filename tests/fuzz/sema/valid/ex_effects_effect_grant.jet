@@ -1,23 +1,19 @@
-// `#Grant(caps: FS) { … }` (D-SCAP1) is the dual of `#Caps`: it GRANTS the
-// listed effect(s) into a lexical scope, binding a first-class capability handle
-// (`caps`) that authorizes the work inside. The capability is RAII-revoked at
-// scope end — the handle is bound only for the block, can't escape it (E0711),
-// and an effect the grant doesn't cover has no capability backing it (E0712).
-// The grant/revoke is a compile-time capability fact; codegen erases it to a
-// plain block (I3).
+// A named `#Caps(caps: FS) { … }` narrows and binds an Authority handle.
+// The handle is RAII-revoked at scope end and cannot escape the block (E0711);
+// an effect outside the list has no authority backing it (E0712). The
+// authority fact is compile-time only; codegen erases it to a plain block (I3).
 use core.files as fs
 
 fn run() {
     path :: "/tmp/jet_scap_grant.txt"
-    // Filesystem + console authority is granted only for the extent of this
-    // block. Like `#Caps`, the block is bounded to the granted set — every effect
-    // used inside (`FS` for the file work, `IO` for `print`) must be granted, or
-    // it has no capability (E0712). The handle `caps` may not escape (E0711).
-    #Grant(caps: FS, IO) {
+    // Filesystem + console authority is listed only for the extent of this
+    // block. Every effect used inside (`FS` for the file work, `IO` for `print`)
+    // must be in the list (E0712). The handle `caps` may not escape (E0711).
+    #Caps(caps: FS, IO) {
         fs.write(path, "granted\nthen revoked") ?? panic("write failed")
         text :: fs.read(path) ?? panic("read failed")
         print(text.to_upper())
     }
-    // Outside the grant the capability is revoked — ordinary code resumes.
+    // Outside the block the Authority is revoked — ordinary code resumes.
     print("done")
 }

@@ -134,6 +134,7 @@ impl TraitRegistry {
             let snapshot = registries.clone();
             let mut changed = false;
             for (module_idx, module) in bundle.modules.iter().enumerate() {
+                let (core_imports, _) = crate::AST::core_import_maps(&module.imports);
                 let imports: HashMap<String, usize> = module
                     .imports
                     .iter()
@@ -145,6 +146,20 @@ impl TraitRegistry {
                 changed |= registries[module_idx].compute_auto_derives_with(
                     &module.items,
                     |name, trait_name| {
+                        // D-CONFIG-ENV1: qualified core imports can remain
+                        // source-shaped until the bundle derives pass. Keep
+                        // Secret's redacted Debug bridge visible here without
+                        // treating an unrelated foreign `Secret` as supported.
+                        if trait_name == DEBUG
+                            && name.rsplit_once('.').is_some_and(|(alias, leaf)| {
+                                leaf == "Secret"
+                                    && core_imports
+                                        .get(alias)
+                                        .is_some_and(|module| module == "core.crypto")
+                            })
+                        {
+                            return Some(true);
+                        }
                         let (target, leaf) = if let Some((namespace, leaf)) =
                             name.rsplit_once("::")
                         {
@@ -158,6 +173,16 @@ impl TraitRegistry {
                             let (alias, leaf) = name.rsplit_once('.')?;
                             (*imports.get(alias)?, leaf)
                         };
+                        // D-CONFIG-ENV1: the crypto bridge supplies a redacted
+                        // JetDebug implementation for Secret. It is not a
+                        // Rust-Debug value, but records may safely derive the
+                        // Jet debug protocol around it.
+                        if name_ledger.module_alias(target) == Some("core.crypto")
+                            && leaf == "Secret"
+                            && trait_name == DEBUG
+                        {
+                            return Some(true);
+                        }
                         Some(snapshot[target].implements_trait(leaf, trait_name))
                     },
                 );
@@ -1182,6 +1207,17 @@ impl TraitRegistry {
                         })
                 }
             }
+            // D-CONFIG-ENV1: `Secret` has a shared redacted JetDebug bridge.
+            // A containing record may derive Debug even though the carrier is
+            // intentionally not Rust-Debug; the generated record body either
+            // uses the field's redaction marker or Secret's own redacted hook.
+            Type::Tagged {
+                marker: crate::AST::TagMarker::Internal(
+                    crate::AST::InternalTag::CoreCryptoNominal,
+                ),
+                inner,
+            } if trait_name == DEBUG
+                && matches!(inner.as_ref(), Type::Named(name) if name == "Secret") => true,
             Type::Tagged { inner, .. } => {
                 if matches!(trait_name, ENCODE | DECODE) {
                     false

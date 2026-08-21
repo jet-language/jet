@@ -155,7 +155,7 @@ pub const OPTION_PRIORITY_TIERS: &[&str] = &["Default", "Force", "Priority"];
 /// D-PERFBUDGET-GRAMMAR1=A: closed typed Budget vocabulary. Leading-dot enum
 /// cases use these exact spellings; no metric-key shorthand or aliases exist.
 pub const PERF_BUDGET_SCOPES: &[&str] =
-    &["Package", "Env", "Service", "Scene", "Bench", "Target"];
+    &["Package", "Env", "Service", "Scene", "Test", "Target"];
 pub const PERF_BUDGET_PROVIDERS: &[&str] = &[
     "BuildArtifact", "CompilerFacts", "AllocationProbe", "BenchMeasurement",
     "ServiceProbe", "SceneProbe", "CompilerProbe",
@@ -640,20 +640,15 @@ pub const MANIFEST_BLOCK_MEMBERS: &str = "members";
 pub const MANIFEST_BLOCK_PACKAGES: &str = "packages";
 
 /// D-TGT1/D-TGT2 (ratified 2026-06-21): a package's build targets, replacing the
-/// removed `kind:` (U10). The six shipped targets — `library` is imported for its
+/// removed `kind:` (U10). The five shipped targets — `library` is imported for its
 /// code, `executable` installs a binary on PATH, `test`/`example` build their own
-/// artifacts, `benchmark` (c80, D-TGT2) points `jet bench` at the package entry,
-/// `sandbox` (c81, D-PLUGIN1/D-DEP-WASM1) builds an isolated WASM Component Model
+/// artifacts, and `sandbox` (c81, D-PLUGIN1/D-DEP-WASM1) builds an isolated WASM Component Model
 /// module. Written as a bare keyword (`deploy: executable`, D-TGT3) or inside a
 /// `{ targets: [ … ] }` list.
 pub const TARGET_LIBRARY: &str = "library";
 pub const TARGET_EXECUTABLE: &str = "executable";
 pub const TARGET_TEST: &str = "test";
 pub const TARGET_EXAMPLE: &str = "example";
-/// D-TGT2 / c80 (ratified 2026-06-21; backend shipped 2026-06-25): the manifest
-/// target that routes `jet bench` at the package entry — same engine as `#Bench`/
-/// `jet bench file.jet`, now addressable from a `packages:` declaration.
-pub const TARGET_BENCHMARK: &str = "benchmark";
 /// D-PLUGIN1=B / D-DEP-WASM1=A (ratified 2026-06-25; backend shipped c81): a
 /// package built as `sandbox` compiles to an isolated `wasm32` Component Model
 /// module (wasmtime host, typed `.wit` contract) instead of a native binary.
@@ -667,8 +662,7 @@ pub const RETIRED_TARGET_PLUGIN: &str = "plugin";
 
 /// D-TGT2 (ratified 2026-06-21): target keywords reserved for a future increment —
 /// recognized but rejected (no backend yet) until their tooling lands.
-/// `benchmark` shipped (c80); `sandbox` shipped (c81). Empty until the next
-/// reserved target is proposed.
+/// `sandbox` shipped (c81). Empty until the next reserved target is proposed.
 pub const TARGET_RESERVED: &[&str] = &[];
 
 /// D-TGT1 (ratified 2026-06-21): the per-package field listing build targets —
@@ -698,7 +692,7 @@ pub const TARGET_FIELD_EXPORT: &str = "export";
 /// `take` rode the S10 ownership keywords, since superseded by D-CAP7's
 /// capability sigils (memory model v5: bare/`&`/`^`). `edit` and `share`
 /// never left reserved-spelling status under that word law and are not wired
-/// into the parser; check docs/spec/syntax-decisions.md's Capabilities
+/// into the parser; check docs/spec/syntax-decisions.md's Abilities
 /// section for current sigil-based capability law before reusing these.
 pub const CAPABILITY_EDIT: &str = "edit";
 pub const CAPABILITY_SHARE: &str = "share";

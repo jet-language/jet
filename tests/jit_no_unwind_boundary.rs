@@ -507,6 +507,46 @@ fn no_jit_host_address_escapes_the_generated_boundary() {
     );
 }
 
+/// #1997 criterion 9: `Concurrency.rs` is the named call-site inventory for
+/// scheduler control transfers. Its production host bodies must not grow a
+/// bare panic/expect/unwrap: those either abort below a JIT frame or bypass
+/// the shared status conversion. The test module has ordinary Rust assertions
+/// by design, so stop the scan at its `#[cfg(test)]` boundary instead of
+/// weakening the rule to an allowlist of test line numbers.
+#[test]
+fn concurrency_host_bodies_have_no_bare_panic_sites() {
+    let path = repo_root().join("crates/jet-jit/src/Concurrency.rs");
+    let source = fs::read_to_string(&path)
+        .unwrap_or_else(|error| panic!("read {path:?}: {error}"));
+    let marker = "\n#[cfg(test)]\nmod tests {";
+    let (production, _) = source.split_once(marker).unwrap_or_else(|| {
+        panic!(
+            "{path:?} lost its cfg(test) boundary; the panic-site check would scan the wrong scope"
+        )
+    });
+    let offenders: Vec<String> = production
+        .lines()
+        .enumerate()
+        .filter_map(|(index, line)| {
+            let trimmed = line.trim_start();
+            if trimmed.starts_with("//") {
+                return None;
+            }
+            (line.contains("panic!(")
+                || line.contains(".expect(")
+                || line.contains(".unwrap("))
+                .then(|| format!("Concurrency.rs:{}: {}", index + 1, line.trim()))
+        })
+        .collect();
+    assert!(
+        offenders.is_empty(),
+        "a Concurrency host body gained a bare panic site below a JIT frame; \
+         route the outcome through `wait_status`, `contain_seam_unwind`, or \
+         the generated `host_seam` boundary:\n{}",
+        offenders.join("\n")
+    );
+}
+
 #[test]
 fn the_host_fns_macro_still_generates_the_boundary() {
     let sources = jit_crate_sources();
@@ -828,4 +868,73 @@ fn a_cancelled_task_reaches_an_exit_code_on_every_tier_never_a_signal() {
     }
 
     let _ = fs::remove_dir_all(&cache_root);
+}
+
+/// #1997 criterion 8. The cancelled child is deliberately named-deopted by
+/// `core.text.casefold` in an interpolated return; its wait point therefore
+/// runs inside `jet_deopt_call` below a Cranelift frame. Cancellation must
+/// become the ordinary child status consumed by `join` and render as a Jet
+/// diagnostic with exit 70. A signal or an abort marker proves the boundary
+/// was bypassed.
+#[test]
+fn cancelled_interpreter_wait_inside_deopt_is_a_diagnostic_not_a_signal() {
+    let root = std::env::temp_dir().join(format!(
+        "jet_no_unwind_deopt_cancel_{}",
+        std::process::id()
+    ));
+    fs::create_dir_all(&root).expect("deopt cancellation fixture dir");
+    let file = root.join("cancel_deopt.jet");
+    fs::write(
+        &file,
+        r#"use core.text as text
+use core.time as time
+
+fn slow_deopt() String {
+    time.sleep(200ms)
+    return "{text.casefold("Straße")}"
+}
+
+fn run() {
+    task_handle :: task slow_deopt()
+    time.sleep(20ms)
+    task_handle.cancel()
+    print(task_handle.join() ?? panic("cancelled deopt task"))
+}
+"#,
+    )
+    .expect("write deopt cancellation fixture");
+
+    let shown = file.to_string_lossy().into_owned();
+    let cache = root.join("cache");
+    fs::create_dir_all(&cache).expect("deopt cancellation cache dir");
+    let output = jet_run(&["run", "--trace-tiers", shown.as_str()], &cache);
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+
+    assert!(
+        terminating_signal(&output.status).is_none(),
+        "deopt cancellation terminated with signal {:?}; stdout:\n{stdout}\nstderr:\n{stderr}",
+        terminating_signal(&output.status)
+    );
+    for marker in ABORT_MARKERS {
+        assert!(
+            !stderr.contains(marker),
+            "deopt cancellation escaped its boundary through `{marker}`:\n{stderr}"
+        );
+    }
+    assert_eq!(
+        output.status.code(),
+        Some(70),
+        "cancelled deopt child must reach the runtime diagnostic rail:\nstdout:\n{stdout}\nstderr:\n{stderr}"
+    );
+    assert!(
+        stderr.contains("Stop [E3001]") && stderr.contains("task cancelled"),
+        "missing cancellation runtime diagnostic:\n{stderr}"
+    );
+    assert!(
+        stderr.contains("slow_deopt") && stderr.contains("tier0 interp"),
+        "fixture did not prove the cancelled wait ran through named deopt:\n{stderr}"
+    );
+
+    let _ = fs::remove_dir_all(&root);
 }

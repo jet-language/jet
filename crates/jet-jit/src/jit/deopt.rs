@@ -3,10 +3,11 @@
 //! Deopt tier calls the SAME TIR evaluator as #777 (`TirBridge` /
 //! `install_comptime_bridge` / `run_named_func`).
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::time::Instant;
 
+use cranelift_codegen::ir::condcodes::IntCC;
 use cranelift_codegen::ir::{types, InstBuilder};
 use cranelift_frontend::{FunctionBuilder, FunctionBuilderContext};
 use cranelift_jit::JITModule;
@@ -30,23 +31,89 @@ thread_local! {
     /// current resident run. The evaluator owns cache semantics.
     static DEOPT_MEMOS: RefCell<Option<TIR::MemoState>> = const { RefCell::new(None) };
     static NATIVE_FNS: RefCell<HashMap<String, NativeFn>> = RefCell::new(HashMap::new());
+    static NATIVE_HOOK_INSTALLED: Cell<bool> = const { Cell::new(false) };
 }
 
+#[derive(Clone)]
 struct NativeFn {
     code: *const u8,
     params: Vec<Type>,
     ret: Option<Type>,
 }
 
-// SAFETY: pointers live only for the resident module lifetime on this thread.
+// SAFETY: pointers live for the resident module lifetime; the scheduler drains
+// workers before that module is torn down.
 unsafe impl Send for NativeFn {}
 unsafe impl Sync for NativeFn {}
+
+/// Deopt state belongs to one resident run, but scheduler workers are not the
+/// thread that installed the run's TLS. Carry the state into every JIT task so
+/// a worker's `jet_deopt_call` sees the same checked program and memo carrier.
+#[derive(Clone, Default)]
+pub(crate) struct DeoptState {
+    /// Address is only used while the owning resident invoke is alive.
+    program: Option<usize>,
+    names: Vec<String>,
+    memos: Option<TIR::MemoState>,
+    native_fns: HashMap<String, NativeFn>,
+    native_hook_installed: bool,
+}
+
+pub(crate) struct DeoptStateGuard {
+    previous: DeoptState,
+}
+
+impl Drop for DeoptStateGuard {
+    fn drop(&mut self) {
+        apply_deopt_state(std::mem::take(&mut self.previous));
+    }
+}
+
+fn apply_deopt_state(state: DeoptState) {
+    let DeoptState {
+        program,
+        names,
+        memos,
+        native_fns,
+        native_hook_installed,
+    } = state;
+    DEOPT_PROGRAM
+        .with(|slot| *slot.borrow_mut() = program.map(|address| address as *const JitProgram));
+    DEOPT_NAMES.with(|slot| *slot.borrow_mut() = names);
+    DEOPT_MEMOS.with(|slot| *slot.borrow_mut() = memos);
+    NATIVE_FNS.with(|slot| *slot.borrow_mut() = native_fns);
+    NATIVE_HOOK_INSTALLED.with(|slot| slot.set(native_hook_installed));
+    TIR::set_native_call_hook(if native_hook_installed {
+        Some(native_call_hook)
+    } else {
+        None
+    });
+}
+
+pub(crate) fn capture_deopt_state() -> DeoptState {
+    DeoptState {
+        program: DEOPT_PROGRAM.with(|slot| slot.borrow().map(|program| program as usize)),
+        names: DEOPT_NAMES.with(|slot| slot.borrow().clone()),
+        memos: DEOPT_MEMOS.with(|slot| slot.borrow().clone()),
+        native_fns: NATIVE_FNS.with(|slot| slot.borrow().clone()),
+        native_hook_installed: NATIVE_HOOK_INSTALLED.with(Cell::get),
+    }
+}
+
+/// Install a parent task's deopt state on a scheduler worker. The guard
+/// restores the worker's prior state because the worker is reused.
+pub(crate) fn install_deopt_state(state: DeoptState) -> DeoptStateGuard {
+    let previous = capture_deopt_state();
+    apply_deopt_state(state);
+    DeoptStateGuard { previous }
+}
 
 pub(crate) fn clear_deopt_state() {
     DEOPT_PROGRAM.with(|s| *s.borrow_mut() = None);
     DEOPT_NAMES.with(|s| s.borrow_mut().clear());
     DEOPT_MEMOS.with(|s| *s.borrow_mut() = None);
     NATIVE_FNS.with(|s| s.borrow_mut().clear());
+    NATIVE_HOOK_INSTALLED.with(|s| s.set(false));
     TIR::set_native_call_hook(None);
 }
 
@@ -93,6 +160,7 @@ pub(crate) fn register_native_fn(name: String, code: *const u8, tir: &TFunc) {
 }
 
 pub(crate) fn install_native_hook() {
+    NATIVE_HOOK_INSTALLED.with(|s| s.set(true));
     TIR::set_native_call_hook(Some(native_call_hook));
 }
 
@@ -449,6 +517,38 @@ pub(crate) fn lower_deopt_stub(
         }
         let host_ref = module.declare_func_in_func(host.deopt_call, b.func);
         let call = b.ins().call(host_ref, &args);
+        // `jet_deopt_call` converts an interpreter unwind into the tier's
+        // status channel. A deopt stub is also a direct task entry, so it has
+        // no caller-side trap poll to observe that status before returning.
+        let trapped_ref = module.declare_func_in_func(host.is_trapped, b.func);
+        let trapped_call = b.ins().call(trapped_ref, &[]);
+        let trapped = b.inst_results(trapped_call)[0];
+        let pending_ref = module.declare_func_in_func(host.conc.pending_exit_status, b.func);
+        let pending_call = b.ins().call(pending_ref, &[]);
+        let pending = b.inst_results(pending_call)[0];
+        let status = b.ins().bor(trapped, pending);
+        let interrupted = b.ins().icmp_imm(IntCC::NotEqual, status, 0);
+        let interrupted_block = b.create_block();
+        let continue_block = b.create_block();
+        b.ins()
+            .brif(interrupted, interrupted_block, &[], continue_block, &[]);
+        b.switch_to_block(interrupted_block);
+        b.seal_block(interrupted_block);
+        if let Some(ret) = &tir.ret {
+            if let Some(ct) = meta.clif_ty(ret) {
+                let zero = match ct {
+                    types::I64 | types::I8 | types::I32 => b.ins().iconst(ct, 0),
+                    _ => return Err(format!("{}: unexpected return clif type {ct}", tir.name)),
+                };
+                b.ins().return_(&[zero]);
+            } else {
+                b.ins().return_(&[]);
+            }
+        } else {
+            b.ins().return_(&[]);
+        }
+        b.switch_to_block(continue_block);
+        b.seal_block(continue_block);
         if let Some(ret) = &tir.ret {
             if let Some(ct) = meta.clif_ty(ret) {
                 let raw = b.inst_results(call)[0];

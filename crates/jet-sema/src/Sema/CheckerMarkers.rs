@@ -258,7 +258,6 @@ fn static_product_site(site: crate::Policy::RuleSite) -> bool {
             | crate::Policy::RuleSite::Field
             | crate::Policy::RuleSite::Variant
             | crate::Policy::RuleSite::Test
-            | crate::Policy::RuleSite::Bench
     )
 }
 

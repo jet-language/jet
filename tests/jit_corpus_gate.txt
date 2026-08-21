@@ -9,6 +9,10 @@
 # non-zero, so NO tier comparison ran for the stem. expected_exit means one thing
 # and one thing only — the golden itself expects a non-zero exit. oracle_unavailable
 # is a HOST fact (no rustc), so it carries no ratchet and says nothing about a stem.
+# A resident_jit or deopt_interp row may carry `interpreter_refused: CODE`. That
+# row proves AOT==default tiered plus its recorded backend; no interpreter output
+# comparison happened. A resident_jit or deopt_interp row without that marker
+# includes the interpreter compare.
 #
 # That invariant is enforced, not merely stated (#2013). CORPUS_GATE_ROW_FLOOR
 # and CORPUS_GATE_UNCLASSIFIED_CEILING in tests/dev_parts/support.rs pin how many
@@ -19,15 +23,13 @@
 # both with no run at all.
 #
 # Never hand-write a classification: a row states an OBSERVED tier. Regenerate with
-#   JET_DUMP_CORPUS_GATE=1 JET_WRITE_CORPUS_GATE=1 cargo test --test dev_corpus_gate \
-#     example_corpus_strict_jit_aot_differential_gate -- --exact --nocapture
+#   JET_CORPUS_GATE_REPORT_DIR=jit-aot-parity-report JET_WRITE_CORPUS_GATE=1 \
+#     bash tools/ci/jit-aot-parity.sh
 
 frontend_rejected:
   concurrency/parallel_scan: E0113: `run` promises to return Unit ? Err, but this `return` is empty
   concurrency/parallel_scan_expert: E0113: `run` promises to return Unit ? Err, but this `return` is empty
-  crypto/vault_keys: E0740: `run` uses the effect `Panic`, which its signature doesn't allow
   crypto/vault_secret: E0510: `core.crypto.vault.get` requires an audited `#Unsafe` region; E0107: nothing named `x` exists here
-  io/db_read_footprint: E0740: `person_count` uses the effect `Panic`, which its signature doesn't allow
   io/watcher: E0113: `run` promises to return Unit ? Err, but this `return` is empty
   memory/pin: E0106: the name `Queue` is built in and can't be redefined; E0119: there's no type called `Queue`
   memory/shared_guard_queue: E1101: `changed` cannot cross the `task capture` boundary: the value writes shared state
@@ -45,7 +47,6 @@ frontend_rejected:
   net/ws_echo: E2402: `?` can't convert `HTTPError` into `Err` — no declared conversion exists; E2402: `?` can't convert `WsError` into `Err` — no declared conversion exists; E0311: `text` isn't a method on this value; E2402: `?` can't convert `RangeError` into `Err` — no declared conversion exists; E2402: `?` can't convert `TaskFailure` into `Err` — no declared conversion exists
   serde/csv_typed: E2402: `?` can't convert `[FieldError]` into `Err` — no declared conversion exists; E0107: nothing named `s` exists here
   serde/datatree_accessors: E2402: `?` can't convert `JSONError` into `Err` — no declared conversion exists; E0311: `field` isn't a method on this value; E0311: `field` isn't a method on this value; E0311: `field` isn't a method on this value
-  serde/decode_traced: E2402: `?` can't convert `[FieldError]` into `Err` — no declared conversion exists; E2402: `?` can't convert `[FieldError]` into `Err` — no declared conversion exists; E2402: `?` can't convert `[FieldError]` into `Err` — no declared conversion exists; E0302: `.id` only works on struct and tuple values; E0302: `.id` only works on struct and tuple values; E0302: `.display_name` only works on struct and tuple values; E0302: `.verified` only works on struct and tuple values; E0107: nothing named `step` exists here; E2402: `?` can't convert `[FieldError]` into `Err` — no declared conversion exists
   serde/encoding: E2402: `?` can't convert `JSONError` into `Err` — no declared conversion exists; E2402: `?` can't convert `JSONError` into `Err` — no declared conversion exists; E2402: `?` can't convert `JSONError` into `Err` — no declared conversion exists
   serde/encoding_breadth: E2402: `?` can't convert `JSONError` into `Err` — no declared conversion exists; E2402: `?` can't convert `EncodingError` into `Err` — no declared conversion exists; E2402: `?` can't convert `JSONError` into `Err` — no declared conversion exists; E2402: `?` can't convert `XMLError` into `Err` — no declared conversion exists; E2402: `?` can't convert `CBORError` into `Err` — no declared conversion exists; E2402: `?` can't convert `CBORError` into `Err` — no declared conversion exists; E2402: `?` can't convert `EncodingError` into `Err` — no declared conversion exists
   serde/encoding_cbor_stream: E2402: `?` can't convert `IOError` into `Err` — no declared conversion exists; E2402: `?` can't convert `EncodingError` into `Err` — no declared conversion exists; E0114: `write_catalog` promises to return Unit ? Err, but a path can reach the end without `return`; E2402: `?` can't convert `IOError` into `Err` — no declared conversion exists; E2402: `?` can't convert `IOError` into `Err` — no declared conversion exists; E2402: `?` can't convert `EncodingError` into `Err` — no declared conversion exists
@@ -325,7 +326,7 @@ resident_jit:
   memory/expiring_secret
   memory/gc_cyclic
   memory/local_cache
-  memory/no_alloc_policy
+  memory/effect_denials
   memory/owner_backed_views
   memory/ownership
   memory/parameter_modes
@@ -381,7 +382,7 @@ resident_jit:
   serde/validate
   syntax/maturity_tags
   syntax/trailing_block
-  text/bigint
+  text/int_exact
   text/dates
   text/datetime
   text/decimal

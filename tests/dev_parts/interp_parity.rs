@@ -18,7 +18,8 @@ fn interpreter_matches_compiled_binary() {
     }
     let dir = std::env::temp_dir().join(format!("jet_dev_diff_{}", std::process::id()));
     fs::create_dir_all(&dir).unwrap();
-    let (_, _, manifested_divergences) = parse_jit_gap_manifest();
+    // No persistent parity exceptions: every observed divergence fails.
+    let manifested_divergences = Vec::new();
     let stats =
         run_interpreter_battery_parallel(interpreter_example_stems(), dir, manifested_divergences);
     eprintln!(

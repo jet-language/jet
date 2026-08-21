@@ -13,8 +13,16 @@ question it answers.
 | --- | --- | --- | --- | --- |
 | Live scheduler | What runs, waits, or queues now? | `jet run app.jet --observe`, then `jet inspect live <pid>` | `--observe` publishes a bounded snapshot. `--once` and `--json` project that snapshot. | `jet-observe-<pid>.json`, `schema_version: 1`. No shared recorder or envelope: live state has a freshness bound, process identity check, and no history. |
 | GC promotions | Which allocations enter automatic memory management, and what ownership rewrite helps? | `jet run app.jet --gc-trace`, then `jet gc report` | `--gc-trace` records promotion evidence. | `.jet/gc/trace-v1.json` uses `jet.gc.trace` v1. `jet gc report` emits `jet.gc.report` v1. No shared envelope: the report requires complete promotion and identity evidence and rejects dropped rows. |
-| Wall-clock session | Which symbols consume wall time, CPU, task, lock, or I/O time? | `jet perf run app.jet`, then `jet perf view <trace.jettrace>` | `jet perf run`, `jet perf test`, `jet perf bench`, and `jet perf attach` record sessions. The ratified user-verb on-ramp is `--record=<name>`. | `.jettrace` uses the shared `jet.trace` v1 envelope. This is the historical recorder home. |
+| Wall-clock session | Which symbols consume wall time, CPU, task, lock, or I/O time? | `jet perf run app.jet`, then `jet perf view <trace.jettrace>` | `jet perf run`, `jet perf test`, and `jet perf attach` record sessions. The ratified user-verb on-ramp is `--record=<name>`. | `.jettrace` uses the shared `jet.trace` v1 envelope. This is the historical recorder home. |
 | Browser rows | Which browser, WebAssembly, or DOM rows consume time? | `jet dev --target=web`, then `jet perf attach <pid>` | The dev server sends payload-free relay rows. `jet perf attach` requests collection. | The relay uses `jet.browser.relay.v1` as transport. `jet perf attach` maps rows into `.jettrace` and `jet.trace` v1. The transport stays separate because it is not a user report or second artifact. |
+
+`jet perf export <trace.jettrace> --chrome` writes Chrome Trace Event JSON. Open
+the output in Perfetto UI or `chrome://tracing`. Captured wall/cpu, allocation,
+browser, task-span, I/O, lock, and native rows become complete (`X`) events;
+process, domain, and task lanes use metadata (`M`) events. Unavailable states,
+async flows, counters, screenshots, and source-map events remain outside this
+projection. `--pprof` and `--otel` remain Jet JSON projections, not wire-format
+exports.
 
 ## Recorder boundary
 

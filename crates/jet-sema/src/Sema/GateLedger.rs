@@ -504,13 +504,13 @@ fn visit_statement_gates(source: &str, body: &[Stmt], ledger: &mut GateLedger) {
                 "ambient comptime effect gate",
                 if reason.is_some() { "recorded" } else { "missing" },
             )),
-            Stmt::Grant { caps, span, .. } => ledger.push(source_entry(
+            Stmt::Caps { caps, span, .. } => ledger.push(source_entry(
                 GateKind::DependencyGrant,
                 "security",
                 "block",
                 source,
                 *span,
-                "#grant",
+                "#Caps",
                 None,
                 &format!(
                     "authority: {}",

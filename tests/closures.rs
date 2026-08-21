@@ -45,7 +45,7 @@ fn bump(box: Shared<Box>) {
 }
 
 fn run() {
-    box :: shared Box.{n: 0}
+    box :: shared Box{n: 0}
     t :: task bump(box)
     t.join() ?? panic("task failed")
     print(box.n)
@@ -269,7 +269,7 @@ fn run() {
     jet::compile(src).expect("sort_by lambda should compile");
 }
 
-// D-ITER1: lazy iterator adapter set.
+// D-ITER1 / D-CORE-EAGER2: adapter receiver split.
 #[test]
 fn iter_adapters_compile() {
     let src = r#"
@@ -289,7 +289,10 @@ fn run() {
     print(words.min_by((w: String) => w.len()))
     print(words.max_by((w: String) => w.len()))
     nested := [[1, 2], [3, 4]]
-    print(nested.flat_map((xs: [Int]) => xs).to_list())
+    print(nested.flatten())
+    print(nested.lazy().flatten().to_list())
+    print(nested.flat_map((xs: [Int]) => xs))
+    print(nested.lazy().flat_map((xs: [Int]) => xs).to_list())
 }
 "#;
     let out = jet::compile(src).expect("D-ITER1 adapters should compile");
@@ -319,8 +322,20 @@ fn run() {
         "take_while should lower lazily"
     );
     assert!(
+        out.rust.contains("jet_list_flat_map"),
+        "concrete List.flat_map should lower eagerly"
+    );
+    assert!(
+        out.rust.contains("jet_list_flatten"),
+        "concrete List.flatten should lower eagerly"
+    );
+    assert!(
+        out.rust.contains("jet_iter_flatten"),
+        "`.lazy().flatten` should lower lazily"
+    );
+    assert!(
         out.rust.contains("jet_iter_flat_map"),
-        "flat_map should lower lazily"
+        "`.lazy().flat_map` should lower lazily"
     );
 }
 

@@ -522,7 +522,7 @@ impl<'a> Parser<'a> {
             matches!(
                 name,
                 Syntax::KW_TEST
-                    | Syntax::KW_BENCH
+                    | "Bench"
                     | Syntax::KW_UNSAFE
                     | Syntax::KW_REACTIVE
                     | Syntax::KW_PURE

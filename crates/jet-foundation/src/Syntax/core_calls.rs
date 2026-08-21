@@ -653,6 +653,11 @@ impl CoreCallRecord {
 
 /// Every Core call whose form is a plain symbol call.
 pub const CORE_CALLS: &[CoreCallRecord] = &[
+    // D-BENCH-KEEP1=A: one generic identity sink. AOT projects this row to
+    // the Prelude black-box kernel; resident tiers preserve the same identity
+    // through their marshalling adapters.
+    CoreCallRecord::new("core.prelude", "keep", "jet_keep", true, &[false])
+        .without_direct_jit(),
     CoreCallRecord::new("core.mem", "volatile_read", "std::ptr::read_volatile", false, &[false])
         .without_direct_aot(),
     CoreCallRecord::new("core.mem", "volatile_write", "std::ptr::write_volatile", false, &[false, false])
@@ -1600,6 +1605,7 @@ pub const CORE_CALLS: &[CoreCallRecord] = &[
     CoreCallRecord::receiver(&["Decimal"], "add", &[false]),
     CoreCallRecord::receiver(&["Decimal"], "sub", &[false]),
     CoreCallRecord::receiver(&["Decimal"], "mul", &[false]),
+    CoreCallRecord::receiver(&["Decimal"], "equal", &[false]),
     CoreCallRecord::receiver(&["ZonedDateTime"], "date", &[]),
     CoreCallRecord::receiver(&["ZonedDateTime"], "time", &[]),
     CoreCallRecord::receiver(&["ZonedDateTime"], "offset_seconds", &[]),

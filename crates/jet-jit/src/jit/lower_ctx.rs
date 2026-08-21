@@ -4993,19 +4993,23 @@ impl LowerCtx<'_, '_> {
                             } else {
                                 rhs
                             };
-                            let setter_id = match &field_ty {
-                                Type::Int => self.host.struct_set_i64,
-                                Type::Float => self.host.struct_set_f64,
-                                Type::Bool => self.host.struct_set_bool,
-                                Type::Char => self.host.struct_set_char,
-                                Type::String => self.host.struct_set_str,
-                                other if clif_ty(other) == Some(types::I64) => {
-                                    self.host.struct_set_i64
-                                }
-                                other => {
-                                    return Err(format!(
-                                        "jit pool field assignment type unsupported: {other:?}"
-                                    ))
+                            let setter_id = if self.is_record_storage_type(&field_ty) {
+                                self.host.struct_set_record
+                            } else {
+                                match &field_ty {
+                                    Type::Int => self.host.struct_set_i64,
+                                    Type::Float => self.host.struct_set_f64,
+                                    Type::Bool => self.host.struct_set_bool,
+                                    Type::Char => self.host.struct_set_char,
+                                    Type::String => self.host.struct_set_str,
+                                    other if clif_ty(other) == Some(types::I64) => {
+                                        self.host.struct_set_i64
+                                    }
+                                    other => {
+                                        return Err(format!(
+                                            "jit pool field assignment type unsupported: {other:?}"
+                                        ))
+                                    }
                                 }
                             };
                             let field_index = self.b.ins().iconst(types::I64, field_index as i64);
@@ -5053,19 +5057,23 @@ impl LowerCtx<'_, '_> {
                             } else {
                                 rhs
                             };
-                            let host_id = match &field_ty {
-                                Type::Int => self.host.struct_set_i64,
-                                Type::Float => self.host.struct_set_f64,
-                                Type::Bool => self.host.struct_set_bool,
-                                Type::Char => self.host.struct_set_char,
-                                Type::String => self.host.struct_set_str,
-                                other if clif_ty(other) == Some(types::I64) => {
-                                    self.host.struct_set_i64
-                                }
-                                other => {
-                                    return Err(format!(
-                                        "jit field assignment type unsupported: {other:?}"
-                                    ));
+                            let host_id = if self.is_record_storage_type(&field_ty) {
+                                self.host.struct_set_record
+                            } else {
+                                match &field_ty {
+                                    Type::Int => self.host.struct_set_i64,
+                                    Type::Float => self.host.struct_set_f64,
+                                    Type::Bool => self.host.struct_set_bool,
+                                    Type::Char => self.host.struct_set_char,
+                                    Type::String => self.host.struct_set_str,
+                                    other if clif_ty(other) == Some(types::I64) => {
+                                        self.host.struct_set_i64
+                                    }
+                                    other => {
+                                        return Err(format!(
+                                            "jit field assignment type unsupported: {other:?}"
+                                        ));
+                                    }
                                 }
                             };
                             let index = self.b.ins().iconst(types::I64, index as i64);
@@ -5099,19 +5107,23 @@ impl LowerCtx<'_, '_> {
                                 } else {
                                     rhs
                                 };
-                                let host_id = match &field_ty {
-                                    Type::Int => self.host.struct_set_i64,
-                                    Type::Float => self.host.struct_set_f64,
-                                    Type::Bool => self.host.struct_set_bool,
-                                    Type::Char => self.host.struct_set_char,
-                                    Type::String => self.host.struct_set_str,
-                                    other if clif_ty(other) == Some(types::I64) => {
-                                        self.host.struct_set_i64
-                                    }
-                                    other => {
-                                        return Err(format!(
-                                            "jit pool field assignment type unsupported: {other:?}"
-                                        ))
+                                let host_id = if self.is_record_storage_type(&field_ty) {
+                                    self.host.struct_set_record
+                                } else {
+                                    match &field_ty {
+                                        Type::Int => self.host.struct_set_i64,
+                                        Type::Float => self.host.struct_set_f64,
+                                        Type::Bool => self.host.struct_set_bool,
+                                        Type::Char => self.host.struct_set_char,
+                                        Type::String => self.host.struct_set_str,
+                                        other if clif_ty(other) == Some(types::I64) => {
+                                            self.host.struct_set_i64
+                                        }
+                                        other => {
+                                            return Err(format!(
+                                                "jit pool field assignment type unsupported: {other:?}"
+                                            ))
+                                        }
                                     }
                                 };
                                 let index = self.b.ins().iconst(types::I64, index as i64);
@@ -5384,17 +5396,21 @@ impl LowerCtx<'_, '_> {
                     } else {
                         rhs
                     };
-                    let setter = match &assign.field_ty {
-                        Type::Int => self.host.struct_set_i64,
-                        Type::Float => self.host.struct_set_f64,
-                        Type::Bool => self.host.struct_set_bool,
-                        Type::Char => self.host.struct_set_char,
-                        Type::String => self.host.struct_set_str,
-                        other if clif_ty(other) == Some(types::I64) => self.host.struct_set_i64,
-                        other => {
-                            return Err(format!(
-                                "jit indexed field assignment type unsupported: {other:?}"
-                            ));
+                    let setter = if self.is_record_storage_type(&assign.field_ty) {
+                        self.host.struct_set_record
+                    } else {
+                        match &assign.field_ty {
+                            Type::Int => self.host.struct_set_i64,
+                            Type::Float => self.host.struct_set_f64,
+                            Type::Bool => self.host.struct_set_bool,
+                            Type::Char => self.host.struct_set_char,
+                            Type::String => self.host.struct_set_str,
+                            other if clif_ty(other) == Some(types::I64) => self.host.struct_set_i64,
+                            other => {
+                                return Err(format!(
+                                    "jit indexed field assignment type unsupported: {other:?}"
+                                ));
+                            }
                         }
                     };
                     let field_index = self.b.ins().iconst(types::I64, field_index as i64);
@@ -9206,6 +9222,19 @@ impl LowerCtx<'_, '_> {
                     })
                 })
             }
+            THostCall::OptionProbe { inner, kind } => {
+                in_own_frame(|| -> Result<Value, String> {
+                    match kind {
+                        TIR::TOptionProbe::Unwrap => self.lower_expr(inner),
+                        TIR::TOptionProbe::IsSome => {
+                            Err("jit option presence probe needs a resident option value".to_string())
+                        }
+                        TIR::TOptionProbe::Field(field) => {
+                            Err(format!("jit option field probe unsupported: {field}"))
+                        }
+                    }
+                })
+            }
             THostCall::TupleIndex { base, index } => {
                 in_own_frame(|| -> Result<Value, String> {
                     let handle = self.lower_expr(base)?;
@@ -12064,15 +12093,23 @@ impl LowerCtx<'_, '_> {
         ty: &Type,
     ) -> Result<(), String> {
         let index = self.b.ins().iconst(types::I64, index as i64);
-        let host = match ty {
-            Type::String => self.host.struct_set_str,
-            _ => match self.meta.clif_ty(ty).or_else(|| clif_ty(ty)) {
-            Some(kind) if kind == types::F64 => self.host.struct_set_f64,
-            Some(kind) if kind == types::I8 => self.host.struct_set_bool,
-            Some(kind) if kind == types::I32 => self.host.struct_set_char,
-            Some(kind) if kind == types::I64 => self.host.struct_set_i64,
-            other => return Err(format!("jit patch field type unsupported: {ty:?} ({other:?})")),
-            },
+        let host = if self.is_record_storage_type(ty) {
+            self.host.struct_set_record
+        } else {
+            match ty {
+                Type::String => self.host.struct_set_str,
+                _ => match self.meta.clif_ty(ty).or_else(|| clif_ty(ty)) {
+                    Some(kind) if kind == types::F64 => self.host.struct_set_f64,
+                    Some(kind) if kind == types::I8 => self.host.struct_set_bool,
+                    Some(kind) if kind == types::I32 => self.host.struct_set_char,
+                    Some(kind) if kind == types::I64 => self.host.struct_set_i64,
+                    other => {
+                        return Err(format!(
+                            "jit patch field type unsupported: {ty:?} ({other:?})"
+                        ))
+                    }
+                },
+            }
         };
         let host = self.module.declare_func_in_func(host, self.b.func);
         self.b.ins().call(host, &[handle, index, value]);
@@ -12219,6 +12256,15 @@ impl LowerCtx<'_, '_> {
     /// same boxed-handle host-struct representation (`struct_new`/
     /// `struct_set_*`). Field values are lowered in source order, not name
     /// order, while `storage_index` preserves the declaration layout (R12).
+    fn is_record_storage_type(&self, ty: &Type) -> bool {
+        match ty {
+            Type::Tuple(_) => true,
+            Type::Tagged { inner, .. } => self.is_record_storage_type(inner),
+            _ => record_type_key(ty)
+                .is_some_and(|name| self.meta.struct_layout(&name).is_some()),
+        }
+    }
+
     fn lower_record_fields<'f>(
         &mut self,
         fields: impl Iterator<Item = (&'f TExpr, usize)>,
@@ -12230,18 +12276,22 @@ impl LowerCtx<'_, '_> {
         for (value, storage_index) in values {
             let raw = self.lower_expr(value)?;
             let abi_ty = self.erase_distinct_ty(&value.ty);
-            let host_id = match &abi_ty {
-                ty if Self::is_string_abi_ty(ty) => self.host.struct_set_str,
-                Type::Int => self.host.struct_set_i64,
-                Type::Float | Type::Float32 => self.host.struct_set_f64,
-                Type::Bool => self.host.struct_set_bool,
-                Type::Char => self.host.struct_set_char,
-                other if clif_ty(other) == Some(types::I64) => self.host.struct_set_i64,
-                _ => {
-                    return Err(format!(
-                        "jit record field unsupported: {:?} (abi {:?})",
-                        value.ty, abi_ty
-                    ))
+            let host_id = if self.is_record_storage_type(&value.ty) {
+                self.host.struct_set_record
+            } else {
+                match &abi_ty {
+                    ty if Self::is_string_abi_ty(ty) => self.host.struct_set_str,
+                    Type::Int => self.host.struct_set_i64,
+                    Type::Float | Type::Float32 => self.host.struct_set_f64,
+                    Type::Bool => self.host.struct_set_bool,
+                    Type::Char => self.host.struct_set_char,
+                    other if clif_ty(other) == Some(types::I64) => self.host.struct_set_i64,
+                    _ => {
+                        return Err(format!(
+                            "jit record field unsupported: {:?} (abi {:?})",
+                            value.ty, abi_ty
+                        ))
+                    }
                 }
             };
             let idx = self
@@ -12541,12 +12591,14 @@ impl LowerCtx<'_, '_> {
             }
             CtValue::BigInt(b) => {
                 let text = b.to_string_rep();
-                let handle = self
-                    .runtime
-                    .heap
-                    .int_from_str(&text)
-                    .map_err(|e| format!("jit comptime Int: {e}"))?;
-                Ok(self.b.ins().iconst(types::I64, handle))
+                // The compile-time heap is not the resident execution heap.
+                // Materializing a spill tag here leaves the tag pointing at
+                // a slot that the run-time heap does not own. Keep the text
+                // in the transferred string table and let the resident Int
+                // host allocate the exact value in its own arena.
+                let text = self.runtime.heap.alloc_string(text);
+                let text = self.b.ins().iconst(types::I64, text);
+                Ok(self.call_host(self.host.num.int_from_str, &[text]))
             }
             CtValue::List(values) => {
                 let elem_slot = match slot {
@@ -12804,24 +12856,28 @@ impl LowerCtx<'_, '_> {
                 _ => field_ty.clone(),
             };
             let abi_ty = self.erase_distinct_ty(&concrete_ty);
-            let host_id = match &abi_ty {
-                ty if Self::is_string_abi_ty(ty) => self.host.struct_set_str,
-                Type::Int => self.host.struct_set_i64,
-                Type::Float | Type::Float32 => self.host.struct_set_f64,
-                Type::Bool => self.host.struct_set_bool,
-                Type::Char => self.host.struct_set_char,
-                other if clif_ty(other) == Some(types::I64) => self.host.struct_set_i64,
-                Type::Option(_)
-                | Type::List(_)
-                | Type::Map { .. }
-                | Type::Result { .. }
-                | Type::Named(_)
-                | Type::Tuple(_)
-                | Type::Apply { .. } => self.host.struct_set_i64,
-                other => {
-                    return Err(format!(
-                        "jit comptime struct field unsupported: {other:?}"
-                    ));
+            let host_id = if self.is_record_storage_type(field_ty) {
+                self.host.struct_set_record
+            } else {
+                match &abi_ty {
+                    ty if Self::is_string_abi_ty(ty) => self.host.struct_set_str,
+                    Type::Int => self.host.struct_set_i64,
+                    Type::Float | Type::Float32 => self.host.struct_set_f64,
+                    Type::Bool => self.host.struct_set_bool,
+                    Type::Char => self.host.struct_set_char,
+                    other if clif_ty(other) == Some(types::I64) => self.host.struct_set_i64,
+                    Type::Option(_)
+                    | Type::List(_)
+                    | Type::Map { .. }
+                    | Type::Result { .. }
+                    | Type::Named(_)
+                    | Type::Tuple(_)
+                    | Type::Apply { .. } => self.host.struct_set_i64,
+                    other => {
+                        return Err(format!(
+                            "jit comptime struct field unsupported: {other:?}"
+                        ));
+                    }
                 }
             };
             let idx = self.b.ins().iconst(types::I64, i as i64);
@@ -14124,6 +14180,13 @@ impl LowerCtx<'_, '_> {
                         return in_own_frame(|| -> Result<Value, String> {
                             return self.lower_compute_transform_call(method, args);
                         });
+                    }
+                    // D-BENCH-KEEP1=A: Cranelift preserves the shared Prelude
+                    // identity semantics. The generic AOT black-box ABI cannot
+                    // be one fixed host signature for every Jet value, so this
+                    // tier only marshals the value through unchanged.
+                    if module == "core.prelude" && method == "keep" && args.len() == 1 {
+                        return self.lower_expr(&args[0]);
                     }
                     // D-INTBIG1: the generic Core row is the fixed-width fallback
                     // for core.math. Let the exact Int path below select the
@@ -18085,14 +18148,21 @@ impl LowerCtx<'_, '_> {
                     for (duration, value) in afters {
                         let duration_ns = self.lower_expr(duration)?;
                         after_flat.push(duration_ns);
-                        after_flat.push(match value {
-                            Some(v) => self.lower_expr(v)?,
-                            None => self.b.ins().iconst(types::I64, 0),
-                        });
+                        if !matches!(&expr.ty, Type::Tuple(_)) {
+                            after_flat.push(match value {
+                                Some(v) => self.lower_expr(v)?,
+                                None => self.b.ins().iconst(types::I64, 0),
+                            });
+                        }
                     }
                     let recv_list = self.lower_i64_value_list(&recv_vals)?;
                     let after_list = self.lower_i64_value_list(&after_flat)?;
-                    let status = self.call_host(self.host.conc.select_wait, &[recv_list, after_list]);
+                    let host = if matches!(&expr.ty, Type::Tuple(_)) {
+                        self.host.conc.select_wait_tagged
+                    } else {
+                        self.host.conc.select_wait
+                    };
+                    let status = self.call_host(host, &[recv_list, after_list]);
                     Ok(self.finish_wait_call(status))
                 })
             }
@@ -18672,6 +18742,24 @@ impl LowerCtx<'_, '_> {
                             return Ok(self.b.ins().select(equal, equal_disc, unequal));
                         });
                     }
+                    // D-AUTHORITY-NAME1=A / D-AUTHORITY-WORD2=E: the host
+                    // only marshals the heap handle. The shared Prelude owns
+                    // the holds relation and the E0712 denial.
+                    if matches!(&recv.ty, Type::Named(name) if name == jet_foundation::Syntax::TYPE_ABILITIES)
+                        && args.len() == 1
+                        && matches!(method.name.as_str(), "with" | "without")
+                    {
+                        let authority = self.lower_expr(recv)?;
+                        let requested = self.lower_call_arg(&args[0])?;
+                        let host = if method.name == "with" {
+                            self.host.coll.authority_with
+                        } else {
+                            self.host.coll.authority_without
+                        };
+                        let value = self.call_host(host, &[authority, requested]);
+                        self.emit_trap_check()?;
+                        return Ok(value);
+                    }
                     if matches!(&recv.ty, Type::TraitObject(_)) {
                         return in_own_frame(|| -> Result<Value, String> {
                             return self.lower_trait_object_method(recv, method, args, &expr.ty);
@@ -18989,27 +19077,16 @@ impl LowerCtx<'_, '_> {
                             return Ok(self.call_host(self.host.memory.shared_new, &[value]));
                         });
                     }
-                    // D-AUTHORITY-NAME1=A: the JIT carries Authority as the
-                    // ordinary heap-record handle returned by the same static
-                    // Prelude construction seam. The rights payload is private
-                    // to that carrier until the narrowing slice lands.
-                    let is_authority_workspace = method.name == "workspace"
+                    // D-AUTHORITY-NAME1=A / D-AUTHORITY-WORD2=E: the JIT
+                    // marshals the ordinary abilities value through the shared
+                    // Prelude host adapter; it does not re-encode its defaults.
+                    let is_abilities_workspace = method.name == "workspace"
                         && args.is_empty()
                         && prelude_path.is_some_and(|path| {
                             path == "JetAuthority" || path.ends_with("::JetAuthority")
                     });
-                    if is_authority_workspace {
-                        let string_kind = self.b.ins().iconst(types::I64, 1);
-                        let rights = self
-                            .call_host(self.host.coll.sorted_set_new, &[string_kind]);
-                        let fields = self.b.ins().iconst(types::I64, 1);
-                        let handle = self.call_host(self.host.struct_new, &[fields]);
-                        let set = self
-                            .module
-                            .declare_func_in_func(self.host.struct_set_i64, self.b.func);
-                        let zero = self.b.ins().iconst(types::I64, 0);
-                        self.b.ins().call(set, &[handle, zero, rights]);
-                        return Ok(handle);
+                    if is_abilities_workspace {
+                        return Ok(self.call_host(self.host.coll.authority_workspace, &[]));
                     }
                     // D-ENCSTREAM-SURFACE1: `EncodingLimits.safe()` — fixed defaults, no host.
                     let is_encoding_limits_safe = method.name == "safe"
@@ -19479,6 +19556,7 @@ impl LowerCtx<'_, '_> {
                         ("Decimal", "add") => self.host.num.decimal_add,
                         ("Decimal", "sub") => self.host.num.decimal_sub,
                         ("Decimal", "mul") => self.host.num.decimal_mul,
+                        ("Decimal", "equal") => self.host.num.decimal_equal,
                         ("Decimal", "to_string") => self.host.num.decimal_to_string,
                         ("Fraction", "from_parts") => self.host.num.fraction_from_parts,
                         ("Fraction", "add") => self.host.num.fraction_add,
@@ -23607,17 +23685,21 @@ impl LowerCtx<'_, '_> {
         let handle = self.call_host(self.host.struct_new, &[n]);
         for (i, (payload, fty)) in [pa, pb].into_iter().zip(field_tys.iter()).enumerate() {
             let idx = self.b.ins().iconst(types::I64, i as i64);
-            let host_id = match fty {
-                Type::Int => self.host.struct_set_i64,
-                Type::Float => self.host.struct_set_f64,
-                Type::Bool => self.host.struct_set_bool,
-                Type::Char => self.host.struct_set_char,
-                Type::String => self.host.struct_set_str,
-                other if clif_ty(other) == Some(types::I64) => self.host.struct_set_i64,
-                other => {
-                    return Err(format!(
-                        "jit Option.zip pair field unsupported on `{tuple_struct}`: {other:?}"
-                    ));
+            let host_id = if self.is_record_storage_type(fty) {
+                self.host.struct_set_record
+            } else {
+                match fty {
+                    Type::Int => self.host.struct_set_i64,
+                    Type::Float => self.host.struct_set_f64,
+                    Type::Bool => self.host.struct_set_bool,
+                    Type::Char => self.host.struct_set_char,
+                    Type::String => self.host.struct_set_str,
+                    other if clif_ty(other) == Some(types::I64) => self.host.struct_set_i64,
+                    other => {
+                        return Err(format!(
+                            "jit Option.zip pair field unsupported on `{tuple_struct}`: {other:?}"
+                        ));
+                    }
                 }
             };
             let set_ref = self.module.declare_func_in_func(host_id, self.b.func);
@@ -24946,6 +25028,7 @@ impl LowerCtx<'_, '_> {
                         ("Decimal", "add") => (self.host.num.decimal_add, 1),
                         ("Decimal", "sub") => (self.host.num.decimal_sub, 1),
                         ("Decimal", "mul") => (self.host.num.decimal_mul, 1),
+                        ("Decimal", "equal") => (self.host.num.decimal_equal, 1),
                         ("Decimal", "to_string") => (self.host.num.decimal_to_string, 0),
                         ("Fraction", "add") => (self.host.num.fraction_add, 1),
                         ("Fraction", "sub") => (self.host.num.fraction_sub, 1),
@@ -25439,7 +25522,7 @@ impl LowerCtx<'_, '_> {
                         "detached" => (self.host.process.spec_detached, 0),
                         "terminal" if args.is_empty() => (self.host.process.spec_terminal, 0),
                         "terminal" => (self.host.process.spec_terminal_with_policy, 1),
-                        "capabilities" => (self.host.process.spec_capabilities, 0),
+                        "abilities" => (self.host.process.spec_abilities, 0),
                         "run" => (self.host.process.spec_run, 0),
                         "run_checked" => (self.host.process.spec_run_checked, 0),
                         "spawn" => (self.host.process.spec_spawn, 0),

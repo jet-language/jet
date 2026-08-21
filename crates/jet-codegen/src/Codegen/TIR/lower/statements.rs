@@ -419,7 +419,6 @@ fn collect_interrupt_callback_scan(
                         | Stmt::TaskGroup { body, .. }
                         | Stmt::Layout { body, .. }
                         | Stmt::Caps { body, .. }
-                        | Stmt::Grant { body, .. }
                         | Stmt::ContextBlock { body, .. }
                         | Stmt::Live { body, .. }
                         | Stmt::AssumeDet { body, .. }
@@ -591,7 +590,6 @@ fn collect_interrupt_aliases(stmts: &[Stmt], aliases: &mut Vec<(String, String)>
                 | Stmt::TaskGroup { body, .. }
                 | Stmt::Layout { body, .. }
                 | Stmt::Caps { body, .. }
-                | Stmt::Grant { body, .. }
                 | Stmt::ContextBlock { body, .. }
                 | Stmt::Live { body, .. }
                 | Stmt::AssumeDet { body, .. }
@@ -771,7 +769,6 @@ fn collect_interrupt_lambda_captures(stmts: &[Stmt], captures: &mut Vec<(String,
             | Stmt::TaskGroup { body, .. }
             | Stmt::Layout { body, .. }
             | Stmt::Caps { body, .. }
-            | Stmt::Grant { body, .. }
             | Stmt::ContextBlock { body, .. }
             | Stmt::Live { body, .. }
             | Stmt::AssumeDet { body, .. }
@@ -3648,7 +3645,7 @@ fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmt
                 );
             });
         }
-        // c109 Phase 26: a `#Caps(IO) { … }` effect-restriction region (D-EFF1). `emit_stmt`'s
+        // c109 Phase 26: a `#Abilities(IO) { … }` effect-restriction region (D-EFF1). `emit_stmt`'s
         // `Stmt::Caps` arm is byte-for-byte `Stmt::Region`; effects erase at codegen (I3).
         Stmt::Caps { body, .. } => {
             return in_own_frame(|| {
@@ -3663,15 +3660,6 @@ fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmt
         // is a compile-time-only fact (authority to perform the granted effects),
         // erased here (I3); the body emits as a plain lexical `TStmt::Region`.
         // No runtime grant/revoke value, no `unsafe`.
-        Stmt::Grant { body, .. } => {
-            return in_own_frame(|| {
-                let scoped = clone_env(env);
-                return deferred_stmt(
-                    vec![LowerBody::scoped(body, scoped)],
-                    |mut lowered| TStmt::Region(lowered.pop().expect("grant body was deferred")),
-                );
-            });
-        }
         // c109 Phase 19: a `#Context(field: value) { … }` block (D-CTX1/D-DEADLINE1).
         // Resolve each field against the outer env, then lower the guarded Rust block
         // in a lexical child env.

@@ -1088,7 +1088,6 @@ impl Expr {
                 | Stmt::Region { body, .. }
                 | Stmt::Policy { body, .. }
                 | Stmt::Caps { body, .. }
-                | Stmt::Grant { body, .. }
                 | Stmt::ComptimeBlock { body, .. }
                 | Stmt::Live { body, .. }
                 | Stmt::Transact { body, .. } => walk_stmts(body, f),

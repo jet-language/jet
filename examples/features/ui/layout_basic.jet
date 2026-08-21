@@ -15,16 +15,16 @@
 // read back with `.value()`.
 fn run() {
     form :: Layout{
-        label.width >= 80.0,
-        label.right + 16.0 == input.left,
-        label.width + 16.0 + input.width == self.width
+        label.width >= Float{80.0},
+        label.right + Float{16.0} == input.left,
+        label.width + Float{16.0} + input.width == self.width
     }
     // `self.width` inside the literal vivifies the container box
     // (`form.h("form", "width")`) — set it via a soft suggestion (an edit
     // variable): required constraints always win over a suggestion, but with
     // nothing else pinning label.width, the solver settles at its tightest
     // required bound (80.0) and gives the rest of the row to input.width.
-    form.suggest(form.h("form", "width"), 300.0)
+    form.suggest(form.h("form", "width"), Float{300.0})
     label_w :: form.value(form.h("label", "width"))
     input_w :: form.value(form.h("input", "width"))
     print("label width: {label_w}", "input width: {input_w}", "feasible: {(form.is_feasible())}")

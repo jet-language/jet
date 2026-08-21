@@ -88,4 +88,4 @@ Suggested learning order:
 | `ui/` | view tree, styles, component kit, motion, a11y, reactive TUI |
 | `web/` | hybrid JS DOM + Wasm compute — see `docs/sidequests/web-backend-wasm.md` for the full example index, build commands, and unsupported-breadth list |
 | `lowlevel/` | ffi, c layout, simd, freestanding, MMIO board writes, cross-compile |
-| `tooling/` | tests, bench, debug, property tests, build profiles |
+| `tooling/` | tests, measurement, debug, property tests, build profiles |

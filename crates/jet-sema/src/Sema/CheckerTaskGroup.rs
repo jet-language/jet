@@ -552,14 +552,26 @@ impl<'a> Checker<'a> {
         }
         *recv_type_out = Some(Syntax::TYPE_TASKGROUP.to_string());
         match method {
-            Syntax::TASKGROUP_SELECT_METHOD => self.infer_taskgroup_select(args, span),
+            "select" => {
+                self.diags.push(Diagnostic::error(
+                    "E0102",
+                    "`Group.select()` is retired".to_string(),
+                    "readiness waits are subjectless `if` tables on plain endpoints".to_string(),
+                    "write `if { value, receiver :> handle(value) }`".to_string(),
+                    Some(span),
+                ));
+                for a in args.iter_mut() {
+                    self.infer(&mut a.expr);
+                }
+                None
+            }
             other => {
                 self.diags.push(Diagnostic::error(
                     "E0102",
                     format!("`Group` has no method `{other}`"),
-                    "task groups use the `task` keyword; `Group` values only support the fluent select builder"
+                    "task groups use the `task` keyword; `Group` values do not own readiness waits"
                         .to_string(),
-                    "write `task work()`, `task.all { … }`, or `task.group g { g.select().recv(ch).wait() }".to_string(),
+                    "write `task work()`, `task.all { … }`, or a subjectless readiness table".to_string(),
                     Some(span),
                 ));
                 for a in args.iter_mut() {
@@ -829,287 +841,6 @@ impl<'a> Checker<'a> {
         }
     }
 
-    fn infer_taskgroup_select(&mut self, args: &mut Vec<CallArg>, span: Span) -> Option<Type> {
-        if !args.is_empty() {
-            self.diags.push(Diagnostic::error(
-                "E0104",
-                format!(
-                    "`.select()` takes no arguments, got {} argument{}",
-                    args.len(),
-                    if args.len() == 1 { "" } else { "s" }
-                ),
-                "scoped select starts an empty fluent builder — add arms with `.recv`, `.read`, or `.after`"
-                    .to_string(),
-                "write `g.select().recv(ch).wait()`".to_string(),
-                Some(span),
-            ));
-            for a in args.iter_mut() {
-                self.infer(&mut a.expr);
-            }
-            return None;
-        }
-        Some(Type::Apply {
-            name: Syntax::TYPE_SELECT_BUILDER.to_string(),
-            args: vec![],
-        })
-    }
-
-    #[allow(dead_code)]
-    pub(crate) fn infer_select_method(
-        &mut self,
-        receiver: &mut Box<Expr>,
-        method: &str,
-        span: Span,
-        args: &mut Vec<CallArg>,
-        recv_type_out: &mut Option<String>,
-    ) -> Option<Type> {
-        let recv_ty = self.infer(receiver)?;
-        let elem = match &recv_ty {
-            Type::Apply { name, args, .. }
-                if name == Syntax::TYPE_SELECT_BUILDER && args.len() == 1 =>
-            {
-                Some(args[0].clone())
-            }
-            Type::Named(n) if n == Syntax::TYPE_SELECT_BUILDER => None,
-            _ => None,
-        };
-        *recv_type_out = Some(match &elem {
-            Some(t) => format!("{}<{}>", Syntax::TYPE_SELECT_BUILDER, t.show()),
-            None => Syntax::TYPE_SELECT_BUILDER.to_string(),
-        });
-        match method {
-            Syntax::SELECT_RECV_METHOD => self.infer_select_recv(args, span, elem.as_ref()),
-            Syntax::SELECT_AFTER_METHOD => self.infer_select_after(args, span, elem.as_ref()),
-            Syntax::SELECT_READ_METHOD => self.infer_select_read(args, span, elem.as_ref()),
-            Syntax::SELECT_WAIT_METHOD => self.infer_select_wait(args, span, elem.as_ref()),
-            other => {
-                self.diags.push(Diagnostic::error(
-                    "E0102",
-                    format!("`SelectBuilder` has no method `{other}`"),
-                    "scoped select supports `.recv(ch)`, `.read(stream)`, `.after(duration: …)`, and `.wait()`"
-                        .to_string(),
-                    "write `g.select().recv(ch).wait()`".to_string(),
-                    Some(span),
-                ));
-                for a in args.iter_mut() {
-                    self.infer(&mut a.expr);
-                }
-                None
-            }
-        }
-    }
-
-    #[allow(dead_code)]
-    fn infer_select_recv(
-        &mut self,
-        args: &mut Vec<CallArg>,
-        span: Span,
-        elem: Option<&Type>,
-    ) -> Option<Type> {
-        // D-SELECT-GENERIC1=A: the language contract is Receiver<T>, not
-        // Receiver<Int>. Codegen and every runtime tier carry this same T.
-        if args.len() != 1 {
-            self.diags.push(Diagnostic::error(
-                "E0104",
-                format!(
-                    "`.recv()` takes one receiver, got {} argument{}",
-                    args.len(),
-                    if args.len() == 1 { "" } else { "s" }
-                ),
-                "a select receive arm waits on one typed receiver".to_string(),
-                "write `.recv(rx)` where `rx` is a `Receiver<T>`".to_string(),
-                Some(span),
-            ));
-            for a in args.iter_mut() {
-                self.infer(&mut a.expr);
-            }
-            return None;
-        }
-        let ch_ty = self.infer(&mut args[0].expr)?;
-        let inner = match ch_ty {
-            Type::Apply {
-                ref name, ref args, ..
-            } if name == "Receiver" && args.len() == 1 => args[0].clone(),
-            other => {
-                self.diags.push(Diagnostic::error(
-                    "E0112",
-                    format!("`.recv()` needs a receiver, not {}", other.show()),
-                    "each select receive arm waits on a `Receiver<T>`".to_string(),
-                    "write `.recv(rx)` where `rx` came from `tasks.channel<T>()`".to_string(),
-                    Some(args[0].expr.span()),
-                ));
-                return None;
-            }
-        };
-        if let Some(prev) = elem {
-            if prev.show() != inner.show() {
-                self.diags.push(Diagnostic::error(
-                    "E0112",
-                    format!(
-                        "select receive arms must share one element type, got `{}` and `{}`",
-                        prev.show(),
-                        inner.show()
-                    ),
-                    "every `.recv()` in one select waits on the same `Receiver<T>` element type"
-                        .to_string(),
-                    "use channels with the same `T`, or split into separate selects".to_string(),
-                    Some(args[0].expr.span()),
-                ));
-                return None;
-            }
-        }
-        Some(Type::Apply {
-            name: Syntax::TYPE_SELECT_BUILDER.to_string(),
-            args: vec![inner],
-        })
-    }
-
-    #[allow(dead_code)]
-    fn infer_select_after(
-        &mut self,
-        args: &mut Vec<CallArg>,
-        span: Span,
-        elem: Option<&Type>,
-    ) -> Option<Type> {
-        if !(args.len() == 1 || args.len() == 2) {
-            self.diags.push(Diagnostic::error(
-                "E0104",
-                format!(
-                    "`.after()` takes one Duration and an optional value, got {} argument{}",
-                    args.len(),
-                    if args.len() == 1 { "" } else { "s" }
-                ),
-                "a select timer arm fires after the given Duration; mixed recv/timer selects need a typed value"
-                    .to_string(),
-                "write `.after(100ms)` or `.after(100ms, fallback)`".to_string(),
-                Some(span),
-            ));
-            for a in args.iter_mut() {
-                self.infer(&mut a.expr);
-            }
-            return None;
-        }
-        let duration_ty = self.infer(&mut args[0].expr)?;
-        if !matches!(duration_ty, Type::Named(ref n) if n == "Duration") {
-            self.diags.push(Diagnostic::error(
-                "E0112",
-                format!(
-                    "`.after(duration: …)` needs a Duration, not {}",
-                    duration_ty.show()
-                ),
-                "timer arms use the canonical Time delta".to_string(),
-                "write `.after(100ms)`".to_string(),
-                Some(args[0].expr.span()),
-            ));
-        }
-        let value_ty = if args.len() == 2 {
-            Some(self.infer(&mut args[1].expr)?)
-        } else {
-            None
-        };
-        if let (Some(prev), Some(value)) = (elem, value_ty.as_ref()) {
-            if prev.show() != value.show() {
-                self.diags.push(Diagnostic::error(
-                    "E0112",
-                    format!(
-                        "select timer value must match receive element type, got `{}` and `{}`",
-                        prev.show(),
-                        value.show()
-                    ),
-                    "one select returns one type no matter which arm wins".to_string(),
-                    "use a timer value with the same type as the receive arms".to_string(),
-                    Some(args[1].expr.span()),
-                ));
-                return None;
-            }
-        }
-        if elem.is_some() && value_ty.is_none() {
-            self.diags.push(Diagnostic::error(
-                "E0112",
-                "a timer arm mixed with receive arms needs a typed value".to_string(),
-                "otherwise the select would have no value to return when the timer wins"
-                    .to_string(),
-                "write `.after(100ms, fallback)`".to_string(),
-                Some(span),
-            ));
-            return None;
-        }
-        Some(Type::Apply {
-            name: Syntax::TYPE_SELECT_BUILDER.to_string(),
-            args: elem
-                .cloned()
-                .or(value_ty)
-                .map(|t| vec![t])
-                .unwrap_or_default(),
-        })
-    }
-
-    #[allow(dead_code)]
-    fn infer_select_read(
-        &mut self,
-        args: &mut Vec<CallArg>,
-        span: Span,
-        elem: Option<&Type>,
-    ) -> Option<Type> {
-        if args.len() != 1 {
-            self.diags.push(Diagnostic::error(
-                "E0104",
-                format!(
-                    "`.read()` takes one stream, got {} argument{}",
-                    args.len(),
-                    if args.len() == 1 { "" } else { "s" }
-                ),
-                "a select read arm waits until a TCP stream looks readable".to_string(),
-                "write `.read(conn)` where `conn` is a `TcpStream`".to_string(),
-                Some(span),
-            ));
-            for a in args.iter_mut() {
-                self.infer(&mut a.expr);
-            }
-            return None;
-        }
-        let _ = self.infer(&mut args[0].expr)?;
-        Some(match elem {
-            Some(t) => Type::Apply {
-                name: Syntax::TYPE_SELECT_BUILDER.to_string(),
-                args: vec![t.clone()],
-            },
-            None => Type::Apply {
-                name: Syntax::TYPE_SELECT_BUILDER.to_string(),
-                args: vec![],
-            },
-        })
-    }
-
-    #[allow(dead_code)]
-    fn infer_select_wait(
-        &mut self,
-        args: &mut Vec<CallArg>,
-        span: Span,
-        elem: Option<&Type>,
-    ) -> Option<Type> {
-        if !args.is_empty() {
-            self.diags.push(Diagnostic::error(
-                "E0104",
-                format!(
-                    "`.wait()` takes no arguments, got {} argument{}",
-                    args.len(),
-                    if args.len() == 1 { "" } else { "s" }
-                ),
-                "`.wait()` blocks until one select arm wins and deregisters the losers".to_string(),
-                "write `g.select().recv(ch).wait()`".to_string(),
-                Some(span),
-            ));
-            for a in args.iter_mut() {
-                self.infer(&mut a.expr);
-            }
-            return None;
-        }
-        Some(match elem {
-            Some(t) => t.clone(),
-            None => Type::Named("Unit".to_string()),
-        })
-    }
 }
 
 fn collect_task_idents(expr: &Expr, out: &mut HashSet<String>) {

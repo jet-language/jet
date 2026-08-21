@@ -356,9 +356,8 @@ pub(crate) fn eval_comptime_items(
 
 /// D-META-CONST1: resolve every declaration-side fixed-list length and enum
 /// discriminant after comptime bindings have been evaluated, but before type
-/// registration. Parser values are deliberately not special-cased here: a
-/// literal, a same-file `@` binding, and a computed expression all use the
-/// ordinary comptime evaluator.
+/// registration. Generic function measures remain symbolic until their
+/// specialization; all other declaration measures must resolve here.
 pub(crate) fn resolve_comptime_declaration_values(
     items: &mut [Item],
     base_dir: &std::path::Path,
@@ -373,6 +372,7 @@ pub(crate) fn resolve_comptime_declaration_values(
         base_dir,
         core_imports,
         diags,
+        allow_symbolic_measures: false,
     };
     resolver.resolve_items(items);
 }
@@ -384,6 +384,7 @@ struct ComptimeTypeResolver<'a> {
     base_dir: &'a std::path::Path,
     core_imports: &'a HashMap<String, String>,
     diags: &'a mut Vec<Diagnostic>,
+    allow_symbolic_measures: bool,
 }
 
 enum IntegerFailure {
@@ -593,11 +594,14 @@ impl<'a> ComptimeTypeResolver<'a> {
     }
 
     fn resolve_func(&mut self, function: &mut Func) {
+        let previous = self.allow_symbolic_measures;
+        self.allow_symbolic_measures = !function.type_params.is_empty();
         self.resolve_params(&mut function.params);
         if let Some(return_type) = &mut function.return_type {
             self.resolve_type(return_type);
         }
         self.resolve_stmts(&mut function.body);
+        self.allow_symbolic_measures = previous;
     }
 
     fn resolve_params(&mut self, params: &mut [crate::AST::Param]) {
@@ -666,22 +670,7 @@ impl<'a> ComptimeTypeResolver<'a> {
             }
             Type::FixedList { elem, len } => {
                 self.resolve_type(elem);
-                // D-META-CONST1: a same-file `@` binding is a constant, so the
-                // measure resolves against the comptime globals this pass just
-                // evaluated. Only a symbol nobody declared is an error.
-                *len = len.resolve_symbols(&|name| match self.globals.get(name) {
-                    Some(crate::Comptime::CtValue::Int(value)) => u64::try_from(*value).ok(),
-                    _ => None,
-                });
-                if len.literal_value().is_none() {
-                    self.push_constant_error(
-                        "E0963",
-                        "a fixed-size list length must resolve to a compile-time integer",
-                        "the measure named something that is not a declared constant or module value parameter",
-                        "use an integer literal, a same-file `@` constant, or a module Int value argument",
-                        crate::Diagnostics::Span::new(0, 0),
-                    );
-                }
+                self.resolve_measure(len);
             }
             Type::InlineRange { base, .. } => self.resolve_type(base),
             Type::Tagged { inner, .. } | Type::Quantity { base: inner, .. } => {
@@ -695,8 +684,27 @@ impl<'a> ComptimeTypeResolver<'a> {
             | Type::Named(_)
             | Type::TraitObject(_)
             | Type::IntN { .. }
-            | Type::Float32
-            | Type::Measure(_) => {}
+            | Type::Float32 => {}
+            Type::Measure(measure) => self.resolve_measure(measure),
+        }
+    }
+
+    /// Resolve every measure-bearing type position through the same closed
+    /// literal/module-value boundary. Generic-module templates skip this pass;
+    /// their symbols are substituted before the specialized module is visited.
+    fn resolve_measure(&mut self, measure: &mut crate::AST::Measure) {
+        *measure = measure.resolve_symbols(&|name| match self.globals.get(name) {
+            Some(crate::Comptime::CtValue::Int(value)) => u64::try_from(*value).ok(),
+            _ => None,
+        });
+        if measure.literal_value().is_none() && !self.allow_symbolic_measures {
+            self.push_constant_error(
+                "E0963",
+                "a type measure must resolve to a compile-time integer",
+                "the measure named something that is not a declared constant or module value parameter",
+                "use an integer literal, a same-file `@` constant, or a module Int value argument",
+                crate::Diagnostics::Span::new(0, 0),
+            );
         }
     }
 
@@ -774,7 +782,6 @@ impl<'a> ComptimeTypeResolver<'a> {
                 | Stmt::TaskGroup { body, .. }
                 | Stmt::Layout { body, .. }
                 | Stmt::Caps { body, .. }
-                | Stmt::Grant { body, .. }
                 | Stmt::ComptimeBlock { body, .. }
                 | Stmt::Live { body, .. }
                 | Stmt::Transact { body, .. }

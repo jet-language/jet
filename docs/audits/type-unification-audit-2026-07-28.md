@@ -119,7 +119,7 @@ type-like thing. The ontology has roughly two: runtime types and fact types.
 | Phantom | Where it lives | Who sees it |
 | --- | --- | --- |
 | `State` | `Policy.rs:546-547` rule signature (`#State(state: State)`) | E0930 signature text, `jet explain` |
-| `Capability` | `effects_surface.rs:123` (`#Grant` handle); rule sigs (`Policy.rs:535,585`) | E0711/E0712 copy |
+| `Capability` | `effects_surface.rs:123` (`#Caps` handle); rule sigs (`Policy.rs:535,585`) | E0711/E0712 copy |
 | `TaintKind` (`.Input/.PII/.Secret/.Credential`) | `Policy.rs:536`; closed set in D-TAINT1/2 | E0721/E0722 |
 | `ObligationMode` (`.Track/.Skip/.None`) | `Policy.rs:534`; D-UNSAFE-OBLIG1 | unsafe policy |
 | `PolicySetting` / `PolicyValue` | sig string `Policy.rs:526`; `PolicyValue` enum `Policy.rs:21-43`. No Rust `PolicySetting` type exists — it is rendered signature text only | `jet explain marker` |
@@ -339,7 +339,7 @@ impossible today.
 
 **Demoted half.** Typed capability handles (`Capability<FS.Read>`) were in
 an earlier draft and are withdrawn for v1. Jet's ratified authority story is
-ambient: effect rows (D-EFF1) plus lexical `#Grant` scopes (D-SCAP1) plus
+ambient: effect rows (D-EFF1) plus lexical `#Caps` scopes (D-SCAP1) plus
 package budgets (D-EFFBUDGET1). A helper that needs `FS.Read` already
 declares `=[FS.Read]=>`. Capability-passing style only pays when authority
 flows through data, which v1's no-stored-references design forecloses.

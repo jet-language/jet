@@ -18,7 +18,7 @@ impl<'a> Checker<'a> {
         span: Span,
     ) -> bool {
         let expected = match (type_name, method) {
-            ("Browser", "capabilities" | "context" | "close" | "trace" | "privacy" | "receipt")
+            ("Browser", "abilities" | "context" | "close" | "trace" | "privacy" | "receipt")
             | ("BrowserContext", "page" | "tab" | "close" | "isolated" | "user_hash")
             | ("BrowserPage", "close" | "main_frame" | "frames" | "screenshot" | "pdf"
                 | "clear_cookies")
@@ -27,7 +27,7 @@ impl<'a> Checker<'a> {
             | ("BrowserIntercept", "remove")
             | ("BrowserEvent", "kind" | "request_id" | "request_method" | "url_hash"
                 | "is_blocked" | "status_code" | "download_id" | "suggested_filename_hash")
-            | ("BrowserCapabilities", "bidi" | "cdp" | "profile")
+            | ("BrowserAbilities", "bidi" | "cdp" | "profile")
             | ("BrowserTrace", "entry_count" | "redacted" | "summary")
             | ("BrowserReceipt", "entry_count" | "redacted" | "summary" | "isolated" | "cleaned")
             | ("BrowserPrivacy", "isolated_profiles" | "redact_receipts" | "shared_profiles")
@@ -175,8 +175,8 @@ pub fn net_method_return(
             err: Box::new(Type::Named("WsError".to_string())),
         })),
         // D-BROWSER-AUTO1=A: native BiDi handles.
-        ("Browser", "capabilities") => {
-            Some(Some(Type::Named("BrowserCapabilities".to_string())))
+        ("Browser", "abilities") => {
+            Some(Some(Type::Named("BrowserAbilities".to_string())))
         }
         ("Browser", "context") => Some(Some(Type::Result {
             ok: Box::new(Type::Named("BrowserContext".to_string())),
@@ -287,8 +287,8 @@ pub fn net_method_return(
             ok: Box::new(Type::String),
             err: Box::new(Type::Named("BrowserError".to_string())),
         })),
-        ("BrowserCapabilities", "bidi" | "cdp") => Some(Some(Type::Bool)),
-        ("BrowserCapabilities", "profile") => Some(Some(Type::String)),
+        ("BrowserAbilities", "bidi" | "cdp") => Some(Some(Type::Bool)),
+        ("BrowserAbilities", "profile") => Some(Some(Type::String)),
         ("BrowserTrace", "entry_count") => Some(Some(Type::Int)),
         ("BrowserTrace", "redacted") => Some(Some(Type::Bool)),
         ("BrowserTrace", "summary") => Some(Some(Type::String)),
@@ -690,7 +690,7 @@ pub fn http_type_method_return(
             _ => None,
         },
         Type::Named(n) if n == "Browser" => match (method, _args.len()) {
-            ("capabilities", 0) => mk("BrowserCapabilities"),
+            ("abilities", 0) => mk("BrowserAbilities"),
             ("context", 0) => Some(Some(Type::Result {
                 ok: Box::new(Type::Named("BrowserContext".to_string())),
                 err: Box::new(Type::Named("BrowserError".to_string())),
@@ -796,7 +796,7 @@ pub fn http_type_method_return(
             })),
             _ => None,
         },
-        Type::Named(n) if n == "BrowserCapabilities" => match (method, _args.len()) {
+        Type::Named(n) if n == "BrowserAbilities" => match (method, _args.len()) {
             ("bidi" | "cdp", 0) => Some(Some(Type::Bool)),
             ("profile", 0) => mk_str(),
             _ => None,

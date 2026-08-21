@@ -77,4 +77,4 @@ pub use jet_pkg_model::{
 };
 pub use jet_pkg_model::Authority;
 pub use jet_pkg_model::JetLib::{JetLibArtifact, JetLibStamp};
-pub use Compile::{bundle_uses_unsafe, Capabilities, CompileOutput};
+pub use Compile::{bundle_uses_unsafe, Abilities, CompileOutput};

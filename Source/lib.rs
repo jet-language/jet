@@ -37,7 +37,7 @@ pub use jet_driver::{
     RBind,
     TclBind,
     CanonicalAST,
-    Capabilities,
+    Abilities,
     Codegen,
     Collections,
     Compile,

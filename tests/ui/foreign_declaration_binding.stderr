@@ -6,18 +6,66 @@ Error [E0003]: `fun` is a function declaration keyword; Jet writes `fn`
  Why: Jet uses one function declaration spelling so every declaration has one shape
  Fix: replace `fun` with `fn`
 
-Error [E0003]: `var` is a foreign binding keyword; Jet writes `:=`
-  --> tests/ui/foreign_declaration_binding.jet:8:5
+Error [E0003]: `func` is a function declaration keyword; Jet writes `fn`
+  --> tests/ui/foreign_declaration_binding.jet:7:1
     |
-  8 |     var count: Int = 1
+  7 | func subtract(left: Int, right: Int) => Int {
+    | ^^^^
+ Why: Jet uses one function declaration spelling so every declaration has one shape
+ Fix: replace `func` with `fn`
+
+Error [E0003]: `def` is a function declaration keyword; Jet writes `fn`
+  --> tests/ui/foreign_declaration_binding.jet:11:1
+    |
+ 11 | def multiply(left: Int, right: Int): Int {
+    | ^^^
+ Why: Jet uses one function declaration spelling so every declaration has one shape
+ Fix: replace `def` with `fn`
+
+Error [E0003]: a function return type uses `:`
+  --> tests/ui/foreign_declaration_binding.jet:11:36
+    |
+ 11 | def multiply(left: Int, right: Int): Int {
+    |                                    ^
+ Why: Jet uses `:` for parameter and field types; callable results use `:>`
+ Fix: replace `:` with `:>` before the return type
+
+Error [E0003]: `function` is a function declaration keyword; Jet writes `fn`
+  --> tests/ui/foreign_declaration_binding.jet:15:1
+    |
+ 15 | function divide(left: Int, right: Int) => Int {
+    | ^^^^^^^^
+ Why: Jet uses one function declaration spelling so every declaration has one shape
+ Fix: replace `function` with `fn`
+
+Error [E0003]: `var` is a foreign binding keyword; Jet writes `:=`
+  --> tests/ui/foreign_declaration_binding.jet:20:5
+    |
+ 20 |     var count: Int = 1
     |     ^^^
  Why: Jet puts binding mutability on `:=` or `::`, not on a declaration keyword
  Fix: write `name := value`
 
 Error [E0003]: `let` is a foreign binding keyword; Jet writes `::`
-  --> tests/ui/foreign_declaration_binding.jet:9:5
+  --> tests/ui/foreign_declaration_binding.jet:21:5
     |
-  9 |     let total = count
+ 21 |     let total = count
+    |     ^^^
+ Why: Jet puts binding mutability on `:=` or `::`, not on a declaration keyword
+ Fix: write `name :: value`
+
+Error [E0003]: expected a call, binding, assignment, or `return`, found the keyword `const`
+  --> tests/ui/foreign_declaration_binding.jet:22:5
+    |
+ 22 |     const stable = total
+    |     ^^^^^
+ Why: inside a function body, write a call, binding, assignment, or `return`
+ Fix: e.g. print("hello") or x :: 1
+
+Error [E0003]: `val` is a foreign binding keyword; Jet writes `::`
+  --> tests/ui/foreign_declaration_binding.jet:23:5
+    |
+ 23 |     val alias = stable
     |     ^^^
  Why: Jet puts binding mutability on `:=` or `::`, not on a declaration keyword
  Fix: write `name :: value`

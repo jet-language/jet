@@ -2267,7 +2267,6 @@ fn collect_stmt(stmt: &AST::Stmt, mp: &str, module: &LoadedModule, ctx: &mut Wal
         | AST::Stmt::TaskGroup { body, .. }
         | AST::Stmt::Layout { body, .. }
         | AST::Stmt::Caps { body, .. }
-        | AST::Stmt::Grant { body, .. }
         | AST::Stmt::Transact { body, .. }
         | AST::Stmt::AssumeDet { body, .. } => {
             structural_slot(ctx, "body", StructuralSlotKind::List, |ctx| collect_stmts(body, mp, module, ctx));

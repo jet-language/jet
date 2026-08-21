@@ -83,3 +83,114 @@ fn run() {
         .expect("web target must accept the shared freeze operation");
     assert!(output.web.is_some(), "web target must produce artifacts");
 }
+
+// D-CONC-CROSS1=A / I9: this is the smallest accepted crossing. The same
+// parser, fact proof, TIR, and task adapter must carry the frozen value on
+// every execution surface.
+const CROSSING_SOURCE: &str = r#"
+struct Snapshot { value: Int }
+
+fn run() {
+    source := Snapshot{value: 41}
+    frozen :: freeze(source)
+    worker :: task frozen.value + 1
+    print(worker.join() ?? 0)
+}
+"#;
+
+const CROSSING_EXPECTED: &str = "42\n";
+
+#[test]
+fn crossing_plane_parser_accepts_the_canonical_source() {
+    let (tokens, diagnostics) = jet::Lexer::lex(CROSSING_SOURCE);
+    assert!(diagnostics.is_empty(), "lexer diagnostics: {diagnostics:?}");
+    assert!(
+        jet::Parser::parse(&tokens).is_ok(),
+        "crossing source must parse on the shared parser"
+    );
+}
+
+#[test]
+fn crossing_plane_sema_accepts_the_fact_proof() {
+    jet::compile(CROSSING_SOURCE).expect("crossing source must pass sema");
+}
+
+#[test]
+fn crossing_plane_tir_erase_the_fact() {
+    let output = jet::compile(CROSSING_SOURCE).expect("crossing source must pass sema");
+    assert!(
+        output.rust.contains("JetTask::spawn") || output.rust.contains("jet_scheduler_spawn"),
+        "TIR must lower the accepted crossing to the task adapter"
+    );
+    assert!(
+        !output.rust.contains("Sendability") && !output.rust.contains("FlowFacts"),
+        "crossing facts must erase before codegen"
+    );
+}
+
+#[test]
+fn crossing_plane_aot_matches_expected() {
+    if tir_support::have_rustc() {
+        let (code, stdout, stderr) = tir_support::build_and_run_full(
+            "jet_crossing_plane",
+            "aot",
+            CROSSING_SOURCE,
+        );
+        assert_eq!(code, 0, "AOT failed: {stderr}");
+        assert_eq!(stdout, CROSSING_EXPECTED, "AOT output drifted: {stderr}");
+    }
+}
+
+#[test]
+fn crossing_plane_jit_matches_expected() {
+    let (code, stdout, stderr) = tir_support::jit_run(
+        "concurrency_crossing_plane_jit",
+        CROSSING_SOURCE,
+    );
+    assert_eq!(code, 0, "default jet run failed: {stderr}");
+    assert_eq!(
+        stdout,
+        CROSSING_EXPECTED,
+        "default jet run output drifted: {stderr}"
+    );
+}
+
+#[test]
+fn crossing_plane_interpreter_matches_expected() {
+    let (code, stdout, stderr) =
+        tir_support::interpreter_run("concurrency_crossing_plane_interpreter", CROSSING_SOURCE);
+    assert_eq!(code, 0, "interpreter failed: {stderr}");
+    assert_eq!(
+        stdout,
+        CROSSING_EXPECTED,
+        "interpreter output drifted: {stderr}"
+    );
+}
+
+#[test]
+fn crossing_plane_comptime_uses_the_same_front_end() {
+    let source = format!(
+        "{CROSSING_SOURCE}\n@folded :: 40 + 2\n\nfn show() {{ print(@folded) }}\n"
+    );
+    jet::compile(&source).expect("comptime crossing source must use the shared sema path");
+}
+
+#[test]
+fn crossing_plane_repl_matches_the_runtime_result() {
+    let transcript = jet::REPL::run_transcript(&[CROSSING_SOURCE, "run()"], None);
+    assert_eq!(transcript, format!("ok\n{CROSSING_EXPECTED}"));
+}
+
+#[test]
+fn crossing_plane_web_accepts_the_same_source() {
+    let output = jet::compile_web_with_path(
+        CROSSING_SOURCE,
+        "tests/fixtures/concurrency_crossing_plane.jet",
+    )
+    .expect("web target must accept the crossing source");
+    let web = output.web.expect("web target must produce artifacts");
+    assert!(
+        web.js_app.contains("jet_task_spawn"),
+        "web adapter must retain the accepted task crossing"
+    );
+}

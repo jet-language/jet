@@ -234,6 +234,8 @@ impl<'a> Resolver<'a> {
             version: Lock::LOCK_VERSION,
             packages,
             root_dependencies: root_deps,
+            authority: (manifest.authority != Default::default())
+                .then(|| manifest.authority.clone()),
             workspace_members: self
                 .existing_lock
                 .map(|lock| lock.workspace_members.clone())

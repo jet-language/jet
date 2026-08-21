@@ -142,7 +142,7 @@ M0–M14, v1.0 arc, verified 2026-06-14.
 - **E2-M8** — supply chain: `jet registry publish` (pre-publish gate), `jet registry vendor`, `jet inspect audit`, SBOM; PubGrub resolver. Registry upload deferred (D-PKGS1, M12.2); Jetpack hangar cleanup is `jet clean`.
 - **E2-M9** — first-party library ring: `core.regex`, `core.encoding.{csv,toml,yaml,json}`, `core.log`, `core.time`, `core.crypto`, `core.archive` (zip/tar containers) plus `core.archive` (gzip/zstd streams, D-CORE-COMPRESS1), `core.db` (SQLite via rusqlite bundled — D-DEP-DB1).
 - **E2-M10** — networking: blocking TCP/UDP, HTTP client/server (`core.http`; client HTTPS became default later under D-TLS1; server HTTPS uses D-TLSSERVE1's named `tls:` option). Advanced client TLS configuration remains `core.net.tls`.
-- **E2-M11** — testing/docs/bench: doctests, coverage, `jet bench`, property testing.
+- **E2-M11** — testing/docs/measurement: doctests, coverage, `jet test --measure`, property testing.
 - **E2-M12** — debug/observe: DAP prep, panic locals, structured logging/tracing/metrics.
 - **E2-M13** — expert low-level tier: `use core.mem`, `#Unsafe("reason")` gates, `*T`, volatile; I1 amendment (D-LL1).
 - **E2-M14** — C FFI: `#Bindgen`/`#Extern module`, `use c.<lib>`, link discovery.

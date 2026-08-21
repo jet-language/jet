@@ -35,8 +35,12 @@ impl<'a> Checker<'a> {
         /// this: their own caller already decided the name is free.
         pub(crate) fn declare_in_scope(&mut self, name: &str, info: LocalInfo) {
             let depth = self.flow.depth;
+            // D-FACT-OWN1: every binding enters the shared crossing plane with
+            // the ownership prover's answer. Do not give parameters and other
+            // scope-only bindings a private/default sendability bit.
+            let sendable = self.sendability_problem(&info.ty, true).is_none();
             self.flow.bindings.set_at(name, depth, info);
-            self.flow.sendability.set_at(name, depth, true);
+            self.flow.sendability.set_at(name, depth, sendable);
         }
 
         /// Every name a binding is known by here, at any depth. Callers use it

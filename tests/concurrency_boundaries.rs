@@ -372,7 +372,7 @@ fn run() {
     let parallel = jet::compile(
         r#"
 fn run() {
-    seen := [Int].{}
+    seen := [Int]{}
     values :: [1, 2, 3]
     values.para_map((n: Int) => { seen.push(n) })
 }
@@ -476,7 +476,7 @@ fn shared_is_the_safe_mutation_control_case() {
     let source = r#"
 struct Counter { value: Int }
 fn run() {
-    counter := shared Counter.{ value: 0 }
+    counter := shared Counter{ value: 0 }
     handle :: task {
         counter.value += 1
     }
@@ -778,11 +778,155 @@ fn a_taskgroup_parameter_cannot_lend_a_borrow() {
     // The join runs in the caller's frame, so this frame cannot prove the
     // borrowed owner outlives it.
     let source = r#"
-fn spawn_view(group: TaskGroup, values: View<Int>) {
+fn spawn_view(group: Group, values: View<Int>) {
     handle :: task values[0]
     print(handle.join() ?? panic("task failed"))
 }
 fn run() {}
 "#;
     assert_rejected(source, "E1102");
+}
+
+#[test]
+fn crossing_prover_keeps_the_ratified_before_after_matrix() {
+    // D-PARCAPTURE1=D and the kernel decisions define this matrix. The
+    // crossing-plane migration may change the prover and voice, not which
+    // programs cross safely.
+    let cases = [
+        (
+            "task capture",
+            r#"
+fn run() {
+    frozen :: freeze(41)
+    worker :: task frozen
+    print(worker.join() ?? 0)
+}
+"#,
+            None,
+        ),
+        (
+            "parallel adapter",
+            r#"
+fn run() {
+    values :: [1, 2, 3]
+    doubled :: values.para_map((n: Int) :> n * 2)
+    print(doubled)
+}
+"#,
+            None,
+        ),
+        (
+            "parallel local cell",
+            r#"
+fn cross(cell: Cell<Int>) {
+    values :: [1, 2, 3]
+    _ :: values.para_map((n: Int) :> {
+        _ :: cell
+        return n
+    })
+}
+fn run() {}
+"#,
+            Some("E1102"),
+        ),
+        (
+            "parallel fixed backing",
+            r#"
+use core.mem
+fn run() {
+    fixed :: mem.Fixed.new(size: 128)
+    values :: [1, 2, 3]
+    _ :: values.para_map((n: Int) :> {
+        _ :: fixed
+        return n
+    })
+}
+"#,
+            Some("E1102"),
+        ),
+        (
+            "safe kernel",
+            r#"
+#Kernel(.parallel) fn add(left: Int, right: Int) Int :> left + right
+fn run() { print(add(20, 22)) }
+"#,
+            None,
+        ),
+        (
+            "task mutable capture",
+            r#"
+fn run() {
+    count := 0
+    worker :: task { count += 1 }
+    worker.join() ?? panic("task failed")
+}
+"#,
+            Some("E1101"),
+        ),
+        (
+            "parallel mutable capture",
+            r#"
+fn run() {
+    seen := [Int].{}
+    values :: [1, 2, 3]
+    values.para_map((n: Int) :> { seen.push(n) })
+}
+"#,
+            Some("E1101"),
+        ),
+        (
+            "kernel effect",
+            r#"
+#Kernel(.parallel) fn noisy(value: Int) Int {
+    print(value)
+    return value
+}
+fn run() { print(noisy(1)) }
+"#,
+            Some("E1102"),
+        ),
+        (
+            "kernel local cell",
+            r#"
+#Kernel(.parallel) fn blocked(cell: Cell<Int>) Int :> 0
+fn run() {}
+"#,
+            Some("E1102"),
+        ),
+        (
+            "local cell",
+            r#"
+fn cross(cell: Cell<Int>) {
+    worker :: task { _ :: cell }
+    worker.join() ?? panic("task failed")
+}
+fn run() {}
+"#,
+            Some("E1102"),
+        ),
+        (
+            "fixed backing",
+            r#"
+use core.mem
+fn run() {
+    fixed :: mem.Fixed.new(size: 128)
+    worker :: task { _ :: fixed }
+    worker.join() ?? panic("task failed")
+}
+"#,
+            Some("E1102"),
+        ),
+    ];
+
+    for (name, source, expected_code) in cases {
+        match (expected_code, jet::compile(source)) {
+            (None, Ok(_)) => {}
+            (None, Err(diagnostics)) => panic!("{name} changed from accepted: {diagnostics:?}"),
+            (Some(code), Ok(_)) => panic!("{name} changed from rejected: expected {code}"),
+            (Some(code), Err(diagnostics)) => assert!(
+                diagnostics.iter().any(|diagnostic| diagnostic.code == code),
+                "{name} lost {code}: {diagnostics:?}"
+            ),
+        }
+    }
 }

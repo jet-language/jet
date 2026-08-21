@@ -34,7 +34,7 @@ fn jet_process_spec_terminal_with_policy(
 // keys without changing a public report type. Known facts come from the
 // checked TerminalFact namespace. Unix PTY support advertises the three
 // stable facts; unsupported targets keep the set empty.
-fn jet_process_spec_capabilities(
+fn jet_process_spec_abilities(
     _spec: &jet_std::ProcessSpec,
 ) -> std::collections::HashSet<String> {
     let mut facts = std::collections::HashSet::new();

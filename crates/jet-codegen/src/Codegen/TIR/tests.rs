@@ -463,11 +463,12 @@ fn run() {
                 _ => None,
             })
             .collect();
-        // D-LOOPMAP1=B keeps `List.map` eager (`[R]`), but `scan` (D-ITERTOOLS1=A),
-        // `filter_map` (D-FAILCOMP1) and `flat_map` (D-ITER1) are lazy adapters that
-        // resolve to `Iter<T>` — sema refines the element and the TIR carries sema's
-        // `resolved_ret` verbatim (`lower/method_calls.rs`'s closure-op arm). The
-        // refinements are `CheckerInfer/calls/builtin_methods.rs`: scan at the seed
+        // D-LOOPMAP1=B keeps `List.map` eager (`[R]`), and D-CORE-EAGER2=A extends
+        // that rule to concrete `List.flat_map`. `scan` (D-ITERTOOLS1=A) and
+        // `filter_map` (D-FAILCOMP1) stay lazy and resolve to `Iter<T>` — sema
+        // refines the element and the TIR carries sema's `resolved_ret` verbatim
+        // (`lower/method_calls.rs`'s closure-op arm). The refinements are
+        // `CheckerInfer/calls/builtin_methods.rs`: scan at the seed
         // (`Collections::iter_ty(seed_ty)`), filter_map from the closure's `ok` type,
         // flat_map from the closure's list element.
         assert_eq!(
@@ -478,7 +479,7 @@ fn run() {
                 crate::Collections::iter_ty(Type::Float),
                 Type::List(Box::new(Type::Float)),
                 crate::Collections::iter_ty(Type::Float),
-                crate::Collections::iter_ty(Type::Float),
+                Type::List(Box::new(Type::Float)),
                 Type::Map {
                     key: Box::new(Type::Bool),
                     key_span: None,
@@ -1607,16 +1608,16 @@ fn greet() => String { return input() }
 
     #[test]
     fn covers_caps_block() {
-        // c109 Phase 26: a `#Caps(IO) { … }` effect-restriction region erases to a plain
+        // c109 Phase 26: a `#Abilities(IO) { … }` effect-restriction region erases to a plain
         // block (byte-for-byte `Stmt::Region`); its body is checked on the SAME locals, so
         // an out-of-subset body keeps the whole fn off the TIR path.
-        assert!(covers("fn f() { #Caps(IO) { print(\"x\") } }", "f"));
+        assert!(covers("fn f() { #Abilities(IO) { print(\"x\") } }", "f"));
         // c109: a single-uppercase-letter DECLARED struct name (`P`) is a concrete
         // type, not a type variable — the `is_type_var_name` heuristic is now guarded
         // on non-declaration (`cx.struct_fields` lookup). So `P{x: 1}` and the
         // `P{x} :: p` struct-destructure are both covered; the fn routes through TIR.
         assert!(covers(
-            "struct P { x: Int }\nfn f() { p :: P.{x: 1}\n#Caps(IO) { P.{x} :: p\nprint(x) } }",
+            "struct P { x: Int }\nfn f() { p :: P.{x: 1}\n#Abilities(IO) { P.{x} :: p\nprint(x) } }",
             "f"
         ));
     }

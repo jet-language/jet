@@ -7774,6 +7774,89 @@ impl<'a> EvalCtx<'a> {
                         }
                     }
                 }
+                crate::Codegen::TIR::THostCall::BinMatchScan { parts, probe } => {
+                    let subject = self
+                        .switch_subject
+                        .as_ref()
+                        .ok_or_else(|| unsupported("binary pattern outside switch", self.span()))?;
+                    let hit = super::bin_match_scan_value(subject, parts, false);
+                    match probe {
+                        crate::Codegen::TIR::TMatchProbe::IsSome => {
+                            Ok(CtValue::Bool(hit.is_some()))
+                        }
+                        crate::Codegen::TIR::TMatchProbe::Unwrap => {
+                            let Some((_, binds)) = hit else {
+                                return Err(unsupported("binary pattern unwrap", self.span()));
+                            };
+                            let Type::Tuple(fields) = &expr.ty else {
+                                return Err(unsupported("binary pattern tuple", self.span()));
+                            };
+                            if fields.len() != binds.len() {
+                                return Err(unsupported("binary pattern binding count", self.span()));
+                            }
+                            let plain_fields = fields
+                                .iter()
+                                .map(|(name, ty)| (name.clone(), (**ty).clone()))
+                                .collect::<Vec<_>>();
+                            let values = binds
+                                .into_iter()
+                                .map(|(_, _, bind)| super::bin_match_bind_value(bind));
+                            Ok(CtValue::Struct {
+                                type_name: crate::Codegen::Tuples::tuple_struct_name(
+                                    &plain_fields,
+                                ),
+                                fields: fields
+                                    .iter()
+                                    .map(|(name, _)| name.clone())
+                                    .zip(values)
+                                    .collect(),
+                            })
+                        }
+                    }
+                }
+                crate::Codegen::TIR::THostCall::OptionProbe { inner, kind } => {
+                    let value = self.eval_expr_child(inner, scope)?;
+                    match kind {
+                        crate::Codegen::TIR::TOptionProbe::IsSome => Ok(CtValue::Bool(
+                            matches!(value, CtValue::Present(_)),
+                        )),
+                        crate::Codegen::TIR::TOptionProbe::Unwrap => match value {
+                            CtValue::Present(value) => Ok(*value),
+                            CtValue::Failed(crate::AST::CtReport::Clean(_)) => {
+                                Err(unsupported("option unwrap", self.span()))
+                            }
+                            _ => Err(unsupported("option unwrap", self.span())),
+                        },
+                        crate::Codegen::TIR::TOptionProbe::Field(field) => {
+                            let CtValue::Present(value) = value else {
+                                return Err(unsupported("option field", self.span()));
+                            };
+                            let CtValue::Struct { fields, .. } = *value else {
+                                return Err(unsupported("option field receiver", self.span()));
+                            };
+                            fields
+                                .into_iter()
+                                .find(|(name, _)| name == field)
+                                .map(|(_, value)| value)
+                                .ok_or_else(|| unsupported("option field", self.span()))
+                        }
+                    }
+                }
+                crate::Codegen::TIR::THostCall::TupleIndex { base, index } => {
+                    let value = self.eval_expr_child(base, scope)?;
+                    match value {
+                        CtValue::Struct { fields, .. } => fields
+                            .into_iter()
+                            .nth(*index)
+                            .map(|(_, value)| value)
+                            .ok_or_else(|| unsupported("tuple index", self.span())),
+                        CtValue::List(values) => values
+                            .into_iter()
+                            .nth(*index)
+                            .ok_or_else(|| unsupported("tuple index", self.span())),
+                        _ => Err(unsupported("tuple index receiver", self.span())),
+                    }
+                }
                 crate::Codegen::TIR::THostCall::SwitchSubjectField { field } => {
                     let CtValue::Struct { fields, .. } = self
                         .switch_subject
@@ -9447,7 +9530,11 @@ impl<'a> EvalCtx<'a> {
             }
             TExprKind::SelectWait { builder } => {
                 let builder = self.eval_expr_child(builder, scope)?;
-                self.eval_select_wait(builder)
+                if matches!(&expr.ty, Type::Tuple(_)) {
+                    self.eval_select_wait_tagged(builder)
+                } else {
+                    self.eval_select_wait(builder)
+                }
             }
             TExprKind::FnValue { kind } => match kind {
                 TFnValueKind::NamedFn {
@@ -10550,6 +10637,16 @@ fn eval_precise_builtin(
                 .map_err(|_| unsupported(&format!("`Decimal(\"{s}\")`"), span)),
             _ => Err(unsupported("`Decimal.from_str`", span)),
         },
+        // D-TYPE2-DEFAULT1: an exact Decimal crosses into Float at the
+        // irrational-result math functions, exactly as a Fraction does. The
+        // checker and the AOT lowerer both admit it, so the evaluator behind
+        // default `jet run` must produce the same value.
+        ("Decimal", "to_float") => match args.first() {
+            Some(value) => CtDecimal::from_value(value)
+                .map(|decimal| CtValue::Float(CtFloat::f64(decimal.to_f64())))
+                .map_err(|_| unsupported("`Decimal.to_float`", span)),
+            None => Err(unsupported("`Decimal.to_float`", span)),
+        },
         ("Fraction", "from_parts") => {
             let [CtValue::Int(numerator), CtValue::Int(denominator)] = args.as_slice() else {
                 return Err(unsupported("`Fraction.from_parts`", span));
@@ -10558,7 +10655,7 @@ fn eval_precise_builtin(
                 .map(|fraction| fraction.to_value())
                 .ok_or_else(|| unsupported("invalid exact quotient", span))
         }
-        ("Decimal", "add" | "sub" | "mul" | "to_string")
+        ("Decimal", "add" | "sub" | "mul" | "equal" | "to_string")
         | (
             "Fraction",
             "add" | "sub" | "mul" | "neg" | "to_string" | "div" | "equal"

@@ -433,7 +433,7 @@ pub(crate) fn is_db_value_type_name(name: &str) -> bool {
 pub(crate) fn root_prelude_rust_type_name(name: &str) -> Option<&'static str> {
     match name {
         n if n == Syntax::TYPE_MEMO_STATS => Some("JetMemoStats"),
-        n if n == Syntax::TYPE_AUTHORITY => Some("JetAuthority"),
+        n if n == Syntax::TYPE_ABILITIES => Some("JetAuthority"),
         _ => None,
     }
 }
@@ -1428,6 +1428,75 @@ impl Cx {
         contains(self, &self.expand_type_aliases(ty), &mut HashSet::new())
     }
 
+    /// Core crypto values are move-only and intentionally do not implement
+    /// Rust `Debug` or `Clone`. Do not let a containing user record derive
+    /// either backend trait; its Jet debug path already honors `#Redact`.
+    pub(crate) fn type_contains_secret(&self, ty: &Type) -> bool {
+        fn payload_contains(
+            cx: &Cx,
+            payload: &VariantPayload,
+            seen: &mut HashSet<String>,
+        ) -> bool {
+            match payload {
+                VariantPayload::Unit => false,
+                VariantPayload::Single(ty, _) => contains(cx, ty, seen),
+                VariantPayload::Named(fields) => {
+                    fields.iter().any(|field| contains(cx, &field.ty, seen))
+                }
+            }
+        }
+
+        fn named_contains(cx: &Cx, name: &str, seen: &mut HashSet<String>) -> bool {
+            if !seen.insert(name.to_string()) {
+                return false;
+            }
+            let found = cx.struct_fields.get(name).is_some_and(|fields| {
+                fields.iter().any(|(_, ty)| contains(cx, ty, seen))
+            }) || cx.enum_variants.get(name).is_some_and(|variants| {
+                variants
+                    .iter()
+                    .any(|(_, payload)| payload_contains(cx, payload, seen))
+            });
+            seen.remove(name);
+            found
+        }
+
+        fn contains(cx: &Cx, ty: &Type, seen: &mut HashSet<String>) -> bool {
+            match ty {
+                Type::Tagged {
+                    marker: crate::AST::TagMarker::Internal(
+                        crate::AST::InternalTag::CoreCryptoNominal,
+                    ),
+                    ..
+                } => true,
+                Type::Named(name) => named_contains(cx, name, seen),
+                Type::Apply { name, args } => {
+                    args.iter().any(|arg| contains(cx, arg, seen))
+                        || named_contains(cx, name, seen)
+                }
+                Type::List(inner)
+                | Type::Shared(inner)
+                | Type::Option(inner)
+                | Type::Tagged { inner, .. } => contains(cx, inner, seen),
+                Type::Map { key, value, .. } | Type::Result { ok: key, err: value } => {
+                    contains(cx, key, seen) || contains(cx, value, seen)
+                }
+                Type::Tuple(fields) => fields.iter().any(|(_, ty)| contains(cx, ty, seen)),
+                Type::Union(members) => members.iter().any(|ty| contains(cx, ty, seen)),
+                Type::FixedList { elem, .. }
+                | Type::InlineRange { base: elem, .. }
+                | Type::Quantity { base: elem, .. } => contains(cx, elem, seen),
+                Type::Fn { params, ret, .. } => {
+                    params.iter().any(|ty| contains(cx, ty, seen))
+                        || ret.as_deref().is_some_and(|ty| contains(cx, ty, seen))
+                }
+                _ => false,
+            }
+        }
+
+        contains(self, &self.expand_type_aliases(ty), &mut HashSet::new())
+    }
+
     /// Render a type whose view-bearing leaves borrow the function's hidden
     /// owner lifetime. Wrappers stay wrappers; only references and generated
     /// aggregate types receive the lifetime argument.
@@ -1978,8 +2047,8 @@ impl Cx {
             Type::Named(name) if name == "BrowserReceipt" => "JetBrowserReceipt".to_string(),
             Type::Named(name) if name == "BrowserPrivacy" => "JetBrowserPrivacy".to_string(),
             Type::Named(name) if name == "BrowserError" => "JetBrowserError".to_string(),
-            Type::Named(name) if name == "BrowserCapabilities" => {
-                "JetBrowserCapabilities".to_string()
+            Type::Named(name) if name == "BrowserAbilities" => {
+                "JetBrowserAbilities".to_string()
             }
             Type::Named(name) if name == "BrowserProfile" => "JetBrowserProfile".to_string(),
             Type::Named(name) if name == "BrowserTimeout" => "JetBrowserTimeout".to_string(),
@@ -4194,7 +4263,7 @@ pub(crate) fn build_cx_items(
         "BrowserReceipt",
         "BrowserPrivacy",
         "BrowserError",
-        "BrowserCapabilities",
+        "BrowserAbilities",
         "BrowserProfile",
         "BrowserTimeout",
         "BrowserProtocol",
@@ -4761,7 +4830,9 @@ pub(crate) fn build_cx_items(
         match item {
             Item::Struct(s) => {
                 cx.boxed_edges.extend(find_struct_box_edges(s, &cx));
-                if type_is_cloneable_struct(s, &cx.type_names) {
+                if type_is_cloneable_struct(s, &cx.type_names)
+                    && !cx.type_contains_secret(&Type::Named(s.name.clone()))
+                {
                     cx.cloneable.insert(s.name.clone());
                 }
                 if crate::Traits::struct_auto_derive_ok(s) {
@@ -4830,7 +4901,9 @@ pub(crate) fn build_cx_items(
             }
             Item::Enum(e) => {
                 cx.boxed_edges.extend(find_enum_box_edges(e, &cx));
-                if type_is_cloneable_enum(e, &cx.type_names) {
+                if type_is_cloneable_enum(e, &cx.type_names)
+                    && !cx.type_contains_secret(&Type::Named(e.name.clone()))
+                {
                     cx.cloneable.insert(e.name.clone());
                 }
                 if crate::Traits::enum_auto_derive_ok(e) {
@@ -5253,6 +5326,10 @@ pub(crate) fn field_type_cloneable(
             .all(|(_, t)| field_type_cloneable(t, types, param_names)),
         Type::TraitObject(_) | Type::Fn { .. } => false,
         Type::FixedList { elem, .. } => field_type_cloneable(elem, types, param_names),
+        Type::Tagged {
+            marker: crate::AST::TagMarker::Internal(crate::AST::InternalTag::CoreCryptoNominal),
+            ..
+        } => false,
         Type::Tagged { inner, .. } => field_type_cloneable(inner, types, param_names),
         Type::InlineRange { base, .. } => field_type_cloneable(base, types, param_names),
         Type::Union(members) => members

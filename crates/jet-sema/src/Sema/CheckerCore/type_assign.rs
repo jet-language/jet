@@ -8,8 +8,8 @@ use crate::Sema::CheckerCoreLib::{
 use crate::Sema::Bundle::fn_types_compatible;
 use crate::Sema::{Checker, KnowledgeGate, KnowledgePlane};
 use crate::Sema::Diagnostics::{
-    edit_distance, option_used_where_plain_expected, result_used_where_plain_expected,
-    soft_public_use, type_fix_hint, undeclared_value_tag,
+    option_used_where_plain_expected, result_used_where_plain_expected, soft_public_use,
+    suggest_field, type_fix_hint, undeclared_value_tag,
 };
 use crate::Syntax;
 use super::helpers::no_any_type;
@@ -247,7 +247,7 @@ impl<'a> Checker<'a> {
                             return;
                         }
                     }
-                    // D-FACT-HOME1=A: a phantom fact-menu name (`Capability`,
+                    // D-FACT-HOME1=A: a phantom fact-menu name (`Ability`,
                     // `InlineMode`, ...) is refused with a fix naming the real
                     // path, not the generic "no type called" message.
                     if let Some(diag) = phantom_fact_menu_diag(n, span) {
@@ -326,7 +326,6 @@ impl<'a> Checker<'a> {
                         && matches!(
                             lookup_name,
                             "Task"
-                                | "Channel"
                                 | Syntax::TYPE_RECEIVER
                                 | "Sender"
                                 | "Ptr"
@@ -658,15 +657,7 @@ impl<'a> Checker<'a> {
             }
             candidates.sort();
             candidates.dedup();
-            candidates
-                .into_iter()
-                .map(|candidate| (edit_distance(name, &candidate), candidate))
-                // Distance 0 is the rejected tag itself: a tag that is visible
-                // here but failed the declaration lookup must not be handed back
-                // as the fix for its own rejection (#2002).
-                .filter(|(distance, _)| *distance > 0 && *distance <= 2)
-                .min_by(|a, b| a.cmp(b))
-                .map(|(_, candidate)| candidate)
+            suggest_field(name, &candidates)
         }
     
         /// Returns true when a diagnostic was emitted or compatibility was

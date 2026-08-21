@@ -321,19 +321,10 @@ pub fn block_marker(
             crate::Syntax::MARKER_POLICY,
             vec![MarkerArgument::Policy(declarations.clone())],
         ),
-        Stmt::Caps { caps, .. } => (
+        Stmt::Caps { caps, binding, .. } => (
             crate::Syntax::KW_CAPS,
             vec![MarkerArgument::Idents {
-                label: None,
-                values: caps.iter().map(|(name, _)| name.clone()).collect(),
-            }],
-        ),
-        Stmt::Grant {
-            caps, binding, ..
-        } => (
-            crate::Syntax::KW_GRANT,
-            vec![MarkerArgument::Idents {
-                label: Some(binding.clone()),
+                label: binding.clone(),
                 values: caps.iter().map(|(name, _)| name.clone()).collect(),
             }],
         ),
@@ -1359,7 +1350,7 @@ const fn truth_row(
 /// what a writer may attach and where; it holds no fact that moves toward or
 /// away from safety, so it states `none` and names no gate. The moving facts a
 /// marker *writes* belong to the plane, right, or build row that holds them —
-/// `#Caps` and `#Grant` are gate words on the `Rights` row, not directions of
+/// `#Caps` is a gate word on the `Rights` row, not a direction of
 /// their own. Stated once here for every marker row, so no row can drift.
 fn marker_row(rule: &'static AppliedRule) -> RegistryRow {
     RegistryRow {

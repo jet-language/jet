@@ -84,7 +84,7 @@ pub const CATEGORIES: &[&str] = &[
 
 fn category_for(cmd: &str) -> &'static str {
     match cmd {
-        "run" | "check" | "test" | "build" | "debug" | "bench" | "eval" | "emit" => {
+        "run" | "check" | "test" | "build" | "debug" | "eval" | "emit" => {
             "Build & Run"
         }
         "dev" => "Development Server",

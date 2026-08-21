@@ -13,7 +13,8 @@ fn build(b: BuildContext) BuildPlan ? {
     @map :: jc.source_map("// jet:source-map source=generated.jet\n// jet:line 1") ?? panic("compiler API source map failed")
     if @map.generated_lines().len() != 1 :> panic("compiler API lost source mapping")
     b.generate("compiler_api") {
-        fn generated_compiler_api() => String :: "compiler API";
+        fn generated_compiler_api() String :> "compiler API"
+
     }?
     app :: b.add_executable("compiler_api", ["compiler_api.jet", ".jet/generated/compiler_api/compiler_api.jet"], [])?
     return b.plan(app)

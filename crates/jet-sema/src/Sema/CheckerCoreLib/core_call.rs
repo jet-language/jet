@@ -94,6 +94,44 @@ fn analytics_sql_columns(sql: &str) -> Vec<String> {
     columns
 }
 
+// D-TYPE2-DEFAULT1: these functions leave the rational world. An exact value
+// may cross this one explicit semantic boundary into Float; the other math
+// calls keep their existing exact/inexact contracts.
+//
+// Both exact carriers cross, not just Fraction. `sqrt(1 / 3)` and `sqrt(0.5)`
+// are equally exact inputs to a function whose result is irrational, so
+// admitting one and rejecting the other was one boundary with two rules — and
+// the rejected spelling is the one a beginner writes first, because a decimal
+// literal is exact by default under this same decision.
+fn exact_rational_math_approx(name: &str) -> bool {
+    matches!(
+        name,
+        "sqrt"
+            | "sin"
+            | "cos"
+            | "tan"
+            | "asin"
+            | "acos"
+            | "atan"
+            | "sinh"
+            | "cosh"
+            | "tanh"
+            | "exp"
+            | "ln"
+            | "log2"
+            | "log10"
+            | "acosh"
+            | "asinh"
+            | "atanh"
+            | "cbrt"
+            | "exp2"
+            | "exp_m1"
+            | "ln_1p"
+            | "degrees"
+            | "radians"
+    )
+}
+
 impl<'a> Checker<'a> {
     pub(crate) fn check_analytics_sql_schema(&mut self, row: &Type, query: &Expr) {
         let Some(sql) = analytics_sql_literal(query) else {
@@ -952,6 +990,21 @@ impl<'a> Checker<'a> {
                     self.expect_core_arg(name, 0, &input_type, arg);
                 }
                 return Some(core_compiler_return(name));
+            }
+            // D-BENCH-KEEP1=A: `keep` is the one generic identity sink. Sema
+            // infers its argument and returns that exact type; no engine gets
+            // a second signature or value policy.
+            if module == "core.prelude" && name == "keep" {
+                if args.len() != 1 {
+                    self.diags.push(wrong_core_arity(name, 1, args.len(), span));
+                }
+                let value_type = args
+                    .get_mut(0)
+                    .and_then(|arg| self.infer(&mut arg.expr));
+                for arg in args.iter_mut().skip(1) {
+                    self.infer(&mut arg.expr);
+                }
+                return value_type;
             }
             // D-SERVICE1=D: the first service slice is a declaration language,
             // not an executable callback. Type the callback normally, then
@@ -2686,6 +2739,13 @@ impl<'a> Checker<'a> {
                         return Some(Type::Float);
                     };
                     let ty = self.infer(&mut arg.expr)?;
+                    if exact_rational_math_approx(name)
+                        && matches!(&ty, Type::Named(type_name)
+                            if type_name == Syntax::TYPE_FRACTION
+                                || type_name == Syntax::TYPE_DECIMAL)
+                    {
+                        return Some(Type::Float);
+                    }
                     if name == "sqrt"
                         && matches!(
                             &ty,

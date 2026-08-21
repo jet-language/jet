@@ -319,7 +319,7 @@ module complete<T>(count: Int, label: String) {
         return local
     }
     #Test fn identity(value: T) { expect(count == count) }
-    #Bench("complete") { expect(label == label) }
+    #Test("complete") { .measure { assert(label == label) } }
 }
 module complete_use :: complete<Int>(3, "generic module")
 fn run() {}

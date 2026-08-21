@@ -465,14 +465,14 @@ fn render(lib: &str, routines: &[Routine]) -> String {
         out.push_str("pub fn ");
         out.push_str(&routine.jet_name);
         render_params(&mut out, &routine.params);
-        // D-NOPANIC1=D: an array routine's wrapper carries the column-major
-        // extent guard below, which is a `panic`. A declared row is an upper
-        // bound, so the row has to publish `Panic` or sema rejects the binding
-        // this very generator wrote (E0740). Scalar-only wrappers cannot stop.
+        // D-PANICROOT1=A: the wrapper's column-major extent guard is a local
+        // stop path, not a grantable positive effect. The generated wrapper
+        // publishes only its FFI leaf; the shared sema reachability pass keeps
+        // the deny-only stop row available to prohibition checks.
         out.push_str(if routine.has_arrays() {
-            " :[Fortran, Panic]> "
+            " :[FFI.Fortran]> "
         } else {
-            " :[Fortran]> "
+            " :[FFI.Fortran]> "
         });
         out.push_str(routine.result.jet());
         out.push_str(" {\n");

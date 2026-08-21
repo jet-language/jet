@@ -935,6 +935,11 @@ pub(crate) fn check_effect_boundaries(
                         if super::effect_root(&e) != "Mem" {
                             prohibited.insert(e);
                         }
+                    } else if let Some(diagnostic) =
+                        super::reject_positive_deny_only_effect(&e, *span)
+                    {
+                        diags.push(diagnostic);
+                        bad_name = true;
                     } else {
                         declared.insert(e);
                     }
@@ -1064,7 +1069,14 @@ pub(crate) fn check_effect_boundaries(
                             }
                             match parse_effect_name(name) {
                                 Some(e) => {
-                                    set.insert(e);
+                                    if let Some(diagnostic) =
+                                        super::reject_positive_deny_only_effect(&e, *span)
+                                    {
+                                        diags.push(diagnostic);
+                                        ok = false;
+                                    } else {
+                                        set.insert(e);
+                                    }
                                 }
                                 None => {
                                     diags.push(unknown_effect(name, *span));

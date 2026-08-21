@@ -5,3 +5,11 @@ Error [E1102]: `pending` is pinned `#Local` and can't cross into a task
     |                    ^
  Why: `#Local` keeps `Signal<Int>` in the fast one-thread form
  Fix: remove `#Local`, or send owned values through a channel
+
+Error [E1102]: `pending` is pinned `#Local` and can't cross into a parallel worker
+  --> tests/ui/reactive_local_pin_task.jet:12:21
+    |
+ 12 |     values.para_map((n: Int) :> {
+    |                     ^^^^^^^^^^^^^
+ Why: `#Local` keeps `Signal<Int>` in the fast one-thread form
+ Fix: remove `#Local`, or keep the reactive graph off the parallel path

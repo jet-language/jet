@@ -1167,7 +1167,7 @@ fn run() {
     profile :: browser.profile("bidi-2024.11") ?? panic("profile")
     timeout :: browser.timeout(500) ?? panic("timeout")
     session :: browser.connect_profile("__ENDPOINT__", profile, timeout) ?? panic("connect")
-    print(session.capabilities().profile())
+    print(session.abilities().profile())
     bidi :: session.protocol("bidi") ?? panic("protocol")
     blocked :: bidi.send("webExtension.install", "{{}}") ?? "blocked"
     print(blocked)
@@ -1293,7 +1293,7 @@ use core.web.browser as browser
 
 fn run() {
     session :: browser.connect("__ENDPOINT__") ?? panic("connect")
-    print(session.capabilities().profile())
+    print(session.abilities().profile())
 }
 "#
         .replace("__ENDPOINT__", &endpoint);
@@ -2286,8 +2286,8 @@ fn run() {
     profile :: browser.profile("bidi-2025.5") ?? panic("profile")
     timeout :: browser.timeout(500) ?? panic("timeout")
     session :: browser.connect_profile("__ENDPOINT__", profile, timeout) ?? panic("connect")
-    caps :: session.capabilities()
-    print("caps:{caps.bidi()}:{caps.cdp()}")
+    abilities :: session.abilities()
+    print("abilities:{abilities.bidi()}:{abilities.cdp()}")
 
     bidi :: session.protocol("bidi") ?? panic("bidi")
     smuggle :: bidi.send("goog:cdp.sendCommand", "{{\"method\":\"Network.enable\",\"params\":{{}}}}") ?? "blocked-smuggle"
@@ -2393,7 +2393,7 @@ fn missing_cdp(endpoint: String) => String {
     profile :: browser.profile("bidi-2025.5") ?? return "unexpected-profile"
     timeout :: browser.timeout(250) ?? return "unexpected-timeout"
     session :: browser.connect_profile(endpoint, profile, timeout) ?? return "unexpected-connect"
-    print("caps:{session.capabilities().cdp()}")
+    print("abilities:{session.abilities().cdp()}")
     cdp :: session.protocol("cdp") ?? return "caught-capability"
     return "unexpected-open"
 }
@@ -2976,9 +2976,9 @@ fn run() {
     session :: browser.connect_profile("__ENDPOINT__", profile, timeout) ?? panic("connect")
 
     privacy :: session.privacy()
-    caps :: session.capabilities()
+    abilities :: session.abilities()
     print("privacy:{privacy.isolated_profiles()}:{privacy.shared_profiles()}:{privacy.redact_receipts()}")
-    print("caps:{caps.bidi()}:{caps.cdp()}:{caps.profile()}")
+    print("abilities:{abilities.bidi()}:{abilities.cdp()}:{abilities.profile()}")
 
     context :: session.context() ?? panic("context")
     print("isolated:{context.isolated()}")

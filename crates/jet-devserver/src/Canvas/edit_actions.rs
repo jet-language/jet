@@ -1291,7 +1291,6 @@ fn find_switched_node_in_children(stmt: &Stmt, node_span: SourceSpan) -> Option<
         | Stmt::TaskGroup { body, .. }
         | Stmt::Layout { body, .. }
         | Stmt::Caps { body, .. }
-        | Stmt::Grant { body, .. }
         | Stmt::ComptimeBlock { body, .. }
         | Stmt::ContextBlock { body, .. }
         | Stmt::Live { body, .. }
@@ -1569,7 +1568,6 @@ fn find_pattern_target_in_children<'a>(
         | Stmt::TaskGroup { body, .. }
         | Stmt::Layout { body, .. }
         | Stmt::Caps { body, .. }
-        | Stmt::Grant { body, .. }
         | Stmt::ComptimeBlock { body, .. }
         | Stmt::ContextBlock { body, .. }
         | Stmt::Live { body, .. }
@@ -1679,7 +1677,6 @@ fn find_pattern_arm_remove_span_in_children(
         | Stmt::TaskGroup { body, .. }
         | Stmt::Layout { body, .. }
         | Stmt::Caps { body, .. }
-        | Stmt::Grant { body, .. }
         | Stmt::ComptimeBlock { body, .. }
         | Stmt::ContextBlock { body, .. }
         | Stmt::Live { body, .. }
@@ -1783,7 +1780,6 @@ fn find_pattern_span_in_children(
         | Stmt::TaskGroup { body, .. }
         | Stmt::Layout { body, .. }
         | Stmt::Caps { body, .. }
-        | Stmt::Grant { body, .. }
         | Stmt::ComptimeBlock { body, .. }
         | Stmt::ContextBlock { body, .. }
         | Stmt::Live { body, .. }
@@ -1895,7 +1891,6 @@ fn find_multi_input_in_stmt(stmt: &Stmt, node_span: SourceSpan, out: &mut Option
         | Stmt::TaskGroup { body, .. }
         | Stmt::Layout { body, .. }
         | Stmt::Caps { body, .. }
-        | Stmt::Grant { body, .. }
         | Stmt::ComptimeBlock { body, .. }
         | Stmt::ContextBlock { body, .. }
         | Stmt::Live { body, .. }
@@ -2427,7 +2422,6 @@ fn collect_child_statement_locs(
         | Stmt::TaskGroup { body, .. }
         | Stmt::Layout { body, .. }
         | Stmt::Caps { body, .. }
-        | Stmt::Grant { body, .. }
         | Stmt::ComptimeBlock { body, .. }
         | Stmt::ContextBlock { body, .. }
         | Stmt::Live { body, .. }

@@ -31,6 +31,31 @@ pub struct SwitchArm {
     pub span: Span,
 }
 
+/// D-CONC-CHAN2=D: the parser keeps a readiness head in the existing tuple
+/// node so every later stage can recognize one canonical shape without a
+/// second arm representation.
+pub enum ReadinessHead<'a> {
+    Receive { binding: &'a str, source: &'a Expr },
+    After { duration: &'a Expr },
+}
+
+pub fn readiness_head(expr: &Expr) -> Option<ReadinessHead<'_>> {
+    let Expr::TupleLit(fields, _, _) = expr else {
+        return None;
+    };
+    let [(name, value)] = fields.as_slice() else {
+        return None;
+    };
+    if name == crate::Syntax::INTERNAL_SELECT_AFTER_FIELD {
+        Some(ReadinessHead::After { duration: value })
+    } else {
+        Some(ReadinessHead::Receive {
+            binding: name,
+            source: value,
+        })
+    }
+}
+
 /// D-IFGUARD1=A: ordered arm tables without a named subject reuse
 /// `Stmt::Switch` with a compiler-private `true` subject at the `if` span.
 pub fn is_subjectless_guard(subject: &Expr, span: Span) -> bool {
@@ -264,33 +289,16 @@ pub enum Stmt {
         body: Vec<Stmt>,
         span: Span,
     },
-    /// D-EFF1 / D-QUAL1: a `#Caps(Net, DB) { … }` effect-restriction region. The
-    /// `caps` list is the only effects the body (and everything it transitively
-    /// calls) may use; an out-of-set effect is E0741. `caps` names are validated
-    /// in sema. A lexical scope emitted as a plain Rust block — the restriction
-    /// is enforced entirely in sema (I3: codegen stays dumb, effects erase).
+    /// D-EFF1 / D-AUTHORITY-SCOPE1: a `#Abilities(Net, DB) { … }` effect-restriction
+    /// region, optionally with a named authority handle:
+    /// `#Abilities(auth: FS, Net) { … }`. Bare `#Abilities` narrows; the named form also
+    /// binds the handle for the block. The caps list is validated in sema and
+    /// the lexical scope is emitted as a plain Rust block.
     Caps {
         caps: Vec<(String, Span)>,
         caps_span: Span,
-        body: Vec<Stmt>,
-        span: Span,
-    },
-    /// D-SCAP1 (ratified 2026-06-21, opt A): a scoped-capability grant region
-    /// `#grant(FS) { caps -> … }`. The listed effects are **authorized** inside
-    /// the block via the first-class handle `binding` (here `caps`), and the
-    /// capability is **revoked at scope end** by the RAII rule (S63) — the handle
-    /// is bound only for the block's extent. The dual of `#Caps`: `#Caps`
-    /// *restricts* a region to a set, `#grant` *authorizes* one. An effect used
-    /// inside the block that the grant doesn't cover has no authority backing it
-    /// (E0712); letting the handle escape (returned, stored, captured) is E0711.
-    /// A lexical scope emitted as a plain Rust block — the grant/revoke is a
-    /// compile-time capability fact, erased in codegen (I3).
-    Grant {
-        caps: Vec<(String, Span)>,
-        caps_span: Span,
-        /// The bound capability handle name (`caps` in `#grant(FS) { caps -> … }`).
-        binding: String,
-        binding_span: Span,
+        binding: Option<String>,
+        binding_span: Option<Span>,
         body: Vec<Stmt>,
         span: Span,
     },
@@ -533,7 +541,6 @@ impl Stmt {
                 | Stmt::Region { body, .. }
                 | Stmt::Policy { body, .. }
                 | Stmt::Caps { body, .. }
-                | Stmt::Grant { body, .. }
                 | Stmt::ComptimeBlock { body, .. }
                 | Stmt::Live { body, .. }
                 | Stmt::Transact { body, .. }
@@ -672,9 +679,6 @@ impl Stmt {
                 | Stmt::Caps {
                     body, span: current, ..
                 }
-                | Stmt::Grant {
-                    body, span: current, ..
-                }
                 | Stmt::ComptimeBlock {
                     body, span: current, ..
                 }
@@ -800,7 +804,6 @@ impl Stmt {
             | Stmt::TaskGroup { span, .. }
             | Stmt::Layout { span, .. }
             | Stmt::Caps { span, .. }
-            | Stmt::Grant { span, .. }
             | Stmt::ComptimeIf { span, .. }
             | Stmt::ComptimeSwitch { span, .. }
             | Stmt::ComptimeBlock { span, .. }

@@ -1160,46 +1160,42 @@ fn run() {
     );
 }
 
-/// c109 Phase 26: the `require(cond[, msg])` / `require_eq` rich-report builtins (S36,
-/// 14_panic). A satisfied `require` is a no-op; the program continues. (The failing
+/// c109 Phase 26: the `assert(cond[, msg])` / `assert_eq` rich-report builtins (S36,
+/// 14_panic). A satisfied assertion is a no-op; the program continues. (The failing
 /// branch's rich panic is exercised by the golden suite; here we prove the TIR
 /// renders + runs the guard byte-for-byte.)
 #[test]
-fn require_builtins() {
+fn assert_builtins() {
     if !have_rustc() {
         return;
     }
     let src = "\
 fn run() {
-    require(((1 + 1) == 2))
-    require(true, \"unreachable\")
-    require_eq(6, (2 * 3))
+    assert(((1 + 1) == 2))
+    assert(true, \"unreachable\")
+    assert_eq(6, (2 * 3))
     print(\"ok\")
 }
 ";
-    let (code, stdout) = build_and_run("tir_require", src);
+    let (code, stdout) = build_and_run("tir_assert", src);
     assert_eq!(code, 0);
     assert_eq!(stdout, "ok\n");
 }
 
-/// c109 Phase 26: a `#Caps(IO) { … }` effect-restriction region (D-EFF1, effect_caps)
-/// erases to a plain block in codegen; the body runs unchanged.
+/// D-AUTHORITY-SCOPE1: bare and named `#Caps` regions have one meaning on AOT,
+/// default `jet run`, and the forced interpreter. The named handle is sema-only
+/// and the body remains an ordinary lexical block on every tier.
 #[test]
 fn caps_block() {
-    if !have_rustc() {
-        return;
-    }
     let src = "\
 fn announce(label: String, n: Int) =[IO]=> {
     print(\"{label}: {n}\")
 }
 fn run() {
-    #Caps(IO) {
+    #Caps(auth: IO) {
         announce(\"answer\", 42)
     }
 }
 ";
-    let (code, stdout) = build_and_run("tir_caps", src);
-    assert_eq!(code, 0);
-    assert_eq!(stdout, "answer: 42\n");
+    tir_support::assert_tiers_agree("tir_caps", src, "answer: 42\n");
 }

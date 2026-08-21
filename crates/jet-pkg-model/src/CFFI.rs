@@ -318,7 +318,7 @@ pub fn assemble(bundle: &mut ProgramBundle) -> Result<CFfi, Vec<Diagnostic>> {
                 && generated_language == Some(ForeignLanguage::Fortran)
             {
                 for function in &mut functions {
-                    function.effect_root = Some("Fortran".to_string());
+                    function.effect_root = Some("FFI.Fortran".to_string());
                 }
             }
             let surf = match surfaces.entry(lib.clone()) {
@@ -384,51 +384,61 @@ pub fn assemble(bundle: &mut ProgramBundle) -> Result<CFfi, Vec<Diagnostic>> {
 
         if lib.starts_with("jet_go_") {
             for function in &mut merged {
-                function.effect_root = Some("Go".to_string());
+                function.effect_root = Some("FFI.Go".to_string());
             }
         }
         if lib.starts_with("jet_java_") {
             for function in &mut merged {
-                function.effect_root = Some("Java".to_string());
+                function.effect_root = Some("FFI.Java".to_string());
             }
         }
         if lib.starts_with("jet_cpp_") {
             for function in &mut merged {
-                function.effect_root = Some("Cpp".to_string());
+                function.effect_root = Some("FFI.Cpp".to_string());
+            }
+        }
+        if lib.starts_with("jet_lua_") {
+            for function in &mut merged {
+                function.effect_root = Some("FFI.Lua".to_string());
+            }
+        }
+        if lib.starts_with("jet_cobol_") {
+            for function in &mut merged {
+                function.effect_root = Some("FFI.Cobol".to_string());
             }
         }
         if lib.starts_with("jet_cs_") {
-            for function in &mut merged { function.effect_root=Some("DotNet".to_string()); }
+            for function in &mut merged { function.effect_root=Some("FFI.DotNet".to_string()); }
         }
         if lib.starts_with("jet_tcl_") {
-            for function in &mut merged { function.effect_root=Some("Tcl".to_string()); }
+            for function in &mut merged { function.effect_root=Some("FFI.Tcl".to_string()); }
         }
         if lib.starts_with("jet_ada_") {
-            for function in &mut merged { function.effect_root=Some("Ada".to_string()); }
+            for function in &mut merged { function.effect_root=Some("FFI.Ada".to_string()); }
         }
         if lib.starts_with("jet_pascal_") {
-            for function in &mut merged { function.effect_root=Some("Pascal".to_string()); }
+            for function in &mut merged { function.effect_root=Some("FFI.Pascal".to_string()); }
         }
         if lib.starts_with("jet_dart_") {
-            for function in &mut merged { function.effect_root=Some("Dart".to_string()); }
+            for function in &mut merged { function.effect_root=Some("FFI.Dart".to_string()); }
         }
         if lib.starts_with("jet_pwsh_") {
-            for function in &mut merged { function.effect_root=Some("PowerShell".to_string()); }
+            for function in &mut merged { function.effect_root=Some("FFI.PowerShell".to_string()); }
         }
         if lib.starts_with("jet_perl_") {
-            for function in &mut merged { function.effect_root=Some("Perl".to_string()); }
+            for function in &mut merged { function.effect_root=Some("FFI.Perl".to_string()); }
         }
         if lib.starts_with("jet_ruby_") {
-            for function in &mut merged { function.effect_root=Some("Ruby".to_string()); }
+            for function in &mut merged { function.effect_root=Some("FFI.Ruby".to_string()); }
         }
         if lib.starts_with("jet_php_") {
-            for function in &mut merged { function.effect_root=Some("Php".to_string()); }
+            for function in &mut merged { function.effect_root=Some("FFI.Php".to_string()); }
         }
         if lib.starts_with("jet_r_") {
-            for function in &mut merged { function.effect_root=Some("R".to_string()); }
+            for function in &mut merged { function.effect_root=Some("FFI.R".to_string()); }
         }
         if lib.starts_with("jet_com_") {
-            for function in &mut merged { function.effect_root=Some("Com".to_string()); }
+            for function in &mut merged { function.effect_root=Some("FFI.Com".to_string()); }
         }
 
         let alias = synthetic_alias(lib);

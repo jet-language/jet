@@ -494,55 +494,22 @@
         super::jet_scheduler_current_task_trace()
     }
 
-    /// D-SELECT-GENERIC1=A: fluent select builder for any one `Receiver<T>`
-    /// element type, accumulated at compile time and executed at `.wait()`.
-    pub struct JetSelectBuilder<T: Send + 'static> {
-        recvs: Vec<JetReceiver<T>>,
-        after_values: Vec<(i64, T)>,
-    }
-
-    impl<T: Send + 'static> JetSelectBuilder<T> {
-        pub fn start() -> JetSelectBuilder<T> {
-            JetSelectBuilder {
-                recvs: Vec::new(),
-                after_values: Vec::new(),
-            }
-        }
-        pub fn recv(mut self, ch: JetReceiver<T>) -> JetSelectBuilder<T> {
-            self.recvs.push(ch);
-            self
-        }
-        pub fn after(mut self, ms: i64) -> JetSelectBuilder<T>
-        where
-            T: Default,
-        {
-            self.after_values.push((ms, T::default()));
-            self
-        }
-        pub fn after_value(mut self, ms: i64, value: T) -> JetSelectBuilder<T> {
-            self.after_values.push((ms, value));
-            self
-        }
-        pub fn read(self, _stream: super::JetTCPStream) -> JetSelectBuilder<T> {
-            self
-        }
-        pub fn wait(self) -> T {
-            let recv_refs: Vec<&JetReceiver<T>> = self.recvs.iter().collect();
-            jet_select_wait(&recv_refs, self.after_values)
-        }
-    }
-
-    /// D-SELECT-GENERIC1=A: multiplex any one `Receiver<T>` element type.
-    pub fn jet_select_wait<T: Send + 'static>(
+    /// D-CONC-CHAN1: wait on plain endpoints and return the selected arm plus
+    /// its receive payload. Timer arms carry no value, so the option is absent.
+    pub fn jet_select_wait_tagged<T: Send + 'static>(
         recvs: &[&JetReceiver<T>],
-        after_values: Vec<(i64, T)>,
-    ) -> T {
-        let inners: Vec<_> = recvs.iter().map(|c| c.inner.select_inner()).collect();
-        let timers = after_values
+        after_ns: Vec<i64>,
+    ) -> (i64, Option<T>) {
+        let inners: Vec<_> = recvs.iter().map(|receiver| receiver.inner.select_inner()).collect();
+        let after_ms = after_ns
             .into_iter()
-            .map(|(ms, value)| (super::jet_task_delay_ms_defaulted(ms), Some(value)))
+            .map(|ns| super::jet_task_delay_ms_defaulted(super::jet_std_time_duration_to_millis(ns)))
             .collect();
-        super::jet_scheduler_select_values(inners, timers)
+        match super::jet_scheduler_select(inners, after_ms) {
+            super::JetSelectOutcome::Recv { arm, value } => (arm as i64, Some(value)),
+            super::JetSelectOutcome::After { arm } => ((recvs.len() + arm) as i64, None),
+            super::JetSelectOutcome::Closed => super::jet_scheduler_fatal("select closed"),
+        }
     }
 
     /// D-TUPLE-DESTRUCT1: `tasks.channel<T>()` — mirrors Rust's `mpsc::channel()`:

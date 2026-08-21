@@ -130,11 +130,11 @@ fn core_tls_repl_requests_use_the_net_effect() {
         resolved_ret: None,
         checked_widen: false,
     };
-    let stmts = vec![Stmt::Grant {
+    let stmts = vec![Stmt::Caps {
         caps: vec![("Net".to_string(), span)],
         caps_span: span,
-        binding: "caps".to_string(),
-        binding_span: span,
+        binding: Some("caps".to_string()),
+        binding_span: Some(span),
         body: vec![Stmt::Expr(tls_call)],
         span,
     }];

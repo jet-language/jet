@@ -62,7 +62,7 @@ def risky(x: int) -> int:
     assert!(generated.contains("fn add(x: Int, y: Int) => Int"), "{generated}");
     assert!(generated.contains("total := x + y"), "{generated}");
     assert!(generated.contains("#Test fn test_add()"), "{generated}");
-    assert!(generated.contains("require_eq(add(2, 3), 5)"), "{generated}");
+    assert!(generated.contains("assert_eq(add(2, 3), 5)"), "{generated}");
     assert!(!generated.contains("fn risky"), "unsupported body became fake code: {generated}");
     assert!(!generated.contains("decimal"), "unsupported import leaked into output: {generated}");
     let checked = run(&root, &["check", "jet/app/math.jet"]);

@@ -317,12 +317,11 @@ const OS_ACTIONS: &[NestedCommandSpec] = &[
 
 // D-PERFSESSION1=D: `jet perf` owns collection/view/compare/export. `run` and
 // `test` stay canonical top-level intents and also live here so the group help
-// lists the full family. `bench` remains a trace-producing projection of the
-// measured test intent.
+// lists the full family. Measurement remains a mode of the canonical test
+// intent, not another perf-session action.
 const PERF_ACTIONS: &[NestedCommandSpec] = &[
     NestedCommandSpec { name: "run", usage: "run", summary: "Run a program and write a .jettrace", handler: HandlerKey::Perf, also_canonical_top_level: true },
     NestedCommandSpec { name: "test", usage: "test", summary: "Run tests and write a .jettrace", handler: HandlerKey::Perf, also_canonical_top_level: true },
-    NestedCommandSpec { name: "bench", usage: "bench", summary: "Measure test claims and write a .jettrace", handler: HandlerKey::Perf, also_canonical_top_level: false },
     NestedCommandSpec { name: "attach", usage: "attach", summary: "Attach to a running process and write a .jettrace", handler: HandlerKey::Perf, also_canonical_top_level: false },
     NestedCommandSpec { name: "view", usage: "view", summary: "Show a .jettrace summary", handler: HandlerKey::Perf, also_canonical_top_level: false },
     NestedCommandSpec { name: "compare", usage: "compare", summary: "Compare two .jettrace artifacts", handler: HandlerKey::Perf, also_canonical_top_level: false },
@@ -1052,7 +1051,7 @@ const BASE_FLAGS: &[FlagSpec] = &[
         help: "with build --target=web: show which code becomes JavaScript or WebAssembly",
     },
     // E2-M11 flags.
-    FlagSpec { long: "--capabilities-json", help: "with build: write used authority as JSON" },
+    FlagSpec { long: "--abilities-json", help: "with build: write used abilities as JSON" },
     FlagSpec { long: "--update-snapshots", help: "with test: replace expected snapshot output" },
     FlagSpec { long: "--coverage", help: "with test: show function and branch coverage" },
     FlagSpec { long: "--rust", help: "with emit: print generated Rust source" },
@@ -1859,7 +1858,7 @@ mod tests {
             ("os", "push", Push, "push", false), ("os", "bridge", Bridge, "bridge", false),
             ("os", "services", Services, "services", false), ("os", "config", Config, "config", false),
             ("perf", "run", Perf, "perf", true), ("perf", "test", Perf, "perf", true),
-            ("perf", "bench", Perf, "perf", true), ("perf", "attach", Perf, "perf", true),
+            ("perf", "attach", Perf, "perf", true),
             ("perf", "view", Perf, "perf", true), ("perf", "compare", Perf, "perf", true),
             ("perf", "export", Perf, "perf", true),
         ];

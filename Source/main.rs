@@ -1192,8 +1192,8 @@ fn main() {
 
     normalize_frequency_ring_argv(&mut raw);
 
-    // D-PERFSESSION1=D: `jet perf` owns the full family, including run/test/bench
-    // sessions that spawn the exact base-intent driver and write .jettrace.
+    // D-PERFSESSION1=D: `jet perf` owns trace sessions for the run and test
+    // intents and spawns the exact base-intent driver that writes .jettrace.
     if raw.first().map(String::as_str) == Some("perf") {
         match CmdPerf::run(&raw) {
             CmdPerf::Outcome::Exit(code) => exit(code),
@@ -1249,8 +1249,8 @@ fn main() {
     // D-A11YGATE1=B (c134 Phase 6): `jet lint --a11y` — opt-in, never blocking.
     let a11y = jet_argv.iter().any(|a| a == "--a11y");
     let complexity = jet_argv.iter().any(|a| a == "--complexity");
-    // D-TOOL5 (E2-M11): capability summary flags.
-    let capabilities_json = jet_argv.iter().any(|a| a == "--capabilities-json");
+    // D-TOOL5 (E2-M11): ability summary flags.
+    let abilities_json = jet_argv.iter().any(|a| a == "--abilities-json");
     // D-SUPPLY1: `jet build --sbom` writes an SPDX SBOM next to the binary.
     let sbom = jet_argv.iter().any(|a| a == "--sbom");
     // E2-M15 / D-CONF-WORD1=A: the machine axis. `--target` accepts either
@@ -1478,7 +1478,7 @@ fn main() {
                 cross_target.as_deref(),
                 explain_partition,
                 verbose,
-                capabilities_json,
+                abilities_json,
                 sbom,
                 named_profile.as_deref(),
                 &setting_overrides,
@@ -2501,7 +2501,7 @@ fn main() {
                                     effective.as_deref(),
                                     explain_partition,
                                     verbose,
-                                    capabilities_json,
+                                    abilities_json,
                                     sbom,
                                     named_profile.as_deref(),
                                     &setting_overrides,
@@ -2763,7 +2763,7 @@ fn main() {
                 effective.as_deref(),
                 explain_partition,
                 verbose,
-                capabilities_json,
+                abilities_json,
                 sbom,
                 named_profile.as_deref(),
                 &setting_overrides,

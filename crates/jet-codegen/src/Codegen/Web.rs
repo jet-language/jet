@@ -59,6 +59,8 @@ const JS_EXECUTION_PRELUDE: &str = concat!(
     "\n",
     include_str!("../Prelude/Core/Values.js"),
     "\n",
+    include_str!("../Prelude/Core/Measurement.js"),
+    "\n",
     include_str!("../Prelude/Core/Shared.js"),
     "\n",
     include_str!("../Prelude/Core/Authority.js"),
@@ -566,6 +568,14 @@ fn is_stream_type(ty: &Type) -> bool {
     matches!(ty, Type::Apply { name, args } if name == Syntax::TYPE_STREAM && args.len() == 1)
 }
 
+fn is_measurement_type(ty: &Type) -> bool {
+    matches!(
+        ty,
+        Type::Apply { name, args }
+            if name == Syntax::TYPE_MEASUREMENT && args.as_slice() == [Type::Float]
+    )
+}
+
 fn web_close_key(ty: &Type) -> Option<String> {
     let name = match ty {
         Type::Named(name) => name,
@@ -841,15 +851,17 @@ fn web_wasm_expr_supported(
         TIR::TExprKind::StrLit(parts) => parts.iter().all(|part| match part {
             TIR::TStrPart::Lit(_) => true,
             TIR::TStrPart::Interp(value, _) => {
-                (matches!(
-                    value.ty,
+                (is_measurement_type(&value.ty)
+                    || matches!(
+                        value.ty,
                         Type::Int
-                        | Type::IntN { .. }
-                        | Type::InlineRange { .. }
-                        | Type::Float
-                        | Type::Float32
-                        | Type::Bool
-                ) || matches!(&value.ty, Type::Named(name) if name == Syntax::TYPE_COMPLEX)
+                            | Type::IntN { .. }
+                            | Type::InlineRange { .. }
+                            | Type::Float
+                            | Type::Float32
+                            | Type::Bool
+                    )
+                    || matches!(&value.ty, Type::Named(name) if name == Syntax::TYPE_COMPLEX)
                     || is_string_like(&value.ty))
                     && web_wasm_expr_supported(value, bundle, file_prefix, reconstructions)
             }
@@ -1051,11 +1063,22 @@ fn web_wasm_expr_supported(
             web_wasm_expr_supported(base, bundle, file_prefix, reconstructions)
                 && web_wasm_expr_supported(index, bundle, file_prefix, reconstructions)
         }
+        TIR::TExprKind::StaticCall {
+            owner: TIR::TStaticOwner::Prelude { path, .. },
+            method,
+            args,
+            ..
+        } if path == "JetAuthority" && method.name == "workspace" && args.is_empty() => true,
         TIR::TExprKind::Call { name, args, .. } => wasm_callee_bucket(bundle, &local_web_key(file_prefix, name)) == Some(WebBucket::Wasm)
             && args.iter().all(|a| web_wasm_expr_supported(&a.value, bundle, file_prefix, reconstructions)),
         TIR::TExprKind::MethodCall {
             recv, method, args, ..
         } => {
+            let authority = matches!(
+                &recv.ty,
+                Type::Named(type_name) if type_name == Syntax::TYPE_ABILITIES
+            ) && matches!(method.name.as_str(), "with" | "without")
+                && args.len() == 1;
             let computed = method.mangled
                 && args.is_empty()
                 && matches!(
@@ -1076,7 +1099,7 @@ fn web_wasm_expr_supported(
                 Type::Named(type_name)
                     if bundle_has_inherent_method(bundle, type_name, &method.name)
             );
-            (computed || display || inherent)
+            (authority || computed || display || inherent)
                 && web_wasm_expr_supported(recv, bundle, file_prefix, reconstructions)
                 && args.iter().all(|arg| {
                     web_wasm_expr_supported(&arg.value, bundle, file_prefix, reconstructions)
@@ -1104,7 +1127,11 @@ fn web_wasm_expr_supported(
             args,
             ..
         } => {
-            wasm_math_core_helper(module, method, args, &expr.ty).is_some()
+            ((is_measurement_type(&expr.ty)
+                && module == "core.units"
+                && method == "from"
+                && args.len() == 2)
+                || wasm_math_core_helper(module, method, args, &expr.ty).is_some())
                 && args.iter().all(|arg| {
                     web_wasm_expr_supported(arg, bundle, file_prefix, reconstructions)
                 })
@@ -1384,6 +1411,11 @@ fn web_js_handle_method_supported(op: &TIR::THandleOp, argc: usize) -> bool {
         TIR::THandleOp::CivilTimeMethod { kind, method } => {
             kind == "Instant" && argc == 0 && matches!(method.as_str(), "elapsed_millis" | "elapsed")
         }
+        TIR::THandleOp::MeasurementMethod { method } => matches!(
+            (method.as_str(), argc),
+            ("value" | "uncertainty" | "sqrt", 0)
+                | ("add" | "sub" | "mul" | "div", 1)
+        ),
         _ => false,
     }
 }
@@ -1418,6 +1450,11 @@ fn web_wasm_handle_method_supported(op: &TIR::THandleOp, argc: usize) -> bool {
         TIR::THandleOp::CivilTimeMethod { kind, method } => {
             kind == "Instant" && argc == 0 && matches!(method.as_str(), "elapsed_millis" | "elapsed")
         }
+        TIR::THandleOp::MeasurementMethod { method } => matches!(
+            (method.as_str(), argc),
+            ("value" | "uncertainty" | "sqrt", 0)
+                | ("add" | "sub" | "mul" | "div", 1)
+        ),
         TIR::THandleOp::ReflectValueTypeName
         | TIR::THandleOp::ReflectValuePath
         | TIR::THandleOp::ReflectValueDisplay
@@ -1524,6 +1561,16 @@ fn web_expr_supported(expr: &TIR::TExpr) -> bool {
             args,
             ..
         } if path == "JetAuthority" && method.name == "workspace" && args.is_empty() => true,
+        E::MethodCall {
+            recv,
+            method,
+            args,
+            ..
+        } if matches!(&recv.ty, Type::Named(name) if name == Syntax::TYPE_ABILITIES)
+            && matches!(method.name.as_str(), "with" | "without")
+            && args.len() == 1 => {
+            web_expr_supported(recv) && web_expr_supported(&args[0].value)
+        }
         E::Present(inner) | E::Ok(inner) | E::Err(inner) => web_expr_supported(inner),
         E::Try { inner, note, .. } => {
             web_expr_supported(inner)
@@ -1562,6 +1609,11 @@ fn web_expr_supported(expr: &TIR::TExpr) -> bool {
                 && args.iter().all(web_expr_supported)
         }
         E::ModuleCall { form: TIR::TModuleCallForm::Qualified { .. } | TIR::TModuleCallForm::InlineMangled { .. }, args, .. } => args.iter().all(|a| web_expr_supported(&a.value)),
+        E::CoreCall { module, method, args, .. }
+            if is_measurement_type(&expr.ty)
+                && module == "core.units"
+                && method == "from"
+                && args.len() == 2 => args.iter().all(|arg| web_expr_supported(arg)),
         E::CoreCall { module, method, args, .. } => {
             let arity_ok = if module == "core.term" && method == "print" {
                 // D-PRELUDEX1 / D-VERDICT-1321-1: the qualified print twin
@@ -3769,12 +3821,18 @@ fn wasm_ty(ty: &Type) -> Option<&'static str> {
         Type::InlineRange { base, .. } => wasm_ty(base),
         Type::Int => Some("JetWasmInt"),
         Type::IntN { signed: true, .. } => Some("i64"),
+        Type::Named(name) if name == Syntax::TYPE_ABILITIES => Some("JetAuthority"),
         Type::Named(name)
             if name == Syntax::DURATION_TYPE || name == Syntax::TYPE_INSTANT => Some("i64"),
         Type::IntN { signed: false, .. } => Some("u64"),
         Type::Float | Type::Float32 => Some("f64"),
         Type::Bool => Some("bool"),
         Type::Named(name) if name == Syntax::TYPE_COMPLEX => Some("JetComplex"),
+        Type::Apply { name, args }
+            if name == Syntax::TYPE_MEASUREMENT && args.as_slice() == [Type::Float] =>
+        {
+            Some("JetMeasurement")
+        }
         Type::String => Some("String"),
         Type::Apply { name, .. } if name == Syntax::TYPE_CHECKED_TEXT => Some("String"),
         Type::List(inner) if matches!(**inner, Type::Int | Type::InlineRange { .. }) => Some("Vec<JetWasmInt>"),
@@ -3794,7 +3852,13 @@ fn wasm_storage_ty(ty: &Type) -> Option<String> {
         Type::Tagged { inner, .. } => wasm_storage_ty(inner)?,
         Type::InlineRange { base, .. } => wasm_storage_ty(base)?,
         Type::Named(name) if name == "Unit" => "()".to_string(),
+        Type::Named(name) if name == Syntax::TYPE_ABILITIES => "JetAuthority".to_string(),
         Type::Named(name) if name == Syntax::TYPE_COMPLEX => "JetComplex".to_string(),
+        Type::Apply { name, args }
+            if name == Syntax::TYPE_MEASUREMENT && args.as_slice() == [Type::Float] =>
+        {
+            "JetMeasurement".to_string()
+        }
         Type::Int => "JetWasmInt".to_string(),
         Type::IntN { signed: true, .. } => "i64".to_string(),
         Type::Named(name)
@@ -3837,9 +3901,15 @@ fn wasm_internal_ty(ty: &Type, bundle: &ProgramBundle) -> Option<String> {
         Type::Tagged { inner, .. } => wasm_internal_ty(inner, bundle)?,
         Type::InlineRange { base, .. } => wasm_internal_ty(base, bundle)?,
         Type::Named(name) if name == "Unit" => "()".to_string(),
+        Type::Named(name) if name == Syntax::TYPE_ABILITIES => "JetAuthority".to_string(),
         Type::Named(name) if name == Syntax::TYPE_COMPLEX => "JetComplex".to_string(),
         Type::Named(name)
             if name == Syntax::DURATION_TYPE || name == Syntax::TYPE_INSTANT => "i64".to_string(),
+        Type::Apply { name, args }
+            if name == Syntax::TYPE_MEASUREMENT && args.as_slice() == [Type::Float] =>
+        {
+            "JetMeasurement".to_string()
+        }
         Type::Named(name) if name == Syntax::DURATION_RANGE_ERROR_TYPE => {
             "JetRangeError".to_string()
         }
@@ -3973,6 +4043,9 @@ fn wasm_export_arg_expr(name: &str, ty: &Type, conv: AccessConvention) -> String
 }
 
 fn wasm_export_ty(ty: &Type) -> Option<&'static str> {
+    if is_measurement_type(ty) {
+        return None;
+    }
     match ty {
         Type::Tagged { inner, .. } => wasm_export_ty(inner),
         Type::InlineRange { base, .. } => wasm_export_ty(base),
@@ -5149,6 +5222,21 @@ fn wasm_emit_expr(
             method,
             args,
             ..
+        } if is_measurement_type(&expr.ty)
+            && module == "core.units"
+            && method == "from"
+            && args.len() == 2 => {
+            let args = args
+                .iter()
+                .map(|arg| wasm_emit_expr(arg, funcs, file_prefix, reconstructions))
+                .collect::<Result<Vec<_>, _>>()?;
+            format!("JetMeasurement::new({}, {})", args[0], args[1])
+        }
+        TIR::TExprKind::CoreCall {
+            module,
+            method,
+            args,
+            ..
         } if module == "core.reflect" && method == "of" && args.len() == 1 => {
             format!(
                 "({}).jet_web_reflect()",
@@ -5166,6 +5254,22 @@ fn wasm_emit_expr(
         TIR::TExprKind::HandleMethod { recv, op, args } => {
             let recv = wasm_emit_expr(recv, funcs, file_prefix, reconstructions)?;
             match op {
+                TIR::THandleOp::MeasurementMethod { method } => {
+                    let args = args
+                        .iter()
+                        .map(|arg| wasm_emit_expr(arg, funcs, file_prefix, reconstructions))
+                        .collect::<Result<Vec<_>, _>>()?;
+                    match (method.as_str(), args.as_slice()) {
+                        ("value", []) => format!("({recv}).value()"),
+                        ("uncertainty", []) => format!("({recv}).uncertainty()"),
+                        ("sqrt", []) => format!("({recv}).sqrt()"),
+                        ("add", [other]) => format!("({recv}).add({other})"),
+                        ("sub", [other]) => format!("({recv}).sub({other})"),
+                        ("mul", [other]) => format!("({recv}).mul({other})"),
+                        ("div", [other]) => format!("({recv}).div({other})"),
+                        _ => return Err(()),
+                    }
+                }
                 TIR::THandleOp::DurationNew { unit, float } => {
                     let scale = web_duration_scale(unit).ok_or(())?;
                     if *float {
@@ -5591,6 +5695,31 @@ fn wasm_emit_expr(
             }
             let symbol = format!("jet_wasm_{key}");
             format!("{symbol}({})", args.iter().map(|a| wasm_emit_call_arg(a, funcs, file_prefix, reconstructions)).collect::<Result<Vec<_>, _>>()?.join(", "))
+        }
+        TIR::TExprKind::StaticCall {
+            owner: TIR::TStaticOwner::Prelude { path, .. },
+            method,
+            args,
+            ..
+        } if path == "JetAuthority" && method.name == "workspace" && args.is_empty() => {
+            "JetAuthority::workspace()".to_string()
+        }
+        TIR::TExprKind::MethodCall {
+            recv, method, args, ..
+        } if matches!(&recv.ty, Type::Named(name) if name == Syntax::TYPE_ABILITIES)
+            && matches!(method.name.as_str(), "with" | "without")
+            && args.len() == 1 => {
+            let receiver = wasm_emit_expr(recv, funcs, file_prefix, reconstructions)?;
+            let requested = wasm_emit_expr(&args[0].value, funcs, file_prefix, reconstructions)?;
+            if method.name == "with" {
+                format!(
+                    "jet_authority_with(&({receiver}), &({requested})).unwrap_or_else(|message| jet_runtime_stop(\"E0712\", {}, {}, &message))",
+                    mangle_generated("source_file"),
+                    0,
+                )
+            } else {
+                format!("jet_authority_without(&({receiver}), &({requested}))")
+            }
         }
         TIR::TExprKind::MethodCall {
             recv, method, args, ..
@@ -7695,7 +7824,26 @@ fn tir_js_expr(expr: &TIR::TExpr, funcs: &[FuncWeb], file_prefix: Option<&str>) 
             if is_wasm_export(&key, funcs) { format!("await bridge_{key}({args})") }
             else { format!("{key}({args})") }
         }
-        E::Print(value) => format!("jetDom.print({})", tir_js_expr(value, funcs, file_prefix)?),
+        E::Print(value) => {
+            let rendered = tir_js_expr(value, funcs, file_prefix)?;
+            if is_measurement_type(&value.ty) {
+                format!("jetDom.print(jet_measurement_show({rendered}))")
+            } else {
+                format!("jetDom.print({rendered})")
+            }
+        }
+        E::MethodCall { recv, method, args, .. }
+            if matches!(&recv.ty, Type::Named(name) if name == Syntax::TYPE_ABILITIES)
+                && matches!(method.name.as_str(), "with" | "without")
+                && args.len() == 1 =>
+        {
+            format!(
+                "jet_authority_{}({}, {})",
+                method.name,
+                tir_js_expr(recv, funcs, file_prefix)?,
+                tir_js_expr(&args[0].value, funcs, file_prefix)?,
+            )
+        }
         E::MethodCall { recv, method, args, .. } => format!("{}.{}({})", tir_js_expr(recv, funcs, file_prefix)?, web_name(&method.rust()), tir_call_args(args, funcs, file_prefix)?),
         E::ClosureMethod { recv, op, args } => {
             let kernel = match op {
@@ -7709,6 +7857,18 @@ fn tir_js_expr(expr: &TIR::TExpr, funcs: &[FuncWeb], file_prefix: Option<&str>) 
                 .collect::<Result<Vec<_>, _>>()?
                 .join(", ");
             format!("{}({}, {})", kernel, tir_js_expr(recv, funcs, file_prefix)?, args)
+        }
+        E::CoreCall {
+            module,
+            method,
+            args,
+            ..
+        } if is_measurement_type(&expr.ty)
+            && module == "core.units"
+            && method == "from"
+            && args.len() == 2 => {
+            let args = tir_plain_args(args, funcs, file_prefix)?;
+            format!("jet_measurement_new(Number({}), Number({}))", args[0], args[1])
         }
         E::CoreCall {
             module,
@@ -7756,6 +7916,16 @@ fn tir_js_expr(expr: &TIR::TExpr, funcs: &[FuncWeb], file_prefix: Option<&str>) 
             let recv = tir_js_expr(recv, funcs, file_prefix)?;
             let a = tir_plain_args(args, funcs, file_prefix)?;
             match op {
+                TIR::THandleOp::MeasurementMethod { method } => match (method.as_str(), a.len()) {
+                    ("value", 0) => format!("jet_measurement_value({recv})"),
+                    ("uncertainty", 0) => format!("jet_measurement_uncertainty({recv})"),
+                    ("sqrt", 0) => format!("jet_measurement_sqrt({recv})"),
+                    ("add", 1) => format!("jet_measurement_add({recv}, {})", a[0]),
+                    ("sub", 1) => format!("jet_measurement_sub({recv}, {})", a[0]),
+                    ("mul", 1) => format!("jet_measurement_mul({recv}, {})", a[0]),
+                    ("div", 1) => format!("jet_measurement_div({recv}, {})", a[0]),
+                    _ => return Err(()),
+                },
                 TIR::THandleOp::UiBackendMethod { method } => match (method.as_str(), a.len()) {
                     ("measure", 2) => format!("jetDom.measure({}, {})", a[0], a[1]),
                     ("layout", 2) => format!("jetDom.layout({recv}, {}, {})", a[0], a[1]),
@@ -8064,9 +8234,12 @@ fn tir_js_string(
                 TIR::TStrPart::Lit(text) => out.push_str(text),
                 TIR::TStrPart::Interp(value, _) => {
                     let is_float = value.ty.is_float();
+                    let is_measurement = is_measurement_type(&value.ty);
                     let rendered = tir_js_expr(value, funcs, file_prefix)?;
                     if is_float {
                         out.push_str(&format!("${{jet_float_display({rendered})}}"));
+                    } else if is_measurement {
+                        out.push_str(&format!("${{jet_measurement_show({rendered})}}"));
                     } else {
                         out.push_str(&format!("${{{rendered}}}"));
                     }
@@ -8246,6 +8419,63 @@ const WASM_ARITH_PRELUDE: &str = concat!(
     "    let text = value.to_string();\n",
     "    unsafe { jet_web_print(text.as_ptr() as u32, text.len() as u32); }\n",
     "}\n\n",
+    include_str!("../Prelude/Core/Measurement.rs"),
+    "\n",
+    "#[derive(Clone, Copy, Debug, PartialEq)]\n\
+     struct JetMeasurement { value: f64, uncertainty: f64 }\n\
+     impl JetMeasurement {\n\
+         fn new(value: f64, uncertainty: f64) -> Self {\n\
+             let (value, uncertainty) = jet_measurement_kernel_new(value, uncertainty);\n\
+             Self { value, uncertainty }\n\
+         }\n\
+         fn value(&self) -> f64 { self.value }\n\
+         fn uncertainty(&self) -> f64 { self.uncertainty }\n\
+         fn add(&self, other: Self) -> Self {\n\
+             let (value, uncertainty) = jet_measurement_kernel_add(\n\
+                 (self.value, self.uncertainty),\n\
+                 (other.value, other.uncertainty),\n\
+             );\n\
+             Self::new(value, uncertainty)\n\
+         }\n\
+         fn sub(&self, other: Self) -> Self {\n\
+             let (value, uncertainty) = jet_measurement_kernel_sub(\n\
+                 (self.value, self.uncertainty),\n\
+                 (other.value, other.uncertainty),\n\
+             );\n\
+             Self::new(value, uncertainty)\n\
+         }\n\
+         fn mul(&self, other: Self) -> Self {\n\
+             let (value, uncertainty) = jet_measurement_kernel_mul(\n\
+                 (self.value, self.uncertainty),\n\
+                 (other.value, other.uncertainty),\n\
+             );\n\
+             Self::new(value, uncertainty)\n\
+         }\n\
+         fn div(&self, other: Self) -> Self {\n\
+             let (value, uncertainty) = jet_measurement_kernel_div(\n\
+                 (self.value, self.uncertainty),\n\
+                 (other.value, other.uncertainty),\n\
+             );\n\
+             Self::new(value, uncertainty)\n\
+         }\n\
+         fn sqrt(&self) -> Self {\n\
+             let (value, uncertainty) =\n\
+                 jet_measurement_kernel_sqrt((self.value, self.uncertainty));\n\
+             Self::new(value, uncertainty)\n\
+         }\n\
+     }\n\
+     impl JetDisplay for JetMeasurement {\n\
+         fn jet_display(&self) -> String {\n\
+             jet_measurement_kernel_show((self.value, self.uncertainty))\n\
+         }\n\
+     }\n\
+     impl std::fmt::Display for JetMeasurement {\n\
+         fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {\n\
+             formatter.write_str(&jet_measurement_kernel_show((self.value, self.uncertainty)))\n\
+         }\n\
+     }\n\
+     \n\
+",
     "#[derive(Debug)]\n",
     "struct JetWasmRuntimeFailure { error: JetErr, frame: String, exit_code: i32 }\n\n",
     "struct JetWasmHostError { json: String, journey: String, frame: String, status: i32 }\n\n",
@@ -8399,6 +8629,8 @@ const WASM_ARITH_PRELUDE: &str = concat!(
     include_str!("../Prelude/Core/Duration.rs"),
     "\n",
     include_str!("../Prelude/Core/TimeMonotonic.rs"),
+    "\n",
+    include_str!("../Prelude/Core/Authority.rs"),
     "\n",
     "#[derive(Clone, Debug)]\n",
     "struct JetRangeError { reason: String }\n\n",

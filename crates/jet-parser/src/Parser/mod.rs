@@ -180,6 +180,7 @@ fn is_teaching_parse_diag(code: &str) -> bool {
             | "E0373"
             | "E0374"
             | "E0378"
+            | "E0379"
             | "E0999"
             | "E0412"
             | "E0413"
@@ -1381,7 +1382,7 @@ fn notify(ready: Bool) :[Net]> {
     task.group group {
         task fetch()
     }
-    #Grant(caps: FS, Net) {
+    #Caps(caps: FS, Net) {
         use_caps(caps)
     }
 }
@@ -1395,7 +1396,7 @@ fn notify(ready: Bool) :[Net]> {
         assert!(once.contains("loop item, items :> audit(item)"), "{once}");
         assert!(once.contains("next(outer)"), "{once}");
         assert!(once.contains("task fetch()"), "{once}");
-        assert!(once.contains("#Grant(caps: FS, Net)"), "{once}");
+        assert!(once.contains("#Caps(caps: FS, Net)"), "{once}");
         let twice = format_source(&once).expect("canonical arrow/control syntax reformats");
         assert_eq!(once, twice);
     }
@@ -1468,6 +1469,14 @@ fn notify(ready: Bool) :[Net]> {
                     Some(":>"),
                     "the retired function-body marker must offer the canonical replacement"
                 );
+            }
+            if code == "E0077" {
+                let diagnostic = diagnostics
+                    .iter()
+                    .find(|diagnostic| diagnostic.code == code)
+                    .expect("E0077");
+                assert!(diagnostic.what.contains("#Grant"), "{diagnostic:?}");
+                assert!(diagnostic.fix.contains("#Caps"), "{diagnostic:?}");
             }
         }
     }

@@ -1097,6 +1097,7 @@ impl<'a> Parser<'a> {
             TokKind::KwConst => self.retired_const_def().map(Item::Const),
             TokKind::KwComptime => self.comptime_def().map(Item::Const),
             TokKind::Hash if self.at_test_def() => self.test_def().map(Item::Test),
+            TokKind::Hash if self.at_bench_def() => self.retired_bench_marker(),
             TokKind::Hash if self.at_persist_binding() => self.persist_def().map(Item::Const),
             TokKind::Hash if self.at_comptime_marker() => self.comptime_def().map(Item::Const),
             TokKind::Hash if self.at_known_lead() => self.comptime_def().map(Item::Const),

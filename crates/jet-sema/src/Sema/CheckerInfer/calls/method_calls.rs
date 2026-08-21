@@ -2342,7 +2342,7 @@ impl<'a> Checker<'a> {
                     }
                     return None;
                 }
-                let target = type_args[0].clone();
+                let target = self.resolve_type(type_args[0].clone());
                 if !self.is_decodable(&target) {
                     let shown = target.show();
                     let shown = shown.trim_matches('`');
@@ -2364,9 +2364,6 @@ impl<'a> Checker<'a> {
             if let Type::Named(ref n) | Type::Apply { name: ref n, .. } = &recv_ty {
                 if n == Syntax::TYPE_TASKGROUP {
                     return self.infer_taskgroup_method(receiver, method, span, args, recv_type_out);
-                }
-                if n == Syntax::TYPE_SELECT_BUILDER {
-                    return self.infer_select_method(receiver, method, span, args, recv_type_out);
                 }
                 // D-TYPEDTEXT1=D: inspect a checked `SQL`/`HTML` value. `.template()`/
                 // `.params()` expose the bound-parameter split (SQL never re-embeds a
@@ -3675,7 +3672,7 @@ impl<'a> Checker<'a> {
                             }
                         }
                         *recv_type_out = Some("ProcessSpec".to_string());
-                        if method == "capabilities" {
+                        if method == "abilities" {
                             *resolved_ret_out = ret.clone();
                         }
                         return ret;
@@ -3802,6 +3799,30 @@ impl<'a> Checker<'a> {
             // Set `recv_type_out` so codegen routes the call to the handle-method op
             // (TIR shape (h)) rather than failing the typed-IR subset check.
             if let Type::Named(handle_ty) = &recv_ty {
+                // D-AUTHORITY-NAME1=A / D-AUTHORITY-WORD2=E: the carried
+                // abilities value is ordinary data. Its only instance family is
+                // the Prelude `with`/`without` narrowing pair.
+                if handle_ty == crate::Syntax::TYPE_ABILITIES {
+                    if let Some(ret) = Collections::builtin_method_return(
+                        &recv_ty,
+                        method,
+                        args.len(),
+                        false,
+                    ) {
+                        let handle_ty = handle_ty.clone();
+                        let result = self.finish_builtin_method(
+                            receiver,
+                            method,
+                            &recv_ty,
+                            args,
+                            span,
+                            ret,
+                        );
+                        *recv_type_out = Some(handle_ty);
+                        *resolved_ret_out = result.clone();
+                        return result;
+                    }
+                }
                 // D-DET-CAPAPI: `rng.pick(list)` / `rng.shuffle(&list)` are GENERIC — the
                 // element type comes from the `[T]` arg, mirroring the ambient
                 // `random.pick`/`random.shuffle`. Resolve element-aware here (the

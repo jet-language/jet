@@ -497,13 +497,13 @@ fn script_start_budget_fixtures_and_peers() {
         &[
             "node",
             "-e",
-            "process.stdout.write(require('fs').readFileSync('data.txt','utf8'))",
+            "process.stdout.write(assert('fs').readFileSync('data.txt','utf8'))",
         ],
         Some(&fix),
     );
     let bash_sub = peer_us(&["bash", "-c", "true"], None);
     let node_sub = peer_us(
-        &["node", "-e", "require('child_process').execFileSync('true')"],
+        &["node", "-e", "assert('child_process').execFileSync('true')"],
         None,
     );
 

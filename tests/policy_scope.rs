@@ -3,8 +3,6 @@ mod common;
 #[path = "tir_support/mod.rs"]
 mod tir_support;
 
-use jet::Policy::{self, PolicyKey, PolicyValue};
-
 fn fixture(path: &str) -> String {
     std::fs::read_to_string(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures").join(path)).unwrap()
 }
@@ -16,31 +14,16 @@ fn package_policy_cannot_authorize_unsafe() {
 }
 
 #[test]
-fn package_module_function_block_policy_has_one_explainable_chain() {
-    let package = jet::Package::PackageFacts::parse(&fixture("policy_scope_chain/package.jet"), "test").unwrap();
-    let source = fixture("policy_scope_chain/main.jet");
-    let (tokens, lex) = jet::Lexer::lex(&source);
-    assert!(lex.is_empty());
-    let program = jet::Parser::parse(&tokens).unwrap();
-    let mut declarations = package.policy.memory;
-    declarations.extend(program.policy_declarations.iter().filter(|d| d.key == PolicyKey::ArenaBounded).cloned());
-    let effective = Policy::resolve(PolicyKey::ArenaBounded, declarations).unwrap().unwrap();
-    assert_eq!(effective.value, PolicyValue::Limit(8192));
-    assert_eq!(effective.provenance.len(), 4);
-    let explanation = Policy::explain(&effective);
-    assert!(explanation.contains("package.jet"));
-    assert!(explanation.contains("<source>"));
-}
-
-#[test]
-fn package_to_module_widening_is_e0355_policy_error() {
-    let package = jet::Package::PackageFacts::parse(&fixture("policy_package_module_widen/package.jet"), "test").unwrap();
-    let source = fixture("policy_package_module_widen/main.jet");
-    let (tokens, lex) = jet::Lexer::lex(&source);
-    assert!(lex.is_empty());
-    let program = jet::Parser::parse(&tokens).unwrap();
-    let declarations = package.policy.memory.into_iter().chain(program.policy_declarations).collect::<Vec<_>>();
-    assert!(matches!(Policy::resolve(PolicyKey::ArenaBounded, declarations), Err(Policy::PolicyError::Widening { .. })));
+fn manifest_memory_denial_uses_the_effects_rights_tree() {
+    let package = jet::Package::PackageFacts::parse(
+        "name: \"memory\"\nversion: \"0.1.0\"\nauthority: .{ holds: { deny: [Mem.Alloc(above: 65536)] } }\n",
+        "test",
+    )
+    .unwrap();
+    assert_eq!(
+        package.effects_deny,
+        Some(vec!["Mem.Alloc(above: 65536)".to_string()])
+    );
 }
 
 #[test]

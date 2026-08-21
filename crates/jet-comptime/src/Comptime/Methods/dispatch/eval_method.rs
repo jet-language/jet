@@ -112,7 +112,7 @@ impl<'a> Interp<'a> {
         // D-AUTHORITY-NAME1=A: comptime static construction uses the same
         // built-in seam as TIR interpretation.
         if let Expr::Ident(type_name, _) = receiver {
-            if type_name == crate::Syntax::TYPE_AUTHORITY
+            if type_name == crate::Syntax::TYPE_ABILITIES
                 && method == "workspace"
                 && args.is_empty()
             {

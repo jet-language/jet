@@ -168,7 +168,7 @@ fn serve() ? {
 }
 
 fn verify_release() ? {
-    require(licenses_ok(), "unapproved license")
+    assert(licenses_ok(), "unapproved license")
 }
 ```
 
@@ -463,11 +463,11 @@ fn run() ? {
 }
 
 fn test_unit() ? {
-    require(2 + 2 == 4, "arithmetic changed")
+    assert(2 + 2 == 4, "arithmetic changed")
 }
 
 fn postgres_ready() ? {
-    require(true, "postgres did not answer")
+    assert(true, "postgres did not answer")
 }
 ```
 
@@ -699,7 +699,7 @@ fn run() ? {
 }
 
 fn unit() ? {
-    require(true, "api unit failed")
+    assert(true, "api unit failed")
 }
 ```
 
@@ -720,7 +720,7 @@ outputs: .{
 
 ```jet
 fn unit() ? {
-    require(true, "billing unit failed")
+    assert(true, "billing unit failed")
 }
 ```
 
@@ -1204,7 +1204,7 @@ fn api_ready() ? {
 
 fn api_can_serve() ? {
     response :: http.get("http://127.0.0.1:8080/health")?
-    require(response.status() == 200, "api could not serve a request")
+    assert(response.status() == 200, "api could not serve a request")
 }
 
 pub web_base :: Config.{

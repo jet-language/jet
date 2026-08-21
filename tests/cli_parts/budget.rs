@@ -49,7 +49,7 @@ fn compiler_facts_rejects_compile_time_instead_of_measuring() {
 fn allocation_probe_uses_real_bench_boundaries_and_rejects_forged_cache() {
     use jet_foundation::PerformanceBudget::CanonicalJson;
     let dir = allocation_budget_project("allocation_probe_runtime");
-    let run = || Command::new(jet()).args(["bench", "--show-default", "src/run.jet"]).current_dir(&dir).output().unwrap();
+    let run = || Command::new(jet()).args(["budget", "check", "--json"]).current_dir(&dir).output().unwrap();
 
     let first = run();
     assert_eq!(first.status.code(), Some(0), "stdout: {}\nstderr: {}", String::from_utf8_lossy(&first.stdout), String::from_utf8_lossy(&first.stderr));

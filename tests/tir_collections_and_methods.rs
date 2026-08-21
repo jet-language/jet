@@ -978,6 +978,30 @@ fn list_surface_forced_interpreter() {
     }
 }
 
+/// D-SUBJECT-CALL1=A: bare member chains desugar to ordinary one-parameter
+/// lambdas before the forced interpreter sees the collection methods.
+#[test]
+fn bare_member_shorthand_forced_interpreter() {
+    let path = format!(
+        "{}/examples/features/basics/method_chain.jet",
+        env!("CARGO_MANIFEST_DIR")
+    );
+    match dev_iteration(&path, false, true) {
+        RunOutcome::Ran {
+            stdout,
+            stderr,
+            exit_code,
+        } => {
+            assert_eq!(exit_code, 0);
+            assert_eq!(stderr, "");
+            assert_eq!(stdout, "HELL0 W0RLD\n3\n[Ada]\n[ADA, GRACE]\n");
+        }
+        RunOutcome::Problems(diagnostics) => {
+            panic!("forced interpreter rejected bare member shorthand: {diagnostics:?}")
+        }
+    }
+}
+
 /// `join(sep)` on a list of strings — the `.iter().map(jet_show)…join` form.
 #[test]
 fn list_join_with_separator() {

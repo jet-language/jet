@@ -645,57 +645,58 @@ fn documented_cli_program_matches_aot_default_interpreter_and_goldens() {
 }
 
 #[test]
-fn benchmark_cli_help_and_selected_region_keep_aot_golden_contract() {
+fn measured_test_cli_and_selected_claim_keep_aot_golden_contract() {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let source = root.join("examples/features/tooling/bench_target/main.jet");
     let golden = fs::read(root.join("examples/features/expected/tooling/bench_target.out"))
-        .expect("read benchmark target golden");
+        .expect("read measured test target golden");
     let scratch = common::Scratch::new("bench_cli_parity");
-    fs::copy(&source, scratch.join("main.jet")).expect("copy benchmark target source");
+    fs::copy(&source, scratch.join("main.jet")).expect("copy measured test target source");
     fs::copy(
         root.join("examples/features/tooling/bench_target/package.jet"),
         scratch.join("package.jet"),
     )
-    .expect("copy benchmark target package");
+    .expect("copy measured test target package");
     fs::copy(
         root.join("examples/features/tooling/bench_target/bench_perf.jet"),
         scratch.join("bench_perf.jet"),
     )
-    .expect("copy benchmark target module");
+    .expect("copy measured test target module");
 
     let build = Command::new(env!("CARGO_BIN_EXE_jet"))
         .args(["build", "main.jet"])
         .current_dir(&scratch.path)
         .env("NO_COLOR", "1")
         .output()
-        .expect("build benchmark target");
-    assert!(build.status.success(), "AOT benchmark target build failed: {}", String::from_utf8_lossy(&build.stderr));
+        .expect("build measured test target");
+    assert!(build.status.success(), "AOT measured test target build failed: {}", String::from_utf8_lossy(&build.stderr));
     let aot = Command::new(scratch.join("build/main"))
         .current_dir(&scratch.path)
         .output()
-        .expect("run AOT benchmark target");
-    assert!(aot.status.success(), "AOT benchmark target failed: {}", String::from_utf8_lossy(&aot.stderr));
-    assert_eq!(aot.stdout, golden, "AOT benchmark target changed its named golden");
+        .expect("run AOT measured test target");
+    assert!(aot.status.success(), "AOT measured test target failed: {}", String::from_utf8_lossy(&aot.stderr));
+    assert_eq!(aot.stdout, golden, "AOT measured test target changed its named golden");
 
     let help = Command::new(env!("CARGO_BIN_EXE_jet"))
-        .args(["bench", "--help"])
+        .args(["test", "--help"])
         .env("NO_COLOR", "1")
         .output()
-        .expect("show bench help");
-    assert!(help.status.success(), "bench help failed: {}", String::from_utf8_lossy(&help.stderr));
-    assert!(String::from_utf8_lossy(&help.stdout).contains("--filter"));
+        .expect("show test help");
+    assert!(help.status.success(), "test help failed: {}", String::from_utf8_lossy(&help.stderr));
+    let help = String::from_utf8_lossy(&help.stdout);
+    assert!(help.contains("--filter"));
+    assert!(help.contains("--measure"));
 
-    let bench = Command::new(env!("CARGO_BIN_EXE_jet"))
-        .args(["bench", "--show-default", "main.jet", "--filter=sum_to(1000)"])
+    let measured = Command::new(env!("CARGO_BIN_EXE_jet"))
+        .args(["test", "main.jet", "--measure", "--filter=sum_to(1000)"])
         .current_dir(&scratch.path)
         .env("NO_COLOR", "1")
         .output()
-        .expect("run selected benchmark region");
-    assert!(bench.status.success(), "selected benchmark failed: {}", String::from_utf8_lossy(&bench.stderr));
-    let selected = String::from_utf8_lossy(&bench.stdout);
-    assert_eq!(selected.lines().filter(|line| line.contains("ns/iter")).count(), 1);
-    assert!(selected.contains("main.jet::sum_to(1000)"), "selected benchmark lost path-qualified region: {selected}");
-    assert!(selected.contains("profile: release"), "selected benchmark lost profile label: {selected}");
+        .expect("run selected measured claim");
+    assert!(measured.status.success(), "selected measured claim failed: {}", String::from_utf8_lossy(&measured.stderr));
+    let selected = String::from_utf8_lossy(&measured.stdout);
+    assert!(selected.contains("sum_to(1000)"), "selected measurement lost claim name: {selected}");
+    assert!(selected.contains("ns"), "selected measurement lost timing: {selected}");
 }
 
 #[test]
@@ -758,7 +759,7 @@ fn command_override_examples_match_aot_default_run_and_interpreter() {
     assert!(override_run.status.success(), "test override failed: {}", String::from_utf8_lossy(&override_run.stderr));
     assert!(String::from_utf8_lossy(&override_run.stdout).contains("jet test: using fn test override"));
 
-    for command in ["test", "bench"] {
+    for command in ["test"] {
         let help = Command::new(env!("CARGO_BIN_EXE_jet"))
             .args([command, "--help"])
             .env("NO_COLOR", "1")

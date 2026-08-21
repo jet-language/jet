@@ -3,7 +3,7 @@ mod common;
 const SHARED_SOURCE: &str = r#"
 struct Counter { value: Int }
 fn run() {
-    counter := shared Counter.{ value: 0 }
+    counter := shared Counter{ value: 0 }
     handle :: task {
         counter.value += 1
     }

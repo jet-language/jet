@@ -111,7 +111,7 @@ Input and file access are explicit. Queue `Ada` in the browser's **Input**
 control, then run this cell:
 
 ```jet
-#Grant(caps: IO, FS) {
+#Caps(abilities: IO, FS) {
     name :: input("name: ") ?? "world"
     assert(name == "Ada")
     write_file("notes.txt", name) ?? panic("write failed")

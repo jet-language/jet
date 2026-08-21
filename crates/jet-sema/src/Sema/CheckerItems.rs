@@ -3525,10 +3525,10 @@ impl<'a> Checker<'a> {
     }
 
     pub(crate) fn check_panic_call(&mut self, call: &mut Call) {
-        // D-NOPANIC1=D: the existing reachability sentinel is the source of
-        // both the legacy `reaches_panic` fact and the deniable Panic effect.
+        // D-PANICROOT1=A: the existing reachability sentinel is the source of
+        // both the legacy `reaches_panic` fact and the deniable Panic row.
+        // Panic is not an ordinary direct effect and cannot be granted.
         self.fx_edges.insert("__jet_panic__".to_string());
-        self.record_effect(Effect::Panic.name(), call.name_span);
         let safe_panic_context = self.autodiff_safe_panic_context;
         if safe_panic_context {
             self.fx_autodiff_safe_panic = true;

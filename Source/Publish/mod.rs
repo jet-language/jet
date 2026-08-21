@@ -375,6 +375,7 @@ mod tests {
             version: 1,
             packages: pkgs,
             root_dependencies: vec![],
+            authority: None,
             workspace_members: Vec::new(),
             workspace_source_digest: None,
             workspace_overlay_policy: Default::default(),

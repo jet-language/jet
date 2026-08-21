@@ -130,7 +130,7 @@ pub(crate) enum TypeDef {
         c_layout_tag: Option<crate::AST::CEnumTag>,
     },
     /// D-DIST1 (ratified 2026-06-19): a distinct type — a nominal wrapper over
-    /// a base type. No implicit coercion either direction (E0128). Capability
+    /// a base type. No implicit coercion either direction (E0128). Ability
     /// requests remain ordinary derive rows after registration.
     Distinct {
         base: Type,
@@ -491,13 +491,12 @@ impl TypeRegistry {
         let ty = ty.without_user_tags();
         match ty {
             Type::IntN { .. } => ty.integer_range(),
-            Type::Named(name) => {
-                let base = self.distinct_base(name)?;
-                base.is_integer()
-                    .then(|| self.distinct_range(name))
-                    .flatten()
-                    .map(|(lo, hi)| (i128::from(lo), i128::from(hi)))
-            }
+            Type::Named(name) => match self.types.get(name) {
+                Some(TypeDef::Distinct {
+                    base, knowledge, ..
+                }) if base.is_integer() => knowledge.interval_i128(),
+                _ => None,
+            },
             _ => None,
         }
     }
@@ -1458,12 +1457,12 @@ pub(crate) struct Checker<'a> {
     fx_maximal: bool,
     /// First source span that forced the row maximal.
     fx_maximal_span: Option<Span>,
-    /// D-EFF1: stack of active `#Caps(…)` regions, innermost last. Every effect
+    /// D-EFF1: stack of active `#Abilities(…)` regions, innermost last. Every effect
     /// or edge recorded while one is open is also added to it (and all enclosing
     /// regions) so the region's own effect set can be checked against its caps.
     region_stack: Vec<RegionAccum>,
-    /// D-EFF1: completed `#Caps(…)` regions in this body, rolled into the
-    /// `EffectSummary` for the post-pass E0741 check.
+    /// D-EFF1: completed `#Abilities(…)` regions in this body, rolled into the
+    /// `EffectSummary` for the post-pass E0712 check.
     fx_regions: Vec<RegionSummary>,
     /// D-EFF2: callback-bound obligations recorded at higher-order call sites
     /// where the function-typed parameter carries a `#Pure`/`#(…)` bound. Rolled
@@ -2343,7 +2342,7 @@ pub use PolicyFacts::{
     PolicyFactGraph,
 };
 // D-EFFBUDGET1: the closed effect vocabulary, exposed so jet-driver can
-// validate `pkg.jet` `effects:`/`grants:` manifest keys against it.
+// validate `pkg.jet` `authority.holds`/`authority.grants` manifest fields against it.
 // D-EFFTREE1: also export the tree helpers — jet-driver's EffectBudget and
 // manifest parsing need root validation and ancestor-subsumption coverage
 // too, not just the bare enum.
@@ -2352,8 +2351,8 @@ pub(crate) use CheckerMarkers::{check_declared_rule_facts, check_marker_vocabula
 pub(crate) use CheckerSchedule::{check_every_marker, check_job_collisions};
 pub use Effects::{
     builtin_effect, core_effect, effect_covers, effect_root, effect_row_var, effect_set_has_root,
-    memory_allocation_bound, parse_effect_name, resolve_effect_name, show_set, undeclared_effect,
-    Effect, EffectSet,
+    memory_allocation_bound, parse_effect_name, reject_positive_deny_only_effect,
+    resolve_effect_name, show_set, undeclared_effect, Effect, EffectSet,
 };
 pub use Purity::{check_pure_fn, check_pure_program_root, e3401, e3402, e3403};
 pub use Registration::effect_key;

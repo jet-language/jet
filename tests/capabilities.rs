@@ -1,24 +1,24 @@
-//! c110 (P0): capability reporting is derived from semantic facts (resolved
+//! c110 (P0): ability reporting is derived from semantic facts (resolved
 //! Core calls, `#Unsafe` gates, FFI declarations), not from scanning generated
 //! Rust text. These tests pin the new behavior and the bugs it fixes.
 //!
-//! Note: the legacy `Capabilities::from_rust` text scan turned out to be stale —
+//! Note: the legacy `Abilities::from_rust` text scan turned out to be stale —
 //! the codegen helper names it looks for (`jet_fs_`, …) have drifted, so it
 //! silently under-reported real Core use. The sema-derived path does not depend
 //! on lowered-Rust spelling at all, which is the point of the card.
 
 mod common;
 
-use jet::Capabilities;
+use jet::Abilities;
 
-fn caps(src: &str) -> Capabilities {
-    jet::compile(src).expect("program compiles").capabilities
+fn abilities(src: &str) -> Abilities {
+    jet::compile(src).expect("program compiles").abilities
 }
 
-/// A plain program declares no special capabilities.
+/// A plain program declares no special abilities.
 #[test]
-fn plain_program_has_no_capabilities() {
-    let c = caps(r#"fn run() { print("hi"); }"#);
+fn plain_program_has_no_abilities() {
+    let c = abilities(r#"fn run() { print("hi"); }"#);
     assert!(
         !c.uses_network
             && !c.uses_file_io
@@ -26,7 +26,7 @@ fn plain_program_has_no_capabilities() {
             && !c.uses_ffi
             && !c.uses_crypto
             && !c.uses_concurrency,
-        "hello world should have no capabilities: {}",
+        "hello world should have no abilities: {}",
         c.summary()
     );
 }
@@ -34,7 +34,7 @@ fn plain_program_has_no_capabilities() {
 /// A filesystem call sets `uses_file_io` from the resolved Core call.
 #[test]
 fn fs_call_sets_file_io() {
-    let c = caps(
+    let c = abilities(
         r#"
 use core.files as fs
 fn run() { x :: fs.read("a") ?? ""; print(x); }
@@ -51,7 +51,7 @@ fn run() { x :: fs.read("a") ?? ""; print(x); }
 /// A clock call sets `uses_concurrency` (time).
 #[test]
 fn time_call_sets_concurrency() {
-    let c = caps(
+    let c = abilities(
         r#"
 use core.time as time
 fn run() { t :: time.now(); print("{t}"); }
@@ -65,18 +65,18 @@ fn run() { t :: time.now(); print("{t}"); }
 }
 
 /// The headline of c110: a program that merely *prints a string* containing an
-/// old codegen marker must NOT be reported as using that capability. The
+/// old codegen marker must NOT be reported as using that ability. The
 /// sema-derived path knows no network call is made; the legacy text scan is
 /// fooled by the literal in the generated Rust — proving why c110 matters.
 #[test]
-fn capabilities_ignore_rust_text_lookalikes() {
+fn abilities_ignore_rust_text_lookalikes() {
     let out = jet::compile(r#"fn run() { print("jet_net_ is only text"); }"#).expect("compiles");
     assert!(
-        !out.capabilities.uses_network,
+        !out.abilities.uses_network,
         "sema must not flag network for a mere string literal"
     );
     assert!(
-        Capabilities::from_rust(&out.rust).uses_network,
+        Abilities::from_rust(&out.rust).uses_network,
         "the legacy text scan false-positives on the literal (a bug c110 removes)"
     );
 }

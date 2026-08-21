@@ -248,7 +248,7 @@ impl DevStatus {
     fn write_header_verbose(&self, line: &str) {
         let _g = self.term_lock.lock().unwrap();
         let mut out = std::io::stderr();
-        // Capability check belongs inside the terminal lock. A refresh that
+        // Ability check belongs inside the terminal lock. A refresh that
         // waited behind EOF/Ctrl-C must not reinstall DECSTBM after cleanup.
         if !self.controls_ready.load(Ordering::SeqCst) {
             let _ = writeln!(out, "{}", line);

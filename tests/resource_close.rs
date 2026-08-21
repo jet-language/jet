@@ -362,9 +362,9 @@ fn run() {
     automatic := Resource.{ name: "automatic" }
     deferred := Resource.{ name: "deferred" }
     defer close(^deferred)
-    require(true)
+    assert(true)
     print("before failure")
-    require(false, "stop")
+    assert(false, "stop")
     print(automatic.name)
 }
 "#;

@@ -42,7 +42,7 @@ Authority for this run:
 | Lens | Grade | Evidence |
 | --- | --- | --- |
 | Exploratory density vs Python | aligned (local drift) | Prelude `print`/`input`; inferred effects; bare-param lambdas; yielding `loop … ->`; `?.`/`??`. New small costs: `twice(() => { … })` replaces `twice { … }`; `SQL.{"…"}` replaces silent elaboration. Both buy clarity. |
-| Systems expressiveness vs Zig/Rust/Odin/C/C++ | aligned | Params bare/`&`/`^`; `~` copy; `#Unsafe("reason")` + typed `assert` obligations; effect rows/`#Grant`; `[U8].{"…"}` bit-typed holes with `be`/`le`; `Reader.take_pattern`; FFI/`#Layout`/`Type.{ uninit }`; comptime. |
+| Systems expressiveness vs Zig/Rust/Odin/C/C++ | aligned | Params bare/`&`/`^`; `~` copy; `#Unsafe("reason")` + typed `assert` obligations; effect rows/`#Caps`; `[U8].{"…"}` bit-typed holes with `be`/`le`; `Reader.take_pattern`; FFI/`#Layout`/`Type.{ uninit }`; comptime. |
 | Clarity | aligned (improved) | The silent expected-type rewrite of bare strings into `SQL`/`HTML` is gone — a literal's meaning no longer depends on distant context. Bare `{ }` after a call is E0335 with a fix showing `callee(() => { … })`. |
 | Isomorphic consistency | aligned (improved from drift) | One literal head law (D-UNIFYLIT1=A); one code-argument spelling (D-TRAILBLOCK2=A); one `T?`/`T ? E` spacing law in every type position including returns. Remaining drift: `#` beyond rules; `&`/`^` bitwise; S83. |
 
@@ -59,7 +59,7 @@ Rows unchanged since 2026-07-27 are carried forward; changed rows are marked
 | Expression / statement / decl split | M4–M6 | X06 | One grammar; braces group; braces do not force a result | teaches well |
 | `fn run` / typed CLI entry (`#CLI`, `#[Flag]`) | M11, D20 | X19 | Program root; entry type owns argv | teaches well |
 | `comptime` / `#Caller` / embed / `build.os` fold | M12, P04 | X03 | Same Jet at compile time | teaches well |
-| Effect rows / `#Grant` / taint | M9, T10 | X04,X19 | World acts as type data | teaches well |
+| Effect rows / `#Caps` / taint | M9, T10 | X04,X19 | World acts as type data | teaches well |
 | Diagnostics + UI snapshots (I4) | H06 | — | Compiler messages as product | teaches well |
 
 ### Values (V*)
@@ -153,7 +153,7 @@ Rows unchanged since 2026-07-27 are carried forward; changed rows are marked
 | --- | --- | --- | --- | --- |
 | Inferred effects; `=[]=>` purity | E01,T10 | X04,X15 | Pure when the row is empty | teaches well |
 | Ten roots + dotted leaves | E02–E12 | — | Closed effect vocabulary | teaches well |
-| `#Grant` / `=[!E]=>` / `#Caps` | E18,S03 | X19 | Capability and prohibition | teaches well |
+| `#Caps` / `=[!E]=>` | E18,S03 | X19 | Capability and prohibition | teaches well |
 | `#Tainted` / `#Sanitizer`; E0149 typed-text boundary **(changed)** | T21,S03 | — | Information flow; a runtime `String` cannot enter `SQL`/`HTML`/`Sh` without `.raw` audit | teaches well |
 | `#Unsafe("reason")` + `assert valid_ptr, aligned, no_alias` | S09,S11 | X09,X19 | Audited escape with typed obligations | teaches well |
 | `~x` copy; call-site `&`/`^` | R06,C10 | X16 | Explicit copy and access | teaches well |

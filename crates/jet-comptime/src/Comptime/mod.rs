@@ -539,7 +539,7 @@ pub fn render_datatree_pretty_for_tir(value: &CtValue) -> String {
 /// TIR typed JSON decode uses the ordered DataTree shape. Dynamic JSON keeps
 /// its BTreeMap shape, so this adapter is separate from `core.encoding.json.parse`.
 pub fn parse_ordered_json_for_tir(text: &str) -> CtValue {
-    match JSONInterp::parse_json_ordered(text) {
+    match JSONInterp::parse_json_typed_ordered(text) {
         Ok(value) => CtValue::Present(Box::new(value)),
         Err(error) => CtValue::failed(Box::new(JSONInterp::json_error_value(error))),
     }
@@ -1395,7 +1395,7 @@ fn run_repl_step_inner(
         debugger: None,
         depth: 0,
         cur_func: "main".to_string(),
-        // D-REPLCOREEFFECT1=A: only a lexical `#Grant` opens this depth.
+        // D-REPLCOREEFFECT1=A: only a lexical `#Abilities` opens this depth.
         impure_depth: 0,
         gates: jet_foundation::Policy::GateSet::allow(jet_foundation::Policy::PolicyKey::Impure),
         repl_mode: true,

@@ -34,11 +34,13 @@ an implementation boundary; it does not keep that behavior as an option.
   `app.sync(doc, over: session)`. The shared Prelude now turns malformed or
   overflowing carriers into an absorbing invalid state instead of truncating
   replica data. Typed carrier operations retain their identity metadata. The
-  fixed `app.sync` String seam merges canonical map/list/counter displays,
-  preserves duplicate idempotence, and publishes the latest receipt through
-  the bounded local live transport for replay on reconnect. Vector-clock
-  access, auth-scoped routing, remote reconnect, and a network merge protocol
-  are unshipped.
+  fixed `app.sync` String seam merges canonical list/counter displays and
+  equal-valued map entries, preserves duplicate idempotence, and publishes the
+  latest receipt through the bounded local live transport for replay on
+  reconnect. A conflicting map value or opaque text document is denied because
+  display serialization carries no atom/LWW metadata. Vector-clock access,
+  auth-scoped routing, remote reconnect, and a network merge protocol are
+  unshipped.
 - D-DBPOLICY1 defines typed per-row rules that apply below app code on every
   query, mutation, and live-query path. The shipped boundary accepts only the
   compiled `true` and `owner == user` forms and rejects other expressions. That

@@ -844,4 +844,17 @@ mod tests {
         let merged = FlowFacts::merge_paths(&before, &[then, otherwise]);
         assert_eq!(merged.sendability.get("value"), Some(&false));
     }
+
+    #[test]
+    fn sendability_is_not_proven_when_one_path_has_no_fact() {
+        let mut before = FlowFacts::default();
+        before.sendability.set("value", true);
+
+        let then = before.clone();
+        let mut otherwise = before.clone();
+        otherwise.sendability.remove("value");
+
+        let merged = FlowFacts::merge_paths(&before, &[then, otherwise]);
+        assert_eq!(merged.sendability.get("value"), Some(&false));
+    }
 }

@@ -779,12 +779,15 @@ impl KnowledgeVector {
     }
 
     pub fn interval_i128(&self) -> Option<(i128, i128)> {
-        self.entries
-            .iter()
-            .find_map(|entry| match (&entry.path.is_empty(), &entry.fact) {
-                (true, KnowledgeFact::Interval { lo, hi }) => Some((*lo, *hi)),
-                _ => None,
-            })
+        let interval_plane = crate::Registry::type_plane("Interval");
+        self.entries.iter().find_map(|entry| {
+            (entry.plane == interval_plane && entry.path.is_empty())
+                .then_some(&entry.fact)
+                .and_then(|fact| match fact {
+                    KnowledgeFact::Interval { lo, hi } => Some((*lo, *hi)),
+                    _ => None,
+                })
+        })
     }
 
     pub fn interval(&self) -> Option<(i64, i64)> {
@@ -2404,7 +2407,7 @@ impl Type {
 mod tests {
     use super::{
         numeric_type_from_name, AccessConvention, CallablePolicy, CallablePolicyChain, Dimension,
-        FunctionCallMetadata, InternalTag, KnowledgeFact, Measure, TagMarker, Type,
+        FunctionCallMetadata, InternalTag, KnowledgeFact, KnowledgeVector, Measure, TagMarker, Type,
     };
     use crate::AST::{Expr, ParamZone, StrPart};
     use crate::Diagnostics::Span;
@@ -2699,6 +2702,17 @@ mod tests {
             assert_eq!(ty.knowledge_vector().interval_i128(), Some(expected));
             assert_eq!(ty.integer_range(), Some(expected));
         }
+    }
+
+    #[test]
+    fn interval_projection_ignores_interval_shaped_facts_on_other_planes() {
+        let mut vector = KnowledgeVector::new();
+        vector.push(
+            crate::Registry::type_plane("Layout"),
+            KnowledgeFact::Interval { lo: 1, hi: 6 },
+        );
+
+        assert_eq!(vector.interval_i128(), None);
     }
 
     #[test]

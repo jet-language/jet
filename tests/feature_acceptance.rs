@@ -1,6 +1,6 @@
 //! Feature-claim acceptance lanes (UL0 / pre-push ledger).
 //!
-//! Each `#[test]` named in `docs/spec/feature-claim-manifest.json` must
+//! Each `#[test]` named in `docs/spec/feature-claims.json` must
 //! contain the exact lane marker `FEATURE_CLAIM: <claim-id> / <lane-id>`
 //! in its body. Proven claims run these via
 //! `check-feature-ledger.mjs --verify-focused`.
@@ -649,7 +649,7 @@ fn run() {
         "I5 taint/IFC slice example must remain"
     );
     assert!(
-        read("examples/features/packages/effect_budget/package.jet").contains("effects:"),
+        read("examples/features/packages/effect_budget/package.jet").contains("authority:"),
         "I5 effect-budget example must remain"
     );
     let replay_ui = read("tests/ui/replayable_reaches_io.stderr");
@@ -794,7 +794,7 @@ use core.testing as testing
 fn run() {}
 
 #Test("testing.snap updates") {
-    require(testing.snap("helper-case", "helper-fresh"))
+    assert(testing.snap("helper-case", "helper-fresh"))
 }
 "#;
     fs::write(dir.join("helper.jet"), helper).expect("write helper");

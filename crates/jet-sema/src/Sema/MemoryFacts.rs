@@ -96,7 +96,7 @@ pub(crate) fn bundle_memory_inputs(
             roots: package_roots.clone(),
             span: Span::new(0, 0),
             source: "package.jet".to_string(),
-            provenance: format!("manifest denial `effects: {{ deny: [{denial}] }}`"),
+            provenance: format!("manifest denial `authority: {{ holds: {{ deny: [{denial}] }} }}`"),
         });
     }
     for module in &bundle.modules {

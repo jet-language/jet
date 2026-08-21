@@ -448,11 +448,11 @@ Only what wins on merit; nothing stays because it shipped.
 
 - Effect inference, erasure, and zero runtime cost (byte-identical Rust) —
   inference is the least-privilege magic, and erasure is the price of zero.
-- `=[Net]=>` rows and `effect` leaf declarations — a row reads as a contract.
+- `:[Net]>` rows and `effect` leaf declarations — a row reads as a contract.
 - `#Unsafe("reason")` — the written reason is the audit; no shorter form
   carries it.
 - Memory floor words retire under D-AUTHORITY-MEM1=B; denials use
-  `=[!Mem.Alloc]=>`, with `Mem.Alloc(above: N)` from D-AUTHORITY-MEM2=A.
+  `:[!Mem.Alloc]>`, with `Mem.Alloc(above: N)` from D-AUTHORITY-MEM2=A.
 - All diagnostic meanings; codes stay (E0740/E0741/E0711/E0712/E1220/E3112…).
 - Frozen walls: no top type, no HKT, no macros, comptime never creates types,
   facts never select runtime types or dispatch (the reified authority value is
@@ -1156,7 +1156,7 @@ Leo hits two errors in one afternoon. One says a value needs a write capability 
 // Same word, two shipped diagnostic families:
 // E07xx: "the loop takes the write capability (&) for items"   <- borrowing
 // E0711: "the Capability handle escapes the #Grant region"     <- authority
-// plus: feature-claim-manifest.json, card #1499 "Capability ledger",
+// plus: feature-claims.json, card #1499 "Capability ledger",
 // card #422 "Remote builders: capability model"
 ```
 

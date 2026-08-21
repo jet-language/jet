@@ -43,7 +43,14 @@ pub(crate) fn jet_measurement_kernel_div(left: (f64, f64), right: (f64, f64)) ->
 }
 pub(crate) fn jet_measurement_kernel_sqrt(value: (f64, f64)) -> (f64, f64) {
     let root = value.0.sqrt();
-    (root, value.1 / (2.0 * root))
+    let uncertainty = if root == 0.0 && value.1 == 0.0 {
+        // The derivative form is 0 / 0 at an exact zero. Preserve the
+        // measured-grade invariant instead of manufacturing NaN.
+        0.0
+    } else {
+        value.1 / (2.0 * root)
+    };
+    (root, uncertainty)
 }
 
 

@@ -37,7 +37,7 @@ Authority for this run:
 | Lens | Grade | Evidence |
 | --- | --- | --- |
 | Exploratory density vs Python | aligned (local drift) | Prelude `print`/`input`; inferred effects (D-EFFECT-OMIT1); bare-param lambdas; yielding `loop … ->`; methods plus `?.`/`??`; no general `\|>` (D-SHAPE-PIPE1); named-only tuples |
-| Systems expressiveness vs Zig/Rust/Odin/C/C++ | aligned | Params `bare`/`&`/`^`; `~` copy; Views without lifetime syntax; `#Unsafe("reason")`; effect rows/`#Grant`; `#Transact`/`#Shield`; FFI/`#Layout`/`uninit`; comptime; generic modules |
+| Systems expressiveness vs Zig/Rust/Odin/C/C++ | aligned | Params `bare`/`&`/`^`; `~` copy; Views without lifetime syntax; `#Unsafe("reason")`; effect rows/`#Caps`; `#Transact`/`#Shield`; FFI/`#Layout`/`uninit`; comptime; generic modules |
 | Clarity | aligned | `::`/`:=`; `=>` vs `->` (D-ARROW-CONTROL1); `Val`/`None` vs `Ok`/`Err`; bars mean alternatives |
 | Isomorphic consistency | drift (local) | `#` used outside rules; `&`/`^` also bitwise; S83 multi-head vs `if` dispatch; owner I8 exception for `++`/`--` |
 
@@ -53,7 +53,7 @@ false rhyme / absent.
 | Expression / statement / decl split | M4–M6 | X06 | One grammar; braces group; braces do not force a result | teaches well |
 | `fn run` / typed CLI entry | M11, D20 | X19 | Program root; entry type owns argv when present | teaches well |
 | `comptime` / `#Caller` / embed | M12, P04 | X03 | Same Jet at compile time | teaches well |
-| Effect rows / `#Grant` / taint | M9, T10, E* | X04,X19 | World acts as type data | teaches well |
+| Effect rows / `#Caps` / taint | M9, T10, E* | X04,X19 | World acts as type data | teaches well |
 | Diagnostics + UI snapshots | H06, I4 | — | Compiler messages as product | teaches well |
 
 ### Values (V*)
@@ -140,7 +140,7 @@ false rhyme / absent.
 | --- | --- | --- | --- | --- |
 | Inferred effects; `=[]=>` purity | E01,T10 | X04,X15 | Pure when the row is empty | teaches well |
 | Ten roots + dotted leaves | E02–E12 | — | Closed effect vocabulary | teaches well |
-| `#Grant` / `=[!E]=>` / `#Caps` | E18,S03 | X19 | Capability and prohibition | teaches well |
+| `#Caps` / `=[!E]=>` | E18,S03 | X19 | Capability and prohibition | teaches well |
 | `#Tainted` / `#Sanitizer` | T21,S03 | — | Light information-flow tags | teaches well |
 | `#Unsafe("reason")` | S09 | X09,X19 | Audited escape | teaches well |
 | `~x` copy; call-site `&`/`^` | R06,C10 | X16 | Explicit copy and access | teaches well |
@@ -226,7 +226,7 @@ false rhyme / absent.
 
 ### Family H — Applied rules (`#`)
 
-- Members: `#Unsafe`, `#Grant`, `#Test`, `#Cli`, derives, contracts, block
+- Members: `#Unsafe`, `#Caps`, `#Test`, `#Cli`, derives, contracts, block
   regions; also non-rule `#` in `[T#N]`, `pkg#ver`, `{x#Debug}`.
 - Shared ontology: P09 for rules. Size, version, and format selectors are other
   jobs that share the glyph.

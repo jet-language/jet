@@ -400,16 +400,15 @@ fn stmt_in_subset_inner(s: &Stmt, cx: &Cx, locals: &mut HashSet<String>) -> bool
             fields.iter().all(|(_, v, _)| expr_in_subset(v, cx, locals))
                 && scoped_stmts_in_subset(body, cx, locals)
         }
-        // c109 Phase 26: a `#Caps(IO) { … }` effect-restriction region (D-EFF1/D-QUAL1)
+        // c109 Phase 26: a `#Abilities(IO) { … }` effect-restriction region (D-EFF1/D-QUAL1)
         // erases to a plain Rust block — `emit_stmt`'s `Stmt::Caps` arm is byte-for-byte
         // identical to `Stmt::Region` (`{ <body> }`). The cap set is enforced entirely
-        // in sema (E0741); codegen is dumb (I3).
+        // in sema (E0712); codegen is dumb (I3).
         Stmt::Caps { body, .. } => scoped_stmts_in_subset(body, cx, locals),
         // D-SCAP1: a `#grant(FS) { caps -> … }` scoped-capability grant erases to a
         // plain Rust block (the grant/revoke is a compile-time capability fact, I3).
         // The capability handle is sema-only — it is NOT emitted, so the body lowers
         // exactly like a lexical `Stmt::Region`.
-        Stmt::Grant { body, .. } => scoped_stmts_in_subset(body, cx, locals),
         // D-TERM1 (ratified 2026-06-22): `live { … }` lowers to a guarded Rust block.
         Stmt::Live { body, .. } => scoped_stmts_in_subset(body, cx, locals),
         // D-DOTSCOPE1: a `#Test` scope member — in-subset iff its region body is.
@@ -669,6 +668,53 @@ pub(crate) fn switch_in_subset(
         return false;
     }
     if crate::AST::is_subjectless_guard(subject, span) {
+        // D-CONC-CHAN2=D: a subjectless readiness table is one covered TIR
+        // wait, not an ordinary boolean guard. Keep the coverage proof in
+        // lockstep with `lower_readiness_switch`: every head is a receive or
+        // Duration expression, and only a receive head adds a body binding.
+        if arms
+            .iter()
+            .any(|arm| crate::AST::readiness_head(&arm.cond).is_some())
+        {
+            let mut has_wait = false;
+            for arm in arms {
+                let Some(head) = crate::AST::readiness_head(&arm.cond) else {
+                    return false;
+                };
+                let bindings = match head {
+                    crate::AST::ReadinessHead::Receive { binding, source } => {
+                        has_wait = true;
+                        if !expr_in_subset(source, cx, locals) {
+                            return false;
+                        }
+                        vec![binding.to_string()]
+                    }
+                    crate::AST::ReadinessHead::After { duration } => {
+                        has_wait = true;
+                        if !expr_in_subset(duration, cx, locals) {
+                            return false;
+                        }
+                        Vec::new()
+                    }
+                };
+                let mut body_locals = locals.clone();
+                body_locals.extend(bindings);
+                if !arm
+                    .body
+                    .iter()
+                    .all(|stmt| stmt_in_subset(stmt, cx, &mut body_locals))
+                {
+                    return false;
+                }
+            }
+            if !has_wait {
+                return false;
+            }
+            return else_body.as_ref().is_none_or(|body| {
+                let mut else_locals = locals.clone();
+                body.iter().all(|stmt| stmt_in_subset(stmt, cx, &mut else_locals))
+            });
+        }
         for arm in arms {
             let Some(bindings) = if_cond_in_subset(&arm.cond, cx, locals) else {
                 return false;

@@ -227,7 +227,7 @@ statement, or block stay inline. (This matches every current example.)
 Grouping stays exactly as ratified (D-MARK-STACK1=A): bare when single, one
 `#[A, B]` list for two or more, E0999 with autofix for the edges. Scoped rules
 still never share one group — when two scoped rules interact
-(`#Caps` then `#Grant`), nesting order is meaning, and the syntax must show it.
+(`#Caps` with an optional named head), nesting order is meaning, and the syntax must show it.
 
 ### The full surface in one program
 

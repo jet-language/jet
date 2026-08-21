@@ -165,7 +165,7 @@ fn map_view() => String {
     duplicate_a :: values.add_new("a", 99)
     seen := [String].{}
     values.each((key, value) => {
-        require((key == "a" && value == 1) || (key == "b" && value == 20) || (key == "c" && value == 3) || (key == "d" && value == 4), "Map.each pair")
+        assert((key == "a" && value == 1) || (key == "b" && value == 20) || (key == "c" && value == 3) || (key == "d" && value == 4), "Map.each pair")
         seen.push(key)
     })
     keys :: values.keys()

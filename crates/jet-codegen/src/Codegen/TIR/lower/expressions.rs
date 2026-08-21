@@ -418,7 +418,25 @@ pub(super) fn lower_or_fallback(
                 kind: TExprKind::InlineBlock(stmts),
             }))
         }
-        OrFallback::Return(None, _) => TOrFallback::Return(None),
+        OrFallback::Return(None, _) => {
+            if matches!(
+                &env.ret_ty,
+                Some(Type::Result { ok, .. })
+                    if matches!(ok.as_ref(), Type::Named(n) if n == crate::Syntax::INTERNAL_UNIT_TYPE)
+            ) {
+                let ret_ty = env.ret_ty.clone().expect("fallible void return");
+                let unit = TExpr {
+                    ty: Type::Named(crate::Syntax::INTERNAL_UNIT_TYPE.to_string()),
+                    kind: TExprKind::Unit,
+                };
+                TOrFallback::Return(Some(Box::new(TExpr {
+                    ty: ret_ty,
+                    kind: TExprKind::Ok(Box::new(unit)),
+                })))
+            } else {
+                TOrFallback::Return(None)
+            }
+        }
         OrFallback::Return(Some(e), _) => {
             TOrFallback::Return(Some(Box::new(lower_expr(
                 e,

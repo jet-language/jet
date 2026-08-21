@@ -6,7 +6,7 @@ use crate::Codegen::escape_rust_str;
 use crate::Codegen::mangle;
 use crate::Codegen::mangle_generated;
 use crate::Codegen::mangle_path;
-use crate::Codegen::TIR::emit::collect_select_arms;
+use crate::Codegen::TIR::emit::{collect_select_after_durations, collect_select_arms};
 use crate::Codegen::TIR::emit::emit_http_bridge_error;
 use crate::Codegen::TIR::emit::emit_http_response_from_bridge;
 use crate::Codegen::TIR::emit::emit_math_swizzle_read;
@@ -1404,6 +1404,26 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
             ..
         } => {
             let method_rust = method.rust();
+            // D-AUTHORITY-NAME1=A / D-AUTHORITY-WORD2=E: the only operations
+            // on the ordinary abilities value are Prelude calls. `with` is
+            // fallible so the shared E0712 policy cannot be hidden in Rust
+            // method dispatch or silently widened by an adapter.
+            if matches!(&recv.ty, Type::Named(name) if name == crate::Syntax::TYPE_ABILITIES)
+                && args.len() == 1
+                && matches!(method_rust.as_str(), "with" | "without")
+            {
+                let receiver = emit_tir_expr(recv, cx);
+                let requested = emit_tir_expr(&args[0].value, cx);
+                if method_rust == "with" {
+                    return format!(
+                        "jet_authority_with(&({receiver}), &({requested})).unwrap_or_else(|message| jet_runtime_stop(\"E0712\", {:?}, 0, &message))",
+                        cx.file,
+                    );
+                }
+                return format!(
+                    "jet_authority_without(&({receiver}), &({requested}))"
+                );
+            }
             let arg_str = emit_tir_call_args(args, cx);
             if let Some(line) = operator_line {
                 let trait_name = match method_rust.as_str() {
@@ -4618,8 +4638,8 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                         recv,
                         a(0)
                     ),
-                    "capabilities" => {
-                        format!("{}jet_process_spec_capabilities(&({}))", root, recv)
+                    "abilities" => {
+                        format!("{}jet_process_spec_abilities(&({}))", root, recv)
                     }
                     "run" => format!("{}jet_process_spec_run(&({}))", root, recv),
                     "run_checked" => {
@@ -5211,8 +5231,8 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                             format!("{}jet_ws_message_bytes(&({}))", root, recv)
                         }
                         // D-BROWSER-AUTO1=A: native BiDi handle methods.
-                        ("Browser", "capabilities") => {
-                            format!("{}jet_browser_capabilities(&({}))", root, recv)
+                        ("Browser", "abilities") => {
+                            format!("{}jet_browser_abilities(&({}))", root, recv)
                         }
                         ("Browser", "context") => {
                             format!("{}jet_browser_context(&({}))", root, recv)
@@ -5471,18 +5491,18 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                             a(0),
                             a(1)
                         ),
-                        ("BrowserCapabilities", "bidi") => format!(
-                            "{}jet_browser_capabilities_bidi(&({}))",
+                        ("BrowserAbilities", "bidi") => format!(
+                            "{}jet_browser_abilities_bidi(&({}))",
                             root,
                             recv
                         ),
-                        ("BrowserCapabilities", "cdp") => format!(
-                            "{}jet_browser_capabilities_cdp(&({}))",
+                        ("BrowserAbilities", "cdp") => format!(
+                            "{}jet_browser_abilities_cdp(&({}))",
                             root,
                             recv
                         ),
-                        ("BrowserCapabilities", "profile") => format!(
-                            "{}jet_browser_capabilities_profile(&({}))",
+                        ("BrowserAbilities", "profile") => format!(
+                            "{}jet_browser_abilities_profile(&({}))",
                             root,
                             recv
                         ),
@@ -5855,11 +5875,9 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                         ok_val = ok_val,
                     )
                 }
-                // D-BINPAT1 (card #506 follow-up): `reader.take_pattern(b"…")` —
-                // inline scan (I8: the D-BINPAT1 engine in consume mode,
-                // `bin_match_scan_closure_ex`), byte-mode sibling of
-                // `CursorTakePattern` immediately above — same shape, `&[u8]`
-                // tail instead of `&str`.
+                // D-BINPAT1 (card #2100): `reader.take_pattern(b"…")` —
+                // marshal the byte tail through the shared Prelude matcher,
+                // then project the binding tuple and consumed byte count.
                 THandleOp::ReaderTakePattern { parts, canonical } => {
                     let (closure, holes) =
                         bin_match_scan_closure_ex(
@@ -6081,52 +6099,27 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
             let list = emit_tir_expr(tasks, cx);
             format!("{}jet_std::jet_task_any({list})", cx.root_prefix)
         }
-        TExprKind::SelectStart => {
-            format!("{}jet_std::JetSelectBuilder::start()", cx.root_prefix)
-        }
-        TExprKind::SelectRecv { builder, channel } => {
-            let b = emit_tir_expr(builder, cx);
-            let ch = emit_tir_expr(channel, cx);
-            format!("{b}.recv({ch})")
-        }
-        TExprKind::SelectAfter {
-            builder,
-            duration,
-            value,
-        } => {
-            let b = emit_tir_expr(builder, cx);
-            let duration = emit_tir_expr(duration, cx);
-            let ms = format!(
-                "{}jet_std_time_duration_to_millis(({}).ns)",
-                cx.root_prefix,
-                duration
-            );
-            if let Some(value) = value {
-                let v = emit_tir_expr(value, cx);
-                format!("{b}.after_value({ms}, {v})")
-            } else {
-                format!("{b}.after({ms})")
-            }
-        }
-        TExprKind::SelectRead { builder, stream } => {
-            let b = emit_tir_expr(builder, cx);
-            let s = emit_tir_expr(stream, cx);
-            format!("{b}.read({s})")
+        TExprKind::SelectStart
+        | TExprKind::SelectRecv { .. }
+        | TExprKind::SelectAfter { .. }
+        | TExprKind::SelectRead { .. } => {
+            unreachable!("retired fluent select builder reached AOT emission")
         }
         TExprKind::SelectWait { builder } => {
-            let (recvs, afters) = collect_select_arms(builder, cx);
+            let (recvs, _) = collect_select_arms(builder, cx);
             let recv_list = if recvs.is_empty() {
                 "&[]".to_string()
             } else {
                 format!("&[&{}]", recvs.join(", &"))
             };
-            let after_list = if afters.is_empty() {
+            let durations = collect_select_after_durations(builder, cx);
+            let after_list = if durations.is_empty() {
                 "Vec::new()".to_string()
             } else {
-                format!("vec![{}]", afters.join(", "))
+                format!("vec![{}]", durations.join(", "))
             };
             format!(
-                "{}jet_std::jet_select_wait({}, {})",
+                "{}jet_std::jet_select_wait_tagged({}, {})",
                 cx.root_prefix, recv_list, after_list
             )
         }

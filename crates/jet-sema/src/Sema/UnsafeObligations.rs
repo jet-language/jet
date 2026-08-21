@@ -396,7 +396,7 @@ pub(crate) fn nested_bodies(statement: &Stmt) -> Vec<&[Stmt]> {
     match statement {
         Stmt::While { body, .. } | Stmt::For { body, .. } | Stmt::Loop { body, .. } | Stmt::CountedLoop { body, .. }
         | Stmt::Impure { body, .. } | Stmt::Reactive { body, .. } | Stmt::Shield { body, .. } | Stmt::Switched { body, .. } | Stmt::Region { body, .. } | Stmt::Policy { body, .. } | Stmt::TaskGroup { body, .. }
-        | Stmt::Layout { body, .. } | Stmt::Caps { body, .. } | Stmt::Grant { body, .. } | Stmt::Transact { body, .. }
+        | Stmt::Layout { body, .. } | Stmt::Caps { body, .. } | Stmt::Transact { body, .. }
         | Stmt::ContextBlock { body, .. } | Stmt::Live { body, .. } | Stmt::AssumeDet { body, .. } => vec![body],
         Stmt::Switch { arms, else_body, .. } => arms.iter().map(|arm| arm.body.as_slice()).chain(else_body.iter().map(Vec::as_slice)).collect(),
         Stmt::ComptimeIf { then_body, else_body, .. } => std::iter::once(then_body.as_slice()).chain(else_body.iter().map(Vec::as_slice)).collect(),
@@ -445,7 +445,7 @@ fn nested_bodies_mut(statement: &mut Stmt) -> Vec<&mut Vec<Stmt>> {
         Stmt::Unsafe { body, .. } | Stmt::While { body, .. } | Stmt::For { body, .. } | Stmt::Loop { body, .. }
         | Stmt::CountedLoop { body, .. } | Stmt::Impure { body, .. } | Stmt::Reactive { body, .. } | Stmt::Shield { body, .. }
         | Stmt::Switched { body, .. } | Stmt::Region { body, .. } | Stmt::Policy { body, .. }
-        | Stmt::TaskGroup { body, .. } | Stmt::Layout { body, .. } | Stmt::Caps { body, .. } | Stmt::Grant { body, .. }
+        | Stmt::TaskGroup { body, .. } | Stmt::Layout { body, .. } | Stmt::Caps { body, .. }
         | Stmt::Transact { body, .. } | Stmt::ContextBlock { body, .. } | Stmt::Live { body, .. } | Stmt::AssumeDet { body, .. } => vec![body],
         Stmt::Switch { arms, else_body, .. } => arms.iter_mut().map(|arm| &mut arm.body).chain(else_body.iter_mut()).collect(),
         Stmt::ComptimeIf { then_body, else_body, .. } => std::iter::once(then_body).chain(else_body.iter_mut()).collect(),

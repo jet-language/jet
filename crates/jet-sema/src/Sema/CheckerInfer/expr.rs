@@ -1741,7 +1741,7 @@ impl<'a> Checker<'a> {
         // Rewriting to the ordinary lambda node keeps every execution tier on
         // the existing closure path.
         if let Some(Type::Fn { params, .. }) = self.expected_type.clone() {
-            if params.len() == 1 && is_bare_member_chain(e) {
+            if is_bare_member_chain(e) && params.len() == 1 {
                 let span = e.span();
                 let mut body = std::mem::replace(e, Expr::Absent(span));
                 replace_bare_member_subject(&mut body);
@@ -1758,6 +1758,16 @@ impl<'a> Checker<'a> {
                     meta: LambdaMeta::default(),
                 });
                 return self.infer(e);
+            }
+            if is_bare_member_chain(e) {
+                let arity = params.len().to_string();
+                let chain = bare_member_chain_text(e);
+                self.diags.push(Diagnostic::from_row(
+                    "E-SUBJECT-CALL-ARITY",
+                    &[("arity", arity.as_str()), ("chain", chain.as_str())],
+                    Some(e.span()),
+                ));
+                return None;
             }
         }
 
@@ -2747,10 +2757,11 @@ impl<'a> Checker<'a> {
                         self.diags.push(Diagnostic::error(
                             "E0116",
                             format!("`{}` doesn't hand back a value", call.name),
-                            "only calls that declare `=> Type` can be used as a value".to_string(),
+                            "a call is a value only when its function declares a result after the parameter list"
+                                .to_string(),
                             format!(
-                                "call `{}` on its own line, or give it a return type",
-                                call.name
+                                "inside an arm, wrap the call in `{{ … }}`; otherwise put `{}` on its own line, or declare it as `fn {}(…) Type :> …`",
+                                call.name, call.name
                             ),
                             Some(span),
                         ));

@@ -200,7 +200,7 @@ fn rich_panic_shows_jet_location() {
 
     let src = r#"
 fn check(n: Int) {
-    require(n > 0, "must be positive")
+    assert(n > 0, "must be positive")
 }
 fn run() {
     check(0)
@@ -219,13 +219,13 @@ fn run() {
         stderr
     );
     assert!(
-        stderr.contains("require(n > 0"),
+        stderr.contains("assert(n > 0"),
         "source line missing: {}",
         stderr
     );
     assert!(stderr.contains('^'), "caret missing: {}", stderr);
     assert!(
-        stderr.contains("Why: The program hit a `panic`, `require`, or `require_eq` call that failed, a bounds/key check triggered at runtime, or another program-side stop. The shared report boundary owns the program-side stop; an unhandled entry error is a returned report, not E3001. Jet file and line are shown in Jet terms — never generated-Rust terms (I2).")
+        stderr.contains("Why: The program hit a `panic`, `assert`, or `assert_eq` call that failed, a bounds/key check triggered at runtime, or another program-side stop. The shared report boundary owns the program-side stop; an unhandled entry error is a returned report, not E3001. Jet file and line are shown in Jet terms — never generated-Rust terms (I2).")
             && stderr.contains("Fix: Fix the logic that led to the failure. Program-side stops exit 70 through the shared boundary; unhandled entry errors print their report and exit 1; exit 101 is reserved for Jet defects."),
         "shared stop guidance missing: {}",
         stderr
@@ -247,7 +247,7 @@ fn safe_locals_shown_in_dev_mode() {
     // Int and Bool locals should appear; String should not (non-scalar).
     let src = r#"
 fn capture(count: Int, active: Bool, name: String) {
-    require(count > 10, "not enough")
+    assert(count > 10, "not enough")
 }
 fn run() {
     capture(3, true, "test")
@@ -320,7 +320,7 @@ fn panic_context_uses_only_lexically_live_locals() {
         ),
         (
             "grant",
-            "#Grant(caps: IO) { grant_only :: 7; print(grant_only) }",
+            "#Caps(caps: IO) { grant_only :: 7; print(grant_only) }",
             &["grant_only"],
         ),
         // `assume_deterministic { … }` was renamed to `#Nondeterministic("reason") { … }`
@@ -339,7 +339,7 @@ fn panic_context_uses_only_lexically_live_locals() {
         ),
         (
             // Card #1939: the dotted fixture stem must not reach rustc as a
-            // crate name while TaskGroup lowering is exercised.
+            // crate name while Group lowering is exercised.
             "task.group",
             "task.group g { task_group_only :: 7; print(task_group_only) }",
             &["task_group_only"],
@@ -403,7 +403,7 @@ fn unsafe_block_locals_not_leaked() {
 
     let src = r#"
 fn capture(secret: String, count: Int) {
-    require(count > 5, "failed")
+    assert(count > 5, "failed")
 }
 fn run() {
     capture("password123", 1)

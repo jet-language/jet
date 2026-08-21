@@ -50,7 +50,7 @@ fn registers_typed_targets_and_default_plan() {
         )
         .unwrap();
     b.add_test("unit", TargetSpec::new().with_dep(app)).unwrap();
-    b.add_bench("frame-time", TargetSpec::new().with_dep(app))
+    b.add_test("frame-time", TargetSpec::new().with_dep(app))
         .unwrap();
     b.add_asset_bundle("assets", TargetSpec::new().with_action(gen))
         .unwrap();

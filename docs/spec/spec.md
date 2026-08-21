@@ -262,7 +262,7 @@ keep code readable from top to bottom. See
   Range cannot determine a type declaration (D-RANGE-VALUE1=A).
 - **Ambient surface (D-NAME-ALIAS1=A, D-CORE-PRELUDE1/2):** one readable
   `core/prelude.jet` module declares the closed no-prefix surface. Functions
-  are `print`, `input`, `panic`, `require`, `assert`, and `assert_eq`.
+  are `print`, `input`, `panic`, `assert`, and `assert_eq`.
   `pub use` aliases add `eprint`, `Clock`, `Instant`, `Date`, `Duration`,
   `Path`, `read_file`, `write_file`, and `file_exists`. The comptime-gated
   names `embed_file`, `embed_bytes`, `find`, and `fetch` stay gated at their
@@ -308,6 +308,13 @@ keep code readable from top to bottom. See
   `jet fmt` preserves call-site labels as written (D-NARG2).
   A positional `Bool` parameter on a `pub` fn or `pub` method triggers the
   advisory L2401 lint.
+- **Deterministic call mapping ([D-CALLPOS1=A](syntax-decisions.md))**: bare arguments fill slots
+  left to right, defaults fill unbound slots afterwards, and a final `...T`
+  packs the remaining tail. Types never reroute a bound value. Adjacent
+  same-type parameters remain legal positionally; parameter-name inlay hints
+  make their public labels visible. An imported candidate set must have one
+  successful binding; two successes are E0772 and require names to
+  deconflict.
 - Definitions are unique (E0105), can't shadow built-ins (E0106), and
   unknown type names are E0119.
 
@@ -559,7 +566,7 @@ owner-tied borrowed access.
 shared value — "a copyable door". It reads and writes like any other value:
 
 ```jet
-config :: shared AppConfig.{ name: "jet-server", hits: 0 }
+config :: shared AppConfig{ name: "jet-server", hits: 0 }
 t1 :: task handle(1, config)   // no `^` needed
 label :: config.name           // one locked read
 config.hits += 1               // one locked write
@@ -696,24 +703,27 @@ diagnostic code.
 
 ### Transitive memory facts
 
-`no_alloc`, `zero_rc`, and `arena_bounded(N)` are explicit memory facts on the
-D-MARK-SCOPE1 package/module/function/block ladder (D-MEM-FACTS1). Sema checks
-every reachable call, including dependencies, against the effective inherited
-facts. **E0921** identifies the incompatible source operation, prints the full
-call path, and names the effective declaration plus its provenance. An
+Memory floors are effect-row prohibitions (D-AUTHORITY-MEM1 and D-MEM-FACTS1),
+not `#Policy` settings. Sema checks every reachable call, including
+dependencies, against the function's `!Mem.*` denial. The unbounded forms are
+`!Mem.Alloc` and `!Mem.Rc`; the bounded form is
+`!Mem.Alloc(above: N)`. **E0921** identifies the incompatible source operation,
+prints the full call path, and names the denial plus its provenance. An
 open-world dispatch must have a sealed target set or a signed dependency
 summary; otherwise the strict fact is unprovable and rejected.
 
 ```jet
-#Policy(no_alloc)
-
-fn integrate(e: &Entity, dt: Float) { e.pos += e.vel * dt }
+fn integrate(e: &Entity, dt: Float) :[!Mem.Alloc]> {
+    e.pos += e.vel * dt
+}
 ```
 
-(examples/features/memory/no_alloc_policy.jet)
+(examples/features/memory/effect_denials.jet)
 
-Card #644 owns the implementation migration from the shipped module-local
-`no_alloc` denylist to this transitive contract.
+The old `#Policy(no_alloc)`, `#Policy(zero_rc)`, and
+`#Policy(arena_bounded(N))` spellings are tombstoned. Write the corresponding
+`!Mem.*` denial on the function signature; a package manifest writes the same
+right under `authority: .{ holds: { deny: [...] } }`.
 
 `@name :: value` is the explicit compile-time-demand binding
 (S57 / D-VERDICT-1308-1); ordinary foldable expressions need no marker.
@@ -979,23 +989,12 @@ impl Circle {
   edits only `.jet/cache/schema/`, never user source. There is **no `jet inspect schema
   check` verb** — `jet build`'s E0910 is already the CI gate.
 
-  **Decode-time migration transparency (D-MIGRATE3=A):** `decode_traced<T>(raw)
-  => DecodeResult<T> ?` sits beside `decode<T>` on every codec that shares this
-  decode machinery (json/csv/toml/yaml, D-ENC1). `DecodeResult<T>` is `{ value:
-  T, migration: MigrationStatus }`; `MigrationStatus` carries `.migrated: Bool`,
-  `.from` (the source shape's version label), and `.steps` (one entry per
-  migration step applied, `"v1->v2"` style). `decode` itself is unchanged —
-  same call, same cost, for anyone not asking (I8). `.migrated` is `false` and
-  `.from`/`.steps` are empty for a plain type and for a `#PublishedSchema`
-  type decoding data already shaped like the current struct.
-
-  ```jet
-  r    :: json.decode_traced<UserRecord>(raw)?
-  user :: r.value
-  if r.migration.migrated {
-      log.info("record {user.id} arrived as schema {r.migration.from}")
-  }
-  ```
+  **Decode-time migration transparency (D-MIGRATE3=A, retired by
+  D-VALIDATE-DECODE1=B):** the separate migration-report result was removed.
+  Every codec's typed `decode<T>` is the one canonical contract,
+  `Result<T, [FieldError]>` (or `Result<[T], [FieldError]>` for CSV). Published
+  schema migration remains silent inside that call; no second decoder or
+  compatibility wrapper exists.
 
   **Runtime migration chain (D-MIGRATE4=A):** decoding a concrete
   `#PublishedSchema` type that derives `Decode` and has `migration { }` blocks
@@ -1025,13 +1024,10 @@ impl Circle {
   4. **No match** — the ordinary decode error is returned unchanged (garbage
      stays garbage).
 
-  Plain `decode` applies the same chain silently; `decode_traced` reports it
-  (`from: "v1"`, `steps: ["v1->v2", "v2->v3"]`, …). Version labels are
-  positional — `v1` is the oldest shape the blocks describe. Types without
-  migration blocks pay nothing: no step functions and no per-type chain code
-  are emitted, and their decode path is unchanged. CSV applies the chain per
-  row (an old-header file migrates every row; the batch-level status reports
-  the first migrated row).
+  Plain `decode` applies the same chain silently. Version labels are positional
+  — `v1` is the oldest shape the blocks describe. Types without migration
+  blocks pay nothing: no step functions and no per-type chain code are emitted,
+  and their decode path is unchanged. CSV applies the chain per row.
 
 - **Struct layout control (D-REPRC1):** `#Layout(c)` before a struct stamps
   `#[repr(C)]` on the generated Rust struct, enabling direct C-FFI pointer
@@ -1109,7 +1105,7 @@ violations.
   parse predictably. The right side may be a value, **`return`**, **`return expr`**,
   or **`panic(…)`**. The retired word **`or`** is paused under D-S14-PAUSE and
   gets an ordinary parse error.
-- **`panic("msg")`** and **`require(cond)`** / **`require(cond, "msg")`**
+- **`panic("msg")`** and **`assert(cond)`** / **`assert(cond, "msg")`**
   (S36), `#Todo`, raw Prelude panics, and scheduler/stream/FFI stops enter one
   report boundary and exit code 70. Explicit process stops enter the same
   cleanup boundary and preserve their requested code.
@@ -1160,8 +1156,8 @@ Idempotence: **`fmt(fmt(x)) == fmt(x)`** on every `examples/*.jet` and
 ## M6 phase 2 — `jet test` + `jet new` (done)
 
 **`#Test("name") { … }`** (S43, D-CASING1 follow-on) — top-level blocks only.
-Bodies parse like a parameterless function; use **`require(cond)`** /
-**`require(cond, "msg")`** and **`require_eq(a, b)`** (S36) for checks. Duplicate
+Bodies parse like a parameterless function; use **`assert(cond)`** /
+**`assert(cond, "msg")`** and **`assert_eq(a, b)`** (S36) for checks. Duplicate
 test names → **E0105**; a nested `#Test` block → **E0601**; bare `test "name"` is
 paused under D-S14-PAUSE and gets an ordinary parse error. **`jet run`** / **`jet build`** ignore test
 blocks; only **`jet test`** compiles and runs them.
@@ -1179,7 +1175,7 @@ statement-position `.name { … }` / `.name(args) { … }` resolves against the
 marker's declared vocabulary (`Syntax::scope_members`). This is the one spelling
 for scope vocabulary (I8); the parser/sema shape is generic (a marker→members
 table), so other markers can grow members later without new grammar. `#Test`
-declares four; `#Bench` (and every other block marker) declares none, so a member
+declares five, including `.measure`, so a member
 there is **E0614**. A member outside any member-declaring marker is **E0615**;
 an unknown member **E0614** (lists the vocabulary); a wrong argument shape
 **E0617**; a member nested instead of a top-level statement of the block
@@ -1191,7 +1187,7 @@ mode (structural check).
   statements are spliced inline and run first; a failure inside fails the test on
   the normal path. It does **not** open a new scope — bindings made in `.setup`
   are visible to the rest of the test body (init sugar).
-- **`.expect_fail { … }`** — the region *must* fail (a `require` failure or a
+- **`.expect_fail { … }`** — the region *must* fail (an `assert` failure or a
   panic). It runs under the harness's panic-catching boundary with a silenced
   hook; if it completes cleanly the **test** fails with `expected this region to
   fail, but it passed`. If it fails, execution continues after the region and the
@@ -1207,6 +1203,9 @@ mode (structural check).
   the **first** statement the whole test is skipped: it reports `name: skip` and
   the shared summary reports its skipped count. A `.skip` later in the body skips
   only that region; the rest of the test still runs.
+- **`.measure { … }`** — marks the containing claim for measurement. Plain
+  `jet test` runs it once as correctness evidence; `jet test --measure` selects
+  only claims with this member and reports their samples.
 
 **`jet new <name>`** creates `<name>/run.jet` with a zero-argument `fn run()`
 (hello world), plus `<name>/package.jet` and `<name>/.gitignore` (`build/`).
@@ -1216,21 +1215,46 @@ Example: `examples/features/tooling/tests.jet`; scope members in
 `tests/jet_test.rs`, `tests/fixtures/test_fail.jet` + `.fixed.jet`, and the
 `scope_*` fixtures for the member fail paths.
 
-## `#Bench` region benchmarks + perf timing (c121, D-BENCH1) — done
+## Measured test claims + perf timing (D-CLAIM-BENCH1=A)
 
-**`#Bench("name") { … }`** (D-BENCH1, D-BENCH-MARKER1) is the exact sibling of `#Test`: a
-top-level block whose body parses like a parameterless function (and may use
-`require`/`require_eq`). **`jet run`** / **`jet build`** ignore bench blocks. A
-file with `#Bench` blocks runs per-region under **`jet bench`** — each region's
-body is warmed, its iteration count auto-scaled to ≥1ms, sampled, and reported
-as `name  <ns> ns/iter (±sd)  <ops> ops/sec`. A file with no `#Bench` blocks
-keeps whole-program `jet bench` timing (5 warmup + 20 trials). The body call is
-`black_box`'d so the optimizer can't elide it. Example:
-`examples/features/tooling/bench.jet`; golden `examples/features/expected/105_bench.out`
-(the `jet run` `main` output) + structural check in `tests/jet_test.rs`.
-Bench compilation uses the optimized `release` profile. Human result lines and
-machine records carry `profile: release`; directory targets qualify region
-names with their source path.
+**`#Test("name") { .measure { … } }`** is the one claim form for correctness
+and performance. Plain **`jet test`** runs every claim once. **`jet test
+--measure`** selects only measured claims, runs the shared measurement harness
+with five warmups, calibration-based iteration scaling, and twenty serial
+samples under the optimized AOT profile. Human lines, JSON records, and machine
+evidence label the execution tier, profile, warmups, iterations, and serial
+mode. `--filter` selects measured claims by name. `jet run` and `jet build`
+ignore test claims. The old benchmark command and marker are retired; their
+teaching diagnostic points to `.measure` and `jet test --measure`.
+
+The harness sinks the measured body with `black_box` so the optimizer cannot
+elide the returned result. Example: `examples/features/tooling/bench.jet`; the
+executable golden remains the `jet run` output.
+
+### Optimizer-trap catalog for measured regions
+
+A benchmark can measure the optimizer instead of the work. The harness sinks the
+region result with `black_box`, but that does not keep intermediate values that a
+loop computes and drops. A unit-returning loop can therefore disappear, or leave
+only a cheap operation behind.
+
+- **Dead-loop elision.** The nested-loop language benchmark in `UJ_W0O3sFnY`
+  measured integer division because the loop's intended work had no live result.
+- **Lazy-resource deferral.** The first mmap benchmark in `BOrAVwwCXq8` did not
+  fault in the file pages inside the measured region. It reported a result about
+  2000x too fast.
+- **Loop-invariant folding.** If a loop repeats work whose inputs never change,
+  an optimizer can compute it once or replace it with a constant.
+- **Result-sink limit.** The harness's result sink does not protect work whose
+  values die inside the body, and it does not force a lazy resource whose cost
+  occurs after the region. Put the force and the value sink inside the measured
+  loop. The approved identity sink is `keep(value)` under D-BENCH-KEEP1; it
+  returns the same value and must be treated as used.
+
+This catalog applies to measured regions, including the shipped `.measure` form.
+D-CLAIM-BENCH1 retires the former benchmark marker and command in favor of
+`.measure` and `jet test --measure`; the trap rules and sink guidance stay with
+measurement.
 
 **Compiler phase timing** — set **`JET_TIMING=1`** and any build writes
 `jet-timing.json` (load/sema/ffi/codegen µs, plus `build_plan` µs when a build
@@ -2472,7 +2496,7 @@ backpressure only; channels have no drop policy.
 |---|---|---|
 | `channel<T>(capacity: N)` | `send` waits for receiver space; deadline or cancellation can wake the wait | Preserve work-queue values and FIFO; capacity bounds queued memory and producer pressure |
 | `AsyncEvent<T, E>` | `Block` waits; `DropNewest` drops the new attempt; `DropOldest` drops the oldest queued attempt | Only explicit loss path; report exposes acceptance and terminal state |
-| `core.services` worker mailbox | Full delivery waits under deadline or returns `Full` | At-most-once, per-sender FIFO; no silent drop |
+| future `core.service` worker mailbox | Full delivery waits under deadline or returns `Full` | At-most-once, per-sender FIFO; no silent drop |
 | `core.files` buffered handles | Reader/writer calls block or flush; no Jet queue or drop policy | Bounded-memory stream; caller pace controls progress |
 | `core.term` stream handles and `core.http` `Body` | Blocking reads/writes use OS or socket backpressure; body limits reject over-limit input | Transport streaming preserves accepted bytes; no overflow drop |
 | `core.encoding` readers/writers and `core.data.DataStream` | Blocking `next`/`write`/`flush`; `EncodingLimits`/`DataLimits` bound retained work; no hidden queue or drop | Bounded pull/push stream, not lossy delivery |
@@ -2513,10 +2537,10 @@ portable parallel reduction.
 When the plan has one chunk, the engine runs that chunk on the caller thread.
 This keeps small inputs serial and avoids paying for worker setup; the crossover
 to a useful `para_map` speedup depends on item count, callback cost, and the host.
-Run `jet bench examples/features/tooling/para_map_crossover_bench.jet` on the
+Run `jet test --measure examples/features/tooling/para_map_crossover_bench.jet` on the
 same machine as the workload before choosing between `map` and `para_map`.
-`jet bench` owns the optimized benchmark profile; do not compare its numbers
-with debug or default builds.
+The measured test owns the optimized profile; do not compare its numbers with
+debug or default builds.
 
 The checked-in reference run (Linux x86_64, Ryzen 9 7950X3D, 32 logical CPUs,
 three invocations) first favored `para_map` at 256 items with callback cost 256;
@@ -2565,21 +2589,21 @@ consume their children; there are no list twins or handle-list spellings.
 also bounds the number of active children; an `n` below one is clamped to one
 before child admission. The group owns every child created in its body and
 joins the children when the block closes.
-The same `TaskGroup` parameter may be passed to a helper; `task` in that helper
+The same `Group` parameter may be passed to a helper; `task` in that helper
 uses the caller's group. A group is a borrow of its scope, so it may be named in
 every direct parameter position — a method's parameter list exactly like a free
 function's (**D-CONC-GROUP1=A**, which amends D-TASKGROUP-PARAM1=A by lifting
 its named-free-function restriction only):
 
 ```jet
-fn add_work(group: TaskGroup, value: Int) {
+fn add_work(group: Group, value: Int) {
     task value + 1
 }
 
 struct Crawler {
     step: Int
 
-    fn add_stepped(self, group: TaskGroup, value: Int) {
+    fn add_stepped(self, group: Group, value: Int) {
         step :: self.step
         task value + step
     }
@@ -2594,7 +2618,7 @@ fn run() {
 }
 ```
 
-Nothing else about the ban moved. `TaskGroup` in a struct field, a return type,
+Nothing else about the ban moved. `Group` in a struct field, a return type,
 a local annotation, a lambda parameter, an alias, or any aggregate is still
 refused, and a lambda may not capture the handle — so no child outlives the
 scope that joins it. `self` holds the receiver, never the group, so a method
@@ -2627,7 +2651,7 @@ task.group g {
 
 A group lends only what outlives its own join. An owner declared inside the
 group's own block drops before the group joins, and a group reached through a
-`TaskGroup` parameter joins in another frame; both stay **E1102**. Channels
+`Group` parameter joins in another frame; both stay **E1102**. Channels
 and task bodies still require sendable owned values.
 
 Combinators are nested selectors, not methods on a group handle:
@@ -2649,9 +2673,9 @@ Combinators are nested selectors, not methods on a group handle:
 
 ```jet
 if {
-    job, jobs    -> handle(job)
-    msg, control -> obey(msg)
-    after 100ms  -> retry()
+    job, jobs    :> handle(job)
+    msg, control :> obey(msg)
+    after 100ms  :> retry()
 }
 ```
 
@@ -3113,7 +3137,7 @@ The package view merges its declarations with loaded dependency and Prelude
 declarations. After a root has any declared leaves, dotted uses under that root
 must match a declaration exactly. Bare roots remain valid, and a root with no
 declared leaves remains open. The same check applies to function effect rows,
-`#Caps`, `#Grant`, and package effect budgets. Declarations have no runtime
+`#Caps` and package effect budgets. Declarations have no runtime
 representation.
 
 | Effect  | Carried by |
@@ -3247,7 +3271,7 @@ body all generate byte-identical Rust.
 
 Where `=[…]=>` bounds a whole function, `#Caps(…) { … }` restricts a **block**.
 Inside the region, the only effects allowed — directly or through any call it
-reaches — are the ones listed; anything else is **E0741**. It is a hard local
+reaches — are the ones listed; anything else is **E0712**. It is a hard local
 ceiling, not a grant: the effects still happen and still count toward the
 enclosing function's set.
 
@@ -3264,7 +3288,7 @@ fn run() {
 }
 ```
 
-A call inside the region that transitively touches `Net` would be E0741 even
+A call inside the region that transitively touches `Net` would be E0712 even
 though no `Net` call appears literally in the block. Like every effect
 construct, `#Caps` is a plain lexical block in codegen — it erases.
 
@@ -3382,7 +3406,7 @@ Lists, maps, options, results, structs, enums, and closures are not rebuilt
 from display text; explicit binding annotations remain available to `:type`.
 
 Pure Core calls run directly. Ambient Core calls use normal Jet authority:
-the call must be inside `#Grant(root)`, and the REPL must authorize the exact
+the call must be inside `#Caps(root)`, and the REPL must authorize the exact
 operation and resource before it touches host state. A TTY prompts for once,
 session, or deny. A session allowance is an exact tuple and offers continue
 or revoke on reuse. `--allow-fs`, `--allow-env`, `--allow-exec`,
@@ -3811,8 +3835,8 @@ time the bundle compiled at all) — the same side-channel `jet inspect semindex
   (`#[inline]` / `#[inline(always)]`). Functions with neither marker produce
   no line — the lens reports contracts, not every function in the program.
 
-- `memory` (D-MEM-FACTS1) — declared and projected `no_alloc`, `zero_rc`, and
-  `arena_bounded` facts.
+- `memory` (D-MEM-FACTS1/D-AUTHORITY-MEM1) — declared and projected `Mem.*`
+  effect denials, including bounded `Mem.Alloc(above: N)` facts.
 - `web` (D-WEBAPP1) — the checked application graph: routes, actions, mounts,
   and policy.
 - `effects` (D-EFF1 / D-SEMINDEX1) — each checked function's resolved effect
@@ -4164,7 +4188,7 @@ entries are checked but never run. With no package-local entry, the existing
 zero-configuration batteries pipeline is unchanged.
 
 Build code registers ordinary typed values. Targets are declared once with
-`b.add_executable`, `b.add_library`, `b.add_test`, `b.add_bench`,
+`b.add_executable`, `b.add_library`, `b.add_test`,
 `b.add_asset_bundle`, `b.add_doc`, `b.add_install`, `b.add_package`, or
 `b.add_publish`; each returns a `BuildTarget`. `b.action(name, inputs, outputs,
 argv, caps)` returns a `BuildAction`. `b.plan()` or `b.plan(default)` hands the

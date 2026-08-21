@@ -255,7 +255,7 @@ pub(crate) fn process_spec_method_return(
         // size and mode on the same ProcessSpec.
         ("terminal", 0 | 1) => Some(Some(spec_ty.clone())),
         ("env_clear" | "detached", 0) => Some(Some(spec_ty)),
-        ("capabilities", 0) => Some(Some(Type::Tagged {
+        ("abilities", 0) => Some(Some(Type::Tagged {
             marker: crate::AST::TagMarker::Internal(crate::AST::InternalTag::TerminalFactSet),
             inner: Box::new(Type::Apply {
                 name: "Set".to_string(),
@@ -279,7 +279,7 @@ pub(crate) fn process_spec_method_return(
             diags.push(wrong_core_arity(method, 2, n_args, span));
             Some(None)
         }
-        ("env_clear" | "detached" | "run" | "run_checked" | "spawn" | "capabilities", _) => {
+        ("env_clear" | "detached" | "run" | "run_checked" | "spawn" | "abilities", _) => {
             diags.push(wrong_core_arity(method, 0, n_args, span));
             Some(None)
         }

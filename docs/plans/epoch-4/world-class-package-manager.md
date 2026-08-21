@@ -115,7 +115,7 @@ These are integrity and isolation defects. They precede ecosystem breadth.
 
 ## Nix parity matrix
 
-| Capability | Nix bar | Jetpack audited state | Epoch closure |
+| Ability | Nix bar | Jetpack audited state | Epoch closure |
 |---|---|---|---|
 | Package language | lazy evaluator produces derivations | typed Jet build/env model; installed Nix for Nix inputs | native compatibility evaluator plus one Jet action IR |
 | Derivations | builder, args, env, inputs, platforms, named outputs | linear recipes plus separate build-plan models | every package path lowers to one finite action graph |

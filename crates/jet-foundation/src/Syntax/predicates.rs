@@ -69,6 +69,7 @@ pub const UNIT_SUFFIX_IMAGINARY: &str = "i";
 /// key set equals this slice.
 pub const KNOWN_CORE_MODULES: &[&str] = &[
     "core",
+    "core.prelude",
     // D-CORE-TREE1=A: one canonical nested Core tree. Keep this list in
     // lexical/domain order; deleted free namespaces do not get aliases here.
     "core.files",
@@ -293,7 +294,7 @@ pub const EFFECTS_FIELD_ALLOW: &str = "allow"; // D-EFFBUDGET1
 /// dependency graph must never use.
 pub const EFFECTS_FIELD_DENY: &str = "deny"; // D-EFFBUDGET1
 /// D-EFFBUDGET1: the `grants { "dep": [Effect] }` block — an audited
-/// per-dependency escape from the `effects:` budget, recorded in the lockfile.
+/// per-dependency escape from the `authority.holds` budget, recorded in the lockfile.
 pub const MANIFEST_BLOCK_GRANTS: &str = "grants"; // D-EFFBUDGET1
 /// D-POLICY-WORD1=A: package floors and memory governance live under the
 /// `policy: { … }` block in `package.jet`. Manifest keys only, no language

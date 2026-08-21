@@ -301,7 +301,7 @@ After — Core ships a readable prelude module; the compiler opens it for every 
 // core/prelude.jet (Core source; the ratified list, ballot-gated growth)
 pub fn print(value: Any) { … }         // ambient basics are declared here
 pub fn panic(message: String) { … }    // (their meaning stays in Prelude
-pub fn require(cond: Bool) { … }       //  per I9, as today)
+pub fn assert(cond: Bool) { … }       //  per I9, as today)
 pub use core.time.[Clock, Instant, Date, Duration]
 pub use core.files.[Path, read as read_file, write as write_file]
 pub use core.comptime.[embed_file, embed_bytes, find, fetch]

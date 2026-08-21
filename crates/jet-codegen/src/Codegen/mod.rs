@@ -221,6 +221,9 @@ const PRELUDE_PARTS: &[&str] = &[
     // D-SHIFT1: `binary.Reader` / `text.Cursor`. Owned by jet-foundation so the
     // AOT prelude and the canonical TIR evaluator run one kernel (I9).
     include_str!("../../../jet-foundation/src/StreamCursor.rs"),
+    // D-BINPAT1 / I9: one binary-pattern scan kernel. AST-shaped engines only
+    // marshal pattern parts and project its values.
+    include_str!("../../../jet-foundation/src/Prelude/MatchScan.rs"),
 ];
 
 const OUTCOME_SOURCE: &str = include_str!("../../../jet-foundation/src/Outcome.rs");
@@ -2266,7 +2269,6 @@ fn collect_allocator_constructors(
             | Stmt::TaskGroup { body, .. }
             | Stmt::Layout { body, .. }
             | Stmt::Caps { body, .. }
-            | Stmt::Grant { body, .. }
             | Stmt::ComptimeBlock { body, .. }
             | Stmt::ContextBlock { body, .. }
             | Stmt::Live { body, .. }
@@ -3010,6 +3012,9 @@ mod tests {
             std::fs::read_to_string(root.join("../jet-foundation/src/StructuralDebug.rs")).unwrap();
         let stream_cursor =
             std::fs::read_to_string(root.join("../jet-foundation/src/StreamCursor.rs")).unwrap();
+        let match_scan =
+            std::fs::read_to_string(root.join("../jet-foundation/src/Prelude/MatchScan.rs"))
+                .unwrap();
         for (relative, source) in [
             ("../jet-foundation/src/Outcome.rs", outcome.as_str()),
             ("src/Prelude/FaultInjection.rs", fault_injection.as_str()),
@@ -3074,6 +3079,10 @@ mod tests {
             (
                 "../jet-foundation/src/StreamCursor.rs",
                 stream_cursor.as_str(),
+            ),
+            (
+                "../jet-foundation/src/Prelude/MatchScan.rs",
+                match_scan.as_str(),
             ),
         ] {
             assert!(
@@ -3199,6 +3208,9 @@ mod tests {
         let stream_cursor_pos = production_codegen
             .find("include_str!(\"../../../jet-foundation/src/StreamCursor.rs\")")
             .unwrap();
+        let match_scan_pos = production_codegen
+            .find("include_str!(\"../../../jet-foundation/src/Prelude/MatchScan.rs\")")
+            .unwrap();
         assert!(
             outcome_pos < unicode_pos
                 && outcome_pos < job_pos
@@ -3241,7 +3253,8 @@ mod tests {
                 && control_pos < observe_pos
                 && observe_pos < exact_units_pos
                 && exact_units_pos < structural_debug_pos
-                && structural_debug_pos < stream_cursor_pos,
+                && structural_debug_pos < stream_cursor_pos
+                && stream_cursor_pos < match_scan_pos,
             "prelude ownership order is generated-byte order"
         );
         assert!(production_codegen.contains("for (index, part) in PRELUDE_PARTS.iter().enumerate()"));
@@ -3311,6 +3324,7 @@ mod tests {
                 exact_units.as_str(),
                 structural_debug.as_str(),
                 stream_cursor.as_str(),
+                match_scan.as_str(),
             ],
             "PRELUDE_PARTS must list every owned module exactly once in generated-byte order"
         );
@@ -3364,6 +3378,7 @@ mod tests {
                     exact_units.as_str(),
                     structural_debug.as_str(),
                     stream_cursor.as_str(),
+                    match_scan.as_str(),
                 ]
                 .concat(),
             );
@@ -3430,6 +3445,7 @@ mod tests {
             "../jet-foundation/src/ExactUnitConversion.rs",
             "../jet-foundation/src/StructuralDebug.rs",
             "../jet-foundation/src/StreamCursor.rs",
+            "../jet-foundation/src/Prelude/MatchScan.rs",
         ] {
             fragments.push(root.join(relative));
         }
@@ -4068,28 +4084,55 @@ fn emit_test_main_cov_mode(
     out.push_str("    if measure_mode { slots.retain(|s| s.measure && !s.skip); }\n");
     out.push_str("    if measure_mode {\n");
     out.push_str("        fn jet_measure_hex(bytes: &[u8]) -> String { const H: &[u8; 16] = b\"0123456789abcdef\"; let mut out = String::with_capacity(bytes.len() * 2); for byte in bytes { out.push(H[(byte >> 4) as usize] as char); out.push(H[(byte & 15) as usize] as char); } out }\n");
+    out.push_str("        const JET_MEASURE_WARMUPS: usize = 5;\n");
+    out.push_str("        const JET_MEASURE_SAMPLES: usize = 20;\n");
+    out.push_str("        const JET_MEASURE_TARGET_NS: u128 = 1_000_000;\n");
+    out.push_str("        let tier = \"aot\";\n");
+    out.push_str("        let profile = if cfg!(jet_release) { \"release\" } else { \"default\" };\n");
+    out.push_str("        let serial = true;\n");
     out.push_str("        let mut measured = 0usize;\n");
     out.push_str("        for slot in &slots {\n");
-    out.push_str("            let mut samples = Vec::with_capacity(20);\n");
-    out.push_str("            let mut exact_samples: Vec<u128> = Vec::with_capacity(20);\n");
-    out.push_str("            let mut allocation_samples: Vec<(usize, usize)> = Vec::with_capacity(20);\n");
-    out.push_str("            for _ in 0..20 {\n");
+    out.push_str("            let mut samples = Vec::with_capacity(JET_MEASURE_SAMPLES);\n");
+    out.push_str("            let mut exact_samples: Vec<u128> = Vec::with_capacity(JET_MEASURE_SAMPLES);\n");
+    out.push_str("            let mut allocation_samples: Vec<(usize, usize)> = Vec::with_capacity(JET_MEASURE_SAMPLES);\n");
+    out.push_str("            let run_once = || -> Result<(), String> { let result = (slot.run)(); let _ = jet_test_take_output(); result };\n");
+    out.push_str("            for _ in 0..JET_MEASURE_WARMUPS {\n");
+    out.push_str("                if let Err(message) = run_once() { eprintln!(\"{}: FAIL during measurement [tier={}, profile={}, serial={}]: {}\", slot.name, tier, profile, serial, message);\n");
+    if override_entry.is_some() {
+        out.push_str("                        return (measured as i64, 1); }\n");
+    } else {
+        out.push_str("                        std::process::exit(1); }\n");
+    }
+    out.push_str("            }\n");
+    out.push_str("            let calibration_started = std::time::Instant::now();\n");
+    out.push_str("            if let Err(message) = run_once() { eprintln!(\"{}: FAIL during measurement [tier={}, profile={}, serial={}]: {}\", slot.name, tier, profile, serial, message);\n");
+    if override_entry.is_some() {
+        out.push_str("                return (measured as i64, 1); }\n");
+    } else {
+        out.push_str("                std::process::exit(1); }\n");
+    }
+    out.push_str("            let calibration_ns = calibration_started.elapsed().as_nanos();\n");
+    out.push_str("            let iterations = if calibration_ns == 0 { 1 } else { (JET_MEASURE_TARGET_NS / calibration_ns).max(1) as u64 };\n");
+    out.push_str("            for _ in 0..JET_MEASURE_SAMPLES {\n");
     out.push_str("                jet_allocation_probe_reset();\n");
     out.push_str("                let started = std::time::Instant::now();\n");
-    out.push_str("                match (slot.run)() {\n");
-    out.push_str("                    Ok(()) => { let elapsed = started.elapsed().as_nanos(); exact_samples.push(elapsed); samples.push(elapsed as f64); allocation_samples.push(jet_allocation_probe_take()); }\n");
-    out.push_str("                    Err(message) => { eprintln!(\"{}: FAIL during measurement: {}\", slot.name, message);\n");
+    out.push_str("                for _ in 0..iterations {\n");
+    out.push_str("                    if let Err(message) = run_once() { eprintln!(\"{}: FAIL during measurement [tier={}, profile={}, serial={}]: {}\", slot.name, tier, profile, serial, message);\n");
     if override_entry.is_some() {
         out.push_str("                        return (measured as i64, 1); }\n");
     } else {
         out.push_str("                        std::process::exit(1); }\n");
     }
     out.push_str("                }\n");
+    out.push_str("                let elapsed = started.elapsed().as_nanos();\n");
+    out.push_str("                exact_samples.push(elapsed);\n");
+    out.push_str("                samples.push(elapsed as f64);\n");
+    out.push_str("                allocation_samples.push(jet_allocation_probe_take());\n");
     out.push_str("            }\n");
-    out.push_str("            let mean = samples.iter().sum::<f64>() / samples.len() as f64;\n");
-    out.push_str("            let variance = samples.iter().map(|sample| (sample - mean) * (sample - mean)).sum::<f64>() / samples.len() as f64;\n");
+    out.push_str("            let mean = samples.iter().sum::<f64>() / samples.len() as f64 / iterations as f64;\n");
+    out.push_str("            let variance = samples.iter().map(|sample| { let sample = *sample / iterations as f64; (sample - mean) * (sample - mean) }).sum::<f64>() / samples.len() as f64;\n");
     out.push_str("            let deviation = variance.sqrt();\n");
-    out.push_str("            if measure_evidence { print!(\"JETBENCH1\\t{}\\t1\", jet_measure_hex(slot.name.as_bytes())); for sample in &exact_samples { print!(\"\\t{}\", sample); } println!(); print!(\"JETALLOC1\\t{}\\t1\", jet_measure_hex(slot.name.as_bytes())); for (count, bytes) in &allocation_samples { print!(\"\\t{}:{}\", count, bytes); } println!(); } else if json { println!(\"{{\\\"name\\\":\\\"{}\\\",\\\"mean_ns\\\":{:.3},\\\"stddev_ns\\\":{:.3},\\\"samples\\\":{}}}\", slot.name, mean, deviation, samples.len()); } else { println!(\"{}: {:.3} ns ±{:.3} ({} samples)\", slot.name, mean, deviation, samples.len()); }\n");
+    out.push_str("            if measure_evidence { print!(\"JETTESTMEASURE1\\t{}\\t{}\\t{}\\t{}\\t{}\\t{}\", jet_measure_hex(slot.name.as_bytes()), tier, profile, JET_MEASURE_WARMUPS, iterations, serial); for sample in &exact_samples { print!(\"\\t{}\", sample); } println!(); print!(\"JETALLOC1\\t{}\\t{}\\t{}\\t{}\\t{}\\t{}\", jet_measure_hex(slot.name.as_bytes()), tier, profile, JET_MEASURE_WARMUPS, iterations, serial); for (count, bytes) in &allocation_samples { print!(\"\\t{}:{}\", count, bytes); } println!(); } else if json { println!(\"{{\\\"name\\\":\\\"{}\\\",\\\"tier\\\":\\\"{}\\\",\\\"profile\\\":\\\"{}\\\",\\\"serial\\\":{},\\\"warmups\\\":{},\\\"iterations\\\":{},\\\"mean_ns\\\":{:.3},\\\"stddev_ns\\\":{:.3},\\\"samples\\\":{}}}\", slot.name, tier, profile, serial, JET_MEASURE_WARMUPS, iterations, mean, deviation, samples.len()); } else { println!(\"{}: {:.3} ns/iter ±{:.3} ({} samples, warmups={}, iterations={}) [tier={}, profile={}, serial={}]\", slot.name, mean, deviation, samples.len(), JET_MEASURE_WARMUPS, iterations, tier, profile, serial); }\n");
     out.push_str("            measured += 1;\n");
     out.push_str("        }\n");
     if override_entry.is_some() {

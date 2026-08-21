@@ -40,7 +40,7 @@ Literals (`IntLit`/`FloatLit`/`BoolLit`/`CharLit`/`StrLit` plain), `Local`,
 
 ## Proof
 
-- No new `tests/jit_gaps.txt` entries on this wave.
+- No hand-maintained JIT gap entries. `jit_coverage_audit` must stay green.
 - `examples/features/concurrency/freeze_capture.jet` is the executable proof
   for AOT, default `jet run`, and forced interpretation. Comptime returns an
   already-owned `CtValue` for `freeze`; the REPL task boundary remains E1802,

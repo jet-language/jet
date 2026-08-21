@@ -304,9 +304,12 @@ mod tests {
         assert_eq!(unsafe_row.signature.params[1].default, Some(".None"));
         assert!(unsafe_row.sites.contains(&RuleSite::Operation));
 
-        let caps = rows.iter().find(|row| row.name == "Caps").expect("#Caps");
+        let caps = rows
+            .iter()
+            .find(|row| row.name == "Caps")
+            .expect("#Caps");
         assert_eq!(caps.signature.variadic, Some(RuleArgType::Ident));
-        assert_eq!(caps.signature.variadic_source_type, Some("Capability"));
+        assert_eq!(caps.signature.variadic_source_type, Some("Ability"));
 
         let pre = rows.iter().find(|row| row.name == "Pre").expect("#Pre");
         assert!(pre.repeatable);

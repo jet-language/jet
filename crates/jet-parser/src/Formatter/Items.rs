@@ -1,9 +1,9 @@
 use super::*;
 use crate::AST::{
     AccessConvention, CModuleKind, CodeModule, ConstAttr, ConstDef, EnumDef, EnumGroup, ExternFn,
-    ExternRustBlock, Field, Func, GenericModuleDef, GenericModuleParam, ImplDef, ImportDecl,
-    ImportKind, Item, Marker, MetaAttr, MetaField, Param, Pattern, StructDef, TraitImplBlock, Type,
-    TypeParam, Variant, VariantPayload,
+    DeriveBodyItem, ExternRustBlock, Field, Func, GenericModuleDef, GenericModuleParam, ImplDef,
+    ImportDecl, ImportKind, Item, Marker, MetaAttr, MetaField, Param, Pattern, StructDef,
+    TraitImplBlock, Type, TypeParam, Variant, VariantPayload,
 };
 
 enum EnumFmtEntry<'b> {
@@ -359,13 +359,11 @@ impl<'a> Fmt<'a> {
                 self.newline();
                 self.skip_verbatim_comments(declaration.span.end);
             }
-            // D-META-NAME1/FORM1: emitted verbatim, like `EffectDecl` — parse-only
-            // (card #1456); canonical reformatting is #1457's/#1458's job.
+            // D-META-NAME1/FORM1: declarations with typed bodies use the same
+            // item-template formatter as derives. Text-head contracts still use
+            // their source form because their body is a separate DSL.
             Item::MarkerDecl(declaration) => {
-                let text = self.src[declaration.span.start..declaration.span.end].to_string();
-                self.write(&text);
-                self.newline();
-                self.skip_verbatim_comments(declaration.span.end);
+                self.fmt_marker_decl(declaration);
             }
             // D-FACTDECL1=A: fact declarations keep their source spelling;
             // they erase before TIR like marker declarations.
@@ -432,20 +430,11 @@ impl<'a> Fmt<'a> {
                 self.newline();
                 self.skip_verbatim_comments(s.span.end);
             }
-            // D-PROTO1/D-PROTO2: protocol blocks are emitted verbatim (non-destructive).
-            Item::ProtocolDecl(p) => {
-                let text = self.src[p.span.start..p.span.end].to_string();
-                self.write(&text);
-                self.newline();
-                self.skip_verbatim_comments(p.span.end);
-            }
+            // D-PROTO1/D-PROTO2: protocol declarations have typed message
+            // fields, so format those fields instead of copying the block.
+            Item::ProtocolDecl(p) => self.fmt_protocol_decl(p),
             // D-META-CODE1=A: derive bodies are typed item templates.
-            Item::UserDerive(d) => {
-                let text = self.src[d.span.start..d.span.end].to_string();
-                self.write(&text);
-                self.newline();
-                self.skip_verbatim_comments(d.span.end);
-            }
+            Item::UserDerive(d) => self.fmt_derive_decl(d),
             // D-CONF-GENSPELL1=A: generic module templates are typed item
             // templates, not opaque source strings.
             Item::GenericModule(gm) => self.fmt_generic_module(gm),
@@ -458,6 +447,151 @@ impl<'a> Fmt<'a> {
                 self.newline();
                 self.skip_verbatim_comments(ma.span.end);
             }
+        }
+    }
+
+    fn fmt_marker_decl(&mut self, declaration: &crate::AST::MarkerDecl) {
+        if declaration.text.is_some() {
+            let text = self.src[declaration.span.start..declaration.span.end].to_string();
+            self.write(&text);
+            self.newline();
+            self.skip_verbatim_comments(declaration.span.end);
+            return;
+        }
+        self.write("marker ");
+        self.write(&declaration.name);
+        self.write("(");
+        for (index, param) in declaration.params.iter().enumerate() {
+            if index > 0 {
+                self.write(", ");
+            }
+            self.write(&param.name);
+            self.write(": ");
+            if let Some(ty) = &param.ty {
+                if param.variadic {
+                    self.write("...");
+                }
+                self.fmt_type(ty);
+                if let Some(default) = &param.value {
+                    self.write(" = ");
+                    self.fmt_expr(default, Prec::OrFallback);
+                }
+            } else if let Some(value) = &param.value {
+                self.fmt_expr(value, Prec::OrFallback);
+            }
+        }
+        self.write(")");
+        if let Some(body) = &declaration.body {
+            self.write(" {");
+            self.newline();
+            self.with_indent(|f| f.fmt_derive_body_items(body));
+            self.emit_leading(declaration.span.end);
+            self.end_template_block();
+        }
+        self.newline();
+    }
+
+    fn fmt_protocol_decl(&mut self, protocol: &crate::AST::ProtocolDecl) {
+        self.fmt_pub_qualifier(protocol.is_pub, protocol.is_package_pub);
+        self.write("protocol ");
+        self.write(&protocol.name);
+        self.write(" {");
+        self.newline();
+        self.with_indent(|f| {
+            for (index, message) in protocol.messages.iter().enumerate() {
+                if index > 0 {
+                    f.newline();
+                }
+                f.emit_leading(message.span.start);
+                let sender = match message.direction {
+                    crate::AST::ProtocolDirection::ClientToServer => Syntax::PROTO_CLIENT,
+                    crate::AST::ProtocolDirection::ServerToClient => Syntax::PROTO_SERVER,
+                };
+                f.write(sender);
+                f.write(": ");
+                f.write(&message.name);
+                f.write("(");
+                for (field_index, (name, ty)) in message.fields.iter().enumerate() {
+                    if field_index > 0 {
+                        f.write(", ");
+                    }
+                    f.write(name);
+                    f.write(": ");
+                    f.fmt_type(ty);
+                }
+                f.write(")");
+                f.emit_trailing(message.span.end);
+            }
+        });
+        self.emit_leading(protocol.span.end);
+        self.end_block();
+    }
+
+    fn fmt_derive_decl(&mut self, derive: &crate::AST::DeriveDef) {
+        self.write("derive ");
+        self.write(&derive.type_param);
+        self.write(".");
+        self.write(&derive.trait_name);
+        self.write(" {");
+        self.newline();
+        self.with_indent(|f| f.fmt_derive_body_items(&derive.body));
+        self.emit_leading(derive.span.end);
+        self.end_template_block();
+    }
+
+    /// Format typed derive, marker, and generated-source bodies through their
+    /// AST. These bodies share one representation, so one walk closes all
+    /// three formatter gaps.
+    pub(super) fn fmt_derive_body_items(&mut self, body: &[DeriveBodyItem]) {
+        for (index, body_item) in body.iter().enumerate() {
+            if index > 0 && !self.at_line_start {
+                self.newline();
+            }
+            let start = self.derive_body_item_start(body_item);
+            self.emit_leading(start);
+            match body_item {
+                DeriveBodyItem::Item(item) => self.fmt_item(item),
+                DeriveBodyItem::Stmt(stmt) => self.fmt_stmt(stmt),
+                DeriveBodyItem::Loop {
+                    var, source, body, ..
+                } => {
+                    self.write("@loop ");
+                    self.write(var);
+                    self.write(", ");
+                    self.fmt_expr(source, Prec::OrFallback);
+                    self.write(" {");
+                    self.newline();
+                    self.with_indent(|f| f.fmt_derive_body_items(body));
+                    self.end_template_block();
+                }
+            }
+            self.emit_trailing(self.derive_body_item_end(body_item));
+            if !self.at_line_start {
+                self.newline();
+            }
+        }
+    }
+
+    fn end_template_block(&mut self) {
+        if !self.at_line_start {
+            self.newline();
+        }
+        self.write("}");
+    }
+
+    fn derive_body_item_start(&self, body_item: &DeriveBodyItem) -> usize {
+        match body_item {
+            DeriveBodyItem::Item(item) => item_span_start(item, self.src),
+            DeriveBodyItem::Stmt(stmt) => stmt.span().start,
+            DeriveBodyItem::Loop { span, .. } => span.start,
+        }
+    }
+
+    fn derive_body_item_end(&self, body_item: &DeriveBodyItem) -> usize {
+        match body_item {
+            DeriveBodyItem::Item(item) => item_span_end(item),
+            DeriveBodyItem::Stmt(stmt) => self.statement_source_end(stmt),
+            DeriveBodyItem::Loop { span, .. } => span.end,
         }
     }
 

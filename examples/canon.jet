@@ -25,17 +25,17 @@ fn show_values() {
 }
 
 // --- functions & generics ------------------------------------------------
-fn greet(who: String) :> String :: "hello, {who}"
+fn greet(who: String) String :> "hello, {who}"
 
-fn id<T>(x: ^T) :> T :: x
+fn id<T>(x: ^T) T :> x
 
 struct Point {
     x: Float
     y: Float
 
-    fn dist_sq(self) :> Float :: self.x * self.x + self.y * self.y
+    fn dist_sq(self) Float :> self.x * self.x + self.y * self.y
 
-    fn origin() :> Point { return Point{x: 0.0, y: 0.0} }
+    fn origin() Point { return Point{x: 0.0, y: 0.0} }
 }
 
 // --- enums & pattern matching --------------------------------------------
@@ -46,7 +46,7 @@ enum Light {
     Green
 }
 
-fn next(light: Light) :> Light {
+fn next(light: Light) Light {
     if light == {
         .Red :> { return Light.Yellow }
         .Yellow :> { return Light.Green }
@@ -54,7 +54,7 @@ fn next(light: Light) :> Light {
     }
 }
 
-fn day_kind(day: String) :> String {
+fn day_kind(day: String) String {
     if day == {
         "sat" | "sun" :> { return "weekend" }
         else :> { return "weekday" }
@@ -66,19 +66,19 @@ enum ParseError {
     Empty
 }
 
-fn parse_age(raw: String) :> Int ? ParseError {
+fn parse_age(raw: String) Int ? ParseError {
     if raw == "" :> return Err(ParseError.Empty)
     return Ok(7)
 }
 
-fn double_age(raw: String) :> Int ? ParseError {
+fn double_age(raw: String) Int ? ParseError {
     n :: parse_age(raw)?
     return Ok(n * 2)
 }
 
 // --- traits & impl -------------------------------------------------------
 trait Shape {
-    fn area(self) :> Float
+    fn area(self) Float
 }
 
 struct Square {
@@ -86,18 +86,18 @@ struct Square {
 }
 
 impl Square.Shape {
-    fn area(self) :> Float :: self.side * self.side
+    fn area(self) Float :> self.side * self.side
 }
 
 // --- inline module -------------------------------------------------------
 module math {
-    pub fn double(n: Int) => Int :: n * 2
+    pub fn double(n: Int) Int :> n * 2
 }
 
 // --- low-level: `Type.{ uninit }` sentinel --------------------------------
 // Opts a binding out of automatic zero-fill; sema proves every read happens
 // after a write on all paths (E0420, D-UNINIT-SENTINEL2). Gated by `use core.mem`.
-fn show_uninit() :> Int {
+fn show_uninit() Int {
     n := Int{ uninit }
     n = 99
     return n
@@ -106,9 +106,9 @@ fn show_uninit() :> Int {
 // --- inline contracts: `#Inline` / `#Inline(Always)` ----------------------
 // D-INLINE-PARAM1=A: `#Inline` is a soft hint; `#Inline(Always)` is a checked
 // promise the compiler proves or refuses to build.
-#Inline fn square(x: Int) :> Int :: x * x
+#Inline fn square(x: Int) Int :> x * x
 
-#Inline(Always) fn twice(x: Int) :> Int :: x * 2
+#Inline(Always) fn twice(x: Int) Int :> x * 2
 
 // --- typed CLI args: `#CLI` struct + `#Doc(...)` fields -----------------
 // D-CLIFLAG1=A: an entry function's `#CLI` parameter type IS the CLI spec.
@@ -123,7 +123,7 @@ struct ServeArgs {
 // --- stream parsing: `Reader.over` / `Cursor.over` / `take_pattern` -------
 // D-SHIFT1: the "shift" kernel for linear stream parsing — every read
 // advances position and returns `? Err`, never panics or truncates silently.
-fn parse_packet() :> String {
+fn parse_packet() String {
     packet :: [U8]{42, 0, 0, 0, 3, 0, 16, 32, 48}
     r :: Reader.over(packet)
     magic :: r.read_u32_le() ?? panic("bad packet: no magic")
@@ -132,7 +132,7 @@ fn parse_packet() :> String {
     return "magic={magic} count={count} payload_len={payload.len()}"
 }
 
-fn parse_incident(line: String) :> String {
+fn parse_incident(line: String) String {
     c :: Cursor.over(line)
     c.skip_ws()
     matched :: c.take_pattern("inc-{id:Int} sev {sev:Int}: ") ?? panic("bad incident line")
@@ -155,7 +155,7 @@ migration Account {
     add verified: Bool = false
 }
 
-fn decode_account(raw: String) :> String {
+fn decode_account(raw: String) String {
     account :: json.decode<Account>(raw) ?? panic("bad account")
     return "id={account.id} verified={account.verified}"
 }
@@ -167,7 +167,7 @@ fn decode_account(raw: String) :> String {
 // examples/features/lowlevel/os_target_gating.jet — main() never calls
 // this gated impl directly; it only proves the two compile side by side.
 trait Backend {
-    fn label(self) :> String
+    fn label(self) String
 }
 
 struct LinuxBackend {
@@ -176,7 +176,7 @@ struct LinuxBackend {
 
 #Target(OS.Linux)
 impl LinuxBackend.Backend {
-    fn label(self) :> String :: "linux: {self.name}"
+    fn label(self) String :> "linux: {self.name}"
 }
 
 // --- `#Test` scope members: `.setup` / `.expect_fail` / `.timeout` / `.skip`

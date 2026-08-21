@@ -67,6 +67,16 @@ pub(crate) fn method_call_in_subset(
                 .iter()
                 .all(|arg| expr_in_subset(&arg.expr, cx, locals));
     }
+    // D-AUTHORITY-NAME1=A / D-AUTHORITY-WORD2=E: the carried abilities value
+    // has exactly one instance family. Keep both operations in TIR as ordinary
+    // receiver calls; their policy lives in the shared Prelude helpers.
+    if recv_type.as_deref() == Some(Syntax::TYPE_ABILITIES)
+        && matches!(method, "with" | "without")
+        && args.len() == 1
+    {
+        return expr_in_subset(receiver, cx, locals)
+            && expr_in_subset(&args[0].expr, cx, locals);
+    }
     // D-MEMO1=A: sema resolves `name.cache()` to the MemoStats projection.
     // Mirror the lowerer's exact shape so the TIR gate cannot reject a call
     // that lower_method_call_with_sig already represents canonically.
@@ -307,29 +317,6 @@ pub(crate) fn method_call_in_subset(
             || method == Syntax::INTERNAL_TASK_ANY_METHOD)
     {
         return args.len() == 1 && expr_in_subset(&args[0].expr, cx, locals);
-    }
-    // D-CONCSELECT1=A: fluent scoped select on taskgroups.
-    if recv_type.as_deref() == Some(Syntax::TYPE_TASKGROUP)
-        && method == Syntax::TASKGROUP_SELECT_METHOD
-    {
-        return args.is_empty();
-    }
-    if recv_type
-        .as_deref()
-        .is_some_and(|rt| rt == Syntax::TYPE_SELECT_BUILDER || rt.starts_with("SelectBuilder<"))
-    {
-        match method {
-            Syntax::SELECT_RECV_METHOD | Syntax::SELECT_READ_METHOD => {
-                return args.len() == 1 && expr_in_subset(&args[0].expr, cx, locals);
-            }
-            Syntax::SELECT_AFTER_METHOD => {
-                // `select.after(duration)` or `select.after(duration, value)` — both covered.
-                return (args.len() == 1 || args.len() == 2)
-                    && args.iter().all(|a| expr_in_subset(&a.expr, cx, locals));
-            }
-            Syntax::SELECT_WAIT_METHOD => return args.is_empty(),
-            _ => {}
-        }
     }
     // D-MEM1 S6 (D-POOLID-API1=A / D-SHARED-API1=A): `Pool<T>.add/remove/ids` and
     // `Shared<T>.read/edit`. Sema sets `recv_type` to `"Pool"`/`"Shared"`

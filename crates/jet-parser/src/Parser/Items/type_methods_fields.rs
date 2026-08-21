@@ -14,12 +14,26 @@ impl<'a> Parser<'a> {
             self.validate_param_labels(&params);
             self.reject_root_method_params(&params);
             let (
-                return_type,
+                mut return_type,
                 _return_type_span,
                 mut declared_effects,
                 _effect_via,
                 _prefix_effect_span,
             ) = self.parse_callable_result_and_prefix_effects()?;
+            // A retired `:> Type` trait signature has no body marker after the
+            // result, so the shared callable lookahead cannot distinguish it
+            // from a concise body. Trait declarations have no concise-body
+            // form; recover that result here so fmt can emit bare `Type`.
+            if return_type.is_none() && self.at_unified_arrow() {
+                let arrow = self.bump();
+                if self.type_starts_here() {
+                    let (ty, _) = self.return_type()?;
+                    self.diags.push(Self::retired_signature_shape(arrow.span));
+                    return_type = Some(ty);
+                } else {
+                    self.pos = self.pos.saturating_sub(1);
+                }
+            }
             let declared_return_view_provenance =
                 self.parse_opt_declared_view_from(&params);
             if declared_effects.is_none() {
@@ -31,7 +45,10 @@ impl<'a> Parser<'a> {
             let default_body = if matches!(self.peek().kind, TokKind::LBrace) {
                 self.bump();
                 let previous_tail_depth = self.callable_tail_block_depth;
-                if return_type.is_some() {
+                if return_type
+                    .as_ref()
+                    .is_some_and(|ty| Self::return_type_has_value(ty))
+                {
                     self.callable_tail_block_depth = Some(self.block_depth + 1);
                 }
                 let stmts = self.block_stmts();

@@ -49,6 +49,7 @@ const CEILINGS: &[(&str, usize)] = &[
     ("map-replace", 0),
     ("set-replace", 0),
     ("allow-impure", 0),
+    ("scope-marker-grant", 0),
     ("core-path-free-functions", 0),
     ("core-namespace-io", 0),
     ("core-namespace-path", 0),
@@ -457,6 +458,27 @@ fn tally(row: &Retirement) -> (usize, usize) {
             let mut canonical = 0;
             for path in content_files() {
                 if path.ends_with("crates/jet-foundation/src/Syntax/retirements.rs") {
+                    continue;
+                }
+                let Some(text) = read(&path) else { continue };
+                if text.contains(row.retired) {
+                    retired += 1;
+                } else if text.contains(row.canonical) {
+                    canonical += 1;
+                }
+            }
+            (retired, canonical)
+        }
+        "scope-marker-grant" => {
+            let mut retired = 0;
+            let mut canonical = 0;
+            for path in content_files() {
+                if path.ends_with("crates/jet-codegen/src/Prelude/Diagnostics.jet")
+                    || path.ends_with("crates/jet-foundation/src/Syntax/retirements.rs")
+                    || path.ends_with("crates/jet-parser/src/Parser/Statements/control.rs")
+                    || path.ends_with("crates/jet-parser/src/Parser/mod.rs")
+                    || path.ends_with("tests/retirement_ratchet.rs")
+                {
                     continue;
                 }
                 let Some(text) = read(&path) else { continue };

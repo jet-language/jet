@@ -25,10 +25,37 @@ pub const EFFECT_ARROW_CLOSE: &str = "]>";
 /// A declared leaf makes its closed root checked in the package view.
 pub const KW_EFFECT_DECL: &str = "effect";
 
-/// Prelude effect leaves. These make common authority names typo-checked
-/// without declarations in user code.
+/// Prelude effect leaves. These make the supported FFI language names
+/// typo-checked without declarations in user code. The parent `FFI` root still
+/// covers every leaf through D-EFFTREE1 ancestor subsumption.
 pub const BUILTIN_EFFECT_LEAVES: &[&str] =
-    &["DB.Read", "DB.Write", "FS.Read", "FS.Write", "Rand.Draw", "Exec.Exit"];
+    &[
+        "DB.Read",
+        "DB.Write",
+        "FS.Read",
+        "FS.Write",
+        "Rand.Draw",
+        "Exec.Exit",
+        "FFI.Go",
+        "FFI.Java",
+        "FFI.DotNet",
+        "FFI.Fortran",
+        "FFI.Cobol",
+        "FFI.Tcl",
+        "FFI.Lua",
+        "FFI.Ada",
+        "FFI.Pascal",
+        "FFI.Dart",
+        "FFI.PowerShell",
+        "FFI.Perl",
+        "FFI.Ruby",
+        "FFI.Php",
+        "FFI.R",
+        "FFI.Com",
+        "FFI.Cpp",
+        "FFI.Py",
+        "FFI.Octave",
+    ];
 
 /// Retired D-TAINT1 spelling. D-TAG-SURFACE1=A uses direct declared tags such
 /// as `#Input value` and `#Credential value`.
@@ -116,31 +143,18 @@ pub const STATE_ENTRY: &str = "_";
 /// D-AUTHORITY-SCOPE1=A (ratified 2026-08-06, card #1500; implementation
 /// #1573): one scope marker serves both narrowed blocks and named handles.
 /// Bare `#Caps(Net, DB) { … }` narrows the block; `#Caps(g: FS, Net) { … }`
-/// binds `g` for the block. The `#Grant` retirement and migration belong to
-/// #1573. PascalCase per D-CASING1. Erased in codegen (I3).
+/// binds `g` for the block. The retired Grant marker remains only as a parser
+/// tombstone. PascalCase per D-CASING1. Erased in codegen (I3).
 pub const KW_CAPS: &str = "Caps";
 
-/// D-SCAP1, amended by D-ARROW-CONTROL1=A: the scoped-capability grant marker,
-/// written `#Grant(caps: FS) { … }`. Grants the listed effects inside the
-/// block through the first-class handle bound in the marker head, and
-/// **revokes** the capability at scope end (RAII, S63) — the handle is bound only
-/// for the block. The dual of `#Caps` (which restricts): an effect used inside
-/// that the grant doesn't cover has no capability (E0712); letting the handle
-/// escape is E0711. Erased in codegen (I3). PascalCase per D-MARKERCASE1=A.
-pub const KW_GRANT: &str = "Grant";
+/// D-AUTHORITY-SCOPE1: parser tombstone for the retired Grant marker.
+pub const RETIRED_MARKER_GRANT: &str = "Grant";
 
-/// D-SCAP1 + D-ARROW-CONTROL1=A: the existing field separator binds a grant
-/// handle in the marker head — `#Grant(caps: FS) { … }`.
-pub const GRANT_BIND_SEPARATOR: &str = ":";
-/// D-SCAP1: the type of a capability handle bound by
-/// `#Grant(caps: FS, Net) { … }`.
-/// An opaque sema-only handle (authority to perform the granted effects); erased
-/// in codegen (I3). Mirrors `TXN_HANDLE_TYPE`.
-pub const CAP_HANDLE_TYPE: &str = "Capability";
-
-/// D-AUTHORITY-NAME1=A (ratified 2026-08-06, card #1569): the one named
-/// rights value crossing process, plugin, and session boundaries.
-pub const TYPE_AUTHORITY: &str = "Authority";
+/// D-AUTHORITY-SCOPE1 / D-AUTHORITY-NAME1=A: the type of a scoped Authority
+/// handle bound by `#Caps(authority: FS, Net) { … }`. It is an ordinary value type;
+/// the block still erases in codegen, but a named handle can cross its checked
+/// boundary only where the surrounding API accepts Authority.
+pub const CAP_HANDLE_TYPE: &str = "Authority";
 
 /// D-CONC-SPAWN1=D: parser-only receiver used while lowering `task` sugar.
 pub const INTERNAL_TASK_RECEIVER: &str = "\0jet.task";
@@ -175,24 +189,6 @@ pub const INTERNAL_TASK_RACE_METHOD: &str = "\0jet.task.race";
 
 /// Compiler-private dispatch method for `task.any { … }`.
 pub const INTERNAL_TASK_ANY_METHOD: &str = "\0jet.task.any";
-
-/// D-CONCSELECT1=A: fluent scoped select — `g.select().recv(...).after(...).wait()?`.
-pub const TASKGROUP_SELECT_METHOD: &str = "select";
-
-/// D-CONCSELECT1=A: sema/codegen builder type for chained select arms.
-pub const TYPE_SELECT_BUILDER: &str = "SelectBuilder";
-
-/// D-CONCSELECT1=A: register a channel receive arm on a select builder.
-pub const SELECT_RECV_METHOD: &str = "recv";
-
-/// D-TYPE2-TIME1=A: register a timer arm — `.after(duration: Duration)`.
-pub const SELECT_AFTER_METHOD: &str = "after";
-
-/// D-CONCSELECT1=A: register a readable I/O arm — `.read(stream)`.
-pub const SELECT_READ_METHOD: &str = "read";
-
-/// D-CONCSELECT1=A: block until one arm wins — `.wait()`.
-pub const SELECT_WAIT_METHOD: &str = "wait";
 
 /// D-COROUTINE1=A: mark a task paused in the control plane.
 pub const METHOD_TASK_PAUSE: &str = "pause";

@@ -215,6 +215,27 @@ catalog := xml.decode<Catalog>(source)?
 copy := xml.decode_bytes<Catalog>(wire)?
 ```
 
+## D-JSON-EXACTNUM1=A — Exact typed JSON numbers
+
+Ratified 2026-08-06 on card #1395, D-JSON-EXACTNUM1 keeps one JSON number
+tokenizer for dynamic and typed decoding. Untyped `json.parse` retains its
+ratified `DataTree` projection:
+integral numbers become `Int` and fractional numbers become `Float`.
+
+Typed `json.decode<T>` and `data.json<T>` retain each valid number token until
+the target consumes it. `Decimal` parses the token directly, preserving its
+sign, exponent, and lexical scale (`12.340` remains `12.340`). The exact
+integer destination is the arbitrary-precision default `Int` after D-INTBIG1
+and D-TYPE2-NUM1; `JetBigInt` is internal storage only, not a user-facing
+decode target. Exact `Int` rejects non-integral fractions. Neither target uses
+quoted text as a fallback, and no typed path round-trips through binary64.
+
+Whole-value and stream decoding share this tokenizer, projection, limits, and
+field-error vocabulary. Invalid JSON, non-finite input, target mismatch,
+fixed-width overflow, and digit/exponent-limit failures remain ordinary JSON
+or `[FieldError]` values. Canonical output remains governed by D-JSONCANON1;
+this decision adds no second writer.
+
 ## D-JSONCANON1=A — Canonical JSON semantics
 
 Live `json.canonical(DataTree) => String` is a shipped prototype: it sorts Rust strings, formats Float with Rust debug syntax, renders Bytes as a JSON number array, and cannot fail. Those bytes are deterministic only accidentally and are not RFC 8785. Ratified D-ENCSTREAM1=A requires whole-value and reader/writer modes to share one codec; D-ENCSTREAM-SURFACE1=A requires canonical and ordinary JSON writers to share rejection/lifecycle law. This ballot chooses the one canonical JSON meaning used by both. `json.to_string` and `json.to_string_pretty` remain ordinary JSON renderers and are not hashing contracts.

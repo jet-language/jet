@@ -531,7 +531,7 @@ fn eval_session_method(
                 .action(name, spec)
                 .map(|handle| handle_value(crate::Syntax::TYPE_BUILD_ACTION, id, handle.id.0))
         }
-        "add_executable" | "add_library" | "add_test" | "add_bench" | "add_asset_bundle"
+        "add_executable" | "add_library" | "add_test" | "add_asset_bundle"
         | "add_doc" | "add_install" | "add_package" | "add_publish" => {
             let name = string_arg(&args, 0, span)?;
             let sources = string_list_arg(&args, 1, span)?;
@@ -580,7 +580,6 @@ fn eval_session_method(
                 "add_executable" => session.context.add_executable(name, spec).map(|h| h.id.0),
                 "add_library" => session.context.add_library(name, spec).map(|h| h.id.0),
                 "add_test" => session.context.add_test(name, spec).map(|h| h.id.0),
-                "add_bench" => session.context.add_bench(name, spec).map(|h| h.id.0),
                 "add_asset_bundle" => session.context.add_asset_bundle(name, spec).map(|h| h.id.0),
                 "add_doc" => session.context.add_doc(name, spec).map(|h| h.id.0),
                 "add_install" => session.context.add_install(name, spec).map(|h| h.id.0),
@@ -975,7 +974,7 @@ fn build_error_text(error: &BuildError) -> String {
             format!("build plugin component digest is invalid: {message}")
         }
         BuildError::CachedActionWithoutOutputs(name) => format!("cached action `{name}` declares no outputs"),
-        BuildError::PhonyActionWithoutCaps(name) => format!("uncached action `{name}` declares no capabilities"),
+        BuildError::PhonyActionWithoutCaps(name) => format!("uncached action `{name}` declares no abilities"),
         BuildError::DuplicateBuildOutput { output, first_action, second_action } => format!(
             "output `{output}` is owned by both `{first_action}` and `{second_action}`"
         ),

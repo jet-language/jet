@@ -8,7 +8,7 @@ mod common;
 use std::fs;
 use std::process::Command;
 
-use jet::AST::{Item, KnowledgeFact, Measure, Type};
+use jet::AST::{Dimension, Item, KnowledgeFact, Measure, Type};
 use jet_foundation::Registry;
 
 const SOURCE: &str = r#"
@@ -202,6 +202,10 @@ fn measure_rows_share_one_registry_and_all_tiers() {
     };
     let matrix = Type::compute_shape_type("Matrix", &[2, 3]);
     let lanes = Type::Named("F32x4".to_string());
+    let quantity = Type::Quantity {
+        base: Box::new(Type::Float),
+        dimension: Dimension::base("Length"),
+    };
 
     assert!(Registry::row(plane).is_some(), "measure plane must be registered");
     assert!(fixed.knowledge_vector().facts(plane).any(|fact| matches!(
@@ -218,6 +222,11 @@ fn measure_rows_share_one_registry_and_all_tiers() {
         fact,
         KnowledgeFact::Measure(Measure::Literal { kind, value })
             if kind == "lane" && *value == 4
+    )));
+    assert!(quantity.knowledge_vector().facts(plane).any(|fact| matches!(
+        fact,
+        KnowledgeFact::Measure(Measure::SignedLiteral { kind, value })
+            if kind == "exponent" && *value == 1
     )));
 
     let source = r#"
@@ -243,6 +252,26 @@ fn run() {
         source,
         "vector:1\nmatrix:2\n",
     );
+}
+
+#[test]
+fn measure_rows_share_one_registry_and_all_tiers_examples() {
+    for (stem, expected) in [
+        (
+            "collections/fixed_arrays",
+            include_str!("../examples/features/expected/collections/fixed_arrays.out"),
+        ),
+        (
+            "tooling/compute_linalg",
+            include_str!("../examples/features/expected/tooling/compute_linalg.out"),
+        ),
+        (
+            "types/dimensional_quantities",
+            include_str!("../examples/features/expected/types/dimensional_quantities.out"),
+        ),
+    ] {
+        tir_support::assert_example_cli_tiers_agree(stem, expected);
+    }
 }
 
 /// Web checking accepts the same source without a native-only reflection path.

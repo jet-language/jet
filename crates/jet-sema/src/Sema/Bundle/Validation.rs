@@ -81,7 +81,6 @@ mod effect_qualification_tests {
                 edges: ["left.same".to_string()].into_iter().collect(),
                 maximal: false,
                 caps_span: Span::new(1, 2),
-                grant: false,
             }],
             callback_obligations: vec![CallbackObligation {
                 bound: EffectSet::new(),
@@ -1824,7 +1823,7 @@ fn check_func_body_bundle_scoped(
     let mut direct_spans = std::mem::take(&mut ck.fx_direct_spans);
     let memory_events = std::mem::take(&mut ck.fx_memory_events);
     // D-AUTHORITY-MEM1: memory operations publish the same rights-tree names
-    // as manifest `effects.deny`. The detailed event stream remains the
+    // as manifest `authority.holds.deny`. The detailed event stream remains the
     // source for bounded proofs and diagnostics.
     for event in &memory_events {
         let right = match event.kind {
@@ -1919,7 +1918,6 @@ fn apply_reactive_upgrade_flags(stmts: &mut [Stmt], names: &std::collections::Ha
                 | Stmt::Policy { body, .. }
                 | Stmt::TaskGroup { body, .. }
                 | Stmt::Caps { body, .. }
-                | Stmt::Grant { body, .. }
                 | Stmt::ComptimeBlock { body, .. }
                 | Stmt::ContextBlock { body, .. }
                 | Stmt::Live { body, .. }

@@ -99,6 +99,33 @@ fn power_result_types_follow_the_operands() {
     );
 }
 
+/// D-TYPE2-NUM1: a whole-number power remains exact past the machine-word
+/// fast path. The comptime and runtime expressions must agree on every tier.
+#[test]
+fn exact_int_power_stays_exact_across_tiers() {
+    let src = r#"
+@folded :: 2 ^ 200
+
+fn show_exact(value: Int) {
+    print(value)
+}
+
+fn raise(base: Int, exponent: Int) :> Int {
+    return base ^ exponent
+}
+
+fn run() {
+    show_exact(raise(2, 200))
+    show_exact(@folded)
+}
+"#;
+    assert_tiers_agree(
+        "exact_int_power",
+        src,
+        "1606938044258990275541962092341162602522202993782792835301376\n1606938044258990275541962092341162602522202993782792835301376\n",
+    );
+}
+
 /// D-EXPSEM1=A: `^=` raises a binding in place, on whole numbers and floats.
 #[test]
 fn power_assign_raises_in_place() {

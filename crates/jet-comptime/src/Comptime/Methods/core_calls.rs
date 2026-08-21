@@ -505,6 +505,24 @@ pub(in super::super) fn as_float(v: &CtValue, span: Span) -> Result<f64, Diagnos
 fn as_ct_float(v: &CtValue, span: Span) -> Result<CtFloat, Diagnostic> {
     match v {
         CtValue::Float(value) => Ok(*value),
+        // Both exact carriers cross into Float at the irrational-result math
+        // functions. The checker and the AOT lowerer admit Fraction and
+        // Decimal alike, so this evaluator must too or default `jet run`
+        // disagrees with the type that was already accepted.
+        CtValue::Struct { type_name, .. }
+            if type_name == crate::Syntax::TYPE_FRACTION => {
+            let fraction = crate::Numeric::CtFraction::from_value(v)
+                .map_err(|_| unsupported("malformed Fraction", span))?;
+            Ok(CtFloat::F64(
+                fraction.numerator as f64 / fraction.denominator as f64,
+            ))
+        }
+        CtValue::Struct { type_name, .. }
+            if type_name == crate::Syntax::TYPE_DECIMAL => {
+            let decimal = crate::Numeric::CtDecimal::from_value(v)
+                .map_err(|_| unsupported("malformed Decimal", span))?;
+            Ok(CtFloat::F64(decimal.to_f64()))
+        }
         _ => Err(unsupported("non-float argument to a Core math call", span)),
     }
 }
@@ -719,6 +737,9 @@ pub fn apply_core_call_with_type(
     };
 
     match (module, method) {
+        // D-BENCH-KEEP1=A: comptime binds the same generic identity behavior;
+        // the AOT-only black-box effect has no observable CtValue equivalent.
+        ("core.prelude", "keep") => Ok(args.first().cloned().unwrap_or(CtValue::Unit)),
         ("jet.unit", "magnitude") => {
             Ok(CtValue::Str(as_float(one(0)?, span)?.to_string()))
         }

@@ -206,7 +206,6 @@ fn visit_statement_shapes(statement: &Stmt, controls: &mut Vec<Span>, nesting: &
         | Stmt::TaskGroup { body, .. }
         | Stmt::Layout { body, .. }
         | Stmt::Caps { body, .. }
-        | Stmt::Grant { body, .. }
         | Stmt::ComptimeBlock { body, .. }
         | Stmt::Live { body, .. }
         | Stmt::Transact { body, .. }

@@ -117,7 +117,7 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{mpsc, Arc, Condvar, Mutex, OnceLock};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use crate::AST::{Expr, Func, Item, ProgramBundle, Stmt, Type, UnitFamilyDef};
+use crate::AST::{BinMatchPart, Expr, Func, Item, ProgramBundle, Stmt, Type, UnitFamilyDef};
 use crate::Codegen::mangle;
 use super::Cx;
 use crate::Codegen::TIR::{
@@ -127,6 +127,7 @@ use crate::Codegen::TIR::{
 use super::build_cx_items;
 use crate::Comptime::{self, CtReport, CtValue, DevSink};
 use crate::Diagnostics::{Diagnostic, Span};
+use jet_foundation::MatchScan::BinBind;
 use jet_foundation::Reflection::ReflectionField;
 
 /// Cross-tier hook: Cranelift-native functions callable from the TIR evaluator (#778).
@@ -151,6 +152,34 @@ pub fn set_native_call_hook(hook: Option<NativeCallHook>) {
 
 pub(super) fn native_call_hook() -> Option<NativeCallHook> {
     NATIVE_CALL_HOOK.with(Cell::get)
+}
+
+/// Binary-pattern marshalling shared by arm probes and direct pattern binds.
+/// The scan and endian policy live in Foundation's Prelude kernel.
+pub(super) fn bin_match_scan_value(
+    value: &CtValue,
+    parts: &[BinMatchPart],
+    consume_prefix: bool,
+) -> Option<(usize, Vec<(String, Type, BinBind)>)> {
+    let bytes = match value {
+        CtValue::Bytes(bytes) => bytes.clone(),
+        CtValue::List(items) => items
+            .iter()
+            .map(|item| match item {
+                CtValue::Int(value) => Some(*value as u8),
+                _ => None,
+            })
+            .collect::<Option<Vec<_>>>()?,
+        _ => return None,
+    };
+    jet_foundation::MatchScan::bin_match_scan(&bytes, parts, consume_prefix)
+}
+
+pub(super) fn bin_match_bind_value(bind: BinBind) -> CtValue {
+    match bind {
+        BinBind::Int(value) => CtValue::Int(value),
+        BinBind::Rest(bytes) => CtValue::Bytes(bytes),
+    }
 }
 
 fn wall_now_ms() -> i64 {
@@ -2576,6 +2605,63 @@ impl<'a> EvalCtx<'a> {
         drop(_deadline);
         self.task_wait_cancel_check()?;
         Ok(value)
+    }
+
+    /// D-CONC-CHAN1: interpreter twin of the tagged Prelude select door.
+    pub(super) fn eval_select_wait_tagged(
+        &self,
+        builder: CtValue,
+    ) -> Result<CtValue, Diagnostic> {
+        let (receiver_ids, after_values) = Self::select_builder_parts(&builder)
+            .ok_or_else(|| unsupported("select builder", self.span()))?;
+        if receiver_ids.is_empty() && after_values.is_empty() {
+            return Err(unsupported("empty select", self.span()));
+        }
+        let channels = {
+            let runtime = self.runtime.lock().expect("evaluator runtime poisoned");
+            receiver_ids
+                .iter()
+                .map(|index| {
+                    runtime
+                        .channels
+                        .get(*index)
+                        .map(|channel| channel.channel.clone())
+                })
+                .collect::<Option<Vec<_>>>()
+        }
+        .ok_or_else(|| unsupported("select receiver", self.span()))?;
+        let recvs = channels
+            .iter()
+            .map(|channel| channel.select_inner())
+            .collect();
+        // The scheduler takes unsigned nanoseconds; a Duration is stored signed.
+        let after_ns = after_values
+            .iter()
+            .map(|(duration_ns, _)| (*duration_ns).max(0) as u64)
+            .collect();
+        let _deadline = self
+            .context_deadline
+            .map(crate::scheduler::jet_ctx_push_deadline);
+        let outcome = self.scheduler_wait("select wait", || {
+            crate::scheduler::jet_scheduler_select(recvs, after_ns)
+        })?;
+        drop(_deadline);
+        self.task_wait_cancel_check()?;
+        let (arm, value) = match outcome {
+            crate::scheduler::JetSelectOutcome::Recv { arm, value } => {
+                (arm as i64, CtValue::Present(Box::new(value)))
+            }
+            crate::scheduler::JetSelectOutcome::After { arm } => {
+                (receiver_ids.len() as i64 + arm as i64, CtValue::absent(Type::Named("Unit".to_string())))
+            }
+            crate::scheduler::JetSelectOutcome::Closed => {
+                return Err(unsupported("select closed", self.span()));
+            }
+        };
+        Ok(CtValue::Struct {
+            type_name: "tuple".to_string(),
+            fields: vec![("arm".to_string(), CtValue::Int(arm)), ("value".to_string(), value)],
+        })
     }
 
     /// D-VERDICT-1323-1: request cancellation for one task without consuming

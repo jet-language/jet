@@ -466,7 +466,6 @@ pub(super) fn substitute_stmts(
             | Stmt::TaskGroup { body, .. }
             | Stmt::Layout { body, .. }
             | Stmt::Caps { body, .. }
-            | Stmt::Grant { body, .. }
             | Stmt::Transact { body, .. }
             | Stmt::ComptimeBlock { body, .. }
             | Stmt::Live { body, .. } => substitute_stmts(body, types, &values),

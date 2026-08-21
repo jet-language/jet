@@ -1,8 +1,8 @@
 // Run `jet inspect bind cs Counter.cs --pkg counter`, then `jet run main.jet`.
 use cs.counter as counter
 
-// Panic is declared: a missing CoreCLR runtime is unrecoverable for this demo.
-fn run() :[DotNet, IO, Panic]> {
+// Panic is deny-only; this demo handles the fallible bridge results locally.
+fn run() :[FFI.DotNet, IO]> {
     handle :: counter.new(40) ?? panic("CoreCLR create failed")
     print(counter.add(handle, 2) ?? -1)
     print(counter.twice(2.5) ?? -1.0)

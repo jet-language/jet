@@ -66,7 +66,7 @@ pub(crate) fn run(raw: &[String]) -> i32 {
     };
     let active: Vec<_> = specs.into_iter().filter(|located| applicable(&located.spec, "native", "dev")).collect();
     let store = BudgetStore::new(&root);
-    let built = match build_report(&root, &store, &bundle, &effect_facts, &active, &measured_start, "native", "dev", None, None, None) {
+    let built = match build_report(&root, &store, &bundle, &effect_facts, &active, &measured_start, "native", "dev", None, None) {
         Ok(report) => report,
         Err(error) => return tool_failure(&options, &error),
     };
@@ -169,7 +169,7 @@ pub(crate) fn run_build_gates(entry:&str, artifact_path:&Path, target:&str, prof
         Err(error)=>return build_gate_tool_failure(&error),
     }
     let started=timestamp_now();
-    let built=match build_report(&root,&store,&bundle,&effect_facts,&active,&started,target,profile,artifact,None,None){Ok(report)=>report,Err(error)=>return build_gate_tool_failure(&error)};
+    let built=match build_report(&root,&store,&bundle,&effect_facts,&active,&started,target,profile,artifact,None){Ok(report)=>report,Err(error)=>return build_gate_tool_failure(&error)};
     let report_id=text_field(&built.value,"report_id").expect("verified report id").to_string();
     let path=format!(".jet/perf/reports/{report_id}.json");
     let created=match store.write_report(&built.bytes){Ok((_,created))=>created,Err(error)=>return build_gate_tool_failure(&format!("report write refused: {error}"))};
@@ -206,41 +206,6 @@ fn compatible_report(root:&Path,bundle:&jet::AST::ProgramBundle,specs:&[LocatedB
 
 fn emit_stored_build_gates(stored:&StoredBuildReport)->i32{let mut failed=0;for fact in &stored.facts{if fact.outcome=="fail"{failed+=1;let code=if fact.evidence=="unavailable"{"E2906"}else{"E2907"};let state=if fact.evidence=="unavailable"{"has no usable evidence"}else if fact.evidence=="inconclusive"{"is inconclusive"}else{"regressed"};eprintln!("Error [{code}]: performance budget {} {state}\n --> {}\n Why: {}\n Fix: {}",fact.name,fact.source,fact.reason,if code=="E2906"{"correct the provider evidence or bootstrap only when absent or stale evidence is eligible"}else{"improve the measured behavior, inspect `jet budget check --verbose`, or record an explicit exception"});}}let short=&stored.report_id[..12];if failed>0{eprintln!("budgets failed: {} · report {short}",count(failed,"budget failed","budgets failed"));1}else{eprintln!("budgets: {} passed · report {short}",count(stored.facts.len(),"budget","budgets"));0}}
 fn build_gate_tool_failure(why:&str)->i32{eprintln!("Error [E2908]: performance budget operation failed\n Why: {why}\n Fix: correct the named failure and retry");1}
-
-/// Measurement budgets reuse the `jet test --measure` harness. Both
-/// BenchMeasurement and allocation samples come from the same invocation; no
-/// second workload pass exists.
-pub(crate) fn reuse_bench_report(entry:&str)->Option<i32>{
-    let entry=match std::path::Path::new(entry).canonicalize(){Ok(path)=>path,Err(error)=>return Some(build_gate_tool_failure(&format!("cannot resolve benchmark entry: {error}")))};
-    let root=jet::Loader::find_manifest_root(entry.parent().unwrap_or(Path::new("."))).unwrap_or_else(||entry.parent().unwrap_or(Path::new(".")).to_path_buf());
-    let entry_text=entry.to_string_lossy();
-    let(diagnostics,bundle,_)=jet::Driver::check_file_with_effect_facts(&entry_text,None,false);
-    if diagnostics.iter().any(|diagnostic|diagnostic.severity==jet::Diagnostics::Severity::Error){return None}
-    let bundle=bundle?;
-    let specs=jet::Sema::collect_located_budget_specs_bundle(&bundle).ok()?;
-    let active=specs.into_iter().filter(|located|bench_owned(&located.spec)&&applicable(&located.spec,"native","bench")).collect::<Vec<_>>();
-    if active.is_empty(){return None}
-    match compatible_report(&root,&bundle,&active,"native","bench",None){Ok(Some(stored))=>Some(emit_stored_build_gates(&stored)),Ok(None)=>None,Err(error)=>Some(build_gate_tool_failure(&error))}
-}
-
-pub(crate) fn run_bench_refresh(entry:&str,evidence:&[crate::CmdDevTools::BenchEvidence])->i32{
-    let entry=match std::path::Path::new(entry).canonicalize(){Ok(path)=>path,Err(error)=>return build_gate_tool_failure(&format!("cannot resolve benchmark entry: {error}"))};
-    let root=jet::Loader::find_manifest_root(entry.parent().unwrap_or(Path::new("."))).unwrap_or_else(||entry.parent().unwrap_or(Path::new(".")).to_path_buf());
-    let entry_text=entry.to_string_lossy();
-    let(diagnostics,bundle,effect_facts)=jet::Driver::check_file_with_effect_facts(&entry_text,None,false);
-    if diagnostics.iter().any(|diagnostic|diagnostic.severity==jet::Diagnostics::Severity::Error){eprint!("{}",jet::render_all_colored(&entry_text,&std::fs::read_to_string(&entry).unwrap_or_default(),&diagnostics,false));return 1}
-    let Some(bundle)=bundle else{return build_gate_tool_failure("front-end produced no checked benchmark program")};
-    let specs=match jet::Sema::collect_located_budget_specs_bundle(&bundle){Ok(specs)=>specs,Err(diagnostics)=>{eprint!("{}",jet::render_all_colored(&entry_text,&std::fs::read_to_string(&entry).unwrap_or_default(),&diagnostics,false));return 1}};
-    let active=specs.into_iter().filter(|located|bench_owned(&located.spec)&&applicable(&located.spec,"native","bench")).collect::<Vec<_>>();
-    if active.is_empty(){return 0}
-    match compatible_report(&root,&bundle,&active,"native","bench",None){Ok(Some(stored))=>return emit_stored_build_gates(&stored),Ok(None)=>{},Err(error)=>return build_gate_tool_failure(&error)}
-    let store=BudgetStore::new(&root);let started=timestamp_now();
-    let built=match build_report(&root,&store,&bundle,&effect_facts,&active,&started,"native","bench",None,Some(evidence),None){Ok(report)=>report,Err(error)=>return build_gate_tool_failure(&error)};
-    let report_id=text_field(&built.value,"report_id").expect("verified report id").to_string();let path=format!(".jet/perf/reports/{report_id}.json");
-    let created=match store.write_report(&built.bytes){Ok((_,created))=>created,Err(error)=>return build_gate_tool_failure(&format!("report write refused: {error}"))};
-    let options=Options{command:"check",baseline:None,bootstrap:false,accept_regression:false,reason:None,yes:false,json:false,verbose:false,quiet:false,annotations:Annotations::None};emit_check(&options,&built,&report_id,&path,created);
-    if built.fail>0{1}else{0}
-}
 
 fn confirm_update() -> bool {
     eprint!("Apply? [y/N] ");
@@ -301,7 +266,7 @@ struct ResultRow { id:String, name:String, source:String, line:usize, column:usi
 
 type ArtifactIdentity = (PathBuf, u64, String);
 
-fn build_report(root:&Path, store:&BudgetStore, bundle:&jet::AST::ProgramBundle, effect_facts:&jet::Sema::SemIndexEffectFacts, specs:&[LocatedBudgetSpec], at:&str, target:&str, profile:&str, supplied_artifact:Option<ArtifactIdentity>, bench_evidence:Option<&[crate::CmdDevTools::BenchEvidence]>, dev_evidence:Option<&DevEvidence>)->Result<BuiltReport,String>{
+fn build_report(root:&Path, store:&BudgetStore, bundle:&jet::AST::ProgramBundle, effect_facts:&jet::Sema::SemIndexEffectFacts, specs:&[LocatedBudgetSpec], at:&str, target:&str, profile:&str, supplied_artifact:Option<ArtifactIdentity>, dev_evidence:Option<&DevEvidence>)->Result<BuiltReport,String>{
     for located in specs { let spec=&located.spec; if !matches!(provider_kind(&spec.provider),"CompilerFacts"|"BuildArtifact"|"BenchMeasurement"|"AllocationProbe"|"ServiceProbe"|"SceneProbe"|"CompilerProbe") { return Err(format!("provider `{}` for budget `{}` has no command-owned measurement implementation",spec.provider,spec.name)); } }
     let mut ordered=specs.iter().collect::<Vec<_>>();ordered.sort_by(|a,b|a.spec.name.cmp(&b.spec.name));
     let needs_artifact=ordered.iter().any(|located|provider_kind(&located.spec.provider)=="BuildArtifact");
@@ -323,27 +288,6 @@ fn build_report(root:&Path, store:&BudgetStore, bundle:&jet::AST::ProgramBundle,
     let mut compile_metadata=vec![None;ordered.len()];
     for (provider_name,indices) in groups {
         let kind=provider_kind(&provider_name);
-        if matches!(kind,"BenchMeasurement"|"AllocationProbe") {
-            if let Some(evidence)=bench_evidence {
-                let name=provider_identity(&provider_name);
-                let bench=evidence.iter().find(|bench|bench.name==name).ok_or_else(||format!("#Bench `{name}` was not emitted by its selected benchmark target"))?;
-                for index in indices {
-                    if kind=="BenchMeasurement" {
-                        if !ordered[index].spec.metric.starts_with("BenchTime("){return Err(format!("BenchMeasurement does not support metric `{}`",ordered[index].spec.metric))}
-                        samples[index]=bench.samples.iter().map(|(elapsed,iters)|Rational::parse(&elapsed.to_string(),&iters.to_string())).collect::<Result<Vec<_>,_>>()?;
-                    } else {
-                        let metric=ordered[index].spec.metric.as_str();
-                        if !matches!(metric,"AllocationCount"|"AllocationBytes"){return Err(format!("AllocationProbe does not support metric `{metric}`"))}
-                        if bench.allocation_samples.len()!=20{return Err(format!("AllocationProbe `{name}` returned {} samples; policy requires 20",bench.allocation_samples.len()))}
-                        samples[index]=bench.allocation_samples.iter().map(|(count,bytes,iters)|{
-                            let numerator=if metric=="AllocationCount"{count}else{bytes};
-                            Rational::parse(&numerator.to_string(),&iters.to_string())
-                        }).collect::<Result<Vec<_>,_>>()?;
-                    }
-                }
-                continue;
-            }
-        }
         if kind=="ServiceProbe" {
             if let Some(evidence)=dev_evidence {
                 let name=provider_identity(&provider_name);
@@ -507,7 +451,7 @@ struct DevEvidence {
 }
 
 /// D-PERFBUDGET-INTEGRATION1: `jet dev` owns ServiceProbe + SceneProbe
-/// refresh. Mirrors `run_bench_refresh` exactly: reuses a compatible cached
+/// refresh. Reuses a compatible cached
 /// report when digests are unchanged; otherwise measures and writes a new one.
 pub(crate) fn run_dev_refresh(entry: &str, service_evidence: &[ServiceEvidence], scene_evidence: &[SceneEvidence]) -> i32 {
     let entry = match std::path::Path::new(entry).canonicalize() {
@@ -542,7 +486,7 @@ pub(crate) fn run_dev_refresh(entry: &str, service_evidence: &[ServiceEvidence],
     let evidence = DevEvidence { service: service_evidence.to_vec(), scene: scene_evidence.to_vec() };
     let store = BudgetStore::new(&root);
     let started = timestamp_now();
-    let built = match build_report(&root, &store, &bundle, &effect_facts, &active, &started, "native", "dev", None, None, Some(&evidence)) {
+    let built = match build_report(&root, &store, &bundle, &effect_facts, &active, &started, "native", "dev", None, Some(&evidence)) {
         Ok(report) => report,
         Err(error) => return build_gate_tool_failure(&error),
     };
@@ -648,7 +592,6 @@ fn context_key(subject:&CanonicalJson,tool:&CanonicalJson,provider:&CanonicalJso
 fn compiler_fact(bundle:&jet::AST::ProgramBundle,effect_facts:&jet::Sema::SemIndexEffectFacts,spec:&BudgetSpec)->Result<u128,String>{match spec.metric.as_str(){"PublicApiItems"=>Ok(bundle.modules.iter().enumerate().flat_map(|(module_idx,m)|m.items.iter().map(move |item|(module_idx,item))).filter(|&(module_idx,item)|match item{Item::Func(v)=>effect_facts.name_ledger.public(module_idx,&v.name),Item::Struct(v)=>effect_facts.name_ledger.public(module_idx,&v.name),Item::Enum(v)=>effect_facts.name_ledger.public(module_idx,&v.name),Item::Trait(v)=>effect_facts.name_ledger.public(module_idx,&v.name),Item::CodeModule(v)=>effect_facts.name_ledger.public(module_idx,&v.name),_=>false}).count()as u128),"DependencyCount"=>Ok(bundle.dep_roots.len()as u128),"EffectCount"=>{let effects=effect_facts.solved.values().flat_map(|set|set.iter().cloned()).collect::<std::collections::BTreeSet<_>>();Ok(effects.len()as u128)},"GeneratedUnsafe"=>Err("CompilerFacts metric `GeneratedUnsafe` has no exact checked front-end fact; refusing proxy measurement".into()),m if m.starts_with("CompileTime")=>Err("CompilerFacts metric `CompileTime` is unsupported; use the typed CompilerProbe provider".into()),other=>Err(format!("CompilerFacts metric `{other}` is not implemented"))}}
 fn provider_kind(provider:&str)->&str{provider.split_once('(').map(|(kind,_)|kind).unwrap_or(provider)}
 fn provider_identity(provider:&str)->&str{provider.split_once('(').and_then(|(_,rest)|rest.strip_suffix(')')).unwrap_or("")}
-fn bench_owned(spec:&BudgetSpec)->bool{matches!(provider_kind(&spec.provider),"BenchMeasurement"|"AllocationProbe")&&spec.scope.starts_with("Bench(")}
 fn metric_unit(metric:&str)->&'static str{match metric.split('(').next().unwrap_or(metric){"BinarySize"|"ArtifactSize"=>"Bytes","StartupTime"|"FrameTime"|"Latency"|"BenchTime"|"ServiceReadiness"|"CompileTime"=>"Duration","MemoryHighWater"|"AllocationBytes"|"SceneAssetBytes"=>"Bytes","Throughput"=>"Rate",_=>"Count"}}
 fn build_selected_artifact(root:&Path,entry:&Path)->Result<(PathBuf,u64,String),String>{
     let executable=running_executable().map_err(|e|format!("cannot identify compiler for BuildArtifact: {e}"))?;

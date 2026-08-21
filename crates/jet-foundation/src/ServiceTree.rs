@@ -49,7 +49,7 @@ pub fn worker_declarations(lambda: &Lambda) -> Option<Vec<WorkerDeclaration>> {
     let LambdaBody::Block(statements) = &lambda.body else {
         return None;
     };
-    if statements.len() > MAX_WORKERS {
+    if statements.is_empty() || statements.len() > MAX_WORKERS {
         return None;
     }
     let mut workers = Vec::with_capacity(statements.len());

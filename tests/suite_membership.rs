@@ -374,8 +374,8 @@ fn every_test_target_belongs_to_a_named_set() {
 ///
 /// The check above passes today only because every target happens to carry a
 /// row, so "it passed" says nothing about whether it CAN fail — and a ledger that
-/// stayed green through three falsifications is exactly the history
-/// `tests/jit_gaps.txt` has. Hand the audit an inventory with a target no section
+/// stayed green through three falsifications is exactly the history the retired
+/// JIT hand ledger had. Hand the audit an inventory with a target no section
 /// names, a target two sections claim, a row with no file, and a parked row with
 /// no gate, and require it to name each one.
 #[test]

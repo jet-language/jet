@@ -363,7 +363,7 @@ run/inspect/debug/profile/interrupt controls, stdin queueing, save/open/reopen,
 stable-ID merge, and both exports. `tests/notebook.rs` runs the shared Prelude
 file/input journey, while `scripts/notebook-test/acceptance.mjs` drives the
 production loopback server through the real browser client and all three client
-lenses. The first-hour path and its explicit `#Grant`/`Path` example are
+lenses. The first-hour path and its explicit `#Caps`/`Path` example are
 documented in [`docs/first-hour.md`](../first-hour.md).
 
 ### Deployment

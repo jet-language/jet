@@ -1006,7 +1006,7 @@ fn persist_example_survives_hot_reload() {
     let shown = file.to_string_lossy().to_string();
 
     let mut child = Command::new(env!("CARGO_BIN_EXE_jet"))
-        .args(["dev", &shown])
+        .args(["dev", &shown, "--swap"])
         .env("NO_COLOR", "1")
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -2274,8 +2274,8 @@ fn exact_int_example_matches_interpreter_resident_jit_default_dev_and_aot() {
         return;
     }
     let _guard = lock_recovered(dev_diff_lock(), "dev_diff_lock");
-    let file = "examples/features/text/bigint.jet";
-    let expected = ProgramOutput::ran(golden_stdout("text/bigint"), String::new(), 0);
+    let file = "examples/features/text/int_exact.jet";
+    let expected = ProgramOutput::ran(golden_stdout("text/int_exact"), String::new(), 0);
 
     let interpreted = match dev_iteration(file, false, true) {
         RunOutcome::Ran { stdout, stderr, exit_code } => {
@@ -3978,7 +3978,7 @@ fn rollback(cell: Shared<Slot>) {
     }
 }
 fn run() {
-    cell :: shared Slot.{value: 1}
+    cell :: shared Slot{value: 1}
     rollback(cell)
     print(cell.value)
 }
@@ -4282,7 +4282,7 @@ fn shared_scalar_edit_matches_interpreter_resident_jit_and_aot() {
     let source = r#"
 struct Counter { value: Int }
 fn run() {
-    counter :: shared Counter.{value: 0}
+    counter :: shared Counter{value: 0}
     counter.value += 1
     print(counter.value)
 }
@@ -5493,39 +5493,16 @@ fn resident_jit_safe_string_method_chain() {
     );
 }
 
-/// #1509 c2/c3: the two ledgers agree, and `run_gaps:` may only shrink.
-///
-/// Manifest against manifest — no example is compiled or run here, so this is
-/// the cheap gate that catches a new run-tier parity failure hiding between the
-/// ledgers. The corpus gate itself still measures the run tier.
+/// The corpus gate has no live run-tier parity failures.
 #[test]
-fn ledger_cross_check_holds() {
-    let (compile_covered, _, run_gaps, _) = parse_jit_gap_manifest_full();
-    let gate = parse_corpus_gate_manifest();
-
-    let conflicts = ledger_conflicts(&compile_covered, &run_gaps, &gate);
+fn run_tier_parity_guard() {
+    let run_gaps = corpus_gate_run_gaps(&parse_corpus_gate_manifest());
     assert!(
-        conflicts.is_empty(),
-        "the tier ledgers disagree:\n{}",
-        conflicts.join("\n")
+        run_gaps.is_empty(),
+        "JIT run-tier parity has {} gap(s):\n{}",
+        run_gaps.len(),
+        run_gaps.join("\n")
     );
-
-    // Shrink-only ratchet (D-LENS-RUN2). Every row is a real I9 parity failure,
-    // so the count may fall and never rise: fix a row, delete it, lower this
-    // number in the same diff. Adding a row without lowering it fails here.
-    const RUN_GAPS_CEILING: usize = 0;
-    assert!(
-        run_gaps.len() <= RUN_GAPS_CEILING,
-        "tests/jit_gaps.txt `run_gaps:` grew to {} rows (ceiling {RUN_GAPS_CEILING}); run-tier \
-         parity gaps may only shrink",
-        run_gaps.len()
-    );
-    for row in &run_gaps {
-        assert!(
-            row.split_once(": ").is_some_and(|(_, why)| !why.is_empty()),
-            "every `run_gaps:` row needs its reason: `{row}`"
-        );
-    }
 }
 
 /// #1760: the two serde stems stay green — and each pin claims only what a
@@ -5552,25 +5529,14 @@ fn ledger_cross_check_holds() {
 /// stem may be a refusal or a divergence" can only ever get easier to satisfy —
 /// it is a real parity claim, not a restatement of today's row. A bare
 /// `deopt_interp:` row is a TIER CHOICE; the gate treats a detail-carrying one as
-/// FAILING (`ledger_conflicts`), so the empty-detail pin below is the
+/// FAILING, so the empty-detail pin below is the
 /// assertion that actually catches a `serde/serde_generic` regression, and it is
 /// stricter than the class pin it replaces.
 ///
-/// Compile coverage is pinned for `serde/serde_generic` alone. `compile_covered:`
-/// is not a wish list — `jit_coverage_audit` compares it to the OBSERVED set in
-/// both directions (#1663), so a row the audit does not observe fails as a
-/// REGRESSION. `serde/encoding_breadth` was observed neither way: before #1998
-/// the audit dropped a stem whose in-process Loader/Sema pass errored, and this
-/// stem was one of them. Pinning it "must remain compile-covered" therefore
-/// demanded a row that `jit_coverage_audit` rejects — the pin could only be
-/// satisfied by falsifying the ledger it guards. The audit now records such a
-/// stem in its `out_of_universe` list with the diagnostic that stopped it, so
-/// the reason this claim is not made is readable from one audit run. Dropping
-/// the claim loses no cover: the audit's GREW assertion adds the row the moment
-/// the stem enters the universe, and its REGRESSED assertion pins it afterwards.
+/// Compile coverage is owned by `jit_coverage_audit`; this test only pins the
+/// two serde rows' observed run-tier classification.
 #[test]
 fn serde_jit_parity_manifest_pins() {
-    let (compile_covered, gaps, run_gaps, _) = parse_jit_gap_manifest_full();
     let gate = parse_corpus_gate_manifest();
     for stem in ["serde/encoding_breadth", "serde/serde_generic"] {
         // Accounted for exactly once. A ghost row, a duplicate, or a stem that
@@ -5584,8 +5550,7 @@ fn serde_jit_parity_manifest_pins() {
             rows.len()
         );
         let record = rows[0];
-        // The parity claim, on the two shrink-only sections that mean "a tier
-        // disagreed". Both are empty today, so this may only get easier to hold.
+        // The parity claim, on the two sections that mean a tier disagreed.
         assert!(
             !matches!(
                 record.class,
@@ -5599,8 +5564,7 @@ fn serde_jit_parity_manifest_pins() {
         if record.class == CorpusGateClass::DeoptInterp {
             assert!(
                 record.detail.is_empty(),
-                "{stem} deopts to the interpreter CARRYING a diagnostic, which the \
-                 gate counts as failing: {}",
+                "{stem} deopts to the interpreter CARRYING a diagnostic: {}",
                 record.detail
             );
         }
@@ -5619,82 +5583,7 @@ fn serde_jit_parity_manifest_pins() {
              is a live defect, not the known one",
             record.detail
         );
-        assert!(
-            !gaps.iter().any(|row| {
-                row == stem || row.starts_with(&format!("{stem}:"))
-            }),
-            "{stem} must not return to the JIT compile-gap ledger"
-        );
-        assert!(
-            !run_gaps.iter().any(|row| {
-                row == stem || row.starts_with(&format!("{stem}:"))
-            }),
-            "{stem} must not return to the run-tier gap ledger"
-        );
     }
-    for stem in ["serde/encoding_breadth", "serde/serde_generic"] {
-        assert!(
-            compile_covered.iter().any(|row| row == stem),
-            "{stem} must remain compile-covered"
-        );
-    }
-}
-
-/// #1509 c4: negative control — the cross-check actually fires.
-///
-/// A gate class alone must not trip it, and a parked stem must not trip it;
-/// only a compile-covered stem the gate records as failing and `run_gaps:` does
-/// not name. Without this, `ledger_cross_check_holds` passing proves nothing.
-#[test]
-fn ledger_cross_check_fires_on_a_conflict() {
-    let compile_covered = vec!["comptime/embed".to_string(), "basics/hello".to_string()];
-    let gate = vec![
-        CorpusGateRecord {
-            stem: "comptime/embed".to_string(),
-            class: CorpusGateClass::FrontendRejected,
-            detail: "E0956: call `embed_file` can't run at compile time yet".to_string(),
-        },
-        CorpusGateRecord {
-            stem: "basics/hello".to_string(),
-            class: CorpusGateClass::ResidentJit,
-            detail: String::new(),
-        },
-    ];
-
-    // Unparked: one conflict, quoting both ledger lines and the stem.
-    let conflicts = ledger_conflicts(&compile_covered, &[], &gate);
-    assert_eq!(conflicts.len(), 1, "expected one conflict: {conflicts:?}");
-    let message = &conflicts[0];
-    assert!(
-        message.contains("comptime/embed")
-            && message.contains("tests/jit_gaps.txt `compile_covered:` says `  comptime/embed`")
-            && message.contains(
-                "tests/jit_corpus_gate.txt `frontend_rejected:` says \
-                 `  comptime/embed: E0956: call `embed_file` can't run at compile time yet`"
-            ),
-        "the failure must quote both ledger lines: {message}"
-    );
-
-    // Parked with a reason: tolerated, and the healthy stem never trips it.
-    // Synthetic parked row: the real comptime rows are no longer parked.
-    let parked = vec!["comptime/embed: synthetic negative-control row".to_string()];
-    assert!(ledger_conflicts(&compile_covered, &parked, &gate).is_empty());
-
-    // A bare deopt row is a tier choice, not a failure.
-    let bare = vec![CorpusGateRecord {
-        stem: "basics/hello".to_string(),
-        class: CorpusGateClass::DeoptInterp,
-        detail: String::new(),
-    }];
-    assert!(ledger_conflicts(&compile_covered, &[], &bare).is_empty());
-
-    // A deopt row carrying a diagnostic is a failure.
-    let told = vec![CorpusGateRecord {
-        stem: "basics/hello".to_string(),
-        class: CorpusGateClass::DeoptInterp,
-        detail: "E0956: `core.event.scope()` at comptime".to_string(),
-    }];
-    assert_eq!(ledger_conflicts(&compile_covered, &[], &told).len(), 1);
 }
 
 /// c139 M3: string interpolation builds the same stdout as the interpreter.
@@ -6497,18 +6386,16 @@ fn enum_variant_change_emits_e2210() {
     }
 }
 
-/// D-PERSIST1: `#Persist` is inert in a release build — the marker carries no
-/// AOT hooks. Dev-tier persistence lives in the shared `jet_foundation::Persist`
-/// store (not in generated Rust). `#Persist name := …` is the only module-level
-/// bare-binding form (D-BIND-BARE1), so there is no marker-free twin to diff
-/// against. The proof is that release codegen lowers the binding to a plain
-/// Rust `static` and emits no persist-store call.
+/// D-PERSIST-DEVSTATE1=A: release codegen lowers a writable `#Persist` binding
+/// to the safe interior-mutable Prelude cell. The storage mechanism is shared
+/// with dev-tier reload state; generated Rust only marshals reads and writes
+/// through that cell.
 #[test]
-fn persist_marker_is_codegen_inert() {
+fn persist_binding_codegen_uses_safe_prelude_cell() {
     let dir = std::env::temp_dir().join(format!("jet_persist_parity_{}", std::process::id()));
     fs::create_dir_all(&dir).unwrap();
     let path = dir.join("counter.jet");
-    let src = "#Persist counter := 0\nfn run() {\n    print(counter)\n}\n";
+    let src = "#Persist counter := 0\nfn run() {\n    counter += 1\n    print(counter)\n}\n";
     fs::write(&path, src).unwrap();
     let shown = path.to_string_lossy().to_string();
     let rust = jet::compile_with_path(src, &shown)
@@ -6522,30 +6409,16 @@ fn persist_marker_is_codegen_inert() {
     // The binding under test is `counter`. It reaches Rust through the single
     // naming law: `mangle("counter")` prefixes `GENERATED_NAME_PREFIX` (`__jet_`,
     // crates/jet-foundation/src/Syntax/predicates.rs:367) and `emit_const`
-    // uppercases the result (crates/jet-codegen/src/Codegen/Items.rs:2832), so
-    // `#Persist counter := 0` can only lower to `static __JET_COUNTER`. Name the
-    // binding in the message: the dump opens with `const __JET_PACKAGE_EDITION`,
-    // unconditional harness boilerplate emitted for every program, which is not
-    // the binding under test.
+    // uppercases the result, so the generated slot is `__JET_COUNTER`. Name the
+    // binding in the message because the dump also contains unconditional
+    // harness statics.
     assert!(
-        rust.contains("static __JET_COUNTER: i64 = 0i64;"),
-        "`#Persist counter := 0` must lower to the plain release static \
-         `__JET_COUNTER`:\n{rust}"
+        rust.contains("static __JET_COUNTER: JetPersistCell<i64> = JetPersistCell::new(0i64);"),
+        "`#Persist counter := 0` must lower to a Prelude `JetPersistCell`:\n{rust}"
     );
-    // Dev-tier persistence lives in `jet_foundation::Persist`
-    // (crates/jet-foundation/src/Persist.rs), which is not part of the embedded
-    // prelude, so a release build that grew a store hook could only name that
-    // store. Keep both needles qualified: the bare stem `persist` occurs in the
-    // prelude's unrelated GC-ledger `self.persist()` calls and in this fixture's
-    // own `jet_persist_parity_*` source path, so a looser filter would report
-    // lines that have nothing to do with `#Persist`.
-    let hooks: Vec<&str> = rust
-        .lines()
-        .filter(|l| l.contains("Persist::") || l.contains("jet_foundation::Persist"))
-        .collect();
     assert!(
-        hooks.is_empty(),
-        "`#Persist` must emit no persist-store hooks in release Rust: {hooks:?}"
+        rust.contains("(__JET_COUNTER).set(jet_std::jet_int_add((__JET_COUNTER).get(), 1i64));"),
+        "writes to `#Persist counter` must use the Prelude cell:\n{rust}"
     );
     let _ = fs::remove_dir_all(&dir);
 }
@@ -6619,7 +6492,7 @@ fn run() {
 }
 
 /// D-SCHEDULE1 (ratified 2026-07-11, card #505): `jet dev`'s due-job tick
-/// consumer. `scheduled_tasks` must enumerate every `#Job #Every(…)` fn
+/// consumer. `scheduled_jobs` must enumerate every `#Job #Every(…)` fn
 /// with its resolved schedule (and skip a plain `#Job fn` with no
 /// `#Every(…)`), and `run_named_job` must actually execute one by name
 /// through the same interpreter tier `dev_iteration` uses — golden-testing
@@ -6643,9 +6516,9 @@ fn schedule_every_dev_loop_consumer() {
         jet::render_diagnostics("schedule_every.jet", &src, &diags)
     );
 
-    let mut tasks = jet::Interpreter::scheduled_tasks(&bundle);
-    tasks.sort_by(|a, b| a.0.cmp(&b.0));
-    let names: Vec<&str> = tasks.iter().map(|(n, _)| n.as_str()).collect();
+    let mut jobs = jet::Interpreter::scheduled_jobs(&bundle);
+    jobs.sort_by(|a, b| a.0.cmp(&b.0));
+    let names: Vec<&str> = jobs.iter().map(|(n, _)| n.as_str()).collect();
     assert_eq!(
         names,
         vec![
@@ -6654,33 +6527,33 @@ fn schedule_every_dev_loop_consumer() {
             "prune_sessions",
             "refresh_indexes",
         ],
-        "scheduled_tasks must list every #Job fn carrying #Every(…), and skip the \
+        "scheduled_jobs must list every #Job fn carrying #Every(…), and skip the \
          #Every(…)-less `manual_only` job"
     );
     let schedules: std::collections::HashMap<&str, &jet::AST::EverySchedule> =
-        tasks.iter().map(|(n, s)| (n.as_str(), s)).collect();
+        jobs.iter().map(|(n, s)| (n.as_str(), s)).collect();
     assert_eq!(
         *schedules["prune_sessions"],
-        jet::AST::EverySchedule::Interval {
+        jet::AST::EverySchedule::Duration {
             nanos: 5 * 60 * 1_000_000_000
         },
         "`#Every(5min)` must resolve to a 5-minute interval"
     );
     assert_eq!(
         *schedules["nightly_backup"],
-        jet::AST::EverySchedule::DailyAt { hour: 3, minute: 0 },
+        jet::AST::EverySchedule::WallClockTime { hour: 3, minute: 0 },
         "`#Every(\"03:00\")` must resolve to 03:00 daily"
     );
     assert_eq!(
         *schedules["refresh_indexes"],
-        jet::AST::EverySchedule::Interval {
+        jet::AST::EverySchedule::Duration {
             nanos: 2 * 60 * 60 * 1_000_000_000
         },
         "`#Every(2h)` must resolve through the canonical Time family"
     );
     assert_eq!(
         *schedules["compact_archive"],
-        jet::AST::EverySchedule::Interval {
+        jet::AST::EverySchedule::Duration {
             nanos: 24 * 60 * 60 * 1_000_000_000
         },
         "`#Every(1d)` must resolve through the canonical Time family"

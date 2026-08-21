@@ -306,10 +306,19 @@ pub fn assert_test_path_on_disk(path: &Path, label: &str) {
     );
 }
 
-/// Guard the two process-wide artifact locations before a battery writes.
+/// Guard process-wide artifact locations before a battery writes.
 pub fn assert_test_environment_is_safe() {
-    if let Some(target) = std::env::var_os("CARGO_TARGET_DIR") {
-        assert_test_path_on_disk(&PathBuf::from(target), "CARGO_TARGET_DIR");
+    for (name, value) in [
+        ("CARGO_TARGET_DIR", std::env::var_os("CARGO_TARGET_DIR")),
+        ("JET_TEST_SCRATCH_DIR", std::env::var_os("JET_TEST_SCRATCH_DIR")),
+        (
+            "JET_DEV_ORACLE_CACHE_DIR",
+            std::env::var_os("JET_DEV_ORACLE_CACHE_DIR"),
+        ),
+    ] {
+        if let Some(value) = value {
+            assert_test_path_on_disk(&PathBuf::from(value), name);
+        }
     }
 }
 

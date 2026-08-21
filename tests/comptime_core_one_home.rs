@@ -264,6 +264,17 @@ fn measurement_has_one_semantic_home() {
         assert!(!aot.contains(fingerprint), "AOT wrapper copied `{fingerprint}`");
         assert!(!jit.contains(fingerprint), "JIT wrapper copied `{fingerprint}`");
     }
+
+    let docs = read("docs/reference/core-library.md")
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ");
+    for statement in [
+        "first-order linear propagation with uncorrelated inputs",
+        "Correlated errors are out of scope",
+    ] {
+        assert!(docs.contains(statement), "measurement docs omit `{statement}`");
+    }
 }
 
 #[test]

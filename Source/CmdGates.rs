@@ -133,23 +133,122 @@ fn scope_matches(entry: &GateEntry, scope: Option<&str>) -> bool {
         || entry.source.eq_ignore_ascii_case(scope)
 }
 
-fn append_external_writers(ledger: &mut GateLedger, root: &Path, args: &[String]) {
-    if let Some(Ok(facts)) = jet::Package::PackageFacts::load(root) {
-        for (dependency, effects) in &facts.grants {
-            let mut provenance = facts.field_provenance("grants").to_vec();
-            if provenance.is_empty() {
-                provenance.push("package.jet:grants".to_string());
-            }
+fn append_authority_entries(
+    ledger: &mut GateLedger,
+    authority: &jet::Package::PackageAuthority,
+    source: &str,
+) {
+    let provenance = |field: &str| vec![format!("{source}:{field}")];
+    if let Some(allow) = &authority.holds.allow {
+        ledger.push(external_entry(
+            GateKind::BuildFlag,
+            "security",
+            "package",
+            source,
+            "authority.holds.allow",
+            &format!("holds allow: {}", allow.join(",")),
+            provenance("authority.holds.allow"),
+        ));
+    }
+    if let Some(deny) = &authority.holds.deny {
+        ledger.push(external_entry(
+            GateKind::BuildFlag,
+            "security",
+            "package",
+            source,
+            "authority.holds.deny",
+            &format!("holds deny: {}", deny.join(",")),
+            provenance("authority.holds.deny"),
+        ));
+    }
+    for (dependency, rights) in &authority.grants {
+        ledger.push(external_entry(
+            GateKind::DependencyGrant,
+            "security",
+            "package",
+            source,
+            dependency,
+            &format!("authority.grants: {}", rights.join(",")),
+            provenance("authority.grants"),
+        ));
+    }
+    if let Some(trust) = &authority.trust {
+        if let Some(default) = trust.default {
             ledger.push(external_entry(
-                GateKind::DependencyGrant,
+                GateKind::TrustGrant,
+                "security",
                 "package",
-                "package",
-                "package.jet",
-                dependency,
-                &format!("effects: {}", effects.join(",")),
-                provenance,
+                source,
+                "authority.trust.default",
+                &format!("default: {}", trust_decision_label(default)),
+                provenance("authority.trust.default"),
             ));
         }
+        if let Some(ci) = trust.ci_prompt {
+            ledger.push(external_entry(
+                GateKind::TrustGrant,
+                "security",
+                "package",
+                source,
+                "authority.trust.ci",
+                &format!("prompt: {}", trust_decision_label(ci)),
+                provenance("authority.trust.ci"),
+            ));
+        }
+        for (service, decision) in &trust.services {
+            ledger.push(external_entry(
+                GateKind::TrustGrant,
+                "security",
+                "package",
+                source,
+                &format!("authority.trust.services.{service}"),
+                &format!("{}", trust_decision_label(*decision)),
+                provenance("authority.trust.services"),
+            ));
+        }
+        if let Some(require) = trust.require {
+            ledger.push(external_entry(
+                GateKind::TrustGrant,
+                "security",
+                "package",
+                source,
+                "authority.trust.require",
+                &format!("require: {}", require.label()),
+                provenance("authority.trust.require"),
+            ));
+        }
+    }
+    for provider in &authority.providers {
+        let mut detail = format!("registry: {}", provider.registry);
+        if !provider.allow.is_empty() {
+            detail.push_str(&format!(", allow: {}", provider.allow.join(",")));
+        }
+        if !provider.deny.is_empty() {
+            detail.push_str(&format!(", deny: {}", provider.deny.join(",")));
+        }
+        ledger.push(external_entry(
+            GateKind::TrustGrant,
+            "security",
+            "package",
+            source,
+            &format!("authority.providers.{}", provider.provider),
+            &detail,
+            provenance("authority.providers"),
+        ));
+    }
+}
+
+fn trust_decision_label(decision: jet::Package::TrustDecision) -> &'static str {
+    match decision {
+        jet::Package::TrustDecision::Allow => "allow",
+        jet::Package::TrustDecision::Prompt => "prompt",
+        jet::Package::TrustDecision::Deny => "deny",
+    }
+}
+
+fn append_external_writers(ledger: &mut GateLedger, root: &Path, args: &[String]) {
+    if let Some(Ok(facts)) = jet::Package::PackageFacts::load(root) {
+        append_authority_entries(ledger, &facts.authority, "package.jet");
         for effect in &facts.build_allow {
             let mut provenance = facts.field_provenance("build_allow").to_vec();
             if provenance.is_empty() {
@@ -165,37 +264,28 @@ fn append_external_writers(ledger: &mut GateLedger, root: &Path, args: &[String]
                 provenance,
             ));
         }
-        if let Some(effects) = &facts.effects_allow {
-            if !effects.is_empty() {
-                let mut provenance = facts.field_provenance("effects_allow").to_vec();
-                if provenance.is_empty() {
-                    provenance.push("package.jet:effects.allow".to_string());
-                }
-                ledger.push(external_entry(
-                    GateKind::BuildFlag,
-                    "security",
-                    "package",
-                    "package.jet",
-                    "effects:allow",
-                    &format!("effects: {}", effects.join(",")),
-                    provenance,
-                ));
-            }
-        }
     }
 
     if let Some(lock) = jet::Lock::load(root) {
-        for package in &lock.packages {
-            if !package.effect_grants.is_empty() {
-                ledger.push(external_entry(
-                    GateKind::DependencyGrant,
-                    "security",
-                    "package",
-                    jet::Syntax::UNIFIED_LOCK_FILE,
-                    &package.name,
-                    &format!("effects: {}", package.effect_grants.join(",")),
-                    vec![format!("{}:dependency.effect-grants", jet::Syntax::UNIFIED_LOCK_FILE)],
-                ));
+        if let Some(authority) = &lock.authority {
+            append_authority_entries(
+                ledger,
+                authority,
+                jet::Syntax::UNIFIED_LOCK_FILE,
+            );
+        } else {
+            for package in &lock.packages {
+                if !package.effect_grants.is_empty() {
+                    ledger.push(external_entry(
+                        GateKind::DependencyGrant,
+                        "security",
+                        "package",
+                        jet::Syntax::UNIFIED_LOCK_FILE,
+                        &package.name,
+                        &format!("effects: {}", package.effect_grants.join(",")),
+                        vec![format!("{}:dependency.effect-grants", jet::Syntax::UNIFIED_LOCK_FILE)],
+                    ));
+                }
             }
         }
         for (subject, effects) in &lock.workspace_overlay_policy.build_grants {

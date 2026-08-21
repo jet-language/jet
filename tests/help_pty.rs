@@ -351,7 +351,7 @@ fn short_f1_viewport_keeps_later_selection_visible_without_scrolling_terminal() 
     let transcript = run_pty_sized(&keys, "never", false, 8, 60);
     let frame = final_frame_before_cleanup(&transcript);
     let lines: Vec<&str> = frame.lines().collect();
-    assert!(frame.contains(">   bench"), "final selected row wrong/clipped:\n{frame}");
+    assert!(frame.contains(">   run"), "final selected row wrong/clipped:\n{frame}");
     assert_eq!(lines.len(), 8, "final frame scrolled or exceeded rows:\n{frame}");
     assert!(lines.iter().all(|line| visible_cols(line) <= 60), "final frame exceeded 60 cols:\n{frame}");
 }

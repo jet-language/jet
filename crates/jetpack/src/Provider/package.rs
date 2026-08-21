@@ -352,16 +352,19 @@ fn normalized_manifest_semantics(
         package.targets.sort_by_key(|target| format!("{target:?}"));
     }
     manifest.build_profiles.sort_by(|a, b| a.name.cmp(&b.name));
-    manifest.grants.sort_by(|a, b| a.0.cmp(&b.0));
-    for (_, effects) in &mut manifest.grants {
+    manifest.authority.grants.sort_by(|a, b| a.0.cmp(&b.0));
+    for (_, effects) in &mut manifest.authority.grants {
         effects.sort();
     }
-    if let Some(effects) = &mut manifest.effects_allow {
+    if let Some(effects) = &mut manifest.authority.holds.allow {
         effects.sort();
     }
-    if let Some(effects) = &mut manifest.effects_deny {
+    if let Some(effects) = &mut manifest.authority.holds.deny {
         effects.sort();
     }
+    manifest.grants = manifest.authority.grants.clone();
+    manifest.effects_allow = manifest.authority.holds.allow.clone();
+    manifest.effects_deny = manifest.authority.holds.deny.clone();
     if let Some(policy) = &mut manifest.authority.trust {
         policy.services.sort_by(|a, b| a.0.cmp(&b.0));
     }

@@ -216,7 +216,7 @@ pub(crate) fn is_process_handle_method_name(
                 // D-PROCESS-SESSION1=A / D-PROCESS-SESSION2=D: beginner and
                 // expert terminal opt-in plus the keyed host report.
                 | ("terminal", 0 | 1)
-                | ("env_clear" | "detached" | "capabilities" | "run" | "run_checked" | "spawn", 0)
+                | ("env_clear" | "detached" | "abilities" | "run" | "run_checked" | "spawn", 0)
                 | ("timeout" | "output_limit", 1)
         ),
         Some("ProcessChild") => matches!(
@@ -322,7 +322,7 @@ pub(crate) fn is_http_type(recv_type: Option<&str>) -> bool {
                 | "BrowserTrace"
                 | "BrowserReceipt"
                 | "BrowserPrivacy"
-                | "BrowserCapabilities"
+                | "BrowserAbilities"
                 | "BrowserProtocol"
                 | "BrowserLocked",
         )
@@ -351,7 +351,7 @@ pub(crate) fn is_http_method_name(recv_type: Option<&str>, method: &str) -> bool
         Some("WsMessage") => matches!(method, "is_text" | "is_binary" | "is_close" | "text" | "bytes"),
         Some("Browser") => matches!(
             method,
-            "capabilities"
+            "abilities"
                 | "context"
                 | "subscribe"
                 | "next_event"
@@ -411,7 +411,7 @@ pub(crate) fn is_http_method_name(recv_type: Option<&str>, method: &str) -> bool
                 | "suggested_filename_hash"
         ),
         Some("BrowserProtocol") => method == "send",
-        Some("BrowserCapabilities") => matches!(method, "bidi" | "cdp" | "profile"),
+        Some("BrowserAbilities") => matches!(method, "bidi" | "cdp" | "profile"),
         Some("BrowserTrace") => matches!(method, "entry_count" | "redacted" | "summary"),
         Some("BrowserReceipt") => {
             matches!(method, "entry_count" | "redacted" | "summary" | "isolated" | "cleaned")

@@ -7,8 +7,8 @@
 //! This is the **only** reader of `package.jet` (D-CONF-PLANE1, ratified
 //! 2026-08-06): the compile path (`jet-driver`), tooling, and Canvas all
 //! parse through `PackageFacts::parse`/`load`. There is no second,
-//! legacy-vocabulary parser — `deps:`/`packages:`/`build:`/`effects:`/
-//! `grants:`/`authority:`/`policy:` block grammar lives in `Blocks`.
+//! legacy-vocabulary parser — `deps:`/`packages:`/`build:`/
+//! `authority:`/`policy:` block grammar lives in `Blocks`.
 
 pub mod Blocks;
 mod Convert;
@@ -191,11 +191,11 @@ pub struct PackageFacts {
     pub build_profiles: Vec<Blocks::BuildProfileDef>,
     /// D-CTEFFECT1: standing capabilities granted to this package's `fn build`.
     pub build_allow: Vec<String>,
-    /// D-EFFBUDGET1: whether an `effects: .{ … }` block is present at all.
+    /// D-EFFBUDGET1: whether `authority.holds` is present at all.
     pub effects_enabled: bool,
     pub effects_allow: Option<Vec<String>>,
     pub effects_deny: Option<Vec<String>>,
-    /// D-EFFBUDGET1: the audited per-dependency escape from `effects:`.
+    /// D-EFFBUDGET1: the audited per-dependency escape from `authority:`.
     pub grants: Vec<(String, Vec<String>)>,
     /// D-AUTHORITY-MANIFEST1=A: the one source authority namespace
     /// (`authority: .{ … }`).
@@ -224,12 +224,12 @@ pub struct PackageFacts {
 
 /// D-POLICY-WORD1=A: the package's non-memory governance namespace —
 /// package-scope only (never a Config contribution), same as the ratified
-/// D-MARK-SCOPE1 package rung. Memory denials live in `effects.deny` and are
+/// D-MARK-SCOPE1 package rung. Memory denials live in `authority.holds.deny` and are
 /// carried separately through `PackageGuarantees`.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct PackagePolicy {
     /// D-AUTHORITY-MEM1: source policy keeps only non-memory settings. Memory
-    /// floors are rights-tree denials in `effects.deny`.
+    /// floors are rights-tree denials in `authority.holds.deny`.
     pub declarations: Vec<crate::Policy::PolicyDeclaration>,
     /// D-LINTPOLICY1=A: `policy.lints.deny`. `None` means no `lints:` block
     /// at all (warn-never-block stays the default).
@@ -363,9 +363,9 @@ pub enum PackageParseError {
     /// U1/S52/E1209: a reserved top-level key (`dev_deps`/`patch`/`workspace`)
     /// was used non-empty.
     ReservedSection(&'static str),
-    /// D-EFFBUDGET1: a malformed `effects:`/`grants:`/`build.allow:` block.
+    /// D-EFFBUDGET1: a malformed `authority:`/`build.allow:` block.
     BadEffectsBlock(String),
-    /// D-AUTHORITY-MANIFEST1: a grant authority field moved into `authority:`.
+    /// D-AUTHORITY-MANIFEST1: a retired authority field moved into `authority:`.
     RetiredAuthorityField { field: String, replacement: String },
     /// D-PACKAGE-POLICY-SCOPE1: malformed or widening package memory policy.
     BadMemoryPolicy { detail: String },
@@ -406,7 +406,7 @@ impl fmt::Display for PackageParseError {
             Self::ReservedSection(section) => write!(f, "`{section}` is reserved"),
             Self::BadEffectsBlock(detail) => f.write_str(detail),
             Self::RetiredAuthorityField { field, replacement } => {
-                write!(f, "`{field}` is retired; use `{replacement}` in `authority:`")
+                write!(f, "`{field}` is retired; use `{replacement}`")
             }
             Self::BadMemoryPolicy { detail } => f.write_str(detail),
             Self::RetiredPolicyField { field, replacement } => {
@@ -1644,6 +1644,11 @@ fn parse_common(
             return Err(PackageParseError::MalformedField(entry));
         };
         if seen.contains_key(&field) {
+            if field == crate::Syntax::MANIFEST_BLOCK_AUTHORITY {
+                return Err(PackageParseError::BadEffectsBlock(
+                    "malformed `authority:` block: declared more than once".to_string(),
+                ));
+            }
             return Err(PackageParseError::Composition(format!(
                 "`{field}` is declared more than once"
             )));
@@ -1731,15 +1736,10 @@ fn parse_common(
             }
             "effects" if config => return Err(PackageParseError::UnknownField(field.clone())),
             "effects" => {
-                facts.effects_enabled = true;
-                let (allow, deny) = Blocks::parse_effects(record_body(&value, "effects")?)?;
-                // Keep the legacy spelling on the same authority fact while
-                // its parser remains during the one-pass manifest migration.
-                // Consumers therefore have one semantic source even before
-                // the retired key is removed by the retirement slice.
-                facts.effects_allow = allow.clone();
-                facts.effects_deny = deny.clone();
-                facts.authority.holds = Blocks::AuthorityHolds { allow, deny };
+                return Err(PackageParseError::RetiredAuthorityField {
+                    field: field.clone(),
+                    replacement: "authority.holds".to_string(),
+                })
             }
             "grants" if config => return Err(PackageParseError::UnknownField(field.clone())),
             "grants" => {
@@ -1750,8 +1750,7 @@ fn parse_common(
             }
             "authority" if config => return Err(PackageParseError::UnknownField(field.clone())),
             "authority" => {
-                let body = record_body(&value, "authority")?;
-                let authority = Blocks::parse_authority(body)?;
+                let authority = Blocks::parse_authority_value(&value)?;
                 if authority.holds.allow.is_some() || authority.holds.deny.is_some() {
                     facts.effects_enabled = true;
                     facts.effects_allow = authority.holds.allow.clone();

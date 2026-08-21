@@ -26,6 +26,9 @@ mod loadable_semantics {
 mod string_concat_semantics {
     include!("../../../jet-codegen/src/Prelude/Core/StringConcat.rs");
 }
+mod authority_semantics {
+    include!("../../../jet-codegen/src/Prelude/Core/Authority.rs");
+}
 
 use crate::AST::{BinOp, CtFloat, Type};
 
@@ -112,6 +115,84 @@ fn canonical_instant(value: i64) -> CtValue {
         type_name: crate::Syntax::TYPE_INSTANT.to_string(),
         fields: vec![("start_ns".to_string(), CtValue::Int(value))],
     }
+}
+
+fn authority_value(rights: std::collections::BTreeSet<String>) -> CtValue {
+    CtValue::Struct {
+        type_name: crate::Syntax::TYPE_ABILITIES.to_string(),
+        fields: vec![(
+            "rights".to_string(),
+            CtValue::List(rights.into_iter().map(CtValue::Str).collect()),
+        )],
+    }
+}
+
+fn authority_rights(value: &CtValue) -> std::collections::BTreeSet<String> {
+    let CtValue::Struct { type_name, fields } = value else {
+        return std::collections::BTreeSet::new();
+    };
+    if type_name != crate::Syntax::TYPE_ABILITIES {
+        return std::collections::BTreeSet::new();
+    }
+    fields
+        .iter()
+        .find_map(|(name, value)| {
+            (name == "rights").then(|| match value {
+                CtValue::List(values) => values
+                    .iter()
+                    .filter_map(|value| match value {
+                        CtValue::Str(right) => Some(right.clone()),
+                        _ => None,
+                    })
+                    .collect(),
+                _ => std::collections::BTreeSet::new(),
+            })
+        })
+        .unwrap_or_default()
+}
+
+fn apply_authority_method(
+    recv: &CtValue,
+    method: &str,
+    args: &[CtValue],
+    span: Span,
+) -> Option<Result<CtValue, Diagnostic>> {
+    if !matches!(
+        recv,
+        CtValue::Struct { type_name, .. }
+            if type_name == crate::Syntax::TYPE_ABILITIES
+    ) || !matches!(method, "with" | "without")
+    {
+        return None;
+    }
+    if args.len() != 1 {
+        return Some(Err(unsupported(
+            &format!("Authority.{method} expects one String right"),
+            span,
+        )));
+    }
+    let CtValue::Str(requested) = &args[0] else {
+        return Some(Err(unsupported(
+            &format!("Authority.{method} expects a String right"),
+            span,
+        )));
+    };
+    let held = authority_rights(recv);
+    if method == "with" {
+        return Some(match authority_semantics::jet_authority_with_right(&held, requested) {
+            Ok(rights) => Ok(authority_value(rights)),
+            Err(message) => Err(Diagnostic::error(
+                "E0712",
+                format!("this Authority value cannot narrow to `{requested}`"),
+                "the requested right is not held by this Authority value".to_string(),
+                format!("use a right already held by the Authority value: {message}"),
+                Some(span),
+            )),
+        });
+    }
+    Some(Ok(authority_value(
+        authority_semantics::jet_authority_without_right(&held, requested),
+    )))
 }
 
 fn canonical_time_cmp(left: i64, right: i64) -> std::cmp::Ordering {
@@ -621,17 +702,16 @@ pub fn apply_static_type_method(
     args: Vec<CtValue>,
     span: Span,
 ) -> Option<Result<CtValue, Diagnostic>> {
-    // D-AUTHORITY-NAME1=A: the interpreter/comptime carrier has the same
-    // ordinary-data shape as the Prelude value. Boundary narrowing is a later
-    // operation family; construction is the only surface in this slice.
+    // D-AUTHORITY-WORD2=E: the interpreter/comptime carrier has the same
+    // ordinary-data shape as the Prelude value. Boundary narrowing uses the
+    // same rights relation as AOT and JIT.
     if matches!(type_name, "Authority" | "JetAuthority")
         && method == "workspace"
         && args.is_empty()
     {
-        return Some(Ok(CtValue::Struct {
-            type_name: crate::Syntax::TYPE_AUTHORITY.to_string(),
-            fields: Vec::new(),
-        }));
+        return Some(Ok(authority_value(
+            authority_semantics::jet_authority_workspace_rights(),
+        )));
     }
     if method == "new" {
         if let Some(result) = super::CollectionEval::prelude_new(type_name, args.clone(), span) {
@@ -1121,6 +1201,9 @@ pub fn apply_method(
     args: Vec<CtValue>,
     span: Span,
 ) -> Result<CtValue, Diagnostic> {
+    if let Some(result) = apply_authority_method(recv, method, &args, span) {
+        return result;
+    }
     if let CtValue::Enum {
         type_name,
         variant,

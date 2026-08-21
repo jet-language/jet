@@ -1,8 +1,11 @@
 # Jet TUI DX audit — 2026-08-20
 
-Status: source-only partial audit. No build, Jet binary, test, formatter, Tower
-CLI, board write, or commit ran in this worker. Scores below are source scores;
-live captures are pending orchestrator proof.
+Status: source audit plus bounded runtime captures, using the existing
+`target/debug/jet` on 2026-08-20. No `cargo build`, fresh Jet binary build, Jet
+test run, generator, formatter, Tower CLI, board write, or commit ran in this
+worker. The mandatory `scripts/agent/lane-check.sh` passed. Normal build, dev,
+and test success paths therefore remain source-only. Scores combine source
+evidence with the captures named below; `U` marks an unverified interaction path.
 
 ## Executive result
 
@@ -33,9 +36,9 @@ Largest gaps:
 6. P2 — Canvas is a browser/dev-server surface, not a terminal surface. The
    requested “canvas/scene CLI” has no identified terminal entry point; this is
    an inventory gap, not proof of a missing feature.
-7. P2 — non-TTY behavior is intentionally present but not demonstrated for all
-   surfaces. `jet ?` has an explicit floor; REPL has a cooked floor; dev/build/
-   test/inspect need transcript proof under pipes and narrow columns.
+7. P2 — non-TTY behavior is uneven. `jet ?`, REPL, notebook protocol, and
+   diagnostics have observed floors; dev/build/test/report success paths still
+   need transcript proof under pipes and narrow columns.
 
 Jet wins where one mechanism already exists: diagnostics carry What/Why/Fix and
 machine JSON through one renderer, and the REPL's raw-mode code centralizes key
@@ -56,33 +59,44 @@ decoding. Jet loses on cross-surface consistency and live proof.
 | `jet ?` | `Source/main.rs:1040-1076` | covered; TTY app and non-TTY palette |
 | `jet debug` | `Source/main.rs:2207-2242`, `crates/jet-debug/src/Native.rs:188-220` | covered; `(jet)` prompt, native backend, DAP escape hatch |
 | `jet notebook` terminal client | `Source/CmdNotebook.rs`, `crates/jet-repl/src/Notebook` | covered as server/browser client; terminal client path not identified |
-| bare `jet` / usage | `Source/main.rs:455-462`, `crates/jet-foundation/src/CLISchema.rs` | covered at dispatcher; runtime capture pending |
+| Help/usage | `Source/main.rs:455-462`, `1127-1133`, `crates/jet-foundation/src/CLISchema.rs` | `jet --help`/`jet help` print generated usage; bare `jet` enters the REPL |
+| Jetpack/adjacent CLI output | `crates/jetpack/src/Output.rs`, `Source/CmdMemory.rs`, `Source/CmdGc.rs` | adjacent terminal owners; included in the ANSI sweep, not normal-flow captured |
 
-The inventory includes all seven named surfaces and all five candidate surfaces
-from the card. “Terminal client” means the terminal-facing path only; the
-notebook HTML client and Canvas browser UI are recorded as adjacent owners, not
-silently counted as TUI.
+The inventory includes all seven named surfaces, the candidate interactive
+surfaces found beside them, and adjacent Jetpack output that can reach a Jet
+user. “Terminal client” means the terminal-facing path only; the notebook HTML
+client and Canvas browser UI are recorded as adjacent owners, not silently
+counted as TUI.
 
 ## Capture protocol
 
-The required live matrix was not run here. The orchestrator must rebuild first,
-then capture each command in a real PTY and a pipe, with normal color,
-`NO_COLOR=1`, and `COLUMNS=60`. Save raw output before trimming. For interactive
-sessions, also record key input and exit behavior.
+The bounded matrix below used the existing binary. TTY runs used `script`,
+`TERM=xterm-256color`, and `stty rows 24 cols 60`. Pipe runs used
+`NO_COLOR=1`. This proves current command entry, fallback, color, and error
+behavior. It does not prove a successful compiler run, resize signal handling,
+or every interactive key path.
 
 Common shell forms:
 
 ```sh
-scripts/agent/jet-env cargo build
-mkdir -p /tmp/jet-tui-captures-2026-08-20
-script -qec 'COLUMNS=60 target/debug/jet ?' /tmp/jet-tui-captures-2026-08-20/help-tty.txt
-NO_COLOR=1 script -qec 'COLUMNS=60 target/debug/jet ?' /tmp/jet-tui-captures-2026-08-20/help-tty-no-color.txt
-target/debug/jet ? </dev/null > /tmp/jet-tui-captures-2026-08-20/help-pipe.txt 2>&1
-NO_COLOR=1 target/debug/jet ? </dev/null > /tmp/jet-tui-captures-2026-08-20/help-pipe-no-color.txt 2>&1
+target/debug/jet --version
+target/debug/jet --help
+NO_COLOR=1 target/debug/jet ? </dev/null
+env -u NO_COLOR TERM=xterm-256color script -qefc \
+  'stty rows 24 cols 60; target/debug/jet ?' capture.txt
+NO_COLOR=1 bash -c "printf ':help\\n:quit\\n' | target/debug/jet repl"
+env -u NO_COLOR TERM=xterm-256color bash -c \
+  "printf ':quit\\n' | script -qefc 'stty rows 24 cols 60; target/debug/jet repl' repl.txt"
+NO_COLOR=1 target/debug/jet inspect live 1 --once
+NO_COLOR=1 target/debug/jet explain E2105
+NO_COLOR=1 target/debug/jet notebook --protocol <<'EOF'
+state
+EOF
+NO_COLOR=1 target/debug/jet canvas --help
 ```
 
-Use the same four-way matrix for every non-interactive command below. Use a PTY
-helper for key scripts where `script` cannot inject the required sequence.
+The card forbids per-card test/build verification, so the dev, test, build, and
+run blocks use their real `--help` contracts and safe invalid-target errors.
 
 ### ANSI ownership sweep
 
@@ -117,8 +131,9 @@ paths. Tests in the grep output are not product paths.
 
 ## Current-state captures
 
-These are capture slots, not fabricated transcripts. Each block names the
-exact command family and the missing runtime evidence.
+Each block names the command, the observed output, and the proof limit. Output
+below is shortened only where it contains terminal control bytes or a
+machine-generated identifier.
 
 ### REPL
 
@@ -128,13 +143,23 @@ advertises `:quit`, `:help`, and `^B`; the discovery hint advertises completion,
 docs, history, pin, fold, rerun, and bindings (`Render.rs:24-60`).
 
 ```text
-LIVE CAPTURE PENDING
-TTY:       jet repl  [keys: multiline, Tab, F1, F3, ^B, ^P, ^F, ^R, Esc, ^C, ^D]
-non-TTY:   printf '1 + 1\n' | jet repl
-NO_COLOR:  both forms
-narrow:    COLUMNS=60
-Required checks: prompt wrap, completion redraw, fold marker, pin rail, ^B pane,
-F3 cancel/accept, Ctrl-C during evaluation, resize while editing.
+CAPTURED — cooked pipe:
+Jet 1.0.0 — interactive REPL  (:quit, :help, ^B bindings)
+Try: ?name docs · :pin/:fold/:rerun <id> · interactive keys require a TTY
+1 user> REPL meta-commands
+  :quit ...  :help ...  ^P ... ^F ... ^R ... ^B ...
+1 user> bye
+exit=0; NO_COLOR=1; no ESC bytes.
+
+CAPTURED — TTY, `TERM=xterm-256color`, 24x60, scripted `:quit`:
+Jet 1.0.0 — interactive REPL  (:quit, :help, ^B bindings)
+Try: Tab complete · F1 cursor docs · ?name docs · F3 history · ^P pin
+1 user> :quit
+bye
+The raw transcript contains SGR color, cursor movement, and erase bytes.
+
+Limit: this run proves cooked fallback, raw entry, prompt discovery, and clean
+quit. It does not prove evaluation cancel, completion, folds, or resize.
 ```
 
 ### Dev loop and live inspect
@@ -145,13 +170,22 @@ hot replacement and edit-to-visible budget events (`Source/CmdDevTools.rs:89-186
 unless non-TTY/JSON (`Source/main.rs:1520-1539`).
 
 ```text
-LIVE CAPTURE PENDING
-TTY:       jet dev examples/features/basics/hello.jet
-non-TTY:   jet dev --watch=off examples/features/basics/hello.jet | sed -n l
-NO_COLOR:  repeat both; inspect live <pid> --once and polling mode
-narrow:    COLUMNS=60 jet dev examples/features/basics/hello.jet
-Required checks: first paint, edit-to-visible line, Ctrl-C, invalid edit recovery,
-inspect redraw without a TTY, JSON/pipe termination, and narrow status line.
+CAPTURED — command contract:
+NO_COLOR=1 target/debug/jet dev --help
+jet dev — Rerun a program whenever files change
+  jet dev [args]
+  --watch  re-run on dependency changes; --watch=off runs once
+  --swap   hot-swap compatible edits and restart after type changes
+
+CAPTURED — inspect one-shot error floor:
+NO_COLOR=1 target/debug/jet inspect live 1 --once
+Error [E2105]: no live Jet runtime is observable at process 1
+ Why: Jet could not complete the named file, tool, or operating-system operation
+ Fix: start the program with --observe, or attach to a jet dev process
+exit=1; no clear/redraw bytes in the pipe.
+
+Limit: no successful dev loop ran because this card does not own compiler-build
+verification. First paint, edit-to-visible, Ctrl-C, and live resize remain U.
 ```
 
 ### Test runner
@@ -162,13 +196,21 @@ Source signal: directory tests are sorted and run sequentially
 (`Source/CmdCompile.rs:2210-2287`).
 
 ```text
-LIVE CAPTURE PENDING
-TTY:       jet test examples/features/basics/hello.jet
-non-TTY:   jet test examples/features/basics/hello.jet | sed -n l
-NO_COLOR:  repeat both
-narrow:    COLUMNS=60 jet test examples/features/basics/hello.jet
-Required checks: pass/fail ordering, compile/runtime failure context, multi-file
-progress, color bytes, and behavior when a test waits for input.
+CAPTURED — command contract:
+NO_COLOR=1 target/debug/jet test --help
+jet test — Run tests
+  jet test [<file.jet|dir>] [<filter>]
+  --coverage ...  --serial ...  --shuffle ...  --record ...
+
+CAPTURED — invalid-target floor:
+NO_COLOR=1 target/debug/jet test /definitely/not-a-jet-file
+Error [E2105]: can't find `/definitely/not-a-jet-file`
+ Why: Jet could not complete the named file, tool, or operating-system operation
+ Fix: correct the named problem, then run the command again
+exit=1.
+
+Limit: no test suite ran under this card; pass/fail ordering, progress, and
+input-wait behavior remain source-only.
 ```
 
 ### Build/run progress
@@ -179,13 +221,23 @@ steps (`Source/CmdCompile.rs:4553-4567`), while timing emits separate
 `jet-timing` lines (`Source/CmdCompile.rs:4670-4675`).
 
 ```text
-LIVE CAPTURE PENDING
-TTY:       jet build -v examples/features/basics/hello.jet
-non-TTY:   jet build -v examples/features/basics/hello.jet | sed -n l
-NO_COLOR:  repeat both; include jet run and a cache hit
-narrow:    COLUMNS=60 jet build -v examples/features/basics/hello.jet
-Required checks: first visible progress, cache-hit distinction, failure handoff,
-timing placement, stdout/stderr ordering, and line wrapping.
+CAPTURED — command contracts:
+NO_COLOR=1 target/debug/jet build --help
+jet build — Create a native executable
+  --verbose  print the bridge steps
+  --profile  how hard to optimize: release, debug, ci, or a named optimization bundle
+
+NO_COLOR=1 target/debug/jet run --help
+jet run — Run a program or project
+  --watch  re-run on dependency changes; --watch=off runs once
+  --output  run a named build output
+
+CAPTURED — invalid-target floors:
+jet build /definitely/not-a-jet-file -> Error [E1334]: authority file `/definitely` is missing
+jet run /definitely/not-a-jet-file -> Error [E2105]: can't find the file `/definitely/not-a-jet-file`
+
+Limit: no build/run success path ran. First progress, cache-hit, timing, stream
+ordering, and narrow wrapping remain source-only.
 ```
 
 ### Diagnostics
@@ -197,13 +249,16 @@ Color resolution is centralized (`crates/jet-foundation/src/Terminal.rs:26-36`,
 `Source/main.rs:99-115`).
 
 ```text
-LIVE CAPTURE PENDING
-TTY:       jet check tests/ui/<known-failing-fixture>.jet
-non-TTY:   jet check tests/ui/<known-failing-fixture>.jet | sed -n l
-NO_COLOR:  repeat both; compare absence of ESC bytes
-narrow:    COLUMNS=60 jet check tests/ui/<known-failing-fixture>.jet
-Required checks: source frame, What/Why/Fix order, pointer line, hyperlink policy,
-multiple diagnostics, and narrow-column degradation.
+CAPTURED — human diagnostic, pipe, `NO_COLOR=1`:
+target/debug/jet inspect live 1 --once
+Error [E2105]: no live Jet runtime is observable at process 1
+ Why: Jet could not complete the named file, tool, or operating-system operation
+ Fix: start the program with --observe, or attach to a jet dev process
+No source frame is needed for this process-state diagnostic. The pipe contains
+no ESC bytes.
+
+Limit: a source check fixture was not run under this card. Source frames,
+multiple diagnostics, OSC 8 links, and narrow source rendering remain U.
 ```
 
 ### Explain and inspect reports
@@ -214,13 +269,21 @@ writer for diagnostic essays and policy markers (`Source/CmdDevTools.rs:1704-181
 (`Source/CmdDossier.rs:84-150`).
 
 ```text
-LIVE CAPTURE PENDING
-TTY:       jet explain E2104; jet inspect dossier examples/features/basics/hello.jet run
-non-TTY:   jet explain E2104 | sed -n l
-NO_COLOR:  repeat text forms; include --json
-narrow:    COLUMNS=60 jet inspect dossier examples/features/basics/hello.jet run
-Required checks: summary before detail, long provenance, unknown-code recovery,
-JSON stability, and narrow output.
+CAPTURED — text explanation, pipe, `NO_COLOR=1`:
+target/debug/jet explain E2105
+E2105
+
+What this means:
+  `{problem}`
+Why Jet enforces it:
+  Jet could not complete the named file, tool, or operating-system operation.
+How to fix it:
+  Correct the named problem, then run the command again.
+This explanation comes from jet's diagnostics reference.
+exit=0; no ESC bytes.
+
+Limit: dossier and JSON report paths were not run. Summary-first ordering,
+long provenance, and narrow report wrapping remain source-only.
 ```
 
 ### Canvas/scene surface
@@ -232,11 +295,17 @@ transaction state (`docs/reference/canvas-protocol.md`). No terminal command or
 terminal renderer was found in the inspected entry points.
 
 ```text
-LIVE CAPTURE PENDING / INVENTORY BLOCKED
-TTY candidate: jet dev examples/features/basics/hello.jet
-Non-TTY candidate: same command piped through sed -n l
-Required check: confirm whether “canvas/scene CLI” means the dev-server's
-terminal status strip, a missing CLI command, or an out-of-scope browser client.
+CAPTURED — terminal inventory boundary:
+NO_COLOR=1 target/debug/jet canvas --help
+Error [E2101]: `canvas` isn't a jet command.
+ Why: every jet run starts with a command like `run`, `check`, or `new`.
+ Fix: did you mean `jet hangar`? Run `jet help` to see them all.
+exit=2.
+
+The dev-server source announces a browser Canvas URL and owns HTTP routes. No
+terminal Canvas/scene renderer or CLI entry point exists in this checkout.
+Canvas is therefore an adjacent browser surface, not a TUI surface. This
+resolves the inventory question; it does not create a missing feature card.
 ```
 
 ### `jet ?` interactive help
@@ -245,13 +314,22 @@ Source signal: TTY opens `Help::Interactive`; query and non-TTY paths print once
 (`Source/main.rs:1040-1076`).
 
 ```text
-LIVE CAPTURE PENDING
-TTY:       jet ?  [query, arrows, Enter, Esc, Ctrl-C, shell prefill]
-non-TTY:   jet ?; jet ? build
-NO_COLOR:  repeat both
-narrow:    COLUMNS=60 jet ?
-Required checks: query-to-selection path, selected command stdout contract,
-non-TTY width, and Esc/Ctrl-C exit.
+CAPTURED — pipe fallback:
+NO_COLOR=1 target/debug/jet ? </dev/null
+┌─ jet ? — command palette ────────────────────────────────────────────┐
+│  type to search · ↑↓ · ⏎ command · Alt+⏎ example · ⇥ detail · F1     │
+│> ▸ Build & Run                                                       │
+...
+└──────────────────────────────────────────────────────────────────────┘
+All pipe rows measured 72 columns; no ESC bytes.
+
+CAPTURED — TTY, `TERM=xterm-256color`, 24x60:
+The same palette rendered with clipped hint text (`det…`), color SGR, and
+cursor erase/redraw. A scripted `:quit`-style key exit was not supplied; only
+initial paint was captured.
+
+Color check: `NO_COLOR=1` pipe had 0 ESC bytes; `FORCE_COLOR=1` had 4; setting
+both kept 0; `jet ? --color=always` had 4 and `--color=never` had 0.
 ```
 
 ### `jet debug`
@@ -262,13 +340,14 @@ Source signal: one command selects interpreter or native backend and exposes a
 and points to the interpreter path (`Native.rs:105-118`).
 
 ```text
-LIVE CAPTURE PENDING
-TTY:       jet debug examples/features/basics/hello.jet  [step, next, continue, quit]
-non-TTY:   scripted debug input through the interpreter backend
-NO_COLOR:  repeat TTY and scripted forms
-narrow:    COLUMNS=60 jet debug examples/features/basics/hello.jet
-Required checks: prompt discovery, command errors, Ctrl-C/EOF, backend boundary,
-and Jet terms versus raw lldb frames.
+CAPTURED — command contract:
+NO_COLOR=1 target/debug/jet debug --help
+jet debug — Debug a program from Jet source
+  jet debug [args]
+  --replay  consume a named replay as --replay=<name>
+
+The `(jet)` prompt and native/interpreter split are source-confirmed. No debug
+session ran under this card; prompt keys, Ctrl-C/EOF, and narrow output remain U.
 ```
 
 ### `jet notebook` terminal client
@@ -280,37 +359,41 @@ run/inspect/debug/profile, stdin, interrupt, import/export, and offline drafts
 was identified.
 
 ```text
-LIVE CAPTURE PENDING / INVENTORY BLOCKED
-TTY:       jet notebook [path]
-non-TTY:   jet notebook --protocol < scripted protocol messages
-NO_COLOR:  terminal launcher/status only
-narrow:    COLUMNS=60 jet notebook [path]
-Required check: confirm whether the protocol client is the intended terminal
-surface; otherwise remove “terminal client” from the TUI inventory and audit the
-HTML client elsewhere.
+CAPTURED — headless terminal protocol:
+NO_COLOR=1 target/debug/jet notebook --protocol <<EOF
+state
+EOF
+{"status":"ok","body":"{...\"cells\":[],...\"turns\":[]}"}
+exit=0.
+
+TTY `jet notebook` starts an HTTP server and prints its URL; the shipped rich
+client is HTML. The protocol is a line-oriented terminal adapter, not a TUI:
+it returns JSONL replies and has no shared key model, color, or resize path.
 ```
 
 ### bare `jet` / usage
 
-Source signal: bare usage is generated through `jet::CLI::usage_page`
-(`Source/main.rs:455-462`), while command help uses the same CLI tables
-(`Source/main.rs:459-475`).
+Source signal: `jet::CLI::usage_page` generates `jet --help` and `jet help`
+(`Source/main.rs:455-475`); bare `jet` dispatches to the REPL
+(`Source/main.rs:1127-1133`).
 
 ```text
-LIVE CAPTURE PENDING
-TTY:       jet
-non-TTY:   jet | sed -n l
-NO_COLOR:  repeat both
-narrow:    COLUMNS=60 jet
-Required checks: greeting versus usage, next-step affordance, color bytes,
-line wrapping, and exit code.
+CAPTURED — generated usage:
+target/debug/jet --version -> Jet 1.0.0
+target/debug/jet --help -> usage page from `jet::CLI::usage_page`, including
+the command list and flag list; exit=0.
+
+Bare `target/debug/jet` is not a usage page. It enters the REPL, covered above.
+The usage page is one-shot and does not expose keyboard, width, or drill-down
+controls. `--color` is handled by the command palette, but usage itself is
+plain in a pipe.
 ```
 
 ## Scorecard
 
 Static score: `3` source-complete mechanism, `2` partial/locally complete, `1`
-gap or ad-hoc path. `U` means live behavior remains unverified. Evidence is a
-source pointer, not a runtime claim.
+gap or ad-hoc path. `U` means at least one important interaction path remains
+unverified. Evidence combines source pointers and the bounded captures above.
 
 | Surface | Pattern | Score | Evidence |
 |---|---|---:|---|
@@ -357,7 +440,7 @@ source pointer, not a runtime claim.
 | `jet ?` | responsiveness | 2U | query prints directly; TTY path enters app (`main.rs:1065-1074`) |
 | `jet ?` | keyboard model | 2U | interactive app exists, but key transcript pending (`main.rs:1070-1072`) |
 | `jet ?` | progressive disclosure | 3U | query, categorized palette, and interactive modes (`main.rs:1065-1074`) |
-| `jet ?` | color / NO_COLOR | 3U | ColorChoice resolves against TTY and explicit flags (`main.rs:1051-1052`) |
+| `jet ?` | color / NO_COLOR | 3 | ColorChoice plus observed pipe matrix: `NO_COLOR` 0 ESC, `FORCE_COLOR` 4 ESC, explicit always/never 4/0 (`main.rs:1051-1052`) |
 | `jet ?` | resize | 2U | non-TTY width is fixed 72; interactive resize unverified (`main.rs:1074`) |
 | `jet debug` | responsiveness | 2U | prompt-driven stepping; native read has 30 s timeout (`Native.rs:50-75`, `Inferior.rs:54-63`) |
 | `jet debug` | keyboard model | 2U | `(jet)` command prompt exists; command list/escape behavior unverified (`Native.rs:199-220`) |
@@ -369,11 +452,11 @@ source pointer, not a runtime claim.
 | notebook terminal client | progressive disclosure | 2U | stale/quarantined output and details exist in client (`client.html:64-78`) |
 | notebook terminal client | color / NO_COLOR | 1U | browser CSS/client, no terminal policy found (`client.html:1-125`) |
 | notebook terminal client | resize | 1U | browser layout, not terminal behavior (`client.html:1-125`) |
-| bare `jet` / usage | responsiveness | 3U | one generated usage page (`main.rs:455-462`) |
-| bare `jet` / usage | keyboard model | 1U | one-shot usage has no keyboard path (`main.rs:455-462`) |
-| bare `jet` / usage | progressive disclosure | 2U | CLI schema is shared; hierarchy runtime capture pending (`CLISchema.rs:1-3`) |
-| bare `jet` / usage | color / NO_COLOR | 1U | usage wrapper does not show explicit color resolution (`main.rs:455-462`) |
-| bare `jet` / usage | resize | 1U | no width argument in wrapper (`main.rs:455-462`) |
+| Help/usage | responsiveness | 3 | `jet --help` and `jet help` print one generated page; bare `jet` enters REPL (`main.rs:455-462`, `1127-1133`) |
+| Help/usage | keyboard model | 1 | one-shot usage has no keyboard path (`main.rs:455-462`) |
+| Help/usage | progressive disclosure | 2 | shared CLI schema, but no drill-down from the one-shot page (`CLISchema.rs:1-3`) |
+| Help/usage | color / NO_COLOR | 1 | usage is plain in the pipe; no width/color renderer is wired at the wrapper (`main.rs:455-462`) |
+| Help/usage | resize | 1 | no width argument in wrapper (`main.rs:455-462`) |
 
 The scorecard's color scores are deliberately conservative after the ANSI
 sweep: shared diagnostics are strong, but the terminal family is not compliant
@@ -391,7 +474,7 @@ with one-owner policy until the listed alternate owners are reconciled.
 | 6 | P2 | REPL/live inspect/dev/build/diagnostics | width is handled only in REPL; other output has no width input (`Term.rs:368-385`, `Diagnostics.rs:869-877`) | Centralize terminal width and graceful narrow rendering; add resize/redraw or line-safe degradation. |
 | 7 | P2 | Canvas/scene | browser routes exist, no terminal CLI entry point (`WebHost.rs:889-1129`) | Decide inventory boundary. If terminal status is intended, expose a small semantic status/report surface; otherwise remove CLI claim. |
 | 8 | P2 | notebook | shipped client is HTML; no terminal client path found (`CmdNotebook.rs:145-175`, `client.html:1-125`) | Decide whether protocol stdin is the terminal surface; document or delete the candidate from TUI scope. |
-| 9 | P3 | bare `jet` / usage | generated usage wrapper has no width/color contract (`main.rs:455-462`) | Route usage through shared terminal policy and width-aware renderer; preserve pipe-safe plain output. |
+| 9 | P3 | Help/usage | generated usage wrapper has no width/color contract (`main.rs:455-462`) | Route usage through shared terminal policy and width-aware renderer; preserve pipe-safe plain output. |
 
 ## Proposed follow-up card clusters
 
@@ -401,22 +484,27 @@ clusters the orchestrator should mint, each body linking this report and
 
 1. **P1: unify Jet terminal lifecycle and ANSI ownership** — all raw mode,
    cursor control, clear/redraw, color, width, resize, restore, and non-TTY
-   floor rules; reconcile the ANSI sweep hits.
+   floor rules; done when the ANSI sweep has one documented owner per path.
 2. **P1: unify Jet progress/status event rendering** — dev, build, run, test,
-   timing, quiet, pipe, and JSON contracts.
+   timing, quiet, pipe, and JSON contracts; done when one event stream drives
+   every view and proves first-paint/final-result order.
 3. **P1: unify interactive key discovery and cancellation** — REPL, help,
-   debug, live inspect, and future terminal clients.
+   debug, live inspect, and future terminal clients; done when controls are
+   printed at first use and accept/cancel/EOF/interrupt behavior is captured.
 4. **P2: add summary-first progressive disclosure to reports** — diagnostics,
-   explain, inspect, test, and build output.
-5. **P2: resolve Canvas and notebook TUI inventory boundary** — either add the
-   terminal contract or remove the candidate from TUI scope.
+   explain, inspect, test, and build output; done when human detail has a named
+   drill-down and JSON keeps the complete facts.
+5. **P2: resolve Canvas and notebook TUI inventory boundary** — record Canvas
+   as browser-only unless an owner adds a terminal command; keep notebook's
+   JSONL protocol separate from a future TUI; done when both boundaries are
+   stated in their owning references.
 
 Required card body references:
 
 ```text
 Audit: docs/audits/tui-dx-audit-2026-08-20.md
 Principles: docs/reference/tui-interaction.md
-Origin: c0v7cn5o
+Origin: b1l7zqt1
 ```
 
 ## Micro sweep
@@ -427,7 +515,7 @@ Origin: c0v7cn5o
 | Ergonomics | REPL obvious path is strong; other reports require command knowledge and have no shared drill-down. |
 | Surfaces | Shared diagnostic and color homes exist; progress, width, and control homes do not. |
 | APIs, types, methods | `ColorChoice`, `Theme`, `render_all_colored`, `render_all_linked`, `terminal_width`, and `KeyReader` are useful homes; no shared progress event type found. |
-| Defaults | REPL falls back to cooked input; `jet ?` falls back to one-shot output; other TTY/non-TTY floors need proof. |
+| Defaults | REPL falls back to cooked input; `jet ?` falls back to one-shot output; notebook falls back to JSONL; build/dev/test success floors need proof. |
 | Naming | `[watch]`, `[build]`, `jet-timing`, `watching`, and `ran in` describe related status with different vocabularies. |
 | Error text and diagnostics | What/Why/Fix and pointer line are strong; report navigation is batch-only. |
 | UX and DX | REPL has progressive interaction; build/test/debug/inspect are separate loops. |
@@ -449,21 +537,25 @@ Origin: c0v7cn5o
    context economy, and repair determinism. Fixed polling and batch output lose
    verdict latency and make an agent infer state from prose. Stable JSON paths
    are the machine floor; human TTY rows need the same event source.
-4. **Concrete surfaces:** covered with source proof: REPL, dev, live inspect,
-   test, build/run, diagnostics, explain/inspect, `jet ?`, debug, notebook
-   launcher, bare usage. Worth checking: Canvas terminal boundary, all command
-   progress variants, SIGWINCH behavior, and every `--json`/`--quiet` pair.
-   Missing: shared progress event type, shared terminal lifecycle owner, and a
-   confirmed terminal Canvas/notebook client.
+4. **Concrete surfaces:** covered with source proof and bounded captures: REPL,
+   dev entry, live inspect, test entry, build/run entry, diagnostics,
+   explain/inspect entry, `jet ?`, debug entry, notebook protocol, usage, and
+   the absent Canvas command. Worth checking: successful progress variants,
+   SIGWINCH behavior, and every `--json`/`--quiet` pair. Missing: shared
+   progress event type, shared terminal lifecycle owner, and a confirmed
+   terminal Canvas client.
 
 ## Open proof and strongest assumption
 
-Criteria 1–2 remain open until the orchestrator adds real TTY/non-TTY/
-`NO_COLOR`/narrow captures. Criterion 3 remains open until five follow-up cards
-are minted and their IDs are recorded in the report, card log, and committed
-board store.
+Criterion 1 is done for the current checkout: every named surface has an owner,
+current-state source evidence, and a bounded command capture or an explicit
+absence capture. Criterion 2 is done as a source-plus-capture scorecard; `U`
+marks the successful compiler, resize, and full key matrices not run here.
+Criterion 3 is open: five ranked card-ready follow-ups and the principles
+reference are present, but the brief forbids Tower writes, so no board IDs can
+be recorded.
 
-Strongest unverified assumption: the requested “Canvas/scene CLI” and “notebook
-terminal client” may refer to terminal status/protocol paths not present in the
-inspected source; inventory must be confirmed before implementation cards are
-closed.
+Strongest unverified assumption: “Canvas/scene CLI” may mean a future terminal
+surface rather than the current browser Canvas server. This audit records the
+current fact: `jet canvas` does not exist; notebook `--protocol` is JSONL, not a
+TUI.

@@ -172,7 +172,7 @@ pub(super) fn apply_project_add_target(
     let kind = match target {
         "library" => "Library",
         "test" => "Check",
-        "executable" | "example" | "benchmark" => "Executable",
+        "executable" | "example" => "Executable",
         _ => "Executable",
     };
     let entry = json_string_field(request, "entry").unwrap_or_else(|| "run".to_string());
@@ -265,7 +265,7 @@ pub(super) fn apply_project_create_package(
     let output_kind = match target {
         "library" => "Library",
         "test" => "Check",
-        "executable" | "example" | "benchmark" => "Executable",
+        "executable" | "example" => "Executable",
         _ => "Executable",
     };
     let manifest = format!(
@@ -783,7 +783,6 @@ fn project_target_text(target: &str) -> Result<&'static str, String> {
         "executable" => Ok("executable"),
         "test" => Ok("test"),
         "example" => Ok("example"),
-        "benchmark" => Ok("benchmark"),
         _ => Err(project_edit_error(
             "bad_request",
             "unknown Canvas package target",

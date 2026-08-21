@@ -953,16 +953,16 @@ fn struct_decode_body(s: &crate::AST::StructDef, span: Span) -> Vec<Stmt> {
                 span,
             ));
             let error_name = format!("jet_serde_field_errors_{index}");
-            body.push(pattern_switch(
+            body.push(result_switch(
                 ident(&result, span),
-                "Ok",
-                vec![ok_value.clone()],
+                &ok_value,
                 vec![assign_local(
                     &slot,
                     Expr::Present(Box::new(ident(&ok_value, span)), span),
                     span,
                 )],
-                Some(serde_decode_error_body(&error_name, None, None, span)),
+                &error_name,
+                serde_decode_error_body(&error_name, None, None, span),
                 span,
             ));
             decoded.push((slot, value.clone(), None, None));
@@ -1013,21 +1013,21 @@ fn struct_decode_body(s: &crate::AST::StructDef, span: Span) -> Vec<Stmt> {
                 span,
             ));
             let error_name = format!("jet_serde_field_errors_{index}");
-            body.push(pattern_switch(
+            body.push(result_switch(
                 ident(&result, span),
-                "Ok",
-                vec![ok_value.clone()],
+                &ok_value,
                 vec![assign_local(
                     &slot,
                     Expr::Present(Box::new(ident(&ok_value, span)), span),
                     span,
                 )],
-                Some(serde_decode_error_body(
+                &error_name,
+                serde_decode_error_body(
                     &error_name,
                     missing.as_deref(),
                     Some(&key),
                     span,
-                )),
+                ),
                 span,
             ));
             decoded.push((slot, value.clone(), missing, Some(key)));
@@ -1522,11 +1522,12 @@ fn pattern_switch(
     else_body: Option<Vec<Stmt>>,
     span: Span,
 ) -> Stmt {
+    let pattern_subject = subject.clone();
     Stmt::Switch {
         subject,
         arms: vec![SwitchArm {
             cond: Expr::PatternTest {
-                subject: Box::new(ident("it", span)),
+                subject: Box::new(pattern_subject),
                 pattern: Pattern::Variant {
                     variant: variant.to_string(),
                     bindings: bindings.into_iter().map(|name| PatSlot::Bind { name, span }).collect(),
@@ -1539,6 +1540,59 @@ fn pattern_switch(
             span,
         }],
         else_body,
+        span,
+    }
+}
+
+fn result_switch(
+    subject: Expr,
+    ok_binding: &str,
+    ok_body: Vec<Stmt>,
+    err_binding: &str,
+    err_body: Vec<Stmt>,
+    span: Span,
+) -> Stmt {
+    let ok_subject = subject.clone();
+    let err_subject = subject.clone();
+    Stmt::Switch {
+        subject,
+        arms: vec![
+            SwitchArm {
+                cond: Expr::PatternTest {
+                    subject: Box::new(ok_subject),
+                    pattern: Pattern::Variant {
+                        variant: "Ok".to_string(),
+                        bindings: vec![PatSlot::Bind {
+                            name: ok_binding.to_string(),
+                            span,
+                        }],
+                        leading_dot: true,
+                        span,
+                    },
+                    span,
+                },
+                body: ok_body,
+                span,
+            },
+            SwitchArm {
+                cond: Expr::PatternTest {
+                    subject: Box::new(err_subject),
+                    pattern: Pattern::Variant {
+                        variant: "Err".to_string(),
+                        bindings: vec![PatSlot::Bind {
+                            name: err_binding.to_string(),
+                            span,
+                        }],
+                        leading_dot: true,
+                        span,
+                    },
+                    span,
+                },
+                body: err_body,
+                span,
+            },
+        ],
+        else_body: Some(Vec::new()),
         span,
     }
 }

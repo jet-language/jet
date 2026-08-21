@@ -648,12 +648,20 @@ impl<'a> Checker<'a> {
             else_body: &mut Option<Vec<Stmt>>,
             span: Span,
         ) {
+            let subjectless_guard = crate::AST::is_subjectless_guard(subject, span);
+            if subjectless_guard
+                && arms
+                    .iter()
+                    .any(|arm| crate::AST::readiness_head(&arm.cond).is_some())
+            {
+                self.check_readiness_switch(arms, else_body, span);
+                return;
+            }
             let original_conditions = arms
                 .iter()
                 .map(|arm| arm.cond.clone())
                 .collect::<Vec<_>>();
             let mut reordered_optional_guard = false;
-            let subjectless_guard = crate::AST::is_subjectless_guard(subject, span);
             // Normalize a single optional absence guard to the equivalent
             // Present test so TIR carries the same proven value that sema
             // checks. The branch swap preserves source evaluation order: only
@@ -1045,6 +1053,127 @@ impl<'a> Checker<'a> {
                 );
             }
             self.flow = crate::Sema::FlowFacts::FlowFacts::merge_paths(&outside_table, &paths);
+        }
+
+        /// D-CONC-CHAN2=D: readiness tables are not Boolean guards. Each arm
+        /// validates one plain `Receiver<T>` or one `Duration`, then checks its
+        /// body in the scope containing the receive binding.
+        fn check_readiness_switch(
+            &mut self,
+            arms: &mut [crate::AST::SwitchArm],
+            else_body: &mut Option<Vec<Stmt>>,
+            _span: Span,
+        ) {
+            let before = self.flow.clone();
+            let mut paths = Vec::with_capacity(arms.len() + usize::from(else_body.is_some()));
+            let mut element_ty: Option<Type> = None;
+            let mut has_receive = false;
+            let mut has_after = false;
+
+            for arm in arms.iter_mut() {
+                self.flow = before.clone();
+                let Some(head) = crate::AST::readiness_head(&arm.cond) else {
+                    self.diags.push(Diagnostic::error(
+                        "E0112",
+                        "a readiness table cannot mix channel arms with Boolean guards".to_string(),
+                        "every arm in one readiness table waits on a Receiver<T> or a Duration".to_string(),
+                        "write `value, receiver :> ...` or move the Boolean guard to a separate `if`".to_string(),
+                        Some(arm.cond.span()),
+                    ));
+                    self.check_block(&mut arm.body, true);
+                    paths.push(self.flow.clone());
+                    continue;
+                };
+                match head {
+                    crate::AST::ReadinessHead::Receive { binding, source } => {
+                        has_receive = true;
+                        let source_ty = self.infer(&mut source.clone());
+                        let payload = match source_ty {
+                            Some(Type::Apply { name, args })
+                                if name == Syntax::TYPE_RECEIVER && args.len() == 1 =>
+                            {
+                                args[0].clone()
+                            }
+                            Some(other) => {
+                                self.diags.push(Diagnostic::error(
+                                    "E0112",
+                                    format!("a readiness receive arm needs Receiver<T>, not {}", other.show()),
+                                    "a receive arm waits on one plain channel endpoint".to_string(),
+                                    "use the receiver returned by `channel<T>()`".to_string(),
+                                    Some(source.span()),
+                                ));
+                                Type::Named("Unit".to_string())
+                            }
+                            None => Type::Named("Unit".to_string()),
+                        };
+                        if let Some(previous) = &element_ty {
+                            if previous != &payload {
+                                self.diags.push(Diagnostic::error(
+                                    "E0112",
+                                    format!(
+                                        "readiness receive arms must share one element type, got {} and {}",
+                                        previous.show(),
+                                        payload.show()
+                                    ),
+                                    "one readiness table returns one receive payload type".to_string(),
+                                    "use receivers with the same T, or split the table".to_string(),
+                                    Some(source.span()),
+                                ));
+                            }
+                        } else {
+                            element_ty = Some(payload.clone());
+                        }
+                        self.push_scope();
+                        let mut restore_moved = Vec::new();
+                        if let Some(restored) =
+                            self.declare_condition_binding(binding, arm.cond.span(), payload)
+                        {
+                            restore_moved.push(restored);
+                        }
+                        self.check_block(&mut arm.body, false);
+                        self.pop_scope();
+                        for (name, at) in restore_moved {
+                            self.flow.moved.set(&name, at);
+                        }
+                    }
+                    crate::AST::ReadinessHead::After { duration } => {
+                        has_after = true;
+                        let duration_ty = self.infer(&mut duration.clone());
+                        if !matches!(duration_ty, Some(Type::Named(ref name)) if name == Syntax::DURATION_TYPE) {
+                            let shown = duration_ty
+                                .as_ref()
+                                .map(Type::show)
+                                .unwrap_or_else(|| "this value".to_string());
+                            self.diags.push(Diagnostic::error(
+                                "E0112",
+                                format!("`after` needs a Duration, not {shown}"),
+                                "a readiness timeout is one canonical Duration delta".to_string(),
+                                "write `after 100ms` or pass a Duration binding".to_string(),
+                                Some(duration.span()),
+                            ));
+                        }
+                        self.record_effect(crate::Sema::Effects::Effect::Time.name(), arm.cond.span());
+                        self.check_block(&mut arm.body, false);
+                    }
+                }
+                paths.push(self.flow.clone());
+            }
+
+            if let Some(body) = else_body {
+                self.flow = before.clone();
+                self.check_block(body, true);
+                paths.push(self.flow.clone());
+            }
+            if !has_receive && !has_after {
+                self.diags.push(Diagnostic::error(
+                    "E0112",
+                    "a readiness table has no usable wait arm".to_string(),
+                    "a table must wait on a Receiver<T> or a Duration".to_string(),
+                    "add `value, receiver :> ...` or `after 100ms :> ...`".to_string(),
+                    Some(arms.first().map(|arm| arm.cond.span()).unwrap_or(Span::new(0, 0))),
+                ));
+            }
+            self.flow = crate::Sema::FlowFacts::FlowFacts::merge_paths(&before, &paths);
         }
     
 }

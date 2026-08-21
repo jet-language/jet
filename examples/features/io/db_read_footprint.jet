@@ -7,11 +7,11 @@
 use core.db as db
 
 // A checked read-only query: its only DB effect is `DB.Read`, so the
-// `=[DB.Read, Panic]=>` bound holds. Decoding a row value (`.get`/`.int`) is pure,
+// `:[DB.Read]>` bound holds. Decoding a row value (`.get`/`.int`) is pure,
 // so it adds no effect — the `conn.query_one` read and the `?? panic` fallbacks
 // are the whole set. A `conn.execute` hiding in here would need `DB.Write` and be
 // rejected by E0740, which is the point.
-fn person_count(conn: DBScope) Int :[DB.Read, Panic]> {
+fn person_count(conn: DBScope) Int :[DB.Read]> {
     row_opt :: conn.query_one("SELECT COUNT(*) AS n FROM person", []) ?? panic("count failed")
     if row_opt == .Val(row) {
         n_val :: row.get("n") ?? panic("missing n")

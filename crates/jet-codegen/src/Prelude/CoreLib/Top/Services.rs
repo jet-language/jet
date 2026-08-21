@@ -597,10 +597,17 @@ impl JetShow for JetServiceError {
 
 impl JetShow for JetServiceTree {
     fn jet_show(&self) -> String {
+        let handlers = self
+            .workers
+            .iter()
+            .map(|worker| format!("{}:{}", worker.name, worker.handler))
+            .collect::<Vec<_>>()
+            .join(",");
         format!(
-            "ServiceTree(name={}, workers={}, started={}, restart={}, budget={}/{}ms, delivery={})",
+            "ServiceTree(name={}, workers={}, handlers=[{}], started={}, restart={}, budget={}/{}ms, delivery={})",
             self.name,
             self.workers.len(),
+            handlers,
             self.started,
             self.restart.jet_show(),
             self.restart_budget.max,

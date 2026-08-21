@@ -32,7 +32,7 @@ pub const RESERVED_TYPES: &[&str] = &[
     Syntax::DURATION_UNIT_TYPE,
     Syntax::DURATION_RANGE_ERROR_TYPE,
     Syntax::EXPIRING_VALUE_TYPE,
-    Syntax::TYPE_AUTHORITY,
+    Syntax::TYPE_ABILITIES,
     // D-SOLVER-LIB1=A: `Solver` is the Core finite-solver handle. Reserving it
     // prevents a user type from being mistaken for the runtime solver handle.
     Syntax::SOLVER_TYPE,
@@ -220,7 +220,7 @@ pub fn iter_elem(ty: &Type) -> Option<&Type> {
 /// below still delegates to `builtin_method_return`, so a name is suggested
 /// only when the canonical method table accepts it for that receiver.
 const BUILTIN_METHOD_VOCABULARY: &str = concat!(
-    "a accepted action active_count add add_asset_bundle add_bench add_doc add_executable add_install add_library add_new ",
+    "a accepted action active_count add add_asset_bundle add_doc add_executable add_install add_library add_new ",
     "add_package add_publish add_test advance after all any average b before binary_search binary_search_by ",
     "blocked_count bool buffer bytes cancel capacity capitalize chars chunk_while chunks clear clone ",
     "close collect compare concat contains contains_value copy copy_to count count_by count_ones count_zeros ",
@@ -245,7 +245,7 @@ const BUILTIN_METHOD_VOCABULARY: &str = concat!(
     "sources split split_once split_write starts_with state status step_by string strong_count sum summary ",
     "swapcase symmetric_difference syntax system take take_while text then tick title to_bytes to_float ",
     "to_int to_list to_lower to_set to_sorted_list to_string to_title to_upper today tokens toolchain trace ",
-    "trailing_zeros trim trim_end trim_start true_ try_collect try_insert try_push try_reserve types union unsubscribe unzip update upgrade ",
+    "trailing_zeros trim trim_end trim_start true_ try_collect try_insert try_push try_reserve types union unsubscribe unzip update upgrade without ",
     "value values view wait weighted_pick why windows with_capacity write write_byte write_bytes write_to ",
     "write_u16_be write_u16_le write_u32_be write_u32_le write_u64_be write_u64_le write_u8 zip zip_pad zip_short",
 );
@@ -292,6 +292,14 @@ pub fn builtin_method_return(
         }
         Type::Map { key, value, .. } => map_method_return(key, value, method, arg_count),
         Type::String => string_method_return(method, arg_count),
+        // D-AUTHORITY-NAME1=A / D-AUTHORITY-WORD2=E: one ordinary rights value;
+        // both operations return another narrowed value of the same type.
+        Type::Named(n) if n == Syntax::TYPE_ABILITIES => match (method, arg_count) {
+            ("with" | "without", 1) => Some(Some(Type::Named(
+                Syntax::TYPE_ABILITIES.to_string(),
+            ))),
+            _ => None,
+        },
         Type::Named(n) if n == Syntax::TYPE_ORDERING => match (method, arg_count) {
             ("then", 1) | ("reverse", 0) => Some(Some(Type::Named(
                 Syntax::TYPE_ORDERING.to_string(),
@@ -555,7 +563,7 @@ fn build_context_method_return(method: &str, arg_count: usize) -> Option<Option<
         })),
         ("action", 5 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14 | 15) => build_result(Syntax::TYPE_BUILD_ACTION),
         ("legacy", 6..=17) => build_result(Syntax::TYPE_BUILD_ACTION),
-        ("add_executable" | "add_library" | "add_test" | "add_bench" | "add_asset_bundle"
+        ("add_executable" | "add_library" | "add_test" | "add_asset_bundle"
         | "add_doc" | "add_install" | "add_package" | "add_publish", 3 | 4 | 5 | 6 | 7) => {
             build_result(Syntax::TYPE_BUILD_TARGET)
         }
@@ -679,26 +687,26 @@ pub fn build_context_method_arg_types(method: &str, arg_count: usize) -> Option<
             }
             Some(args)
         }
-        ("add_executable" | "add_library" | "add_test" | "add_bench"
+        ("add_executable" | "add_library" | "add_test"
         | "add_asset_bundle" | "add_doc" | "add_install" | "add_package" | "add_publish", 3) => {
             Some(vec![Type::String, strings(), actions()])
         }
-        ("add_executable" | "add_library" | "add_test" | "add_bench"
+        ("add_executable" | "add_library" | "add_test"
         | "add_asset_bundle" | "add_doc" | "add_install" | "add_package" | "add_publish", 4) => {
             Some(vec![Type::String, strings(), actions(), targets()])
         }
-        ("add_executable" | "add_library" | "add_test" | "add_bench"
+        ("add_executable" | "add_library" | "add_test"
         | "add_asset_bundle" | "add_doc" | "add_install" | "add_package" | "add_publish", 5) => {
             Some(vec![Type::String, strings(), actions(), targets(), probes()])
         }
-        ("add_executable" | "add_library" | "add_test" | "add_bench"
+        ("add_executable" | "add_library" | "add_test"
         | "add_asset_bundle" | "add_doc" | "add_install" | "add_package" | "add_publish", 6) => {
             Some(vec![
                 Type::String, strings(), actions(), targets(), probes(),
                 Type::Named(Syntax::TYPE_BUILD_TOOLCHAIN.to_string()),
             ])
         }
-        ("add_executable" | "add_library" | "add_test" | "add_bench"
+        ("add_executable" | "add_library" | "add_test"
         | "add_asset_bundle" | "add_doc" | "add_install" | "add_package" | "add_publish", 7) => {
             Some(vec![
                 Type::String, strings(), actions(), targets(), probes(),
@@ -940,10 +948,10 @@ fn builtin_static_return(ty: &Type, method: &str, nargs: usize) -> Option<Option
         (Type::Named(n), "now", 0) if n == crate::Syntax::CLOCK_TYPE => {
             Some(Some(Type::Named("Instant".to_string())))
         }
-        // D-AUTHORITY-NAME1=A: `Authority.workspace()` constructs the one
+        // D-AUTHORITY-WORD2=E: `Abilities.workspace()` constructs the one
         // named rights carrier. Its narrowing methods are a later slice.
-        (Type::Named(n), "workspace", 0) if n == crate::Syntax::TYPE_AUTHORITY => {
-            Some(Some(Type::Named(crate::Syntax::TYPE_AUTHORITY.to_string())))
+        (Type::Named(n), "workspace", 0) if n == crate::Syntax::TYPE_ABILITIES => {
+            Some(Some(Type::Named(crate::Syntax::TYPE_ABILITIES.to_string())))
         }
         (Type::Named(n), "today", 0) if n == "Date" => {
             Some(Some(Type::Named("Date".to_string())))
@@ -2293,6 +2301,9 @@ pub fn builtin_method_arg_types(recv_ty: &Type, method: &str) -> Option<Vec<Type
         }
     }
     match recv_ty {
+        Type::Named(n) if n == Syntax::TYPE_ABILITIES && matches!(method, "with" | "without") => {
+            Some(vec![Type::String])
+        }
         Type::Named(n) if n == Syntax::TYPE_ORDERING => match method {
             "then" => Some(vec![Type::Named(Syntax::TYPE_ORDERING.to_string())]),
             "reverse" => Some(vec![]),
@@ -2349,7 +2360,7 @@ pub fn builtin_method_arg_types(recv_ty: &Type, method: &str) -> Option<Vec<Type
                 Type::List(Box::new(Type::String)),
                 Type::List(Box::new(Type::String)),
             ]),
-            "add_executable" | "add_library" | "add_test" | "add_bench"
+            "add_executable" | "add_library" | "add_test"
             | "add_asset_bundle" | "add_doc" | "add_install" | "add_package"
             | "add_publish" => Some(vec![
                 Type::String,
@@ -2653,7 +2664,7 @@ pub fn builtin_method_arg_types(recv_ty: &Type, method: &str) -> Option<Vec<Type
             "send" => Some(vec![args.first().cloned().unwrap_or(Type::Int)]),
             _ => Some(vec![]),
         },
-        Type::Apply { name, .. } if name == "Task" || name == "Channel" => Some(vec![]),
+        Type::Apply { name, .. } if name == "Task" => Some(vec![]),
         Type::Apply { name, args } if name == "Cell" => {
             let t = args.first().cloned().unwrap_or(Type::Int);
             match method {

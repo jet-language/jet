@@ -68,7 +68,7 @@ use core.testing as testing
     fs.write(path, "journal") ?? return
     values := List.try_with_capacity(1) ?? return
     values.try_push(1) ?? return
-    require(values.len() == 1)
+    assert(values.len() == 1)
     fs.remove(path) ?? return
 }
 ~~~

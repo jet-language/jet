@@ -184,8 +184,7 @@ impl<'a> Parser<'a> {
             };
             if let Some(marker_span) = body_marker_span {
                 let value_body = !matches!(self.peek().kind, TokKind::LBrace)
-                    || self.brace_starts_record()
-                    || !effect_body_marker;
+                    || (!effect_body_marker && self.brace_starts_inferred_literal());
                 if value_body {
                     let start = marker_span.start;
                     // A one-expression marker accepts a non-empty brace as an
@@ -257,7 +256,10 @@ impl<'a> Parser<'a> {
             }
             self.expect(TokKind::LBrace, "to open the function body")?;
             let previous_tail_depth = self.callable_tail_block_depth;
-            if return_type.is_some() {
+            if return_type
+                .as_ref()
+                .is_some_and(|ty| Self::return_type_has_value(ty))
+            {
                 self.callable_tail_block_depth = Some(self.block_depth + 1);
             }
             let body = self.block_stmts();
@@ -485,6 +487,7 @@ impl<'a> Parser<'a> {
                     TokKind::ColonColon | TokKind::Eq | TokKind::UnifiedArrow
                 ) || (matches!(self.peek().kind, TokKind::LBrace)
                     && end < self.peek().span.start)
+                    || matches!(&self.peek().kind, TokKind::Ident(name) if name == Syntax::VIEW_FROM)
             });
             self.pos = saved_pos;
             self.diags.truncate(saved_diags);

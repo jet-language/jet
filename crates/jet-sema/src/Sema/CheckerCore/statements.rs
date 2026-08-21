@@ -2747,69 +2747,11 @@ impl<'a> Checker<'a> {
                     }
                     self.pop_scope();
                 }
-                // D-EFF1: a `#Caps(Net, DB) { … }` effect-restriction
-                // region. Validate the cap names (E0119), open an accumulator so the
-                // effects reached inside are tallied, check the body, then seal the
-                // region for the post-pass E0741 subset check. A lexical scope.
+                // D-EFF1 / D-AUTHORITY-SCOPE1: bare `#Abilities(Net, DB) { … }`
+                // restricts effects. A named `#Abilities(auth: FS, Net) { … }`
+                // also binds a scoped Authority handle and uses the same
+                // subset check for both forms.
                 Stmt::Caps {
-                    caps,
-                    caps_span,
-                    body,
-                    ..
-                } => {
-                    let mut cap_set = crate::Sema::EffectSet::new();
-                    let mut bad = false;
-                    for (name, span) in caps.iter() {
-                        match crate::Sema::resolve_effect_name(name, self.effect_facts) {
-                            Ok(e) => {
-                                cap_set.insert(e);
-                            }
-                            Err(suggestion) => {
-                                if crate::Sema::parse_effect_name(name).is_some() {
-                                    self.diags.push(crate::Sema::undeclared_effect(
-                                        name,
-                                        suggestion.as_deref(),
-                                        Some(*span),
-                                    ));
-                                } else {
-                                    self.diags.push(unknown_effect(name, *span));
-                                }
-                                bad = true;
-                            }
-                        }
-                    }
-                    self.region_stack.push(crate::Sema::RegionAccum {
-                        caps: cap_set,
-                        caps_span: *caps_span,
-                        direct: crate::Sema::EffectSet::new(),
-                        edges: std::collections::BTreeSet::new(),
-                        maximal: false,
-                        grant: false,
-                    });
-                    self.check_block(body, true);
-                    let acc = self.region_stack.pop().expect("pushed above");
-                    // Skip the E0741 subset check when a cap name was invalid (the
-                    // cap set is incomplete) — E0119 is the real problem to fix.
-                    if !bad {
-                        self.fx_regions.push(crate::Sema::RegionSummary {
-                            caps: acc.caps,
-                            direct: acc.direct,
-                            edges: acc.edges,
-                            maximal: acc.maximal,
-                            caps_span: acc.caps_span,
-                            grant: acc.grant,
-                        });
-                    }
-                }
-                // D-SCAP1 (ratified 2026-06-21, opt A): a `#grant(FS) { caps -> … }`
-                // scoped-capability grant region — the dual of `#Caps`. Validate the
-                // granted effect names (E0119), bind the first-class capability handle
-                // `caps` in a fresh scope (revoked at scope end, RAII), open a grant
-                // accumulator so effects reached inside are tallied against the grant
-                // (an effect with no backing capability is E0712 in the post-pass),
-                // check the body, then enforce that the handle does not escape (E0711).
-                // A lexical scope; erased in codegen (I3).
-                Stmt::Grant {
                     caps,
                     caps_span,
                     binding,
@@ -2822,7 +2764,14 @@ impl<'a> Checker<'a> {
                     for (name, span) in caps.iter() {
                         match crate::Sema::resolve_effect_name(name, self.effect_facts) {
                             Ok(e) => {
-                                cap_set.insert(e);
+                                if let Some(diagnostic) =
+                                    crate::Sema::reject_positive_deny_only_effect(&e, *span)
+                                {
+                                    self.diags.push(diagnostic);
+                                    bad = true;
+                                } else {
+                                    cap_set.insert(e);
+                                }
                             }
                             Err(suggestion) => {
                                 if crate::Sema::parse_effect_name(name).is_some() {
@@ -2838,32 +2787,39 @@ impl<'a> Checker<'a> {
                             }
                         }
                     }
-                    self.push_scope();
-                    self.declare_loop_var(
-                        binding.clone(),
-                        *binding_span,
-                        &Type::Named(crate::Syntax::CAP_HANDLE_TYPE.to_string()),
-                    );
+                    if let Some(binding) = binding {
+                        let binding_span = binding_span
+                            .as_ref()
+                            .copied()
+                            .expect("named #Abilities binding has a span");
+                        self.push_scope();
+                        self.declare_loop_var(
+                            binding.clone(),
+                            binding_span,
+                            &Type::Named(crate::Syntax::CAP_HANDLE_TYPE.to_string()),
+                        );
+                    }
                     self.region_stack.push(crate::Sema::RegionAccum {
                         caps: cap_set,
                         caps_span: *caps_span,
                         direct: crate::Sema::EffectSet::new(),
                         edges: std::collections::BTreeSet::new(),
                         maximal: false,
-                        grant: true,
                     });
                     self.check_block(body, true);
                     let acc = self.region_stack.pop().expect("pushed above");
-                    // E0711: the capability handle may not outlive the grant — it is
-                    // revoked at scope end. Flag a return/store/share that lets it
-                    // escape. (Uses outside the block already fail as unknown-name,
-                    // since the handle is scoped to this block.)
-                    if let Some(escape_span) = grant_handle_escape(body, binding) {
-                        self.diags.push(crate::Sema::e0711(binding, escape_span));
+                    if let Some(binding) = binding {
+                        if let Some(escape_span) = grant_handle_escape(body, binding) {
+                            self.diags.push(crate::Sema::e0711(
+                                binding,
+                                crate::Syntax::KW_CAPS,
+                                escape_span,
+                            ));
+                        }
+                        self.pop_scope();
                     }
-                    self.pop_scope();
-                    // Skip the E0712 subset check when a grant name was invalid (the
-                    // grant set is incomplete) — E0119 is the real problem to fix.
+                    // Skip the subset check when a cap name was invalid (the cap
+                    // set is incomplete) — E0119 is the real problem to fix.
                     if !bad {
                         self.fx_regions.push(crate::Sema::RegionSummary {
                             caps: acc.caps,
@@ -2871,7 +2827,6 @@ impl<'a> Checker<'a> {
                             edges: acc.edges,
                             maximal: acc.maximal,
                             caps_span: acc.caps_span,
-                            grant: acc.grant,
                         });
                     }
                 }

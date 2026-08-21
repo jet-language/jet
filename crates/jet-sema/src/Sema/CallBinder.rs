@@ -543,8 +543,12 @@ mod tests {
         .is_none());
         assert_eq!(diags.len(), 1);
         assert_eq!(diags[0].code, "E0772");
+        assert!(diags[0]
+            .what
+            .contains("matches more than one callable body"));
         assert!(diags[0].why.contains("put(name: String, text: String)"));
         assert!(diags[0].why.contains("put(key: String, id: String)"));
+        assert!(diags[0].fix.contains("name the arguments"));
         assert!(diags[0].fix.contains("put(name: …, text: …)"));
     }
 
@@ -577,5 +581,27 @@ mod tests {
         assert!(diags.is_empty());
         assert_eq!(args[0].flags.binder_label.as_deref(), Some("key"));
         assert_eq!(args[1].flags.binder_label.as_deref(), Some("id"));
+    }
+
+    #[test]
+    fn candidate_set_rejects_when_no_body_type_matches() {
+        let first = vec![param("name"), param("text")];
+        let candidates = [CallableCandidate {
+            params: &first,
+            signature: "put(name: String, text: String)",
+        }];
+        let mut args = vec![arg(4), arg(12)];
+        let mut diags = Vec::new();
+
+        assert!(bind_call_candidate_set(
+            "put",
+            &candidates,
+            &mut args,
+            Span::new(0, 16),
+            &mut diags,
+            |_, _| false,
+        )
+        .is_none());
+        assert!(diags.is_empty());
     }
 }

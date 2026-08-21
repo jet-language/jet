@@ -21,7 +21,7 @@
 // enter the grammar. Every row states its safe direction and its gate words
 // (D-FACT-LAW1=B); a prover may publish a read-only row (D-FACT-OWN1=A).
 // Marker-plane reconciliation anchors: MARKER_PUB_FILE, MARKER_NO_PRELUDE, MARKER_TARGET,
-// MARKER_LAYOUT, MARKER_CODABLE, Policy::APPLIED_RULES, Registry::rows, KW_CAPS, KW_GRANT,
+// MARKER_LAYOUT, MARKER_CODABLE, Policy::APPLIED_RULES, Registry::rows, KW_CAPS (#Caps),
 // KW_COMPTIME, KW_DERIVE, MARKER_TRACK, MARKER_LOCAL, MARKER_SHARED. Constants live in the private modules
 // below; keep this root file mentioning them so I7 audits can check one
 // canonical surface entrypoint.
@@ -185,6 +185,10 @@
 // effect and value forms stay quiet. Fmt preserves the author's branch shape.
 // D-EFFECT-DECL1=A (ratified 2026-07-28, card #1299) mints KW_EFFECT_DECL:
 // `effect Root.Leaf` adds one package-view fact and erases before TIR.
+// D-AUTHORITY-ROOTS1=A (ratified 2026-08-06, card #1567) keeps the closed
+// grantable root table at thirteen and serves foreign-language leaves through
+// BUILTIN_EFFECT_LEAVES (`FFI.Go`, `FFI.Py`, `FFI.Octave`, and the other
+// supported binders). `Panic` and `Mem` are deny-only rows, not roots.
 // D-EACH1=C (ratified 2026-07-28, card #1239) mints SIGIL_FENCE_OPEN /
 // SIGIL_FENCE_CLOSE. D-FENCE-GLYPH1=A (card #1516) respells them
 // `@[ a, b ]@` and opens expression-position fences to expression entries:
@@ -278,6 +282,9 @@ pub const TYPE_SENDER: &str = "Sender";
 pub const LOOP_CHANNEL_DRAIN: &str = "loop value, receiver";
 /// D-CONC-CHAN2=D: contextual timeout arm in a readiness table.
 pub const READINESS_AFTER: &str = "after";
+/// Compiler-private field used while a readiness arm is carried through the
+/// existing one-field tuple AST node. It cannot be written by source code.
+pub const INTERNAL_SELECT_AFTER_FIELD: &str = "\0jet.select.after";
 
 /// D-CONC-SHARE1=A: prefix for construction of a shared cell.
 pub const KW_SHARED: &str = "shared";

@@ -248,20 +248,10 @@ use std::collections::HashSet;
                             continue;
                         }
                     }
-                    if self.is_task_spawn && self.type_contains_cell_guard(&cap_ty) {
-                        let problem = self
-                            .crossing_problem(&cap_ty, SendCrossing::TaskCapture, true)
-                            .expect("Cell guards are thread-confined");
-                        self.report_unsendable(
-                            name,
-                            &cap_ty,
-                            problem,
-                            SendCrossing::TaskCapture,
-                            lam.span,
-                        );
-                        continue;
-                    }
-                    if self.type_contains_cell_guard(&cap_ty) {
+                    // Cell-guard storage is a separate local-lambda rule. A task
+                    // capture must reach the shared crossing prover instead of
+                    // being shadowed by E0217.
+                    if !self.is_task_spawn && self.type_contains_cell_guard(&cap_ty) {
                         self.report_cell_guard_storage(
                             format!("Cell guard `{name}` cannot be captured by a lambda"),
                             lam.span,
@@ -884,7 +874,6 @@ fn rewrite_inline_loop_target(stmts: &mut [Stmt], old: &str, new: &str) {
             | Stmt::TaskGroup { body, .. }
             | Stmt::Layout { body, .. }
             | Stmt::Caps { body, .. }
-            | Stmt::Grant { body, .. }
             | Stmt::ComptimeBlock { body, .. }
             | Stmt::ContextBlock { body, .. }
             | Stmt::Live { body, .. }
@@ -976,7 +965,6 @@ fn rewrite_collect_yields(stmts: &mut [Stmt], target: &str) {
             | Stmt::TaskGroup { body, .. }
             | Stmt::Layout { body, .. }
             | Stmt::Caps { body, .. }
-            | Stmt::Grant { body, .. }
             | Stmt::ComptimeBlock { body, .. }
             | Stmt::AssumeDet { body, .. }
             | Stmt::ScopeMember { body, .. } => rewrite_collect_yields(body, target),

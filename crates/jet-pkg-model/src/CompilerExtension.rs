@@ -17,7 +17,7 @@
 //! **deterministic key order** (lexicographic) and no insignificant whitespace.
 //! Schema version is `protocol` (must equal [`PROTOCOL_VERSION`]).
 //!
-//! Snapshot fields: `protocol`, `stage`, `capabilities`, `limits`, `trust`,
+//! Snapshot fields: `protocol`, `stage`, `abilities`, `limits`, `trust`,
 //! `types`, `symbols`, `spans` (symbols carry `effects` + `provenance`).
 //! Response fields: `protocol`, `findings`, `proposed_edits`, `artifacts`
 //! (`artifacts` must be `[]` in v1).
@@ -25,7 +25,7 @@
 //! # Limits / trust / lifecycle
 //!
 //! - [`ResourceLimits`]: fuel, memory, table, finding/edit/response caps, wall timeout.
-//! - [`TrustPolicy`]: components are `untrusted` by default; protocol + capability
+//! - [`TrustPolicy`]: components are `untrusted` by default; protocol + ability
 //!   negotiation must pass before analyze.
 //! - **Deterministic sandbox:** empty host linker — no clock/random/fs/net/process
 //!   imports; guests that declare them fail closed at load (D-DX5-HOOK1).
@@ -88,10 +88,10 @@ pub const MAX_SNAPSHOT_BYTES: usize = 16 * 1024 * 1024;
 /// this larger cap also bounds host startup, IPC, and crash cleanup.
 pub const HOST_PROCESS_TIMEOUT_MS: u64 = 5_000;
 
-/// Capabilities a v1 component may negotiate. Later stages extend this set
+/// Abilities a v1 component may negotiate. Later stages extend this set
 /// rather than inventing a second plugin system (D-DX5-HOOK1 hybrid law).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub enum Capability {
+pub enum Ability {
     ReadTypes,
     ReadSymbols,
     ReadEffects,
@@ -101,42 +101,42 @@ pub enum Capability {
     ProposeEdit,
 }
 
-impl Capability {
+impl Ability {
     pub fn as_str(self) -> &'static str {
         match self {
-            Capability::ReadTypes => "read_types",
-            Capability::ReadSymbols => "read_symbols",
-            Capability::ReadEffects => "read_effects",
-            Capability::ReadSpans => "read_spans",
-            Capability::ReadProvenance => "read_provenance",
-            Capability::EmitFinding => "emit_finding",
-            Capability::ProposeEdit => "propose_edit",
+            Ability::ReadTypes => "read_types",
+            Ability::ReadSymbols => "read_symbols",
+            Ability::ReadEffects => "read_effects",
+            Ability::ReadSpans => "read_spans",
+            Ability::ReadProvenance => "read_provenance",
+            Ability::EmitFinding => "emit_finding",
+            Ability::ProposeEdit => "propose_edit",
         }
     }
 
-    pub fn parse(s: &str) -> Option<Capability> {
+    pub fn parse(s: &str) -> Option<Ability> {
         Some(match s {
-            "read_types" => Capability::ReadTypes,
-            "read_symbols" => Capability::ReadSymbols,
-            "read_effects" => Capability::ReadEffects,
-            "read_spans" => Capability::ReadSpans,
-            "read_provenance" => Capability::ReadProvenance,
-            "emit_finding" => Capability::EmitFinding,
-            "propose_edit" => Capability::ProposeEdit,
+            "read_types" => Ability::ReadTypes,
+            "read_symbols" => Ability::ReadSymbols,
+            "read_effects" => Ability::ReadEffects,
+            "read_spans" => Ability::ReadSpans,
+            "read_provenance" => Ability::ReadProvenance,
+            "emit_finding" => Ability::EmitFinding,
+            "propose_edit" => Ability::ProposeEdit,
             _ => return None,
         })
     }
 
     /// V1 floor: typed observation + findings/edits.
-    pub fn v1_defaults() -> &'static [Capability] {
+    pub fn v1_defaults() -> &'static [Ability] {
         &[
-            Capability::ReadTypes,
-            Capability::ReadSymbols,
-            Capability::ReadEffects,
-            Capability::ReadSpans,
-            Capability::ReadProvenance,
-            Capability::EmitFinding,
-            Capability::ProposeEdit,
+            Ability::ReadTypes,
+            Ability::ReadSymbols,
+            Ability::ReadEffects,
+            Ability::ReadSpans,
+            Ability::ReadProvenance,
+            Ability::EmitFinding,
+            Ability::ProposeEdit,
         ]
     }
 }
@@ -219,22 +219,22 @@ impl std::fmt::Display for ProtocolError {
     }
 }
 
-/// Negotiate capabilities against the v1 allowlist + protocol version.
-pub fn negotiate_capabilities(
+/// Negotiate abilities against the v1 allowlist + protocol version.
+pub fn negotiate_abilities(
     protocol: u32,
-    requested: &[Capability],
-) -> Result<Vec<Capability>, ProtocolError> {
+    requested: &[Ability],
+) -> Result<Vec<Ability>, ProtocolError> {
     if protocol != PROTOCOL_VERSION {
         return Err(ProtocolError::new(format!(
             "compiler-extension protocol mismatch: host={PROTOCOL_VERSION}, guest={protocol}"
         )));
     }
-    let allow: BTreeSet<_> = Capability::v1_defaults().iter().copied().collect();
+    let allow: BTreeSet<_> = Ability::v1_defaults().iter().copied().collect();
     let mut granted = BTreeSet::new();
     for cap in requested {
         if !allow.contains(cap) {
             return Err(ProtocolError::new(format!(
-                "capability `{}` is not in the v1 allowlist",
+                "ability `{}` is not in the v1 allowlist",
                 cap.as_str()
             )));
         }
@@ -276,7 +276,7 @@ pub struct SymbolFact {
 pub struct TypedSnapshot {
     pub protocol: u32,
     pub stage: String,
-    pub capabilities: Vec<Capability>,
+    pub abilities: Vec<Ability>,
     pub limits: ResourceLimits,
     pub trust: TrustPolicy,
     pub types: Vec<TypeFact>,
@@ -285,15 +285,15 @@ pub struct TypedSnapshot {
 }
 
 impl TypedSnapshot {
-    /// Build a v1 snapshot after capability negotiation. Facts must be sorted
+    /// Build a v1 snapshot after ability negotiation. Facts must be sorted
     /// by `id` before encode for byte-stable replay.
     pub fn new(
-        capabilities: Vec<Capability>,
+        abilities: Vec<Ability>,
         types: Vec<TypeFact>,
         symbols: Vec<SymbolFact>,
         spans: Vec<SpanFact>,
     ) -> Result<Self, ProtocolError> {
-        let capabilities = negotiate_capabilities(PROTOCOL_VERSION, &capabilities)?;
+        let abilities = negotiate_abilities(PROTOCOL_VERSION, &abilities)?;
         let mut types = types;
         let mut symbols = symbols;
         let mut spans = spans;
@@ -303,7 +303,7 @@ impl TypedSnapshot {
         Ok(Self {
             protocol: PROTOCOL_VERSION,
             stage: STAGE.to_string(),
-            capabilities,
+            abilities,
             limits: ResourceLimits::v1_defaults(),
             trust: TrustPolicy::Untrusted,
             types,
@@ -328,10 +328,10 @@ impl TypedSnapshot {
                 "v1 trust policy admits only `untrusted` components",
             ));
         }
-        let caps: Vec<String> = self.capabilities.iter().map(|c| c.as_str().to_string()).collect();
+        let caps: Vec<String> = self.abilities.iter().map(|c| c.as_str().to_string()).collect();
         let mut obj = BTreeMap::new();
         obj.insert(
-            "capabilities".into(),
+            "abilities".into(),
             JSONValue::Array(caps.into_iter().map(JSONValue::String).collect()),
         );
         obj.insert("limits".into(), limits_to_json(&self.limits));
@@ -365,7 +365,7 @@ impl TypedSnapshot {
             &[
                 "protocol",
                 "stage",
-                "capabilities",
+                "abilities",
                 "limits",
                 "trust",
                 "types",
@@ -389,7 +389,7 @@ impl TypedSnapshot {
         let trust = TrustPolicy::parse(trust_s).ok_or_else(|| {
             ProtocolError::new(format!("unknown trust policy `{trust_s}`"))
         })?;
-        let caps = parse_capabilities(obj.get("capabilities").unwrap())?;
+        let caps = parse_abilities(obj.get("abilities").unwrap())?;
         let limits = limits_from_json(obj.get("limits").unwrap())?;
         let types = parse_types(obj.get("types").unwrap())?;
         let symbols = parse_symbols(obj.get("symbols").unwrap())?;
@@ -397,7 +397,7 @@ impl TypedSnapshot {
         Ok(Self {
             protocol,
             stage: stage.to_string(),
-            capabilities: caps,
+            abilities: caps,
             limits,
             trust,
             types,
@@ -485,7 +485,7 @@ impl AnalyzeResponse {
     }
 }
 
-/// Validate a decoded response against the snapshot, granted capabilities,
+/// Validate a decoded response against the snapshot, granted abilities,
 /// and resource limits. Successful validation does **not** mutate compiler
 /// state — the host must explicitly accept staged findings/edits.
 pub fn validate_response(
@@ -524,30 +524,30 @@ pub fn validate_response(
             snapshot.limits.max_edits
         )));
     }
-    let caps: BTreeSet<_> = snapshot.capabilities.iter().copied().collect();
-    if !response.findings.is_empty() && !caps.contains(&Capability::EmitFinding) {
+    let caps: BTreeSet<_> = snapshot.abilities.iter().copied().collect();
+    if !response.findings.is_empty() && !caps.contains(&Ability::EmitFinding) {
         return Err(ProtocolError::new(
-            "findings require capability `emit_finding`",
+            "findings require ability `emit_finding`",
         ));
     }
-    if !response.proposed_edits.is_empty() && !caps.contains(&Capability::ProposeEdit) {
+    if !response.proposed_edits.is_empty() && !caps.contains(&Ability::ProposeEdit) {
         return Err(ProtocolError::new(
-            "proposed_edits require capability `propose_edit`",
+            "proposed_edits require ability `propose_edit`",
         ));
     }
     let span_ids = snapshot.span_ids();
     let type_ids = snapshot.type_ids();
     // Snapshot internal consistency: symbol refs must resolve when those
-    // read capabilities were granted.
-    if caps.contains(&Capability::ReadSymbols) {
+    // read abilities were granted.
+    if caps.contains(&Ability::ReadSymbols) {
         for sym in &snapshot.symbols {
-            if caps.contains(&Capability::ReadTypes) && !type_ids.contains(sym.type_id.as_str()) {
+            if caps.contains(&Ability::ReadTypes) && !type_ids.contains(sym.type_id.as_str()) {
                 return Err(ProtocolError::new(format!(
                     "symbol `{}` references unknown type_id `{}`",
                     sym.id, sym.type_id
                 )));
             }
-            if caps.contains(&Capability::ReadSpans) && !span_ids.contains(sym.span_id.as_str()) {
+            if caps.contains(&Ability::ReadSpans) && !span_ids.contains(sym.span_id.as_str()) {
                 return Err(ProtocolError::new(format!(
                     "symbol `{}` references unknown span_id `{}`",
                     sym.id, sym.span_id
@@ -1057,20 +1057,20 @@ fn json_usize(v: &JSONValue, name: &str) -> Result<usize, ProtocolError> {
     usize::try_from(n).map_err(|_| ProtocolError::new(format!("`{name}` out of range")))
 }
 
-fn parse_capabilities(v: &JSONValue) -> Result<Vec<Capability>, ProtocolError> {
+fn parse_abilities(v: &JSONValue) -> Result<Vec<Ability>, ProtocolError> {
     let arr = v
         .as_array()
-        .map_err(|e| ProtocolError::new(format!("capabilities: {e}")))?;
+        .map_err(|e| ProtocolError::new(format!("abilities: {e}")))?;
     let mut out = Vec::with_capacity(arr.len());
     for item in arr {
         let s = item.as_str().map_err(ProtocolError::new)?;
-        let cap = Capability::parse(s)
-            .ok_or_else(|| ProtocolError::new(format!("unknown capability `{s}`")))?;
+        let cap = Ability::parse(s)
+            .ok_or_else(|| ProtocolError::new(format!("unknown ability `{s}`")))?;
         out.push(cap);
     }
     out.sort();
     out.dedup();
-    negotiate_capabilities(PROTOCOL_VERSION, &out)
+    negotiate_abilities(PROTOCOL_VERSION, &out)
 }
 
 fn parse_string_array(v: &JSONValue, name: &str) -> Result<Vec<String>, ProtocolError> {
@@ -1273,7 +1273,7 @@ mod tests {
 
     fn sample_snapshot() -> TypedSnapshot {
         TypedSnapshot::new(
-            Capability::v1_defaults().to_vec(),
+            Ability::v1_defaults().to_vec(),
             vec![TypeFact {
                 id: "t1".into(),
                 repr: "Int".into(),
@@ -1379,19 +1379,19 @@ mod tests {
         assert!(wit.contains(&format!("export {ANALYZE_EXPORT}:")));
         assert!(wit.contains("list<u8>"));
         assert!(!wit.contains("world jetplugin"));
-        assert!(Capability::v1_defaults().contains(&Capability::ReadTypes));
-        assert!(Capability::v1_defaults().contains(&Capability::EmitFinding));
-        assert_eq!(Capability::ReadSymbols.as_str(), "read_symbols");
+        assert!(Ability::v1_defaults().contains(&Ability::ReadTypes));
+        assert!(Ability::v1_defaults().contains(&Ability::EmitFinding));
+        assert_eq!(Ability::ReadSymbols.as_str(), "read_symbols");
     }
 
     #[test]
-    fn capability_negotiation_rejects_unknown_and_version_mismatch() {
-        assert!(negotiate_capabilities(2, &[Capability::ReadTypes]).is_err());
+    fn ability_negotiation_rejects_unknown_and_version_mismatch() {
+        assert!(negotiate_abilities(2, &[Ability::ReadTypes]).is_err());
         let granted =
-            negotiate_capabilities(1, &[Capability::ReadTypes, Capability::EmitFinding]).unwrap();
+            negotiate_abilities(1, &[Ability::ReadTypes, Ability::EmitFinding]).unwrap();
         assert_eq!(
             granted,
-            vec![Capability::ReadTypes, Capability::EmitFinding]
+            vec![Ability::ReadTypes, Ability::EmitFinding]
         );
     }
 
@@ -1405,7 +1405,7 @@ mod tests {
         assert!(!text.contains(' '));
         assert!(text.contains("\"effects\":[\"pure\"]"));
         assert!(text.contains("\"provenance\":\"sema\""));
-        assert!(text.starts_with("{\"capabilities\":["));
+        assert!(text.starts_with("{\"abilities\":["));
         let decoded = TypedSnapshot::decode(&a).unwrap();
         assert_eq!(decoded, snap);
         // Re-encode of decoded must match original bytes (stable order).
@@ -1461,7 +1461,7 @@ mod tests {
         assert!(validate_response(&snap, &with_artifact, 8).is_err());
 
         let mut no_emit = sample_snapshot();
-        no_emit.capabilities.retain(|c| *c != Capability::EmitFinding);
+        no_emit.abilities.retain(|c| *c != Ability::EmitFinding);
         let finding = AnalyzeResponse {
             protocol: 1,
             findings: vec![Finding {

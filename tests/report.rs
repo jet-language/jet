@@ -215,7 +215,7 @@ fn report_is_registered_in_cli_surfaces() {
 
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/cli");
     for (name, exact) in [
-        ("completions_bash.txt", "perf report bench"),
+        ("completions_bash.txt", "perf) COMPREPLY=( $(compgen -W \"run test attach view compare export"),
         (
             "completions_zsh.txt",
             "'report:Write a private local report bundle'",
@@ -226,7 +226,7 @@ fn report_is_registered_in_cli_surfaces() {
         ),
         (
             "completions_powershell.txt",
-            "'budget','perf','report','bench'",
+            "'budget','perf','report','fuzz'",
         ),
         (
             "man.txt",

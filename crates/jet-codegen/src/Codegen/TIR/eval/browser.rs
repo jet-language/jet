@@ -33,7 +33,7 @@ pub(super) fn handle(
             | "BrowserTrace"
             | "BrowserReceipt"
             | "BrowserPrivacy"
-            | "BrowserCapabilities"
+            | "BrowserAbilities"
             | "BrowserProtocol"
             | "BrowserLocked"
     ) {
@@ -45,7 +45,7 @@ pub(super) fn handle(
             | "BrowserTrace"
             | "BrowserReceipt"
             | "BrowserPrivacy"
-            | "BrowserCapabilities"
+            | "BrowserAbilities"
             | "BrowserLocked"
     ) {
         crate::BrowserHost::eval_value_method(kind, method, recv, span).and_then(|value| {

@@ -84,7 +84,7 @@ These are ordinary generated enums. The marker registry is their source, so
 diagnostics, `jet explain`, hover, completion, documentation, and reflection
 show the same declaration.
 
-The generated enum types are `ABI`, `Capability`, `FfiLanguage`, `InlineMode`,
+The generated enum types are `ABI`, `Ability`, `FfiLanguage`, `InlineMode`,
 `IntType`, `Layout`, `Maturity`, `NamingCase`, `ObligationMode`,
 `PolicySetting`, `State`, `TaintKind`, `Target`, and `Track`.
 
@@ -698,7 +698,7 @@ Examples: `examples/features/net/http_rest_service.jet` and
 
 `core.web.browser` is the portable browser automation home. It speaks versioned
 WebDriver BiDi over `core.net.ws`, with Jetpack-locked browser binaries and an
-explicit capability-checked CDP expert path. There is no Node or Playwright
+explicit ability-checked CDP expert path. There is no Node or Playwright
 runtime dependency.
 
 | Surface | Notes |
@@ -709,7 +709,7 @@ runtime dependency.
 | Semantic locators + waits | `get_by_role` / `text` / `label` / `placeholder` / `test_id` / `css`; `wait` / `wait_gone`; click/hover/fill/press |
 | Events + network | `subscribe` / `next_event`; redacted request facts; intercept continue/fail/fulfill |
 | Artifacts | cookies, local/session storage, `set_files`, downloads folder, screenshot, PDF |
-| `session.protocol("cdp"\|"bidi")` | Expert raw commands; CDP only after `goog:cdp` capability |
+| `session.protocol("cdp"\|"bidi")` | Expert raw commands; CDP only after the protocol's `goog:cdp` signal |
 | `privacy` / `receipt` / `trace` | Isolated profiles on; shared denied; redacted audit facts only |
 
 Acceptance matrix and agent cookbook:
@@ -1470,7 +1470,7 @@ policy :: TerminalPolicy{
     mode: .Raw
 }
 plan :: process.cmd(["python", "-i"]).terminal(policy)
-if plan.capabilities().has(TerminalFact.resize) {
+if plan.abilities().has(TerminalFact.resize) {
     child :: plan.spawn()?
     session :: child.terminal ?? return
     session.resize(TerminalSize{ cols: 160, rows: 50 })?
@@ -1478,7 +1478,7 @@ if plan.capabilities().has(TerminalFact.resize) {
 ```
 
 `TerminalMode` is `.Raw` or `.Cooked`. The no-argument form uses an `80x24`
-`.Cooked` policy. `capabilities()` returns a `Set[String]`. Use the checked
+`.Cooked` policy. `abilities()` returns a `Set[String]`. Use the checked
 keys `TerminalFact.terminal`, `TerminalFact.resize`, and `TerminalFact.raw`
 for stable facts. String keys remain open for preview facts without adding a
 second report type; a close literal typo suggests the nearest stable key.
@@ -2178,6 +2178,45 @@ numeric target, non-finite input, target mismatch, fixed-width overflow, and
 configured digit/exponent limits return ordinary decode errors. `JetBigInt` is
 internal storage; `Int` is the exact-integer decode destination.
 
+### Exact JSON numbers: beginner default and expert policy
+
+Use the target type as the numeric policy. `Decimal` is the default for values
+with a fractional part. `Int` is the default for whole values, including values
+larger than binary64 can represent exactly.
+
+```jet
+#Codable
+struct Invoice {
+    total: Decimal
+    units: Int
+}
+
+invoice :: json.decode<Invoice>(raw)?
+```
+
+Use a fixed-width target when a wire contract has a fixed range. An out-of-range
+number returns a field error. Do not quote a number to force exact decoding.
+Use `data.json<T>` for arrays of typed rows; it uses the same token path.
+
+The matched valid payload is in `examples/features/serde/json_typed.py`. Python
+uses one `json.loads` call with `parse_float=Decimal` and `parse_int=int` for
+that payload. The Jet fixture uses one `json.decode<ExactNumbers>` call with
+`Decimal` and `Int` fields. The source-cost record is equal for this numeric
+policy: one decode call plus two target-policy choices on each side.
+
+| Numeric source cost | Python | Jet |
+| --- | ---: | ---: |
+| Decode call | 1 | 1 |
+| Fraction policy | 1 hook | 1 `Decimal` target |
+| Integer policy | 1 hook | 1 `Int` target |
+| Total policy units | **3** | **3** |
+
+The matched Python fixture prints `accepted-nonfinite:2`. The Jet corpus rejects
+`NaN` and `Infinity`, rejects fixed-width overflow, and reports target mismatch
+as typed decode errors. This is the measured safety and diagnosis win. The
+executable proof is in `tests/encoding_corpus.rs::exact_typed_json_numbers` and
+`tests/encoding_parity.rs::exact_typed_json_numbers_match_aot_default_run_and_interpreter`.
+
 **`core.encoding.csv`** — `parse(text) :> [[String]] ? String` (rows of fields),
 `to_string(rows) :> String`, plus bounded `reader` / `writer` handles over
 RFC-4180 records. Quoted fields preserve commas, escaped quotes, and embedded
@@ -2685,6 +2724,12 @@ The group handle's `select()` races receivers and timers: `.recv(rx)` waits for 
 value, `.after(duration: Duration)` is a unit timer arm, and `.after(duration: Duration, value: fallback)`
 is a typed timeout arm that can be mixed with same-`T` receive arms.
 
+### `core.prelude` — always-available helpers
+
+`core.prelude` is the readable home for names that are available without an
+import. `keep(value)` returns the same value and is the approved sink for
+values whose result must stay observable during measurement (D-BENCH-KEEP1=A).
+
 ### `core.testing` — fixtures under `#Test`
 
 D-TESTKIT1 keeps `#Test` as the only test syntax. `core.testing` is a helper
@@ -2746,7 +2791,7 @@ instead of a module function call (D-TESTKIT1).
 
 `jet test <dir>` walks every subdirectory (skipping `build/` and dotdirs),
 running every `.jet` file found, in sorted path order. Bare `jet test` inside a
-project is a package target (S43, D-BENCH-PARITY1): it discovers every `#Test`
+project is a package target (S43, D-CLAIM-BENCH1=A): it discovers every `#Test`
 in the package, so a module file's tests run without naming the file. Package
 members with no `#Test` blocks and no doctests are skipped; `E0601` is reported
 only when the whole package has nothing to run. An entry-file `fn test`
@@ -3873,7 +3918,7 @@ share that source-owned TIR path.
 | `examples/features/io/dir_entry.jet` | `fs.list_dir` → `[DirEntry]` |
 | `examples/features/serde/serde_derive.jet` | `#Codable` encode + typed `decode<T>` with `#Rename` |
 | `examples/features/serde/csv_typed.jet` | `csv.decode<Row>` → struct → JSON (the typed CSV pipeline) |
-| `examples/features/serde/json_typed.jet` | Nested struct + list + optional round-trip with `#RenameAll(camel)` |
+| `examples/features/serde/json_typed.jet` | Nested `#Codable` round-trip plus exact `Decimal` and `Int` decoding |
 | `examples/features/serde/decode_migration.jet` | canonical typed `decode<T>` silently applies a real v1→v2 migration |
 | `examples/features/reflection/reflect-value.jet` | `reflect.of(x)` — `.type_name()`/`.path()`/`.display()`/`.fields()` |
 | `examples/features/syntax/maturity_tags.jet` | `#Meta(maturity: .Experimental / .Tested / .Hardened)` doc-only API metadata (D-MARK-META1=B) |

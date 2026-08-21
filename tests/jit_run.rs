@@ -282,8 +282,8 @@ fn run() {
         mode: .Raw
     }
     plan :: process.cmd(["echo", "terminal"]).terminal(policy)
-    print(plan.capabilities().has(TerminalFact.terminal))
-    facts :: plan.capabilities()
+    print(plan.abilities().has(TerminalFact.terminal))
+    facts :: plan.abilities()
     print(facts.has(TerminalFact.resize))
     print(facts.has(TerminalFact.raw))
     print(facts.has("preview_x"))
@@ -343,7 +343,7 @@ fn run() {
 
 /// D-PROCESS-SESSION2=D / #1842: the capability report is one real program
 /// observed through the AOT, resident Cranelift, and explicitly forced
-/// interpreter lenses. This must exercise `ProcessSpec.capabilities().has`,
+/// interpreter lenses. This must exercise `ProcessSpec.abilities().has`,
 /// not a direct generated-Rust helper.
 #[cfg(unix)]
 #[test]
@@ -360,7 +360,7 @@ fn terminal_capabilities_match_aot_resident_jit_and_interpreter() {
 
 fn run() {
     plan :: process.cmd(["echo", "terminal"]).terminal()
-    facts :: plan.capabilities()
+    facts :: plan.abilities()
     print(facts.has(TerminalFact.terminal))
     print(facts.has("preview_x"))
 }

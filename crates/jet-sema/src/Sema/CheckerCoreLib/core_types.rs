@@ -151,18 +151,18 @@ pub(crate) fn is_text_error_type_name(name: &str) -> bool {
     name == "TextError"
 }
 
-/// D-FACT-HOME1=A: the fixed marker-argument menu (`Capability`, `InlineMode`,
+/// D-FACT-HOME1=A: the fixed marker-argument menu (`Ability`, `InlineMode`,
 /// etc.) is a fact vocabulary published for reflection, never a general type —
 /// no constructor exists outside `#Marker(param: Name.Variant)` position. Each
 /// fix names the real path: the living counterpart when one exists (only
-/// `Capability` has one — `Authority`/`[Right]`), otherwise the marker that
+/// `Ability` has one — `Authority`/`[Right]`), otherwise the marker that
 /// legitimately writes the name. `Layout` is excluded: it is also a real
 /// dot-ctor value type (D-LAYOUT-CTOR1, see the `matches!` in
 /// `core_type_known`), so that name resolves before this ever runs.
 fn phantom_fact_menu_fix(name: &str) -> Option<&'static str> {
     Some(match name {
         "ABI" => "write it only inside `#ABI(name: system)`",
-        "Capability" => "take `Authority` (the rights value), or a rights list `[Right]`; inside a marker, write it in `#Grant(...)` or `#Caps(...)`",
+        "Ability" => "take `Abilities` (the rights value), or a rights list `[Right]`; inside a marker, write it in `#Caps(...)`",
         "FfiLanguage" => "write it only inside `#FFI(language: c)`",
         "InlineMode" => "write it only inside `#Inline(mode: Always)`",
         "IntType" => "write it only inside `#Layout(tag: I32)`",
@@ -221,7 +221,7 @@ pub(crate) fn core_type_known(name: &str) -> bool {
         // D-DET1: deterministic injected capability handles.
         // D-DET-CAPAPI: `Duration` value type for the widened clock surface.
         // D-AUTHORITY-NAME1=A: one ordinary, nameable rights carrier.
-        | Syntax::TYPE_AUTHORITY
+        | Syntax::TYPE_ABILITIES
         | "Clock" | "Rng" | "Fake" | "Duration" | "DurationUnit" | "RangeError" | "Condition" | "Path"
         | "TestSuite"
         | "GameScene" | "GameAssets" | "GameInputMap"
@@ -354,7 +354,7 @@ pub(crate) fn core_type_known(name: &str) -> bool {
         | "Browser" | "BrowserContext" | "BrowserPage" | "BrowserFrame" | "BrowserLocator"
         | "BrowserIntercept"
         | "BrowserEvent" | "BrowserTrace" | "BrowserReceipt" | "BrowserPrivacy" | "BrowserError"
-        | "BrowserCapabilities"
+        | "BrowserAbilities"
         | "BrowserProfile" | "BrowserTimeout" | "BrowserProtocol" | "BrowserLocked"
         // D-SHIFT1 (c7shift): `binary.Reader` / `text.Cursor` — consuming,
         // fallible, `?`-composed cursors over `[U8]`/`String`.

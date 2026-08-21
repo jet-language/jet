@@ -13,7 +13,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Mutex, OnceLock};
-use std::time::Duration;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 // v5: the canonical Prelude/runtime and the used Core/CoreLib closure are
 // separate rlibs. `export_runtime_source` no longer mis-promotes multi-line
@@ -30,6 +30,11 @@ const END: &str = crate::Codegen::CACHED_RUNTIME_END;
 const CORE_BEGIN: &str = crate::Codegen::CACHED_CORE_BEGIN;
 const CORE_END: &str = crate::Codegen::CACHED_CORE_END;
 const DIGEST_LEN: usize = 64;
+
+/// Maximum logical size of the shared runtime rlib cache. Writes evict the
+/// oldest published entries until this 512 MiB bound holds.
+pub const RUNTIME_CACHE_LIMIT_BYTES: u64 = 512 * 1024 * 1024;
+
 static NEXT_TEMP: AtomicU64 = AtomicU64::new(0);
 
 #[derive(Debug)]
@@ -53,6 +58,8 @@ pub struct PreparedRuntime {
     runtime_rlib: Option<PathBuf>,
     core_rlib: Option<PathBuf>,
     cache_hit: bool,
+    _runtime_lock: Option<BuildLock>,
+    _core_lock: Option<BuildLock>,
 }
 
 impl PreparedRuntime {
@@ -62,6 +69,8 @@ impl PreparedRuntime {
             runtime_rlib: None,
             core_rlib: None,
             cache_hit: false,
+            _runtime_lock: None,
+            _core_lock: None,
         }
     }
 
@@ -125,6 +134,11 @@ pub fn prepare(
 /// the next program that shares the key. Anything that genuinely needs its own
 /// runtime artifacts (the golden suite, a child compiler probe) sets
 /// `JET_RUNTIME_CACHE_DIR` explicitly.
+///
+/// The cache is bounded by [`RUNTIME_CACHE_LIMIT_BYTES`]. A successful write
+/// prunes the oldest published entry first (FIFO by artifact publication time),
+/// while build locks held by live preparations pin entries until their linked
+/// program build drops the returned [`PreparedRuntime`].
 pub fn cache_root() -> PathBuf {
     if let Ok(path) = std::env::var("JET_RUNTIME_CACHE_DIR") {
         return PathBuf::from(path);
@@ -133,6 +147,12 @@ pub fn cache_root() -> PathBuf {
         .or_else(|_| std::env::var("USERPROFILE"))
         .unwrap_or_else(|_| ".".to_string());
     PathBuf::from(home).join(".cache").join("jet").join("runtime")
+}
+
+/// Logical bytes occupied by regular files below [`cache_root`]. Symlinks are
+/// ignored; the value is the same byte count used by cache pruning and doctor.
+pub fn cache_footprint() -> u64 {
+    directory_size(&cache_root())
 }
 
 /// `JET_RUNTIME_CACHE_STATS=1` reports one line per prepared program on stderr:
@@ -244,6 +264,8 @@ fn prepare_at_uncounted(
             runtime_rlib: Some(runtime.path),
             core_rlib: None,
             cache_hit: runtime.cache_hit,
+            _runtime_lock: Some(runtime.lock),
+            _core_lock: None,
         });
     }
     let Some(core) = core else {
@@ -254,6 +276,8 @@ fn prepare_at_uncounted(
         runtime_rlib: Some(runtime.path),
         core_rlib: Some(core.path),
         cache_hit: runtime.cache_hit && core.cache_hit,
+        _runtime_lock: Some(runtime.lock),
+        _core_lock: Some(core.lock),
     })
 }
 
@@ -266,6 +290,7 @@ struct SplitGenerated {
 struct Artifact {
     path: PathBuf,
     cache_hit: bool,
+    lock: BuildLock,
 }
 
 fn compile_artifact(
@@ -284,13 +309,14 @@ fn compile_artifact(
     fs::create_dir_all(&entry)
         .map_err(|error| Error::Cache(format!("could not create {}: {error}", entry.display())))?;
     let rlib = entry.join(format!("lib{crate_name}.rlib"));
+    let lock = BuildLock::acquire(&entry)?;
     if verified_artifact(&rlib) {
-        return Ok(Some(Artifact { path: rlib, cache_hit: true }));
-    }
-
-    let _lock = BuildLock::acquire(&entry)?;
-    if verified_artifact(&rlib) {
-        return Ok(Some(Artifact { path: rlib, cache_hit: true }));
+        prune_cache(root)?;
+        return Ok(Some(Artifact {
+            path: rlib,
+            cache_hit: true,
+            lock,
+        }));
     }
 
     // The lock serializes writers; the private directory keeps a slow compile
@@ -351,7 +377,12 @@ fn compile_artifact(
         &entry.join("runtime.rs"),
         format!("{crate_prefix}{exported}").as_bytes(),
     )?;
-    Ok(Some(Artifact { path: rlib, cache_hit: false }))
+    prune_cache(root)?;
+    Ok(Some(Artifact {
+        path: rlib,
+        cache_hit: false,
+        lock,
+    }))
 }
 
 fn split_generated(generated: &str) -> Result<Option<SplitGenerated>, Error> {
@@ -597,11 +628,117 @@ fn publish(path: &Path, bytes: &[u8]) -> Result<(), Error> {
     result
 }
 
+fn directory_size(path: &Path) -> u64 {
+    let Ok(metadata) = fs::symlink_metadata(path) else {
+        return 0;
+    };
+    if metadata.file_type().is_file() {
+        return metadata.len();
+    }
+    if !metadata.is_dir() {
+        return 0;
+    }
+    let Ok(entries) = fs::read_dir(path) else {
+        return 0;
+    };
+    entries
+        .filter_map(Result::ok)
+        .map(|entry| directory_size(&entry.path()))
+        .fold(0, |total, size| total.saturating_add(size))
+}
+
+fn is_cache_entry(path: &Path) -> bool {
+    path.file_name()
+        .and_then(OsStr::to_str)
+        .is_some_and(|name| {
+            name.len() == DIGEST_LEN
+                && name
+                    .bytes()
+                    .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase())
+        })
+}
+
+/// Oldest published artifact first. The digest record is written once after a
+/// successful publish, so cache hits do not reorder victims or make pruning
+/// depend on directory-lock churn.
+fn entry_age(path: &Path) -> SystemTime {
+    ["artifact.sha256", "libjet_runtime.rlib", "libjet_runtime_core.rlib"]
+        .iter()
+        .filter_map(|name| fs::symlink_metadata(path.join(name)).ok())
+        .filter_map(|metadata| metadata.modified().ok())
+        .min()
+        .unwrap_or(UNIX_EPOCH)
+}
+
+fn prune_cache(root: &Path) -> Result<(), Error> {
+    let mut footprint = directory_size(root);
+    if footprint <= RUNTIME_CACHE_LIMIT_BYTES {
+        return Ok(());
+    }
+    let Ok(entries) = fs::read_dir(root) else {
+        return Ok(());
+    };
+    let mut candidates = entries
+        .filter_map(Result::ok)
+        .filter(|entry| {
+            entry.file_type().map(|kind| kind.is_dir()).unwrap_or(false)
+                && is_cache_entry(&entry.path())
+        })
+        .map(|entry| {
+            let path = entry.path();
+            let key = entry.file_name().to_string_lossy().into_owned();
+            (entry_age(&path), key, path)
+        })
+        .collect::<Vec<_>>();
+    candidates.sort_by(|left, right| {
+        left.0
+            .cmp(&right.0)
+            .then_with(|| left.1.cmp(&right.1))
+    });
+
+    for (_, _, entry) in candidates {
+        if footprint <= RUNTIME_CACHE_LIMIT_BYTES {
+            break;
+        }
+        // A live preparation owns this lock from cache lookup/store through
+        // its user's rustc link. Never remove an entry that lock acquisition
+        // says is in use.
+        let Some(_lock) = BuildLock::try_acquire(&entry)? else {
+            continue;
+        };
+        let size = directory_size(&entry);
+        match fs::remove_dir_all(&entry) {
+            Ok(()) => footprint = footprint.saturating_sub(size),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => {
+                return Err(Error::Cache(format!(
+                    "could not evict runtime cache entry {}: {error}",
+                    entry.display()
+                )))
+            }
+        }
+    }
+    Ok(())
+}
+
 struct BuildLock {
     path: PathBuf,
 }
 
 impl BuildLock {
+    fn try_acquire(entry: &Path) -> Result<Option<Self>, Error> {
+        let path = entry.join(".build-lock");
+        match fs::create_dir(&path) {
+            Ok(()) => Ok(Some(Self { path })),
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => Ok(None),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
+            Err(error) => Err(Error::Cache(format!(
+                "could not lock {}: {error}",
+                entry.display()
+            ))),
+        }
+    }
+
     fn acquire(entry: &Path) -> Result<Self, Error> {
         let path = entry.join(".build-lock");
         loop {
@@ -622,6 +759,14 @@ impl BuildLock {
                         continue;
                     }
                     std::thread::sleep(Duration::from_millis(25));
+                }
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                    fs::create_dir_all(entry).map_err(|create_error| {
+                        Error::Cache(format!(
+                            "could not recreate {} after eviction: {create_error}",
+                            entry.display()
+                        ))
+                    })?;
                 }
                 Err(error) => {
                     return Err(Error::Cache(format!(
@@ -1285,19 +1430,101 @@ use std::fmt::Debug;
 
         let one = format!("{BEGIN}fn runtime() {{}}\n{END}fn main() {{}}\n");
         let first = prepare_at(&root.join("cache"), rustc.as_os_str(), &one, &[], &[]).unwrap();
-        let second = prepare_at(&root.join("cache"), rustc.as_os_str(), &one, &[], &[]).unwrap();
         assert!(!first.cache_hit());
+        drop(first);
+        let second = prepare_at(&root.join("cache"), rustc.as_os_str(), &one, &[], &[]).unwrap();
         assert!(second.cache_hit());
         assert_eq!(fs::read(&count).unwrap(), b"x");
 
-        fs::write(second.runtime_rlib.as_ref().unwrap(), b"corrupt!").unwrap();
+        let runtime_rlib = second.runtime_rlib.as_ref().unwrap().clone();
+        drop(second);
+        fs::write(runtime_rlib, b"corrupt!").unwrap();
         let repaired = prepare_at(&root.join("cache"), rustc.as_os_str(), &one, &[], &[]).unwrap();
         assert!(!repaired.cache_hit());
         assert_eq!(fs::read(&count).unwrap(), b"xx");
 
         let two = format!("{BEGIN}fn runtime_changed() {{}}\n{END}fn main() {{}}\n");
+        drop(repaired);
         prepare_at(&root.join("cache"), rustc.as_os_str(), &two, &[], &[]).unwrap();
         assert_eq!(fs::read(&count).unwrap(), b"xxx");
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn pruning_skips_entry_pinned_by_live_build() {
+        let root = std::env::temp_dir().join(format!(
+            "jet-runtime-cache-live-{}-{:?}",
+            std::process::id(),
+            std::thread::current().id()
+        ));
+        let cache = root.join("cache");
+        let entry = cache.join(format!("{:064x}", 1));
+        fs::create_dir_all(&entry).unwrap();
+        let file = fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(entry.join("libjet_runtime.rlib"))
+            .unwrap();
+        file.set_len(RUNTIME_CACHE_LIMIT_BYTES + 1).unwrap();
+        drop(file);
+        let lock = BuildLock::acquire(&entry).unwrap();
+        prune_cache(&cache).unwrap();
+        assert!(entry.is_dir(), "live build entry must not be evicted");
+        drop(lock);
+        prune_cache(&cache).unwrap();
+        assert!(!entry.exists(), "unlocked oversized entry should be evicted");
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn bounded_write_evicts_old_entries_and_keeps_build_successful() {
+        let root = std::env::temp_dir().join(format!(
+            "jet-runtime-cache-bound-{}-{:?}",
+            std::process::id(),
+            std::thread::current().id()
+        ));
+        let cache = root.join("cache");
+        fs::create_dir_all(&cache).unwrap();
+        for key in [format!("{:064x}", 1), format!("{:064x}", 2)] {
+            let entry = cache.join(key);
+            fs::create_dir_all(&entry).unwrap();
+            let rlib = entry.join("libjet_runtime.rlib");
+            let file = fs::OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .open(rlib)
+                .unwrap();
+            file.set_len(RUNTIME_CACHE_LIMIT_BYTES / 2 + 1).unwrap();
+            fs::write(entry.join("artifact.sha256"), b"seed\n").unwrap();
+        }
+        let before = directory_size(&cache);
+
+        let generated = format!("{BEGIN}fn runtime() {{}}\n{END}fn main() {{}}\n");
+        let prepared = prepare_at(&cache, OsStr::new("rustc"), &generated, &[], &[]).unwrap();
+        let after = directory_size(&cache);
+        assert!(prepared.is_split(), "bounded cache build must still prepare a split runtime");
+        assert!(after < before, "pruning must reduce cache footprint");
+        assert!(after <= RUNTIME_CACHE_LIMIT_BYTES, "cache must stay under its bound");
+        assert!(prepared.runtime_rlib.as_ref().unwrap().is_file());
+
+        let source = root.join("main.rs");
+        let binary = root.join("main");
+        fs::write(&source, prepared.rust()).unwrap();
+        let mut command = Command::new("rustc");
+        command
+            .args(["--edition", "2021"])
+            .arg(&source)
+            .arg("-o")
+            .arg(&binary);
+        prepared.add_rustc_args(&mut command);
+        let output = command.output().unwrap();
+        assert!(
+            output.status.success(),
+            "user build must succeed after eviction: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        drop(prepared);
         let _ = fs::remove_dir_all(root);
     }
 

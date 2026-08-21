@@ -143,7 +143,7 @@ fn scrub(s: &str, file: &Path) -> String {
     scrubbed
 }
 
-/// A private cwd for a `jet run`/`build`/`bench`/`test` subprocess.
+/// A private cwd for a `jet run`/`build`/`test` subprocess.
 ///
 /// `jet` writes compiled output to `build/<stem>.rs` + `build/<stem>` *relative
 /// to its own cwd* (Source/CmdCompile.rs `bin_path`/`stem`/`build`), keyed only
@@ -175,7 +175,7 @@ fn isolated_cwd(tag: &str) -> PathBuf {
 
 // D-VERDICT-678-1 (2026-07-17) renamed the project entry to `run.jet`; retired
 // `main.jet` is never a discovery fallback (jet-pkg-model
-// `resolve_run_entry_checked`). A bare `jet budget`/`jet bench` in these
+// `resolve_run_entry_checked`). A bare `jet budget` in these
 // fixtures resolves its entry, so the entry must carry the canonical name.
 fn budget_project(tag: &str, limit: u64) -> PathBuf {
     let dir = isolated_cwd(tag);
@@ -276,7 +276,7 @@ fn benchmark_budget_project(tag: &str) -> PathBuf {
     fs::write(dir.join("src/run.jet"), r#"module perf.package {
     budgets: [Budget.{
         name: "parse",
-        scope: .Bench("parse"),
+        scope: .Test("parse"),
         metric: .BenchTime(.P50),
         provider: .BenchMeasurement("parse"),
         comparison: .RelativeTo("ci/linux"),
@@ -284,11 +284,11 @@ fn benchmark_budget_project(tag: &str) -> PathBuf {
         enforcement: .Warn,
     }],
 }
-#Bench("parse") {
+#Test("parse") { .measure {
     total := 0
     loop value, 0..100 { total = total + value }
-    require_eq(total, 5050)
-}
+    assert_eq(total, 5050)
+} }
 fn run() {}
 "#).unwrap();
     dir
@@ -303,7 +303,7 @@ module perf.package {
     budgets: [
         Budget.{
             name: "arena-count",
-            scope: .Bench("arena"),
+            scope: .Test("arena"),
             metric: .AllocationCount,
             provider: .AllocationProbe("arena"),
             comparison: .AbsoluteFrom("local/arena"),
@@ -312,7 +312,7 @@ module perf.package {
         },
         Budget.{
             name: "arena-bytes",
-            scope: .Bench("arena"),
+            scope: .Test("arena"),
             metric: .AllocationBytes,
             provider: .AllocationProbe("arena"),
             comparison: .AbsoluteFrom("local/arena"),
@@ -321,11 +321,11 @@ module perf.package {
         },
     ],
 }
-#Bench("arena") {
+#Test("arena") { .measure {
     arena :: mem.Arena.new()
     value :: arena.alloc(42)
-    require_eq(value, 42)
-}
+    assert_eq(value, 42)
+} }
 fn run() {}
 "#).unwrap();
     dir

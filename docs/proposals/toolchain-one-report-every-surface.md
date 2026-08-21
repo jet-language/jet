@@ -143,7 +143,7 @@ totals: FAIL
   Stop [E3001]: expected 100, got 101
     --> tests/orders.jet:14 in totals
       |
-   14 |     require_eq(total(cart), 100)
+   14 |     assert_eq(total(cart), 100)
       |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 1 passed, 1 failed
 ```

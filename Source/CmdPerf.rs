@@ -1,6 +1,6 @@
 //! D-PERFSESSION1=D: `jet perf` family over one versioned `.jettrace` truth.
 //!
-//! `run`/`test`/`bench` spawn the exact base-intent driver (`jet run|test …`).
+//! `run`/`test` spawn the exact base-intent driver (`jet run|test …`).
 //! with observe enabled, poll live facts while the child runs, then write one
 //! `.jettrace` with wall/alloc/tasks/locks/io/native/task-observation spans before
 //! exiting with the child's code.
@@ -105,7 +105,7 @@ pub(crate) fn run(raw: &[String]) -> Outcome {
     let quiet = rest.iter().any(|arg| arg == "--quiet");
     rest.retain(|arg| arg != "--quiet");
     match action {
-        "run" | "test" | "bench" => Outcome::Exit(run_session(action, &rest, quiet)),
+        "run" | "test" => Outcome::Exit(run_session(action, &rest, quiet)),
         "attach" => Outcome::Exit(attach(&rest)),
         "view" => Outcome::Exit(view(&rest)),
         "compare" => Outcome::Exit(compare(&rest)),
@@ -136,14 +136,7 @@ fn run_session(action: &str, args: &[String], quiet: bool) -> i32 {
             return ExitCodes::USAGE;
         }
     };
-    // D-CLAIM-BENCH1=A: the perf-session spelling remains useful as a trace
-    // label, but its producer is the one measured test mode. There is no
-    // second benchmark runner behind `jet perf bench`.
-    let base_action = if action == "bench" { "test" } else { action };
-    let mut child_argv = vec![base_action.to_string()];
-    if action == "bench" && !parsed.child_args.iter().any(|arg| arg == "--measure") {
-        child_argv.push("--measure".to_string());
-    }
+    let mut child_argv = vec![action.to_string()];
     child_argv.extend(parsed.child_args.iter().cloned());
 
     let mut child = match Command::new(&exe)

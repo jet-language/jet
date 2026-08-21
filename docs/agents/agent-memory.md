@@ -1061,7 +1061,7 @@ audited gate. Proposal: `docs/proposals/authority-one-model.md` (committed).
   its new rules: surface-is-the-product (before/after pairs), greenfield
   breaks welcome, merit-only "what stays", simple prose.
 - Card **#1500** (e2) carries eight full-profile ballots awaiting owner:
-  SCOPE1 (merge #Grant into #Caps; optional handle head) plus:
+  SCOPE1 (merge #Caps into #Caps; optional handle head) plus:
   D-AUTHORITY-MODEL1 (one substrate), ROOTS1 (13 closed roots, FFI langs as
   leaves), MEM1 (Mem.* floors on one ladder; unsafe stays a gate, NOT a
   right), NAME1 (nameable authority value; PascalCase `Authority.workspace()`;

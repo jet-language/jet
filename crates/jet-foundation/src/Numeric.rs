@@ -53,6 +53,7 @@ pub fn decimal_method_return(method: &str, nargs: usize) -> Option<Option<Type>>
     let decimal = || Type::Named(Syntax::TYPE_DECIMAL.to_string());
     match (method, nargs) {
         ("add" | "sub" | "mul", 1) => Some(Some(decimal())),
+        ("equal", 1) => Some(Some(Type::Bool)),
         ("to_string", 0) => Some(Some(Type::String)),
         _ => None,
     }
@@ -1091,6 +1092,14 @@ impl CtDecimal {
         let w: String = whole.iter().map(|d| (b'0' + *d) as char).collect();
         let f: String = frac.iter().map(|d| (b'0' + *d) as char).collect();
         format!("{sign}{w}.{f}")
+    }
+
+    /// D-TYPE2-DEFAULT1: the one place an exact `Decimal` becomes an
+    /// approximate `Float`, at the irrational-result math functions that leave
+    /// the exact world. Rounding happens exactly once, from the full digit
+    /// string, so no intermediate step loses precision the value still had.
+    pub fn to_f64(&self) -> f64 {
+        self.to_string_rep().parse::<f64>().unwrap_or(f64::NAN)
     }
 
     pub fn to_value(&self) -> crate::AST::CtValue {

@@ -36,7 +36,7 @@ fn perf_help_lists_family() {
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(output.status.success(), "{stdout}");
     assert!(stdout.contains("jet perf"), "{stdout}");
-    for verb in ["run", "test", "bench", "attach", "view", "compare", "export"] {
+    for verb in ["run", "test", "attach", "view", "compare", "export"] {
         assert!(stdout.contains(verb), "missing {verb} in {stdout}");
     }
 }

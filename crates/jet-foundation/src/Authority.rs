@@ -12,11 +12,15 @@ use std::sync::LazyLock;
 pub const EFFECT_SOURCE: &str = include_str!("../../jet-codegen/src/Prelude/Effects.jet");
 
 /// Closed authority roots, read once from the embedded Prelude source.
+///
+/// `Panic` and `Mem` remain parseable deny-only rows, but are deliberately not
+/// part of this grantable root table (D-PANICROOT1, D-AUTHORITY-MEM1).
 pub static EFFECT_ROOTS: LazyLock<Vec<&'static str>> = LazyLock::new(|| {
     EFFECT_SOURCE
         .lines()
         .filter_map(|line| line.trim().strip_prefix("effect "))
         .map(str::trim)
+        .filter(|root| !root.contains('.'))
         .collect()
 });
 
@@ -35,23 +39,6 @@ pub enum Effect {
     GPU,
     Panic,
     FFI,
-    Go,
-    Java,
-    DotNet,
-    Fortran,
-    Cobol,
-    Tcl,
-    Lua,
-    Ada,
-    Pascal,
-    Dart,
-    PowerShell,
-    Perl,
-    Ruby,
-    Php,
-    R,
-    Com,
-    Py,
     Browser,
     Secret,
     Mem,
@@ -86,23 +73,6 @@ impl Effect {
             Self::GPU => "GPU",
             Self::Panic => "Panic",
             Self::FFI => "FFI",
-            Self::Go => "Go",
-            Self::Java => "Java",
-            Self::DotNet => "DotNet",
-            Self::Fortran => "Fortran",
-            Self::Cobol => "Cobol",
-            Self::Tcl => "Tcl",
-            Self::Lua => "Lua",
-            Self::Ada => "Ada",
-            Self::Pascal => "Pascal",
-            Self::Dart => "Dart",
-            Self::PowerShell => "PowerShell",
-            Self::Perl => "Perl",
-            Self::Ruby => "Ruby",
-            Self::Php => "Php",
-            Self::R => "R",
-            Self::Com => "Com",
-            Self::Py => "Py",
             Self::Browser => "Browser",
             Self::Secret => "Secret",
             Self::Mem => "Mem",
@@ -127,23 +97,6 @@ impl Effect {
             "GPU" => Self::GPU,
             "Panic" => Self::Panic,
             "FFI" => Self::FFI,
-            "Go" => Self::Go,
-            "Java" => Self::Java,
-            "DotNet" => Self::DotNet,
-            "Fortran" => Self::Fortran,
-            "Cobol" => Self::Cobol,
-            "Tcl" => Self::Tcl,
-            "Lua" => Self::Lua,
-            "Ada" => Self::Ada,
-            "Pascal" => Self::Pascal,
-            "Dart" => Self::Dart,
-            "PowerShell" => Self::PowerShell,
-            "Perl" => Self::Perl,
-            "Ruby" => Self::Ruby,
-            "Php" => Self::Php,
-            "R" => Self::R,
-            "Com" => Self::Com,
-            "Py" => Self::Py,
             "Browser" => Self::Browser,
             "Secret" => Self::Secret,
             "Mem" => Self::Mem,
@@ -233,6 +186,12 @@ pub fn root(right: &str) -> &str {
 /// for its root; leaf declaration remains sema's job.
 pub fn parse_root(right: &str) -> Option<&'static str> {
     let root = root(right);
+    if root.eq_ignore_ascii_case("Panic") {
+        return Some("Panic");
+    }
+    if root.eq_ignore_ascii_case("Mem") {
+        return Some("Mem");
+    }
     EFFECT_ROOTS
         .iter()
         .copied()
@@ -243,6 +202,9 @@ pub fn parse_root(right: &str) -> Option<&'static str> {
 pub fn parse_right(right: &str) -> Option<String> {
     let right = right.trim();
     let root = parse_root(right)?;
+    if root == "Panic" && right != "Panic" {
+        return None;
+    }
     Some(match right.split_once('.') {
         Some((_, leaf)) => format!("{root}.{leaf}"),
         None => root.to_string(),
@@ -644,5 +606,47 @@ mod tests {
         ledger.push(entry("trust store"));
         assert_eq!(ledger.entries().len(), 1);
         assert_eq!(ledger.entries()[0].provenance.len(), 2);
+    }
+
+    #[test]
+    fn effect_roots_are_the_thirteen_grantable_roots() {
+        assert_eq!(
+            EFFECT_ROOTS.as_slice(),
+            &[
+                "Net", "FS", "IO", "DB", "Time", "Rand", "Env", "Exec", "Log", "GPU",
+                "FFI", "Browser", "Secret",
+            ]
+        );
+        assert_eq!(Effect::all().len(), 13);
+        assert_eq!(parse_right("Panic").as_deref(), Some("Panic"));
+        assert_eq!(parse_right("Mem.Alloc").as_deref(), Some("Mem.Alloc"));
+    }
+
+    #[test]
+    fn every_ffi_language_leaf_is_covered_by_the_ffi_root() {
+        for leaf in crate::Syntax::BUILTIN_EFFECT_LEAVES
+            .iter()
+            .copied()
+            .filter(|leaf| leaf.starts_with("FFI."))
+        {
+            assert!(covers("FFI", leaf), "FFI must cover {leaf}");
+            assert!(parse_right(leaf).is_some(), "leaf must parse: {leaf}");
+            assert_eq!(
+                answer(&Holds::new(), &Holds::from(["FFI".to_string()]), leaf),
+                Verdict::Denied,
+                "FFI denial must cover {leaf}"
+            );
+        }
+    }
+
+    #[test]
+    fn retired_flat_ffi_spellings_do_not_parse() {
+        for root in [
+            "Go", "Java", "DotNet", "Fortran", "Cobol", "Tcl", "Lua", "Ada", "Pascal",
+            "Dart", "PowerShell", "Perl", "Ruby", "Php", "R", "Com", "Cpp", "Py", "Octave",
+        ] {
+            assert!(parse_right(root).is_none(), "retired spelling parsed: {root}");
+            assert!(Effect::parse(root).is_none(), "retired root parsed: {root}");
+        }
     }
 }

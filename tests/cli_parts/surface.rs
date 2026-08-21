@@ -483,26 +483,22 @@ fn moved_command_registry_agrees_with_dispatch_exceptions() {
             "gc report",
             "perf run",
             "perf test",
-            "perf bench",
         ]
     );
 }
 
 #[test]
-fn test_and_bench_help_keep_shared_runner_flags_paired() {
+fn test_help_exposes_measurement_and_retired_command_teaches_it() {
     let test_help = Command::new(jet()).args(["test", "--help"]).env("NO_COLOR", "1").output().unwrap();
-    let bench_help = Command::new(jet()).args(["bench", "--help"]).env("NO_COLOR", "1").output().unwrap();
     assert!(test_help.status.success(), "jet test --help failed: {}", String::from_utf8_lossy(&test_help.stderr));
-    assert!(bench_help.status.success(), "jet bench --help failed: {}", String::from_utf8_lossy(&bench_help.stderr));
     let test_help = String::from_utf8_lossy(&test_help.stdout);
-    let bench_help = String::from_utf8_lossy(&bench_help.stdout);
     assert!(test_help.contains("--filter"), "test help lost shared filter flag: {test_help}");
-    assert!(bench_help.contains("--filter"), "bench help missing shared filter flag: {bench_help}");
+    assert!(test_help.contains("--measure"), "test help omitted measurement mode: {test_help}");
     assert!(test_help.contains("--show-default"), "test help missing command override escape hatch: {test_help}");
-    assert!(bench_help.contains("--show-default"), "bench help missing command override escape hatch: {bench_help}");
-    for flag in ["--shuffle", "--coverage", "--update-snapshots", "--serial"] {
-        assert!(!bench_help.contains(flag), "bench help exposed test-only flag {flag}: {bench_help}");
-    }
+    let retired = Command::new(jet()).args(["bench", "--help"]).env("NO_COLOR", "1").output().unwrap();
+    assert!(!retired.status.success(), "retired jet bench unexpectedly succeeded");
+    let retired = String::from_utf8_lossy(&retired.stderr);
+    assert!(retired.contains("jet test --measure"), "retired bench did not teach measurement: {retired}");
 }
 
 /// I8: this test owns exactly ONE fact — that every user-visible surface names
@@ -823,6 +819,13 @@ fn machine_report_paths_stay_resolvable_across_repository_layouts() {
         jet_foundation::JSON::json_get(edit, "new_text").unwrap(),
     )
     .unwrap();
+    assert_eq!(
+        jet_foundation::JSON::json_str(
+            jet_foundation::JSON::json_get(edit, "safety").unwrap(),
+        )
+        .unwrap(),
+        "behavior-preserving"
+    );
     let mut fixed = fs::read_to_string(edit_file).unwrap();
     fixed.replace_range(start..end, new_text);
     fs::write(edit_file, &fixed).unwrap();
@@ -884,6 +887,175 @@ fn e0102_and_e0111_typed_fix_edits_apply() {
         );
         assert_eq!(fs::read_to_string(file).unwrap(), expected);
     }
+}
+
+#[test]
+fn name_suggestion_json_edit_applies_and_rechecks_clean() {
+    let dir = isolated_cwd("name_suggestion_fix_edit");
+    let file = dir.join("name.jet");
+    fs::write(
+        &file,
+        "fn run() {\n    score :: 90\n    print(scor)\n}\n",
+    )
+    .unwrap();
+
+    let check = || {
+        Command::new(jet())
+            .args(["check", file.to_str().unwrap(), "--json"])
+            .current_dir(&dir)
+            .env("NO_COLOR", "1")
+            .output()
+            .unwrap()
+    };
+    let output = check();
+    assert_eq!(output.status.code(), Some(1));
+    assert!(output.stdout.is_empty());
+    let report = parse_json(String::from_utf8(output.stderr).unwrap().trim()).unwrap();
+    assert_eq!(
+        jet_foundation::JSON::json_str(jet_foundation::JSON::json_get(&report, "code").unwrap())
+            .unwrap(),
+        "E0107"
+    );
+    let edits = match jet_foundation::JSON::json_get(&report, "fix_edits").unwrap() {
+        jet_foundation::JSON::JSONValue::Array(edits) => edits,
+        _ => panic!("fix_edits is not an array"),
+    };
+    assert_eq!(edits.len(), 1);
+    let edit = &edits[0];
+    let edit_file = jet_foundation::JSON::json_str(
+        jet_foundation::JSON::json_get(edit, "file").unwrap(),
+    )
+    .unwrap();
+    assert_eq!(edit_file, file.to_str().unwrap());
+    let span = jet_foundation::JSON::json_get(edit, "span").unwrap();
+    let start = jet_foundation::JSON::json_int(
+        jet_foundation::JSON::json_get(span, "start").unwrap(),
+    )
+    .unwrap() as usize;
+    let end = jet_foundation::JSON::json_int(
+        jet_foundation::JSON::json_get(span, "end").unwrap(),
+    )
+    .unwrap() as usize;
+    let new_text = jet_foundation::JSON::json_str(
+        jet_foundation::JSON::json_get(edit, "new_text").unwrap(),
+    )
+    .unwrap();
+    let source = fs::read_to_string(&file).unwrap();
+    assert_eq!(&source[start..end], "scor");
+    assert_eq!(new_text, "score");
+
+    let applied = Command::new(jet())
+        .args(["fix", file.to_str().unwrap()])
+        .current_dir(&dir)
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    assert_eq!(applied.status.code(), Some(0), "{}", String::from_utf8_lossy(&applied.stderr));
+    let mut expected = source;
+    expected.replace_range(start..end, new_text);
+    assert_eq!(fs::read_to_string(&file).unwrap(), expected);
+
+    let fixed = check();
+    assert_eq!(fixed.status.code(), Some(0), "{}", String::from_utf8_lossy(&fixed.stderr));
+    assert!(fixed.stdout.is_empty());
+    assert!(fixed.stderr.is_empty());
+}
+
+#[test]
+fn fix_safety_tiers_are_reported_and_applied() {
+    let dir = isolated_cwd("typed_fix_edits");
+    let typo = dir.join("typo.jet");
+    fs::write(&typo, "fn run() {\n    pirnt(\"hi\");\n}\n").unwrap();
+    let formatting = dir.join("formatting.jet");
+    fs::write(
+        &formatting,
+        "fn run() {\n    loop item; [1, 2, 3] { print(item) }\n}\n",
+    )
+    .unwrap();
+    let immutable = dir.join("immutable.jet");
+    let immutable_source = "fn run() {\n    x :: 1\n    x = 2;\n    print(x);\n}\n";
+    fs::write(&immutable, immutable_source).unwrap();
+
+    let report_grades = |file: &Path| {
+        let output = Command::new(jet())
+            .args(["check", file.to_str().unwrap(), "--json"])
+            .current_dir(&dir)
+            .env("NO_COLOR", "1")
+            .output()
+            .unwrap();
+        assert_eq!(output.status.code(), Some(1), "{}", String::from_utf8_lossy(&output.stderr));
+        let report = parse_json(String::from_utf8(output.stderr).unwrap().trim()).unwrap();
+        let applicability = jet_foundation::JSON::json_str(
+            jet_foundation::JSON::json_get(&report, "applicability").unwrap(),
+        )
+        .unwrap()
+        .to_string();
+        let edits = match jet_foundation::JSON::json_get(&report, "fix_edits").unwrap() {
+            jet_foundation::JSON::JSONValue::Array(edits) => edits,
+            _ => panic!("fix_edits is not an array"),
+        };
+        assert_eq!(edits.len(), 1);
+        let safety = jet_foundation::JSON::json_str(
+            jet_foundation::JSON::json_get(&edits[0], "safety").unwrap(),
+        )
+        .unwrap()
+        .to_string();
+        (applicability, safety)
+    };
+
+    assert_eq!(
+        report_grades(&formatting),
+        ("safe".to_string(), "formatting".to_string())
+    );
+    assert_eq!(
+        report_grades(&immutable),
+        ("suggested".to_string(), "api-changing".to_string())
+    );
+
+    let output = Command::new(jet())
+        .args(["fix", typo.to_str().unwrap()])
+        .current_dir(&dir)
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "jet fix failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(
+        fs::read_to_string(&typo).unwrap(),
+        "fn run() {\n    print(\"hi\");\n}\n"
+    );
+
+    let output = Command::new(jet())
+        .args(["fix", formatting.to_str().unwrap()])
+        .current_dir(&dir)
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(0));
+    assert!(fs::read_to_string(&formatting).unwrap().contains("loop item,"));
+
+    let output = Command::new(jet())
+        .args(["fix", immutable.to_str().unwrap()])
+        .current_dir(&dir)
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(0));
+    assert_eq!(fs::read_to_string(&immutable).unwrap(), immutable_source);
+    assert!(String::from_utf8_lossy(&output.stdout).contains("skipped 1 suggestion"));
+
+    let output = Command::new(jet())
+        .args(["fix", immutable.to_str().unwrap(), "--all"])
+        .current_dir(&dir)
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(0));
+    assert!(fs::read_to_string(&immutable).unwrap().contains("x := 1"));
 }
 
 #[test]

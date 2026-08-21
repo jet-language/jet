@@ -12,7 +12,7 @@
 // Safety model / deterministic sandbox (D-DX5-HOOK1): the linker registers
 // *zero* host imports, so a component that declares any import fails to
 // instantiate. Guests get no ambient clock, random, filesystem, network, or
-// process — nondeterministic capability requests fail closed at load. V1
+// process — nondeterministic ability requests fail closed at load. V1
 // components only export pure `analyze(snapshot: list<u8>) -> list<u8>`; the
 // host owns snapshot schema, response validation, diagnostics, and semantic
 // authority (I2/I3).

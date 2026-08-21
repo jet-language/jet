@@ -771,7 +771,6 @@ impl<'a> TaintCtx<'a> {
             | Stmt::TaskGroup { body, .. }
             | Stmt::Layout { body, .. }
             | Stmt::Caps { body, .. }
-            | Stmt::Grant { body, .. }
             | Stmt::Transact { body, .. }
             | Stmt::AssumeDet { body, .. }
             | Stmt::ScopeMember { body, .. }
@@ -1134,13 +1133,27 @@ pub fn collect_tag_facts(
         name: &str,
         candidates: impl IntoIterator<Item = &'a str>,
     ) -> Option<&'a str> {
-        candidates
-            .into_iter()
-            .map(|candidate| (crate::Syntax::edit_distance(name, candidate), candidate))
+        let mut best: Option<(&'a str, usize)> = None;
+        let mut ambiguous = false;
+        for candidate in candidates {
+            let distance = crate::Syntax::edit_distance(name, candidate);
             // Distance 0 is the rejected spelling itself; never suggest it (#2002).
-            .filter(|(distance, _)| *distance > 0 && *distance <= 3)
-            .min_by_key(|(distance, candidate)| (*distance, *candidate))
-            .map(|(_, candidate)| candidate)
+            if distance == 0 || distance > 3 {
+                continue;
+            }
+            match best {
+                None => best = Some((candidate, distance)),
+                Some((_, best_distance)) if distance < best_distance => {
+                    best = Some((candidate, distance));
+                    ambiguous = false;
+                }
+                Some((best_candidate, best_distance)) if distance == best_distance => {
+                    ambiguous |= best_candidate != candidate;
+                }
+                _ => {}
+            }
+        }
+        best.filter(|_| !ambiguous).map(|(candidate, _)| candidate)
     }
 
     fn register_scrubber(

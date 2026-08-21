@@ -108,12 +108,11 @@ fn corpus_gate_ledger_audit_fires_on_a_missing_row() {
 /// compares default tiered against optimized AOT stdout/stderr/exit
 /// byte-for-byte, and compares the pure interpreter too WHEN the TIR evaluator
 /// runs the program. A pure-interpreter refusal carrying E2201/E0956 is accepted
-/// and does not change the class (`classify_corpus_stem`, support.rs:4080-4120),
-/// so a `resident_jit` row proves AOT==tiered-JIT plus resident Cranelift
-/// execution — it does NOT by itself prove the interpreter leg. Every accepted
-/// refusal is TIR coverage owed against D-ONECORE1=A/I9, not a settled boundary;
-/// do not cite `resident_jit` as three-tier parity for a stem the evaluator
-/// refuses. An AOT-green example whose
+/// and records `interpreter_refused: CODE` on the observed backend row. A
+/// `resident_jit` row proves AOT==tiered-JIT plus resident Cranelift execution.
+/// It proves interpreter parity only without that marker. Every accepted refusal
+/// is TIR coverage owed against D-ONECORE1=A/I9, not a settled boundary. Do not
+/// cite a marked `resident_jit` row as three-tier parity. An AOT-green example whose
 /// default tiered run REFUSES to run it lands in `run_tier_broken`, which must
 /// hold exactly `RUN_TIER_BROKEN_HELD_OUT`; one that runs but disagrees with the
 /// oracle lands in `tier_divergent`, which must stay empty. Recording both facts
@@ -126,19 +125,33 @@ fn corpus_gate_ledger_audit_fires_on_a_missing_row() {
 /// parity: guard tests/dev_corpus_gate.rs::example_corpus_strict_jit_aot_differential_gate
 ///
 /// c730: CI runs this via `tools/ci/jit-aot-parity.sh` on every supported
-/// native x86_64 host (Linux/macOS/Windows). Set `JET_CORPUS_GATE_REPORT_DIR`
-/// to write the canonical report bundle.
+/// native x86_64 host (Linux/macOS/Windows). Set the shard index/count to run
+/// one weighted corpus slice; each slice writes its report, and
+/// `tools/ci/compose-corpus-gate.sh` composes the ledger. Set
+/// `JET_CORPUS_GATE_REPORT_DIR` to write the report bundle.
 #[test]
 fn example_corpus_strict_jit_aot_differential_gate() {
     let started = std::time::Instant::now();
     if skip_if_cranelift_host_unsupported() {
         return;
     }
+    let shard = corpus_gate_shard_config();
     let filter = std::env::var("JET_CORPUS_GATE_FILTER").ok();
+    let selected_stems = corpus_gate_selected_stems();
     let records = collect_corpus_gate_records();
+    let covered_stems: Vec<String> = records.iter().map(|record| record.stem.clone()).collect();
+    assert_eq!(
+        covered_stems, selected_stems,
+        "corpus gate shard did not classify its exact selected stem set"
+    );
     if std::env::var("JET_DUMP_CORPUS_GATE").as_deref() == Ok("1") {
         print_corpus_gate_manifest(&records);
-        if std::env::var("JET_WRITE_CORPUS_GATE").as_deref() == Ok("1") {
+        if shard.is_some() {
+            assert!(
+                std::env::var_os("JET_CORPUS_GATE_REPORT_DIR").is_some(),
+                "a sharded corpus dump needs JET_CORPUS_GATE_REPORT_DIR; compose shard reports instead of overwriting the canonical ledger"
+            );
+        } else if std::env::var("JET_WRITE_CORPUS_GATE").as_deref() == Ok("1") {
             let manifest = corpus_gate_manifest_from_records(&records);
             fs::write(
                 PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/jit_corpus_gate.txt"),
@@ -146,8 +159,11 @@ fn example_corpus_strict_jit_aot_differential_gate() {
             )
             .expect("write tests/jit_corpus_gate.txt");
         }
+        write_corpus_gate_report(&records, started.elapsed());
         eprintln!(
-            "c727 corpus gate: {} examples ({} resident JIT, {} deopt-interp, {} run-tier-broken, {} tier-divergent)",
+            "c727 corpus gate: shard {}/{} classified {} examples ({} resident JIT, {} deopt-interp, {} run-tier-broken, {} tier-divergent)",
+            shard.map_or(0, |(index, _)| index),
+            shard.map_or(1, |(_, count)| count),
             records.len(),
             records
                 .iter()
@@ -169,8 +185,10 @@ fn example_corpus_strict_jit_aot_differential_gate() {
         return;
     }
     let mut expected = parse_corpus_gate_manifest();
-    if let Some(filter) = filter {
-        expected.retain(|record| record.stem.contains(&filter));
+    if filter.is_some() || shard.is_some() {
+        let selected: std::collections::HashSet<&str> =
+            selected_stems.iter().map(String::as_str).collect();
+        expected.retain(|record| selected.contains(record.stem.as_str()));
     } else {
         assert_eq!(
             records.len(),
@@ -255,7 +273,7 @@ fn example_corpus_strict_jit_aot_differential_gate() {
     // stem that RAN under both tiers with different observables is a divergence,
     // not a refusal. It stays empty — default tiered output must equal optimized
     // AOT output byte for byte (D-ONECORE1=A), the same law
-    // `tests/jit_gaps.txt::parity_divergences` states.
+    // `jit_coverage_audit` states and enforces.
     let divergent: Vec<String> = records
         .iter()
         .filter(|r| r.class == CorpusGateClass::TierDivergent)
@@ -272,8 +290,8 @@ fn example_corpus_strict_jit_aot_differential_gate() {
         records, expected,
         "corpus gate manifest drifted; update tests/jit_corpus_gate.txt only for an intentional \
          ratchet move (D-VERDICT-1254-1: run_tier_broken may only shrink). Refresh with \
-         JET_DUMP_CORPUS_GATE=1 JET_WRITE_CORPUS_GATE=1 cargo test --test dev_corpus_gate \
-         example_corpus_strict_jit_aot_differential_gate -- --exact --nocapture"
+         JET_CORPUS_GATE_REPORT_DIR=jit-aot-parity-report JET_WRITE_CORPUS_GATE=1 \
+         bash tools/ci/jit-aot-parity.sh"
     );
     let aot_oracle: Vec<_> = records
         .iter()

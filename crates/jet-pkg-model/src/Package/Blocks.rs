@@ -1,5 +1,5 @@
-//! Structural sub-parsers for the `deps:`, `packages:`, `build:`, `effects:`,
-//! `grants:`, `authority:`, and `policy:` blocks of the ratified `package.jet`
+//! Structural sub-parsers for the `deps:`, `packages:`, `build:`,
+//! `authority:`, and `policy:` blocks of the ratified `package.jet`
 //! vocabulary
 //! (D-CONF-PLANE1, D-CONF-NAME1). These blocks carry semantics ratified by
 //! their own, separate decisions (D-JPK23, D-TGT1/D-TGT2/D-TGT3, D-CFFI2,
@@ -336,7 +336,6 @@ pub enum Target {
     Executable,
     Test,
     Example,
-    Benchmark,
     Plugin { export: Option<String> },
 }
 
@@ -394,7 +393,6 @@ fn parse_target(name: &str, value: &str) -> Result<Target, PackageParseError> {
         k if k == Syntax::TARGET_EXECUTABLE => Target::Executable,
         k if k == Syntax::TARGET_TEST => Target::Test,
         k if k == Syntax::TARGET_EXAMPLE => Target::Example,
-        k if k == Syntax::TARGET_BENCHMARK => Target::Benchmark,
         k if Syntax::TARGET_RESERVED.contains(&k) => {
             return Err(PackageParseError::BadTarget {
                 name: name.to_string(),
@@ -690,36 +688,6 @@ fn parse_string_list(value: &str) -> Result<Vec<String>, ()> {
     Ok(out)
 }
 
-// ── effects: …, grants: … (D-EFFBUDGET1) ────────────────────────────────────
-
-pub(super) fn parse_effects(
-    body: &str,
-) -> Result<(Option<Vec<String>>, Option<Vec<String>>), PackageParseError> {
-    let mut allow = None;
-    let mut deny = None;
-    let mut seen = HashSet::new();
-    for (key, value) in key_value_entries(body)? {
-        if !seen.insert(key.clone()) {
-            return Err(PackageParseError::BadEffectsBlock(format!(
-                "`effects.{key}` is declared more than once"
-            )));
-        }
-        if key == Syntax::EFFECTS_FIELD_ALLOW {
-            allow = Some(parse_effect_list(Syntax::EFFECTS_FIELD_ALLOW, value.trim())?);
-        } else if key == Syntax::EFFECTS_FIELD_DENY {
-            deny = Some(parse_effect_list(Syntax::EFFECTS_FIELD_DENY, value.trim())?);
-        } else {
-            return Err(PackageParseError::BadEffectsBlock(format!(
-                "unknown field `{key}` in `{}:` — allowed: `{}`, `{}`",
-                Syntax::MANIFEST_BLOCK_EFFECTS,
-                Syntax::EFFECTS_FIELD_ALLOW,
-                Syntax::EFFECTS_FIELD_DENY,
-            )));
-        }
-    }
-    Ok((allow, deny))
-}
-
 pub(super) fn parse_grants(body: &str) -> Result<Vec<(String, Vec<String>)>, PackageParseError> {
     let mut out = Vec::new();
     let mut seen = HashSet::new();
@@ -746,12 +714,12 @@ fn parse_effect_list(field: &str, value: &str) -> Result<Vec<String>, PackagePar
         if name.contains('(') {
             if !field.ends_with("deny") {
                 return Err(PackageParseError::BadEffectsBlock(format!(
-                    "`{name}` is a parameterized memory denial and belongs only in an `effects.deny` list — use `Mem.Alloc(above: 65536)` there"
+                    "`{name}` is a parameterized memory denial and belongs only in an `authority.holds.deny` list — use `Mem.Alloc(above: 65536)` there"
                 )));
             }
             if crate::Sema::memory_allocation_bound(name).is_none() {
                 return Err(PackageParseError::BadEffectsBlock(format!(
-                    "`{name}` has an invalid parameterized rights entry — use `Mem.Alloc(above: 65536)`"
+                "`{name}` has an invalid parameterized rights entry — use `Mem.Alloc(above: 65536)`"
                 )));
             }
         }
@@ -812,8 +780,8 @@ pub struct ProviderAuthority {
 }
 
 /// D-AUTHORITY-MANIFEST1=A: one parsed authority block. The package model
-/// copies this into its public authority fact and mirrors holds/grants into
-/// the existing effect-budget inputs until the retired top-level keys leave.
+/// copies this into its public authority fact and projects holds/grants into
+/// the effect-budget summary inputs.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct AuthorityBlock {
     pub holds: AuthorityHolds,
@@ -834,6 +802,11 @@ fn authority_object_body<'a>(value: &'a str, field: &str) -> Result<&'a str, Pac
     let Some(close) = value.rfind('}') else {
         return Err(authority_bad(format!("`authority.{field}` is missing `}}`")));
     };
+    if close <= open || !value[close + 1..].trim().is_empty() {
+        return Err(authority_bad(format!(
+            "`authority.{field}` must contain one complete record"
+        )));
+    }
     Ok(&value[open + 1..close])
 }
 
@@ -906,6 +879,13 @@ pub(super) fn parse_authority(body: &str) -> Result<AuthorityBlock, PackageParse
         }
     }
     Ok(authority)
+}
+
+/// Parse the complete `authority:` value so a missing or non-record outer
+/// value uses the same malformed-authority error as malformed nested fields.
+pub(crate) fn parse_authority_value(value: &str) -> Result<AuthorityBlock, PackageParseError> {
+    let body = authority_object_body(value, "authority")?;
+    parse_authority(body)
 }
 
 fn authority_error(error: PackageParseError) -> PackageParseError {
@@ -1080,13 +1060,13 @@ pub(super) fn parse_policy(
         }
         let Some(key) = crate::Policy::PolicyKey::parse(&name) else {
             let replacement = match name.as_str() {
-                "no_alloc" => Some("`effects: .{ deny: [Mem.Alloc] }`".to_string()),
-                "zero_rc" => Some("`effects: .{ deny: [Mem.Rc] }`".to_string()),
+                "no_alloc" => Some("`authority: .{ holds: { deny: [Mem.Alloc] } }`".to_string()),
+                "zero_rc" => Some("`authority: .{ holds: { deny: [Mem.Rc] } }`".to_string()),
                 "arena_bounded" => raw
                     .parse::<u64>()
                     .ok()
                     .filter(|bytes| *bytes > 0)
-                    .map(|bytes| format!("`effects: .{{ deny: [Mem.Alloc(above: {bytes})] }}`")),
+                    .map(|bytes| format!("`authority: .{{ holds: {{ deny: [Mem.Alloc(above: {bytes})] }} }}`")),
                 _ => None,
             };
             if let Some(replacement) = replacement {
@@ -1115,7 +1095,7 @@ pub(super) fn parse_policy(
                     ),
                 });
             }
-            return Err(bad_mem(format!("`{name}` is not a registered package policy; memory floors belong in `effects.deny`")));
+            return Err(bad_mem(format!("`{name}` is not a registered package policy; memory floors belong in `authority.holds.deny`")));
         };
         if !seen.insert(key) {
             return Err(bad_mem(format!("package policy `{name}` is declared more than once")));

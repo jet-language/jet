@@ -15,6 +15,7 @@ pub fn core_module_items(module: &str) -> Vec<String> {
             .collect();
     }
     let items: &[&str] = match module {
+        "core.prelude" => &["keep"],
         "core.term" => &[
             "Reader",
             "Writer",
@@ -1022,7 +1023,7 @@ pub fn core_module_items(module: &str) -> Vec<String> {
             "Browser", "BrowserContext", "BrowserPage", "BrowserFrame", "BrowserLocator",
             "BrowserIntercept",
             "BrowserEvent", "BrowserTrace", "BrowserReceipt", "BrowserPrivacy", "BrowserError",
-            "BrowserCapabilities",
+            "BrowserAbilities",
             "BrowserProfile", "BrowserTimeout", "BrowserProtocol", "BrowserLocked",
             "profile", "timeout", "locked", "connect", "connect_profile",
         ],
@@ -1119,7 +1120,7 @@ pub(crate) fn core_module_type_item(module: &str, item: &str) -> bool {
             "Browser" | "BrowserContext" | "BrowserPage" | "BrowserFrame" | "BrowserLocator"
             | "BrowserIntercept"
             | "BrowserEvent" | "BrowserTrace" | "BrowserReceipt" | "BrowserPrivacy" | "BrowserError"
-            | "BrowserCapabilities"
+            | "BrowserAbilities"
             | "BrowserProfile" | "BrowserTimeout" | "BrowserProtocol" | "BrowserLocked")
         // D-WEBAPP1=D: namespaced `web.App` / `web.Page` / `web.Context` / `web.Mount`.
         | ("core.web", "App" | "Page" | "Context" | "Mount")

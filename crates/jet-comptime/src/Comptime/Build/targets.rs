@@ -11,7 +11,6 @@ pub enum TargetKind {
     Executable,
     Library,
     Test,
-    Bench,
     AssetBundle,
     Doc,
     Install,

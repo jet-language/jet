@@ -83,6 +83,8 @@ fn perf_attach_view_compare_export_share_one_jettrace_truth() {
     assert!(exported.contains("\"kind\":\"jet.trace.projection\""), "{exported}");
     assert!(exported.contains("\"loss\":"), "{exported}");
     assert!(exported.contains("\"schema\":\"jet.trace\""), "{exported}");
+    assert!(exported.contains("--chrome"), "{exported}");
+    assert!(!exported.contains("no pprof/otel/chrome payloads"), "{exported}");
 
     let pprof = run_jet(&root, &["perf", "export", out.to_str().unwrap(), "--pprof"]);
     let pprof_out = String::from_utf8_lossy(&pprof.stdout);
@@ -102,6 +104,11 @@ fn perf_attach_view_compare_export_share_one_jettrace_truth() {
     assert!(chrome.status.success(), "{}", String::from_utf8_lossy(&chrome.stderr));
     assert!(
         String::from_utf8_lossy(&chrome.stdout).contains("chrome-projection"),
+        "{}",
+        String::from_utf8_lossy(&chrome.stdout)
+    );
+    assert!(
+        String::from_utf8_lossy(&chrome.stdout).contains("\"traceEvents\":["),
         "{}",
         String::from_utf8_lossy(&chrome.stdout)
     );

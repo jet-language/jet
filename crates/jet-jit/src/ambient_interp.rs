@@ -680,8 +680,8 @@ pub(crate) mod process_prelude {
         jet_process_spec_terminal_with_policy(spec, policy)
     }
 
-    pub(crate) fn spec_capabilities(spec: &ProcessSpec) -> std::collections::HashSet<String> {
-        jet_process_spec_capabilities(spec)
+    pub(crate) fn spec_abilities(spec: &ProcessSpec) -> std::collections::HashSet<String> {
+        jet_process_spec_abilities(spec)
     }
 
     pub(crate) fn spec_run(spec: &ProcessSpec) -> Result<ProcessResult, IOError> {
@@ -1281,7 +1281,7 @@ fn ambient_process_handle(
             | "output_limit"
             | "detached"
             | "terminal"
-            | "capabilities"
+            | "abilities"
             | "run"
             | "run_checked"
             | "spawn"
@@ -1334,8 +1334,8 @@ fn ambient_process_handle(
                 }
                 _ => Err(unsupported("ProcessSpec.terminal arguments", span)),
             },
-            "capabilities" => Ok(process_set_value(
-                process_prelude::spec_capabilities(&spec).into_iter().collect(),
+            "abilities" => Ok(process_set_value(
+                process_prelude::spec_abilities(&spec).into_iter().collect(),
             )),
             "run" => Ok(process_result_outcome(process_prelude::spec_run(&spec))),
             "run_checked" => Ok(process_result_outcome(process_prelude::spec_run_checked(&spec))),
@@ -2799,6 +2799,11 @@ pub fn ambient_core_call(
                 span,
             )));
         }
+    }
+    // D-BENCH-KEEP1=A: the interpreter marshals the shared identity behavior;
+    // it does not invent a second sink implementation.
+    if module == "core.prelude" && method == "keep" {
+        return Some(Ok(args.first().cloned().unwrap_or(CtValue::Unit)));
     }
     if module == "core.files" && matches!(method, "walk" | "walk_parallel") {
         return Some(ambient_fs_walk(&args, span));

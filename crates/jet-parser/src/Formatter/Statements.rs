@@ -700,14 +700,8 @@ impl<'a> Fmt<'a> {
                 });
                 self.end_block();
             }
-            // D-EFF1 / D-QUAL1: `#Caps(Net, DB) { … }` effect-restriction region.
+            // D-EFF1 / D-QUAL1: `#Abilities(Net, DB) { … }` effect-restriction region.
             Stmt::Caps { body, .. } => {
-                self.with_indent(|f| f.fmt_block_stmts(body));
-                self.end_block();
-            }
-            // D-SCAP1 / D-ARROW-CONTROL1:
-            // `#Grant(caps: FS, Net) { … }` scoped-capability grant region.
-            Stmt::Grant { body, .. } => {
                 self.with_indent(|f| f.fmt_block_stmts(body));
                 self.end_block();
             }

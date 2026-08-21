@@ -66,9 +66,6 @@ fn spelling(row: &AppliedRule) -> String {
             args.push(placeholder(ty, source_type));
         }
     }
-    if row.name == "Grant" && row.signature.variadic.is_some() {
-        args[0] = format!("caps: {}", args[0]);
-    }
     if row.name == "Scrub" {
         args[0] = "X".to_string();
     }
@@ -143,9 +140,6 @@ fn program_at(marker: &str, row: &AppliedRule, site: RuleSite) -> Option<String>
         RuleSite::Variant => {
             format!("enum E {{\n    {marker} A\n    B\n}}\n\nfn run() {{\n}}\n")
         }
-        RuleSite::Block if marker.starts_with("#Grant") => {
-            format!("fn run() {{\n    {marker} {{\n    }}\n}}\n")
-        }
         RuleSite::Block => format!("fn run() {{\n    {marker} {{\n        print(\"ok\")\n    }}\n}}\n"),
         RuleSite::Statement => format!("fn run() {{\n    {marker} print(\"ok\")\n}}\n"),
         RuleSite::Declaration if marker.starts_with("#Persist") => format!(
@@ -162,7 +156,6 @@ fn program_at(marker: &str, row: &AppliedRule, site: RuleSite) -> Option<String>
         }
         RuleSite::Expression => format!("fn run() {{\n    value :: {marker}\n}}\n"),
         RuleSite::Test => format!("{marker} {{\n    print(\"ok\")\n}}\n\nfn run() {{\n}}\n"),
-        RuleSite::Bench => format!("{marker} {{\n    print(\"ok\")\n}}\n\nfn run() {{\n}}\n"),
         RuleSite::Package | RuleSite::Impl | RuleSite::Operation | RuleSite::Text => return None,
     })
 }
@@ -378,6 +371,15 @@ fn every_retired_row_teaches_a_replacement() {
             );
         }
     }
+}
+
+#[test]
+fn invariant_marker_is_retired_to_the_interval_range_form() {
+    let rule = Policy::applied_rule("Invariant").expect("Invariant retirement row");
+    assert!(matches!(
+        rule.status,
+        RuleStatus::Retired { replacement } if replacement == "distinct Int(lo..hi)"
+    ));
 }
 
 /// D-MARK-REPEAT1=A: the repeatable column is the only place repetition is

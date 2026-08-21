@@ -44,6 +44,49 @@ fn jet_test_example_output() {
 }
 
 #[test]
+fn jet_test_expected_fail_tracks_failure_and_unexpected_pass() {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let jet = jet_bin();
+    if !have_rustc() || !jet.exists() {
+        return;
+    }
+    let example = root.join("examples/features/tooling/expected_fail.jet");
+    let expected = fs::read_to_string(
+        root.join("examples/features/expected/tooling/expected_fail.test.out"),
+    )
+    .expect("expected_fail.test.out");
+
+    let green = Command::new(&jet)
+        .args(["test", "--show-default", "--serial", "--filter=known"])
+        .arg(&example)
+        .output()
+        .unwrap();
+    assert!(green.status.success(), "expected failure should stay green:\n{}", String::from_utf8_lossy(&green.stdout));
+    assert_eq!(
+        String::from_utf8_lossy(&green.stdout),
+        "known bug remains expected-fail: expected-fail\n0 passed, 0 failed, 0 skipped, 1 expected-fail\n"
+    );
+
+    let out = Command::new(&jet)
+        .args(["test", "--show-default", "--serial"])
+        .arg(&example)
+        .output()
+        .unwrap();
+    assert!(!out.status.success(), "unexpected pass must fail the run");
+    assert_eq!(String::from_utf8_lossy(&out.stdout), expected);
+
+    let json = Command::new(&jet)
+        .args(["test", "--json", "--serial"])
+        .arg(&example)
+        .output()
+        .unwrap();
+    assert!(!json.status.success(), "JSON run must preserve unexpected-pass failure");
+    let json = String::from_utf8_lossy(&json.stdout);
+    assert!(json.contains("\"expectedFailures\":1"), "missing expected-failure count: {json}");
+    assert!(json.contains("\"unexpectedPasses\":1"), "missing unexpected-pass count: {json}");
+}
+
+#[test]
 fn jet_test_package_collects_imported_module_tests() {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let jet = jet_bin();
@@ -241,116 +284,6 @@ fn jet_scope_timeout_exceeded_fails() {
 }
 
 #[test]
-fn jet_bench_example_regions() {
-    // D-BENCH1: `jet bench` on a file with `#Bench` blocks times each region
-    // and reports `<name>  <ns> ns/iter (...)  <ops> ops/sec`. Timing values
-    // are non-deterministic, so this asserts structure: every block runs and
-    // every name + the ns/iter and ops/sec labels appear.
-    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let jet = jet_bin();
-    let have_rustc = have_rustc();
-    if !have_rustc || !jet.exists() {
-        eprintln!("note: rustc not found; skipping jet bench integration");
-        return;
-    }
-
-    let example = root.join("examples/features/tooling/bench.jet");
-    let out = Command::new(&jet)
-        .arg("bench")
-        .arg("--show-default")
-        .arg(&example)
-        .output()
-        .unwrap();
-    let stdout = String::from_utf8_lossy(&out.stdout);
-    assert!(
-        out.status.success(),
-        "jet bench examples/features/tooling/bench.jet failed:\nstdout: {}\nstderr: {}",
-        stdout,
-        String::from_utf8_lossy(&out.stderr)
-    );
-    for needle in ["fib(10)", "sum to 100", "ns/iter", "ops/sec"] {
-        assert!(
-            stdout.contains(needle),
-            "bench output missing `{}`:\n{}",
-            needle,
-            stdout
-        );
-    }
-    // One report line per `#Bench` block.
-    assert_eq!(
-        stdout.lines().filter(|l| l.contains("ns/iter")).count(),
-        2,
-        "expected exactly two bench region lines:\n{}",
-        stdout
-    );
-}
-
-#[test]
-fn jet_bench_para_map_crossover_matrix() {
-    // E3-1405: the crossover example owns one map/para_map pair for each
-    // count/cost cell. Timing values are host-specific; this proves that the
-    // repeatable optimized benchmark emits every named cell and 20-sample
-    // report shape without pinning a machine-dependent threshold.
-    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let jet = jet_bin();
-    if !have_rustc() || !jet.exists() {
-        return;
-    }
-    let example = root.join("examples/features/tooling/para_map_crossover_bench.jet");
-    let out = Command::new(&jet)
-        .arg("bench")
-        .arg("--show-default")
-        .arg(&example)
-        .output()
-        .unwrap();
-    let stdout = String::from_utf8_lossy(&out.stdout);
-    assert!(
-        out.status.success(),
-        "para_map crossover benchmark failed:\nstdout: {stdout}\nstderr: {}",
-        String::from_utf8_lossy(&out.stderr)
-    );
-    for count in [64, 256, 1024, 4096] {
-        for cost in [1, 32, 256] {
-            for method in ["map", "para_map"] {
-                let name = format!("{method} n{count} c{cost}");
-                assert!(stdout.contains(&name), "benchmark output missing {name}:\n{stdout}");
-            }
-        }
-    }
-    assert_eq!(
-        stdout.lines().filter(|line| line.contains("ns/iter")).count(),
-        24,
-        "expected one report line per map/para_map cell:\n{stdout}"
-    );
-}
-
-#[test]
-fn jet_bench_failure_is_not_reported_as_timing() {
-    // A failed `require` in a benchmark body must stop the command; silently
-    // discarding the body Result would publish a false green timing report.
-    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let jet = jet_bin();
-    if !have_rustc() || !jet.exists() {
-        return;
-    }
-    let fixture = root.join("tests/fixtures/bench_fail.jet");
-    let out = Command::new(&jet).arg("bench").arg("--show-default").arg(&fixture).output().unwrap();
-    assert!(!out.status.success(), "failed benchmark body unexpectedly passed");
-    assert_eq!(out.status.code(), Some(70), "failed benchmark must use the program-stop exit");
-    assert!(
-        String::from_utf8_lossy(&out.stderr).contains("bench region failed"),
-        "missing benchmark failure boundary: {}",
-        String::from_utf8_lossy(&out.stderr)
-    );
-    assert!(
-        String::from_utf8_lossy(&out.stderr).contains("Stop [E3001]"),
-        "benchmark failure must use the shared runtime report: {}",
-        String::from_utf8_lossy(&out.stderr)
-    );
-    assert!(!String::from_utf8_lossy(&out.stdout).contains("ns/iter"));
-}
-
-#[test]
 fn jet_test_fail_then_fixed() {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let jet = jet_bin();
@@ -371,15 +304,15 @@ fn jet_test_fail_then_fixed() {
     );
     assert!(
         String::from_utf8_lossy(&bad.stderr).contains("Stop [E3001]"),
-        "require_eq should print the registered test report"
+        "assert_eq should print the registered test report"
     );
     assert!(
         String::from_utf8_lossy(&bad.stderr).contains("expected 4, got 3"),
-        "require_eq report should preserve expected/got"
+        "assert_eq report should preserve expected/got"
     );
     assert!(
         String::from_utf8_lossy(&bad.stderr).contains("-->"),
-        "require_eq report should preserve source location"
+        "assert_eq report should preserve source location"
     );
 
     let good = Command::new(&jet).arg("test").arg("--show-default").arg(&fixed).output().unwrap();
@@ -1090,53 +1023,17 @@ fn jet_test_coverage_reports_branch_taken_and_not_taken_in_text_and_json() {
 }
 
 #[test]
-fn jet_bench_target_integration() {
-    // c80 / D-TGT2: a package whose package.jet declares `target: benchmark` runs
-    // its `#Bench` regions via the existing `jet bench` engine (no new mechanism).
+fn benchmark_target_does_not_reintroduce_retired_command() {
+    // D-CLAIM-BENCH1=A: the old package target cannot revive `jet bench`.
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let jet = jet_bin();
-    let have_rustc = have_rustc();
-    if !have_rustc || !jet.exists() {
-        eprintln!("note: rustc not found; skipping jet bench target integration");
-        return;
-    }
     let example = root.join("examples/features/tooling/bench_target/main.jet");
-    // Isolated cwd: this fixture's stem is `main`. `jet` writes `build/<stem>.*`
-    // relative to its own cwd (Source/CmdCompile.rs `bin_path`/`stem`/`build`),
-    // keyed only by stem — a concurrent test compiling a different `main.jet`
-    // from the shared repo-root cwd would race this one on `build/main.rs`.
-    let cwd = std::env::temp_dir().join(format!("jet_bench_target_cwd_{}", std::process::id()));
-    let _ = fs::remove_dir_all(&cwd);
-    fs::create_dir_all(&cwd).unwrap();
     let out = Command::new(&jet)
-        .arg("bench")
-        .arg("--show-default")
-        .arg(&example)
-        .current_dir(&cwd)
+        .args(["bench", example.to_str().unwrap()])
         .output()
         .unwrap();
-    let stdout = String::from_utf8_lossy(&out.stdout);
-    assert!(
-        out.status.success(),
-        "jet bench examples/features/tooling/bench_target/main.jet failed:\nstdout: {}\nstderr: {}",
-        stdout,
-        String::from_utf8_lossy(&out.stderr)
-    );
-    for needle in ["sum_to(1000)", "ns/iter", "ops/sec"] {
-        assert!(
-            stdout.contains(needle),
-            "bench output missing `{}`:\n{}",
-            needle,
-            stdout
-        );
-    }
-    // Exactly one `#Bench` region in this example.
-    assert_eq!(
-        stdout.lines().filter(|l| l.contains("ns/iter")).count(),
-        1,
-        "expected exactly one bench region line:\n{}",
-        stdout
-    );
+    assert!(!out.status.success());
+    assert!(String::from_utf8_lossy(&out.stderr).contains("jet test --measure"));
 }
 
 #[test]
@@ -1174,17 +1071,17 @@ fn jet_test_dir_recurses_into_subdirectories() {
     fs::create_dir_all(dir.join("nested/deeper")).unwrap();
     fs::write(
         dir.join("a.jet"),
-        "#Test(\"top level\") { require(true) }\n",
+        "#Test(\"top level\") { assert(true) }\n",
     )
     .unwrap();
     fs::write(
         dir.join("nested/b.jet"),
-        "#Test(\"one level down\") { require(true) }\n",
+        "#Test(\"one level down\") { assert(true) }\n",
     )
     .unwrap();
     fs::write(
         dir.join("nested/deeper/c.jet"),
-        "#Test(\"two levels down\") { require(true) }\n",
+        "#Test(\"two levels down\") { assert(true) }\n",
     )
     .unwrap();
     let out = Command::new(&jet).arg("test").arg("--show-default").arg(&dir).output().unwrap();
@@ -1235,7 +1132,7 @@ fn bare_jet_test_discovers_tests_in_every_package_module() {
     let dir = bare_package_project("bare_package", &jet);
     fs::write(
         dir.join("math.jet"),
-        "fn double(n: Int) => Int :: (n * 2)\n\n#Test(\"double returns twice the input\") {\n    require_eq(double(3), 6)\n}\n",
+        "fn double(n: Int) => Int :: (n * 2)\n\n#Test(\"double returns twice the input\") {\n    assert_eq(double(3), 6)\n}\n",
     )
     .unwrap();
     let out = Command::new(&jet).arg("test").current_dir(&dir).output().unwrap();
@@ -1299,7 +1196,7 @@ fn bare_jet_test_surfaces_a_broken_package_member() {
     let dir = bare_package_project("bare_broken", &jet);
     fs::write(
         dir.join("good.jet"),
-        "#Test(\"good member passes\") {\n    require(true)\n}\n",
+        "#Test(\"good member passes\") {\n    assert(true)\n}\n",
     )
     .unwrap();
     fs::write(dir.join("broken.jet"), "fn oops( {\n").unwrap();
@@ -1466,7 +1363,7 @@ fn jet_fuzz_example_clean_run_output() {
 fn jet_fuzz_ambiguous_target_names_candidates() {
     // Gap #1, target selection: a file with more than one property test must
     // name one — this is CLI argument validation, not a compiler diagnostic
-    // (same tier as `jet bench`'s "can't find the file").
+    // (same tier as a CLI missing-file argument error).
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let jet = jet_bin();
     let have_rustc = have_rustc();

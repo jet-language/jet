@@ -66,7 +66,7 @@ And the machinery census (file:line from the code sweep):
 | 2 | Unjoined-task check | `CheckerOwnership.rs:4141` vs `:4173` | a comment admits it "mirrors the `#SingleUse` check"; one warns, one errors |
 | 3 | Six flow-fact stores | `moved` (`mod.rs:1253`), `uninit` (`:1375`), `StateCtx` (`State.rs:246`), `TaintCtx` (`Taint.rs:33`), narrow-by-shadowing (`switches.rs:144`), `ViewFactGraph` (`mod.rs:882`) | six shapes for "per-binding fact, updated by flow" |
 | 4 | Dead joins | `State.rs:712` `join_after`, `mod.rs:44` `UninitState::merge_paths` | both `#[allow(dead_code)]` — typestate and partial-init have **no live branch merge** |
-| 5 | Phantom fact enums | `Capability`, `State`, `TaskGroup`, `PolicySetting`, ~14 more (type-unification audit :117–129) | named in errors, accepted in signatures, impossible to build — `fn f(x: Capability)` compiles to a dead end |
+| 5 | Phantom fact enums | `Capability`, `State`, `Group`, `PolicySetting`, ~14 more (type-unification audit :117–129) | named in errors, accepted in signatures, impossible to build — `fn f(x: Capability)` compiles to a dead end |
 | 6 | Send-safety | stray `sendable` flag on `LocalInfo`, `mod.rs:756` | a plane-shaped fact outside every registry (concurrency proposal flags it) |
 | 7 | Twelve hand-added fact columns | `LocalInfo`, `mod.rs:746-772` | per-binding facts grown one field at a time (row 6 is one of them) |
 | 8 | Reflection string fallback | `Reflect.rs:151` | facts leave the compiler as strings |
@@ -219,7 +219,7 @@ tag Pii { deny: [Log, Net] }                     // a fact kind: one registry ro
 fn hash_email(email: String) => String { ... }   // sanitizer's declaration (D-TAG-SURFACE1)
 
 fn ingest(rows: [Row]) =[DB.Read, Log]=> Report {
-    stats :: shared Stats.{ seen: 0 }            // place facts: lock story inferred
+    stats :: shared Stats{ seen: 0 }            // place facts: lock story inferred
 
     task.group g(limit: 4) {                     // work facts: state, duty, reach
         loop row, rows {

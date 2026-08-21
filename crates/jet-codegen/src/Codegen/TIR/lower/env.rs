@@ -413,7 +413,6 @@ pub(super) fn collect_txn_mut_roots(body: &[Stmt], out: &mut Vec<String>) {
             | Stmt::TaskGroup { body, .. }
             | Stmt::Layout { body, .. }
             | Stmt::Caps { body, .. }
-            | Stmt::Grant { body, .. }
             | Stmt::ContextBlock { body, .. }
             | Stmt::Live { body, .. }
             | Stmt::AssumeDet { body, .. } => work.extend(body.iter().rev()),

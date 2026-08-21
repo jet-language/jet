@@ -139,7 +139,6 @@ pub(super) fn stmts_have_comptime_evaluation(stmts: &[Stmt]) -> bool {
         | Stmt::TaskGroup { body, .. }
         | Stmt::Layout { body, .. }
         | Stmt::Caps { body, .. }
-        | Stmt::Grant { body, .. }
         | Stmt::Transact { body, .. }
         | Stmt::AssumeDet { body, .. }
         | Stmt::Live { body, .. }

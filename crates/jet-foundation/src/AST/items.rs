@@ -1710,7 +1710,7 @@ pub struct DistinctDef {
     pub is_pub: bool,
     /// D-PUBPKG1=A: true for `pub(package) Name :: distinct Base`.
     pub is_package_pub: bool,
-    /// Source-ordered applied rules. Capability requests are lowered into the
+    /// Source-ordered applied rules. Ability requests are lowered into the
     /// ordinary derive rows below; this is the one declaration-side home for
     /// every derived capability.
     pub type_markers: Vec<Marker>,

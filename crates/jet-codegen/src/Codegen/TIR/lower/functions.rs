@@ -539,16 +539,26 @@ fn wrap_contract_scope(
     }
 }
 
+fn test_body_return_type() -> Type {
+    Type::Result {
+        ok: Box::new(Type::Named(Syntax::INTERNAL_UNIT_TYPE.to_string())),
+        err: Box::new(Type::Named(Syntax::TYPE_ERR.to_string())),
+    }
+}
+
 /// c109: lower + emit a `#Test` block body through the TIR, reproducing the legacy
 /// `emit_stmts(cx, body, &mut env, out, 1, false)` byte-for-byte. The body is a bare
-/// statement list with no params and an empty env, emitted at indent 1 inside the
-/// `fn jet_test_N() -> Result<(), String>` the caller already opened. The env's
-/// `fn_name` is taken LIVE from `cx.current_fn` — exactly the value the legacy `?`/panic
-/// emitters read (`emit_*_tests` never resets `cx.current_fn` before the test loop, so
-/// both paths embed the same trailing function name in any `?`/panic frame).
+/// statement list with no params, emitted at indent 1 inside the
+/// `fn jet_test_N() -> Result<(), String>` the caller already opened. The env carries
+/// that wrapper's fallible-unit return type so `return` lowering has the same context
+/// as the generated Rust function. The env's `fn_name` is taken LIVE from
+/// `cx.current_fn` — exactly the value the legacy `?`/panic emitters read
+/// (`emit_*_tests` never resets `cx.current_fn` before the test loop, so both paths
+/// embed the same trailing function name in any `?`/panic frame).
 pub(crate) fn emit_tir_test_body(body: &[Stmt], cx: &Cx, out: &mut String) {
     let mut env = LowerEnv::new(cx.current_fn.borrow().clone());
     env.sentries_fenced = cx.dependency_fenced;
+    env.ret_ty = Some(test_body_return_type());
     prepare_interrupt_callback_locals(body, cx, &mut env);
     let tbody = lower_stmts(body, cx, &mut env);
     emit_tir_stmts(&tbody, cx, out, 1);
@@ -567,6 +577,7 @@ pub(crate) fn emit_tir_property_test_body(
 ) {
     let mut env = LowerEnv::new(cx.current_fn.borrow().clone());
     env.sentries_fenced = cx.dependency_fenced;
+    env.ret_ty = Some(test_body_return_type());
     for p in params {
         env.bind(&p.name, TLocal::user(&p.name), Some(p.ty.clone()));
     }

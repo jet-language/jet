@@ -808,12 +808,12 @@ fn test_runs_unimported_sibling_jet_tests_and_propagates_failure() {
     .unwrap();
     fs::write(
         project.join("main.jet"),
-        "#Test(\"entry test\") {\n    require(true)\n}\n",
+        "#Test(\"entry test\") {\n    assert(true)\n}\n",
     )
     .unwrap();
     fs::write(
         project.join("sibling_test.jet"),
-        "#Test(\"unimported sibling test\") {\n    require(false)\n}\n",
+        "#Test(\"unimported sibling test\") {\n    assert(false)\n}\n",
     )
     .unwrap();
     fs::write(
@@ -856,7 +856,7 @@ fn test_check_only_package_without_run_jet_collects_package_tests() {
     .unwrap();
     fs::write(
         project.join("check.jet"),
-        "#Test(\"check-only package\") {\n    require(true)\n}\n",
+        "#Test(\"check-only package\") {\n    assert(true)\n}\n",
     )
     .unwrap();
     fs::write(

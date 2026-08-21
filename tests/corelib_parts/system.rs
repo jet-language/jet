@@ -338,7 +338,7 @@ use core.testing as testing
 module perf.testing {
     budgets: [Budget.{
         name: "parse",
-        scope: .Bench("parse"),
+        scope: .Test("parse"),
         metric: .BenchTime(.P50),
         provider: .BenchMeasurement("parse"),
         comparison: .AbsoluteFrom("local/testing-helpers"),
@@ -359,7 +359,7 @@ fn run() {
     print(rng.int(1, 4) >= 1)
 }
 
-#Bench("parse") {}
+#Test("parse") { .measure {} }
 "#,
         &[],
         None,

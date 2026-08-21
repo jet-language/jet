@@ -1,0 +1,17 @@
+// @dev_interpreter
+use core.sys as env
+
+#Decode
+struct Settings {
+    port: Int
+}
+
+fn run() {
+    env.set("APP_PORT", "not-an-int")
+    failed :: env.decode<Settings>(prefix: "APP_", file: "", allow: ["APP_PORT"])
+    if failed == {
+        .Ok(_) :> { panic("invalid config unexpectedly accepted") }
+        .Err(errors) :> { panic("config: {errors}") }
+    }
+    env.unset("APP_PORT") ?? false
+}

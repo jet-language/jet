@@ -136,7 +136,7 @@ fn shared_callbacks_receive_exactly_one_host_borrow() {
     let src = r#"
 struct Config { hits: Int }
 fn run() {
-    config := shared Config.{ hits: 0 }
+    config := shared Config{ hits: 0 }
     print(config.hits)
     config.hits += 1
 }
@@ -194,8 +194,8 @@ impl Jobs {
 }
 
 fn run() {
-    queue := shared Jobs.{ items: [Int].{} }
-    other := shared Jobs.{ items: [Int].{} }
+    queue := shared Jobs{ items: [Int]{} }
+    other := shared Jobs{ items: [Int]{} }
     guard :: queue.guard_edit()
     other_guard :: other.guard_read()
     guard.value.add(1)
@@ -230,7 +230,7 @@ fn shared_read_guard_value_is_not_writable() {
 struct Counter { value: Int }
 
 fn run() {
-    counter := shared Counter.{ value: 0 }
+    counter := shared Counter{ value: 0 }
     guard :: counter.guard_read()
     guard.value.value += 1
 }
@@ -314,11 +314,11 @@ fn shared_guard_map_and_split_preserve_disjoint_places() {
 struct Pair { left: Int, right: Int }
 
 fn run() {
-    first := shared Pair.{ left: 1, right: 2 }
+    first := shared Pair{ left: 1, right: 2 }
     mapped :: first.guard_edit().map(value => value.left)
     mapped.value += 1
 
-    second := shared Pair.{ left: 3, right: 4 }
+    second := shared Pair{ left: 3, right: 4 }
     (left, right) :: second.guard_edit().split(
         value => value.left,
         value => value.right
@@ -336,7 +336,7 @@ fn shared_guard_split_rejects_overlapping_places() {
 struct Pair { left: Int, right: Int }
 
 fn run() {
-    cell := shared Pair.{ left: 1, right: 2 }
+    cell := shared Pair{ left: 1, right: 2 }
     guard :: cell.guard_edit()
     _ :: guard.split(value => value.left, value => value.left)
 }
@@ -1530,7 +1530,7 @@ fn run() {
 fn run() { print(0) }
 #Test("member argument capture walk") {
     values := [1, 2]
-    .skip("length {values.len()}") { require(false) }
+    .skip("length {values.len()}") { assert(false) }
 }
 "#;
     jet::compile(scope_member).expect("valid scope-member arguments remain walkable");

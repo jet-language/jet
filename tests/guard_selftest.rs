@@ -29,6 +29,21 @@ fn guards_stay_quiet_on_a_healthy_run() {
 }
 
 #[test]
+fn persistent_test_scratch_stays_off_system_temp() {
+    let scratch = common::test_scratch_root("guard-selftest");
+    common::assert_test_path_on_disk(&scratch, "test scratch");
+}
+
+#[test]
+#[should_panic(expected = "RAM-backed temp storage")]
+fn test_path_guard_rejects_system_temp() {
+    common::assert_test_path_on_disk(
+        &std::env::temp_dir().join("jet-test-path-guard"),
+        "test scratch",
+    );
+}
+
+#[test]
 fn unsafe_region_ratchet_trips_on_seeded_growth() {
     unsafe_ratchet::ratchet_trips_on_seeded_growth();
 }

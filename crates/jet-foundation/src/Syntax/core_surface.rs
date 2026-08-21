@@ -888,6 +888,11 @@ pub const TYPE_DECIMAL: &str = "Decimal";
 // D-NUMTYPE1=A: an exact ratio of two whole numbers, kept reduced.
 pub const TYPE_FRACTION: &str = "Fraction";
 
+/// D-AUTHORITY-NAME1=A: the one nameable authority value at process, plugin
+/// and session boundaries. `ProcessAuthority` was renamed to this;
+/// `ProcessPlan` and `ProcessReceipt` keep their names.
+pub const TYPE_ABILITIES: &str = "Authority";
+
 /// D-BUILDENTRY1/D-BUILDTARGET1/D-BUILDACTION1: typed build-program values.
 /// These names are compiler-known only while the selected root `fn build`
 /// runs; build entry is removed before runtime codegen.

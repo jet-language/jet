@@ -1,4 +1,4 @@
-//! dev / repl / doctor / explain / completions / bind / eval / emit / bench
+//! dev / repl / doctor / explain / completions / bind / eval / emit
 //! developer-tooling subcommand handlers.
 
 use std::collections::BTreeMap;
@@ -11,7 +11,7 @@ use std::sync::mpsc::{self, Receiver};
 use jet::Diagnostics::{json_str as json_string, ColorChoice};
 use jet::ExitCodes;
 
-use crate::CmdCompile::{build, collect_source_files_recursive, stem};
+use crate::CmdCompile::{build, stem};
 use crate::{report_problems, BuildProfile, OutputMode};
 pub(crate) use jet_devserver::{watch_policy_from, WatchPolicy};
 
@@ -82,31 +82,43 @@ fn run_dev_tests(file: &str, filters: &[String]) -> Vec<String> {
             return Vec::new();
         }
     };
-    let mut command = Command::new(executable);
-    command.arg("test").arg(file);
-    if filters.len() == 1 {
-        command.arg(format!("--filter={}", filters[0]));
-    }
-    let output = match command.output() {
-        Ok(output) => output,
-        Err(error) => {
-            eprintln!("[Tests] could not start test runner: {error}");
-            return Vec::new();
-        }
+    // The CLI filter is a single substring. Run one child per remembered
+    // failure so `f` remains failed-claims-only when several claims failed;
+    // passing the whole list to one child would silently drop every filter.
+    let selected_filters: Vec<Option<&str>> = if filters.len() > 1 {
+        filters.iter().map(|filter| Some(filter.as_str())).collect()
+    } else {
+        vec![filters.first().map(String::as_str)]
     };
-    print!("{}", String::from_utf8_lossy(&output.stdout));
-    eprint!("{}", String::from_utf8_lossy(&output.stderr));
-    output
-        .stdout
-        .split(|byte| *byte == b'\n')
-        .filter_map(|line| {
+    let mut failed = Vec::new();
+    for filter in selected_filters {
+        let mut command = Command::new(&executable);
+        command.arg("test").arg(file);
+        if let Some(filter) = filter {
+            command.arg(format!("--filter={filter}"));
+        }
+        let output = match command.output() {
+            Ok(output) => output,
+            Err(error) => {
+                eprintln!("[Tests] could not start test runner: {error}");
+                continue;
+            }
+        };
+        print!("{}", String::from_utf8_lossy(&output.stdout));
+        eprint!("{}", String::from_utf8_lossy(&output.stderr));
+        for name in output.stdout.split(|byte| *byte == b'\n').filter_map(|line| {
             let line = String::from_utf8_lossy(line);
             let line = line.trim();
             line.strip_suffix(": FAIL")
                 .or_else(|| line.strip_prefix("FAIL "))
                 .map(str::to_string)
-        })
-        .collect()
+        }) {
+            if !failed.contains(&name) {
+                failed.push(name);
+            }
+        }
+    }
+    failed
 }
 
 /// Preserve the Prelude's stream order when a run outcome crosses the CLI
@@ -3300,258 +3312,6 @@ pub(crate) fn run_lint_complexity(file: &str, mode: OutputMode, max_budget: Opti
     exit(ExitCodes::USER_ERROR);
 }
 
-/// D-TOOL5 / D-BENCH-PARITY1=B: `jet bench` accepts one file, a recursive
-/// directory target, or a project root. Region benches stay serial because
-/// concurrent workloads would corrupt timing results.
-#[derive(Clone, Default)]
-pub(crate) struct BenchRunOpts {
-    /// `--filter=<substr>` selects benchmark region names after discovery.
-    pub(crate) filter: Option<String>,
-    /// `--show-default` forces the stock harness when the entry defines `fn bench`.
-    pub(crate) show_default: bool,
-}
-
-const BENCH_PROFILE_LABEL: &str = "release";
-
-fn bench_path_label(path: &Path) -> String {
-    // `resolve_source_path` (Source/main.rs) hands a single-file bench target
-    // to `run_bench` as the *canonical* authority path since the fail-closed
-    // authority resolver landed, so `path` arrives absolute even when the user
-    // typed `bench.jet`. The bench label is the display identity of the region
-    // (`== <file> ==`, the human line, and the JSON `name`/`file` fields), so
-    // it names the file the way it was addressed: relative to the working
-    // directory whenever it lives there. A target outside the working
-    // directory keeps its absolute spelling — there is no shorter honest name.
-    // `getcwd` and the resolver's `canonicalize` both yield a symlink-free
-    // absolute path, so one comparison is enough.
-    let mut display = path;
-    if path.is_absolute() {
-        if let Ok(working) = std::env::current_dir() {
-            if let Ok(relative) = path.strip_prefix(&working) {
-                if !relative.as_os_str().is_empty() {
-                    display = relative;
-                }
-            }
-        }
-    }
-    let mut label = display.to_string_lossy().replace('\\', "/");
-    while let Some(rest) = label.strip_prefix("./") {
-        label = rest.to_string();
-    }
-    label
-}
-
-pub(crate) fn run_bench(path: &str, opts: BenchRunOpts, mode: OutputMode) {
-    let target = Path::new(path);
-    if !target.exists() {
-        crate::cli_error!("E2105", "can't find the file `{}`", path);
-        exit(ExitCodes::USER_ERROR);
-    }
-    let mut files = Vec::new();
-    if target.is_dir() {
-        collect_source_files_recursive(target, jet::Syntax::FILE_EXT, &mut files);
-        files.sort();
-        if files.is_empty() {
-            crate::cli_error!("E2104", "no .{} files in `{}` (searched subdirectories too)", jet::Syntax::FILE_EXT, path);
-            exit(ExitCodes::USER_ERROR);
-        }
-    } else {
-        files.push(target.to_path_buf());
-    }
-
-    let multi_file = files.len() > 1;
-    let mut any_fail = false;
-    for file in files {
-        let shown = bench_path_label(&file);
-        if multi_file && !mode.json {
-            println!("== {shown} ==");
-        }
-        if !run_bench_file(&file, &shown, &opts, mode) {
-            any_fail = true;
-        }
-    }
-    exit(if any_fail {
-        ExitCodes::USER_ERROR
-    } else {
-        ExitCodes::OK
-    });
-}
-
-fn run_bench_file(path: &Path, shown: &str, opts: &BenchRunOpts, mode: OutputMode) -> bool {
-    let file = path.to_string_lossy();
-    let src = match fs::read_to_string(path) {
-        Ok(s) => s,
-        Err(error) => {
-            crate::cli_error!("E2105", "couldn't read `{}`: {}", shown, error);
-            return false;
-        }
-    };
-
-    let override_entry = !opts.show_default && jet::has_entry_fn(&file, "bench");
-    if override_entry && !mode.quiet && !mode.json {
-        println!("jet bench: using fn bench override");
-    }
-    // D-BENCH1: region files use the generated harness. A filter applies only
-    // to discovered regions; a file without regions contributes no result.
-    if jet::has_bench_blocks(&file) {
-        return run_bench_regions(
-            &file,
-            shown,
-            &src,
-            opts.filter.as_deref(),
-            mode,
-            override_entry,
-        );
-    }
-    if override_entry {
-        return run_bench_override_program(&file, shown, &src, opts.filter.as_deref(), mode);
-    }
-    if opts.filter.is_some() {
-        return true;
-    }
-
-    let (rust_code, ffi_link, _capabilities) = match jet::compile_with_path(&src, &file) {
-        Ok(out) => (out.rust, out.ffi, out.capabilities),
-        Err(diags) => {
-            report_problems(mode, &file, &src, &diags);
-            return false;
-        }
-    };
-    let bin = PathBuf::from("build").join(format!("bench_{}", stem(&file)));
-    build(
-        &file,
-        &rust_code,
-        bin.clone(),
-        BuildProfile::Release,
-        ffi_link.as_ref(),
-        &[],
-        false,
-        None,
-        None,
-        None,
-        mode,
-        // Benchmark build; not content-cached (race-safe via `build`'s temp path).
-        None,
-    );
-
-    let warmups = 5u32;
-    let trials = 20u32;
-
-    for _ in 0..warmups {
-        Command::new(&bin).output().ok();
-    }
-
-    let mut times_ms: Vec<f64> = Vec::new();
-    for _ in 0..trials {
-        let t0 = std::time::Instant::now();
-        let status = Command::new(&bin).status();
-        let elapsed = t0.elapsed().as_secs_f64() * 1000.0;
-        match status {
-            Ok(s) if s.success() => times_ms.push(elapsed),
-            Ok(_) => {
-                eprintln!("bench: program exited with non-zero status during trial");
-                return false;
-            }
-            Err(error) => {
-                eprintln!("bench: couldn't run `{}`: {}", bin.display(), error);
-                return false;
-            }
-        }
-    }
-
-    let n = times_ms.len() as f64;
-    let mean = times_ms.iter().sum::<f64>() / n;
-    let variance = times_ms.iter().map(|time| (time - mean).powi(2)).sum::<f64>() / n;
-    let stddev = variance.sqrt();
-    let name = stem(&file);
-
-    if mode.json {
-        println!(
-            "{{\"name\":{},\"file\":{},\"mean_ms\":{:.3},\"stddev_ms\":{:.3},\"trials\":{},\"warmups\":{},\"profile\":{}}}",
-            jet::Diagnostics::json_str(&name),
-            jet::Diagnostics::json_str(shown),
-            mean,
-            stddev,
-            trials,
-            warmups,
-            jet::Diagnostics::json_str(BENCH_PROFILE_LABEL),
-        );
-    } else {
-        println!(
-            "{}  {:.2} ms ±{:.2}  ({} runs, {} warmup)  profile: {}",
-            name, mean, stddev, trials, warmups, BENCH_PROFILE_LABEL
-        );
-    }
-    true
-}
-
-/// D-BENCH1: build and run the per-region bench harness. The harness binary's
-/// `main` auto-scales and records 20 serial samples per selected region.
-fn run_bench_regions(
-    file: &str,
-    shown: &str,
-    src: &str,
-    filter: Option<&str>,
-    mode: OutputMode,
-    command_override: bool,
-) -> bool {
-    if !command_override && filter.is_none() && !mode.json {
-        if let Some(status) = crate::CmdBudget::reuse_bench_report(file) {
-            return status == 0;
-        }
-    }
-    let evidence = collect_bench_evidence_with_filter(
-        file,
-        src,
-        mode,
-        false,
-        filter,
-        command_override,
-    );
-    for bench in &evidence {
-        let samples = bench
-            .samples
-            .iter()
-            .map(|(elapsed, iters)| *elapsed as f64 / *iters as f64)
-            .collect::<Vec<_>>();
-        let n = samples.len() as f64;
-        let mean = samples.iter().sum::<f64>() / n;
-        let variance = samples
-            .iter()
-            .map(|sample| (sample - mean) * (sample - mean))
-            .sum::<f64>()
-            / n;
-        let ops = if mean > 0.0 { 1.0e9 / mean } else { 0.0 };
-        let name = format!("{shown}::{}", bench.name);
-        if mode.json {
-            println!(
-                "{{\"name\":{},\"file\":{},\"region\":{},\"mean_ns\":{:.1},\"stddev_ns\":{:.1},\"ops_per_sec\":{:.0},\"samples\":{},\"profile\":{}}}",
-                jet::Diagnostics::json_str(&name),
-                jet::Diagnostics::json_str(shown),
-                jet::Diagnostics::json_str(&bench.name),
-                mean,
-                variance.sqrt(),
-                ops,
-                samples.len(),
-                jet::Diagnostics::json_str(BENCH_PROFILE_LABEL),
-            );
-        } else {
-            println!(
-                "{}  {:.1} ns/iter (\u{00b1}{:.1})  {:.0} ops/sec  profile: {}",
-                name,
-                mean,
-                variance.sqrt(),
-                ops,
-                BENCH_PROFILE_LABEL
-            );
-        }
-    }
-    if !command_override && filter.is_none() && crate::CmdBudget::run_bench_refresh(file, &evidence) != 0 {
-        return false;
-    }
-    true
-}
-
 #[derive(Clone, Debug)]
 pub(crate) struct BenchEvidence {
     pub(crate) name: String,
@@ -3560,134 +3320,6 @@ pub(crate) struct BenchEvidence {
     /// row per measured trial. Calibration/warmup runs are outside the reset
     /// boundary and never enter these facts.
     pub(crate) allocation_samples: Vec<(u128, u128, u64)>,
-}
-
-/// Shared `#Bench` executor for human bench output and BenchMeasurement.
-/// Wire rows are compiler-private; user-facing spelling stays `jet bench`.
-pub(crate) fn collect_bench_evidence(
-    file: &str,
-    src: &str,
-    mode: OutputMode,
-    relay_output: bool,
-) -> Vec<BenchEvidence> {
-    collect_bench_evidence_with_filter(file, src, mode, relay_output, None, false)
-}
-
-fn collect_bench_evidence_with_filter(
-    file: &str,
-    src: &str,
-    mode: OutputMode,
-    relay_output: bool,
-    filter: Option<&str>,
-    command_override: bool,
-) -> Vec<BenchEvidence> {
-    let (rust_code, ffi_link) = match if command_override {
-        jet::compile_bench_override_with_path(src, file)
-    } else {
-        jet::compile_benches_with_path(file)
-    } {
-        Ok(r) => r,
-        Err(diags) => {
-            report_problems(mode, file, src, &diags);
-            exit(ExitCodes::USER_ERROR);
-        }
-    };
-    let bin = PathBuf::from("build").join(format!("bench_{}", stem(file)));
-    build(
-        file,
-        &rust_code,
-        bin.clone(),
-        BuildProfile::Release,
-        ffi_link.as_ref(),
-        &[],
-        false,
-        None,
-        None,
-        None,
-        mode,
-        // Benchmark build; not content-cached (race-safe via `build`'s temp path).
-        None,
-    );
-    let mut command = Command::new(&bin);
-    if let Some(filter) = filter {
-        command.env("JET_BENCH_FILTER", filter);
-    }
-    let out = command.output().unwrap_or_else(|e| {
-        eprintln!("bench: couldn't run `{}`: {}", bin.display(), e);
-        exit(ExitCodes::USER_ERROR);
-    });
-    if !out.stderr.is_empty() {
-        eprint!("{}", String::from_utf8_lossy(&out.stderr));
-    }
-    if !out.status.success() {
-        // A failed `#Bench` body stops the harness through the shared runtime
-        // boundary, which already picked the program-stop status (70 for
-        // E3001). Relay it: replacing it with the driver's own USER_ERROR would
-        // report a program stop as a jet-side problem.
-        exit(crate::CmdCompile::child_exit_code(out.status));
-    }
-    let stdout = String::from_utf8(out.stdout).unwrap_or_else(|_| {
-        eprintln!("bench: harness emitted non-UTF-8 evidence");
-        exit(ExitCodes::USER_ERROR);
-    });
-    let mut evidence: Vec<BenchEvidence> = Vec::new();
-    for line in stdout.lines() {
-        if let Some(wire) = line.strip_prefix("JETALLOC1\t") {
-            let mut fields = wire.split('\t');
-            let name = fields.next().and_then(decode_hex).unwrap_or_else(|| {
-                eprintln!("bench: harness emitted malformed allocation workload identity");
-                exit(ExitCodes::USER_ERROR);
-            });
-            let iters = fields.next().and_then(|value| value.parse::<u64>().ok()).filter(|value| *value > 0).unwrap_or_else(|| {
-                eprintln!("bench: harness emitted invalid allocation iteration count");
-                exit(ExitCodes::USER_ERROR);
-            });
-            let samples = fields.map(|value| {
-                let (count, bytes) = value.split_once(':').ok_or(())?;
-                Ok((count.parse::<u128>().map_err(|_| ())?, bytes.parse::<u128>().map_err(|_| ())?, iters))
-            }).collect::<Result<Vec<_>, ()>>().unwrap_or_else(|_| {
-                eprintln!("bench: harness emitted malformed allocation evidence");
-                exit(ExitCodes::USER_ERROR);
-            });
-            if samples.len() != 20 {
-                eprintln!("bench: harness emitted {} allocation samples; policy requires 20", samples.len());
-                exit(ExitCodes::USER_ERROR);
-            }
-            let bench = evidence.iter_mut().find(|bench| bench.name == name).unwrap_or_else(|| {
-                eprintln!("bench: allocation evidence preceded its named timing workload");
-                exit(ExitCodes::USER_ERROR);
-            });
-            if !bench.allocation_samples.is_empty() {
-                eprintln!("bench: harness emitted duplicate allocation evidence for `{name}`");
-                exit(ExitCodes::USER_ERROR);
-            }
-            bench.allocation_samples = samples;
-            continue;
-        }
-        let Some(wire) = line.strip_prefix("JETBENCH1\t") else {
-            if relay_output { println!("{line}"); }
-            continue;
-        };
-        let mut fields = wire.split('\t');
-        let name = fields.next().and_then(decode_hex).unwrap_or_else(|| {
-            eprintln!("bench: harness emitted malformed benchmark identity");
-            exit(ExitCodes::USER_ERROR);
-        });
-        let iters = fields.next().and_then(|value| value.parse::<u64>().ok()).filter(|value| *value > 0).unwrap_or_else(|| {
-            eprintln!("bench: harness emitted invalid iteration count");
-            exit(ExitCodes::USER_ERROR);
-        });
-        let samples = fields.map(|value| value.parse::<u128>().map(|elapsed| (elapsed, iters))).collect::<Result<Vec<_>, _>>().unwrap_or_else(|_| {
-            eprintln!("bench: harness emitted invalid exact sample");
-            exit(ExitCodes::USER_ERROR);
-        });
-        if samples.len() != 20 {
-            eprintln!("bench: harness emitted {} samples; policy requires 20", samples.len());
-            exit(ExitCodes::USER_ERROR);
-        }
-        evidence.push(BenchEvidence { name, samples, allocation_samples: Vec::new() });
-    }
-    evidence
 }
 
 /// D-CLAIM-BENCH1=A: collect the same exact twenty samples through the test
@@ -3750,6 +3382,22 @@ pub(crate) fn collect_measure_evidence(
                 eprintln!("measure: harness emitted malformed allocation identity");
                 exit(ExitCodes::USER_ERROR);
             });
+            let tier = fields.next().filter(|value| !value.is_empty()).unwrap_or_else(|| {
+                eprintln!("measure: harness emitted no execution tier for allocation evidence");
+                exit(ExitCodes::USER_ERROR);
+            });
+            let profile = fields.next().filter(|value| !value.is_empty()).unwrap_or_else(|| {
+                eprintln!("measure: harness emitted no build profile for allocation evidence");
+                exit(ExitCodes::USER_ERROR);
+            });
+            let warmups = fields
+                .next()
+                .and_then(|value| value.parse::<u64>().ok())
+                .filter(|value| *value > 0)
+                .unwrap_or_else(|| {
+                    eprintln!("measure: harness emitted invalid warmup count for allocation evidence");
+                    exit(ExitCodes::USER_ERROR);
+                });
             let iters = fields
                 .next()
                 .and_then(|value| value.parse::<u64>().ok())
@@ -3758,6 +3406,14 @@ pub(crate) fn collect_measure_evidence(
                     eprintln!("measure: harness emitted invalid allocation iteration count");
                     exit(ExitCodes::USER_ERROR);
                 });
+            let serial = fields.next().and_then(|value| value.parse::<bool>().ok()).unwrap_or_else(|| {
+                eprintln!("measure: harness emitted non-serial allocation evidence");
+                exit(ExitCodes::USER_ERROR);
+            });
+            if tier != "aot" || profile != "release" || warmups != 5 || !serial {
+                eprintln!("measure: harness emitted allocation evidence without the optimized serial AOT profile");
+                exit(ExitCodes::USER_ERROR);
+            }
             let samples = fields
                 .map(|value| {
                     let (count, bytes) = value.split_once(':').ok_or(())?;
@@ -3783,12 +3439,28 @@ pub(crate) fn collect_measure_evidence(
             entry.allocation_samples = samples;
             continue;
         }
-        let Some(wire) = line.strip_prefix("JETBENCH1\t") else { continue };
+        let Some(wire) = line.strip_prefix("JETTESTMEASURE1\t") else { continue };
         let mut fields = wire.split('\t');
         let name = fields.next().and_then(decode_hex).unwrap_or_else(|| {
             eprintln!("measure: harness emitted malformed claim identity");
             exit(ExitCodes::USER_ERROR);
         });
+        let tier = fields.next().filter(|value| !value.is_empty()).unwrap_or_else(|| {
+            eprintln!("measure: harness emitted no execution tier");
+            exit(ExitCodes::USER_ERROR);
+        });
+        let profile = fields.next().filter(|value| !value.is_empty()).unwrap_or_else(|| {
+            eprintln!("measure: harness emitted no build profile");
+            exit(ExitCodes::USER_ERROR);
+        });
+        let warmups = fields
+            .next()
+            .and_then(|value| value.parse::<u64>().ok())
+            .filter(|value| *value > 0)
+            .unwrap_or_else(|| {
+                eprintln!("measure: harness emitted invalid warmup count");
+                exit(ExitCodes::USER_ERROR);
+            });
         let iters = fields
             .next()
             .and_then(|value| value.parse::<u64>().ok())
@@ -3797,6 +3469,14 @@ pub(crate) fn collect_measure_evidence(
                 eprintln!("measure: harness emitted invalid iteration count");
                 exit(ExitCodes::USER_ERROR);
             });
+        let serial = fields.next().and_then(|value| value.parse::<bool>().ok()).unwrap_or_else(|| {
+            eprintln!("measure: harness emitted non-serial timing evidence");
+            exit(ExitCodes::USER_ERROR);
+        });
+        if tier != "aot" || profile != "release" || warmups != 5 || !serial {
+            eprintln!("measure: harness emitted timing evidence without the optimized serial AOT profile");
+            exit(ExitCodes::USER_ERROR);
+        }
         let samples = fields
             .map(|value| value.parse::<u128>().map(|elapsed| (elapsed, iters)))
             .collect::<Result<Vec<_>, _>>()
@@ -3813,51 +3493,6 @@ pub(crate) fn collect_measure_evidence(
     evidence
 }
 
-fn run_bench_override_program(
-    file: &str,
-    shown: &str,
-    src: &str,
-    filter: Option<&str>,
-    mode: OutputMode,
-) -> bool {
-    let (rust_code, ffi_link) = match jet::compile_bench_override_with_path(src, file) {
-        Ok(value) => value,
-        Err(diags) => {
-            report_problems(mode, file, src, &diags);
-            return false;
-        }
-    };
-    let bin = PathBuf::from("build").join(format!("bench_override_{}", stem(file)));
-    build(
-        file,
-        &rust_code,
-        bin.clone(),
-        BuildProfile::Release,
-        ffi_link.as_ref(),
-        &[],
-        false,
-        None,
-        None,
-        None,
-        mode,
-        None,
-    );
-    let mut command = Command::new(&bin);
-    if let Some(filter) = filter {
-        command.env("JET_BENCH_FILTER", filter);
-    }
-    let output = match command.output() {
-        Ok(output) => output,
-        Err(error) => {
-            eprintln!("bench: couldn't run `{}`: {}", shown, error);
-            return false;
-        }
-    };
-    print!("{}", String::from_utf8_lossy(&output.stdout));
-    eprint!("{}", String::from_utf8_lossy(&output.stderr));
-    let _ = fs::remove_file(&bin);
-    output.status.success()
-}
 
 /// Collect `ServiceProbe` evidence by cycling each named service down→up→ready
 /// 20 times. Reads `env.jet` from the project root to resolve `DevServicePlan`.

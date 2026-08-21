@@ -155,6 +155,8 @@ fn check_caches() -> Vec<Check> {
     let mut out = Vec::new();
     let build = crate::BuildCache::cache_dir();
     out.push(cache_check("build cache", build));
+    let runtime = crate::RuntimeCache::cache_root();
+    out.push(runtime_cache_check(runtime));
     let ffi = ffi_cache_dir();
     out.push(cache_check("ffi cache", ffi));
     let store = crate::Store::store_dir();
@@ -183,6 +185,39 @@ fn cache_check(label: &'static str, dir: PathBuf) -> Check {
         );
     }
     Check::ok("cache", label, dir.display().to_string())
+}
+
+fn runtime_cache_check(dir: PathBuf) -> Check {
+    if !dir.exists() {
+        return Check::ok(
+            "cache",
+            "runtime cache",
+            format!(
+                "{} (0 bytes; limit {} bytes)",
+                dir.display(),
+                crate::RuntimeCache::RUNTIME_CACHE_LIMIT_BYTES
+            ),
+        );
+    }
+    if !dir.is_dir() {
+        return Check::problem(
+            "cache",
+            "runtime cache",
+            format!("{} exists but is not a directory", dir.display()),
+            format!("remove `{}` so Jet can recreate it", dir.display()),
+            true,
+        );
+    }
+    Check::ok(
+        "cache",
+        "runtime cache",
+        format!(
+            "{} ({} bytes; limit {} bytes)",
+            dir.display(),
+            crate::RuntimeCache::cache_footprint(),
+            crate::RuntimeCache::RUNTIME_CACHE_LIMIT_BYTES
+        ),
+    )
 }
 
 /// PATH sanity: is the running `jet` binary reachable as `jet` on PATH?

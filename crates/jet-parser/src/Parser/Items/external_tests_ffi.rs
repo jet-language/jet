@@ -162,7 +162,7 @@ impl<'a> Parser<'a> {
         /// D-CLAIM-BENCH1=A: true when cursor is at the retired `#Bench` spelling.
         pub(in crate::Parser) fn at_bench_def(&self) -> bool {
             matches!(self.peek().kind, TokKind::Hash)
-                && matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::KW_BENCH)
+                && matches!(&self.peek2().kind, TokKind::Ident(n) if n == "Bench")
         }
 
         /// `#Bench` is no longer an AST item. Consume its marker head and
@@ -175,7 +175,7 @@ impl<'a> Parser<'a> {
             let name = self.bump();
             Err(Diagnostic::error(
                 "E0927",
-                "`#Bench` is retired".to_string(),
+                "`#Bench` is a retired claim spelling".to_string(),
                 "measurement is a mode of `#Test`, so Jet has one claim family".to_string(),
                 "write `#Test(\"name\") { .measure { ... } }` and run `jet test --measure`"
                     .to_string(),

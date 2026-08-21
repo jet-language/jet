@@ -158,7 +158,7 @@ pub fn revoke_matching(store: &mut TrustStore, _notebook_source_hash: &str) {
 pub enum RenderDecision {
     /// Sanitized passive MIME or zero-capability sandboxed widget — no prompt.
     AllowPassive { text_plain: String, mime: Vec<(String, String)> },
-    /// Capability widget with a matching local grant.
+    /// Ability widget with a matching local grant.
     AllowActive { text_plain: String, mime: Vec<(String, String)> },
     /// Quarantined / ungated active content — safe text fallback only.
     FallbackPlain { text_plain: String, reason: String },

@@ -57,7 +57,7 @@ tag Input { deny: [IO] }
 #MustUse fn discardable() => Int { return 1 }
 
 fn run() {
-    #Grant(caps: IO) {}
+    #Caps(caps: IO) {}
     discardable().drop("intentional result discard")
     detached :: task 42
     detached.detach()
@@ -82,12 +82,60 @@ fn knowledge_tier_web_source() -> &'static str {
     include_str!("fixtures/knowledge_tier_web.jet")
 }
 
+// D-TYPE2-NUM1 / card #1550 / c9: the number grid keeps one executable
+// meaning across every compiler-facing and hosted tier. Reuse the ratified
+// range example and its golden output; this matrix adds the missing per-tier
+// proof without creating a second numeric example or spelling.
+const NUMBER_GRID_EXAMPLE: &str =
+    include_str!("../examples/features/types/range_types.jet");
+const NUMBER_GRID_EXPECTED: &str =
+    include_str!("../examples/features/expected/types/range_types.out");
+const NUMBER_GRID_WEB_SOURCE: &str = r#"#Target(Web)
+fn set_brightness(level: Int(0..100)) Int(0..100) :> level
+
+fn run() {
+    print(set_brightness(42))
+    print(Int(0..100).from_int(3))
+}
+"#;
+
 fn have_tool(name: &str) -> bool {
     Command::new(name)
         .arg("--version")
         .output()
         .map(|output| output.status.success())
         .unwrap_or(false)
+}
+
+fn have_wasm_target() -> bool {
+    Command::new("rustc")
+        .args(["--print", "target-libdir", "--target", "wasm32-unknown-unknown"])
+        .output()
+        .map(|output| output.status.success())
+        .unwrap_or(false)
+}
+
+fn checked_number_grid_bundle(
+    tag: &str,
+) -> (common::Scratch, jet::AST::ProgramBundle) {
+    let scratch = common::Scratch::new(tag);
+    let entry = scratch.join("range_types.jet");
+    fs::write(&entry, NUMBER_GRID_EXAMPLE).unwrap();
+    let shown = entry.to_string_lossy().into_owned();
+    let mut bundle = jet::Loader::load_entry(&shown).expect("number-grid example must load");
+    let diagnostics = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
+    assert!(diagnostics.is_empty(), "number-grid sema failed: {diagnostics:#?}");
+    (scratch, bundle)
+}
+
+fn assert_inline_int_range(ty: &jet::AST::Type, lo: i64, hi: i64) {
+    match ty {
+        jet::AST::Type::InlineRange { base, lo: actual_lo, hi: actual_hi } => {
+            assert_eq!(base.as_ref(), &jet::AST::Type::Int);
+            assert_eq!((*actual_lo, *actual_hi), (lo, hi));
+        }
+        other => panic!("expected Int({lo}..{hi}), got {other:?}"),
+    }
 }
 
 fn assert_tier_output(output: Output) {
@@ -195,6 +243,53 @@ fn full_and_filtered_views_keep_one_provenance_ledger() {
     ));
     assert!(unsafe_view.contains("\"gates\":["), "{unsafe_view}");
     assert!(!unsafe_view.contains("test impure reason"), "{unsafe_view}");
+}
+
+#[test]
+fn authority_ledger_mirrors_manifest_and_lock_block_shape() {
+    let scratch = common::Scratch::new("authority-ledger");
+    fs::write(
+        scratch.join("package.jet"),
+        r#"name: "ledger"
+version: "0.1.0"
+authority: .{
+    holds: { allow: [IO], deny: [Exec] },
+    grants: { "image-codec": [FS.Read] },
+    trust: { default: prompt, ci: { prompt: deny }, services: { stripe: allow } },
+    providers: { nix: { registry: "nixpkgs", deny: ["openssl-1.0"] } },
+}
+"#,
+    )
+    .unwrap();
+    fs::write(scratch.join("run.jet"), "fn run() { print(\"ledger\") }\n").unwrap();
+    fs::create_dir_all(scratch.join(".jet")).unwrap();
+    fs::write(
+        scratch.join(".jet/lock"),
+        r#"version = 1
+
+[root]
+dependencies = []
+authority = .{ holds: { allow: [IO], deny: [Exec] }, grants: { "image-codec": [FS.Read] }, trust: { default: prompt, ci: { prompt: deny }, services: { stripe: allow } }, providers: { nix: { registry: "nixpkgs", deny: ["openssl-1.0"] } } }
+"#,
+    )
+    .unwrap();
+
+    let json = stdout(&run(
+        &scratch.path,
+        &["inspect", "authority", "--json", "run.jet"],
+    ));
+    for subject in [
+        "authority.holds.allow",
+        "authority.holds.deny",
+        "image-codec",
+        "authority.trust.default",
+        "authority.trust.ci",
+        "authority.trust.services.stripe",
+        "authority.providers.nix",
+    ] {
+        assert!(json.contains(&format!("\"subject\":\"{subject}\"")), "{subject}: {json}");
+    }
+    assert!(json.contains(".jet/lock"), "lock authority provenance missing: {json}");
 }
 
 #[test]
@@ -444,4 +539,194 @@ fn i9_web_tier_keeps_the_fixture_buildable() {
         &scratch.path,
         &["build", "--target=web", "web.jet"],
     ));
+}
+
+#[test]
+fn i9_number_grid_parser_keeps_int_ranges_as_one_surface() {
+    let (tokens, diagnostics) = jet::Lexer::lex(NUMBER_GRID_EXAMPLE);
+    assert!(diagnostics.is_empty(), "number-grid lexer diagnostics: {diagnostics:?}");
+    let program = jet::Parser::parse(&tokens).expect("number-grid example must parse");
+
+    let severity = program
+        .items
+        .iter()
+        .find_map(|item| match item {
+            jet::AST::Item::Distinct(def) if def.name == "Severity" => Some(def),
+            _ => None,
+        })
+        .expect("number-grid distinct range declaration");
+    assert_eq!(severity.range.map(|(lo, hi, _)| (lo, hi)), Some((0, 10)));
+
+    let setter = program
+        .items
+        .iter()
+        .find_map(|item| match item {
+            jet::AST::Item::Func(func) if func.name == "set_brightness" => Some(func),
+            _ => None,
+        })
+        .expect("number-grid inline range function");
+    assert_inline_int_range(&setter.params[0].ty, 0, 100);
+    assert_inline_int_range(
+        setter.return_type.as_ref().expect("setter return type"),
+        0,
+        100,
+    );
+}
+
+#[test]
+fn i9_number_grid_sema_records_the_shared_interval_facts() {
+    let (_scratch, bundle) = checked_number_grid_bundle("number-grid-sema");
+    let module = &bundle.modules[bundle.entry];
+    let severity = module
+        .items
+        .iter()
+        .find_map(|item| match item {
+            jet::AST::Item::Distinct(def) if def.name == "Severity" => Some(def),
+            _ => None,
+        })
+        .expect("sema must retain the distinct interval");
+    assert_eq!(severity.range.map(|(lo, hi, _)| (lo, hi)), Some((0, 10)));
+}
+
+#[test]
+fn i9_number_grid_tir_consumes_the_interval_and_keeps_output() {
+    let (_scratch, bundle) = checked_number_grid_bundle("number-grid-tir");
+    let program = jet::Codegen::TIR::lower_jit_program(&bundle)
+        .expect("number-grid example must lower through TIR");
+    assert_eq!(program.distinct_ranges.get("Severity"), Some(&(0, 10)));
+
+    let mut sink = jet::Comptime::DevSink::default();
+    jet::Codegen::TIR::run_program(
+        &program,
+        &bundle.project_root,
+        &mut sink,
+        std::collections::HashMap::new(),
+        &std::collections::HashMap::new(),
+        jet::Policy::GateSet::allow(jet::Policy::PolicyKey::Impure),
+    )
+    .expect("number-grid TIR evaluation must succeed");
+    assert_eq!(sink.stdout, NUMBER_GRID_EXPECTED);
+}
+
+#[test]
+fn i9_number_grid_aot_keeps_the_golden_behavior() {
+    if !common::have_rustc() {
+        eprintln!("note: skipping number-grid AOT tier proof (need rustc)");
+        return;
+    }
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let output = stdout(&run(
+        root,
+        &["run", "--release", "examples/features/types/range_types.jet"],
+    ));
+    assert_eq!(output, NUMBER_GRID_EXPECTED);
+}
+
+#[test]
+fn i9_number_grid_jit_keeps_the_golden_behavior() {
+    let scratch = common::Scratch::new("number-grid-jit");
+    fs::write(scratch.join("range_types.jet"), NUMBER_GRID_EXAMPLE).unwrap();
+    let output = stdout(&run(&scratch.path, &["run", "range_types.jet"]));
+    assert_eq!(output, NUMBER_GRID_EXPECTED);
+}
+
+#[test]
+fn i9_number_grid_dev_keeps_the_golden_behavior() {
+    let scratch = common::Scratch::new("number-grid-dev");
+    fs::write(scratch.join("range_types.jet"), NUMBER_GRID_EXAMPLE).unwrap();
+    let output = stdout(&run(
+        &scratch.path,
+        &["dev", "range_types.jet", "--watch=off"],
+    ));
+    assert_eq!(output, NUMBER_GRID_EXPECTED);
+}
+
+#[test]
+fn i9_number_grid_comptime_keeps_the_exact_inline_value() {
+    let (_scratch, bundle) = checked_number_grid_bundle("number-grid-comptime");
+    let constant = bundle.modules[bundle.entry]
+        .items
+        .iter()
+        .find_map(|item| match item {
+            jet::AST::Item::Const(def) if def.name == "comptime_brightness" => Some(def),
+            _ => None,
+        })
+        .expect("number-grid comptime binding");
+    assert!(constant.is_comptime);
+    assert!(matches!(
+        constant.ct.as_ref(),
+        Some(jet::AST::CtValue::Int(42))
+    ));
+}
+
+#[test]
+fn i9_number_grid_repl_keeps_the_inline_range_behavior() {
+    let transcript = jet::REPL::run_transcript(
+        &[
+            "fn set_brightness(level: Int(0..100)) Int(0..100) :> level",
+            "fn checked_inline(raw: Int) Int(0..100) ? String :> Int(0..100).from_int(raw)",
+            "print(set_brightness(42))",
+            "print(checked_inline(3) ?? Int(0..100).from_int(0))",
+        ],
+        None,
+    );
+    assert_eq!(transcript, "ok\nok\n42\n3\n");
+}
+
+#[test]
+fn i9_number_grid_web_keeps_the_shared_runtime_behavior() {
+    let output = jet::compile_web_with_path(
+        NUMBER_GRID_WEB_SOURCE,
+        "tests/fixtures/number_grid_web.jet",
+    )
+    .unwrap_or_else(|diagnostics| panic!("number-grid web source was rejected: {diagnostics:#?}"));
+    let web = output.web.expect("number-grid web target must produce artifacts");
+    assert!(web.js_app.contains("function jet_inline_range_from_int"));
+    assert!(web.wasm_rust.contains("jet_inline_range_from_int"));
+
+    if !have_tool("rustc") || !have_tool("node") || !have_wasm_target() {
+        eprintln!("note: skipping number-grid web execution (need rustc, node, and wasm32 target)");
+        return;
+    }
+
+    let scratch = common::Scratch::new("number-grid-web");
+    fs::write(scratch.join("app.js"), &web.js_app).unwrap();
+    fs::write(scratch.join("jet_dom_runtime.js"), &web.dom_runtime).unwrap();
+    fs::write(scratch.join("app_wasm.rs"), &web.wasm_rust).unwrap();
+    fs::write(scratch.join("package.json"), r#"{"type":"module"}"#).unwrap();
+
+    let wasm = Command::new("rustc")
+        .current_dir(&scratch.path)
+        .args([
+            "--edition",
+            "2021",
+            "--target",
+            "wasm32-unknown-unknown",
+            "--crate-type",
+            "cdylib",
+            "-O",
+            "app_wasm.rs",
+            "-o",
+            "app.wasm",
+        ])
+        .output()
+        .expect("spawn number-grid web rustc");
+    assert!(
+        wasm.status.success(),
+        "rustc rejected number-grid web output: {}",
+        String::from_utf8_lossy(&wasm.stderr)
+    );
+
+    let node = Command::new("node")
+        .current_dir(&scratch.path)
+        .arg("app.js")
+        .output()
+        .expect("spawn number-grid web app");
+    assert!(
+        node.status.success(),
+        "number-grid web app failed: stdout={} stderr={}",
+        String::from_utf8_lossy(&node.stdout),
+        String::from_utf8_lossy(&node.stderr)
+    );
+    assert_eq!(String::from_utf8_lossy(&node.stdout), "42\n3\n");
 }

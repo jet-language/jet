@@ -303,7 +303,7 @@ pub(crate) fn run_compile_cmd(
     cross_target: Option<&str>,
     explain_partition: bool,
     verbose: bool,
-    capabilities_json: bool,
+    abilities_json: bool,
     sbom: bool,
     named_profile: Option<&str>,
     setting_overrides: &BTreeMap<String, String>,
@@ -431,7 +431,7 @@ pub(crate) fn run_compile_cmd(
             || small
             || freestanding
             || !build_grants.is_empty()
-            || capabilities_json
+            || abilities_json
             || sbom;
         if incompatible {
             let diagnostic = jet::Diagnostics::Diagnostic::error(
@@ -496,7 +496,7 @@ pub(crate) fn run_compile_cmd(
         && !small
         && !freestanding
         && build_grants.is_empty()
-        && !capabilities_json
+        && !abilities_json
         && !sbom
         && !is_web
         && !is_plugin
@@ -556,7 +556,7 @@ pub(crate) fn run_compile_cmd(
     let cache_profile_tag = format!("{profile_tag};{}", setting_overrides_tag(setting_overrides));
     // `jet run` needs its key *before* the front end: a hit below replays the
     // cached binary without loading the program at all. `jet build` stays on
-    // the full path (its effect + capability summaries must print), so #2083
+    // the full path (its effect + ability summaries must print), so #2083
     // computes its key further down, from the one front end a build actually
     // runs, instead of from a second independently reloaded copy of the same
     // program.
@@ -578,7 +578,7 @@ pub(crate) fn run_compile_cmd(
     // toolchain-version + `package.jet` salts guarantee a compiler or policy change
     // invalidates the entry, so effect-budget enforcement can't be masked.
     // `jet build` deliberately stays on the full path below so its effect +
-    // capability summaries always print; it still skips rustc via `native_key`.
+    // ability summaries always print; it still skips rustc via `native_key`.
     // A selected `fn build` also stays on the full path: replaying a binary
     // would skip staging the build entry, so nothing would execute the action
     // graph or record the computed writers in this project's `.jet/lock`.
@@ -796,7 +796,7 @@ pub(crate) fn run_compile_cmd(
         rust_code,
         ffi_link,
         clinks,
-        capabilities,
+        abilities,
         web_out,
         web_partition_report,
         plugin_out,
@@ -851,7 +851,7 @@ pub(crate) fn run_compile_cmd(
                     library_rust.unwrap_or(out.rust),
                     out.ffi,
                     clinks,
-                    out.capabilities,
+                    out.abilities,
                     out.web,
                     out.web_partition_report,
                     out.plugin,
@@ -870,7 +870,7 @@ pub(crate) fn run_compile_cmd(
     }
 
     // D-EFFBUDGET1: zero-config effect summary on every build, plus opt-in
-    // whole-graph enforcement when `package.jet` declares `effects:`. The
+    // whole-graph enforcement when `package.jet` declares `authority.holds`.
     // summary is the whole-program effect fixpoint (`Sema::solve`) that
     // ordinary compilation doesn't need to return.
     if cmd == "build" || cmd == "run" {
@@ -917,11 +917,13 @@ pub(crate) fn run_compile_cmd(
             }
             if let Some((root, manifest)) = package_manifest.as_ref() {
                 let configured_names = manifest
-                    .effects_allow
+                    .authority
+                    .holds
+                    .allow
                     .iter()
                     .flatten()
-                    .chain(manifest.effects_deny.iter().flatten())
-                    .chain(manifest.grants.iter().flat_map(|(_, names)| names));
+                    .chain(manifest.authority.holds.deny.iter().flatten())
+                    .chain(manifest.authority.grants.iter().flat_map(|(_, names)| names));
                 let mut violations = Vec::new();
                 for name in configured_names {
                     if jet::Sema::parse_effect_name(name).is_some() {
@@ -1021,10 +1023,10 @@ pub(crate) fn run_compile_cmd(
                         println!("built: {}", binding.display());
                     }
                 }
-                if capabilities_json {
-                    println!("{}", capabilities.to_json());
+                if abilities_json {
+                    println!("{}", abilities.to_json());
                 } else {
-                    println!("{}", capabilities.summary());
+                    println!("{}", abilities.summary());
                 }
                 return;
             }
@@ -1076,11 +1078,11 @@ pub(crate) fn run_compile_cmd(
             if sbom {
                 write_sbom_for_build(file, &bin_path(file), mode);
             }
-            // D-TOOL5 (E2-M11): print capability summary after a successful build.
-            if capabilities_json {
-                println!("{}", capabilities.to_json());
+            // D-TOOL5 (E2-M11): print ability summary after a successful build.
+            if abilities_json {
+                println!("{}", abilities.to_json());
             } else {
-                println!("{}", capabilities.summary());
+                println!("{}", abilities.summary());
             }
         }
         "run" => {
@@ -1444,6 +1446,7 @@ fn write_sbom_for_build(file: &str, bin: &Path, mode: OutputMode) {
         version: 1,
         packages: Vec::new(),
         root_dependencies: Vec::new(),
+        authority: None,
         workspace_members: Vec::new(),
         workspace_source_digest: None,
         workspace_overlay_policy: Default::default(),
@@ -2004,10 +2007,10 @@ pub(crate) fn run_test_package(root: &Path, opts: TestRunOpts, mode: OutputMode)
     });
 }
 
-/// D-TESTKIT1=A gap #2 / D-BENCH-PARITY1=B: walk every subdirectory under
+/// D-TESTKIT1=A gap #2: walk every subdirectory under
 /// `dir`, collecting `.ext` files. `build/` and dotdirs (`.git`, `.jet`'s own
 /// cache, etc.) are skipped, as are reserved package/env/workspace/config
-/// files. Test and bench runners share this target walk.
+/// files. The test runner owns this target walk.
 pub(crate) fn collect_source_files_recursive(dir: &Path, ext: &str, out: &mut Vec<PathBuf>) {
     let Ok(entries) = fs::read_dir(dir) else {
         return;
@@ -2028,7 +2031,7 @@ pub(crate) fn collect_source_files_recursive(dir: &Path, ext: &str, out: &mut Ve
     }
 }
 
-/// Reserved package surfaces are never test or bench targets: they declare
+/// Reserved package surfaces are never test targets: they declare
 /// package, env, workspace, and config facts instead of runnable code. One
 /// list for the recursive target walk and for the package member set.
 fn is_reserved_target_file(path: &Path) -> bool {
@@ -2067,7 +2070,7 @@ fn run_test_target(
 ) -> TestTargetOutcome {
     let update_snapshots = opts.update_snapshots;
     let coverage = opts.coverage;
-    let profile = if opts.release {
+    let profile = if opts.release || opts.measure {
         BuildProfile::Release
     } else {
         BuildProfile::Default
@@ -3537,7 +3540,7 @@ pub(crate) fn run_fuzz(file: &str, test_name: Option<&str>, opts: FuzzRunOpts, m
 /// an empty identity when the file has no project manifest. An unreadable
 /// manifest returns `None`, disabling cache reuse rather than guessing. The
 /// fingerprint is folded into the cache-key salt so a manifest edit — including
-/// a tightened `effects:` budget or a changed build profile — invalidates old
+/// a tightened `authority.holds` budget or a changed build profile — invalidates old
 /// cache entries. That is what keeps skipping the pipeline on a cache hit sound:
 /// a policy the manifest enforces (effect budgets, D-EFFBUDGET1) can never be
 /// masked by an unchanged program AST, because changing the manifest changes
@@ -3698,7 +3701,7 @@ fn dependency_interface_fingerprint(bundle: &jet::AST::ProgramBundle) -> String 
 }
 
 /// D-BUILDNORM1=A (Tower #85): the content-cache key for building `file` under
-/// `mode_tag` (`"run"`, `"test"`, `"testcov"`, `"bench"`, `"dev"`, …), computed
+/// `mode_tag` (`"run"`, `"test"`, `"testcov"`, `"dev"`, …), computed
 /// from the *pre-sema* canonical AST of the whole program (entry + every module
 /// the loader resolved). Returns `None` when:
 ///

@@ -73,7 +73,7 @@ return colon gets the existing `=>` edit. These words never enter the grammar;
 ordinary dead-value cases keep E0003's existing wording.
 
 **D-CASING1 — Casing law + "Core"** *(with D-MARKER-CANON1, D-CONTRACTCASE1)*:
-every `#` applied rule is PascalCase (`#Test`, `#Unsafe`, `#Grant`, `#Pre`);
+every `#` applied rule is PascalCase (`#Test`, `#Unsafe`, `#Caps`, `#Pre`);
 lowercase `#[allow(...)]` is the registered lint-policy exception. Traits are
 PascalCase. The standard library is
 **"Core"** — never "std"/"stdlib" — in docs, identifiers, and error copy.
@@ -322,6 +322,43 @@ client :: connect("db.internal", tls: true, timeout: 5)?
 
 Retires the fixed-position rule: labels used to be spelling checks at one
 position and never reordered (E0125).
+
+**D-CALLPOS1=A — positional when unambiguous, named to deconflict** *(ratified
+2026-08-19, card #2042)*: deterministic mapping follows one fixed sequence:
+
+1. Resolve the callee to one callable body, or to an imported candidate set.
+2. Before the first written label, each bare argument fills the next unfilled
+   parameter in declaration order. It does not skip a slot because its type
+   would fit a later parameter. A bare argument after a label is E0768. The
+   `/` and `*` zone rules from S61 still apply.
+3. A written label binds the parameter with that public name. Labels may be
+   written in any order and may skip parameters with defaults.
+4. After written arguments bind, defaults fill unbound parameters in
+   declaration order. Missing required parameters are E0766; an argument with
+   no slot is E0104. A final `...T` parameter owns the remaining bare tail and
+   checks every item against `T`.
+5. Check each value against the slot selected by steps 2–4. A type mismatch is
+   E0112. Types never reroute a value or trigger another positional attempt.
+   Adjacent parameters with the same type remain legal positionally; always-on
+   call hints show each public parameter name without requiring the user to
+   type it.
+
+For an imported candidate set, steps 2–5 run independently for each body. Zero
+successful candidates keep the ordinary binding or type error. One selects that
+body. Two or more produce E0772 with every matching signature and a fully
+labelled rewrite of the first candidate; labels are the deconfliction
+mechanism. User Jet definitions remain unique (D-CAP10), and S83 multi-head
+dispatch remains variant-driven, so this rule does not add user overloading.
+
+Corpus boundaries: `examples/features/basics/named_args.jet` covers `/` and
+`*` zones, skipped defaults in `connect`, a defaulted slot and variadic tail
+in `collect`, and adjacent same-type `Float` parameters in `Rect.new`, both
+bare and labelled. `tests/ui/call_mapping_type_boundary.jet` proves that types
+do not reroute bare arguments; `tests/ui/wrong_arg_count.jet` covers the
+no-slot arity boundary. The `CallBinder` candidate-set tests cover one,
+zero, and multiple successful imported bodies; `tests/ui/ambiguous_call_e0772.jet`
+pins the E0772 renderer until the C++ overload importer supplies real
+candidate sets.
 
 **S83 — Multi-head functions**: same name, different parameter patterns, each
 head its own body; dispatch by argument shape; heads must be exhaustive.
@@ -1011,13 +1048,14 @@ adapters. Default `Int` arithmetic never takes an overflow-trap path. Fixed
 width integers keep trap-by-default arithmetic and expose explicit
 `checked_*`, `wrapping_*`, and `saturating_*` receiver methods; fixed-width and
 FFI conversions range-check and report E1003. The canonical executable proof is
-`examples/features/text/bigint.jet` with
-`examples/features/expected/text/bigint.out`.
+`examples/features/text/int_exact.jet` with
+`examples/features/expected/text/int_exact.out`.
 
 **D-BIGINT1** *(superseded by D-INTBIG1 and amended by D-TYPE2-NUM1=A,
 2026-08-06)*: the former public `BigInt` spelling and its explicit constructors
-are retired. `Int` now owns the exact arbitrary-precision language meaning; the
-limb carrier is internal runtime machinery only. **D-DECIMAL1**:
+are retired. **Replacement: write `Int`.** `Int` now owns the exact
+arbitrary-precision language meaning; the limb carrier is internal runtime
+machinery only. **D-DECIMAL1**:
 arbitrary-precision base-10 `Decimal` in `core.math`; default-on lint L0504
 fires when a money-named field holds a float (`#[allow(float_money)]`
 suppresses).
@@ -1028,10 +1066,10 @@ suppresses).
 Wrong-state call E0150; markers erase in codegen. Ordering falls out of the
 transition graph.
 
-**D-REFINE1 — Refinements**: `#Invariant("value >= lo && value < hi")` before
-a `distinct Int` declaration records a pure linear integer bound. The first
-shipped prover uses that bound to prove fixed-list indexes in-bounds; no new
-keyword.
+**D-REFINE1 — Refinements** *(retired by D-TYPE2-REFINE1=A)*: the former
+`#Invariant("value >= lo && value < hi")` spelling is retired. Use
+`distinct Int(lo..hi)` for a named range or `Int(lo..hi)` inline; the interval
+fact proves fixed-list indexes in bounds.
 
 **D-PENDING1**: blessed loading-state enum `Loadable<T, E>`
 (idle/loading/loaded/failed) in Core. **Declined (types)**: `newtype` keyword
@@ -1084,13 +1122,16 @@ there is no public `enumerate` adapter.
 
 **D-CORE-EAGER1=A / D-LOOPMAP1=B amends the default above for concrete
 collections**: `map` and `filter` on a real `List`, `Map`, or `Set` execute
-now and return a plain collection. Write `.lazy()` first to enter the same
-deferred `Iter<T>` vocabulary. Sources that already arrive over time, such as
-file lines, streams, channels, and `String.split`, remain deferred. The rest
-of the D-ITERTOOLS1 adapter ledger stays on `Iter`; the #1479 surface is
-covered by `examples/features/collections/iter_adapters.jet` under this
-split. Adjacent eager adapters may fuse when their intermediate is not
-observable, without changing callback order or count.
+now and return a plain collection. **D-CORE-EAGER2=A** extends the same rule
+to `flatten` and `flat_map` on a concrete `List`; they return a plain `List`.
+Write `.lazy()` first to enter the same deferred `Iter<T>` vocabulary, so
+`.lazy().flatten()` and `.lazy().flat_map(...)` remain one-pass. Sources that
+already arrive over time, such as file lines, streams, channels, and
+`String.split`, remain deferred. The rest of the D-ITERTOOLS1 adapter ledger
+stays on `Iter`; the #1479 surface is covered by
+`examples/features/collections/iter_adapters.jet` under this split. Adjacent
+eager adapters may fuse when their intermediate is not observable, without
+changing callback order or count.
 
 **D-ZIPPAD1 (ratified on card #1400):** the zip family is one lazy iterator
 mechanism. Free calls and methods accept any number of sequence inputs and
@@ -1393,10 +1434,25 @@ form and extends S34 so a `?` clause after the parameter list is a full
 return annotation.
 
 **D-FAIL-BIND1=A — `err` is ambient inside a fallible fallback** *(ratified
-2026-08-06, card #1535)*: inside a `??` fallback for a fallible value, `err`
-names the report. It is in scope only in that fallback. Optional fallbacks
-reject `err`. No lambda, binder, or parentheses are added. The
-`?? (next)` value form in D-ORRETURN-CANON1 is unchanged.
+2026-08-06, card #1535; amended by D-ERR-DECON1=A)*: inside a `??` fallback
+for a fallible value, `err` names the report. It is in scope only in that
+fallback. Optional fallbacks reject `err`. No lambda, binder, or parentheses
+are added. The `?? (next)` value form in D-ORRETURN-CANON1 is unchanged;
+D-ERR-DECON1 owns the one bare-value-or-diverging-tail rule for fallback
+blocks.
+
+**D-ERR-DECON1=A — one `??` block tail** *(ratified 2026-08-19, card #2041)*:
+the existing fallback operator gains no new token or parallel mechanism. A
+`?? { ... }` block runs ordinary statements and ends with either one bare value
+or one real diverging tail: `return`, `return expr`, `next`, `break`, or
+`panic(...)`. The tail `return expr` is a function return; it is no longer
+reinterpreted as the block's value. A value-bearing block keeps the success
+payload type, while a diverging block types the binding at that payload type.
+Fallible blocks retain the ambient `err` from D-FAIL-BIND1; optional blocks do
+not gain it. Direct `?? return`/`?? next`/`?? break` routes and `?` propagation
+are unchanged. D-CHOOSE-TEST1 routes may use the block form only when its tail
+diverges. Shared lowering carries the same meaning to AOT, JIT, interpreter,
+and web targets under I9.
 
 **D-FAIL-EDGE1=A — the program edge uses target-native delivery** *(ratified
 2026-08-06, card #1536)*: an unhandled error crosses the final boundary in the
@@ -1408,7 +1464,7 @@ the boundary. D-FAIL-BREACH1 owns report words. Raw JavaScript throws and raw
 wasm panic paths are replaced.
 
 **S36 — Bug stops** *(amended by D-FAIL-BREACH1 and D-FAIL-EXIT1)*:
-`panic("msg")` and `require(cond[, "msg"])` are Prelude builtins. Program-side
+`panic("msg")` and `assert(cond[, "msg"])` are Prelude builtins. Program-side
 stops use the registered E30xx report family and exit 70. Scheduler, stream, and
 FFI producers enter the same report and cleanup boundary. Explicit process
 termination uses that cleanup boundary and preserves its requested exit code.
@@ -1840,10 +1896,11 @@ grammar as ordinary syntax errors. The rule is now universal: an expert
 scoped region is a `#` block.
 
 **D-POLICY-WORD1=A — one meaning for `policy`** *(ratified by owner
-2026-07-12, card #512; amended by D-MARK-SCOPE1)*: source policy uses
-`#Policy(…)`; future floors arrive as arguments, never new keywords. Package-
-wide policy integrates with `package.jet`'s existing `policy:` namespace rather
-than copying source-marker placement into the Package record. The bare `policy`
+2026-07-12, card #512; amended by D-MARK-SCOPE1 and D-AUTHORITY-MEM1)*: source
+policy uses `#Policy(…)` for non-memory settings; memory floors are effect-row
+denials, never policy-marker arguments or new keywords. Package-wide policy
+integrates with `package.jet`'s existing `policy:` namespace rather than
+copying source-marker placement into the Package record. The bare `policy`
 keyword leaves the grammar; the word means the Package governance namespace
 alone.
 
@@ -1854,7 +1911,7 @@ package scope. The nearest declaration of a key wins, unmentioned keys inherit,
 and `jet explain` reports the effective value plus every declaration it
 overrode. A compiler-owned applicability matrix decides which levels each
 setting may use and whether it may tighten, override, or merge. Site-specific
-proof and authority stay site-bound: `#Unsafe` authorization, `#Grant`,
+proof and authority stay site-bound: `#Unsafe` authorization, `#Caps`,
 direct fact tags, `#Scrub(Tag)`, and field wire attributes do not widen through this
 ladder. At package scope, each setting uses the coherent Package `policy:`
 surface owned by its policy decision; the common ladder does not mint a second
@@ -1862,12 +1919,13 @@ manifest spelling.
 
 The compiler registry is also the source of semantic-index/explain provenance:
 it returns one effective value and the complete outer-to-inner declaration
-chain. The shared memory fields are `no_alloc: true`, `zero_rc: true`,
-`arena_bounded: <positive bytes>`, and `gc: true`. Site-bound
-`#Unsafe`, `#Grant`, direct fact tags, `#Scrub(Tag)`, wire, and authority rows have
+chain. The registry keeps only non-memory policy settings: `gc: true`,
+`explicit_units: true`, `copies: .Explicit`, and `sentries: .Off`. Memory
+floors are effect-row prohibitions, not policy fields. Site-bound
+`#Unsafe`, `#Caps`, direct fact tags, `#Scrub(Tag)`, wire, and authority rows have
 explicit applicability but never inherit.
 The concrete terminal view uses the ratified existing route:
-`jet explain marker Source/sensor.jet:9 arena_bounded`.
+`jet explain marker Source/sensor.jet:9` reports the effect-row denial.
 
 **D-PACKAGE-POLICY-SCOPE1=A — package `policy:` holds a typed field value**
 *(ratified 2026-07-16, card #657)*: the package-echelon `policy:` field
@@ -1875,10 +1933,9 @@ settled by D-POLICY-WORD1 holds a typed `.{ ... }` value whose governance
 keys are ordinary fields, written like every other Package role field, with
 bare top-level `name:`/`version:` identity — not the `#Policy(...)` marker
 call. Each package-field key maps to the identical key the source-scope
-`#Policy(...)` marker uses, so `no_alloc: true` in `policy:` and
-`#Policy(no_alloc)` on a block/function/module are the same key in two
-echelon-appropriate spellings, and `jet explain` unifies provenance across
-the whole D-MARK-SCOPE1 ladder. Package policy may only tighten safety — it
+`#Policy(...)` marker uses. Memory floors use the `effects:` rights namespace,
+so `deny: [Mem.Alloc]` is the manifest spelling and there is no package
+memory-policy mirror. Package policy may only tighten safety — it
 can forbid unsafe code but can never authorize an unsafe operation; that
 still requires a written `#Unsafe("reason")` block or function. Reuse across
 a monorepo is reached through the ratified `jet split` (D-ECO-SPLITPOLICY1),
@@ -1889,16 +1946,11 @@ which extracts a shared `policy:` value into a named `Config` when needed;
 # package.jet — policy: reads beside bare Package identity
 name:     "meter"
 version:  "1.0.0"
-policy:   .{
-    no_alloc: true
-    zero_rc: true
-    arena_bounded: 65536
-    unsafe: .Forbid
-}
+policy:   .{ unsafe: .Forbid }
+effects:  .{ deny: [Mem.Alloc, Mem.Rc] }
 
-# Source/sensor.jet — a module tightens one key with the source marker
-#Policy(arena_bounded(2048))
-module sensor
+# Source/sensor.jet — a function writes the memory denial on its signature
+fn sensor() :[!Mem.Alloc(above: 2048)]> { }
 
 # Package policy may only tighten safety, never authorize it:
 policy: .{ unsafe: .Allow }
@@ -1907,13 +1959,15 @@ policy: .{ unsafe: .Allow }
 ```
 
 **D-MEM-FACTS1=B — transitive memory facts** *(ratified 2026-07-15, card
-#644)*: `no_alloc`, `zero_rc`, and `arena_bounded(N)` are explicit memory facts
-on the D-MARK-SCOPE1 ladder. Each fact checks every reachable call, including
-dependencies, and a violation reports its source, full call path, effective
-declaration, and declaration provenance. Open-world dispatch cannot prove a
-strict fact: the program must seal the target set or consume a signed dependency
-summary, otherwise the compiler rejects the unprovable contract. This
-supersedes D-NOALLOC-SEM1=A's local-only denylist scope.
+#644; amended by D-AUTHORITY-MEM1=B and D-AUTHORITY-MEM2=A)*: `!Mem.Alloc`,
+`!Mem.Rc`, and `!Mem.Alloc(above: N)` are effect-row prohibitions. Each
+prohibition checks every reachable call, including dependencies, and a
+violation reports its source, full call path, denial spelling, and provenance.
+Open-world dispatch cannot prove a strict fact: the program must seal the target
+set or consume a signed dependency summary, otherwise the compiler rejects the
+unprovable contract. The old `#Policy(no_alloc)`, `#Policy(zero_rc)`, and
+`#Policy(arena_bounded(N))` forms are tombstoned; write the corresponding
+`!Mem.*` denial instead.
 
 **D-DROP-WORD1=A — one meaning for `drop`** *(ratified by owner
 2026-07-12, card #512)*: the linear finisher for `#SingleUse` values
@@ -2039,7 +2093,8 @@ E0207/E0427); safe stored and returned views use D-MEM-VIEWRET1's named
 `View<T>`/`ViewMut<T>` boundary instead. L0201
 deleted — moves of named bindings are always written `^`; temporaries pass
 freely; `~x` (D-SHAPE-COPY1) is the one copy spelling. Named escape hatches
-`Shared<T>`, `Pool<T>`/`Id<T>`; scoped memory-policy facts (`no_alloc` first).
+`Shared<T>`, `Pool<T>`/`Id<T>`; scoped memory facts now use `Mem.*` effect
+denials (the old `no_alloc` spelling is tombstoned).
 **S1 shipped (2026-07-04)**: `&` is the write sigil, `~` is gone from the
 grammar, call sites/receivers/formatter speak v5 spelling. **S2 shipped
 (2026-07-04)**: unmarked param is `Read`, decided at parse time — `Infer` and
@@ -2089,8 +2144,9 @@ bumping the slot's generation, returning `T?` (mirrors `Map.remove`'s
 runtime, mirroring the array-out-of-bounds precedent — not a new diagnostic
 code. **S7 shipped (2026-07-04, D-NOALLOC-SEM1=A; superseded by
 D-MEM-FACTS1=B)**: the original module-local allocation denylist shipped as
-E0921. Current law follows reachable calls at every eligible scope and checks
-the transitive `no_alloc`, `zero_rc`, and `arena_bounded(N)` facts above.
+E0921. Current law follows reachable calls from each function's `!Mem.*` row
+and checks the transitive `Mem.Alloc`, `Mem.Rc`, and bounded
+`Mem.Alloc(above: N)` facts above.
 **S8 shipped (2026-07-04)**: docs sweep —
 diagnostics.md retired-code stubs for every deleted S1-S7 mechanism,
 spec.md's memory chapter rewritten to v5 end to end, this file's
@@ -2198,7 +2254,7 @@ join at scope end under D-CONC-SPAWN1.
 **D-CONC-GROUP1=A — group borrows work in any parameter position** *(ratified
 2026-08-06, card #1505)*: a group may be a direct parameter of a free function
 or method. A group may not be stored, returned, captured, or placed in a field.
-The storage ban and E1110 rationale remain. This amends
+The public handle type is named `Group`. The storage ban and E1110 rationale remain. This amends
 D-TASKGROUP-PARAM1=A only at its parameter-position boundary.
 
 **D-CONC-OUTCOME1=A — typed outcome and status** *(ratified 2026-08-06,
@@ -2332,29 +2388,33 @@ spellings are retired; no alias exists.
 empty effect row `:[]>` is the checked purity signature; violations name the
 impure call path. The same empty row works in function-type bounds.
 
-**D-EFF4 / D-EFF5 — Vocabulary**: closed set of ten tree ROOTS — `Net`, `FS`,
-`IO`, `DB`, `Time`, `Rand`, `Env`, `Exec`, `Log`, `GPU`; unknown root E0119.
-Amended by D-EFFTREE1: a root may be dotted into an open leaf path (`FS.Read`)
-and ancestor matching is subsumption. `effect <Name>` user declarations
-reserved, unminted.
+**D-EFF4 / D-EFF5 — Vocabulary**: closed set of thirteen grantable tree ROOTS
+— `Net`, `FS`, `IO`, `DB`, `Time`, `Rand`, `Env`, `Exec`, `Log`, `GPU`, `FFI`,
+`Browser`, `Secret`; unknown root E0119. `FFI` owns the built-in language
+leaves (`FFI.Go`, `FFI.Java`, `FFI.Py`, `FFI.Octave`, and the other supported
+binders), so `:[!FFI]>` prohibits every foreign language at once. `Panic` and
+`Mem` remain deny-only rows and are not grantable roots. Amended by
+D-EFFTREE1 and D-AUTHORITY-ROOTS1: a root may be dotted into an open leaf path
+(`FS.Read`) and ancestor matching is subsumption; old flat FFI language roots
+are retired. `effect <Name>` user declarations remain reserved, unminted.
 
-**D-EFFTREE1 — Effect tree** *(ratified 2026-07-03, card #181)*: the ten
-D-EFF4/5 names are tree roots; a signature/`#Caps`/`#Grant`/`=[!…]=>` entry may
+**D-EFFTREE1 — Effect tree** *(ratified 2026-07-03, card #181)*: the
+D-EFF4/5 names are tree roots; a signature/`#Caps`/`=[!…]=>` entry may
 be a dotted path rooted at one (`FS.Read`, `Net.HTTP.Get`) — root closed
 (E0119), leaf open/user-chosen, no fixed vocabulary or depth limit. Ancestor
 matching is subsumption, the same rule as D-TAG1's tag-tree subtree matching
 learned once and reused: `=[FS]=>` accepts any `FS.*` callee; `=[FS.Read]=>`
-rejects a sibling `FS.Write` callee; `#Grant(FS.Read)` doesn't authorize
+rejects a sibling `FS.Write` callee; `#Caps(FS.Read)` doesn't authorize
 `FS.Write`; `=[!FS]=>` prohibits the whole `FS.*` subtree. Reverses E0740 for
-the ancestor case, keeps it for out-of-tree/sibling cases. Flat root names
-stay valid (no migration break) — Core stdlib calls are still tagged with a
+the ancestor case, keeps it for out-of-tree/sibling cases. Flat names stay
+valid for the ten non-FFI roots — Core stdlib calls are still tagged with a
 bare root; leaf precision is a user-declared-contract concept.
 
 **D-EFFECT-DECL1=A — Effect-leaf declarations** *(ratified 2026-07-28,
 card #1299)*: `effect FS.Read` is a compile-time package declaration. A package
 view contains its own declarations, declarations from loaded dependencies, and
 Prelude leaves. Once a root has one declared leaf, every dotted use under that
-root in effect rows, `#Caps`, `#Grant`, and package budgets must name a declared
+root in effect rows, `#Caps`, and package budgets must name a declared
 leaf exactly; E0750 suggests the nearest declaration. Bare roots stay valid.
 A root with no declared leaves stays open for gradual adoption. Declarations
 erase before TIR.
@@ -2394,7 +2454,7 @@ trait Renderer { fn render(self) =[GPU]=> Image }
 callee must not use the effect (E0749).
 
 **D-SCAP1 — Scoped capabilities** *(amended by D-ARROW-CONTROL1)*:
-`#Grant(caps: FS) { … }` authorizes effects in a lexical scope and binds an
+`#Caps(caps: FS) { … }` authorizes effects in a lexical scope and binds an
 erased first-class handle in the marker head. An effect
 without backing grant E0712; handle escape E0711.
 
@@ -2419,8 +2479,9 @@ pure-callable capabilities; `#Nondeterministic("reason") { }` expert escape (res
 not routed through a deterministic/mockable capability. Implemented by the
 effect fixpoint as E0725; deterministic `Clock`/`Rng` handles remain pure.
 
-**D-TXN1–4, D-TXN-ROLLBACK — Transactions**: `#Transact(name) { … }` — on a
-`?`-failure, mutated locals restore LIFO from auto-snapshots (layer 1);
+**D-TXN1–4, D-TXN-ROLLBACK — Transactions**: `#Transact { … }` or the named
+`#Transact(name) { … }` form — on a `?`-failure, mutated locals restore LIFO
+from auto-snapshots (layer 1);
 `Rollback` trait for custom snapshots (layer 2); `name.on_rollback(() => …)`
 and `name.on_commit(() => …)` explicit hooks (layer 3, Drop-backed).
 Irreversible effects (`Net`/`FS`/`Exec`) inside the block are E0746 — move
@@ -2804,25 +2865,20 @@ an effect root and its open leaf path, so Fs.Write selects the existing
 canonical FS.Write operation.
 
 **S43 — Tests** *(D-TESTPAREN1, D-TGT5)*: `#Test("name") { … }` blocks with
-`require`/`require_eq`; `jet test` auto-collects every `#Test` in the
+`assert`/`assert_eq`; `jet test` auto-collects every `#Test` in the
 package; optional `test { entry: … }` target adds an out-of-tree file.
 **D-TEST1**: a parameterized `#Test fn name(p: T)` is a property test —
 ~200 generated cases (`JET_PROP_SEED`), automatic shrinking; ungeneratable
 param type E0613. **D-TEST4**: fenced ```jet blocks in `///` docs run as
 doctests; `EXPR // => VALUE` compares JetShow output (E2901).
 
-**D-BENCH1 / D-BENCH-MARKER1=A**: `#Bench("name") { … }` region benchmarks, run by `jet bench`
-(ops/sec + ns/iter); the `benchmark` manifest target points `jet bench` at a
-package entry.
+**D-BENCH1 / D-BENCH-MARKER1=A**: historical region benchmark decision,
+superseded by D-CLAIM-BENCH1=A below. Its marker, command, and manifest target
+are retired.
 
-**D-BENCH-PARITY1=B** *(ratified 2026-08-05, card #1452)*: `jet bench` and
-`jet test` share file, recursive-directory, and project targets. `jet bench`
-selects region names with `--filter=<substr>` and always runs serially for
-timing integrity. Test-only flags (`--shuffle`, `--coverage`, and
-`--update-snapshots`) stay off the bench surface. A multi-file human report
-uses one heading per file and path-qualified region names; `--json` emits one
-record per region. Future runner-surface changes apply to both commands or
-name an explicit carve-out.
+**D-BENCH-PARITY1=B** *(ratified 2026-08-05, card #1452)*: superseded by
+D-CLAIM-BENCH1=A. The surviving parity law is the ordinary `jet test` target;
+measurement is selected with `--measure`.
 
 **D-COV1**: `jet test --coverage` — per-function HIT/MISS table; probes only
 in this mode, normal codegen byte-identical. **D-TOOL4**: snapshot testing
@@ -2978,7 +3034,7 @@ the D-FFI-PY1 precedent):**
   recorded in the binding (order mismatch is a checked error, never a
   silent transposition).
 - **D-FFI-LUA1=A**: `lua.*` — in-process VM (embedding is Lua's design
-  point); tables ↔ `[K:V]` zero-copy views; effect root `=[Lua]=>`.
+  point); tables ↔ `[K:V]` zero-copy views; effect leaf `:[FFI.Lua]>`.
 - **D-FFI-RUBY1=A**: `ruby.*` — sidecar worker (GVL + interpreter global
   state make embedding hostile); RubyGems as jetpack provider.
 - **D-FFI-PERL1=A**: `perl.*` — sidecar worker; CPAN provider; legacy
@@ -2994,7 +3050,7 @@ the D-FFI-PY1 precedent):**
   migration of the COBOL estate.
 - **D-FFI-OCTAVE1=A**: `octave.*` — sidecar Octave worker
   (MATLAB-compatible); matrices ↔ `Matrix<M,N>`/`Tensor<T>`; `.m`
-  scripts callable; jetpack-provisioned.
+  scripts callable; effect leaf `:[FFI.Octave]>`; jetpack-provisioned.
 - **D-FFI-SH1=A**: `Sh` typed text — the third D-TYPEDTEXT1 instance
   (same engine, I8): each `{hole}` becomes exactly one argv item, never
   word-split or glob-expanded; `core.process.run(cmd: Sh)` executes
@@ -3045,8 +3101,8 @@ binder's declaration format inside `rust.*`; D-NPMTYPE1 stubs are the js
 binder's v1; D-DEP1 vendoring/hash-pinning extends to every language's refs.
 Per-language binder depth, all ratified 2026-07-03:
 **D-FFI-PY1 (=A)**: Python's default host is a supervised sidecar CPython
-worker (typed message boundary, crash-isolated, `=[Py]=>` effect added to the
-D-EFF4 set); opt-in `py@embed` switches to in-process libpython for
+worker (typed message boundary, crash-isolated, `:[FFI.Py]>` effect leaf added
+by D-AUTHORITY-ROOTS1); opt-in `py@embed` switches to in-process libpython for
 zero-copy buffer-protocol arrays. One `use py.X` or `use py.[X, Y]` surface; the
 tier never moves call sites. **D-FFI-JS1 (=A)**: one `use js.X` or
 `use js.[X, Y]` surface, host chosen by
@@ -3100,7 +3156,7 @@ npm interop = typed first-party stub packages, no `.d.ts` parsing
 (D-NPMTYPE1); Swift interop waits on native-UI/C-ABI work (D-JSWIFTFFI1).
 
 **D-REPLCOREEFFECT1=A (ratified 2026-07-11)**: `jet repl` uses the existing
-effect model for ambient Core calls. An enclosing `#Grant(root)` supplies
+effect model for ambient Core calls. An enclosing `#Caps(root)` supplies
 lexical authority. Interactive sessions then authorize the exact
 `(root, operation, resource)` tuple once or for the in-memory session;
 reusing session authority offers continue or revoke before execution.
@@ -3108,7 +3164,7 @@ reusing session authority offers continue or revoke before execution.
 Non-TTY and transcript sessions never prompt and deny effects without the
 matching allow flag. Filesystem operations stay within the REPL project root
 and reject absolute paths, parent traversal, and symlinks. `Exec.Exit` always
-gets its own consequence prompt interactively and needs both `#Grant(Exec)`
+gets its own consequence prompt interactively and needs both `#Caps(Exec)`
 and `--allow-exec` outside a TTY.
 
 **D-FE-REPL-HISTORY1=A (ratified 2026-07-11)**: `jet repl` persists the
@@ -3332,7 +3388,7 @@ index, not a substitute for that law.
   `terminal(TerminalPolicy)`, with `TerminalSize` and `.Raw`/`.Cooked`
   `TerminalMode`; `ProcessChild.terminal` is `TerminalSession?`, present only
   when that child was launched with a terminal.
-  `ProcessSpec.capabilities()` returns an open keyed report. Stable keys use
+  `ProcessSpec.abilities()` returns an open keyed report. Stable keys use
   `TerminalFact` constants; string keys allow preview facts without a parallel
   report type, and close literal typos suggest the nearest stable key.
 - **D-MATHLIB2=A**: `core.math` is the canonical callable surface for libm and
@@ -3727,7 +3783,7 @@ nonce/AAD domains, parser caps, atomic publication rules, cancellation points,
 and platform primitives are normative parts of the decision, not replaceable
 aliases or whole-buffer facades.
 
-**D-CORE-NUMERIC1=A — one math home** *(ratified by owner 2026-07-12, card #512)*: `BigInt` and `Decimal` move into `core.math`; `core.numeric` leaves the registry (ordinary unknown-module error). Construction spellings, the no-auto-promotion law (E0130–E0133), and lint L0504 are unchanged.
+**D-CORE-NUMERIC1=A — one math home** *(ratified by owner 2026-07-12, card #512)*: `Decimal` moves into `core.math`; `core.numeric` leaves the registry (ordinary unknown-module error). The former arbitrary-precision integer construction is superseded by exact `Int` under D-INTBIG1; the no-auto-promotion law (E0130–E0133) is retired by D-TYPE2-NUM1, and lint L0504 remains.
 
 **D-API-LEN1=A — Law 1 blessed vocabulary** *(ratified by owner 2026-07-12, card #513)*: the API rubric keeps its plain-English rule; `len` joins a closed blessed-abbreviation list (with the module names `fmt`, `args`, `env`, `mem`); extensions to the list need a ballot. The shipped `len()`/`.len` surface is untouched.
 
@@ -3749,6 +3805,15 @@ card #536)*: `.new(…)` may omit the receiver only when the surrounding expecte
 type plus its arguments determine one receiver type. `Type.new(…)` always remains
 available. Elaboration reuses ordinary expected-type inference and the existing
 static-call path; there is no constructor registry or global search.
+
+**D-SUBJECT-CALL1=A — bare member shorthand for unary callable arguments**
+*(ratified by owner, card #1418)*: at a call argument whose expected type is a
+known one-parameter callable `fn(T) => R`, a bare lower-case
+`.member[.method(args)]*` chain means `(subject: T) :> subject.member…`. Sema
+rewrites it to the ordinary lambda AST, so all execution tiers use the existing
+closure path. The shorthand is not valid for operators, literals, unknown or
+non-callable expected types, or callables with more than one parameter; write
+the full lambda in those cases. It adds no token or second member mechanism.
 
 **D-SHAPE-DURATION1=A / D-SHAPE-DURATIONCONVERT1=A — checked runtime
 durations** *(ratified by owner 2026-07-14, cards #558/#575)*: a runtime `Int`
@@ -3779,6 +3844,14 @@ alias, or priority rule.
 **D-CACHENAME1=A — bounded cache is `Cache<K,V>`** *(ratified 2026-07-31, card #1356)*: rename the Core type formerly spelled `Lru<K,V>` to `Cache<K,V>`. Eviction remains least-recently-used when full; method law unchanged (`has_key`, `add`, `add_new`, …). Amends D-COLLBREADTH1 / D-ITERTOOLS1 naming.
 
 **D-MAP-MERGE1=E — `Map.merge`** *(ratified 2026-07-31, card #1354)*: one method `merge(other, conflict: ((K, V, V) => V)? = None)`. Omit `conflict` → right wins on shared keys (beginner default). Pass `conflict:` → callback result per shared key. Distinct from `Set.union` and struct Patch `merge`. Semantics live in Prelude (`jet_map_merge` / `jet_map_merge_with`); engines marshall only (I9).
+
+**D-MAP-KEY1=A — recursive value-semantic map keys** *(ratified 2026-08-19,
+card #1969)*: a map key is `Int`, `String`, `Bool`, `Char`, `U8`/`IntN`, a
+payload-free enum, or a tuple/struct whose fields recursively satisfy this
+rule. `Float`, views, `Shared`, functions, lists, maps, sets, and
+payload-carrying enums remain ineligible. Maps are ordered; deep field
+equality and ordering use the one `JetMap` Prelude path. Set element rules are
+separate.
 
 **D-LISTREMOVE1=F — value-first list removal** *(ratified by owner, card #1410)*:
 `List.remove(value)` removes the first equal item and returns `T?`; explicit
@@ -4388,7 +4461,7 @@ hashes. Profiles: `Build.{optimize, debug_info, small, panic, settings}`,
 selected by explicit flag (`--release`/`--profile=<name>`), never ambient env.
 
 D-BUILDTARGET1=A: build targets are registered once with `b.add_executable`,
-`b.add_library`, `b.add_test`, `b.add_bench`, `b.add_asset_bundle`,
+`b.add_library`, `b.add_test`, `b.add_asset_bundle`,
 `b.add_doc`, `b.add_install`, `b.add_package`, and `b.add_publish`; each call
 returns a typed handle and `b.plan()` / `b.plan(default: target)` returns the
 registered graph. D-BUILDACTION1=A: `b.action(name, inputs, outputs, run,
@@ -4464,22 +4537,20 @@ Verbs: `add f: T = val`; `remove f`; `change f: Old => New via { old =>
 expr }` (converter: inline `via` → `impl Old => New` in scope → E0910); no
 `reorder`. CLI: `jet inspect schema squash --before <ver>`, `jet inspect schema status`.
 
-**Decode-time migration transparency** *(D-MIGRATE3=A)*: `decode_traced<T>(raw)
-=> DecodeResult<T> ?` beside `decode<T>` on every codec sharing the decode
-machinery (json/csv/toml/yaml); `DecodeResult<T> = { value: T, migration:
-MigrationStatus }`, `MigrationStatus = { migrated: Bool, from: String, steps:
-[String] }`. `decode` unchanged (I8, zero cost for callers not asking).
-`.migrated` is `false` for a plain type and for a `#PublishedSchema` type
-decoding fresh (current-shape) data; the migrated cases are D-MIGRATE4.
+**Decode-time migration transparency** *(D-MIGRATE3=A, retired by
+D-VALIDATE-DECODE1=B)*: the separate migration-report result is retired.
+Every codec's typed `decode<T>` has the one canonical result,
+`Result<T, [FieldError]>` (or `Result<[T], [FieldError]>` for CSV). Migration
+steps run silently inside that call; no second decoder or compatibility wrapper
+exists.
 **D-MIGRATE4 (=A, ratified 2026-07-03, c105migrate4; shipped)**: the runtime
 half — codegen lowers each `migration { }` block to a step function; decoding
 a `#PublishedSchema` type first tries the current shape (prefer-newest
 ambiguity rule), on mismatch detects the source shape by field-name set
 (newest matching historical shape wins) and walks the chain oldest→current
-applying steps. Plain `decode` applies silently; `decode_traced` records
-`from` + `steps` (positional labels: `v1` oldest, steps `"v1->v2"`). No
-matching shape → the ordinary decode error. Zero cost for types without
-migrations. Runtime semantics: spec.md "Runtime migration chain".
+applying steps. Plain `decode` applies silently. No matching shape → the
+ordinary decode error. Zero cost for types without migrations. Runtime
+semantics: spec.md "Runtime migration chain".
 
 **D-EXPANDCLI1 (=A, ratified 2026-07-03, c183expand)**: the transparency
 command is `jet inspect expand --facts <lens> <file>`; bare `jet inspect expand <file>`
@@ -5569,7 +5640,7 @@ policy, the built-in constructor fails closed; it must not fabricate a token.
 **D-SERVICE1=D — sema-known structured service tree**: typed builders promote
 ordinary functions into named workers/groups; sema validates topology, endpoint
 types, effects, cycles, and lifetimes. Each group is a supervisor-owned child
-group — D-CONC-GROUP1=A later renamed `TaskGroup` to `Group`, so the older
+group — D-CONC-GROUP1=A later settled the public handle name as `Group`, so the older
 "taskgroup" spelling in this ruling's ballot text is retired. Beginner default
 is a bounded OneForOne restart budget with parent escalation, carried as data on
 the group (D-CONC-SCHED1=A).
@@ -5618,7 +5689,7 @@ and 2 means usage/parse/I/O failure. Preflight finds all failures before a
 zero-write abort. `jet fmt - --stdin-path=...` gives editor-equivalent stdin
 diagnostics. CLI, LSP, Canvas, and CI output is one byte-identical fixpoint.
 
-**D-PERFSESSION1=D / D-ARTIFACT-EXT1=A — one `.jettrace` truth**: `jet perf run/test/bench` preserves
+**D-PERFSESSION1=D / D-ARTIFACT-EXT1=A — one `.jettrace` truth**: `jet perf run/test` preserves
 the exact base-command argument surface and driver path; `attach/view/compare/
 export` complete the family. `.jettrace` embeds schema/toolchain/source/source-map
 identity and capture policy. Compare enforces hardware/toolchain baseline
@@ -5744,15 +5815,15 @@ reserved against built-in lifecycle/CLI names and collisions at one scope.
 There are no flag aliases, and a release binary reports non-shipped jobs as
 unknown commands.
 
-**D-CMD-OVERRIDE1=C — every command may be expert-overridden** *(ratified
-2026-08-05, card #1451)*: `fn test(suite: TestSuite)` and
-`fn bench(suite: BenchSuite)` are ordinary functions that become the selected
-command entry when present. The compiler supplies the discovered suite after
-the command's filter; the value exposes `run()`, `iteration`, and `result`.
-A zero-parameter `fn test()` or `fn bench()` replaces the stock harness without
-receiving a suite. `jet test --show-default` and `jet bench --show-default` force the
-stock harness and ignore the override. The rule adds no token: it extends the
-existing named-function entry convention.
+**D-CMD-OVERRIDE1=C — every live command may be expert-overridden** *(ratified
+2026-08-05, card #1451; amended by D-CLAIM-BENCH1=A)*: `fn test(suite:
+TestSuite)` is an ordinary function that becomes the selected test entry when
+present. The compiler supplies the discovered suite after the command's
+filter; the value exposes `run()`, `iteration`, and `result`. A zero-parameter
+`fn test()` replaces the stock harness without receiving a suite.
+`jet test --show-default` forces the stock harness and ignores the override.
+The retired benchmark override is deleted with its command. The rule adds no
+token: it extends the existing named-function entry convention.
 
 **D-SCHEDULE1=A — schedule-as-code** *(ratified by owner 2026-07-11, card
 #505)*: `#Every(…)` is a directive marker on a `#Job fn`
@@ -6488,7 +6559,7 @@ rational, but the landing default is exact instead of Float. D-EXPSEM1 and
 D-EXPNEG1: a written negative exponent gets the same exact landing. D-NUMTYPE1:
 its Fraction-is-opt-in-by-name clause relaxes, because plain division can now
 answer an exact ratio. Exact values use machine-word fast paths with spill, the
-bigint Int playbook. Sized widths and Float keep every ratified behavior once
+exact-Int playbook. Sized widths and Float keep every ratified behavior once
 named, mixing with an approximate operand answers approximate under the one
 widening law, and narrowing still requires approx.
 
@@ -6544,22 +6615,37 @@ widening is written and audited.
   ten plus `FFI`, `Browser` and `Secret`. FFI languages are leaves such as
   `FFI.Go`; flat language roots are deleted. This amends D-EFF4/D-EFF5 and the
   FFI effect clauses. Implementation: #1567.
+- **D-AUTHORITY-ROOTS1 effect amendments**: the language rulings now publish
+  these leaves: `D-FFI-GO1 → FFI.Go`, `D-FFI-JVM1 → FFI.Java`,
+  `D-FFI-DOTNET1 → FFI.DotNet`, `D-FFI-FORTRAN1 → FFI.Fortran`,
+  `D-FFI-COBOL1 → FFI.Cobol`, `D-FFI-TCL1 → FFI.Tcl`,
+  `D-FFI-LUA1 → FFI.Lua`, `D-FFI-ADA1 → FFI.Ada`,
+  `D-FFI-PASCAL1 → FFI.Pascal`, `D-FFI-DART1 → FFI.Dart`,
+  `D-FFI-PWSH1 → FFI.PowerShell`, `D-FFI-PERL1 → FFI.Perl`,
+  `D-FFI-RUBY1 → FFI.Ruby`, `D-FFI-PHP1 → FFI.Php`,
+  `D-FFI-R1 → FFI.R`, `D-FFI-COM1 → FFI.Com`,
+  `D-FFI-CPP1 → FFI.Cpp`, `D-FFI-PY1 → FFI.Py`, and
+  `D-FFI-OCTAVE1 → FFI.Octave`. `D-FFI-UNIFY1` supplies the common `FFI`
+  parent. This is the honoring amendment for D-FFI-PY1 and
+  D-FFI-OCTAVE1.
 - **D-AUTHORITY-MEM1=B**: memory floors leave `#Policy` and become effect
-  denials such as `=[!Mem.Alloc]=>` and manifest `deny: [Mem.Alloc]`.
-  `#Policy` keeps non-memory arguments. This amends D-MEM-FACTS1 and
-  D-POLICY-WORD1. Implementation: #1568.
+  denials such as `:[!Mem.Alloc]>` and manifest
+  `authority: .{ holds: { deny: [Mem.Alloc] } }`. `#Policy` keeps non-memory arguments.
+  This amends D-MEM-FACTS1 and D-POLICY-WORD1. The retired floor words are
+  tombstones whose replacement is the matching `!Mem.*` denial. Implementation:
+  #1568.
 - **D-AUTHORITY-MEM2=A**: denial rows accept an optional `above: Bytes`
-  argument, for example `=[!Mem.Alloc(above: 65536)]=>` and manifest
-  `deny: [Mem.Alloc(above: 65536)]`. Record-only outcome; it closes the
-  bounded-arena gate in #1568 criterion 4.
+  argument, for example `:[!Mem.Alloc(above: 65536)]>` and manifest
+  `authority: .{ holds: { deny: [Mem.Alloc(above: 65536)] } }`. Record-only outcome; it
+  closes the bounded-arena gate in #1568 criterion 4.
 - **D-AUTHORITY-NAME1=A**: `Authority` is the one nameable rights value at
   process, plugin and session boundaries; `ProcessAuthority` becomes
   `Authority`, while `ProcessPlan` and `ProcessReceipt` stay. Implementation:
   #1569.
 - **D-AUTHORITY-SCOPE1=A**: `#Caps` is the one block marker. A bare list
   narrows (`#Caps(FS, Net)`); a name-before-list head binds the handle
-  (`#Caps(g: FS, Net)`). `#Grant` is deleted, and its error points to
-  `#Caps`. This amends D-EFF1, D-SCAP1 and D-ARROW-CONTROL1. Implementation:
+  (`#Caps(g: FS, Net)`). The retired marker spelling is deleted, and its error
+  points to `#Caps`. This amends D-EFF1, D-SCAP1 and D-ARROW-CONTROL1. Implementation:
   #1573.
 - **D-AUTHORITY-MANIFEST1=A**: one `authority:` block holds package bounds,
   dependency grants, trust defaults and provider bounds; replaced keys are
@@ -6936,7 +7022,7 @@ The named instances, as rows of the one table
 Marker law zero is the instance with no meaningful direction. A rule on written
 code says what a writer may attach and where; it holds no fact that moves, so
 every marker row states `none` and names no gate. The moving facts a marker
-*writes* belong to the row that holds them — `#Grant` is a gate word on the
+*writes* belong to the row that holds them — `#Caps` is a gate word on the
 `Rights` row, not a direction of its own. That is stated once, for every marker
 row at once, so no row can drift from it.
 
@@ -7025,7 +7111,7 @@ refusal), #1623 (the `$` read surface), #1571 (the gate ledger), #1624 (the one
 law voice). No per-plane card in #1517–#1579 closes before its substrate
 prerequisite closes.
 
-**2026-08-06 — D-CONC-SPAWN1 = D / D-CONC-FAIL1 = A / D-CONC-JOIN1** *(card #1685)*. The spawn surface has one reserved word: `task`. A plain `task f()` or `task { … }` starts one child. Nested selectors stay free identifiers: `task.all { … }` waits for every branch and fail-fast cancels siblings, `task.race { … }` returns the first successful branch and cancels losers, and `task.any { … }` returns the first completed branch and cancels the rest. `task.group g { … }` owns a lexical scope; `task.group g(limit: n) { … }` bounds active children and the group joins at close. `TaskGroup` parameters reuse the caller's lexical group. `join()` is the fallible `T ? TaskFailure` rail with `.Cancelled`, `.DeadlineBlown`, and `.Panicked(reason)`. `TaskOutcome`, `TaskStatus`, `trace()`, and `exception()` are retired. The old `taskgroup`, `g.task =>`, `g.all([…])`, `g.race([…])`, `g.any([…])`, `tasks.spawn`, `tasks.spawn_group`, `tasks.join_all`, and `tasks.wait_any` spellings have no compatibility path.
+**2026-08-06 — D-CONC-SPAWN1 = D / D-CONC-FAIL1 = A / D-CONC-JOIN1** *(card #1685)*. The spawn surface has one reserved word: `task`. A plain `task f()` or `task { … }` starts one child. Nested selectors stay free identifiers: `task.all { … }` waits for every branch and fail-fast cancels siblings, `task.race { … }` returns the first successful branch and cancels losers, and `task.any { … }` returns the first completed branch and cancels the rest. `task.group g { … }` owns a lexical scope; `task.group g(limit: n) { … }` bounds active children and the group joins at close. `Group` parameters reuse the caller's lexical group. `join()` is the fallible `T ? TaskFailure` rail with `.Cancelled`, `.DeadlineBlown`, and `.Panicked(reason)`. `TaskOutcome`, `TaskStatus`, `trace()`, and `exception()` are retired. The old `taskgroup`, `g.task =>`, `g.all([…])`, `g.race([…])`, `g.any([…])`, `tasks.spawn`, `tasks.spawn_group`, `tasks.join_all`, and `tasks.wait_any` spellings have no compatibility path.
 **2026-08-08 — D-LIB-EXPORT1=C / D-LIB-DYNTRUST1=A / D-LIB-NAME1=A /
 D-LIB-CALLGRANT1=A** *(card #1421)*: `Library` keeps one output kind. Its
 `loadable: true` field requests a `.jetlib` artifact. `Mod.load(path,
@@ -7102,7 +7188,7 @@ The marker vocabulary is written as ordinary Jet source, not as a Rust table.
 - The Rust constants `Policy::APPLIED_RULES` and `Facts::EFFECT_ROOTS` no longer
   hold the vocabulary; both are read from those two files.
 - D-VARIADIC1: a marker that takes a list of arguments writes it the same way a
-  function does — `capabilities: ...Capability`. This is the only new spelling
+  function does — `abilities: ...Ability`. This is the only new spelling
   the card adds, and it reuses the ratified rest-parameter form.
 - D-MARK-VOCAB1: `Policy::MarkerVocabulary` is the one vocabulary value. It
   holds the registry rows plus the `derive T.Name { … }` providers a build can
@@ -7213,8 +7299,8 @@ accepts the typed faults list. Sema canonicalizes effect roots and the shared
 Prelude owns deterministic fail-nth schedules; AOT and JIT adapters marshal
 the same operation labels. Unknown roots reuse E0119 with a UI snapshot.
 
-**2026-08-14 — D-NOPANIC1=D** *(card #1925)*. `Panic` is a closed effect-tree
-row. A function or package may deny it with `=[!Panic]=>` or
+**2026-08-14 — D-NOPANIC1=D** *(card #1925)*. `Panic` is a deny-only effect
+row. A function or package may deny it with `:[!Panic]>` or
 `effects: { deny: [Panic] }`; the existing prohibition and manifest-budget
 machinery enforce the denial across the whole reachable dependency graph.
 Expected failure returns `T ? E`. A programmer-error stop is admissible only
@@ -7222,6 +7308,14 @@ when callers carry a `#Pre` or refinement fact that proves the stop unreachable.
 The diagnostic names the panic site and gives the three exits: return a
 fallible result, add facts, or stay undenied. The row is compile-time only and
 does not add a runtime effect mechanism or an execution-tier exception.
+
+**2026-08-20 — D-PANICROOT1=A** *(card #1567)*. `Panic` stays in the effect
+vocabulary only as a deny-only row: no positive signature, `#Caps`, or grant
+may name it. Positive naming is E0751 (`Panic can't be granted, only denied`);
+`:[!Panic]>`, manifest denial, E0749, and `#Pre`/refinement discharge remain
+valid. `check_panic_call` contributes the existing reachability sentinel, and
+the shared effect projection exposes its `Panic` row for denial without making
+it an ordinary grantable root.
 
 **2026-08-13 — D-MARK-BLOCK1=A** *(card #1606)*. Dedicated block-construct
 nodes keep their typed fields. Tools recover the registered marker row and its
@@ -7308,6 +7402,13 @@ promoted to a report, no report falls back to a bare string, and no engine,
 editor, JSON writer, or web host re-creates registry meaning. A missing tier
 proof is an open criterion, not a `tests/jit_gaps.txt` entry.
 
+**D-REPORT-FIXGRADE1=D — machine fixes carry one closed safety class (card #2106).**
+Every `jet.report/v1` `fix_edits` entry carries exactly one of `formatting`,
+`behavior-preserving`, `api-changing`, `target-changing`, or `needs-review`.
+The typed fix construction path requires the class; it never supplies a default.
+`jet fix` applies `formatting` and `behavior-preserving` edits by default,
+reports skipped higher-risk edits, and accepts `--all` to apply every class.
+
 **2026-08-13 — D-COLLNAME1=A** *(card #1439)*: the canonical named Core
 container roster is `Set`, `Rank`, `Queue`, `PriorityQueue`, `Tally`, `Cache`,
 `Bits`, and `Bytes`. The five renamed rows use the D-ONCE-RETIRE1=C pure-rename
@@ -7326,10 +7427,13 @@ the one assertion family in code, tests, and scripts. `require` and
 one stop family remain. This amends S43, the D-PRELUDE-LAW1=A ambient registry,
 and the D-FAIL-BREACH1=A wording.
 
-**2026-08-07 — D-CLAIM-BENCH1=A** *(card #1641)*: `.measure` is a `#Test`
-member and `jet test --measure` is measurement mode. `#Bench` and `jet bench`
-retire. The member rides D-DOTSCOPE1; plain `jet test` still runs the measured
-claim once as a correctness claim, with typed budgets and the one report frame.
+**2026-08-07 — D-CLAIM-BENCH1=A** *(card #1641; shipped in card #2082)*:
+`.measure` is a `#Test` member and `jet test --measure` is measurement mode.
+`#Bench` and `jet bench` retire. The member rides D-DOTSCOPE1; plain `jet test`
+still runs the measured claim once as a correctness claim, with typed budgets
+and the one report frame. The shipped surface uses the ordinary test target,
+the `.Test(name)` budget scope, one tier-labeled measurement reporter, and the
+registered retired-spelling teaching diagnostics.
 
 **2026-08-07 — D-CLAIM-CASES1=B** *(card #1641)*: `.cases` takes a row list,
 as `.cases([ ... ])`, and may take an explicit row parameter name, as
@@ -7412,6 +7516,22 @@ Debug text with two-space indentation and one field or element per line, and kee
 output deterministic and width-independent. The selector and `core.text.fmt.pretty`
 call share one Prelude formatter.
 
+**2026-08-19 — D-ERR-DECON1=A** *(card #2041; ratified 2026-08-19)*: a `??`
+fallback block ends with one bare value or one real diverging tail, so
+`return expr` is a function return and never a hidden block-value spelling.
+This amends D-FAIL-BIND1 at the block-tail boundary and adds no token, binder,
+or second fallback mechanism.
+
+**2026-08-19 — D-CALLPOS1=A** *(card #2042; ratified 2026-08-19)*: bare call
+arguments fill one callable left to right when the mapping is deterministic;
+defaults fill after supplied arguments, and a final variadic slot owns the bare
+tail. Types never reroute a bound argument. Adjacent same-type parameters stay
+legal positionally. An imported call with more than one successful candidate
+binding raises E0772 and prints candidate signatures plus a labelled rewrite;
+always-on LSP inlay hints show the public names without requiring repeated
+typing. This adds no syntax and does not reopen S61 zones or user-definition
+uniqueness.
+
 **2026-08-20 — D-LIT-DOT1=B** *(card #2080; ratified 2026-08-20)*: a literal
 constructor drops the dot before its braces. A named head writes `Point{x: 1}`
 and `[Int]{1, 2, 3, 4}`. An enum payload writes `.Password{username: u}`. An
@@ -7421,6 +7541,21 @@ and byte-pattern heads, D-REGEX-LIT1=D, D-BOUND-HEAD1=A, D-BINPAT1=A,
 D-UNINIT-SENTINEL2=A, and the `[T].{}` / `[K:V].{}` empty forms — to the
 dotless spelling. The dotted form is retired: E0320's class teaches the dotless
 direction, and the reflex that E0320 punished is now the correct spelling.
+
+**2026-08-20 — D-LOOP-SUBJECT1=A** *(card #1417)*: a one-source loop may omit
+its binding when the source is a collection. The source item is the implicit
+subject, represented by `Syntax::KW_IT`; bare `.member` in the guard or body
+reads that subject. The guard keeps the comma-less form, for example
+`loop users if .active :> .name`. Scalar sources still require `name, source`,
+and `(key, value)` sources always keep both names. Nested bindingless loops
+teach named bindings. Subject-member resolution runs before D-SHAPE3a's
+expected-type static shorthand. This adds no token or second loop mechanism.
+
+**2026-08-20 — D-SUBJECT-CALL1=A** *(card #1418; ratified 2026-08-20)*: a
+lower-case `.member[.method(args)]*` argument in a known one-parameter callable
+position means `(subject: T) :> subject.member…`. Sema lowers it to the ordinary
+lambda AST; no new token or runtime path exists. Multi-parameter, non-callable,
+unknown, operator, and literal contexts require the full lambda.
 
 **2026-08-20 — D-ARROW-UNIFY1=B** *(card #2081; ratified 2026-08-20)*: one arrow,
 `:>`, in every arrow position — a callable result, a dispatch arm, a loop body,

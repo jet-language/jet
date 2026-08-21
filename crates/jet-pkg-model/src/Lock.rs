@@ -334,6 +334,9 @@ pub struct LockFile {
     pub packages: Vec<LockedPackage>,
     /// Root dependency names (direct deps of the workspace root).
     pub root_dependencies: Vec<String>,
+    /// D-AUTHORITY-MANIFEST1=A: the root package's one authority block,
+    /// mirrored as one typed value instead of four lockfile spellings.
+    pub authority: Option<crate::Package::PackageAuthority>,
     /// D-WORKSPACELOCK1=A: monorepo workspace members live in this same
     /// lockfile, not in a separate `.jet/workspace.lock`.
     pub workspace_members: Vec<LockedWorkspaceMember>,
@@ -594,6 +597,9 @@ pub fn write(lock: &LockFile) -> String {
     } else {
         out.push_str("dependencies = []\n");
     }
+    if let Some(authority) = &lock.authority {
+        out.push_str(&format!("authority = {}\n", write_authority_value(authority)));
+    }
 
     // D-CTEFFECT1 Tier-1: embed inputs.
     for ci in &lock.comptime_inputs {
@@ -615,6 +621,98 @@ fn write_string_array(values: &[String]) -> String {
             .collect::<Vec<_>>()
             .join(", ")
     )
+}
+
+fn write_authority_value(authority: &crate::Package::PackageAuthority) -> String {
+    let mut fields = Vec::new();
+
+    let mut holds = Vec::new();
+    if let Some(allow) = &authority.holds.allow {
+        holds.push(format!("allow: {}", write_string_array(allow)));
+    }
+    if let Some(deny) = &authority.holds.deny {
+        holds.push(format!("deny: {}", write_string_array(deny)));
+    }
+    if !holds.is_empty() {
+        fields.push(format!("holds: .{{ {} }}", holds.join(", ")));
+    }
+
+    if !authority.grants.is_empty() {
+        let grants = authority
+            .grants
+            .iter()
+            .map(|(package, rights)| {
+                format!(
+                    "\"{}\": {}",
+                    escape_str(package),
+                    write_string_array(rights)
+                )
+            })
+            .collect::<Vec<_>>();
+        fields.push(format!("grants: .{{ {} }}", grants.join(", ")));
+    }
+
+    if let Some(trust) = &authority.trust {
+        let mut trust_fields = Vec::new();
+        if let Some(default) = trust.default {
+            trust_fields.push(format!("default: {}", write_trust_decision(default)));
+        }
+        if let Some(ci) = trust.ci_prompt {
+            trust_fields.push(format!(
+                "ci: .{{ prompt: {} }}",
+                write_trust_decision(ci)
+            ));
+        }
+        if !trust.services.is_empty() {
+            let services = trust
+                .services
+                .iter()
+                .map(|(name, decision)| {
+                    format!("\"{}\": {}", escape_str(name), write_trust_decision(*decision))
+                })
+                .collect::<Vec<_>>();
+            trust_fields.push(format!("services: .{{ {} }}", services.join(", ")));
+        }
+        if let Some(require) = trust.require {
+            trust_fields.push(format!("require: {}", require.label()));
+        }
+        fields.push(format!("trust: .{{ {} }}", trust_fields.join(", ")));
+    }
+
+    if !authority.providers.is_empty() {
+        let providers = authority
+            .providers
+            .iter()
+            .map(|provider| {
+                let mut provider_fields = vec![format!(
+                    "registry: \"{}\"",
+                    escape_str(&provider.registry)
+                )];
+                if !provider.allow.is_empty() {
+                    provider_fields.push(format!("allow: {}", write_string_array(&provider.allow)));
+                }
+                if !provider.deny.is_empty() {
+                    provider_fields.push(format!("deny: {}", write_string_array(&provider.deny)));
+                }
+                format!(
+                    "\"{}\": .{{ {} }}",
+                    escape_str(&provider.provider),
+                    provider_fields.join(", ")
+                )
+            })
+            .collect::<Vec<_>>();
+        fields.push(format!("providers: .{{ {} }}", providers.join(", ")));
+    }
+
+    format!(".{{ {} }}", fields.join(", "))
+}
+
+fn write_trust_decision(decision: crate::Package::TrustDecision) -> &'static str {
+    match decision {
+        crate::Package::TrustDecision::Allow => "allow",
+        crate::Package::TrustDecision::Prompt => "prompt",
+        crate::Package::TrustDecision::Deny => "deny",
+    }
 }
 
 fn write_workspace_overlay_policy(out: &mut String, policy: &OverlayPolicy) {
@@ -740,6 +838,7 @@ pub fn parse(raw: &str) -> Result<LockFile, String> {
     let mut version: Option<u32> = None;
     let mut packages: Vec<LockedPackage> = Vec::new();
     let mut root_deps: Vec<String> = Vec::new();
+    let mut authority: Option<crate::Package::PackageAuthority> = None;
     let mut workspace_members: Vec<LockedWorkspaceMember> = Vec::new();
     let mut workspace_source_digest: Option<String> = None;
     let mut workspace_overlay_sets: Vec<PartialWorkspaceOverlay> = Vec::new();
@@ -889,8 +988,19 @@ pub fn parse(raw: &str) -> Result<LockFile, String> {
         }
 
         if in_root {
-            if key == "dependencies" {
-                root_deps = parse_string_array(val);
+            match key {
+                "dependencies" => root_deps = parse_string_array(val),
+                "authority" => {
+                    let parsed = crate::Package::Blocks::parse_authority_value(val)
+                        .map_err(|error| error.to_string())?;
+                    authority = Some(crate::Package::PackageAuthority {
+                        holds: parsed.holds,
+                        grants: parsed.grants,
+                        trust: parsed.trust,
+                        providers: parsed.providers,
+                    });
+                }
+                _ => {}
             }
             continue;
         }
@@ -1104,6 +1214,7 @@ pub fn parse(raw: &str) -> Result<LockFile, String> {
         version: version.unwrap_or(0),
         packages,
         root_dependencies: root_deps,
+        authority,
         workspace_members,
         workspace_source_digest,
         workspace_overlay_policy,
@@ -1838,6 +1949,7 @@ pub fn record_nix_realization(
             version: LOCK_VERSION,
             packages: Vec::new(),
             root_dependencies: Vec::new(),
+            authority: None,
             workspace_members: Vec::new(),
             workspace_source_digest: None,
             workspace_overlay_policy: Default::default(),
@@ -1992,6 +2104,7 @@ pub fn record_cran_realization(
             version: LOCK_VERSION,
             packages: Vec::new(),
             root_dependencies: Vec::new(),
+            authority: None,
             workspace_members: Vec::new(),
             workspace_source_digest: None,
             workspace_overlay_policy: Default::default(),
@@ -2084,6 +2197,7 @@ pub fn record_luarocks_realization(
             version: LOCK_VERSION,
             packages: Vec::new(),
             root_dependencies: Vec::new(),
+            authority: None,
             workspace_members: Vec::new(),
             workspace_source_digest: None,
             workspace_overlay_policy: Default::default(),
@@ -2177,6 +2291,7 @@ pub fn record_registry_realization(
             version: LOCK_VERSION,
             packages: Vec::new(),
             root_dependencies: Vec::new(),
+            authority: None,
             workspace_members: Vec::new(),
             workspace_source_digest: None,
             workspace_overlay_policy: Default::default(),
@@ -2274,6 +2389,7 @@ pub fn record_toolchain(project_root: &Path, tc: LockedToolchain) {
             version: LOCK_VERSION,
             packages: Vec::new(),
             root_dependencies: Vec::new(),
+            authority: None,
             workspace_members: Vec::new(),
             workspace_source_digest: None,
             workspace_overlay_policy: Default::default(),
@@ -2314,6 +2430,7 @@ pub fn record_browser(project_root: &Path, browser: LockedBrowser) {
             version: LOCK_VERSION,
             packages: Vec::new(),
             root_dependencies: Vec::new(),
+            authority: None,
             workspace_members: Vec::new(),
             workspace_source_digest: None,
             workspace_overlay_policy: Default::default(),
@@ -2388,6 +2505,7 @@ pub fn record_generated_inputs(
             version: LOCK_VERSION,
             packages: Vec::new(),
             root_dependencies: Vec::new(),
+            authority: None,
             workspace_members: Vec::new(),
             workspace_source_digest: None,
             workspace_overlay_policy: Default::default(),
@@ -2560,6 +2678,7 @@ pub fn record_build_contributions(
             version: LOCK_VERSION,
             packages: Vec::new(),
             root_dependencies: Vec::new(),
+            authority: None,
             workspace_members: Vec::new(),
             workspace_source_digest: None,
             workspace_overlay_policy: Default::default(),
@@ -2634,6 +2753,7 @@ pub fn record_source_channel(project_root: &Path, source: LockedSourceChannel) {
             version: LOCK_VERSION,
             packages: Vec::new(),
             root_dependencies: Vec::new(),
+            authority: None,
             workspace_members: Vec::new(),
             workspace_source_digest: None,
             workspace_overlay_policy: Default::default(),
@@ -2914,6 +3034,7 @@ mod a4_envelope_tests {
             version: LOCK_VERSION,
             packages,
             root_dependencies: Vec::new(),
+            authority: None,
             workspace_members: Vec::new(),
             workspace_source_digest: None,
             workspace_overlay_policy: Default::default(),
@@ -2947,6 +3068,39 @@ mod a4_envelope_tests {
         );
         let back = parse(&text).expect("parse");
         assert_eq!(back.packages[0].envelope, Some(e));
+    }
+
+    #[test]
+    fn lock_roundtrips_the_manifest_authority_shape() {
+        let authority = crate::Package::PackageAuthority {
+            holds: crate::Package::AuthorityHolds {
+                allow: Some(vec!["Net".to_string()]),
+                deny: Some(vec!["Exec".to_string()]),
+            },
+            grants: vec![("image-codec".to_string(), vec!["FS.Read".to_string()])],
+            trust: Some(crate::Package::TrustPolicy {
+                default: Some(crate::Package::TrustDecision::Prompt),
+                ci_prompt: Some(crate::Package::TrustDecision::Deny),
+                services: vec![("stripe".to_string(), crate::Package::TrustDecision::Allow)],
+                require: Some(crate::Package::ProvenanceRequirement::Attested),
+            }),
+            providers: vec![crate::Package::ProviderAuthority {
+                provider: "nix".to_string(),
+                registry: "nixpkgs".to_string(),
+                allow: vec!["openssl".to_string()],
+                deny: vec!["openssl-1.0".to_string()],
+            }],
+        };
+        let mut lock = base_lock(Vec::new(), Vec::new());
+        lock.authority = Some(authority.clone());
+
+        let raw = write(&lock);
+        assert!(raw.contains("authority = .{"), "missing root authority: {raw}");
+        assert!(raw.contains("holds: .{"), "missing authority holds: {raw}");
+        assert!(raw.contains("grants: .{"), "missing authority grants: {raw}");
+        assert!(raw.contains("trust: .{"), "missing authority trust: {raw}");
+        assert!(raw.contains("providers: .{"), "missing authority providers: {raw}");
+        assert_eq!(parse(&raw).expect("authority lock parses").authority, Some(authority));
     }
 
     /// A filled signature slot round-trips explicitly (forward-compat for #13).

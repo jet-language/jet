@@ -1260,7 +1260,7 @@ fn byte_size_for_type(ty: &crate::AST::Type) -> Option<crate::TargetMachine::Byt
 #[derive(Debug, Clone)]
 pub struct BuildRunOptions {
     pub grants: std::collections::BTreeSet<crate::Comptime::Build::BuildCapability>,
-    /// Policy for typed legacy/plugin bridges. Capability grants and bridge
+    /// Policy for typed legacy/plugin bridges. Ability grants and bridge
     /// policy are separate: an explicit `Exec` grant does not implicitly
     /// enable a legacy wrapper or a plugin.
     pub policy: crate::Comptime::Build::BuildPolicy,
@@ -3322,7 +3322,7 @@ fn compile_build_from_front_end(
                 lints,
                 ffi: None,
                 clinks: Vec::new(),
-                capabilities: crate::Capabilities::default(),
+                abilities: crate::Abilities::default(),
                 comptime_inputs: std::mem::take(&mut bundle.comptime_inputs),
                 web: None,
                 web_partition_report: None,
@@ -3365,7 +3365,7 @@ fn compile_build_from_front_end(
                 vec![Diagnostic::error(
                     "E-WEB-TIR-UNSUPPORTED",
                     format!("web output cannot compile `{}` yet", miss.func_name),
-                    "web emitter capability facts drifted after validation".to_string(),
+                    "web emitter ability facts drifted after validation".to_string(),
                     "report this compiler bug with the named function".to_string(),
                     Some(miss.span),
                 )]
@@ -3390,7 +3390,7 @@ fn compile_build_from_front_end(
         timer.metric("rust_bytes", rust.len() as u128);
         timer.write_to(&bundle.project_root);
     }
-    let capabilities = crate::Capabilities::from_sema(
+    let abilities = crate::Abilities::from_sema(
         &bundle.used_core,
         crate::bundle_uses_unsafe(&bundle),
         ffi.is_some() || bundle.cffi.links_c(),
@@ -3400,7 +3400,7 @@ fn compile_build_from_front_end(
         lints,
         ffi,
         clinks: Vec::new(),
-        capabilities,
+        abilities,
         comptime_inputs: std::mem::take(&mut bundle.comptime_inputs),
         web,
         web_partition_report: bundle.web_partition_report.clone(),
@@ -3755,7 +3755,6 @@ fn contains_impure_gate(stmts: &[crate::AST::Stmt]) -> bool {
         | crate::AST::Stmt::TaskGroup { body, .. }
         | crate::AST::Stmt::Layout { body, .. }
         | crate::AST::Stmt::Caps { body, .. }
-        | crate::AST::Stmt::Grant { body, .. }
         | crate::AST::Stmt::ComptimeBlock { body, .. }
         | crate::AST::Stmt::Live { body, .. }
         | crate::AST::Stmt::Transact { body, .. }
@@ -4795,8 +4794,8 @@ fn build_execution_diagnostic(error: crate::Comptime::Build::BuildExecutionError
     match error {
         BuildExecutionError::MissingGrant { action, capability } => Diagnostic::error(
             "E3504",
-            format!("build action `{action}` asks for ungranted `{capability:?}` authority"),
-            "declaring a capability in `fn build` does not grant it; root policy must approve each ambient effect".to_string(),
+            format!("build action `{action}` asks for ungranted `{capability:?}` ability"),
+            "declaring an ability in `fn build` does not grant it; root policy must approve each ambient effect".to_string(),
             format!("pass `--allow-{}` for this run, or grant it in package/workspace policy", capability.flag()),
             None,
         ),
@@ -4981,7 +4980,7 @@ fn compile_bundle_path_opts_on_compiler_stack(
                 vec![Diagnostic::error(
                     "E-WEB-TIR-UNSUPPORTED",
                     format!("web output cannot compile `{}` yet", miss.func_name),
-                    "web emitter capability facts drifted after validation".to_string(),
+                    "web emitter ability facts drifted after validation".to_string(),
                     "report this compiler bug with the named function".to_string(),
                     Some(miss.span),
                 )]
@@ -5038,7 +5037,7 @@ fn compile_bundle_path_opts_on_compiler_stack(
     }
     // c110: capabilities are derived from semantic facts (resolved Core calls,
     // `#Unsafe` gates, FFI declarations), not from scanning the lowered Rust.
-    let capabilities = crate::Capabilities::from_sema(
+    let abilities = crate::Abilities::from_sema(
         &bundle.used_core,
         crate::bundle_uses_unsafe(&bundle),
         ffi.is_some() || bundle.cffi.links_c(),
@@ -5080,7 +5079,7 @@ fn compile_bundle_path_opts_on_compiler_stack(
         // codegen / front-end checks never depend on system link discovery);
         // see `resolve_c_links`.
         clinks: Vec::new(),
-        capabilities,
+        abilities,
         comptime_inputs,
         web,
         web_partition_report: bundle.web_partition_report.clone(),
@@ -5245,7 +5244,7 @@ fn compile_src_on_compiler_stack(
             vec![Diagnostic::error(
                 "E-WEB-TIR-UNSUPPORTED",
                 format!("web output cannot compile `{}` yet", miss.func_name),
-                "web emitter capability facts drifted after validation".to_string(),
+                "web emitter ability facts drifted after validation".to_string(),
                 "report this compiler bug with the named function".to_string(),
                 Some(miss.span),
             )]
@@ -5255,7 +5254,7 @@ fn compile_src_on_compiler_stack(
     };
     // c110: capabilities are derived from semantic facts (resolved Core calls,
     // `#Unsafe` gates, FFI declarations), not from scanning the lowered Rust.
-    let capabilities = crate::Capabilities::from_sema(
+    let abilities = crate::Abilities::from_sema(
         &bundle.used_core,
         crate::bundle_uses_unsafe(&bundle),
         ffi.is_some() || bundle.cffi.links_c(),
@@ -5266,7 +5265,7 @@ fn compile_src_on_compiler_stack(
         lints,
         ffi,
         clinks: Vec::new(),
-        capabilities,
+        abilities,
         comptime_inputs,
         web,
         web_partition_report: bundle.web_partition_report.clone(),
@@ -5819,7 +5818,7 @@ fn compile_bundle_path_with_entry_on_compiler_stack(
         false,
         crate::Syntax::OSTarget::host(),
     );
-    let capabilities = crate::Capabilities::from_sema(
+    let abilities = crate::Abilities::from_sema(
         &bundle.used_core,
         crate::bundle_uses_unsafe(&bundle),
         ffi.is_some() || bundle.cffi.links_c(),
@@ -5830,7 +5829,7 @@ fn compile_bundle_path_with_entry_on_compiler_stack(
         lints,
         ffi,
         clinks: Vec::new(),
-        capabilities,
+        abilities,
         comptime_inputs,
         web: None,
         web_partition_report: bundle.web_partition_report.clone(),

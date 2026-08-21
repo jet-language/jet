@@ -77,7 +77,7 @@ struct JetBrowserTimeout {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-struct JetBrowserCapabilities {
+struct JetBrowserAbilities {
     bidi: bool,
     cdp: bool,
     profile: String,
@@ -710,9 +710,9 @@ fn jet_browser_connect_profile(
     Ok(browser)
 }
 
-fn jet_browser_capabilities(browser: &JetBrowser) -> JetBrowserCapabilities {
+fn jet_browser_abilities(browser: &JetBrowser) -> JetBrowserAbilities {
     let state = browser.state.borrow();
-    JetBrowserCapabilities {
+    JetBrowserAbilities {
         bidi: true,
         cdp: state.cdp,
         profile: state.profile.clone(),
@@ -1896,15 +1896,15 @@ fn jet_browser_protocol_send(
     Ok(jet_std::render_json(&result, false, 0))
 }
 
-fn jet_browser_capabilities_bidi(caps: &JetBrowserCapabilities) -> bool {
+fn jet_browser_abilities_bidi(caps: &JetBrowserAbilities) -> bool {
     caps.bidi
 }
 
-fn jet_browser_capabilities_cdp(caps: &JetBrowserCapabilities) -> bool {
+fn jet_browser_abilities_cdp(caps: &JetBrowserAbilities) -> bool {
     caps.cdp
 }
 
-fn jet_browser_capabilities_profile(caps: &JetBrowserCapabilities) -> String {
+fn jet_browser_abilities_profile(caps: &JetBrowserAbilities) -> String {
     caps.profile.clone()
 }
 

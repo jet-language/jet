@@ -1,4 +1,4 @@
-//! Compiler output types: CompileOutput, Capabilities, bundle_uses_unsafe.
+//! Compiler output types: CompileOutput, Abilities, bundle_uses_unsafe.
 use crate::Diagnostics::Diagnostic;
 use crate::Lock;
 use crate::AST;
@@ -13,8 +13,8 @@ pub struct CompileOutput {
     pub ffi: Option<FFI::FfiLink>,
     /// Native C-library linker args (S59 / E2-M14), ready for `rustc`.
     pub clinks: Vec<String>,
-    /// D-TOOL5 (E2-M11): capability flags inferred from the generated code.
-    pub capabilities: Capabilities,
+    /// D-TOOL5 (E2-M11): ability flags inferred from the generated code.
+    pub abilities: Abilities,
     /// D-CTEFFECT1 Tier-1: embed_file/embed_bytes inputs seen during sema.
     /// Each entry: relative path + sha256 of the bytes at compile time.
     /// Written to `.jet/lock` by the build driver for reproducibility.
@@ -37,9 +37,9 @@ pub struct CompileOutput {
     pub layer_ceiling: Option<crate::Syntax::RuntimeLayer>,
 }
 
-/// D-TOOL5 (E2-M11, ratified as option C): capability summary emitted by `jet build`.
+/// D-TOOL5 (E2-M11, ratified as option C): ability summary emitted by `jet build`.
 #[derive(Debug, Default)]
-pub struct Capabilities {
+pub struct Abilities {
     pub uses_network: bool,
     pub uses_file_io: bool,
     pub uses_unsafe: bool,
@@ -48,7 +48,7 @@ pub struct Capabilities {
     pub uses_concurrency: bool,
 }
 
-impl Capabilities {
+impl Abilities {
     pub fn from_sema(
         used_core: &std::collections::HashSet<String>,
         has_unsafe: bool,
@@ -59,7 +59,7 @@ impl Capabilities {
                 .iter()
                 .any(|k| prefixes.iter().any(|p| k.starts_with(p)))
         };
-        Capabilities {
+        Abilities {
             uses_network: any(&["core.net", "core.http", "core.watcher::port"]),
             uses_file_io: any(&["core.term", "core.files", "core.watcher"]),
             uses_unsafe: has_unsafe || any(&["core.mem"]),
@@ -70,7 +70,7 @@ impl Capabilities {
     }
 
     pub fn from_rust(rust: &str) -> Self {
-        Capabilities {
+        Abilities {
             uses_network: rust.contains("jet_net_")
                 || rust.contains("jet_http_")
                 || rust.contains("jet_watcher_port"),
@@ -107,9 +107,9 @@ impl Capabilities {
             caps.push("unsafe");
         }
         if caps.is_empty() {
-            "capabilities: none".to_string()
+            "abilities: none".to_string()
         } else {
-            format!("capabilities: {}", caps.join(", "))
+            format!("abilities: {}", caps.join(", "))
         }
     }
 

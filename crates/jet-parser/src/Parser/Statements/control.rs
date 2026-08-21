@@ -125,7 +125,9 @@ impl<'a> Parser<'a> {
                     ..
                 } = &first
                 {
-                    let step = if self.at_yielding_loop_stride() {
+                    let step = if self.at_yielding_loop_stride()
+                        && !self.at_yielding_loop_guard_comma()
+                    {
                         self.take_loop_comma();
                         Some(self.expr_no_struct_lit()?)
                     } else {
@@ -141,7 +143,9 @@ impl<'a> Parser<'a> {
                     let exclusive = matches!(self.peek().kind, TokKind::DotDotLt);
                     self.bump();
                     let end = self.expr_no_struct_lit()?;
-                    let step = if self.at_yielding_loop_stride() {
+                    let step = if self.at_yielding_loop_stride()
+                        && !self.at_yielding_loop_guard_comma()
+                    {
                         self.take_loop_comma();
                         Some(self.expr_no_struct_lit()?)
                     } else {
@@ -154,7 +158,9 @@ impl<'a> Parser<'a> {
                         exclusive,
                     }
                 } else {
-                    let step = if self.at_yielding_loop_stride() {
+                    let step = if self.at_yielding_loop_stride()
+                        && !self.at_yielding_loop_guard_comma()
+                    {
                         self.take_loop_comma();
                         Some(self.expr_no_struct_lit()?)
                     } else {
@@ -166,6 +172,9 @@ impl<'a> Parser<'a> {
                     }
                 };
                 clauses.push((var, var_span, var2, kind));
+                if self.at_yielding_loop_guard_comma() {
+                    self.take_yielding_loop_guard_comma();
+                }
                 if !self.at_yielding_loop_clause() {
                     break;
                 }
@@ -392,7 +401,7 @@ impl<'a> Parser<'a> {
                 | Syntax::MARKER_LIVE
                 | Syntax::MARKER_NONDETERMINISTIC
                 | Syntax::KW_CAPS
-                | Syntax::KW_GRANT
+                | Syntax::RETIRED_MARKER_GRANT
                 | Syntax::KW_TRANSACT
                 | Syntax::KW_IMPURE
                 | Syntax::KW_SHIELD
@@ -1230,11 +1239,66 @@ impl<'a> Parser<'a> {
     /// in statement position. Cursor is on the `#` token. Effect names are bare
     /// idents; sema validates them against the known effect vocabulary (E0119).
     pub(super) fn at_caps_stmt(&mut self) -> Result<Stmt, Diagnostic> {
+        if matches!(self.peek3().kind, TokKind::LParen)
+            && matches!(self.peek4().kind, TokKind::Ident(_))
+            && matches!(self.peek5().kind, TokKind::Colon)
+        {
+            let start = self.bump().span; // `#`
+            let marker_name_span = self.peek().span;
+            self.expect_ident(&format!("`#{}`", Syntax::KW_CAPS))?;
+            self.expect(TokKind::LParen, "after `#Caps`")?;
+            let (binding, binding_span) = self.expect_ident("as the scoped Abilities handle")?;
+            self.expect(TokKind::Colon, "after the scoped Abilities handle")?;
+            let mut caps = Vec::new();
+            let mut marker_args = Vec::new();
+            loop {
+                let (name, span) = self.expect_effect_path_name("as an ability-bound effect")?;
+                let name = Self::strip_marker_enum_prefix(name, "Ability");
+                marker_args.push(crate::AST::Expr::Ident(name.clone(), span));
+                caps.push((name, span));
+                if matches!(self.peek().kind, TokKind::RParen) {
+                    break;
+                }
+                self.expect(TokKind::Comma, "between capped effects")?;
+            }
+            let caps_start = caps.first().map_or(binding_span.end, |(_, span)| span.start);
+            self.expect(TokKind::RParen, "to close `#Caps`")?;
+            let caps_end = self.toks[self.pos - 1].span.end;
+            self.record_rule_fact(
+                crate::AST::Marker {
+                    name: Syntax::KW_CAPS.to_string(),
+                    negated: false,
+                    name_span: marker_name_span,
+                    args: marker_args,
+                    arg_labels: vec![None; caps.len()],
+                    span: Span::new(start.start, caps_end),
+                    ct: None,
+                },
+                None,
+                crate::Policy::RuleSite::Block,
+            );
+            self.expect(TokKind::LBrace, "after `#Caps(abilities: Effects)`")?;
+            let body = self.block_stmts();
+            let end = self.toks[self.pos - 1].span.end;
+            self.bind_rule_fact(
+                marker_name_span,
+                Some(Span::new(start.start, end)),
+                crate::Policy::RuleSite::Block,
+            );
+            return Ok(Stmt::Caps {
+                caps,
+                caps_span: Span::new(caps_start, caps_end),
+                binding: Some(binding),
+                binding_span: Some(binding_span),
+                body,
+                span: Span::new(start.start, end),
+            });
+        }
         let marker = self.parse_registered_marker_at_site(crate::Policy::RuleSite::Block)?;
         let arguments = self.bound_registered_rule_arguments(&marker)?;
         let mut caps = Vec::with_capacity(marker.args.len());
         for argument in arguments.variadic() {
-            let Some(name) = Self::marker_enum_path(argument, "Capability") else {
+            let Some(name) = Self::marker_enum_path(argument, "Ability") else {
                 return Err(crate::Policy::marker_argument_shape_error(Syntax::KW_CAPS, argument.span()));
             };
             caps.push((name, argument.span()));
@@ -1250,115 +1314,24 @@ impl<'a> Parser<'a> {
         Ok(Stmt::Caps {
             caps,
             caps_span: Span::new(marker.name_span.end, marker.span.end),
+            binding: None,
+            binding_span: None,
             body,
             span: Span::new(marker.span.start, end),
         })
     }
 
-    /// D-SCAP1 + D-ARROW-CONTROL1: parse a
-    /// `#Grant(caps: FS, Net) { … }` scoped-capability grant region
-    /// in statement position. Cursor is on the `#` token. Effect names are bare
-    /// idents (sema validates them, E0119); `caps` binds the first-class
-    /// capability handle for the block. The dual of `#Caps`: `#Grant` authorizes
-    /// the listed effects through the handle, RAII-revoked at scope end.
-    pub(super) fn at_grant_stmt(&mut self) -> Result<Stmt, Diagnostic> {
-        if matches!(self.peek3().kind, TokKind::LParen)
-            && matches!(self.peek4().kind, TokKind::Ident(_))
-            && matches!(self.peek5().kind, TokKind::Colon)
-        {
-            let start = self.bump().span; // `#`
-            let marker_name_span = self.peek().span;
-            self.expect_ident(&format!("`#{}`", Syntax::KW_GRANT))?;
-            self.expect(TokKind::LParen, "after `#Grant`")?;
-            let (binding, binding_span) =
-                self.expect_ident("as the scoped authority handle")?;
-            self.expect(TokKind::Colon, "after the scoped authority handle")?;
-            let mut caps = Vec::new();
-            let mut marker_args = Vec::new();
-            loop {
-                let (name, span) = self.expect_effect_path_name("as a granted effect")?;
-                let name = Self::strip_marker_enum_prefix(name, "Capability");
-                marker_args.push(crate::AST::Expr::Ident(name.clone(), span));
-                caps.push((name, span));
-                if matches!(self.peek().kind, TokKind::RParen) {
-                    break;
-                }
-                self.expect(TokKind::Comma, "between granted effects")?;
-            }
-            let caps_start = caps.first().map_or(binding_span.end, |(_, span)| span.start);
-            self.expect(TokKind::RParen, "to close `#Grant`")?;
-            let caps_end = self.toks[self.pos - 1].span.end;
-            self.record_rule_fact(
-                crate::AST::Marker {
-                    name: Syntax::KW_GRANT.to_string(),
-                    negated: false,
-                    name_span: marker_name_span,
-                    args: marker_args,
-                    arg_labels: vec![None; caps.len()],
-                    span: Span::new(start.start, caps_end),
-                    ct: None,
-                },
-                None,
-                crate::Policy::RuleSite::Block,
-            );
-            self.expect(TokKind::LBrace, "after `#Grant(caps: Effects)`")?;
-            let body = self.block_stmts();
-            let end = self.toks[self.pos - 1].span.end;
-            self.bind_rule_fact(
-                marker_name_span,
-                Some(Span::new(start.start, end)),
-                crate::Policy::RuleSite::Block,
-            );
-            return Ok(Stmt::Grant {
-                caps,
-                caps_span: Span::new(caps_start, caps_end),
-                binding,
-                binding_span,
-                body,
-                span: Span::new(start.start, end),
-            });
-        }
+    /// D-AUTHORITY-SCOPE1: the retired Grant marker is a hard parse error.
+    pub(super) fn retired_grant_stmt(&mut self) -> Result<Stmt, Diagnostic> {
         let marker = self.parse_rule_marker()?;
-        self.diags.push(Diagnostic::error(
+        Err(Diagnostic::error(
             "E0077",
-            "this scoped grant uses the retired body binding".to_string(),
-            "the `Authority` handle is part of the grant header; `->` is reserved for selected or yielded values"
+            "the `#Grant` scope marker is retired".to_string(),
+            "`#Caps` now narrows a block and binds an Abilities handle when its head has a name"
                 .to_string(),
-            "write `#Grant(caps: FS, Net) { ... }`".to_string(),
+            "write `#Caps(abilities: FS, Net) { ... }`".to_string(),
             Some(marker.span),
-        ));
-        let arguments = self.bound_registered_rule_arguments(&marker)?;
-        let mut caps = Vec::with_capacity(marker.args.len());
-        for argument in arguments.variadic() {
-            let Some(name) = Self::marker_enum_path(argument, "Capability") else {
-                return Err(crate::Policy::marker_argument_shape_error(Syntax::KW_GRANT, argument.span()));
-            };
-            caps.push((name, argument.span()));
-        }
-        self.expect(
-            TokKind::LBrace,
-            &format!("after `#{}(…)`", Syntax::KW_GRANT),
-        )?;
-        // Retired spelling: `{ caps :> … }` (old arrows remain a migration arm).
-        let (binding, binding_span) = self.expect_ident("for the authority handle name")?;
-        self.expect_unified_arrow(
-            &format!(
-                "after the `#{}` handle name (`#{}(…) {{ caps {} … }}`)",
-                Syntax::KW_GRANT,
-                Syntax::KW_GRANT,
-                Syntax::OP_UNIFIED_ARROW
-            ),
-        )?;
-        let body = self.block_stmts();
-        let end = self.toks[self.pos - 1].span.end;
-        Ok(Stmt::Grant {
-            caps,
-            caps_span: Span::new(marker.name_span.end, marker.span.end),
-            binding,
-            binding_span,
-            body,
-            span: Span::new(marker.span.start, end),
-        })
+        ))
     }
 
     /// D-TXN4: parse a `#Transact { … }` or named `#Transact(name) { … }`
@@ -1716,6 +1689,22 @@ impl<'a> Parser<'a> {
             }
             _ => false,
         }
+    }
+
+    fn take_yielding_loop_guard_comma(&mut self) {
+        let span = self.bump().span;
+        self.diags.push(Diagnostic::error(
+            "E0379",
+            "a guard follows its source with no comma".to_string(),
+            "the guard self-announces with `if`, so the loop head only uses commas between positional clauses".to_string(),
+            "remove the comma before `if`".to_string(),
+            Some(span),
+        ));
+    }
+
+    fn at_yielding_loop_guard_comma(&self) -> bool {
+        matches!(self.peek().kind, TokKind::Comma)
+            && matches!(self.peek2().kind, TokKind::KwIf)
     }
 
     fn at_yielding_loop_clause(&self) -> bool {
@@ -2528,7 +2517,7 @@ impl<'a> Parser<'a> {
                     | Syntax::MARKER_LIVE
                     | Syntax::MARKER_NONDETERMINISTIC
                     | Syntax::KW_CAPS
-                    | Syntax::KW_GRANT
+                    | Syntax::RETIRED_MARKER_GRANT
                     | Syntax::KW_TRANSACT
                     | Syntax::KW_IMPURE
                     | Syntax::KW_SHIELD
@@ -2569,9 +2558,9 @@ impl<'a> Parser<'a> {
                 if matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::KW_CAPS) {
                     return self.at_caps_stmt();
                 }
-                // D-SCAP1: `#grant(FS) { caps -> … }` scoped-capability grant region.
-                if matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::KW_GRANT) {
-                    return self.at_grant_stmt();
+                // D-AUTHORITY-SCOPE1: retired Grant marker tombstone.
+                if matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::RETIRED_MARKER_GRANT) {
+                    return self.retired_grant_stmt();
                 }
                 // D-TXN1–D-TXN4: `#Transact(name) { … }` transaction block.
                 if matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::KW_TRANSACT) {
@@ -3002,7 +2991,6 @@ fn rewrite_collect_root_exits(stmts: &mut [Stmt], target: &str, nested_loop_dept
             | Stmt::TaskGroup { body, .. }
             | Stmt::Layout { body, .. }
             | Stmt::Caps { body, .. }
-            | Stmt::Grant { body, .. }
             | Stmt::ComptimeBlock { body, .. }
             | Stmt::ContextBlock { body, .. }
             | Stmt::Live { body, .. }

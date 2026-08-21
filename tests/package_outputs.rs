@@ -5,7 +5,8 @@
 //! `examples/features/packages/outputs_build/` has no `main.jet`/`run.jet`
 //! convention file. Its `package.jet` uses a *dotted* entry —
 //! `outputs: .{ demo: .Executable.{ entry: service.run } }` — which follows
-//! `entry.jet`'s `use service` import into `service/module.jet`. That's
+//! `entry.jet`'s `use "service/module" as service` file import into
+//! `service/module.jet`. That's
 //! deliberate: a single-segment `entry: run` resolves through the existing
 //! root-level source lookup, so it can never prove `outputs:` is doing
 //! anything.

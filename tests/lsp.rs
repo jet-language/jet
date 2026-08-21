@@ -1336,7 +1336,7 @@ fn lsp_diagnostic_and_code_action_match_all_tier_reports() {
     assert!(diagnostics.contains(r#""code":"E0311""#), "{diagnostics}");
     assert!(
         diagnostics.contains(
-            r##""fix_edits":[{"file":"/tmp/lsp_report_test.jet","span":{"start":47,"end":51},"new_text":"get"}]"##
+            r##""fix_edits":[{"file":"/tmp/lsp_report_test.jet","span":{"start":47,"end":51},"new_text":"get","safety":"needs-review"}]"##
         ),
         "{diagnostics}"
     );
@@ -2982,6 +2982,51 @@ fn lsp_inlay_hints_returns_type_labels() {
 }
 
 #[test]
+fn lsp_inlay_hints_return_call_parameter_names() {
+    let jet = jet_bin();
+    if !jet.exists() {
+        return;
+    }
+    let source = "fn clamp(value: Int, low: Int, high: Int) :> Int { return value }\nfn run() { print(clamp(12, 0, 10)) }\n";
+    let uri = "file:///tmp/lsp_call_parameter_hints.jet";
+
+    run_transcript(
+        source,
+        &[
+            TranscriptStep::Send {
+                msg:
+                    r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"capabilities":{}}}"#
+                        .to_string(),
+                expect_contains: Some(vec!["inlayHintProvider".to_string()]),
+            },
+            TranscriptStep::Send {
+                msg: r#"{"jsonrpc":"2.0","method":"initialized","params":{}}"#.to_string(),
+                expect_contains: None,
+            },
+            TranscriptStep::Open {
+                uri: uri.to_string(),
+                expect_notification: true,
+            },
+            TranscriptStep::Send {
+                msg: format!(
+                    r#"{{"jsonrpc":"2.0","id":2,"method":"textDocument/inlayHint","params":{{"textDocument":{{"uri":"{}"}},"range":{{"start":{{"line":0,"character":0}},"end":{{"line":10,"character":0}}}}}}}}"#,
+                    uri
+                ),
+                expect_contains: Some(vec![
+                    "value: ".to_string(),
+                    "low: ".to_string(),
+                    "high: ".to_string(),
+                ]),
+            },
+            TranscriptStep::Send {
+                msg: r#"{"jsonrpc":"2.0","id":99,"method":"shutdown","params":{}}"#.to_string(),
+                expect_contains: Some(vec!["result".to_string()]),
+            },
+        ],
+    );
+}
+
+#[test]
 fn lsp_inlay_hints_include_scattered_method_breadcrumbs() {
     let jet = jet_bin();
     if !jet.exists() {
@@ -3457,12 +3502,12 @@ fn c44_prelude_idents_canonical() {
     assert_eq!(
         names,
         [
-            "print", "input", "panic", "require", "assert", "assert_eq", "eprint", "Clock",
+            "print", "input", "panic", "assert", "assert_eq", "eprint", "Clock",
             "Instant", "Date", "Duration", "Path", "read_file", "write_file", "file_exists",
             "embed_file", "embed_bytes", "find", "fetch",
         ]
     );
-    for name in ["print", "input", "panic", "require"] {
+    for name in ["print", "input", "panic"] {
         assert_eq!(
             CorePrelude::entry(name).map(|entry| entry.target),
             Some(Target::Builtin),

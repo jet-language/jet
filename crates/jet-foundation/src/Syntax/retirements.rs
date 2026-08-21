@@ -205,6 +205,15 @@ pub const RETIREMENTS: &[Retirement] = &[
         code: Some("E1343"),
     },
     Retirement {
+        id: "scope-marker-grant",
+        retired: "#Grant",
+        canonical: "#Caps",
+        kind: RetirementKind::Semantic,
+        decision: "D-AUTHORITY-SCOPE1",
+        since: "2026-08-06",
+        code: Some("E0077"),
+    },
+    Retirement {
         id: "core-path-free-functions",
         retired: "core.path.join/parent/extension/normalize",
         canonical: "Path.from(value).join(part), .parent(), .extension(), .normalize()",

@@ -101,7 +101,7 @@ line references prove each claim.
 | 5 | Five checkers ask "may this cross to another worker": tasks, `para_*`, kernels, cells, fixed backings | `CheckerOwnership.rs:4229/:4463/:5117/:4495`, `AST/items.rs:832` |
 | 6 | Send-safety is stored as a stray `bool`, outside the fact registry and the type-system-v2 plane list | `mod.rs:1124` |
 | 7 | The runtime knows a task ends four ways. Jet code gets a `String`. | `scheduler.rs:1223` vs `StructuralDebug.rs:31` |
-| 8 | Four handle types exist only in error messages: `TaskGroup`, `SelectBuilder`, `Transaction`, `Capability` | `effects_surface.rs:128/147/263/121` |
+| 8 | Four handle types exist only in error messages: `Group`, `SelectBuilder`, `Transaction`, `Capability` | `effects_surface.rs:128/147/263/121` |
 | 9 | `Receiver<T>` cannot be written in a signature; a dead `Channel` entry can | `type_assign.rs:284` |
 | 10 | Streams once carried a separately written shutdown law; D-CONC-STREAM1 now delegates lifecycle to the task law | D-CONC-STREAM1=A and D-CANCELMODEL1=C |
 | 11 | `select` does not work on the interpreter tier; the `.read` arm is dropped on every tier | `TIR/eval/exprs.rs:5139`, `emit/helpers.rs:225` |
@@ -146,7 +146,7 @@ The rules, in plain words:
   successful result and cancels losers; `any` returns the first completed
   result and cancels the rest. They need no handles at all.
 - `task.group g(limit: N)` is for dynamic counts and caps. `g` is a value you
-  can pass to helpers (`fn drain(g: TaskGroup, rx: Receiver<Job>)`). It can never
+  can pass to helpers (`fn drain(g: Group, rx: Receiver<Job>)`). It can never
   be stored, so no child outlives its scope.
 - `D-CONC-GROUP1=A` allows a group borrow in free-function and method
   parameters. Storage, return, capture, and fields remain banned.
@@ -192,7 +192,7 @@ D-CONC-OUTCOME1=A.
 
 ### 3. Channels and readiness waits — D-CONC-CHAN1=A, D-CONC-CHAN2=D
 
-**Today.** A module call, a manual drain dance, and a builder chain.
+**Retired.** A module call, a manual drain dance, and a builder chain.
 
 ```jet
 (tx, rx) :: channel<Int>(capacity: 8)
@@ -214,9 +214,9 @@ D-CONC-CHAN1=A.
 loop job, rx { handle(job) }             // receive until the channel closes
 
 if {
-    job, jobs    -> handle(job)          // arm binding mirrors `loop v, source`
-    msg, control -> obey(msg)
-    after 100ms  -> retry()              // unit literal, one time rail (D-TYPE2-TIME1)
+    job, jobs    :> handle(job)          // arm binding mirrors `loop v, source`
+    msg, control :> obey(msg)
+    after 100ms  :> retry()              // Duration literal, one time rail (D-TYPE2-TIME1)
 }
 ```
 
@@ -227,18 +227,18 @@ if {
   dropped on every tier) are deleted.
 
 **Canonical:** `channel<T>()` is builtin and needs no import. The old
-`g.select()` builder, `tasks.channel`, and `.read` arm still need deletion in
-the select migration.
+`g.select()` builder, `tasks.channel`, and `.read` arm are retired and do not
+parse.
 D-CONC-CHAN1=A amends D-CONCSELECT1 and narrows D-TASKRUNTIME1's module
 surface. D-CONC-CHAN2=D makes the wait spelling the subjectless `if` table
 shown above.
 
 ### 4. Shared state and transactions — D-CONC-SHARE1=A, D-CONC-STM1=A
 
-**Today.** A closure per touch.
+**Retired historical form (before D-CONC-SHARE1=A).** A closure per touch.
 
 ```jet
-config :: Shared.new(AppConfig.{name: "jet-server", hits: 0})
+config :: Shared.new(AppConfig{name: "jet-server", hits: 0})
 label :: config.read(c => c.name)
 config.edit(c => { c.hits += 1 })
 ```
@@ -247,7 +247,7 @@ config.edit(c => { c.hits += 1 })
 is one atomic step. Several statements commit together under `#Transact`.
 
 ```jet
-config :: shared AppConfig.{name: "jet-server", hits: 0}   // Shared<AppConfig>
+config :: shared AppConfig{name: "jet-server", hits: 0}   // Shared<AppConfig>
 
 label :: config.name                  // one locked read
 config.hits += 1                      // one locked write
@@ -267,9 +267,9 @@ D-CONC-STM1=A settles the drift in the earlier STM text: the block body runs
 exactly once, locks are acquired in fixed order, and contention waits instead
 of retrying. A log line inside the block runs once.
 
-**Deleted:** the `read`/`edit` closure forms and the `#Transact(tx)` mandatory
-name. The name stays for `on_commit` and `on_rollback` hooks. D-CONC-SHARE1=A
-amends D-SHARED-API1 and D-TXN2.
+**Deleted:** the `read`/`edit` closure forms and the mandatory `#Transact(tx)`
+name. The name stays optional and is used for `on_commit` and `on_rollback`
+hooks. D-CONC-SHARE1=A amends D-SHARED-API1 and D-TXN2.
 
 ### 5. Schedules, pools, and services — D-CONC-SCHED1=A
 

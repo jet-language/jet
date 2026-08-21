@@ -313,7 +313,7 @@ fn script_test_verb_keeps_test_blocks_and_does_not_run_script_body() {
     let file = dir.join("main.jet");
     std::fs::write(
         &file,
-        "print(\"script body\")\n#Test(\"script test\") { require(helper()) }\nfn helper() => Bool { return true }\n",
+        "print(\"script body\")\n#Test(\"script test\") { assert(helper()) }\nfn helper() => Bool { return true }\n",
     )
     .unwrap();
     let path = file.to_str().unwrap();

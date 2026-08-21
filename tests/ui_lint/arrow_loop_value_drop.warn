@@ -3,5 +3,5 @@ Warning [L0508] (arrow_loop_value_drop): this arrow loop body computes a value a
     |
   3 |     loop v, values -> v * 2
     |                       ^^^^^
- Why: a statement-position loop arrow discards its body's value; use a value loop to collect results or a write handle to update the source
- Fix: bind the loop with `::` to collect its values, or write `loop v, &values -> v *= 2` to update in place
+ Why: a statement-position loop arrow discards its body's value; the loop takes write access (&) for items when it updates the source
+ Fix: bind the loop with `::` to collect its values, or write `loop v, &values -> v *= 2` so it takes write access (&) for items

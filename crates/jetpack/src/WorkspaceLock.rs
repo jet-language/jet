@@ -207,6 +207,7 @@ fn empty_lock() -> LockFile {
         version: Lock::LOCK_VERSION,
         packages: Vec::new(),
         root_dependencies: Vec::new(),
+        authority: None,
         workspace_members: Vec::new(),
         workspace_source_digest: None,
         workspace_overlay_policy: Default::default(),

@@ -17,7 +17,7 @@ Status keys:
 | --- | --- | --- | --- | --- |
 | `D-S14-PAUSE` | S14 alias policy | shipped | `retired_s14_teaching_is_paused`; parser recoveries gated off; `while`/`for` lex as identifiers | #338 done |
 | `S74-D-DESTRUCT1-ARM` | dispatch-arm struct-pattern head note | shipped, stale doc | `crates/jet-parser/src/Parser/Expressions.rs` parses `Pattern::Struct`; `crates/jet-sema/src/Sema/CheckerItems.rs`; `crates/jet-codegen/src/Codegen/TIR/{lower,subset}.rs`; `tests/tir_patterns_and_fields.rs` struct-arm coverage | #341 |
-| `D-REFINE1` | refinements | shipped | Parser accepts `#Invariant("value >= lo && value < hi")` on `distinct Int`; sema proves fixed-list indexes in-bounds; TIR lowers proven indexes without `jet_index_vec`; `examples/features/types/refinements.jet` and `tests/corelib.rs` cover it | #347 |
+| `D-REFINE1` | refinements | superseded by D-TYPE2-REFINE1 | The direct `distinct Int(lo..hi)` spelling stores an interval fact; sema proves fixed-list indexes in-bounds; TIR lowers proven indexes without `jet_index_vec`; `examples/features/types/refinements.jet` and `tests/corelib_parts/compile.rs` cover it | #1548 |
 | `D-COLLBREADTH1` | collections breadth | partial | `Deque<T>` / `Set<T>` shipped; HashMap and iterator breadth still audit-sized | #305 |
 | `D-ITER1` | iterator adapters | partial | Core iteration exists, full Rust/itertools parity not proven | #305 |
 | `D-TYPEDTEXT2` | typed text prefixes | shipped | Expected-type `SQL`/`HTML` path shipped; parser recognizes adjacent `sql"..."` / `html"..."` prefixes and sema rewrites through the same typed-text constructor path; `examples/features/safety/typed_sql.jet` covers no-expected-type bindings | #348 |

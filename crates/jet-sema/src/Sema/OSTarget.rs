@@ -148,7 +148,6 @@ fn desugar_child_blocks(
         | Stmt::TaskGroup { body, .. }
         | Stmt::Layout { body, .. }
         | Stmt::Caps { body, .. }
-        | Stmt::Grant { body, .. }
         | Stmt::Transact { body, .. }
         | Stmt::AssumeDet { body, .. }
         | Stmt::ComptimeBlock { body, .. }

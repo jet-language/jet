@@ -1031,23 +1031,6 @@ fn project_stmt(
             add_region(g, ordinal, "caps", &title, *span);
             project_stmt_block(g, index, src, body, ordinal * 100 + 160, x + 230, y + 70);
         }
-        Stmt::Grant {
-            caps,
-            binding,
-            body,
-            span,
-            ..
-        } => {
-            let title = format!(
-                "{} -> {binding}",
-                caps.iter()
-                    .map(|(cap, _)| cap.as_str())
-                    .collect::<Vec<_>>()
-                    .join(", ")
-            );
-            add_region(g, ordinal, "grant", &title, *span);
-            project_stmt_block(g, index, src, body, ordinal * 100 + 165, x + 230, y + 70);
-        }
         Stmt::ComptimeIf {
             cond,
             then_body,

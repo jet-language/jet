@@ -1,0 +1,16 @@
+// D-CONC-CROSS1: a Fixed handle carries a lexical backing and cannot cross
+// into a worker. The common crossing prover reports the boundary as E1102.
+use core.mem
+
+fn run() {
+    task_fixed :: mem.Fixed.new(size: 128)
+    worker :: task {
+        _ :: task_fixed
+    }
+    worker.join() ?? panic("task failed")
+    parallel_fixed :: mem.Fixed.new(size: 128)
+    values :: [1, 2, 3]
+    _ :: values.para_map((n: Int) :> {
+        _ :: parallel_fixed
+    })
+}

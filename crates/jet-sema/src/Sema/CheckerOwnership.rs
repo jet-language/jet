@@ -1554,7 +1554,6 @@ impl<'a> Checker<'a> {
                 | Stmt::TaskGroup { body, .. }
                 | Stmt::Layout { body, .. }
                 | Stmt::Caps { body, .. }
-                | Stmt::Grant { body, .. }
                 | Stmt::Transact { body, .. }
                 | Stmt::AssumeDet { body, .. }
                 | Stmt::Live { body, .. } => {

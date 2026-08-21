@@ -631,7 +631,7 @@ pub struct PackageGuarantees {
     pub contain: std::collections::BTreeSet<String>,
     pub harden: bool,
     /// D-AUTHORITY-MEM1/D-AUTHORITY-MEM2: package-wide memory denials from
-    /// `effects.deny`. The loader carries the raw canonical rights here so
+    /// `authority.holds.deny`. The loader carries the raw canonical rights here so
     /// sema applies the same memory proof as a signature denial.
     pub memory_denials: Vec<String>,
 }

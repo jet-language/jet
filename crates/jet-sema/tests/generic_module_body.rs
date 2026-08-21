@@ -91,6 +91,7 @@ fn check_modules(sources: &[(&str, &str, &[(&str, usize)])]) -> (ProgramBundle, 
             block_spans: std::mem::take(&mut program.block_spans),
             web_target_ceiling: program.web_target_ceiling, pub_file: program.pub_file, no_prelude: program.no_prelude,
             default_target: program.default_target,
+            html_path: program.html_path,
             policy_declarations: program.policy_declarations.clone(),
             rule_facts: std::mem::take(&mut program.rule_facts),
         });

@@ -1,6 +1,5 @@
-// D-BENCH1: `#Bench("name") { … }` — a region benchmark, the sibling of
-// `#Test`. `jet bench` times each block and reports ns/iter + ops/sec.
-// `jet run` ignores the bench blocks and just runs `main`.
+// D-CLAIM-BENCH1=A: a measured claim uses the ordinary `#Test` marker.
+// `jet test --measure` selects each block and `jet run` ignores them.
 fn fib(n: Int) => Int {
     if n < 2 -> return n
     return fib(n - 1) + fib(n - 2)
@@ -8,12 +7,12 @@ fn fib(n: Int) => Int {
 
 fn run() { print("fib(10) = {fib(10)}") }
 
-#Bench("fib(10)") {
-    require_eq(fib(10), 55)
-}
+#Test("fib(10)") { .measure {
+    assert_eq(fib(10), 55)
+} }
 
-#Bench("sum to 100") {
+#Test("sum to 100") { .measure {
     total := 0
     loop i, 0..100 -> total += i
-    require_eq(total, 4950)
-}
+    assert_eq(total, 4950)
+} }

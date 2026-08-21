@@ -134,7 +134,6 @@ fn desugar_stmt(stmt: &mut Stmt) {
         | Stmt::TaskGroup { body, .. }
         | Stmt::Layout { body, .. }
         | Stmt::Caps { body, .. }
-        | Stmt::Grant { body, .. }
         | Stmt::Transact { body, .. }
         | Stmt::ComptimeBlock { body, .. }
         | Stmt::Live { body, .. } => desugar_stmts(body),

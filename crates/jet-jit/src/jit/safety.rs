@@ -6420,7 +6420,7 @@ fn resident_safe_handle_op(op: &THandleOp, recv: &TExpr, args: &[TExpr]) -> bool
                     && recv.ty == Type::Named("Decimal".into())
                     && matches!(
                         (method.as_str(), args.len()),
-                        ("add" | "sub" | "mul", 1) | ("to_string", 0)
+                        ("add" | "sub" | "mul" | "equal", 1) | ("to_string", 0)
                     ))
                 || (type_name == "Fraction"
                     && recv.ty == Type::Named("Fraction".into())
@@ -6569,7 +6569,7 @@ fn resident_safe_handle_op(op: &THandleOp, recv: &TExpr, args: &[TExpr]) -> bool
                 ) | ("env", 2)
                     | ("terminal", 0 | 1)
                     | (
-                        "env_clear" | "detached" | "capabilities" | "run" | "run_checked"
+                        "env_clear" | "detached" | "abilities" | "run" | "run_checked"
                             | "spawn",
                         0,
                     )

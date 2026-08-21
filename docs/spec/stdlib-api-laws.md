@@ -259,7 +259,7 @@ and examples.
 | Rule | Current test |
 |---|---|
 | C1 | Judge the call site, not the declaration. |
-| C2 | Required values are positional; labels make uncommon or ambiguous options readable. |
+| C2 | Required values are positional; labels make uncommon or ambiguous options readable. Do not force `*` zones on simple APIs; reserve them for load-bearing names. |
 | C3 | The common dataflow reads left to right through methods and `?`. |
 | D1 | The bare call performs the safest common operation with no setup ceremony. |
 | D2 | Every magic default appears in the defaults table and has an explicit override. |

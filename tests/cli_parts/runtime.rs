@@ -726,7 +726,7 @@ fn quiet_accepted_and_suppresses_budget_check_recap() {
 }
 
 #[test]
-fn bench_targets_filter_and_json_match_test_runner_contract() {
+fn measured_test_targets_filter_and_json_match_test_runner_contract() {
     if !common::have_rustc() {
         return;
     }
@@ -735,20 +735,20 @@ fn bench_targets_filter_and_json_match_test_runner_contract() {
     let source = r#"fn run() {}
 
 #Test("needle") {
-    require_eq(1, 1)
+    assert_eq(1, 1)
 }
 
 #Test("other") {
-    require_eq(2, 2)
+    assert_eq(2, 2)
 }
 
-#Bench("needle") {
-    require_eq(1, 1)
-}
+#Test("measured-needle") { .measure {
+    assert_eq(1, 1)
+} }
 
-#Bench("other") {
-    require_eq(2, 2)
-}
+#Test("measured-other") { .measure {
+    assert_eq(2, 2)
+} }
 "#;
     fs::write(dir.join("root.jet"), source).unwrap();
     fs::write(dir.join("nested/child.jet"), source).unwrap();
@@ -764,35 +764,33 @@ fn bench_targets_filter_and_json_match_test_runner_contract() {
     assert!(test_stdout.contains("needle"), "filtered test missing needle: {test_stdout}");
     assert!(!test_stdout.contains("other: pass"), "filtered test ran other: {test_stdout}");
 
-    let benches = Command::new(jet())
-        .args(["bench", "--show-default", ".", "--filter=needle"])
+    let measured = Command::new(jet())
+        .args(["test", "--show-default", ".", "--measure", "--filter=measured-needle"])
         .current_dir(&dir)
         .env("NO_COLOR", "1")
         .output()
         .unwrap();
-    assert!(benches.status.success(), "bench target failed:\nstdout:\n{}\nstderr:\n{}", String::from_utf8_lossy(&benches.stdout), String::from_utf8_lossy(&benches.stderr));
-    let bench_stdout = String::from_utf8_lossy(&benches.stdout);
-    assert_eq!(bench_stdout.matches("ns/iter").count(), 2, "directory bench must run one selected region per file: {bench_stdout}");
-    assert!(bench_stdout.contains("root.jet::needle"), "human bench output must qualify region by path: {bench_stdout}");
-    assert!(bench_stdout.contains("nested/child.jet::needle"), "human bench output must include nested file path: {bench_stdout}");
-    assert!(!bench_stdout.contains("::other"), "filtered bench ran other: {bench_stdout}");
+    assert!(measured.status.success(), "measured test target failed:\nstdout:\n{}\nstderr:\n{}", String::from_utf8_lossy(&measured.stdout), String::from_utf8_lossy(&measured.stderr));
+    let measured_stdout = String::from_utf8_lossy(&measured.stdout);
+    assert_eq!(measured_stdout.matches("measured-needle").count(), 2, "directory measurement must run one selected claim per file: {measured_stdout}");
+    assert!(!measured_stdout.contains("measured-other"), "filtered measurement ran other: {measured_stdout}");
 
     let json = Command::new(jet())
-        .args(["bench", "--show-default", ".", "--filter=needle", "--json"])
+        .args(["test", "--show-default", ".", "--measure", "--filter=measured-needle", "--json"])
         .current_dir(&dir)
         .env("NO_COLOR", "1")
         .output()
         .unwrap();
-    assert!(json.status.success(), "bench JSON target failed: {}", String::from_utf8_lossy(&json.stderr));
+    assert!(json.status.success(), "measured test JSON target failed: {}", String::from_utf8_lossy(&json.stderr));
     let json_stdout = String::from_utf8_lossy(&json.stdout);
     let records: Vec<_> = json_stdout
         .lines()
-        .map(|line| parse_json(line).unwrap_or_else(|_| panic!("bench JSON line does not parse: {line}")))
+        .map(|line| parse_json(line).unwrap_or_else(|_| panic!("measurement JSON line does not parse: {line}")))
         .collect();
-    assert_eq!(records.len(), 2, "JSON must contain one record per selected region: {json_stdout}");
+    assert_eq!(records.len(), 2, "JSON must contain one record per selected claim: {json_stdout}");
     for record in records {
-        let JSONValue::Object(record) = record else { panic!("bench JSON record is not an object") };
-        assert!(matches!(record.get("profile"), Some(JSONValue::String(profile)) if profile == "release"), "JSON record has wrong profile: {record:?}");
-        assert!(matches!(record.get("name"), Some(JSONValue::String(name)) if name.ends_with("::needle")), "JSON region name is not path-qualified: {record:?}");
+        let JSONValue::Object(record) = record else { panic!("measurement JSON record is not an object") };
+        assert!(matches!(record.get("name"), Some(JSONValue::String(name)) if name == "measured-needle"), "JSON claim name is wrong: {record:?}");
+        assert!(record.contains_key("mean_ns"), "JSON measurement has no mean: {record:?}");
     }
 }

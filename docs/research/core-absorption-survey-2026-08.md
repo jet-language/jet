@@ -30,10 +30,10 @@ are therefore not minted here.
 
 Registry numbers were read on 2026-08-20. Numbers are not comparable across
 registries: PyPI, npm, crates.io, RubyGems, and Packagist publish download
-counts; pkg.go.dev publishes known importers; Maven Central's public search API
-publishes artifact version counts in this read; CocoaPods metrics publishes
-GitHub star counts. The last two are popularity proxies, not downloads. They
-are marked as such and are excluded from cross-registry arithmetic.
+counts; pkg.go.dev publishes known importers; `deps.dev` publishes public
+dependent counts for Maven; CocoaPods metrics publishes cumulative pod download
+counts. These measures are not comparable across registries and are excluded
+from cross-registry arithmetic.
 
 The sample uses the top or high-use packages visible in each registry source.
 It is a broad evidence sample, not a claim that every registry exposes a
@@ -131,23 +131,22 @@ known importers while its subpackages are widely used. Do not use it for rank.
 
 ### Java / Kotlin
 
-Source: [Maven Central search API](https://search.maven.org/). The public
-search response read on 2026-08-20 returned `versionCount`, not package
-downloads. The number below is therefore a release-history proxy, not usage.
-Maven Central documents download insights as a separate publisher service
-([insights documentation](https://central.sonatype.org/publish/publish-portal-insights/)).
+Source: [Google Open Source Insights API](https://docs.deps.dev/api/v3alpha/),
+`GetDependents` responses read on 2026-08-20. Count: known public packages
+that depend directly or indirectly on the listed version. This is a usage
+proxy, not a Maven Central download count; the API warns that private
+dependents are absent.
 
-| Artifact | Version count |
-|---|---:|
-| `org.springframework:spring-core` | 311 |
-| `com.fasterxml.jackson.core:jackson-databind` | 208 |
-| `org.jetbrains.kotlin:kotlin-stdlib` | 258 |
-| `com.google.guava:guava` | 150 |
-| `org.slf4j:slf4j-api` | 106 |
-| `org.apache.logging.log4j:log4j-core` | 76 |
+| Artifact | Version | Known public dependents |
+|---|---|---:|
+| `org.springframework:spring-core` | `6.2.10` | 4,580 |
+| `com.fasterxml.jackson.core:jackson-databind` | `2.20.0` | 6,858 |
+| `org.jetbrains.kotlin:kotlin-stdlib` | `2.2.20` | 19,089 |
+| `com.google.guava:guava` | `33.4.8-jre` | 11,139 |
+| `org.slf4j:slf4j-api` | `2.0.17` | 55,241 |
+| `org.apache.logging.log4j:log4j-core` | `2.25.2` | 1,286 |
 
-The missing per-artifact download number is a research limit, not evidence
-that these artifacts have low usage.
+The direct API paths are [spring-core](https://api.deps.dev/v3alpha/systems/MAVEN/packages/org.springframework%3Aspring-core/versions/6.2.10:dependents), [Jackson](https://api.deps.dev/v3alpha/systems/MAVEN/packages/com.fasterxml.jackson.core%3Ajackson-databind/versions/2.20.0:dependents), [Kotlin](https://api.deps.dev/v3alpha/systems/MAVEN/packages/org.jetbrains.kotlin%3Akotlin-stdlib/versions/2.2.20:dependents), [Guava](https://api.deps.dev/v3alpha/systems/MAVEN/packages/com.google.guava%3Aguava/versions/33.4.8-jre:dependents), [SLF4J](https://api.deps.dev/v3alpha/systems/MAVEN/packages/org.slf4j%3Aslf4j-api/versions/2.0.17:dependents), and [Log4j](https://api.deps.dev/v3alpha/systems/MAVEN/packages/org.apache.logging.log4j%3Alog4j-core/versions/2.25.2:dependents).
 
 ### C#
 
@@ -167,19 +166,21 @@ Source: [NuGet search API](https://learn.microsoft.com/nuget/api/search-query-re
 
 ### Swift
 
-Source: [CocoaPods metrics API](https://metrics.cocoapods.org/), read
-2026-08-20. Count: GitHub stars returned by the registry metrics endpoint.
-This is a popularity proxy, not download usage.
+Source: [CocoaPods metrics API](https://metrics.cocoapods.org/api/v1/pods/Alamofire),
+read 2026-08-20. Count: cumulative `download_total` returned by the pod
+metrics endpoint. CocoaPods does not expose a comparable current weekly count
+in these responses, so these totals are evidence of use but are not comparable
+with the other registry windows.
 
-| Package | GitHub stars |
+| Package | Cumulative pod downloads |
 |---|---:|
-| Alamofire | 25,398 |
-| SwiftyJSON | 15,528 |
-| RxSwift | 10,926 |
-| SnapKit | 10,896 |
-| Kingfisher | 9,798 |
-| PromiseKit | 8,295 |
-| Moya | 7,147 |
+| Alamofire | 42,097,177 |
+| SwiftyJSON | 21,026,478 |
+| RxSwift | 13,952,932 |
+| SnapKit | 11,431,071 |
+| Kingfisher | 8,183,631 |
+| PromiseKit | 6,806,003 |
+| Moya | 3,395,774 |
 
 Swift Package Index confirms Alamofire's package identity and current release
 surface ([Alamofire package page](https://swiftpackageindex.com/Alamofire/Alamofire)).

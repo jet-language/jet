@@ -927,19 +927,29 @@ pub(crate) fn pattern_binding_types(payload: &VariantPayload) -> Vec<Type> {
 /// never a fix — it tells the reader to write what was just refused, and it
 /// contradicts the message that named it missing. Distance 0 is therefore not
 /// a suggestion but evidence that the candidate set and the failed lookup
-/// disagree; the caller keeps its ordinary fix text instead (card #2002).
+/// disagree; a tied nearest pair is ambiguous for a machine edit. The caller
+/// keeps its ordinary fix text in either case (card #2002).
 pub(crate) fn suggest_field(name: &str, candidates: &[String]) -> Option<String> {
     let mut best: Option<(String, usize)> = None;
+    let mut ambiguous = false;
     for cand in candidates {
         let d = edit_distance(name, cand);
         if d == 0 || d > 2 {
             continue;
         }
-        if best.as_ref().is_none_or(|(_, best_distance)| d < *best_distance) {
-            best = Some((cand.clone(), d));
+        match best.as_ref() {
+            None => best = Some((cand.clone(), d)),
+            Some((_best_name, best_distance)) if d < *best_distance => {
+                best = Some((cand.clone(), d));
+                ambiguous = false;
+            }
+            Some((best_name, best_distance)) if d == *best_distance => {
+                ambiguous |= best_name != cand;
+            }
+            _ => {}
         }
     }
-    best.map(|(s, _)| s)
+    best.filter(|_| !ambiguous).map(|(s, _)| s)
 }
 
 /// The one home for cross-language method names (card #1965).
@@ -1328,7 +1338,9 @@ pub(crate) fn one_pass_materializer(ty: &Type) -> Option<&'static str> {
 pub(crate) fn is_core_shown_type(name: &str) -> bool {
     matches!(
         name,
-        "Mime"
+        "Decimal"
+            | "Fraction"
+            | "Mime"
             | "ServiceUpgradeReceipt"
             | "Complex"
             | "Url"
@@ -1941,7 +1953,7 @@ pub(crate) fn builtin_type_from_ident(name: &str) -> Option<Type> {
         Syntax::TYPE_CHAR => Some(Type::Char),
         Syntax::DURATION_TYPE => Some(Type::Named(Syntax::DURATION_TYPE.to_string())),
         Syntax::CLOCK_TYPE => Some(Type::Named(Syntax::CLOCK_TYPE.to_string())),
-        Syntax::TYPE_AUTHORITY => Some(Type::Named(Syntax::TYPE_AUTHORITY.to_string())),
+        Syntax::TYPE_ABILITIES => Some(Type::Named(Syntax::TYPE_ABILITIES.to_string())),
         "Date" => Some(Type::Named("Date".to_string())),
         "Instant" => Some(Type::Named("Instant".to_string())),
         "Path" => Some(Type::Named("Path".to_string())),
@@ -2122,6 +2134,8 @@ mod tests {
         let family = vec!["decode".to_string(), "encode".to_string(), "parse".to_string()];
         assert_ne!(suggest_field("decode", &family).as_deref(), Some("decode"));
         assert_eq!(suggest_field("decod", &family).as_deref(), Some("decode"));
+        let tied = vec!["decode".to_string(), "decord".to_string()];
+        assert_eq!(suggest_field("decod", &tied), None);
     }
 
     #[test]

@@ -47,6 +47,15 @@ fn run() {
     bob_rows :: bob.query("SELECT title FROM tasks", []) ?? panic("bob query")
     alice_rows :: scoped.query("SELECT title FROM tasks", []) ?? panic("alice query")
     print("cross:{bob_rows.len()}:{alice_rows.len()}")
+    blank_user := conn.with_policy(policy, "   ")
+    blank_insert := blank_user.execute(
+        "INSERT INTO tasks (owner, title) VALUES (?, ?)",
+        [DBValue.Text("   "), DBValue.Text("blank")]
+    )
+    if blank_insert == {
+        .Err(_) -> { print("blank-user:rejected") }
+        .Ok(_) -> { print("blank-user:accepted") }
+    }
     live :: scoped.live("SELECT title FROM tasks", []) ?? panic("live")
     print("live:ok")
     commented := scoped.query("SELECT title FROM tasks -- hide policy", [])
@@ -93,7 +102,7 @@ fn run() {
 fn db_scope_enforces_policy_on_query_insert_and_live_aot() {
     let (code, stdout) = build_and_run("db_policy_scope", SOURCE);
     assert_eq!(code, 0);
-    assert_eq!(stdout, "schema:rejected\nrows:2\nbypass:rejected\ncross:1:2\nlive:ok\ncomment:rejected\nblock:rejected\njoin:rejected\nsubquery:rejected\nupsert:rejected\nreplace:rejected\n");
+    assert_eq!(stdout, "schema:rejected\nrows:2\nbypass:rejected\ncross:1:2\nblank-user:rejected\nlive:ok\ncomment:rejected\nblock:rejected\njoin:rejected\nsubquery:rejected\nupsert:rejected\nreplace:rejected\n");
 }
 
 #[test]
@@ -104,7 +113,7 @@ fn db_scope_enforces_policy_on_query_insert_and_live_default() {
         &[("main.jet", SOURCE)],
     );
     assert_eq!(code, 0, "default jet run failed: {stderr}");
-    assert_eq!(stdout, "schema:rejected\nrows:2\nbypass:rejected\ncross:1:2\nlive:ok\ncomment:rejected\nblock:rejected\njoin:rejected\nsubquery:rejected\nupsert:rejected\nreplace:rejected\n");
+    assert_eq!(stdout, "schema:rejected\nrows:2\nbypass:rejected\ncross:1:2\nblank-user:rejected\nlive:ok\ncomment:rejected\nblock:rejected\njoin:rejected\nsubquery:rejected\nupsert:rejected\nreplace:rejected\n");
 }
 
 /// D-DBPOLICY1=A + I9: the closed policy language is one fact

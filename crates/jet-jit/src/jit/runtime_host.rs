@@ -2004,6 +2004,12 @@ fn jet_jit_struct_set_i64(h: i64, idx: i64, v: i64) {
     });
 }
 
+fn jet_jit_struct_set_record(h: i64, idx: i64, v: i64) {
+    with_runtime_mut(|rt| {
+        let _ = rt.heap.record_set_record(h, idx, v);
+    });
+}
+
 fn jet_jit_struct_set_f64(h: i64, idx: i64, v: f64) {
     with_runtime_mut(|rt| {
         let _ = rt.heap.record_set_float(h, idx, v);
@@ -2499,6 +2505,10 @@ mod service_adapter {
             CtValue::Str(value) => {
                 let handle = rt.heap.alloc_string(value.clone());
                 let _ = rt.heap.record_set_string(record, index, handle);
+            }
+            CtValue::Struct { type_name, fields } => {
+                let handle = marshal_struct(rt, type_name, fields);
+                let _ = rt.heap.record_set_record(record, index, handle);
             }
             CtValue::Present(value) => {
                 let bits = marshal_scalar(rt, value).wrapping_add(1);
@@ -3907,6 +3917,7 @@ host_fns! {
         sig_struct_set_i64.params.push(AbiParam::new(types::I64));
         sig_struct_set_i64.params.push(AbiParam::new(types::I64));
         sig_struct_set_i64.params.push(AbiParam::new(types::I64));
+        let sig_struct_set_record = sig_struct_set_i64.clone();
         let mut sig_struct_set_f64 = Signature::new(cc);
         sig_struct_set_f64.params.push(AbiParam::new(types::I64));
         sig_struct_set_f64.params.push(AbiParam::new(types::I64));
@@ -4189,6 +4200,7 @@ host_fns! {
     struct_get_char: "jet_jit_struct_get_char" => jet_jit_struct_get_char: sig_struct_get_i32;
     struct_get_str: "jet_jit_struct_get_str" => jet_jit_struct_get_str: sig_struct_get_i64;
     struct_set_i64: "jet_jit_struct_set_i64" => jet_jit_struct_set_i64: sig_struct_set_i64;
+    struct_set_record: "jet_jit_struct_set_record" => jet_jit_struct_set_record: sig_struct_set_record;
     struct_set_f64: "jet_jit_struct_set_f64" => jet_jit_struct_set_f64: sig_struct_set_f64;
     struct_set_bool: "jet_jit_struct_set_bool" => jet_jit_struct_set_bool: sig_struct_set_i8;
     struct_set_char: "jet_jit_struct_set_char" => jet_jit_struct_set_char: sig_struct_set_i32;

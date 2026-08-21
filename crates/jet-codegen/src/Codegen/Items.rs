@@ -297,16 +297,18 @@ pub(crate) fn emit_struct(cx: &Cx, s: &StructDef, out: &mut String) {
         .fields
         .iter()
         .any(|f| cx.type_contains_shared_guard(&f.ty));
+    let has_secret_field = cx.type_contains_secret(&Type::Named(s.name.clone()));
     // Backend representation derives only. Jet capability implementations are
     // expanded into parsed Jet items in Sema/Registration/Derives.rs; these
     // Rust attributes do not grant or validate a Jet capability.
     let mut rust_derives: Vec<&str> = Vec::new();
-    if !has_fn_field && !has_shared_guard_field && s.type_params.is_empty() {
+    if !has_fn_field && !has_shared_guard_field && !has_secret_field && s.type_params.is_empty() {
         rust_derives.push("Debug");
     }
     if cx.cloneable.contains(&s.name)
         && !has_shared_guard_field
         && !has_mutable_view_field
+        && !has_secret_field
     {
         rust_derives.push("Clone");
     }
@@ -1838,19 +1840,21 @@ pub(crate) fn emit_enum(cx: &Cx, e: &EnumDef, out: &mut String) {
             .iter()
             .any(|field| cx.type_contains_shared_guard(&field.ty)),
     });
+    let has_secret_payload = cx.type_contains_secret(&Type::Named(e.name.clone()));
     // Debug/Clone are backend representation traits. Equality and ordering
     // are ordinary Jet impls produced by sema and are never Rust-derived here.
     let mut rust_derives = Vec::new();
-    if !has_shared_guard {
+    if !has_shared_guard && !has_secret_payload {
         rust_derives.push("Debug");
     }
     if !has_shared_guard
         && !has_mutable_view_payload
+        && !has_secret_payload
         && cx.cloneable.contains(&e.name)
     {
         rust_derives.push("Clone");
     }
-    if !has_shared_guard && cx.hashable.contains(&e.name) {
+    if !has_shared_guard && !has_secret_payload && cx.hashable.contains(&e.name) {
         rust_derives.push("PartialEq");
         rust_derives.push("Eq");
         rust_derives.push("PartialOrd");

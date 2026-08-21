@@ -770,7 +770,6 @@ fn walk_stmt_expr_nodes(s: &Stmt, opts: WalkOpts, f: &mut impl FnMut(&Expr)) {
         | Stmt::TaskGroup { body, .. }
         | Stmt::Layout { body, .. }
         | Stmt::Caps { body, .. }
-        | Stmt::Grant { body, .. }
         | Stmt::Live { body, .. }
         | Stmt::Transact { body, .. } => {
             walk_stmt_body_nodes(body, opts, f);

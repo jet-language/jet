@@ -10,8 +10,8 @@ use std::fs;
 const OUTER_GROUP_HELPER: &str = r#"
 struct Gate { step: Int }
 
-fn spawn_later(group: TaskGroup) => Shared<Gate> {
-    gate :: shared Gate.{ step: 0 }
+fn spawn_later(group: Group) => Shared<Gate> {
+    gate :: shared Gate{ step: 0 }
     task {
         gate.step += 1
         loop gate.step == 1 {}
@@ -78,7 +78,7 @@ fn assert_jit_compiles(name: &str, source: &str) {
                 .collect::<Vec<_>>();
             assert!(errors.is_empty(), "{errors:?}");
             jet_jit::try_compile_bundle(&bundle)
-                .expect("TaskGroup source must compile for resident JIT");
+                .expect("Group source must compile for resident JIT");
         })
         .expect("spawn JIT compile thread");
     join.join().expect("JIT compile thread");
@@ -91,23 +91,23 @@ fn named_function_parameters_spawn_copy_and_owned_captures() {
     }
     // D-CONC-SPAWN1=D: the bare `task` keyword binds to the innermost active
     // group (`taskgroup_stack.last()`), so it cannot target a specific one of
-    // two simultaneous `TaskGroup` parameters the way `first.task => …` /
+    // two simultaneous `Group` parameters the way `first.task => …` /
     // `second.task => …` could under the retired spelling. The ratified text
     // is silent on multi-group-per-function, so this splits the old
     // `spawn_both(first, second)` into two single-group helpers instead of
     // guessing a new qualified-spawn syntax (see card #1854 log).
     let source = r#"
-fn spawn_one(group: TaskGroup, value: Int) {
+fn spawn_one(group: Group, value: Int) {
     handle :: task value + 1
     print(handle.join() ?? 0)
 }
 
-fn spawn_owned(group: TaskGroup, values: ^[Int]) {
+fn spawn_owned(group: Group, values: ^[Int]) {
     handle :: task values[0]
     print(handle.join() ?? 0)
 }
 
-fn spawn_both(group: TaskGroup) {
+fn spawn_both(group: Group) {
     left :: task 20
     right :: task 22
     print((left.join() ?? 0) + (right.join() ?? 0))
@@ -174,7 +174,7 @@ fn default_run_joins_helper_spawn_before_outer_exit() {
 #[test]
 fn parameter_spawn_rejects_view_capture() {
     let source = r#"
-fn spawn_view(group: TaskGroup, values: View<Int>) {
+fn spawn_view(group: Group, values: View<Int>) {
     handle :: task values[0]
     print(handle.join() ?? 0)
 }
@@ -188,42 +188,42 @@ fn run() {}
 fn taskgroup_type_is_second_class() {
     for (source, expected) in [
         (
-            "struct Bad { group: TaskGroup }\nfn run() {}\n",
+            "struct Bad { group: Group }\nfn run() {}\n",
             &["E1110"][..],
         ),
         // D-CONC-GROUP1=A: the parameter positions widened, so the positions
         // that stay banned must teach with the E1110 family instead of the bare
-        // "there is no type called `TaskGroup`" fall-through (E0119).
+        // "there is no type called `Group`" fall-through (E0119).
         (
-            "fn bad() => TaskGroup { return 0 }\nfn run() {}\n",
+            "fn bad() => Group { return 0 }\nfn run() {}\n",
             &["E1110", "E0113"][..],
         ),
         (
-            "struct Bad { step: Int\n    fn bad(self) => TaskGroup { return 0 }\n}\nfn run() {}\n",
+            "struct Bad { step: Int\n    fn bad(self) => Group { return 0 }\n}\nfn run() {}\n",
             &["E1110", "E0113"][..],
         ),
         (
-            "fn run() { group: TaskGroup :: 0 }\n",
+            "fn run() { group: Group :: 0 }\n",
             &["E0003"][..],
         ),
         (
-            "fn run() { f :: (group: TaskGroup) => 0 }\n",
+            "fn run() { f :: (group: Group) => 0 }\n",
             &["E0119"][..],
         ),
         (
-            "fn bad(group: TaskGroup) { alias :: group }\nfn run() {}\n",
+            "fn bad(group: Group) { alias :: group }\nfn run() {}\n",
             &["E0120"][..],
         ),
         (
-            "fn bad(group: TaskGroup) { groups :: [group] }\nfn run() {}\n",
+            "fn bad(group: Group) { groups :: [group] }\nfn run() {}\n",
             &["E1110"][..],
         ),
         (
-            "fn bad(group: TaskGroup) { pair :: (group: group, n: 1) }\nfn run() {}\n",
+            "fn bad(group: Group) { pair :: (group: group, n: 1) }\nfn run() {}\n",
             &["E1110"][..],
         ),
         (
-            "fn bad(group: TaskGroup) { maybe :: Val(group) }\nfn run() {}\n",
+            "fn bad(group: Group) { maybe :: Val(group) }\nfn run() {}\n",
             &["E1110"][..],
         ),
     ] {
@@ -234,9 +234,9 @@ fn taskgroup_type_is_second_class() {
 #[test]
 fn taskgroup_cannot_escape_in_a_closure() {
     let source = r#"
-fn use_group(group: TaskGroup) => Int :: 1
+fn use_group(group: Group) => Int :: 1
 
-fn escape(group: TaskGroup) => fn() => Int {
+fn escape(group: Group) => fn() => Int {
     return () => use_group(group)
 }
 
@@ -248,12 +248,12 @@ fn run() {}
     // parameter is admitted, and the lambda escape door it could otherwise open
     // stays shut with the same teaching error.
     let method_escape = r#"
-fn use_group(group: TaskGroup) => Int :: 1
+fn use_group(group: Group) => Int :: 1
 
 struct Crawler {
     step: Int
 
-    fn escape(self, group: TaskGroup) => fn() => Int {
+    fn escape(self, group: Group) => fn() => Int {
         return () => use_group(group)
     }
 }
@@ -268,18 +268,18 @@ fn run() {}
 /// free function's. The storage ban alone carries the structural guarantee, so
 /// a spawn through the method's parameter group still owns its captures.
 ///
-/// One assertion per tier: `assert_group_close_success` runs the interpreter,
-/// probes resident-JIT residency, runs the default `jet run` native tier, and
-/// runs the AOT build, and requires identical observables from all four (I9).
+/// `assert_group_close_success` covers the native execution tiers: interpreter,
+/// resident JIT, default `jet run`, and AOT. The separate comptime, REPL, and
+/// web parity gate remains an explicit card criterion.
 #[test]
 fn method_parameters_spawn_owned_captures() {
     let source = r#"
 struct Crawler {
     step: Int
 
-    fn drain(self, group: TaskGroup, value: Int) {
+    fn drain(self, group: Group, values: ^[Int]) {
         step :: self.step
-        handle :: task value + step
+        handle :: task values[0] + step
         print(handle.join() ?? 0)
     }
 }
@@ -287,7 +287,8 @@ struct Crawler {
 fn run() {
     task.group group {
         crawler :: Crawler.{step: 2}
-        crawler.drain(group, 40)
+        values :: [40]
+        crawler.drain(group, ^values)
     }
 }
 "#;
@@ -300,7 +301,7 @@ fn run() {
 struct Crawler {
     step: Int
 
-    fn drain(self, group: TaskGroup, values: View<Int>) {
+    fn drain(self, group: Group, values: View<Int>) {
         handle :: task values[0]
         print(handle.join() ?? 0)
     }
@@ -541,7 +542,7 @@ fn fail_after_start(gate: Shared<Gate>) => Int {
 }
 
 fn leave_on_wait_panic() {
-    gate :: shared Gate.{ step: 0 }
+    gate :: shared Gate{ step: 0 }
     task.group group {
         slow :: task slow_value(gate)
         ignored :: task.any { fail_after_start(gate) }
@@ -602,7 +603,7 @@ fn run() {
 #[test]
 fn early_return_closes_group_before_caller_continues() {
     let source = r#"
-fn spawn_bad(group: TaskGroup) {
+fn spawn_bad(group: Group) {
     bad :: task panic("child")
 }
 

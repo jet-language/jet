@@ -308,11 +308,11 @@ fn jet_jit_process_spec_terminal_with_policy(spec: i64, policy: i64) -> i64 {
     })
 }
 
-fn jet_jit_process_spec_capabilities(spec: i64) -> i64 {
+fn jet_jit_process_spec_abilities(spec: i64) -> i64 {
     let Some(spec) = clone_spec(spec) else {
         return 0;
     };
-    let facts = process_prelude::spec_capabilities(&spec);
+    let facts = process_prelude::spec_abilities(&spec);
     Concurrency::with_runtime_mut(|rt| {
         let facts = facts
             .into_iter()
@@ -531,7 +531,7 @@ host_fns! {
     spec_detached: "jet_jit_process_spec_detached" => jet_jit_process_spec_detached: sig_unary;
     spec_terminal: "jet_jit_process_spec_terminal" => jet_jit_process_spec_terminal: sig_unary;
     spec_terminal_with_policy: "jet_jit_process_spec_terminal_with_policy" => jet_jit_process_spec_terminal_with_policy: sig_binary;
-    spec_capabilities: "jet_jit_process_spec_capabilities" => jet_jit_process_spec_capabilities: sig_unary;
+    spec_abilities: "jet_jit_process_spec_abilities" => jet_jit_process_spec_abilities: sig_unary;
     spec_run: "jet_jit_process_spec_run" => jet_jit_process_spec_run: sig_unary;
     spec_run_checked: "jet_jit_process_spec_run_checked" => jet_jit_process_spec_run_checked: sig_unary;
     spec_spawn: "jet_jit_process_spec_spawn" => jet_jit_process_spec_spawn: sig_unary;

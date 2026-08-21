@@ -2216,12 +2216,18 @@ impl<'a> Fmt<'a> {
         self.write(")");
         if let Some(template) = template {
             self.write(" ");
-            if let Some(text) = self.src.get(template.span.start..template.span.end) {
-                self.write(text);
-                self.skip_verbatim_comments(template.span.end);
-            } else {
-                self.write("{}");
+            self.write("{");
+            self.newline();
+            self.with_indent(|f| {
+                if let Some(items) = &template.flags.template_items {
+                    f.fmt_derive_body_items(items);
+                }
+            });
+            self.emit_leading(template.span.end);
+            if !self.at_line_start {
+                self.newline();
             }
+            self.write("}");
         }
     }
 

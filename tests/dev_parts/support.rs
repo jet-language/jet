@@ -12,6 +12,7 @@
 // share, so the split cannot fork a helper into two versions (AGENTS.md I8).
 
 use std::fs;
+use std::io::Write as _;
 use std::path::PathBuf;
 use std::process::{Command, Output, Stdio};
 use std::sync::{Arc, LazyLock, Mutex, MutexGuard, OnceLock};
@@ -299,9 +300,9 @@ impl OracleBuildFailure {
 /// The current run's oracle artifact directory, or `None` when it cannot be
 /// created — then every caller builds exactly as it did before #2076.
 ///
-/// The path is NOT salted with the toolchain: the key below already carries
-/// `rustc -vV`, so two toolchains get different keys inside one root instead of
-/// two roots that could disagree about which is current.
+/// An explicit run root is used as-is. The ad-hoc fallback is salted with the
+/// rustc identity as well as the process, while the key below still carries
+/// `rustc -vV` so the inputs remain self-describing.
 static ORACLE_CACHE_ROOT: LazyLock<Option<PathBuf>> = LazyLock::new(|| {
     common::assert_test_environment_is_safe();
     let root = match std::env::var_os("JET_DEV_ORACLE_CACHE_DIR") {
@@ -310,10 +311,16 @@ static ORACLE_CACHE_ROOT: LazyLock<Option<PathBuf>> = LazyLock::new(|| {
             common::assert_test_path_on_disk(&root, "JET_DEV_ORACLE_CACHE_DIR");
             root
         }
-        None => common::test_scratch_root("dev-oracle-cache").join(format!(
-            "run-{}",
-            std::process::id()
-        )),
+        None => {
+            let rustc_salt = ORACLE_RUSTC_IDENTITY
+                .as_deref()
+                .map(|identity| jet::SHA256::sha256_hex(identity.as_bytes()))
+                .unwrap_or_else(|| "unknown".to_string());
+            common::test_scratch_root("dev-oracle-cache").join(format!(
+                "run-{}-{rustc_salt}",
+                std::process::id()
+            ))
+        }
     };
     fs::create_dir_all(&root).ok().map(|()| root)
 });
@@ -344,8 +351,8 @@ static ORACLE_RUSTC_IDENTITY: LazyLock<Option<String>> = LazyLock::new(|| {
 ///   3. the rustc flags, from the one `ORACLE_RUSTC_FLAGS` list,
 ///   4. the FFI bridge link inputs when the example has one — crate name, rlib
 ///      path (itself content-keyed by the bridge signature), the rlib's OWN
-///      digest, because that bridge is rebuilt in place under the same path,
-///      and every dependency search dir,
+///      digest, its `artifacts.sha256` manifest digest because that bridge is
+///      rebuilt in place under the same path, and every dependency search dir,
 ///   5. the resolved C link flags.
 fn oracle_cache_entry(
     rust: &str,
@@ -368,6 +375,21 @@ fn oracle_cache_entry(
             push_oracle_key_field(
                 &mut data,
                 jet::SHA256::sha256_file_hex(&link.rlib_path).ok()?.as_bytes(),
+            );
+            let artifacts_manifest = link
+                .rlib_path
+                .parent()?
+                .join(format!("{}.sha256", link.crate_name));
+            push_oracle_key_field(&mut data, b"ffi-artifacts.sha256");
+            push_oracle_key_field(
+                &mut data,
+                artifacts_manifest.to_string_lossy().as_bytes(),
+            );
+            push_oracle_key_field(
+                &mut data,
+                jet::SHA256::sha256_file_hex(&artifacts_manifest)
+                    .ok()?
+                    .as_bytes(),
             );
             for deps_dir in link.dependency_dirs() {
                 push_oracle_key_field(&mut data, deps_dir.to_string_lossy().as_bytes());
@@ -397,10 +419,18 @@ fn push_oracle_key_field(out: &mut Vec<u8>, value: &[u8]) {
 /// its own binary.
 fn reuse_cached_oracle(entry: &std::path::Path, bin: &std::path::Path) -> bool {
     let ready = entry.join("ready");
-    let artifact = ready.join("oracle");
-    let Ok(recorded) = fs::read_to_string(ready.join("oracle.sha256")) else {
+    let artifact = ready.join("artifact");
+    let digest = ready.join("artifact.sha256");
+    let Ok(recorded) = fs::read_to_string(&digest) else {
         return false;
     };
+    if !fs::symlink_metadata(&artifact)
+        .is_ok_and(|metadata| metadata.file_type().is_file())
+        || !fs::symlink_metadata(&digest)
+            .is_ok_and(|metadata| metadata.file_type().is_file())
+    {
+        return false;
+    }
     match jet::SHA256::sha256_file_hex(&artifact) {
         Ok(actual) if actual == recorded.trim() => {}
         _ => return false,
@@ -424,8 +454,8 @@ fn reuse_cached_oracle(entry: &std::path::Path, bin: &std::path::Path) -> bool {
 ///
 /// A hard link, not a copy: the run then holds exactly ONE copy of the bytes per
 /// distinct oracle, whoever built it and however many batteries reuse it. The
-/// persistent disk root keeps that copy available to later runs. It also means
-/// a later build that writes over that same scratch path in place can change the
+/// run-scoped root keeps that copy available to every battery in the run. A
+/// later build that writes over that same scratch path in place can change the
 /// published bytes — and that is caught rather than served, because a hit
 /// re-hashes the artifact against its recorded digest and a mismatch is a miss.
 fn publish_cached_oracle(entry: &std::path::Path, bin: &std::path::Path) {
@@ -440,12 +470,12 @@ fn publish_cached_oracle(entry: &std::path::Path, bin: &std::path::Path) {
     ));
     let published = (|| -> std::io::Result<()> {
         fs::create_dir_all(&staged)?;
-        if fs::hard_link(bin, staged.join("oracle")).is_err() {
-            fs::copy(bin, staged.join("oracle"))?;
+        if fs::hard_link(bin, staged.join("artifact")).is_err() {
+            fs::copy(bin, staged.join("artifact"))?;
         }
         fs::write(
-            staged.join("oracle.sha256"),
-            jet::SHA256::sha256_file_hex(&staged.join("oracle"))?,
+            staged.join("artifact.sha256"),
+            jet::SHA256::sha256_file_hex(&staged.join("artifact"))?,
         )?;
         fs::rename(&staged, &ready)
     })();
@@ -1015,6 +1045,127 @@ fn all_example_stems() -> Vec<String> {
     stems
 }
 
+/// The same weighted LPT shard used by `tools/ci/test-shards.sh`, applied to
+/// corpus stems when the gate is split for a bounded run.
+fn corpus_gate_shard_config() -> Option<(usize, usize)> {
+    let index = std::env::var("JET_CORPUS_GATE_SHARD_INDEX").ok();
+    let count = std::env::var("JET_CORPUS_GATE_SHARD_COUNT").ok();
+    match (index, count) {
+        (None, None) => None,
+        (Some(index), Some(count)) => {
+            let index = index.parse::<usize>().unwrap_or_else(|_| {
+                panic!(
+                    "JET_CORPUS_GATE_SHARD_INDEX must be a non-negative integer, got `{index}`"
+                )
+            });
+            let count = count.parse::<usize>().unwrap_or_else(|_| {
+                panic!(
+                    "JET_CORPUS_GATE_SHARD_COUNT must be a positive integer, got `{count}`"
+                )
+            });
+            assert!(
+                count > 0,
+                "JET_CORPUS_GATE_SHARD_COUNT must be >= 1, got {count}"
+            );
+            assert!(
+                index < count,
+                "JET_CORPUS_GATE_SHARD_INDEX ({index}) must be < JET_CORPUS_GATE_SHARD_COUNT ({count})"
+            );
+            Some((index, count))
+        }
+        (Some(_), None) | (None, Some(_)) => panic!(
+            "JET_CORPUS_GATE_SHARD_INDEX and JET_CORPUS_GATE_SHARD_COUNT must be set together"
+        ),
+    }
+}
+
+/// Static work estimate for one corpus stem. The current ledger class is the
+/// cheapest honest cost signal available before a run: frontend/held-out rows
+/// stop before the tier differential, AOT-broken rows reach the oracle, and
+/// resident/deopt rows run all tiers. New stems take the expensive default so
+/// they cannot silently skew a shard.
+fn corpus_gate_stem_weight(class: Option<&CorpusGateClass>) -> u64 {
+    match class {
+        Some(
+            CorpusGateClass::FrontendRejected
+            | CorpusGateClass::GateExcluded
+            | CorpusGateClass::NonRunnable
+            | CorpusGateClass::OracleUnavailable,
+        ) => 1,
+        Some(CorpusGateClass::ExpectedExit) => 2,
+        Some(CorpusGateClass::AotBroken | CorpusGateClass::RunTierBroken) => 3,
+        Some(CorpusGateClass::ResidentJit | CorpusGateClass::DeoptInterp | CorpusGateClass::TierDivergent)
+        | None => 4,
+    }
+}
+
+fn corpus_gate_shard_stems(stems: Vec<String>) -> Vec<String> {
+    let Some((index, count)) = corpus_gate_shard_config() else {
+        return stems;
+    };
+
+    let weights: std::collections::BTreeMap<String, CorpusGateClass> =
+        parse_corpus_gate_manifest()
+            .into_iter()
+            .map(|record| (record.stem, record.class))
+            .collect();
+    let mut input = String::new();
+    for stem in &stems {
+        input.push_str(&corpus_gate_stem_weight(weights.get(stem)).to_string());
+        input.push('\t');
+        input.push_str(stem);
+        input.push('\n');
+    }
+
+    let mut child = Command::new("bash")
+        .arg(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tools/ci/weighted-shards.sh"))
+        .args([index.to_string(), count.to_string()])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("spawn shared weighted shard engine");
+    child
+        .stdin
+        .as_mut()
+        .expect("shared weighted shard stdin")
+        .write_all(input.as_bytes())
+        .expect("write corpus stems to shared weighted shard engine");
+    let output = child
+        .wait_with_output()
+        .expect("wait for shared weighted shard engine");
+    assert!(
+        output.status.success(),
+        "shared weighted shard engine failed:\n{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let known: std::collections::BTreeSet<&str> = stems.iter().map(String::as_str).collect();
+    let mut selected: Vec<String> = String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .filter(|stem| !stem.is_empty())
+        .map(str::to_string)
+        .collect();
+    assert!(
+        selected.iter().all(|stem| known.contains(stem.as_str())),
+        "shared weighted shard engine emitted a stem outside its input: {selected:?}"
+    );
+    selected.sort();
+    assert!(
+        selected.windows(2).all(|pair| pair[0] != pair[1]),
+        "shared weighted shard engine emitted a duplicate stem: {selected:?}"
+    );
+    selected
+}
+
+fn corpus_gate_selected_stems() -> Vec<String> {
+    let mut stems = all_example_stems();
+    if let Ok(filter) = std::env::var("JET_CORPUS_GATE_FILTER") {
+        stems.retain(|stem| stem.contains(&filter));
+    }
+    corpus_gate_shard_stems(stems)
+}
+
 /// Stems the corpus gate already classifies as frontend-rejected (compile errors).
 /// Interpreter parity batteries skip them — they cannot run or hit an interpreter boundary.
 fn frontend_rejected_stems() -> std::collections::HashSet<String> {
@@ -1158,8 +1309,8 @@ enum JitCompileVerdict {
 ///
 /// A floor, because examples get added: deleting one, or making
 /// `topic_jet_files` stop seeing one, must lower a reviewed constant. It lives
-/// here, outside `examples/features/` and outside `tests/jit_gaps.txt`, for the
-/// same reason `COMPILE_COVERED_FLOOR` does.
+/// here, outside `examples/features/`, so deleting an example cannot silently
+/// shrink the measured universe.
 ///
 /// #2012: every reader of `collect_jit_coverage` asserts this, not just the
 /// coverage audit, so no battery scoped to a slice of this universe can report
@@ -1186,8 +1337,8 @@ const EXAMPLE_CORPUS_FLOOR: usize = 497;
 
 /// How many stems the compile oracle is still allowed to be blind to (#1998).
 ///
-/// Shrink-only, exactly like GAPS_CEILING and RUN_GAPS_CEILING. Every row is a
-/// stem this oracle cannot judge, so every row is a defect to fix — build the
+/// Shrink-only. Every row is a stem this oracle cannot judge, so every row is a
+/// defect to fix — build the
 /// context the harness is missing, or fix the frontend the stem trips — never a
 /// skip to accept. The rows are derived from the compiler's own diagnostics at
 /// audit time, so this is a counted ceiling and not an allowlist: no stem can be
@@ -1419,76 +1570,6 @@ fn classify_jit_bundle(bundle: jet::AST::ProgramBundle) -> JitCompileVerdict {
     }
 }
 
-fn parse_jit_gap_manifest() -> (Vec<String>, Vec<String>, Vec<String>) {
-    let (covered, gaps, divergences, _) = parse_jit_gap_manifest_full();
-    (covered, gaps, divergences)
-}
-
-/// #1509: the same manifest, including its `run_gaps:` rows.
-///
-/// `run_gaps` are the stems this file calls compile-covered that the corpus gate
-/// still records as failing at the run tier. They are read only by the ledger
-/// cross-check, so the four-value form stays out of the ratchet call sites.
-fn parse_jit_gap_manifest_full() -> (Vec<String>, Vec<String>, Vec<String>, Vec<String>) {
-    enum Section {
-        None,
-        CompileCovered,
-        Gaps,
-        RunGaps,
-        ParityDivergences,
-    }
-
-    let mut section = Section::None;
-    let mut covered = Vec::new();
-    let mut gaps = Vec::new();
-    let mut run_gaps = Vec::new();
-    let mut parity_divergences = Vec::new();
-    for raw in include_str!("../jit_gaps.txt").lines() {
-        let line = raw.trim_end();
-        let trimmed = line.trim();
-        if trimmed.is_empty() || trimmed.starts_with('#') {
-            continue;
-        }
-        match trimmed {
-            // #1509: this file tracks compile coverage only. The old name,
-            // `covered:`, claimed run coverage it never measured.
-            "compile_covered:" => {
-                section = Section::CompileCovered;
-                continue;
-            }
-            "gaps:" => {
-                section = Section::Gaps;
-                continue;
-            }
-            "run_gaps:" => {
-                section = Section::RunGaps;
-                continue;
-            }
-            "parity_divergences:" => {
-                section = Section::ParityDivergences;
-                continue;
-            }
-            _ => {}
-        }
-        match section {
-            Section::CompileCovered => covered.push(trimmed.to_string()),
-            Section::Gaps => gaps.push(trimmed.to_string()),
-            Section::RunGaps => run_gaps.push(trimmed.to_string()),
-            Section::ParityDivergences => parity_divergences.push(trimmed.to_string()),
-            Section::None => panic!("manifest entry outside a section: {trimmed}"),
-        }
-    }
-    covered.sort();
-    gaps.sort();
-    run_gaps.sort();
-    parity_divergences.sort();
-    assert!(
-        parity_divergences.is_empty(),
-        "parity_divergences must stay empty: default dev and interpreter output must exactly match default AOT output; fix the shared semantics or use transparent fallback"
-    );
-    (covered, gaps, run_gaps, parity_divergences)
-}
-
 fn is_manifested_parity_divergence(stem: &str, entries: &[String]) -> bool {
     entries.iter().any(|entry| {
         entry
@@ -1614,7 +1695,7 @@ fn print_jit_op_report() {
 ///   - E2201: a feature the dev interpreter doesn't cover (pre-scan boundary),
 ///   - E2202 / E0952: the step/fuel budget was exhausted,
 ///   - E0956: a construct not yet supported at comptime (hit during execution),
-///   - E0953: a deliberate user-authored panic (`require(false, …)`), which is
+///   - E0953: a deliberate user-authored panic (`assert(false, …)`), which is
 ///     the program legitimately failing, not a silent skip.
 ///   - E3410 / E3411: a D-CTEFFECT1 Tier-2 comptime effect (`core.files`/`core.term`/
 ///     `core.sys`/…) reached with no `#Impure` gate, or a gate present but
@@ -1637,13 +1718,6 @@ const BOUNDARY_CODES: &[&str] = &[
 const DEFAULT_BACKEND_EXPECTED_BOUNDARIES: &[&str] = &[
     "collections/list_bounds",
 ];
-
-fn jit_gap_stem_set() -> std::collections::HashSet<String> {
-    let (_, gaps, _) = parse_jit_gap_manifest();
-    gaps.iter()
-        .map(|entry| entry.split(':').next().unwrap().to_string())
-        .collect()
-}
 
 #[derive(Default, Clone)]
 struct DevBatteryStats {
@@ -3425,75 +3499,8 @@ fn jit_coverage_audit_inner() {
         // there. This ratchet is about compile coverage only.
         ..
     } = collect_jit_coverage();
-    if std::env::var("JET_DUMP_JIT_GAPS").as_deref() == Ok("1") {
-        // #1509: this writer regenerates the whole file, so it must carry the
-        // `run_gaps:` ratchet across. Rewriting the file without it would delete
-        // the cross-check's baseline and read as a clean dump.
-        let (_, _, run_gaps, _) = parse_jit_gap_manifest_full();
-        let mut out = String::from(
-            "# Compile-coverage ratchet baseline for Tower card #125 / #778.\n\
-             # Format consumed by tests/dev.rs::jit_coverage_audit.\n\
-             #\n\
-             # This file tracks COMPILE coverage only. compile_covered means TIR lowered and\n\
-             # Cranelift compiled end-to-end; it says nothing about whether the example runs.\n\
-             # Run coverage is measured by the corpus gate, tests/jit_corpus_gate.txt.\n\
-             # Compiled is not the same as runs, and #1509 was filed because the old section\n\
-             # name (`covered`) claimed both.\n\
-             #\n\
-             # gaps list the first compile/unsupported reason.\n\
-             # run_gaps list stems this file calls compile_covered that the corpus gate still\n\
-             # records as failing at the run tier. tests/dev.rs::ledger_cross_check_holds\n\
-             # fails on any such stem that is not listed here, so a new run-tier parity\n\
-             # failure cannot hide between the two ledgers.\n\
-             #\n\
-             # Directional ratchet (D-LENS-RUN2 / #778, hole closed by #1663). Each section\n\
-             # moves one way only, and the audit names the direction it rejects:\n\
-             #   compile_covered may only GROW. Its row count is pinned by\n\
-             #     COMPILE_COVERED_FLOOR in tests/dev.rs::jit_coverage_audit, so a hand-edit\n\
-             #     cannot delete a covered stem to green the audit. A stem that stops being\n\
-             #     covered is a REGRESSION: fix it or file it, never drop the row.\n\
-             #   gaps and run_gaps may only SHRINK. A new compile gap is a lowering bug to\n\
-             #     fix (AGENTS.md I9), not a row to park here.\n\
-             # This file is scoped to the stems the audit could judge, never to the corpus.\n\
-             # EXAMPLE_CORPUS_FLOOR and OUT_OF_UNIVERSE_CEILING in tests/dev.rs pin\n\
-             # how many stems were measured and how many\n\
-             # could not be judged (#1998), so an empty `gaps:` here is not a claim that the\n\
-             # corpus has no compile gap. The audit prints the unjudged stems and their\n\
-             # diagnostics on every run.\n\
-             # Movement is intentional only; update this file, and the floor, in one diff.\n\
-             \n\
-             compile_covered:\n",
-        );
-        for s in &covered {
-            out.push_str(&format!("  {s}\n"));
-        }
-        out.push_str("\ngaps:\n");
-        for g in &gaps {
-            out.push_str(&format!("  {g}\n"));
-        }
-        out.push_str("\nrun_gaps:\n");
-        for r in &run_gaps {
-            out.push_str(&format!("  {r}\n"));
-        }
-        eprint!("{out}");
-        if std::env::var("JET_WRITE_JIT_GAPS").as_deref() == Ok("1") {
-            fs::write(
-                PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/jit_gaps.txt"),
-                out,
-            )
-            .expect("write tests/jit_gaps.txt");
-        }
-        // #1998: a regeneration states the denominator too, so the operator who
-        // moves the ratchet sees which stems the new ledger does not speak for.
-        report_jit_universe(corpus, &covered, &gaps, &out_of_universe);
-        return;
-    }
-    let (expected_covered, expected_gaps, run_gaps, _) = parse_jit_gap_manifest_full();
-    eprintln!(
-        "jit gap ledger: gaps: {}, run_gaps: {}",
-        expected_gaps.len(),
-        run_gaps.len()
-    );
+    let run_gaps = corpus_gate_run_gaps(&parse_corpus_gate_manifest());
+    eprintln!("jit coverage: gaps: {}, run_gaps: {}", gaps.len(), run_gaps.len());
     report_jit_universe(corpus, &covered, &gaps, &out_of_universe);
     eprintln!("jit compile-covered ({}):", covered.len());
     for s in &covered {
@@ -3512,16 +3519,8 @@ fn jit_coverage_audit_inner() {
     }
     print_jit_op_report();
 
-    // #1998: `COMPILE_COVERED_FLOOR` pins how much of the corpus compiles.
-    // `EXAMPLE_CORPUS_FLOOR` and `OUT_OF_UNIVERSE_CEILING` pin the corpus
-    // itself, so coverage can no longer be greened by a stem quietly leaving the
-    // denominator — the hole that let `gaps: 0` stand while 81 stems were never
-    // judged at all. All three live outside `tests/jit_gaps.txt`, for the same
-    // reason the coverage floor does.
-    //
-    // #2012: the two universe pins are declared once, next to `JitCoverage`, and
-    // asserted by every reader of the shared observation — this ratchet and the
-    // three-way differential battery — rather than copied per test.
+    // #1998: the universe pins the corpus and the compile oracle, so coverage
+    // cannot be greened by a stem quietly leaving the denominator.
     assert!(
         corpus >= EXAMPLE_CORPUS_FLOOR,
         "the example corpus shrank to {corpus} stem(s) (floor {EXAMPLE_CORPUS_FLOOR}). A stem \
@@ -3529,9 +3528,8 @@ fn jit_coverage_audit_inner() {
          it, or lower the floor in the same diff as the deletion."
     );
 
-    // Shrink-only, exactly like GAPS_CEILING and RUN_GAPS_CEILING; see
-    // `OUT_OF_UNIVERSE_CEILING` for why every row here is a defect to fix and
-    // why the count is derived, never an allowlist.
+    // Every out-of-universe row is a defect to fix; the count is derived, never
+    // an allowlist.
     assert!(
         out_of_universe.len() <= OUT_OF_UNIVERSE_CEILING,
         "{} stem(s) sit outside the compile oracle (ceiling {OUT_OF_UNIVERSE_CEILING}); this \
@@ -3544,90 +3542,19 @@ fn jit_coverage_audit_inner() {
         "the oracle now judges the whole corpus: set OUT_OF_UNIVERSE_CEILING to 0 in the same \
          diff, so the universe hole cannot reopen unnoticed"
     );
-    // #1663: this ledger has been hand-falsified three times, in both
-    // directions, because one blob equality could not say which way a set
-    // moved. Compare each section directionally and name the direction that
-    // failed, so the fix a row demands is the fix the message asks for.
-    let regressed = rows_missing_from(&expected_covered, &covered);
-    let regressed_count = regressed.len();
     assert!(
-        regressed.is_empty(),
-        "JIT compile coverage REGRESSED: {regressed_count} stem(s) recorded in \
-         tests/jit_gaps.txt `compile_covered:` no longer compile: {regressed:?}. A stem \
-         leaving the covered set is a regression to fix or file under the owning card — \
-         never delete the row to green this audit."
+        gaps.is_empty(),
+        "JIT compile coverage has {} gap(s); fix the lowering path before changing the corpus \
+         claim:\n{}",
+        gaps.len(),
+        gaps.join("\n")
     );
-    let unrecorded = rows_missing_from(&covered, &expected_covered);
-    let unrecorded_count = unrecorded.len();
-    let observed_count = covered.len();
     assert!(
-        unrecorded.is_empty(),
-        "JIT compile coverage GREW: {unrecorded_count} stem(s) compile but are missing from \
-         tests/jit_gaps.txt `compile_covered:`: {unrecorded:?}. A gain is a ratchet move: add \
-         the rows and set COMPILE_COVERED_FLOOR to {observed_count} in the same diff."
+        run_gaps.is_empty(),
+        "JIT run-tier parity has {} gap(s); fix the shared semantics:\n{}",
+        run_gaps.len(),
+        run_gaps.join("\n")
     );
-
-    // #1663: only `gaps:`/`run_gaps:` were shrink-only, so deleting a
-    // `compile_covered:` row was invisible — the ledger was its own baseline,
-    // and the cheapest way to green a shrinking observed set was to drop the
-    // row (aec11ad74 dropped `types/unit_literals` while it was a live gap).
-    // Pin the row count outside the file: a deletion now has to lower a
-    // reviewed constant, exactly like RUN_GAPS_CEILING.
-    // 480 -> 481 with `errors/qq_panic` (#1967), observed tier1 native for both
-    // of its functions under `jet run --trace-tiers`.
-    const COMPILE_COVERED_FLOOR: usize = 481;
-    let recorded_count = expected_covered.len();
-    assert_eq!(
-        recorded_count, COMPILE_COVERED_FLOOR,
-        "tests/jit_gaps.txt `compile_covered:` holds {recorded_count} rows but the ratchet floor \
-         is {COMPILE_COVERED_FLOOR}. Raise the floor in the same diff as a coverage gain; a \
-         count that FELL means covered stems were deleted, which is a regression, not an edit"
-    );
-    let mut unique_covered = expected_covered.clone();
-    unique_covered.dedup();
-    assert_eq!(
-        unique_covered.len(),
-        recorded_count,
-        "tests/jit_gaps.txt `compile_covered:` repeats a stem; duplicate rows pad the floor \
-         and hide a deletion"
-    );
-
-    let unrecorded_gaps = rows_missing_from(&gaps, &expected_gaps);
-    let unrecorded_gaps_count = unrecorded_gaps.len();
-    assert!(
-        unrecorded_gaps.is_empty(),
-        "{unrecorded_gaps_count} JIT compile gap(s) are not recorded in tests/jit_gaps.txt \
-         `gaps:`: {unrecorded_gaps:?}. gaps may only shrink: an unsupported construct is a \
-         lowering bug to fix (AGENTS.md I9), never a row to park here."
-    );
-    let stale_gaps = rows_missing_from(&expected_gaps, &gaps);
-    let stale_gaps_count = stale_gaps.len();
-    assert!(
-        stale_gaps.is_empty(),
-        "{stale_gaps_count} row(s) in tests/jit_gaps.txt `gaps:` no longer reproduce: \
-         {stale_gaps:?}. The reason text is part of the row — delete a fixed row, or update \
-         it when the first reason changed."
-    );
-
-    // Shrink-only ratchet (D-LENS-RUN2), mirroring RUN_GAPS_CEILING: every row
-    // is a live I9 parity failure, so the count may fall and never rise.
-    const GAPS_CEILING: usize = 0;
-    let recorded_gaps = expected_gaps.len();
-    assert!(
-        recorded_gaps <= GAPS_CEILING,
-        "tests/jit_gaps.txt `gaps:` grew to {recorded_gaps} rows (ceiling {GAPS_CEILING}); \
-         compile gaps may only shrink"
-    );
-}
-
-/// Rows of `left` that `right` does not contain, for the #1663 directional
-/// ratchet. Both sides arrive sorted, so this reads as a set difference and
-/// keeps the audit's failure message pointed at one direction of drift.
-fn rows_missing_from(left: &[String], right: &[String]) -> Vec<String> {
-    left.iter()
-        .filter(|row| !right.contains(row))
-        .cloned()
-        .collect()
 }
 
 fn cranelift_three_way_differential_battery_inner() {
@@ -3849,6 +3776,15 @@ fn corpus_gate_unique_codes<'a>(codes: impl IntoIterator<Item = &'a str>) -> Str
     out.join("; ")
 }
 
+fn corpus_gate_interpreter_refusal_detail<'a>(
+    codes: impl IntoIterator<Item = &'a str>,
+) -> String {
+    format!(
+        "interpreter_refused: {}",
+        corpus_gate_unique_codes(codes)
+    )
+}
+
 /// R13 (#1997): an abort is never an outcome, so it is never a ledger row
 /// either.
 ///
@@ -3946,7 +3882,7 @@ enum CorpusGateClass {
     /// not a run-tier refusal: the program runs under `jet run` and prints the
     /// wrong thing (or the oracle does). Kept separate because `run_tier_broken`
     /// asserts "fails under default `jet run`", and a stem that ran did not fail
-    /// (D-ONECORE1=A, the same law `jit_gaps.txt::parity_divergences` states).
+    /// (D-ONECORE1=A, the same law `jit_coverage_audit` states).
     /// Detail names the diverging stream(s): `stdout`, `stderr`, `exit`.
     TierDivergent,
 }
@@ -4236,11 +4172,11 @@ fn classify_corpus_stem(stem: &str, have_rustc: bool) -> CorpusGateRecord {
                     detail: corpus_gate_divergent_streams(&jit_out, &aot_out),
                 };
             }
-            // Criterion #5: tiered must match AOT (above). Pure-interpreter must
-            // match too when the TIR evaluator covers the program; remaining
-            // E2201/E0956 gaps are TIR coverage (tracked for follow-on), not
-            // tier-semantics drift — deopt uses the same evaluator.
-            match jet::Interpreter::run_checked(&bundle, true) {
+            // Criterion #5: tiered must match AOT (above). The forced
+            // interpreter must match when the TIR evaluator covers the program.
+            // A known E2201/E0956 boundary is recorded on the backend row; it
+            // is not an interpreter comparison.
+            let interpreter_detail = match jet::Interpreter::run_checked(&bundle, true) {
                 RunOutcome::Ran {
                     stdout,
                     stderr,
@@ -4253,14 +4189,18 @@ fn classify_corpus_stem(stem: &str, have_rustc: bool) -> CorpusGateRecord {
                         interp_out, aot_out,
                         "`{stem}` pure-interpreter must match AOT stdout/stderr/exit"
                     );
+                    String::new()
                 }
                 RunOutcome::Problems(diags) => {
                     assert!(
                         diags.iter().any(|d| d.code == "E2201" || d.code == "E0956"),
                         "`{stem}` pure-interpreter failed without TIR coverage boundary: {diags:?}"
                     );
+                    corpus_gate_interpreter_refusal_detail(
+                        diags.iter().map(|diagnostic| diagnostic.code.as_str()),
+                    )
                 }
-            }
+            };
 
             if jet_jit::deopt_invoked_for_test()
                 || !jet_jit::resident_jit_safe_bundle(&bundle)
@@ -4268,7 +4208,7 @@ fn classify_corpus_stem(stem: &str, have_rustc: bool) -> CorpusGateRecord {
                 CorpusGateRecord {
                     stem: stem.to_string(),
                     class: CorpusGateClass::DeoptInterp,
-                    detail: String::new(),
+                    detail: interpreter_detail,
                 }
             } else {
                 assert!(
@@ -4278,7 +4218,7 @@ fn classify_corpus_stem(stem: &str, have_rustc: bool) -> CorpusGateRecord {
                 CorpusGateRecord {
                     stem: stem.to_string(),
                     class: CorpusGateClass::ResidentJit,
-                    detail: String::new(),
+                    detail: interpreter_detail,
                 }
             }
         }
@@ -4289,10 +4229,7 @@ fn collect_corpus_gate_records() -> Vec<CorpusGateRecord> {
     common::assert_test_environment_is_safe();
     let _ = common::test_scratch_root("aot");
     let have_rustc = have_rustc();
-    let mut stems = all_example_stems();
-    if let Ok(filter) = std::env::var("JET_CORPUS_GATE_FILTER") {
-        stems.retain(|stem| stem.contains(&filter));
-    }
+    let stems = corpus_gate_selected_stems();
     let jobs = Arc::new(Mutex::new(std::collections::VecDeque::from(stems)));
     let records = Arc::new(Mutex::new(Vec::<CorpusGateRecord>::new()));
     let failures = Arc::new(Mutex::new(Vec::<String>::new()));
@@ -4332,10 +4269,8 @@ fn collect_corpus_gate_records() -> Vec<CorpusGateRecord> {
         failures.join("\n")
     );
     // NOT `into_inner()`: poison here means a worker unwound while holding the
-    // record set, so the classification is missing stems. Every ledger
-    // cross-check downstream compares this set against `tests/jit_gaps.txt` and
-    // `tests/jit_corpus_gate.txt`, and an absent stem silently drops a conflict —
-    // a partial corpus would read as agreement. Fail with the cause named.
+    // record set, so the classification is missing stems. A partial corpus
+    // would read as agreement. Fail with the cause named.
     let mut records = match records.lock() {
         Ok(records) => records.clone(),
         Err(poisoned) => panic!(
@@ -4370,63 +4305,32 @@ fn collect_corpus_gate_records() -> Vec<CorpusGateRecord> {
     records
 }
 
-/// #1509: the ledgers measure different things, so cross-check them.
+/// Live run-tier parity failures from the observed corpus gate.
 ///
-/// `tests/jit_gaps.txt` measures compile coverage and `tests/jit_corpus_gate.txt`
-/// measures run coverage. Nothing compared the two, so four comptime stems sat
-/// in `compile_covered:` and in the gate's `frontend_rejected:` at the same
-/// time — a real I9 run-tier parity failure that CI could not see.
-///
-/// A stem this file calls compile-covered may not also be a stem the gate
-/// records as failing at the run tier, unless `run_gaps:` names it and says why.
-/// Returns one message per conflict, quoting both ledger lines.
-fn ledger_conflicts(
-    compile_covered: &[String],
-    run_gaps: &[String],
-    gate: &[CorpusGateRecord],
-) -> Vec<String> {
-    let covered: std::collections::HashSet<&str> =
-        compile_covered.iter().map(String::as_str).collect();
-    let parked: std::collections::HashSet<&str> = run_gaps
+/// The retired hand ledger called these `run_gaps:` rows. Keep the name in the
+/// audit output, but derive it from the one run-tier observation instead of
+/// maintaining a second list.
+fn corpus_gate_run_gaps(records: &[CorpusGateRecord]) -> Vec<String> {
+    let mut gaps: Vec<String> = records
         .iter()
-        .map(|row| row.split_once(": ").map_or(row.as_str(), |(stem, _)| stem))
+        .filter(|record| {
+            matches!(
+                record.class,
+                CorpusGateClass::RunTierBroken | CorpusGateClass::TierDivergent
+            ) || (record.class == CorpusGateClass::DeoptInterp
+                && !record.detail.is_empty()
+                && !record.detail.starts_with("interpreter_refused: "))
+        })
+        .map(|record| {
+            if record.detail.is_empty() {
+                record.stem.clone()
+            } else {
+                format!("{}: {}", record.stem, record.detail)
+            }
+        })
         .collect();
-
-    let mut conflicts = Vec::new();
-    for record in gate {
-        // A run-tier failure is either a stem the gate could not put through the
-        // front end at all, or one that deopted to the interpreter carrying a
-        // diagnostic. A bare `deopt_interp:` row is a tier choice, not a failure.
-        let failing = match record.class {
-            CorpusGateClass::FrontendRejected => true,
-            CorpusGateClass::DeoptInterp => !record.detail.is_empty(),
-            _ => false,
-        };
-        if !failing
-            || !covered.contains(record.stem.as_str())
-            || parked.contains(record.stem.as_str())
-        {
-            continue;
-        }
-        let class = match record.class {
-            CorpusGateClass::FrontendRejected => "frontend_rejected",
-            _ => "deopt_interp",
-        };
-        let gate_line = if record.detail.is_empty() {
-            record.stem.clone()
-        } else {
-            format!("{}: {}", record.stem, record.detail)
-        };
-        conflicts.push(format!(
-            "{stem}: tests/jit_gaps.txt `compile_covered:` says `  {stem}`, but \
-             tests/jit_corpus_gate.txt `{class}:` says `  {gate_line}`. Compiled is not the \
-             same as runs. Fix the run tier, or park the stem in `run_gaps:` with the reason \
-             and the card that owes it.",
-            stem = record.stem,
-        ));
-    }
-    conflicts.sort();
-    conflicts
+    gaps.sort();
+    gaps
 }
 
 fn corpus_gate_manifest_from_records(records: &[CorpusGateRecord]) -> String {
@@ -4442,6 +4346,9 @@ fn corpus_gate_manifest_from_records(records: &[CorpusGateRecord]) -> String {
          # non-zero, so NO tier comparison ran for the stem. expected_exit means one thing\n\
          # and one thing only — the golden itself expects a non-zero exit. oracle_unavailable\n\
          # is a HOST fact (no rustc), so it carries no ratchet and says nothing about a stem.\n\
+         # A resident_jit or deopt_interp row may carry interpreter_refused: CODE.\n\
+         # That row has no interpreter output comparison. A resident_jit or\n\
+         # deopt_interp row without that detail does.\n\
          #\n\
          # That invariant is enforced, not merely stated (#2013). CORPUS_GATE_ROW_FLOOR\n\
          # and CORPUS_GATE_UNCLASSIFIED_CEILING in tests/dev_parts/support.rs pin how many\n\
@@ -4452,8 +4359,8 @@ fn corpus_gate_manifest_from_records(records: &[CorpusGateRecord]) -> String {
          # both with no run at all.\n\
          #\n\
          # Never hand-write a classification: a row states an OBSERVED tier. Regenerate with\n\
-         #   JET_DUMP_CORPUS_GATE=1 JET_WRITE_CORPUS_GATE=1 cargo test --test dev_corpus_gate \\\n\
-         #     example_corpus_strict_jit_aot_differential_gate -- --exact --nocapture\n\n",
+         #   JET_CORPUS_GATE_REPORT_DIR=jit-aot-parity-report JET_WRITE_CORPUS_GATE=1 \\\n\
+         #     bash tools/ci/jit-aot-parity.sh\n\n",
     );
     for class in CORPUS_GATE_SECTION_ORDER {
         let section = corpus_gate_section_name(&class);
@@ -4563,7 +4470,7 @@ fn parse_corpus_gate_manifest() -> Vec<CorpusGateRecord> {
 /// `resident_jit:` rows as current evidence about which tier runs a stem.
 ///
 /// This lives here, outside the file it guards, for the same reason
-/// `COMPILE_COVERED_FLOOR` does: a hand-edit cannot green the ledger by deleting
+/// its row floor does: a hand-edit cannot green the ledger by deleting
 /// the row that fails. A row that LEAVES is either a deleted example — lower this
 /// in the same diff as the deletion — or the defect this pins.
 const CORPUS_GATE_ROW_FLOOR: usize = 496;
@@ -4603,14 +4510,13 @@ const CORPUS_GATE_EXCLUDED_CEILING: usize = 12;
 ///
 /// Nothing here decides which section a stem belongs in. This check cannot and
 /// must not classify: a classification needs an observed run, and the rows this
-/// file's sibling `tests/jit_gaps.txt` carries were falsified three times by
-/// exactly the hand-edit that guessing here would invite. Regenerate the rows
+/// an earlier hand ledger was falsified three times by exactly the hand-edit
+/// that guessing here would invite. Regenerate the rows
 /// from an observation:
 ///
 /// ```text
-/// JET_DUMP_CORPUS_GATE=1 JET_WRITE_CORPUS_GATE=1 \
-///   cargo test --test dev_corpus_gate example_corpus_strict_jit_aot_differential_gate \
-///   -- --exact --nocapture
+/// JET_CORPUS_GATE_REPORT_DIR=jit-aot-parity-report JET_WRITE_CORPUS_GATE=1 \
+///   bash tools/ci/jit-aot-parity.sh
 /// ```
 fn assert_corpus_gate_manifest_covers_corpus() {
     let manifest = parse_corpus_gate_manifest();
@@ -4737,7 +4643,7 @@ struct CorpusGateLedgerAudit {
 /// stem the manifest forgot. Without that, "the ledger is complete" would rest on
 /// an assertion nothing ever watched fail — which is exactly how the sibling
 /// ledger stayed green through three falsifications (#1509 c4 keeps the same
-/// negative control over `ledger_conflicts`).
+/// negative control).
 fn audit_corpus_gate_ledger(
     manifest: &[CorpusGateRecord],
     corpus: &[String],
@@ -4849,7 +4755,8 @@ fn write_corpus_gate_report(records: &[CorpusGateRecord], elapsed: std::time::Du
          # resident_jit = native Cranelift; deopt_interp = tiered deopt to tier-0\n\
          # run_tier_broken = AOT-green but the default jet run refuses (D-VERDICT-1254-1)\n\
          # tier_divergent = both tiers ran and the named stream(s) disagree\n\
-         # parity = pure-interpreter + default tiered + optimized AOT identity\n",
+         # parity = pure-interpreter + default tiered + optimized AOT identity\n\
+         # only when the row has no interpreter_refused: CODE detail\n",
     );
     for record in records {
         let backend = corpus_gate_section_name(&record.class);
@@ -4866,7 +4773,9 @@ fn write_corpus_gate_report(records: &[CorpusGateRecord], elapsed: std::time::Du
     fs::write(
         dir.join("timing.txt"),
         format!(
-            "elapsed_ms={}\nelapsed_s={:.3}\n",
+            "shard_index={}\nshard_count={}\nelapsed_ms={}\nelapsed_s={:.3}\n",
+            corpus_gate_shard_config().map_or(-1_i32, |(index, _)| index as i32),
+            corpus_gate_shard_config().map_or(1, |(_, count)| count),
             elapsed.as_millis(),
             elapsed.as_secs_f64()
         ),
@@ -5135,9 +5044,9 @@ fn persist_binding_survives_hot_swap_and_resets_on_shape_change_inner() {
 
     jet_foundation::Persist::shared_clear();
 
-    write("#Persist counter := 0\nfn run() {\n    print(counter)\n}\n");
+    write("#Persist counter := 0\nfn run() {\n    counter += 1\n    print(counter)\n}\n");
     let v1 = load_checked(&path);
-    write("#Persist counter := 99\nfn run() {\n    print(counter)\n}\n");
+    write("#Persist counter := 99\nfn run() {\n    counter += 1\n    print(counter)\n}\n");
     let v2 = load_checked(&path);
     write("#Persist counter := true\nfn run() {\n    print(counter)\n}\n");
     let v3 = load_checked(&path);
@@ -5151,7 +5060,7 @@ fn persist_binding_survives_hot_swap_and_resets_on_shape_change_inner() {
             RunOutcome::Ran { stdout, .. } => stdout,
             RunOutcome::Problems(ds) => panic!("interp run failed: {ds:?}"),
         };
-        assert_eq!(out1, "0\n");
+        assert_eq!(out1, "1\n");
 
         let out2 = match backend.hot_swap("run", &v2, false) {
             Ok(RunOutcome::Ran { stdout, .. }) => stdout,
@@ -5159,8 +5068,8 @@ fn persist_binding_survives_hot_swap_and_resets_on_shape_change_inner() {
             Err(ds) => panic!("interp hot_swap failed: {ds:?}"),
         };
         assert_eq!(
-            out2, "0\n",
-            "compatible `#Persist` reload must keep prior Int value, not reinit to 99"
+            out2, "2\n",
+            "compatible `#Persist` reload must keep the mutated Int value, not reinit to 99"
         );
 
         let out3 = match backend.hot_swap("run", &v3, false) {
@@ -5178,7 +5087,7 @@ fn persist_binding_survives_hot_swap_and_resets_on_shape_change_inner() {
             RunOutcome::Problems(ds) => panic!("interp restart failed: {ds:?}"),
         };
         assert_eq!(
-            out4, "99\n",
+            out4, "100\n",
             "restart must clear persist and use the new initializer"
         );
     }
@@ -5196,7 +5105,7 @@ fn persist_binding_survives_hot_swap_and_resets_on_shape_change_inner() {
             RunOutcome::Ran { stdout, .. } => stdout,
             RunOutcome::Problems(ds) => panic!("jit run failed: {ds:?}"),
         };
-        assert_eq!(out1, "0\n");
+        assert_eq!(out1, "1\n");
 
         let out2 = match backend.hot_swap("run", &v2, false) {
             Ok(RunOutcome::Ran { stdout, .. }) => stdout,
@@ -5204,8 +5113,8 @@ fn persist_binding_survives_hot_swap_and_resets_on_shape_change_inner() {
             Err(ds) => panic!("jit hot_swap failed: {ds:?}"),
         };
         assert_eq!(
-            out2, "0\n",
-            "JIT hot_swap must keep `#Persist` Int across compatible reload"
+            out2, "2\n",
+            "JIT hot_swap must keep the mutated `#Persist` Int across compatible reload"
         );
 
         let out3 = match backend.hot_swap("run", &v3, false) {
@@ -5219,7 +5128,7 @@ fn persist_binding_survives_hot_swap_and_resets_on_shape_change_inner() {
             RunOutcome::Ran { stdout, .. } => stdout,
             RunOutcome::Problems(ds) => panic!("jit restart failed: {ds:?}"),
         };
-        assert_eq!(out4, "99\n");
+        assert_eq!(out4, "100\n");
     }
 
     jet_foundation::Persist::shared_clear();

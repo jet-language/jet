@@ -1,6 +1,6 @@
 # One run, one claim — the dev loop and testing as a single machine
 
-Combined first-principles audit: the dev loop (`jet run` / `dev` / `watch` / REPL / `jet debug`, JIT-as-dev-tier, deferred time travel) and testing/benchmarks (assertions, `#Test`, `#Bench`, Check Outputs, budgets). Date: 2026-08-07.
+Combined first-principles audit: the dev loop (`jet run` / `dev` / `watch` / REPL / `jet debug`, JIT-as-dev-tier, deferred time travel) and testing/measurements (assertions, `#Test`, measured claims, Check Outputs, budgets). Date: 2026-08-07.
 
 ## Executive summary
 
@@ -8,7 +8,7 @@ Jet already ships a strong dev loop and a strong test kit. The audit found that 
 
 The one idea: **Jet has one run and one claim. Verbs pick the observer of the run. Claims pick the inputs and the evidence grade. Nothing else may vary.**
 
-Why now. The landing zone is already ratified and unbuilt: D-REPORT-TEST1=A gives test failures the one report frame, D-FAIL-BREACH1=A binds `require` into the one stop family, D-CORE-PRELUDE1=A adds `assert`/`assert_eq`, D-PERFBUDGET-BENCHMIGRATE1 orders the bench prototypes deleted, D-ENTRY-SCRIPT1=B makes bare code runnable, and D-BENCH-PARITY1=B makes `jet bench` accept what `jet test` accepts. If those cards build on today's seams, they build seven coats again. If they build on one substrate, the whole area collapses into one small grid.
+Why now. The landing zone is already ratified and unbuilt: D-REPORT-TEST1=A gives test failures the one report frame, D-FAIL-BREACH1=A binds `require` into the one stop family, D-CORE-PRELUDE1=A adds `assert`/`assert_eq`, D-PERFBUDGET-BENCHMIGRATE1 orders the measurement prototypes deleted, D-ENTRY-SCRIPT1=B makes bare code runnable, and D-BENCH-PARITY1=B makes the test target accept the same claims in correctness and measurement modes. If those cards build on today's seams, they build seven coats again. If they build on one substrate, the whole area collapses into one small grid.
 
 What the ballots ask: one word for assertions (D-CLAIM-WORD1), benchmarks as measured tests — one marker, one verb (D-CLAIM-BENCH1), table-driven claims (D-CLAIM-CASES1), watch as a modifier on every runnable verb (D-RUN-WATCH1), one resident session with in-session keys (D-RUN-SESSION1), and the recording observer as the Epoch 6 time-travel on-ramp (D-RUN-RECORD1). D-RUN-LAW1 adopts the model itself. Each ballot stands alone, and every element lands on a rail a sibling audit already ratified — the report frame, the stop family, the settings plane, the member grammar, the script-mode entry law, the machine report shape — so nothing here founds a second mechanism.
 
@@ -23,12 +23,12 @@ One underlying thing, many coats. Each row is a place where the same job grew a 
 | 1 | State a runtime fact | `require` / `require_eq` (S43, `Syntax/math_layout.rs:610`) | `assert` / `assert_eq` ratified into the prelude (D-CORE-PRELUDE1=A, unbuilt) | Two ratified vocabularies for one job; no ruling retires either |
 | 2 | Report a failed fact | `jet_panic_rich(file, line, fn, caret, locals)` in normal code | `return Err(format!("left: {}, right: {}"))` under `jet test` (`Codegen/TIR/emit/helpers.rs:429-437`) | The test path drops file, line, caret, and locals — the poorer report goes to the person debugging |
 | 3 | Declare a runnable check | `#Test("name") { … }` | Output `.Check.{ entry: verify }` — both become `JetTestSlot` rows in the same generated main (`Codegen/mod.rs:2580,2587`) | Two spellings, one harness, nobody says so |
-| 4 | Time a region | `#Bench("name") { … }` | `#Test("name") { … }` — "identical structure to `TestDef`" (`AST/items.rs:814`) | Same node shape, separate marker, no members (`.setup` in `#Bench` is E0614) |
-| 5 | Enforce a perf limit | `#Bench` timing output | typed `Budget.{…}` rows; game budgets a separate path | Spec orders one path ("no second enforcement path may survive", `performance-budget-decisions.md:37`); the `bench_budget` prototype is already gone from code, but the ratified migration (D-PERFBUDGET-BENCHMIGRATE1=B, paired GAMEMIGRATE1) is unfinished |
+| 4 | Time a region | former benchmark claim | `#Test("name") { .measure { … } }` — "identical structure to `TestDef`" (`AST/items.rs:814`) | One marker family, with measurement as a member |
+| 5 | Enforce a perf limit | former timing output | typed `Budget.{…}` rows; game budgets a separate path | Spec orders one path ("no second enforcement path may survive", `performance-budget-decisions.md:37`); the `bench_budget` prototype is already gone from code, and the ratified migration (D-PERFBUDGET-BENCHMIGRATE1=B, paired GAMEMIGRATE1) is now shipped |
 | 6 | Say "check" | `jet check` (typecheck) | `.Check` Output, `jet fmt --check`, `jet os check`, `jet split env --check` | Five meanings; on a parse error `jet fmt --check` exits 2 where `jet check` exits 1 |
 | 7 | Collect the tests | Spec: "`jet test` auto-collects every `#Test` in the package" (S43) | Code scans the entry module only (`Source/lib.rs:1126,1140`; `Codegen/mod.rs:3025`) | Tests in imported modules silently do not run — the Zig trap Jet's own spec forbids |
 | 8 | Watch files and re-run | `Source/CmdDevTools.rs:64-117` (native) | `Source/CmdCompile.rs:2652-2680` (web) — same engine, loop copy-pasted | Two choreographies to keep in sync |
-| 9 | Benchmark honestly | Spec: "`jet bench` owns the optimized benchmark profile" (`spec.md:2235`) | Code passes `BuildProfile::Default` (`CmdDevTools.rs:2476,2584,2794`) | Numbers come from the wrong tier and nothing says so |
+| 9 | Measure honestly | Spec promises the optimized measurement profile (`spec.md:2235`) | Code passes `BuildProfile::Default` (`CmdDevTools.rs:2476,2584,2794`) | Numbers came from the wrong tier and nothing said so |
 | 10 | Compare against a stored value | `testing.golden(path, actual) -> Bool` (`FSIoEnvOsTesting.rs:964`) | `expect(value).snapshot()` with paths, update flow, missing-file message | The golden path folds "missing file", "unreadable", and "differs" into one `false` |
 | 11 | Run a package's tests | `jet test` | `jetpack test` — its body ends in `cmd_build` and runs no test (`trust_env_build.rs:918`) | A verb that lies |
 | 12 | Record and replay a run | `.jetproof-replay` (D-JREPLAY1=A, capture + `jet prove --replay`) | `.jetreplay` game recordings — disjoint by decree | Both exist; neither is reachable from `jet run`, `jet dev`, or `jet debug` |
@@ -50,7 +50,7 @@ The run grid — every dev verb is one row of "same run, different observer":
 | `jet run` | none | shipped |
 | `jet dev` | file watcher + resident session | shipped |
 | `jet test` | claim harness | shipped |
-| `jet bench` | measurer | shipped, wrong profile |
+| `jet test --measure` | measurer | shipped, optimized profile |
 | `jet debug` | stepper | shipped |
 | `jet repl` / notebook | prompt | shipped |
 | `--record` | recorder | ratified capture format, reachable only under `jet prove` |
@@ -59,12 +59,12 @@ The claim grid — every check is one cell of "who supplies inputs × what evide
 
 | Inputs from | Construct today | Evidence word (ratified) |
 |-------------|-----------------|--------------------------|
-| the caller, at runtime | `require(...)` in code; `#Pre`/`#Post` contracts (D-FAIL-TIER1) | observed |
+| the caller, at runtime | `assert(...)` in code; `#Pre`/`#Post` contracts (D-FAIL-TIER1) | observed |
 | the author, as literals | `#Test("name") { … }`; `.Check` Output entry | passed / failed |
 | the docs | `/// ```jet` doctest, `// => VALUE` | passed |
 | a generator | `#Test fn prop(xs: [Int])` property tests; `jet fuzz` corpus | passed (sampled) |
 | a stored artifact | `expect(...).snapshot()`, `testing.golden` | passed |
-| a measurement | `#Bench` region + `Budget.{…}` limit | met |
+| a measurement | `#Test` `.measure` member + `Budget.{…}` limit | met |
 | the prover | range/refinement facts; erased contracts | proved |
 
 Everything on both grids already exists. The proposal deletes the seams between the cells, not any cell.
@@ -94,7 +94,7 @@ Before (two vocabularies, both law):
 
 ```jet
 fn withdraw(amount: Int) {
-    require(amount > 0, "amount must be positive")   // S43 spelling
+    assert(amount > 0, "amount must be positive")   // S43 spelling
 }
 
 #Test("withdraw rejects zero") {
@@ -135,7 +135,7 @@ double returns twice the input: FAIL (0.2 ms)
 Stop [E3001]: expected 6, got 7
   --> app.jet:13:5
    |
-13 |     require_eq(double(3), 7)
+13 |     assert_eq(double(3), 7)
    |     ^^^^^^^^^^^^^^^^^^^^^^^^
    |
 2 passed, 1 failed
@@ -148,21 +148,23 @@ The same substrate gives `jet test --json` (D-REPORT-MACHINE1=A owns the shape),
 
 ### Benchmarks are measured tests — ballot D-CLAIM-BENCH1
 
-The code already says it: a `#Bench` body "type-checks exactly like a `#Test` body". The model says why: a benchmark is a claim whose evidence is a measurement and whose limit is a `Budget`. Taken seriously, that means the second marker and the second verb both go. A measured test is still a test — it is spelled as one, collected as one, and reported as one. Measuring is a member (`.measure`), because D-DOTSCOPE1 already ratified members as the only spelling for scope vocabulary and says new members are API decisions, not syntax ones.
+The code already says it: a former benchmark body "type-checks exactly like a `#Test` body". The model says why: a benchmark is a claim whose evidence is a measurement and whose limit is a `Budget`. Taken seriously, the separate marker and verb go. A measured test is still a test — it is spelled as one, collected as one, and reported as one. Measuring is a member (`.measure`), because D-DOTSCOPE1 already ratified members as the only spelling for scope vocabulary and says new members are API decisions, not syntax ones.
 
-Before (today — a second marker, no members allowed, a second verb on the wrong profile):
+Before (retired — a second marker, no members allowed, a second verb on the wrong profile):
 
 ```jet
-#Bench("parse") {
-    parse(load_fixture())        // setup cost pollutes the measurement
+#Test("parse") {
+    .measure {
+        parse(load_fixture())    // setup cost pollutes the measurement
+    }
 }
 ```
 
 ```
-$ jet bench app.jet              # BuildProfile::Default — spec promises optimized
+$ jet test --measure app.jet     # BuildProfile::Default — spec promises optimized
 ```
 
-After (proposed — one marker, one verb; `.measure` marks the claim as measured):
+After (shipped — one marker, one verb; `.measure` marks the claim as measured):
 
 ```jet
 use core.testing as testing
@@ -180,9 +182,9 @@ $ jet test app.jet --measure     # measurement mode: warmups, iterations, optimi
 parse stays fast   142.1 ns/iter (±3.4)   7,036,000 ops/sec   [aot, optimized]
 ```
 
-Plain `jet test` runs a measured claim once — a measured test that crashes is a failing test, caught before any timing happens. `--measure` is the measurer observer: warmups, auto-scaled iterations, the optimized profile the spec already promises, and the tier labeled in every line and artifact. Enforcement is only ever a `Budget` row (ratified direction: D-PERFBUDGET-BENCHMIGRATE1=B and its paired game-budget decision, D-PERFBUDGET-GAMEMIGRATE1); the `Budget` scope spelling `.Bench("parse")` migrates with the marker. D-BENCH-PARITY1=B (bench accepts what test accepts) is subsumed — one verb cannot disagree with itself.
+Plain `jet test` runs a measured claim once — a measured test that crashes is a failing test, caught before any timing happens. `--measure` is the measurer observer: warmups, auto-scaled iterations, the optimized profile the spec already promises, and the tier labeled in every line and artifact. Enforcement is only ever a `Budget` row (ratified direction: D-PERFBUDGET-BENCHMIGRATE1=B and its paired game-budget decision); the `Budget` scope spelling `.Test("parse")` travels with the claim. D-BENCH-PARITY1=B is subsumed — one verb cannot disagree with itself.
 
-Options: **A** — `.measure` member; `#Bench` and `jet bench` both retire; `jet test --measure` is measurement mode (recommended — the model's own spelling). **B** — `.measure` member; `#Bench` retires but `jet bench` survives as sugar for `jet test --measure`. **C** — keep `#Bench` as a marker that is sugar for a measured test. **D** — status quo plus the profile fix and tier label only.
+Options: **A** — `.measure` member; the former marker and command retire; `jet test --measure` is measurement mode (recommended — the model's own spelling). **B** — `.measure` member; the former marker retires but a compatibility command survives as sugar for `jet test --measure`. **C** — keep a separate marker as sugar for a measured test. **D** — status quo plus the profile fix and tier label only.
 
 ### The claim grammar — one construct, one extension axis
 
@@ -206,9 +208,9 @@ The missing cell the sweep found: table-driven tests. The surface-frequency audi
 Before (today — copy the block or hand-roll a loop that dies at the first failure):
 
 ```jet
-#Test("round half up") { require_eq(round(1.5), 2) }
-#Test("round half down stays") { require_eq(round(1.4), 1) }
-#Test("round negative half") { require_eq(round(-1.5), -2) }
+#Test("round half up") { assert_eq(round(1.5), 2) }
+#Test("round half down stays") { assert_eq(round(1.4), 1) }
+#Test("round negative half") { assert_eq(round(-1.5), -2) }
 ```
 
 After (proposed — one claim, three rows, each row reported on its own line):
@@ -220,7 +222,7 @@ After (proposed — one claim, three rows, each row reported on its own line):
         .{ give: 1.4,  want: 1 },
         .{ give: -1.5, want: -2 },
     ])
-    require_eq(round(case.give), case.want)
+    assert_eq(round(case.give), case.want)
 }
 ```
 
@@ -261,7 +263,7 @@ $ jet test app.jet --watch                               (proposed)
 2 passed
 ```
 
-Options: **A** — `--watch` on run/test/bench/check; `jet dev` stays the resident session verb (recommended; respects D-CLI-DEVSERVE1=A). **B** — fold watching entirely into `jet dev` lenses (`jet dev --test`); plain verbs never watch. **C** — status quo (watch on run/dev only). Internal to every option: the duplicated web watch loop dies; one choreography serves native and web.
+Options: **A** — `--watch` on run/test/check; `jet dev` stays the resident session verb (recommended; respects D-CLI-DEVSERVE1=A). **B** — fold watching entirely into `jet dev` lenses (`jet dev --test`); plain verbs never watch. **C** — status quo (watch on run/dev only). Internal to every option: the duplicated web watch loop dies; one choreography serves native and web.
 
 ### One session, in-session verbs — ballot D-RUN-SESSION1
 
@@ -320,7 +322,7 @@ hello
 fn double(n: Int) => Int { n * 2 }
 
 #Test("double returns twice the input") {
-    require_eq(double(3), 6)
+    assert_eq(double(3), 6)
 }
 ```
 
@@ -350,7 +352,7 @@ print(price(14))
 
 #Test("price scales") {
     .cases([ .{ give: 2, want: 6 }, .{ give: 0, want: 0 } ])
-    require_eq(price(case.give), case.want)
+    assert_eq(price(case.give), case.want)
 }
 
 #Test("price hot path") {
@@ -396,7 +398,7 @@ one program (I9: one meaning on every tier)
 │     --record=        recorder (.jetproof-replay)
 │
 └── the claim ──────── inputs × evidence ──────────────────────
-      require(x)       caller      → observed
+      assert(x)       caller      → observed
       #Test            author      → passed
       #Test .cases     table       → passed (one line per row)
       /// doctest      docs        → passed
@@ -415,7 +417,7 @@ one program (I9: one meaning on every tier)
 
 **Critical software.** The claim grid ends at `proved`; the same `require` a beginner writes is the fact an expert later discharges statically. Nothing is rewritten to climb the ladder.
 
-**Performance work.** Honest benches (right profile, labeled tier, deterministic budget gates) end the "numbers from the wrong tier" class of error permanently.
+**Performance work.** Honest measurements (right profile, labeled tier, deterministic budget gates) end the "numbers from the wrong tier" class of error permanently.
 
 **Epoch 6.** Time travel lands on a shipped recorder and a mature debugger, exactly as its deferral demanded — instead of starting from zero.
 
@@ -435,7 +437,7 @@ one program (I9: one meaning on every tier)
 |--------|----------|-------------------------------|--------|
 | D-RUN-LAW1 | Adopt "one run, one claim" as the law of this domain? | A adopt / B dev-loop half only / C testing half only / D decline | none (names the model) |
 | D-CLAIM-WORD1 | One assertion word? | B `assert` family / A `require` family / C fresh `claim` family / D keep both | A: D-CORE-PRELUDE1. B/C: S43, D-PRELUDE-LAW1, D-FAIL-BREACH1 wording |
-| D-CLAIM-BENCH1 | Benchmarks are measured tests? | A `.measure` member, retire `#Bench` and `jet bench` / B `.measure`, keep `jet bench` as sugar / C keep `#Bench` as sugar / D status quo + profile fix | D-BENCH-MARKER1=A, D-BENCH1 wording; subsumes D-BENCH-PARITY1=B; completes D-PERFBUDGET-BENCHMIGRATE1=B and GAMEMIGRATE1; fixes spec.md:2235 drift |
+| D-CLAIM-BENCH1 | Benchmarks are measured tests? | A `.measure` member, retire the former marker and command / B `.measure` plus compatibility command / C keep a separate marker / D status quo + profile fix | D-BENCH-MARKER1=A, D-BENCH1 wording; subsumes D-BENCH-PARITY1=B; completes D-PERFBUDGET-BENCHMIGRATE1=B and GAMEMIGRATE1; fixes spec.md:2235 drift |
 | D-CLAIM-CASES1 | Table-driven claims via `.cases` with ambient `case`? | A adopt `.cases` + ambient `case` / B `.cases` with an explicit parameter name / C decline (literals and generators only) | none — rides D-DOTSCOPE1 ("addition is an API decision") and the D-FAIL-BIND1 ambient-binding precedent |
 | D-RUN-WATCH1 | Watch as a modifier on every runnable verb? | A `--watch` everywhere + `jet dev` stays / B fold into `jet dev` lenses / C status quo | none (extends D-CLI-BARE1 pattern) |
 | D-RUN-SESSION1 | One resident session with in-session keys and attaching tools? | A full session model / B keys only / C status quo | none |
@@ -447,6 +449,6 @@ Defect cards (no owner decision needed): package-wide claim collection; test-fra
 
 **Phase A — one substrate, no surface change.** One watch choreography for native/web/canvas. One harness substrate under `#Test` + Checks. Test failures render the one report frame (ratified debt). Package-wide collection. Honest golden/fixture errors. `ExitCodes` everywhere. All tests green; user-visible output changes only where ratified law already demanded it.
 
-**Phase B — land the ratified-but-unbuilt on the substrate.** Script mode (the repl/notebook/entry law). Prelude additions as resolved by D-CLAIM-WORD1. Bench parity (#1452) and the optimized, labeled bench profile. `--json` on test/bench via the D-REPORT machine shape. Built once, on one substrate.
+**Phase B — land the ratified-but-unbuilt on the substrate.** Script mode (the repl/notebook/entry law). Prelude additions as resolved by D-CLAIM-WORD1. Test/measurement parity (#1452) and the optimized, labeled measurement profile. `--json` on test via the D-REPORT machine shape. Built once, on one substrate.
 
-**Phase C — the balloted surface.** The claim-word migration across every example and doc. The `#Bench` unification. `--watch` on test/bench/check with affected-only honesty. Session keys and attaching tools. `--record`/`--replay` on user verbs. Each is a coherent greenfield migration that deletes the replaced form.
+**Phase C — the balloted surface.** The claim-word migration across every example and doc. The measured-claim unification. `--watch` on test/check with affected-only honesty. Session keys and attaching tools. `--record`/`--replay` on user verbs. Each is a coherent greenfield migration that deletes the replaced form.

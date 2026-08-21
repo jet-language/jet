@@ -5,6 +5,152 @@ mod tir_support;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 
+const MEMORY_DENIAL_SOURCE: &str = r#"
+fn run() :[!Mem.Alloc]> {
+    print("memory denial")
+}
+"#;
+
+const MEMORY_COMPTIME_SOURCE: &str = r#"
+@answer :: "memory denial"
+
+fn run() :[!Mem.Alloc]> {
+    print(@answer)
+}
+"#;
+
+#[test]
+fn memory_denial_parser_keeps_the_canonical_effect_row() {
+    let (tokens, lexer_diagnostics) = jet::Lexer::lex(MEMORY_DENIAL_SOURCE);
+    assert!(lexer_diagnostics.is_empty(), "lex: {lexer_diagnostics:?}");
+    let program = jet::Parser::parse(&tokens).expect("memory denial source parses");
+    let function = program
+        .items
+        .iter()
+        .find_map(|item| match item {
+            jet::AST::Item::Func(function) if function.name == "run" => Some(function),
+            _ => None,
+        })
+        .expect("run function");
+    let effects = function
+        .declared_effects
+        .as_ref()
+        .expect("declared denial row")
+        .iter()
+        .map(|(name, _)| name.as_str())
+        .collect::<Vec<_>>();
+    assert_eq!(effects, vec!["!Mem.Alloc"]);
+
+    let (tokens, lexer_diagnostics) = jet::Lexer::lex("fn run() :[Mem.Alloc(above: 1)]> {}");
+    assert!(lexer_diagnostics.is_empty(), "lex positive row: {lexer_diagnostics:?}");
+    let diagnostics = jet::Parser::parse(&tokens).expect_err("bounded rights are denial-only");
+    assert!(diagnostics.iter().any(|diagnostic| {
+        diagnostic.code == "E0119" && diagnostic.fix.contains("!Mem.Alloc(above: 1)")
+    }));
+}
+
+#[test]
+fn memory_denial_sema_and_tir_share_one_erased_contract() {
+    let compiled = jet::compile(MEMORY_DENIAL_SOURCE).expect("memory denial source compiles");
+    assert!(!compiled.rust.contains("!Mem.Alloc"));
+}
+
+#[test]
+fn parameterized_memory_rights_are_denials_not_positive_effects() {
+    let error = jet::Package::PackageFacts::parse(
+        "name: \"memory\"\nversion: \"0.1.0\"\nauthority: .{ holds: { allow: [Mem.Alloc(above: 65536)] } }\n",
+        "test",
+    )
+    .expect_err("a bounded memory right must be a denial");
+    assert!(matches!(
+        error,
+        jet::Package::PackageParseError::BadEffectsBlock(detail)
+            if detail.contains("authority.holds.deny")
+    ));
+}
+
+#[test]
+fn manifest_memory_denial_reaches_the_same_sema_fact_pass() {
+    let root = common::unique_tmp("jet_manifest_memory_denial");
+    std::fs::create_dir_all(&root).unwrap();
+    std::fs::write(
+        root.join("package.jet"),
+        "name: \"memory\"\nversion: \"0.1.0\"\nauthority: .{ holds: { deny: [Mem.Alloc] } }\n",
+    )
+    .unwrap();
+    std::fs::write(root.join("main.jet"), "fn run() { print(\"frame {1}\") }\n").unwrap();
+    let mut bundle = jet::Loader::load_entry(root.join("main.jet").to_str().unwrap()).unwrap();
+    assert_eq!(bundle.package_guarantees.memory_denials, vec!["Mem.Alloc"]);
+    let diagnostics = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
+    assert!(
+        diagnostics.iter().any(|diagnostic| diagnostic.code == "E0921"),
+        "manifest denial did not reach the memory fact pass: {diagnostics:#?}"
+    );
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
+fn memory_denial_matches_aot_jit_and_interpreter() {
+    tir_support::assert_tiers_agree("memory-denial-parity", MEMORY_DENIAL_SOURCE, "memory denial\n");
+}
+
+#[test]
+fn memory_denial_example_matches_all_hosted_tiers() {
+    tir_support::assert_example_cli_tiers_agree(
+        "memory/effect_denials",
+        include_str!("../examples/features/expected/memory/effect_denials.out"),
+    );
+}
+
+#[test]
+fn memory_denial_matches_the_dev_interpreter_path() {
+    let root = common::unique_tmp("jet_memory_denial_dev");
+    std::fs::create_dir_all(&root).unwrap();
+    let entry = root.join("main.jet");
+    std::fs::write(&entry, MEMORY_DENIAL_SOURCE).unwrap();
+    let output = Command::new(jet())
+        .args(["dev", entry.to_str().unwrap(), "--interpret", "--watch=off"])
+        .current_dir(&root)
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "dev rejected the memory denial source: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(String::from_utf8_lossy(&output.stdout), "memory denial\n");
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
+fn memory_denial_matches_comptime() {
+    let compiled = jet::compile(MEMORY_COMPTIME_SOURCE).expect("comptime source compiles");
+    assert!(compiled.rust.contains("memory denial"));
+}
+
+#[test]
+fn memory_denial_matches_repl() {
+    let transcript = jet::REPL::run_transcript(
+        &[
+            "fn denied() :[!Mem.Alloc]> { print(\"memory denial\") }",
+            "denied()",
+        ],
+        None,
+    );
+    assert!(transcript.contains("memory denial"), "REPL lost the denial program: {transcript}");
+    assert!(!transcript.contains("E0921"), "REPL changed a valid denial into a diagnostic: {transcript}");
+}
+
+#[test]
+fn memory_denial_matches_web_lowering() {
+    let compiled = jet::compile_web_with_path(
+        MEMORY_DENIAL_SOURCE,
+        "tests/fixtures/memory_denial_web.jet",
+    )
+    .expect("web accepts the memory denial source");
+    assert!(compiled.web.is_some(), "web lowering produced no artifact");
+}
 
 fn jet() -> PathBuf {
     PathBuf::from(env!("CARGO_BIN_EXE_jet"))

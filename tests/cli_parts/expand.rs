@@ -390,15 +390,15 @@ fn expand_json_selected_empty_and_positions_are_proved() {
 
     let memory = Command::new(jet())
         .args(["inspect", "expand", "--facts", "memory", "--json"])
-        .arg(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("examples/features/memory/no_alloc_policy.jet"))
+        .arg(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("examples/features/memory/effect_denials.jet"))
         .env("NO_COLOR", "1")
         .output()
         .unwrap();
     assert_eq!(memory.status.code(), Some(0));
     let memory_json = String::from_utf8_lossy(&memory.stdout);
     assert!(parse_json(&memory_json).is_ok());
-    assert!(memory_json.contains("\"fact\":\"no_alloc\""));
-    assert!(memory_json.contains("\"line\":5"), "memory fact location missing: {memory_json}");
+    assert!(memory_json.contains("\"fact\":\"!Mem.Alloc\""));
+    assert!(memory_json.contains("\"line\":4"), "memory fact location missing: {memory_json}");
 
     let web = Command::new(jet())
         .args(["inspect", "expand", "--facts", "web", "--json"])

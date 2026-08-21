@@ -274,6 +274,30 @@ pub(super) fn collect_select_arms(builder: &TExpr, cx: &Cx) -> (Vec<String>, Vec
     (recvs, afters)
 }
 
+/// Collect only Duration expressions from a readiness wait, preserving source
+/// arm order. The tagged Prelude door owns the ns-to-scheduler-time conversion.
+pub(super) fn collect_select_after_durations(builder: &TExpr, cx: &Cx) -> Vec<String> {
+    let mut durations = Vec::new();
+    let mut cur = builder;
+    loop {
+        match &cur.kind {
+            TExprKind::SelectStart => break,
+            TExprKind::SelectRecv { builder: inner, .. }
+            | TExprKind::SelectRead { builder: inner, .. } => cur = inner,
+            TExprKind::SelectAfter {
+                builder: inner,
+                duration,
+                ..
+            } => {
+                durations.push(format!("({}).ns", emit_tir_expr(duration, cx)));
+                cur = inner;
+            }
+            _ => break,
+        }
+    }
+    durations
+}
+
 /// D-SWIZZLE1: render a read swizzle as lane extract(s) and optional `VecN` ctor.
 pub(super) fn emit_math_swizzle_read(cx: &Cx, type_name: &str, recv: &TExpr, lanes: &[u8]) -> String {
     let r = emit_tir_expr(recv, cx);

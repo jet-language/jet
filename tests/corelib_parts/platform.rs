@@ -267,7 +267,7 @@ fn run() {
         mode: .Raw
     }
     plan :: process.cmd(["echo", "hi"]).terminal(policy)
-    facts :: plan.capabilities()
+    facts :: plan.abilities()
     print(facts.has(TerminalFact.terminal))
     print(facts.has(TerminalFact.resize))
     print(facts.has(TerminalFact.raw))
@@ -298,7 +298,7 @@ fn run() {
     let typo = jet::compile(
         r#"use core.process as process
 fn run() {
-    facts :: process.cmd(["echo", "x"]).capabilities()
+    facts :: process.cmd(["echo", "x"]).abilities()
     print(facts.has(TerminalFact.reszie))
 }
 "#,
@@ -316,7 +316,7 @@ fn run() {
     let preview_typo = jet::compile(
         r#"use core.process as process
 fn run() {
-    facts :: process.cmd(["echo", "x"]).capabilities()
+    facts :: process.cmd(["echo", "x"]).abilities()
     print(facts.has("reszie"))
 }
 "#,

@@ -1047,8 +1047,7 @@ fn is_zed_anonymous_word_token(s: &str) -> bool {
     // makes the whole Jet language fail to load.
     matches!(
         s,
-        "Bench"
-            | "Bool"
+        "Bool"
             | "Char"
             | "Err"
             | "F32"

@@ -1040,7 +1040,6 @@ fn collect_capture_statements(
             | Stmt::Policy { body, .. }
             | Stmt::Layout { body, .. }
             | Stmt::Caps { body, .. }
-            | Stmt::Grant { body, .. }
             | Stmt::ComptimeBlock { body, .. }
             | Stmt::Transact { body, .. } => {
                 collect_capture_statements(body, aliases, local_functions, sites)

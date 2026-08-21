@@ -1,8 +1,7 @@
-Error [E0921]: `shared` introduces reference-counted ownership at tests/ui/zero_rc_policy_violation.jet violates the effective `zero_rc` declared at tests/ui/zero_rc_policy_violation.jet
+Error [E0921]: `shared` introduces reference-counted ownership at tests/ui/zero_rc_policy_violation.jet violates the effective `!Mem.Rc` declared at tests/ui/zero_rc_policy_violation.jet
   --> tests/ui/zero_rc_policy_violation.jet:2:15
     |
   2 |     handle :: shared 1
     |               ^^^^^^
- Why: tests/ui/zero_rc_policy_violation.jet is reachable through zero_rc_policy_violation::run -> zero_rc_policy_violation::make_shared from code governed by `zero_rc`; declaration provenance: zero_rc = true
-  [effective] function true at tests/ui/zero_rc_policy_violation.jet:82..98; operation provenance: make_shared in tests/ui/zero_rc_policy_violation.jet
- Fix: remove or replace the incompatible operation, call an implementation whose transitive memory facts satisfy the contract, or move the call outside this policy scope
+ Why: tests/ui/zero_rc_policy_violation.jet is reachable through zero_rc_policy_violation::run -> zero_rc_policy_violation::make_shared from code governed by `!Mem.Rc`; declaration provenance: signature denial `:[!Mem.Rc]>` in tests/ui/zero_rc_policy_violation.jet
+ Fix: remove or replace the incompatible operation, seal the target set, or move the call outside this denial

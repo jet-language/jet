@@ -50,7 +50,7 @@ const UI_PARSE_INVALID: &[&str] = &[
     "tests/ui/dispatch_missing_eq.jet",
     "tests/ui/dispatch_pattern_needs_eq.jet",
     "tests/ui/dispatch_redundant_subject.jet",
-    "tests/ui/dotless_struct_e0320.jet",
+    "tests/ui/dotted_literal_e0320.jet",
     "tests/ui/dunder_marker_not_generated.jet",
     "tests/ui/dunder_reserved.jet",
     "tests/ui/effect_arrow_retired.jet",
@@ -166,8 +166,8 @@ const UI_PARSE_INVALID: &[&str] = &[
     "tests/ui/retired_void_result.jet",
     "tests/ui/return_arrow_split.jet",
     "tests/ui/root_param_shape.jet",
-    "tests/ui/schedule_every_without_task.jet",
-    "tests/ui/schedule_task_on_method.jet",
+    "tests/ui/schedule_every_without_job.jet",
+    "tests/ui/job_on_method.jet",
     "tests/ui/shared_retired_constructor.jet",
     "tests/ui/shield_arguments.jet",
     "tests/ui/single_bracket_marker.jet",
@@ -242,15 +242,16 @@ fn collect_matching_jet_files(dir: &PathBuf, out: &mut Vec<PathBuf>) {
     }
 }
 
-// The loss oracle is ordered and exact after these parser-equivalent rewrites:
+// The loss oracle is ordered and exact after parser-equivalent rewrites:
 // top-level formatter ordering; marker-list grouping; `Type<T>.method()`;
 // external-method sugar; canonical anonymous-union member order;
-// optional declaration/trailing commas; redundant default file aliases. The
-// comparator itself permits only formatter-added arm blocks, bare-lambda parens,
-// leading-dot variant patterns, struct shorthand labels/separators, and a
-// required default alias on a dotted module import. No rule can reorder or
-// discard an expression operand, operator, marker payload, comment, or string
-// interpolation.
+// optional declaration/trailing commas; redundant default file aliases;
+// typed-literal constructor dot removal; and arrow unification. The
+// comparator permits only those named rewrites plus formatter-added arm blocks,
+// bare-lambda parens, leading-dot variant patterns, struct shorthand
+// labels/separators, and a required default alias on a dotted module import.
+// No rule can reorder or discard an expression operand, operator, marker
+// payload, comment, or string interpolation.
 fn canonical_tokens(src: &str, path: &std::path::Path) -> Vec<Token> {
     let (tokens, diagnostics) = jet::Lexer::lex(src);
     assert!(
@@ -456,11 +457,6 @@ fn file_chunk_category(chunk: &[Token]) -> usize {
         }
         [TokKind::Hash, TokKind::Ident(name), ..]
             if matches!(name.as_str(), jet::Syntax::MARKER_TARGET | jet::Syntax::MARKER_HTML) =>
-        {
-            2
-        }
-        [TokKind::Hash, TokKind::Ident(policy), TokKind::LParen, TokKind::Ident(no_alloc), ..]
-            if policy == jet::Syntax::MARKER_POLICY && no_alloc == jet::Syntax::POLICY_NO_ALLOC =>
         {
             2
         }
@@ -748,7 +744,7 @@ fn plain_string_value(parts: &[StrTokPart]) -> Option<String> {
 fn token_kinds_equal(left: &TokKind, right: &TokKind) -> bool {
     match (left, right) {
         (TokKind::Str(left), TokKind::Str(right)) => string_parts_equal(left, right),
-        // D-BINPAT1 / D-UNIFYLIT1=A: `[U8].{"…"}` binary patterns are ordinary
+        // D-BINPAT1 / D-UNIFYLIT1=A: `[U8]{"…"}` binary patterns are ordinary
         // `Str` parts inside a typed literal, so the `Str` arm already covers them.
         _ => left == right,
     }
@@ -762,16 +758,19 @@ fn string_parts_equal(left: &[StrTokPart], right: &[StrTokPart]) -> bool {
                 let left: Vec<_> = left
                     .iter()
                     .filter(|token| !matches!(token.kind, TokKind::Semi | TokKind::Eof))
+                    .cloned()
                     .collect();
                 let right: Vec<_> = right
                     .iter()
                     .filter(|token| !matches!(token.kind, TokKind::Semi | TokKind::Eof))
+                    .cloned()
                     .collect();
-                left.len() == right.len()
-                    && left
-                    .iter()
-                    .zip(right)
-                    .all(|(left, right)| token_kinds_equal(&left.kind, &right.kind))
+                ordered_token_diff(
+                    std::path::Path::new("<string interpolation>"),
+                    &left,
+                    &right,
+                )
+                .is_ok()
             }
             _ => false,
         })
@@ -834,6 +833,17 @@ fn ordered_token_diff(
             formatted_i = next_formatted;
             continue;
         }
+        if let Some((next_original, next_formatted)) =
+            canonical_arrow_rewrite(original, original_i, formatted, formatted_i)
+        {
+            original_i = next_original;
+            formatted_i = next_formatted;
+            continue;
+        }
+        if typed_literal_dot_rewrite(original, original_i, formatted, formatted_i) {
+            original_i += 1;
+            continue;
+        }
         if formatted_arm_block_opens(formatted, formatted_i)
             && !matches!(original.get(original_i).map(|t| &t.kind), Some(TokKind::LBrace))
         {
@@ -856,11 +866,11 @@ fn ordered_token_diff(
             && matches!(formatted.get(formatted_i).map(|t| &t.kind), Some(TokKind::RParen))
             && matches!(
                 formatted.get(formatted_i + 1).map(|t| &t.kind),
-                Some(TokKind::LambdaArrow)
+                Some(TokKind::UnifiedArrow | TokKind::LambdaArrow | TokKind::Arrow)
             )
             && matches!(
                 original.get(original_i).map(|t| &t.kind),
-                Some(TokKind::LambdaArrow)
+                Some(TokKind::UnifiedArrow | TokKind::LambdaArrow | TokKind::Arrow)
             )
         {
             inserted_lambda_parens -= 1;
@@ -934,6 +944,100 @@ fn reordered_simple_union_type(
     original_members.sort();
     formatted_members.sort();
     (original_members == formatted_members).then_some((next_original, next_formatted))
+}
+
+fn canonical_arrow_rewrite(
+    original: &[Token],
+    original_i: usize,
+    formatted: &[Token],
+    formatted_i: usize,
+) -> Option<(usize, usize)> {
+    if matches!(
+        original.get(original_i).map(|token| &token.kind),
+        Some(TokKind::Arrow | TokKind::LambdaArrow)
+    ) && matches!(
+        formatted.get(formatted_i).map(|token| &token.kind),
+        Some(TokKind::UnifiedArrow)
+    ) {
+        return Some((original_i + 1, formatted_i + 1));
+    }
+
+    if !matches!(
+        original.get(original_i).map(|token| &token.kind),
+        Some(TokKind::Eq)
+    ) || !matches!(
+        formatted.get(formatted_i).map(|token| &token.kind),
+        Some(TokKind::Colon)
+    ) {
+        return None;
+    }
+    if !matches!(
+        original.get(original_i + 1).map(|token| &token.kind),
+        Some(TokKind::LBracket)
+    ) || !matches!(
+        formatted.get(formatted_i + 1).map(|token| &token.kind),
+        Some(TokKind::LBracket)
+    ) {
+        return None;
+    }
+    let original_close = matching_bracket_end(original, original_i + 1)?;
+    let formatted_close = matching_bracket_end(formatted, formatted_i + 1)?;
+    if original_close - original_i != formatted_close - formatted_i
+        || !original[original_i + 2..original_close]
+            .iter()
+            .zip(&formatted[formatted_i + 2..formatted_close])
+            .all(|(left, right)| token_kinds_equal(&left.kind, &right.kind))
+        || !matches!(
+            original.get(original_close + 1).map(|token| &token.kind),
+            Some(TokKind::LambdaArrow)
+        )
+        || !matches!(
+            formatted.get(formatted_close + 1).map(|token| &token.kind),
+            Some(TokKind::UnifiedArrow)
+        )
+    {
+        return None;
+    }
+    Some((original_close + 2, formatted_close + 2))
+}
+
+fn matching_bracket_end(tokens: &[Token], open: usize) -> Option<usize> {
+    let mut depth = 0usize;
+    for (index, token) in tokens.iter().enumerate().skip(open) {
+        match token.kind {
+            TokKind::LBracket => depth += 1,
+            TokKind::RBracket => {
+                depth -= 1;
+                if depth == 0 {
+                    return Some(index);
+                }
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
+fn typed_literal_dot_rewrite(
+    original: &[Token],
+    original_i: usize,
+    formatted: &[Token],
+    formatted_i: usize,
+) -> bool {
+    if !matches!(
+        original.get(original_i).map(|token| &token.kind),
+        Some(TokKind::Dot)
+    ) {
+        return false;
+    }
+    let Some(original_body) = original.get(original_i + 1) else {
+        return false;
+    };
+    let Some(formatted_body) = formatted.get(formatted_i) else {
+        return false;
+    };
+    matches!(original_body.kind, TokKind::LBrace | TokKind::Str(_))
+        && token_kinds_equal(&original_body.kind, &formatted_body.kind)
 }
 
 fn simple_union_type_annotation(tokens: &[Token], start: usize) -> bool {
@@ -1075,7 +1179,7 @@ fn same_brace_scope_has_if(tokens: &[Token], before: usize) -> bool {
     for token in tokens[..before].iter().rev() {
         match token.kind {
             TokKind::KwIf => return true,
-            TokKind::LBrace | TokKind::RBrace | TokKind::Arrow => return false,
+            TokKind::LBrace | TokKind::RBrace | TokKind::UnifiedArrow | TokKind::Arrow | TokKind::LambdaArrow => return false,
             _ => {}
         }
     }
@@ -1091,7 +1195,8 @@ fn pattern_reaches_arrow(tokens: &[Token], index: usize) -> bool {
             TokKind::RParen if paren_depth > 0 => paren_depth -= 1,
             TokKind::LBracket => bracket_depth += 1,
             TokKind::RBracket if bracket_depth > 0 => bracket_depth -= 1,
-            TokKind::Arrow if paren_depth == 0 && bracket_depth == 0 => return true,
+            TokKind::UnifiedArrow | TokKind::Arrow | TokKind::LambdaArrow
+                if paren_depth == 0 && bracket_depth == 0 => return true,
             TokKind::LBrace | TokKind::RBrace if paren_depth == 0 && bracket_depth == 0 => {
                 return false;
             }
@@ -1105,7 +1210,7 @@ fn formatted_arm_block_opens(tokens: &[Token], index: usize) -> bool {
     matches!(tokens.get(index).map(|t| &t.kind), Some(TokKind::LBrace))
         && matches!(
             index.checked_sub(1).and_then(|i| tokens.get(i)).map(|t| &t.kind),
-            Some(TokKind::Arrow)
+            Some(TokKind::UnifiedArrow | TokKind::Arrow | TokKind::LambdaArrow)
         )
 }
 
@@ -1122,7 +1227,7 @@ fn formatted_lambda_params_open(tokens: &[Token], index: usize) -> bool {
                 if depth == 0 {
                     return matches!(
                         tokens.get(cursor + 1).map(|t| &t.kind),
-                        Some(TokKind::LambdaArrow)
+                        Some(TokKind::UnifiedArrow | TokKind::LambdaArrow | TokKind::Arrow)
                     );
                 }
             }
@@ -1141,6 +1246,36 @@ fn next_token_matches(
     match (original.get(original_i), formatted.get(formatted_i)) {
         (None, None) => true,
         (Some(original), Some(formatted)) => token_kinds_equal(&original.kind, &formatted.kind),
+        _ => false,
+    }
+}
+
+fn struct_literal_head_before_brace(tokens: &[Token], open: usize) -> bool {
+    match open.checked_sub(1).and_then(|i| tokens.get(i)).map(|t| &t.kind) {
+        Some(TokKind::Dot
+            | TokKind::Colon
+            | TokKind::ColonColon
+            | TokKind::Comma
+            | TokKind::LParen
+            | TokKind::Eq
+            | TokKind::KwReturn) => true,
+        Some(TokKind::Ident(name)) => name.starts_with(char::is_uppercase),
+        Some(TokKind::RBracket) => {
+            let Some(bracket_open) = open.checked_sub(2) else {
+                return false;
+            };
+            matches!(
+                tokens.get(bracket_open).map(|t| &t.kind),
+                Some(TokKind::LBracket)
+            ) && matches!(
+                bracket_open
+                    .checked_sub(1)
+                    .and_then(|i| tokens.get(i))
+                    .map(|t| &t.kind),
+                Some(TokKind::Ident(name)) if name.starts_with(char::is_uppercase)
+            )
+        }
+        Some(TokKind::Gt) => true,
         _ => false,
     }
 }
@@ -1164,10 +1299,7 @@ fn formatted_struct_shorthand_expansion(tokens: &[Token], index: usize) -> bool 
         match tokens[cursor].kind {
             TokKind::RBrace => depth += 1,
             TokKind::LBrace if depth == 0 => {
-                return matches!(
-                    cursor.checked_sub(1).and_then(|i| tokens.get(i)).map(|t| &t.kind),
-                    Some(TokKind::Dot)
-                );
+                return struct_literal_head_before_brace(tokens, cursor);
             }
             TokKind::LBrace => depth -= 1,
             _ => {}
@@ -1223,10 +1355,7 @@ fn formatted_struct_separator(tokens: &[Token], index: usize) -> bool {
         match tokens[cursor].kind {
             TokKind::RBrace => depth += 1,
             TokKind::LBrace if depth == 0 => {
-                return matches!(
-                    cursor.checked_sub(1).and_then(|i| tokens.get(i)).map(|t| &t.kind),
-                    Some(TokKind::Dot)
-                );
+                return struct_literal_head_before_brace(tokens, cursor);
             }
             TokKind::LBrace => depth -= 1,
             _ => {}
@@ -1417,8 +1546,8 @@ fn canonical_rewrite_rules_are_explicit_and_narrow() {
         ),
         (
             "external method",
-            "fn Point.len(self) => Int { return 1 }\n",
-            "impl Point { fn len(self) => Int { return 1 } }\n",
+            "fn Point.len(self) :> Int { return 1 }\n",
+            "impl Point { fn len(self) :> Int { return 1 } }\n",
         ),
         (
             "enum group separators",
@@ -1441,29 +1570,39 @@ fn canonical_rewrite_rules_are_explicit_and_narrow() {
             "use \"./foo\"\nfn run() {}\n",
         ),
         (
-            "dispatch arm block",
+            "typed-literal dot removal",
+            "fn run() { p :: Point.{x: 1} }\n",
+            "fn run() { p :: Point{x: 1} }\n",
+        ),
+        (
+            "arrow unification",
             "fn run() { if x == { .A -> print(1) } }\n",
-            "fn run() { if x == { .A -> { print(1) } } }\n",
+            "fn run() { if x == { .A :> print(1) } }\n",
+        ),
+        (
+            "dispatch arm block",
+            "fn run() { if x == { .A :> print(1) } }\n",
+            "fn run() { if x == { .A :> { print(1) } } }\n",
         ),
         (
             "bare lambda params",
-            "fn run() { f :: x => x }\n",
-            "fn run() { f :: (x) => x }\n",
+            "fn run() { f :: x :> x }\n",
+            "fn run() { f :: (x) :> x }\n",
         ),
         (
             "bare enum variant pattern",
-            "fn run() { if x == { A(v) -> print(v) } }\n",
-            "fn run() { if x == { .A(v) -> print(v) } }\n",
+            "fn run() { if x == { A(v) :> print(v) } }\n",
+            "fn run() { if x == { .A(v) :> print(v) } }\n",
         ),
         (
             "bare None variant pattern",
-            "fn run() { if x == { None -> print(0) } }\n",
-            "fn run() { if x == { .None -> print(0) } }\n",
+            "fn run() { if x == { None :> print(0) } }\n",
+            "fn run() { if x == { .None :> print(0) } }\n",
         ),
         (
             "struct shorthand label",
-            "fn run() { p :: Point.{x} }\n",
-            "fn run() { p :: Point.{x: x} }\n",
+            "fn run() { p :: Point{x} }\n",
+            "fn run() { p :: Point{x: x} }\n",
         ),
         (
             "default module alias",
@@ -1472,8 +1611,8 @@ fn canonical_rewrite_rules_are_explicit_and_narrow() {
         ),
         (
             "struct literal separator",
-            "fn run() { p :: Point.{x: 1 y: 2} }\n",
-            "fn run() { p :: Point.{x: 1, y: 2} }\n",
+            "fn run() { p :: Point{x: 1 y: 2} }\n",
+            "fn run() { p :: Point{x: 1, y: 2} }\n",
         ),
         (
             "anonymous union member order",
@@ -1482,9 +1621,10 @@ fn canonical_rewrite_rules_are_explicit_and_narrow() {
         ),
     ];
     for (name, original, formatted) in allowed {
+        let diff = ordered_sources_diff(original, formatted);
         assert!(
-            ordered_sources_diff(original, formatted).is_ok(),
-            "allowed canonical rewrite failed: {name}"
+            diff.is_ok(),
+            "allowed canonical rewrite failed: {name}: {diff:?}"
         );
     }
 
@@ -1516,8 +1656,8 @@ fn canonical_rewrite_rules_are_explicit_and_narrow() {
         ),
         (
             "external-method rewrite preserves receiver",
-            "fn Point.len(self) => Int { return 1 }\n",
-            "impl Other { fn len(self) => Int { return 1 } }\n",
+            "fn Point.len(self) :> Int { return 1 }\n",
+            "impl Other { fn len(self) :> Int { return 1 } }\n",
         ),
         (
             "task-block rewrite preserves body",
@@ -1546,28 +1686,28 @@ fn canonical_rewrite_rules_are_explicit_and_narrow() {
         ),
         (
             "arm-block rule does not remove explicit braces",
-            "fn run() { if x == { .A -> { print(1) } } }\n",
-            "fn run() { if x == { .A -> print(1) } }\n",
+            "fn run() { if x == { .A :> { print(1) } } }\n",
+            "fn run() { if x == { .A :> print(1) } }\n",
         ),
         (
             "lambda rule does not remove explicit parens",
-            "fn run() { f :: (x) => x }\n",
-            "fn run() { f :: x => x }\n",
+            "fn run() { f :: (x) :> x }\n",
+            "fn run() { f :: x :> x }\n",
         ),
         (
             "variant-dot rule requires a PascalCase pattern",
-            "fn run() { if x == { value -> print(value) } }\n",
-            "fn run() { if x == { .value -> print(value) } }\n",
+            "fn run() { if x == { value :> print(value) } }\n",
+            "fn run() { if x == { .value :> print(value) } }\n",
         ),
         (
             "variant-dot rule requires a dispatch arm context",
-            "fn run() { Foo work -> print(1) }\n",
-            "fn run() { .Foo work -> print(1) }\n",
+            "fn run() { Foo work :> print(1) }\n",
+            "fn run() { .Foo work :> print(1) }\n",
         ),
         (
             "shorthand expansion preserves field value",
-            "fn run() { p :: Point.{x} }\n",
-            "fn run() { p :: Point.{x: y} }\n",
+            "fn run() { p :: Point{x} }\n",
+            "fn run() { p :: Point{x: y} }\n",
         ),
         (
             "module alias requires exact use-path context",
@@ -1576,8 +1716,8 @@ fn canonical_rewrite_rules_are_explicit_and_narrow() {
         ),
         (
             "struct-literal separator rule does not remove commas",
-            "fn run() { p :: Point.{x: 1, y: 2} }\n",
-            "fn run() { p :: Point.{x: 1 y: 2} }\n",
+            "fn run() { p :: Point{x: 1, y: 2} }\n",
+            "fn run() { p :: Point{x: 1 y: 2} }\n",
         ),
         (
             "union order rule requires a type annotation",
@@ -1586,8 +1726,8 @@ fn canonical_rewrite_rules_are_explicit_and_narrow() {
         ),
         (
             "union order rule rejects struct field values",
-            "fn run() { p :: Point.{x: left | right} }\n",
-            "fn run() { p :: Point.{x: right | left} }\n",
+            "fn run() { p :: Point{x: left | right} }\n",
+            "fn run() { p :: Point{x: right | left} }\n",
         ),
         (
             "union order rule rejects dotted member replacement",

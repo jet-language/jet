@@ -77,8 +77,8 @@ use core.compiler.lang as lang
 fn helper() {}
 
 fn run() {
-    #Caps(lang.Capability.Net) {}
-    #Grant(caps: lang.Capability.Net) {}
+    #Caps(lang.Ability.Net) {}
+    #Caps(caps: lang.Ability.Net) {}
 }
 "#,
     );
@@ -96,6 +96,12 @@ fn qualified_state_namespace_is_valid_and_not_a_value() {
         "state Door { Closed Open }\nstruct Door {}\nfn run() { print(Door.State.Open) }",
     );
     assert!(value.iter().any(|code| code == "E0302"), "{value:?}");
+}
+
+#[test]
+fn retired_bench_marker_teaches_measured_test() {
+    let diagnostics = codes("#Bench(\"old\") { assert(true) }\nfn run() {}\n");
+    assert!(diagnostics.iter().any(|code| code == "E0927"), "{diagnostics:?}");
 }
 
 #[test]
@@ -195,11 +201,6 @@ fn parser_binds_the_authoritative_declaration_site_matrix() {
             jet::Policy::RuleSite::Test,
         ),
         (
-            "#Bench declaration",
-            "#Bench(\"fast\") {}\nfn run() {}",
-            jet::Policy::RuleSite::Bench,
-        ),
-        (
             "#Job on function",
             "#Job fn work() {}\nfn run() {}",
             jet::Policy::RuleSite::Function,
@@ -229,7 +230,7 @@ fn parser_binds_the_authoritative_declaration_site_matrix() {
     }
 
     let (tokens, lexer_diagnostics) =
-        jet::Lexer::lex("#Policy(no_alloc)\nfn run() {}");
+        jet::Lexer::lex("#Policy(copies: .Explicit)\nfn run() {}");
     assert!(lexer_diagnostics.is_empty(), "{lexer_diagnostics:?}");
     let program = jet::Parser::parse(&tokens)
         .unwrap_or_else(|diagnostics| panic!("#Policy module declaration: {diagnostics:?}"));
@@ -505,7 +506,6 @@ fn static_string_products_resolve_before_consumers() {
 #HTML(@page)
 Tiny :: distinct Int(0..3)
 #Test(@label) {}
-#Bench(@label) {}
 fn run() {}
 "#;
     let (bundle, diagnostics) = checked(source, jet::Sema::CompileMode::Check);
@@ -516,15 +516,11 @@ fn run() {}
     let module = &bundle.modules[bundle.entry];
     assert_eq!(module.html_path.as_deref(), Some("index.html"));
     let mut saw_test = false;
-    let mut saw_bench = false;
     let mut saw_range = false;
     for item in &module.items {
         match item {
             jet::AST::Item::Test(test) => {
                 saw_test = test.name.as_deref() == Some("shared")
-            }
-            jet::AST::Item::Bench(bench) => {
-                saw_bench = bench.name.as_deref() == Some("shared")
             }
             jet::AST::Item::Distinct(distinct) if distinct.name == "Tiny" => {
                 saw_range = distinct
@@ -534,7 +530,7 @@ fn run() {}
             _ => {}
         }
     }
-    assert!(saw_test && saw_bench && saw_range);
+    assert!(saw_test && saw_range);
 }
 
 #[test]
@@ -542,7 +538,6 @@ fn static_string_products_report_one_shared_type_error_each() {
     for source in [
         "@value :: 42\n#HTML(@value)\nfn run() {}",
         "@value :: 42\n#Test(@value) {}\nfn run() {}",
-        "@value :: 42\n#Bench(@value) {}\nfn run() {}",
     ] {
         let diagnostics = codes(source);
         assert_eq!(
@@ -597,7 +592,6 @@ fn static_string_products_reject_nonstatic_expressions_once() {
     for source in [
         "#HTML(runtime_name)\nfn run() {}",
         "#Test(runtime_name) {}\nfn run() {}",
-        "#Bench(runtime_name) {}\nfn run() {}",
     ] {
         let diagnostics = codes(source);
         assert_eq!(
@@ -672,12 +666,11 @@ fn run() {}
 }
 
 #[test]
-fn generic_instances_materialize_distinct_test_and_bench_names() {
+fn generic_instances_materialize_distinct_test_names() {
     let (bundle, diagnostics) = checked(
         r#"
 module suite(label: String) {
     #Test(label) {}
-    #Bench(label) {}
 }
 module first :: suite("case")
 module second :: suite("other")
@@ -696,14 +689,13 @@ fn run() {}
         .iter()
         .filter_map(|item| match item {
             jet::AST::Item::Test(test) => test.name.clone(),
-            jet::AST::Item::Bench(bench) => bench.name.clone(),
             _ => None,
         })
         .collect::<Vec<_>>();
     names.sort();
     assert_eq!(
         names,
-        ["first_case", "first_case", "second_other", "second_other"]
+        ["first_case", "second_other"]
     );
 }
 
@@ -729,9 +721,8 @@ fn run() {}
 
 #[test]
 fn formatter_preserves_static_rule_expressions() {
-    let source = "@name :: \"case\"\n#Test(@name) {}\n#Bench(@name) {}\n#HTML(@name)\nfn run() {}\n";
+    let source = "@name :: \"case\"\n#Test(@name) {}\n#HTML(@name)\nfn run() {}\n";
     let formatted = jet::format_source(source).expect("static rule expressions should format");
     assert!(formatted.contains("#Test(@name)"), "{formatted}");
-    assert!(formatted.contains("#Bench(@name)"), "{formatted}");
     assert!(formatted.contains("#HTML(@name)"), "{formatted}");
 }

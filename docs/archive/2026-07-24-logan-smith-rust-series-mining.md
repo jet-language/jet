@@ -35,7 +35,7 @@
 | **Errors as typed values, not exceptions/erased** (Results, Constructors) | **Aligned, structural** | `T ? E` typed payload, `?`, `??`, `.drop()`, `#MustUse`, E0401-05. No exceptions. The Results video's own top pains (lib errors skipping the `Error` trait; anyhow-infects-downstream; `core` fragmentation) are things Jet's language-native error carrier pre-empts. `docs/spec/spec.md:784-821` |
 | **`Option<&T>` not `&Option<T>`** (Options) | **Aligned, structural** | `&User?` grammar = "write access over an optional User" — the reference sits *inside* the optional by construction. The bad pattern is awkward to even spell. Niche optimization inherited via Rust lowering. `docs/spec/spec.md:528-557` |
 | **Reference the borrowed view, not the container** (`&[T]`/`&str`, 5-Opinions, Arc) | **Aligned, arguably safer** | `View<T>`/`ViewMut<T>`/`View<str>` are owner-provenance-tracked borrowed views; `~` for an owned copy across a boundary. Owner tracking (E2305/E2307) catches use-after-free the C++ commenter warned about. `docs/spec/spec.md:329,371,391-405` |
-| **Make invalid states unrepresentable** (Constructors, Moves, Verse parse-don't-validate) | **Aligned, rich** | `validate { }` in-struct rules accumulating `[FieldError]` (D-VALIDATE1=A); `#Invariant(...)` refinements (D-REFINE1); range/distinct-Int types (D-RANGETYPE1) that lower without bounds checks; `require(...)`. `newtype` keyword deliberately **declined**. `docs/spec/syntax-decisions.md:646,652,2707,1752` |
+| **Make invalid states unrepresentable** (Constructors, Moves, Verse parse-don't-validate) | **Aligned, rich** | `validate { }` in-struct rules accumulating `[FieldError]` (D-VALIDATE1=A); direct interval facts on range/distinct-Int types (D-TYPE2-REFINE1); range types lower without bounds checks; `assert(...)`. `newtype` keyword deliberately **declined**. `docs/spec/syntax-decisions.md:646,652,2707,1752` |
 | **Named constructors that build-then-validate** (Constructors) | **Aligned** | `Type.new(...)` for hidden-state construction; `Type.{...}` literals; `.new(...)` receiver-elision (D-SHAPE3a). Note: commenters insist the correct term is "named constructor," **not** "factory" — worth honoring in Jet docs. `docs/spec/spec.md:520-560` |
 | **Dynamic dispatch is a deliberate choice** (DynDispatch) | **Aligned, dual-facet** | S48: trait in type position (`fn f(s: Shape)`) = auto-boxing + dynamic dispatch (beginner magic); `<T: Shape>` = monomorphization (expert static). **No user-facing `dyn`.** `docs/spec/syntax-decisions.md:963-965` |
 | **Least-powerful mechanism; bounded metaprogramming** (ProcMacros, 5-Opinions impl-Into) | **Aligned by invariant** | Jet has comptime + entry-local user `derive` + `#[Codable]`, but **no proc-macro-style arbitrary-syntax invention**. The ProcMacros comment "insane that arbitrary syntax can be added to a compiled language" is exactly the wow-factor I7/I8 reject. `docs/spec/spec.md:616-671` |
@@ -110,7 +110,7 @@ on purpose), **DOC** (a wording or teaching fix).
 ### Safety
 
 1. **Make invalid states unrepresentable.** The strongest cross-video theme
-   (a 505-like top comment). **ALIGNED:** `validate { }`, `#Invariant(...)`,
+   (a 505-like top comment). **ALIGNED:** `validate { }`, interval-backed
    range/distinct-`Int` types, no null, `T?` / `T ? E`.
 2. **Single-motion construction.** Build every field as a local, then make the
    whole value in one step. No half-built object, no two-phase init, no

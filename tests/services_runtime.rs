@@ -47,6 +47,7 @@ fn run() {
     runtime := services.runtime(store, retention: retention)
     tree := services.tree("orders")
     endpoint :: services.worker(&tree, "orders", 2) ?? panic("worker")
+    services.group(&tree, "orders-supervisor", ["orders"]) ?? panic("group")
     services.start(&tree) ?? panic("start")
 
     first :: runtime.send(endpoint, "order", key: "order-1") ?? panic("first")
@@ -60,6 +61,8 @@ fn run() {
     print("delivered:{delivered}")
     runtime.commit(id) ?? panic("commit")
     print("committed:ok")
+    services.fail_worker(&tree, endpoint) ?? panic("restart")
+    print("restarted:{services.restarts(tree, endpoint)}")
 
     duplicate :: recovered.send(endpoint, "order", key: "order-1") ?? panic("duplicate")
     print("duplicate:{receipt_kind(duplicate)}")
@@ -94,7 +97,7 @@ fn service_authority_receipts_survive_reopen_and_lifecycle() {
     assert_eq!(code, 0);
     assert_eq!(
         stdout,
-        "first:enqueued\nrecovered:enqueued\ndelivered:order\ncommitted:ok\nduplicate:executed\nretain:retained\nretry:retained\nredelivered:order\ndead:dead\nstopped:rejected\nreplay:dead\n"
+        "first:enqueued\nrecovered:enqueued\ndelivered:order\ncommitted:ok\nrestarted:1\nduplicate:executed\nretain:retained\nretry:retained\nredelivered:order\ndead:dead\nstopped:rejected\nreplay:dead\n"
     );
 }
 
@@ -108,7 +111,7 @@ fn service_authority_receipts_match_default_run() {
     assert_eq!(code, 0, "default jet run failed: {stderr}");
     assert_eq!(
         stdout,
-        "first:enqueued\nrecovered:enqueued\ndelivered:order\ncommitted:ok\nduplicate:executed\nretain:retained\nretry:retained\nredelivered:order\ndead:dead\nstopped:rejected\nreplay:dead\n"
+        "first:enqueued\nrecovered:enqueued\ndelivered:order\ncommitted:ok\nrestarted:1\nduplicate:executed\nretain:retained\nretry:retained\nredelivered:order\ndead:dead\nstopped:rejected\nreplay:dead\n"
     );
 }
 
@@ -146,12 +149,15 @@ fn run() {
     runtime := services.runtime(store, retention: retention)
     tree := services.tree("restart-orders")
     endpoint :: services.worker(&tree, "orders", 2) ?? panic("worker")
+    services.group(&tree, "orders-supervisor", ["orders"]) ?? panic("group")
     services.start(&tree) ?? panic("start")
     if phase == "send" {
         receipt :: runtime.send(endpoint, "order", key: "order-restart") ?? panic("send")
         print(receipt_id(receipt))
     } else {
         id :: env.get("JET_SERVICE_AUTH_ID") ?? panic("id")
+        services.fail_worker(&tree, endpoint) ?? panic("restart")
+        print("restarted:{services.restarts(tree, endpoint)}")
         retry :: runtime.retry(id) ?? panic("retry")
         print(receipt_kind(retry))
         message :: services.receive(&tree, endpoint) ?? panic("receive")
@@ -245,7 +251,7 @@ fn service_authority_recovers_pending_delivery_across_process_restart() {
     assert!(!id.is_empty(), "send process did not return a receipt id");
     assert_eq!(
         run_restart_process(&bin, &store, "recover", Some(id)),
-        "enqueued\norder\n"
+        "restarted:1\nenqueued\norder\n"
     );
 
     let default_store = dir.join("authority-default.log");
@@ -254,7 +260,7 @@ fn service_authority_recovers_pending_delivery_across_process_restart() {
     assert!(!id.is_empty(), "default send process did not return a receipt id");
     assert_eq!(
         run_restart_process(&bin, &default_store, "recover", Some(id)),
-        "enqueued\norder\n"
+        "restarted:1\nenqueued\norder\n"
     );
 
     let aot_store = dir.join("authority-aot-to-default.log");
@@ -263,7 +269,7 @@ fn service_authority_recovers_pending_delivery_across_process_restart() {
     assert!(!id.is_empty(), "AOT send process did not return a receipt id");
     assert_eq!(
         run_restart_default_process(&dir, &aot_store, "recover", Some(id)),
-        "enqueued\norder\n"
+        "restarted:1\nenqueued\norder\n"
     );
 }
 

@@ -7,6 +7,7 @@ from decimal import Decimal
 payload = (
     '{"amount":12.340,"exponent":1E-5,"whole":100,'
     '"tenth":0.1,"tenth_with_zero":0.10,"scientific_tenth":1e-1,'
+    '"adjacent_lo":9007199254740992,"adjacent_hi":9007199254740993,'
     '"large":12345678901234567890123456789012345678901234567890,'
     '"large_exp":1e30}'
 )
@@ -18,6 +19,8 @@ assert value["whole"] == 100
 assert value["tenth"] == Decimal("0.1")
 assert value["tenth_with_zero"] == Decimal("0.10")
 assert value["scientific_tenth"] == Decimal("0.1")
+assert value["adjacent_lo"] == 9007199254740992
+assert value["adjacent_hi"] == 9007199254740993
 assert value["large"] == 12345678901234567890123456789012345678901234567890
 assert value["large_exp"] == 10**30
 

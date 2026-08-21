@@ -106,6 +106,34 @@ fn run() {
     assert_tiers_agree("tir_generated_name_patterns", src, "7\n6\nok:7:7:6\n");
 }
 
+#[test]
+fn binary_pattern_width_classes_match_all_tiers() {
+    let src = r#"
+fn run() {
+    subbyte :: [U8]{0xAB}
+    if subbyte == {
+        [U8]{"{hi:U4}{lo:U4}"} :> { print("sub={hi}/{lo}") }
+        else :> { print("sub=miss") }
+    }
+    aligned :: [U8]{0x01, 0x02}
+    if aligned == {
+        [U8]{"{value:U16be}"} :> { print("aligned={value}") }
+        else :> { print("aligned=miss") }
+    }
+    non_power :: [U8]{0x01, 0x02, 0x03}
+    if non_power == {
+        [U8]{"{be:U24be}"} :> { print("wide={be}") }
+        else :> { print("wide=miss") }
+    }
+}
+"#;
+    assert_tiers_agree(
+        "tir_binary_pattern_width_classes",
+        src,
+        "sub=10/11\naligned=258\nwide=66051\n",
+    );
+}
+
 /// c109 (builtin-name collision): a user method whose name collides with a builtin
 /// (`get`/`len`) was mis-dispatched by `emit_builtin_method` (name-keyed, not
 /// receiver-typed) → `b.get()` emitted garbage, `b.len()` → E0599. The fix dispatches

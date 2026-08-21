@@ -264,7 +264,7 @@ deps: .{ httpkit: "^2" }
 outputs: .{ serve: .Service.{ entry: run } }
 settings: .{ metrics: Bool = false }
 build: .{ release: .{ optimize: full, settings: .{ metrics: true } } }
-policy: .{ no_alloc: false }
+// No memory floor is set here. A floor uses `effects: .{ deny: [Mem.Alloc] }`.
 members: find("./packages")
 ```
 

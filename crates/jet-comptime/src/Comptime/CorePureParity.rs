@@ -63,6 +63,14 @@ pub(super) fn evaluate(
         (CoreCallPureRoute::Time, "is_leap_year") => time_is_leap_year(args, span),
         (CoreCallPureRoute::Math, "decimal") => decimal_from_str(args, span),
         (CoreCallPureRoute::Math, "fraction") => fraction_new(args, span),
+        // D-TYPE2-UNCERT1=A: `core.math.sqrt` keeps the measured grade. The
+        // existing Prelude-backed method adapter owns the uncertainty rule;
+        // ordinary Float sqrt remains on the core-call path below.
+        (CoreCallPureRoute::Math, "sqrt") => match args {
+            [value @ CtValue::Struct { type_name, .. }]
+                if type_name == crate::Syntax::TYPE_MEASUREMENT => measurement_sqrt(value, span),
+            _ => return None,
+        },
         (CoreCallPureRoute::Measurement, "from") => measurement(args, span),
         (CoreCallPureRoute::Date, "new") => date_new_call(args, span),
         (CoreCallPureRoute::Date, "parse") => date_parse_call(args, span),
@@ -168,6 +176,15 @@ pub(super) fn evaluate_method(
     let normalized_type_name = type_name
         .strip_prefix(jet_foundation::Syntax::GENERATED_NAME_PREFIX)
         .unwrap_or(type_name.as_str());
+    // D-TYPE2-UNCERT1=A: TIR lowers `core.math.sqrt(Measurement)` to this
+    // internal handle even though `sqrt` is not a user-facing Measurement
+    // method and therefore has no receiver registry row.
+    if normalized_type_name == crate::Syntax::TYPE_MEASUREMENT
+        && method == "sqrt"
+        && args.is_empty()
+    {
+        return Some(measurement_sqrt(recv, span));
+    }
     let row = jet_foundation::Syntax::core_receiver_method(type_name, method)
         .or_else(|| jet_foundation::Syntax::core_receiver_method(normalized_type_name, method))?;
     if !row
@@ -425,6 +442,10 @@ pub(super) fn evaluate_method(
         }),
         ("Decimal", "to_string", 0) => decimal_from_value(recv, span)
             .map(|decimal| CtValue::Str(decimal.to_string_rep())),
+        ("Decimal", "equal", 1) => decimal_from_value(recv, span).and_then(|left| {
+            let right = decimal_from_value(&args[0], span)?;
+            Ok(CtValue::Bool(left == right))
+        }),
         ("Decimal", "add" | "sub" | "mul", 1) => decimal_from_value(recv, span).and_then(|left| {
             let right = decimal_from_value(&args[0], span)?;
             let out = match method {
