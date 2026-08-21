@@ -169,7 +169,7 @@ function cmdBrief(args) {
     const openNow = (c) => c.phase !== "done" && c.phase !== "frozen";
     picked = all
       .filter((c) => {
-        if (!openNow(c) || c.phase === "deciding") return false;
+        if (!openNow(c) || c.phase === "deciding" || undecided(c)) return false;
         const cr = c.criteria ?? [];
         if (!cr.length || !cr.every((x) => x.status === "open")) return false;
         // stale-blocker aware: a blocker that is already closed does not block
@@ -255,10 +255,15 @@ function cmdHarvest() {
   writeFileSync(readFile, [...seen].join("\n"));
 }
 
+function undecided(c) {
+  if (/^\s*ballot\b/i.test(c.title || "")) return true;
+  return (c.decisions || []).some((d) => !d.outcome && d.status !== "ratified");
+}
+
 function cmdRecycle(args) {
   const want = Number(args[0] ?? 30);
   const all = cards();
-  const open = all.filter((c) => c.phase !== "done" && c.phase !== "frozen" && c.phase !== "deciding");
+  const open = all.filter((c) => c.phase !== "done" && c.phase !== "frozen" && c.phase !== "deciding" && !undecided(c));
   const live = new Set(lanes().filter((l) => l.running).map((l) => l.name));
   const rows = [];
   for (const c of open) {
