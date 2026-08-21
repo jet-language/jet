@@ -530,7 +530,6 @@ const TYPE_CONTAINER = {
   X25519PublicKey: "core.crypto",
   PasswordHash: "core.crypto",
   TestSuite: "core.testing",
-  BenchSuite: "core.testing",
   Bytes: "Bytes",
   Queue: "Queue",
   Set: "Set",
@@ -737,7 +736,7 @@ const RATIFIED_DECLINES = {
   "gap.core.db.rollback": ["D-CORESURF-SMALL1", "DBScope.rollback"],
   "gap.core.db.copy": ["D-CORESURF-SMALL1", "one witness language; no consistent competitor meaning"],
   "gap.core.db.count": ["D-CORESURF-SMALL1", "DBConnection.query(...).len()"],
-  "gap.core.testing.benchmark": ["D-CORESURF-SMALL1", "#Bench marker block + `jet bench`"],
+  "gap.core.testing.benchmark": ["D-CORESURF-SMALL1", "#Test .measure member + `jet test --measure`"],
   "gap.core.testing.fail": ["D-CORESURF-SMALL1", "#Test marker block + `jet test`"],
   "gap.core.testing.main": ["D-CORESURF-SMALL1", "#Test marker block + `jet test`"],
   "gap.core.testing.runtests": ["D-CORESURF-SMALL1", "#Test marker block + `jet test`"],
@@ -1232,7 +1231,6 @@ function discoverTables(sources) {
     if (
       rhs.includes("match (method")
       || arm.lhs.includes('"TestSuite"')
-      || arm.lhs.includes('"BenchSuite"')
     ) {
       inlineArms.push(arm);
       continue;

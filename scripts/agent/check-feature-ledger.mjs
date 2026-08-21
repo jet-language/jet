@@ -7,7 +7,7 @@ import { fileURLToPath } from "node:url";
 import { execFileSync, spawnSync } from "node:child_process";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
-const MANIFEST_PATH = join(ROOT, "docs/spec/feature-claim-manifest.json");
+const MANIFEST_PATH = join(ROOT, "docs/spec/feature-claims.json");
 const REGISTRY_PATH = join(ROOT, "docs/reference/feature-claims.md");
 const REPORT_PATH = join(ROOT, "docs/plans/epoch-3/feature-claim-report.json");
 const FIXTURES_PATH = join(ROOT, "tests/fixtures/feature-claims/hostile-cases.json");

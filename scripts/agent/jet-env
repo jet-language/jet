@@ -62,6 +62,13 @@ check_target_dir() {
   fi
 }
 
+set_default_target_dir() {
+  if [ -z "${CARGO_TARGET_DIR:-}" ]; then
+    export CARGO_TARGET_DIR="$1/target"
+  fi
+}
+
+set_default_target_dir "$repo"
 check_target_dir "$repo"
 
 # Cache-mode selection (card #1785): a COLD tree (no target/debug yet — fresh
@@ -89,6 +96,7 @@ cache_mode_env() {
 if command -v direnv >/dev/null 2>&1; then
   if env_dump="$(cd "$repo" && JET_DEV_SHELL="$profile" direnv export bash 2>/dev/null)"; then
     eval "$env_dump"
+    set_default_target_dir "$repo"
     check_target_dir "$repo"
     cache_mode_env "$repo"
     exec "$@"
@@ -99,6 +107,6 @@ fi
 # the check sees the shell's PATH.
 joined="$(printf '%q ' "$@")"
 if [ "$profile" = "full" ]; then
-  exec nix develop "$repo#full" -c bash -c "$(declare -f check_target_dir cache_mode_env); check_target_dir $(printf %q "$repo"); cache_mode_env $(printf %q "$repo"); exec $joined"
+  exec nix develop "$repo#full" -c bash -c "$(declare -f check_target_dir set_default_target_dir cache_mode_env); set_default_target_dir $(printf %q "$repo"); check_target_dir $(printf %q "$repo"); cache_mode_env $(printf %q "$repo"); exec $joined"
 fi
-exec nix develop "$repo" -c bash -c "$(declare -f check_target_dir cache_mode_env); check_target_dir $(printf %q "$repo"); cache_mode_env $(printf %q "$repo"); exec $joined"
+exec nix develop "$repo" -c bash -c "$(declare -f check_target_dir set_default_target_dir cache_mode_env); set_default_target_dir $(printf %q "$repo"); check_target_dir $(printf %q "$repo"); cache_mode_env $(printf %q "$repo"); exec $joined"

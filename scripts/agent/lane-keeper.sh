@@ -52,15 +52,12 @@ while true; do
     # When every open card has already had a lane, restart the ones that
     # produced no report. A lane that timed out still leaves its partial work in
     # the tree, so a second pass usually gets further than the first.
+    # Once every open card has had a lane, keep the slots working by giving the
+    # unfinished ones another pass, least-recently-worked first. A second lane
+    # starts from the first one's partial work and usually gets further.
     if [ -z "$fresh" ] || [ "$fresh" = "(nothing to brief)" ]; then
-        fresh=$(printf '%s' "$status" \
-            | sed -n 's/.*no report (re-brief smaller): //p' \
-            | tr ' ' '\n' \
-            | grep -E '^(c[0-9]+|[a-z][a-z0-9]+)$' \
-            | grep -vE '^(corpus-shard|test-shard|dotarrow|persist)' \
-            | head -n "$room" \
-            | tr '\n' ' ')
-        [ -n "$fresh" ] && note "no unstarted cards; restarting stalled: $fresh"
+        fresh=$(cd "$REPO" && node "$DISPATCH" recycle "$room" 2>/dev/null | tr -d '\n')
+        [ -n "${fresh// /}" ] && note "recycling open cards: $fresh"
     fi
 
     if [ -n "${fresh// /}" ]; then

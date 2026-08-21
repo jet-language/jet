@@ -255,6 +255,23 @@ function cmdHarvest() {
   writeFileSync(readFile, [...seen].join("\n"));
 }
 
+function cmdRecycle(args) {
+  const want = Number(args[0] ?? 30);
+  const all = cards();
+  const open = all.filter((c) => c.phase !== "done" && c.phase !== "frozen" && c.phase !== "deciding");
+  const live = new Set(lanes().filter((l) => l.running).map((l) => l.name));
+  const rows = [];
+  for (const c of open) {
+    const name = `c${c.num}`;
+    if (live.has(name)) continue;
+    if (!existsSync(join(DIR, `${name}.md`))) continue;
+    const log = join(DIR, `${name}.out`);
+    rows.push([name, existsSync(log) ? statSync(log).mtimeMs : 0]);
+  }
+  rows.sort((a, b) => a[1] - b[1]);
+  console.log(rows.slice(0, want).map((r) => r[0]).join(" "));
+}
+
 const [, , cmd, ...rest] = process.argv;
-({ brief: cmdBrief, launch: cmdLaunch, status: cmdStatus, harvest: cmdHarvest }[cmd] ??
+({ brief: cmdBrief, launch: cmdLaunch, status: cmdStatus, harvest: cmdHarvest, recycle: cmdRecycle }[cmd] ??
   (() => console.log("usage: lane-dispatch.mjs brief|launch|status|harvest")))(rest);
