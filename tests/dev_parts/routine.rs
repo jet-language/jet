@@ -1731,7 +1731,7 @@ fn run() {{
         panic!("openssl TLS 1.3 server did not accept on 127.0.0.1:{port}");
     };
     let start_server = |port: u16| {
-        let mut server = Command::new("openssl")
+        let server = Command::new("openssl")
             .args([
                 "s_server",
                 "-quiet",

@@ -1,6 +1,10 @@
 mod common;
 
 mod runtime {
+    // This module includes shared Prelude source that several hosts compile,
+    // each using a different subset, so dead-code reports here describe the
+    // other hosts' usage rather than this target's.
+    #![allow(dead_code)]
     #[allow(unused_imports)]
     pub use jet_foundation::Outcome::*;
     include!("../crates/jet-codegen/src/Prelude/CoreLib/Top/CryptoEntropy.rs");

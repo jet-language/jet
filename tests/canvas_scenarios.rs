@@ -685,7 +685,7 @@ struct CanvasCase {
 }
 
 impl CanvasCase {
-    fn new(repo: &Path, name: &str) -> CanvasCase {
+    fn new(_repo: &Path, name: &str) -> CanvasCase {
         let root = std::env::var("JET_VERIFY_TMPDIR")
             .map(PathBuf::from)
             .unwrap_or_else(|_| std::env::temp_dir().join("jet-test-tmp"));

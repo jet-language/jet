@@ -1,30 +1,10 @@
 use jet::Interpreter::RunOutcome;
 use jet::AST::{Expr, Item, OutputKind, Type};
+// CraneliftBackend's run/hot_swap come from this trait.
 use jet::JitBackend::JitBackend;
 use jet_jit::CraneliftBackend;
 
 mod common;
-
-struct RejectJitFallback;
-
-impl JitBackend for RejectJitFallback {
-    fn run(&mut self, _: &jet::AST::ProgramBundle, _: bool) -> RunOutcome {
-        panic!("resident JIT unexpectedly used its fallback")
-    }
-
-    fn hot_swap(
-        &mut self,
-        _: &str,
-        _: &jet::AST::ProgramBundle,
-        _: bool,
-    ) -> Result<RunOutcome, Vec<jet::Diagnostics::Diagnostic>> {
-        panic!("resident JIT unexpectedly used its fallback")
-    }
-
-    fn restart(&mut self, _: &jet::AST::ProgramBundle, _: bool) -> RunOutcome {
-        panic!("resident JIT unexpectedly used its fallback")
-    }
-}
 
 fn checked_bundle(source: &str, tag: &str, mode: jet::Sema::CompileMode) -> jet::AST::ProgramBundle {
     let dir = common::unique_tmp(tag);

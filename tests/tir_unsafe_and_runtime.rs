@@ -1120,7 +1120,7 @@ fn select_receives_from_real_channel() {
     if !have_rustc() {
         return;
     }
-    let src = "\
+    let src = r#"
 fn run() {
     (sender, receiver) :: channel<Int>()
     task :: task {
@@ -1131,7 +1131,7 @@ fn run() {
     }
     task.join() ?? panic("task failed")
 }
-";
+"#;
     let (code, stdout) = build_and_run("tir_select", src);
     assert_eq!(code, 0);
     assert_eq!(stdout, "42\n");
