@@ -75,6 +75,10 @@ pub struct CallArgFlags {
     /// callable argument of `apply`; lowering unwraps the value through the
     /// shared callable seam and never rebuilds its signature.
     pub callable_policy: Option<CallablePolicyChain>,
+    /// D-AUTHORITY-NAME1=A: sema proved this argument is the scoped `Abilities`
+    /// value crossing the one approved process/plugin boundary. The escape
+    /// checker uses this fact; engines do not.
+    pub authority_boundary: bool,
 }
 
 #[derive(Debug, Clone)]

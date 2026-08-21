@@ -7,6 +7,15 @@ pub struct JetAuthority {
 }
 
 impl JetAuthority {
+    /// Build the one runtime carrier for a checked named `#Abilities` scope.
+    /// The caller has already resolved the names; this method only stores the
+    /// rights set, so every execution tier shares the same relation.
+    pub fn from_rights(rights: Vec<String>) -> Self {
+        Self {
+            rights: jet_authority_rights_from_strings(rights),
+        }
+    }
+
     /// D-AUTHORITY-NAME1=A: the workspace value starts with the safe workspace
     /// read right. Boundary operations may narrow it, but never widen it.
     pub fn workspace() -> Self {
@@ -14,6 +23,19 @@ impl JetAuthority {
             rights: jet_authority_workspace_rights(),
         }
     }
+}
+
+pub(crate) fn jet_authority_rights_from_strings(
+    rights: Vec<String>,
+) -> std::collections::BTreeSet<String> {
+    rights.into_iter().collect()
+}
+
+/// Marshal the ordinary Authority carrier across the sandboxed plugin bridge.
+/// The plugin runtime stores this wire value; it never turns it into host
+/// imports or a second permission policy.
+pub(crate) fn jet_authority_to_wire(authority: &JetAuthority) -> String {
+    authority.rights.iter().cloned().collect::<Vec<_>>().join("\n")
 }
 
 fn jet_authority_covers(held: &str, requested: &str) -> bool {

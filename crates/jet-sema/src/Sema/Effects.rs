@@ -1646,11 +1646,23 @@ fn expr_handle_escape(e: &crate::AST::Expr, handle: &str) -> Option<Span> {
         Expr::CompareChain { operands, .. } => {
             operands.iter().find_map(|e| expr_handle_escape(e, handle))
         }
-        Expr::Call(c) => c.args.iter().find_map(|a| expr_handle_escape(&a.expr, handle)),
+        Expr::Call(c) => c
+            .args
+            .iter()
+            .filter(|a| !a.flags.authority_boundary)
+            .find_map(|a| expr_handle_escape(&a.expr, handle)),
         Expr::CallValue { callee, args, .. } => expr_handle_escape(callee, handle)
-            .or_else(|| args.iter().find_map(|a| expr_handle_escape(&a.expr, handle))),
+            .or_else(|| {
+                args.iter()
+                    .filter(|a| !a.flags.authority_boundary)
+                    .find_map(|a| expr_handle_escape(&a.expr, handle))
+            }),
         Expr::MethodCall { receiver, args, .. } => expr_handle_escape(receiver, handle)
-            .or_else(|| args.iter().find_map(|a| expr_handle_escape(&a.expr, handle))),
+            .or_else(|| {
+                args.iter()
+                    .filter(|a| !a.flags.authority_boundary)
+                    .find_map(|a| expr_handle_escape(&a.expr, handle))
+            }),
         Expr::Index { base, index, .. } => {
             expr_handle_escape(base, handle).or_else(|| expr_handle_escape(index, handle))
         }

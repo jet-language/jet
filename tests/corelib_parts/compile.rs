@@ -841,7 +841,7 @@ fn core_os_interrupt_runtime_failures_use_the_boundary_aware_helpers() {
         r#"jet_runtime_boundary(|| jet_runtime_stop("E3001", "", 0, &message))"#
     ));
     assert!(scheduler_host.contains("std::panic::panic_any(rendered)"));
-    assert!(task_mem.contains("super::jet_panic("));
+    assert!(task_mem.contains("super::jet_runtime_stop_with_context("));
     // The deadline helper binds the rendered E3003 to a local so it can feed
     // interrupt handlers, native wait boundaries, and explicitly typed deadline
     // tasks while ordinary scheduler tasks retain the exact process-fatal E3003

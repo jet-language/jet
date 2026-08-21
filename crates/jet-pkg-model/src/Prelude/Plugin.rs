@@ -34,6 +34,7 @@ use wasmtime::{Engine, Store};
 struct PluginInstance {
     store: Store<()>,
     instance: wasmtime::component::Instance,
+    authority: String,
 }
 
 thread_local! {
@@ -49,7 +50,7 @@ static NEXT_HANDLE: AtomicU64 = AtomicU64::new(1);
 /// registers none). Never panics — every wasmtime error is caught and
 /// rendered as a plain message (I2: no raw loader crash reaches the host
 /// program).
-pub fn jet_plugin_load(path: &str) -> String {
+pub fn jet_plugin_load(path: &str, authority: &str) -> String {
     let engine = Engine::default();
     let component = match Component::from_file(&engine, path) {
         Ok(c) => c,
@@ -71,7 +72,11 @@ pub fn jet_plugin_load(path: &str) -> String {
     let handle = NEXT_HANDLE.fetch_add(1, Ordering::Relaxed);
     PLUGINS.with(|m| {
         m.borrow_mut()
-            .insert(handle, PluginInstance { store, instance })
+            .insert(handle, PluginInstance {
+                store,
+                instance,
+                authority: authority.to_string(),
+            })
     });
     format!("O:{handle}")
 }

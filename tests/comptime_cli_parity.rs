@@ -697,6 +697,44 @@ fn measured_test_cli_and_selected_claim_keep_aot_golden_contract() {
     let selected = String::from_utf8_lossy(&measured.stdout);
     assert!(selected.contains("sum_to(1000)"), "selected measurement lost claim name: {selected}");
     assert!(selected.contains("ns"), "selected measurement lost timing: {selected}");
+
+    let bench = Command::new(env!("CARGO_BIN_EXE_jet"))
+        .args([
+            "test",
+            "examples/features/tooling/bench.jet",
+            "--measure",
+            "--json",
+        ])
+        .current_dir(&root)
+        .env("NO_COLOR", "1")
+        .output()
+        .expect("measure keep sink benchmark");
+    assert!(
+        bench.status.success(),
+        "keep sink benchmark failed: {}",
+        String::from_utf8_lossy(&bench.stderr)
+    );
+    let bench_stdout = String::from_utf8_lossy(&bench.stdout);
+    let mean_ns = |name: &str| -> f64 {
+        let needle = format!("\"name\":\"{name}\"");
+        let row = bench_stdout
+            .lines()
+            .find(|line| line.contains(&needle))
+            .unwrap_or_else(|| panic!("missing measured benchmark `{name}`: {bench_stdout}"));
+        row.split_once("\"mean_ns\":")
+            .and_then(|(_, rest)| {
+                rest.split(|character: char| character == ',' || character == '}')
+                    .next()
+            })
+            .and_then(|value| value.parse::<f64>().ok())
+            .unwrap_or_else(|| panic!("missing mean for measured benchmark `{name}`: {row}"))
+    };
+    let elided_ns = mean_ns("elided baseline");
+    let kept_ns = mean_ns("keep loop");
+    assert!(
+        kept_ns > elided_ns,
+        "keep loop must remain slower than the elided control: keep={kept_ns:.3} ns/iter, elided={elided_ns:.3} ns/iter"
+    );
 }
 
 #[test]

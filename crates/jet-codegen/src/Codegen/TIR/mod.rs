@@ -4128,7 +4128,8 @@ pub enum TExprKind {
     /// `Pool<T>`. `mutable` selects the in-place `jet_pool_get_mut` place over the
     /// `jet_pool_get` value clone, so a write or a mutating receiver edits the
     /// stored element instead of a throwaway copy. `field_rust` narrows the place
-    /// to one mangled field.
+    /// to one mangled field. `src_line` is captured at lowering so every engine
+    /// receives the stop's own source line rather than a function-frame fallback.
     PoolSlot {
         pool: Box<TExpr>,
         id: Box<TExpr>,
@@ -4136,6 +4137,7 @@ pub enum TExprKind {
         /// Jet field name when narrowing `pool[id].field`; emit mangles.
         field: Option<String>,
         line: usize,
+        src_line: String,
     },
     /// D-INDEX-HOOK: `mytype[k]` when the type implements `Index`.
     IndexHook {
@@ -4450,23 +4452,20 @@ pub enum TExprKind {
     TaskGroupAny {
         tasks: Box<TExpr>,
     },
-    /// D-SELECT-GENERIC1=A: `g.select()` starts a builder for one element type
-    /// `T`; sema accepts any `Receiver<T>` and requires all receive arms (and
-    /// typed timer values) in the chain to use that same `T`.
+    /// Compiler-private readiness-table carrier. Source `if { ... }` lowers
+    /// to this chain without exposing a public builder spelling.
     SelectStart,
-    /// D-SELECT-GENERIC1=A: `.recv(ch)` registers one `Receiver<T>` arm.
+    /// Compiler-private receiver arm in the readiness-table carrier.
     SelectRecv {
         builder: Box<TExpr>,
         channel: Box<TExpr>,
     },
-    /// D-TYPE2-TIME1=A: `.after(duration: …)` registers a timer arm carrying the
-    /// builder's same `T` when a value is supplied.
+    /// Compiler-private timer arm in the readiness-table carrier.
     SelectAfter {
         builder: Box<TExpr>,
         duration: Box<TExpr>,
         value: Option<Box<TExpr>>,
     },
-    /// D-SELECT-GENERIC1=A: `.wait()` returns the selected arm's `T` payload.
     /// D-CONC-CHAN2=D: a readiness table with `else` uses the same tagged door
     /// without parking; `nonblocking` is compiler-owned, not user syntax.
     SelectWait {

@@ -1382,6 +1382,27 @@ impl CtValue {
             CtValue::Failed(CtReport::Clean(_)) => "Err(JetAbsent)".to_string(),
             CtValue::Failed(CtReport::Told(e)) => format!("Err({})", e.serialize()),
             CtValue::Struct { type_name, fields } => {
+                // D-TYPE2-DEFAULT1: Fraction and Decimal are compiler-owned
+                // Prelude carriers, not generated user structs. Rebuild them
+                // through the same constructors as runtime exact arithmetic;
+                // a `__jet_Fraction { ... }` literal would violate I2 because
+                // no user struct with that name exists in generated Rust.
+                if type_name == crate::Syntax::TYPE_FRACTION {
+                    let fraction = crate::Numeric::CtFraction::from_value(self)
+                        .expect("comptime Fraction must have its carrier fields");
+                    return format!(
+                        "jet_fraction_from_parts({}i64, {}i64)",
+                        fraction.numerator, fraction.denominator
+                    );
+                }
+                if type_name == crate::Syntax::TYPE_DECIMAL {
+                    let decimal = crate::Numeric::CtDecimal::from_value(self)
+                        .expect("comptime Decimal must have its carrier fields");
+                    return format!(
+                        "jet_decimal_from_str(&{:?}.to_string())",
+                        decimal.to_string_rep()
+                    );
+                }
                 let parts: Vec<String> = fields
                     .iter()
                     .filter(|(name, _)| !crate::Syntax::is_memo_storage_name(name))

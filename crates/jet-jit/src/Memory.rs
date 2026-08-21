@@ -716,18 +716,19 @@ fn pool_value(handle: i64, id: i64) -> Option<i64> {
     (slot.generation == generation).then_some(slot.value).flatten()
 }
 
-/// `line` is the Jet line of the `pool[id]` read, the same fact AOT hands
-/// `jet_pool_get(&pool, id, file, line)`. Without it the shared report boundary
-/// renders a locationless stop and this tier disagrees with AOT on the `-->`
-/// line for one identical program (I9).
-fn jet_jit_pool_get(handle: i64, id: i64, line: u32) -> i64 {
+/// `src_line` is the source line captured in the shared PoolSlot TIR node; it
+/// avoids falling back to the enclosing function's prologue when this host's
+/// run-level source text is unavailable.
+fn jet_jit_pool_get(handle: i64, id: i64, line: i64, src_line: i64) -> i64 {
     match pool_value(handle, id) {
         Some(value) => value,
         None => {
             Concurrency::with_runtime_mut(|rt| {
-                rt.set_runtime_stop(
+                let source_line = rt.heap.clone_string(src_line).unwrap_or_default();
+                rt.set_runtime_stop_with_source_line(
                     "E3001",
-                    line,
+                    line.max(0) as u32,
+                    Some(source_line.as_str()),
                     jet_foundation::Outcome::jet_pool_stale_message(),
                 )
             });
@@ -1535,10 +1536,6 @@ host_fns! {
         binary_i8.params.push(AbiParam::new(types::I64));
         binary_i8.params.push(AbiParam::new(types::I64));
         binary_i8.returns.push(AbiParam::new(types::I8));
-        // (handle, id, line) -> value: the same `line` tail every other
-        // report-bearing host shim carries (`Collections.rs`'s `sig_get`).
-        let mut binary_i32 = binary.clone();
-        binary_i32.params.push(AbiParam::new(types::I32));
 
 
     }
@@ -1558,7 +1555,7 @@ host_fns! {
     gc_add_edge: "jet_jit_gc_add_edge" => jet_jit_gc_add_edge: ternary_void;
     pool_new: "jet_jit_pool_new" => jet_jit_pool_new: noarg_i64;
     pool_add: "jet_jit_pool_add" => jet_jit_pool_add: binary;
-    pool_get: "jet_jit_pool_get" => jet_jit_pool_get: binary_i32;
+    pool_get: "jet_jit_pool_get" => jet_jit_pool_get: quaternary;
     pool_remove: "jet_jit_pool_remove" => jet_jit_pool_remove: binary;
     pool_ids: "jet_jit_pool_ids" => jet_jit_pool_ids: unary;
     shared_new: "jet_jit_shared_new" => jet_jit_shared_new: unary;

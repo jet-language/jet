@@ -1,8 +1,8 @@
 //! D-AUTHORITY-MODEL1=A: one rights tree, one holds relation, one gate record.
 //!
-//! Authority facts are compile-time data. The parser, sema, package budget,
-//! build evaluator, comptime checker, and REPL only consume this module's
-//! names and laws. No authority value reaches TIR or generated Rust.
+//! Authority names and laws are compile-time facts. Named `#Abilities` scopes
+//! also lower to the shared Prelude's ordinary runtime carrier; this module
+//! does not define a second value or policy representation.
 
 use crate::Diagnostics::{Diagnostic, Span};
 use std::collections::BTreeSet;

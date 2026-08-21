@@ -1,12 +1,14 @@
 // D-AUTHORITY-WORD2=E: Abilities is the one rights value that crosses
 // process, plugin, and session boundaries. It only narrows.
+use core.process as process
+
 struct Holder {
     abilities: Abilities
 }
 
 fn run() {
-    abilities :: Abilities.workspace()
-    narrowed :: abilities.with("FS.Read")
-    released :: narrowed.without("FS.Read")
-    print("abilities")
+    #Abilities(abilities: Exec, IO) {
+        result :: process.run(["echo", "abilities"], abilities)
+        print("abilities")
+    }
 }

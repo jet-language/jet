@@ -3092,16 +3092,16 @@ pub(crate) fn emit_tir_core_call(
         }
         ("core.plugin", "load") if args.len() == 2 => {
             format!(
-                "{{ let _authority = &({}); let _ = _authority; {root}JetPlugin {{ handle: {root}jet_std::jet_plugin_load_handle(&{}(&({}))) }} }}",
-                arg(1),
+                "{{ {root}JetPlugin {{ handle: {root}jet_std::jet_plugin_load_handle(&{}(&({}), &{root}jet_authority_to_wire(&({})))) }} }}",
                 regex_fn("jet_plugin_load"),
                 arg(0),
+                arg(1),
                 root = cx.root_prefix,
             )
         }
         ("core.plugin", "load") => {
             format!(
-                "{root}JetPlugin {{ handle: {root}jet_std::jet_plugin_load_handle(&{}(&({}))) }}",
+                "{root}JetPlugin {{ handle: {root}jet_std::jet_plugin_load_handle(&{}(&({}), \"\")) }}",
                 regex_fn("jet_plugin_load"),
                 arg(0),
                 root = cx.root_prefix,

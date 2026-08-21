@@ -500,7 +500,7 @@ fn caught_task_panics_keep_stderr_deterministic_under_parallel_repetition() {
                 for _attempt in 0..4 {
                     let run = command_output_with_timeout(
                         Command::new(binary.as_ref()),
-                        DEV_DIFF_TIMEOUT,
+                        *DEV_DIFF_TIMEOUT,
                         &format!("scheduler panic run {worker}/{iteration}"),
                     );
                     let got = ProgramOutput::ran(

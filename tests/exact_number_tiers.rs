@@ -61,23 +61,21 @@ fn exact_numbers_parser_accepts_the_canonical_surface() {
 
 #[test]
 fn exact_numbers_sema_accepts_exact_defaults_and_float_opt_in() {
-    let result = jet::compile_with_path(SOURCE, "tests/fixtures/exact_number_tiers.jet");
-    assert!(result.is_ok(), "sema rejected exact numbers: {result:#?}");
+    tir_support::compile("exact_number_tiers_sema", SOURCE);
 }
 
 #[test]
 fn exact_numbers_tir_keeps_the_numeric_prelude_carriers() {
-    let compiled = jet::compile_with_path(SOURCE, "tests/fixtures/exact_number_tiers.jet")
-        .expect("exact numbers must reach TIR");
+    let compiled = tir_support::compile("exact_number_tiers_tir", SOURCE);
     assert!(
-        compiled.rust.contains("jet_decimal") || compiled.rust.contains("JetDecimal"),
+        compiled.contains("jet_decimal") || compiled.contains("JetDecimal"),
         "TIR lost the exact Decimal carrier:\n{}",
-        compiled.rust
+        compiled
     );
     assert!(
-        compiled.rust.contains("19.99") && compiled.rust.contains("f64"),
+        compiled.contains("19.99") && compiled.contains("f64"),
         "TIR lost the explicit machine Float path:\n{}",
-        compiled.rust
+        compiled
     );
 }
 

@@ -725,6 +725,26 @@ fn check_json_golden() {
 }
 
 #[test]
+fn name_suggestion_json_golden() {
+    let dir = isolated_cwd("name_suggestion_json");
+    let p = dir.join("name.jet");
+    fs::write(
+        &p,
+        "fn run() {\n    score :: 90\n    print(scor)\n}\n",
+    )
+    .unwrap();
+    let out = Command::new(jet())
+        .args(["check", p.to_str().unwrap(), "--json"])
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(1));
+    assert!(out.stdout.is_empty());
+    let stderr = scrub(&String::from_utf8_lossy(&out.stderr), &p);
+    check_snapshot("name_suggestion_json.txt", &stderr);
+}
+
+#[test]
 fn machine_report_paths_stay_resolvable_across_repository_layouts() {
     let dir = isolated_cwd("machine_report_paths");
     let runner = dir.join("runner");

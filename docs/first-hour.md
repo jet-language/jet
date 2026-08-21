@@ -5,8 +5,7 @@ native command-line tool.
 
 ## 1. Install Jet
 
-On a supported host with Nix, install the current Jet package without a
-repository checkout:
+On a supported host with Nix, install the current Jet package without a repository checkout:
 
 ```bash
 nix profile install github:jet-language/jet
@@ -23,9 +22,7 @@ export PATH="$PWD/result/bin:$PATH"
 jet version
 ```
 
-The installed `jet` binary is the compiler. For a source build,
-`result/bin/jet` is the compiler and the `PATH` change applies to the current
-shell.
+The installed `jet` binary is the compiler. For a source build, `result/bin/jet` is the compiler and the `PATH` change applies to the current shell.
 
 ## 2. Run your first program
 
@@ -49,9 +46,7 @@ Jet prints:
 hello, world
 ```
 
-`fn run()` is the entry point. `print` is built in, so this program needs no
-imports, manifest, or project setup. This snippet is also the
-[golden-tested hello example](../examples/features/basics/hello.jet).
+`fn run()` is the entry point. `print` is built in, so this program needs no imports, manifest, or project setup. This snippet is also the [golden-tested hello example](../examples/features/basics/hello.jet).
 
 ## 3. Read your first error
 
@@ -71,14 +66,11 @@ Error [E0102]: nothing named `pirnt` exists here
 
 Change `pirnt` back to `print`. Run `jet check hello.jet` again.
 
-The error code stays stable. The full
-[E0102 reference](reference/errors/E0102.md) links to its tested failing
-program.
+The error code stays stable. The full [E0102 reference](reference/errors/E0102.md) links to its tested failing program.
 
 ## 4. Use the shared REPL and notebook
 
-If `jet` is already installed on your host, this journey needs no repository
-checkout. Verify the binary first:
+If `jet` is already installed on your host, this journey needs no repository checkout. Verify the binary first:
 
 ```bash
 jet version

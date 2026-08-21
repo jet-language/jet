@@ -4382,12 +4382,11 @@ impl LowerCtx<'_, '_> {
     /// Return the local updated by the one pure integer reduction shape that
     /// can keep its list buffer borrowed for the whole native loop.
     fn direct_int_sum_target(var: &str, body: &[TStmt]) -> Option<String> {
-        let trace = std::env::var_os("JET_TRACE_CARD2058").is_some();
         let mut target_name = None;
         for stmt in body {
             let TStmt::Assign {
                 place: TPlace::Local(target),
-                op: Some(BinOp::Add),
+                op,
                 value,
                 ..
             } = stmt
@@ -4395,63 +4394,37 @@ impl LowerCtx<'_, '_> {
                 if matches!(stmt, TStmt::SourceSpan(_) | TStmt::LineMarker(_)) {
                     continue;
                 }
-                if trace {
-                    let kind = match stmt {
-                        TStmt::Assign {
-                            place: TPlace::Expr(_),
-                            ..
-                        } => "assign_expr",
-                        TStmt::Assign {
-                            place: TPlace::Local(_),
-                            ..
-                        } => "assign_local_unmatched",
-                        TStmt::GcEdit { .. } => "gc_edit",
-                        TStmt::Let { .. } => "let",
-                        TStmt::ExprStmt(_) => "expr_stmt",
-                        TStmt::If { .. } => "if",
-                        TStmt::LineMarker(_) => "line_marker",
-                        TStmt::SourceSpan(_) => "source_span",
-                        _ => "other",
-                    };
-                    if let TStmt::Assign {
-                        place: TPlace::Local(target),
-                        op,
-                        value,
-                        ..
-                    } = stmt
-                    {
-                        eprintln!(
-                            "[card2058] direct target var={var} reject=non_assign kind={kind} op={op:?} target={target:?} value_ty={:?}",
-                            value.ty,
-                        );
-                    } else {
-                        eprintln!("[card2058] direct target var={var} reject=non_assign kind={kind}");
-                    }
-                }
                 return None;
             };
             if target.deref || !matches!(value.ty, Type::Int) {
-                if trace {
-                    eprintln!(
-                        "[card2058] direct target var={var} reject=target_or_value target={target:?} value_ty={:?}",
-                        value.ty,
-                    );
-                }
                 return None;
             }
-            let TExprKind::Local(rhs) = &value.kind else {
-                if trace {
-                    eprintln!("[card2058] direct target var={var} reject=rhs_not_local");
+            let rhs = match (&*op, &value.kind) {
+                // Older TIR kept the compound operator on the assignment.
+                (Some(BinOp::Add), TExprKind::Local(rhs)) => rhs,
+                // Current sema canonicalizes `total += x` to `total = total + x`
+                // before TIR lowering. Keep the reduction recognizer aligned with
+                // that canonical form instead of sending the loop through list_get.
+                (None, TExprKind::Binary {
+                    op: BinOp::Add,
+                    lhs,
+                    rhs,
+                    ..
+                }) => {
+                    let TExprKind::Local(lhs) = &lhs.kind else {
+                        return None;
+                    };
+                    if lhs.deref || lhs.name != target.name {
+                        return None;
+                    }
+                    let TExprKind::Local(rhs) = &rhs.kind else {
+                        return None;
+                    };
+                    rhs
                 }
-                return None;
+                _ => return None,
             };
             if rhs.deref || rhs.name != var || target_name.is_some() {
-                if trace {
-                    eprintln!(
-                        "[card2058] direct target var={var} reject=rhs_shape rhs={rhs:?} already={}",
-                        target_name.is_some(),
-                    );
-                }
                 return None;
             }
             target_name = Some(target.rust_name());
@@ -5036,15 +5009,18 @@ impl LowerCtx<'_, '_> {
                             id,
                             field: Some(field),
                             line,
+                            src_line,
                             ..
                         } = &place_expr.kind
                         {
                             let pool_handle = self.lower_expr(pool)?;
                             let id_value = self.lower_expr(id)?;
-                            let line = self.b.ins().iconst(types::I32, *line as i64);
+                            let line = self.b.ins().iconst(types::I64, *line as i64);
+                            let src_line = self.runtime.heap.alloc_string(src_line);
+                            let src_line = self.b.ins().iconst(types::I64, src_line as i64);
                             let record = self.call_host(
                                 self.host.memory.pool_get,
-                                &[pool_handle, id_value, line],
+                                &[pool_handle, id_value, line, src_line],
                             );
                             self.emit_trap_check()?;
                             let elem_ty = match &pool.ty {
@@ -6278,18 +6254,6 @@ impl LowerCtx<'_, '_> {
                         return in_own_frame(|| -> Result<(), String> {
                             return Err("jit for-in by-value stream unsupported".to_string());
                         });
-                    }
-                    if std::env::var_os("JET_TRACE_CARD2058").is_some() {
-                        eprintln!(
-                            "[card2058] for-in var={var} ty={:?} var2={} step={} method_none={} columnar={} by_value={} target={:?}",
-                            collection.ty,
-                            var2.is_none(),
-                            step.is_none(),
-                            method_kind.is_none(),
-                            !*columnar,
-                            !*by_value,
-                            Self::direct_int_sum_target(var, body),
-                        );
                     }
                     if var2.is_none()
                         && step.is_none()
@@ -19181,6 +19145,18 @@ impl LowerCtx<'_, '_> {
                     if is_abilities_workspace {
                         return Ok(self.call_host(self.host.coll.authority_workspace, &[]));
                     }
+                    let is_abilities_from_rights = method.name == "from_rights"
+                        && args.len() == 1
+                        && prelude_path.is_some_and(|path| {
+                            path == "JetAuthority" || path.ends_with("::JetAuthority")
+                        });
+                    if is_abilities_from_rights {
+                        let rights = self.lower_call_arg(&args[0])?;
+                        return Ok(self.call_host(
+                            self.host.coll.authority_from_rights,
+                            &[rights],
+                        ));
+                    }
                     // D-ENCSTREAM-SURFACE1: `EncodingLimits.safe()` — fixed defaults, no host.
                     let is_encoding_limits_safe = method.name == "safe"
                         && args.is_empty()
@@ -19588,7 +19564,6 @@ impl LowerCtx<'_, '_> {
                     let payload = self.load_local(local)?;
                     let map = self.call_host(self.host.encoding.object_entries_to_map, &[payload]);
                     self.emit_trap_check()?;
-                    Ok(map)
                 })
             }
             TExprKind::PoolSlot {
@@ -19596,6 +19571,7 @@ impl LowerCtx<'_, '_> {
                 id,
                 field,
                 line,
+                src_line,
                 ..
             } => {
                 in_own_frame(|| -> Result<Value, String> {
@@ -19605,9 +19581,11 @@ impl LowerCtx<'_, '_> {
                     };
                     let pool = self.lower_expr(pool)?;
                     let id = self.lower_expr(id)?;
-                    let line = self.b.ins().iconst(types::I32, *line as i64);
-                    let value = self.call_host(self.host.memory.pool_get, &[pool, id, line]);
-                    self.emit_trap_check()?;
+                    let line = self.b.ins().iconst(types::I64, *line as i64);
+                    let src_line = self.runtime.heap.alloc_string(src_line);
+                    let src_line = self.b.ins().iconst(types::I64, src_line as i64);
+                    let value =
+                        self.call_host(self.host.memory.pool_get, &[pool, id, line, src_line]);
                     if let Some(field) = field {
                         let elem_ty =
                             elem_ty.ok_or_else(|| "jit Pool field element type".to_string())?;
@@ -22930,6 +22908,9 @@ impl LowerCtx<'_, '_> {
                         .ins()
                         .iconst(types::I64, i64::from(*signed));
                     return Ok(self.call_host(self.host.intn_to_string, &[value, signed]));
+                }
+                if matches!(&recv.ty, Type::Int) {
+                    return Ok(self.call_host(self.host.num.int_to_string, &[value]));
                 }
                 let text = self.call_host(self.host.str_begin, &[]);
                 let push = match clif_ty(&recv.ty) {

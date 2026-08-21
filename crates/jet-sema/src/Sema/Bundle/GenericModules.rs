@@ -173,6 +173,70 @@ pub(super) fn top_level_instance_display_paths(
     paths
 }
 
+/// Return display projections for plain inline-module types lifted into the
+/// containing item list. Nested modules use their full source path for the
+/// generated type prefix, so `vis2.bank.Account` cannot collide with a sibling
+/// `bank.Account`.
+pub(super) fn plain_inline_module_display_paths(
+    instance: &CodeModule,
+    items: &[Item],
+) -> Vec<(String, String)> {
+    let mut paths = Vec::new();
+    collect_plain_inline_display_paths(
+        instance,
+        &instance.name,
+        &instance.name,
+        items,
+        &mut paths,
+    );
+    paths
+}
+
+fn collect_plain_inline_display_paths(
+    instance: &CodeModule,
+    source_path: &str,
+    display_path: &str,
+    items: &[Item],
+    paths: &mut Vec<(String, String)>,
+) {
+    let type_prefix = module_type_prefix(&inline_type_alias(source_path));
+    let selected: Vec<Item> = items
+        .iter()
+        .filter(|item| match item {
+            Item::Struct(definition) => definition.name.starts_with(&type_prefix),
+            Item::Enum(definition) => definition.name.starts_with(&type_prefix),
+            Item::Trait(definition) => definition.name.starts_with(&type_prefix),
+            Item::Tag(definition) => definition.name.starts_with(&type_prefix),
+            Item::Impl(implementation) => implementation.type_name.starts_with(&type_prefix),
+            _ => false,
+        })
+        .cloned()
+        .collect();
+    collect_instance_display_paths(
+        &inline_type_alias(source_path),
+        "",
+        display_path,
+        &selected,
+        paths,
+    );
+    if let Some(body) = &instance.body {
+        for child in body.iter().filter_map(|item| match item {
+            Item::CodeModule(child) => Some(child),
+            _ => None,
+        }) {
+            let child_source_path = format!("{source_path}.{}", child.name);
+            let child_display_path = format!("{display_path}.{}", child.name);
+            collect_plain_inline_display_paths(
+                child,
+                &child_source_path,
+                &child_display_path,
+                items,
+                paths,
+            );
+        }
+    }
+}
+
 fn join_member_path(prefix: &str, name: &str) -> String {
     if prefix.is_empty() {
         name.to_string()
@@ -2349,7 +2413,7 @@ pub(crate) fn expand_generic_module_aliases(
 ///
 /// This is that same mechanism, with no arguments to substitute: one member
 /// naming scheme (`module_type_name`), one lifting step, one display
-/// projection (`top_level_instance_display_paths`), no engine change. Generic
+/// projection (`plain_inline_module_display_paths`), no engine change. Generic
 /// instances are skipped — `expand_alias` already lifted their members.
 ///
 /// Visibility is preserved: the bare name and the qualified `bank.Account`
@@ -2364,91 +2428,13 @@ pub(crate) fn hoist_inline_module_member_types(bundle: &mut ProgramBundle) {
             let Item::CodeModule(code_module) = item else {
                 continue;
             };
-            if code_module.instance_identity.is_some() {
-                continue;
-            }
-            let module_name = code_module.name.clone();
-            let Some(body) = &mut code_module.body else {
-                continue;
-            };
-            let mut member_types: HashMap<String, Type> = HashMap::new();
-            for inner in body.iter() {
-                let (name, is_pub) = match inner {
-                    Item::Struct(def) => (&def.name, def.is_pub || def.is_package_pub),
-                    Item::Enum(def) => (&def.name, def.is_pub || def.is_package_pub),
-                    Item::Trait(def) => (&def.name, def.is_pub || def.is_package_pub),
-                    Item::Tag(def) => (&def.name, def.is_pub || def.is_package_pub),
-                    _ => continue,
-                };
-                let resolved = Type::Named(module_type_name(&module_name, name));
-                member_types.insert(name.clone(), resolved.clone());
-                member_types.insert(format!("{module_name}.{name}"), resolved.clone());
-                if is_pub {
-                    exported.insert(format!("{module_name}.{name}"), resolved);
-                }
-            }
-            if member_types.is_empty() {
-                continue;
-            }
-            let values: HashMap<String, crate::AST::CtValue> = HashMap::new();
-            let mut kept = Vec::with_capacity(body.len());
-            for inner in std::mem::take(body) {
-                match inner {
-                    Item::Struct(def) => declarations.push(Item::Struct(specialize_struct(
-                        &def,
-                        &module_name,
-                        &[],
-                        &[],
-                        &member_types,
-                        &values,
-                    ))),
-                    Item::Enum(def) => declarations.push(Item::Enum(specialize_enum(
-                        &def,
-                        &module_name,
-                        &[],
-                        &[],
-                        &member_types,
-                        &values,
-                    ))),
-                    Item::Trait(def) => declarations.push(Item::Trait(specialize_trait(
-                        &def,
-                        &[],
-                        &[],
-                        &member_types,
-                        &values,
-                    ))),
-                    Item::Tag(def) => {
-                        declarations.push(Item::Tag(specialize_tag(&def, &member_types, &values)))
-                    }
-                    // An `impl` block belongs beside the type it implements.
-                    Item::Impl(def) => declarations.push(Item::Impl(specialize_impl(
-                        &def,
-                        &[],
-                        &[],
-                        &member_types,
-                        &values,
-                    ))),
-                    // Member callables keep their own name (mangling happens at
-                    // registration); only the member type spellings inside them move.
-                    Item::Func(def) => kept.push(Item::Func(specialize_func(
-                        def,
-                        &[],
-                        &[],
-                        &member_types,
-                        &values,
-                    ))),
-                    Item::Const(mut def) => {
-                        substitute_expr(&mut def.value, &member_types, &values);
-                        def.ty = def
-                            .ty
-                            .as_ref()
-                            .map(|ty| specialize_module_type(ty, &member_types, &values));
-                        kept.push(Item::Const(def));
-                    }
-                    other => kept.push(other),
-                }
-            }
-            *body = kept;
+            let source_path = code_module.name.clone();
+            hoist_inline_module_types(
+                code_module,
+                &source_path,
+                &mut declarations,
+                &mut exported,
+            );
         }
         if declarations.is_empty() {
             continue;
@@ -2481,6 +2467,142 @@ fn rewrite_exported_inline_types(items: &mut [Item], exported: &HashMap<String, 
             _ => {}
         }
     }
+}
+
+fn inline_type_alias(source_path: &str) -> String {
+    source_path.replace('.', "_")
+}
+
+fn hoist_inline_module_types(
+    code_module: &mut CodeModule,
+    source_path: &str,
+    declarations: &mut Vec<Item>,
+    exported: &mut HashMap<String, Type>,
+) -> HashMap<String, Type> {
+    if code_module.instance_identity.is_some() {
+        return HashMap::new();
+    }
+    let Some(body) = &mut code_module.body else {
+        return HashMap::new();
+    };
+
+    let module_alias = inline_type_alias(source_path);
+    let module_name = code_module.name.clone();
+    let mut direct_types = HashMap::new();
+    let mut direct_names = Vec::new();
+    for inner in body.iter() {
+        let (name, is_pub) = match inner {
+            Item::Struct(def) => (&def.name, def.is_pub || def.is_package_pub),
+            Item::Enum(def) => (&def.name, def.is_pub || def.is_package_pub),
+            Item::Trait(def) => (&def.name, def.is_pub || def.is_package_pub),
+            Item::Tag(def) => (&def.name, def.is_pub || def.is_package_pub),
+            _ => continue,
+        };
+        let resolved = Type::Named(module_type_name(&module_alias, name));
+        direct_types.insert(name.clone(), resolved.clone());
+        direct_types.insert(format!("{module_name}.{name}"), resolved.clone());
+        direct_types.insert(format!("{source_path}.{name}"), resolved.clone());
+        direct_names.push(name.clone());
+        if is_pub {
+            exported.insert(format!("{source_path}.{name}"), resolved);
+        }
+    }
+
+    let mut kept = Vec::with_capacity(body.len());
+    let mut lifted = Vec::new();
+    let mut descendant_types = HashMap::new();
+    for inner in std::mem::take(body) {
+        match inner {
+            Item::CodeModule(mut child) => {
+                let child_path = format!("{source_path}.{}", child.name);
+                descendant_types.extend(hoist_inline_module_types(
+                    &mut child,
+                    &child_path,
+                    declarations,
+                    exported,
+                ));
+                kept.push(Item::CodeModule(child));
+            }
+            Item::Struct(_)
+            | Item::Enum(_)
+            | Item::Trait(_)
+            | Item::Tag(_)
+            | Item::Impl(_) => lifted.push(inner),
+            other => kept.push(other),
+        }
+    }
+
+    let mut visible_types = direct_types.clone();
+    for (full_path, ty) in &descendant_types {
+        visible_types.insert(full_path.clone(), ty.clone());
+        if let Some(relative) = full_path.strip_prefix(&format!("{source_path}.")) {
+            visible_types.insert(relative.to_string(), ty.clone());
+        }
+    }
+    let values: HashMap<String, crate::AST::CtValue> = HashMap::new();
+    for inner in &mut kept {
+        match inner {
+            Item::Func(def) => {
+                *def = specialize_func(def.clone(), &[], &[], &visible_types, &values)
+            }
+            Item::Const(def) => {
+                substitute_expr(&mut def.value, &visible_types, &values);
+                def.ty = def
+                    .ty
+                    .as_ref()
+                    .map(|ty| specialize_module_type(ty, &visible_types, &values));
+            }
+            _ => {}
+        }
+    }
+    for inner in lifted {
+        match inner {
+            Item::Struct(def) => declarations.push(Item::Struct(specialize_struct(
+                &def,
+                &module_alias,
+                &[],
+                &[],
+                &visible_types,
+                &values,
+            ))),
+            Item::Enum(def) => declarations.push(Item::Enum(specialize_enum(
+                &def,
+                &module_alias,
+                &[],
+                &[],
+                &visible_types,
+                &values,
+            ))),
+            Item::Trait(def) => declarations.push(Item::Trait(specialize_trait(
+                &def,
+                &[],
+                &[],
+                &visible_types,
+                &values,
+            ))),
+            Item::Tag(def) => {
+                declarations.push(Item::Tag(specialize_tag(&def, &visible_types, &values)))
+            }
+            Item::Impl(def) => declarations.push(Item::Impl(specialize_impl(
+                &def,
+                &[],
+                &[],
+                &visible_types,
+                &values,
+            ))),
+            _ => unreachable!("only type declarations and impls are lifted"),
+        }
+    }
+    *body = kept;
+
+    let mut all_types = HashMap::new();
+    for name in direct_names {
+        if let Some(ty) = direct_types.get(&name) {
+            all_types.insert(format!("{source_path}.{name}"), ty.clone());
+        }
+    }
+    all_types.extend(descendant_types);
+    all_types
 }
 
 #[cfg(test)]

@@ -35,8 +35,7 @@ fn run() {
 
 const AUTHORITY_VALUE_SOURCE: &str = r#"
 fn run() {
-    #Abilities(scope: IO) {
-        abilities :: Abilities.workspace()
+    #Abilities(abilities: FS.Read) {
         narrowed :: abilities.with("FS.Read")
         released :: narrowed.without("FS.Read")
         print("abilities")
@@ -86,6 +85,8 @@ fn run() {
     );
     assert!(output.rust.contains("jet_plugin_load"), "{}", output.rust);
     assert!(output.rust.contains("JetAuthority"), "{}", output.rust);
+    assert!(output.rust.contains("jet_authority_to_wire"), "{}", output.rust);
+    assert!(!output.rust.contains("let _authority"), "{}", output.rust);
 }
 
 #[test]
@@ -103,7 +104,7 @@ fn run() {
 
 #[test]
 fn authority_parser_accepts_the_named_value() {
-    let (tokens, diagnostics) = jet::Lexer::lex("fn run() { #Abilities(scope: IO) { value :: Abilities.workspace() } }");
+    let (tokens, diagnostics) = jet::Lexer::lex("fn run() { #Abilities(abilities: FS.Read) { value :: abilities.with(\"FS.Read\") } }");
     assert!(diagnostics.is_empty(), "{diagnostics:#?}");
     jet::Parser::parse(&tokens).expect("parser must accept Abilities");
 }
@@ -142,7 +143,7 @@ fn authority_dev_runs_the_same_value() {
 
 #[test]
 fn authority_comptime_uses_the_same_value() {
-    let source = "@abilities :: Abilities.workspace().with(\"FS.Read\")\n\nfn run() { print(\"abilities\") }\n";
+    let source = "@abilities :: Abilities.from_rights([\"FS.Read\"])\n\nfn run() { print(\"abilities\") }\n";
     let output = jet::compile(source).expect("comptime should construct Abilities");
     assert!(output.rust.contains("JetAuthority"), "{}", output.rust);
 }
@@ -150,7 +151,12 @@ fn authority_comptime_uses_the_same_value() {
 #[test]
 fn authority_repl_accepts_the_same_value() {
     let transcript = jet::REPL::run_transcript(
-        &["abilities :: Abilities.workspace()", "narrowed :: abilities.with(\"FS.Read\")", "print(\"abilities\")"],
+        &[
+            "abilities :: Abilities.workspace()",
+            "narrowed :: abilities.with(\"FS.Read\")",
+            "#Abilities(scoped: FS.Read) { inside :: scoped.with(\"FS.Read\") }",
+            "print(\"abilities\")",
+        ],
         None,
     );
     assert!(transcript.contains("abilities"), "REPL changed Abilities meaning: {transcript}");
@@ -167,5 +173,6 @@ fn authority_web_accepts_the_same_value() {
     let web = output.web.expect("web tier dropped Abilities");
     assert!(web.js_app.contains("jet_authority_with"), "web lost Abilities.with");
     assert!(web.js_app.contains("jet_authority_without"), "web lost Abilities.without");
+    assert!(web.js_app.contains("jet_authority_from_rights"), "web lost named Abilities construction");
     let _ = std::fs::remove_dir_all(root);
 }

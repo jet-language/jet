@@ -2359,7 +2359,8 @@ unmatched right row as `None`.
 ## E2-M1 — Concurrency (tasks and channels, verified 2026-08-06)
 
 `task` provides spawning and nested combinators. `core.tasks` remains the normal
-core module for typed channels and task control helpers:
+core module for task control and timer helpers; typed channels use the builtin
+`channel<T>()` form:
 
 ```jet
 use core.tasks as tasks;

@@ -168,6 +168,34 @@ fn jet_decode_inline_range(
     jet_inline_range_from_int(value, lo, hi).map_err(jet_std::FieldError::one)
 }
 
+// D-JSON-EXACTNUM1: fixed-width integer fields must keep the exact integer
+// token until the destination width check. `I64` has the same Rust carrier as
+// default `Int`, so its ordinary trait impl cannot carry the width policy.
+fn jet_decode_fixed_int(
+    t: &jet_std::DataTree,
+    signed: bool,
+    bits: u8,
+    name: &str,
+) -> Result<i128, Vec<jet_std::FieldError>> {
+    let value = jet_std::decode_int(t)?;
+    let value = jet_std::jet_int_to_i128(value).ok_or_else(|| {
+        jet_std::FieldError::one(format!("expected {name}, found out-of-range Int"))
+    })?;
+    let in_range = if signed {
+        let max = (1i128 << u32::from(bits - 1)) - 1;
+        (-(max + 1)..=max).contains(&value)
+    } else {
+        (0..=(1i128 << u32::from(bits)) - 1).contains(&value)
+    };
+    if in_range {
+        Ok(value)
+    } else {
+        Err(jet_std::FieldError::one(format!(
+            "expected {name}, found out-of-range Int"
+        )))
+    }
+}
+
 fn jet_decode_inline_range_list<T, F>(
     t: &jet_std::DataTree,
     mut decode: F,

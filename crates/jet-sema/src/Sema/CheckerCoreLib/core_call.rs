@@ -5156,6 +5156,7 @@ impl<'a> Checker<'a> {
                         &Type::Named(crate::Syntax::CAP_HANDLE_TYPE.to_string()),
                         &mut args[1],
                     );
+                    args[1].flags.authority_boundary = true;
                 }
                 for arg in args.iter_mut().skip(2) {
                     self.infer(&mut arg.expr);
@@ -5181,6 +5182,7 @@ impl<'a> Checker<'a> {
                         &Type::Named(crate::Syntax::CAP_HANDLE_TYPE.to_string()),
                         &mut args[1],
                     );
+                    args[1].flags.authority_boundary = true;
                 }
                 for arg in args.iter_mut().skip(2) {
                     self.infer(&mut arg.expr);

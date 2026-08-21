@@ -190,6 +190,12 @@ pub(crate) fn lower_expr_as_mut_place(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> 
         env: &mut LowerEnv,
     ) -> TExpr {
         let line = crate::Diagnostics::span_line_col(&cx.src, idx_span.start).0;
+        let src_line = cx
+            .src
+            .lines()
+            .nth(line.saturating_sub(1))
+            .unwrap_or_default()
+            .to_string();
         let pool_t = lower_expr(pool_expr, cx, env);
         let id_t = lower_expr(id_expr, cx, env);
         let elem_ty = match &pool_t.ty {
@@ -205,6 +211,7 @@ pub(crate) fn lower_expr_as_mut_place(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> 
                     mutable: true,
                     field: None,
                     line,
+                    src_line: src_line.clone(),
                 },
             },
             Some(f) => {
@@ -217,6 +224,7 @@ pub(crate) fn lower_expr_as_mut_place(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> 
                         mutable: true,
                         field: Some(f.to_string()),
                         line,
+                        src_line,
                     },
                 }
             }
@@ -2060,6 +2068,22 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                 }
             })
         }
+        // D-TYPE2-DEFAULT1: comptime/REPL fragments can reach TIR before body
+        // sema rewrites an untyped decimal token to `Decimal("…")`. Keep that
+        // raw fragment path on the same exact Prelude carrier as the ordinary
+        // sema path. Synthetic Float/F32 conversions carry `raw = None`, so
+        // the explicit machine-float opt-in is unchanged.
+        Expr::Float(_, _, is_f32, Some(raw)) if super::is_eval_fragment() && !*is_f32 => TExpr {
+            ty: Type::Named(Syntax::TYPE_DECIMAL.to_string()),
+            kind: TExprKind::PreciseBuiltin {
+                type_name: Syntax::TYPE_DECIMAL.to_string(),
+                func: "from_str".to_string(),
+                args: vec![TExpr {
+                    ty: Type::String,
+                    kind: TExprKind::StrLit(vec![TStrPart::Lit(raw.clone())]),
+                }],
+            },
+        },
         Expr::Float(v, _, is_f32, _) => TExpr {
             // D-FLOATW1: sema resolves F32 context and writes `is_f32=true` on the
             // node; carry that width through to TIR so emit produces the right suffix.
@@ -5066,6 +5090,12 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                         }
                         _ => Type::Int,
                     };
+                    let src_line = cx
+                        .src
+                        .lines()
+                        .nth(line.saturating_sub(1))
+                        .unwrap_or_default()
+                        .to_string();
                     return TExpr {
                         ty: elem_ty,
                         kind: TExprKind::PoolSlot {
@@ -5074,6 +5104,7 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                             mutable: false,
                             field: None,
                             line,
+                            src_line,
                         },
                     };
                 }

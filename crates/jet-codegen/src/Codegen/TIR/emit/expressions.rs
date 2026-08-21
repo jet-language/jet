@@ -167,6 +167,40 @@ fn ct_lit_needs_its_type(value: &crate::AST::CtValue) -> bool {
         _ => false,
     }
 }
+
+fn emit_measurement_ct_lit(value: &crate::AST::CtValue, ty: &Type, cx: &Cx) -> Option<String> {
+    let is_measurement = match ty {
+        Type::Apply { name, args } => {
+            name == crate::Syntax::TYPE_MEASUREMENT && args.as_slice() == [Type::Float]
+        }
+        // CtValue::jet_type keeps nominal structs nominal, so a folded
+        // Measurement arrives here without its erased Float parameter.
+        Type::Named(name) => name == crate::Syntax::TYPE_MEASUREMENT,
+        _ => false,
+    };
+    if !is_measurement {
+        return None;
+    }
+    let crate::AST::CtValue::Struct { type_name, fields } = value else {
+        return None;
+    };
+    if type_name != crate::Syntax::TYPE_MEASUREMENT {
+        return None;
+    }
+    let field = |name: &str| {
+        fields
+            .iter()
+            .find(|(field_name, _)| field_name == name)
+            .map(|(_, value)| value.serialize())
+    };
+    Some(format!(
+        "{}jet_std::JetMeasurement::new({}, {})",
+        cx.root_prefix,
+        field("value")?,
+        field("uncertainty")?
+    ))
+}
+
 fn emit_track_origin_ct_lit(value: &crate::AST::CtValue, ty: &Type, cx: &Cx) -> Option<String> {
     let crate::AST::CtValue::Struct { type_name, fields } = value else {
         return None;
@@ -981,6 +1015,28 @@ fn type_contains_inline_range(ty: &Type) -> bool {
     }
 }
 
+fn type_contains_fixed_int(ty: &Type) -> bool {
+    match ty {
+        Type::IntN { .. } => true,
+        Type::List(inner)
+        | Type::Shared(inner)
+        | Type::Option(inner)
+        | Type::Tagged { inner, .. }
+        | Type::FixedList { elem: inner, .. } => type_contains_fixed_int(inner),
+        Type::Map { key, value, .. } => {
+            type_contains_fixed_int(key) || type_contains_fixed_int(value)
+        }
+        Type::Result { ok, err } => {
+            type_contains_fixed_int(ok) || type_contains_fixed_int(err)
+        }
+        Type::Tuple(fields) => fields
+            .iter()
+            .any(|(_, field)| type_contains_fixed_int(field)),
+        Type::Union(members) => members.iter().any(type_contains_fixed_int),
+        _ => false,
+    }
+}
+
 pub(crate) fn emit_inline_range_decode(
     ty: &Type,
     tree: &str,
@@ -996,27 +1052,40 @@ pub(crate) fn emit_inline_range_decode(
         Type::InlineRange { lo, hi, .. } => Some(format!(
             "{root}jet_decode_inline_range({tree}, {lo}, {hi})"
         )),
+        Type::IntN { signed, bits } => Some(format!(
+            "{root}jet_decode_fixed_int({tree}, {signed}, {bits}, {:?}).map(|__value| __value as {}{})",
+            format!("{}{}", if *signed { 'I' } else { 'U' }, bits),
+            if *signed { 'i' } else { 'u' },
+            bits,
+        )),
         Type::Tagged { inner, .. } => emit_inline_range_decode(inner, &tree, root, true),
-        Type::List(inner) if type_contains_inline_range(inner) => {
+        Type::List(inner)
+            if type_contains_inline_range(inner) || type_contains_fixed_int(inner) =>
+        {
             let child = emit_inline_range_decode(inner, "__item", root, true)?;
             Some(format!(
                 "{root}jet_decode_inline_range_list({tree}, |__item| {child})"
             ))
         }
-        Type::FixedList { elem, len, .. } if type_contains_inline_range(elem) => {
+        Type::FixedList { elem, len, .. }
+            if type_contains_inline_range(elem) || type_contains_fixed_int(elem) =>
+        {
             let child = emit_inline_range_decode(elem, "__item", root, true)?;
             Some(format!(
                 "{root}jet_decode_inline_range_fixed::<_, _, {len}>({tree}, |__item| {child})"
             ))
         }
-        Type::Option(inner) if type_contains_inline_range(inner) => {
+        Type::Option(inner)
+            if type_contains_inline_range(inner) || type_contains_fixed_int(inner) =>
+        {
             let child = emit_inline_range_decode(inner, "__item", root, true)?;
             Some(format!(
                 "{root}jet_decode_inline_range_option({tree}, |__item| {child})"
             ))
         }
         Type::Map { key, value, .. }
-            if matches!(key.as_ref(), Type::String) && type_contains_inline_range(value) =>
+            if matches!(key.as_ref(), Type::String)
+                && (type_contains_inline_range(value) || type_contains_fixed_int(value)) =>
         {
             let child = emit_inline_range_decode(value, "__item", root, true)?;
             Some(format!(
@@ -1095,6 +1164,9 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                     let parts: Vec<String> = xs.iter().map(|x| x.serialize()).collect();
                     return format!("[{}]", parts.join(", "));
                 }
+            }
+            if let Some(measured) = emit_measurement_ct_lit(value, &e.ty, cx) {
+                return measured;
             }
             // D-INTBIG1: `CtValue::serialize` predates nested generated
             // modules and has no codegen context, so its exact-Int constructor
@@ -3523,18 +3595,20 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
             mutable,
             field,
             line,
+            src_line,
         } => {
             let p = emit_tir_expr(pool, cx);
             let i = emit_tir_expr(id, cx);
+            let fn_name = cx.current_fn.borrow().clone();
             let base = if *mutable {
                 format!(
-                    "(*{root}jet_std::jet_pool_get_mut(&mut ({p}), {i}, {file:?}, {line}))",
+                    "(*{root}jet_std::jet_pool_get_mut(&mut ({p}), {i}, {file:?}, {line}, {fn_name:?}, {src_line:?}))",
                     root = cx.root_prefix,
                     file = cx.file,
                 )
             } else {
                 format!(
-                    "{root}jet_std::jet_pool_get(&({p}), {i}, {file:?}, {line})",
+                    "{root}jet_std::jet_pool_get(&({p}), {i}, {file:?}, {line}, {fn_name:?}, {src_line:?})",
                     root = cx.root_prefix,
                     file = cx.file,
                 )

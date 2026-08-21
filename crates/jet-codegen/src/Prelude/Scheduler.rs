@@ -465,19 +465,35 @@ impl ParkSlot {
         if self.notified.swap(false, Ordering::Acquire) {
             return;
         }
-        let guard = self.lock.lock().unwrap();
+        let mut guard = self.lock.lock().unwrap();
         if self.notified.swap(false, Ordering::Acquire) {
             return;
         }
         // Tower #126: count real condvar blocks so scale tests can prove tasks
         // park (bounded blocks) rather than busy-wait (zero blocks, hot spin).
         METRIC_PARK_BLOCKS.fetch_add(1, Ordering::Relaxed);
-        if let Some(t) = timeout {
-            let _unused = self.cv.wait_timeout(guard, t).unwrap();
-        } else {
-            let _unused = self.cv.wait(guard).unwrap();
+        match timeout {
+            Some(timeout) => {
+                let deadline = Instant::now() + timeout;
+                loop {
+                    let remaining = deadline.saturating_duration_since(Instant::now());
+                    if remaining.is_zero() {
+                        break;
+                    }
+                    let (next, result) = self.cv.wait_timeout(guard, remaining).unwrap();
+                    guard = next;
+                    if self.notified.swap(false, Ordering::Acquire) || result.timed_out() {
+                        break;
+                    }
+                }
+            }
+            None => loop {
+                guard = self.cv.wait(guard).unwrap();
+                if self.notified.swap(false, Ordering::Acquire) {
+                    break;
+                }
+            },
         }
-        let _ = self.notified.swap(false, Ordering::Acquire);
     }
 
     pub fn wake(&self) {

@@ -400,15 +400,17 @@ fn stmt_in_subset_inner(s: &Stmt, cx: &Cx, locals: &mut HashSet<String>) -> bool
             fields.iter().all(|(_, v, _)| expr_in_subset(v, cx, locals))
                 && scoped_stmts_in_subset(body, cx, locals)
         }
-        // c109 Phase 26: a `#Abilities(IO) { … }` effect-restriction region (D-EFF1/D-QUAL1)
-        // erases to a plain Rust block — `emit_stmt`'s `Stmt::Caps` arm is byte-for-byte
-        // identical to `Stmt::Region` (`{ <body> }`). The cap set is enforced entirely
-        // in sema (E0712); codegen is dumb (I3).
-        Stmt::Caps { body, .. } => scoped_stmts_in_subset(body, cx, locals),
-        // D-AUTHORITY-SCOPE1: a named `#Abilities(abilities: FS) { … }` scope erases to a
-        // plain Rust block (the grant/revoke is a compile-time ability fact, I3).
-        // The capability handle is sema-only — it is NOT emitted, so the body lowers
-        // exactly like a lexical `Stmt::Region`.
+        // c109 Phase 26 / D-AUTHORITY-NAME1=A: the effect ceiling is sema-only,
+        // but the named form also introduces a real Authority local for TIR.
+        // Keep that local in the subset environment so the gate and lowering
+        // agree on the same executable body.
+        Stmt::Caps { binding, body, .. } => {
+            let mut scoped = locals.clone();
+            if let Some(binding) = binding {
+                scoped.insert(binding.clone());
+            }
+            body.iter().all(|s| stmt_in_subset(s, cx, &mut scoped))
+        }
         // D-TERM1 (ratified 2026-06-22): `live { … }` lowers to a guarded Rust block.
         Stmt::Live { body, .. } => scoped_stmts_in_subset(body, cx, locals),
         // D-DOTSCOPE1: a `#Test` scope member — in-subset iff its region body is.

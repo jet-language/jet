@@ -113,16 +113,19 @@ impl<'a> Interp<'a> {
         // built-in seam as TIR interpretation.
         if let Expr::Ident(type_name, _) = receiver {
             if type_name == crate::Syntax::TYPE_ABILITIES
-                && method == "workspace"
-                && args.is_empty()
+                && matches!(method, "workspace" | "from_rights")
             {
+                let mut argv = Vec::with_capacity(args.len());
+                for arg in args {
+                    argv.push(self.eval(&arg.expr, scope)?);
+                }
                 return super::super::super::Builtins::apply_static_type_method(
                     "JetAuthority",
                     method,
-                    Vec::new(),
+                    argv,
                     span,
                 )
-                .expect("Abilities.workspace is registered");
+                .expect("Abilities authority constructor is registered");
             }
         }
         // D-ENC-XML-SURFACE1=A: qualified safe whole-value XML constructors.

@@ -974,6 +974,15 @@ pub(crate) fn collect_core_expr(
             collect_core_stmts(else_body, imports, used, spans, ffi_cb);
             collect_core_expr(else_value, imports, used, spans, ffi_cb);
         }
+        Expr::ComptimeName {
+            value: Some(crate::AST::CtValue::Struct { type_name, .. }),
+            span,
+            ..
+        } if type_name == Syntax::TYPE_MEASUREMENT => {
+            // Folding leaves the measured carrier as a comptime value. Keep
+            // the runtime core closure reachable for its emitted value.
+            note_core_usage(used, spans, "core.units::from", Some(*span));
+        }
         Expr::Int(_, _, _, _)
         | Expr::Float(_, _, _, _)
         | Expr::Bool(_, _)

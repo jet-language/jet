@@ -338,8 +338,9 @@ impl<'a> Interp<'a> {
         if stmts.is_empty() {
             return Ok(Flow::Normal);
         }
-        // TIR intentionally erases `#Abilities` to a plain Region. Keep REPL
-        // grant scope in this host frame before the bridge evaluates a body.
+        // TIR keeps a named `#Abilities` value as an ordinary local. Keep the
+        // same value in the REPL host frame before the bridge evaluates a body;
+        // the grant list remains the authorization context for effectful calls.
         if self.repl_mode
             && stmts
                 .iter()
@@ -502,7 +503,24 @@ impl<'a> Interp<'a> {
             res?;
         }
         if self.repl_mode {
-            if let Stmt::Caps { caps, body, .. } = stmt {
+            if let Stmt::Caps {
+                caps,
+                binding,
+                body,
+                ..
+            } = stmt
+            {
+                let previous_binding = binding.as_ref().map(|name| {
+                    (
+                        name.clone(),
+                        scope.insert(
+                            name.clone(),
+                            super::Builtins::authority_value_from_rights(
+                                caps.iter().map(|(name, _)| name.clone()).collect(),
+                            ),
+                        ),
+                    )
+                });
                 let old_len = self.repl_grants.len();
                 self.repl_grants
                     .extend(caps.iter().map(|(name, _)| name.clone()));
@@ -510,6 +528,13 @@ impl<'a> Interp<'a> {
                 let result = self.exec_block(body, scope);
                 self.impure_depth -= 1;
                 self.repl_grants.truncate(old_len);
+                if let Some((name, previous)) = previous_binding {
+                    if let Some(previous) = previous {
+                        scope.insert(name, previous);
+                    } else {
+                        scope.remove(&name);
+                    }
+                }
                 return result;
             }
         }

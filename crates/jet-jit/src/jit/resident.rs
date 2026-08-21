@@ -71,10 +71,10 @@ pub(crate) fn fresh_runtime_with_allocator_cap(cap_bytes: Option<u64>) -> JitRun
         stderr: String::new(),
         heap: jet_rt::JetArena::default(),
         int_list_views: Vec::new(),
-        program_allocator: cap_bytes.map_or_else(
+        program_allocator: std::sync::Arc::new(cap_bytes.map_or_else(
             jet_codegen::program_allocator::JetProgramAllocator::system,
             jet_codegen::program_allocator::JetProgramAllocator::counting,
-        ),
+        )),
         compute: crate::Compute::ComputeState::default(),
         compile_strings: Vec::new(),
         zip_plans: Vec::new(),
@@ -636,10 +636,10 @@ pub(crate) fn resident_hot_swap(
         .with(|slot| slot.borrow_mut().take())
         .unwrap_or_else(|| fresh_runtime_with_allocator_cap(cap_bytes));
     runtime.program_allocator.release_hosted_reservations();
-    runtime.program_allocator = cap_bytes.map_or_else(
+    runtime.program_allocator = std::sync::Arc::new(cap_bytes.map_or_else(
         jet_codegen::program_allocator::JetProgramAllocator::system,
         jet_codegen::program_allocator::JetProgramAllocator::counting,
-    );
+    ));
     RESIDENT_MODULE.with(|slot| *slot.borrow_mut() = None);
     let (mut module, host) = new_jit_module()?;
     let main_id = compile_program(&mut module, &host, program, &mut runtime, None)?;

@@ -117,6 +117,10 @@ fn canonical_instant(value: i64) -> CtValue {
     }
 }
 
+pub(crate) fn authority_value_from_rights(rights: Vec<String>) -> CtValue {
+    authority_value(authority_semantics::jet_authority_rights_from_strings(rights))
+}
+
 fn authority_value(rights: std::collections::BTreeSet<String>) -> CtValue {
     CtValue::Struct {
         type_name: crate::Syntax::TYPE_ABILITIES.to_string(),
@@ -712,6 +716,27 @@ pub fn apply_static_type_method(
         return Some(Ok(authority_value(
             authority_semantics::jet_authority_workspace_rights(),
         )));
+    }
+    if matches!(type_name, crate::Syntax::TYPE_ABILITIES | "JetAuthority")
+        && method == "from_rights"
+    {
+        let Some(CtValue::List(rights)) = args.into_iter().next() else {
+            return Some(Err(unsupported(
+                "Abilities.from_rights expects one list of String rights",
+                span,
+            )));
+        };
+        let mut strings = Vec::with_capacity(rights.len());
+        for right in rights {
+            let CtValue::Str(right) = right else {
+                return Some(Err(unsupported(
+                    "Abilities.from_rights expects String rights",
+                    span,
+                )));
+            };
+            strings.push(right);
+        }
+        return Some(Ok(authority_value_from_rights(strings)));
     }
     if method == "new" {
         if let Some(result) = super::CollectionEval::prelude_new(type_name, args.clone(), span) {

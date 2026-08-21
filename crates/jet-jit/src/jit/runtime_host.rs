@@ -311,7 +311,8 @@ pub(crate) struct JitRuntime {
     pub(crate) int_list_views: Vec<Box<[i64]>>,
     /// Canonical Prelude allocator instance for resident fallible allocations.
     /// The checked package fact selects its mode before any host call runs.
-    pub(crate) program_allocator: jet_codegen::program_allocator::JetProgramAllocator,
+    pub(crate) program_allocator:
+        std::sync::Arc<jet_codegen::program_allocator::JetProgramAllocator>,
     pub(crate) compute: Compute::ComputeState,
     /// Compile-time string handles baked into Cranelift as `iconst` ids.
     /// `reset_run_heap` and the run-cache artifact must preserve these — clearing
@@ -545,21 +546,38 @@ impl JitRuntime {
     /// Marshal a runtime breach into the Foundation Prelude renderer. JIT
     /// hosts provide only source facts and keep no user-facing wording.
     pub(crate) fn set_runtime_stop(&mut self, code: &'static str, line: u32, message: &str) {
+        self.set_runtime_stop_with_source_line(code, line, None, message);
+    }
+
+    /// Same renderer, with a source line captured at the TIR stop site. A host
+    /// can otherwise fall back to the enclosing function's prologue line when
+    /// its run-level source text is unavailable (the Pool stale-id path is the
+    /// concrete case).
+    pub(crate) fn set_runtime_stop_with_source_line(
+        &mut self,
+        code: &'static str,
+        line: u32,
+        source_override: Option<&str>,
+        message: &str,
+    ) {
         if self.trapped.is_some() || self.exit_code.is_some() {
             return;
         }
-        let source_line = self
-            .source_text
-            .lines()
-            .nth((line as usize).saturating_sub(1))
+        let source_line = source_override
             .filter(|source| !source.is_empty())
-            .unwrap_or(&self.current_source_line);
+            .or_else(|| {
+                self.source_text
+                    .lines()
+                    .nth((line as usize).saturating_sub(1))
+                    .filter(|source| !source.is_empty())
+            })
+            .unwrap_or(self.current_source_line.as_str());
         let report = contract_kernel::jet_runtime_stop_report(
             code,
             &self.source_file,
             line,
             &self.current_function,
-            &source_line,
+            source_line,
             1,
             1,
             message,

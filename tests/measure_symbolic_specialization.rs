@@ -71,6 +71,31 @@ fn sema_type_checks_generic_join_with_symbolic_additive_length() {
 }
 
 #[test]
+fn tir_carries_the_specialized_additive_measure() {
+    let scratch = common::Scratch::new("measure-fixed-join-tir");
+    let entry = scratch.join("app.jet");
+    fs::write(&entry, FIXED_JOIN_SOURCE).unwrap();
+    let mut bundle = jet::Loader::load_entry(entry.to_str().unwrap()).unwrap();
+    let errors: Vec<_> = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run)
+        .into_iter()
+        .filter(|diagnostic| diagnostic.severity == jet::Diagnostics::Severity::Error)
+        .collect();
+    assert!(errors.is_empty(), "fixed join rejected: {errors:?}");
+
+    let program =
+        jet::Codegen::TIR::lower_jit_program(&bundle).expect("fixed join must lower through TIR");
+    let function = program
+        .funcs
+        .iter()
+        .find(|function| function.name == "join")
+        .expect("TIR must retain join");
+    let Some(Type::FixedList { len, .. }) = function.ret.as_ref() else {
+        panic!("TIR join return must retain fixed-list measure");
+    };
+    assert_eq!(len.literal_value(), Some(5));
+}
+
+#[test]
 fn aot_jit_and_interpreter_agree_on_additive_fixed_list_length() {
     tir_support::assert_tiers_agree("measure_fixed_join", FIXED_JOIN_SOURCE, "5\n5\n");
 }

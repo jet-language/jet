@@ -47,6 +47,7 @@ const JS_EXECUTION_PRELUDE: &str = concat!(
     include_str!("../Prelude/Core/RuntimeStop.js"),
     include_str!("../Prelude/Core/Keep.js"),
     include_str!("../Prelude/Core/Task.js"),
+    include_str!("../Prelude/Core/Channel.js"),
     "\n",
     include_str!("../Prelude/Core/Option.js"),
     "\n",
@@ -863,6 +864,7 @@ fn web_wasm_expr_supported(
                             | Type::Bool
                     )
                     || matches!(&value.ty, Type::Named(name) if name == Syntax::TYPE_COMPLEX)
+                    || matches!(&value.ty, Type::Named(name) if name == Syntax::TYPE_FRACTION || name == Syntax::TYPE_DECIMAL)
                     || is_string_like(&value.ty))
                     && web_wasm_expr_supported(value, bundle, file_prefix, reconstructions)
             }
@@ -1078,6 +1080,17 @@ fn web_wasm_expr_supported(
             args,
             ..
         } if path == "JetAuthority" && method.name == "workspace" && args.is_empty() => true,
+        TIR::TExprKind::StaticCall {
+            owner: TIR::TStaticOwner::Prelude { path, .. },
+            method,
+            args,
+            ..
+        } if path == "JetAuthority"
+            && method.name == "from_rights"
+            && args.len() == 1 =>
+        {
+            web_wasm_expr_supported(&args[0].value, bundle, file_prefix, reconstructions)
+        }
         TIR::TExprKind::Call { name, args, .. } => wasm_callee_bucket(bundle, &local_web_key(file_prefix, name)) == Some(WebBucket::Wasm)
             && args.iter().all(|a| web_wasm_expr_supported(&a.value, bundle, file_prefix, reconstructions)),
         TIR::TExprKind::MethodCall {
@@ -1184,13 +1197,27 @@ fn web_wasm_expr_supported(
 }
 
 fn web_complex_precise_supported(type_name: &str, func: &str, arity: usize) -> bool {
-    type_name == Syntax::TYPE_COMPLEX
-        && matches!(
+    match type_name {
+        Syntax::TYPE_COMPLEX => matches!(
             (func, arity),
             ("from_parts", 2)
                 | ("add" | "sub" | "mul" | "div", 2)
                 | ("abs" | "to_string", 1)
-        )
+        ),
+        Syntax::TYPE_FRACTION => matches!(
+            (func, arity),
+            ("from_parts", 2)
+                | ("add" | "sub" | "mul" | "div" | "equal", 2)
+                | ("numerator" | "denominator" | "to_string" | "to_float" | "is_zero", 1)
+        ),
+        Syntax::TYPE_DECIMAL => matches!(
+            (func, arity),
+            ("from_str", 1)
+                | ("add" | "sub" | "mul" | "equal", 2)
+                | ("to_string", 1)
+        ),
+        _ => false,
+    }
 }
 
 fn wasm_callee_bucket(bundle: &ProgramBundle, name: &str) -> Option<WebBucket> {
@@ -1201,6 +1228,7 @@ fn web_stmts_supported(stmts: &[TIR::TStmt]) -> bool {
     stmts.iter().all(|stmt| match stmt {
         TIR::TStmt::LineMarker(_) | TIR::TStmt::SourceSpan(_) | TIR::TStmt::Return(None) => true,
         TIR::TStmt::Let { init, .. } | TIR::TStmt::ExprStmt(init) | TIR::TStmt::Return(Some(init)) => web_expr_supported(init),
+        TIR::TStmt::TupleDestructure { init, .. } => web_expr_supported(init),
         TIR::TStmt::Assign { value, .. } => web_expr_supported(value),
         TIR::TStmt::Contract { contract } => {
             contract.disposition != TIR::TContractDisposition::Check
@@ -1224,12 +1252,15 @@ fn web_stmts_supported(stmts: &[TIR::TStmt]) -> bool {
         TIR::TStmt::Range { start, end, step, body, .. } => web_expr_supported(start) && web_expr_supported(end) && step.as_ref().map(web_expr_supported).unwrap_or(true) && web_stmts_supported(body),
         TIR::TStmt::ForIn {
             step: None,
-            method_kind: None,
+            method_kind,
             columnar: false,
             collection,
             body,
             ..
-        } => web_expr_supported(collection) && web_stmts_supported(body),
+        } if method_kind.is_none()
+            || matches!(method_kind, Some(TIR::TForInMethod::ChannelReceiver)) => {
+            web_expr_supported(collection) && web_stmts_supported(body)
+        }
         TIR::TStmt::EnumMatch {
             scrutinee,
             arms,
@@ -1404,6 +1435,8 @@ fn web_js_ui_backend_method_supported(method: &str, argc: usize) -> bool {
 fn web_js_handle_method_supported(op: &TIR::THandleOp, argc: usize) -> bool {
     match op {
         TIR::THandleOp::TaskJoin | TIR::THandleOp::TaskDetach => argc == 0,
+        TIR::THandleOp::ChannelReceive | TIR::THandleOp::ChannelClose => argc == 0,
+        TIR::THandleOp::SenderSend => argc == 1,
         TIR::THandleOp::UiBackendMethod { method } => {
             web_js_ui_backend_method_supported(method, argc)
         }
@@ -1510,6 +1543,45 @@ fn web_shared_host_call_supported(host: &TIR::THostCall) -> bool {
     }
 }
 
+fn web_host_call_supported(host: &TIR::THostCall) -> bool {
+    match host {
+        TIR::THostCall::OptionProbe { inner, .. } => web_expr_supported(inner),
+        TIR::THostCall::TupleIndex { base, .. } => web_expr_supported(base),
+        _ => web_shared_host_call_supported(host),
+    }
+}
+
+/// Walk the compiler-private readiness-table chain. The chain is only a TIR
+/// carrier; the Web tier calls the same scheduler Prelude door as AOT/JIT.
+fn web_js_select_supported(builder: &TIR::TExpr) -> bool {
+    let mut current = builder;
+    loop {
+        match &current.kind {
+            TIR::TExprKind::SelectStart => return true,
+            TIR::TExprKind::SelectRecv {
+                builder: inner,
+                channel,
+            } => {
+                if !web_expr_supported(channel) {
+                    return false;
+                }
+                current = inner;
+            }
+            TIR::TExprKind::SelectAfter {
+                builder: inner,
+                duration,
+                value,
+            } => {
+                if value.is_some() || !web_expr_supported(duration) {
+                    return false;
+                }
+                current = inner;
+            }
+            _ => return false,
+        }
+    }
+}
+
 fn web_expr_supported(expr: &TIR::TExpr) -> bool {
     use TIR::TExprKind as E;
     match &expr.kind {
@@ -1555,7 +1627,10 @@ fn web_expr_supported(expr: &TIR::TExpr) -> bool {
             .iter()
             .all(|(key, value)| web_expr_supported(key) && web_expr_supported(value)),
         E::Index { base, index, .. } => web_expr_supported(base) && web_expr_supported(index),
-        E::HostCall(host) => web_shared_host_call_supported(host),
+        E::HostCall(host) => web_host_call_supported(host),
+        E::TupleLit { fields, .. } => {
+            fields.iter().all(|(_, value)| web_expr_supported(value))
+        }
         E::StaticCall {
             owner: TIR::TStaticOwner::Prelude { path, .. },
             method,
@@ -1570,6 +1645,14 @@ fn web_expr_supported(expr: &TIR::TExpr) -> bool {
             args,
             ..
         } if path == "JetAuthority" && method.name == "workspace" && args.is_empty() => true,
+        E::StaticCall {
+            owner: TIR::TStaticOwner::Prelude { path, .. },
+            method,
+            args,
+            ..
+        } if path == "JetAuthority"
+            && method.name == "from_rights"
+            && args.len() == 1 => web_expr_supported(&args[0].value),
         E::MethodCall {
             recv,
             method,
@@ -1623,6 +1706,14 @@ fn web_expr_supported(expr: &TIR::TExpr) -> bool {
                 && module == "core.units"
                 && method == "from"
                 && args.len() == 2 => args.iter().all(|arg| web_expr_supported(arg)),
+        E::CoreCall {
+            module,
+            method,
+            args,
+            ..
+        } if module == "core.tasks" && method == "channel" && args.len() <= 1 => {
+            args.iter().all(web_expr_supported)
+        }
         E::CoreCall { module, method, args, .. } => {
             let arity_ok = if module == "core.term" && method == "print" {
                 // D-PRELUDEX1 / D-VERDICT-1321-1: the qualified print twin
@@ -1710,6 +1801,7 @@ fn web_expr_supported(expr: &TIR::TExpr) -> bool {
                 ..
             },
         } => web_expr_supported(label) && web_lambda_supported(executable),
+        E::SelectWait { builder, .. } => web_js_select_supported(builder),
         _ => false,
     }
 }
@@ -3837,6 +3929,8 @@ fn wasm_ty(ty: &Type) -> Option<&'static str> {
         Type::Float | Type::Float32 => Some("f64"),
         Type::Bool => Some("bool"),
         Type::Named(name) if name == Syntax::TYPE_COMPLEX => Some("JetComplex"),
+        Type::Named(name) if name == Syntax::TYPE_FRACTION => Some("JetWasmFraction"),
+        Type::Named(name) if name == Syntax::TYPE_DECIMAL => Some("JetWasmDecimal"),
         Type::Apply { name, args }
             if name == Syntax::TYPE_MEASUREMENT && args.as_slice() == [Type::Float] =>
         {
@@ -3863,6 +3957,8 @@ fn wasm_storage_ty(ty: &Type) -> Option<String> {
         Type::Named(name) if name == "Unit" => "()".to_string(),
         Type::Named(name) if name == Syntax::TYPE_ABILITIES => "JetAuthority".to_string(),
         Type::Named(name) if name == Syntax::TYPE_COMPLEX => "JetComplex".to_string(),
+        Type::Named(name) if name == Syntax::TYPE_FRACTION => "JetWasmFraction".to_string(),
+        Type::Named(name) if name == Syntax::TYPE_DECIMAL => "JetWasmDecimal".to_string(),
         Type::Apply { name, args }
             if name == Syntax::TYPE_MEASUREMENT && args.as_slice() == [Type::Float] =>
         {
@@ -3912,6 +4008,8 @@ fn wasm_internal_ty(ty: &Type, bundle: &ProgramBundle) -> Option<String> {
         Type::Named(name) if name == "Unit" => "()".to_string(),
         Type::Named(name) if name == Syntax::TYPE_ABILITIES => "JetAuthority".to_string(),
         Type::Named(name) if name == Syntax::TYPE_COMPLEX => "JetComplex".to_string(),
+        Type::Named(name) if name == Syntax::TYPE_FRACTION => "JetWasmFraction".to_string(),
+        Type::Named(name) if name == Syntax::TYPE_DECIMAL => "JetWasmDecimal".to_string(),
         Type::Named(name)
             if name == Syntax::DURATION_TYPE || name == Syntax::TYPE_INSTANT => "i64".to_string(),
         Type::Apply { name, args }
@@ -5145,9 +5243,11 @@ fn wasm_emit_expr(
                 .iter()
                 .map(|arg| wasm_emit_expr(arg, funcs, file_prefix, reconstructions))
                 .collect::<Result<Vec<_>, _>>()?;
-            match func.as_str() {
-                "from_parts" => format!("jet_complex_from_parts({}, {})", parts[0], parts[1]),
-                "add" | "sub" | "mul" | "div" => {
+            match (type_name.as_str(), func.as_str()) {
+                ("Complex", "from_parts") => {
+                    format!("jet_complex_from_parts({}, {})", parts[0], parts[1])
+                }
+                ("Complex", "add" | "sub" | "mul" | "div") => {
                     let helper = match func.as_str() {
                         "add" => "jet_complex_add",
                         "sub" => "jet_complex_sub",
@@ -5157,8 +5257,60 @@ fn wasm_emit_expr(
                     };
                     format!("{helper}(&({}), &({}))", parts[0], parts[1])
                 }
-                "abs" => format!("jet_complex_abs({})", parts[0]),
-                "to_string" => format!("jet_complex_to_string(&({}))", parts[0]),
+                ("Complex", "abs") => format!("jet_complex_abs({})", parts[0]),
+                ("Complex", "to_string") => {
+                    format!("jet_complex_to_string(&({}))", parts[0])
+                }
+                ("Fraction", "from_parts") => format!(
+                    "jet_wasm_fraction_from_parts({}, {})",
+                    parts[0], parts[1]
+                ),
+                ("Fraction", "add" | "sub" | "mul" | "div") => {
+                    let helper = match func.as_str() {
+                        "add" => "jet_wasm_fraction_add",
+                        "sub" => "jet_wasm_fraction_sub",
+                        "mul" => "jet_wasm_fraction_mul",
+                        "div" => "jet_wasm_fraction_div",
+                        _ => unreachable!(),
+                    };
+                    format!("{helper}(&({}), &({}))", parts[0], parts[1])
+                }
+                ("Fraction", "equal") => {
+                    format!("jet_wasm_fraction_equal(&({}), &({}))", parts[0], parts[1])
+                }
+                ("Fraction", "numerator") => {
+                    format!("jet_wasm_fraction_numerator(&({}))", parts[0])
+                }
+                ("Fraction", "denominator") => {
+                    format!("jet_wasm_fraction_denominator(&({}))", parts[0])
+                }
+                ("Fraction", "to_string") => {
+                    format!("jet_wasm_fraction_to_string(&({}))", parts[0])
+                }
+                ("Fraction", "to_float") => {
+                    format!("jet_wasm_fraction_to_float(&({}))", parts[0])
+                }
+                ("Fraction", "is_zero") => {
+                    format!("jet_wasm_fraction_is_zero(&({}))", parts[0])
+                }
+                ("Decimal", "from_str") => {
+                    format!("jet_wasm_decimal_from_str(&({}))", parts[0])
+                }
+                ("Decimal", "add") => {
+                    format!("jet_wasm_decimal_add(&({}), &({}))", parts[0], parts[1])
+                }
+                ("Decimal", "sub") => {
+                    format!("jet_wasm_decimal_sub(&({}), &({}))", parts[0], parts[1])
+                }
+                ("Decimal", "mul") => {
+                    format!("jet_wasm_decimal_mul(&({}), &({}))", parts[0], parts[1])
+                }
+                ("Decimal", "equal") => {
+                    format!("jet_wasm_decimal_equal(&({}), &({}))", parts[0], parts[1])
+                }
+                ("Decimal", "to_string") => {
+                    format!("jet_wasm_decimal_to_string(&({}))", parts[0])
+                }
                 _ => return Err(()),
             }
         }
@@ -5380,10 +5532,14 @@ fn wasm_emit_expr(
                 wasm_emit_expr(recv, funcs, file_prefix, reconstructions)?
             )
         }
-        TIR::TExprKind::Print(inner) => format!(
-            "jet_wasm_print({})",
-            wasm_emit_expr(inner, funcs, file_prefix, reconstructions)?
-        ),
+        TIR::TExprKind::Print(inner) => {
+            let value = wasm_emit_expr(inner, funcs, file_prefix, reconstructions)?;
+            if matches!(&inner.ty, Type::Named(name) if name == Syntax::TYPE_FRACTION || name == Syntax::TYPE_DECIMAL) {
+                format!("jet_wasm_print(&({value}))")
+            } else {
+                format!("jet_wasm_print({value})")
+            }
+        }
         TIR::TExprKind::Field { recv, field, boxed: false } => {
             let recv_expr = wasm_emit_expr(recv, funcs, file_prefix, reconstructions)?;
             if matches!(&recv.ty, Type::Named(name) if name == jet_foundation::Syntax::TYPE_ERR) {
@@ -5723,6 +5879,17 @@ fn wasm_emit_expr(
             ..
         } if path == "JetAuthority" && method.name == "workspace" && args.is_empty() => {
             "JetAuthority::workspace()".to_string()
+        }
+        TIR::TExprKind::StaticCall {
+            owner: TIR::TStaticOwner::Prelude { path, .. },
+            method,
+            args,
+            ..
+        } if path == "JetAuthority" && method.name == "from_rights" && args.len() == 1 => {
+            format!(
+                "JetAuthority::from_rights({})",
+                wasm_emit_call_arg(&args[0], funcs, file_prefix, reconstructions)?
+            )
         }
         TIR::TExprKind::MethodCall {
             recv, method, args, ..
@@ -6833,6 +7000,24 @@ fn emit_tir_js_body_inner(
                 out.push_str(&format!("{pad}{source_marker} line {line}\n"));
             }
             TIR::TStmt::Let { name, init, .. } => out.push_str(&format!("{pad}let {} = {};\n", web_name(name), tir_js_expr(init, funcs, file_prefix)?)),
+            TIR::TStmt::TupleDestructure {
+                tmp,
+                init,
+                kw,
+                binds,
+                ..
+            } => {
+                let tmp = web_name(tmp);
+                let binding = if *kw == "let mut" { "let mut" } else { "let" };
+                out.push_str(&format!("{pad}const {tmp} = {};\n", tir_js_expr(init, funcs, file_prefix)?));
+                for (local, field) in binds {
+                    out.push_str(&format!(
+                        "{pad}{binding} {} = {tmp}.{};\n",
+                        web_name(local),
+                        web_name(field),
+                    ));
+                }
+            }
             TIR::TStmt::Assign { place, op, value, line, .. } => {
                 let target = web_tir_place(place)?;
                 let v = tir_js_expr(value, funcs, file_prefix)?;
@@ -6907,6 +7092,23 @@ fn emit_tir_js_body_inner(
                 };
                 let cmp = if *exclusive { "<" } else { "<=" };
                 out.push_str(&format!("{pad}for (let {} = {}; {} {cmp} {}; {} += {step}) {{\n", web_name(var), tir_js_expr(start, funcs, file_prefix)?, web_name(var), tir_js_expr(end, funcs, file_prefix)?, web_name(var)));
+                emit_tir_js_body(body, out, funcs, file_prefix, indent + 1)?;
+                out.push_str(&format!("{pad}}}\n"));
+            }
+            TIR::TStmt::ForIn {
+                var,
+                var2: None,
+                method_kind: Some(TIR::TForInMethod::ChannelReceiver),
+                collection,
+                body,
+                ..
+            } => {
+                let result = web_name(&mangle_generated("channel_result")).to_string();
+                out.push_str(&format!(
+                    "{pad}while (true) {{\n{pad}  const {result} = await jet_channel_receive({});\n{pad}  if ({result}.tag !== \"Ok\") break;\n{pad}  let {} = {result}.values[0];\n",
+                    tir_js_expr(collection, funcs, file_prefix)?,
+                    web_name(var),
+                ));
                 emit_tir_js_body(body, out, funcs, file_prefix, indent + 1)?;
                 out.push_str(&format!("{pad}}}\n"));
             }
@@ -7261,6 +7463,38 @@ fn tir_plain_args(args: &[TIR::TExpr], funcs: &[FuncWeb], file_prefix: Option<&s
     args.iter().map(|a| tir_js_expr(a, funcs, file_prefix)).collect()
 }
 
+fn web_js_select_parts(
+    builder: &TIR::TExpr,
+    funcs: &[FuncWeb],
+    file_prefix: Option<&str>,
+) -> Result<(Vec<String>, Vec<String>), ()> {
+    let mut receivers = Vec::new();
+    let mut durations = Vec::new();
+    let mut current = builder;
+    loop {
+        match &current.kind {
+            TIR::TExprKind::SelectStart => break,
+            TIR::TExprKind::SelectRecv {
+                builder: inner,
+                channel,
+            } => {
+                receivers.push(tir_js_expr(channel, funcs, file_prefix)?);
+                current = inner;
+            }
+            TIR::TExprKind::SelectAfter {
+                builder: inner,
+                duration,
+                value: None,
+            } => {
+                durations.push(tir_js_expr(duration, funcs, file_prefix)?);
+                current = inner;
+            }
+            _ => return Err(()),
+        }
+    }
+    Ok((receivers, durations))
+}
+
 fn tir_js_abi_int_expr(
     expr: &TIR::TExpr,
     funcs: &[FuncWeb],
@@ -7516,6 +7750,21 @@ fn tir_js_expr(expr: &TIR::TExpr, funcs: &[FuncWeb], file_prefix: Option<&str>) 
             _ => "void 0".to_string(),
         },
         E::HostCall(host) => match host.as_ref() {
+            TIR::THostCall::OptionProbe { inner, kind } => {
+                let inner = format!("({})", tir_js_expr(inner, funcs, file_prefix)?);
+                match kind {
+                    TIR::TOptionProbe::IsSome => format!("{inner}.tag === \"Some\""),
+                    TIR::TOptionProbe::Unwrap => format!("{inner}.values[0]"),
+                    TIR::TOptionProbe::Field(field) => {
+                        format!("{inner}.values[0].{}", web_name(field))
+                    }
+                }
+            }
+            TIR::THostCall::TupleIndex { base, index } => format!(
+                "({})[{}]",
+                tir_js_expr(base, funcs, file_prefix)?,
+                index,
+            ),
             TIR::THostCall::FixedListIndex {
                 base,
                 index,
@@ -7563,6 +7812,17 @@ fn tir_js_expr(expr: &TIR::TExpr, funcs: &[FuncWeb], file_prefix: Option<&str>) 
             ..
         } if path == "JetAuthority" && method.name == "workspace" && args.is_empty() => {
             "jet_authority_workspace()".to_string()
+        }
+        E::StaticCall {
+            owner: TIR::TStaticOwner::Prelude { path, .. },
+            method,
+            args,
+            ..
+        } if path == "JetAuthority" && method.name == "from_rights" && args.len() == 1 => {
+            format!(
+                "jet_authority_from_rights({})",
+                tir_js_expr(&args[0].value, funcs, file_prefix)?
+            )
         }
         // D-EXPSEM1=A / D-FLOORDIV1=A: `^` and `/%` call the JS preamble, which
         // carries the same rules the Prelude helpers do.
@@ -7698,6 +7958,18 @@ fn tir_js_expr(expr: &TIR::TExpr, funcs: &[FuncWeb], file_prefix: Option<&str>) 
             format!("({{ message: {message}, code: {code}, cause: {cause} }})")
         }
         E::StructLit { fields, .. } => format!("({{ {} }})", fields.iter().map(|(n, v, _)| Ok(format!("{}: {}", web_name(n), tir_js_expr(v, funcs, file_prefix)?))).collect::<Result<Vec<_>, ()>>()?.join(", ")),
+        E::TupleLit { fields, .. } => format!(
+            "({{ {} }})",
+            fields
+                .iter()
+                .map(|(name, value)| Ok(format!(
+                    "{}: {}",
+                    web_name(name),
+                    tir_js_expr(value, funcs, file_prefix)?
+                )))
+                .collect::<Result<Vec<_>, ()>>()?
+                .join(", ")
+        ),
         E::EnumLit {
             variant, payload, ..
         } => {
@@ -7898,8 +8170,41 @@ fn tir_js_expr(expr: &TIR::TExpr, funcs: &[FuncWeb], file_prefix: Option<&str>) 
         } if module == "core.time" && method == "instant" && args.is_empty() => {
             "jet_time_monotonic_now_ns()".to_string()
         }
+        E::CoreCall {
+            module,
+            method,
+            args,
+            ..
+        } if module == "core.tasks" && method == "channel" && args.len() <= 1 => {
+            if args.is_empty() {
+                "jet_channel_new()".to_string()
+            } else {
+                format!(
+                    "jet_channel_bounded({})",
+                    tir_js_expr(&args[0], funcs, file_prefix)?
+                )
+            }
+        }
         E::CoreCall { module, method, args, .. } => {
             tir_core_call(module, method, args, funcs, file_prefix)?
+        }
+        E::SelectWait {
+            builder,
+            nonblocking,
+        } => {
+            let (receivers, durations) = web_js_select_parts(builder, funcs, file_prefix)?;
+            let recv_list = format!("[{}]", receivers.join(", "));
+            let duration_list = format!("[{}]", durations.join(", "));
+            let door = if *nonblocking {
+                "jet_scheduler_try_select"
+            } else {
+                "jet_scheduler_select"
+            };
+            if *nonblocking {
+                format!("{door}({recv_list}, {duration_list})")
+            } else {
+                format!("await {door}({recv_list}, {duration_list})")
+            }
         }
         E::BuiltinMethod { recv, op, args } => {
             let recv_ty = &recv.ty;
@@ -7936,6 +8241,15 @@ fn tir_js_expr(expr: &TIR::TExpr, funcs: &[FuncWeb], file_prefix: Option<&str>) 
             let recv = tir_js_expr(recv, funcs, file_prefix)?;
             let a = tir_plain_args(args, funcs, file_prefix)?;
             match op {
+                TIR::THandleOp::ChannelReceive if a.is_empty() => {
+                    format!("await jet_channel_receive({recv})")
+                }
+                TIR::THandleOp::ChannelClose if a.is_empty() => {
+                    format!("jet_channel_close({recv})")
+                }
+                TIR::THandleOp::SenderSend if a.len() == 1 => {
+                    format!("await jet_channel_send({recv}, {})", a[0])
+                }
                 TIR::THandleOp::MeasurementMethod { method } => match (method.as_str(), a.len()) {
                     ("value", 0) => format!("jet_measurement_value({recv})"),
                     ("uncertainty", 0) => format!("jet_measurement_uncertainty({recv})"),
@@ -8004,7 +8318,7 @@ fn tir_js_expr(expr: &TIR::TExpr, funcs: &[FuncWeb], file_prefix: Option<&str>) 
                         format!("jet_time_sub(jet_time_monotonic_now_ns(), {recv})")
                     }
                 TIR::THandleOp::TaskJoin if a.is_empty() => {
-                    format!("jet_task_join({recv})")
+                    format!("await jet_task_join({recv})")
                 }
                 TIR::THandleOp::TaskDetach if a.is_empty() => {
                     format!("jet_task_detach({recv})")
@@ -8696,6 +9010,8 @@ const WASM_ARITH_PRELUDE: &str = concat!(
     include_str!("../Prelude/Core/Division.rs"),
     "\n",
     include_str!("../Prelude/Core/ExactInt.rs"),
+    "\n",
+    include_str!("../Prelude/Core/ExactNumbers.rs"),
     "\n",
     include_str!("../Prelude/Core/StringConcat.rs"),
     "\n",

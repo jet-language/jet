@@ -1335,8 +1335,10 @@ fn populate_name_ledger(
                 // member naming (`hoist_inline_module_member_types`), so project
                 // them back to `module.Type` for every message and tool.
                 if instance.instance_identity.is_none() && instance.body.is_some() {
-                    for (internal, display) in
-                        GenericModules::top_level_instance_display_paths(instance, &module.items)
+                    for (internal, display) in GenericModules::plain_inline_module_display_paths(
+                        instance,
+                        &module.items,
+                    )
                     {
                         ledger.record_display_path(
                             module_idx,

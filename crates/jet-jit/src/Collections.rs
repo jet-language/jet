@@ -3591,6 +3591,24 @@ fn jet_jit_authority_workspace() -> i64 {
     })
 }
 
+fn jet_jit_authority_from_rights(rights: i64) -> i64 {
+    Concurrency::with_runtime_mut(|rt| {
+        let len = rt.heap.list_len(rights).unwrap_or(0);
+        let values = (0..len)
+            .map(|index| {
+                rt.heap
+                    .list_get_int(rights, index)
+                    .and_then(|value| rt.heap.clone_string(value))
+                    .unwrap_or_default()
+            })
+            .collect();
+        authority_record(
+            rt,
+            authority_semantics::jet_authority_rights_from_strings(values),
+        )
+    })
+}
+
 fn jet_jit_authority_with(authority: i64, requested: i64) -> i64 {
     Concurrency::with_runtime_mut(|rt| {
         let held = authority_rights(rt, authority);
@@ -5588,6 +5606,7 @@ host_fns! {
     bag_len: "jet_jit_bag_len" => jet_jit_bag_len: sig_len;
     sorted_set_new: "jet_jit_sorted_set_new" => jet_jit_sorted_set_new: sig_sorted_set_new;
     authority_workspace: "jet_jit_authority_workspace" => jet_jit_authority_workspace: sig_new;
+    authority_from_rights: "jet_jit_authority_from_rights" => jet_jit_authority_from_rights: sig_len;
     authority_with: "jet_jit_authority_with" => jet_jit_authority_with: sig_get_opt;
     authority_without: "jet_jit_authority_without" => jet_jit_authority_without: sig_get_opt;
     sorted_set_len: "jet_jit_sorted_set_len" => jet_jit_sorted_set_len: sig_len;

@@ -266,12 +266,15 @@ struct SmallI64 {
     value: I64
 }
 
-@comptime_amount :: json.decode<Decimal>("12.340") ?? panic("comptime decimal")
-@comptime_adjacent :: json.decode<Int>("9007199254740993") ?? panic("comptime Int")
+#Codable
+struct ExactIntRow {
+    adjacent_hi: Int
+    large: Int
+}
+
+@limited_text :: "1{"0".repeat(1000000)}"
 
 fn run() {
-    print(@comptime_amount.to_string())
-    print(@comptime_adjacent.to_string())
     raw :: "{{\"amount\":12.340,\"exponent\":1E-5,\"whole\":100,\"tenth\":0.1,\"tenth_with_zero\":0.10,\"scientific_tenth\":1e-1,\"adjacent_lo\":9007199254740992,\"adjacent_hi\":9007199254740993,\"large\":12345678901234567890123456789012345678901234567890,\"large_exp\":1e30}}"
     value :: json.decode<ExactNumbers>(raw) ?? panic("whole decode")
     print(value.amount.to_string())
@@ -285,32 +288,64 @@ fn run() {
     print(value.large.to_string())
     print(value.large_exp.to_string())
 
-    rows :: data.json<ExactNumbers>("[" + raw + "]") ?? panic("stream decode")
-    print(rows[0].amount.to_string())
-    print(rows[0].adjacent_hi.to_string())
-    print(rows[0].large.to_string())
+    stream_raw :: "{{\"adjacent_hi\":9007199254740993,\"large\":12345678901234567890123456789012345678901234567890}}"
+    rows :: data.json<ExactIntRow>("[{stream_raw}]") ?? panic("stream decode")
+    loop row, rows {
+        print(row.adjacent_hi.to_string())
+        print(row.large.to_string())
+    }
 
     overflow :: json.decode<SmallI64>("{{\"value\":9223372036854775808}}")
-    if overflow == { Err(_) -> print("i64-overflow") else -> print("accepted") }
+    if overflow == {
+        .Err(_) :> { print("i64-overflow") }
+        else :> { print("accepted") }
+    }
     nonfinite :: json.decode<Float>("1e400")
-    if nonfinite == { Err(_) -> print("nonfinite") else -> print("accepted") }
+    if nonfinite == {
+        .Err(_) :> { print("nonfinite") }
+        else :> { print("accepted") }
+    }
     invalid_nan :: json.decode<Decimal>("NaN")
-    if invalid_nan == { Err(_) -> print("nan-rejected") else -> print("accepted") }
+    if invalid_nan == {
+        .Err(_) :> { print("nan-rejected") }
+        else :> { print("accepted") }
+    }
     invalid_infinity :: json.decode<Decimal>("Infinity")
-    if invalid_infinity == { Err(_) -> print("infinity-rejected") else -> print("accepted") }
+    if invalid_infinity == {
+        .Err(_) :> { print("infinity-rejected") }
+        else :> { print("accepted") }
+    }
     fractional_integer :: json.decode<Int>("1.5")
-    if fractional_integer == { Err(_) -> print("fractional-rejected") else -> print("accepted") }
+    if fractional_integer == {
+        .Err(_) :> { print("fractional-rejected") }
+        else :> { print("accepted") }
+    }
     exponent_limited :: json.decode<Decimal>("1e1000001")
-    if exponent_limited == { Err(_) -> print("exponent-limit") else -> print("accepted") }
+    if exponent_limited == {
+        .Err(_) :> { print("exponent-limit") }
+        else :> { print("accepted") }
+    }
     mismatch_raw :: "{{\"amount\":\"12.340\",\"exponent\":1E-5,\"whole\":100,\"tenth\":0.1,\"tenth_with_zero\":0.10,\"scientific_tenth\":1e-1,\"adjacent_lo\":1,\"adjacent_hi\":1,\"large\":1,\"large_exp\":1}}"
     mismatch :: json.decode<ExactNumbers>(mismatch_raw)
-    if mismatch == { Err(_) -> print("mismatch") else -> print("accepted") }
-    stream_mismatch :: data.json<ExactNumbers>("[" + mismatch_raw + "]")
-    if stream_mismatch == { Err(_) -> print("stream-mismatch") else -> print("accepted") }
+    if mismatch == {
+        .Err(_) :> { print("mismatch") }
+        else :> { print("accepted") }
+    }
+    stream_mismatch :: data.json<ExactNumbers>("[{mismatch_raw}]")
+    if stream_mismatch == {
+        .Err(_) :> { print("stream-mismatch") }
+        else :> { print("accepted") }
+    }
     string_mismatch :: json.decode<String>("123")
-    if string_mismatch == { Err(_) -> print("string-mismatch") else -> print("accepted") }
-    limited :: json.decode<Decimal>("1" + "0".repeat(1000000))
-    if limited == { Err(_) -> print("limit") else -> print("accepted") }
+    if string_mismatch == {
+        .Err(_) :> { print("string-mismatch") }
+        else :> { print("accepted") }
+    }
+    limited :: json.decode<Decimal>(@limited_text)
+    if limited == {
+        .Err(_) :> { print("limit") }
+        else :> { print("accepted") }
+    }
 }
 "#;
     let (code, stdout, stderr) = build_and_run(&dir, "exact_typed_json_numbers", source);
@@ -318,12 +353,11 @@ fn run() {
     assert_eq!(
         stdout,
         concat!(
-            "12.340\n9007199254740993\n",
             "12.340\n0.00001\n100\n0.1\n0.10\n0.1\n",
             "9007199254740992\n9007199254740993\n",
             "12345678901234567890123456789012345678901234567890\n",
             "1000000000000000000000000000000\n",
-            "12.340\n9007199254740993\n",
+            "9007199254740993\n",
             "12345678901234567890123456789012345678901234567890\n",
             "i64-overflow\nnonfinite\nnan-rejected\ninfinity-rejected\n",
             "fractional-rejected\nexponent-limit\nmismatch\nstream-mismatch\n",

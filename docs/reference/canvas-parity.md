@@ -1,12 +1,12 @@
 # Canvas Parity Matrix
 
-Canvas is source-backed. A row means the form is acknowledged by the Canvas
-contract; it does not mean every form has a bespoke graph gesture. Status values:
+Canvas is source-backed. A row means the form is acknowledged by the Canvas contract; it does not mean every form has a bespoke graph gesture. Status values:
 
 - `graph`: projected with dedicated graph semantics.
 - `source`: fully editable through Code lens/source transaction.
 - `readonly`: visible/cataloged, edits go through source.
 - `unsupported`: deliberately not graph-editable; Canvas must keep source truth
+
   and avoid pretending support.
 
 Vocabulary: [Jet vocabulary](../spec/vocabulary.md).
@@ -85,10 +85,13 @@ Vocabulary: [Jet vocabulary](../spec/vocabulary.md).
 ## Palette staging
 
 - Core entries with `needs_canvas_defaults` or `method_only` status are graph
+
   `stageable`: the palette shows them normally, places a dashed local node, and
   leaves source bytes unchanged until a compatible input wire materializes the
   checked source transaction.
+
 - `needs_unsafe_region`, `type_member`, `type_only`, and `value_only` remain
+
   excluded with their stable reason codes.
 
 ## Expressions

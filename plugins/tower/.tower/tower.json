@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 2131,
-    "rev": 40490,
+    "rev": 40495,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -1879,7 +1879,7 @@
       "title": "M06 · Names, modules, and the Core tree",
       "goal": "Bracket use lists, the Core namespace tree, prelude policy, Path, eager helpers, doctrine sweep, collections verb table, one-lookup upsert. Depends on M01.",
       "criteria": [],
-      "status": "open",
+      "status": "review-ready",
       "created": "2026-08-12T18:10:00.210Z"
     },
     {
@@ -1987,7 +1987,7 @@
       "title": "M18 · Dev loop and testing",
       "goal": "Interactive scripting closeout (REPL/notebook), one-run-one-claim dev loop, compile-latency budgets, branch coverage, release-tier test proof, fault injection, TLS fixtures, docs GC. Depends on M01.",
       "criteria": [],
-      "status": "open",
+      "status": "review-ready",
       "created": "2026-08-12T18:10:06.090Z"
     },
     {
@@ -99519,6 +99519,11 @@
       "assignee": null,
       "log": [
         {
+          "at": "2026-08-21",
+          "by": "fable-e3-burndown",
+          "text": "c17 is blocked on an I9 question the owner must answer, not on missing work. examples/features/lowlevel/polyglot_fortran/main.jet checks clean but default jet run fails E0956: the evaluator hard-refuses TExprKind::ExternCall at Codegen/TIR/eval/exprs.rs:9580, while AOT emits the FFI wrapper at TIR/emit/expressions.rs:6266-6285. The call crosses a native Fortran ABI, so the interpreter genuinely cannot evaluate it. I9 allows exactly one escape here: an owner-ratified carve-out naming a tier that cannot apply to a surface. Native FFI under the interpreter is that shape. The alternative, deopting ExternCall to a compiled path instead of refusing, is real work and a different card. Local AOT additionally stops E3201 because gfortran is absent; tests/golden.rs:746-769 already capability-gates that, so it is environment, not defect."
+        },
+        {
           "at": "2026-08-20",
           "by": "fable-e3-burndown",
           "text": "Reconciled against the one-crossing slate (#1655) on 2026-08-19: no pre-law conflict. D-BOUND-UNDO1 does NOT depend on this table - crates/jet-sema/src/Sema/Effects.rs:179-197 fires E0746 on is_extern plus a missing #Undo, not on the effect root - so UNDO1 was never blocked on this card. The 16 flat language effect roots (Prelude/Effects.jet:22-38) remain this card's scope."
@@ -99718,7 +99723,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-06T21:35:44.281Z",
-      "updated": "2026-08-21T05:48:44.611Z",
+      "updated": "2026-08-21T06:07:19.668Z",
       "updatedBy": "fable-e3-burndown",
       "workOrder": 1120
     },
@@ -134915,7 +134920,7 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": "e3-m06-names-core",
-      "phase": "ready",
+      "phase": "done",
       "priority": "P2",
       "plan": "## Outcome\nA struct declared inside a plain inline module is visible to its own module: the card-body probe (`module bank { pub struct Account { balance: Int } pub fn open() { a :: Account.{balance: 100} } }`) compiles, in type position and literal position, qualified or not. E0113 never emits a self-contradictory fix (prescribing exactly the spelling the user wrote). Diagnostic snapshots re-blessed.\n\n## Law\n- D-MOD2 / D-MOD3 (inline module item mangling + qualified access), D-NAME-WALK1=A (inline module scoping maps) — this is a bug fix inside their shipped semantics; no new syntax.\n- I4: the E0113 fix must never prescribe the rejected spelling.\n\n## Work\n1. Repros: `target-probes/sr/vis3.jet` (E0119 \"no type called Account\") and `target-probes/sr/vis2.jet` (E0113 \"promises to return bank.Account, but this returns vis2.bank.Account ... Fix: use bank.Account here\"). Reproduce both on the current binary first.\n2. E0119 half: trace `Sema/Pipeline.rs:923-931` — `Item::CodeModule` registers inline-module FUNCTIONS under mangled names (`__jet_math__double`) for call-site checking, but struct/enum/type items in `cm.body` are not registered into the type registry that `CheckerItems.rs:1832/1856` and `CheckerCore/type_assign.rs:258` consult. Generic modules DO support member structs (`Bundle/GenericModules.rs` specializes them into ordinary items) — mirror that: register plain-CodeModule member types so they resolve (a) bare inside their own module's bodies, (b) qualified `bank.Account` inside and outside per `pub`, reusing the D-NAME-WALK1 inline-scope maps (Sema/mod.rs:1296-1319) so nothing leaks into sibling scopes.\n3. E0113 half: the mismatch at `CheckerCore/statements.rs:1685` renders want/got with different qualification (file-qualified `vis2.bank.Account` vs `bank.Account`) for what is ONE declaration. Fix identity, not wording: `nominal_type_identity` / `same_declared_name_identity` (type_assign.rs:849+) must treat the two spellings of one declared type as identical, which makes the false E0113 disappear. For remaining genuine mismatches, render both sides under one display convention so the fix text can never prescribe the input spelling (I4).\n4. Consistency check: generic-module member structs (`module cache<K>(...)`) must behave identically before/after — no regression in `modules/generic_modules`.\n5. Shipped-evidence follow-up: `examples/features/web/ui_showcase.jet:16-29` documents this bug PLUS an I2 codegen rejection as the reason for 10 repeated `#Target(JS)` tags. After the sema fix, probe whether `#Target(JS) module browser {}` now works end-to-end; if the I2 codegen half still rejects, log that finding on this card (and let the milestone mint a codegen card) — do not half-migrate the example.\n6. Re-bless E0119/E0113 snapshots; `modules/inline_module`, `modules/module_inline_sibling`, `modules/library` goldens stay green.\n\n## Not building\n- The `#Target(JS)` I2 codegen rejection (separate defect unless the trace proves one root).\n- No visibility-rule redesign (`pub` semantics unchanged), no generic-module changes.\n\n## Proof\n- vis3.jet and vis2.jet compile and run byte-identical on `jet run`, `jet run --release`, interpreter (criterion 1: probe compiles, E0113 fix no longer self-contradictory).\n- Snapshot suite for E0119/E0113 re-blessed; module example goldens green. Focused checks only; full suite at epoch closeout.\n\n## blockedBy\nnone — self-contained sema registration + type-identity fix.",
       "blockedBy": [],
@@ -134925,11 +134930,11 @@
         {
           "n": 1,
           "text": "A struct declared in an inline module is visible to its own module (probe from the card body compiles), and E0113 fix text no longer contradicts itself; diagnostic snapshots re-blessed.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-19T13:50:40.874Z"
+          "evidence": "jet check tests/ui/inline_module_return_type_mismatch.jet emits exactly the blessed stderr:1-7 with a non-contradictory fix; hoist and visibility at Sema/Bundle/GenericModules.rs:2403-2450 with Pipeline.rs:427-433; a probe module using its own bare struct type checks clean",
+          "at": "2026-08-21T06:05:58.249Z"
         }
       ],
       "refs": [],
@@ -134937,8 +134942,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-19T11:43:46.485Z",
-      "updated": "2026-08-19T16:21:20.584Z",
-      "updatedBy": "fable"
+      "updated": "2026-08-21T06:05:59.853Z",
+      "updatedBy": "fable-e3-burndown",
+      "completedAt": "2026-08-21T06:05:59.853Z"
     },
     {
       "id": "c0beea95",
@@ -135304,7 +135310,7 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": "e3-m18-devloop-testing",
-      "phase": "ready",
+      "phase": "done",
       "priority": "P3",
       "plan": "## Outcome\n`keep(x)` exists as a Prelude sink the optimizer must treat as used, available in every execution tier (I9), so a measured loop whose values would otherwise be dead cannot be elided and a lazy resource can be forced inside the timed region; the bench docs carry the optimizer-trap catalog from both perf videos. A demo bench proves nonzero work with keep() versus an elided baseline. The three empty criterion rows are met with \"empty placeholder row — superseded by the appended criterion\" per the card log.\n\n## Law\n- D-BENCH1 / D-BENCH-MARKER1=A — `#Bench(\"name\") { … }` regions, `jet bench` harness (spec.md:1193-1206).\n- D-BENCH-PARITY1=B — shared targets/filters; benches run serially.\n- D-CLAIM-BENCH1=A (2026-08-07, card #1641) — `#Bench`/`jet bench` RETIRE in favor of `.measure` + `jet test --measure`. Retirement is ratified but NOT yet shipped (no `--measure` in Source/; run_bench live at Source/CmdDevTools.rs:2930-3360). Consequence: keep() MUST be harness-neutral — a Prelude function usable in any measured body — never a `jet bench`-only feature; docs note the migration so the trap catalog moves with `.measure`.\n- I7 — keep(x) is NEW user-typeable surface with no ratified decision ID. A decision (suggest D-BENCH-KEEP1: name, signature keep(x: T) => T vs Unit-returning, tier semantics) must be ratified before the user-typeable name ships. This is the card's one clearance item.\n- I9 — sink semantics live in Prelude source shared by AOT, Cranelift host, interpreter ambient, comptime; engines only marshal.\n- I5 — executable example + golden. Core-surface ledger gate (card #1442, scripts/agent/check-core-surface-ledger.mjs) must absorb the new name.\n\n## Work\n1. Trace first: crates/jet-codegen/src/Codegen/mod.rs:5339-5355 — the generated bench harness ALREADY wraps each region body call in `std::hint::black_box` (spec.md:1202 documents it). Refine the card's video-mine claim: the harness sinks the body's RESULT; the real gap is (a) values computed and dropped INSIDE the loop body (a Unit-returning body gives black_box nothing), and (b) lazy costs (mmap-style fault-in) deferred past the timed region. State this precisely in the card log before building.\n2. Ratify surface (blocking): raise the D-BENCH-KEEP1 ballot (name `keep`, generic identity signature so `total = keep(total)` composes, \"optimizer must treat the value as used\" contract, tier-neutral no-op semantics everywhere except AOT optimization pressure). Do not emit user-typeable surface before ratification (I7).\n3. Implement in Prelude: one `jet_keep` kernel in a PRELUDE_PARTS file (Prelude/Observe.rs or Prelude/Core/RuntimeControl.rs — pick the existing home whose neighbors are runtime-control intrinsics) using `std::hint::black_box` for AOT. Register the Jet-visible name in sema's core call tables (trace via tests/core_call_table.rs and the registries it pins); wire interpreter ambient + Cranelift host + comptime to the same symbol (identity behavior — parity means the program RUNS identically in every tier, jet run / --interpret / --release).\n4. Docs: optimizer-trap catalog in the bench section of docs/spec/spec.md (:1193-1206) and docs/reference/core-library.md (:2675-2716): dead-loop elision (nested-loop benchmark that actually measured integer division — UJ_W0O3sFnY), lazy-resource deferral (grep video's 2000x mmap lie — BOrAVwwCXq8), constant folding of loop-invariant work, and when the harness's own result-sink is NOT enough. Note the D-CLAIM-BENCH1 migration so the catalog is written against \"measured regions\", not the retiring spelling.\n5. Example + proof fixture (I5): extend examples/features/tooling/bench.jet (or sibling) with a keep()-guarded region; golden expected output for the `jet run` main path; a harness test in tests/jet_bench.rs asserting the demo bench with keep() reports nonzero ns/iter while the keep-less twin loop is measurably elided (assert ordering/magnitude, never absolute timings).\n6. Ledger + gates: update the core-surface ledger for the new name; diagnostics: none expected (keep has no failure mode — if sema rejects misuse, reuse existing arity/type diagnostics; no new code → no I4 row).\n\n## Not building\n- No allocator work (#2061 sibling).\n- No `.measure`/`jet test --measure` implementation and no `#Bench` retirement — that is card #1641's ratified scope; keep() must merely survive it.\n- No timing-assertion tests (absolute wall-clock asserts are banned flake sources); no new bench CLI flags; no changes to sample counts or bench scheduling (#2075/audit rank 9 territory).\n\n## Proof\n- Criterion 4 (the real one): `jet bench` on the demo file shows the keep()-fed region measuring nonzero work vs the elided baseline (paste both result lines into the card log); `cargo test --test jet_bench` focused run green; docs sections present; tier parity probe: the keep()-using example prints identical output under `jet run`, `jet run --interpret`, `jet run --release` (default + release AOT parity per I9).\n- Criteria 1-3 (empty rows): meet with evidence \"empty placeholder row — superseded by the appended criterion\" per the 2026-08-19 card log.\n- Ledger/table gates: `cargo test --test core_call_table --test core_surface_ledger` (targeted) green.\n\n## blockedBy\nD-BENCH-KEEP1 (new ballot to raise — I7 gates the user-typeable name; steps 1, 2 and the docs catalog can proceed immediately, code that exposes `keep` waits for ratification).",
       "blockedBy": [
@@ -135359,11 +135365,11 @@
         {
           "n": 4,
           "text": "keep(x) exists as a Prelude sink the optimizer must treat as used; a bench whose loop feeds keep() measures nonzero work versus an elided baseline; bench docs carry the optimizer-trap catalog.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-e3-burndown",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-19T13:30:25.472Z"
+          "evidence": "tests/comptime_cli_parity.rs:701-737 runs jet test bench.jet --measure --json, parses mean_ns for the elided baseline and the keep loop, and asserts kept > elided. The threshold is the elided run itself, so it calibrates to the machine rather than pinning a constant",
+          "at": "2026-08-21T06:05:58.710Z"
         }
       ],
       "refs": [],
@@ -135373,8 +135379,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-19T11:45:42.237Z",
-      "updated": "2026-08-21T01:47:36.233Z",
-      "updatedBy": "fable-e3-burndown"
+      "updated": "2026-08-21T06:06:00.548Z",
+      "updatedBy": "fable-e3-burndown",
+      "completedAt": "2026-08-21T06:06:00.548Z"
     },
     {
       "id": "c0hipgvn",
@@ -186687,6 +186694,41 @@
   ],
   "events": [
     {
+      "at": "2026-08-21T06:07:19.677Z",
+      "by": "fable-e3-burndown",
+      "action": "card.update",
+      "ref": "c09mc3y7",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-08-21T06:06:00.548Z",
+      "by": "fable-e3-burndown",
+      "action": "card.update",
+      "ref": "c08jqcnk",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-21T06:05:59.854Z",
+      "by": "fable-e3-burndown",
+      "action": "card.update",
+      "ref": "c027z91l",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-21T06:05:58.718Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c08jqcnk",
+      "note": "#4"
+    },
+    {
+      "at": "2026-08-21T06:05:58.249Z",
+      "by": "fable-e3-burndown",
+      "action": "card.criteria-meet",
+      "ref": "c027z91l",
+      "note": "#1"
+    },
+    {
       "at": "2026-08-21T05:48:45.083Z",
       "by": "fable-e3-burndown",
       "action": "card.criteria-meet",
@@ -190150,41 +190192,6 @@
       "action": "card.criteria-meet",
       "ref": "c0615ffl",
       "note": "#1"
-    },
-    {
-      "at": "2026-08-20T21:29:35.058Z",
-      "by": "owner",
-      "action": "done.clear",
-      "ref": null,
-      "note": "2026-08-20T21:29:35.058Z"
-    },
-    {
-      "at": "2026-08-20T21:27:54.381Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0575p3w",
-      "note": "#4"
-    },
-    {
-      "at": "2026-08-20T21:27:53.917Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c066jfg6",
-      "note": "#4"
-    },
-    {
-      "at": "2026-08-20T21:27:53.419Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0zjmtah",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-20T21:27:52.953Z",
-      "by": "fable-e3-burndown",
-      "action": "card.update",
-      "ref": "c0be7t09",
-      "note": "phase,logEntry"
     }
   ],
   "nextNum": 368,

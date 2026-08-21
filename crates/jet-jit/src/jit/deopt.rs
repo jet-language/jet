@@ -631,7 +631,15 @@ pub(crate) fn jet_deopt_call(
         let param_tys: Vec<Type> = func.params.iter().map(|(_, ty, _)| ty.clone()).collect();
         let ret_ty = func.ret.clone();
 
-        let result: Option<Result<i64, String>> = Concurrency::with_runtime_mut(|rt| {
+        let prepared: Option<
+            Result<
+                (
+                    Vec<CtValue>,
+                    std::sync::Arc<jet_codegen::program_allocator::JetProgramAllocator>,
+                ),
+                String,
+            >,
+        > = Concurrency::with_runtime_mut(|rt| {
             let mut args = Vec::with_capacity(argc);
             for i in 0..argc {
                 let ty = match param_tys.get(i) {
@@ -643,28 +651,48 @@ pub(crate) fn jet_deopt_call(
                     Err(d) => return Some(Err(d.what)),
                 }
             }
-            let mut sink = DevSink::new();
-            let memos = DEOPT_MEMOS
-                .with(|state| state.borrow().clone())
-                .unwrap_or_else(TIR::new_memo_state);
-            let value =
-                match jet_codegen::program_allocator::jet_with_active_hosted_program_allocator(
-                    &rt.program_allocator,
-                    || {
-                        jet_codegen::Comptime::with_ambient(
-                            Some(crate::ambient_interp::ambient_core_call),
-                            Some(crate::ambient_interp::ambient_handle),
-                            || {
-                                TIR::run_named_func_with_memos(
-                                    program, &func_name, args, &mut sink, memos,
-                                )
-                            },
-                        )
-                    },
-                ) {
-                    Ok(v) => v,
-                    Err(d) => return Some(Err(d.what)),
-                };
+            Some(Ok((args, rt.program_allocator.clone())))
+        });
+        let (args, allocator) = match prepared {
+            Some(Ok(value)) => value,
+            Some(Err(msg)) => {
+                Concurrency::with_runtime_mut(|rt| rt.set_trap(&msg));
+                return 0;
+            }
+            None => {
+                Concurrency::with_runtime_mut(|rt| {
+                    rt.set_trap("deopt call: no active runtime");
+                });
+                return 0;
+            }
+        };
+
+        let mut sink = DevSink::new();
+        let memos = DEOPT_MEMOS
+            .with(|state| state.borrow().clone())
+            .unwrap_or_else(TIR::new_memo_state);
+        let value =
+            match jet_codegen::program_allocator::jet_with_active_hosted_program_allocator(
+                allocator.as_ref(),
+                || {
+                    jet_codegen::Comptime::with_ambient(
+                        Some(crate::ambient_interp::ambient_core_call),
+                        Some(crate::ambient_interp::ambient_handle),
+                        || {
+                            TIR::run_named_func_with_memos(
+                                program, &func_name, args, &mut sink, memos,
+                            )
+                        },
+                    )
+                },
+            ) {
+                Ok(v) => v,
+                Err(d) => {
+                    Concurrency::with_runtime_mut(|rt| rt.set_trap(&d.what));
+                    return 0;
+                }
+            };
+        let result: Option<Result<i64, String>> = Concurrency::with_runtime_mut(|rt| {
             rt.stdout.push_str(&sink.stdout);
             rt.stderr.push_str(&sink.stderr);
             match &ret_ty {

@@ -8,6 +8,10 @@ function jet_authority_workspace() {
   return { rights: new Set(["FS.Read"]) };
 }
 
+function jet_authority_from_rights(rights) {
+  return { rights: new Set(rights.map(right => String(right))) };
+}
+
 function jet_authority_with(authority, requested) {
   const right = String(requested);
   if (![...authority.rights].some(held => jet_authority_covers(held, right))) {

@@ -232,7 +232,7 @@ pub(crate) fn emit_tir_str(parts: &[TStrPart], cx: &Cx) -> String {
     }
 }
 
-/// Walk a lowered select-builder chain and collect channel/timer arm expressions.
+/// Walk the compiler-private readiness-table chain and collect its arms.
 pub(super) fn collect_select_arms(builder: &TExpr, cx: &Cx) -> (Vec<String>, Vec<String>) {
     let mut recvs = Vec::new();
     let mut afters = Vec::new();

@@ -51,14 +51,13 @@ fn measurement_parser_accepts_the_canonical_constructor() {
 
 #[test]
 fn measurement_sema_accepts_the_knowledge_grade() {
-    let result = jet::compile_with_path(SOURCE, "tests/fixtures/measurement_tiers.jet");
+    let result = jet::compile(SOURCE);
     assert!(result.is_ok(), "sema rejected measured values: {result:#?}");
 }
 
 #[test]
 fn measurement_tir_keeps_the_carrier_and_operation() {
-    let compiled = jet::compile_with_path(SOURCE, "tests/fixtures/measurement_tiers.jet")
-        .expect("measurement source must reach TIR");
+    let compiled = jet::compile(SOURCE).expect("measurement source must reach TIR");
     assert!(compiled.rust.contains("JetMeasurement"));
     assert!(
         compiled.rust.contains("jet_std::JetMeasurement::new")

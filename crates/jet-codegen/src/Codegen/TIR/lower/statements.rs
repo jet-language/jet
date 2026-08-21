@@ -30,6 +30,7 @@ use crate::Codegen::TIR::tir_recv_jet_ty;
 use crate::Codegen::TIR::ScopeMemberKind;
 use crate::Codegen::TIR::TExpr;
 use crate::Codegen::TIR::TExprKind;
+use crate::Codegen::TIR::TCallArg;
 use crate::Codegen::TIR::TCoreClosureKind;
 use crate::Codegen::TIR::TirWorklist;
 use crate::Codegen::TIR::TLetTy;
@@ -41,6 +42,7 @@ use crate::Codegen::TIR::TBindingOrigin;
 use crate::Codegen::TIR::TPlace;
 use crate::Codegen::TIR::TPattern;
 use crate::Codegen::TIR::TRequireKind;
+use crate::Codegen::TIR::TStaticOwner;
 use crate::Codegen::TIR::TStmt;
 use crate::Codegen::TIR::TUnsafeGate;
 use crate::Codegen::TIR::lower::lower_comptime_scalar;
@@ -2775,6 +2777,12 @@ fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmt
                     if matches!(kind, IndexKind::Pool) {
                         return in_own_frame(|| {
                             let line = crate::Diagnostics::span_line_col(&cx.src, span.start).0;
+                            let src_line = cx
+                                .src
+                                .lines()
+                                .nth(line.saturating_sub(1))
+                                .unwrap_or_default()
+                                .to_string();
                             let elem_ty = value_t.ty.clone();
                             ready_return!(TStmt::Assign {
                                 place: TPlace::Expr(Box::new(TExpr {
@@ -2785,6 +2793,7 @@ fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmt
                                         mutable: true,
                                         field: None,
                                         line,
+                                        src_line,
                                     },
                                 })),
                                 op: *op,
@@ -2918,6 +2927,12 @@ fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmt
                     {
                         return in_own_frame(|| {
                             let line = crate::Diagnostics::span_line_col(&cx.src, idx_span.start).0;
+                            let src_line = cx
+                                .src
+                                .lines()
+                                .nth(line.saturating_sub(1))
+                                .unwrap_or_default()
+                                .to_string();
                             let pool_t = lower_expr(pool_expr, cx, env);
                             let id_t = lower_expr(id_expr, cx, env);
                             let elem_ty = match &pool_t.ty {
@@ -2933,6 +2948,7 @@ fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmt
                                     mutable: true,
                                     field: Some(field.to_string()),
                                     line,
+                                    src_line,
                                 },
                             }));
                             let clone_value = if let Expr::Ident(vname, _) = value {
@@ -3645,8 +3661,76 @@ fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmt
                 );
             });
         }
-        // c109 Phase 26: a `#Abilities(IO) { … }` effect-restriction region (D-EFF1). `emit_stmt`'s
-        // `Stmt::Caps` arm is byte-for-byte `Stmt::Region`; effects erase at codegen (I3).
+        // c109 Phase 26: a bare `#Abilities(IO) { … }` effect-restriction region
+        // (D-EFF1). Effects erase at codegen (I3).
+        Stmt::Caps {
+            caps,
+            binding: Some(binding),
+            body,
+            ..
+        } => {
+            return in_own_frame(|| {
+                // D-AUTHORITY-NAME1=A: the named form is an ordinary runtime
+                // Authority value. Its rights are the already-resolved marker
+                // list; construction remains a Prelude call so every engine
+                // receives the same carrier and relation.
+                let authority_ty = Type::Named(Syntax::TYPE_ABILITIES.to_string());
+                let authority = TLocal::user(binding);
+                let mut scoped = clone_env(env);
+                scoped.bind(binding, authority, Some(authority_ty.clone()));
+                let rights = TExpr {
+                    ty: Type::List(Box::new(Type::String)),
+                    kind: TExprKind::CtLit(crate::AST::CtValue::List(
+                        caps.iter()
+                            .map(|(name, _)| crate::AST::CtValue::Str(name.clone()))
+                            .collect(),
+                    )),
+                };
+                let init = TExpr {
+                    ty: authority_ty.clone(),
+                    kind: TExprKind::StaticCall {
+                        owner: TStaticOwner::Prelude {
+                            rooted: true,
+                            path: "JetAuthority".to_string(),
+                            generics: Vec::new(),
+                        },
+                        owner_type: None,
+                        method: crate::Codegen::TIR::TMethodRef::bare("from_rights"),
+                        type_args: Vec::new(),
+                        args: vec![TCallArg {
+                            value: rights,
+                            template_items: None,
+                            borrow: false,
+                            mut_borrow: false,
+                            clone: false,
+                            arc_clone: false,
+                            fn_coerce: None,
+                            widen_to_vec: false,
+                            widen_to_union: None,
+                            box_as_trait: None,
+                        }],
+                    },
+                };
+                return deferred_stmt(
+                    vec![LowerBody::scoped(body, scoped)],
+                    move |mut lowered| {
+                        let mut lowered = lowered.pop().expect("caps body was deferred");
+                        lowered.insert(
+                            0,
+                            TStmt::Let {
+                                name: binding.clone(),
+                                kw: "let",
+                                let_ty: TLetTy::plain(authority_ty),
+                                init,
+                                gc_promotion: None,
+                                gc_transferred: false,
+                            },
+                        );
+                        TStmt::Region(lowered)
+                    },
+                );
+            });
+        }
         Stmt::Caps { body, .. } => {
             return in_own_frame(|| {
                 let scoped = clone_env(env);
@@ -3656,10 +3740,6 @@ fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmt
                 );
             });
         }
-        // D-AUTHORITY-SCOPE1: a named `#Abilities(abilities: FS) { … }` scope. The Authority handle
-        // is a compile-time-only fact (authority to perform the granted effects),
-        // erased here (I3); the body emits as a plain lexical `TStmt::Region`.
-        // No runtime grant/revoke value, no `unsafe`.
         // c109 Phase 19: a `#Context(field: value) { … }` block (D-CTX1/D-DEADLINE1).
         // Resolve each field against the outer env, then lower the guarded Rust block
         // in a lexical child env.

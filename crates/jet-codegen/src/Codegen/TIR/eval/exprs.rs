@@ -4553,8 +4553,8 @@ impl<'a> EvalCtx<'a> {
     /// D-MEM1 S6 (D-POOLID-API1=A): a stale `Id<T>` is a generation check that
     /// failed while the program ran, so it reports through the same shared
     /// boundary its list and map siblings use here — `runtime_index_stop`,
-    /// which is this tier's marshalling of the `jet_panic` inside
-    /// `jet_pool_get` — naming this file and line.
+    /// which is this tier's marshalling of the shared Prelude stale-slot stop
+    /// in `jet_pool_get` — naming this file and line.
     ///
     /// It used to be a hand-built comptime `E0953` ("your comptime code
     /// stopped the build") carrying no span, so a running program's stop
@@ -4948,9 +4948,6 @@ impl<'a> EvalCtx<'a> {
             return Ok(CtValue::Unit);
         }
         if module == "core.tasks" && method == "channel" {
-            if !self.runtime_execution {
-                return Err(unsupported("`tasks.channel` at compile time", source_span));
-            }
             let capacity = args
                 .first()
                 .map(|arg| self.eval_expr_child(arg, scope))

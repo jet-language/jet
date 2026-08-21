@@ -6,9 +6,11 @@ fn run() {
     task.group g {
         (sender, ch) :: channel<Int>(1)
         sender.send(1)
-        blocked :: task sender.send(2)
-        print(ch.receive() ?? panic("channel closed"))
-        print(ch.receive() ?? panic("channel closed"))
+        blocked :: task ^sender {
+            sender.send(2)
+            sender.close()
+        }
+        loop value, ch :> print(value)
         blocked.join() ?? panic("blocked task failed")
         if {
             after 0ms :> print(-1)

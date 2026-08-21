@@ -4,14 +4,15 @@
 class JetWebTask {
   constructor(work) {
     this.state = "running";
-    try {
-      this.result = { tag: "Ok", values: [work()] };
-    } catch (error) {
-      this.result = {
-        tag: "Err",
-        values: [{ tag: "Panicked", values: [String(error?.message ?? error)] }],
-      };
-    }
+    this.result = Promise.resolve()
+      .then(() => work())
+      .then(
+        (value) => ({ tag: "Ok", values: [value] }),
+        (error) => ({
+          tag: "Err",
+          values: [{ tag: "Panicked", values: [String(error?.message ?? error)] }],
+        }),
+      );
   }
 
   join() {

@@ -1482,6 +1482,9 @@ pub(crate) fn static_method_call_in_subset(
     ) {
         return true;
     }
+    if type_name == Syntax::TYPE_ABILITIES && method == "from_rights" && args.len() == 1 {
+        return args.iter().all(|arg| expr_in_subset(&arg.expr, cx, locals));
+    }
     if matches!((type_name, method, args.len()), ("ExpiringValue", "new", 3)) {
         return args
             .iter()

@@ -1215,23 +1215,41 @@
     /// `pool[id]` read (`Expr::Index`, `IndexKind::Pool`): a generation-checked
     /// clone of `T`. Panics naming the stale-access class on a mismatched or
     /// vacant slot, mirroring the array-out-of-bounds panic precedent
-    /// (`jet_index_vec`) — a runtime panic, not a new diagnostic code.
-    pub fn jet_pool_get<T: Clone>(pool: &JetPool<T>, id: JetId<T>, file: &str, line: u32) -> T {
+    /// (`jet_index_vec`) — a runtime panic, not a new diagnostic code. The
+    /// generated caller supplies its Jet function and source-line facts so this
+    /// shared Prelude stop renders the same context on every execution tier.
+    pub fn jet_pool_get<T: Clone>(
+        pool: &JetPool<T>,
+        id: JetId<T>,
+        file: &str,
+        line: u32,
+        fn_name: &str,
+        src_line: &str,
+    ) -> T {
         match pool.slots.get(id.index as usize) {
             Some(JetPoolSlot::Occupied(gen, v)) if *gen == id.generation => v.clone(),
-            _ => super::jet_panic(file, line, super::jet_pool_stale_message()),
+            _ => super::jet_runtime_stop_with_context(
+                "E3001",
+                file,
+                line,
+                fn_name,
+                src_line,
+                super::jet_pool_stale_message(),
+            ),
         }
     }
 
     /// `pool[id] = v` / `pool[id].field = v` (`LValue::Index` / `LValue::Field`
     /// nested on a `Pool` index): a genuine mutable place, not a value
     /// round-trip — a nested field write edits the real slot. Same stale-access
-    /// panic as `jet_pool_get`.
+    /// panic as `jet_pool_get`, with the same source context.
     pub fn jet_pool_get_mut<'a, T>(
         pool: &'a mut JetPool<T>,
         id: JetId<T>,
         file: &str,
         line: u32,
+        fn_name: &str,
+        src_line: &str,
     ) -> &'a mut T {
         let idx = id.index as usize;
         let valid = matches!(
@@ -1239,7 +1257,14 @@
             Some(JetPoolSlot::Occupied(gen, _)) if *gen == id.generation
         );
         if !valid {
-            super::jet_panic(file, line, super::jet_pool_stale_message());
+            super::jet_runtime_stop_with_context(
+                "E3001",
+                file,
+                line,
+                fn_name,
+                src_line,
+                super::jet_pool_stale_message(),
+            );
         }
         match &mut pool.slots[idx] {
             JetPoolSlot::Occupied(_, v) => v,
