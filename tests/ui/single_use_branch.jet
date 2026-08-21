@@ -3,12 +3,16 @@
     resource: String
 }
 
-fn acquire(resource: String) Lock { return Lock{resource: ~resource} }
+fn acquire(resource: String) => Lock {
+    return Lock.{resource: ~resource}
+}
 
-fn release(lock: ^Lock) { print("unlocked {lock.resource}") }
+fn release(lock: ^Lock) {
+    print("unlocked {lock.resource}")
+}
 
 fn run() {
     db :: acquire("db")
     early :: true
-    if early :> release(^db)
+    if early -> release(^db)
 }

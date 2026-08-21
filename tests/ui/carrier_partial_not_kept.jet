@@ -4,12 +4,12 @@ struct ImportErr {
     broken: Int
 }
 
-fn import_rows(rows: [String]) [String] ? ImportErr {
-    if rows.len() == 0 :> return Err(ImportErr{broken: 1})
+fn import_rows(rows: [String]) => [String] ? ImportErr {
+    if rows.len() == 0 -> return Err(ImportErr.{broken: 1})
     return Ok(rows)
 }
 
 fn run() {
-    spotty :: import_rows([String]{})
+    spotty :: import_rows([String].{})
     print((spotty.partial() ?? []).len())
 }

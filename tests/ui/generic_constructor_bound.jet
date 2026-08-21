@@ -1,5 +1,5 @@
 trait Named {
-    fn name(self) String
+    fn name(self) => String
 }
 
 struct Token {
@@ -11,11 +11,13 @@ struct Box<T: Named> {
 }
 
 impl Box {
-    fn new(value: ^T) Box<T> { return Box<T>{value: value} }
+    fn new(value: ^T) => Box<T> {
+        return Box<T>.{value: value}
+    }
 }
 
 fn run() {
-    value :: Token{value: 1}
+    value :: Token.{value: 1}
     boxed :: Box.new(^value)
     boxed_list :: Box.new([1])
 }

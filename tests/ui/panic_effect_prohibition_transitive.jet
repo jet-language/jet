@@ -1,8 +1,16 @@
 // D-NOPANIC1=D: Panic denial follows the existing effect call graph.
-fn leaf() { panic("bad input") }
+fn leaf() {
+    panic("bad input")
+}
 
-fn middle() { leaf() }
+fn middle() {
+    leaf()
+}
 
-fn top() :[!Panic]> { middle() }
+fn top() =[!Panic]=> {
+    middle()
+}
 
-fn run() { top() }
+fn run() {
+    top()
+}
