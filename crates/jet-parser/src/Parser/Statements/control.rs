@@ -1265,8 +1265,8 @@ impl<'a> Parser<'a> {
             let marker_name_span = self.peek().span;
             self.expect_ident(&format!("`#{}`", Syntax::KW_CAPS))?;
             self.expect(TokKind::LParen, "after `#Caps`")?;
-            let (binding, binding_span) = self.expect_ident("as the scoped Abilities handle")?;
-            self.expect(TokKind::Colon, "after the scoped Abilities handle")?;
+            let (binding, binding_span) = self.expect_ident("as the scoped Authority handle")?;
+            self.expect(TokKind::Colon, "after the scoped Authority handle")?;
             let mut caps = Vec::new();
             let mut marker_args = Vec::new();
             loop {
@@ -1342,10 +1342,13 @@ impl<'a> Parser<'a> {
     /// D-AUTHORITY-SCOPE1: the retired Grant marker is a hard parse error.
     pub(super) fn retired_grant_stmt(&mut self) -> Result<Stmt, Diagnostic> {
         let marker = self.parse_rule_marker()?;
+        // The marker is a parser tombstone, not a live sema fact. Leaving the
+        // fact behind makes sema report a second E0927 unknown-marker error.
+        self.rule_facts.pop();
         Err(Diagnostic::error(
             "E0077",
             "the `#Grant` scope marker is retired".to_string(),
-            "`#Caps` now narrows a block and binds an Abilities handle when its head has a name"
+            "`#Caps` now narrows a block and binds an Authority handle when its head has a name"
                 .to_string(),
             "write `#Caps(abilities: FS, Net) { ... }`".to_string(),
             Some(marker.span),

@@ -192,6 +192,10 @@
 // grantable root table at thirteen and serves foreign-language leaves through
 // BUILTIN_EFFECT_LEAVES (`FFI.Go`, `FFI.Py`, `FFI.Octave`, and the other
 // supported binders). `Panic` and `Mem` are deny-only rows, not roots.
+// D-AUTHORITY-WORD1=A (ratified 2026-08-06, card #1572) retires the word
+// `capability` from user-facing language surfaces: borrow copy says `write
+// access`, the rights value is `Authority`, and product claims are feature
+// claims. Design-history prose may retain the term; this adds no syntax.
 // D-EACH1=C (ratified 2026-07-28, card #1239) mints SIGIL_FENCE_OPEN /
 // SIGIL_FENCE_CLOSE. D-FENCE-GLYPH1=A (card #1516) respells them
 // `@[ a, b ]@` and opens expression-position fences to expression entries:

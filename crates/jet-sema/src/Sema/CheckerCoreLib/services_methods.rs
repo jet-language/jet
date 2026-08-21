@@ -82,16 +82,33 @@ impl<'a> Checker<'a> {
 
         let ret = match method {
             "worker" => {
-                if self.service_method_arity("ServiceTree.worker", args, 2, span) {
+                if self.service_method_arity("ServiceTree.worker", args, 3, span) {
                     super::net_text_time::require_exact_labels(
                         "ServiceTree.worker",
                         args,
-                        &[(1, "capacity")],
+                        &[(2, "capacity")],
                         span,
                         &mut self.diags,
                     );
                     self.expect_core_arg("ServiceTree.worker", 0, &Type::String, &mut args[0]);
-                    self.expect_core_arg("ServiceTree.worker", 1, &Type::Int, &mut args[1]);
+                    let handler_ty = Type::Fn {
+                        params: Vec::new(),
+                        ret: None,
+                        effect_bound: None,
+                        param_contract: None,
+                        call_metadata: None,
+                        return_view_provenance: None,
+                    };
+                    self.expect_core_arg("ServiceTree.worker", 1, &handler_ty, &mut args[1]);
+                    if !matches!(args[1].expr, Expr::Ident(..)) {
+                        invalid_service_value(
+                            self,
+                            "worker handler",
+                            "pass an ordinary named function value",
+                            args[1].expr.span(),
+                        );
+                    }
+                    self.expect_core_arg("ServiceTree.worker", 2, &Type::Int, &mut args[2]);
                     if let Some(name) = literal_string(&args[0].expr) {
                         if !jet_foundation::ServiceTree::valid_name(&name) {
                             invalid_service_value(
@@ -102,12 +119,12 @@ impl<'a> Checker<'a> {
                             );
                         }
                     }
-                    if literal_int(&args[1].expr).is_some_and(|capacity| capacity <= 0) {
+                    if literal_int(&args[2].expr).is_some_and(|capacity| capacity <= 0) {
                         invalid_service_value(
                             self,
                             "worker capacity",
                             "use a positive bounded integer capacity",
-                            args[1].expr.span(),
+                            args[2].expr.span(),
                         );
                     }
                 }

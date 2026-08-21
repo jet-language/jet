@@ -23,7 +23,18 @@ use jet::Interpreter::{dev_iteration, dev_run_bundle, run_jit_once, run_named_jo
 use jet::JitBackend::JitBackend;
 use jet_jit::CraneliftBackend;
 
-const DEV_DIFF_TIMEOUT: Duration = Duration::from_secs(30);
+// A stem that has never been built pays a cold AOT compile, and this battery
+// runs eight of them at once. Thirty seconds was a warm-cache number, so a
+// cold or freshly pruned runtime cache turned real passes into timeouts.
+// JET_TIER_PARITY_TIMEOUT_SECS raises it without hiding a genuine hang.
+static DEV_DIFF_TIMEOUT: std::sync::LazyLock<Duration> = std::sync::LazyLock::new(|| {
+    Duration::from_secs(
+        std::env::var("JET_TIER_PARITY_TIMEOUT_SECS")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(30),
+    )
+});
 
 fn dev_diff_lock() -> &'static Mutex<()> {
     static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
@@ -688,7 +699,7 @@ fn build_oracle_binary(
     }
     let out = command_output_with_timeout(
         rustc_cmd,
-        DEV_DIFF_TIMEOUT,
+        *DEV_DIFF_TIMEOUT,
         &format!("rustc build for `{stem}`"),
     );
     if let Some(entry) = &entry {
@@ -750,7 +761,7 @@ fn compiled_binary_output_with_stdin(
     let runtime_timeout = if stem == "io/os_process_control" {
         Duration::from_secs(120)
     } else {
-        DEV_DIFF_TIMEOUT
+        *DEV_DIFF_TIMEOUT
     };
     let run = command_output_with_timeout(
         run_cmd,
@@ -789,7 +800,7 @@ fn try_compiled_binary_output(
     let bin = try_compiled_binary_build(dir, tag, i, stem, file)?;
     let run = command_output_with_timeout(
         Command::new(&bin),
-        DEV_DIFF_TIMEOUT,
+        *DEV_DIFF_TIMEOUT,
         &format!("compiled binary run for `{stem}`"),
     );
     Some(ProgramOutput::ran(
@@ -902,7 +913,7 @@ fn cli_tier_output_with_answers(
         .stdin(fs::File::open(answer_file(&cache, &tag, 0, answers)).unwrap());
     let output = command_output_with_timeout(
         cmd,
-        DEV_DIFF_TIMEOUT,
+        *DEV_DIFF_TIMEOUT,
         &format!("`jet run` with answers for `{stem}` ({tag})"),
     );
     let _ = fs::remove_dir_all(&cache);
@@ -967,10 +978,10 @@ fn dev_iteration_with_timeout(stem: &str, file: &str, use_interpreter: bool) -> 
             let _ = tx.send((out, flags));
         })
         .expect("dev_iteration worker");
-    let (out, flags) = rx.recv_timeout(DEV_DIFF_TIMEOUT).unwrap_or_else(|_| {
+    let (out, flags) = rx.recv_timeout(*DEV_DIFF_TIMEOUT).unwrap_or_else(|_| {
         panic!(
             "dev_iteration timed out after {:?} for `{}` ({}) with use_interpreter={}",
-            DEV_DIFF_TIMEOUT, stem, file, use_interpreter
+            *DEV_DIFF_TIMEOUT, stem, file, use_interpreter
         )
     });
     jet_jit::merge_jit_trace_flags_for_test(flags);
@@ -2465,7 +2476,7 @@ fn run_cli_default_resident(command: &str, file: &str, tag: &str) -> ProgramOutp
         .env("JET_CACHE_DIR", cache.join("build"));
     let output = command_output_with_timeout(
         cmd,
-        DEV_DIFF_TIMEOUT,
+        *DEV_DIFF_TIMEOUT,
         &format!("default CLI {command} for `{tag}`"),
     );
     assert!(
@@ -2503,7 +2514,7 @@ fn assert_cli_diagnostic_snapshot(command: &str, fixture: &str, snapshot: &str) 
         .env("NO_COLOR", "1");
     let output = command_output_with_timeout(
         cmd,
-        DEV_DIFF_TIMEOUT,
+        *DEV_DIFF_TIMEOUT,
         &format!("default CLI {command} diagnostic"),
     );
     assert!(
@@ -4838,7 +4849,7 @@ fn multi_head_diagnostic_entries(file: &str, src: &str) -> MultiHeadDiagnosticEn
             tx.send(entries).expect("multi-head diagnostic receiver");
         })
         .expect("spawn multi-head diagnostic worker");
-    let entries = rx.recv_timeout(DEV_DIFF_TIMEOUT).expect("multi-head diagnostic worker");
+    let entries = rx.recv_timeout(*DEV_DIFF_TIMEOUT).expect("multi-head diagnostic worker");
     worker
         .join()
         .expect("multi-head diagnostic worker panicked");

@@ -1573,11 +1573,12 @@ pub(crate) fn emit_tir_core_call(
             arg(1)
         ),
         ("core.services", "worker") => format!(
-            "{}(&mut ({}), ({}).clone(), {})",
+            "{}(&mut ({}), ({}).clone(), ({}).clone(), {})",
             helper("jet_services_worker"),
             arg(0),
             arg(1),
-            arg(2)
+            arg(2),
+            arg(3)
         ),
         ("core.services", "group") => format!(
             "{}(&mut ({}), ({}).clone(), ({}).clone())",

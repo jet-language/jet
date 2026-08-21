@@ -1775,16 +1775,16 @@ pub fn e0712(over: &EffectSet, caps: &EffectSet, span: Span, marker: &str) -> Di
     )
 }
 
-/// E0711 (D-AUTHORITY-SCOPE1): the `Abilities` handle bound by a named `#Caps(…)` region escapes
+/// E0711 (D-AUTHORITY-SCOPE1 / D-AUTHORITY-NAME1): the `Authority` handle bound by a named `#Caps(…)` region escapes
 /// its scope — returned, stored in an outer binding, or captured by an escaping
-/// value. The abilities are revoked at scope end (RAII, S63), so a reference
-/// that outlives the block would name revoked abilities.
+/// value. The rights are revoked at scope end (RAII, S63), so a reference
+/// that outlives the block would name revoked rights.
 pub fn e0711(handle: &str, marker: &str, span: Span) -> Diagnostic {
     Diagnostic::error(
         "E0711",
-        format!("the `Abilities` handle `{}` can't escape its `#{}` block", handle, marker),
+        format!("the `Authority` handle `{}` can't escape its `#{}` block", handle, marker),
         format!(
-            "`#{}(…)` revokes the `Abilities` at the end of its block (RAII); returning, storing, or sharing `{}` would let revoked abilities outlive the scope",
+            "`#{}(…)` revokes the `Authority` at the end of its block (RAII); returning, storing, or sharing `{}` would let revoked rights outlive the scope",
             marker, handle
         ),
         format!("use `{}` only inside the `#{}` block, or perform the work there", handle, marker),

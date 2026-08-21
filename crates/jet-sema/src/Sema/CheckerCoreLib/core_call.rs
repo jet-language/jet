@@ -1019,36 +1019,37 @@ impl<'a> Checker<'a> {
                 }
                 return None;
             }
-            // D-SERVICE1=D: a tree value is the typed topology root. Workers
-            // and groups are added through its checked methods; no callback or
-            // string-keyed procedural tree builder exists beside it.
+            // D-SERVICE1=D: a tree value is the typed topology root. The
+            // inline declaration form promotes ordinary function values into
+            // named workers; the direct string form remains the constructor
+            // used by the same typed tree API.
             if module == "core.service" && name == "tree" {
                 if args.len() != 1 {
                     self.diags.push(wrong_core_arity(name, 1, args.len(), span));
                 }
                 if let Some(arg) = args.get_mut(0) {
                     self.expect_core_arg(name, 0, &Type::String, arg);
-                    if let Expr::Str(parts, _) = &arg.expr {
-                        let literal = parts
-                            .iter()
-                            .map(|part| match part {
-                                crate::AST::StrPart::Lit(value) => Some(value.as_str()),
-                                crate::AST::StrPart::Interp(..) => None,
-                            })
-                            .collect::<Option<Vec<_>>>()
-                            .map(|parts| parts.concat());
-                        if let Some(value) = literal {
-                            if !jet_foundation::ServiceTree::valid_name(&value) {
-                                self.diags.push(Diagnostic::error(
-                                    "E0112",
-                                    "service tree name is outside the checked builder shape".to_string(),
-                                    "service topology names must be non-empty and visible before runtime construction".to_string(),
-                                    "use a non-empty visible tree name of at most 256 bytes".to_string(),
-                                    Some(arg.expr.span()),
-                                ));
+                        if let Expr::Str(parts, _) = &arg.expr {
+                            let literal = parts
+                                .iter()
+                                .map(|part| match part {
+                                    crate::AST::StrPart::Lit(value) => Some(value.as_str()),
+                                    crate::AST::StrPart::Interp(..) => None,
+                                })
+                                .collect::<Option<Vec<_>>>()
+                                .map(|parts| parts.concat());
+                            if let Some(value) = literal {
+                                if !jet_foundation::ServiceTree::valid_name(&value) {
+                                    self.diags.push(Diagnostic::error(
+                                        "E0112",
+                                        "service tree name is outside the checked builder shape".to_string(),
+                                        "service topology names must be non-empty and visible before runtime construction".to_string(),
+                                        "use a non-empty visible tree name of at most 256 bytes".to_string(),
+                                        Some(arg.expr.span()),
+                                    ));
+                                }
                             }
                         }
-                    }
                 }
                 for arg in args.iter_mut().skip(1) {
                     self.infer(&mut arg.expr);
@@ -5163,7 +5164,7 @@ impl<'a> Checker<'a> {
             }
 
             // D-AUTHORITY-WORD2=E: plugin construction accepts the same
-            // Abilities boundary value as process execution. The one-argument
+            // Authority boundary value as process execution. The one-argument
             // loader remains the existing sandboxed convenience form; the
             // two-argument form carries the explicit authority value.
             if module == "core.plugin" && name == "load" {

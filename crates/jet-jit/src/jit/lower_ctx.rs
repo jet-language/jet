@@ -19103,7 +19103,7 @@ impl LowerCtx<'_, '_> {
                         });
                     }
                     // D-AUTHORITY-NAME1=A / D-AUTHORITY-WORD2=E: the JIT
-                    // marshals the ordinary abilities value through the shared
+                    // marshals the ordinary Authority value through the shared
                     // Prelude host adapter; it does not re-encode its defaults.
                     let is_abilities_workspace = method.name == "workspace"
                         && args.is_empty()

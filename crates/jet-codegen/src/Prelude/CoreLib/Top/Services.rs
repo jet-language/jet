@@ -703,6 +703,7 @@ fn jet_services_set_restart(
 fn jet_services_worker(
     tree: &mut JetServiceTree,
     name: String,
+    handler: String,
     capacity: i64,
 ) -> Result<JetServiceEndpoint, JetServiceError> {
     if tree.started {
@@ -721,6 +722,14 @@ fn jet_services_worker(
     {
         return Err(JetServiceError::Policy(
             "worker name must be non-empty and visible".to_string(),
+        ));
+    }
+    if handler.trim().is_empty()
+        || handler.chars().any(char::is_control)
+        || handler.len() > MAX_SERVICE_NAME
+    {
+        return Err(JetServiceError::Policy(
+            "worker handler must be non-empty and visible".to_string(),
         ));
     }
     if tree.workers.len() >= MAX_SERVICE_WORKERS {
@@ -749,7 +758,7 @@ fn jet_services_worker(
     // channel allocation must not leave a ghost authority in the registry.
     service_authority_register(&endpoint, false)?;
     tree.workers.push(JetServiceWorker {
-        handler: name.clone(),
+        handler,
         name,
         endpoint: endpoint.clone(),
         mailbox,

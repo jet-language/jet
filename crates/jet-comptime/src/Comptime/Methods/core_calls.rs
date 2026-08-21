@@ -2244,6 +2244,9 @@ pub fn apply_core_call_with_type(
         ("core.service", "tree") => {
             super::super::ServicesLite::apply("tree", &args, span)
         }
+        ("core.service", "tree_declared") => {
+            super::super::ServicesLite::apply("tree_declared", &args, span)
+        }
         ("core.service", "state_store") => {
             super::super::ServicesLite::apply("state_store", &args, span)
         }

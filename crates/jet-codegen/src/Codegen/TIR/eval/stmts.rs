@@ -1259,7 +1259,20 @@ impl<'a> EvalCtx<'a> {
                             self.burn()?;
                             let next = self.receive_eval_channel(index)?;
                             let CtValue::Present(value) = next else {
-                                if matches!(next, CtValue::Failed(CtReport::Clean(_))) {
+                                let closed = matches!(&next, CtValue::Failed(CtReport::Clean(_)))
+                                    || matches!(
+                                        &next,
+                                        CtValue::Failed(CtReport::Told(error))
+                                            if matches!(
+                                                error.as_ref(),
+                                                CtValue::Enum {
+                                                    type_name,
+                                                    variant,
+                                                    ..
+                                                } if type_name == "Closed" && variant == "Closed"
+                                            )
+                                    );
+                                if closed {
                                     break;
                                 }
                                 return Err(unsupported("channel receiver loop", self.span()));

@@ -122,7 +122,7 @@ impl<'a> Interp<'a> {
                     Vec::new(),
                     span,
                 )
-                .expect("Abilities.workspace is registered");
+                .expect("Authority.workspace is registered");
             }
         }
         // D-ENC-XML-SURFACE1=A: qualified safe whole-value XML constructors.

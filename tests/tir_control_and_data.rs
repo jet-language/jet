@@ -247,6 +247,10 @@ fn channel_select_examples_match_all_execution_tiers() {
         "concurrency/select_generic",
         include_str!("../examples/features/expected/concurrency/select_generic.out"),
     );
+    tir_support::assert_example_cli_tiers_agree(
+        "concurrency/channel_builtin_1560",
+        include_str!("../examples/features/expected/concurrency/channel_builtin_1560.out"),
+    );
 }
 
 /// D-FAIL-EXIT1=A / I9: the default-fallible entry keeps its journey and exit

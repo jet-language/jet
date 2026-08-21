@@ -3839,7 +3839,7 @@ impl<'a> Checker<'a> {
             // (TIR shape (h)) rather than failing the typed-IR subset check.
             if let Type::Named(handle_ty) = &recv_ty {
                 // D-AUTHORITY-NAME1=A / D-AUTHORITY-WORD2=E: the carried
-                // abilities value is ordinary data. Its only instance family is
+                // Authority value is ordinary data. Its only instance family is
                 // the Prelude `with`/`without` narrowing pair.
                 if handle_ty == crate::Syntax::TYPE_ABILITIES {
                     if let Some(ret) = Collections::builtin_method_return(

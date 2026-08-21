@@ -43,7 +43,7 @@ fn language_callables_and_types_match_interpreter_jit_and_aot() {
         "language_callables_and_types_match_interpreter_jit_and_aot",
         CHILD_STEM,
         "language/callable/type parity",
-        DEV_DIFF_TIMEOUT,
+        *DEV_DIFF_TIMEOUT,
         &stems,
         &[],
     );
@@ -85,7 +85,7 @@ fn comptime_effects_and_errors_match_interpreter_jit_and_aot() {
         "comptime_effects_and_errors_match_interpreter_jit_and_aot",
         CHILD_STEM,
         "comptime/effect/error parity",
-        DEV_DIFF_TIMEOUT,
+        *DEV_DIFF_TIMEOUT,
         &stems,
         &[],
     );
@@ -131,7 +131,7 @@ fn collections_memory_and_streams_match_interpreter_jit_and_aot() {
         "collections_memory_and_streams_match_interpreter_jit_and_aot",
         CHILD_STEM,
         "collection/memory/stream parity",
-        DEV_DIFF_TIMEOUT,
+        *DEV_DIFF_TIMEOUT,
         &stems,
         &[],
     );
@@ -240,7 +240,7 @@ fn crypto_auth_and_vault_match_interpreter_jit_and_aot() {
         "crypto_auth_and_vault_match_interpreter_jit_and_aot",
         CHILD_STEM,
         "crypto/auth/vault parity",
-        DEV_DIFF_TIMEOUT,
+        *DEV_DIFF_TIMEOUT,
         &stems,
         &[],
     );
@@ -279,7 +279,7 @@ fn network_http_and_browser_match_interpreter_jit_and_aot() {
         "network_http_and_browser_match_interpreter_jit_and_aot",
         CHILD_STEM,
         "network/http/browser parity",
-        DEV_DIFF_TIMEOUT,
+        *DEV_DIFF_TIMEOUT,
         &stems,
         &[],
     );
@@ -310,7 +310,7 @@ fn concurrency_and_game_match_interpreter_jit_and_aot() {
         "concurrency_and_game_match_interpreter_jit_and_aot",
         CHILD_STEM,
         "concurrency/game parity",
-        DEV_DIFF_TIMEOUT,
+        *DEV_DIFF_TIMEOUT,
         &stems,
         &[],
     );
@@ -352,7 +352,7 @@ fn ui_and_web_match_interpreter_jit_and_aot() {
         "ui_and_web_match_interpreter_jit_and_aot",
         CHILD_STEM,
         "ui/web parity",
-        DEV_DIFF_TIMEOUT,
+        *DEV_DIFF_TIMEOUT,
         &stems,
         &[("JET_UI_HEADLESS", "1")],
     );
@@ -424,7 +424,7 @@ fn data_pipelines_and_parsing_match_interpreter_jit_and_aot() {
         "data_pipelines_and_parsing_match_interpreter_jit_and_aot",
         CHILD_STEM,
         "data/parse/tooling parity",
-        DEV_DIFF_TIMEOUT,
+        *DEV_DIFF_TIMEOUT,
         &stems,
         &[],
     );

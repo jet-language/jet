@@ -1220,7 +1220,7 @@ fn core_fixed_sig_impl(
             Some((vec![], Some(Type::String)))
         },
         // D-SERVICE1=D (#444): the typed tree value is the public topology
-        // root. Workers and groups are ordinary checked methods on it.
+        // surface; worker declarations are methods on that value.
         ("core.service", "tree") => Some((
             vec![(read, Type::String)],
             Some(Type::Named("ServiceTree".to_string())),

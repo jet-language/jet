@@ -152,6 +152,7 @@ use crate::Codegen::TIR::TMethodRef;
 use crate::Codegen::TIR::TNumericOp;
 use crate::Codegen::TIR::TPreludeArg;
 use crate::Codegen::TIR::TStaticOwner;
+use crate::Codegen::TIR::TStrPart;
 use crate::Codegen::TIR::tir_recv_jet_ty;
 use crate::Codegen::TIR::tls_static_op;
 use crate::Codegen::TIR::http_client_static_op;
@@ -5252,7 +5253,20 @@ fn lower_method_call_impl(
             return in_own_frame(|| {
                 let mut lowered_args = Vec::with_capacity(args.len() + 1);
                 lowered_args.push(lower_expr(receiver, cx, env));
-                lowered_args.extend(args.iter().map(|arg| lower_expr(&arg.expr, cx, env)));
+                if handle == "ServiceTree" && method == "worker" && args.len() == 3 {
+                    lowered_args.push(lower_expr(&args[0].expr, cx, env));
+                    let handler = match &args[1].expr {
+                        Expr::Ident(name, _) => name.clone(),
+                        _ => String::new(),
+                    };
+                    lowered_args.push(TExpr {
+                        ty: Type::String,
+                        kind: TExprKind::StrLit(vec![TStrPart::Lit(handler)]),
+                    });
+                    lowered_args.push(lower_expr(&args[2].expr, cx, env));
+                } else {
+                    lowered_args.extend(args.iter().map(|arg| lower_expr(&arg.expr, cx, env)));
+                }
                 let widen_to_vec = vec![false; lowered_args.len()];
                 TExpr {
                     ty: resolved_ret.cloned().unwrap_or_else(unit_type),

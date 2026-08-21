@@ -1405,7 +1405,7 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
         } => {
             let method_rust = method.rust();
             // D-AUTHORITY-NAME1=A / D-AUTHORITY-WORD2=E: the only operations
-            // on the ordinary abilities value are Prelude calls. `with` is
+            // on the ordinary Authority value are Prelude calls. `with` is
             // fallible so the shared E0712 policy cannot be hidden in Rust
             // method dispatch or silently widened by an adapter.
             if matches!(&recv.ty, Type::Named(name) if name == crate::Syntax::TYPE_ABILITIES)
