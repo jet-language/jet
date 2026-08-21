@@ -476,14 +476,22 @@ impl<'a> Fmt<'a> {
                     self.write(&format!("{} :: ", _n));
                 }
                 self.write("loop ");
-                if var2.is_some() {
-                    self.write("(");
-                }
-                self.write(var);
-                if let Some((v2, _)) = var2 {
-                    self.write(", ");
-                    self.write(v2);
-                    self.write(")");
+                // D-LOOP-SUBJECT1: the bindingless form writes its subject
+                // bare. The parser records the implicit binding as `it`, so
+                // printing the name back produces `loop it, words`, which is
+                // not a spelling the parser accepts — `it` is a keyword, not a
+                // name. Round-tripping the corpus depends on eliding it here.
+                let bindingless = var2.is_none() && var == Syntax::KW_IT;
+                if !bindingless {
+                    if var2.is_some() {
+                        self.write("(");
+                    }
+                    self.write(var);
+                    if let Some((v2, _)) = var2 {
+                        self.write(", ");
+                        self.write(v2);
+                        self.write(")");
+                    }
                 }
                 let clause_width = match kind {
                     ForKind::Range { start, end, step, exclusive } => {
@@ -503,7 +511,11 @@ impl<'a> Fmt<'a> {
                     ForKind::Range { start, .. } => start.span().start,
                     ForKind::In { collection, .. } => collection.span().start,
                 };
-                self.loop_clause_separator(first_clause_start, wrap);
+                if bindingless {
+                    self.maybe_wrap_loop_clause(wrap);
+                } else {
+                    self.loop_clause_separator(first_clause_start, wrap);
+                }
                 match kind {
                     ForKind::Range { start, end, step, exclusive } => {
                         self.fmt_expr(start, Prec::OrFallback);

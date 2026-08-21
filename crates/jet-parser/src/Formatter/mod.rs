@@ -1197,6 +1197,16 @@ impl<'a> Fmt<'a> {
         }
     }
 
+    /// The bindingless loop subject has no name and therefore no comma before
+    /// it: `loop words :> .to_upper()`. Only the line break survives from
+    /// `loop_clause_separator`; the space after `loop` is already written.
+    fn maybe_wrap_loop_clause(&mut self, wrap: bool) {
+        if wrap {
+            self.newline();
+            self.write_loop_continuation_indent();
+        }
+    }
+
     fn blank_line_between_items(&mut self) {
         if !self.pending_blank {
             self.newline();

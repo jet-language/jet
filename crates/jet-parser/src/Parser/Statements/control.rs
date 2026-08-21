@@ -64,18 +64,30 @@ impl<'a> Parser<'a> {
                 span: Span::new(start.start, end),
             });
         }
+        // The collecting arrow is `:>` (`UnifiedArrow`). This header still
+        // tested the retired `->`, so every bindingless comprehension —
+        // `loop words :> .to_upper()` — was rejected as unbounded.
+        let collect_arrow = TokKind::UnifiedArrow;
         let bindingless_source = matches!(self.peek().kind, TokKind::Ident(_))
-            && matches!(self.peek2().kind, TokKind::Arrow | TokKind::KwIf);
+            && (self.peek2().kind == collect_arrow
+                || matches!(self.peek2().kind, TokKind::Arrow | TokKind::KwIf));
+        // `it` lexes as its own keyword, not an identifier, so a header that
+        // names the implicit binding explicitly — `loop it, users` — reaches
+        // here too. It is not the ratified spelling (D-LOOP-SUBJECT1 writes
+        // the subject bare), but it must earn the honest "that is not a name"
+        // diagnostic rather than a misleading claim about exhaustion.
+        let binding_head = matches!(self.peek().kind, TokKind::Ident(_) | TokKind::KwIt);
         let finite_header = matches!(self.peek().kind, TokKind::LParen)
-            || (matches!(self.peek().kind, TokKind::Ident(_))
-                && matches!(
-                    self.peek2().kind,
-                    TokKind::ColonEq
-                        | TokKind::Semi
-                        | TokKind::Comma
-                        | TokKind::Arrow
-                        | TokKind::KwIf
-                ));
+            || (binding_head
+                && (self.peek2().kind == collect_arrow
+                    || matches!(
+                        self.peek2().kind,
+                        TokKind::ColonEq
+                            | TokKind::Semi
+                            | TokKind::Comma
+                            | TokKind::Arrow
+                            | TokKind::KwIf
+                    )));
         if !finite_header {
             return Err(Diagnostic::error(
                 "E0072",
@@ -83,7 +95,7 @@ impl<'a> Parser<'a> {
                     .to_string(),
                 "a collecting loop must finish after a statically finite source or C-style condition; bare infinite and condition-only loops do not provide that boundary"
                     .to_string(),
-                "remove `->`, or iterate a finite source; return one final value from an ordinary loop with `break value`"
+                "remove `:>`, or iterate a finite source; return one final value from an ordinary loop with `break value`"
                     .to_string(),
                 Some(start),
             ));
