@@ -62,7 +62,8 @@ pub use AmbientRuntime::{
     ambient_hooks, try_core_call as try_ambient_core_call,
     try_core_call_typed as try_ambient_core_call_typed,
     try_core_call_typed_with_sink,
-    try_handle as try_ambient_handle, with_ambient,
+    try_extern_call as try_ambient_extern_call, try_handle as try_ambient_handle,
+    with_ambient,
 };
 pub use ArgsLite::{core_args_spec, eval_handle as eval_args_handle};
 pub use EventLite::{
@@ -258,11 +259,14 @@ pub use Purity::{
 pub use Reflect::{
     build_attribution_info, build_dimension_info, build_distinct_type_info,
     build_distinct_type_info_with_path, build_effect_info, build_enum_layout_info,
+    build_enum_layout_info_with_engine,
     build_function_type_info, build_maturity_info, build_movedness_info, build_program_info,
     build_range_info, build_registered_fact_info, build_registered_fact_infos,
     build_sendability_info, build_state_infos, build_state_ref, build_state_refs,
-    build_struct_layout_info, build_struct_type_info, build_struct_type_info_with_path,
+    build_struct_layout_info, build_struct_layout_info_with_engine, build_struct_type_info,
+    build_struct_type_info_with_path,
     build_struct_type_info_with_path_and_vocabulary,
+    build_struct_type_info_with_path_and_vocabulary_and_engine,
     build_struct_type_info_with_states, build_track_origin_info,
     build_unit_scale_provenance_info, build_view_provenance_info, reflected_fact_field,
     program_reflection_identity, reflect_type_value, registered_fact_value, ProgramSemanticFacts,
@@ -1245,13 +1249,15 @@ pub fn run_main_with_fuel(
 /// REPL `:run` transcript path: like `run_main_with_fuel` but with the REPL
 /// sandbox (Tier-2 I/O, accumulated `core_imports`) so materialized sessions
 /// replay the same semantics as interactive inputs.
-pub fn run_repl_main_with_fuel(
+pub fn run_repl_main_with_fuel<'a>(
     main: &Func,
-    funcs: &HashMap<String, &Func>,
+    funcs: &HashMap<String, &'a Func>,
     base_dir: &Path,
     sink: &mut DevSink,
     fuel: u64,
     core_imports: &HashMap<String, String>,
+    methods: &HashMap<(String, String), &'a Func>,
+    structs: &HashMap<String, &'a StructDef>,
 ) -> Result<(), Diagnostic> {
     let mut interp = Interp {
         funcs,
@@ -1271,8 +1277,11 @@ pub fn run_repl_main_with_fuel(
         embed_inputs: Vec::new(),
         binding_types: HashMap::new(),
         globals: empty_globals(),
-        methods: empty_methods(),
-        structs: empty_structs(),
+        // `:run` replays an accumulated session, so it must see the session's
+        // own methods and structs. These were hardcoded empty, which is why a
+        // method call resolved interactively died on replay.
+        methods,
+        structs,
         computed_fields: empty_computed(),
         distinct_ranges: empty_distinct(),
         distinct_bases: empty_distinct_bases(),
@@ -1690,6 +1699,7 @@ pub fn format_template_items(items: Vec<crate::AST::Item>) -> String {
         default_target: None,
         html_path: None,
         policy_declarations: Vec::new(),
+        user_policy_declarations: Vec::new(),
         applied_rules: Vec::new(),
         rule_facts: Vec::new(),
     };
@@ -1727,13 +1737,13 @@ fn expand_derive_items(
                 out.push(item);
             }
             crate::AST::DeriveBodyItem::Loop { var, source, body, .. } => {
-                let value = interp.eval(source, scope)?;
+                let value = eval_template_loop_source(source, interp, scope)?;
                 let CtValue::List(values) = value else {
                     return Err(Diagnostic::error(
                         "E0956",
-                        "a derive loop source is not a compile-time list".to_string(),
+                        "an `@loop` source is not a compile-time list".to_string(),
                         "`@loop` expands one item template for each value in its source list".to_string(),
-                        "use a reflected list such as `T.@fields`".to_string(),
+                        "use a reflected/comptime list such as `T.@fields`, or a closed type list like `[TypeA, TypeB]`".to_string(),
                         Some(source.span()),
                     ));
                 };
@@ -1751,6 +1761,40 @@ fn expand_derive_items(
         }
     }
     Ok(())
+}
+
+/// D-STRUCT-ONCE1=A amendment: written type names are a closed loop source,
+/// even though they are not runtime/comptime values that the value interpreter
+/// can evaluate. They become text bindings only; sema still checks every
+/// generated declaration against the ordinary type registry.
+fn eval_template_loop_source(
+    source: &crate::AST::Expr,
+    interp: &mut Interpreter::Interp<'_>,
+    scope: &mut HashMap<String, CtValue>,
+) -> Result<CtValue, Diagnostic> {
+    match interp.eval(source, scope) {
+        Ok(value) => Ok(value),
+        Err(diagnostic) => {
+            let crate::AST::Expr::ListLit(values, _) = source else {
+                return Err(diagnostic);
+            };
+            if values.is_empty() {
+                return Err(diagnostic);
+            }
+            let mut names = Vec::with_capacity(values.len());
+            for value in values {
+                let name = match value {
+                    crate::AST::Expr::Ident(name, _) => name.clone(),
+                    crate::AST::Expr::ComptimeName { name, .. } => {
+                        name.trim_start_matches('@').to_string()
+                    }
+                    _ => return Err(diagnostic),
+                };
+                names.push(CtValue::Str(name));
+            }
+            Ok(CtValue::List(names))
+        }
+    }
 }
 
 fn expand_template_item(
@@ -1776,6 +1820,45 @@ fn expand_template_item(
             }
             for (_, _, ty) in &mut implementation.assoc_type_impls {
                 expand_template_type(ty, interp, scope)?;
+            }
+            Ok(())
+        }
+        crate::AST::Item::ErrorConv(conversion) => {
+            conversion.from_ty = expand_template_name(
+                &conversion.from_ty,
+                conversion.from_span,
+                interp,
+                scope,
+            )?;
+            conversion.to_ty = expand_template_name(
+                &conversion.to_ty,
+                conversion.to_span,
+                interp,
+                scope,
+            )?;
+            for stmt in &mut conversion.body {
+                expand_template_stmt(stmt, interp, scope)?;
+            }
+            Ok(())
+        }
+        crate::AST::Item::Test(test) => {
+            if let Some(expression) = &mut test.name_expr {
+                expand_template_expr(expression, interp, scope)?;
+            }
+            if let Some(expression) = &mut test.faults_expr {
+                expand_template_expr(expression, interp, scope)?;
+            }
+            if let Some(expression) = &mut test.expected_fail_expr {
+                expand_template_expr(expression, interp, scope)?;
+            }
+            for parameter in &mut test.params {
+                expand_template_type(&mut parameter.ty, interp, scope)?;
+                if let Some(default) = &mut parameter.default {
+                    expand_template_expr(default, interp, scope)?;
+                }
+            }
+            for stmt in &mut test.body {
+                expand_template_stmt(stmt, interp, scope)?;
             }
             Ok(())
         }
@@ -2017,12 +2100,11 @@ fn expand_template_name(
     interp: &mut Interpreter::Interp<'_>,
     scope: &mut HashMap<String, CtValue>,
 ) -> Result<String, Diagnostic> {
-    let Some(binding) = name.strip_prefix('@') else {
-        return Ok(name.to_string());
-    };
+    let explicit = name.starts_with('@');
+    let binding = name.strip_prefix('@').unwrap_or(name);
     match scope_value(scope, binding) {
         Some(CtValue::Str(value)) => Ok(value.clone()),
-        Some(CtValue::Struct { fields, .. }) => fields
+        Some(CtValue::Struct { fields, .. }) if explicit => fields
             .iter()
             .find(|(field, _)| field == "name")
             .and_then(|(_, value)| match value {
@@ -2036,14 +2118,14 @@ fn expand_template_name(
                 "bind the name to a String value".to_string(),
                 Some(span),
             )),
-        Some(value) => Err(Diagnostic::error(
+        Some(value) if explicit => Err(Diagnostic::error(
             "E0956",
-            format!("compile-time name `@{binding}` is not text"),
+            format!("compile-time name `{name}` is not text"),
             format!("a generated item name needs text, but this value is {}", value.jet_type().name()),
             "bind the name to a String value".to_string(),
             Some(span),
         )),
-        None => {
+        Some(_) | None => {
             let _ = interp;
             Ok(name.to_string())
         }
@@ -2074,22 +2156,31 @@ fn expand_template_expr_node(
     let span = expr.span();
     let probe = expr.clone();
     match expr {
-        crate::AST::Expr::Field(base, member, _) if member.starts_with('@') => {
-            if let Ok(value) = interp.eval(&probe, scope) {
-                if let Some(literal) = comptime_literal_expr(value, span) {
-                    *expr = literal;
-                    return Ok(());
-                }
-            }
+        crate::AST::Expr::Field(base, member, _) => {
             let binding = match base.as_ref() {
                 crate::AST::Expr::Ident(name, _) => Some(name.as_str()),
                 crate::AST::Expr::ComptimeName { name, .. } => Some(name.as_str()),
                 _ => None,
             };
             if let Some(binding) = binding {
-                if let Some(CtValue::Struct { fields, .. }) = scope_value(scope, binding.trim_start_matches('@')) {
-                    if let Some((_, CtValue::Str(value))) = fields.iter().find(|(name, _)| name == member.trim_start_matches('@')) {
-                        *expr = crate::AST::Expr::Str(vec![crate::AST::StrPart::Lit(value.clone())], span);
+                if let Some(CtValue::Struct { fields, .. }) =
+                    scope_value(scope, binding.trim_start_matches('@'))
+                {
+                    if let Some((_, value)) = fields
+                        .iter()
+                        .find(|(name, _)| name == member.trim_start_matches('@'))
+                    {
+                        if let Some(literal) = comptime_literal_expr(value.clone(), span) {
+                            *expr = literal;
+                            return Ok(());
+                        }
+                    }
+                }
+            }
+            if member.starts_with('@') {
+                if let Ok(value) = interp.eval(&probe, scope) {
+                    if let Some(literal) = comptime_literal_expr(value, span) {
+                        *expr = literal;
                     }
                 }
             }
@@ -2201,10 +2292,9 @@ fn expand_template_type(
     scope: &mut HashMap<String, CtValue>,
 ) -> Result<(), Diagnostic> {
     match ty {
-        Type::Named(name) if name.starts_with('@') => {
+        Type::Named(name) => {
             *name = expand_template_name(name, crate::Diagnostics::Span::new(0, 0), interp, scope)?;
         }
-        Type::Named(_) => {}
         Type::List(inner)
         | Type::Shared(inner)
         | Type::Option(inner)

@@ -14,6 +14,8 @@ const STAGE_A_AUTHORITY_FIXTURE: &str =
     include_str!("../../../tests/fixtures/nix-compat/stage-a-authority.json");
 const STAGE_A_DERIVATION_FIXTURE: &str =
     include_str!("../../../tests/fixtures/nix-compat/stage-a-derivation.json");
+const BREADTH_FIXTURE: &str =
+    include_str!("../../../tests/fixtures/nix-compat/breadth.json");
 
 #[test]
 fn partial_stage_authority_is_minted_inside_seam_tests() {
@@ -272,6 +274,38 @@ fn native_evaluator_rejects_deeply_nested_syntax_before_stack_overflow() {
 }
 
 #[test]
+fn native_evaluator_applies_memory_budget_before_parser_growth() {
+    let source = format!(
+        "{}{}",
+        " ".repeat(800_000),
+        "a ".repeat(EVALUATOR_TOKEN_LIMIT)
+    );
+    let error = evaluate_devshell(&source, "x86_64-linux")
+        .expect_err("large token storage must hit the memory budget");
+    assert!(matches!(
+        error,
+        EvaluationError::ResourceLimit(reason)
+            if reason.contains("memory budget")
+    ));
+}
+
+#[test]
+fn native_evaluator_applies_json_depth_budget_before_recursive_conversion() {
+    let nesting = Evaluator::MAX_EVAL_DEPTH + 1;
+    let json = format!("{}true{}", "[".repeat(nesting), "]".repeat(nesting));
+    let source = format!(
+        "{{ devShells.x86_64-linux.default = pkgs.mkShell {{ packages = builtins.fromJSON \"{json}\"; }}; }}"
+    );
+    let error = evaluate_devshell(&source, "x86_64-linux")
+        .expect_err("deep JSON must hit the shared evaluator depth budget");
+    assert!(matches!(
+        error,
+        EvaluationError::ResourceLimit(reason)
+            if reason.contains("JSON value is too deeply nested")
+    ));
+}
+
+#[test]
 fn native_devshell_releases_lazy_scopes_after_each_evaluation() {
     let source =
         "let make = packages: pkgs.mkShell { packages = packages; }; in { outputs = { devShells.x86_64-linux.default = make [ pkgs.fd ]; }; }";
@@ -481,7 +515,11 @@ fn stage_a_differential_fixture_matches_native_projection() {
             .expect("Stage A value system")
             .as_str()
             .expect("Stage A value system string");
-        let evaluated = evaluate_devshell(value_source, system)
+        let output = value_case
+            .get("output")
+            .and_then(|value| value.as_str().ok())
+            .unwrap_or("default");
+        let evaluated = evaluate_devshell_output(value_source, system, output)
             .expect("pinned Stage A devShell value must evaluate");
         let fixture_packages = fixture_strings(value_case.get("jet_packages").unwrap());
         let fixture_unsupported = fixture_strings(value_case.get("jet_unsupported").unwrap());
@@ -599,6 +637,95 @@ fn stage_a_differential_fixture_matches_native_projection() {
     }
 }
 
+fn breadth_variant(source: &str, seed: usize) -> String {
+    match seed % 5 {
+        0 => format!("# breadth seed {seed}\n{source}"),
+        1 => format!("(\n{source}\n)"),
+        2 => format!("{source}\n# breadth seed {seed}\n"),
+        3 => format!("(\n# breadth seed {seed}\n{source}\n)"),
+        4 => format!("let result = ({source}); in result"),
+        _ => format!("let result = {source}; in result"),
+    }
+}
+
+#[test]
+fn breadth_fixture_matches_native_projection_for_every_seed() {
+    let fixture = JSON::parse(BREADTH_FIXTURE).expect("breadth fixture must parse");
+    let root = fixture.as_object().expect("breadth fixture root object");
+    let seeds = root
+        .get("fuzz_seeds")
+        .expect("breadth fuzz seeds")
+        .as_array()
+        .expect("breadth fuzz seed array")
+        .iter()
+        .map(|seed| match seed {
+            JSONValue::Num(value) => *value as usize,
+            _ => panic!("breadth seed must be a number"),
+        })
+        .collect::<Vec<_>>();
+
+    for value in root
+        .get("values")
+        .expect("breadth values")
+        .as_array()
+        .expect("breadth value array")
+    {
+        let value = value.as_object().expect("breadth value object");
+        let source = value.get("source").unwrap().as_str().unwrap();
+        let system = value.get("system").unwrap().as_str().unwrap();
+        let packages = fixture_strings(value.get("jet_packages").unwrap());
+        let unsupported = fixture_strings(value.get("jet_unsupported").unwrap());
+        for seed in &seeds {
+            let evaluated = evaluate_devshell(&breadth_variant(source, *seed), system)
+                .expect("seeded breadth value must evaluate");
+            assert_eq!(evaluated.packages(), packages.as_slice());
+            assert_eq!(evaluated.unsupported(), unsupported.as_slice());
+        }
+    }
+
+    for error_case in root
+        .get("errors")
+        .expect("breadth errors")
+        .as_array()
+        .expect("breadth error array")
+    {
+        let error_case = error_case.as_object().expect("breadth error object");
+        let source = error_case.get("source").unwrap().as_str().unwrap();
+        let system = error_case.get("system").unwrap().as_str().unwrap();
+        let expected = error_case.get("jet_error").unwrap().as_str().unwrap();
+        for seed in &seeds {
+            let error = evaluate_devshell(&breadth_variant(source, *seed), system)
+                .expect_err("seeded breadth error must fail closed");
+            assert_eq!(error.to_string(), expected);
+        }
+    }
+
+    let budgets = root
+        .get("budgets")
+        .expect("breadth budgets")
+        .as_object()
+        .expect("breadth budget object");
+    let budget_number = |name: &str| match budgets.get(name) {
+        Some(JSONValue::Num(value)) => *value as usize,
+        _ => panic!("breadth budget `{name}` must be a number"),
+    };
+    let budget = evaluator_budget();
+    assert_eq!(budget_number("input_bytes"), budget.input_bytes);
+    assert_eq!(budget_number("tokens"), budget.tokens);
+    assert_eq!(budget_number("expression_steps"), budget.expression_steps);
+    assert_eq!(budget_number("imports"), budget.imports);
+    assert_eq!(budget_number("string_bytes"), budget.string_bytes);
+    assert_eq!(budget_number("memory_bytes"), EVALUATOR_MEMORY_BYTES);
+    assert_eq!(budget_number("latency_micros"), EVALUATOR_LATENCY_MICROS as usize);
+    // The pinned latency budget is asserted as a *declared* number, not measured
+    // here. This crate is `#![no_std]` on purpose — the lints above keep process
+    // and network authority out of the evaluator seam — so `std::time` is not
+    // reachable, and a wall-clock assertion inside a unit test would in any case
+    // fail on a loaded machine rather than on a real regression. Cost is pinned
+    // deterministically by the input, token, step, import, string and memory
+    // budgets asserted directly above; measured latency belongs in a benchmark.
+}
+
 fn fixture_strings(value: &JSONValue) -> Vec<String> {
     value
         .as_array()
@@ -627,23 +754,39 @@ fn pinned_inventory_has_no_implicit_skip_reason() {
     let object = manifest.as_object().expect("inventory manifest object");
     assert_eq!(object.get("schema"), Some(&JSONValue::Num(1.0)));
     assert_eq!(object.get("nix_version"), Some(&JSONValue::Str(NIX_VERSION.into())));
+    assert_eq!(
+        object.get("nixpkgs_revision"),
+        Some(&JSONValue::Str(NIXPKGS_REVISION.into()))
+    );
+    let expected_systems = REQUIRED_SYSTEMS
+        .iter()
+        .map(|system| JSONValue::Str((*system).into()))
+        .collect::<Vec<_>>();
+    assert_eq!(
+        object
+            .get("systems")
+            .expect("inventory systems")
+            .as_array()
+            .expect("inventory systems array"),
+        expected_systems.as_slice()
+    );
     let entries = object
         .get("entries")
         .expect("inventory entries")
         .as_array()
         .expect("inventory entries array");
-    assert_eq!(entries.len(), 16);
+    assert_eq!(entries.len(), 17);
     assert_eq!(inventory.len(), entries.len());
     let counts = object
         .get("expected_counts")
         .expect("inventory expected counts")
         .as_object()
         .expect("inventory expected counts object");
-    assert_eq!(counts.get("evaluable"), Some(&JSONValue::Num(7.0)));
-    assert_eq!(counts.get("buildable"), Some(&JSONValue::Num(3.0)));
-    assert_eq!(counts.get("skipped"), Some(&JSONValue::Num(6.0)));
-    assert_eq!(inventory.iter().filter(|entry| entry.status == InventoryStatus::Covered).count(), 10);
-    assert_eq!(inventory.iter().filter(|entry| entry.status == InventoryStatus::Skipped).count(), 6);
+    assert_eq!(counts.get("evaluable"), Some(&JSONValue::Num(10.0)));
+    assert_eq!(counts.get("buildable"), Some(&JSONValue::Num(5.0)));
+    assert_eq!(counts.get("skipped"), Some(&JSONValue::Num(2.0)));
+    assert_eq!(inventory.iter().filter(|entry| entry.status == InventoryStatus::Covered).count(), 15);
+    assert_eq!(inventory.iter().filter(|entry| entry.status == InventoryStatus::Skipped).count(), 2);
     for (entry, manifest_entry) in inventory.iter().zip(entries) {
         let fields = manifest_entry.as_object().expect("inventory entry object");
         assert_eq!(fields.get("surface").unwrap().as_str().unwrap(), entry.surface);
@@ -657,6 +800,17 @@ fn pinned_inventory_has_no_implicit_skip_reason() {
     assert!(inventory.iter().any(|entry| {
         entry.surface == "devshells" && entry.status == InventoryStatus::Covered
     }));
+    for (surface, class) in [
+        ("fixed-output-fetchers", "buildable"),
+        ("cross-system-packages", "buildable"),
+        ("external-flakes", "evaluable"),
+    ] {
+        assert!(inventory.iter().any(|entry| {
+            entry.surface == surface
+                && entry.status == InventoryStatus::Covered
+                && entry.class == class
+        }));
+    }
     assert!(inventory.iter().all(|entry| !entry.reason.trim().is_empty()));
     let budget = evaluator_budget();
     assert_eq!(budget.input_bytes, 1 << 20);
@@ -828,18 +982,33 @@ fn native_derivation_fixture_matches_pure_request() {
             evaluated.input_sources(),
             &fixture_strings(expected.get("input_sources").unwrap())
         );
-        assert_eq!(evaluated.outputs().len(), 1);
-        let output = evaluated.outputs().first().unwrap();
-        let expected_output = expected.get("output").unwrap().as_object().unwrap();
-        assert_eq!(output.name(), expected_output.get("name").unwrap().as_str().unwrap());
-        assert_eq!(
-            output.method_algo(),
-            expected_output.get("method_algo").unwrap().as_str().unwrap()
-        );
-        assert_eq!(
-            output.hash_hex(),
-            expected_output.get("hash_hex").unwrap().as_str().unwrap()
-        );
+        let expected_outputs = if let Some(values) = expected.get("outputs") {
+            values
+                .as_array()
+                .expect("fixture outputs array")
+                .iter()
+                .collect::<Vec<_>>()
+        } else {
+            vec![expected.get("output").expect("fixture output")]
+        };
+        assert_eq!(evaluated.outputs().len(), expected_outputs.len());
+        for expected_output in expected_outputs {
+            let expected_output = expected_output.as_object().unwrap();
+            let name = expected_output.get("name").unwrap().as_str().unwrap();
+            let output = evaluated
+                .outputs()
+                .iter()
+                .find(|output| output.name() == name)
+                .expect("fixture output name");
+            assert_eq!(
+                output.method_algo(),
+                expected_output.get("method_algo").unwrap().as_str().unwrap()
+            );
+            assert_eq!(
+                output.hash_hex(),
+                expected_output.get("hash_hex").unwrap().as_str().unwrap()
+            );
+        }
     }
 }
 
@@ -964,4 +1133,103 @@ fn native_evaluator_rejects_fetchers_and_cross_system_packages_without_authority
         EvaluationError::Unsupported(reason)
             if reason.contains("external flakes") && reason.contains("provider authority")
     ));
+}
+
+#[test]
+fn breadth_authority_fixture_matches_pinned_values_and_derivation_inputs() {
+    let fixture = JSON::parse(BREADTH_FIXTURE).expect("breadth fixture must parse");
+    let root = fixture.as_object().expect("breadth fixture root object");
+    for case in root
+        .get("authority_values")
+        .expect("breadth authority values")
+        .as_array()
+        .expect("breadth authority values array")
+    {
+        let case = case.as_object().expect("breadth authority value object");
+        let source = case.get("source").unwrap().as_str().unwrap();
+        let system = case.get("system").unwrap().as_str().unwrap();
+        let responses = case
+            .get("authority")
+            .unwrap()
+            .as_object()
+            .unwrap()
+            .iter()
+            .map(|(request, value)| {
+                (
+                    request.clone(),
+                    value.as_str().expect("authority response string").to_string(),
+                )
+            })
+            .collect::<BTreeMap<_, _>>();
+        let authority = Rc::new(move |request: &str| {
+            responses
+                .get(request)
+                .cloned()
+                .ok_or_else(|| format!("unlisted authority request `{request}`"))
+        });
+        let expected_packages = fixture_strings(case.get("jet_packages").unwrap());
+        let expected_cross_packages = fixture_strings(case.get("jet_cross_packages").unwrap());
+        let expected_unsupported = fixture_strings(case.get("jet_unsupported").unwrap());
+        let seeds = root
+            .get("fuzz_seeds")
+            .unwrap()
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|seed| match seed {
+                JSONValue::Num(value) => *value as usize,
+                _ => panic!("breadth seed must be a number"),
+            });
+        for seed in seeds {
+            let evaluated = evaluate_devshell_with_import_authority(
+                &breadth_variant(source, seed),
+                system,
+                Some(authority.clone()),
+            )
+            .expect("authorized breadth value must evaluate");
+            assert_eq!(evaluated.packages(), expected_packages.as_slice());
+            assert_eq!(evaluated.cross_packages(), expected_cross_packages.as_slice());
+            assert_eq!(evaluated.unsupported(), expected_unsupported.as_slice());
+        }
+    }
+
+    for case in root
+        .get("derivations")
+        .expect("breadth derivation fixtures")
+        .as_array()
+        .expect("breadth derivation fixture array")
+    {
+        let case = case.as_object().expect("breadth derivation fixture object");
+        let source = case.get("source").unwrap().as_str().unwrap();
+        let system = case.get("system").unwrap().as_str().unwrap();
+        let responses = case
+            .get("authority")
+            .unwrap()
+            .as_object()
+            .unwrap()
+            .iter()
+            .map(|(request, value)| {
+                (
+                    request.clone(),
+                    value.as_str().expect("authority response string").to_string(),
+                )
+            })
+            .collect::<BTreeMap<_, _>>();
+        let authority = Rc::new(move |request: &str| {
+            responses
+                .get(request)
+                .cloned()
+                .ok_or_else(|| format!("unlisted authority request `{request}`"))
+        });
+        let evaluated = evaluate_derivation_with_import_authority(
+            source,
+            system,
+            Some(authority),
+        )
+        .expect("authorized fixed-output derivation must evaluate");
+        assert_eq!(
+            evaluated.input_sources(),
+            &fixture_strings(case.get("jet_input_sources").unwrap())
+        );
+    }
 }
