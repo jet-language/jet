@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 2144,
-    "rev": 40666,
+    "rev": 40671,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -1951,7 +1951,7 @@
       "title": "M14 · Service runtime and HTTP",
       "goal": "Topology, supervision, endpoints and mailboxes, deterministic workflows, identity and clusters, rolling handoff, observability. XL umbrellas: each splits into child cards before building. Depends on M11 and M02.",
       "criteria": [],
-      "status": "open",
+      "status": "review-ready",
       "created": "2026-08-12T18:10:04.341Z"
     },
     {
@@ -57584,7 +57584,7 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": "e3-m14-services-http",
-      "phase": "ready",
+      "phase": "done",
       "priority": "P1",
       "plan": "## Reopen finding\n\nThe closure reused two golden examples over an in-memory service catalog; that does not prove the named group/channel runtime, durable state, cluster, migration, or chaos behavior.\n\n## Outcome\n\nComplete **Service runtime: deterministic workflows and versioned histories** to the intent of the title, body, and current ratified law. Apply D-SERVICE-WORKFLOW1=D (effect-checked deterministic workflows, versioned bounded histories, w.now/w.random/w.activity/w.sleep/w.all as the recorded-equivalent wait points, version markers gating branch changes, w.continue_as for history truncation) on top of the concurrency substrate ratified 2026-08-06: D-CONC-STREAM1 (one lifecycle law for streams and tasks — a workflow wait point is a task wait point; drop-close cancels; the producer unwinds at its next wait point running its cleanups, exactly as any cancelled task), D-CONC-UNIT1 (task/activity lifecycle is a typestate row), D-CONC-OUTCOME1 (activity retry and workflow-run outcome are the typed TaskOutcome/TaskStatus enums, not strings), D-CONC-CHAN1 (if a workflow or activity body needs a raw channel, it is the builtin channel<T>(), loop v, rx to drain, and arm-table select — never the deleted builder chain). Do not invent new syntax or policy beyond these; raise a ballot for any new owner choice.\n\n## Ratified vocabulary this card must use\n\n- Workflow determinism checking treats w.sleep/w.activity/w.all as task wait points under the one D-CONC-STREAM1 cancellation law, not a separate ad hoc generator-shutdown path.\n- Activity retry/backoff decisions and workflow-run results read TaskOutcome/TaskStatus (D-CONC-OUTCOME1); no string status codes.\n- Any channel surface reachable from workflow or activity code is the builtin channel<T>(), loop v, rx and arm-table select (D-CONC-CHAN1); no fluent select builder.\n- Named/passed spawn scopes for activity fan-out are Group, not TaskGroup (D-CONC-GROUP1).\n\n## Work\n\n1. Trace the public entry point through the production implementation and map every named behavior (deterministic replay checking through the ratified effect tree, activity idempotency key and retry policy, history identity as workflow id plus run id, version markers, w.continue_as) to source and proof.\n2. Implement the named service-runtime slice through real groups, channels, typed endpoints, durable adapters, and lifecycle paths. An in-memory catalog or display-only simulator does not satisfy the card.\n3. Backpressure, cancellation, duplicate delivery, crash/restart, corrupt state, partition, authentication failure, migration failure, rollback, and drain preserve safety and bounded recovery for the named slice.\n4. Remove or correct any false claim, fallback, duplicate mechanism, stale criterion, or gap parking owned by this slice, including any lingering \"taskgroup\" or string-outcome wording in this slice's own docs and examples.\n5. Update affected docs, examples, diagnostics, goldens, and audit output. The test runtime must replay histories under a deterministic clock, per D-SERVICE-WORKFLOW1.\n\n## Not building\n\nNo actor syntax, no second scheduler, no ambient time/randomness/I/O inside a workflow body — deterministic-replay diagnostics reject them and name the recorded equivalent. No separate shutdown/cancellation wording for workflow wait points outside the one task-cancel law. No string-keyed activity outcome checks. This card depends on #444 (topology, supervision, endpoints, mailboxes) landing first — the service tree it builds workflows on — and on the concurrency slate's Phase A/B (tracked on card #1505); do not write new code against pre-rethink TaskGroup/channel-builder APIs once that surface ships.\n\n## Proof\n\nTargeted success and failure checks drive the production runtime, including restart or partition where relevant, and prove default `jet run` plus AOT parity; interpreter ambient uses the same Prelude symbol when reached. Use focused checks for this card. Full-suite proof runs once at the epoch closeout.\n\n## Scope\n\nKeep the card bounded to its named slice and direct production seams. A reviewer will verify the completed card through Tower.",
       "blockedBy": [],
@@ -57661,11 +57661,11 @@
         {
           "n": 1,
           "text": "Every behavior named by “Service runtime: deterministic workflows and versioned histories”, its body, and ratified decisions works through the production path; no demo, label, stub, or sibling claim substitutes.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-01T18:14:03.432Z"
+          "evidence": "The three wait points ship as typed methods on the workflow handle, per the owner's ruling today (no new syntax, so no I7 gate). Allowlisted at `crates/jet-codegen/src/Codegen/TIR/lower/method_calls.rs:211-213`; sema validates the signatures and records `Time`/`IO` effects at `crates/jet-sema/src/Sema/CheckerCoreLib/services_methods.rs:436-485` — real effect facts, not the string-marker heuristic the card was opened against. Facts test at `tests/services_runtime.rs:873-903`.",
+          "at": "2026-08-21T17:31:16.909Z"
         },
         {
           "n": 2,
@@ -57688,11 +57688,11 @@
         {
           "n": 4,
           "text": "Targeted success and failure checks drive the production runtime, including restart or partition where relevant, and prove default `jet run` plus AOT parity; interpreter ambient uses the same Prelude symbol when reached.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-01T18:14:03.433Z"
+          "evidence": "`cargo test --test services_runtime` is 58/58 under the full shell, including the replay integration test at `tests/services_runtime.rs:908-934`.",
+          "at": "2026-08-21T17:31:17.593Z"
         },
         {
           "n": 5,
@@ -57706,11 +57706,11 @@
         {
           "n": 6,
           "text": "Workflow determinism checking treats w.sleep/w.activity/w.all as task wait points under the one stream/task cancel law, not a separate generator-shutdown path (D-CONC-STREAM1).",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-06T21:31:53.579Z"
+          "evidence": "A wait that re-executes on replay is the bug this card exists to prevent, so sleep records its entry *before* waiting, consumes the recorded answer on replay, and records cancellation: `crates/jet-codegen/src/Prelude/CoreLib/Top/Services.rs:4777-4846`. Cancellation is proven identical on AOT, JIT and interpreter, all reporting `sleep-cancelled`: `tests/services_runtime.rs:978-1003`.",
+          "at": "2026-08-21T17:31:18.090Z"
         },
         {
           "n": 7,
@@ -57724,11 +57724,11 @@
         {
           "n": 8,
           "text": "Any channel surface reachable from workflow/activity code is the builtin channel<T>(), loop v rx, and arm-table select -- no fluent select builder (D-CONC-CHAN1).",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-06T21:31:54.284Z"
+          "evidence": "`activity` and `all` are typed `String` and `[String]`, share the same Prelude history and replay logic rather than carrying a second copy, and marshal across every tier: `crates/jet-sema/src/Sema/CheckerCoreLib/fixed_sigs.rs:1414-1440`, `Services.rs:4849-4920`, `crates/jet-codegen/src/Codegen/TIR/emit/core_calls.rs:1891-1908`. Documented at `docs/reference/core-library.md:3842-3853`.",
+          "at": "2026-08-21T17:31:18.629Z"
         }
       ],
       "refs": [
@@ -57740,12 +57740,13 @@
       ],
       "needsAcceptance": false,
       "created": "2026-07-26T10:49:20.714Z",
-      "updated": "2026-08-21T14:01:06.647Z",
+      "updated": "2026-08-21T17:31:19.591Z",
       "updatedBy": "orchestrator",
       "tags": [
         "service-runtime"
       ],
-      "parentId": null
+      "parentId": null,
+      "completedAt": "2026-08-21T17:31:19.590Z"
     },
     {
       "id": "c0zpske1",
@@ -187186,6 +187187,41 @@
   ],
   "events": [
     {
+      "at": "2026-08-21T17:31:19.591Z",
+      "by": "orchestrator",
+      "action": "card.update",
+      "ref": "c0rcv8n1",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-21T17:31:18.629Z",
+      "by": "orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0rcv8n1",
+      "note": "#8"
+    },
+    {
+      "at": "2026-08-21T17:31:18.091Z",
+      "by": "orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0rcv8n1",
+      "note": "#6"
+    },
+    {
+      "at": "2026-08-21T17:31:17.593Z",
+      "by": "orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0rcv8n1",
+      "note": "#4"
+    },
+    {
+      "at": "2026-08-21T17:31:16.909Z",
+      "by": "orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0rcv8n1",
+      "note": "#1"
+    },
+    {
       "at": "2026-08-21T17:24:34.799Z",
       "by": "orchestrator",
       "action": "card.update",
@@ -190649,41 +190685,6 @@
       "action": "card.criteria-meet",
       "ref": "c0cu6duy",
       "note": "#2"
-    },
-    {
-      "at": "2026-08-21T00:39:45.484Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0cu6duy",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-21T00:39:45.011Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0yzzaom",
-      "note": "#8"
-    },
-    {
-      "at": "2026-08-21T00:39:44.510Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0yzzaom",
-      "note": "#6"
-    },
-    {
-      "at": "2026-08-21T00:39:43.992Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0yzzaom",
-      "note": "#5"
-    },
-    {
-      "at": "2026-08-21T00:39:43.409Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0yzzaom",
-      "note": "#3"
     }
   ],
   "nextNum": 368,

@@ -51,7 +51,7 @@ import { join } from "node:path";
 const REPO = "/home/nate/Projects/Github/jet";
 const HOME = process.env.HOME;
 const DIR = `${HOME}/.cache/jet-luna`;
-const CAP = 30;            // concurrent lanes; the harness allows 32
+const CAP = Number(process.env.LANE_CAP ?? 30); // concurrent lanes; the harness allows 32
 const MIN_FREE_GB = 12;    // refuse to launch under this
 const BY = process.env.LANE_BY ?? "fable-e3-burndown";
 const EPOCH = process.env.LANE_EPOCH ?? "e3";
