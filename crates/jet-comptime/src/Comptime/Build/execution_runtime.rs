@@ -1,10 +1,10 @@
 use super::actions_policy::{ActionCache, BuildAction, BuildCapability, LegacyWrapperKind};
 use super::cache_cas::{
-    ActionCacheProvenance, ActionCacheStatus, ActionInputSnapshot, ActionKey, ActionOutcome,
-    ActionOutputRecord, ActionResultRecord, CacheHitReason, CacheMissReason, ContentDigest,
-    FrontEndCompletion, LocalCas, RemoteBuildBinding, RemoteCacheError, RemoteCachePolicy,
-    RemoteCacheTransport, RemoteDeniedReason, RemoteExecutionRequest, atomic_restore_file,
-    ensure_real_directory, secure_read_file,
+    atomic_restore_file, ensure_real_directory, secure_read_file, ActionCacheProvenance,
+    ActionCacheStatus, ActionInputSnapshot, ActionKey, ActionOutcome, ActionOutputRecord,
+    ActionResultRecord, CacheHitReason, CacheMissReason, ContentDigest, FrontEndCompletion,
+    LocalCas, RemoteBuildBinding, RemoteCacheError, RemoteCachePolicy, RemoteCacheTransport,
+    RemoteDeniedReason, RemoteExecutionRequest,
 };
 use super::errors_keys::BuildError;
 use super::execution_helpers::action_pools;
@@ -14,13 +14,44 @@ use super::provenance_toolchains::{ProbeKind, ReproducibilityClass};
 use super::targets::BuildPath;
 use super::validation::resolve_under;
 use std::collections::{BTreeMap, BTreeSet};
-use std::path::{Component, Path, PathBuf};
 use std::io::Write;
+use std::path::{Component, Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::{fs, io, time::{Duration, Instant, SystemTime, UNIX_EPOCH}};
+use std::{
+    fs, io,
+    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
+};
 
 static REMOTE_ATTEMPT: AtomicU64 = AtomicU64::new(1);
+const MAX_REMOTE_EXECUTION_ATTEMPTS: usize = 2;
+
+struct RemoteAttemptFailure {
+    error: BuildExecutionError,
+    retryable: bool,
+}
+
+impl RemoteAttemptFailure {
+    fn terminal(error: BuildExecutionError) -> Self {
+        Self {
+            error,
+            retryable: false,
+        }
+    }
+
+    fn retryable(error: BuildExecutionError) -> Self {
+        Self {
+            error,
+            retryable: true,
+        }
+    }
+}
+
+impl From<BuildExecutionError> for RemoteAttemptFailure {
+    fn from(error: BuildExecutionError) -> Self {
+        Self::terminal(error)
+    }
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BuildProbeFact {
@@ -41,19 +72,29 @@ pub struct BuildExecutionResult {
 /// Driver-owned implementation for a compiler action cache miss. The
 /// executor still owns declared-output validation, atomic restore, CAS capture,
 /// and action records.
-pub type CompilerActionRunner<'a> = dyn Fn(
-        &BuildAction,
-        &[ActionInputSnapshot],
-    ) -> Result<Vec<Vec<u8>>, String>
-    + Sync + 'a;
+pub type CompilerActionRunner<'a> =
+    dyn Fn(&BuildAction, &[ActionInputSnapshot]) -> Result<Vec<Vec<u8>>, String> + Sync + 'a;
 
 #[derive(Debug)]
 pub enum BuildExecutionError {
-    MissingGrant { action: String, capability: BuildCapability },
+    MissingGrant {
+        action: String,
+        capability: BuildCapability,
+    },
     SandboxUnavailable,
-    IO { action: String, detail: String },
-    ActionFailed { action: String, exit_code: i32, stderr: String },
-    ProbeFailed { probe: String, detail: String },
+    IO {
+        action: String,
+        detail: String,
+    },
+    ActionFailed {
+        action: String,
+        exit_code: i32,
+        stderr: String,
+    },
+    ProbeFailed {
+        probe: String,
+        detail: String,
+    },
     InvalidGraph(BuildError),
 }
 
@@ -82,13 +123,7 @@ pub fn execute_build_plan_with_front_end(
     grants: &BTreeSet<BuildCapability>,
     front_end: FrontEndCompletion,
 ) -> Result<BuildExecutionResult, BuildExecutionError> {
-    execute_build_plan_with_front_end_and_remote(
-        plan,
-        project_root,
-        grants,
-        front_end,
-        None,
-    )
+    execute_build_plan_with_front_end_and_remote(plan, project_root, grants, front_end, None)
 }
 
 /// Execute with an explicitly selected host-owned builder binding. No
@@ -138,17 +173,26 @@ pub fn execute_build_plan_with_front_end_and_remote_and_compiler(
     remote_binding: Option<&RemoteBuildBinding>,
     compiler: Option<&CompilerActionRunner<'_>>,
 ) -> Result<BuildExecutionResult, BuildExecutionError> {
-    let selected_actions = plan.selected_action_ids().map_err(BuildExecutionError::InvalidGraph)?;
-    for action in plan.actions.iter().filter(|action| selected_actions.contains(&action.id)) {
+    let selected_actions = plan
+        .selected_action_ids()
+        .map_err(BuildExecutionError::InvalidGraph)?;
+    for action in plan
+        .actions
+        .iter()
+        .filter(|action| selected_actions.contains(&action.id))
+    {
         for cap in &action.caps {
             if !grants.contains(cap) {
                 return Err(BuildExecutionError::MissingGrant {
-                    action: action.name.clone(), capability: *cap
+                    action: action.name.clone(),
+                    capability: *cap,
                 });
             }
         }
     }
-    let selected_probes = plan.selected_probe_ids().map_err(BuildExecutionError::InvalidGraph)?;
+    let selected_probes = plan
+        .selected_probe_ids()
+        .map_err(BuildExecutionError::InvalidGraph)?;
     if !selected_probes.is_empty() && !grants.contains(&BuildCapability::Exec) {
         let probe = &plan.probes[selected_probes.iter().next().unwrap().0];
         return Err(BuildExecutionError::MissingGrant {
@@ -157,11 +201,14 @@ pub fn execute_build_plan_with_front_end_and_remote_and_compiler(
         });
     }
     let probes = execute_probes(plan, &selected_probes)?;
-    let model = plan.execution_model().map_err(BuildExecutionError::InvalidGraph)?;
+    let model = plan
+        .execution_model()
+        .map_err(BuildExecutionError::InvalidGraph)?;
     let cas = LocalCas::new(project_root.join(".jet/build-cache/cas"));
     let records = project_root.join(".jet/build-cache/actions");
     ensure_real_directory(&records).map_err(|e| BuildExecutionError::IO {
-        action: "cache".to_string(), detail: e.to_string()
+        action: "cache".to_string(),
+        detail: e.to_string(),
     })?;
     let mut outcomes = Vec::new();
     for stage in model.stages {
@@ -171,7 +218,8 @@ pub fn execute_build_plan_with_front_end_and_remote_and_compiler(
                 for cap in &action.caps {
                     if !grants.contains(cap) {
                         return Err(BuildExecutionError::MissingGrant {
-                            action: action.name.clone(), capability: cap.clone()
+                            action: action.name.clone(),
+                            capability: cap.clone(),
                         });
                     }
                 }
@@ -184,22 +232,28 @@ pub fn execute_build_plan_with_front_end_and_remote_and_compiler(
                     .iter()
                     .map(|action_id| {
                         let action = &plan.actions[action_id.0];
-                        let handle = ActionHandle { id: action.id, context: plan.context };
-                        (handle, scope.spawn(move || {
-                            execute_one_action(
-                                plan,
-                                action,
-                                handle,
-                                project_root,
-                                cas,
-                                records,
-                                grants,
-                                probe_facts,
-                                front_end,
-                                remote_binding,
-                                compiler,
-                            )
-                        }))
+                        let handle = ActionHandle {
+                            id: action.id,
+                            context: plan.context,
+                        };
+                        (
+                            handle,
+                            scope.spawn(move || {
+                                execute_one_action(
+                                    plan,
+                                    action,
+                                    handle,
+                                    project_root,
+                                    cas,
+                                    records,
+                                    grants,
+                                    probe_facts,
+                                    front_end,
+                                    remote_binding,
+                                    compiler,
+                                )
+                            }),
+                        )
                     })
                     .collect::<Vec<_>>();
                 jobs.into_iter()
@@ -216,7 +270,9 @@ pub fn execute_build_plan_with_front_end_and_remote_and_compiler(
             outcomes.extend(completed);
         }
     }
-    let report = plan.execution_report(&outcomes).map_err(BuildExecutionError::InvalidGraph)?;
+    let report = plan
+        .execution_report(&outcomes)
+        .map_err(BuildExecutionError::InvalidGraph)?;
     Ok(BuildExecutionResult { report, probes })
 }
 
@@ -270,7 +326,9 @@ fn execute_one_action(
     compiler: Option<&CompilerActionRunner<'_>>,
 ) -> Result<ActionOutcome, BuildExecutionError> {
     let cache_lookup_allowed = front_end.authorize_cache_lookup().is_ok();
-    let snapshots = cas.snapshot_declared_inputs(project_root, action).map_err(|e| io_action(action, e))?;
+    let snapshots = cas
+        .snapshot_declared_inputs(project_root, action)
+        .map_err(|e| io_action(action, e))?;
     let remote_requested = remote_binding.is_some_and(RemoteBuildBinding::is_enabled);
     let (executable, executable_digest) = if action.is_compiler_owned() {
         (
@@ -298,16 +356,26 @@ fn execute_one_action(
         };
         (executable, ContentDigest::from_bytes(&executable_bytes))
     };
-    let action_probe_names = action.probes.iter().map(|probe| plan.probes[probe.id.0].name.as_str()).collect::<BTreeSet<_>>();
-    let effective_probe_facts = probe_facts.iter().filter(|fact| action_probe_names.contains(fact.name.as_str())).cloned().collect::<Vec<_>>();
-    let key = plan.effective_action_key(
-        handle,
-        &snapshots,
-        grants,
-        &executable,
-        &executable_digest,
-        &effective_probe_facts,
-    ).map_err(BuildExecutionError::InvalidGraph)?;
+    let action_probe_names = action
+        .probes
+        .iter()
+        .map(|probe| plan.probes[probe.id.0].name.as_str())
+        .collect::<BTreeSet<_>>();
+    let effective_probe_facts = probe_facts
+        .iter()
+        .filter(|fact| action_probe_names.contains(fact.name.as_str()))
+        .cloned()
+        .collect::<Vec<_>>();
+    let key = plan
+        .effective_action_key(
+            handle,
+            &snapshots,
+            grants,
+            &executable,
+            &executable_digest,
+            &effective_probe_facts,
+        )
+        .map_err(BuildExecutionError::InvalidGraph)?;
     let record_path = records.join(key.as_str().trim_start_matches("act-sha256:"));
     let remote = if action.is_compiler_owned() {
         None
@@ -322,7 +390,8 @@ fn execute_one_action(
         // E4-JP2: no cache lookup may bypass parser/sema/policy/diagnostics.
         if cache_lookup_allowed {
             match read_action_record(records, &record_path, key.clone()) {
-                Ok(Some(record)) => match cas.restore_action_outputs(project_root, action, &record) {
+                Ok(Some(record)) => match cas.restore_action_outputs(project_root, action, &record)
+                {
                     Ok(()) => {
                         write_last_rebuild_record(
                             project_root,
@@ -344,9 +413,7 @@ fn execute_one_action(
             restore_failure = Some(CacheMissReason::FrontEndIncomplete);
         }
     }
-    if action.cache == ActionCache::Cached
-        && cache_lookup_allowed
-    {
+    if action.cache == ActionCache::Cached && cache_lookup_allowed {
         if let Some((transport, policy, _execute)) = &remote {
             match transport.download_action_record(&key, policy) {
                 Ok(record) => {
@@ -378,17 +445,14 @@ fn execute_one_action(
                             return Ok(ActionOutcome::RestoredFromCache);
                         }
                         Err(_detail)
-                            if remote_binding
-                                .is_some_and(|binding| binding.fallback_local) => {}
+                            if remote_binding.is_some_and(|binding| binding.fallback_local) => {}
                         Err(detail) => return Err(remote_action(action, detail)),
                     }
                 }
-                Err(RemoteCacheError::Io(error))
-                    if error.kind() == io::ErrorKind::NotFound => {}
+                Err(RemoteCacheError::Io(error)) if error.kind() == io::ErrorKind::NotFound => {}
                 Err(RemoteCacheError::Denied(denied))
                     if denied.reason == RemoteDeniedReason::GrantNotAllowed => {}
-                Err(_error)
-                    if remote_binding.is_some_and(|binding| binding.fallback_local) => {}
+                Err(_error) if remote_binding.is_some_and(|binding| binding.fallback_local) => {}
                 Err(error) => return Err(remote_action(action, error.to_string())),
             }
         }
@@ -439,7 +503,8 @@ fn execute_one_action(
             });
         }
         for (output, bytes) in action.outputs.iter().zip(bytes) {
-            let path = resolve_under(project_root, output.as_str()).map_err(|e| io_action(action, e))?;
+            let path =
+                resolve_under(project_root, output.as_str()).map_err(|e| io_action(action, e))?;
             prepare_output_destination(project_root, &path).map_err(|e| io_action(action, e))?;
             super::cache_cas::atomic_restore_file(project_root, &path, &bytes)
                 .map_err(|e| io_action(action, e))?;
@@ -477,6 +542,7 @@ fn execute_one_action(
             policy,
             rebuild_status,
             timeout_ms,
+            remote_binding.expect("enabled remote execution requires its host binding"),
         );
         match remote_result {
             Ok(outcome) => return Ok(outcome),
@@ -485,9 +551,9 @@ fn execute_one_action(
         }
     }
 
-    if remote_binding.is_some_and(|binding| {
-        binding.cache_read && !binding.execute && !binding.fallback_local
-    }) {
+    if remote_binding
+        .is_some_and(|binding| binding.cache_read && !binding.execute && !binding.fallback_local)
+    {
         return Err(remote_action(
             action,
             "remote cache miss cannot fall back to local execution".to_string(),
@@ -495,17 +561,26 @@ fn execute_one_action(
     }
 
     let sandbox = project_root.join(".jet/build-sandbox").join(format!(
-        "{}-{}-{}", std::process::id(), action.id.0, key.as_str().trim_start_matches("act-sha256:")
+        "{}-{}-{}",
+        std::process::id(),
+        action.id.0,
+        key.as_str().trim_start_matches("act-sha256:")
     ));
-    let sandbox_root = sandbox
-        .parent()
-        .ok_or_else(|| io_action(action, io::Error::new(io::ErrorKind::InvalidInput, "sandbox has no parent")))?;
+    let sandbox_root = sandbox.parent().ok_or_else(|| {
+        io_action(
+            action,
+            io::Error::new(io::ErrorKind::InvalidInput, "sandbox has no parent"),
+        )
+    })?;
     ensure_real_directory(sandbox_root).map_err(|e| io_action(action, e))?;
     if let Ok(metadata) = fs::symlink_metadata(&sandbox) {
         if metadata.file_type().is_symlink() || !metadata.is_dir() {
             return Err(io_action(
                 action,
-                io::Error::new(io::ErrorKind::PermissionDenied, "action sandbox is not a real directory"),
+                io::Error::new(
+                    io::ErrorKind::PermissionDenied,
+                    "action sandbox is not a real directory",
+                ),
             ));
         }
         fs::remove_dir_all(&sandbox).map_err(|e| io_action(action, e))?;
@@ -514,34 +589,48 @@ fn execute_one_action(
     for input in &action.inputs {
         let from = resolve_under(project_root, input.as_str()).map_err(|e| io_action(action, e))?;
         let to = resolve_under(&sandbox, input.as_str()).map_err(|e| io_action(action, e))?;
-        if let Some(parent) = to.parent() { fs::create_dir_all(parent).map_err(|e| io_action(action, e))?; }
+        if let Some(parent) = to.parent() {
+            fs::create_dir_all(parent).map_err(|e| io_action(action, e))?;
+        }
         let bytes = super::cache_cas::secure_read_file(project_root, &from)
             .map_err(|e| io_action(action, e))?;
         fs::write(to, bytes).map_err(|e| io_action(action, e))?;
     }
     for output in &action.outputs {
         let path = resolve_under(&sandbox, output.as_str()).map_err(|e| io_action(action, e))?;
-        if let Some(parent) = path.parent() { fs::create_dir_all(parent).map_err(|e| io_action(action, e))?; }
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent).map_err(|e| io_action(action, e))?;
+        }
     }
 
     let bwrap = find_program_path("bwrap").ok_or(BuildExecutionError::SandboxUnavailable)?;
     let mut command = Command::new(bwrap);
     command
-        .arg("--die-with-parent").arg("--new-session").arg("--unshare-all")
-        .arg("--ro-bind").arg("/nix/store").arg("/nix/store")
-        .arg("--proc").arg("/proc").arg("--dev").arg("/dev")
-        .arg("--tmpfs").arg("/tmp")
-        .arg("--bind").arg(&sandbox).arg("/work")
-        .arg("--chdir").arg("/work").arg("--clearenv");
+        .arg("--die-with-parent")
+        .arg("--new-session")
+        .arg("--unshare-all")
+        .arg("--ro-bind")
+        .arg("/nix/store")
+        .arg("/nix/store")
+        .arg("--proc")
+        .arg("/proc")
+        .arg("--dev")
+        .arg("/dev")
+        .arg("--tmpfs")
+        .arg("/tmp")
+        .arg("--bind")
+        .arg(&sandbox)
+        .arg("/work")
+        .arg("--chdir")
+        .arg("/work")
+        .arg("--clearenv");
     if grants.contains(&BuildCapability::Net) && action.caps.contains(&BuildCapability::Net) {
         command.arg("--share-net");
     }
     command.arg("--setenv").arg("PATH").arg("/nix/store");
-    for (key, value) in action
-        .env
-        .iter()
-        .filter(|(key, _)| action.env_allowlist.is_empty() || action.env_allowlist.contains(key.as_str()))
-    {
+    for (key, value) in action.env.iter().filter(|(key, _)| {
+        action.env_allowlist.is_empty() || action.env_allowlist.contains(key.as_str())
+    }) {
         command.arg("--setenv").arg(key).arg(value);
     }
     command.arg(executable).args(&action.argv[1..]);
@@ -551,13 +640,15 @@ fn execute_one_action(
         let _ = fs::remove_dir_all(&sandbox);
         write_last_rebuild_record(project_root, action, &key, rebuild_status, Some(code))?;
         return Err(BuildExecutionError::ActionFailed {
-            action: action.name.clone(), exit_code: code,
+            action: action.name.clone(),
+            exit_code: code,
             stderr: String::from_utf8_lossy(&output.stderr).trim().to_string(),
         });
     }
     for declared in &action.outputs {
         let from = resolve_under(&sandbox, declared.as_str()).map_err(|e| io_action(action, e))?;
-        let to = resolve_under(project_root, declared.as_str()).map_err(|e| io_action(action, e))?;
+        let to =
+            resolve_under(project_root, declared.as_str()).map_err(|e| io_action(action, e))?;
         let bytes = super::cache_cas::secure_read_file(&sandbox, &from)
             .map_err(|e| io_action(action, e))?;
         prepare_output_destination(project_root, &to).map_err(|e| io_action(action, e))?;
@@ -566,10 +657,15 @@ fn execute_one_action(
     }
     let outcome = ActionOutcome::Succeeded { exit_code: code };
     if action.cache == ActionCache::Cached {
-        let record = cas.capture_declared_outputs(
-            project_root, action, key.clone(), outcome,
-            ActionCacheProvenance::miss(CacheMissReason::NoLocalActionRecord),
-        ).map_err(|e| io_action(action, e))?;
+        let record = cas
+            .capture_declared_outputs(
+                project_root,
+                action,
+                key.clone(),
+                outcome,
+                ActionCacheProvenance::miss(CacheMissReason::NoLocalActionRecord),
+            )
+            .map_err(|e| io_action(action, e))?;
         if let Some((transport, policy, _)) = &remote {
             if policy
                 .check(super::cache_cas::RemoteActionRequest::CacheWrite)
@@ -598,7 +694,48 @@ fn execute_remote_action(
     policy: &RemoteCachePolicy,
     rebuild_status: ActionCacheStatus,
     timeout_ms: u64,
+    binding: &RemoteBuildBinding,
 ) -> Result<ActionOutcome, BuildExecutionError> {
+    let mut policy = policy.clone();
+    let mut last_failure = None;
+    for attempt in 0..MAX_REMOTE_EXECUTION_ATTEMPTS {
+        match execute_remote_attempt(
+            plan,
+            action,
+            project_root,
+            cas,
+            record_path,
+            snapshots,
+            key,
+            transport,
+            &policy,
+            rebuild_status,
+            timeout_ms,
+        ) {
+            Ok(outcome) => return Ok(outcome),
+            Err(failure) if failure.retryable && attempt + 1 < MAX_REMOTE_EXECUTION_ATTEMPTS => {
+                last_failure = Some(failure.error);
+                policy = remote_attempt_policy(plan, action, key, binding, transport)?;
+            }
+            Err(failure) => return Err(failure.error),
+        }
+    }
+    Err(last_failure.expect("remote execution attempt loop must produce a result"))
+}
+
+fn execute_remote_attempt(
+    plan: &BuildPlan,
+    action: &BuildAction,
+    project_root: &Path,
+    cas: &LocalCas,
+    record_path: &Path,
+    snapshots: &[ActionInputSnapshot],
+    key: &ActionKey,
+    transport: &RemoteCacheTransport,
+    policy: &RemoteCachePolicy,
+    rebuild_status: ActionCacheStatus,
+    timeout_ms: u64,
+) -> Result<ActionOutcome, RemoteAttemptFailure> {
     let proof = policy
         .proof()
         .cloned()
@@ -611,13 +748,13 @@ fn execute_remote_action(
             .upload_execution_blob(&bytes, policy)
             .map_err(|error| remote_action(action, error.to_string()))?;
         if digest != snapshot.digest || bytes.len() as u64 != snapshot.byte_len {
-            return Err(remote_action(
+            return Err(RemoteAttemptFailure::terminal(remote_action(
                 action,
                 format!(
                     "remote input CAS identity changed for {}",
                     snapshot.path.as_str()
                 ),
-            ));
+            )));
         }
     }
     let request = RemoteExecutionRequest {
@@ -668,21 +805,25 @@ fn execute_remote_action(
                 }
                 write_action_record(record_path, &record).map_err(|e| io_action(action, e))?;
             }
-            write_last_rebuild_record(project_root, action, key, rebuild_status, None)?;
+            write_last_rebuild_record(project_root, action, key, rebuild_status, None)
+                .map_err(RemoteAttemptFailure::terminal)?;
             Ok(ActionOutcome::Succeeded { exit_code })
         }
         ActionOutcome::Failed { exit_code } => {
-            write_last_rebuild_record(project_root, action, key, rebuild_status, Some(exit_code))?;
-            Err(BuildExecutionError::ActionFailed {
-                action: action.name.clone(),
-                exit_code,
-                stderr: "remote execution failed".to_string(),
-            })
+            write_last_rebuild_record(project_root, action, key, rebuild_status, Some(exit_code))
+                .map_err(RemoteAttemptFailure::terminal)?;
+            Err(RemoteAttemptFailure::terminal(
+                BuildExecutionError::ActionFailed {
+                    action: action.name.clone(),
+                    exit_code,
+                    stderr: "remote execution failed".to_string(),
+                },
+            ))
         }
-        ActionOutcome::RestoredFromCache => Err(remote_action(
+        ActionOutcome::RestoredFromCache => Err(RemoteAttemptFailure::terminal(remote_action(
             action,
             "remote execution returned a cache-only outcome".to_string(),
-        )),
+        ))),
     }
 }
 
@@ -703,7 +844,10 @@ fn remote_for_action(
         ));
     }
     if binding.trust_domain.len() > 256
-        || binding.trust_domain.chars().any(|character| character.is_control())
+        || binding
+            .trust_domain
+            .chars()
+            .any(|character| character.is_control())
     {
         return Err(remote_action(
             action,
@@ -718,6 +862,23 @@ fn remote_for_action(
     }
     let transport = RemoteCacheTransport::for_binding(binding)
         .map_err(|detail| remote_action(action, detail))?;
+    if !action.caps.contains(&BuildCapability::Net) {
+        return Err(BuildExecutionError::MissingGrant {
+            action: format!("remote build transport for {}", action.name),
+            capability: BuildCapability::Net,
+        });
+    }
+    let policy = remote_attempt_policy(plan, action, key, binding, &transport)?;
+    Ok(Some((transport, policy, binding.execute)))
+}
+
+fn remote_attempt_policy(
+    plan: &BuildPlan,
+    action: &BuildAction,
+    key: &ActionKey,
+    binding: &RemoteBuildBinding,
+    transport: &RemoteCacheTransport,
+) -> Result<RemoteCachePolicy, BuildExecutionError> {
     let attempt = REMOTE_ATTEMPT.fetch_add(1, Ordering::Relaxed);
     let timestamp = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -738,22 +899,12 @@ fn remote_for_action(
             toolchain_provenance_digest(plan, action.toolchain),
         )
         .map_err(|detail| remote_action(action, detail))?;
-    if !action.caps.contains(&BuildCapability::Net) {
-        return Err(BuildExecutionError::MissingGrant {
-            action: format!("remote build transport for {}", action.name),
-            capability: BuildCapability::Net,
-        });
-    }
-    Ok(Some((
-        transport,
-        RemoteCachePolicy::with_grants(
-            binding.cache_read,
-            binding.cache_write,
-            binding.execute,
-            proof,
-        ),
+    Ok(RemoteCachePolicy::with_grants(
+        binding.cache_read,
+        binding.cache_write,
         binding.execute,
-    )))
+        proof,
+    ))
 }
 
 fn wait_remote_execution_result(
@@ -762,31 +913,34 @@ fn wait_remote_execution_result(
     key: &ActionKey,
     action: &BuildAction,
     timeout_ms: u64,
-) -> Result<super::cache_cas::RemoteExecutionResult, BuildExecutionError> {
+) -> Result<super::cache_cas::RemoteExecutionResult, RemoteAttemptFailure> {
     let timeout = Duration::from_millis(timeout_ms);
     let deadline = Instant::now() + timeout;
     loop {
         match transport.download_execution_result(key, policy) {
             Ok(result) => return Ok(result),
             Err(RemoteCacheError::Io(error))
-                if error.kind() == io::ErrorKind::NotFound
-                    && Instant::now() < deadline =>
+                if error.kind() == io::ErrorKind::NotFound && Instant::now() < deadline =>
             {
                 std::thread::sleep(Duration::from_millis(10));
             }
             Err(RemoteCacheError::Io(error)) if error.kind() == io::ErrorKind::NotFound => {
-                let cancellation = transport.cancel_execution(key, policy).err();
-                let detail = match cancellation {
-                    None => format!(
-                        "remote worker did not publish a result within {}ms",
-                        timeout.as_millis()
-                    ),
-                    Some(cancel_error) => format!(
-                        "remote worker did not publish a result within {}ms; cancellation failed: {cancel_error}",
-                        timeout.as_millis()
-                    ),
+                return match transport.cancel_execution(key, policy) {
+                    Ok(()) => Err(RemoteAttemptFailure::retryable(remote_action(
+                        action,
+                        format!(
+                            "remote worker did not publish a result within {}ms",
+                            timeout.as_millis()
+                        ),
+                    ))),
+                    Err(cancel_error) => Err(RemoteAttemptFailure::terminal(remote_action(
+                        action,
+                        format!(
+                            "remote worker did not publish a result within {}ms; cancellation failed: {cancel_error}",
+                            timeout.as_millis()
+                        ),
+                    ))),
                 };
-                return Err(remote_action(action, detail));
             }
             Err(error) => {
                 let detail = match transport.cancel_execution(key, policy) {
@@ -795,7 +949,9 @@ fn wait_remote_execution_result(
                         format!("{}; cancellation failed: {cancel_error}", error)
                     }
                 };
-                return Err(remote_action(action, detail));
+                return Err(RemoteAttemptFailure::terminal(remote_action(
+                    action, detail,
+                )));
             }
         }
     }
@@ -822,7 +978,9 @@ fn restore_remote_outputs(
     let mut backups = Vec::with_capacity(record.outputs.len());
     for output in &record.outputs {
         let bytes = match blob_request {
-            super::cache_cas::RemoteActionRequest::CacheRead => transport.download_blob(&output.digest, policy),
+            super::cache_cas::RemoteActionRequest::CacheRead => {
+                transport.download_blob(&output.digest, policy)
+            }
             super::cache_cas::RemoteActionRequest::Execute => {
                 transport.download_execution_blob(&output.digest, policy)
             }
@@ -839,8 +997,8 @@ fn restore_remote_outputs(
                 output.path.as_str()
             ));
         }
-        let path = resolve_under(project_root, output.path.as_str())
-            .map_err(|error| error.to_string())?;
+        let path =
+            resolve_under(project_root, output.path.as_str()).map_err(|error| error.to_string())?;
         let previous = match secure_read_file(project_root, &path) {
             Ok(bytes) => Some(bytes),
             Err(error) if error.kind() == io::ErrorKind::NotFound => None,
@@ -886,8 +1044,8 @@ fn publish_remote_outputs(
 ) -> Result<(), String> {
     let mut outputs = Vec::with_capacity(record.outputs.len());
     for output in &record.outputs {
-        let path = resolve_under(project_root, output.path.as_str())
-            .map_err(|error| error.to_string())?;
+        let path =
+            resolve_under(project_root, output.path.as_str()).map_err(|error| error.to_string())?;
         let bytes = secure_read_file(project_root, &path).map_err(|error| error.to_string())?;
         let digest = transport
             .upload_blob(&bytes, policy)
@@ -986,15 +1144,23 @@ pub(super) fn read_last_rebuild_record(
         Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
         Err(error) => return Err(error),
     };
-    let text = String::from_utf8(bytes)
-        .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "rebuild explanation is not UTF-8"))?;
+    let text = String::from_utf8(bytes).map_err(|_| {
+        io::Error::new(
+            io::ErrorKind::InvalidData,
+            "rebuild explanation is not UTF-8",
+        )
+    })?;
     let mut lines = text.lines();
-    let Some(key) = lines.next() else { return Ok(None) };
+    let Some(key) = lines.next() else {
+        return Ok(None);
+    };
     let action_digest = ContentDigest::from_bytes(action_name.as_bytes());
     if lines.next() != Some(action_digest.as_str()) {
         return Ok(None);
     }
-    let Some(status) = lines.next().and_then(parse_rebuild_status) else { return Ok(None) };
+    let Some(status) = lines.next().and_then(parse_rebuild_status) else {
+        return Ok(None);
+    };
     Ok(Some(LastRebuildRecord {
         key: ActionKey(key.to_string()),
         status,
@@ -1022,31 +1188,42 @@ fn write_last_rebuild_record(
             .map(|code| format!("failed:{code}\n"))
             .unwrap_or_default()
     );
-    atomic_restore_file(project_root, &path, text.as_bytes()).map_err(|error| BuildExecutionError::IO {
-        action: format!("rebuild explanation {}", action.name),
-        detail: error.to_string(),
+    atomic_restore_file(project_root, &path, text.as_bytes()).map_err(|error| {
+        BuildExecutionError::IO {
+            action: format!("rebuild explanation {}", action.name),
+            detail: error.to_string(),
+        }
     })
 }
 
 pub(super) fn prepare_output_destination(root: &Path, output: &Path) -> io::Result<()> {
     let parent = output.parent().unwrap_or(root);
-    let relative = parent.strip_prefix(root).map_err(|_| io::Error::new(
-        io::ErrorKind::InvalidInput,
-        "build output parent escapes project root",
-    ))?;
+    let relative = parent.strip_prefix(root).map_err(|_| {
+        io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "build output parent escapes project root",
+        )
+    })?;
     let mut current = root.to_path_buf();
     for component in relative.components() {
         if let Component::Normal(part) = component {
             current.push(part);
             match fs::symlink_metadata(&current) {
-                Ok(meta) if meta.file_type().is_symlink() => return Err(io::Error::new(
-                    io::ErrorKind::PermissionDenied,
-                    format!("build output parent `{}` is a symlink", current.display()),
-                )),
-                Ok(meta) if !meta.is_dir() => return Err(io::Error::new(
-                    io::ErrorKind::NotADirectory,
-                    format!("build output parent `{}` is not a directory", current.display()),
-                )),
+                Ok(meta) if meta.file_type().is_symlink() => {
+                    return Err(io::Error::new(
+                        io::ErrorKind::PermissionDenied,
+                        format!("build output parent `{}` is a symlink", current.display()),
+                    ))
+                }
+                Ok(meta) if !meta.is_dir() => {
+                    return Err(io::Error::new(
+                        io::ErrorKind::NotADirectory,
+                        format!(
+                            "build output parent `{}` is not a directory",
+                            current.display()
+                        ),
+                    ))
+                }
                 Ok(_) => {}
                 Err(error) if error.kind() == io::ErrorKind::NotFound => {
                     match fs::create_dir(&current) {
@@ -1081,20 +1258,43 @@ fn execute_probes(
     selected: &BTreeSet<ProbeId>,
 ) -> Result<Vec<BuildProbeFact>, BuildExecutionError> {
     let mut facts = Vec::new();
-    for probe in plan.probes.iter().filter(|probe| selected.contains(&probe.id)) {
+    for probe in plan
+        .probes
+        .iter()
+        .filter(|probe| selected.contains(&probe.id))
+    {
         let (success, detail) = match &probe.kind {
-            ProbeKind::FindProgram { program } => match resolve_program_path(plan, probe.toolchain, program) {
-                Some(path) => (true, path.display().to_string()),
-                None => (false, format!("program `{program}` not found")),
-            },
-            ProbeKind::PkgConfig { package, min_version } => {
-                let Some(pkg_config) = resolve_program_path(plan, probe.toolchain, "pkg-config") else {
-                    return Err(BuildExecutionError::ProbeFailed { probe: probe.name.clone(), detail: "pkg-config not found".to_string() });
+            ProbeKind::FindProgram { program } => {
+                match resolve_program_path(plan, probe.toolchain, program) {
+                    Some(path) => (true, path.display().to_string()),
+                    None => (false, format!("program `{program}` not found")),
+                }
+            }
+            ProbeKind::PkgConfig {
+                package,
+                min_version,
+            } => {
+                let Some(pkg_config) = resolve_program_path(plan, probe.toolchain, "pkg-config")
+                else {
+                    return Err(BuildExecutionError::ProbeFailed {
+                        probe: probe.name.clone(),
+                        detail: "pkg-config not found".to_string(),
+                    });
                 };
                 let mut cmd = Command::new(pkg_config);
                 cmd.arg("--exists");
-                if let Some(version) = min_version { cmd.arg(format!("{package} >= {version}")); } else { cmd.arg(package); }
-                match cmd.status() { Ok(status) => (status.success(), format!("pkg-config exit {}", status.code().unwrap_or(1))), Err(e) => (false, e.to_string()) }
+                if let Some(version) = min_version {
+                    cmd.arg(format!("{package} >= {version}"));
+                } else {
+                    cmd.arg(package);
+                }
+                match cmd.status() {
+                    Ok(status) => (
+                        status.success(),
+                        format!("pkg-config exit {}", status.code().unwrap_or(1)),
+                    ),
+                    Err(e) => (false, e.to_string()),
+                }
             }
             ProbeKind::HeaderCheck { header } => {
                 let source = format!("#include <{header}>\nint main(void) {{ return 0; }}\n");
@@ -1119,7 +1319,12 @@ fn execute_probes(
             toolchain: probe.toolchain,
             toolchain_provenance: toolchain_provenance_digest(plan, probe.toolchain),
         });
-        if !success { return Err(BuildExecutionError::ProbeFailed { probe: probe.name.clone(), detail }); }
+        if !success {
+            return Err(BuildExecutionError::ProbeFailed {
+                probe: probe.name.clone(),
+                detail,
+            });
+        }
     }
     Ok(facts)
 }
@@ -1129,7 +1334,10 @@ fn run_compile_probe(plan: &BuildPlan, toolchain: ToolchainHandle, source: &str)
         .into_iter()
         .find_map(|name| resolve_program_path(plan, toolchain, name));
     let Some(compiler) = compiler else {
-        return (false, "no C compiler (`cc`, `clang`, or `gcc`) was found".to_string());
+        return (
+            false,
+            "no C compiler (`cc`, `clang`, or `gcc`) was found".to_string(),
+        );
     };
     let mut child = match Command::new(&compiler)
         .args(["-x", "c", "-fsyntax-only", "-"])
@@ -1139,38 +1347,58 @@ fn run_compile_probe(plan: &BuildPlan, toolchain: ToolchainHandle, source: &str)
         .spawn()
     {
         Ok(child) => child,
-        Err(error) => return (false, format!("could not start {}: {error}", compiler.display())),
+        Err(error) => {
+            return (
+                false,
+                format!("could not start {}: {error}", compiler.display()),
+            )
+        }
     };
     let Some(mut stdin) = child.stdin.take() else {
         return (false, "could not open compiler input".to_string());
     };
     if let Err(error) = stdin.write_all(source.as_bytes()) {
-        return (false, format!("could not send source to {}: {error}", compiler.display()));
+        return (
+            false,
+            format!("could not send source to {}: {error}", compiler.display()),
+        );
     }
     drop(stdin);
     match child.wait_with_output() {
-        Ok(output) if output.status.success() => {
-            (true, format!("{} accepted the syntax probe", compiler.display()))
-        }
+        Ok(output) if output.status.success() => (
+            true,
+            format!("{} accepted the syntax probe", compiler.display()),
+        ),
         Ok(output) => {
             let detail = String::from_utf8_lossy(&output.stderr).trim().to_string();
-            (false, if detail.is_empty() {
-                format!("{} rejected the syntax probe", compiler.display())
-            } else {
-                detail
-            })
+            (
+                false,
+                if detail.is_empty() {
+                    format!("{} rejected the syntax probe", compiler.display())
+                } else {
+                    detail
+                },
+            )
         }
-        Err(error) => (false, format!("could not wait for {}: {error}", compiler.display())),
+        Err(error) => (
+            false,
+            format!("could not wait for {}: {error}", compiler.display()),
+        ),
     }
 }
 
 fn find_program_path(program: &str) -> Option<PathBuf> {
     let direct = Path::new(program);
-    if direct.components().count() > 1 && direct.is_file() { return fs::canonicalize(direct).ok(); }
+    if direct.components().count() > 1 && direct.is_file() {
+        return fs::canonicalize(direct).ok();
+    }
     std::env::var_os("PATH").and_then(|paths| {
         std::env::split_paths(&paths).find_map(|dir| {
             let candidate = dir.join(program);
-            candidate.is_file().then(|| fs::canonicalize(candidate).ok()).flatten()
+            candidate
+                .is_file()
+                .then(|| fs::canonicalize(candidate).ok())
+                .flatten()
         })
     })
 }
@@ -1184,7 +1412,9 @@ fn resolve_program_path(
     if let Some(declared) = toolchain.tools.get(program) {
         return canonical_executable_path(declared);
     }
-    let basename = Path::new(program).file_name().and_then(|name| name.to_str());
+    let basename = Path::new(program)
+        .file_name()
+        .and_then(|name| name.to_str());
     if let Some(basename) = basename {
         if let Some(declared) = toolchain.tools.get(basename) {
             return canonical_executable_path(declared);
@@ -1198,7 +1428,10 @@ fn resolve_program_path(
     // The host toolchain is explicitly ambient. A target toolchain must name
     // the executable in its declaration; falling through to PATH here would
     // make a cross build depend on whichever host tool happens to be installed.
-    if matches!(toolchain.role, super::provenance_toolchains::ToolchainRole::Host) {
+    if matches!(
+        toolchain.role,
+        super::provenance_toolchains::ToolchainRole::Host
+    ) {
         find_program_path(program)
     } else if target_matches_running_host(&toolchain.target_triple) {
         // An explicit native target still runs on the host. Keep the target
@@ -1217,10 +1450,7 @@ fn target_matches_running_host(triple: &str) -> bool {
         format!("{arch}-linux-gnu"),
         format!("{arch}-unknown-linux-gnu"),
     ];
-    let macos = [
-        format!("{arch}-macos"),
-        format!("{arch}-apple-darwin"),
-    ];
+    let macos = [format!("{arch}-macos"), format!("{arch}-apple-darwin")];
     let windows = [
         format!("{arch}-windows"),
         format!("{arch}-pc-windows-msvc"),
@@ -1236,7 +1466,9 @@ fn target_matches_running_host(triple: &str) -> bool {
 
 fn canonical_executable_path(program: &str) -> Option<PathBuf> {
     let path = Path::new(program);
-    path.is_file().then(|| fs::canonicalize(path).ok()).flatten()
+    path.is_file()
+        .then(|| fs::canonicalize(path).ok())
+        .flatten()
 }
 
 fn toolchain_provenance_digest(plan: &BuildPlan, toolchain: ToolchainHandle) -> ContentDigest {
@@ -1250,9 +1482,19 @@ fn toolchain_provenance_digest(plan: &BuildPlan, toolchain: ToolchainHandle) -> 
 fn write_action_record(path: &Path, record: &ActionResultRecord) -> io::Result<()> {
     let mut text = format!("{}\n", record.key.as_str());
     for output in &record.outputs {
-        text.push_str(&format!("{}\t{}\t{}\n", output.path.as_str(), output.digest.as_str(), output.byte_len));
+        text.push_str(&format!(
+            "{}\t{}\t{}\n",
+            output.path.as_str(),
+            output.digest.as_str(),
+            output.byte_len
+        ));
     }
-    let root = path.parent().ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "action record has no cache directory"))?;
+    let root = path.parent().ok_or_else(|| {
+        io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "action record has no cache directory",
+        )
+    })?;
     atomic_restore_file(root, path, text.as_bytes())
 }
 
@@ -1278,26 +1520,43 @@ pub(super) fn read_action_record(
         .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "action record is not UTF-8"))?;
     let mut lines = text.lines();
     if lines.next() != Some(key.as_str()) {
-        return Err(io::Error::new(io::ErrorKind::InvalidData, "action record key does not match its cache path"));
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "action record key does not match its cache path",
+        ));
     }
     let mut outputs = Vec::new();
     for line in lines {
         let mut parts = line.split('\t');
-        let invalid = || io::Error::new(io::ErrorKind::InvalidData, "malformed action output record");
+        let invalid =
+            || io::Error::new(io::ErrorKind::InvalidData, "malformed action output record");
         let path = BuildPath::new(parts.next().ok_or_else(invalid)?).map_err(|_| invalid())?;
         let digest = ContentDigest::parse(parts.next().ok_or_else(invalid)?)?;
-        let byte_len = parts.next().ok_or_else(invalid)?.parse().map_err(|_| invalid())?;
+        let byte_len = parts
+            .next()
+            .ok_or_else(invalid)?
+            .parse()
+            .map_err(|_| invalid())?;
         if parts.next().is_some() {
             return Err(invalid());
         }
-        outputs.push(ActionOutputRecord { path, digest, byte_len });
+        outputs.push(ActionOutputRecord {
+            path,
+            digest,
+            byte_len,
+        });
     }
     Ok(Some(ActionResultRecord {
-        key, outcome: ActionOutcome::RestoredFromCache, outputs,
+        key,
+        outcome: ActionOutcome::RestoredFromCache,
+        outputs,
         provenance: ActionCacheProvenance::hit(CacheHitReason::LocalActionRecordMatched),
     }))
 }
 
 fn io_action(action: &BuildAction, error: io::Error) -> BuildExecutionError {
-    BuildExecutionError::IO { action: action.name.clone(), detail: error.to_string() }
+    BuildExecutionError::IO {
+        action: action.name.clone(),
+        detail: error.to_string(),
+    }
 }
