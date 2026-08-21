@@ -10,3 +10,12 @@ function jet_float_display(value) {
   const text = String(number);
   return Number.isInteger(number) && !/[eE]/.test(text) ? `${text}.0` : text;
 }
+
+// D-DISPLAY-SHAPE / I9: the JS adapter for AOT's `JetShow` collection rule.
+// JavaScript's Array#toString omits the brackets and spaces that Jet owns.
+function jet_show(value) {
+  if (Array.isArray(value)) {
+    return `[${value.map((item) => jet_show(item)).join(", ")}]`;
+  }
+  return String(value);
+}

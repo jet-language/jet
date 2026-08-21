@@ -1303,7 +1303,7 @@ fn web_fallible_match_and_option_if_emit_on_js_and_wasm() {
 enum Toggle { On Off }
 
 #Target(JS)
-fn make_result(flag: Bool) => Int ? String {
+fn make_result(flag: Bool) => Int ! String {
     if flag return .Ok(7)
     return .Err("x")
 }
@@ -1340,7 +1340,7 @@ fn js_matches_and(flag: Bool) => Int {
     return 0
 }
 #Target(Wasm)
-fn wasm_make_result(flag: Bool) => Int ? String {
+fn wasm_make_result(flag: Bool) => Int ! String {
     if flag return .Ok(7)
     return .Err("x")
 }
@@ -1423,11 +1423,11 @@ impl StoreErr => Err {
     return Err("store unavailable")
 }
 
-fn read_store() => Int ? StoreErr {
+fn read_store() => Int ! StoreErr {
     return Err(StoreErr.Missing)
 }
 
-fn get_user() => Int ? {
+fn get_user() => Int ! {
     value :: read_store()?
     return Ok(value)
 }
@@ -2091,7 +2091,7 @@ try {
     );
 
     let wasm_ok_source = r#"#Target(Web)
-fn run() => Int ? {
+fn run() => Int ! {
     return Ok(42)
 }
 "#;
@@ -2323,18 +2323,18 @@ fn web_js_try_reaches_typed_edge() {
         return;
     }
     let source = r#"#Target(JS)
-fn load() => Int ? {
+fn load() => Int ! {
     return Err("try failed", code: "TRYFAIL")
 }
 
 #Target(JS)
-fn read() => Int ? {
+fn read() => Int ! {
     value :: load()?
     return Ok(value)
 }
 
 #Target(JS)
-fn run() ? {
+fn run() ! {
     value :: read()?
     print(value)
 }
@@ -2388,18 +2388,18 @@ fn web_wasm_try_returns_typed_journey() {
         return;
     }
     let source = r#"#Target(Wasm)
-fn load() => Int ? {
+fn load() => Int ! {
     return Err("try failed", code: "TRYFAIL")
 }
 
 #Target(Wasm)
-fn read() => Int ? {
+fn read() => Int ! {
     value :: load()?
     return Ok(value)
 }
 
 #Target(Wasm)
-fn run() ? {
+fn run() ! {
     value :: read()?
     print(value)
 }
@@ -2502,16 +2502,16 @@ fn web_two_hop_journey_matches_all_execution_tiers() {
         eprintln!("note: skipping web two-hop journey parity test (need rustc + node)");
         return;
     }
-    let source = r#"fn load() => String ? {
+    let source = r#"fn load() => String ! {
     return Err("two-hop", code: "TWOHOP")
 }
 
-fn read() => String ? {
+fn read() => String ! {
     value :: load()? "reading source"
     return Ok(value)
 }
 
-fn run() ? {
+fn run() ! {
     value :: read()? "running source"
     print(value)
 }
@@ -3752,11 +3752,11 @@ fn web_wasm_list_int_export_hostile_roundtrip() {
     let expected = include_str!("../examples/features/expected/web/web_wasm_list.out");
     assert_eq!(stdout, expected);
     assert!(
-        stdout.contains("-1,2,-3"),
+        stdout.contains("[-1, 2, -3]"),
         "signed ints lost in [Int] roundtrip:\n{stdout:?}"
     );
     assert!(
-        stdout.contains("42,0,-7,99"),
+        stdout.contains("[42, 0, -7, 99]"),
         "mixed ints lost in [Int] roundtrip:\n{stdout:?}"
     );
     let _ = fs::remove_dir_all(&dir);

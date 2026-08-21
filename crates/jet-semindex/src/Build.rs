@@ -183,6 +183,7 @@ impl SymbolDB {
             }
         }
         project_generated_presentation(self, bundle);
+        self.align_reference_targets();
         let defs = convert_defs(&self.defs, &self.view_provenance, &self.members, bundle);
         let refs = convert_refs(&self.refs);
         let effects = convert_effects(facts);
@@ -257,6 +258,20 @@ impl SymbolDB {
         }).collect());
     }
 
+    fn align_reference_targets(&mut self) {
+        for reference in &mut self.refs {
+            let Some(target) = &mut reference.target else { continue };
+            let mut definitions = self
+                .defs
+                .iter()
+                .filter(|definition| definition_matches_target(definition, target));
+            let Some(definition) = definitions.next() else { continue };
+            if definitions.next().is_none() {
+                target.semantic_identity = Some(definition.identity.clone());
+            }
+        }
+    }
+
     /// Hover text for the symbol at `offset` in `path`.
     pub fn hover_at(&self, path: &str, offset: usize) -> Option<&str> {
         self.hover
@@ -272,6 +287,27 @@ impl SymbolDB {
             .filter(|h| h.module_path == path)
             .collect()
     }
+}
+
+fn definition_matches_target(definition: &SymDef, target: &DefinitionAnchor) -> bool {
+    definition.module_path == target.module_path
+        && definition.def_span.start == target.def_span.start
+        && definition.def_span.end == target.def_span.end
+        && match (&definition.kind, target.kind.as_str()) {
+            (SymKind::Module, "module")
+            | (SymKind::Function { .. }, "function" | "method" | "extern")
+            | (SymKind::Struct { .. }, "struct")
+            | (SymKind::Enum { .. }, "enum")
+            | (SymKind::Trait, "trait")
+            | (SymKind::Tag, "tag")
+            | (SymKind::Type { .. }, "type" | "checked_text_head" | "state" | "protocol")
+            | (SymKind::Const, "const")
+            | (SymKind::EnumVariant { .. }, "enum_variant" | "variant")
+            | (SymKind::Field { .. }, "field")
+            | (SymKind::Local { .. }, "local")
+            | (SymKind::Param { .. }, "param") => true,
+            _ => false,
+        }
 }
 
 fn project_generated_presentation(db: &mut SymbolDB, bundle: &ProgramBundle) {
