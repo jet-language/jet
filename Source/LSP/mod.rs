@@ -186,7 +186,7 @@ mod tests {
 
     #[test]
     fn hover_returns_function_signature() {
-        let src = "fn add(a: Int, b: Int) => Int { return a + b; }\nfn run() { r :: add(1, 2) }\n";
+        let src = "fn add(a: Int, b: Int) Int { return a + b; }\nfn run() { r :: add(1, 2) }\n";
         let (project, _, bundle, facts) = check_test_document(src);
         let bundle = bundle.expect("bundle");
         let db = build_symbol_db(&bundle, &facts);
@@ -200,7 +200,7 @@ mod tests {
 
     #[test]
     fn hover_shows_callable_access_defaults_and_policies() {
-        let src = "#Policy(trace(\"users.load\"))\nfn load(value: &Int, label: String = \"user\") => Int { return 1 }\nfn run() {}\n";
+        let src = "#Policy(trace(\"users.load\"))\nfn load(value: &Int, label: String = \"user\") Int { return 1 }\nfn run() {}\n";
         let (project, diagnostics, bundle, facts) = check_test_document(src);
         assert!(diagnostics.iter().all(|diagnostic| diagnostic.severity != crate::Diagnostics::Severity::Error));
         let bundle = bundle.expect("bundle");
@@ -258,7 +258,7 @@ mod tests {
         let project = TestProject::new();
         std::fs::write(
             project.root.join("library.jet"),
-            "pub fn render(#Root value: Int) => Int { return value }\n",
+            "pub fn render(#Root value: Int) Int { return value }\n",
         )
         .expect("write imported root-call library");
         let src = "use \"./library\" as one\nfn run() { value :: 1\n    value.render()\n}\n";
@@ -472,7 +472,7 @@ fn run() {}
 
     #[test]
     fn inlay_hints_for_bare_call_parameter_names() {
-        let src = "fn clamp(value: Int, low: Int, high: Int) :> Int {\n    return value\n}\nfn run() {\n    print(clamp(12, low: 0, high: 10))\n}\n";
+        let src = "fn clamp(value: Int, low: Int, high: Int) Int {\n    return value\n}\nfn run() {\n    print(clamp(12, low: 0, high: 10))\n}\n";
         let (project, diagnostics, bundle, facts) = check_test_document(src);
         assert!(diagnostics.is_empty(), "unexpected diagnostics: {diagnostics:?}");
         let bundle = bundle.expect("bundle");
@@ -554,7 +554,7 @@ fn run() {
 
     #[test]
     fn hover_and_completion_use_same_semantic_fact() {
-        let src = "/// Adds two values.\n/// Example: add(1, 2)\nfn add(a: Int, b: Int) => Int { return a + b }\nfn run() {\n    \n}\n";
+        let src = "/// Adds two values.\n/// Example: add(1, 2)\nfn add(a: Int, b: Int) Int { return a + b }\nfn run() {\n    \n}\n";
         let (project, _, bundle, facts) = check_test_document(src);
         let bundle = bundle.expect("bundle");
         let db = build_symbol_db(&bundle, &facts);
@@ -585,7 +585,7 @@ fn run() {
     #[test]
     fn completion_exposes_public_labels_and_parameter_zones() {
         let src =
-            "fn connect(host: String, /, *, timeout seconds: Int = 30) => String {\n    return host\n}\nfn run() {\n    \n}\n";
+            "fn connect(host: String, /, *, timeout seconds: Int = 30) String {\n    return host\n}\nfn run() {\n    \n}\n";
         let (project, _, bundle, facts) = check_test_document(src);
         let db = build_symbol_db(&bundle.expect("bundle"), &facts);
         let offset = src.rfind("    \n").unwrap() + 4;
@@ -595,7 +595,7 @@ fn run() {
             .expect("connect completion");
         assert_eq!(
             item.detail.as_deref(),
-            Some("fn connect(host: String, /, *, timeout seconds: Int) =[]=> String")
+            Some("fn connect(host: String, /, *, timeout seconds: Int) String")
         );
     }
 
@@ -615,7 +615,7 @@ fn run() {
 
     #[test]
     fn completion_exposes_call_for_function_value_param() {
-        let src = "fn run(callback: fn(Int) => Int) {\n    callback.call(1)\n}\n";
+        let src = "fn run(callback: fn(Int) Int) {\n    callback.call(1)\n}\n";
         let (project, _, bundle, facts) = check_test_document(src);
         let db = build_symbol_db(&bundle.expect("bundle"), &facts);
         let offset = src.find("callback.call").unwrap() + "callback.ca".len();

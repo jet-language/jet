@@ -929,19 +929,37 @@ fn semantic_shape(
             }
             let params = parameter_parts.join(", ");
             let prefix = owner.map_or_else(|| format!("fn {name}"), |owner| format!("{owner}.{name}"));
-            let arrow = if let Some((param, _)) = effect_via {
-                format!(" =[via {param}]=>")
-            } else {
-                effects.as_ref().map_or_else(
-                    || ret.as_ref().map(|_| " =>".to_string()).unwrap_or_default(),
-                    |row| format!(" =[{}]=>", row.iter().map(|(name, _)| name.as_str()).collect::<Vec<_>>().join(", ")),
-                )
-            };
+            // D-SIG-SHAPE1=B: return type bare after the parameter list, and an
+            // effect ceiling in the body-arrow slot as `:[IO]>`. The retired
+            // `=[…]=>` must not reach a hover, completion or symbol label.
+            //
+            // D-PANICROOT1=A and D-AUTHORITY-MEM1=B make Panic and Mem
+            // deny-only, so they never belong in a rendered positive ceiling —
+            // showing one would display a row the user cannot type.
+            let shown: Vec<&str> = effects
+                .as_ref()
+                .map(|row| {
+                    row.iter()
+                        .map(|(name, _)| name.as_str())
+                        .filter(|name| {
+                            let root = name.split('.').next().unwrap_or(name);
+                            root != "Panic" && root != "Mem"
+                        })
+                        .collect()
+                })
+                .unwrap_or_default();
             let result = ret
                 .as_ref()
                 .map(|ty| format!(" {}", display_type(&ty.name())))
                 .unwrap_or_default();
-            (SemanticSymbolKind::Function, format!("{prefix}({params}){arrow}{result}"))
+            let ceiling = if let Some((param, _)) = effect_via {
+                format!(" :[via {param}]>")
+            } else if shown.is_empty() {
+                String::new()
+            } else {
+                format!(" :[{}]>", shown.join(", "))
+            };
+            (SemanticSymbolKind::Function, format!("{prefix}({params}){result}{ceiling}"))
         }
         SymKind::Struct { fields, .. } => (
             SemanticSymbolKind::Type,

@@ -52,9 +52,9 @@ impl FixApplicability {
 
 /// A source identity suitable for a report consumer to open from its process.
 ///
-/// Process-supplied paths remain in the spelling the caller provided. No
-/// manifest, `.git`, or current-directory prefix is added. Synthetic labels
-/// such as `<cli>` remain labels.
+/// Relative disk paths are made absolute lexically. No manifest or `.git`
+/// search is involved, and the source does not need to exist yet. Synthetic
+/// labels such as `<cli>` remain labels.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ReportPath(String);
 
@@ -64,7 +64,10 @@ impl ReportPath {
     }
 
     pub fn from_process(value: &str) -> Self {
-        Self::new(value)
+        if value.is_empty() || value.starts_with('<') {
+            return Self::new(value);
+        }
+        Self::from_path(std::path::Path::new(value))
     }
 
     pub fn from_path(path: &std::path::Path) -> Self {

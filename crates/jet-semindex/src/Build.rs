@@ -394,16 +394,34 @@ fn fn_signature(
         parameter_index += 1;
     }
     let params = parameter_parts.join(", ");
-    let arrow = if let Some((param, _)) = effect_via {
-        format!(" =[via {param}]=>")
-    } else {
-        effects.map_or_else(
-            || ret.as_ref().map(|_| " =>".to_string()).unwrap_or_default(),
-            |row| format!(" =[{}]=>", row.iter().map(|(name, _)| name.as_str()).collect::<Vec<_>>().join(", ")),
-        )
-    };
+    // D-SIG-SHAPE1=B: the return type sits bare after the parameter list and
+    // `:>` introduces the body; an effect ceiling rides the body-arrow slot as
+    // `:[IO]>`. The retired `=[…]=>` spelling must not reach a hover or a
+    // completion, which are user-facing surfaces.
+    //
+    // D-PANICROOT1=A and D-AUTHORITY-MEM1=B make Panic and Mem deny-only: they
+    // are never a positive ceiling a user writes, so rendering them here would
+    // show a row the user cannot type.
+    let shown: Vec<&str> = effects
+        .map(|row| {
+            row.iter()
+                .map(|(name, _)| name.as_str())
+                .filter(|name| {
+                    let root = name.split('.').next().unwrap_or(name);
+                    root != "Panic" && root != "Mem"
+                })
+                .collect()
+        })
+        .unwrap_or_default();
     let result = ret.as_ref().map(|ty| format!(" {}", ty.name())).unwrap_or_default();
-    let mut signature = format!("fn {name}({params}){arrow}{result}");
+    let ceiling = if let Some((param, _)) = effect_via {
+        format!(" :[via {param}]>")
+    } else if shown.is_empty() {
+        String::new()
+    } else {
+        format!(" :[{}]>", shown.join(", "))
+    };
+    let mut signature = format!("fn {name}({params}){result}{ceiling}");
     if let Some(map) = view_provenance {
         if let Some(direct) = map.get(&Vec::<String>::new()).filter(|_| map.len() == 1) {
             signature.push_str(" ; view_source = ");
