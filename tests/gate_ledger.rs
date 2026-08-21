@@ -365,6 +365,45 @@ fn ledger_json_and_generated_rust_are_stable_across_two_builds() {
 }
 
 #[test]
+fn structure_inspection_is_read_only_and_structure_facts_erase_before_runtime() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let example = "examples/features/tooling/structure_plane.jet";
+
+    let rust_before = stdout(&run(root, &["emit", "--rust", example]));
+    let run_before = stdout(&run(root, &["run", example]));
+    let release_before = stdout(&run(root, &["run", "--release", example]));
+
+    let structure = stdout(&run(root, &["inspect", "structure", example]));
+    let structure_json = stdout(&run(
+        root,
+        &["inspect", "structure", "--json", example],
+    ));
+    for fact in ["import-edge", "lifecycle", "liveness"] {
+        assert!(structure.contains(fact), "missing {fact}: {structure}");
+        assert!(structure_json.contains(fact), "missing {fact}: {structure_json}");
+    }
+    assert!(structure.contains("provenance"), "{structure}");
+    assert!(structure_json.contains("\"provenance\""), "{structure_json}");
+
+    let rust_after = stdout(&run(root, &["emit", "--rust", example]));
+    let run_after = stdout(&run(root, &["run", example]));
+    let release_after = stdout(&run(root, &["run", "--release", example]));
+
+    assert_eq!(rust_before, rust_after, "structure inspection changed AOT Rust");
+    assert_eq!(run_before, run_after, "structure inspection changed JIT output");
+    assert_eq!(release_before, release_after, "structure inspection changed AOT output");
+    for erased in [
+        "Structure.Liveness",
+        "Structure.Lifecycle",
+        "Structure.ImportEdge",
+        "policy allow",
+        "manifest rule edit",
+    ] {
+        assert!(!rust_before.contains(erased), "structure policy leaked into Rust: {erased}");
+    }
+}
+
+#[test]
 fn heavy_numeric_kind_is_summarized_after_security_rows() {
     let scratch = common::Scratch::new("gate-heavy");
     let mut source = String::from("fn run() {\n");

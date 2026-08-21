@@ -22,7 +22,10 @@ pub(crate) fn run_structure(args: &[String], json: bool, color: bool, gates: jet
     };
 
     let abs = absolutize(&path);
-    let entry = abs.display().to_string();
+    // Preserve the command's relative spelling in provenance. Loading still
+    // resolves from the same working directory, while committed reports stay
+    // deterministic across checkout paths.
+    let entry = path;
     let (diagnostics, bundle, facts) =
         jet::Driver::check_file_with_effect_facts(&entry, None, false);
     let has_errors = diagnostics

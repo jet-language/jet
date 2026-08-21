@@ -1027,6 +1027,49 @@ fn run() {
     let _ = fs::remove_dir_all(&dir);
 }
 
+#[test]
+fn structure_once_duplicate_generated_tests_reenter_test_registration() {
+    let source = r#"
+struct Case { n: Int }
+@cases :: [Case]{ Case{ n: 1 }, Case{ n: 1 } }
+
+@loop case, @cases {
+    #Test("case {case.n}") {
+        assert(case.n > 0)
+    }
+}
+
+fn run() {}
+"#;
+    let diagnostics = jet::compile(source).expect_err("duplicate generated tests must fail");
+    assert!(
+        diagnostics.iter().any(|diagnostic| diagnostic.code == "E0105"),
+        "expected duplicate generated test diagnostic, got: {diagnostics:?}"
+    );
+}
+
+#[test]
+fn structure_once_example_runs_aot_with_generated_meaning() {
+    if !common::have_rustc() {
+        eprintln!("note: skipping structure_once_example_runs_aot_with_generated_meaning (need rustc)");
+        return;
+    }
+    let dir = std::env::temp_dir().join(format!("jet_structure_once_aot_{}", std::process::id()));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap();
+    let source = include_str!("../../examples/features/reflection/derive_loop.jet");
+    let (code, stdout, stderr) = build_and_run(
+        &dir,
+        "structure_once_aot",
+        source,
+        &[],
+        None,
+    );
+    assert_eq!(code, 0, "D-STRUCT-ONCE1 AOT example failed: {stderr}");
+    assert_eq!(stdout, "x\ny\nx\ny\ngenerated\n");
+    let _ = fs::remove_dir_all(&dir);
+}
+
 /// #495 / I2: a field read from a bare (`Read`) parameter is still rooted in
 /// the borrowed parameter. The explicit `~` required by E0209 must produce
 /// owned values for both shallow and nested fields, compile through rustc, and

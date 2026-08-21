@@ -3874,6 +3874,18 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
             }
             let recv_is_fixed = matches!(recv.ty, Type::FixedList { .. });
             let recv_is_iter = crate::Collections::is_iter_type(&recv.ty);
+            let recv_is_set_materialized = matches!(
+                &recv.kind,
+                TExprKind::BuiltinMethod {
+                    recv: source,
+                    op: TBuiltinOp::SetToList | TBuiltinOp::SortedSetToList,
+                    ..
+                } if matches!(
+                    &source.ty,
+                    Type::Apply { name, .. }
+                        if name == "Set" || name == crate::Syntax::TYPE_RANK
+                )
+            );
             let recv = emit_tir_expr(recv, cx);
             // para_* needs a concrete Vec; materialize Iter at the parallel boundary.
             let para_recv = if recv_is_fixed {
@@ -3978,6 +3990,11 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                 TClosureOp::FlatMap => {
                     if recv_is_iter {
                         format!("jet_iter_flat_map({as_iter}, {})", a(0))
+                    } else if recv_is_set_materialized {
+                        format!(
+                            "jet_iter_flat_map(jet_iter_from_vec(({recv}).clone()), {})",
+                            a(0)
+                        )
                     } else {
                         // D-CORE-EAGER2=A: concrete List.flat_map is eager.
                         let mut f = a(0);

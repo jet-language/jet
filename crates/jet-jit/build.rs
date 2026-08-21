@@ -115,6 +115,8 @@ fn write_prelude_enum_meta(manifest: &PathBuf) {
         ("Key", "../jet-codegen/src/Prelude/Core/TermKey.rs", "JetKey"),
         ("EncodingFormat", "../jet-codegen/src/Prelude/CoreLib/JetStd/EncodingTypes.rs", "EncodingFormat"),
         ("EncodingErrorKind", "../jet-codegen/src/Prelude/CoreLib/JetStd/EncodingTypes.rs", "EncodingErrorKind"),
+        ("CBORErrorKind", "../jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs", "CBORErrorKind"),
+        ("XMLReason", "../jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs", "XMLReason"),
         ("DataEvent", "../jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs", "DataEvent"),
         ("AuthError", "../jet-codegen/src/Prelude/CoreLib/Top/Auth.rs", "JetAuthError"),
         ("HookOutcome", "../jet-codegen/src/Prelude/CoreLib/JetStd/ReactiveEventWatch.rs", "JetHookOutcome"),

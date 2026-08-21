@@ -53,6 +53,30 @@ fn expand_item_template_loops(
     *items = expanded_items;
 }
 
+/// Register one test after a template expansion has materialized its static
+/// name. Root loops reach the ordinary item pass directly; marker and derive
+/// bodies use this helper when their generated items are appended later.
+fn register_test_item(
+    test: &crate::AST::TestDef,
+    state: &mut crate::Sema::ModuleState,
+    diags: &mut Vec<Diagnostic>,
+) {
+    let Some(name) = &test.name else {
+        return;
+    };
+    if name_defined(name, &state.funcs, &state.registry, &state.consts)
+        || state.tests.contains_key(name)
+    {
+        diags.push(defined_twice(
+            name,
+            "every test needs a unique name so failures are easy to find",
+            test.name_span,
+        ));
+    } else {
+        state.tests.insert(name.clone(), test.name_span);
+    }
+}
+
 fn register_generated_union_enums(
     items: &[Item],
     state: &mut crate::Sema::ModuleState,
@@ -439,6 +463,7 @@ fn check_bundle_opts_for_output_inner(
     incremental: Option<&mut IncrementalSemaCache>,
     allow_compiler_api: bool,
 ) -> (Vec<Diagnostic>, super::super::Effects::SemIndexEffectFacts) {
+    guard_fact_registry_law();
     let foreign_diags = validate_foreign_imports(bundle);
     if !foreign_diags.is_empty() {
         return (
@@ -807,12 +832,6 @@ fn check_bundle_opts_for_output_inner(
 
     for (idx, module) in bundle.modules.iter_mut().enumerate() {
         super::super::Protocol::expand_module_protocols(&mut module.items, &mut diags);
-        // D-DOTSCOPE1: validate contextual `.member { … }` scope statements
-        // against each marker's declared vocabulary (E0614/E0615/E0616/E0617/E0618).
-        diags.extend(super::super::ScopeMembers::check(
-            &module.items,
-            &marker_vocabulary,
-        ));
         // D-FIELDPOL1: computed-field cycle check (E0338) + `self.field`
         // rewrite + synthesized getter methods, before anything else.
         process_computed_fields(&mut module.items, &mut diags);
@@ -982,20 +1001,7 @@ fn check_bundle_opts_for_output_inner(
                     }
                 }
                 Item::Test(t) => {
-                    let Some(name) = &t.name else {
-                        continue;
-                    };
-                    if name_defined(name, &st.funcs, &st.registry, &st.consts)
-                        || st.tests.contains_key(name)
-                    {
-                        diags.push(defined_twice(
-                            name,
-                            "every test needs a unique name so failures are easy to find",
-                            t.name_span,
-                        ));
-                    } else {
-                        st.tests.insert(name.clone(), t.name_span);
-                    }
+                    register_test_item(t, st, &mut diags);
                 }
                 Item::ExternRust(block) => {
                     if check_extern_block(block, &st.registry, &mut diags) {
@@ -1098,6 +1104,7 @@ fn check_bundle_opts_for_output_inner(
         // D-METADERIVE1=A: user-derive expansion — run after struct/func registration so
         // derive bodies can call helper functions and access TypeInfo. The expanded typed
         // items are appended to the ordinary sema stream; no source string is re-lexed.
+        let mut generated_test_spans = Vec::new();
         {
             if !derive_providers.is_empty() {
                 let struct_infos: Vec<&crate::AST::StructDef> = module
@@ -1327,9 +1334,14 @@ fn check_bundle_opts_for_output_inner(
                         }
                         Item::Tag(_) => {}
                         Item::Impl(_) => {}
+                        Item::Test(_) => {}
                         _ => {}
                     }
                 }
+                generated_test_spans.extend(new_items.iter().filter_map(|item| match item {
+                    Item::Test(test) => Some(test.name_span),
+                    _ => None,
+                }));
                 module.items.extend(new_items);
             }
         }
@@ -1561,10 +1573,33 @@ fn check_bundle_opts_for_output_inner(
                     ),
                     Item::Tag(_) => {}
                     Item::Impl(_) => {}
+                    Item::Test(_) => {}
                     _ => {}
                 }
             }
+            generated_test_spans.extend(new_items.iter().filter_map(|item| match item {
+                Item::Test(test) => Some(test.name_span),
+                _ => None,
+            }));
             module.items.extend(new_items);
+        }
+
+        // Marker/derive expansion can append `#Test` items after the first
+        // static-product pass. Resolve their interpolated names and measured
+        // marker facts before the ordinary test registry and body checker see
+        // them; the pass is idempotent for items handled earlier.
+        super::super::CheckerMarkers::resolve_static_rule_products(
+            module,
+            &base,
+            &ct_core_imports[idx],
+            &mut diags,
+        );
+        for item in &module.items {
+            if let Item::Test(test) = item {
+                if generated_test_spans.contains(&test.name_span) {
+                    register_test_item(test, st, &mut diags);
+                }
+            }
         }
 
         st.consts.extend(comptime_types);
@@ -2297,6 +2332,17 @@ fn check_bundle_opts_for_output_inner(
         }
     }
 
+    // D-DOTSCOPE1 / D-STRUCT-ONCE1: validate contextual `.member { … }`
+    // statements after every typed template expansion. Generated tests and
+    // methods must receive the same structural diagnostics as written items;
+    // the marker vocabulary remains the single source of truth.
+    for module in &bundle.modules {
+        diags.extend(super::super::ScopeMembers::check(
+            &module.items,
+            &marker_vocabulary,
+        ));
+    }
+
     resolve_inline_module_imports(bundle, &mut states, &mut name_ledger, &mut diags);
 
     complete_bundle_check(
@@ -2311,6 +2357,15 @@ fn check_bundle_opts_for_output_inner(
         name_ledger,
         diags,
     )
+}
+
+/// D-STRUCT-PLANE1=A / I2 / I3: the fact law is a front-end invariant. Keep
+/// the registry guard in sema so no downstream engine can become the first
+/// place that notices a structure row lost its direction or gate.
+fn guard_fact_registry_law() {
+    if let Some(violation) = jet_foundation::Registry::law_violations().into_iter().next() {
+        jet_foundation::ice!(None, "fact registry law violation: {violation}");
+    }
 }
 
 /// D-FAIL-EXIT1=A: every explicit `fn run` gets the default fallible entry

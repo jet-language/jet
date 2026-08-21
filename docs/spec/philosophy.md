@@ -103,6 +103,25 @@ The D-LINTPOLICY1 on-record clause is one law for every gate: each bypass is
 written at its site or on the command line and lands in this ledger. A gate kind
 does not get a private bypass rule or a hidden write surface.
 
+### Structure facts use the same law
+
+*(D-STRUCT-PLANE1=A, ratified 2026-08-19, card #2131.)*
+
+Liveness, lifecycle, and import-edge observations are three rows in the one
+fact registry, not three analyzers. Each row states its safe direction and its
+written gate: `_name` for liveness, `policy allow` for lifecycle, and `manifest
+rule edit` for import edges. The registry guard rejects a structure row that
+loses either column. Sema records the facts and projects gate-bearing rows into
+the one `GateLedger`; `jet inspect structure` reads that ledger and the same
+fact rows as `jet inspect gates`.
+
+Structure facts are compiler observations. They are erased before TIR, AOT,
+Cranelift, interpreter, or web runtime code is formed. I2 and I3 therefore keep
+rustc and the engines from deciding structure policy; I8 keeps the plane from
+growing a second registry or analyzer; I9 requires every applicable execution
+tier to consume the same checked result. D-STRUCT-PLANE1 adds no user spelling:
+the existing `_name` and manifest/policy surfaces remain the written controls.
+
 Two walls stand on purpose. The borrow checker is a **prover**, never a plane:
 alias and flow analysis over places cannot be a fold of per-operation rules, so
 the engine stays its own, and the facts it publishes register as read-only rows

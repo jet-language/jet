@@ -68,6 +68,12 @@ const LENSES: &[Lens] = &[
         render_json: render_derive_json,
     },
     Lens {
+        name: "templates",
+        summary: "checked @loop marker, impl, test, and measurement expansions (D-STRUCT-ONCE1)",
+        render: render_templates,
+        render_json: render_templates_json,
+    },
+    Lens {
         name: "callable-signature",
         summary: "complete checked callable signatures and policy chains (D-CALLPOLICY1)",
         render: render_callable_signature,
@@ -91,7 +97,7 @@ pub(crate) fn run_expand(args: &[String], json: bool) {
                             "E2104",
                             "`--facts` needs a lens name",
                             "the expand command must know which registered lens to project",
-                            "pass `--facts inline`, `--facts memory`, `--facts web`, `--facts effects`, `--facts layout`, `--facts derive`, or `--facts callable-signature`",
+                            "pass `--facts inline`, `--facts memory`, `--facts web`, `--facts effects`, `--facts layout`, `--facts derive`, `--facts templates`, or `--facts callable-signature`",
                         );
                     }
                     if !json {
@@ -130,7 +136,7 @@ pub(crate) fn run_expand(args: &[String], json: bool) {
                         "E2941",
                         &format!("unknown expand lens `{name}`"),
                         "only registered lenses have checked semantic facts",
-                        "use `inline`, `memory`, `web`, `effects`, `layout`, `derive`, or `callable-signature`",
+                        "use `inline`, `memory`, `web`, `effects`, `layout`, `derive`, `templates`, or `callable-signature`",
                     );
                 }
                 if !json {
@@ -896,6 +902,183 @@ fn render_derive_json(
                     ),
                 ),
                 ("derives", expand_string_list(&definition.derives)),
+            ])
+        })
+        .collect()
+}
+
+/// D-STRUCT-ONCE1=A: project the final checked declarations produced by a
+/// typed `@loop`. This intentionally reads only the bundle that the ordinary
+/// sema pipeline already checked. It does not retain a template-side copy,
+/// reparse source, or perform a second expansion.
+struct TemplateRow {
+    source: String,
+    span: jet::Diagnostics::Span,
+    kind: String,
+    name: String,
+    methods: Vec<String>,
+    text: String,
+}
+
+fn module_has_template_loop(module: &jet::AST::LoadedModule) -> bool {
+    module
+        .source
+        .lines()
+        .any(|line| line.trim_start().starts_with("@loop"))
+}
+
+fn test_is_measurement(test: &jet::AST::TestDef) -> bool {
+    test.body.iter().any(|statement| {
+        matches!(
+            statement,
+            jet::AST::Stmt::ScopeMember { name, .. } if name == "measure"
+        )
+    })
+}
+
+fn collect_template_rows(bundle: &ProgramBundle) -> Vec<TemplateRow> {
+    let mut rows = Vec::new();
+    for module in &bundle.modules {
+        if !module_has_template_loop(module) {
+            continue;
+        }
+        for item in &module.items {
+            match item {
+                Item::Struct(definition) => {
+                    let mut seen_markers = Vec::new();
+                    for marker in &definition.type_markers {
+                        seen_markers.push((marker.name.clone(), marker.span));
+                        rows.push(TemplateRow {
+                            source: module.display.clone(),
+                            span: marker.span,
+                            kind: "marker".to_string(),
+                            name: definition.name.clone(),
+                            methods: Vec::new(),
+                            text: format!("marker #{} on {}", marker.name, definition.name),
+                        });
+                    }
+                    for (derive, span) in &definition.derives {
+                        if seen_markers
+                            .iter()
+                            .any(|(name, marker_span)| name == derive && marker_span == span)
+                        {
+                            continue;
+                        }
+                        rows.push(TemplateRow {
+                            source: module.display.clone(),
+                            span: *span,
+                            kind: "derive".to_string(),
+                            name: definition.name.clone(),
+                            methods: Vec::new(),
+                            text: format!("derive #{} on {}", derive, definition.name),
+                        });
+                    }
+                }
+                Item::Impl(implementation) => {
+                    if implementation.is_generated_serde {
+                        continue;
+                    }
+                    let methods = implementation
+                        .methods
+                        .iter()
+                        .map(|method| method.name.clone())
+                        .collect::<Vec<_>>();
+                    let trait_suffix = implementation
+                        .trait_name
+                        .as_deref()
+                        .map_or(String::new(), |name| format!(": {name}"));
+                    let members = if methods.is_empty() {
+                        String::new()
+                    } else {
+                        format!(" [{}]", methods.join(", "))
+                    };
+                    rows.push(TemplateRow {
+                        source: module.display.clone(),
+                        span: implementation.span,
+                        kind: "impl".to_string(),
+                        name: implementation.type_name.clone(),
+                        methods,
+                        text: format!(
+                            "impl {}{}{}",
+                            implementation.type_name, trait_suffix, members
+                        ),
+                    });
+                }
+                Item::Test(test) => {
+                    let name = test
+                        .name
+                        .clone()
+                        .unwrap_or_else(|| "<unresolved>".to_string());
+                    let kind = if test_is_measurement(test) {
+                        "measurement"
+                    } else {
+                        "test"
+                    };
+                    rows.push(TemplateRow {
+                        source: module.display.clone(),
+                        span: test.span,
+                        kind: kind.to_string(),
+                        name: name.clone(),
+                        methods: Vec::new(),
+                        text: format!("{} #Test({})", kind, name),
+                    });
+                }
+                _ => {}
+            }
+        }
+    }
+    rows.sort_by(|left, right| {
+        left.source
+            .cmp(&right.source)
+            .then(left.span.start.cmp(&right.span.start))
+            .then(left.kind.cmp(&right.kind))
+            .then(left.name.cmp(&right.name))
+    });
+    rows
+}
+
+fn render_templates(
+    bundle: &ProgramBundle,
+    _facts: &SemIndexEffectFacts,
+    _index: &SemIndex,
+) -> Vec<String> {
+    collect_template_rows(bundle)
+        .into_iter()
+        .map(|row| {
+            let module = bundle
+                .modules
+                .iter()
+                .find(|module| module.display == row.source)
+                .expect("template row source must be a checked module");
+            let (line, column) = jet::Diagnostics::span_line_col(&module.source, row.span.start);
+            format!(
+                "{}:{}:{}   {}   [from closed comptime @loop]",
+                row.source, line, column, row.text
+            )
+        })
+        .collect()
+}
+
+fn render_templates_json(
+    bundle: &ProgramBundle,
+    _facts: &SemIndexEffectFacts,
+    _index: &SemIndex,
+) -> Vec<ExpandValue> {
+    collect_template_rows(bundle)
+        .into_iter()
+        .map(|row| {
+            let location = source_location(bundle, &row.source, row.span.start);
+            expand_object(vec![
+                ("kind", expand_string(&row.kind)),
+                ("name", expand_string(&row.name)),
+                ("methods", expand_string_list(&row.methods)),
+                ("text", expand_string(&row.text)),
+                ("source", expand_string(&row.source)),
+                ("span", expand_span(row.span, location)),
+                (
+                    "origin",
+                    expand_string("@loop (closed comptime source)"),
+                ),
             ])
         })
         .collect()

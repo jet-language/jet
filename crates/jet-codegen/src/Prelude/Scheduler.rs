@@ -535,6 +535,10 @@ impl JetTaskControl {
         })
     }
 
+    pub fn observe_id_slot(&self) -> &AtomicUsize {
+        &self.observe_id
+    }
+
     pub fn pause(&self) {
         self.pause_with_mode(0);
     }
@@ -3046,7 +3050,7 @@ where F:FnOnce()->T+Send+'static,T:Send+'static,
 fn jet_scheduler_spawn_with_control_kind<F,T>(f:F,control:Arc<JetTaskControl>,blocking:bool)->JetSchedulerJoin<T>
 where F:FnOnce()->T+Send+'static,T:Send+'static,
 {
-    let observe_id = jet_observe_task_register(&control);
+    let observe_id = jet_observe_task_register(&control.observe_id);
     let (tx, rx) = std::sync::mpsc::sync_channel(1);
     let completion_order = Arc::new(OnceLock::new());
     let task_completion_order = completion_order.clone();

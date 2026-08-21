@@ -241,7 +241,7 @@ const INSPECT_ACTIONS: &[NestedCommandSpec] = &[
     NestedCommandSpec { name: "digest", usage: "digest [--json] [--list-topics] [--topic <name>]", summary: "Write the one-file LLM surface digest", handler: HandlerKey::Digest, also_canonical_top_level: false },
     NestedCommandSpec { name: "env", usage: "env [--json] [<env.jet|config.jet>]", summary: "List typed environment reads in a config surface", handler: HandlerKey::InspectEnv, also_canonical_top_level: false },
     NestedCommandSpec { name: "semindex", usage: "semindex <file.jet>", summary: "Search the code index", handler: HandlerKey::Semindex, also_canonical_top_level: false },
-    NestedCommandSpec { name: "expand", usage: "expand [--facts <inline|memory|web|effects|layout|derive|callable-signature>] [--json] <file.jet>", summary: "Show expanded meaning of Jet code (use --json for canonical facts)", handler: HandlerKey::Expand, also_canonical_top_level: false },
+    NestedCommandSpec { name: "expand", usage: "expand [--facts <inline|memory|web|effects|layout|derive|templates|callable-signature>] [--json] <file.jet>", summary: "Show expanded meaning of Jet code (use --json for canonical facts)", handler: HandlerKey::Expand, also_canonical_top_level: false },
     NestedCommandSpec { name: "unsafe", usage: "unsafe <file.jet>", summary: "Review unsafe code and its safeguards", handler: HandlerKey::Unsafe, also_canonical_top_level: false },
     NestedCommandSpec { name: "gates", usage: "gates [--scope <scope>] [--kind <kind>] [--json] <file.jet>", summary: "Read the complete compile-time gate ledger", handler: HandlerKey::Gates, also_canonical_top_level: false },
     NestedCommandSpec { name: "authority", usage: "authority [--scope <scope>] [--kind <kind>] [--json] <file.jet>", summary: "Read rights-bearing gates from the ledger", handler: HandlerKey::Authority, also_canonical_top_level: false },
@@ -1090,7 +1090,7 @@ const BASE_FLAGS: &[FlagSpec] = &[
     FlagSpec { long: "--lens", help: "with prove: project the human report by an exact evidence facet" },
     // #1659 criterion 1 (round 2): see the block above --message for the
     // other 7 formerly usage-string-only flags.
-    FlagSpec { long: "--facts", help: "with expand: project inline, memory, web, effects, layout, derive, or callable-signature facts --facts=<lens>" },
+    FlagSpec { long: "--facts", help: "with expand: project inline, memory, web, effects, layout, derive, templates, or callable-signature facts --facts=<lens>" },
     FlagSpec { long: "--annotations", help: "with budget: CI annotations auto, none, or github" },
     FlagSpec { long: "--baseline", help: "with budget update: selected baseline name" },
     FlagSpec { long: "--bootstrap", help: "with budget update: create absent or stale baseline history" },

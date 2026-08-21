@@ -188,7 +188,7 @@ fn jet_observe_task_update(_state: &'static str, _wait: &str, _deadline_ms: Opti
 // D-OBSERVE-LIVE1: the scheduler registers each task with the shared Observe
 // seam. This scope stubs that seam rather than including it, so the stubs must
 // track `Prelude/Observe.rs`'s signatures.
-fn jet_observe_task_register(_control: &JetTaskControl) -> usize {
+fn jet_observe_task_register(_observe_id: &std::sync::atomic::AtomicUsize) -> usize {
     0
 }
 fn jet_observe_task_enter(_id: usize) {}

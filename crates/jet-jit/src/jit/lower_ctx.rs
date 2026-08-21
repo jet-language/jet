@@ -10923,6 +10923,33 @@ impl LowerCtx<'_, '_> {
                 self.b.ins().call(push_ref, &[buf_id, text]);
                 return Ok(());
             }
+            if type_name == "JSONError" {
+                let recv = self.lower_expr(expr)?;
+                let text = self.call_host(self.host.encoding.json_error_show, &[recv]);
+                let push_ref = self
+                    .module
+                    .declare_func_in_func(self.host.str_push_str, self.b.func);
+                self.b.ins().call(push_ref, &[buf_id, text]);
+                return Ok(());
+            }
+            if type_name == "CBORError" {
+                let recv = self.lower_expr(expr)?;
+                let text = self.call_host(self.host.encoding.cbor_error_show, &[recv]);
+                let push_ref = self
+                    .module
+                    .declare_func_in_func(self.host.str_push_str, self.b.func);
+                self.b.ins().call(push_ref, &[buf_id, text]);
+                return Ok(());
+            }
+            if type_name == "XMLError" {
+                let recv = self.lower_expr(expr)?;
+                let text = self.call_host(self.host.encoding.xml_error_show, &[recv]);
+                let push_ref = self
+                    .module
+                    .declare_func_in_func(self.host.str_push_str, self.b.func);
+                self.b.ins().call(push_ref, &[buf_id, text]);
+                return Ok(());
+            }
             if matches!(type_name, "GameImage" | "GameSound") {
                 let recv = self.lower_expr(expr)?;
                 let kind = self

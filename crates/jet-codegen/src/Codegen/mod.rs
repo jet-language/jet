@@ -217,6 +217,7 @@ const PRELUDE_PARTS: &[&str] = &[
     // file, so no tier re-decodes key bytes or re-states raw-mode entry.
     include_str!("../Prelude/Core/TermKey.rs"),
     include_str!("../Prelude/Core/RuntimeControl.rs"),
+    include_str!("../Prelude/Core/JsonError.rs"),
     include_str!("../Prelude/NumericWiden.rs"),
     include_str!("../Prelude/Observe.rs"),
     include_str!("../../../jet-foundation/src/ExactUnitConversion.rs"),

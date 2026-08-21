@@ -56,15 +56,17 @@ impl<'a> Parser<'a> {
             } else {
                 false
             };
-            // S61: detect `name: expr` label at call site — an ident followed by `:` that is
-            // NOT `::` (a Rust path). We must not consume it yet if it is just a variable name.
-            let label = if matches!(self.peek().kind, TokKind::Ident(_) | TokKind::KwTag)
-                && matches!(self.peek2().kind, TokKind::Colon)
-            {
+            // S61: detect `name: expr` labels — including the registered `use` keyword
+            // inside marker arguments — without consuming a plain variable name.
+            let label_token = matches!(self.peek().kind, TokKind::Ident(_) | TokKind::KwTag)
+                || allow_lowercase_leading_dot
+                    && matches!(self.peek().kind, TokKind::KwUse);
+            let label = if label_token && matches!(self.peek2().kind, TokKind::Colon) {
                 let lbl_tok = self.bump();
                 let lbl_name = match lbl_tok.kind {
                     TokKind::Ident(n) => n,
                     TokKind::KwTag => "tag".to_string(),
+                    TokKind::KwUse => crate::Syntax::KW_USE.to_string(),
                     _ => unreachable!(),
                 };
                 self.bump(); // consume `:`

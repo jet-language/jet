@@ -408,18 +408,6 @@ fn validate_web_func_tir(
 ) {
     *cx.current_type_params.borrow_mut() = f.type_params.iter().map(|p| p.name.clone()).collect();
     let covered = TIR::tir_covers(f, cx);
-    if !covered
-        && matches!(
-            f.name.as_str(),
-            "describe" | "as_named" | "run" | "digit" | "wasm_digit"
-        )
-    {
-        eprintln!(
-            "[web-debug] coverage miss {}: {}",
-            f.name,
-            TIR::refusal::describe(cx)
-        );
-    }
     if covered {
         let tir = TIR::lower_web_func(f, cx);
         let supported = if !require_web_emit {
@@ -437,17 +425,6 @@ fn validate_web_func_tir(
                 && web_func_guarantees_return(f, &tir)
                 && web_wasm_abi_supported(f, &tir, bundle)
         };
-        if !supported {
-            eprintln!(
-                "[web-debug] emitter miss {} bucket {:?}: body {:?}",
-                f.name,
-                bucket,
-                tir.body
-                    .iter()
-                    .map(|stmt| format!("{:?}", std::mem::discriminant(stmt)))
-                    .collect::<Vec<_>>()
-            );
-        }
         if supported {
             cx.current_type_params.borrow_mut().clear();
             return;
@@ -3407,9 +3384,6 @@ fn emit_wasm_rust(bundle: &ProgramBundle, funcs: &[FuncWeb]) -> WebEmitResult<St
         .map(|func| func.key.as_str())
         .collect::<Vec<_>>();
     if !authority_funcs.is_empty() {
-        eprintln!("[probe-authority] funcs={authority_funcs:?}");
-    }
-    if !authority_funcs.is_empty() {
         out.push_str(include_str!("../Prelude/Core/Authority.rs"));
         out.push('\n');
     }
@@ -3844,15 +3818,6 @@ fn emit_wasm_rust(bundle: &ProgramBundle, funcs: &[FuncWeb]) -> WebEmitResult<St
             || auto_started_wasm_run(bundle, f);
         emit_wasm_fn(bundle, f, export, &mut out, funcs)?;
     }
-    if out.contains("Authority") {
-        eprintln!(
-            "[probe-authority-output] {}",
-            out.lines()
-                .filter(|line| line.contains("Authority"))
-                .collect::<Vec<_>>()
-                .join(" || ")
-        );
-    }
     Ok(out)
 }
 
@@ -4069,10 +4034,7 @@ fn emit_wasm_fn(bundle: &ProgramBundle, f: &FuncWeb, export: bool, out: &mut Str
         f.file_prefix.as_deref(),
         &f.tir.web_param_reconstructions,
     )
-    .map_err(|()| {
-        eprintln!("[web-debug] wasm emit miss {}", f.name);
-        web_emit_error(f)
-    })?;
+    .map_err(|()| web_emit_error(f))?;
     if f.key == "run"
         && matches!(
             f.return_type.as_ref(),
@@ -5496,14 +5458,6 @@ fn wasm_emit_inline_block(
     let Some((last, prefix)) = stmts.split_last() else {
         return Ok("{ () }".to_string());
     };
-    if !prefix.is_empty() {
-        let stmt_kind = |stmt: &TIR::TStmt| format!("{:?}", std::mem::discriminant(stmt));
-        eprintln!(
-            "[probe-inline] prefix={:?} last={}",
-            prefix.iter().map(stmt_kind).collect::<Vec<_>>(),
-            stmt_kind(last)
-        );
-    }
     if let Some((name, init)) = web_inline_single_let(prefix) {
         if web_inline_init_is_safe(init) {
             if let Some(rendered) = wasm_emit_inline_direct_call(
@@ -5677,19 +5631,7 @@ fn wasm_emit_direct_call(
     reconstructions: &[TIR::TWebParamReconstruction],
 ) -> Result<Option<String>, ()> {
     let emit_call = |key: String, args: &[TIR::TCallArg]| -> Result<Option<String>, ()> {
-        let arg_shape = args.first().map(|arg| {
-            let place = match &arg.value.kind {
-                TIR::TExprKind::Local(local) => Some(local.rust_place()),
-                _ => None,
-            };
-            (place, arg.clone, arg.arc_clone, arg.widen_to_vec, arg.widen_to_union.is_some())
-        });
-        eprintln!(
-            "[probe-direct] key={key:?} temp={temp_name:?} arg={arg_shape:?} funcs={:?}",
-            funcs.iter().map(|func| (&func.key, func.bucket)).collect::<Vec<_>>()
-        );
         if args.len() != 1 || !web_inline_local_is(&args[0].value, temp_name) {
-            eprintln!("[probe-direct] local mismatch");
             return Ok(None);
         }
         let mut callees = funcs.iter().filter(|f| f.key == key && f.bucket == WebBucket::Wasm);
@@ -5697,7 +5639,10 @@ fn wasm_emit_direct_call(
         if callees.next().is_some() {
             return Err(());
         }
-        let value = wasm_emit_expr(init, funcs, file_prefix, reconstructions)?;
+        let value = match (&init.kind, &init.ty) {
+            (TIR::TExprKind::Local(local), Type::Int) if !local.deref => local.rust_place(),
+            _ => wasm_emit_expr(init, funcs, file_prefix, reconstructions)?,
+        };
         let value = wasm_emit_call_arg_value(&args[0], value)?;
         Ok(Some(format!("jet_wasm_{key}({value})")))
     };
@@ -6693,7 +6638,6 @@ fn emit_js_app(
     // D-FAIL-EDGE1: the build target is fixed in this artifact. Startup and
     // edge delivery never inspect the host runtime to decide which boundary
     // applies.
-    let auto_start = bundle.modules[bundle.entry].html_path.is_none();
     let mut out = String::from(
         "// Generated by jet — web JS entry (D-WEBBACKEND1).\n\
          import * as jetDom from \"./jet_dom_runtime.js\";\n\n",
@@ -6708,6 +6652,11 @@ fn emit_js_app(
         .filter(|f| f.marker == Some(WebPartitionMarker::WasmExport))
         .collect();
     let wasm_main = funcs.iter().any(|f| auto_started_wasm_run(bundle, f));
+    // A browser-owned JS initializer is called by its host. When `run` is the
+    // Wasm entry, suppress its default startup call so importing the module
+    // does not execute the program before the host installs its handlers.
+    let auto_start = bundle.modules[bundle.entry].html_path.is_none()
+        && !(wasm_main && funcs.iter().any(|f| f.bucket == WebBucket::JS && f.name == "init"));
     if !exports.is_empty() || wasm_main {
         out.push_str("let _wasm = null;\n\n");
         out.push_str("async function loadWasm() {\n");
@@ -6959,10 +6908,7 @@ fn emit_js_fn(
         js_source_index(sources, &f.source_path)
     ));
     emit_tir_js_body(&f.tir.body, &mut body, all, f.file_prefix.as_deref(), 2)
-        .map_err(|()| {
-            eprintln!("[web-debug] js emit miss {}", f.name);
-            web_emit_error(f)
-        })?;
+        .map_err(|()| web_emit_error(f))?;
     let async_kw = if !f.is_generator && body.contains("await ") {
         "async "
     } else {

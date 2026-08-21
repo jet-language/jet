@@ -835,6 +835,46 @@ fn build(b: BuildContext) {
         );
     }
 
+    /// D-STRUCT-ONCE1=A: a closed type-list source must stop before the root
+    /// template body, so `[Type] { impl … }` is not parsed as a typed list
+    /// literal.
+    #[test]
+    fn root_template_loop_parses_closed_type_list_and_declarations() {
+        let p = program(
+            r#"
+@loop T, [Point] {
+    impl T {
+        fn generated(self) String :> "generated"
+    }
+    #Test("generated") {
+        .measure {
+            assert(true)
+        }
+    }
+}
+"#,
+        );
+        let loop_item = p
+            .items
+            .iter()
+            .find_map(|item| match item {
+                crate::AST::Item::TemplateLoop(item) => Some(item),
+                _ => None,
+            })
+            .expect("root template loop");
+        assert_eq!(loop_item.body.len(), 2);
+        assert!(matches!(
+            loop_item.body[0],
+            crate::AST::DeriveBodyItem::Item(ref item)
+                if matches!(item.as_ref(), crate::AST::Item::Impl(_))
+        ));
+        assert!(matches!(
+            loop_item.body[1],
+            crate::AST::DeriveBodyItem::Item(ref item)
+                if matches!(item.as_ref(), crate::AST::Item::Test(_))
+        ));
+    }
+
     /// D-CONC-SPAWN1=D: `task work()` parses as a scoped spawn call.
     #[test]
     fn task_keyword_callable_body_parses_as_spawn() {

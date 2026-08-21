@@ -193,10 +193,10 @@ fn jet_observe_event(mut event: JetObserveEvent) {
     events.push_back(event);
 }
 
-pub fn jet_observe_task_register(control: &JetTaskControl) -> usize {
+pub fn jet_observe_task_register(observe_id: &std::sync::atomic::AtomicUsize) -> usize {
     use std::sync::atomic::Ordering;
     let Some(registry) = jet_observe_registry() else {
-        control.observe_id.store(0, Ordering::Relaxed);
+        observe_id.store(0, Ordering::Relaxed);
         return 0;
     };
     let parent = JET_OBSERVE_TASK_ID.with(|current| current.get());
@@ -211,7 +211,7 @@ pub fn jet_observe_task_register(control: &JetTaskControl) -> usize {
             cancelled: false,
         },
     );
-    control.observe_id.store(id, Ordering::Relaxed);
+    observe_id.store(id, Ordering::Relaxed);
     id
 }
 

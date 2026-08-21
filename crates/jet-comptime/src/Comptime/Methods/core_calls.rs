@@ -900,24 +900,48 @@ pub fn apply_core_call_with_type(
                     .ok_or_else(|| unsupported("mixing float widths", span))?,
             ))
         }
-        ("core.math", "min") => match (one(0)?, one(1)?) {
-            (CtValue::Int(left), CtValue::Int(right)) => Ok(CtValue::Int(
-                math_lib_pure::jet_std_math_min_i64(*left, *right),
-            )),
-            (CtValue::Float(left), CtValue::Float(right)) => {
-                Ok(CtValue::Float(core_math_float_min(*left, *right, span)?))
+        ("core.math", "min") => {
+            let left = one(0)?;
+            let right = one(1)?;
+            match (&left, &right) {
+                (CtValue::Int(left), CtValue::Int(right)) => Ok(CtValue::Int(
+                    math_lib_pure::jet_std_math_min_i64(*left, *right),
+                )),
+                (CtValue::Float(left), CtValue::Float(right)) => {
+                    Ok(CtValue::Float(core_math_float_min(*left, *right, span)?))
+                }
+                _ => Ok(CtValue::Float(core_math_float_min(
+                    as_ct_float(&left, span).map_err(|_| {
+                        unsupported("core.math.min: non-numeric arguments", span)
+                    })?,
+                    as_ct_float(&right, span).map_err(|_| {
+                        unsupported("core.math.min: non-numeric arguments", span)
+                    })?,
+                    span,
+                )?)),
             }
-            _ => Err(unsupported("core.math.min: non-numeric arguments", span)),
-        },
-        ("core.math", "max") => match (one(0)?, one(1)?) {
-            (CtValue::Int(left), CtValue::Int(right)) => Ok(CtValue::Int(
-                math_lib_pure::jet_std_math_max_i64(*left, *right),
-            )),
-            (CtValue::Float(left), CtValue::Float(right)) => {
-                Ok(CtValue::Float(core_math_float_max(*left, *right, span)?))
+        }
+        ("core.math", "max") => {
+            let left = one(0)?;
+            let right = one(1)?;
+            match (&left, &right) {
+                (CtValue::Int(left), CtValue::Int(right)) => Ok(CtValue::Int(
+                    math_lib_pure::jet_std_math_max_i64(*left, *right),
+                )),
+                (CtValue::Float(left), CtValue::Float(right)) => {
+                    Ok(CtValue::Float(core_math_float_max(*left, *right, span)?))
+                }
+                _ => Ok(CtValue::Float(core_math_float_max(
+                    as_ct_float(&left, span).map_err(|_| {
+                        unsupported("core.math.max: non-numeric arguments", span)
+                    })?,
+                    as_ct_float(&right, span).map_err(|_| {
+                        unsupported("core.math.max: non-numeric arguments", span)
+                    })?,
+                    span,
+                )?)),
             }
-            _ => Err(unsupported("core.math.max: non-numeric arguments", span)),
-        },
+        }
         ("core.math", "clamp") => match (one(0)?, one(1)?, one(2)?) {
             (CtValue::Int(value), CtValue::Int(low), CtValue::Int(high)) => Ok(CtValue::Int(
                 math_lib_pure::jet_std_math_clamp_i64(*value, *low, *high),

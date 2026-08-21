@@ -27,6 +27,10 @@ mod encoding_error_rt {
     include!("../../jet-codegen/src/Prelude/Core/EncodingError.rs");
 }
 
+mod json_error_rt {
+    include!("../../jet-codegen/src/Prelude/Core/JsonError.rs");
+}
+
 mod field_error_rt {
     include!("../../jet-codegen/src/Prelude/Core/FieldError.rs");
 }
@@ -1987,6 +1991,90 @@ fn jet_jit_encoding_error_show(handle: i64) -> i64 {
     })
 }
 
+/// Marshal a resident JSON parser error into the one Prelude rendering used
+/// by AOT and the TIR evaluator. This function is only the heap adapter.
+fn jet_jit_json_error_show(handle: i64) -> i64 {
+    Concurrency::with_runtime_mut(|rt| {
+        let line = rt.heap.record_get_int(handle, 0).unwrap_or(0);
+        let message_id = rt.heap.record_get_string(handle, 1).unwrap_or(0);
+        let message = rt.heap.clone_string(message_id).unwrap_or_default();
+        rt.heap
+            .alloc_string(json_error_rt::jet_json_error_kernel_show(line, &message))
+    })
+}
+
+/// Marshal a resident CBOR parser error into the shared encoding-error
+/// rendering. The discriminant table mirrors the Prelude enum declaration;
+/// policy and text remain in `EncodingError.rs`.
+fn jet_jit_cbor_error_show(handle: i64) -> i64 {
+    const KIND: &[&str] = &[
+        "Syntax",
+        "Truncated",
+        "Unsupported",
+        "Limit",
+        "TypeMismatch",
+        "TrailingData",
+        "NonCanonical",
+    ];
+    Concurrency::with_runtime_mut(|rt| {
+        let kind = rt.heap.record_get_int(handle, 0).unwrap_or(0) as usize;
+        let byte_offset = rt.heap.record_get_int(handle, 1).unwrap_or(0);
+        let path_id = rt.heap.record_get_string(handle, 2).unwrap_or(0);
+        let reason_id = rt.heap.record_get_string(handle, 3).unwrap_or(0);
+        let path = rt.heap.clone_string(path_id).unwrap_or_default();
+        let reason = rt.heap.clone_string(reason_id).unwrap_or_default();
+        let text = encoding_error_rt::jet_encoding_error_kernel_show(
+            "CBOR",
+            KIND.get(kind).copied().unwrap_or("?"),
+            byte_offset,
+            None,
+            None,
+            &path,
+            &reason,
+        );
+        rt.heap.alloc_string(text)
+    })
+}
+
+/// Marshal a resident XML parser error into the shared encoding-error
+/// rendering. Optional source positions use the normal one-based option ABI.
+fn jet_jit_xml_error_show(handle: i64) -> i64 {
+    const KIND: &[&str] = &[
+        "InvalidEncoding",
+        "Malformed",
+        "MismatchedTag",
+        "InvalidName",
+        "Namespace",
+        "DuplicateAttribute",
+        "Entity",
+        "EntityCycle",
+        "Limit",
+        "Canonicalization",
+        "Shape",
+        "Unsupported",
+    ];
+    Concurrency::with_runtime_mut(|rt| {
+        let kind = rt.heap.record_get_int(handle, 0).unwrap_or(0) as usize;
+        let byte_offset = rt.heap.record_get_int(handle, 1).unwrap_or(0);
+        let line = rt.heap.record_get_int(handle, 2).unwrap_or(0);
+        let column = rt.heap.record_get_int(handle, 3).unwrap_or(0);
+        let path_id = rt.heap.record_get_string(handle, 4).unwrap_or(0);
+        let reason_id = rt.heap.record_get_string(handle, 5).unwrap_or(0);
+        let path = rt.heap.clone_string(path_id).unwrap_or_default();
+        let reason = rt.heap.clone_string(reason_id).unwrap_or_default();
+        let text = encoding_error_rt::jet_encoding_error_kernel_show(
+            "XML",
+            KIND.get(kind).copied().unwrap_or("?"),
+            byte_offset,
+            (line != 0).then_some(line - 1),
+            (column != 0).then_some(column - 1),
+            &path,
+            &reason,
+        );
+        rt.heap.alloc_string(text)
+    })
+}
+
 /// Resident `[FieldError]` rendering for `print(errors)` and `"{errors}"`.
 /// Marshals each record out of the heap and calls the one Prelude projection
 /// (`jet_field_error_kernel_show`); the `[a, b]` wrapper matches AOT's
@@ -2283,6 +2371,9 @@ host_fns! {
     yaml_to_string: "jet_jit_yaml_to_string" => jet_jit_yaml_to_string: sig_unary;
     decode_error_show: "jet_jit_decode_error_show" => jet_jit_decode_error_show: sig_unary;
     encoding_error_show: "jet_jit_encoding_error_show" => jet_jit_encoding_error_show: sig_unary;
+    json_error_show: "jet_jit_json_error_show" => jet_jit_json_error_show: sig_unary;
+    cbor_error_show: "jet_jit_cbor_error_show" => jet_jit_cbor_error_show: sig_unary;
+    xml_error_show: "jet_jit_xml_error_show" => jet_jit_xml_error_show: sig_unary;
     env_config: "jet_jit_env_config" => jet_jit_env_config: sig_ternary;
     env_config_map: "jet_jit_env_config_map" => jet_jit_env_config_map: sig_binary;
 }

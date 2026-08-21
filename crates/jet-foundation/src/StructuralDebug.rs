@@ -27,6 +27,17 @@ static CBOR_ERROR_FIELD_METADATA: &[(&str, bool)] = &[
     ("reason", false),
 ];
 
+static JSON_ERROR_FIELD_METADATA: &[(&str, bool)] = &[("line", false), ("message", false)];
+
+static XML_ERROR_FIELD_METADATA: &[(&str, bool)] = &[
+    ("kind", false),
+    ("byte_offset", false),
+    ("line", false),
+    ("column", false),
+    ("path", false),
+    ("reason", false),
+];
+
 static FIELD_ERROR_FIELD_METADATA: &[(&str, bool)] = &[("path", false), ("reason", false)];
 
 static ALLOC_ERROR_FIELD_METADATA: &[(&str, bool)] =
@@ -41,6 +52,8 @@ static CORE_FIELD_METADATA: &[(&str, &[(&str, bool)])] = &[
     ("IOContext", IO_CONTEXT_FIELD_METADATA),
     ("CBOROptions", CBOR_OPTIONS_FIELD_METADATA),
     ("CBORError", CBOR_ERROR_FIELD_METADATA),
+    ("JSONError", JSON_ERROR_FIELD_METADATA),
+    ("XMLError", XML_ERROR_FIELD_METADATA),
     ("FieldError", FIELD_ERROR_FIELD_METADATA),
     ("AllocError", ALLOC_ERROR_FIELD_METADATA),
 ];

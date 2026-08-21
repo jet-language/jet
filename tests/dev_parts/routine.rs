@@ -487,7 +487,12 @@ fn caught_task_panics_keep_stderr_deterministic_under_parallel_repetition() {
     // Strict JIT no longer AOT-fallbacks all_failfast; parallel AOT runs keep
     // the typed-failure panic-hook regression signal.
 
-    let binary = Arc::new(compiled_binary_path(&dir, "scheduler_panic_hook", 0, file));
+    let binary = Arc::new(compiled_binary_path(
+        &aot_scratch_dir("scheduler_panic_hook", "all_failfast"),
+        "scheduler_panic_hook",
+        0,
+        file,
+    ));
     let failures = Arc::new(Mutex::new(Vec::new()));
     let mut workers = Vec::new();
     for worker in 0..8 {
@@ -1891,9 +1896,9 @@ fn fixed_interpolation_matches_interpreter_and_resident_jit_rounding() {
     }
     let src = r#"
 fn run() {
-    lower_tie :: 1.125
-    upper_tie :: 1.375
-    grouped :: 1234.5678
+    lower_tie :: Float{1.125}
+    upper_tie :: Float{1.375}
+    grouped :: Float{1234.5678}
     print("{lower_tie:Fixed(2)}|{upper_tie:Fixed(2)}|{grouped:Fixed(2)}")
 }
 "#;
@@ -2752,7 +2757,8 @@ fn run() {
     n :: 41
     print(Float.from_int(n))
     print(n.count_ones())
-    print(1.0.is_finite())
+    one :: Float{1.0}
+    print(one.is_finite())
     print(n.to_string())
 }
 "#;
@@ -2892,12 +2898,12 @@ fn run() {
     byte_bad :: I32{ 100000 }
     U8.from_i32(byte_ok).drop("checked conversion success proof")
     U8.from_i32(byte_bad).drop("checked conversion error proof")
-    float_ok :: 42.9
-    float_bad :: 300.0
+    float_ok :: Float{42.9}
+    float_bad :: Float{300.0}
     U8.from_float(float_ok).drop("checked float conversion success proof")
     U8.from_float(float_bad).drop("checked float conversion error proof")
-    narrow_ok :: 2.5
-    narrow_bad :: 1e100
+    narrow_ok :: Float{2.5}
+    narrow_bad :: Float{1e100}
     F32.from_float(narrow_ok).drop("checked F32 conversion success proof")
     F32.from_float(narrow_bad).drop("checked F32 conversion error proof")
     user_source :: U64.from_u8(8)
@@ -3027,11 +3033,11 @@ fn run() ! {
 fn run() ! {
     tie :: Meter.from_half_rounded(1half, .NearestEven, digits: 0)?
     above :: Meter.from_above_half_rounded(1above_half, .NearestEven, digits: 0)?
-    negative_source :: ThreeHalves.from_float(-1.0)
+    negative_source :: ThreeHalves.from_float(-Float{1.0})
     negative :: Meter.from_three_halves_rounded(negative_source, .NearestEven, digits: 0)?
-    tie_point :: TieOffsetPoint.from_float(0.0)
-    above_point :: AboveOffsetPoint.from_float(0.0)
-    below_point :: BelowOffsetPoint.from_float(0.0)
+    tie_point :: TieOffsetPoint.from_float(Float{0.0})
+    above_point :: AboveOffsetPoint.from_float(Float{0.0})
+    below_point :: BelowOffsetPoint.from_float(Float{0.0})
     affine_tie :: KelvinPoint.from_tie_offset_point_rounded(tie_point, .NearestEven, digits: 0)?
     affine_above :: KelvinPoint.from_above_offset_point_rounded(above_point, .NearestEven, digits: 0)?
     affine_below :: KelvinPoint.from_below_offset_point_rounded(below_point, .NearestEven, digits: 0)?
@@ -3046,7 +3052,7 @@ fn run() ! {
     let overflow = r#"
 #UnitFamily(Length, base: meter) { meter double(scale: 2) }
 fn run() ! {
-    source :: Double.from_float(1.7976931348623157e308)
+    source :: Double.from_float(Float{1.7976931348623157e308})
     Meter.from_double_rounded(source, .NearestEven, digits: 0)?
 }
 "#;
@@ -3084,15 +3090,15 @@ fn rounded_physical_quantities_match_resident_default_dev_and_aot() {
     shifted(scale: 1, offset: 249/1000)
 }
 fn run() ! {
-    positive :: Half.from_float(5.0)
-    negative :: Half.from_float(-5.0)
+    positive :: Half.from_float(Float{5.0})
+    negative :: Half.from_float(-Float{5.0})
     toward_zero :: Meter.from_half_rounded(positive, .TowardZero, digits: 0)?
     floor :: Meter.from_half_rounded(negative, .Floor, digits: 0)?
     ceiling :: Meter.from_half_rounded(positive, .Ceiling, digits: 0)?
     nearest_even :: Meter.from_near_quarter_rounded(1near_quarter, .NearestEven, digits: 2)?
     nearest_odd :: Meter.from_near_three_quarters_rounded(1near_three_quarters, .NearestEven, digits: 2)?
-    point :: KelvinPoint.from_shifted_point_rounded(ShiftedPoint.from_float(0.0), .Ceiling, digits: 2)?
-    delta :: KelvinDelta.from_shifted_delta_rounded(ShiftedDelta.from_float(0.0), .Ceiling, digits: 2)?
+    point :: KelvinPoint.from_shifted_point_rounded(ShiftedPoint.from_float(Float{0.0}), .Ceiling, digits: 2)?
+    delta :: KelvinDelta.from_shifted_delta_rounded(ShiftedDelta.from_float(Float{0.0}), .Ceiling, digits: 2)?
     print("{(toward_zero.raw())} {(floor.raw())} {(ceiling.raw())} {(nearest_even.raw())} {(nearest_odd.raw())} {(point.raw())} {(delta.raw())}")
 }
 "#;
@@ -5629,6 +5635,7 @@ fn run() {
                print(99)
        }
     slow.cancel()
+    slow.detach()
     sender.send(42)
     ack.receive() ?? panic("closed")
 }
@@ -5653,6 +5660,7 @@ fn run() {
     }
     ready.receive() ?? panic("closed")
     slow.cancel()
+    slow.detach()
     sender.send(42)
 }
 "#,
@@ -5675,6 +5683,7 @@ fn run() {
     }
     ready.receive() ?? panic("closed")
     slow.cancel()
+    slow.detach()
 }
 "#,
         "unshielded_sleep_cancel",
@@ -6894,12 +6903,12 @@ fn tracked_float_origin_matches_aot_in_default_dev() {
     let file = dir.join("float_binding_origin.jet");
     fs::write(
         &file,
-        "fn run() {\n    #Track speed :: 3.5\n    plain :: 3.5\n    copied :: speed\n    print(speed.origin())\n    print((speed).origin())\n    print(plain.origin())\n    print(copied.origin())\n    print(next().origin())\n}\nfn next() Float {\n    print(\"evaluated\")\n    return 3.5\n}\n",
+        "fn run() {\n    #Track speed :: Float{3.5}\n    plain :: Float{3.5}\n    copied :: speed\n    print(speed.origin())\n    print((speed).origin())\n    print(plain.origin())\n    print(copied.origin())\n    print(next().origin())\n}\nfn next() Float {\n    print(\"evaluated\")\n    return Float{3.5}\n}\n",
     )
     .unwrap();
     let shown = file.to_string_lossy().to_string();
     let expected_stdout = format!(
-        "tracked `speed` at {shown}:2:12: #Track speed :: 3.5\ntracked `speed` at {shown}:2:12: #Track speed :: 3.5\nuntracked\nuntracked\nevaluated\nuntracked\n"
+        "tracked `speed` at {shown}:2:12: #Track speed :: Float{{3.5}}\ntracked `speed` at {shown}:2:12: #Track speed :: Float{{3.5}}\nuntracked\nuntracked\nevaluated\nuntracked\n"
     );
     let aot = compiled_binary_output(
         &dir,

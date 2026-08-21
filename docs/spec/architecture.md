@@ -58,6 +58,24 @@ generation and have no runtime use. A non-struct value keeps its type name, path
 and display text, but its field list is empty. This makes `reflect.of` a read-only
 snapshot, not a dynamic type registry.
 
+### Structure fact plane
+
+D-STRUCT-PLANE1=A puts liveness, lifecycle, and import-edge observations in the
+same `StructureFact` shape in `jet-foundation::Names`, with one registry row per
+kind. Each row carries its safe direction and gate. Sema writes the facts while
+it checks names, lifecycle markers, and resolved imports; `GateLedger` projects
+each gate-bearing fact once with its source span and provenance. The CLI command
+`jet inspect structure <file.jet>` is a read-only projection of those rows and
+that ledger. Its JSON form has the same data; it does not create an inspection
+ledger of its own.
+
+The structure plane ends before TIR. AOT emit, Cranelift, the interpreter, and
+web codegen receive the checked program after structure facts and gates have
+been erased. This preserves I2 and I3 (rustc and engines do not decide policy),
+I8 (one registry and one gate mechanism), and I9 (one meaning across applicable
+tiers). The decision adds no user-typeable spelling and no lint plane or
+external analyzer.
+
 ## Compiler crate map
 
 D-COMPILERSEAMS1/2 split the compiler into workspace seam crates. The root

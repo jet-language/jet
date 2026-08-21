@@ -13,6 +13,7 @@ pub(super) fn complete_bundle_check(
     mut diags: Vec<Diagnostic>,
 ) -> (Vec<Diagnostic>, super::super::super::Effects::SemIndexEffectFacts) {
     populate_name_ledger(bundle, &states, &mut name_ledger);
+    record_import_edge_facts(bundle, &mut name_ledger);
 
     // D-SHARED-CYCLE1=C: run one graph/memo pass after registry and import
     // identities are complete, so a qualified field type resolves to its
@@ -658,4 +659,36 @@ pub(super) fn complete_bundle_check(
             fact_registry,
         },
     )
+}
+
+/// D-STRUCT-PLANE1=A: loader and sema already resolve file/import targets into
+/// `NameLedger`. Project those resolved edges into the same structure fact
+/// shape; no engine needs to rediscover the module graph.
+fn record_import_edge_facts(
+    bundle: &ProgramBundle,
+    ledger: &mut jet_foundation::Names::NameLedger,
+) {
+    for (module_idx, module) in bundle.modules.iter().enumerate() {
+        let source = ledger
+            .module_path(module_idx)
+            .unwrap_or(&module.display)
+            .to_string();
+        for import in &module.imports {
+            let Some(target_idx) = ledger.import_target(module_idx, import.span) else {
+                continue;
+            };
+            let Some(target) = ledger.module_path(target_idx).map(str::to_string) else {
+                continue;
+            };
+            ledger.record_structure_fact(jet_foundation::Names::StructureFact::new(
+                jet_foundation::Names::StructureFactKind::ImportEdge,
+                format!("{source} -> {target}"),
+                source.clone(),
+                import.span,
+                "resolved",
+                "resolved import edge",
+                None,
+            ));
+        }
+    }
 }

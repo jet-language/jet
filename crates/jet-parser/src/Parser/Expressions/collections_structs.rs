@@ -43,9 +43,14 @@ impl<'a> Parser<'a> {
         /// by `:` falls through to an ordinary expression-expected parse error.
         /// D-DOTCTOR3: `[T]{ … }` / `[T#N]{ … }` / `[K:V]{ … }` is a typed-
         /// literal head, not a list value whose first element is a type name.
-        pub(super) fn list_or_map_lit(&mut self) -> Result<Expr, Diagnostic> {
-            if let Some(lit) = self.try_typed_lit_from_bracket()? {
-                return Ok(lit);
+        pub(super) fn list_or_map_lit(
+            &mut self,
+            allow_struct_lit: bool,
+        ) -> Result<Expr, Diagnostic> {
+            if allow_struct_lit {
+                if let Some(lit) = self.try_typed_lit_from_bracket()? {
+                    return Ok(lit);
+                }
             }
             let open = self.bump().span;
             if matches!(self.peek().kind, TokKind::RBracket) {

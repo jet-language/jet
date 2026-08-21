@@ -1150,6 +1150,8 @@ impl<'a> JitMeta<'a> {
                 | "TerminalMode"
                 | "EncodingFormat"
                 | "EncodingErrorKind"
+                | "CBORErrorKind"
+                | "XMLReason"
                 | "DataEvent"
                 | "Key"
                 | "HookOutcome"
@@ -1491,6 +1493,10 @@ static CORE_STRUCT_FIELDS: &[(&[&str], &[&str])] = &[
         ],
     ),
     (
+        &["XMLError"],
+        &["kind", "byte_offset", "line", "column", "path", "reason"],
+    ),
+    (
         &["DataLimits"],
         &[
             "encoding",
@@ -1557,6 +1563,7 @@ static CORE_STRUCT_FIELDS: &[(&[&str], &[&str])] = &[
         &["row_key", "column_key", "count", "sum", "mean"],
     ),
     (&["EncodingCause"], &["kind", "os_code", "message"]),
+    (&["JSONError"], &["line", "message"]),
     (
         &["EncodingError"],
         &[

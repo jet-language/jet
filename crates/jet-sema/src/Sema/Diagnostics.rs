@@ -1375,6 +1375,7 @@ pub(crate) fn is_core_error_family_type(name: &str) -> bool {
     matches!(
         name,
         "BrowserError"
+            | "CBORError"
             | "DBError"
             | "DataError"
             | "EncodingError"
@@ -1387,6 +1388,7 @@ pub(crate) fn is_core_error_family_type(name: &str) -> bool {
             | "TextError"
             | "UTF8Error"
             | "WsError"
+            | "XMLError"
     )
 }
 

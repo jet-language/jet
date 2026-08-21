@@ -2659,7 +2659,7 @@
     }
     impl super::JetShow for JSONError {
         fn jet_show(&self) -> String {
-            format!("line {}: {}", self.line, self.message)
+            super::jet_json_error_kernel_show(self.line, &self.message)
         }
     }
     impl super::JetDisplay for JSONError {

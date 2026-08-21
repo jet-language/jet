@@ -108,7 +108,31 @@ impl<'a> super::Checker<'a> {
         dep: &Deprecation,
         span: Span,
     ) {
-        match deprecation_phase(dep) {
+        let phase = deprecation_phase(dep);
+        let status = match phase {
+            DeprecationPhase::Active => "active",
+            DeprecationPhase::Deprecated => "deprecated",
+            DeprecationPhase::Removed => "removed",
+        };
+        let detail = match dep.removed_in.as_deref() {
+            Some(removed_in) => format!(
+                "since {}; use `{}`; removed in {}",
+                dep.since, dep.replacement, removed_in
+            ),
+            None => format!("since {}; use `{}`", dep.since, dep.replacement),
+        };
+        self.name_ledger.record_structure_fact(
+            jet_foundation::Names::StructureFact::new(
+                jet_foundation::Names::StructureFactKind::Lifecycle,
+                item,
+                self.module_path,
+                span,
+                status,
+                detail,
+                None,
+            ),
+        );
+        match phase {
             DeprecationPhase::Removed => self.diags.push(e2002(item, dep, Some(span))),
             DeprecationPhase::Deprecated => self.diags.push(l2001(item, dep, Some(span))),
             DeprecationPhase::Active => {}

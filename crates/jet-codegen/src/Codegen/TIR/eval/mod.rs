@@ -2009,7 +2009,7 @@ impl<'a> EvalCtx<'a> {
             group.register(task);
         }
         drop(runtime);
-        let observe_id = crate::scheduler::jet_observe_task_register(&control);
+        let observe_id = crate::scheduler::jet_observe_task_register(control.observe_id_slot());
         sender
             .send(EvalTaskJob {
                 lambda: lam,

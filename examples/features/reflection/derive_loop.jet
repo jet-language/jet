@@ -17,8 +17,7 @@ marker AddMarkerFields(@sites: [.Type]) {
     }
 }
 
-#FieldNames
-#AddMarkerFields
+#[FieldNames, AddMarkerFields]
 struct Point {
     x: Int
     y: Int
@@ -38,7 +37,9 @@ struct Case {
 
 @loop case, @cases {
     #Test("case {case.n}") {
-        assert(case.n > 0)
+        .measure {
+            assert(case.n > 0)
+        }
     }
 }
 

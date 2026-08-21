@@ -21,6 +21,13 @@ Every diagnostic has four parts:
 - **why** — the rule behind the error, so the user learns the model.
 - **fix** — a concrete next step, copy-pasteable when possible.
 
+The `E0989` row is still active because `@if` is the live compile-time branch
+spelling. D-STRUCT-ONCE1 reverses the intervening same-day ruling that would
+have replaced it with plain `if`; the syntax-decision record links the reversal
+from lines 2561 and 2588. `@loop` declaration-template failures use the same
+registered front-end diagnostics, including `E0956` for a source the canonical
+comptime evaluator cannot close; no check is deferred to codegen.
+
 `&` and `^` each have two readings: `&` is the write-access marker or the
 bitwise and operator, and `^` is the move marker or the power
 operator. Bitwise xor is `~|`. When a diagnostic shows one of these signs, its

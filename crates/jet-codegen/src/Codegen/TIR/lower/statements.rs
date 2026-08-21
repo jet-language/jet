@@ -3712,21 +3712,42 @@ fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmt
                         }],
                     },
                 };
+                let binding_used = body.iter().any(|stmt| {
+                    if matches!(
+                        stmt,
+                        Stmt::Assign {
+                            target: LValue::Local { name, .. },
+                            ..
+                        } if name == binding
+                    ) {
+                        return true;
+                    }
+                    let mut stmt = stmt.clone();
+                    let mut used = false;
+                    stmt.for_each_expr_mut(|expr| {
+                        if matches!(expr, Expr::Ident(name, _) if name == binding) {
+                            used = true;
+                        }
+                    });
+                    used
+                });
                 return deferred_stmt(
                     vec![LowerBody::scoped(body, scoped)],
                     move |mut lowered| {
                         let mut lowered = lowered.pop().expect("caps body was deferred");
-                        lowered.insert(
-                            0,
-                            TStmt::Let {
-                                name: binding.clone(),
-                                kw: "let",
-                                let_ty: TLetTy::plain(authority_ty),
-                                init,
-                                gc_promotion: None,
-                                gc_transferred: false,
-                            },
-                        );
+                        if binding_used {
+                            lowered.insert(
+                                0,
+                                TStmt::Let {
+                                    name: binding.clone(),
+                                    kw: "let",
+                                    let_ty: TLetTy::plain(authority_ty),
+                                    init,
+                                    gc_promotion: None,
+                                    gc_transferred: false,
+                                },
+                            );
+                        }
                         TStmt::Region(lowered)
                     },
                 );

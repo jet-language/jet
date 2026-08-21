@@ -2677,6 +2677,17 @@ never inject unchecked AST or re-lex emitted text). `@loop` over
 `T.@fields` contributes one checked member per field. Local-only orphan rule.
 Routed through the existing marker system (D-USERDERIVE1).
 
+**D-STRUCT-ONCE1=A — declaration templates**: the existing `@loop` also
+reaches marker bodies, top-level `impl` items, and `#Test` bodies, including
+`.measure` blocks. A source is a closed literal or comptime-pure table; closed
+type lists and interpolated declaration names are the two named amendments.
+Generated declarations re-enter ordinary registration and body checking. No
+type is created at the use site, the impl set stays closed, source is not
+reparsed, and codegen does not perform sema. `@if` remains the live branch
+spelling: the ruling reverses the same-day plain-`if` ruling. See the explicit
+reverse-amendment links at [S57 line 2561](#L2561) and [the reversal paragraph
+line 2588](#L2588).
+
 **S56** stays open for Epoch 3 (typed-reflection hardening; see Open
 decisions).
 
@@ -7755,7 +7766,8 @@ test/bench blocks from closed literal or comptime-pure tables, including the
 closed type-list and interpolated declaration-name amendments. It amends
 D-GENMOD-VALUE1 and D-META-CODE1, reverses the intervening same-day ruling
 that erased `@if` in favor of plain `if`, and is linked back from the earlier
-S57/D-WHEN1 entry above.
+S57/D-WHEN1 entry above. The reverse-amendment links are
+[line 2561](#L2561) and [line 2588](#L2588).
 
 **2026-08-21 — D-ERRSIGIL1=A** *(card #2127; ratified 2026-08-21)*: `?` has
 one meaning: `T?` means a value might be absent, while a fallible type uses

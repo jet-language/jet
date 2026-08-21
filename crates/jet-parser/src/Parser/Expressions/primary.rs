@@ -312,7 +312,7 @@ impl<'a> Parser<'a> {
                     let span = self.bump().span;
                     Ok(Expr::Char(ch, span))
                 }
-                TokKind::LBracket => self.list_or_map_lit(),
+                TokKind::LBracket => self.list_or_map_lit(allow_struct_lit),
                 TokKind::LBrace if allow_struct_lit && self.brace_starts_inferred_literal() => {
                     let start = self.peek().span.start;
                     self.struct_lit_inferred(start)

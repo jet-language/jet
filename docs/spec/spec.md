@@ -3851,6 +3851,10 @@ time the bundle compiled at all) — the same side-channel `jet inspect semindex
   the lens names the registered diagnostic and reason when they are absent.
 - `derive` (D-ONCE-DERIVE1) — behavior already attached to structs,
   enums, and distinct types, with their checked identity and source span.
+- `templates` (D-STRUCT-ONCE1=A) — marker applications and the checked
+  `impl`, `#Test`, and `.measure` declarations produced by closed `@loop`
+  sources. Closed type-list targets and interpolated test names remain visible
+  in this projection; the rows come from the one checked bundle.
 - `callable-signature` (D-CALLPOLICY1=E) — the complete checked callable
   contract: public labels and local names, defaults, access modes, zones,
   types, variadics, effects, errors, returned-view provenance, source identity,
