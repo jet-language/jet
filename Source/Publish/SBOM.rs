@@ -181,6 +181,12 @@ pub(super) fn registry_spdx(
     out
 }
 
+/// The emitted SBOM pins `1970-01-01T00:00:00Z` on purpose: a wall-clock
+/// timestamp would make the document differ between two builds of the same
+/// inputs, which is exactly what the reproducibility work forbids. So nothing
+/// in production formats a time, and this stays for the test that proves the
+/// formatter is right if a real timestamp is ever wanted.
+#[cfg(test)]
 pub(crate) fn iso8601(secs: u64) -> String {
     // Minimal ISO 8601 without chrono. We compute date parts from the epoch.
     // Accurate for years 1970–2100 (Gregorian, no leap seconds).
@@ -218,6 +224,7 @@ pub(crate) fn iso8601(secs: u64) -> String {
     )
 }
 
+#[cfg(test)]
 fn is_leap(year: u64) -> bool {
     (year % 4 == 0 && year % 100 != 0) || year % 400 == 0
 }
