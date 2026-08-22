@@ -1390,6 +1390,51 @@ fn loader_records_import_edge_facts_and_erases_boundary_policy_before_codegen() 
 }
 
 #[test]
+fn denied_import_boundary_fact_reaches_structure_inspection() {
+    let root = tmp_dir("import_boundary_denied_structure_fact");
+    write(
+        &root,
+        "package.jet",
+        &(min_manifest("app", "0.1.0")
+            + "boundaries: { deny: [{ from: \"app.ui\", to: \"app.db\" }] }\n"),
+    );
+    write(&root, "ui.jet", "use db;\nfn run() { }\n");
+    write(&root, "db.jet", "pub fn value() Int -> 1\n");
+    let entry = root.join("ui.jet");
+    let shown = entry.to_str().unwrap();
+
+    let diagnostics = jet::Loader::load_entry_with_diagnostics(shown)
+        .expect_err("denied edge must retain its loader fact");
+    let fact = diagnostics
+        .iter()
+        .find_map(|entry| entry.structure_fact.as_ref())
+        .expect("denied edge structure fact");
+    assert_eq!(fact.subject, "app.ui -> app.db");
+    assert_eq!(fact.status, "denied");
+    assert_eq!(fact.gate.as_deref(), Some("manifest rule edit"));
+
+    let inspected = Command::new(jet_bin())
+        .current_dir(&root)
+        .args(["inspect", "structure", shown])
+        .env("NO_COLOR", "1")
+        .output()
+        .expect("inspect structure must run");
+    assert!(!inspected.status.success(), "denied inspection must fail");
+    let stdout = String::from_utf8(inspected.stdout).expect("inspection is UTF-8");
+    assert!(stdout.contains("Structure.ImportEdge"));
+    assert!(stdout.contains("app.ui -> app.db"));
+    assert!(stdout.contains("denied"));
+    assert!(stdout.contains("manifest rule edit"));
+    let stderr = String::from_utf8(inspected.stderr).expect("diagnostics are UTF-8");
+    assert!(
+        stderr.contains("E0619"),
+        "missing denied-edge diagnostic: {stderr}"
+    );
+
+    fs::remove_dir_all(&root).unwrap();
+}
+
+#[test]
 fn manifest_parse_dep_path() {
     let raw = manifest_with_deps("root", "0.1.0", "    helpers: ../helpers,");
     let mf = jet::Manifest::parse(&PathBuf::from("package.jet"), &raw).expect("path dep should parse");

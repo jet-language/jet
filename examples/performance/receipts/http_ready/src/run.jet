@@ -18,21 +18,19 @@ module perf.receipt {
     }}]
 }
 
-fn http_response() [U8] {
-    return [U8]{
+fn http_response() [U8] -> [U8]{
         72, 84, 84, 80, 47, 49, 46, 49, 32, 50, 48, 48, 32, 79, 75, 13, 10,
         67, 111, 110, 116, 101, 110, 116, 45, 76, 101, 110, 103, 116, 104, 58,
         32, 50, 13, 10, 67, 111, 110, 110, 101, 99, 116, 105, 111, 110, 58,
         32, 99, 108, 111, 115, 101, 13, 10, 13, 10, 111, 107
     }
-}
 
 fn run() (NetError | RangeError | TaskFailure)! {
     args :: process.argv()
     if args.len() > 1 && (args.get(1) ?? "") == "serve" {
         port :: env.get("JETPACK_SERVICE_PORT") ?? "18080"
         listener :: net.tcp_listen("127.0.0.1:{port}")?
-        budget :: Duration.milliseconds(1000)?
+        budget :: Duration.milliseconds(10000)?
         print("ready")
         loop {
             stream :: listener.accept(deadline: budget)?

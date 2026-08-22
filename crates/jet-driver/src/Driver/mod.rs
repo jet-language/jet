@@ -5424,8 +5424,10 @@ fn check_file_on_compiler_stack(
     crate::Sema::SemIndexEffectFacts,
     Vec<std::path::PathBuf>,
 ) {
-    let (loaded, dependencies) =
-        crate::Loader::load_entry_with_overlays_and_dependencies(file, overlays, is_lsp);
+    let (loaded, dependencies, loader_diagnostics) =
+        crate::Loader::load_entry_with_overlays_and_dependencies_with_diagnostics(
+            file, overlays, is_lsp,
+        );
     match loaded {
         Ok(mut bundle) => {
             let mut diags = std::mem::take(&mut bundle.parse_teaching);
@@ -5479,12 +5481,15 @@ fn check_file_on_compiler_stack(
                 Err(diags) => (diags, None, facts, dependencies),
             }
         }
-        Err(diags) => (
-            diags,
-            None,
-            crate::Sema::SemIndexEffectFacts::default(),
-            dependencies,
-        ),
+        Err(diags) => {
+            let mut facts = crate::Sema::SemIndexEffectFacts::default();
+            for entry in loader_diagnostics {
+                if let Some(fact) = entry.structure_fact {
+                    facts.name_ledger.record_structure_fact(fact);
+                }
+            }
+            (diags, None, facts, dependencies)
+        }
     }
 }
 

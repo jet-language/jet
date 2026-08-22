@@ -963,7 +963,6 @@ impl<'a> Parser<'a> {
                 self.expect(TokKind::RBrace, "after a parameter default")?;
                 Some(default)
             } else if matches!(self.peek().kind, TokKind::Eq) {
-                eprintln!("DEBUG default at pos {} source {:?}", self.pos, self.source);
                 let eq = self.bump().span;
                 self.diags
                     .push(Diagnostic::from_row("E0385", &[], Some(eq)));

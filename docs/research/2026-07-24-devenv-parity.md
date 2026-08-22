@@ -88,7 +88,7 @@ Legend: **shipped** · **partial** (ratified / in progress) · **gap** · **ball
 | `dotenv` | — | **gap** | #784 |
 | `unsetEnvVars` / env hygiene | — | **gap** | #784 |
 | Prompt / starship | `prompt:` on env | **partial** | #784 |
-| `devenv info` summary | `jet info` (U26) | **partial** | #789 |
+| `devenv info` summary | `jet env info` (U26) | **shipped** | — |
 | Eval cache / <100ms activate | hangar + native eval work | **partial** | Depends #396/#397 |
 | `devenv gc` | U22 hangar GC | **partial** | Covered by hangar cards |
 | Ad-hoc CLI env (`-O` / `-p`) | `jet env -p` (U16) | **shipped** | — |

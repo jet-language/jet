@@ -260,6 +260,8 @@ secrets or secret-bearing environment variables fail closed; use
 
 `jet env sync` resolves all sources first, prints the plan, writes content
 objects, and applies destination changes with rollback on failure.
+The command is exposed through the canonical `jet env` front door, including
+the generated help, shell completions, and manual.
 
 ## Environment discovery
 
@@ -267,6 +269,7 @@ objects, and applies destination changes with rollback on failure.
 environment, packages, services, `jobs`, `checks`, variables, managed file
 destinations, and integration facts. `jet env info --json` emits the same
 facts for tools.
+It is exposed as the matching `jet env info` action in the same CLI surfaces.
 
 The report does not realize packages, start services, run jobs, or apply
 managed files. A variable read from the environment appears by name with the

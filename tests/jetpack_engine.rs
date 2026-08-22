@@ -13,6 +13,7 @@ use std::fs;
 use std::io::Write;
 use std::path::Path;
 use std::process::Command;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 fn make_writable(path: &str) {
     fn walk(path: &Path) {
@@ -482,6 +483,210 @@ fn binary_cache_local_publish_verify_and_reject_corruption() {
 }
 
 #[test]
+fn binary_cache_trust_receipt_rejects_rollback_freeze_and_mix_and_match() {
+    let root = Scratch::new("cache-trust-root");
+    let source = Scratch::new("cache-trust-source");
+    let mirror = Scratch::new("cache-trust-mirror");
+    fs::write(source.join("payload"), "trusted bytes\n").unwrap();
+    let roots = jetpack::Store::Roots {
+        root: root.path.clone(),
+        dev_mode: false,
+    };
+    let entry = jetpack::Store::ingest_tree(
+        &roots,
+        &jetpack::Store::IngestRequest {
+            name: "cache-trust-demo".into(),
+            version: "1".into(),
+            reference: "./cache-trust-demo".into(),
+            cache_identity: jetpack::Store::CacheIdentity {
+                source_fingerprint: "sha256:cache-trust-source".into(),
+                recipe_fingerprint: "sha256:cache-trust-recipe".into(),
+                policy_fingerprint: "sha256:cache-trust-policy".into(),
+                platform: jetpack::Envelope::host_platform(),
+            },
+            references: Vec::new(),
+            outputs: std::collections::BTreeMap::from([("out".into(), source.path.clone())]),
+            signature: String::new(),
+            provenance: "cache trust test".into(),
+            platform_artifact_kind: String::new(),
+        },
+    )
+    .unwrap()
+    .entry;
+    jetpack::Store::bind_cache(
+        &roots,
+        "public",
+        vec![mirror.path.display().to_string()],
+        None,
+        None,
+        true,
+    )
+    .unwrap();
+    jetpack::Store::publish_cache_entry(&roots, &entry.id, "public").unwrap();
+    jetpack::Store::verify_cache_transfer(&roots, &entry.id, "public").unwrap();
+
+    let key = jetpack::TrustRoot::TrustKey::from_secret(
+        fs::read(root.join("trust/cache-public.key")).unwrap(),
+    )
+    .unwrap();
+    let store_name = format!("{}-{}", entry.envelope.output_hash, entry.id);
+    let receipt_path = mirror.path.join("trust").join(format!("{store_name}.receipt"));
+    let receipt_bytes = fs::read(&receipt_path).unwrap();
+    let field = |name: &str| {
+        String::from_utf8(receipt_bytes.clone())
+            .unwrap()
+            .lines()
+            .find_map(|line| line.strip_prefix(&format!("{name}=")))
+            .unwrap()
+            .to_string()
+    };
+    let provenance = jetpack::TrustRoot::CacheProvenance {
+        reference: field("reference"),
+        source: field("source"),
+        builder: field("builder"),
+        action: field("action"),
+        output: field("output"),
+        platform: field("platform"),
+        sandbox: field("sandbox"),
+        policy: field("policy"),
+    };
+    let receipt_text = |receipt: &jetpack::TrustRoot::CacheReceipt| {
+        format!(
+            "jet-cache-receipt-v1\nrole={}\nversion={}\nissued={}\nexpires={}\nreference={}\nsource={}\nbuilder={}\naction={}\noutput={}\nplatform={}\nsandbox={}\npolicy={}\nsignature_key={}\nsignature_algorithm={}\nsignature={}\n",
+            receipt.role,
+            receipt.version,
+            receipt.issued_unix,
+            receipt.expires_unix,
+            receipt.provenance.reference,
+            receipt.provenance.source,
+            receipt.provenance.builder,
+            receipt.provenance.action,
+            receipt.provenance.output,
+            receipt.provenance.platform,
+            receipt.provenance.sandbox,
+            receipt.provenance.policy,
+            receipt.signature.key_id,
+            receipt.signature.algorithm,
+            receipt.signature.sig_hex,
+        )
+    };
+    let tampered = String::from_utf8(receipt_bytes.clone())
+        .unwrap()
+        .replace(&format!("signature={}", field("signature")), "signature=00");
+    fs::write(&receipt_path, tampered).unwrap();
+    let compromised = jetpack::Store::verify_cache_transfer(&roots, &entry.id, "public")
+        .unwrap_err()
+        .to_string();
+    assert!(
+        compromised.contains("signature") && compromised.contains("discard"),
+        "{compromised}"
+    );
+    fs::write(&receipt_path, &receipt_bytes).unwrap();
+
+    fs::remove_file(&receipt_path).unwrap();
+    let missing = jetpack::Store::verify_cache_transfer(&roots, &entry.id, "public")
+        .unwrap_err()
+        .to_string();
+    assert!(missing.contains("no signed trust receipt"), "{missing}");
+    fs::write(&receipt_path, &receipt_bytes).unwrap();
+
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_secs();
+    let v2 = jetpack::TrustRoot::CacheReceipt::issue(
+        "public",
+        provenance.clone(),
+        2,
+        now.saturating_sub(1),
+        now.saturating_add(600),
+        &key,
+    )
+    .unwrap();
+    fs::write(&receipt_path, receipt_text(&v2)).unwrap();
+    jetpack::Store::verify_cache_transfer(&roots, &entry.id, "public").unwrap();
+
+    let same_version = jetpack::TrustRoot::CacheReceipt::issue(
+        "public",
+        provenance.clone(),
+        2,
+        now.saturating_sub(2),
+        now.saturating_add(601),
+        &key,
+    )
+    .unwrap();
+    fs::write(&receipt_path, receipt_text(&same_version)).unwrap();
+    let same_version_error = jetpack::Store::verify_cache_transfer(&roots, &entry.id, "public")
+        .unwrap_err()
+        .to_string();
+    assert!(
+        same_version_error.contains("same version"),
+        "{same_version_error}"
+    );
+
+    // A valid old receipt is replayed after version 2 was admitted.
+    let v1 = jetpack::TrustRoot::CacheReceipt::issue(
+        "public",
+        provenance.clone(),
+        1,
+        now.saturating_sub(1),
+        now.saturating_add(600),
+        &key,
+    )
+    .unwrap();
+    fs::write(&receipt_path, receipt_text(&v1)).unwrap();
+    let rollback = jetpack::Store::verify_cache_transfer(&roots, &entry.id, "public")
+        .unwrap_err()
+        .to_string();
+    assert!(rollback.contains("rollback"), "{rollback}");
+
+    // Exact expiry is a hard freeze. The signed receipt is validly formed,
+    // but no package bytes become usable after its deadline.
+    let frozen = jetpack::TrustRoot::CacheReceipt::issue(
+        "public",
+        provenance.clone(),
+        3,
+        now.saturating_sub(20),
+        now.saturating_sub(1),
+        &key,
+    )
+    .unwrap();
+    fs::write(&receipt_path, receipt_text(&frozen)).unwrap();
+    let frozen_error = jetpack::Store::verify_cache_transfer(&roots, &entry.id, "public")
+        .unwrap_err()
+        .to_string();
+    assert!(frozen_error.contains("expired"), "{frozen_error}");
+    let frozen_destination = Scratch::new("cache-trust-frozen-destination");
+    assert!(jetpack::Store::substitute_cache_entry(
+        &roots,
+        &entry.id,
+        "public",
+        &frozen_destination.join("out"),
+    )
+    .is_err());
+    assert!(!frozen_destination.join("out").exists());
+
+    // A signed receipt for another output cannot be combined with this
+    // narinfo/NAR pair.
+    let mut mixed = provenance;
+    mixed.output = "sha256:another-output".into();
+    let mixed = jetpack::TrustRoot::CacheReceipt::issue(
+        "public",
+        mixed,
+        4,
+        now.saturating_sub(1),
+        now.saturating_add(600),
+        &key,
+    )
+    .unwrap();
+    fs::write(&receipt_path, receipt_text(&mixed)).unwrap();
+    let mix_error = jetpack::Store::verify_cache_transfer(&roots, &entry.id, "public")
+        .unwrap_err()
+        .to_string();
+    assert!(mix_error.contains("mix-and-match"), "{mix_error}");
+}
+
+#[test]
 fn reproducibility_registration_writes_first_difference_and_blocks_cache() {
     let root = Scratch::new("reproducibility-root");
     let first_source = Scratch::new("reproducibility-first");
@@ -774,6 +979,16 @@ fn package_generation_lifecycle_preserves_source_facts_and_history() {
     let history_stdout = String::from_utf8_lossy(&history.stdout);
     assert!(history_stdout.contains("\"generation\":1"));
     assert!(history_stdout.contains("\"generation\":2"));
+
+    let switched_new = run(["profile", "switch", "dev", "--no-color", "--offline"].as_slice());
+    assert!(
+        switched_new.status.success(),
+        "second switch stderr: {}",
+        String::from_utf8_lossy(&switched_new.stderr)
+    );
+    assert!(fs::read_to_string(project.join(".jet/profiles/dev/current"))
+        .unwrap()
+        .contains("\"generation\":2"));
 
     let rolled_back = run(["profile", "rollback", "dev", "--no-color"].as_slice());
     assert!(
@@ -3828,13 +4043,14 @@ fn bridge_flake_commits_transitive_locked_registry_facts_without_nix() {
         .unwrap();
     let failure_stderr = String::from_utf8(failure.stderr).unwrap();
     assert_eq!(failure.status.code(), Some(1), "{failure_stderr}");
-    let failure_line = failure_stderr
-        .lines()
-        .find(|line| line.contains("different source URL or indirect alias"))
-        .unwrap_or_default();
-    assert_eq!(
-        failure_line,
-        "Error [E1340]: flake.lock root input `tools` maps to node `tools` with a different source URL or indirect alias",
+    assert!(
+        failure_stderr.contains("Error [E1340]: couldn't load the foreign graph"),
+        "{failure_stderr}"
+    );
+    assert!(
+        failure_stderr.contains(
+            "flake.lock root input `tools` maps to node `tools` with a different source URL or indirect alias"
+        ),
         "{failure_stderr}"
     );
 }
@@ -4817,7 +5033,7 @@ fn jet_build_publishes_then_falls_back_to_source_when_cache_is_unavailable() {
     let repaired = jetpack::Store::find_by_reference(&roots, "hello@mine").unwrap();
     assert_eq!(
         fs::read_to_string(Path::new(&repaired.out).join("bin/hello")).unwrap(),
-        "hello\n"
+        "#!/bin/sh\necho hello from jet-pkgs\n"
     );
 
     make_writable(&repaired.out);

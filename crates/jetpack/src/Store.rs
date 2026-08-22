@@ -1803,6 +1803,10 @@ pub fn realize_verified(
             if let Some(hit) = find_verified_by_reference(roots, &reference, expectation)
                 .map_err(RealizeError::Store)?
             {
+                if let RealizeRequest::Adapter { plan, table, .. } = &request {
+                    validate_cached_adapter_hook(&hit.entry, plan, table, expectation)
+                        .map_err(RealizeError::Store)?;
+                }
                 return Ok(VerifiedRealization {
                     entry: hit.entry,
                     source_state: super::Provider::SourceState::Cached,
@@ -2899,7 +2903,6 @@ mod Closure;
 pub use Closure::*;
 pub(crate) use Closure::dir_size;
 pub(crate) use Cache::{fsync_tree, make_tree_writable_for_removal, seal_node};
-#[allow(dead_code)]
 pub(crate) mod Lifecycle;
 pub(crate) use Lifecycle::{
     external_root_closure_size, list_external_roots, reconcile_profile_generation_root,

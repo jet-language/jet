@@ -426,7 +426,7 @@ fn build(b: BuildContext) => BuildPlan ? {
 }
 
 fn require_timeouts(p: ProgramInfo) {
-    loop f; p.functions() {
+    loop f in p.functions() {
         if f.effects.has("Net") and not f.params.has("timeout") {
             f.error(code: "ORG_NET01",
                 what: "network function has no timeout",
@@ -447,7 +447,7 @@ fn run() => Unit ? {
     parsed :: jc.parse(source)?
     checked :: jc.check(parsed)?
 
-    loop f; checked.functions() {
+    loop f in checked.functions() {
         if f.effects.has("Net") {
             print("{f.name} touches the network")
         }

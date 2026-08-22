@@ -1,7 +1,7 @@
 Error [E0068]: This callable uses the retired result-arrow shape.
   --> tests/ui/arg_label_missing.jet:1:61
     |
-  1 | fn connect(host: String, /, *, port: Int, tls: Bool = true) => String :: "{host}"
+  1 | fn connect(host: String, /, *, port: Int, tls: Bool{true}) => String :: "{host}"
     |                                                             ^^
  Why: a return type sits after the parameter list, and `->` introduces the body; an effect ceiling follows the return type
  Fix: write `fn name(...) Type -> body`, or `fn name(...) Type -[Effects]> { … }`
@@ -9,7 +9,7 @@ Error [E0068]: This callable uses the retired result-arrow shape.
 Error [E0065]: This function uses the retired `::` body marker.
   --> tests/ui/arg_label_missing.jet:1:71
     |
-  1 | fn connect(host: String, /, *, port: Int, tls: Bool = true) => String :: "{host}"
+  1 | fn connect(host: String, /, *, port: Int, tls: Bool{true}) => String :: "{host}"
     |                                                                       ^^
  Why: A one-expression function body uses `->`; `::` binds a name, and `=` fills a slot inside a definition.
  Fix: Replace `::` with `->`; `jet fmt` applies this fix.

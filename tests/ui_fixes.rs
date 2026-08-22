@@ -126,10 +126,10 @@ fn liveness_fix_renames_to_existing_underscore_form() {
     let path = scratch.join("liveness.jet");
     fs::write(
         &path,
-        "use core.files as files\n\n\
+        "use core.files as files\nuse core.math.random as random\n\n\
          pub(package) fn package_export() {}\n\n\
          fn unused_private(value: Int) { print(value) }\n\n\
-         fn run() {\n    unused_binding :: print(\"side\")\n}\n",
+         fn run() {\n    unused_binding :: random.normal(0.0, 1.0)\n}\n",
     )
     .unwrap();
 
@@ -147,10 +147,10 @@ fn liveness_fix_renames_to_existing_underscore_form() {
     );
     assert_eq!(
         fs::read_to_string(&path).unwrap(),
-        "use core.files as _files\n\n\
+        "use core.files as _files\nuse core.math.random as random\n\n\
          pub(package) fn _package_export() {}\n\n\
          fn _unused_private(value: Int) { print(value) }\n\n\
-         fn run() {\n    _unused_binding :: print(\"side\")\n}\n"
+         fn run() {\n    _unused_binding :: random.normal(0.0, 1.0)\n}\n"
     );
 }
 
@@ -158,9 +158,10 @@ fn liveness_fix_renames_to_existing_underscore_form() {
 fn liveness_fix_removes_only_literal_locals_and_empty_private_functions() {
     let scratch = Scratch::new("liveness_fix_removal");
     let path = scratch.join("liveness.jet");
-    let original = "pub fn public_api() {}\n\n\
+    let original = "use core.math.random as random\n\n\
+                    pub fn public_api() {}\n\n\
                     fn empty_private() {}\n\n\
-                    fn run() {\n    pure_local :: 42\n    effectful :: print(\"side\")\n    print(\"done\")\n}\n";
+                    fn run() {\n    pure_local :: 42\n    effectful :: random.normal(0.0, 1.0)\n    print(\"done\")\n}\n";
     fs::write(&path, original).unwrap();
 
     let dry_run = Command::new(env!("CARGO_BIN_EXE_jet"))
@@ -193,7 +194,7 @@ fn liveness_fix_removes_only_literal_locals_and_empty_private_functions() {
     assert!(source.contains("pub fn public_api() {}"));
     assert!(!source.contains("empty_private"));
     assert!(!source.contains("pure_local"));
-    assert!(source.contains("_effectful :: print(\"side\")"));
+    assert!(source.contains("_effectful :: random.normal(0.0, 1.0)"));
 
     let checked = Command::new(env!("CARGO_BIN_EXE_jet"))
         .args(["check", path.to_str().unwrap()])

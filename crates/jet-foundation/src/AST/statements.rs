@@ -144,11 +144,12 @@ pub enum Stmt {
         /// D-LOOPLABEL3: optional compile-time loop name (`outer :: loop cond { }`).
         label: Option<(String, Span)>,
     },
-    /// `for i in a..b` (S22) or `for x in collection` / `for k, v in map` (M5).
+    /// `loop i in a..b` (S22) or `loop x in collection` /
+    /// `loop (k, v) in map` (M5).
     For {
         var: String,
         var_span: Span,
-        /// Second binding for `for key, value in map`.
+        /// Second binding for `loop (key, value) in map`.
         var2: Option<(String, Span)>,
         kind: ForKind,
         body: Vec<Stmt>,
@@ -363,7 +364,7 @@ pub enum Stmt {
     /// D-TERM1 (ratified 2026-06-22): `live { … }` — enter un-buffered/no-echo
     /// terminal input mode for the body, restore on every exit (normal, `return`,
     /// `?`, and panic) via the D-DEFER1 scope-guard mechanism.
-    /// `use core.term as term` makes `term.read_key() => Key` available.
+    /// `use core.term as term` makes `term.read_key() -> Key` available.
     Live {
         body: Vec<Stmt>,
         span: Span,
@@ -386,7 +387,7 @@ pub enum Stmt {
     /// lowercase ident, mirroring `region r { … }`) typed `Transaction`.
     /// Inside the block an irreversible effect (Net/FS/Exec) that can't be rolled
     /// back is a compile error (E0746, D-TXN2) — the fix is to move it after the
-    /// block or register it via `name.on_commit(() => { … })` (D-TXN3) so it runs
+    /// block or register it via `name.on_commit(() -> { … })` (D-TXN3) so it runs
     /// only on a clean commit. `on_commit` lambdas are Drop-backed and run LIFO on
     /// commit, dropped on a `?`-failure/rollback. A lexical scope emitted as a
     /// plain Rust block; effects/transaction state erase (I3).

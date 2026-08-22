@@ -124,7 +124,7 @@ fn top_level_help_is_registry_inventory_and_env_help_lists_live_actions() {
     let env_help = Command::new(jet()).args(["env", "--help"]).output().unwrap();
     assert!(env_help.status.success(), "env help failed: {:?}", env_help);
     let env_help = String::from_utf8_lossy(&env_help.stdout);
-    for action in ["hook", "test"] {
+    for action in ["hook", "test", "sync", "info"] {
         assert!(env_help.contains(&format!("jet env {action}")), "env help omitted {action}: {env_help}");
     }
 

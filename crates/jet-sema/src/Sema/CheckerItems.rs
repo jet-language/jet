@@ -2172,7 +2172,7 @@ impl<'a> Checker<'a> {
                     display_type_name,
                     still_missing.join(", ")
                 ),
-                "every field without an `=` default must appear exactly once".to_string(),
+                "every field without a `{…}` default must appear exactly once".to_string(),
                 format!("add: {}", still_missing.join(", ")),
                 Some(span),
             ));

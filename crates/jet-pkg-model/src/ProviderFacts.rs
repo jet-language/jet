@@ -158,14 +158,11 @@ impl Default for ProviderFacts {
 
 impl ProviderFacts {
     pub fn for_reference(provider: &str, reference: &str) -> ProviderFacts {
-        let (reference_without_selector, selector_part) = reference
-            .split_once('#')
-            .map(|(reference, selector)| (reference, Some(selector)))
-            .unwrap_or((reference, None));
+        let (reference_without_selector, selector_part) = split_reference_selector(reference);
         let (target, inferred_provider) = reference_without_selector
             .rsplit_once('@')
             .map(|(target, provider)| (target, provider))
-            .unwrap_or((reference_without_selector, ""));
+            .unwrap_or((reference_without_selector.as_str(), ""));
         let provider = if provider.trim().is_empty() {
             inferred_provider
         } else {
@@ -441,6 +438,18 @@ impl ProviderFacts {
         }
         lines
     }
+}
+
+/// Accept both Jet refs (`target#selector@provider`) and provider records that
+/// already use the normalized form (`target@provider#selector`).
+fn split_reference_selector(reference: &str) -> (String, Option<String>) {
+    let Some((prefix, suffix)) = reference.split_once('#') else {
+        return (reference.to_string(), None);
+    };
+    if let Some((selector, provider)) = suffix.rsplit_once('@') {
+        return (format!("{prefix}@{provider}"), Some(selector.to_string()));
+    }
+    (prefix.to_string(), Some(suffix.to_string()))
 }
 
 fn is_external_provider(provider: &str) -> bool {

@@ -345,6 +345,11 @@ impl CacheReceipt {
     }
 
     pub fn verify(&self, key: &TrustKey, clock: &dyn TrustedClock) -> Result<(), TrustError> {
+        if self.role.trim().is_empty() || self.role.contains(['\n', '\r']) {
+            return Err(TrustError::CacheReceiptInvalid {
+                detail: "cache receipt role is empty or contains a newline".into(),
+            });
+        }
         if self.version == 0 || self.expires_unix <= self.issued_unix {
             return Err(TrustError::CacheReceiptInvalid {
                 detail: "cache receipt version or expiry is invalid".into(),

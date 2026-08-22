@@ -343,7 +343,7 @@ fn top_level_help_flag_prints_full_usage() {
 }
 
 #[test]
-fn env_help_lists_shipped_test_and_hook_actions() {
+fn env_help_lists_shipped_actions() {
     let out = Command::new(jet())
         .args(["env", "--help"])
         .env("NO_COLOR", "1")
@@ -353,6 +353,8 @@ fn env_help_lists_shipped_test_and_hook_actions() {
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert!(stdout.contains("env test [-- command]"), "env help omitted `env test`: {stdout}");
     assert!(stdout.contains("env hook <bash|zsh|fish>"), "env help omitted `env hook`: {stdout}");
+    assert!(stdout.contains("env sync"), "env help omitted `env sync`: {stdout}");
+    assert!(stdout.contains("env info"), "env help omitted `env info`: {stdout}");
 }
 
 #[test]

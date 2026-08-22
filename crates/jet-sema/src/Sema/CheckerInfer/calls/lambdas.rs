@@ -32,17 +32,29 @@ use std::collections::HashSet;
                 ),
                 _ => (None, None, None, None),
             };
-            let (expected_result, expected_error) =
-                lambda_return_slots(exp_ret.map(|ret| ret.as_ref()));
-            let result_annotation_ok = match (expected_result, lam.result_type.as_ref()) {
-                (_, None) => true,
-                (Some(expected), Some(actual)) => lambda_slot_matches(expected, actual),
-                (None, Some(actual)) => is_unit_type(actual),
+            let expected_callable = matches!(expected, Some(Type::Fn { .. }));
+            let (expected_result, expected_error) = if expected_callable {
+                lambda_return_slots(exp_ret.map(|ret| ret.as_ref()))
+            } else {
+                (None, None)
             };
-            let error_annotation_ok = match (expected_error, lam.error_type.as_ref()) {
-                (_, None) => true,
-                (Some(expected), Some(actual)) => lambda_slot_matches(expected, actual),
-                (None, Some(_)) => false,
+            let result_annotation_ok = if !expected_callable {
+                true
+            } else {
+                match (expected_result, lam.result_type.as_ref()) {
+                    (_, None) => true,
+                    (Some(expected), Some(actual)) => lambda_slot_matches(expected, actual),
+                    (None, Some(actual)) => is_unit_type(actual),
+                }
+            };
+            let error_annotation_ok = if !expected_callable {
+                true
+            } else {
+                match (expected_error, lam.error_type.as_ref()) {
+                    (_, None) => true,
+                    (Some(expected), Some(actual)) => lambda_slot_matches(expected, actual),
+                    (None, Some(_)) => false,
+                }
             };
             if let Some(ty) = &lam.result_type {
                 self.check_declared_type(ty, lam.span);

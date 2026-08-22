@@ -533,7 +533,8 @@ pub fn cmd_flake(theme: &Theme, dir: &Path, fixtures: Option<&Path>) -> i32 {
                             }
                             continue;
                         }
-                        theme.error(
+                        theme.error_coded(
+                            "E1256",
                             "couldn't evaluate a package derivation",
                             &format!("{}: {error}", output.name),
                             "use a supported pure derivation with explicit local authority, then run `jet bridge flake` again.",
@@ -756,7 +757,8 @@ fn record_package_output_fact(
     system: &str,
 ) {
     if output.system == system {
-        if !output.attribute.is_empty()
+        if output.attribute != "default"
+            && !output.attribute.is_empty()
             && !facts.packages.iter().any(|package| package == &output.attribute)
         {
             facts.packages.push(output.attribute.clone());

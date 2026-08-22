@@ -3,46 +3,44 @@ use super::super::{
 };
 
 impl<'a> Parser<'a> {
-        /// D-LAMBDA-IFACE1=A: a lambda may carry the same result, error, and
-        /// effect suffixes as a named callable. Look past `)` without parsing
-        /// the type; the real parser below remains the single source of truth.
-        fn lambda_tail_starts_at(&self, index: usize) -> bool {
-            let Some(kind) = self.toks.get(index).map(|token| &token.kind) else {
-                return false;
-            };
-            if Self::at_unified_arrow_token(kind)
-                || matches!(kind, TokKind::Bang | TokKind::Question)
-            {
-                return true;
-            }
-            if matches!(kind, TokKind::Minus | TokKind::Colon | TokKind::Eq)
-                && matches!(self.toks.get(index + 1).map(|token| &token.kind), Some(TokKind::LBracket))
-            {
-                return true;
-            }
-            if matches!(kind, TokKind::MinusMinus) {
-                return true;
-            }
-            if matches!(kind, TokKind::Hash) {
-                let next = self.toks.get(index + 1).map(|token| &token.kind);
-                if matches!(next, Some(TokKind::LParen)) {
-                    return true;
-                }
-            }
-            matches!(
-                kind,
-                TokKind::KwFn
-                    | TokKind::Ident(_)
-                    | TokKind::LParen
-                    | TokKind::LBracket
-                    | TokKind::Star
-            )
+        /// D-LAMBDA-IFACE1=A: probe the real suffix parser so type-start tokens
+        /// that are also expression operators (`*`, `(`, `[`, `?`) do not turn
+        /// ordinary grouped expressions into lambdas.
+        fn lambda_tail_starts_at(&mut self, index: usize) -> bool {
+            let saved_pos = self.pos;
+            let saved_diags = self.diags.len();
+            let saved_pending_type_gt = self.pending_type_gt;
+            let saved_depth = self.depth;
+            let saved_type_generic_depth = self.type_generic_depth;
+            let saved_type_generic_chain_len = self.type_generic_chain.len();
+            let saved_type_generic_truncated = self.type_generic_truncated;
+
+            self.pos = index;
+            let parsed = self
+                .parse_lambda_return_interface()
+                .ok()
+                .and_then(|_| self.parse_opt_func_effects().ok())
+                .map(|(effects, effect_via)| {
+                    effects.is_some()
+                        || effect_via.is_some()
+                        || Self::at_unified_arrow_token(&self.peek().kind)
+                })
+                .unwrap_or(false);
+
+            self.pos = saved_pos;
+            self.diags.truncate(saved_diags);
+            self.pending_type_gt = saved_pending_type_gt;
+            self.depth = saved_depth;
+            self.type_generic_depth = saved_type_generic_depth;
+            self.type_generic_chain.truncate(saved_type_generic_chain_len);
+            self.type_generic_truncated = saved_type_generic_truncated;
+            parsed
         }
 
         /// S46: recognize `(` … `) ->` only when the contents have lambda
         /// parameter shape. A condition such as `(a > b) ->` is an
         /// if-expression condition, not a lambda parameter list.
-        pub(super) fn after_lparen_is_lambda(&self) -> bool {
+        pub(super) fn after_lparen_is_lambda(&mut self) -> bool {
             let mut i = self.pos + 1;
             if matches!(self.toks.get(i).map(|token| &token.kind), Some(TokKind::RParen)) {
                 return self.lambda_tail_starts_at(i + 1);

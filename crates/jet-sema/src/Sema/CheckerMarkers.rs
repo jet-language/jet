@@ -546,7 +546,7 @@ pub(crate) fn resolve_static_rule_products(
     materialize_static_marker_values(&mut module.items, &validated, &invalid);
     materialize_test_faults(&mut module.items, diags);
     materialize_test_expected_fail(&mut module.items, &validated);
-    // D-FIELDDEF1=C: promote retired `#Default(expr)` into `field: T{expr}`.
+    // D-DEFAULT-SHAPE1=B: promote retired `#Default(expr)` into `field: T{expr}`.
     // Then sweep whatever retired spellings are left on the field: the field
     // attachment point had no reader at all, so the registry's `@retired`
     // column was true and silent there — `#Uninit label: String` parsed,
@@ -933,10 +933,10 @@ impl<'a> crate::Sema::Checker<'a> {
                 application.site,
                 Some(crate::Policy::RuleSite::Block | crate::Policy::RuleSite::Statement)
             )
-                && (application.target.is_none()
-                    || application.target == Some(target))
-                && application.marker.span.start <= target.start.saturating_add(1)
-                && target.start <= application.marker.span.start
+                && (application.target == Some(target)
+                    || application.target.is_none()
+                        && application.marker.span.start <= target.start.saturating_add(1)
+                        && target.start <= application.marker.span.start)
                 && !matches!(
                     application.marker.name.as_str(),
                     Syntax::MARKER_META | Syntax::CTX_BLOCK

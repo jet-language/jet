@@ -330,6 +330,9 @@ live acceptance, and documentation. Work order is binding.
   cache transfer boundary: compromised signers, monotonic rollback, exact-expiry
   freeze, metadata mix-and-match, changed cache keys, and revoked builders fail
   closed with the existing signed provenance and recovery explanation.
+- Native cache entries carry a signed, time-bounded admission receipt. The host
+  pins the accepted receipt version and digest per cache role and output, so a
+  replayed older receipt or same-version replacement cannot become usable.
 
 ### E4-JP7 — remote builders and execution
 

@@ -957,17 +957,17 @@ pub enum Type {
         ok: Box<Type>,
         err: Box<Type>,
     },
-    /// S47 (M8): function type `fn(T1, T2) => R` (`ret` omitted = no return value).
+    /// S47 (M8): function type `fn(T1, T2) R` (`ret` omitted = no return value).
     ///
     /// D-EFF2 / D-SHAPE8: an optional effect row lives inside the function
-    /// type's callable arrow — `fn(T) =[]=> U` requires purity and
-    /// `fn(T) =[Net]=> U` permits at most the listed effects. `effect_bound`
-    /// is `None` when unannotated, `Some(empty)` for `=[]=>`, and
+    /// type's effect row — `fn(T) -[]> U` requires purity and
+    /// `fn(T) -[Net]> U` permits at most the listed effects. `effect_bound`
+    /// is `None` when unannotated, `Some(empty)` for `-[]>`, and
     /// `Some([(name, span), …])` for a nonempty row. Names are validated
     /// against the effect vocabulary in sema, not the parser. The bound is a
     /// call-site obligation on whatever callback is passed (E0747) — it is **not**
     /// part of structural type identity (see the manual `PartialEq for Type`,
-    /// which ignores it in the `Fn` arm), so `fn(Int) =[]=>` and `fn(Int)` are the
+    /// which ignores it in the `Fn` arm), so `fn(Int) -[]>` and `fn(Int)` are the
     /// same identity; sema still rejects an offered callable whose obligation
     /// cannot satisfy a stricter required bound.
     Fn {

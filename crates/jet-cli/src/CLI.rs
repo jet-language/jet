@@ -297,12 +297,15 @@ const SELF_ACTIONS: &[NestedCommandSpec] = &[
     NestedCommandSpec { name: "devtools", usage: "devtools", summary: "Run Jet maintenance tools", handler: HandlerKey::Devtools, also_canonical_top_level: false },
     NestedCommandSpec { name: "lsp", usage: "lsp", summary: "Start the language server", handler: HandlerKey::Lsp, also_canonical_top_level: false },
 ];
-// D-ENVHOOK1=A: these are the shipped `jetpack enter` subverbs exposed through
-// Jet's environment front door. `env` stays non-exhaustive because `export` is
-// a private callback used by the shell hook and must continue downstream.
+// D-ENVHOOK1=A / D-ENV-FILES1=A / D-ENV-PROFILE1=C: these are the shipped
+// `jetpack enter` subverbs exposed through Jet's environment front door. `env`
+// stays non-exhaustive because `export` is a private callback used by the shell
+// hook and must continue downstream.
 const ENV_ACTIONS: &[NestedCommandSpec] = &[
     NestedCommandSpec { name: "test", usage: "test [-- command]", summary: "Run environment checks in a clean environment", handler: HandlerKey::Env, also_canonical_top_level: true },
     NestedCommandSpec { name: "hook", usage: "hook <bash|zsh|fish>", summary: "Print the shell auto-activation hook", handler: HandlerKey::Env, also_canonical_top_level: false },
+    NestedCommandSpec { name: "sync", usage: "sync", summary: "Apply typed managed environment files", handler: HandlerKey::Env, also_canonical_top_level: false },
+    NestedCommandSpec { name: "info", usage: "info", summary: "Show the typed environment plan", handler: HandlerKey::Env, also_canonical_top_level: false },
 ];
 const SHARED_STORE_ACTIONS: &[NestedCommandSpec] = &[
     NestedCommandSpec { name: "install", usage: "install", summary: "Install the optional shared Hangar broker", handler: HandlerKey::SharedStore, also_canonical_top_level: false },
@@ -376,6 +379,12 @@ pub fn moved_command(name: &str) -> Option<(&'static CommandSpec, &'static Neste
     // (`jet env test` and `jet test`). The canonical top-level intent wins
     // bare-word lookup; grouped dispatch still uses `nested_command` and keeps
     // the owning group when its handler requires it.
+    // A group name itself has the same priority: `env` is both the canonical
+    // environment front door and the `inspect env` action, so the group must
+    // reach its own dispatcher before this moved-command teaching path.
+    if command_group(name).is_some() {
+        return None;
+    }
     if command_groups().any(|group| {
         group
             .actions
@@ -1860,6 +1869,7 @@ mod tests {
             ("self", "completions", Completions, "completions", false), ("self", "man", Man, "man", false),
             ("self", "devtools", Devtools, "devtools", false), ("self", "lsp", Lsp, "lsp", false),
             ("env", "test", Env, "env", true), ("env", "hook", Env, "env", true),
+            ("env", "sync", Env, "env", true), ("env", "info", Env, "env", true),
             ("shared-store", "install", SharedStore, "shared-store", true),
             ("shared-store", "enroll", SharedStore, "shared-store", true),
             ("shared-store", "status", SharedStore, "shared-store", true),

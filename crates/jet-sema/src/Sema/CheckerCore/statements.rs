@@ -2244,11 +2244,11 @@ impl<'a> Checker<'a> {
                                         self.diags.push(Diagnostic::error(
                                             "E0109",
                                             format!(
-                                                "`for x in` on `{}` needs one loop name, not two",
+                                                "`loop (x, y) in` on `{}` needs one loop name, not two",
                                                 n
                                             ),
                                             "a codec reader yields one item per step".to_string(),
-                                            format!("write `for item in {n}`").to_string(),
+                                            format!("write `loop item in {n}`").to_string(),
                                             Some(collection.span()),
                                         ));
                                     } else if let Some(item_ty) = encoding_reader_item_type(n) {
@@ -2262,11 +2262,11 @@ impl<'a> Checker<'a> {
                                         self.diags.push(Diagnostic::error(
                                             "E0109",
                                             format!(
-                                                "`for x in` on `{}` needs one loop name, not two",
+                                                "`loop (x, y) in` on `{}` needs one loop name, not two",
                                                 n
                                             ),
                                             "a custom iterable yields one item per step".to_string(),
-                                            format!("write `for item in {n}`").to_string(),
+                                            format!("write `loop item in {n}`").to_string(),
                                             Some(collection.span()),
                                         ));
                                     } else {

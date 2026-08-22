@@ -1542,7 +1542,7 @@ fn notify(ready: Bool) -[Net]> {
     outer :: loop {
         break
     }
-    values :: loop item; [1, 2] -> item
+    values :: loop item in [1, 2] -> item
     state :: if ready -> 1 else -> 2
 }
 "#;
@@ -1600,6 +1600,11 @@ fn notify(ready: Bool) -[Net]> {
                 .map(|effects| effects.iter().map(|(name, _)| name.as_str()).collect::<Vec<_>>()),
             Some(vec!["IO"])
         );
+    }
+
+    #[test]
+    fn lambda_interface_lookahead_preserves_grouped_multiplication() {
+        program("fn run() { print((2) * 3) }\n");
     }
 
     #[test]
@@ -1743,7 +1748,7 @@ fn notify(ready: Bool) -[Net]> {
     /// D-ERRSUFFIX1=B: `T?` is Optional; an error type owns the `!` suffix.
     #[test]
     fn return_type_question_spacing_disambiguates_option_vs_result() {
-        let opt = program("fn a() Int? -> { return None }\nfn run() {}\n");
+        let opt = program("fn a() Int? -> None\nfn run() {}\n");
         let a = opt.items.iter().find_map(|i| match i {
             crate::AST::Item::Func(f) if f.name == "a" => Some(f),
             _ => None,
@@ -1753,7 +1758,7 @@ fn notify(ready: Bool) -[Net]> {
             "tight `Int?` must be Optional"
         );
 
-        let res = program("fn b() Int ! -> { return Ok(1) }\nfn run() {}\n");
+        let res = program("fn b() Int ! -> Ok(1)\nfn run() {}\n");
         let b = res.items.iter().find_map(|i| match i {
             crate::AST::Item::Func(f) if f.name == "b" => Some(f),
             _ => None,
@@ -1766,7 +1771,7 @@ fn notify(ready: Bool) -[Net]> {
             "`Int !` must be Result"
         );
 
-        let paren = program("fn c() (Int?) -> { return None }\nfn run() {}\n");
+        let paren = program("fn c() (Int?) -> None\nfn run() {}\n");
         let c = paren.items.iter().find_map(|i| match i {
             crate::AST::Item::Func(f) if f.name == "c" => Some(f),
             _ => None,
@@ -1781,12 +1786,21 @@ fn notify(ready: Bool) -[Net]> {
     fn fallible_type_sigil_is_valid_in_all_type_positions() {
         let parsed = program(
             "struct Holder { value: Int? IOError! }\n\
-             alias Box<T> :: T\n\
+             alias Box<T> :: T? IOError!;\n\
              fn fetch(value: Int? IOError!) Box<Int? IOError!> -> value\n\
              fn run() {}\n",
         );
         assert!(parsed.items.iter().any(|item| matches!(item, crate::AST::Item::Struct(_))));
-        assert!(parsed.items.iter().any(|item| matches!(item, crate::AST::Item::TypeAlias(_))));
+        let alias = parsed.items.iter().find_map(|item| match item {
+            crate::AST::Item::TypeAlias(alias) if alias.name == "Box" => Some(alias),
+            _ => None,
+        }).expect("Box alias");
+        assert!(matches!(
+            &alias.target,
+            crate::AST::Type::Result { ok, err }
+                if matches!(ok.as_ref(), crate::AST::Type::Option(inner) if matches!(inner.as_ref(), crate::AST::Type::Named(name) if name == "T"))
+                    && matches!(err.as_ref(), crate::AST::Type::Named(name) if name == "IOError")
+        ));
     }
 
     #[test]
@@ -1850,6 +1864,48 @@ fn notify(ready: Bool) -[Net]> {
         assert!(matches!(load.return_type, Some(crate::AST::Type::Result { ref ok, ref err })
             if matches!(ok.as_ref(), crate::AST::Type::Named(name) if name == "Config")
                 && matches!(err.as_ref(), crate::AST::Type::Named(name) if name == "IOError")));
+    }
+
+    #[test]
+    fn suffix_zone_supports_bare_default_error_in_general_types() {
+        let parsed = program(
+            "struct Holder {\n\
+                 optional: Int? !,\n\
+                 bare: !\n\
+             }\n\
+             alias DefaultFailure :: !;\n\
+             fn callback(cb: fn(Int? IOError!) Int (DbError | TimeoutError)!) Int? IOError! -> None\n\
+             fn run() {}\n",
+        );
+        let holder = parsed.items.iter().find_map(|item| match item {
+            crate::AST::Item::Struct(def) if def.name == "Holder" => Some(def),
+            _ => None,
+        }).expect("Holder");
+        assert!(matches!(
+            &holder.fields[0].ty,
+            crate::AST::Type::Result { ok, err }
+                if matches!(ok.as_ref(), crate::AST::Type::Option(inner) if matches!(inner.as_ref(), crate::AST::Type::Int))
+                    && matches!(err.as_ref(), crate::AST::Type::Named(name) if name == Syntax::TYPE_ERR)
+        ));
+        assert!(matches!(
+            &holder.fields[1].ty,
+            crate::AST::Type::Result { ok, err }
+                if matches!(ok.as_ref(), crate::AST::Type::Named(name) if name == Syntax::INTERNAL_UNIT_TYPE)
+                    && matches!(err.as_ref(), crate::AST::Type::Named(name) if name == Syntax::TYPE_ERR)
+        ));
+    }
+
+    #[test]
+    fn optional_infix_failure_spelling_teaches_suffix_zone() {
+        let source = "alias Old :: Int? ! IOError\n";
+        let (tokens, lex_diagnostics) = lex(source);
+        assert!(lex_diagnostics.is_empty(), "{lex_diagnostics:?}");
+        let diagnostics = parse(&tokens).expect_err("retired infix spelling");
+        let diagnostic = diagnostics
+            .iter()
+            .find(|diagnostic| diagnostic.code == "E-ERR-SIGIL")
+            .expect("E-ERR-SIGIL");
+        assert!(diagnostic.fix.contains("Entry? StoreError!"));
     }
 
     #[test]

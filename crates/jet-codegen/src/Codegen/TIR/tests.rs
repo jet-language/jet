@@ -1897,7 +1897,7 @@ fn consume(ch: Receiver<Int>) => Int {
         // c109 Phase 23: a fn with default param values is covered (defaults are filled at
         // call sites by sema; codegen never reads `p.default`).
         assert!(covers(
-            "fn box_dims(w: Int, h: Int = w, d: Int = h) => String {\n return \"{w}{h}{d}\"\n}\n",
+            "fn box_dims(w: Int, h: Int{w}, d: Int{h}) String -> {\n return \"{w}{h}{d}\"\n}\n",
             "box_dims"
         ));
     }
@@ -1934,10 +1934,10 @@ fn consume(ch: Receiver<Int>) => Int {
 
     #[test]
     fn covers_default_param_method() {
-        // c109 Phase 23: a struct-body method with a default param value (`clamp: Bool =
-        // false`) is covered (same call-site-fill rule as a free fn; codegen never reads
+        // c109 Phase 23: a struct-body method with a default param value (`clamp: Bool{false}`)
+        // is covered (same call-site-fill rule as a free fn; codegen never reads
         // `p.default`).
-        let src = "struct Rect {\n w: Int\n fn scale(self, factor: Int, clamp: Bool = false) => Int {\n return (self.w * factor)\n }\n}\n";
+        let src = "struct Rect {\n w: Int\n fn scale(self, factor: Int, clamp: Bool{false}) Int -> {\n return (self.w * factor)\n }\n}\n";
         assert!(covers_method(src, "Rect", "scale"));
     }
 

@@ -1666,7 +1666,7 @@ fn string_method_return(method: &str, nargs: usize) -> Option<Option<Type>> {
         // `Int.parse(s)` returns, so one error type covers text→int.
         // D-STR-DECLINE1=C: `to_int`/`to_float` are direct String spellings of
         // the one parse mechanism `Int.parse`/`Float.parse` already run —
-        // same `? ParseError` result, reached one call shorter from text.
+        // same `Int ParseError!` result, reached one call shorter from text.
         ("to_int", 0) => Some(Some(Type::Result {
             ok: Box::new(Type::Int),
             err: Box::new(Type::Named("ParseError".to_string())),
@@ -1676,7 +1676,7 @@ fn string_method_return(method: &str, nargs: usize) -> Option<Option<Type>> {
             err: Box::new(Type::Named("ParseError".to_string())),
         })),
         // D-STR-DECLINE1=C: `matches`/`match` route through the one core.regex
-        // engine (`core.regex.compile` + `is_match`/`find`) — same `? String`
+        // engine (`core.regex.compile` + `is_match`/`find`) — same `String!`
         // bad-pattern error shape `core.regex.compile` already returns.
         ("matches", 1) => Some(Some(Type::Result {
             ok: Box::new(Type::Bool),

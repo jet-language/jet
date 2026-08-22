@@ -1,4 +1,7 @@
 use super::*;
+use std::sync::atomic::{AtomicU64, Ordering};
+
+static QUARANTINE_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
 pub(crate) fn try_entry_output_hash(roots: &Roots, entry: &StoreEntry) -> Result<String, String> {
     let hangar = roots.hangar_dir();
@@ -133,10 +136,12 @@ pub fn quarantine_invalid_entry(
             let quarantine = hangar.join("quarantine");
             ensure_real_directory(&quarantine, "Hangar quarantine")?;
             let stamp = now_secs();
+            let unique = quarantine_suffix();
             let record = hangar.join(&current.id);
             if fs::symlink_metadata(&record).is_ok() {
                 permissions.make_writable(&record, &hangar)?;
-                let destination = quarantine.join(format!("record-{}-{stamp}", current.id));
+                let destination =
+                    quarantine.join(format!("record-{}-{stamp}-{unique}", current.id));
                 fs::rename(&record, &destination)?;
                 permissions.renamed(&record, &destination);
             }
@@ -161,7 +166,8 @@ pub fn quarantine_invalid_entry(
                             .and_then(|name| name.to_str())
                             .ok_or_else(|| std::io::Error::other("invalid owned output name"))?;
                         permissions.make_writable(owned, &hangar)?;
-                        let destination = quarantine.join(format!("output-{name}-{stamp}"));
+                        let destination =
+                            quarantine.join(format!("output-{name}-{stamp}-{unique}"));
                         fs::rename(owned, &destination)?;
                         permissions.renamed(owned, &destination);
                     }
@@ -180,6 +186,19 @@ pub fn quarantine_invalid_entry(
             ))),
         }
     })
+}
+
+fn quarantine_suffix() -> String {
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_nanos())
+        .unwrap_or_default();
+    format!(
+        "{}-{}-{}",
+        std::process::id(),
+        nanos,
+        QUARANTINE_SEQUENCE.fetch_add(1, Ordering::Relaxed)
+    )
 }
 
 pub(crate) fn now_secs() -> u64 {

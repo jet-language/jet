@@ -650,7 +650,9 @@ pub(crate) fn expr_collect_captures(
     called: &mut HashSet<String>,
 ) {
     match e {
-        Expr::Ident(n, _) if !bound.contains(n) => {
+        // D-SUBJECT-COHERE1=A: compiler-owned empty receivers (including a
+        // leading-dot shorthand) are placeholders, never user bindings.
+        Expr::Ident(n, _) if !n.is_empty() && !bound.contains(n) => {
             read.insert(n.clone());
         }
         Expr::Unary(_, inner, _) => expr_collect_captures(inner, bound, read, mut_cap, called),

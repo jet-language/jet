@@ -234,14 +234,17 @@ pub fn community_gate_status(
 
 pub fn community_gate_error(package: &str, version: &str, status: &GateStatus) -> Diagnostic {
     let reasons = status.blocked_reasons().join(", ");
+    let required = "#935 live signature chain, #431 advisory audit, #1912 name policy, #1913 maintainer liveness";
     Diagnostic::error(
         "E2105",
         format!(
             "community-tier package `{package}` {version} is refused: {reasons} gate(s) are closed"
         ),
-        "the community tier accepts a package only after live signature, advisory, name, and maintainer gates pass".to_string(),
         format!(
-            "complete {reasons}, then publish `{package}` {version} again"
+            "the community tier requires all four gates ({required}); a package is accepted only after live signature, advisory, name, and maintainer checks pass"
+        ),
+        format!(
+            "complete the closed gates ({reasons}); verify all four gates ({required}), then publish `{package}` {version} again"
         ),
         None,
     )

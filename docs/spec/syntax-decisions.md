@@ -69,7 +69,7 @@ declaration words (`fun`, `func`, `def`, `function`) and binding words (`let`,
 `let mut`, `var`, `const`, `val`) only when their surrounding shape proves a
 declaration or binding. The diagnostic names the one Jet form — `fn`, `::`, or
 `:=` — and supplies a source edit when the rewrite is mechanical. A function
-return colon gets the existing `=>` edit. These words never enter the grammar;
+return colon gets the existing `->` edit. These words never enter the grammar;
 ordinary dead-value cases keep E0003's existing wording.
 
 **D-CASING1 — Casing law + "Core"** *(with D-MARKER-CANON1, D-CONTRACTCASE1)*:
@@ -264,7 +264,7 @@ named statics (`Point.cartesian(…)`, `Point.polar(…)`); duplicate name E0105
 No marker keyword — return-type-is-the-type identifies a constructor (D-CTOR2).
 
 **S46 — Lambda syntax**: `(params) -> expr` / `(params) -> { … }`. `->` is
-the one callable and control arrow; `:>` and `=>` are retired teaching forms.
+the one callable and control arrow; other arrow spellings receive E0070.
 **D-LAMBDAINFER1**:
 a lambda param type may be omitted where the expected type fixes it
 (`xs.filter((i) -> i.state == .Open)`); required elsewhere (E0801);
@@ -316,7 +316,7 @@ constructors, generic calls, variadics, and function values all bind through
 the one binder. fmt never adds nor strips labels.
 
 ```jet
-fn connect(host: String, /, *, timeout seconds: Int{30}, tls: Bool{true}) => Client ConnectError!
+fn connect(host: String, /, *, timeout seconds: Int{30}, tls: Bool{true}) Client ConnectError!
 client :: connect("db.internal", tls: true, timeout: 5)?
 ```
 
@@ -364,8 +364,8 @@ candidate sets.
 head its own body; dispatch by argument shape; heads must be exhaustive.
 
 ```jet
-fn area(Circle(r: Float)) => Float :: 3.14 * r * r
-fn area(Rect(w: Float, h: Float)) => Float :: w * h
+fn area(Circle(r: Float)) Float -> 3.14 * r * r
+fn area(Rect(w: Float, h: Float)) Float -> w * h
 ```
 
 **D-VARIADIC1 — Variadics & spread**: `...` everywhere — param `name: ...T`
@@ -417,8 +417,8 @@ effect body uses `->` followed by one statement. Arrow arm bodies remain
 expressions. Braces do not determine whether a construct returns a value.
 
 **S19 — Loops** *(D-LOOP-HEADER2=A, D-LOOP-ADVANCE2=A,
-D-LOOPEVAL1=A, D-COMPREHENSION1=A, D-LOOP-COMMA1=A, ratified
-2026-07-30, card #1336)*:
+D-LOOPEVAL1=A, D-COMPREHENSION1=A, D-LOOP-COMMA1=A, amended by
+D-LOOP-IN1=A, ratified 2026-07-30, card #1336)*:
 
 ```jet
 loop { … }                        // infinite
@@ -433,7 +433,8 @@ values :: loop item in items -> item.value
 `while`/`for` are not keywords. A source and optional stride evaluate once,
 left to right; a dynamic nonpositive stride raises E0123 before the first pull.
 Stride N visits source indexes 0, N, 2N; exhaustion while advancing is normal.
-Commas separate loop header clauses. Semicolons remain statement boundaries only.
+`in` joins a source binding to its source. Commas separate later loop header
+clauses. Semicolons remain statement boundaries only.
 **D-LOOP-HEADER3=D**: the old three-slot C-style counter (`loop i := 0, i < n, i += 1`)
 is retired with teaching diagnostic E0376; prefer `loop i in 0..<n` or a range step rule.
 
@@ -708,12 +709,12 @@ linalg types; user structs use methods.
 F64` for experts/FFI. `Int` uses a machine-word fast path and spills only when
 the value needs it.
 Conversions are destination-owned named methods only (`Float.from_int(n)`,
-`U8.from_int(n)?` for fallible narrowing, `Int.parse(s) => Int ParseError!`);
+`U8.from_int(n)?` for fallible narrowing, `Int.parse(s) -> Int ParseError!`);
 no `as`, cast punctuation, or source-owned `to_*` aliases.
 **D-NUMOPS1/2**: plain arithmetic on a fixed-width integer **traps on
 overflow**; exact default `Int` arithmetic does not overflow. Fixed-width
 code may opt in per operation with `wrapping(…)` / `saturating(…)` /
-`checked(…) => T?`, or with receiver methods such as
+`checked(…) -> T?`, or with receiver methods such as
 `value.wrapping_add(other)`, `value.saturating_add(other)`, and
 `value.checked_add(other)`. Per-type `MIN`/`MAX`, float
 `INFINITY`/`NAN`/`EPSILON`, bit ops. **D-FLOATW1**: `core.math` is width-generic.
@@ -840,7 +841,7 @@ Range values; accepting a runtime value here would make the declaration
 value-dependent (D-RANGE-VALUE1=A).
 
 **D-FIELDPOL1 — Computed fields** *(ratified 2026-07-03, card #181; amended by
-D-FIELDMEMO1=A)*: a struct field `name: T => expr` is an unmarked read-time
+D-FIELDMEMO1=A)*: a struct field `name: T -> expr` is an unmarked read-time
 formula over the struct's current field values (siblings, data or computed,
 are readable by bare name inside `expr`). `#Memo` is the explicit retained
 form: the first read keeps its answer, and a write to any stored sibling in
@@ -965,10 +966,10 @@ dimension, kind, and input/output relations. Every input/output must
 determine one concrete unit and kind; an undetermined result is rejected.
 
 ```jet
-fn mean<Q: Quantity<Length, .Linear>>(xs: [Q]) => Q { xs.mean() }
-fn shift<P: Quantity<Temperature, .Point>, D: Quantity<Temperature, .Delta>>(p: P, d: D) => P { p + d }
+fn mean<Q: Quantity<Length, .Linear>>(xs: [Q]) Q -> { xs.mean() }
+fn shift<P: Quantity<Temperature, .Point>, D: Quantity<Temperature, .Delta>>(p: P, d: D) P -> { p + d }
 
-fn mystery<Q: Quantity<Length, .Linear>>() => Q { Meter.from_int(1)? }
+fn mystery<Q: Quantity<Length, .Linear>>() Q -> { Meter.from_int(1)? }
 // error: return unit is not determined by the signature
 // fix: accept a unit-bearing input or return Meter
 ```
@@ -1016,7 +1017,7 @@ length :: 3meter
 total :: length + inner_diameter
 // 3042millimeter — finer unit wins, exactly
 
-fn fits(depth: Meter) => Bool { depth > 0meter }
+fn fits(depth: Meter) Bool -> { depth > 0meter }
 fits(3000millimeter)
 // argument converts exactly to 3meter
 
@@ -1112,10 +1113,10 @@ index then item; one-binding stays item-only. `xs.indexes()` yields every valid
 `Int` index.
 
 **S39 — Indexing**: `xs[i]` / `m[k]` stop with a friendly report on
-OOB/missing key; `xs.get(i) => (T?)` safe access; `m[k] = v` inserts.
+OOB/missing key; `xs.get(i) -> (T?)` safe access; `m[k] = v` inserts.
 
 **S40 — Slicing**: `xs[a..b]` inclusive, copies (no exposed references);
-`s.slice(a..b) => String` on character positions; L0501 lints slice copies in
+`s.slice(a..b) -> String` on character positions; L0501 lints slice copies in
 loops.
 
 **D-ITER1 / D-ITERTOOLS1=A — Iterator adapters**: `map`, `filter`, `each`,
@@ -1676,7 +1677,7 @@ ambient `print`/`input`; no library may inject into the no-prefix surface.
 ### Traits, generics & derives
 
 **S28 — Traits** *(D-IMPLDOT1)*: explicit named capabilities, never
-structural. `trait Shape { fn area(self) => Float }`. Two equivalent impl
+structural. `trait Shape { fn area(self) Float }`. Two equivalent impl
 spellings — inside the type body (`impl Serialize { … }`) or top-level
 **`impl Type.Trait { … }`** ("Type's Trait"). `.` walks namespaces and
 attaches traits; `::` exists only inside `extern rust` path strings. Orphan
@@ -1713,7 +1714,7 @@ Explicit opt-in markers for the other derive families remain
 the `#` plane (see Serde under Core library).
 
 **D-DISPLAYDBG1 / D-DISPLAY-SHAPE — Display & Debug**: `Display` is
-user-facing — a single explicit method `fn display(self) => String`, no
+user-facing — a single explicit method `fn display(self) String`, no
 default (E0915, L0520); interpolation `{}` calls it. `Debug` is dev-facing and
 auto-derived; `{value:Debug}` selects it; `#Redact` on a field renders
 `"[redacted]"` (D-DEBUG-REDACT).
@@ -1723,8 +1724,8 @@ auto-derived; `{value:Debug}` selects it; `#Redact` on a field renders
 `Iterable`+`Iterator` for `loop x in mytype` and `Index`/`IndexMut` for
 bracket syntax. Built-in `[T]`/`Map` keep native paths.
 
-**D-ROLLBACK-TRAIT**: `trait Rollback { type Snapshot; fn snapshot(self) =>
-Snapshot; fn restore(&self, snap: Snapshot) }`; restore total; the
+**D-ROLLBACK-TRAIT**: `trait Rollback { type Snapshot; fn snapshot(self) Snapshot;
+fn restore(&self, snap: Snapshot) }`; restore total; the
 compiler-generated field-wise Rollback implementation is the canonical
 implementation.
 
@@ -1772,7 +1773,7 @@ D-VERDICT-732-1)*: on `#`: `MustUse`,
 `Codable`, `Encode`, `Decode`,
 `PublishedSchema`, `Redact`, `Numeric`, `Debug`, `Comparable`
 (user derives of the same names also use `#`). D-SHAPE8 later moved explicit
-purity to the empty function-effect row (`f: fn(Int) =[]=> Int`). Field-level wire markers
+purity to the empty function-effect row (`f: fn(Int) -[]> Int`). Field-level wire markers
 use `#`: `Rename`, `Skip`, `Default`, `Flatten`, `RenameAll`,
 `DenyUnknownFields`, `Discriminant`, `Untagged`.
 
@@ -2006,7 +2007,7 @@ a sigil binding:
 ```
 
 The marker records provenance for that binding without changing its type.
-Current implementation records Float local origins; `speed.origin() => String`
+Current implementation records Float local origins; `speed.origin() -> String`
 returns the tracked source note, and untracked Floats return `"untracked"`.
 No `Tracked<T>` wrapper exists and no general value-history type is introduced.
 
@@ -2033,9 +2034,9 @@ help-text carrier (D-CLIFLAG1), not free metadata.
 
 **D-PATCH1 — Typed patches** *(ratified 2026-07-03, card #181)*: `#Patchable`
 on a struct `T` synthesizes `T.Patch` — every field wrapped `T?` (Option),
-absent field = no change. Generated methods: `t.apply(patch) => T` (apply
-onto a base), `T.diff(new, old) => T.Patch` (static; fields that changed,
-`None` where equal), `patch.merge(other) => T.Patch` (`other` wins on
+absent field = no change. Generated methods: `t.apply(patch) -> T` (apply
+onto a base), `T.diff(new, old) -> T.Patch` (static; fields that changed,
+`None` where equal), `patch.merge(other) -> T.Patch` (`other` wins on
 conflicting `Some`s). No type parameters (E0336 — concrete field list only);
 no stored-reference or function-typed fields (E0337 — a patch holds owned
 optional values). `Patch` Encode/Decode is deferred to the prelude serde
@@ -2203,7 +2204,7 @@ view may borrow from (`from packet`, `from left | right`, `from self`,
 `from static.MOTD`, or per-slot `from (text: primary | fallback)`).
 `VIEW_FROM` / `VIEW_FROM_STATIC` are contextual identifiers, not lexer
 keywords. Function types may name parameters so a clause can resolve them
-(`fn(line: String, noise: String) => View<str> from line`); names exist only
+(`fn(line: String, noise: String) View<str> from line`); names exist only
 for that resolution and are not part of type identity. Inference
 (D-MEMPROVENANCE2=A) remains the beginner default; undeclared APIs behave as
 today. Sema requires every return path's inferred owners ⊆ the declaration (a
@@ -2495,8 +2496,8 @@ effect fixpoint as E0725; deterministic `Clock`/`Rng` handles remain pure.
 **D-TXN1–4, D-TXN-ROLLBACK — Transactions**: `#Transact { … }` or the named
 `#Transact(name) { … }` form — on a `?`-failure, mutated locals restore LIFO
 from auto-snapshots (layer 1);
-`Rollback` trait for custom snapshots (layer 2); `name.on_rollback(() => …)`
-and `name.on_commit(() => …)` explicit hooks (layer 3, Drop-backed).
+`Rollback` trait for custom snapshots (layer 2); `name.on_rollback(() -> …)`
+and `name.on_commit(() -> …)` explicit hooks (layer 3, Drop-backed).
 Irreversible effects (`Net`/`FS`/`Exec`) inside the block are E0746 — move
 after the block or register via `on_commit`.
 
@@ -2542,7 +2543,7 @@ effect summary and records per-dependency provenance in the lock.
 malformed block E1221.
 
 **D-STREAMYIELD1 — Generators** *(amended by D-CONC-STREAM1=A)*:
-`fn f() => Stream<T>` uses `yield expr` to hand a value to the consumer and
+`fn f() Stream<T>` uses `yield expr` to hand a value to the consumer and
 suspend until the next pull; falling off the end (or a bare `return;`) ends the
 stream; `return value;` is E0806. Consumers are ordinary `loop x in f() { }`
 loops — one keyword, one type, no async/await coloring. Lifecycle,
@@ -2612,8 +2613,8 @@ any other marked member reports E0302 and names the three facts.
 **D-CTCORE1 / D-CTIO1 / D-PURE2 — Comptime I/O**, amended by
 **D-META-EFFECT1**: comptime and runtime read the same Core effect fact. An
 empty effect set is Tier 0 and may evaluate without a gate. Recorded,
-hash-checked inputs such as `embed_file(path) => String`,
-`embed_bytes(path) => [U8]`, `find(glob)`, and pinned `fetch` are Tier 1; they
+hash-checked inputs such as `embed_file(path) -> String`,
+`embed_bytes(path) -> [U8]`, `find(glob)`, and pinned `fetch` are Tier 1; they
 enter `.jet/lock`. Ambient effects are Tier 2 and keep the explicit
 `#Impure("reason")` plus the `--gate impure=allow` gate. **D-STRPARSE1**:
 comptime evaluation may pass through `Result`/`Option` for pure parse paths.
@@ -2621,7 +2622,7 @@ comptime evaluation may pass through `Result`/`Option` for pure parse paths.
 **D-CTEFFECT1 — Comptime effect tiers**: Tier 0 pure always-on; Tier 1
 hashed-reproducible recorded into `.jet/lock` (`@embed`, `find`,
 `fetch(url, sha256:)`); Tier 2 ambient requires `#Impure("reason")` **and**
-`--gate impure=allow`. **D-CTFIND1/2**: `find(glob) => [String]` builtin, sorted,
+`--gate impure=allow`. **D-CTFIND1/2**: `find(glob) -> [String]` builtin, sorted,
 hash-recorded; hand-rolled std-only glob (`*`, `**`, `?`, `{a,b}`, `[a-z]`).
 Shipped by #350.
 
@@ -2951,7 +2952,7 @@ STABILITY test** (idempotence alone misses dropped tokens).
 
 ### FFI & external dependencies
 
-**S50 — Rust FFI**: `extern rust "crate@version" { fn name(args) => T =
+**S50 — Rust FFI**: `extern rust "crate@version" { fn name(args) T =
 "rust::path" }`. Version pins required; by-value boundary only — no borrows,
 callbacks, or trait objects across the edge.
 
@@ -2986,7 +2987,7 @@ binds scalars and `char*`↔String; `#define` constants only. Old
 **D-CABI-CALLBACK1=A / D-CABI-RESULT1=C / D-CABI-PLATFORM1=A** *(ratified
 2026-07-11, card #436)*: C callbacks accept only C-convention function values
 whose arguments and return are C-safe. A callback is non-null, monomorphic,
-explicitly bounded `=[]=>` or a capture-free lambda with an inferred empty row, and safe for foreign threads:
+explicitly bounded `-[]>` or a capture-free lambda with an inferred empty row, and safe for foreign threads:
 no heap allocation, mutable static or thread-local state, scheduler access, or
 panic-capable path. Its pointer is stable for the program lifetime and may be
 called concurrently or reentrantly. There is no hidden context pointer,
@@ -3246,7 +3247,7 @@ card #212)*: Jet ships a first-party game stack: public primitives plus a
 batteries engine. The engine name is `core.game` (D-GAME2=A). The beginner
 API is scene-first with a frame hook (D-GAME3=C): a `Scene` owns sprites,
 shapes, sounds, camera, and input bindings as durable editable data, and
-`scene.on_frame((frame) => { ... })` attaches small game logic to that scene.
+`scene.on_frame((frame) -> { ... })` attaches small game logic to that scene.
 The frame hook is not a second engine model; it is script on the scene. The
 already-ratified `core.raylib` bridge package (D-RAYLIB1=A) remains the
 interim compatibility floor beneath the native-shaped stack.
@@ -3350,7 +3351,7 @@ YAML parser is std-only, YAML 1.2 core incl. anchors.
 **D-SERDE2 = A** *(ratified 2026-07-11, card #131; error contract amended by
 D-VALIDATE-DECODE1)*: the hand-writable codec
 surface is a first-class `Encode`/`Decode` protocol — a type implements
-`encode(self) => DataTree` and `decode(tree: DataTree) => Result<T,
+  `encode(self) DataTree` and `decode(tree: DataTree) Result<T,
 [FieldError]>` to own its wire form (e.g. a validated newtype serializing as a
 bare string). The built-in `#Codable`/`#Encode`/`#Decode` derives become
 ordinary derives that contribute the same checked Jet items and enter sema
@@ -3406,8 +3407,8 @@ index, not a substitute for that law.
   `fn run(args: T)` derives an `ArgsSpec`; library/tooling code may build the
   same spec dynamically for subcommands, env fallbacks, completions, and tests.
 - **D-ENV-MUTATE1=A**: `core.env` uses one process-global, raw-preserving
-  logical environment. `unset(name) => Bool EnvError!` removes a key and
-  `vars() => [String] EnvError!` returns a deterministic, owned names-only
+  logical environment. `unset(name) -> Bool EnvError!` removes a key and
+  `vars() -> [String] EnvError!` returns a deterministic, owned names-only
   snapshot. Unix identity and ordering use exact bytes; Windows identity uses
   `CompareStringOrdinal` ignoring case while preserving the last spelling and
   exact UTF-16 value. `get`, `home_dir`, mutations, and child launches share
@@ -3415,7 +3416,7 @@ index, not a substitute for that law.
   and `env_remove`, then passes raw entries to the OS. Jet mutations never
   mutate libc `environ` or the Windows process environment block. Invalid
   names and values fail without revealing inputs; `vars` fails as a whole on
-  any non-Unicode entry. Existing editions keep `set => ()` and report
+  any non-Unicode entry. Existing editions keep `set -> ()` and report
   invalid input through E3001; its fallible ` EnvError!` signature waits
   for a major release plus edition opt-in.
 - **D-PROCESS-SESSION1=A**: terminal-backed children use the existing
@@ -3529,7 +3530,7 @@ index, not a substitute for that law.
   one-based line/column, DataTree path, reason, and handle-free IO cause. Whole and
   stream paths share parser, value tree, errors, limits, canonical bytes, and
   bounded-memory law, summarized across primitives in the [Bounded buffering law](spec.md#bounded-buffering-law).
-  Shipped `json.events(DataTree) => String` is unchanged;
+  Shipped `json.events(DataTree) -> String` is unchanged;
   pull events exist only through `json.reader` until an edition migration.
 
   **D-ENCXML1=A** selects one lossless namespace-aware ordinary-`DataTree` XML
@@ -3553,8 +3554,8 @@ index, not a substitute for that law.
   is lossless. The prior `{name, attrs, children, text}` tree is unratified and
   receives no compatibility alias.
 
-  **D-JSONCANON1=A** makes `json.canonical(data, limits:) => String ?
-  EncodingError` strict RFC 8785 JCS in edition 2027. It recursively emits UTF-8
+  **D-JSONCANON1=A** makes `json.canonical(data, limits:) String EncodingError!`
+  strict RFC 8785 JCS in edition 2027. It recursively emits UTF-8
   without BOM/LF/whitespace, preserves array order and Unicode scalars, sorts
   keys by unsigned UTF-16 code units, rejects duplicate keys/Bytes/nonfinite
   numbers, and uses the RFC-frozen ECMAScript binary64 serializer (`-0.0` ->
@@ -3565,7 +3566,7 @@ index, not a substitute for that law.
   and audits hashing/signing fixtures. No 2027 legacy branch exists.
 
   **D-ENCBIN1=A / D-ENC-CBOR-SURFACE1=A** select RFC 8949 CBOR. The only whole
-  surface is `parse([U8], options) => DataTree`, `decode<T: Codable>`, `to_bytes`,
+  surface is `parse([U8], options) -> DataTree`, `decode<T: Codable>`, `to_bytes`,
   and `to_bytes_canonical`; `parse` and byte verbs return closed `CBORError`,
   while typed `decode<T>` returns the ratified `[FieldError]` list. `[U8]` uses native
   byte strings through typed Codable; untyped `DataTree` rejects byte strings,
@@ -3765,7 +3766,7 @@ index, not a substitute for that law.
   `app.sync(doc, over: session)`; offline edits merge conflict-free on
   reconnect; expert access to merge metadata.
 - **D-DBPOLICY1=A**: typed row policies —
-  `db.policy<Ticket>((user, row) => …)`; enforced below app code on
+  `db.policy<Ticket>((user, row) -> …)`; enforced below app code on
   every query/mutation/live-query path: provable satisfaction at compile
   time where the effect machinery can see it, generated runtime filter
   otherwise; active policies appear in audit output.
@@ -3787,7 +3788,7 @@ copy tree, symlink/readlink/hardlink, temp handles, advisory lock files,
 canonical/absolute, offset bytes, fsync, and atomic writes (#288). Watch APIs
 follow the owner's D-WATCH-SCOPE1 comment: `core.watcher` owns file, process,
 and port watch handles with `WatchEvent` values plus callback methods through
-`core.event`. `fs.list_dir => [DirEntry]` (D-LSDIR1). Civil time uses
+  `core.event`. `fs.list_dir -> [DirEntry]` (D-LSDIR1). Civil time uses
 Instant/DateTime/LocalDate/LocalTime/Duration/Period/Zone/ZonedDateTime over
 IANA TZif zoneinfo, layered on the injectable `Clock` (D-TIMEDEPTH1 +
 D-TIME-CALENDAR1; #295). PRNG
@@ -3879,11 +3880,11 @@ alias, or priority rule.
 
 **D-ARTIFACT-EXT1=A — one artifact-extension family** *(ratified by owner 2026-07-12, card #514)*: every Jet tool artifact is `.jet<kind>`: `.jetmap`, `.jetnb`, `.jetproof`, `.jettrace`, `.jetreplay` (game input replays), and `.jetproof-replay` (proof replays). The former short-prefix family and replay collision are retired without aliases. Closed family; new artifact kinds need a ballot. Amends D-JPROOF1/D-JREPLAY1/D-PERFSESSION1/D-GAME-REPLAY1 spellings.
 
-**D-API-STORE1=A — one storage verb: add / add_new** *(ratified 2026-07-12, card #513; shape set by owner question q2zvcuql)*: `insert` and `put` die. Keyed containers: `add(key, value) => T?` upserts and returns the displaced old value (`None` = fresh key); `add_new(key, value) => Bool` stores only if absent — `false` means the key existed and the value is untouched (the race-safe claim). Element containers: `add(value) => Bool` (`Set`/`Rank`: true if newly added; `Tally`: always true). `m[k] = v` index-write stays the literal upsert (S39). Enters Law 1; amends the map/`Cache`/D-COLLBREADTH1 method lists.
+**D-API-STORE1=A — one storage verb: add / add_new** *(ratified 2026-07-12, card #513; shape set by owner question q2zvcuql)*: `insert` and `put` die. Keyed containers: `add(key, value) -> T?` upserts and returns the displaced old value (`None` = fresh key); `add_new(key, value) -> Bool` stores only if absent — `false` means the key existed and the value is untouched (the race-safe claim). Element containers: `add(value) -> Bool` (`Set`/`Rank`: true if newly added; `Tally`: always true). `m[k] = v` index-write stays the literal upsert (S39). Enters Law 1; amends the map/`Cache`/D-COLLBREADTH1 method lists.
 
 **D-CACHENAME1=A — bounded cache is `Cache<K,V>`** *(ratified 2026-07-31, card #1356)*: rename the Core type formerly spelled `Lru<K,V>` to `Cache<K,V>`. Eviction remains least-recently-used when full; method law unchanged (`has_key`, `add`, `add_new`, …). Amends D-COLLBREADTH1 / D-ITERTOOLS1 naming.
 
-**D-MAP-MERGE1=E — `Map.merge`** *(ratified 2026-07-31, card #1354)*: one method `merge(other, conflict: ((K, V, V) => V)? = None)`. Omit `conflict` → right wins on shared keys (beginner default). Pass `conflict:` → callback result per shared key. Distinct from `Set.union` and struct Patch `merge`. Semantics live in Prelude (`jet_map_merge` / `jet_map_merge_with`); engines marshall only (I9).
+**D-MAP-MERGE1=E — `Map.merge`** *(ratified 2026-07-31, card #1354)*: one method `merge(other, conflict: (fn(K, V, V) V)? = None)`. Omit `conflict` → right wins on shared keys (beginner default). Pass `conflict:` → callback result per shared key. Distinct from `Set.union` and struct Patch `merge`. Semantics live in Prelude (`jet_map_merge` / `jet_map_merge_with`); engines marshall only (I9).
 
 **D-MAP-KEY1=A — recursive value-semantic map keys** *(ratified 2026-08-19,
 card #1969)*: a map key is `Int`, `String`, `Bool`, `Char`, `U8`/`IntN`, a
@@ -3970,7 +3971,7 @@ checked `SQL` literals feed `db.params(sql)`, rows stay inspectable maps with
 typed `db.row_*` reads, and `db.transaction`/`db.migrate` provide rollback and
 checksum-recorded migration helpers over the same parameterized path. `core.http`: client+server submodules; client
 supports HTTPS by default via rustls + system roots (D-TLS1=A); server is
-plain `fn(req: Request) => Response` on a `mux` (`mux.get("/users/:id", handler)`,
+plain `fn(req: Request) Response` on a `mux` (`mux.get("/users/:id", handler)`,
 `req.params["id"]`, `Server.serve(addr, mux)?`) with HTTPS enabled by the named
 option `Server.serve(addr, mux, tls: Server.tls(cert, key))` (D-TLSSERVE1=A).
 HTTP route parameters use `:name` and final catch-alls use `*name`
@@ -4061,16 +4062,16 @@ being a user-declared-contract concept): the shape is rustc special-casing
 a small closed list of known intrinsics, and it touches only the finite
 table the compiler already keeps for its own stdlib signatures — inference
 through ordinary user calls stays bare-root, exactly as D-EFFTREE1
-decided. A read-only query function can therefore *prove* `=[DB.Read]=>` —
+decided. A read-only query function can therefore *prove* `-[DB.Read]>` —
 the read-footprint qualification `app.live` demands — and a write hiding
 inside such a function is caught by the existing `E0740` check (no new
 diagnostic code). *Reconciliation:* D-LIVEQUERY1's `inWild` stacked
 `#Pure` on top of `#(DB.Read)`; D-SHAPE8 later retired both spellings, so a live
-query now qualifies by its `=[DB.Read]=>` bound alone. `DBConnection` (and
+query now qualifies by its `-[DB.Read]>` bound alone. `DBConnection` (and
 `DBError`) are now nameable types so a query function can annotate its
 connection parameter.
 *Shipped 2026-07-12 (card #505, slice 4 — leaf-inference layer only)*: the
-`DB.Read`/`DB.Write` leaf inference above, the `=[DB.Read]=>` qualification
+`DB.Read`/`DB.Write` leaf inference above, the `-[DB.Read]>` qualification
 proof, the `E0740` hidden-write reject (`tests/ui/db_read_query_hidden_write`),
 and `DBConnection`/`DBError` nameability, with a runnable example
 (`examples/features/io/db_read_footprint.jet`). The #1158 reconciliation now
@@ -4574,8 +4575,8 @@ $ jet run   --release       hello.jet   # optimized one-off run
 
 **Migrations** *(D-MIGRATE1, D-MIGRATE2A–F)*: `#PublishedSchema` types
 snapshot field layout; a breaking change without a migration is E0910.
-Verbs: `add f: T = val`; `remove f`; `change f: Old => New via { old =>
-expr }` (converter: inline `via` → `impl Old => New` in scope → E0910); no
+Verbs: `add f: T = val`; `remove f`; `change f: Old -> New via { old ->
+expr }` (converter: inline `via` → `impl Old -> New` in scope → E0910); no
 `reorder`. CLI: `jet inspect schema squash --before <ver>`, `jet inspect schema status`.
 
 **Decode-time migration transparency** *(D-MIGRATE3=A, retired by
@@ -5560,7 +5561,7 @@ relabeling stored bytes.
 
 #### Full-stack web, compute, and services
 
-**D-APP-UNIFY1=B — one `App` type across targets**: `fn run() => App` is
+**D-APP-UNIFY1=B — one `App` type across targets**: `fn run() App` is
 the single application return surface for native, web, Wasm, JS, and
 freestanding builds. Platform selection comes from the existing `#Target`
 marker or the package manifest `target:` field, never from the type name.
@@ -5590,7 +5591,7 @@ selects a platform-specific application type. A capability unavailable on the
 resolved target is a compile-time error naming the target and the capability.
 
 **D-APP-ARGS1=A — typed CLI inputs reach an App entry** *(card #1450)*:
-`fn run(args: T) => App` uses the same checked `T` schema, `core.args` parser,
+`fn run(args: T) App` uses the same checked `T` schema, `core.args` parser,
 help text, defaults, and value errors as a typed script entry. Jet constructs
 `T`, invokes `run(args)`, and serves the returned `App`; the App return does
 not create a second CLI mechanism or change the `#CLI` field mapping. A typed
@@ -6189,7 +6190,7 @@ topical sections above; they do not restart a log here.
 **D-OPDEF1 — User-defined operators**: option A. Existing arithmetic and
 comparison symbols may dispatch through ordinary hook traits: `Add.add`,
 `Sub.sub`, `Mul.mul`, `Div.div`, `Equatable.equal`, and
-`Comparable.compare => Ordering`. Implementations use canonical
+`Comparable.compare -> Ordering`. Implementations use canonical
 `impl Type.Trait { ... }` syntax, keep the same operand type, and cannot add
 symbols, precedence, overload sets, or side-effect meanings. `+=` reuses `Add`.
 Beginner `#Numeric`/`#Comparable` and auto equality remain front doors to the
@@ -6457,7 +6458,7 @@ division and no engine needed a new rule. In-repo migration: the compound-assign
 to `/%=`; the comptime ratio in `comptime_block.jet` and its differential twin
 moved to `/%`; the divide-by-zero probe in `user_defined.jet` moved to `/%`,
 which still traps where `/` would now answer a Float infinity.
-`all_failfast.jet` panics outright instead: `return 1 / zero` in a `=> Int`
+`all_failfast.jet` panics outright instead: `return 1 / zero` in an `Int`
 function is a type error under this decision, and `/%` was not a drop-in there
 because the comptime evaluator folds a divisor it can see and stops the build.
 The example is about sibling cancellation, so it says so directly. Spelling is unchanged

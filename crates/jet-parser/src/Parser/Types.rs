@@ -121,7 +121,11 @@ impl<'a> Parser<'a> {
     pub(in crate::Parser) fn type_starts_here(&self) -> bool {
         matches!(
             self.peek().kind,
-            TokKind::KwFn | TokKind::Ident(_) | TokKind::LParen | TokKind::LBracket
+            TokKind::Bang
+                | TokKind::KwFn
+                | TokKind::Ident(_)
+                | TokKind::LParen
+                | TokKind::LBracket
         )
         // D-EFF2/D-VERDICT-732-1 (formerly D-MARKERMOVE2): `fn(…) :[]>` — a pure-bounded function type
         // (G1: the one carve-out where a contract marker prefixes a TYPE, not a
@@ -538,6 +542,16 @@ impl<'a> Parser<'a> {
     fn type_inner(&mut self) -> Result<(Type, Span), Diagnostic> {
         let start = self.peek().span;
         let base = match self.peek().kind.clone() {
+            // D-ERRSUFFIX1=B: the empty success slot is unit. This keeps bare
+            // `!` available anywhere a type is accepted, not only in a return
+            // header.
+            TokKind::Bang => {
+                self.bump();
+                Type::Result {
+                    ok: Box::new(Type::Named(Syntax::INTERNAL_UNIT_TYPE.to_string())),
+                    err: Box::new(Type::Named(Syntax::TYPE_ERR.to_string())),
+                }
+            }
             // D-CAP9: `*T` is the canonical raw-pointer type. Lowers to the same
             // internal `Ptr<T>` (`Type::Apply { name: "Ptr", … }`). `Ptr<T>` is
             // a deprecated alias that teaches `*T` (see the `TYPE_PTR` arm).
@@ -937,7 +951,32 @@ impl<'a> Parser<'a> {
                 let tight = question.start == base_end;
                 self.bump();
                 if tight {
-                    self.parse_error_suffix(Type::Option(Box::new(base)))?
+                    let success = Type::Option(Box::new(base));
+                    // `T? !` is the suffix-zone default-error spelling. If a
+                    // type follows the bang, it is the retired `T? ! E`
+                    // spelling and must take the teaching path.
+                    if matches!(self.peek().kind, TokKind::Bang) {
+                        let bang = self.bump().span;
+                        if self.type_starts_here() {
+                            let err = self.type_()?.0;
+                            self.diags.push(Diagnostic::from_row(
+                                "E-ERR-SIGIL",
+                                &[],
+                                Some(bang),
+                            ));
+                            Type::Result {
+                                ok: Box::new(success),
+                                err: Box::new(err),
+                            }
+                        } else {
+                            Type::Result {
+                                ok: Box::new(success),
+                                err: Box::new(Type::Named(Syntax::TYPE_ERR.to_string())),
+                            }
+                        }
+                    } else {
+                        self.parse_error_suffix(success)?
+                    }
                 } else {
                     let err = if self.type_starts_here() {
                         self.type_()?.0

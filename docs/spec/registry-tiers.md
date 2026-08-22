@@ -49,8 +49,9 @@ before the artifact or index changes. The current implementation keeps the
 community channel closed while #1912, #1913, #431, or the live #935 chain is
 not available.
 
-The community trust model still needs an owner ballot with worked options and
-ratification. This document does not open the channel or replace that ballot.
+The community trust model is owner-ratified by D-REGCURATE1=C. This document
+records the ratified tier rules; it does not open the channel while a gate is
+closed.
 
 ## Package name policy (#1912)
 

@@ -973,6 +973,7 @@ fn build_command(exe: &Path, args: &[String], ctx: &BuildContext) -> std::proces
     let mut command = std::process::Command::new(exe);
     command
         .env_clear()
+        .stdin(std::process::Stdio::null())
         .args(args)
         .current_dir(ctx.source_dir)
         .env("JET_BUILD_OUTPUT", ctx.output_root)

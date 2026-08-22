@@ -581,6 +581,7 @@ pub(crate) struct StoreRevision {
 }
 
 impl StoreRevision {
+    #[allow(dead_code)]
     pub(crate) fn as_str(&self) -> &str {
         &self.digest
     }
@@ -637,6 +638,7 @@ pub(crate) struct RootUpdate {
     pub(crate) identity: RootIdentity,
     pub(crate) targets: Vec<String>,
     pub(crate) metadata: RootMetadata,
+    #[allow(dead_code)]
     pub(crate) expected_etag: Option<String>,
     pub(crate) at: LifecycleTimestamp,
 }
@@ -678,6 +680,7 @@ pub(crate) fn commit(
     })
 }
 
+#[allow(dead_code)]
 pub(crate) fn remove_root(
     roots: &Roots,
     id: &RootId,
@@ -707,6 +710,7 @@ pub(crate) fn remove_root(
 /// serialized while one Hangar lock is held. If the process dies between
 /// records, the prepared union remains protected and the same request resumes
 /// by witness/metadata/target identity instead of silently rebinding.
+#[allow(dead_code)]
 pub(crate) fn atomic_update(
     roots: &Roots,
     update: RootUpdate,
@@ -929,6 +933,7 @@ fn cas_conflict(expected: Option<RootEtag>, current: Option<RootEtag>) -> io::Er
     )
 }
 
+#[allow(dead_code)]
 pub(crate) fn import_legacy_root(
     roots: &Roots,
     legacy: LegacyRoot,
@@ -951,6 +956,7 @@ pub(crate) fn import_legacy_root(
     })
 }
 
+#[allow(dead_code)]
 pub(crate) fn list(roots: &Roots) -> io::Result<Vec<LifecycleRoot>> {
     Ok(snapshot(roots)?.roots.into_values().collect())
 }
@@ -985,6 +991,7 @@ pub(crate) fn snapshot_with_legacy(
     })
 }
 
+#[allow(dead_code)]
 pub(crate) fn recover(roots: &Roots) -> io::Result<usize> {
     crate::RuntimePolicy::with_lock(&roots.root, "hangar", || {
         let recovered = recover_unlocked(roots)?;
@@ -1574,6 +1581,7 @@ fn parse_sequence(name: &str) -> Option<u64> {
 struct JournalScan {
     snapshot: Option<(u64, BTreeMap<RootId, LifecycleRoot>)>,
     transactions: Vec<(u64, String, JournalEntry)>,
+    #[allow(dead_code)]
     transaction_names: Vec<String>,
     last_sequence: u64,
 }

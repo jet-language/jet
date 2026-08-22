@@ -155,8 +155,137 @@ fn jet_env_delegates_to_jetpack_enter() {
     );
 }
 
-// ── U16: -p ad-hoc packages / --flake foreign-flake fallback ──
+#[test]
+fn jet_env_sync_delegates_to_typed_managed_file_sync() {
+    let project = Scratch::new("jet-env-sync");
+    let root = Scratch::new("jet-env-sync-root");
+    let home = Scratch::new("jet-env-sync-home");
+    fs::write(
+        project.join("env.jet"),
+        r#"module env.dev {
+    files: ["config/generated.txt": File{ content: "generated\n", mode: .Copy }]
+}
+"#,
+    )
+    .unwrap();
 
+    let output = jet()
+        .args(["env", "sync", "--trust", "--yes", "--offline", "--no-color"])
+        .current_dir(&project.path)
+        .env("JETPACK_ROOT", &root.path)
+        .env("HOME", &home.path)
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(
+        fs::read_to_string(project.join("config/generated.txt")).unwrap(),
+        "generated\n"
+    );
+    assert!(project.join(".jet/files/state").is_file());
+}
+
+#[test]
+fn jet_env_info_discloses_typed_summary_without_realizing_or_starting_services() {
+    let project = Scratch::new("jet-env-info");
+    let root = Scratch::new("jet-env-info-root");
+    fs::write(
+        project.join("env.jet"),
+        r#"module env.dev {
+    prompt: $HOME
+    packages: [nixpkgs.ripgrep]
+    services: {
+        fixture: {
+            enable: false,
+            ports: [8080],
+            run: ["fixture", "--port", "8080"],
+            ready: "fixture --ready",
+            data_dir: "state/fixture",
+            watch: ["src"],
+            after: ["database"],
+            before_start: ["lint"],
+            sockets: ["run/fixture.sock"]
+        }
+    }
+    files: ["config/generated.txt": File{ content: "generated\n", mode: .Copy }]
+}
+"#,
+    )
+    .unwrap();
+    fs::write(project.join("run.jet"), "#Job\nfn lint() {}\n").unwrap();
+
+    let output = jet()
+        .args(["env", "info", "--json", "--offline", "--no-color"])
+        .current_dir(&project.path)
+        .env("JETPACK_ROOT", &root.path)
+        .env("HOME", "/test/home")
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        jetpack::JSON::parse(&stdout).is_ok(),
+        "info JSON must parse: {stdout}"
+    );
+    for fact in [
+        "\"packages\":[\"ripgrep@nixpkgs\"]",
+        "\"name\":\"fixture\",\"enabled\":false",
+        "\"run\":[\"fixture\",\"--port\",\"8080\"]",
+        "\"ready\":\"fixture --ready\"",
+        "\"after\":[\"database\"]",
+        "\"before_start\":[\"lint\"]",
+        "\"sockets\":[\"run/fixture.sock\"]",
+        "\"checks\":[],\"jobs\":[\"lint\"]",
+        "\"variables\":[{\"name\":\"HOME\",\"sources\":[\"environment\"]}]",
+        "\"files\":[\"config/generated.txt\"]",
+    ] {
+        assert!(
+            stdout.contains(fact),
+            "missing {fact}; status={:?}; stderr={}; stdout={}",
+            output.status.code(),
+            String::from_utf8_lossy(&output.stderr),
+            stdout
+        );
+    }
+    assert!(
+        !project.join(".jet/services").exists(),
+        "env info must not start a service supervisor"
+    );
+
+    let missing = jet()
+        .args(["env", "info", "--offline", "--no-color", "--env", "missing"])
+        .current_dir(&project.path)
+        .env("JETPACK_ROOT", &root.path)
+        .output()
+        .unwrap();
+    assert_eq!(
+        missing.status.code(),
+        Some(2),
+        "missing environment must fail"
+    );
+    let stderr = String::from_utf8_lossy(&missing.stderr);
+    assert!(
+        stderr.contains("E1337"),
+        "missing environment lost its diagnostic: {stderr}"
+    );
+    assert!(
+        stderr.contains("environment module `missing` is not declared"),
+        "missing environment failure is not actionable: {stderr}"
+    );
+    assert!(
+        !project.join(".jet/services").exists(),
+        "failed env info must not leave a service supervisor"
+    );
+}
+
+// ── U16: -p ad-hoc packages / --flake foreign-flake fallback ──
 
 #[test]
 fn top_level_jet_run_nixpkgs_suffix_tool_execs_tool() {

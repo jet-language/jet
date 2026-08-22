@@ -1077,14 +1077,16 @@ fn fmt_simplify_keeps_a_routed_value_loop_binding() {
 
 #[test]
 fn fmt_marks_only_value_returning_braced_callables_with_an_arrow() {
-    let source = "fn value() Int { return 1 }\nfn concise() Int -> 1\nfn impure() { print(1) }\nfn fail() ! { }\nfn bounded() Int -[IO]> { return 1 }\ntrait Value { fn get(self) Int { return 1 } }\n";
+    let source = "fn value() Int { return 1 }\nfn concise() Int -> 1\nfn impure() { print(1) }\nfn fail() ! { }\nfn bounded() Int -[IO]> { return 1 }\nfn pure() Int -[]> { return 1 }\ntrait Value { fn get(self) Int { return 1 } fn bounded(self) Int -[IO]> { return 1 } }\n";
     let once = jet::format_source(source).expect("callable body shapes should format");
     assert!(once.contains("fn value() Int -> { return 1 }"), "{once}");
     assert!(once.contains("fn concise() Int -> 1"), "{once}");
-    assert!(once.contains("fn effect() { print(1) }"), "{once}");
+    assert!(once.contains("fn impure() { print(1) }"), "{once}");
     assert!(once.contains("fn fail() ! {}"), "{once}");
     assert!(once.contains("fn bounded() Int -[IO]> { return 1 }"), "{once}");
+    assert!(once.contains("fn pure() Int -[]> { return 1 }"), "{once}");
     assert!(once.contains("fn get(self) Int -> {"), "{once}");
+    assert!(once.contains("fn bounded(self) Int -[IO]> {"), "{once}");
     assert_eq!(once, jet::format_source(&once).expect("formatted callables should be stable"));
 }
 
@@ -1509,6 +1511,7 @@ fn fmt_concurrency_spellings_that_parse_today() {
 
 fn open() {
     pair :: channel<Int>(capacity: 8)
+    plain :: task { 1 }
     frozen :: freeze(1)
     task.group g {
         child :: task ^frozen { frozen }
@@ -1529,6 +1532,7 @@ fn open() {
         "loop value in rx",
         ".Panicked(\"boom\")",
         "channel<Int>(capacity: 8)",
+        "plain :: task { 1 }",
         "freeze(1)",
         "task ^frozen",
     ] {

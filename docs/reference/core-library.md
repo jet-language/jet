@@ -282,7 +282,7 @@ D-ITER-DECLINE1 declines Iter's remaining six ledger names: `fill`,
 `cycle_n`, and `duplicate` route to `repeat`; `tostring` routes to `join`;
 `clip` and `iterator` route to `to_list`/`collect`; `compact` routes to
 `filter`; `next` is declined outright — Iter has no held cursor to pull one
-item and remember where you stopped outside a loop; use a for-loop, `each`,
+item and remember where you stopped outside a loop; use a source loop, `each`,
 or the lazy adapters (`take`, `skip`, `take_while`) instead.
 Also: `examples/features/collections/iter_tools_audit.jet` covers the
 adapter and specialized-container surface. Lazy protocol:
@@ -394,7 +394,7 @@ use core.files as files
 fn count_lines(path: String) :> Int IOError! {
     handle :: files.open(~path)?
     n := 0
-    loop line; handle.lines() {
+    loop line in handle.lines() {
         n = (n + 1)
     }
     return Ok(n)
@@ -407,7 +407,7 @@ fn count_lines(path: String) :> Int IOError! {
 | `create(path)` | `FileWriter IOError!` | Create/overwrite a file for buffered writing |
 | `append(path)` | `FileWriter IOError!` | Open a file for buffered appending |
 | `reader.read_line()` | `String? IOError!` | One line (no newline), `None` at EOF |
-| `reader.lines()` | iterator of `String` | `loop line; handle.lines()` |
+| `reader.lines()` | iterator of `String` | `loop line in handle.lines()` |
 | `writer.write_line(text)` | `IOError!` | Write `text` plus a trailing newline |
 | `writer.flush()` | `IOError!` | Force buffered bytes to disk |
 
@@ -1024,7 +1024,7 @@ fn run() {
     scope :: event.scope()
     files :: watcher.files("src") ?? return
     files.on(scope, (ev) :> { print("changed: {ev.path}") })
-    loop ev; files.poll() {
+    loop ev in files.poll() {
         if ev.kind == {
             .Created :> print("created {ev.path}")
             .Modified :> print("modified {ev.path}")
@@ -1231,7 +1231,7 @@ fn run() {
     print(v.type_name())    // "Point"
     print(v.path())         // the canonical typeable path, e.g. "reflect_value.Point"
     print(v.display())      // "(3, 4)" — exactly what "{p}" would print
-    loop f; v.fields() {
+    loop f in v.fields() {
         print("{f.name()}:{f.value().type_name()} = {f.value().display()}")
     }
 }
@@ -1423,7 +1423,7 @@ fn run() {
         .timeout(Duration.seconds(30)?)
 
     child :: spec.spawn() ?? return
-    loop line; child.stdout.lines() {
+    loop line in child.stdout.lines() {
         print(line)
     }
     status :: child.wait() ?? return
@@ -1528,7 +1528,7 @@ separate backend slices of the same process mechanism.
 `ProcessChild` exposes `id()`, `wait()`, `exited()`, `kill()`, `terminate()`,
 `interrupt()`, `.terminal`, a `.stdin` writer (`child.stdin.write(text)`), and
 `.stdout`/`.stderr` streaming readers consumed only via
-`loop line; child.stdout.lines() { ... }` (same loop-source-only shape as
+`loop line in child.stdout.lines() { ... }` (same loop-source-only shape as
 `FileReader.lines()`/`term.stdin().lines()` — storing the reader or the line
 stream in a name is E2502). `exited()` is `Bool IOError!`: a non-blocking
 companion to `wait()` that reports whether the child has already exited,
@@ -2630,7 +2630,7 @@ chain, and `finish()` returns `T [FieldError]!`.
 |-----------|--------|
 | `#Rename("k")` | use `k` as the wire key for this field |
 | `#Skip` | never serialize; on decode use the field's default |
-| `#Default` / `#Default(8080)` | when the key is absent, use the type's default (or the given literal) |
+| `field: T{expr}` | when the key is absent, use the declaration default expression |
 | `#Flatten` | inline a `#Codable` struct field's keys into the parent object |
 
 **Container attributes:**
@@ -2674,7 +2674,7 @@ Blocking tasks and typed channels are Jet's concurrency model. There is no
 ```jet
 fn sum_range(first: Int, last: Int) :> Int {
     total := 0
-    loop n; first..last {
+    loop n in first..last {
         total += n
     }
     return total
@@ -2699,7 +2699,7 @@ fn run() {
     }
     handle.join() ?? panic("task failed")
     sender.close()
-    loop value in ch :> print(value)
+    loop value in ch -> print(value)
 }
 ```
 
@@ -3313,7 +3313,7 @@ fn run() {
     bad :: Int.parse("oops") ?? -1             // -1 (parse failed → fallback)
     print(n + bad)
 
-    loop line; "first\nsecond".lines() {   // ["first", "second"]
+    loop line in "first\nsecond".lines() {   // ["first", "second"]
         print(line)
     }
 }

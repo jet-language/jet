@@ -3467,7 +3467,7 @@ fn c44_lsp_types_derive_from_syntax() {
             ty
         );
     }
-    // Result is the legacy fallible type (S34 teaching only) — excluded.
+    // Result is the legacy generic spelling (S34 teaching only) — excluded.
     assert!(
         !Syntax::JET_TYPE_LIST.contains(&Syntax::TYPE_RESULT),
         "JET_TYPE_LIST must not contain legacy TYPE_RESULT; use T E! syntax"

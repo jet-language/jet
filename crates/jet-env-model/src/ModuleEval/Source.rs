@@ -151,6 +151,13 @@ pub fn evaluate_package_profile(
                 "profile.declaration",
             );
         }
+        if is_external_provider(&provider) && channel.is_some() {
+            facts.add_loss(
+                "provider.selector",
+                "external provider references must retain an exact version, revision, or digest",
+                "profile.declaration",
+            );
+        }
         match &upstream {
             Some(upstream) => {
                 facts.set_resolved_source(upstream);

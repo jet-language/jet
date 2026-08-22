@@ -1,15 +1,31 @@
-Error [E0121]: `s` was given away earlier, so it can't be used here
-  --> tests/ui/loop_stream_reuse.jet:12:13
+Error [E0068]: This callable uses the retired result-arrow shape.
+  --> tests/ui/loop_stream_reuse.jet:1:18
     |
- 12 |     loop x, s -> print("{x}")
-    |             ^
+  1 | fn count(n: Int) => Stream<Int> {
+    |                  ^^
+ Why: a return type sits after the parameter list, and `->` introduces the body; an effect ceiling follows the return type
+ Fix: write `fn name(...) Type -> body`, or `fn name(...) Type -[Effects]> { … }`
+
+Error [E0080]: A braced callable with a non-unit success result needs `->` before its body.
+  --> tests/ui/loop_stream_reuse.jet:1:33
+    |
+  1 | fn count(n: Int) => Stream<Int> {
+    |                                 ^
+ Why: The body arrow marks a declared success value; unit and unit-fallible callables keep bare braces.
+ Fix: Write `fn name(...) Type -> { ... }`; keep `fn name(...) { ... }` and `fn name(...) Error! { ... }` bare.
+
+Error [E0121]: `s` was given away earlier, so it can't be used here
+  --> tests/ui/loop_stream_reuse.jet:12:15
+    |
+ 12 |     loop x in s -> print("{x}")
+    |               ^
  Why: after a value moves to another name, the old name no longer gives access to it
  Fix: `s` is one-pass and cannot be copied — create a fresh source for the second drive
 
 Error [E0107]: nothing named `x` exists here
-  --> tests/ui/loop_stream_reuse.jet:12:26
+  --> tests/ui/loop_stream_reuse.jet:12:28
     |
- 12 |     loop x, s -> print("{x}")
-    |                          ^
+ 12 |     loop x in s -> print("{x}")
+    |                            ^
  Why: a name must be declared before it's used
  Fix: did you mean `s`?

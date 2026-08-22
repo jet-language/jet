@@ -5,11 +5,9 @@
 //! checked pointer to one generation.
 
 use super::parse::Parsed;
-use super::realize::{
-    classify_or_report, project_env_root, realize_ref_outcome, RefOutcome, RowStyle,
-};
+use super::realize::{project_env_root, realize_ref_outcome, RefOutcome, RowStyle};
 use crate::Output::Theme;
-use crate::{EnvFile, Store, Syntax, JSON, SHA256};
+use crate::{EnvFile, RefSpec, Store, Syntax, JSON, SHA256};
 use jet_env_model::ModuleEval;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
@@ -555,11 +553,10 @@ fn build_generation(
     let state = profile_state_dir(project_dir, &plan.name);
     let generations = generations_dir(&state);
     fs::create_dir_all(&generations)?;
+    let previous = read_generations(&state)?;
     let generation = next_generation(&state)?;
     let generation_dir = generations.join(generation.to_string());
-    fs::create_dir(&generation_dir)?;
     let rootfs = generation_dir.join(PROFILE_ROOTFS_DIR);
-    fs::create_dir(&rootfs)?;
 
     let roots = Store::resolve();
     let table = super::workspace_sources::cwd_table();
@@ -571,9 +568,7 @@ fn build_generation(
         .unwrap_or(1);
     let mut realized = Vec::new();
     for package in &plan.packages {
-        let spec = classify_or_report(theme, &package.raw).map_err(|error| {
-            io::Error::other(format!("E1335: unsupported profile ref: {error:?}"))
-        })?;
+        let spec = realization_spec(package, &table)?;
         let outcome = realize_ref_outcome(
             theme,
             &roots,
@@ -622,7 +617,9 @@ fn build_generation(
                 .push(node.clone());
         }
     }
-    let selected = choose_output_nodes(plan, &groups)?;
+    let selected = choose_output_nodes(plan, &groups, &previous)?;
+    fs::create_dir(&generation_dir)?;
+    fs::create_dir(&rootfs)?;
     copy_projection(&rootfs, &selected)?;
     for package in &realized {
         package.lease.validate()?;
@@ -658,9 +655,37 @@ fn build_generation(
     Ok(generation)
 }
 
+fn realization_spec(
+    package: &jet_env_model::ModuleEval::PackageProfileFact,
+    table: &RefSpec::SourceTable,
+) -> io::Result<RefSpec::RefSpec> {
+    package
+        .provider_facts
+        .validate()
+        .map_err(|error| io::Error::other(format!("E1335: {error}")))?;
+    let target = match &package.channel {
+        Some(channel) => format!("{}#{}", package.target, channel),
+        None => package.target.clone(),
+    };
+    let raw = if package.source == Syntax::REF_SOURCE_PATH {
+        target
+    } else {
+        let source = if package.source == Syntax::DEFAULT_SOURCE {
+            Syntax::REF_SOURCE_NIXPKGS
+        } else {
+            &package.source
+        };
+        format!("{target}{}{source}", Syntax::REF_PROVIDER_AT)
+    };
+    let spec = RefSpec::classify_in(&raw, table)
+        .map_err(|error| io::Error::other(format!("E1335: unsupported profile ref: {error:?}")))?;
+    Ok(spec)
+}
+
 fn choose_output_nodes(
     plan: &jet_env_model::ModuleEval::PackageProfilePlan,
     groups: &BTreeMap<String, Vec<OutputNode>>,
+    previous: &[GenerationRecord],
 ) -> io::Result<BTreeMap<String, OutputNode>> {
     for (path, provider) in &plan.collisions {
         let Some(nodes) = groups.get(path) else {
@@ -696,12 +721,105 @@ fn choose_output_nodes(
                 contender_text(nodes)
             )));
         }
+        if let Some(provider) = provider {
+            ensure_collision_selection_current(previous, path, provider, nodes)?;
+        }
         let chosen = provider
             .and_then(|provider| nodes.iter().find(|node| node.package == *provider))
             .unwrap_or(&nodes[0]);
         selected.insert(path.clone(), chosen.clone());
     }
     Ok(selected)
+}
+
+fn ensure_collision_selection_current(
+    previous: &[GenerationRecord],
+    path: &str,
+    provider: &str,
+    nodes: &[OutputNode],
+) -> io::Result<()> {
+    let Some(record) = previous.last() else {
+        return Ok(());
+    };
+    let Some((Some(previous_provider), previous_contenders)) =
+        collision_record(&record.metadata, path)?
+    else {
+        return Ok(());
+    };
+    if previous_provider != provider {
+        return Ok(());
+    }
+    let mut current_contenders = nodes
+        .iter()
+        .map(|node| {
+            (
+                node.package.clone(),
+                node.kind.as_str().to_string(),
+                node.digest.clone(),
+            )
+        })
+        .collect::<Vec<_>>();
+    current_contenders.sort();
+    if current_contenders != previous_contenders {
+        return Err(io::Error::other(format!(
+            "E1335: stale collision selection at `{path}` for `{provider}`; contender facts changed: {}; re-review `collisions` before rebuilding",
+            contender_text(nodes)
+        )));
+    }
+    Ok(())
+}
+
+fn collision_record(
+    metadata: &str,
+    path: &str,
+) -> io::Result<Option<(Option<String>, Vec<(String, String, String)>)>> {
+    let value = JSON::parse(metadata).map_err(io::Error::other)?;
+    let object = value.as_object().map_err(io::Error::other)?;
+    let Some(collisions) = object.get("collisions") else {
+        return Ok(None);
+    };
+    let collisions = collisions.as_object().map_err(io::Error::other)?;
+    let Some(record) = collisions.get(path) else {
+        return Ok(None);
+    };
+    let record = record.as_object().map_err(io::Error::other)?;
+    let selected = match record.get("selected") {
+        Some(crate::JSON::JSONValue::Null) | None => None,
+        Some(value) => Some(value.as_str().map_err(io::Error::other)?.to_string()),
+    };
+    let contenders = record
+        .get("contenders")
+        .ok_or_else(|| io::Error::other("profile collision record lacks contenders"))?
+        .as_array()
+        .map_err(io::Error::other)?;
+    let mut contenders = contenders
+        .iter()
+        .map(|value| {
+            let contender = value.as_object().map_err(io::Error::other)?;
+            Ok((
+                contender
+                    .get("provider")
+                    .ok_or_else(|| io::Error::other("profile collision contender lacks provider"))?
+                    .as_str()
+                    .map_err(io::Error::other)?
+                    .to_string(),
+                contender
+                    .get("kind")
+                    .ok_or_else(|| io::Error::other("profile collision contender lacks kind"))?
+                    .as_str()
+                    .map_err(io::Error::other)?
+                    .to_string(),
+                contender
+                    .get("digest")
+                    .ok_or_else(|| io::Error::other("profile collision contender lacks digest"))?
+                    .as_str()
+                    .map_err(io::Error::other)?
+                    .to_string(),
+            ))
+        })
+        .collect::<io::Result<Vec<_>>>()?;
+    contenders.sort();
+    Ok(Some((selected, contenders)))
 }
 
 fn contender_text(nodes: &[OutputNode]) -> String {

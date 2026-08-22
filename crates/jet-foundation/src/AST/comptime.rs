@@ -606,7 +606,7 @@ pub enum CtValue {
     /// says whether the stop is clean or told.
     Failed(CtReport),
     Unit,
-    /// c139 JIT/interpreter-parity: a lambda value (`(x) => x > 3`) captured
+    /// c139 JIT/interpreter-parity: a lambda value (`(x) -> x > 3`) captured
     /// at the point it's created, so the interpreter can invoke it later —
     /// passed to a higher-order method (`.filter`/`.map`/`.each`/`.sort_by`/
     /// `Option.lift2`), stored, or returned. See `ClosureData` below.

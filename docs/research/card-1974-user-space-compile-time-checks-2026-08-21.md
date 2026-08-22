@@ -27,6 +27,22 @@ fixed complexity report (`Source/CmdDevTools.rs:3162-3313`). They do not receive
 CLI boundary (`Source/CmdDevTools.rs:3286-3313`). This is a compiler-owned
 lint surface, not a project rule registration point.
 
+### Existing compiler-extension hook
+
+Jet also ships ratified `D-DX5-HOOK1` support for an optional external WASM
+compiler extension. The driver sends a bounded, typed post-sema snapshot to a
+sibling `jetpack` host (`crates/jet-driver/src/CompilerExtensionHook.rs:1-8,29-65`).
+The v1 snapshot covers entry-module function signatures, symbols, effects,
+spans, and provenance (`crates/jet-driver/src/CompilerExtensionHook.rs:280-347`),
+and maps findings to the registered `L1401` lint row
+(`crates/jet-driver/src/CompilerExtensionHook.rs:363-399`).
+
+This hook is not #1974's project check surface. It is an external process
+selected by `JET_COMPILER_EXTENSION`, not Jet comptime; its snapshot is narrower
+than `SemIndex` and `ProgramInfo`; and its findings are fixed compiler lints.
+Reusing it for #1974 would add a second check mechanism or widen the wrong
+fact carrier. Keep it as the separate #549 surface.
+
 ### Inspect and compiler facts
 
 The inspect commands are projections, not additional checking engines.
@@ -46,6 +62,12 @@ The inspect commands are projections, not additional checking engines.
   (`crates/jet-cli/src/Explain.rs:467-548`). Typed fact reads resolve through
   the same registry (`crates/jet-foundation/src/Registry.rs:739-780`). There
   must be no private check-only fact table.
+
+The current `expand`, `impact`, and `dossier` commands project `SemIndex`
+facts, while the compile path renders diagnostics. No command yet joins a
+project check's inputs, finding, and source provenance into those projections.
+That is an open #1974 integration criterion, not a reason to add another query
+service.
 
 ## Proposed check contract
 
@@ -74,6 +96,16 @@ generated Rust, or scrape the JSON/text output of an inspect command. If a
 future rule needs an explicit source query, it must reuse the existing typed
 `core.compiler` result; it must not add a second checker or widen this
 program-fact snapshot by copying CLI fields.
+
+The #1974 read-side seam is not complete. `SemIndex` already stores
+definitions, references, call edges, and structural nodes
+(`crates/jet-semindex/src/Types.rs:442-452`), but `ProgramSemanticFacts` carries
+only effects, reachability, the fact registry, and the name ledger
+(`crates/jet-comptime/src/Comptime/Reflect.rs:19-25`). `build_program_info`
+currently receives the bundle plus that narrower fact carrier
+(`crates/jet-comptime/src/Comptime/Reflect.rs:2204-2209`). A future #1974
+implementation must connect the typed carrier without importing CLI output or
+creating a parallel index.
 
 ### 2. Report boundary
 

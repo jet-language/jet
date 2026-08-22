@@ -2626,6 +2626,7 @@ fn derivation_from_fields(fields: &BTreeMap<String, Thunk>) -> Result<Derivation
             )));
         }
     }
+    env.insert("outputs".into(), output_names.join(" "));
     env.insert("builder".into(), builder.clone());
     env.insert("name".into(), name.clone());
     env.insert("system".into(), system.clone());

@@ -1,7 +1,23 @@
-Error [E0120]: this loop can't take handles out of a field or index
-  --> tests/ui/loop_task_list_field.jet:5:15
+Error [E0068]: This callable uses the retired result-arrow shape.
+  --> tests/ui/loop_task_list_field.jet:3:19
     |
-  5 |     loop h, p.handles -> total += h.join() ?? 0
-    |               ^^^^^^^
+  3 | fn drain(p: Pool) => Int {
+    |                   ^^
+ Why: a return type sits after the parameter list, and `->` introduces the body; an effect ceiling follows the return type
+ Fix: write `fn name(...) Type -> body`, or `fn name(...) Type -[Effects]> { … }`
+
+Error [E0080]: A braced callable with a non-unit success result needs `->` before its body.
+  --> tests/ui/loop_task_list_field.jet:3:26
+    |
+  3 | fn drain(p: Pool) => Int {
+    |                          ^
+ Why: The body arrow marks a declared success value; unit and unit-fallible callables keep bare braces.
+ Fix: Write `fn name(...) Type -> { ... }`; keep `fn name(...) { ... }` and `fn name(...) Error! { ... }` bare.
+
+Error [E0120]: this loop can't take handles out of a field or index
+  --> tests/ui/loop_task_list_field.jet:5:17
+    |
+  5 |     loop h in p.handles -> total += h.join() ?? 0
+    |                 ^^^^^^^
  Why: each step hands you the handle itself, and a task handle cannot be copied — so the loop takes the whole list with the move marker `^`
- Fix: bind the list into a local this scope owns first (`hs := …`), then write `loop h, hs { … }`
+ Fix: bind the list into a local this scope owns first (`hs := …`), then write `loop h in hs { … }`

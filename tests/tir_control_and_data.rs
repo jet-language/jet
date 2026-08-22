@@ -80,13 +80,9 @@ fn run() {
 #[test]
 fn typed_error_union_widening_runs_on_jit_and_interpreter() {
     let src = r#"
-fn narrow() Int String! {
-    return Err("narrow")
-}
+fn narrow() Int String! -> Err("narrow")
 
-fn widen() Int (String | Bool)! {
-    return narrow()?
-}
+fn widen() Int (String | Bool)! -> narrow()?
 
 fn run() {
     print(widen() ?? 7)
@@ -191,7 +187,8 @@ fn returned_function_call_example_matches_all_execution_tiers() {
         include_str!("../examples/features/expected/functions/returned_function_call.out"),
     );
 }
-/// D-BODY-LAST1=B / D-SIG-SHAPE1=B / D-LOOP-STMT-ARROW1=C / I9: the body-rule example
+/// D-CALLABLE-ONE1=A / D-BODY-LAST1=B / D-SIG-SHAPE1=B / D-LOOP-STMT-ARROW1=C / I9:
+/// the body-rule example
 /// produces byte-identical output through AOT, default `jet run`, and the
 /// forced interpreter.
 #[test]
@@ -202,7 +199,7 @@ fn body_rules_example_matches_all_execution_tiers() {
     );
 }
 
-/// D-ERRSIGIL1=A / I9: the fallible type spelling produces one output on
+/// D-ERRSUFFIX1=B / I9: the fallible type spelling produces one output on
 /// release AOT, default `jet run`, and the forced interpreter.
 #[test]
 fn fallible_type_spelling_example_matches_all_execution_tiers() {

@@ -174,7 +174,8 @@
 // such as extern bindings.
 // D-LOOP-COMMA1=A (ratified 2026-07-30, card #1336) uses `(key, value)` for a
 // two-name source binding. D-LOOP-IN1=A (card #2153) joins a source binding to
-// its source with `in`; commas remain for later clauses such as a stride.
+// its source with reserved keyword `in`; commas remain for later clauses such
+// as a stride. Expression-position `x in xs` has no operator spelling.
 // D-LOOP-GUARD1=A (ratified 2026-08-20, card #1416) keeps yielding-loop
 // guards comma-less: `loop name in source if condition -> value`; `, if` is
 // E0379, never a stride.

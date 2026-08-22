@@ -204,6 +204,23 @@ fn provider_cache_identity(
     }
 }
 
+fn nix_cache_identity(
+    source: &str,
+    platform: &str,
+    spec: &RefSpec,
+    table: &SourceTable,
+    ctx: &Ctx,
+) -> super::Store::CacheIdentity {
+    let (normalized_source, normalized_node, normalized_alias, normalized_query) =
+        nix_identity_parts(spec, table);
+    let authority = format!(
+        "source={normalized_source}\nnode={normalized_node}\nalias={normalized_alias}\nquery={normalized_query}"
+    );
+    let mut identity = provider_cache_identity(source, NIX_RECIPE_ID, ctx, &authority);
+    identity.platform = platform.to_string();
+    identity
+}
+
 pub fn validate_cache_authority(
     spec: &RefSpec,
     table: &SourceTable,
@@ -337,14 +354,7 @@ pub fn cache_expectation(
                 env.platform.clone()
             };
             Some(super::Store::CacheExpectation {
-                identity: super::Store::CacheIdentity {
-                    source_fingerprint: env.output_hash.clone(),
-                    recipe_fingerprint: SHA256::sha256_hex(NIX_RECIPE_ID.as_bytes()),
-                    policy_fingerprint: super::RuntimePolicy::cache_policy_fingerprint(
-                        ctx.offline,
-                    ),
-                    platform,
-                },
+                identity: nix_cache_identity(&env.output_hash, &platform, spec, table, ctx),
                 owned_output: Some(PathBuf::from(output)),
                 allow_unsigned_local: true,
             })
@@ -547,12 +557,8 @@ pub(crate) fn prepare_nix_identity(
         signature: String::new(),
         provenance: format!("{} via nix", spec.raw),
     };
-    let cache_identity = super::Store::CacheIdentity {
-        source_fingerprint: envelope.output_hash.clone(),
-        recipe_fingerprint: SHA256::sha256_hex(NIX_RECIPE_ID.as_bytes()),
-        policy_fingerprint: super::RuntimePolicy::cache_policy_fingerprint(ctx.offline),
-        platform: envelope.platform.clone(),
-    };
+    let cache_identity =
+        nix_cache_identity(&envelope.output_hash, &envelope.platform, spec, table, ctx);
     Ok(PreparedNixIdentity {
         normalized_source,
         normalized_node,
@@ -2106,6 +2112,34 @@ mod tests {
         );
         // The fixture name keys off the source name, so `stable-ripgrep.json`.
         assert_eq!(fixture_name(&spec), "stable-ripgrep.json");
+    }
+
+    #[test]
+    fn named_source_changes_nix_cache_authority() {
+        let old_table = SourceTable::from_decls([(
+            "stable".to_string(),
+            "github:NixOS/nixpkgs/nixos-24.05".to_string(),
+            super::super::RefSpec::ProviderKind::Nix,
+        )]);
+        let new_table = SourceTable::from_decls([(
+            "stable".to_string(),
+            "github:NixOS/nixpkgs/nixos-24.11".to_string(),
+            super::super::RefSpec::ProviderKind::Nix,
+        )]);
+        let spec = classify_in("ripgrep@stable", &old_table).unwrap();
+        let store = PathBuf::from(".");
+        let ctx = Ctx {
+            fixtures: None,
+            store_dir: &store,
+            offline: true,
+            project_dir: None,
+        };
+        let old = nix_cache_identity("sha256:output", "linux-x86_64", &spec, &old_table, &ctx);
+        let new = nix_cache_identity("sha256:output", "linux-x86_64", &spec, &new_table, &ctx);
+        assert_ne!(
+            old.policy_fingerprint, new.policy_fingerprint,
+            "a named-source repoint must not reuse the old Nix cache authority"
+        );
     }
 
     #[test]

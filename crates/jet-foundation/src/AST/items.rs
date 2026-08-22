@@ -21,7 +21,7 @@ pub enum Item {
     /// (`usd` → `Usd`) erasing to `Float`. Lowers to a `DistinctDef` per member
     /// in sema registration and codegen — it rides the D-DIST1/D-DIST3 machinery.
     UnitFamily(UnitFamilyDef),
-    /// S28 (M9): `trait Name { fn sig(self) => T; … }`.
+    /// S28 (M9): `trait Name { fn sig(self) T; … }`.
     Trait(TraitDef),
     /// D-TAG-SURFACE1=A: `tag Name { deny: [...], from: [...] }` declares an
     /// erased dataflow fact and its policy.
@@ -47,11 +47,11 @@ pub enum Item {
     /// `module name { … }` (inline body). `body = None` means the items live in
     /// a separate file found by the loader. NOT a JetOS module (see `ModuleDecl`).
     CodeModule(CodeModule),
-    /// D-ERR-CONV (ratified 2026-06-19): `impl Source => Target { … }` — typed
+    /// D-ERR-CONV (ratified 2026-06-19): `impl Source -> Target { … }` — typed
     /// error conversion; `?` applies it when propagating Source into a Target context.
     ErrorConv(ErrorConvDef),
     /// D-MIGRATE1, amended by D-ARROW-CONTROL1:
-    /// `migration TypeName { rename a => b }`
+    /// `migration TypeName { rename a -> b }`
     /// block — declares field renames on a `#PublishedSchema` struct.
     Migration(MigrationDecl),
     /// D-STATE-DECL (ratified 2026-06-25, option B): `state TypeName { A, B, C }` —
@@ -838,11 +838,11 @@ pub struct TraitMethodSig {
     pub span: Span,
     /// D-LIB2: optional default body for a trait method.
     pub default_body: Option<Vec<Stmt>>,
-    /// D-EFF3: `fn hash(self) =[]=>` — the method declares the empty effect set
+    /// D-EFF3: `fn hash(self) -[]>` — the method declares the empty effect set
     /// as its upper bound. Every impl's inferred effects must be empty (E0742),
     /// and a dynamic-dispatch call sees the empty set.
     pub is_pure: bool,
-    /// D-EFF3: `fn render(self) =[GPU]=>` — an effect upper bound on the method.
+    /// D-EFF3: `fn render(self) -[GPU]>` — an effect upper bound on the method.
     /// `None` = un-annotated (per-impl effects under static dispatch; a
     /// trait-object call under an effect ceiling is E0743). `Some(list)` is BOTH
     /// the impl obligation (inferred ⊆ bound, else E0742) AND the dispatch
@@ -2089,7 +2089,7 @@ pub struct Field {
     /// D-DEBUG-REDACT: `#[Redact]` — omit/redact in auto-derived Debug output.
     pub redact: bool,
     /// D-FIELDPOL1 / D-FIELDMEMO1 (ratified 2026-07-03 / 2026-08-13):
-    /// `name: T => expr` is a computed field. An unmarked read recomputes
+    /// `name: T -> expr` is a computed field. An unmarked read recomputes
     /// `expr`; `#Memo` retains the result until a formula dependency changes.
     /// `expr` is parsed with bare sibling field names still as plain `Ident`s —
     /// sema rewrites each one to `self.<field>` once every field of the struct

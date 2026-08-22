@@ -239,7 +239,7 @@ fn default_param_values() {
         return;
     }
     let src = "\
-fn box_dims(w: Int, h: Int{w}, d: Int{h}) String {
+fn box_dims(w: Int, h: Int{w}, d: Int{h}) String -> {
     return \"{w}x{h}x{d}\"
 }
 fn run() {
@@ -264,14 +264,14 @@ fn named_args() {
 fn area(width: Int, height: Int) Int {
     return (width * height)
 }
-fn connect(host: String, /, *, timeout seconds: Int{30}, tls: Bool{true}) String {
+fn connect(host: String, /, *, timeout seconds: Int{30}, tls: Bool{true}) String -> {
     return \"{host} t={seconds} tls={tls}\"
 }
-fn identity<T>(value: T, *, note: String{\"unused\"}) T {
+fn identity<T>(value: T, *, note: String{\"unused\"}) T -> {
     return value
 }
 fn force(*, force: Bool) Int -> 1
-fn apply(action: fn(*, force: Bool) Int) Int {
+fn apply(action: fn(*, force: Bool) Int) Int -> {
     return action(force: true)
 }
 struct Logger {

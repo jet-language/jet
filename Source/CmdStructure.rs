@@ -32,6 +32,15 @@ pub(crate) fn run_structure(args: &[String], json: bool, color: bool, gates: jet
         .iter()
         .any(|diagnostic| diagnostic.severity == jet::Diagnostics::Severity::Error);
     let Some(bundle) = (if has_errors { None } else { bundle }) else {
+        if !facts.name_ledger.structure_facts().is_empty() {
+            let mut ledger = GateLedger::default();
+            ledger.append_structure_facts(&facts.name_ledger);
+            if json {
+                render_json(facts.name_ledger.structure_facts(), &ledger);
+            } else {
+                render_text(facts.name_ledger.structure_facts(), &ledger);
+            }
+        }
         render_frontend_diagnostics(&entry, &abs, &diagnostics, json, color);
     };
 

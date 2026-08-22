@@ -218,6 +218,19 @@ module profile.dev {
     }
 
     #[test]
+    fn package_profile_provider_facts_preserve_selector_and_provenance() {
+        let source = "module profile.dev { packages: [ripgrep#1.2.3@default] }\n";
+        let plan = evaluate_package_profile(&source, &base_dir(), "dev").unwrap();
+        let facts = &plan.packages[0].provider_facts;
+        assert_eq!(facts.reference, "ripgrep#1.2.3@default");
+        assert_eq!(facts.target, "ripgrep");
+        assert_eq!(facts.selector.revision, "1.2.3");
+        assert_eq!(facts.profile, "dev");
+        assert_eq!(facts.profile_provenance, "dev");
+        assert!(facts.is_lossless());
+    }
+
+    #[test]
     fn package_profile_cycles_are_rejected_before_planning() {
         let source = r#"
 module profile.a { extends: ["b"] }

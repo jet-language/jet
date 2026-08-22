@@ -349,7 +349,7 @@ parameter's sigil:
 
 ```jet
 fn bump(n: &Int) { n += 1 }
-fn archive(name: ^String) String { return name }
+fn archive(name: ^String) String -> { return name }
 
 fn run() {
     score: Int := 41
@@ -364,7 +364,7 @@ site:
 
 ```jet
 impl Player {
-    fn show(self) Int { return self.hp }                        // read receiver
+    fn show(self) Int -> { return self.hp }                      // read receiver
     fn heal(&self, amount: Int) { self.hp = self.hp + amount }  // write receiver
 }
 ```
@@ -812,13 +812,13 @@ answer; otherwise write `Type<Args>.new(…)` explicitly.
 struct Circle {
     radius: Float;
 
-    fn area(self) Float {
+    fn area(self) Float -> {
         return 3.14159 * radius * radius;
     }
 }
 
 impl Circle {
-    fn unit() Circle {
+    fn unit() Circle -> {
         return Circle{ radius: 1.0 };
     }
 }
@@ -2098,7 +2098,7 @@ values. Instantiating it produces a specialized ordinary module.
 
 ```jet
 module cache<K>(capacity: Int) {
-    pub fn key_of(k: K) String { … }
+    pub fn key_of(k: K) String -> { … }
 }
 ```
 
@@ -3314,7 +3314,7 @@ at the *call site*, not buried inside the higher-order callee. This is the
 zero-syntax default:
 
 ```jet
-fn apply(f: fn(Int) Int, x: Int) Int { return f(x); }
+fn apply(f: fn(Int) Int, x: Int) Int -> { return f(x); }
 
 fn run() -[IO]> {
     apply(log_it, 1);   // if `log_it` uses Net, this line is E0740 — Net ⊄ {IO}
@@ -3352,7 +3352,7 @@ trait Shape {
     fn area(self) Int -[]>;     // every impl must be pure
 }
 impl Square.Shape {
-    fn area(self) Int { return self.side * self.side; }      // OK — pure
+    fn area(self) Int -> { return self.side * self.side; }    // OK — pure
 }
 ```
 
@@ -4159,7 +4159,7 @@ version: "0.1.0"
 
 ```jet
 // main.jet — the sandbox's own source, no `fn run()` (it's loaded, not run)
-pub fn scale(a: Float, b: Float) Float {
+pub fn scale(a: Float, b: Float) Float -> {
     return a * b
 }
 ```

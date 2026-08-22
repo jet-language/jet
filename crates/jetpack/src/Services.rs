@@ -2534,6 +2534,16 @@ fn finish_supervisor(
         return;
     };
     let existing_lifecycle = read_lifecycle(&dir).ok().flatten();
+    // A detached supervisor can observe its old child exit after a new
+    // generation has already published state. It must not classify that new
+    // generation as failed or clean up its authority.
+    if existing_lifecycle
+        .as_ref()
+        .and_then(|facts| authority_from_lifecycle(facts).ok())
+        .is_some_and(|authority| authority != started.authority)
+    {
+        return;
+    }
     let preserve_terminal_state = existing_lifecycle.as_ref().is_some_and(|facts| {
         (facts.phase == "failed" && facts.recovery == "dependency-failed")
             || (facts.phase == "stopped" && facts.recovery == "down")

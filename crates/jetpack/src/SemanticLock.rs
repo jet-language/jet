@@ -367,6 +367,7 @@ impl FlakeGraph {
         let mut unsupported = Vec::new();
         for field in [
             "shellHook",
+            "inputsFrom",
             "processes",
             "services",
             "nixosConfigurations",
@@ -898,9 +899,9 @@ impl FlakeGraph {
             .iter()
             .cloned()
             .collect::<BTreeSet<_>>();
-        if source_unsupported != locked_unsupported {
+        if !source_unsupported.is_subset(&locked_unsupported) {
             return Err(FlakeGraphError::StaleSemanticLock(
-                "unsupported flake facts differ from the lock".to_string(),
+                "unsupported flake facts are missing from the lock".to_string(),
             ));
         }
         Ok(())
@@ -1845,6 +1846,10 @@ fn assignment_paths(text: &str, prefix: &str) -> Vec<String> {
     let mut cursor = 0;
     while let Some(relative) = text[cursor..].find(prefix) {
         let start = cursor + relative;
+        if start > 0 && is_nix_name_char(text.as_bytes()[start - 1]) {
+            cursor = start + prefix.len();
+            continue;
+        }
         let rest = &text[start + prefix.len()..];
         let mut end = 0;
         for (index, ch) in rest.char_indices() {
@@ -3747,6 +3752,26 @@ mod flake_tests {
         assert_eq!(restored.inputs, graph.inputs);
         assert_eq!(restored.outputs, graph.outputs);
         assert_eq!(restored.semantic_lock_text(), graph.semantic_lock_text());
+    }
+
+    #[test]
+    fn ignores_nested_package_references_when_pinning_outputs() {
+        let source = r#"
+{
+  devShells.x86_64-linux.default = {
+    packages = [ (builtins.getFlake "path:./dep").packages.x86_64-linux.default ];
+  };
+  packages.x86_64-linux.fetched = pkgs.fd;
+}
+"#;
+        let graph = FlakeGraph::parse("flake.nix", source).unwrap();
+        let package_outputs = graph
+            .outputs
+            .iter()
+            .filter(|output| output.kind == FlakeOutputKind::Package)
+            .map(|output| output.attribute.as_str())
+            .collect::<Vec<_>>();
+        assert_eq!(package_outputs, vec!["fetched"]);
     }
 
     #[test]

@@ -159,7 +159,7 @@ fn run() {
     }
     steps :: ["check source", "build binary", "run smoke test"]
     print("Shipping {project}")
-    loop step; steps {
+    loop step in steps {
         print("[ok] {step}")
     }
 }

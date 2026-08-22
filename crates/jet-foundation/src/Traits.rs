@@ -49,7 +49,7 @@ pub struct TraitRegistry {
     pub auto_comparable: HashSet<String>,
     pub auto_encode: HashSet<String>,
     pub auto_decode: HashSet<String>,
-    /// D-ITER-HOOK: collection type → element type for `for x in coll`.
+    /// D-ITER-HOOK: collection type → element type for `loop x in coll`.
     pub iterable_items: HashMap<String, Type>,
     /// D-INDEX-HOOK: type → (key, value) for expert `[]` indexing.
     pub index_types: HashMap<String, (Type, Type)>,

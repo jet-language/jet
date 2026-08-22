@@ -231,7 +231,7 @@ pub const TRAIT_ROLLBACK: &str = "Rollback";
 pub const TRAIT_DISPLAY: &str = "Display";
 /// D-DISPLAYDBG1: developer-facing debug rendering for `{value:Debug}` interpolation.
 pub const TRAIT_DEBUG: &str = "Debug";
-/// D-ITER-HOOK: expert opt-in hook enabling zero-copy `for x in mytype`.
+/// D-ITER-HOOK: expert opt-in hook enabling zero-copy `loop x in mytype`.
 pub const TRAIT_ITERABLE: &str = "Iterable";
 /// D-ITER-HOOK: cursor type for `Iterable::iter`.
 pub const TRAIT_ITERATOR: &str = "Iterator";

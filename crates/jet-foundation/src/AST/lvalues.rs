@@ -157,7 +157,7 @@ impl MetaAttr {
     }
 }
 
-/// `for i in 1..10` vs `for x in xs` (M5).
+/// `loop i in 1..10` vs `loop x in xs` (M5).
 #[derive(Debug, Clone)]
 pub enum ForKind {
     /// S22 (D-SG8): `start..end` inclusive by default.

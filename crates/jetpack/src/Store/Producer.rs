@@ -58,6 +58,11 @@ pub(crate) fn refresh_nix_lock_digest(
         .insert("nix.lock.digest".to_string(), lock_digest.to_string());
     producer.plan = crate::Comptime::Build::BuildPlanReplay::from_facts(producer.facts.clone())
         .map_err(std::io::Error::other)?;
+    producer.bind_cache_provenance(
+        &entry.reference,
+        &entry.envelope.output_hash,
+        &entry.cache_identity,
+    );
 
     let mut refreshed = entry.clone();
     refreshed.producer_record = producer.encode();

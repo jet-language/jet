@@ -10,7 +10,8 @@
 use super::{entry_action_key, NarInfo, ProducerRecord, Roots, StoreEntry};
 use crate::TrustRoot::{
     allow_cache_builder, cache_builder_identity, is_cache_builder_allowed,
-    is_cache_builder_revoked, pin_cache_key, verify_pinned_cache_key, TrustKey,
+    is_cache_builder_revoked, pin_cache_key, verify_pinned_cache_key, CacheProvenance,
+    CacheReceipt, Signature, SystemTrustedClock, TrustKey,
 };
 use crate::SHA256;
 use std::collections::{BTreeMap, BTreeSet};
@@ -80,10 +81,13 @@ const BINDING_MAGIC: &str = "jet-cache-bind-v1";
 const MAX_BINDING_BYTES: u64 = 1024 * 1024;
 const MAX_INFO_BYTES: u64 = 1024 * 1024;
 const NEGATIVE_CACHE_TTL_SECS: u64 = 60;
+const CACHE_RECEIPT_TTL_SECS: u64 = 24 * 60 * 60;
+const CACHE_RECEIPT_MAGIC: &str = "jet-cache-receipt-v1";
 
 struct CacheArtifact {
     info: NarInfo,
     nar: Vec<u8>,
+    receipt: CacheReceipt,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -485,7 +489,7 @@ pub fn publish_cache_entry(
             failures.push(format!("{mirror}: {error}"));
             continue;
         }
-        match publish_endpoint(&endpoint, &info, &nar, &key, roots, &entry) {
+        match publish_endpoint(&endpoint, &info, &nar, &key, roots, &entry, role) {
             Ok(proof) => {
                 let builder = cache_builder_for_entry(&entry)?;
                 allow_cache_builder(&roots.root, role, &builder).map_err(io::Error::other)?;
@@ -581,6 +585,12 @@ pub fn verify_cache_transfer(
         }
         match find_artifact(&endpoint, target, Some(&expected), &key) {
             Ok(Some(artifact)) => {
+                if let Err(error) =
+                    verify_cache_receipt(roots, role, &expected, &artifact.receipt, &key)
+                {
+                    failures.push(format!("{mirror}: trust receipt rejected: {error}"));
+                    continue;
+                }
                 let bytes = artifact.nar;
                 if let Err(error) = verify_artifact_bytes(&artifact.info, &bytes) {
                     failures.push(format!("{mirror}: NAR validation failed: {error}"));
@@ -683,6 +693,7 @@ pub fn substitute_cache_entry(
         match find_artifact(&endpoint, target, Some(&expected), &key) {
             Ok(Some(artifact)) => {
                 let result: io::Result<_> = (|| {
+                    verify_cache_receipt(roots, role, &expected, &artifact.receipt, &key)?;
                     artifact.info.verify(&key)?;
                     verify_artifact_bytes(&artifact.info, &artifact.nar)?;
                     let stats = super::read_nar(&artifact.nar, destination)?;
@@ -899,10 +910,13 @@ fn find_artifact(
                 return Ok(None);
             }
             info.verify(key)?;
+            let receipt = endpoint_get(endpoint, &cache_receipt_key(&store_name)?, MAX_INFO_BYTES)?
+                .ok_or_else(|| invalid("cache entry has no signed trust receipt"))
+                .and_then(|bytes| decode_cache_receipt(&bytes))?;
             let Some(nar) = endpoint_get(endpoint, &info.url, super::MAX_NAR_BYTES as u64)? else {
                 return Ok(None);
             };
-            Ok(Some(CacheArtifact { info, nar }))
+            Ok(Some(CacheArtifact { info, nar, receipt }))
         }
     }
 }
@@ -954,6 +968,16 @@ fn find_local_artifact(
         if info.verify(key).is_err() {
             continue;
         }
+        let receipt_path = mirror.join(cache_receipt_key(store_name)?);
+        let receipt = match read_regular_bounded(&receipt_path, MAX_INFO_BYTES)
+            .and_then(|bytes| decode_cache_receipt(&bytes))
+        {
+            Ok(receipt) => receipt,
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {
+                return Err(invalid("cache entry has no signed trust receipt"));
+            }
+            Err(error) => return Err(error),
+        };
         let nar_path = mirror.join(&info.url);
         validate_path_components(&nar_path)?;
         let nar = match read_regular_bounded(&nar_path, super::MAX_NAR_BYTES as u64) {
@@ -967,7 +991,7 @@ fn find_local_artifact(
         if verify_artifact_bytes(&info, &nar).is_err() {
             continue;
         }
-        return Ok(Some(CacheArtifact { info, nar }));
+        return Ok(Some(CacheArtifact { info, nar, receipt }));
     }
     if let Some(expected) = expected {
         let identity = format!("{}-{}", expected.envelope.output_hash, expected.id);
@@ -1111,6 +1135,10 @@ fn verify_cache_writer_authority(
 }
 
 fn cache_builder_for_entry(entry: &StoreEntry) -> io::Result<String> {
+    Ok(cache_provenance_for_entry(entry)?.builder)
+}
+
+fn cache_provenance_for_entry(entry: &StoreEntry) -> io::Result<CacheProvenance> {
     if entry.reference.trim().is_empty()
         || entry.envelope.provenance.trim().is_empty()
         || entry.cache_identity.source_fingerprint.trim().is_empty()
@@ -1200,7 +1228,7 @@ fn cache_builder_for_entry(entry: &StoreEntry) -> io::Result<String> {
     {
         return Err(invalid("cache entry has incomplete writer provenance"));
     }
-    Ok(builder)
+    Ok(provenance)
 }
 
 fn cache_builder_for_report(entry: &StoreEntry) -> String {
@@ -1209,6 +1237,244 @@ fn cache_builder_for_report(entry: &StoreEntry) -> String {
 
 fn cache_provenance_for_report(entry: &StoreEntry) -> String {
     cache_deriver(entry).unwrap_or_default()
+}
+
+fn cache_receipt_key(store_name: &str) -> io::Result<String> {
+    validate_component(store_name, "cache receipt store name")?;
+    Ok(format!("trust/{store_name}.receipt"))
+}
+
+fn cache_receipt_for_publication(
+    endpoint: &CacheEndpoint,
+    role: &str,
+    entry: &StoreEntry,
+    key: &TrustKey,
+) -> io::Result<CacheReceipt> {
+    validate_component(role, "cache role")?;
+    let provenance = cache_provenance_for_entry(entry)?;
+    let store_name = format!("{}-{}", entry.envelope.output_hash, entry.id);
+    let existing = match endpoint {
+        CacheEndpoint::Local(_)
+        | CacheEndpoint::Http(_)
+        | CacheEndpoint::Ssh { .. }
+        | CacheEndpoint::S3(_) => {
+            endpoint_get(endpoint, &cache_receipt_key(&store_name)?, MAX_INFO_BYTES)?
+                .map(|bytes| decode_cache_receipt(&bytes))
+                .transpose()?
+        }
+        CacheEndpoint::Nix(_) | CacheEndpoint::Hangar => None,
+    };
+    if let Some(existing) = existing {
+        if existing.role == role
+            && existing.provenance == provenance
+            && existing.verify(key, &SystemTrustedClock).is_ok()
+        {
+            return Ok(existing);
+        }
+        let version = existing.version.saturating_add(1).max(1);
+        return CacheReceipt::issue(
+            role,
+            provenance,
+            version,
+            now_seconds(),
+            now_seconds().saturating_add(CACHE_RECEIPT_TTL_SECS),
+            key,
+        )
+        .map_err(|error| invalid(&error.to_string()));
+    }
+    CacheReceipt::issue(
+        role,
+        provenance,
+        1,
+        now_seconds(),
+        now_seconds().saturating_add(CACHE_RECEIPT_TTL_SECS),
+        key,
+    )
+    .map_err(|error| invalid(&error.to_string()))
+}
+
+fn encode_cache_receipt(receipt: &CacheReceipt) -> io::Result<String> {
+    receipt
+        .provenance
+        .validate()
+        .map_err(|error| invalid(&error.to_string()))?;
+    let mut out = String::from(CACHE_RECEIPT_MAGIC);
+    out.push('\n');
+    line(&mut out, "role", &receipt.role)?;
+    line(&mut out, "version", &receipt.version.to_string())?;
+    line(&mut out, "issued", &receipt.issued_unix.to_string())?;
+    line(&mut out, "expires", &receipt.expires_unix.to_string())?;
+    line(&mut out, "reference", &receipt.provenance.reference)?;
+    line(&mut out, "source", &receipt.provenance.source)?;
+    line(&mut out, "builder", &receipt.provenance.builder)?;
+    line(&mut out, "action", &receipt.provenance.action)?;
+    line(&mut out, "output", &receipt.provenance.output)?;
+    line(&mut out, "platform", &receipt.provenance.platform)?;
+    line(&mut out, "sandbox", &receipt.provenance.sandbox)?;
+    line(&mut out, "policy", &receipt.provenance.policy)?;
+    line(&mut out, "signature_key", &receipt.signature.key_id)?;
+    line(
+        &mut out,
+        "signature_algorithm",
+        &receipt.signature.algorithm,
+    )?;
+    line(&mut out, "signature", &receipt.signature.sig_hex)?;
+    Ok(out)
+}
+
+fn decode_cache_receipt(bytes: &[u8]) -> io::Result<CacheReceipt> {
+    let text = String::from_utf8(bytes.to_vec())
+        .map_err(|_| invalid("cache trust receipt is not UTF-8"))?;
+    let mut lines = text.lines();
+    if lines.next() != Some(CACHE_RECEIPT_MAGIC) {
+        return Err(invalid("cache trust receipt has an unknown format"));
+    }
+    let mut fields = BTreeMap::new();
+    for raw in lines {
+        let (name, value) = raw
+            .split_once('=')
+            .ok_or_else(|| invalid("cache trust receipt has a malformed line"))?;
+        validate_text(name, "cache trust receipt field")?;
+        validate_text(value, "cache trust receipt value")?;
+        if fields.insert(name.to_string(), value.to_string()).is_some() {
+            return Err(invalid("cache trust receipt has a duplicate field"));
+        }
+    }
+    let mut take = |name: &str| {
+        fields
+            .remove(name)
+            .ok_or_else(|| invalid(&format!("cache trust receipt has no {name} field")))
+    };
+    let receipt = CacheReceipt {
+        role: take("role")?,
+        version: take("version")?
+            .parse()
+            .map_err(|_| invalid("cache trust receipt version is not an integer"))?,
+        issued_unix: take("issued")?
+            .parse()
+            .map_err(|_| invalid("cache trust receipt issue time is not an integer"))?,
+        expires_unix: take("expires")?
+            .parse()
+            .map_err(|_| invalid("cache trust receipt expiry is not an integer"))?,
+        provenance: CacheProvenance {
+            reference: take("reference")?,
+            source: take("source")?,
+            builder: take("builder")?,
+            action: take("action")?,
+            output: take("output")?,
+            platform: take("platform")?,
+            sandbox: take("sandbox")?,
+            policy: take("policy")?,
+        },
+        signature: Signature {
+            key_id: take("signature_key")?,
+            algorithm: take("signature_algorithm")?,
+            sig_hex: take("signature")?,
+        },
+    };
+    if !fields.is_empty() {
+        return Err(invalid("cache trust receipt has an unknown field"));
+    }
+    receipt
+        .provenance
+        .validate()
+        .map_err(|error| invalid(&error.to_string()))?;
+    Ok(receipt)
+}
+
+fn write_receipt(path: &Path, receipt: &CacheReceipt) -> io::Result<()> {
+    let bytes = encode_cache_receipt(receipt)?.into_bytes();
+    if let Ok(existing) = fs::symlink_metadata(path) {
+        if existing.file_type().is_symlink() || !existing.is_file() {
+            return Err(invalid("cache trust receipt is not a regular file"));
+        }
+        let old = decode_cache_receipt(&read_regular_bounded(path, MAX_INFO_BYTES)?)?;
+        if old == *receipt {
+            return Ok(());
+        }
+        if old.version >= receipt.version {
+            return Err(invalid(
+                "cache trust receipt already has conflicting metadata",
+            ));
+        }
+        return atomic_replace(path, &bytes);
+    }
+    write_resumable(path, &bytes)
+}
+
+fn verify_cache_receipt(
+    roots: &Roots,
+    role: &str,
+    expected: &StoreEntry,
+    receipt: &CacheReceipt,
+    key: &TrustKey,
+) -> io::Result<()> {
+    receipt.verify(key, &SystemTrustedClock).map_err(|error| {
+        invalid(&format!(
+            "{error}; discard the mirror and republish trusted metadata"
+        ))
+    })?;
+    if receipt.role != role {
+        return Err(invalid(&format!(
+            "cache trust receipt role `{}` disagrees with `{role}`; discard the mirror",
+            receipt.role
+        )));
+    }
+    let expected_provenance = cache_provenance_for_entry(expected)?;
+    if receipt.provenance != expected_provenance {
+        return Err(invalid(
+            "cache trust receipt provenance does not match the requested output; mix-and-match rejected",
+        ));
+    }
+    let store_name = format!("{}-{}", expected.envelope.output_hash, expected.id);
+    let pin = roots
+        .root
+        .join("trust")
+        .join("cache-receipts")
+        .join(role)
+        .join(format!("{store_name}.pin"));
+    validate_path_components(&pin)?;
+    crate::RuntimePolicy::with_lock(&roots.root, "cache-trust", || {
+        ensure_parent(&pin)?;
+        let digest = SHA256::sha256_hex(encode_cache_receipt(receipt)?.as_bytes());
+        match read_regular_bounded(&pin, 4096) {
+            Ok(bytes) => {
+                let text = String::from_utf8(bytes)
+                    .map_err(|_| invalid("cache trust pin is not UTF-8"))?;
+                let mut version = None;
+                let mut accepted = None;
+                for line in text.lines() {
+                    if let Some(value) = line.strip_prefix("version=") {
+                        version = value.parse::<u64>().ok();
+                    } else if let Some(value) = line.strip_prefix("digest=") {
+                        accepted = Some(value.to_string());
+                    }
+                }
+                let version = version.ok_or_else(|| invalid("cache trust pin has no version"))?;
+                let accepted = accepted.ok_or_else(|| invalid("cache trust pin has no digest"))?;
+                if receipt.version < version {
+                    return Err(invalid(&format!(
+                        "cache trust metadata rollback rejected: current {version}, incoming {}; refresh or rebuild",
+                        receipt.version
+                    )));
+                }
+                if receipt.version == version && accepted != digest {
+                    return Err(invalid(
+                        "cache trust metadata changed at the same version; mix-and-match rejected",
+                    ));
+                }
+                if receipt.version == version {
+                    return Ok(());
+                }
+            }
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+            Err(error) => return Err(error),
+        }
+        atomic_replace(
+            &pin,
+            format!("version={}\ndigest={digest}\n", receipt.version).as_bytes(),
+        )
+    })
 }
 
 fn write_new_key(path: &Path, role: &str) -> io::Result<()> {
@@ -1490,6 +1756,7 @@ fn publish_endpoint(
     key: &TrustKey,
     _roots: &Roots,
     entry: &StoreEntry,
+    role: &str,
 ) -> io::Result<TransferProof> {
     let caps = endpoint.capabilities();
     if !caps.write {
@@ -1500,7 +1767,8 @@ fn publish_endpoint(
     }
     match endpoint {
         CacheEndpoint::Local(root) => {
-            publish_local_resumable(root, info, nar, key)?;
+            let receipt = cache_receipt_for_publication(endpoint, role, entry, key)?;
+            publish_local_resumable(root, info, nar, key, &receipt)?;
             Ok(TransferProof {
                 nix_nar_hash: None,
                 signed_fingerprint: fingerprint_for_key(key),
@@ -1525,11 +1793,18 @@ fn publish_endpoint(
                     .next()
                     .ok_or_else(|| invalid("narinfo store path has no name"))?
             );
+            let receipt = cache_receipt_for_publication(endpoint, role, entry, key)?;
+            let receipt_text = encode_cache_receipt(&receipt)?;
+            let store_name = info_key
+                .strip_suffix(".narinfo")
+                .ok_or_else(|| invalid("narinfo key has no suffix"))?;
+            let receipt_key = cache_receipt_key(store_name)?;
             publish_remote_atomic(
                 endpoint,
                 [
                     (info.url.as_str(), nar),
                     (&info_key, signed_text.as_bytes()),
+                    (receipt_key.as_str(), receipt_text.as_bytes()),
                 ],
             )?;
             Ok(TransferProof {
@@ -2320,6 +2595,7 @@ fn publish_local_resumable(
     info: &NarInfo,
     nar: &[u8],
     key: &TrustKey,
+    receipt: &CacheReceipt,
 ) -> io::Result<()> {
     crate::RuntimePolicy::with_lock(root, "cache-publish", || {
         let signed = info.clone().signed(key)?;
@@ -2336,8 +2612,16 @@ fn publish_local_resumable(
             .ok_or_else(|| invalid("narinfo store path has no name"))?;
         let info_path = root.join(format!("{store_name}.narinfo"));
         validate_path_components(&info_path)?;
+        let receipt_path = root.join(cache_receipt_key(store_name)?);
+        ensure_parent(&receipt_path)?;
+        ensure_directory(
+            receipt_path
+                .parent()
+                .ok_or_else(|| invalid("cache receipt has no parent"))?,
+        )?;
         write_resumable(&nar_path, nar)?;
         write_resumable(&info_path, signed.to_text()?.as_bytes())?;
+        write_receipt(&receipt_path, receipt)?;
         clear_negative_hint(root, store_name)?;
         Ok(())
     })
