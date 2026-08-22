@@ -374,6 +374,7 @@ mod tests {
             effects: Vec::new(),
             effect_grants: Vec::new(),
             envelope: None,
+            receipt: Default::default(),
             provenance: None,
         }
     }
@@ -399,7 +400,7 @@ mod tests {
     #[test]
     fn audit_lockfile_emits_e2603() {
         let lock = make_lock(vec![make_lock_pkg("mylib", "1.0.3", "sha256-aabb")]);
-        let advisories = vec![Advisory {
+        let advisories = vec![Advisory::Advisory {
             id: "ADV-001".into(),
             package: "mylib".into(),
             affected: VersionReq::parse("^1.0").unwrap(),
@@ -417,7 +418,7 @@ mod tests {
     #[test]
     fn audit_severity_parsed_from_db() {
         let lock = make_lock(vec![make_lock_pkg("mylib", "1.0.3", "sha256-aabb")]);
-        let advisories = vec![Advisory {
+        let advisories = vec![Advisory::Advisory {
             id: "ADV-002".into(),
             package: "mylib".into(),
             affected: VersionReq::parse("^1.0").unwrap(),

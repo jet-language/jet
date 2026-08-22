@@ -56,18 +56,29 @@ pub(crate) fn refresh_nix_lock_digest(
     producer
         .facts
         .insert("nix.lock.digest".to_string(), lock_digest.to_string());
-    producer.plan = crate::Comptime::Build::BuildPlanReplay::from_facts(producer.facts.clone())
+    let mut replay_facts = producer.facts.clone();
+    replay_facts.insert("nix.lock.digest".to_string(), lock_digest.to_string());
+    replay_facts.remove("provider-facts");
+    replay_facts.remove("provider-facts-digest");
+    producer.plan = crate::Comptime::Build::BuildPlanReplay::from_facts(replay_facts)
         .map_err(std::io::Error::other)?;
     producer.bind_cache_provenance(
         &entry.reference,
         &entry.envelope.output_hash,
         &entry.cache_identity,
     );
+    super::super::Provider::refresh_provider_facts(&mut producer, &entry.reference)
+        .map_err(|error| std::io::Error::other(format!("{error:?}")))?;
 
     let mut refreshed = entry.clone();
     refreshed.producer_record = producer.encode();
     super::super::RuntimePolicy::with_lock(&roots.root, "hangar", || {
         Closure::recover_closure_journal_unlocked(roots)?;
+        // Producer refresh changes the canonical receipt inputs. Return the
+        // digest that the registration commits, so the subsequent project
+        // lock projection cannot retain the pre-refresh receipt.
+        refreshed.receipt.clear();
+        Closure::prepare_entry_receipt(roots, &mut refreshed)?;
         Closure::register_entry_unlocked(roots, &refreshed)?;
         Ok(refreshed)
     })

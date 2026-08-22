@@ -170,7 +170,10 @@ Epoch 4 closes 20 live functional package-manager lanes plus the best compatible
 features from other ecosystems and reports the actual sandbox class.
 Its tier-1 gate drives a native package through provider, lease, Hangar,
 offline, and clean-store paths on Linux, macOS, and Windows CI; missing output
-fails closed without a partial store entry.
+fails closed without a partial store entry. The focused lane also runs with an
+empty tool directory and rejects platform values outside the typed tier-1
+matrix, so installed host tools and unsupported hosts cannot create a
+false-green result.
 `D-JPK-EPOCHBOUNDARY1=B` reserves hostile Linux/macOS/Windows isolation and the
 full Nix-replacement claim for Epoch 8 card #398.
 

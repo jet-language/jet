@@ -814,7 +814,93 @@ impl CanonicalWriter {
 
 #[cfg(test)]
 mod tests {
-    use super::{BuildRecipe, BuildStep};
+    use super::{
+        BuildEffect, BuildPlanFragment, BuildRecipe, BuildStep, PlanAuthority, PlanFragmentAction,
+        PlanInput, StagedPlanAction,
+    };
+
+    fn staged_fragment(platform: &str) -> BuildPlanFragment {
+        let mut action = PlanFragmentAction::new("compile", "planner");
+        action.inputs = vec!["manifest".to_string()];
+        action.outputs = vec!["result.bin".to_string()];
+        action.effects = vec![BuildEffect::Exec];
+        action.platform = platform.to_string();
+        BuildPlanFragment {
+            actions: vec![action],
+        }
+    }
+
+    fn staged_action(platform: &str) -> StagedPlanAction {
+        StagedPlanAction::new(
+            "discover",
+            0,
+            1,
+            vec![PlanInput::new("manifest", "sha256-input")],
+            PlanAuthority {
+                tools: vec!["planner".to_string()],
+                effects: vec![BuildEffect::Exec],
+                platform: platform.to_string(),
+            },
+        )
+    }
+
+    #[test]
+    fn staged_identity_binds_finite_inputs_authority_and_fragment() {
+        let action = staged_action("linux-x86_64");
+        let fragment = staged_fragment("linux-x86_64");
+        let identity = action.identity(&fragment).unwrap();
+        assert_eq!(identity, action.identity(&fragment).unwrap());
+        assert_eq!(
+            action.lock(&fragment).unwrap().canonical_identity(),
+            identity
+        );
+
+        let mut changed_stage = action.clone();
+        changed_stage.stage = 1;
+        changed_stage.stage_bound = 2;
+        assert_ne!(identity, changed_stage.identity(&fragment).unwrap());
+
+        let mut changed_input = action.clone();
+        changed_input.inputs[0].digest = "sha256-other".to_string();
+        assert_ne!(identity, changed_input.identity(&fragment).unwrap());
+
+        let mut changed_authority = action.clone();
+        changed_authority.authority.effects.push(BuildEffect::FS);
+        assert_ne!(identity, changed_authority.identity(&fragment).unwrap());
+
+        let mut changed_fragment = fragment.clone();
+        changed_fragment.actions[0].outputs = vec!["other.bin".to_string()];
+        assert_ne!(identity, action.identity(&changed_fragment).unwrap());
+    }
+
+    #[test]
+    fn staged_validation_rejects_cycles_and_overlapping_outputs() {
+        let action = staged_action("linux-x86_64");
+        let mut first = staged_fragment("linux-x86_64").actions.remove(0);
+        first.dependencies = vec!["second".to_string()];
+        let mut second = PlanFragmentAction::new("second", "planner");
+        second.inputs = vec!["manifest".to_string()];
+        second.outputs = vec!["other.bin".to_string()];
+        second.dependencies = vec!["compile".to_string()];
+        second.effects = vec![BuildEffect::Exec];
+        second.platform = "linux-x86_64".to_string();
+        let error = action
+            .validate(&BuildPlanFragment {
+                actions: vec![first, second],
+            })
+            .unwrap_err();
+        assert!(error.to_string().contains("cycle"));
+
+        let mut overlapping = staged_fragment("linux-x86_64");
+        let mut nested = PlanFragmentAction::new("nested", "planner");
+        nested.inputs = vec!["manifest".to_string()];
+        nested.outputs = vec!["result.bin/child".to_string()];
+        nested.effects = vec![BuildEffect::Exec];
+        nested.platform = "linux-x86_64".to_string();
+        overlapping.actions.push(nested);
+        let error = action.validate(&overlapping).unwrap_err();
+        assert!(error.to_string().contains("overlap"));
+    }
 
     #[test]
     fn hook_identity_binds_provider_source() {

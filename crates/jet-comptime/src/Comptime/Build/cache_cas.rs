@@ -1911,19 +1911,10 @@ pub struct RemoteExecutionResult {
 
 /// Compute the immutable identity a worker must repeat in its result.
 pub fn remote_execution_identity(request: &RemoteExecutionRequest) -> ContentDigest {
+    let encoded = encode_remote_execution_request(request);
     let payload = format!(
-        "jet.remote-execution.v1\nkey={}\nattempt={}\ntoolchain={}\nsandbox={}\naction={}\nprovenance={}\nsandbox_class={}\nworker={}\nplatform={}\nabi={}\nreceipt={}\n",
-        request.key.as_str(),
-        request.attempt_id,
-        request.toolchain_digest.as_str(),
-        request.sandbox.sandbox_id,
-        request.sandbox.action_key,
-        request.sandbox.provenance_digest.as_str(),
-        request.sandbox.sandbox_class,
-        request.sandbox.worker_id,
-        request.sandbox.platform,
-        request.sandbox.abi,
-        request.sandbox.worker_receipt,
+        "jet.remote-execution.v2\nbytes={}\n{encoded}",
+        encoded.len()
     );
     ContentDigest::from_bytes(payload.as_bytes())
 }
@@ -2029,7 +2020,7 @@ fn validate_execution_parity(
         || result.execution_id != remote_execution_identity(request)
     {
         return Err(RemoteCacheError::InvalidRecord(
-            "remote execution result changed action, toolchain, or sandbox provenance".to_string(),
+            "remote execution result changed action, inputs, outputs, toolchain, or sandbox provenance".to_string(),
         ));
     }
     if request.outputs.len() != result.outputs.len()
@@ -2048,11 +2039,12 @@ fn validate_execution_parity(
 
 fn encode_remote_execution_request(request: &RemoteExecutionRequest) -> String {
     let mut encoded = format!(
-        "version=1\nkey={}\nattempt={}\ntoolchain={}\nsandbox={}\nproof_action={}\nproof_provenance={}\nworker_id={}\nplatform={}\nabi={}\nworker_receipt={}\nargv={}\n",
+        "version=1\nkey={}\nattempt={}\ntoolchain={}\nsandbox={}\nsandbox_class={}\nproof_action={}\nproof_provenance={}\nworker_id={}\nplatform={}\nabi={}\nworker_receipt={}\nargv={}\n",
         hex_encode(request.key.as_str().as_bytes()),
         hex_encode(request.attempt_id.as_bytes()),
         request.toolchain_digest.as_str(),
         hex_encode(request.sandbox.sandbox_id.as_bytes()),
+        hex_encode(request.sandbox.sandbox_class.as_bytes()),
         hex_encode(request.sandbox.action_key.as_bytes()),
         request.sandbox.provenance_digest.as_str(),
         hex_encode(request.sandbox.worker_id.as_bytes()),
@@ -2101,6 +2093,7 @@ fn decode_remote_execution_request(
     let mut attempt_id = None;
     let mut toolchain_digest = None;
     let mut sandbox_id = None;
+    let mut sandbox_class = None;
     let mut proof_action = None;
     let mut proof_provenance = None;
     let mut worker_id = None;
@@ -2146,6 +2139,13 @@ fn decode_remote_execution_request(
             }
             sandbox_id = Some(String::from_utf8(hex_decode(value)?).map_err(|_| {
                 RemoteCacheError::InvalidRecord("sandbox id is not UTF-8".to_string())
+            })?);
+        } else if let Some(value) = line.strip_prefix("sandbox_class=") {
+            if !seen.insert("sandbox_class") {
+                return Err(duplicate_remote_field("sandbox_class"));
+            }
+            sandbox_class = Some(String::from_utf8(hex_decode(value)?).map_err(|_| {
+                RemoteCacheError::InvalidRecord("sandbox class is not UTF-8".to_string())
             })?);
         } else if let Some(value) = line.strip_prefix("proof_action=") {
             if !seen.insert("proof_action") {
@@ -2262,6 +2262,10 @@ fn decode_remote_execution_request(
             RemoteCacheError::InvalidRecord("missing proof provenance".to_string())
         })?,
     )
+    .with_sandbox_class(
+        sandbox_class
+            .ok_or_else(|| RemoteCacheError::InvalidRecord("missing sandbox class".to_string()))?,
+    )
     .with_attempt_id(attempt_id.clone())
     .with_worker_identity(
         worker_id
@@ -2290,13 +2294,14 @@ fn decode_remote_execution_request(
 
 fn encode_remote_execution_result(result: &RemoteExecutionResult) -> String {
     let mut encoded = format!(
-        "version=2\nkey={}\nattempt={}\nexecution_id={}\noutcome={}\ntoolchain={}\nsandbox={}\nproof_action={}\nproof_provenance={}\nworker_id={}\nplatform={}\nabi={}\nworker_receipt={}\nstdout={}\nstderr={}\nprovenance_signer={}\noutputs={}\n",
+        "version=2\nkey={}\nattempt={}\nexecution_id={}\noutcome={}\ntoolchain={}\nsandbox={}\nsandbox_class={}\nproof_action={}\nproof_provenance={}\nworker_id={}\nplatform={}\nabi={}\nworker_receipt={}\nstdout={}\nstderr={}\nprovenance_signer={}\noutputs={}\n",
         hex_encode(result.key.as_str().as_bytes()),
         hex_encode(result.attempt_id.as_bytes()),
         result.execution_id.as_str(),
         encode_remote_outcome(result.outcome),
         result.toolchain_digest.as_str(),
         hex_encode(result.sandbox.sandbox_id.as_bytes()),
+        hex_encode(result.sandbox.sandbox_class.as_bytes()),
         hex_encode(result.sandbox.action_key.as_bytes()),
         result.sandbox.provenance_digest.as_str(),
         hex_encode(result.sandbox.worker_id.as_bytes()),
@@ -2336,6 +2341,7 @@ fn decode_remote_execution_result(bytes: &[u8]) -> Result<RemoteExecutionResult,
     let mut outcome = None;
     let mut toolchain_digest = None;
     let mut sandbox_id = None;
+    let mut sandbox_class = None;
     let mut proof_action = None;
     let mut proof_provenance = None;
     let mut worker_id = None;
@@ -2392,6 +2398,15 @@ fn decode_remote_execution_result(bytes: &[u8]) -> Result<RemoteExecutionResult,
             }
             sandbox_id = Some(String::from_utf8(hex_decode(value)?).map_err(|_| {
                 RemoteCacheError::InvalidRecord("execution result sandbox is not UTF-8".to_string())
+            })?);
+        } else if let Some(value) = line.strip_prefix("sandbox_class=") {
+            if !seen.insert("sandbox_class") {
+                return Err(duplicate_remote_field("sandbox_class"));
+            }
+            sandbox_class = Some(String::from_utf8(hex_decode(value)?).map_err(|_| {
+                RemoteCacheError::InvalidRecord(
+                    "execution result sandbox class is not UTF-8".to_string(),
+                )
             })?);
         } else if let Some(value) = line.strip_prefix("proof_action=") {
             if !seen.insert("proof_action") {
@@ -2528,6 +2543,9 @@ fn decode_remote_execution_result(bytes: &[u8]) -> Result<RemoteExecutionResult,
                 RemoteCacheError::InvalidRecord("missing execution proof provenance".to_string())
             })?,
         )
+        .with_sandbox_class(sandbox_class.ok_or_else(|| {
+            RemoteCacheError::InvalidRecord("missing execution sandbox class".to_string())
+        })?)
         .with_attempt_id(attempt_id)
         .with_worker_identity(
             worker_id.ok_or_else(|| {

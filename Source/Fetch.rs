@@ -2,7 +2,8 @@
 //!
 //! Network access is entirely via git subprocess — no HTTP in the compiler.
 //! Path dependencies are resolved in-place (no fetch needed).
-//! Results are stored in the Nix-style store (`~/.jet/store/`).
+//! Path and git results retain the legacy source store; verified registry
+//! results are installed in the canonical Jetpack Hangar.
 
 use crate::Diagnostics::Diagnostic;
 use crate::Lock::{self, LockFile, LockSource, LockedPackage, LockedRevision};
@@ -79,8 +80,12 @@ pub fn fetch(
         return Ok((lock.clone(), dep_dirs));
     }
 
-    // Resolve the full dependency graph.
-    let mut resolver = Resolver::new(project_root, existing_lock, opts);
+    // Resolve the full dependency graph. If an offline advisory feed is
+    // configured, verify it before registry resolution can fetch or install a
+    // candidate. An exact existing lock remains the explicit freshness escape.
+    let advisory_policy = Publish::load_advisory_policy(project_root)
+        .map_err(|diagnostic| vec![diagnostic])?;
+    let mut resolver = Resolver::new(project_root, existing_lock, opts, advisory_policy.as_ref());
     let (mut new_lock, dep_dirs) = resolver.resolve_manifest(manifest)?;
     if let Err(d) = enforce_provenance_policy(&new_lock, manifest) {
         return Err(vec![d]);
@@ -189,6 +194,7 @@ struct Resolver<'a> {
     project_root: &'a Path,
     existing_lock: Option<&'a LockFile>,
     opts: &'a FetchOptions,
+    advisory_policy: Option<&'a Publish::AdvisoryPolicy>,
     /// name → (version, source_dir, fingerprint, content hash, deps, provenance)
     resolved: BTreeMap<String, ResolvedPkg>,
     /// name → Vec<chain> — for E1201 blame chains.
@@ -211,11 +217,13 @@ impl<'a> Resolver<'a> {
         project_root: &'a Path,
         existing_lock: Option<&'a LockFile>,
         opts: &'a FetchOptions,
+        advisory_policy: Option<&'a Publish::AdvisoryPolicy>,
     ) -> Self {
         Resolver {
             project_root,
             existing_lock,
             opts,
+            advisory_policy,
             resolved: BTreeMap::new(),
             version_seen: HashMap::new(),
         }
@@ -256,6 +264,7 @@ impl<'a> Resolver<'a> {
             effects: Vec::new(),
             effect_grants: Vec::new(),
             envelope: None,
+            receipt: Default::default(),
             provenance: None,
         });
 
@@ -274,6 +283,7 @@ impl<'a> Resolver<'a> {
                 effects: Vec::new(),
                 effect_grants: Vec::new(),
                 envelope: None,
+                receipt: Default::default(),
                 provenance: pkg.provenance.clone(),
             });
         }
@@ -586,15 +596,16 @@ impl<'a> Resolver<'a> {
                     && self.opts.resolution == ResolveMode::Conservative)
                     .then(|| self.find_locked_registry_version(dep_name))
                     .flatten();
-                let selected = locked_version
+                let locked_candidate = locked_version
                     .as_deref()
                     .filter(|version| {
                         SemVer::parse(version)
                             .is_some_and(|parsed| requirement.matches(&parsed))
                     })
                     .and_then(|version| available.iter().find(|entry| entry.version == version))
-                    .cloned()
-                    .or_else(|| {
+                    .cloned();
+                let reused_exact_lock = locked_candidate.is_some();
+                let selected = locked_candidate.or_else(|| {
                         let mut candidates: Vec<(SemVer, crate::Publish::IndexEntry)> = available
                             .into_iter()
                             .filter(|entry| !entry.yanked)
@@ -623,10 +634,11 @@ impl<'a> Resolver<'a> {
                         )
                         .ok()
                         .cloned()?;
-                        candidates
+                        let selected_entry = candidates
                             .drain(..)
                             .find(|(version, _)| *version == selected_version)
-                            .map(|(_, entry)| entry)
+                            .map(|(_, entry)| entry);
+                        selected_entry
                     });
                 let Some(selected) = selected else {
                     return Err(vec![registry_diagnostic(
@@ -635,6 +647,16 @@ impl<'a> Resolver<'a> {
                         "the configured registry has no compatible non-yanked artifact",
                     )]);
                 };
+                if !reused_exact_lock {
+                    if let Some(policy) = self.advisory_policy {
+                        Publish::authorize_registry_candidate(
+                            policy,
+                            dep_name,
+                            &selected.version,
+                        )
+                        .map_err(|diagnostic| vec![diagnostic])?;
+                    }
+                }
                 let registry_repo = Publish::index_repo_path(&registry);
                 let artifact = Publish::verify_artifact(&registry_repo, &selected).map_err(|error| {
                     vec![registry_diagnostic(
@@ -692,15 +714,32 @@ impl<'a> Resolver<'a> {
                     .iter()
                     .filter_map(|dep| self.resolved.get(dep).map(|pkg| pkg.fingerprint.as_str()))
                     .collect();
+                let hangar_references = trans_deps
+                    .iter()
+                    .filter_map(|dep| {
+                        let pkg = self.resolved.get(dep)?;
+                        if !matches!(&pkg.source, LockSource::Registry { .. }) {
+                            return None;
+                        }
+                        jetpack::Envelope::try_output_hash_of(&pkg.source_dir.to_string_lossy())
+                            .ok()
+                    })
+                    .collect::<Vec<_>>();
                 let cap_digest = crate::Publish::ApiFreeze::project_capability_digest(&artifact);
                 let fp = Lock::compute_fingerprint(&content_hash, &dep_fps, &cap_digest);
-                let (store_path, _content_hash) = Store::ensure_path_dep(
-                    dep_name,
-                    &dep_version,
-                    &fp,
+                let store_path = ingest_registry_artifact(
+                    &registry,
+                    &selected,
                     &artifact,
+                    &hangar_references,
                 )
-                .map_err(|diagnostic| vec![diagnostic])?;
+                .map_err(|error| {
+                    vec![registry_diagnostic(
+                        dep_name,
+                        &error,
+                        "repair the canonical Jetpack Hangar or retry the verified registry ingest",
+                    )]
+                })?;
                 Store::verify_entry(dep_name, &store_path, &content_hash)
                     .map_err(|diagnostic| vec![diagnostic])?;
                 let link_dir = self
@@ -708,7 +747,8 @@ impl<'a> Resolver<'a> {
                     .join(".jet-build")
                     .join("deps")
                     .join(dep_name);
-                Store::link_into_project(&store_path, &link_dir).map_err(|diagnostic| vec![diagnostic])?;
+                Store::copy_into_project(&store_path, &link_dir)
+                    .map_err(|diagnostic| vec![diagnostic])?;
                 let mut provenance = self
                     .existing_provenance(dep_name, &dep_version, &content_hash)
                     .unwrap_or_default();
@@ -737,7 +777,7 @@ impl<'a> Resolver<'a> {
                         fingerprint: fp,
                         content_hash: Some(content_hash),
                         deps: trans_deps,
-                        source_dir: artifact,
+                        source_dir: store_path,
                         provenance,
                     },
                 );
@@ -883,6 +923,66 @@ fn registry_diagnostic(name: &str, what: &str, fix: &str) -> Diagnostic {
     )
 }
 
+/// Move a verified registry source tree into the canonical Jetpack Hangar.
+/// Registry verification happens before this call; Hangar then supplies the
+/// durable, content-addressed project input used by linking and locked fetch.
+fn ingest_registry_artifact(
+    registry: &Publish::RegistryConfig,
+    entry: &Publish::IndexEntry,
+    artifact: &Path,
+    references: &[String],
+) -> Result<PathBuf, String> {
+    let roots = jetpack::Store::resolve();
+    let policy = format!(
+        "registry={};tier={};gate-status={}",
+        registry.name,
+        entry.tier.label(),
+        entry.gate_status.summary(),
+    );
+    let provenance = format!(
+        "registry={};repository={};package={}#{};source-hash={};fingerprint={};publisher={};index-signature={}",
+        registry.name,
+        Publish::redact_registry_url(&registry.url),
+        entry.name,
+        entry.version,
+        entry.content_hash,
+        entry.fingerprint,
+        entry.public_key,
+        entry.signature,
+    );
+    let reference = format!("registry:{}:{}#{}", registry.name, entry.name, entry.version);
+    let references = jetpack::Store::list(&roots)
+        .into_iter()
+        .find(|existing| {
+            existing.name.as_str() == entry.name.as_str()
+                && existing.version.as_str() == entry.version.as_str()
+                && existing.reference.as_str() == reference.as_str()
+                && existing.cache_identity.source_fingerprint.as_str()
+                    == entry.content_hash.as_str()
+        })
+        .map(|existing| existing.references)
+        .unwrap_or_else(|| references.to_vec());
+    let request = jetpack::Store::IngestRequest {
+        name: entry.name.clone(),
+        version: entry.version.clone(),
+        reference,
+        cache_identity: jetpack::Store::CacheIdentity {
+            source_fingerprint: entry.content_hash.clone(),
+            recipe_fingerprint: entry.fingerprint.clone(),
+            policy_fingerprint: format!("sha256-{}", crate::SHA256::sha256_hex(policy.as_bytes())),
+            platform: jetpack::Envelope::host_platform(),
+        },
+        references,
+        outputs: BTreeMap::from([(String::from("out"), artifact.to_path_buf())]),
+        signature: String::new(),
+        provenance,
+        platform_artifact_kind: String::new(),
+    };
+    let ingested = jetpack::Store::ingest_tree(&roots, &request)
+        .map_err(|error| format!("{} ({})", error.what(), error.code()))?;
+    Ok(PathBuf::from(ingested.entry.out))
+}
+
 // ──────────────────────────────────────────────
 // Build dep_dirs from existing lock (--locked mode)
 // ──────────────────────────────────────────────
@@ -1019,7 +1119,13 @@ fn build_dep_dirs_from_lock(
                         "restore the artifact in the local registry mirror; locked mode stays offline",
                     )]
                 })?;
-                artifact
+                ingest_registry_artifact(&config, &entry, &artifact, &[]).map_err(|error| {
+                    vec![registry_diagnostic(
+                        dep_name,
+                        &error,
+                        "repair the canonical Jetpack Hangar or retry the verified registry ingest",
+                    )]
+                })?
             }
         };
         dep_dirs.insert(dep_name.clone(), source_dir);

@@ -41,8 +41,10 @@ The tier-1 platform gate drives a native package through the production
 provider, lease, Hangar, offline, and clean paths in
 `tests/jetpack_platform.rs`. The same focused test runs on Linux, macOS, and
 Windows CI. Missing offline output fails with E1315 without leaving a partial
-Hangar entry. The private lease snapshot is the non-Linux executable handoff;
-hostile child confinement remains Epoch 8 card #398.
+Hangar entry. Its success and failure rows run with an empty tool directory, so
+an installed Nix or shell command cannot make the lane pass by accident. The
+private lease snapshot is the non-Linux executable handoff; hostile child
+confinement remains Epoch 8 card #398.
 
 JP0 stop-line now enforces three truth boundaries:
 
@@ -345,8 +347,11 @@ live acceptance, and documentation. Work order is binding.
 - Native cache entries carry a signed, time-bounded admission receipt. The host
   pins the accepted receipt version and digest per cache role and output, so a
   replayed older receipt or same-version replacement cannot become usable. The
-  transfer report and explain JSON expose the accepted receipt version and
-  expiry alongside the provenance decision.
+transfer report and explain JSON expose the accepted receipt version and
+expiry alongside the provenance decision.
+  `jet explain --json` reports this as `rebuild.cache_admissions`; the view is
+  read-only and distinguishes an accepted, expired, missing, or invalid host
+  admission pin.
 
 ### E4-JP7 — remote builders and execution
 
@@ -367,11 +372,13 @@ Shipped slice evidence:
   cache/execution grants, and explicit local-fallback choice.
 - `RemoteBuilderCapabilities` records platform, features, pools, concurrency,
   priority, trust domain, and cache/execution access. `RemoteScheduler` orders
-  eligible host-owned bindings by priority and builder name, then advances to
-  the next candidate only for a retryable worker loss.
+  eligible host-owned bindings by priority and builder name, reserves each
+  builder's declared concurrency slot, then advances to the next candidate
+  only for a retryable worker loss.
 - `jet build --builder <bound-name>` enters the canonical build executor. It
   uploads missing action inputs to the authenticated CAS, submits the exact
-  action identity, and restores only digest- and length-verified outputs.
+  action identity (including argv, input snapshots, outputs, and effective
+  resource pools), and restores only digest- and length-verified outputs.
 - The transport rejects unauthenticated, malformed, mismatched, stale, or
   replayed records. Cancellation and result publication share one commit lock;
   result publication is idempotent only when a duplicate statement agrees
@@ -515,8 +522,11 @@ transaction. Local clones and artifact trees are built in private staging
 paths and installed by rename; duplicate versions remain reserved after a
 yank. Locked resolution verifies the recorded registry source and exact
 artifact, including an exact yanked version, while fresh resolution excludes
-yanked entries. Registry git transport rejects embedded credentials and
-redacts endpoint details in diagnostics.
+yanked entries. A verified source is ingested into the canonical Jetpack
+Hangar before project linking, and the lock keeps the registry identity while
+the resolved output points at that immutable Hangar object. Registry git
+transport rejects embedded credentials and redacts endpoint details in
+diagnostics.
 
 ### E4-JP13 — one semantic lock, catalogs, overlays, and source maps
 
@@ -583,6 +593,11 @@ composition and exact dev-shell projection are separate delivery slices.
 - Importers prove behavior on real representative projects; TODOs are explicit
   source-linked migration findings, never fake generated implementations.
 
+The production provider boundary now embeds the validated shared carrier in
+each producer record. Store registration and Nix lock refreshes recompute its
+digest after cache and lock facts are added; explain reads that carrier and
+reports a loss or conflict when it is absent, malformed, or changed.
+
 ### E4-JP18 — reproducibility certification
 
 - Build the same action on independent roots/builders with different cwd, UID,
@@ -611,6 +626,10 @@ composition and exact dev-shell projection are separate delivery slices.
   roots, and rebuild checks. `why-depends`, `what-depends`, `closure`,
   `why-live`, and `rebuild` select one causal view. JSON keeps the same fact
   model and reports loss or conflict instead of filling missing facts.
+- Package explain also reads each matching profile-generation fact carrier and
+  verifies the realized output digest against its Store identity. Missing,
+  malformed, stale, or conflicting provider/profile facts remain explicit
+  reports in text and JSON; they are never replaced with defaults.
 - Import/export/copy/dump/restore/sign/verify/repair/optimize operations.
 - Repair is one locked Hangar transaction: a signed archive is staged and
   re-hashed, a corrupt object is quarantined, and failed import restores the
@@ -623,6 +642,11 @@ composition and exact dev-shell projection are separate delivery slices.
 - OSV-compatible advisory feeds with signed offline bundles, monotonic sequence
   and expiry checks, 24-hour third-party release maturity, exact
   `package#version` exceptions, and trust-evidence no-downgrade.
+- `jet inspect audit` reads only the project `.jet/lock`, signed
+  `.jet/advisories.db`, and pinned `.jet/advisory-trust`; it prints the verified
+  feed receipt and fails with E2611 when the lock or advisory database is
+  absent. A configured feed is verified before a new registry candidate can be
+  installed; existing exact locks remain unchanged by freshness policy.
 - SPDX license expression policy, source mapping, yanks/retractions, release
   maturity, and trust-evidence no-downgrade.
 - OCI referrers bind SBOM, signature, provenance, and reproducibility proof.
@@ -642,8 +666,9 @@ composition and exact dev-shell projection are separate delivery slices.
 - Publication writes the canonical fragment, lock, and plan fingerprint to a
   scratch directory, then renames it atomically. Repeating the same action
   returns the same identity and artifact directory.
-- Production-path proof: `tests/jetpack_engine.rs` covers deterministic
-  success, undeclared access, failed stages, cycles, and invalid outputs.
+- Production-path proof: `tests/jetpack_engine.rs` runs the real
+  `jetpack::Recipe` seam for deterministic success, undeclared access, failed
+  stages, cancellation, cycles, and invalid outputs.
 
 ### E4-JP22 — world-class acceptance and scale gate
 

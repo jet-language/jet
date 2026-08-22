@@ -45,6 +45,23 @@ impl Default for PromptStripMode {
     }
 }
 
+/// One environment's non-entry facts from one source module. Keeping these
+/// facts beside the environment name prevents sibling `env.<name>` modules
+/// from leaking services, lifecycle, files, or variable reads into the one
+/// selected runtime plan.
+#[derive(Debug, Clone)]
+pub(super) struct EnvironmentContribution {
+    pub(super) name: String,
+    pub(super) environment_reads: Vec<EnvironmentRead>,
+    pub(super) dev_services: Vec<DevServicePlan>,
+    pub(super) secrets: Vec<String>,
+    pub(super) adapters: Vec<AdapterPlan>,
+    pub(super) lifecycle: EnvironmentLifecycle,
+    pub(super) presets: Vec<PresetSpec>,
+    pub(super) languages: Vec<LanguageSpec>,
+    pub(super) files: Vec<super::Environment::ManagedFile>,
+}
+
 /// One module's contributions, keyed by `(namespace, path)` so `merge_all`
 /// can combine same-keyed contributions from different modules.
 #[derive(Debug)]
@@ -62,34 +79,12 @@ pub struct EvaluatedModule {
     /// D-JOS-VMTEST1: `vmtest.<name>:` contributions, captured as runnable VM
     /// scenarios over known systems.
     pub vmtests: Vec<VmTestPlan>,
-    /// U12: dev-supervised `services:` entries captured from every `env.<name>`
-    /// role-module in this module, in source order. Distinct from the jetos
-    /// `system.<name>.services` capture (`ServicePlan` above) — a different
-    /// Rust type and evaluator (`ModuleEval::DevService`), even though the
-    /// `Service` grammar itself is the one ratified shape (U12).
-    pub dev_services: Vec<DevServicePlan>,
-    /// U13 (D-JPK-SECRETCRYPTO1): declared `secrets: ["name", …]` names from
-    /// every `env.<name>` role-module in this module, in source order — the
-    /// names this env expects to find in the project's encrypted store
-    /// (`.jet/secrets.age`). Validated (every name present) at env entry;
-    /// `Jetpack::Secrets` is the only consumer.
-    pub secrets: Vec<String>,
-    /// U20: `Pkg.adapt(...)` declarations captured from `packages:` fields.
-    /// They ride alongside ordinary package refs and realize into normal
-    /// hangar objects.
-    pub adapters: Vec<AdapterPlan>,
-    /// D-ENV-LIFECYCLE1: typed lifecycle facts captured from env fields.
-    pub lifecycle: EnvironmentLifecycle,
-    /// D-ENV-PROFILE1: named preset compositions.
-    pub presets: Vec<PresetSpec>,
-    /// D-ENV-LANGPACK1: typed language-pack selections from this module.
-    pub languages: Vec<LanguageSpec>,
-    /// D-ENV-FILES1: managed environment-file declarations.
-    pub files: Vec<super::Environment::ManagedFile>,
+    /// Environment-scoped facts. Source evaluation selects one name before
+    /// projecting these into `EnvPlan`.
+    pub(super) environment_contributions: Vec<EnvironmentContribution>,
     /// D-ENV-INTEGRATIONS1: typed first-party integrations imported by this
     /// module and lowered into ordinary environment facts.
     pub integrations: Vec<EnvironmentIntegration>,
-    pub environment_names: Vec<String>,
     /// D-JPK-PROFILE1=D: source-backed package generation declarations. These
     /// are not environment presets and never affect shell selection.
     pub package_profiles: Vec<PackageProfileSpec>,
@@ -249,7 +244,8 @@ pub enum ImageKind {
 /// `Iso`: `target`/`packages`/`services`/`options` are inherited from the
 /// referenced `System` at realize time (Phase D, gap #4), so they are not
 /// stored here. `Oci`: built natively now (no jetos tier involved) from the
-/// referenced `Package`'s realized binary plus `expose`/`env_vars`/`files`/`base`.
+/// referenced `Package` or `Environment`'s realized Hangar output plus
+/// `expose`/`env_vars`/`files`/`base`.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ImagePlan {
     /// The contribution path — the `<name>` in `image.<name>`.
@@ -285,7 +281,8 @@ pub struct ImagePlan {
     /// refs stay explicit until a verified registry transport is configured.
     pub base: Option<String>,
     /// D-ENV-IMAGE1 expert projection fields. Empty/None uses the safe shell
-    /// default for an environment image.
+    /// default for an environment image. Cache, signing, and provenance stay
+    /// on Hangar and `.jet/lock`; this record does not duplicate those stores.
     pub services: Vec<String>,
     pub health: Option<String>,
     pub entrypoint: Option<String>,
@@ -370,8 +367,8 @@ pub struct EnvPlan {
     /// The semantic identity of the Package graph that produced this plan.
     /// Legacy environment plans have no Package authority and keep this None.
     pub graph_identity: Option<String>,
-    /// Every typed environment read in the root config surface and discovered
-    /// module files, in source/discovery order.
+    /// Every typed environment read in the selected environment's root and
+    /// discovered module contributions, in source/discovery order.
     pub environment_reads: Vec<EnvironmentRead>,
     pub package_refs: Vec<String>,
     /// U20 adapter packages declared in `packages:`. Kept separate from refs
@@ -390,20 +387,22 @@ pub struct EnvPlan {
     /// D-JOS-VMTEST1: every captured VM scenario, validated so each host names a
     /// known system.
     pub vmtests: Vec<VmTestPlan>,
-    /// U12: every captured dev-supervised `Service`, across all evaluated
-    /// modules, in source order. `jetpack services <verb>`/`jetpack dev`'s
-    /// health gate are the only consumers — the jetos tier never reads this.
+    /// U12: every captured dev-supervised `Service` in the selected environment,
+    /// in source order. `jetpack services <verb>`/`jetpack dev`'s health gate
+    /// are the only consumers — the jetos tier never reads this.
     pub dev_services: Vec<DevServicePlan>,
-    /// U13 (D-JPK-SECRETCRYPTO1): every declared `secrets:` name, across all
-    /// evaluated modules, in source order. `jetpack enter`/`jetpack dev`
-    /// validate every name exists in the encrypted store at env entry
-    /// (E1263); the jetos tier never reads this.
+    /// U13 (D-JPK-SECRETCRYPTO1): every declared `secrets:` name in the
+    /// selected environment, in source order. `jetpack enter`/`jetpack dev`
+    /// validate every name exists in the encrypted store at env entry (E1263);
+    /// the jetos tier never reads this.
     pub secrets: Vec<String>,
     /// Typed lifecycle facts for activation, checks, and reload.
     pub lifecycle: EnvironmentLifecycle,
-    /// Named preset compositions before CLI/host selection.
+    /// Named preset compositions from the selected environment before
+    /// CLI/host selection.
     pub presets: Vec<PresetSpec>,
-    /// Typed language-pack selections before catalog expansion.
+    /// Typed language-pack selections from the selected environment before
+    /// catalog expansion.
     pub languages: Vec<LanguageSpec>,
     /// The preset selected by the evaluator/runtime, if one was requested.
     pub selected_preset: Option<ResolvedPreset>,
@@ -417,9 +416,11 @@ pub struct EnvPlan {
     /// changed selection facts. Consumers must use this instead of reparsing
     /// the source or reconstructing pack defaults.
     pub language_projections: Vec<LanguageProjection>,
-    /// Managed environment-file declarations before `jet env sync` applies them.
+    /// Managed environment-file declarations from the selected environment
+    /// before `jet env sync` applies them.
     pub files: Vec<super::Environment::ManagedFile>,
-    /// D-ENV-INTEGRATIONS1: typed integrations before host realization.
+    /// D-ENV-INTEGRATIONS1: typed integrations from the selected environment
+    /// before host realization.
     pub integrations: Vec<EnvironmentIntegration>,
     pub integration_facts: IntegrationFactProjection,
     /// D-JPK-PROFILE1=D: source-backed package-generation declarations. These
@@ -439,7 +440,8 @@ pub struct EnvironmentFacts {
     pub active_environment: Option<String>,
     pub active_environment_provenance: Vec<String>,
     pub source_files: Vec<String>,
-    /// Every typed environment read retained for discovery and reporting.
+    /// Every typed environment read retained for discovery and reporting from
+    /// the selected environment.
     /// Consumers must use this projection instead of lexing `env.jet` again.
     pub environment_reads: Vec<EnvironmentRead>,
     pub dev_services: Vec<DevServicePlan>,

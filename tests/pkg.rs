@@ -3450,6 +3450,24 @@ pub fn deposit(a: Account, amount: Int) => Int { return a.balance + amount }
 }
 
 #[test]
+fn cli_typed_default_is_not_frozen_as_positional() {
+    let dir = tmp_dir("cli_default_api_freeze");
+    let src = "#CLI\npub struct Config {\n    port: Int{3000}\n    required: Int\n}\n";
+    let path = dir.join("config.jet");
+    fs::write(&path, src).unwrap();
+    let api = jet::Publish::extract_public_api_for_package(src, path.to_str().unwrap(), "config");
+    let config = api
+        .iter()
+        .find(|item| item.name == "Config")
+        .expect("public CLI struct must be frozen");
+    assert_eq!(
+        config.signature,
+        "struct Config { port: Int; required: Int [positional 0] }"
+    );
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
 fn physical_unit_api_freeze_and_semver_share_one_canonical_signature() {
     use jet::Publish::{diff_public_api, ApiItem};
 
@@ -3947,7 +3965,9 @@ fn sbom_cyclonedx_golden() {
 
 #[test]
 fn audit_e2603_on_vulnerable_dep() {
-    use jet::Publish::{audit_lockfile, Advisory, SemVer, Severity, VersionReq};
+    use jet::Publish::Advisory::Advisory;
+    use jet::Publish::SemVer::SemVer;
+    use jet::Publish::{audit_lockfile, Severity, VersionReq};
 
     let lock = make_test_lock("crypto-lib", "0.9.0", "sha256-aabb");
     // Advisory: crypto-lib ^0 (pre-1.0) has a critical issue fixed in 0.9.5.
@@ -3978,7 +3998,9 @@ fn audit_e2603_on_vulnerable_dep() {
 fn audit_non_critical_is_advisory() {
     // D-SUPPLY1: a non-critical advisory still matches but is advisory-only —
     // the severity carried back is below Critical, so `jet inspect audit` exits 0.
-    use jet::Publish::{audit_lockfile, Advisory, SemVer, Severity, VersionReq};
+    use jet::Publish::Advisory::Advisory;
+    use jet::Publish::SemVer::SemVer;
+    use jet::Publish::{audit_lockfile, Severity, VersionReq};
 
     let lock = make_test_lock("util-lib", "1.0.0", "sha256-ccdd");
     let advisories = vec![Advisory {
@@ -4278,6 +4300,167 @@ fn cli_publish_pushes_index_and_enforces_immutability_e1234() {
     );
 
     let _ = fs::remove_dir_all(&tmp);
+}
+
+#[test]
+fn registry_fetch_installs_verified_artifact_in_hangar_and_locked_reuses_it() {
+    if !jet_bin().is_file() || !have_git() {
+        eprintln!(
+            "note: skipping registry_fetch_installs_verified_artifact (need built binary and git)"
+        );
+        return;
+    }
+
+    let tmp = tmp_dir("registry_fetch_hangar");
+    let publisher = tmp.join("publisher");
+    let consumer = tmp.join("consumer");
+    fs::create_dir_all(&publisher).unwrap();
+    fs::create_dir_all(&consumer).unwrap();
+    let bare = tmp.join("registry.git");
+    let url = bare_registry(&bare);
+    let cache = tmp.join("registry-cache");
+    let store = tmp.join("legacy-store");
+    let hangar_root = tmp.join("jetpack-root");
+    let keys = tmp.join("keys");
+    fs::create_dir_all(&store).unwrap();
+    init_clean_project(&publisher, "textkit", "1.2.0");
+    seed_core_review(&bare, "textkit", "1.2.0");
+
+    let publish = jet_cmd_env(
+        &["registry", "publish"],
+        &publisher,
+        &[
+            ("JET_REGISTRY_URL", url.as_str()),
+            ("JET_REGISTRY_CACHE_DIR", cache.to_str().unwrap()),
+            ("JET_STORE_DIR", store.to_str().unwrap()),
+            ("JET_KEYS_DIR", keys.to_str().unwrap()),
+        ],
+    );
+    assert!(
+        publish.status.success(),
+        "registry publish failed:\n{}",
+        String::from_utf8_lossy(&publish.stderr)
+    );
+
+    let raw = manifest_with_deps("consumer", "0.1.0", "    textkit: textkit#1.2.0,");
+    write(&consumer, "package.jet", &raw);
+    let manifest = jet::Manifest::parse(&consumer.join("package.jet"), &raw).unwrap();
+    let opts = jet::Fetch::FetchOptions {
+        locked: false,
+        update: false,
+        update_dep: None,
+        resolution: jet::Publish::ResolveMode::Conservative,
+    };
+
+    let (lock, dep_dirs) = with_store(&store, || {
+        let previous = [
+            ("JET_REGISTRY_URL", std::env::var_os("JET_REGISTRY_URL")),
+            (
+                "JET_REGISTRY_CACHE_DIR",
+                std::env::var_os("JET_REGISTRY_CACHE_DIR"),
+            ),
+            ("JET_KEYS_DIR", std::env::var_os("JET_KEYS_DIR")),
+            ("JETPACK_ROOT", std::env::var_os("JETPACK_ROOT")),
+        ];
+        std::env::set_var("JET_REGISTRY_URL", &url);
+        std::env::set_var("JET_REGISTRY_CACHE_DIR", &cache);
+        std::env::set_var("JET_KEYS_DIR", &keys);
+        std::env::set_var("JETPACK_ROOT", &hangar_root);
+        let result = jet::Fetch::fetch(&consumer, &manifest, None, &opts);
+        for (key, value) in previous {
+            if let Some(value) = value {
+                std::env::set_var(key, value);
+            } else {
+                std::env::remove_var(key);
+            }
+        }
+        result.expect("verified registry fetch should succeed")
+    });
+
+    let installed = dep_dirs.get("textkit").expect("registry dep directory");
+    assert!(
+        installed.starts_with(hangar_root.join("hangar").join("objects")),
+        "registry dependency must resolve from Hangar, got {}",
+        installed.display()
+    );
+    assert!(installed.join("package.jet").is_file());
+    assert!(
+        !installed.starts_with(&store),
+        "registry dependency must not use the legacy path store"
+    );
+    let lock_source = lock
+        .packages
+        .iter()
+        .find(|package| package.name == "textkit")
+        .expect("registry package must be locked");
+    assert!(
+        matches!(&lock_source.source, jet::Lock::LockSource::Registry { .. }),
+        "registry dependency must retain registry lock identity"
+    );
+    let hangar_entry = jetpack::Store::list(&jetpack::Store::Roots::at(hangar_root.clone()))
+        .into_iter()
+        .find(|entry| entry.name == "textkit" && entry.version == "1.2.0")
+        .expect("registry fetch must register immutable Hangar metadata");
+    assert_eq!(
+        hangar_entry.out.as_str(),
+        installed.to_string_lossy().as_ref(),
+        "Hangar metadata must point at the resolved output"
+    );
+    assert_eq!(
+        hangar_entry.cache_identity.source_fingerprint,
+        lock_source
+            .content_hash
+            .as_deref()
+            .expect("registry lock must retain the source hash")
+    );
+    assert!(
+        hangar_entry
+            .envelope
+            .provenance
+            .contains("package=textkit#1.2.0"),
+        "Hangar provenance must retain the immutable registry package identity"
+    );
+
+    let locked_opts = jet::Fetch::FetchOptions {
+        locked: true,
+        update: false,
+        update_dep: None,
+        resolution: jet::Publish::ResolveMode::Conservative,
+    };
+    let locked_dirs = with_store(&store, || {
+        let previous = [
+            ("JET_REGISTRY_URL", std::env::var_os("JET_REGISTRY_URL")),
+            (
+                "JET_REGISTRY_CACHE_DIR",
+                std::env::var_os("JET_REGISTRY_CACHE_DIR"),
+            ),
+            ("JET_KEYS_DIR", std::env::var_os("JET_KEYS_DIR")),
+            ("JETPACK_ROOT", std::env::var_os("JETPACK_ROOT")),
+        ];
+        std::env::set_var("JET_REGISTRY_URL", &url);
+        std::env::set_var("JET_REGISTRY_CACHE_DIR", &cache);
+        std::env::set_var("JET_KEYS_DIR", &keys);
+        std::env::set_var("JETPACK_ROOT", &hangar_root);
+        let result = jet::Fetch::fetch(&consumer, &manifest, Some(&lock), &locked_opts);
+        for (key, value) in previous {
+            if let Some(value) = value {
+                std::env::set_var(key, value);
+            } else {
+                std::env::remove_var(key);
+            }
+        }
+        result
+            .expect("locked registry fetch should verify and reuse the published artifact")
+            .1
+    });
+    assert_eq!(
+        locked_dirs.get("textkit"),
+        Some(installed),
+        "locked consumption must resolve the same immutable Hangar object"
+    );
+
+    common::make_tree_writable(&tmp);
+    fs::remove_dir_all(tmp).unwrap();
 }
 
 #[test]

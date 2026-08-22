@@ -17,7 +17,7 @@ use super::Diagnostics::{
     fleet_unknown_system, image_from_unknown_system, merge_error_to_diagnostic,
     oci_from_non_executable,
 };
-use super::Eval::{environment_reads, evaluate_modules, merge_all, parse_program, pkg_ref};
+use super::Eval::{evaluate_modules, merge_all, parse_program, pkg_ref};
 use super::Environment::{
     qualified_call_name, EnvironmentIntegration, EnvironmentLifecycle, IntegrationFactProjection,
     IntegrationKind, LanguagePackCatalog, LanguageSpec, ManagedFile, PackageProfileFact,
@@ -355,17 +355,10 @@ pub fn evaluate_env_with_selections(
                 })
         })
         .collect::<Vec<_>>();
-    let mut env_reads = Vec::new();
-    for unit in &units {
-        for read in environment_reads(&unit.src)? {
-            if !env_reads
-                .iter()
-                .any(|seen: &super::Types::EnvironmentRead| seen.name == read.name)
-            {
-                env_reads.push(read);
-            }
-        }
-    }
+    // `evaluate_modules` reads every unit for comptime evaluation. The plan's
+    // disclosure projection is filled below from the selected environment's
+    // scoped contributions, so sibling variables do not leak into `info`.
+    let mut env_reads = Vec::<super::Types::EnvironmentRead>::new();
 
     let table = build_source_table(&units)?;
 
@@ -401,30 +394,114 @@ pub fn evaluate_env_with_selections(
         .flat_map(|module| module.entries.iter())
         .filter_map(|((namespace, name), _)| (*namespace == Namespace::Env).then_some(name.clone()))
         .collect();
+    // Select exactly one environment before projecting any non-entry facts.
+    // Package/settings selection below already used this rule; the same
+    // boundary must govern services, lifecycle, files, integrations, and
+    // variable disclosure.
+    let active_environment =
+        select_active_environment(&environment_names, requested_environment)?;
     for module in &modules {
         systems.extend(module.systems.iter().cloned());
         images.extend(module.images.iter().cloned());
         fleets.extend(module.fleets.iter().cloned());
         vmtests.extend(module.vmtests.iter().cloned());
-        for service in &module.dev_services {
-            if dev_services
-                .iter()
-                .any(|existing: &super::Types::DevServicePlan| existing.name == service.name)
-            {
-                return Err(Diagnostic::error(
-                    "E1262",
-                    format!("service `{}` is declared more than once", service.name),
-                    "one environment supervisor owns each service name and cannot choose between different process facts".to_string(),
-                    "merge the service records or give them distinct names".to_string(),
+        for profile in &module.package_profiles {
+            package_profiles.insert_checked(profile.clone()).map_err(|error| {
+                Diagnostic::error(
+                    "E1332",
+                    format!("package generation composition failed: {error}"),
+                    "one source-backed package generation cannot silently choose different inheritance, package, or collision facts".to_string(),
+                    "merge the declarations so they agree, or give the generations different names".to_string(),
                     None,
-                ));
+                )
+            })?;
+        }
+        let Some(active_name) = active_environment.as_deref() else {
+            continue;
+        };
+        if !module
+            .environment_contributions
+            .iter()
+            .any(|contribution| contribution.name == active_name)
+        {
+            continue;
+        }
+        for contribution in module
+            .environment_contributions
+            .iter()
+            .filter(|contribution| contribution.name == active_name)
+        {
+            for read in &contribution.environment_reads {
+                if !env_reads.iter().any(|seen| seen.name == read.name) {
+                    env_reads.push(read.clone());
+                }
             }
-            dev_services.push(service.clone());
+            for service in &contribution.dev_services {
+                if dev_services.iter().any(|existing| existing.name == service.name) {
+                    return Err(Diagnostic::error(
+                        "E1262",
+                        format!("service `{}` is declared more than once", service.name),
+                        "one environment supervisor owns each service name and cannot choose between different process facts".to_string(),
+                        "merge the service records or give them distinct names".to_string(),
+                        None,
+                    ));
+                }
+                dev_services.push(service.clone());
+            }
+            for secret in &contribution.secrets {
+                push_unique(&mut secrets, secret.clone());
+            }
+            adapters.extend(contribution.adapters.iter().cloned());
+            super::Eval::lifecycle_merge(
+                &mut lifecycle,
+                contribution.lifecycle.clone(),
+                &module.name,
+            )?;
+            for preset in &contribution.presets {
+                presets.insert_checked(preset.clone()).map_err(|error| {
+                    Diagnostic::error(
+                        "E1332",
+                        format!("environment preset composition failed: {error}"),
+                        "one environment graph cannot silently choose between different facts for the same preset".to_string(),
+                        "merge the preset declarations so they are identical, or give them different names".to_string(),
+                        None,
+                    )
+                })?;
+            }
+            for language in &contribution.languages {
+                if let Some(existing) = languages
+                    .iter()
+                    .find(|existing: &&LanguageSpec| existing.key() == language.key())
+                {
+                    if !existing.same_selection(language) {
+                        return Err(Diagnostic::error(
+                            "E1333",
+                            format!("language pack `{}` has conflicting selection facts", language.name),
+                            "one environment graph cannot silently choose a version, channel, venv, or extra-package selection".to_string(),
+                            "merge the language records so their typed facts agree".to_string(),
+                            None,
+                        ));
+                    }
+                } else {
+                    languages.push(language.clone());
+                }
+            }
+            for file in &contribution.files {
+                if let Some(existing) = files.iter().find(|item| item.destination == file.destination) {
+                    if existing != file {
+                        return Err(Diagnostic::error(
+                            "E1326",
+                            format!("managed file `{}` has conflicting declarations", file.destination),
+                            "one environment graph cannot apply two different owners to the same destination".to_string(),
+                            "merge the file declarations or choose distinct destinations".to_string(),
+                            None,
+                        ));
+                    }
+                } else {
+                    files.push(file.clone());
+                }
+            }
         }
-        for secret in &module.secrets {
-            push_unique(&mut secrets, secret.clone());
-        }
-        adapters.extend(module.adapters.iter().cloned());
         for integration in &module.integrations {
             if let Some(existing) = integrations
                 .iter()
@@ -441,6 +518,9 @@ pub fn evaluate_env_with_selections(
                 }
             } else {
                 integrations.push(integration.clone());
+            }
+            for secret in &integration.secrets {
+                push_unique(&mut secrets, secret.clone());
             }
             for package in &integration.packages {
                 push_unique(&mut integration_packages, package.clone());
@@ -488,95 +568,15 @@ pub fn evaluate_env_with_selections(
                 push_unique(&mut integration_facts.losses, loss.clone());
             }
         }
-        for dotenv in &module.lifecycle.dotenv {
-            if let Some(existing) = lifecycle.dotenv.iter().find(|item| item.file == dotenv.file) {
-                if existing != dotenv {
-                    return Err(Diagnostic::error(
-                        "E1333",
-                        format!("dotenv file `{}` has conflicting lifecycle policies", dotenv.file),
-                        "one environment graph cannot silently choose different allowlists or secret classifications for the same dotenv file".to_string(),
-                        "merge the declarations so their policies agree, or use different files".to_string(),
-                        None,
-                    ));
-                }
-            } else {
-                lifecycle.dotenv.push(dotenv.clone());
-            }
-        }
-        lifecycle.unset.extend(module.lifecycle.unset.iter().cloned());
-        lifecycle.on_enter.extend(module.lifecycle.on_enter.iter().cloned());
-        lifecycle.checks.extend(module.lifecycle.checks.iter().cloned());
-        if module.lifecycle.reload_explicit {
-            if lifecycle.reload_explicit && lifecycle.reload != module.lifecycle.reload {
-                return Err(Diagnostic::error(
-                    "E1333",
-                    format!(
-                        "reload policy in module `{}` conflicts with another module",
-                        module.name
-                    ),
-                    "one environment graph cannot silently choose between different reload policies".to_string(),
-                    "merge the reload declarations so they agree, or keep one policy owner".to_string(),
-                    None,
-                ));
-            }
-            lifecycle.reload = module.lifecycle.reload.clone();
-            lifecycle.reload_explicit = true;
-        }
-        for preset in &module.presets {
-            presets.insert_checked(preset.clone()).map_err(|error| {
-                Diagnostic::error(
-                    "E1332",
-                    format!("environment preset composition failed: {error}"),
-                    "one environment graph cannot silently choose between different facts for the same preset".to_string(),
-                    "merge the preset declarations so they are identical, or give them different names".to_string(),
-                    None,
-                )
-            })?;
-        }
-        for profile in &module.package_profiles {
-            package_profiles.insert_checked(profile.clone()).map_err(|error| {
-                Diagnostic::error(
-                    "E1332",
-                    format!("package generation composition failed: {error}"),
-                    "one source-backed package generation cannot silently choose different inheritance, package, or collision facts".to_string(),
-                    "merge the declarations so they agree, or give the generations different names".to_string(),
-                    None,
-                )
-            })?;
-        }
-        for language in &module.languages {
-            if let Some(existing) = languages
-                .iter()
-                .find(|existing: &&LanguageSpec| existing.key() == language.key())
-            {
-                if !existing.same_selection(language) {
-                    return Err(Diagnostic::error(
-                        "E1333",
-                        format!("language pack `{}` has conflicting selection facts", language.name),
-                        "one environment graph cannot silently choose a version, channel, venv, or extra-package selection".to_string(),
-                        "merge the language records so their typed facts agree".to_string(),
-                        None,
-                    ));
-                }
-            } else {
-                languages.push(language.clone());
-            }
-        }
-        for file in &module.files {
-            if let Some(existing) = files.iter().find(|item| item.destination == file.destination) {
-                if existing != file {
-                    return Err(Diagnostic::error(
-                        "E1326",
-                        format!("managed file `{}` has conflicting declarations", file.destination),
-                        "one environment graph cannot apply two different owners to the same destination".to_string(),
-                        "merge the file declarations or choose distinct destinations".to_string(),
-                        None,
-                    ));
-                }
-            } else {
-                files.push(file.clone());
-            }
-        }
+    }
+    if let Err(error) = integration_facts.validate() {
+        return Err(Diagnostic::error(
+            "E1335",
+            "environment integration lowering was lossy".to_string(),
+            error,
+            "use named secret references and supported typed integration arguments".to_string(),
+            None,
+        ));
     }
     let system_names: Vec<String> = systems.iter().map(|s| s.name.clone()).collect();
     // D-JPK-IMAGE1: an `.Oci` image's `from: packages.<name>` cross-checks against
@@ -655,21 +655,9 @@ pub fn evaluate_env_with_selections(
 
     let merged = merge_all(&modules).map_err(|e| merge_error_to_diagnostic(&e))?;
 
-    if let Err(error) = integration_facts.validate() {
-        return Err(Diagnostic::error(
-            "E1335",
-            "environment integration lowering was lossy".to_string(),
-            error,
-            "use named secret references and supported typed integration arguments".to_string(),
-            None,
-        ));
-    }
-
     // Select exactly one environment module. The selected name is explicit when a host
     // asks for it; otherwise `dev`, then `default`, then lexical order gives
     // one stable beginner path instead of silently merging sibling modules.
-    let active_environment =
-        select_active_environment(&environment_names, requested_environment)?;
     let active_key = active_environment
         .as_ref()
         .map(|name| (Namespace::Env, name.clone()));

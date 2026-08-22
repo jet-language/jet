@@ -57,7 +57,8 @@ mod Broker;
 pub use Broker::*;
 mod Reproducibility;
 pub(crate) use Reproducibility::{
-    certify_registration_unlocked, reproducibility_blocked,
+    certify_registration_unlocked, certify_registration_unlocked_with_fresh_agreement,
+    reproducibility_blocked,
 };
 
 fn list_unlocked(roots: &Roots) -> Vec<StoreEntry> {
@@ -469,6 +470,8 @@ fn record_verified_mode(
         )?)
         .map_err(std::io::Error::other)?;
         producer.bind_cache_provenance(reference, &envelope.output_hash, cache_identity);
+        super::Provider::refresh_provider_facts(&mut producer, reference)
+            .map_err(|error| std::io::Error::other(format!("{error:?}")))?;
         let mut entry = StoreEntry {
             id: id.clone(),
             name: name.to_string(),
@@ -519,9 +522,7 @@ pub(crate) fn record_realized_mode_with_fresh_agreement(
     realized: &super::Provider::Realized,
 ) -> std::io::Result<StoreEntry> {
     super::RuntimePolicy::with_lock(&roots.root, "hangar", || {
-        Reproducibility::with_fresh_agreement_unlocked(roots, action_key, || {
-            record_realized_mode_unlocked(roots, realized, Some(action_key))
-        })
+        record_realized_mode_unlocked(roots, realized, Some(action_key))
     })
 }
 
@@ -570,6 +571,8 @@ fn record_realized_mode_unlocked(
             &realized.envelope.output_hash,
             &realized.cache_identity,
         );
+        super::Provider::refresh_provider_facts(&mut producer, &realized.reference)
+            .map_err(|error| std::io::Error::other(format!("{error:?}")))?;
         let mut entry = StoreEntry {
             id,
             name: realized.name.clone(),
@@ -1731,7 +1734,10 @@ pub fn realize_verified(
         ),
     };
 
-    let cache_bindings = list_cache_bindings(roots).unwrap_or_default();
+    // A missing bindings directory means "no configured cache". A present
+    // but malformed or unreadable binding is trust state, not a cache miss;
+    // fail before any local, remote, or newly built result becomes usable.
+    let cache_bindings = list_cache_bindings(roots).map_err(RealizeError::Store)?;
 
     if let (Some(candidate), Some(expectation)) =
         (find_by_reference(roots, &reference), expectation.as_ref())
@@ -1856,11 +1862,18 @@ pub fn realize_verified(
     entry = super::Provider::record_nix_lock_after_store(ctx, roots, &entry)
         .map_err(RealizeError::Provider)?;
     project_receipt_projection(ctx, &entry)?;
+    promote_shared_entry(roots, &entry).map_err(RealizeError::Store)?;
     if realized.source_state == super::Provider::SourceState::Built {
         publish_realized_to_bound_caches(roots, &entry);
     }
-    promote_shared_entry(roots, &entry).map_err(RealizeError::Store)?;
     let lease = snapshot_lease(roots, &entry).map_err(RealizeError::Store)?;
+    if let Some(action_key) = independent
+        .as_ref()
+        .and_then(|prepared| prepared.action_key.as_deref())
+    {
+        Reproducibility::clear_reproducibility_report(roots, action_key)
+            .map_err(RealizeError::Store)?;
+    }
     Ok(VerifiedRealization {
         entry,
         source_state: realized.source_state,
@@ -1916,8 +1929,10 @@ pub fn certify_independent_root_build(
     entry = super::Provider::record_nix_lock_after_store(ctx, roots, &entry)
         .map_err(RealizeError::Provider)?;
     project_receipt_projection(ctx, &entry)?;
-    publish_realized_to_bound_caches(roots, &entry);
     promote_shared_entry(roots, &entry).map_err(RealizeError::Store)?;
+    publish_realized_to_bound_caches(roots, &entry);
+    Reproducibility::clear_reproducibility_report(roots, &action_key)
+        .map_err(RealizeError::Store)?;
     Ok(IndependentRootCertification {
         entry,
         action_key,
@@ -2066,10 +2081,11 @@ fn write_project_lock_atomically(path: &Path, contents: &str) -> std::io::Result
     let temporary = temporary.ok_or_else(|| {
         std::io::Error::other("could not allocate a temporary project lock path after 32 attempts")
     })?;
-    fs::rename(&temporary, path).map_err(|error| {
+    if let Err(error) = fs::rename(&temporary, path) {
         let _ = fs::remove_file(&temporary);
-        error
-    })
+        return Err(error);
+    }
+    sync_store_directory(parent)
 }
 
 /// Try every host-owned cache role before a bad local candidate is rebuilt.

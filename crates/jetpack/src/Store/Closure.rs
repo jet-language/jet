@@ -1094,10 +1094,8 @@ fn recover_closure_journal_graph_unlocked(roots: &Roots) -> std::io::Result<(usi
                 ),
             )
         })?;
-        recovered += usize::from(materialize_receipt(
-            roots,
-            &store_entry_from_meta(&record.id, &meta),
-        )?);
+        recovered +=
+            usize::from(materialize_receipt(roots, &store_entry_from_meta(&record.id, &meta))?.1);
         recovered += usize::from(materialize_package_record(roots, record)?);
     }
     for id in &graph.deleted_records {
@@ -1111,12 +1109,15 @@ fn recover_closure_journal_graph_unlocked(roots: &Roots) -> std::io::Result<(usi
 /// in-memory result, `meta.json`, closure record, and project lock all name the
 /// same object.
 pub(super) fn prepare_entry_receipt(roots: &Roots, entry: &mut StoreEntry) -> std::io::Result<()> {
-    let digest = materialize_receipt(roots, entry)?;
+    let (digest, _) = materialize_receipt(roots, entry)?;
     entry.receipt = digest;
     Ok(())
 }
 
-fn materialize_receipt(roots: &Roots, entry: &StoreEntry) -> std::io::Result<String> {
+/// Returns the receipt digest and whether this call actually wrote it. The
+/// recovery counter needs the second half: an already-present receipt is not a
+/// recovery, and the digest alone cannot tell the two apart.
+fn materialize_receipt(roots: &Roots, entry: &StoreEntry) -> std::io::Result<(String, bool)> {
     let bytes = render_receipt(entry).into_bytes();
     let digest = format!("sha256-{}", SHA256::sha256_hex(&bytes));
     if !entry.receipt.is_empty() && entry.receipt != digest {
@@ -1150,7 +1151,7 @@ fn materialize_receipt(roots: &Roots, entry: &StoreEntry) -> std::io::Result<Str
                     ),
                 ));
             }
-            return Ok(digest);
+            return Ok((digest, false));
         }
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
         Err(error) => return Err(error),
@@ -1172,7 +1173,7 @@ fn materialize_receipt(roots: &Roots, entry: &StoreEntry) -> std::io::Result<Str
     match fs::rename(&partial, &path) {
         Ok(()) => {
             sync_dir(&receipts)?;
-            Ok(digest)
+            Ok((digest, true))
         }
         Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
             let _ = fs::remove_file(&partial);
@@ -1183,7 +1184,7 @@ fn materialize_receipt(roots: &Roots, entry: &StoreEntry) -> std::io::Result<Str
                     format!("Hangar receipt `{digest}` changed during publication"),
                 ));
             }
-            Ok(digest)
+            Ok((digest, false))
         }
         Err(error) => {
             let _ = fs::remove_file(&partial);
@@ -1289,6 +1290,10 @@ fn descriptor_for_entry(
     entry: &StoreEntry,
 ) -> std::io::Result<(Vec<ClosureObject>, ClosureRecord)> {
     let mut normalized = entry.clone();
+    // The package projection is a cache of the canonical receipt. Rebuild it
+    // from the current facts at migration/registration boundaries; stale
+    // projections must not prevent safe repair of the live output.
+    normalized.receipt.clear();
     prepare_entry_receipt(roots, &mut normalized)?;
     let entry = &normalized;
     let primary = entry.envelope.output_hash.clone();
@@ -1418,6 +1423,8 @@ fn normalize_legacy_entry(mut entry: StoreEntry) -> std::io::Result<StoreEntry> 
     )?)
     .map_err(std::io::Error::other)?;
     producer.bind_cache_provenance(&entry.reference, &entry.envelope.output_hash, identity);
+    super::super::Provider::refresh_provider_facts(&mut producer, &entry.reference)
+        .map_err(|error| std::io::Error::other(format!("{error:?}")))?;
     entry.producer_record = producer.encode();
     Ok(entry)
 }
@@ -1812,12 +1819,20 @@ fn validate_receipt_projection(
         ));
     }
     let path = roots.hangar_dir().join(RECEIPTS_DIR).join(&meta.receipt);
-    let bytes = fs::read(&path).map_err(|error| {
-        format!(
-            "closure record `{id}` cannot read Hangar receipt `{}`: {error}",
-            path.display()
-        )
-    })?;
+    let bytes = match fs::read(&path) {
+        Ok(bytes) => bytes,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound && allow_legacy => {
+            // Locked recovery materializes a missing immutable object from the
+            // authoritative closure record immediately after graph loading.
+            return Ok(());
+        }
+        Err(error) => {
+            return Err(format!(
+                "closure record `{id}` cannot read Hangar receipt `{}`: {error}",
+                path.display()
+            ));
+        }
+    };
     if bytes != expected_bytes {
         return Err(format!("closure record `{id}` Hangar receipt is corrupt"));
     }

@@ -1,0 +1,13 @@
+// A runnable shell OCI image uses the existing image record. Package outputs
+// come from the environment's verified Hangar entries; secrets stay runtime
+// mounts or references and never become image-layer bytes.
+module env.dev {
+    packages: ["bash@nixpkgs"]
+}
+
+module image.shell {
+    from: env.dev
+    entrypoint: "/bin/sh"
+    user: 10001
+    expose: [8080]
+}

@@ -1377,13 +1377,13 @@ fn program_info_uses_qualified_collision_free_type_function_and_method_identitie
 
 fn run_program_info_uses_qualified_collision_free_type_function_and_method_identities() {
     let root = project("program-identities");
-    write(&root.join("left.jet"), "use core.net as net\npub enum Choice { A }\nfn helper() { net.tcp_connect(\"127.0.0.1:1\") ?? panic(\"net\") }\npub fn same() { helper(); panic(\"left\") }\npub fn answer() Int { return 7 }\n");
+    write(&root.join("left.jet"), "use core.net as net\npub enum Choice { A }\nfn helper() { net.tcp_connect(\"127.0.0.1:1\") ?? panic(\"net\") }\npub fn same() { helper(); panic(\"left\") }\npub fn answer() Int -> { return 7 }\n");
     write(&root.join("right.jet"), "pub struct Choice { value: Int }\nimpl Choice { pub fn inspect(self) {} }\nfn helper() {}\npub fn same() { helper() }\n");
     let entry = root.join("main.jet");
     write(&entry, r#"
 use "./left" as left
 use "./right" as right
-fn build(b: BuildContext) BuildPlan ! {
+fn build(b: BuildContext) BuildPlan ! -> {
     answer :: left.answer()
     if answer == 7 { b.error(b.program.functions()[0].span, "CALL", "qualified", "evaluator", "ok") }
     loop ty in b.program.types() {

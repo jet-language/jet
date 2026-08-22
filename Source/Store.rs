@@ -114,6 +114,20 @@ pub fn link_into_project(store_entry: &Path, link_root: &Path) -> Result<(), Dia
     link_or_copy_tree(store_entry, link_root)
 }
 
+/// Copy an immutable Hangar object into a project without creating hardlinks
+/// outside the Hangar CAS. Hangar verification treats external hardlinks as a
+/// mutation risk; registry dependencies therefore use this boundary while
+/// legacy path/git stores retain `link_into_project`'s inode sharing.
+pub fn copy_into_project(store_entry: &Path, project_root: &Path) -> Result<(), Diagnostic> {
+    if project_root.is_dir() {
+        return Ok(());
+    }
+    fs::create_dir_all(project_root)
+        .map_err(|e| io_error("creating dep copy dir", project_root, e))?;
+    copy_jet_tree(store_entry, project_root)
+        .map_err(|e| io_error("copying dep tree", project_root, e))
+}
+
 /// Verify the content hash of a store entry matches expected. Returns E1204 on mismatch.
 pub fn verify_entry(
     pkg_name: &str,

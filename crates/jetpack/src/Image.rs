@@ -1,8 +1,9 @@
 //! D-JPK-IMAGE1 (=A, ratified 2026-07-01, c9jetpackgates): the native `.Oci`
 //! image-layout builder. Builds one deterministic native layer, optionally
 //! appended to a validated local OCI base, directly from an already-realized
-//! package binary plus optional `expose`/`env_vars`/`files` metadata
-//! (`ImagePlan`, `ModuleEval::Types`) — no Docker or second image model.
+//! package or environment shell output plus optional
+//! `expose`/`env_vars`/`files` metadata (`ImagePlan`, `ModuleEval::Types`) —
+//! no Docker or second image model.
 //!
 //! **Deterministic by construction** (this is the hard, budgeted part): every
 //! tar entry uses a fixed mtime (Unix epoch 0), uid/gid 0, and no uname/gname;
@@ -67,8 +68,8 @@ pub struct BuildSpec {
     pub files: Vec<LayerFile>,
     /// The single platform represented by this OCI layout.
     pub platform: String,
-    /// The container's `Entrypoint` (D-JPK-IMAGE1: the package binary's path
-    /// inside the image, e.g. `["/usr/local/bin/myapp"]`).
+    /// The container's `Entrypoint` (D-JPK-IMAGE1: the selected executable's
+    /// path inside the image, e.g. `["/usr/local/bin/myapp"]` or `/bin/sh`).
     pub entrypoint: Vec<String>,
     /// `env_vars:` — rendered as `KEY=value` strings in the config's `Env`.
     pub env: Vec<(String, String)>,
@@ -128,6 +129,175 @@ pub struct ProjectionReport {
     pub changed: Vec<String>,
     pub omitted: Vec<String>,
     pub rejected: Vec<String>,
+}
+
+/// Secret-free realization facts written beside the OCI layout. The image
+/// record remains the only image model; Hangar, `.jet/lock`, and the remote
+/// binding policy remain the owners of content, cache, provenance, and
+/// transport facts.
+#[derive(Debug, Clone)]
+pub struct ProjectionPlan {
+    pub source: String,
+    pub platform: String,
+    pub entrypoint: Vec<String>,
+    pub user: u32,
+    pub expose: Vec<i64>,
+    pub healthcheck: bool,
+    pub env_keys: Vec<String>,
+    pub layer_paths: Vec<String>,
+    pub services: Vec<String>,
+    pub base: bool,
+    pub lock: String,
+}
+
+/// Write the classification ledger and the two read-only image inspection
+/// views. Each file is published through the same create-new, sync, rename
+/// path, so an interrupted image build can recover stale temporary files on
+/// the next run without exposing partial JSON.
+pub fn write_projection_artifacts(
+    layout: &Path,
+    manifest_digest: &str,
+    plan: &ProjectionPlan,
+    report: &ProjectionReport,
+) -> io::Result<()> {
+    write_projection_report(layout, manifest_digest, report)?;
+    write_atomic_json(
+        layout,
+        "plan.json",
+        &render_projection_plan(manifest_digest, plan),
+    )?;
+    write_atomic_json(
+        layout,
+        "dossier.json",
+        &render_projection_dossier(manifest_digest, plan, report),
+    )
+}
+
+fn render_projection_plan(manifest_digest: &str, plan: &ProjectionPlan) -> String {
+    let mut env_keys = plan.env_keys.clone();
+    env_keys.sort();
+    env_keys.dedup();
+    let mut layers = plan.layer_paths.clone();
+    layers.sort();
+    layers.dedup();
+    let mut services = plan.services.clone();
+    services.sort();
+    services.dedup();
+    let entrypoint = json_strings(&plan.entrypoint);
+    let env_keys = json_strings(&env_keys);
+    let layers = json_strings(&layers);
+    let services = json_strings(&services);
+    let expose = plan
+        .expose
+        .iter()
+        .map(ToString::to_string)
+        .collect::<Vec<_>>()
+        .join(",");
+    format!(
+        "{{\"schema\":\"jet.image.plan\",\"version\":1,\"manifest\":{},\"source\":{},\"platform\":{},\"user\":{},\"entrypoint\":{},\"expose\":[{}],\"healthcheck\":{},\"env_keys\":{},\"layers\":{},\"services\":{},\"base\":{},\"lock\":{},\"ownership\":{}}}",
+        JSON::quote(manifest_digest),
+        JSON::quote(&plan.source),
+        JSON::quote(&plan.platform),
+        plan.user,
+        entrypoint,
+        expose,
+        plan.healthcheck,
+        env_keys,
+        layers,
+        services,
+        JSON::quote(if plan.base { "local" } else { "none" }),
+        JSON::quote(&plan.lock),
+        render_ownership(plan),
+    )
+}
+
+fn render_projection_dossier(
+    manifest_digest: &str,
+    plan: &ProjectionPlan,
+    report: &ProjectionReport,
+) -> String {
+    format!(
+        "{{\"schema\":\"jet.image.dossier\",\"version\":1,\"manifest\":{},\"secret_policy\":\"runtime-mount-or-reference-only\",\"classification\":{{\"included\":{},\"changed\":{},\"omitted\":{},\"rejected\":{}}},\"ownership\":{}}}",
+        JSON::quote(manifest_digest),
+        json_report_values(&report.included),
+        json_report_values(&report.changed),
+        json_report_values(&report.omitted),
+        json_report_values(&report.rejected),
+        render_ownership(plan),
+    )
+}
+
+fn render_ownership(plan: &ProjectionPlan) -> String {
+    let environment = plan.source.starts_with("env:");
+    let (content, cache, archive, signing, provenance, inputs, platforms) = if environment {
+        (
+            "Hangar",
+            "Hangar",
+            "Hangar",
+            "Hangar",
+            "Hangar+.jet/lock",
+            ".jet/lock",
+            ".jet/lock",
+        )
+    } else {
+        (
+            "project build",
+            "image builder",
+            "image builder",
+            "image builder",
+            "image plan",
+            "package/build",
+            "image target",
+        )
+    };
+    format!(
+        "{{\"content\":{},\"cache\":{},\"archive\":{},\"signing\":{},\"provenance\":{},\"inputs\":{},\"platforms\":{},\"publish\":\"jetpack image\",\"remote\":\"D-JPK-REMOTE1\"}}",
+        JSON::quote(content),
+        JSON::quote(cache),
+        JSON::quote(archive),
+        JSON::quote(signing),
+        JSON::quote(provenance),
+        JSON::quote(inputs),
+        JSON::quote(platforms),
+    )
+}
+
+fn json_report_values(values: &[String]) -> String {
+    let mut values = values.to_vec();
+    values.sort();
+    values.dedup();
+    json_strings(&values)
+}
+
+fn json_strings(values: &[String]) -> String {
+    let values = values
+        .iter()
+        .map(|value| JSON::quote(value))
+        .collect::<Vec<_>>()
+        .join(",");
+    format!("[{values}]")
+}
+
+fn write_atomic_json(layout: &Path, name: &str, json: &str) -> io::Result<()> {
+    let path = layout.join(name);
+    if let Ok(metadata) = fs::symlink_metadata(&path) {
+        if metadata.file_type().is_symlink() || !metadata.is_file() {
+            return Err(invalid("image inspection artifact is not a regular file"));
+        }
+    }
+    let temporary = path.with_extension(format!("tmp-{}", std::process::id()));
+    remove_stale_temporary(&temporary)?;
+    let mut file = OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&temporary)?;
+    file.write_all(json.as_bytes())?;
+    file.sync_all()?;
+    if let Err(error) = fs::rename(&temporary, &path) {
+        let _ = fs::remove_file(&temporary);
+        return Err(error);
+    }
+    Ok(())
 }
 
 pub fn write_projection_report(
@@ -1653,6 +1823,57 @@ mod tests {
         write_projection_report(&dir, "sha256:manifest", &ProjectionReport::default()).unwrap();
         assert!(dir.join("projection.json").is_file());
 
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn projection_artifacts_are_secret_free_and_recover_stale_files() {
+        let dir = std::env::temp_dir().join(format!(
+            "jet-oci-test-projection-artifacts-{}",
+            std::process::id()
+        ));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        let plan = ProjectionPlan {
+            source: "env:dev".to_string(),
+            platform: "linux.x64".to_string(),
+            entrypoint: vec!["/bin/sh".to_string()],
+            user: 10_001,
+            expose: vec![8080],
+            healthcheck: false,
+            env_keys: vec!["PORT".to_string()],
+            layer_paths: vec!["bin/sh".to_string()],
+            services: Vec::new(),
+            base: false,
+            lock: "absent".to_string(),
+        };
+        let report = ProjectionReport {
+            included: vec!["environment:shell".to_string()],
+            changed: vec!["env:PORT".to_string()],
+            omitted: vec!["environment.secrets".to_string()],
+            rejected: Vec::new(),
+        };
+        for name in ["plan.json", "dossier.json"] {
+            let path = dir.join(name);
+            let temporary = path.with_extension(format!("tmp-{}", std::process::id()));
+            fs::write(temporary, b"stale").unwrap();
+        }
+        write_projection_artifacts(&dir, "sha256:manifest", &plan, &report).unwrap();
+        let plan_json = fs::read_to_string(dir.join("plan.json")).unwrap();
+        let dossier_json = fs::read_to_string(dir.join("dossier.json")).unwrap();
+        assert!(JSON::parse(&plan_json).is_ok());
+        assert!(JSON::parse(&dossier_json).is_ok());
+        assert!(plan_json.contains("\"content\":\"Hangar\""));
+        assert!(!plan_json.contains("runtime-mount-or-reference-only"));
+        assert!(dossier_json.contains("runtime-mount-or-reference-only"));
+        assert!(!plan_json.contains("secret-value"));
+        assert!(!dossier_json.contains("secret-value"));
+        assert!(!dir
+            .join("plan.json.tmp-".to_string() + &std::process::id().to_string())
+            .exists());
+        assert!(!dir
+            .join("dossier.json.tmp-".to_string() + &std::process::id().to_string())
+            .exists());
         let _ = fs::remove_dir_all(&dir);
     }
 }

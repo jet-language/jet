@@ -554,14 +554,9 @@ pub fn cmd_flake(theme: &Theme, dir: &Path, fixtures: Option<&Path>) -> i32 {
                 }
                 match read_devshell_output_facts(dir, None, &output.attribute) {
                     Ok(named) => native_devshells.push((output.name.clone(), named)),
-                    Err(_) => {
-                        let label = format!(
-                            "{}:{}:{}",
-                            output.kind.as_str(), output.system, output.attribute
-                        );
-                        if !facts.unmapped.iter().any(|item| item == &label) {
-                            facts.unmapped.push(label);
-                        }
+                    Err(error) => {
+                        super::CLI::report_provider_error(theme, &error);
+                        return 1;
                     }
                 }
             }
@@ -1126,6 +1121,58 @@ mod tests {
 
         let code = cmd_flake(&Theme::resolve(true), &dir, Some(&fixtures));
         assert_eq!(code, 1);
+        assert!(!crate::SemanticLock::live_path(&dir).exists());
+
+        std::fs::remove_dir_all(&dir).ok();
+        std::fs::remove_dir_all(&fixtures).ok();
+    }
+
+    #[test]
+    fn cmd_flake_rejects_over_budget_named_devshell_without_lock() {
+        const CHILD: &str = "JETPACK_NAMED_DEVSHELL_BUDGET_CHILD";
+        if std::env::var_os(CHILD).is_none() {
+            let output = std::process::Command::new(std::env::current_exe().unwrap())
+                .args([
+                    "--exact",
+                    "Bridge::tests::cmd_flake_rejects_over_budget_named_devshell_without_lock",
+                    "--nocapture",
+                ])
+                .env(CHILD, "1")
+                .env("PATH", "")
+                .output()
+                .unwrap();
+            assert!(
+                output.status.success(),
+                "child failed\nstdout: {}\nstderr: {}",
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr)
+            );
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            assert!(stderr.contains("E1256"), "stderr: {stderr}");
+            assert!(stderr.contains("overlay list exceeds 64"), "stderr: {stderr}");
+            return;
+        }
+        let dir = scratch("named_devshell_budget");
+        let system = host_system();
+        let overlays = std::iter::repeat("overlay")
+            .take(65)
+            .collect::<Vec<_>>()
+            .join(" ");
+        std::fs::write(
+            dir.join("flake.nix"),
+            format!(
+                "let overlay = final: prev: {{}}; in {{ devShells.{system}.default = {{ packages = []; }}; devShells.{system}.debug = (import pkgs {{ overlays = [ {overlays} ]; }}).mkShell {{ packages = []; }}; }}"
+            ),
+        )
+        .unwrap();
+        let fixtures = scratch("named_devshell_budget_fx");
+        std::fs::write(
+            fixtures.join(FIXTURE_FILE),
+            r#"{"buildInputs": [], "shellHook": ""}"#,
+        )
+        .unwrap();
+
+        assert_eq!(cmd_flake(&Theme::resolve(true), &dir, Some(&fixtures)), 1);
         assert!(!crate::SemanticLock::live_path(&dir).exists());
 
         std::fs::remove_dir_all(&dir).ok();

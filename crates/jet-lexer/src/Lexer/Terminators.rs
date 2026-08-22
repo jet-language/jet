@@ -306,8 +306,8 @@ fn insert_terminators(src: &str, toks: &mut Vec<Token>, diags: &mut Vec<Diagnost
                         TokKind::UnifiedArrow => "->",
                         TokKind::Arrow => ":>",
                         TokKind::LambdaArrow => "=>",
-                        TokKind::Eq => "=[…]=>",
-                        TokKind::MinusMinus => "=[…]=>",
+                        TokKind::Eq => "-[…]>",
+                        TokKind::MinusMinus => "-[…]>",
                         _ => "{",
                     };
                     diags.push(Diagnostic::error(

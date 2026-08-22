@@ -47,7 +47,7 @@ rejects unknown classes, and requires non-live rows to name an active successor.
 | #201 | model-only | `crates/jetpack/src/Store.rs` | #393/#420 own canonical store and closure-safe GC. |
 | #202 | compatibility-only | `tests/jetpack_no_daemon.rs` | #399 owns permanent no-installed-Nix product gate. |
 | #203 | schema-only | `crates/jet-pkg-model/src/Envelope.rs` | #395 owns live cache protocol. |
-| #204 | model-only | `tests/jetpack_platform.rs` | #398/#426/#433 own real tier-1 execution. |
+| #204 | live | `tests/jetpack_platform.rs` | #433 drives a native package through provider, lease, Hangar, offline, missing-component, and clean-store paths; the focused lane runs on Linux, macOS, and Windows CI. Host/tool gaps fail closed; hostile child confinement remains #398. |
 | #205 | live | `tests/jetpack_discovery.rs` | Local index discovery only; no live registry claim. |
 | #206 | live | `tests/jetpack_build_debug.rs` | Local debuggability path only. |
 | #207 | model-only | `crates/jetpack/src/RuntimePolicy.rs` | #398 owns enforced OS sandbox. |

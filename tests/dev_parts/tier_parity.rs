@@ -18,6 +18,7 @@ fn language_callables_and_types_match_interpreter_jit_and_aot() {
     let _guard = lock_recovered(dev_diff_lock(), "dev_diff_lock");
     let stems = [
         "basics/bare_lambda_param",
+        "basics/default_refs",
         "basics/callbacks",
         "basics/pattern_matching",
         "basics/variadics_spread",

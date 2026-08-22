@@ -31,7 +31,9 @@ use super::Diagnostics::{
 };
 use super::Computed::evaluate_named_fields;
 use super::System::{evaluate_fleet, evaluate_image, evaluate_system, evaluate_vmtest};
-use super::Types::{AdapterPlan, AdapterRecipe, DevServicePlan, EvaluatedModule};
+use super::Types::{
+    AdapterPlan, AdapterRecipe, DevServicePlan, EnvironmentContribution, EvaluatedModule,
+};
 use super::Types::EnvironmentRead;
 
 /// Parse `src` and evaluate every enabled module it declares. `base_dir`
@@ -203,21 +205,9 @@ fn evaluate_module<'a>(
     let mut images = Vec::new();
     let mut fleets = Vec::new();
     let mut vmtests = Vec::new();
-    let mut dev_services = Vec::new();
-    let mut secrets = Vec::new();
-    let mut adapters = Vec::new();
-    let mut lifecycle = EnvironmentLifecycle::default();
-    let mut presets = Vec::new();
-    let mut languages = Vec::new();
-    let mut files = Vec::new();
+    let mut environment_contributions = Vec::new();
     let mut package_profiles = Vec::new();
     let integrations = evaluate_integration_imports(&m.imports, base_dir, funcs, globals)?;
-    let mut integration_secrets = Vec::new();
-    for integration in &integrations {
-        for secret in &integration.secrets {
-            push_unique_string(&mut integration_secrets, secret.clone());
-        }
-    }
     for c in &m.contributions {
         match (&c.namespace, &c.value) {
             (Namespace::Env, ContribValue::Expr(_)) => {
@@ -239,13 +229,19 @@ fn evaluate_module<'a>(
                     languages: captured_languages,
                     files: captured_files,
                 } = capture;
-                lifecycle_merge(&mut lifecycle, captured_lifecycle, &m.name)?;
-                presets.extend(captured_presets);
-                languages.extend(captured_languages);
-                files.extend(captured_files);
+                let environment_reads = environment_reads(&src[c.span.start..c.span.end])?;
+                environment_contributions.push(EnvironmentContribution {
+                    name: c.path.clone(),
+                    environment_reads,
+                    dev_services: Vec::new(),
+                    secrets: names,
+                    adapters: found_adapters,
+                    lifecycle: captured_lifecycle,
+                    presets: captured_presets,
+                    languages: captured_languages,
+                    files: captured_files,
+                });
                 entries.push(((c.namespace, c.path.clone()), entry));
-                secrets.extend(names);
-                adapters.extend(found_adapters);
             }
             (Namespace::Env, ContribValue::Env(lit)) => {
                 let source = format!("{}.{}", m.name, c.path);
@@ -266,14 +262,19 @@ fn evaluate_module<'a>(
                     languages: captured_languages,
                     files: captured_files,
                 } = capture;
-                lifecycle_merge(&mut lifecycle, captured_lifecycle, &m.name)?;
-                presets.extend(captured_presets);
-                languages.extend(captured_languages);
-                files.extend(captured_files);
+                let environment_reads = environment_reads(&src[c.span.start..c.span.end])?;
+                environment_contributions.push(EnvironmentContribution {
+                    name: c.path.clone(),
+                    environment_reads,
+                    dev_services: services,
+                    secrets: names,
+                    adapters: found_adapters,
+                    lifecycle: captured_lifecycle,
+                    presets: captured_presets,
+                    languages: captured_languages,
+                    files: captured_files,
+                });
                 entries.push(((c.namespace, c.path.clone()), entry));
-                dev_services.extend(services);
-                secrets.extend(names);
-                adapters.extend(found_adapters);
             }
             (Namespace::System, ContribValue::System(lit)) => {
                 systems.push(evaluate_system(&c.path, lit, src, base_dir, funcs, globals)?);
@@ -314,15 +315,6 @@ fn evaluate_module<'a>(
             _ => unreachable!("contribution namespace/value shape mismatch"),
         }
     }
-    for secret in integration_secrets {
-        push_unique_string(&mut secrets, secret);
-    }
-    let environment_names = entries
-        .iter()
-        .filter_map(|((namespace, name), _)| {
-            (*namespace == Namespace::Env).then_some(name.clone())
-        })
-        .collect();
     Ok(EvaluatedModule {
         name: m.name.clone(),
         entries,
@@ -330,15 +322,8 @@ fn evaluate_module<'a>(
         images,
         fleets,
         vmtests,
-        dev_services,
-        secrets,
-        adapters,
-        lifecycle,
-        presets,
-        languages,
-        files,
+        environment_contributions,
         integrations,
-        environment_names,
         package_profiles,
     })
 }
@@ -654,7 +639,7 @@ fn integration_key_text(key: &CtKey) -> String {
     }
 }
 
-fn lifecycle_merge(
+pub(super) fn lifecycle_merge(
     target: &mut EnvironmentLifecycle,
     incoming: EnvironmentLifecycle,
     module_name: &str,
@@ -1731,6 +1716,9 @@ pub fn merge_all(
 /// Render one merged `Pkg` as a `<package>@<source>` ref. A bare package (the
 /// sugar's empty source) resolves against the conventional `default` source.
 pub fn pkg_ref(pkg: &Merge::Pkg) -> String {
+    if pkg.source.is_empty() && pkg.name.contains(Syntax::REF_PROVIDER_AT) {
+        return pkg.name.clone();
+    }
     let source = if pkg.source.is_empty() {
         Syntax::DEFAULT_SOURCE
     } else {

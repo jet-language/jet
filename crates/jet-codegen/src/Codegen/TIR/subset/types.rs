@@ -611,6 +611,12 @@ pub(crate) fn is_covered_fallible_ty(ty: &Type, cx: &Cx) -> bool {
 /// default error type `Err` (`Type::Named("Err")`, which `cx.rust_type`
 /// lowers to the Prelude-owned `JetErr`).
 pub(crate) fn fallible_payload_covered(ty: &Type, cx: &Cx) -> bool {
+    // D-ERRSUFFIX1=B: the success side of a fallible signature may itself be
+    // optional (`T? E!`). Keep the composed carrier on the same TIR path as
+    // its AOT lowering; the inner payload follows the same coverage rules.
+    if let Type::Option(inner) = ty {
+        return fallible_payload_covered(inner, cx);
+    }
     // c109 Phase 30: a type-variable payload (`T` in a generic fn's `T?` return —
     // `largest<T: Comparable>() -> (T?)`). A type var renders via `cx.rust_type` to the
     // bare letter (`Option<T>`), and `value(best)`/`null` lower to `Some(user_best)`/`None`

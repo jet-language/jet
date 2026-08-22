@@ -180,6 +180,41 @@ module full {
     }
 
     #[test]
+    fn selected_environment_projection_does_not_merge_sibling_facts() {
+        let source = r#"
+module env.dev {
+    prompt: $DEV_ONLY
+    services: { dev_service: { enable: false } }
+    checks: [{ name: "dev-check", command: "true" }]
+    files: ["config/dev.txt": File{ content: "dev\n", mode: .Copy }]
+}
+module env.full {
+    prompt: $FULL_ONLY
+    services: { full_service: { enable: false } }
+    checks: [{ name: "full-check", command: "true" }]
+    files: ["config/full.txt": File{ content: "full\n", mode: .Copy }]
+}
+"#;
+        let plan = evaluate_env(source, &base_dir()).unwrap();
+        assert_eq!(
+            plan.dev_services.iter().map(|service| service.name.as_str()).collect::<Vec<_>>(),
+            vec!["dev_service"]
+        );
+        assert_eq!(
+            plan.lifecycle.checks.iter().map(|check| check.name.as_str()).collect::<Vec<_>>(),
+            vec!["dev-check"]
+        );
+        assert_eq!(
+            plan.files.iter().map(|file| file.destination.as_str()).collect::<Vec<_>>(),
+            vec!["config/dev.txt"]
+        );
+        assert_eq!(
+            plan.environment_reads.iter().map(|read| read.name.as_str()).collect::<Vec<_>>(),
+            vec!["$DEV_ONLY"]
+        );
+    }
+
+    #[test]
     fn environment_reads_are_retained_in_the_environment_plan() {
         let source = "module env.dev { prompt: $HOME }";
         let plan = evaluate_env(source, &base_dir()).unwrap();
@@ -223,12 +258,12 @@ module profile.dev {
 
     #[test]
     fn package_profile_provider_facts_preserve_selector_and_provenance() {
-        let source = "module profile.dev { packages: [ripgrep#1.2.3@default] }\n";
+        let source = "module profile.dev { packages: [\"ripgrep#version=1.2.3@default\"] }\n";
         let plan = evaluate_package_profile(&source, &base_dir(), "dev").unwrap();
         let facts = &plan.packages[0].provider_facts;
-        assert_eq!(facts.reference, "ripgrep#1.2.3@default");
+        assert_eq!(facts.reference, "ripgrep#version=1.2.3@default");
         assert_eq!(facts.target, "ripgrep");
-        assert_eq!(facts.selector.revision, "1.2.3");
+        assert_eq!(facts.selector.version, "1.2.3");
         assert_eq!(facts.profile, "dev");
         assert_eq!(facts.profile_provenance, "dev");
         assert!(facts.is_lossless());

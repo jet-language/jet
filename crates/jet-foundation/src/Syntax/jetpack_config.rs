@@ -328,10 +328,11 @@ pub const PLATFORM_OS_LINUX: &str = "linux";
 pub const PLATFORM_ARCH_X64: &str = "x64";
 pub const PLATFORM_ARCH_ARM64: &str = "arm64";
 
-/// D-JPK-IMAGE1: an `Image`'s fields — required `from: system.<name>`
-/// and optional `format:` (default `iso`). `target`/`packages`/`services`/
-/// `options` are inherited from the referenced `System`, never restated (the lone
-/// exception is an explicit cross-compile `target:`).
+/// D-JPK-IMAGE1: an `Image`'s fields — required `from: system.<name>`,
+/// `from: packages.<name>`, or `from: env.<name>`, with optional `format:`
+/// (default `iso`). `target`/`packages`/`services`/`options` are inherited from
+/// the referenced `System` for disk images; environment OCI images may select
+/// their own target and existing OCI controls below.
 pub const IMAGE_FIELD_FROM: &str = "from";
 pub const IMAGE_FIELD_FORMAT: &str = "format";
 
@@ -358,6 +359,8 @@ pub const IMAGE_KIND_OCI: &str = "Oci";
 /// project-relative paths), and an optional base image escape hatch
 /// (`base: oci("<ref>")`, unrealized — no registry-pull client yet, D-JPK-
 /// RINGSHIP1/D-JPK-BUILDTOOL1 territory, honestly gated rather than faked).
+/// D-ENV-IMAGE1 adds the existing environment-image controls `target`,
+/// `services`, `health`, `entrypoint`, and `user` to this same record.
 pub const IMAGE_FIELD_KIND: &str = "kind";
 pub const IMAGE_FIELD_EXPOSE: &str = "expose";
 pub const IMAGE_FIELD_ENV_VARS: &str = "env_vars";

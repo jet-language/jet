@@ -291,7 +291,8 @@ impl ProviderFacts {
             .rsplit_once('@')
             .map(|(target, provider)| (target, provider))
             .unwrap_or((reference_without_selector.as_str(), ""));
-        let provider = if provider.trim().is_empty() {
+        let explicit_provider = provider.trim();
+        let provider = if explicit_provider.is_empty() {
             inferred_provider
         } else {
             provider
@@ -332,6 +333,28 @@ impl ProviderFacts {
                 ProviderFactValue::Text(facts.selector.raw.clone()),
                 "ref",
             );
+        }
+        if !explicit_provider.is_empty()
+            && !inferred_provider.trim().is_empty()
+            && explicit_provider != inferred_provider
+        {
+            // Named sources such as `@default` are source authorities, not
+            // provider names. Keep that spelling without treating it as a
+            // conflict; two recognized external providers are contradictory.
+            facts.add_fact(
+                "provider.authority",
+                ProviderFactValue::Text(inferred_provider.to_string()),
+                "ref",
+            );
+            let provider_name = facts.provider.clone();
+            if is_external_provider(&provider_name) && is_external_provider(inferred_provider) {
+                facts.add_conflict(
+                    "provider",
+                    &provider_name,
+                    inferred_provider,
+                    "reference.provider",
+                );
+            }
         }
         if provider == "infer" {
             facts.add_loss(
@@ -528,6 +551,19 @@ impl ProviderFacts {
         for key in self.provenance.keys() {
             if !self.facts.contains_key(key) {
                 return Err(format!("provider provenance `{key}` has no fact"));
+            }
+        }
+        for (key, expected) in [
+            ("provider.name", self.provider.as_str()),
+            ("provider.target", self.target.as_str()),
+            ("provider.selector", self.selector.raw.as_str()),
+        ] {
+            if !expected.is_empty()
+                && !matches!(self.facts.get(key), Some(ProviderFactValue::Text(value)) if value == expected)
+            {
+                return Err(format!(
+                    "provider identity field `{key}` disagrees with its typed fact"
+                ));
             }
         }
         for (key, expected) in [
@@ -950,5 +986,22 @@ mod tests {
             error.contains("lossy") || error.contains("exact"),
             "{error}"
         );
+    }
+
+    #[test]
+    fn source_alias_is_retained_and_external_provider_mismatch_conflicts() {
+        let alias = ProviderFacts::for_reference("nix", "ripgrep@default");
+        assert_eq!(
+            alias.facts.get("provider.authority"),
+            Some(&super::ProviderFactValue::Text("default".to_string()))
+        );
+        alias.validate().expect("named source authority is valid");
+
+        let conflict = ProviderFacts::for_reference("npm", "left-pad#1.0.0@cargo");
+        assert!(conflict
+            .conflicts
+            .iter()
+            .any(|item| item.key == "provider"));
+        assert!(conflict.validate().is_err());
     }
 }

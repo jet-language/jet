@@ -2525,6 +2525,7 @@ fn derivation_from_fields(fields: &BTreeMap<String, Thunk>) -> Result<Derivation
         None => Vec::new(),
     };
 
+    let outputs_declared = fields.contains_key("outputs");
     let output_names = match field_value(fields, "outputs")? {
         Some(Value::List(values)) => values
             .into_iter()
@@ -2626,10 +2627,12 @@ fn derivation_from_fields(fields: &BTreeMap<String, Thunk>) -> Result<Derivation
             )));
         }
     }
-    env.insert("outputs".into(), output_names.join(" "));
     env.insert("builder".into(), builder.clone());
     env.insert("name".into(), name.clone());
     env.insert("system".into(), system.clone());
+    if outputs_declared {
+        env.insert("outputs".into(), output_names.join(" "));
+    }
     if !method_algo.is_empty() {
         env.insert("outputHash".into(), hash_hex.clone());
         env.insert(

@@ -3,9 +3,8 @@
 # formatter, then show what changed.
 #
 # This exists for ratified surface migrations. D-LIT-DOT1=B dropped the dot from
-# literal constructors and D-ARROW-UNIFY1=B collapsed every arrow to `:>`; that
-# is 488 + 516 dotted constructors and 2,816 arrows across roughly a thousand
-# files. No human and no agent should retype that. The formatter is the migration
+# literal constructors and D-ARROW-RESPELL1=A made `->` the one callable/control
+# arrow. No human and no agent should retype that. The formatter is the migration
 # tool: once it emits only the ratified spelling, running it over the corpus IS
 # the migration, and any file it cannot round-trip is a formatter gap worth
 # finding rather than a file worth hand-editing.
@@ -55,14 +54,13 @@ echo
 echo "== changed files"
 git diff --stat -- '*.jet' | tail -1
 echo
-echo "== remaining old spellings (should be zero)"
+echo "== remaining retired spellings (teaching fixtures may remain)"
 node - <<'NODE'
 const { execFileSync } = require("node:child_process");
 const probes = [
   ["dotted constructor", String.raw`\w\.\{`],
-  ["callable arrow", String.raw`=>`],
-  ["control arrow", String.raw`->`],
-  ["effect row", String.raw`=\[`],
+  ["retired callable/control arrow", String.raw`(:>|=>)`],
+  ["retired effect row", String.raw`(:\[|=\[|--\[)`],
 ];
 for (const [label, pattern] of probes) {
   let out = "";

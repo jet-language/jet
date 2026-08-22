@@ -137,6 +137,13 @@ fn walk(root: &Path, out: &mut Vec<PathBuf>) {
     };
     for entry in entries.flatten() {
         let path = entry.path();
+        let Ok(file_type) = entry.file_type() else {
+            continue;
+        };
+        // Ratchets count repository content, not external trees linked into it.
+        if file_type.is_symlink() {
+            continue;
+        }
         if path.is_dir() {
             let relative = path
                 .strip_prefix(env!("CARGO_MANIFEST_DIR"))

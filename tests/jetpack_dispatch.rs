@@ -142,7 +142,7 @@ fn jet_env_delegates_to_jetpack_enter() {
         .current_dir(&proj)
         .env("JETPACK_ROOT", &root)
         .env("HOME", base.join("home"))
-        .env("PATH", "/usr/bin:/bin") // no nix on PATH
+        .env("PATH", "") // no installed tools, including nix, on PATH
         .output()
         .unwrap();
     assert!(
@@ -213,6 +213,18 @@ fn jet_env_info_discloses_typed_summary_without_realizing_or_starting_services()
     }
     files: ["config/generated.txt": File{ content: "generated\n", mode: .Copy }]
 }
+module env.full {
+    prompt: $FULL_ONLY
+    packages: [nixpkgs.fd]
+    services: {
+        sibling: { enable: false, ports: [9090] }
+    }
+    checks: [{
+        name: "full-only-check",
+        command: "true",
+    }]
+    files: ["config/full.txt": File{ content: "full\n", mode: .Copy }]
+}
 "#,
     )
     .unwrap();
@@ -255,10 +267,36 @@ fn jet_env_info_discloses_typed_summary_without_realizing_or_starting_services()
             stdout
         );
     }
+    assert!(!stdout.contains("\"name\":\"sibling\""));
+    assert!(!stdout.contains("full-only-check"));
+    assert!(!stdout.contains("FULL_ONLY"));
+    assert!(!stdout.contains("config/full.txt"));
     assert!(
         !project.join(".jet/services").exists(),
         "env info must not start a service supervisor"
     );
+
+    let full = jet()
+        .args(["env", "info", "--json", "--offline", "--no-color", "--env", "full"])
+        .current_dir(&project.path)
+        .env("JETPACK_ROOT", &root.path)
+        .env("HOME", "/test/home")
+        .output()
+        .unwrap();
+    assert!(
+        full.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&full.stderr)
+    );
+    let full_stdout = String::from_utf8_lossy(&full.stdout);
+    assert!(full_stdout.contains("\"active_environment\":\"full\""));
+    assert!(full_stdout.contains("\"packages\":[\"fd@nixpkgs\"]"));
+    assert!(full_stdout.contains("\"name\":\"sibling\",\"enabled\":false"));
+    assert!(full_stdout.contains("\"checks\":[\"full-only-check\"]"));
+    assert!(full_stdout.contains("\"name\":\"FULL_ONLY\""));
+    assert!(full_stdout.contains("\"files\":[\"config/full.txt\"]"));
+    assert!(!full_stdout.contains("\"name\":\"fixture\""));
+    assert!(!full_stdout.contains("config/generated.txt"));
 
     let missing = jet()
         .args(["env", "info", "--offline", "--no-color", "--env", "missing"])

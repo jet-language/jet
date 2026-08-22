@@ -356,6 +356,13 @@ fn eval_expose(
                 span,
             ));
         };
+        if !(1..=65_535).contains(&n) {
+            return Err(image_field_shape(
+                Syntax::IMAGE_FIELD_EXPOSE,
+                "a list of TCP ports from 1 through 65535",
+                span,
+            ));
+        }
         ports.push(n);
     }
     ports.sort_unstable();

@@ -1,0 +1,18 @@
+// environment_image.jet — the runnable-shell projection surface (D-ENV-IMAGE1).
+// The image record is the same record used by package-backed OCI images. The
+// environment contributes verified Hangar package outputs; image fields select
+// the target platform, non-root user, entrypoint, port, health check, and
+// project-relative layer input.
+module env.dev {
+    packages: ["bash@nixpkgs"]
+}
+
+module image.shell {
+    from: env.dev
+    target: linux.arm64
+    user: 10001
+    entrypoint: "/bin/sh"
+    expose: [8080]
+    health: "test -x /bin/sh"
+    files: ["config/app.toml"]
+}

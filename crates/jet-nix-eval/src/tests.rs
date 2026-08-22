@@ -790,6 +790,11 @@ fn pinned_inventory_has_no_implicit_skip_reason() {
     for (entry, manifest_entry) in inventory.iter().zip(entries) {
         let fields = manifest_entry.as_object().expect("inventory entry object");
         assert_eq!(fields.get("surface").unwrap().as_str().unwrap(), entry.surface);
+        let status = match entry.status {
+            InventoryStatus::Covered => "covered",
+            InventoryStatus::Skipped => "skipped",
+        };
+        assert_eq!(fields.get("status").unwrap().as_str().unwrap(), status);
         assert_eq!(fields.get("class").unwrap().as_str().unwrap(), entry.class);
         assert!(!entry.reason.trim().is_empty());
         assert_eq!(

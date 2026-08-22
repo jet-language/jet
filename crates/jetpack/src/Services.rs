@@ -342,6 +342,10 @@ fn catalog(name: &str) -> Option<&'static Catalog> {
         .find(|entry| entry.names.iter().any(|candidate| *candidate == name))
 }
 
+fn canonical_service_name(name: &str) -> &str {
+    catalog(name).map(Catalog::canonical_name).unwrap_or(name)
+}
+
 /// The catalog's package ref for `name`, if any — `evaluate_env`'s caller
 /// folds this into the project's realized packages so a bare `redis: {
 /// enable: true }` (no explicit `run`) actually has `redis-server` on PATH.
@@ -379,7 +383,13 @@ pub fn image_run_command(plan: &DevServicePlan) -> Result<Vec<String>, String> {
     if !(1..=65535).contains(&port) {
         return Err(format!("service {} has an invalid port", plan.name));
     }
-    Ok((entry.run)(port, Path::new(&format!("/var/lib/jet/services/{}", plan.name))))
+    Ok((entry.run)(
+        port,
+        Path::new(&format!(
+            "/var/lib/jet/services/{}",
+            canonical_service_name(&plan.name)
+        )),
+    ))
 }
 
 /// Built-in service presets exposed by the typed contribution/catalog path.
@@ -409,12 +419,12 @@ struct Resolved {
     project_dir: PathBuf,
 }
 
-/// The `.jet/services/<name>/` directory for `name` under `project_dir`.
+/// The `.jet/services/<canonical-name>/` directory for `name` under `project_dir`.
 fn service_dir(project_dir: &Path, name: &str) -> PathBuf {
     project_dir
         .join(Syntax::CONFIG_DEFAULT_DIR)
         .join(Syntax::SERVICES_STATE_DIR)
-        .join(name)
+        .join(canonical_service_name(name))
 }
 
 fn pid_path(dir: &Path) -> PathBuf {
@@ -4943,10 +4953,17 @@ mod tests {
                 enable: true,
                 ..Default::default()
             };
-            assert_eq!(
-                resolve(&dir, &alias_plan).unwrap().run,
-                resolve(&dir, &canonical_plan).unwrap().run
+            let image_run = image_run_command(&alias_plan).unwrap();
+            let canonical_state = format!("/var/lib/jet/services/{canonical}");
+            assert!(
+                image_run.iter().any(|arg| arg.contains(&canonical_state)),
+                "alias image command must use canonical state path: {image_run:?}"
             );
+            let alias_resolved = resolve(&dir, &alias_plan).unwrap();
+            let canonical_resolved = resolve(&dir, &canonical_plan).unwrap();
+            assert_eq!(alias_resolved.dir, canonical_resolved.dir);
+            assert_eq!(alias_resolved.data_dir, canonical_resolved.data_dir);
+            assert_eq!(alias_resolved.run, canonical_resolved.run);
         }
         fs::remove_dir_all(&dir).ok();
     }

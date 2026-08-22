@@ -6,9 +6,10 @@
 //! canonical build engine.
 
 pub use jet_comptime::Comptime::Build::{
-    remote_execution_identity, ActionKey, BuildCapability, BuildResourcePool, ContentDigest,
-    RemoteActionRequest, RemoteAttemptError, RemoteBuildBinding, RemoteBuildRequest, RemoteBuilder,
-    RemoteBuilderCapabilities, RemoteCacheDenied, RemoteCacheError, RemoteCachePolicy,
-    RemoteCacheTransport, RemoteDeniedReason, RemoteDispatch, RemoteExecutionRequest,
-    RemoteExecutionResult, RemoteSandboxProof, RemoteScheduleError, RemoteScheduler,
+    remote_execution_identity, ActionInputSnapshot, ActionKey, BuildCapability, BuildPath,
+    BuildResourcePool, ContentDigest, RemoteActionRequest, RemoteAttemptError, RemoteBuildBinding,
+    RemoteBuildRequest, RemoteBuilder, RemoteBuilderCapabilities, RemoteCacheDenied,
+    RemoteCacheError, RemoteCachePolicy, RemoteCacheTransport, RemoteDeniedReason, RemoteDispatch,
+    RemoteExecutionRequest, RemoteExecutionResult, RemoteSandboxProof, RemoteScheduleError,
+    RemoteScheduler,
 };

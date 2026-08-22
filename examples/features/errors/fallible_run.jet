@@ -1,6 +1,7 @@
-fn load_port() Int ! -> Ok(8080)
+// D-ERRSUFFIX1=B: optional success plus a typed error uses one suffix zone.
+fn load_port() Int? IOError! -> Ok(Val(8080))
 
 fn run() ! {
-    port :: load_port()?
+    port :: load_port()? ?? 0
     print("port {port}")
 }

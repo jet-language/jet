@@ -109,10 +109,20 @@ D-COMPILERSEAMS1/2 split the compiler into workspace seam crates. The root
 Package-to-JetOS projection stays on this split. jet-pkg-model reads the
 canonical Package outputs and computes the semantic graph identity.
 jet-env-model::ModuleEval::project_package_outputs lowers System and Fleet
-payloads into SystemPlan and FleetPlan. jetpack loads that plan for
-jet os plan and the existing generation writer carries the same identity into
-plan.json and the source proof. Hangar realization and atomic generation
+payloads into SystemPlan and FleetPlan, including service open-record fields.
+jetpack loads that plan for jet os plan and the existing generation writer
+carries the same identity and service facts into plan.json and the source proof.
+Hangar realization and atomic generation
 publication remain in jetpack; the projection adds no store or rollout path.
+
+Environment OCI projection follows the same split. `jet-env-model` owns the
+pure `ImagePlan`; `jetpack::Image` is the one deterministic OCI realization
+path. A successful environment projection writes `projection.json`,
+`plan.json`, and `dossier.json` as secret-free, atomically recovered read-only
+views. Hangar owns content, cache, archive, signing, and publish; `.jet/lock` owns locked
+inputs and platforms; D-JPK-REMOTE1 owns remote bindings and grants. The
+image path does not create a second container record, lock, or Dockerfile
+mechanism.
 
 ### Read-only compiler API
 

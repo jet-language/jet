@@ -142,7 +142,8 @@ outputs: .{
 
 The shipped JetOS projection reads the System and Fleet values from
 package.jet. A System needs target and may include packages, services, and
-options. A Fleet maps host names to System names. The projection keeps the
+options; service open-record fields remain in the plan as deterministic
+`key`/`value` facts. A Fleet maps host names to System names. The projection keeps the
 Package semantic digest as graph_identity in the shared EnvPlan and in
 JetOS plan.json. jet os plan previews this value; JetOS build and proof use
 the existing Hangar and generation receipt path.

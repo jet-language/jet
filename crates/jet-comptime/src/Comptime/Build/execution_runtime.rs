@@ -11,6 +11,7 @@ use super::execution_helpers::action_pools;
 use super::handles::{ActionHandle, ActionId, ProbeId, ToolchainHandle};
 use super::plan_graph::{BuildExecutionReport, BuildPlan};
 use super::provenance_toolchains::{ProbeKind, ReproducibilityClass};
+use super::remote_scheduler::RemoteBuilderLease;
 use super::targets::BuildPath;
 use super::validation::resolve_under;
 use super::{RemoteBuildRequest, RemoteBuilder, RemoteScheduler};
@@ -207,6 +208,14 @@ pub fn execute_build_plan_with_front_end_and_remote_and_compiler(
         .map_err(BuildExecutionError::InvalidGraph)?;
     let cas = LocalCas::new(project_root.join(".jet/build-cache/cas"));
     let records = project_root.join(".jet/build-cache/actions");
+    let remote_scheduler = remote_binding
+        .filter(|binding| binding.is_enabled())
+        .map(|binding| RemoteScheduler::new([RemoteBuilder::from_binding(binding.clone())]))
+        .transpose()
+        .map_err(|error| BuildExecutionError::IO {
+            action: "remote scheduler".to_string(),
+            detail: error.to_string(),
+        })?;
     ensure_real_directory(&records).map_err(|e| BuildExecutionError::IO {
         action: "cache".to_string(),
         detail: e.to_string(),
@@ -229,6 +238,7 @@ pub fn execute_build_plan_with_front_end_and_remote_and_compiler(
                 let cas = &cas;
                 let records = &records;
                 let probe_facts = &probes;
+                let remote_scheduler = remote_scheduler.as_ref();
                 let jobs = batch
                     .iter()
                     .map(|action_id| {
@@ -251,6 +261,7 @@ pub fn execute_build_plan_with_front_end_and_remote_and_compiler(
                                     probe_facts,
                                     front_end,
                                     remote_binding,
+                                    remote_scheduler,
                                     compiler,
                                 )
                             }),
@@ -324,6 +335,7 @@ fn execute_one_action(
     probe_facts: &[BuildProbeFact],
     front_end: FrontEndCompletion,
     remote_binding: Option<&RemoteBuildBinding>,
+    remote_scheduler: Option<&RemoteScheduler>,
     compiler: Option<&CompilerActionRunner<'_>>,
 ) -> Result<ActionOutcome, BuildExecutionError> {
     let cache_lookup_allowed = front_end.authorize_cache_lookup().is_ok();
@@ -381,7 +393,7 @@ fn execute_one_action(
     let remote = if action.is_compiler_owned() {
         None
     } else {
-        remote_for_action(plan, action, &key, grants, remote_binding)?
+        remote_for_action(plan, action, &key, grants, remote_binding, remote_scheduler)?
     };
     let previous_key = read_last_rebuild_record(project_root, action.id, &action.name)
         .map_err(|error| io_action(action, error))?
@@ -415,7 +427,7 @@ fn execute_one_action(
         }
     }
     if action.cache == ActionCache::Cached && cache_lookup_allowed {
-        if let Some((transport, policy, _execute)) = &remote {
+        if let Some((transport, policy, _execute, _lease)) = &remote {
             match transport.download_action_record(&key, policy) {
                 Ok(record) => {
                     if !matches!(
@@ -527,7 +539,7 @@ fn execute_one_action(
         return Ok(outcome);
     }
 
-    if let Some((transport, policy, true)) = &remote {
+    if let Some((transport, policy, true, _lease)) = &remote {
         let timeout_ms = remote_binding
             .map(|binding| binding.timeout_ms)
             .unwrap_or(30_000);
@@ -667,7 +679,7 @@ fn execute_one_action(
                 ActionCacheProvenance::miss(CacheMissReason::NoLocalActionRecord),
             )
             .map_err(|e| io_action(action, e))?;
-        if let Some((transport, policy, _)) = &remote {
+        if let Some((transport, policy, _, _lease)) = &remote {
             if policy
                 .check(super::cache_cas::RemoteActionRequest::CacheWrite)
                 .is_ok()
@@ -834,7 +846,16 @@ fn remote_for_action(
     key: &ActionKey,
     grants: &BTreeSet<BuildCapability>,
     binding: Option<&RemoteBuildBinding>,
-) -> Result<Option<(RemoteCacheTransport, RemoteCachePolicy, bool)>, BuildExecutionError> {
+    scheduler: Option<&RemoteScheduler>,
+) -> Result<
+    Option<(
+        RemoteCacheTransport,
+        RemoteCachePolicy,
+        bool,
+        RemoteBuilderLease,
+    )>,
+    BuildExecutionError,
+> {
     let Some(binding) = binding.filter(|binding| binding.is_enabled()) else {
         return Ok(None);
     };
@@ -873,20 +894,29 @@ fn remote_for_action(
     // still crosses the canonical capability scheduler. Multi-builder callers
     // use the same model with more candidates; this adapter keeps the driver
     // entry point's explicit single-name contract intact.
-    let request = RemoteBuildRequest::new(key.clone())
+    let request = action_pools(action)
+        .into_iter()
+        .fold(RemoteBuildRequest::new(key.clone()), |request, pool| {
+            request.with_pool(pool)
+        })
         .with_platform(binding.platform.clone())
         .with_trust_domain(binding.trust_domain.clone())
         .with_cache_read(binding.cache_read)
         .with_cache_write(binding.cache_write)
         .with_execute(binding.execute)
         .with_local_fallback(binding.fallback_local);
-    let scheduler = RemoteScheduler::new([RemoteBuilder::from_binding(binding.clone())])
-        .map_err(|error| remote_action(action, error.to_string()))?;
-    scheduler
+    let scheduler = scheduler.ok_or_else(|| {
+        remote_action(
+            action,
+            "remote builder binding has no canonical scheduler".to_string(),
+        )
+    })?;
+    let selected = scheduler
         .select(&request)
         .map_err(|error| remote_action(action, error.to_string()))?;
     let policy = remote_attempt_policy(plan, action, key, binding, &transport)?;
-    Ok(Some((transport, policy, binding.execute)))
+    let lease = scheduler.acquire(selected);
+    Ok(Some((transport, policy, binding.execute, lease)))
 }
 
 fn remote_attempt_policy(

@@ -8,7 +8,7 @@ use super::{entry_action_key, ClosureGraph, Lifecycle, ProducerRecord, Roots, St
 use crate::{BuildDebug, ProviderFactValue, ProviderFacts, SemanticLock, JSON};
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
-use std::path::Path;
+use std::path::PathBuf;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ExplainLens {
@@ -93,7 +93,15 @@ pub struct ExplainProvider {
     pub producer_facts: BTreeMap<String, String>,
     pub provider_facts: Option<ProviderFacts>,
     pub locked_provider_facts: Option<ProviderFacts>,
+    pub profile_facts: Vec<ExplainProfile>,
     pub native_document: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ExplainProfile {
+    pub profile: String,
+    pub generation: u64,
+    pub provider_facts: ProviderFacts,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -133,8 +141,20 @@ pub struct ExplainRebuild {
     pub reason: String,
     pub action_key: String,
     pub cache_identity: BTreeMap<String, String>,
+    pub cache_admissions: Vec<ExplainCacheAdmission>,
     pub checks: BTreeMap<String, String>,
     pub attempt: Option<ExplainAttempt>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ExplainCacheAdmission {
+    pub role: String,
+    pub decision: String,
+    pub builder: String,
+    pub provenance: String,
+    pub receipt_version: Option<u64>,
+    pub receipt_expires_unix: Option<u64>,
+    pub reason: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -210,6 +230,7 @@ pub fn explain_package(
     let provider = provider_projection(&entry, &mut reports);
     let provider = provider.map(|mut provider| {
         provider.locked_provider_facts = locked_provider_facts(&entry, &mut reports);
+        provider.profile_facts = profile_provider_facts(&entry, &mut reports);
         if let (Some(source), Some(locked)) = (
             provider.provider_facts.as_ref(),
             provider.locked_provider_facts.as_ref(),
@@ -337,10 +358,77 @@ fn provider_projection(
             return None;
         }
     };
+    let facts = match producer.facts.get("provider-facts") {
+        Some(raw) => match ProviderFacts::from_json(raw) {
+            Ok(facts) => {
+                if let Err(error) = facts.validate() {
+                    reports.push(ExplainReport {
+                        kind: "loss".to_string(),
+                        message: format!("embedded provider facts fail validation: {error}"),
+                    });
+                }
+                facts
+            }
+            Err(error) => {
+                reports.push(ExplainReport {
+                    kind: "loss".to_string(),
+                    message: format!("embedded provider facts could not be decoded: {error}"),
+                });
+                reconstructed_provider_facts(&producer, entry)
+            }
+        },
+        None => {
+            reports.push(ExplainReport {
+                kind: "loss".to_string(),
+                message: "producer record lacks the shared provider-facts carrier".to_string(),
+            });
+            reconstructed_provider_facts(&producer, entry)
+        }
+    };
+    match producer.facts.get("provider-facts-digest") {
+        Some(expected) => {
+            let actual = facts.digest();
+            if expected != &actual {
+                reports.push(ExplainReport {
+                    kind: "conflict".to_string(),
+                    message: format!(
+                        "embedded provider-facts digest differs from its producer record: `{expected}` vs `{actual}`"
+                    ),
+                });
+            }
+        }
+        None if producer.facts.contains_key("provider-facts") => {
+            reports.push(ExplainReport {
+                kind: "loss".to_string(),
+                message: "producer record has provider facts but no provider-facts digest".to_string(),
+            });
+        }
+        None => {}
+    }
+    report_provider_facts(&facts, reports);
+    report_provider_validation(&facts, "producer", reports);
+    Some(ExplainProvider {
+        provider: producer.provider,
+        immutable_source: producer.immutable_source,
+        source_digest: producer.source_digest,
+        toolchain_facts: producer.toolchain_facts,
+        policy_facts: producer.policy_facts,
+        producer_facts: producer.facts,
+        provider_facts: Some(facts),
+        locked_provider_facts: None,
+        profile_facts: Vec::new(),
+        native_document: entry.producer_record.clone(),
+    })
+}
+
+fn reconstructed_provider_facts(producer: &ProducerRecord, entry: &StoreEntry) -> ProviderFacts {
     let mut facts = ProviderFacts::for_reference(&producer.provider, &entry.reference);
     facts.set_resolved_source(&producer.immutable_source);
     facts.set_native_document("jet-producer-record-v1", &entry.producer_record);
     for (key, value) in &producer.facts {
+        if matches!(key.as_str(), "provider-facts" | "provider-facts-digest") {
+            continue;
+        }
         facts.add_fact(
             key,
             ProviderFactValue::Text(value.clone()),
@@ -362,18 +450,7 @@ fn provider_projection(
         ProviderFactValue::Text(producer.policy_facts.clone()),
         "jet-producer-record-v1",
     );
-    report_provider_facts(&facts, reports);
-    Some(ExplainProvider {
-        provider: producer.provider,
-        immutable_source: producer.immutable_source,
-        source_digest: producer.source_digest,
-        toolchain_facts: producer.toolchain_facts,
-        policy_facts: producer.policy_facts,
-        producer_facts: producer.facts,
-        provider_facts: Some(facts),
-        locked_provider_facts: None,
-        native_document: entry.producer_record.clone(),
-    })
+    facts
 }
 
 fn report_provider_facts(facts: &ProviderFacts, reports: &mut Vec<ExplainReport>) {
@@ -394,6 +471,21 @@ fn report_provider_facts(facts: &ProviderFacts, reports: &mut Vec<ExplainReport>
                 conflict.key, conflict.left, conflict.right, conflict.source
             ),
         });
+    }
+}
+
+fn report_provider_validation(
+    facts: &ProviderFacts,
+    context: &str,
+    reports: &mut Vec<ExplainReport>,
+) {
+    if let Err(error) = facts.validate() {
+        if facts.losses.is_empty() && facts.conflicts.is_empty() {
+            reports.push(ExplainReport {
+                kind: "loss".to_string(),
+                message: format!("{context} provider facts fail validation: {error}"),
+            });
+        }
     }
 }
 
@@ -420,18 +512,49 @@ fn locked_provider_facts(
     let mut matches = Vec::new();
     for record in lock.records {
         let Some(raw) = record.future_fields.get("provider-facts") else {
+            if record.future_fields.contains_key("provider-facts-digest") {
+                reports.push(ExplainReport {
+                    kind: "loss".to_string(),
+                    message: format!(
+                        "locked provider-fact digest exists for {} without its full fact record",
+                        record.identity.exact
+                    ),
+                });
+            }
             continue;
         };
         match ProviderFacts::from_json(raw) {
             Ok(facts) => {
                 let canonical_entry =
                     ProviderFacts::for_reference("", &entry.reference).qualified_reference();
-                if let Err(error) = facts.validate() {
-                    reports.push(ExplainReport {
-                        kind: "loss".to_string(),
-                        message: format!("locked provider facts are invalid: {error}"),
-                    });
-                } else if facts.reference == entry.reference
+                report_provider_facts(&facts, reports);
+                report_provider_validation(&facts, "locked", reports);
+                match record.future_fields.get("provider-facts-digest") {
+                    Some(expected) => {
+                        let actual = facts.digest();
+                        if expected != &actual {
+                            reports.push(ExplainReport {
+                                kind: "conflict".to_string(),
+                                message: format!(
+                                    "locked provider-fact digest disagrees with its record: {expected} vs {actual}"
+                                ),
+                            });
+                        }
+                    }
+                    None => {
+                        reports.push(ExplainReport {
+                            kind: "loss".to_string(),
+                            message: format!(
+                                "locked provider facts have no digest: {}",
+                                record.identity.exact
+                            ),
+                        });
+                    }
+                }
+                if facts.validate().is_err() {
+                    continue;
+                }
+                if facts.reference == entry.reference
                     || facts.qualified_reference() == canonical_entry
                     || record.identity.exact == entry.reference
                     || record.identity.exact == facts.qualified_reference()
@@ -462,6 +585,233 @@ fn locked_provider_facts(
         });
     }
     matches.into_iter().next()
+}
+
+fn profile_provider_facts(
+    entry: &StoreEntry,
+    reports: &mut Vec<ExplainReport>,
+) -> Vec<ExplainProfile> {
+    let Some(generations) = nearest_profile_generations(reports) else {
+        return Vec::new();
+    };
+    let mut profiles = Vec::new();
+    let Ok(profile_dirs) = fs::read_dir(&generations) else {
+        reports.push(ExplainReport {
+            kind: "loss".to_string(),
+            message: format!(
+                "profile provider facts are unavailable: could not read {}",
+                generations.display()
+            ),
+        });
+        return profiles;
+    };
+    for profile in profile_dirs.flatten() {
+        let profile_path = profile.path();
+        let Ok(profile_metadata) = fs::symlink_metadata(&profile_path) else {
+            continue;
+        };
+        if profile_metadata.file_type().is_symlink() || !profile_metadata.is_dir() {
+            continue;
+        }
+        let profile_name = profile.file_name().to_string_lossy().into_owned();
+        let generation_dir = profile_path.join("generations");
+        let Ok(generations) = fs::read_dir(&generation_dir) else {
+            continue;
+        };
+        for generation in generations.flatten() {
+            let generation_path = generation.path();
+            let Ok(generation_metadata) = fs::symlink_metadata(&generation_path) else {
+                continue;
+            };
+            if generation_metadata.file_type().is_symlink() || !generation_metadata.is_dir() {
+                continue;
+            }
+            let Ok(number) = generation.file_name().to_string_lossy().parse::<u64>() else {
+                continue;
+            };
+            let metadata_path = generation_path.join("meta.json");
+            let raw = match fs::read_to_string(&metadata_path) {
+                Ok(raw) => raw,
+                Err(error) => {
+                    reports.push(ExplainReport {
+                        kind: "loss".to_string(),
+                        message: format!(
+                            "profile {profile_name} generation {number} metadata is unavailable: {error}"
+                        ),
+                    });
+                    continue;
+                }
+            };
+            let value = match JSON::parse(&raw) {
+                Ok(value) => value,
+                Err(error) => {
+                    reports.push(ExplainReport {
+                        kind: "loss".to_string(),
+                        message: format!(
+                            "profile {profile_name} generation {number} metadata is invalid: {error}"
+                        ),
+                    });
+                    continue;
+                }
+            };
+            let object = match value.as_object() {
+                Ok(object) => object,
+                Err(error) => {
+                    reports.push(ExplainReport {
+                        kind: "loss".to_string(),
+                        message: format!(
+                            "profile {profile_name} generation {number} metadata is not an object: {error}"
+                        ),
+                    });
+                    continue;
+                }
+            };
+            if object.get("schema").and_then(|value| value.as_str().ok())
+                != Some("jet-package-generation-v1")
+            {
+                reports.push(ExplainReport {
+                    kind: "loss".to_string(),
+                    message: format!(
+                        "profile {profile_name} generation {number} has unsupported metadata schema"
+                    ),
+                });
+                continue;
+            }
+            let Some(crate::JSON::JSONValue::Array(packages)) = object.get("packages") else {
+                reports.push(ExplainReport {
+                    kind: "loss".to_string(),
+                    message: format!(
+                        "profile {profile_name} generation {number} metadata lacks packages"
+                    ),
+                });
+                continue;
+            };
+            for package in packages {
+                let Ok(package) = package.as_object() else {
+                    reports.push(ExplainReport {
+                        kind: "loss".to_string(),
+                        message: format!(
+                            "profile {profile_name} generation {number} contains a non-object package"
+                        ),
+                    });
+                    continue;
+                };
+                let output_hash = package
+                    .get("output_hash")
+                    .and_then(|value| value.as_str().ok())
+                    .unwrap_or_default();
+                let raw_reference = package
+                    .get("raw")
+                    .and_then(|value| value.as_str().ok())
+                    .unwrap_or_default();
+                let target = package
+                    .get("target")
+                    .and_then(|value| value.as_str().ok())
+                    .unwrap_or_default();
+                if output_hash != entry.envelope.output_hash
+                    && raw_reference != entry.reference
+                    && target != entry.name
+                {
+                    continue;
+                }
+                if output_hash != entry.envelope.output_hash {
+                    reports.push(ExplainReport {
+                        kind: "loss".to_string(),
+                        message: format!(
+                            "profile {profile_name} generation {number} package identity does not retain the current output hash"
+                        ),
+                    });
+                }
+                let Some(facts_value) = package.get("provider_facts") else {
+                    reports.push(ExplainReport {
+                        kind: "loss".to_string(),
+                        message: format!(
+                            "profile {profile_name} generation {number} package {} lacks provider facts",
+                            entry.reference
+                        ),
+                    });
+                    continue;
+                };
+                let facts = match ProviderFacts::from_json_value(facts_value) {
+                    Ok(facts) => facts,
+                    Err(error) => {
+                        reports.push(ExplainReport {
+                            kind: "loss".to_string(),
+                            message: format!(
+                                "profile {profile_name} generation {number} provider facts are invalid: {error}"
+                            ),
+                        });
+                        continue;
+                    }
+                };
+                report_provider_facts(&facts, reports);
+                report_provider_validation(&facts, "profile", reports);
+                if let Some(expected) = package
+                    .get("provider_facts_digest")
+                    .and_then(|value| value.as_str().ok())
+                {
+                    let actual = facts.digest();
+                    if expected != actual {
+                        reports.push(ExplainReport {
+                            kind: "conflict".to_string(),
+                            message: format!(
+                                "profile {profile_name} generation {number} provider-fact digest disagrees: {expected} vs {actual}"
+                            ),
+                        });
+                    }
+                } else {
+                    reports.push(ExplainReport {
+                        kind: "loss".to_string(),
+                        message: format!(
+                            "profile {profile_name} generation {number} package {} lacks provider-fact digest",
+                            entry.reference
+                        ),
+                    });
+                }
+                profiles.push(ExplainProfile {
+                    profile: profile_name.clone(),
+                    generation: number,
+                    provider_facts: facts,
+                });
+            }
+        }
+    }
+    profiles.sort_by(|left, right| {
+        (&left.profile, left.generation).cmp(&(&right.profile, right.generation))
+    });
+    profiles
+}
+
+fn nearest_profile_generations(reports: &mut Vec<ExplainReport>) -> Option<PathBuf> {
+    let cwd = std::env::current_dir().ok()?;
+    let mut directory = Some(cwd.as_path());
+    while let Some(current) = directory {
+        let profiles = super::managed_dir(current).join("profiles");
+        match fs::symlink_metadata(&profiles) {
+            Ok(metadata) if metadata.file_type().is_symlink() => {
+                reports.push(ExplainReport {
+                    kind: "loss".to_string(),
+                    message: format!("profile state {} is a symlink", profiles.display()),
+                });
+                return None;
+            }
+            Ok(metadata) if metadata.is_dir() => return Some(profiles),
+            Ok(_) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => {
+                reports.push(ExplainReport {
+                    kind: "loss".to_string(),
+                    message: format!(
+                        "profile state {} is unavailable: {error}",
+                        profiles.display()
+                    ),
+                });
+                return None;
+            }
+        }
+        directory = current.parent();
+    }
+    None
 }
 
 fn compare_provider_identity(
@@ -767,6 +1117,27 @@ fn rebuild_projection(
     reports: &mut Vec<ExplainReport>,
 ) -> ExplainRebuild {
     let mut checks = BTreeMap::new();
+    let cache_admissions = match super::Cache::cache_admissions_for_explain(roots, entry) {
+        Ok(admissions) => admissions
+            .into_iter()
+            .map(|admission| ExplainCacheAdmission {
+                role: admission.role,
+                decision: admission.decision,
+                builder: admission.builder,
+                provenance: admission.provenance,
+                receipt_version: admission.receipt_version,
+                receipt_expires_unix: admission.receipt_expires_unix,
+                reason: admission.reason,
+            })
+            .collect(),
+        Err(error) => {
+            reports.push(ExplainReport {
+                kind: "loss".to_string(),
+                message: format!("cache admission state is unavailable: {error}"),
+            });
+            Vec::new()
+        }
+    };
     let output_exists = fs::symlink_metadata(&entry.out)
         .map(|metadata| {
             !metadata.file_type().is_symlink() && (metadata.is_file() || metadata.is_dir())
@@ -776,6 +1147,40 @@ fn rebuild_projection(
         "output".to_string(),
         if output_exists { "present" } else { "missing" }.to_string(),
     );
+    let output_digest = if output_exists {
+        match crate::Envelope::try_output_hash_of_in_hangar(
+            &entry.out,
+            &roots.hangar_dir(),
+            false,
+        ) {
+            Ok(actual) if actual == entry.envelope.output_hash => {
+                checks.insert("output_digest".to_string(), "matches".to_string());
+                Some(true)
+            }
+            Ok(actual) => {
+                checks.insert("output_digest".to_string(), "mismatch".to_string());
+                reports.push(ExplainReport {
+                    kind: "loss".to_string(),
+                    message: format!(
+                        "stored output digest differs: expected {} but found {actual}",
+                        entry.envelope.output_hash
+                    ),
+                });
+                Some(false)
+            }
+            Err(error) => {
+                checks.insert("output_digest".to_string(), "unavailable".to_string());
+                reports.push(ExplainReport {
+                    kind: "loss".to_string(),
+                    message: format!("stored output digest could not be verified: {error}"),
+                });
+                None
+            }
+        }
+    } else {
+        checks.insert("output_digest".to_string(), "missing".to_string());
+        None
+    };
     let action_key = entry_action_key(entry);
     let action_recorded = graph.is_some_and(|graph| {
         graph.records.values().any(|record| {
@@ -817,7 +1222,7 @@ fn rebuild_projection(
         });
     }
     let attempt = match BuildDebug::latest(&roots.hangar_dir(), &entry.name) {
-        Ok(attempt) => attempt.map(attempt_projection),
+        Ok(attempt) => attempt.as_ref().map(attempt_projection),
         Err(error) => {
             reports.push(ExplainReport {
                 kind: "loss".to_string(),
@@ -826,20 +1231,34 @@ fn rebuild_projection(
             None
         }
     };
-    let (decision, reason) = match (&attempt, output_exists, action_recorded, provider.is_some()) {
-        (Some(attempt), _, _, _) if attempt.status == "failed" => (
+    let (decision, reason) = match (
+        &attempt,
+        output_exists,
+        output_digest,
+        action_recorded,
+        provider.is_some(),
+    ) {
+        (Some(attempt), _, _, _, _) if attempt.status == "failed" => (
             "rebuild-required".to_string(),
             format!("latest recorded build attempt failed at step {}", attempt.failed_step),
         ),
-        (_, false, _, _) => (
+        (_, false, _, _, _) => (
             "rebuild-required".to_string(),
             "the realized output is missing; the stored action cannot be used as a live result".to_string(),
         ),
-        (_, _, false, _) => (
+        (_, true, Some(false), _, _) => (
+            "rebuild-required".to_string(),
+            "the realized output digest does not match its stored identity".to_string(),
+        ),
+        (_, true, None, _, _) => (
+            "rebuild-required".to_string(),
+            "the realized output digest cannot be verified".to_string(),
+        ),
+        (_, true, Some(true), false, _) => (
             "rebuild-required".to_string(),
             "the closure does not prove the stored action/output relation".to_string(),
         ),
-        (_, _, _, false) => (
+        (_, true, Some(true), _, false) => (
             "rebuild-required".to_string(),
             "producer provenance is unavailable; identity cannot be safely reused".to_string(),
         ),
@@ -870,6 +1289,7 @@ fn rebuild_projection(
                 entry.cache_identity.platform.clone(),
             ),
         ]),
+        cache_admissions,
         checks,
         attempt,
     }
@@ -957,6 +1377,17 @@ impl PackageExplain {
                     out.push('\n');
                 }
             }
+            for profile in &provider.profile_facts {
+                out.push_str(&format!(
+                    "profile-facts {} generation {}\n",
+                    profile.profile, profile.generation
+                ));
+                for line in profile.provider_facts.explain_lines() {
+                    out.push_str("profile-fact ");
+                    out.push_str(&line);
+                    out.push('\n');
+                }
+            }
         }
         match ExplainLens::parse(&self.lens).unwrap_or(ExplainLens::All) {
             ExplainLens::All => {
@@ -1013,8 +1444,14 @@ impl ExplainProvider {
             .map(|(key, value)| format!("{}:{}", JSON::quote(key), JSON::quote(value)))
             .collect::<Vec<_>>()
             .join(",");
+        let profiles = self
+            .profile_facts
+            .iter()
+            .map(ExplainProfile::to_json)
+            .collect::<Vec<_>>()
+            .join(",");
         format!(
-            "{{\"provider\":{},\"immutable_source\":{},\"source_digest\":{},\"toolchain_facts\":{},\"policy_facts\":{},\"producer_facts\":{{{}}},\"provider_facts\":{},\"locked_provider_facts\":{},\"native_document\":{}}}",
+            "{{\"provider\":{},\"immutable_source\":{},\"source_digest\":{},\"toolchain_facts\":{},\"policy_facts\":{},\"producer_facts\":{{{}}},\"provider_facts\":{},\"locked_provider_facts\":{},\"profile_facts\":[{}],\"native_document\":{}}}",
             JSON::quote(&self.provider),
             JSON::quote(&self.immutable_source),
             JSON::quote(&self.source_digest),
@@ -1023,7 +1460,19 @@ impl ExplainProvider {
             facts,
             option_json(self.provider_facts.as_ref(), ProviderFacts::to_json),
             option_json(self.locked_provider_facts.as_ref(), ProviderFacts::to_json),
+            profiles,
             JSON::quote(&self.native_document),
+        )
+    }
+}
+
+impl ExplainProfile {
+    fn to_json(&self) -> String {
+        format!(
+            "{{\"profile\":{},\"generation\":{},\"provider_facts\":{}}}",
+            JSON::quote(&self.profile),
+            self.generation,
+            self.provider_facts.to_json(),
         )
     }
 }
@@ -1096,11 +1545,12 @@ impl ExplainRebuild {
             .collect::<Vec<_>>()
             .join(",");
         format!(
-            "{{\"decision\":{},\"reason\":{},\"action_key\":{},\"cache_identity\":{{{}}},\"checks\":{{{}}},\"attempt\":{}}}",
+            "{{\"decision\":{},\"reason\":{},\"action_key\":{},\"cache_identity\":{{{}}},\"cache_admissions\":{},\"checks\":{{{}}},\"attempt\":{}}}",
             JSON::quote(&self.decision),
             JSON::quote(&self.reason),
             JSON::quote(&self.action_key),
             cache,
+            json_array(self.cache_admissions.iter().map(ExplainCacheAdmission::to_json)),
             checks,
             option_json(self.attempt.as_ref(), ExplainAttempt::to_json),
         )
@@ -1190,6 +1640,24 @@ fn append_rebuild_text(out: &mut String, rebuild: &ExplainRebuild) {
     for (key, value) in &rebuild.cache_identity {
         out.push_str(&format!("cache {} {}\n", key, value));
     }
+    for admission in &rebuild.cache_admissions {
+        out.push_str(&format!(
+            "cache-trust {} {} builder={} provenance={} receipt-version={} receipt-expires={} {}\n",
+            admission.role,
+            admission.decision,
+            empty_dash(&admission.builder),
+            empty_dash(&admission.provenance),
+            admission
+                .receipt_version
+                .map(|version| version.to_string())
+                .unwrap_or_else(|| "-".to_string()),
+            admission
+                .receipt_expires_unix
+                .map(|expires| expires.to_string())
+                .unwrap_or_else(|| "-".to_string()),
+            admission.reason,
+        ));
+    }
     for (key, value) in &rebuild.checks {
         out.push_str(&format!("check {} {}\n", key, value));
     }
@@ -1198,6 +1666,25 @@ fn append_rebuild_text(out: &mut String, rebuild: &ExplainRebuild) {
             "attempt {} {} {}\n",
             attempt.id, attempt.status, attempt.reference
         ));
+    }
+}
+
+impl ExplainCacheAdmission {
+    fn to_json(&self) -> String {
+        format!(
+            "{{\"role\":{},\"decision\":{},\"builder\":{},\"provenance\":{},\"receipt_version\":{},\"receipt_expires_unix\":{},\"reason\":{}}}",
+            JSON::quote(&self.role),
+            JSON::quote(&self.decision),
+            JSON::quote(&self.builder),
+            JSON::quote(&self.provenance),
+            self.receipt_version
+                .map(|version| version.to_string())
+                .unwrap_or_else(|| "null".to_string()),
+            self.receipt_expires_unix
+                .map(|expires| expires.to_string())
+                .unwrap_or_else(|| "null".to_string()),
+            JSON::quote(&self.reason),
+        )
     }
 }
 

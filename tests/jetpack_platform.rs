@@ -2,7 +2,8 @@
 //!
 //! These are intentionally narrow. They prove the product contract is encoded
 //! in code, then drive one real package through the native CI lane for each
-//! tier-1 OS. This Linux run still does not pretend to execute macOS/Windows.
+//! tier-1 OS. A local run proves only its host; the CI matrix supplies the
+//! native macOS and Windows executions.
 
 use std::fs;
 
@@ -28,6 +29,14 @@ fn platform_tier_audit_contract_names_linux_macos_windows() {
             assert_eq!(key.envelope_key(), format!("{arch}-{os}"));
         }
     }
+
+    let host = Platform::PlatformKey::host();
+    assert!(
+        host.is_tier_one(),
+        "the current CI host is outside Jetpack's tier-1 matrix: {}",
+        host.envelope_key()
+    );
+    assert_eq!(Platform::host_key(), host.envelope_key());
 
     assert!(Platform::PlatformKey::new("riscv64", Platform::OS_LINUX).is_none());
     assert!(Platform::PlatformKey::new(Platform::ARCH_X64, "freebsd").is_none());
@@ -62,6 +71,7 @@ fn platform_tier_gate_runs_native_package_offline_and_cleans_store() {
     let root = Scratch::new("platform-gate-root");
     let fixtures = Scratch::new("platform-gate-fixtures");
     let staging = Scratch::new("platform-gate-staging");
+    let missing_tools = Scratch::new("platform-gate-missing-tools");
     write_native_jetpack_fixture(&fixtures.path, &root.path, &staging.path);
     let program = format!("jetpack{}", std::env::consts::EXE_SUFFIX);
 
@@ -77,7 +87,7 @@ fn platform_tier_gate_runs_native_package_offline_and_cleans_store() {
         ])
         .env("JETPACK_ROOT", &root.path)
         .env("JETPACK_FIXTURES", &fixtures.path)
-        .env("PATH", Platform::clean_path())
+        .env("PATH", &missing_tools.path)
         .output()
         .unwrap();
     assert!(
@@ -102,7 +112,7 @@ fn platform_tier_gate_runs_native_package_offline_and_cleans_store() {
     let clean = jetpack()
         .args(["clean", "--no-color", "--yes"])
         .env("JETPACK_ROOT", &root.path)
-        .env("PATH", Platform::clean_path())
+        .env("PATH", &missing_tools.path)
         .output()
         .unwrap();
     assert!(
@@ -110,13 +120,17 @@ fn platform_tier_gate_runs_native_package_offline_and_cleans_store() {
         "stderr: {}",
         String::from_utf8_lossy(&clean.stderr)
     );
-    assert!(!stale.exists(), "production clean left stale platform state");
+    assert!(
+        !stale.exists(),
+        "production clean left stale platform state"
+    );
 }
 
 #[test]
 fn platform_tier_gate_reports_missing_offline_component() {
     let root = Scratch::new("platform-failure-root");
     let fixtures = Scratch::new("platform-failure-fixtures");
+    let missing_tools = Scratch::new("platform-failure-missing-tools");
     let missing = root.join("missing-component-output");
     fs::create_dir_all(&fixtures.path).unwrap();
     fs::write(
@@ -132,7 +146,7 @@ fn platform_tier_gate_reports_missing_offline_component() {
         .args(["build", "native-jetpack@nixpkgs", "--no-color", "--offline"])
         .env("JETPACK_ROOT", &root.path)
         .env("JETPACK_FIXTURES", &fixtures.path)
-        .env("PATH", Platform::clean_path())
+        .env("PATH", &missing_tools.path)
         .output()
         .unwrap();
     assert!(!output.status.success());

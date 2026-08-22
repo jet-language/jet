@@ -758,12 +758,13 @@ parsed :: Int.parse(text) ?? return
 
 **S32 / D-OPT-SPELL1 / D-SHAPE3b — Optional and Result variants** *(D-SHAPE3b
 ratified 2026-07-14 with owner substitution `Val`, not `Some`)*: `T?` uses
-`Val(expr)` / `None`; `T E!` uses `Ok(expr)` / `Err(expr)`. When the wrapper
-type is known, `.Val` / `.None` / `.Ok` / `.Err` are the contextual forms,
-including patterns. `Some` is never a spelling or alias. Old lowercase result
-forms and foreign optional spellings receive ordinary current name/parse
-errors; E0020's teaching path is retired. **D-RESULT-OPTION-CANON1**: `T?`
-always means Optional; fallible is `T E!` / `T !` (S34, D-ERRSIGIL1).
+`Val(expr)` / `None`; the failure surface uses `[Success?] [ErrorUnion!]` and
+uses `Ok(expr)` / `Err(expr)`. When the wrapper type is known, `.Val` / `.None`
+/ `.Ok` / `.Err` are the contextual forms, including patterns. `Some` is never
+a spelling or alias. Old lowercase result forms and foreign optional spellings
+receive ordinary current name/parse errors; E0020's teaching path is retired.
+**D-RESULT-OPTION-CANON1**: `T?` always means Optional; the fallible error
+type owns the `!` suffix (S34, D-ERRSIGIL1).
 
 **S33 — Generic type arguments**: `Type<Args>` angle brackets; `[]` is
 reserved for collections/indexing/shorthands. Calls infer type arguments by
@@ -1311,10 +1312,11 @@ user type of the same name shadows the core surface entirely.
 
 **S7 — Propagation**: postfix `?` on a fallible call.
 
-**S34 — Failure-returning return**: `T E!`; bare `T !` means `T Err!`. A
-unit-fallible declaration writes its error suffix alone (`fn save(path:
-String) IOError!`); value-returning signatures use `fn load() Config E!`.
-Lowers to Rust `Result` (not surface syntax).
+**S34 — Failure-returning return**: the failure surface is `[Success?]
+[ErrorUnion!]`; bare `!` means the default `Err` error. A unit-fallible
+declaration writes its error suffix alone (`fn save(path: String) IOError!`),
+and value-returning signatures use `fn load() Config E!` or
+`fn load() Config? E!`. Lowers to Rust `Result` (not surface syntax).
 
 **S80 — Default error value** *(D-ERR2, D-S80-RUN1 and D-FAIL-ERROR1=A,
 amended by D-FAIL-EXIT1, 2026-08-06, card #1528)*: `Err` is both the default
@@ -4834,12 +4836,25 @@ add ambient authority or a second build mechanism.
 
 **D-JPK-IMAGE1 (=A, ratified 2026-07-01, c9jetpackgates)**: active `image.*`
 syntax is OCI-only: `from: packages.<name>` (a package this project's `package.jet`
-declares `executable`) + optional `kind: .Oci`, `expose: [Int]`, `env_vars:
-[KEY: "value"]` (map keys must be quoted strings — no bare-ident sugar),
-`files: [String]`, and `base: oci("<ref>")`. A local `file://` OCI layout is
+declares `executable`) or `from: env.<name>` (one declared environment) + optional
+`kind: .Oci`, `expose: [Int]`, `env_vars: [KEY: "value"]` (map keys must be
+quoted strings — no bare-ident sugar), `files: [String]`, and `base:
+oci("<ref>")`. Environment images use the same record and default to a
+non-root `/bin/sh` entrypoint from a verified Hangar shell package. Their
+expert controls are the existing `target`, `user`, `entrypoint`, `health`,
+`services`, `files` (layer inputs), `expose`, and `base` fields. Services stay
+selected on the image record but fail clearly until the typed service
+supervisor prerequisite owns their runtime; Jet never starts raw service PIDs
+from an image build.
+
+Hangar remains the owner of image content, cache, archive, signing, and publish;
+`.jet/lock` remains the owner of locked inputs and platforms; remote realization
+uses only D-JPK-REMOTE1 bindings and grants. Cache/signing/provenance are
+metadata ownership facts, not a second image syntax. Successful environment
+images publish secret-free `projection.json`, `plan.json`, and `dossier.json`
+sidecars; secret values are runtime mounts or references only. A local
+`file://` OCI layout is
 validated and its layers are preserved before Jet appends the new deterministic
-layer. `jet image <name>` builds a deterministic OCI layout
-(`oci-layout`/`index.json`/`blobs/sha256/<digest>`) with an uncompressed tar
 layer. Remote base pulls and pushes remain E1268 until a verified registry
 transport is configured; Jet never silently builds from scratch or claims a
 remote transfer.

@@ -15,6 +15,7 @@ use super::Recipe::{self, BuildContext, BuildRecipe, BuildStep};
 use super::RefSpec::{ProviderKind, RefSpec, Source, SourceTable};
 use super::JSON;
 use crate::SHA256;
+use crate::{ProviderFactValue, ProviderFacts};
 use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -110,6 +111,63 @@ pub(super) fn producer_record(
         facts,
     )
     .map_err(ProviderError::CoreBuild)
+}
+
+const SHARED_PROVIDER_FACTS: &str = "provider-facts";
+const SHARED_PROVIDER_FACTS_DIGEST: &str = "provider-facts-digest";
+
+/// Refresh the one provider carrier after a producer record changes. The
+/// native producer record is retained as an opaque document, while its scalar
+/// facts are additive typed facts with one provenance source. The two carrier
+/// fields are omitted from that native document to avoid recursive growth on
+/// cache and lock refreshes.
+pub(crate) fn refresh_provider_facts(
+    producer: &mut super::Store::ProducerRecord,
+    reference: &str,
+) -> Result<(), ProviderError> {
+    let mut native = producer.clone();
+    native.facts.remove(SHARED_PROVIDER_FACTS);
+    native.facts.remove(SHARED_PROVIDER_FACTS_DIGEST);
+    let mut native_plan_facts = native.plan.facts().clone();
+    native_plan_facts.remove(SHARED_PROVIDER_FACTS);
+    native_plan_facts.remove(SHARED_PROVIDER_FACTS_DIGEST);
+    native.plan = crate::Comptime::Build::BuildPlanReplay::from_facts(native_plan_facts)
+        .map_err(ProviderError::BadOutput)?;
+
+    let mut shared = ProviderFacts::for_reference(&producer.provider, reference);
+    shared.set_resolved_source(&producer.immutable_source);
+    shared.set_native_document("jet-producer-record-v1", &native.encode());
+    for (key, value) in &producer.facts {
+        if matches!(key.as_str(), SHARED_PROVIDER_FACTS | SHARED_PROVIDER_FACTS_DIGEST) {
+            continue;
+        }
+        shared.add_fact(
+            key,
+            ProviderFactValue::Text(value.clone()),
+            "jet-producer-record-v1",
+        );
+    }
+    for (key, value) in [
+        ("provider.source_digest", producer.source_digest.clone()),
+        ("provider.toolchain_facts", producer.toolchain_facts.clone()),
+        ("provider.policy_facts", producer.policy_facts.clone()),
+    ] {
+        shared.add_fact(
+            key,
+            ProviderFactValue::Text(value),
+            "jet-producer-record-v1",
+        );
+    }
+    shared.validate().map_err(ProviderError::BadOutput)?;
+    let encoded = shared.to_json();
+    let digest = shared.digest();
+    producer
+        .facts
+        .insert(SHARED_PROVIDER_FACTS.to_string(), encoded);
+    producer
+        .facts
+        .insert(SHARED_PROVIDER_FACTS_DIGEST.to_string(), digest);
+    Ok(())
 }
 
 fn cache_identity(source: &str, recipe: &str, ctx: &Ctx) -> super::Store::CacheIdentity {
@@ -1490,7 +1548,9 @@ pub(crate) fn realize(
     ctx: &Ctx,
 ) -> Result<Realized, ProviderError> {
     let kind = resolve_kind(spec, table, ctx.offline, ctx.store_dir);
-    provider_for(kind).realize(spec, table, ctx)
+    let mut realized = provider_for(kind).realize(spec, table, ctx)?;
+    refresh_provider_facts(&mut realized.producer, &realized.reference)?;
+    Ok(realized)
 }
 
 /// U20: realize an inline `Pkg.adapt(...)` plan into the same `Realized`
@@ -1635,7 +1695,7 @@ pub(crate) fn realize_adapter(
         ]),
     )
     .map_err(ProviderError::Adapter)?;
-    Ok(Realized {
+    let mut realized = Realized {
         name: plan.name.clone(),
         version: String::new(),
         reference: format!("adapt:{}:{}", plan.name, plan.source),
@@ -1648,7 +1708,9 @@ pub(crate) fn realize_adapter(
         named_outputs: BTreeMap::from([("out".into(), out_dir.to_string_lossy().into_owned())]),
         references: Vec::new(),
         producer,
-    })
+    };
+    refresh_provider_facts(&mut realized.producer, &realized.reference)?;
+    Ok(realized)
 }
 
 fn adapter_recipe_to_build(recipe: &AdapterRecipe) -> BuildRecipe {
@@ -2132,6 +2194,28 @@ mod tests {
         );
     }
 
+    #[test]
+    fn shared_carrier_rejects_unpinned_external_reference() {
+        let plan = crate::Comptime::Build::BuildPlanReplay::from_facts(BTreeMap::from([(
+            "action.kind".to_string(),
+            "test".to_string(),
+        )]))
+        .unwrap();
+        let mut producer = super::super::Store::ProducerRecord::new(
+            "npm",
+            "cas:source",
+            "source",
+            plan,
+            "test-toolchain",
+            "policy=test\nplatform=any",
+            BTreeMap::new(),
+        )
+        .unwrap();
+        let error = refresh_provider_facts(&mut producer, "left-pad@npm").unwrap_err();
+        assert!(matches!(error, ProviderError::BadOutput(reason) if reason.contains("exact")));
+        assert!(!producer.facts.contains_key("provider-facts"));
+    }
+
     /// Card #641: `nix build --json` output wrapped in the host's own
     /// store-optimise noise (hard-link ceiling hit) must still realize —
     /// this used to die with `ProviderError::BadOutput`, "likely a Jetpack
@@ -2278,6 +2362,21 @@ mod tests {
         let r = realize(&spec, &table, &ctx).unwrap();
         assert_eq!(r.name, "hello");
         assert!(std::path::Path::new(&r.bin).join("hello").is_file());
+        let shared = ProviderFacts::from_json(
+            r.producer
+                .facts
+                .get("provider-facts")
+                .expect("production provider embeds shared facts"),
+        )
+        .expect("production provider emits provider-facts JSON");
+        shared.validate().expect("production provider facts are lossless");
+        assert_eq!(shared.reference, r.reference);
+        assert_eq!(shared.resolved_source, r.producer.immutable_source);
+        assert!(!shared.native_document.is_empty());
+        assert_eq!(
+            r.producer.facts.get("provider-facts-digest"),
+            Some(&shared.digest())
+        );
         std::fs::remove_dir_all(&base).ok();
     }
 

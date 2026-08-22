@@ -5,6 +5,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
+use std::sync::{Arc, Condvar, Mutex};
 
 use super::{ActionKey, BuildCapability, BuildResourcePool, RemoteBuildBinding};
 
@@ -186,6 +187,9 @@ impl RemoteBuilder {
     ) -> Result<Self, RemoteScheduleError> {
         if binding.platform != capabilities.platform
             || binding.trust_domain != capabilities.trust_domain
+            || binding.cache_read != capabilities.cache_read
+            || binding.cache_write != capabilities.cache_write
+            || binding.execute != capabilities.execute
         {
             return Err(RemoteScheduleError::BindingFactsMismatch {
                 builder: binding.builder,
@@ -250,6 +254,10 @@ pub enum RemoteScheduleError {
         action: ActionKey,
         fallback_local: bool,
     },
+    CapacityExhausted {
+        action: ActionKey,
+        fallback_local: bool,
+    },
     Rejected {
         action: ActionKey,
         builder: String,
@@ -277,6 +285,14 @@ impl fmt::Display for RemoteScheduleError {
             } => write!(
                 f,
                 "no eligible remote builder for `{}` (local fallback: {fallback_local})",
+                action.as_str()
+            ),
+            Self::CapacityExhausted {
+                action,
+                fallback_local,
+            } => write!(
+                f,
+                "eligible remote builder capacity is exhausted for `{}` (local fallback: {fallback_local})",
                 action.as_str()
             ),
             Self::Rejected {
@@ -316,6 +332,8 @@ pub struct RemoteDispatch<T> {
 #[derive(Debug, Clone, Default)]
 pub struct RemoteScheduler {
     builders: BTreeMap<String, RemoteBuilder>,
+    active: Arc<Mutex<BTreeMap<String, usize>>>,
+    available: Arc<Condvar>,
 }
 
 impl RemoteScheduler {
@@ -332,6 +350,8 @@ impl RemoteScheduler {
         }
         Ok(Self {
             builders: registered,
+            active: Arc::default(),
+            available: Arc::default(),
         })
     }
 
@@ -386,10 +406,17 @@ impl RemoteScheduler {
             });
         }
         let mut attempted = Vec::with_capacity(candidates.len());
+        let mut reserved = false;
         for builder in candidates {
+            let Some(reservation) = self.reserve(builder) else {
+                continue;
+            };
+            reserved = true;
             let name = builder.builder().to_string();
             attempted.push(name.clone());
-            match attempt(builder) {
+            let result = attempt(builder);
+            drop(reservation);
+            match result {
                 Ok(value) => {
                     return Ok(RemoteDispatch {
                         builder: name,
@@ -408,11 +435,78 @@ impl RemoteScheduler {
                 }
             }
         }
+        if !reserved {
+            return Err(RemoteScheduleError::CapacityExhausted {
+                action: request.action.clone(),
+                fallback_local: request.fallback_local,
+            });
+        }
         Err(RemoteScheduleError::AttemptsExhausted {
             action: request.action.clone(),
             attempted,
             fallback_local: request.fallback_local,
         })
+    }
+
+    pub(super) fn acquire(&self, builder: &RemoteBuilder) -> RemoteBuilderLease {
+        let mut active = self
+            .active
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        loop {
+            let count = active.entry(builder.builder().to_string()).or_default();
+            if *count < builder.capabilities.concurrency {
+                *count += 1;
+                return RemoteBuilderLease {
+                    active: Arc::clone(&self.active),
+                    available: Arc::clone(&self.available),
+                    builder: builder.builder().to_string(),
+                };
+            }
+            active = self
+                .available
+                .wait(active)
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+        }
+    }
+
+    fn reserve(&self, builder: &RemoteBuilder) -> Option<RemoteBuilderLease> {
+        let mut active = self
+            .active
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let count = active.entry(builder.builder().to_string()).or_default();
+        if *count >= builder.capabilities.concurrency {
+            return None;
+        }
+        *count += 1;
+        Some(RemoteBuilderLease {
+            active: Arc::clone(&self.active),
+            available: Arc::clone(&self.available),
+            builder: builder.builder().to_string(),
+        })
+    }
+}
+
+pub(super) struct RemoteBuilderLease {
+    active: Arc<Mutex<BTreeMap<String, usize>>>,
+    available: Arc<Condvar>,
+    builder: String,
+}
+
+impl Drop for RemoteBuilderLease {
+    fn drop(&mut self) {
+        let mut active = self
+            .active
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if let Some(count) = active.get_mut(&self.builder) {
+            *count = count.saturating_sub(1);
+            if *count == 0 {
+                active.remove(&self.builder);
+            }
+        }
+        self.available.notify_one();
     }
 }
 
@@ -522,6 +616,64 @@ mod tests {
             error,
             RemoteScheduleError::Rejected { builder, .. } if builder == "fast"
         ));
+    }
+
+    #[test]
+    fn dispatch_reserves_capacity_and_releases_it_after_completion() {
+        use std::sync::mpsc;
+
+        let scheduler = std::sync::Arc::new(
+            RemoteScheduler::new([
+                RemoteBuilder::new(
+                    binding("fast", true),
+                    capabilities(20, true).with_concurrency(1),
+                )
+                .unwrap(),
+                RemoteBuilder::new(
+                    binding("safe", true),
+                    capabilities(10, true).with_concurrency(1),
+                )
+                .unwrap(),
+            ])
+            .unwrap(),
+        );
+        let request = request();
+        let (started_tx, started_rx) = mpsc::channel();
+        let (release_tx, release_rx) = mpsc::channel();
+
+        std::thread::scope(|scope| {
+            let first_scheduler = scheduler.clone();
+            let first_request = request.clone();
+            let first = scope.spawn(move || {
+                first_scheduler
+                    .dispatch(&first_request, |builder| {
+                        assert_eq!(builder.builder(), "fast");
+                        started_tx.send(()).unwrap();
+                        release_rx.recv().unwrap();
+                        Ok::<_, RemoteAttemptError>("first")
+                    })
+                    .unwrap()
+            });
+
+            started_rx.recv().unwrap();
+            let second = scheduler
+                .dispatch(&request, |builder| {
+                    assert_eq!(builder.builder(), "safe");
+                    Ok::<_, RemoteAttemptError>("second")
+                })
+                .unwrap();
+            assert_eq!(second.builder, "safe");
+            release_tx.send(()).unwrap();
+            assert_eq!(first.join().unwrap().builder, "fast");
+
+            let third = scheduler
+                .dispatch(&request, |builder| {
+                    assert_eq!(builder.builder(), "fast");
+                    Ok::<_, RemoteAttemptError>("third")
+                })
+                .unwrap();
+            assert_eq!(third.builder, "fast");
+        });
     }
 
     #[test]

@@ -9,11 +9,14 @@
 //! `tests/jetpack_studio.rs` for the other slices and
 //! `tests/support/jetpack_fixtures.rs` for shared helpers.
 
+use std::collections::{BTreeMap, HashMap};
 use std::fs;
 use std::io::Write;
 use std::path::Path;
 use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
+
+use jet_foundation::BuildEffect;
 
 fn make_writable(path: &str) {
     fn walk(path: &Path) {
@@ -289,12 +292,30 @@ fn binary_cache_local_publish_verify_and_reject_corruption() {
     assert_eq!(verified.output_hash, entry.envelope.output_hash);
     assert_eq!(verified.builder, published.builder);
     assert_eq!(verified.provenance, published.provenance);
+    assert_eq!(published.receipt_version, Some(1));
+    assert!(published.receipt_expires_unix.is_some());
+    assert_eq!(verified.receipt_version, Some(1));
+    assert!(verified.receipt_expires_unix.is_some());
     assert!(!verified.signed_fingerprint.is_empty());
     let report_json = jetpack::Store::cache_report_json("verify", &verified);
     assert!(report_json.contains("\"operation\":\"verify\""));
     assert!(report_json.contains("\"signed_fingerprint\":"));
     assert!(report_json.contains("\"builder\":"));
     assert!(report_json.contains("\"provenance\":"));
+    assert!(report_json.contains("\"receipt_version\":1"));
+    assert!(report_json.contains("\"receipt_expires_unix\":"));
+
+    let explanation =
+        jetpack::Store::explain_package(&roots, &entry.id, jetpack::Store::ExplainLens::Rebuild)
+            .unwrap()
+            .expect("published cache entry should be explainable");
+    let explanation_json = explanation.to_json();
+    assert!(explanation_json.contains("\"cache_admissions\":"));
+    assert!(explanation_json.contains("\"decision\":\"accepted\""));
+    assert!(explanation_json.contains("\"receipt_version\":1"));
+    assert!(explanation_json.contains("\"receipt_expires_unix\":"));
+    assert!(explanation_json.contains(&published.builder));
+    assert!(explanation.text().contains("cache-trust public accepted"));
 
     let restored = Scratch::new("cache-restored");
     jetpack::Store::substitute_cache_entry(
@@ -958,6 +979,47 @@ fn package_generation_lifecycle_preserves_source_facts_and_history() {
     assert!(metadata.contains("\"output_hash\":\"sha256-"));
     assert!(!project.join(".jet/profiles/dev/current").exists());
 
+    let explained = jet()
+        .args(["explain", "greet", "--json", "--no-color"])
+        .current_dir(&project.path)
+        .env("JETPACK_ROOT", &root.path)
+        .env("JETPACK_FIXTURES", &fixtures.path)
+        .output()
+        .unwrap();
+    assert!(
+        explained.status.success(),
+        "explain stderr: {}",
+        String::from_utf8_lossy(&explained.stderr)
+    );
+    let explained_stdout = String::from_utf8_lossy(&explained.stdout);
+    assert!(explained_stdout.contains("\"schema\":\"jet-package-explain-v1\""));
+    assert!(explained_stdout.contains("\"profile_facts\":["));
+    assert!(explained_stdout.contains("\"profile\":\"dev\""));
+    assert!(explained_stdout.contains("\"generation\":1"));
+    assert!(explained_stdout.contains("\"output_digest\":\"matches\""));
+    for lens in [
+        "why-depends",
+        "what-depends",
+        "closure",
+        "why-live",
+        "rebuild",
+    ] {
+        let explained = jet()
+            .args(["explain", lens, "greet", "--json", "--no-color"])
+            .current_dir(&project.path)
+            .env("JETPACK_ROOT", &root.path)
+            .env("JETPACK_FIXTURES", &fixtures.path)
+            .output()
+            .unwrap();
+        assert!(
+            explained.status.success(),
+            "{lens} stderr: {}",
+            String::from_utf8_lossy(&explained.stderr)
+        );
+        let stdout = String::from_utf8_lossy(&explained.stdout);
+        assert!(stdout.contains(&format!("\"lens\":\"{lens}\"")), "{stdout}");
+    }
+
     let switched = run(["profile", "switch", "dev", "--no-color", "--offline"].as_slice());
     assert!(
         switched.status.success(),
@@ -996,9 +1058,39 @@ fn package_generation_lifecycle_preserves_source_facts_and_history() {
         "rollback stderr: {}",
         String::from_utf8_lossy(&rolled_back.stderr)
     );
-    assert!(fs::read_to_string(project.join(".jet/profiles/dev/current"))
-        .unwrap()
-        .contains("\"generation\":1"));
+    assert!(
+        fs::read_to_string(project.join(".jet/profiles/dev/current"))
+            .unwrap()
+            .contains("\"generation\":1")
+    );
+
+    let roots = jetpack::Store::Roots {
+        root: root.path.clone(),
+        dev_mode: false,
+    };
+    let entry = jetpack::Store::list(&roots)
+        .into_iter()
+        .find(|entry| entry.name == "greet")
+        .expect("profile build must publish greet to the Store");
+    make_writable(&entry.out);
+    fs::write(Path::new(&entry.out).join("bin/greet"), "tampered\n").unwrap();
+    let rebuild = jet()
+        .args(["explain", "rebuild", "greet", "--json", "--no-color"])
+        .current_dir(&project.path)
+        .env("JETPACK_ROOT", &root.path)
+        .env("JETPACK_FIXTURES", &fixtures.path)
+        .output()
+        .unwrap();
+    assert!(
+        rebuild.status.success(),
+        "rebuild explain stderr: {}",
+        String::from_utf8_lossy(&rebuild.stderr)
+    );
+    let rebuild_stdout = String::from_utf8_lossy(&rebuild.stdout);
+    assert!(rebuild_stdout.contains("\"decision\":\"rebuild-required\""));
+    assert!(rebuild_stdout.contains("\"output_digest\":\"mismatch\""));
+    assert!(rebuild_stdout.contains("\"kind\":\"loss\""));
+    assert!(rebuild_stdout.contains("stored output digest differs"));
 }
 
 #[test]
@@ -1358,7 +1450,77 @@ fn build_resolves_fixture_ref() {
     assert!(out.status.success());
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert!(stderr.contains("fastfetch"), "stderr: {stderr}");
-    assert!(stderr.contains("/hangar/objects/sha256-"), "stderr: {stderr}");
+    assert!(
+        stderr.contains("/hangar/objects/sha256-"),
+        "stderr: {stderr}"
+    );
+
+    let explained = jet()
+        .args(["explain", "fastfetch", "--json", "--no-color"])
+        .env("JETPACK_ROOT", &root.path)
+        .env("JETPACK_FIXTURES", example_fixtures(&root.path))
+        .output()
+        .unwrap();
+    assert!(
+        explained.status.success(),
+        "explain stderr: {}",
+        String::from_utf8_lossy(&explained.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&explained.stdout);
+    assert!(stdout.contains("\"schema\":\"jet-package-explain-v1\""));
+    assert!(stdout.contains("\"provider_facts\":"));
+    assert!(stdout.contains("\"direct_dependencies\":"));
+    assert!(stdout.contains("\"roots\":"));
+    assert!(stdout.contains("\"decision\":\"realized\""), "{stdout}");
+    assert!(stdout.contains("\"output_digest\":\"matches\""), "{stdout}");
+    for lens in [
+        "why-depends",
+        "what-depends",
+        "closure",
+        "why-live",
+        "rebuild",
+    ] {
+        let explained = jet()
+            .args(["explain", lens, "fastfetch", "--json", "--no-color"])
+            .env("JETPACK_ROOT", &root.path)
+            .env("JETPACK_FIXTURES", example_fixtures(&root.path))
+            .output()
+            .unwrap();
+        assert!(
+            explained.status.success(),
+            "{lens} stderr: {}",
+            String::from_utf8_lossy(&explained.stderr)
+        );
+        let stdout = String::from_utf8_lossy(&explained.stdout);
+        assert!(stdout.contains(&format!("\"lens\":\"{lens}\"")), "{stdout}");
+    }
+
+    let roots = jetpack::Store::Roots {
+        root: root.path.clone(),
+        dev_mode: false,
+    };
+    let entry = jetpack::Store::list(&roots)
+        .into_iter()
+        .find(|entry| entry.name == "fastfetch")
+        .expect("fixture build must publish fastfetch to the Store");
+    make_writable(&entry.out);
+    fs::write(Path::new(&entry.out).join("payload"), "tampered\n").unwrap();
+    let rebuild = jet()
+        .args(["explain", "rebuild", "fastfetch", "--json", "--no-color"])
+        .env("JETPACK_ROOT", &root.path)
+        .env("JETPACK_FIXTURES", example_fixtures(&root.path))
+        .output()
+        .unwrap();
+    assert!(
+        rebuild.status.success(),
+        "rebuild explain stderr: {}",
+        String::from_utf8_lossy(&rebuild.stderr)
+    );
+    let rebuild_stdout = String::from_utf8_lossy(&rebuild.stdout);
+    assert!(rebuild_stdout.contains("\"decision\":\"rebuild-required\""));
+    assert!(rebuild_stdout.contains("\"output_digest\":\"mismatch\""));
+    assert!(rebuild_stdout.contains("\"kind\":\"loss\""));
+    assert!(rebuild_stdout.contains("stored output digest differs"));
 }
 
 
@@ -2381,19 +2543,53 @@ fn no_nix_nixpkgs_package_reports_e1272() {
     let output = jetpack()
         .args(["build", "postgres@nixpkgs", "--no-color"])
         .env("JETPACK_ROOT", &root.path)
-        .env("PATH", "/usr/bin:/bin")
+        .env("PATH", "")
         .output()
         .unwrap();
     assert_eq!(output.status.code(), Some(2));
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(stderr.contains("E1272"), "stderr: {stderr}");
     assert!(stderr.contains("postgres@nixpkgs"), "stderr: {stderr}");
-    assert!(stderr.contains("install Nix"), "stderr: {stderr}");
+    assert!(
+        stderr.contains("pinned compatibility output"),
+        "stderr: {stderr}"
+    );
+    assert!(
+        stderr.contains("does not invoke an installed Nix executable"),
+        "stderr: {stderr}"
+    );
     assert!(stderr.contains("--adapt"), "stderr: {stderr}");
     assert!(!stderr.contains("E1256"), "stderr: {stderr}");
     assert!(!stderr.contains("couldn't run `nix`"), "stderr: {stderr}");
 }
 
+
+#[test]
+fn package_and_environment_paths_have_no_installed_nix_shellout() {
+    let sources = [
+        ("Bridge", include_str!("../crates/jetpack/src/Bridge.rs")),
+        (
+            "Provider",
+            include_str!("../crates/jetpack/src/Provider.rs"),
+        ),
+        (
+            "CLI/realize",
+            include_str!("../crates/jetpack/src/CLI/realize.rs"),
+        ),
+        (
+            "CLI/run_enter_dev",
+            include_str!("../crates/jetpack/src/CLI/run_enter_dev.rs"),
+        ),
+    ];
+    for (path, source) in sources {
+        for forbidden in ["Command::new(\"nix\")", "Command::new(\"nix-store\")"] {
+            assert!(
+                !source.contains(forbidden),
+                "{path} must not shell out to installed Nix via {forbidden}"
+            );
+        }
+    }
+}
 
 #[test]
 fn no_nix_ad_hoc_package_reports_e1272() {
@@ -2411,13 +2607,14 @@ fn no_nix_ad_hoc_package_reports_e1272() {
         ])
         .current_dir(&proj.path)
         .env("JETPACK_ROOT", &root.path)
-        .env("PATH", "/usr/bin:/bin")
+        .env("PATH", "")
         .output()
         .unwrap();
     assert_eq!(output.status.code(), Some(2));
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(stderr.contains("E1272"), "stderr: {stderr}");
     assert!(stderr.contains("postgres@nixpkgs"), "stderr: {stderr}");
+    assert!(!stderr.contains("couldn't run `nix`"), "stderr: {stderr}");
 }
 
 
@@ -2437,7 +2634,7 @@ fn no_nix_mixed_env_realizes_core_then_reports_nix_hole() {
         .current_dir(&proj)
         .env("JETPACK_ROOT", &root)
         .env("HOME", base.join("home"))
-        .env("PATH", "/usr/bin:/bin")
+        .env("PATH", "")
         .output()
         .unwrap();
     assert_eq!(output.status.code(), Some(2));
@@ -2477,7 +2674,7 @@ fn no_nix_json_lists_realized_refs_and_holes() {
         .current_dir(&proj)
         .env("JETPACK_ROOT", &root)
         .env("HOME", base.join("home"))
-        .env("PATH", "/usr/bin:/bin")
+        .env("PATH", "")
         .output()
         .unwrap();
     assert_eq!(output.status.code(), Some(2));
@@ -2834,6 +3031,22 @@ fn jetpack_enter_runs_command_in_project_env() {
         String::from_utf8_lossy(&output.stdout).trim(),
         "hello from jet-pkgs"
     );
+    let roots = jetpack::Store::Roots::at(root);
+    let entry = jetpack::Store::find_by_reference(&roots, "hello@mine")
+        .expect("core realization should register a Store entry");
+    let shared = jetpack::ProviderFacts::from_json(
+        jetpack::Store::ProducerRecord::decode(&entry.producer_record)
+            .expect("Store producer record")
+            .facts
+            .get("provider-facts")
+            .expect("Store entry should carry shared provider facts"),
+    )
+    .expect("shared provider facts JSON");
+    shared
+        .validate()
+        .expect("Store provider facts are lossless");
+    assert_eq!(shared.reference, entry.reference);
+    assert!(!shared.native_document.is_empty());
 }
 
 
@@ -2969,7 +3182,8 @@ fn enter_flake_flag_requires_trust_before_native_projection() {
 #[test]
 fn enter_flake_native_projection_runs_without_nix_on_path() {
     // U16 product proof: `enter --flake --trust` uses the bounded native
-    // evaluator, even when the host cannot resolve `nix`.
+    // evaluator with an empty PATH, so no installed Nix executable can be
+    // discovered by the production path.
     let project = Scratch::new("flake-native-enter");
     fs::write(
         project.join("flake.nix"),
@@ -2983,12 +3197,12 @@ fn enter_flake_native_projection_runs_without_nix_on_path() {
             "--trust",
             "--no-color",
             "--",
-            "sh",
+            "/bin/sh",
             "-c",
             "printf native-flake",
         ])
         .current_dir(&project.path)
-        .env("PATH", "/usr/bin:/bin")
+        .env("PATH", "")
         .output()
         .unwrap();
     assert!(
@@ -3024,7 +3238,7 @@ let marker = "flake-parts mkFlake"; in {
     let first = jetpack()
         .args(["bridge", "flake", "--no-color"])
         .current_dir(&project.path)
-        .env("PATH", "/usr/bin:/bin")
+        .env("PATH", "")
         .output()
         .unwrap();
     assert!(
@@ -3061,7 +3275,7 @@ let marker = "flake-parts mkFlake"; in {
     let failed = jetpack()
         .args(["bridge", "flake", "--no-color"])
         .current_dir(&project.path)
-        .env("PATH", "/usr/bin:/bin")
+        .env("PATH", "")
         .output()
         .unwrap();
     assert_eq!(failed.status.code(), Some(1));
@@ -3081,7 +3295,7 @@ fn enter_flake_dynamic_projection_reports_e1256_without_nix() {
     let output = jetpack()
         .args(["enter", "--flake", "--trust", "--no-color"])
         .current_dir(&project.path)
-        .env("PATH", "/usr/bin:/bin")
+        .env("PATH", "")
         .output()
         .unwrap();
     assert_eq!(output.status.code(), Some(1));
@@ -5463,6 +5677,65 @@ fn jet_audit_reads_without_exec() {
 
 
 #[test]
+fn jet_inspect_audit_missing_inputs_fails_closed() {
+    // Card #431 criterion 6: an audit without its lock or signed advisory
+    // database must not report a false clean result.
+    let project = Scratch::new("inspect-audit-missing-inputs");
+    fs::write(
+        project.join("package.jet"),
+        "name: \"audit-probe\"\nversion: \"0.1.0\"\n",
+    )
+    .unwrap();
+
+    let missing_lock = jet()
+        .args(["inspect", "audit", "--no-color"])
+        .current_dir(&project.path)
+        .env_remove("JET_ADVISORY_DB")
+        .env_remove("JET_ADVISORY_TRUST")
+        .env_remove("JET_ADVISORY_PUBLIC_KEY")
+        .output()
+        .unwrap();
+    assert_eq!(missing_lock.status.code(), Some(1));
+    let missing_lock_stderr = String::from_utf8_lossy(&missing_lock.stderr);
+    assert!(
+        missing_lock_stderr.contains("E2611"),
+        "{missing_lock_stderr}"
+    );
+    assert!(
+        missing_lock_stderr.contains("unified lockfile"),
+        "{missing_lock_stderr}"
+    );
+
+    fs::create_dir_all(project.join(".jet")).unwrap();
+    fs::write(
+        project.join(".jet/lock"),
+        "version = 1\n\n[[package]]\nname = \"audit-probe\"\nversion = \"0.1.0\"\nsource = { root = \".\" }\n\n[root]\ndependencies = []\n",
+    )
+    .unwrap();
+    let missing_db = jet()
+        .args(["inspect", "audit", "--no-color"])
+        .current_dir(&project.path)
+        .env_remove("JET_ADVISORY_DB")
+        .env_remove("JET_ADVISORY_TRUST")
+        .env_remove("JET_ADVISORY_PUBLIC_KEY")
+        .output()
+        .unwrap();
+    assert_eq!(
+        missing_db.status.code(),
+        Some(1),
+        "stdout={} stderr={}",
+        String::from_utf8_lossy(&missing_db.stdout),
+        String::from_utf8_lossy(&missing_db.stderr)
+    );
+    let missing_db_stderr = String::from_utf8_lossy(&missing_db.stderr);
+    assert!(missing_db_stderr.contains("E2611"), "{missing_db_stderr}");
+    assert!(
+        missing_db_stderr.contains("signed advisory database"),
+        "{missing_db_stderr}"
+    );
+}
+
+#[test]
 fn jet_hangar_du_counts_source_built_objects() {
     // T0 exit: `jetpack hangar du` counts realized objects honestly, marking
     // source-built ones. A first-party core build shows up as a `(built)` object.
@@ -5497,6 +5770,303 @@ fn jet_hangar_du_counts_source_built_objects() {
         report.contains("1 built from source"),
         "du summary must count source-built objects honestly: {report}"
     );
+}
+
+#[test]
+fn staged_plan_action_production_path_is_deterministic_and_complete() {
+    let scratch = Scratch::new("staged-plan-success");
+    let source = scratch.join("source");
+    let artifacts = scratch.join("artifacts");
+    fs::create_dir_all(&source).unwrap();
+    let input = b"declared staged input";
+    fs::write(source.join("manifest"), input).unwrap();
+    let digest = format!("sha256-{}", jetpack::SHA256::sha256_hex(input));
+    let platform = format!("{}-{}", std::env::consts::OS, std::env::consts::ARCH);
+    let action = jetpack::Recipe::StagedPlanAction::new(
+        "discover",
+        0,
+        1,
+        vec![jetpack::Recipe::PlanInput::new("manifest", digest.clone())],
+        jetpack::Recipe::PlanAuthority {
+            tools: vec!["planner".to_string()],
+            effects: vec![BuildEffect::Exec, BuildEffect::FS],
+            platform: platform.clone(),
+        },
+    );
+    let tools = HashMap::from([("planner".to_string(), std::env::current_exe().unwrap())]);
+    let context = jetpack::Recipe::StagedPlanContext {
+        source_dir: &source,
+        artifact_root: &artifacts,
+    };
+
+    let first = jetpack::Recipe::run_staged_plan_action(&action, &context, &tools, |sandbox| {
+        assert_eq!(sandbox.read_input("manifest").unwrap(), input);
+        let mut emitted = jetpack::Recipe::PlanFragmentAction::new("compile", "planner");
+        emitted.args = vec!["--stable".to_string()];
+        emitted.inputs = vec!["manifest".to_string()];
+        emitted.outputs = vec!["result.bin".to_string()];
+        emitted.env = BTreeMap::from([("STAGED_INPUT".to_string(), "manifest".to_string())]);
+        emitted.effects = vec![BuildEffect::Exec, BuildEffect::FS];
+        emitted.platform = platform.clone();
+        Ok(jetpack::Recipe::BuildPlanFragment {
+            actions: vec![emitted],
+        })
+    })
+    .unwrap();
+    let second = jetpack::Recipe::run_staged_plan_action(&action, &context, &tools, |sandbox| {
+        assert_eq!(sandbox.read_input("manifest").unwrap(), input);
+        let mut emitted = jetpack::Recipe::PlanFragmentAction::new("compile", "planner");
+        emitted.args = vec!["--stable".to_string()];
+        emitted.inputs = vec!["manifest".to_string()];
+        emitted.outputs = vec!["result.bin".to_string()];
+        emitted.env = BTreeMap::from([("STAGED_INPUT".to_string(), "manifest".to_string())]);
+        emitted.effects = vec![BuildEffect::Exec, BuildEffect::FS];
+        emitted.platform = platform.clone();
+        Ok(jetpack::Recipe::BuildPlanFragment {
+            actions: vec![emitted],
+        })
+    })
+    .unwrap();
+
+    assert_eq!(first.action_identity, second.action_identity);
+    assert_eq!(first.fragment_digest, second.fragment_digest);
+    assert_eq!(first.plan_fingerprint, second.plan_fingerprint);
+    assert_eq!(first.artifact_dir, second.artifact_dir);
+    assert_eq!(first.lock.inputs[0].digest, digest);
+    assert!(first.lock.encode().contains("tool=planner\n"));
+    assert!(first.lock.encode().contains("effect=exec\n"));
+    assert!(first
+        .lock
+        .encode()
+        .contains(&format!("platform={platform}\n")));
+    assert!(first.artifact_dir.join("fragment.plan").is_file());
+    assert!(first.artifact_dir.join("lock").is_file());
+    assert!(first.artifact_dir.join("plan.fingerprint").is_file());
+
+    let plan = jetpack::Recipe::lower_staged_plan_action(
+        &action,
+        &jetpack::Recipe::BuildPlanFragment {
+            actions: vec![{
+                let mut emitted = jetpack::Recipe::PlanFragmentAction::new("compile", "planner");
+                emitted.inputs = vec!["manifest".to_string()];
+                emitted.outputs = vec!["result.bin".to_string()];
+                emitted.effects = vec![BuildEffect::Exec, BuildEffect::FS];
+                emitted.platform = platform.clone();
+                emitted
+            }],
+        },
+        &tools,
+    )
+    .unwrap();
+    assert_eq!(plan.actions().len(), 2, "planner plus one emitted action");
+    assert!(plan
+        .actions()
+        .iter()
+        .any(|item| item.inputs.iter().any(|path| path.as_str() == "manifest")));
+    assert!(plan.actions().iter().any(|item| item
+        .outputs
+        .iter()
+        .any(|path| path.as_str() == "result.bin")));
+    assert!(plan.actions().iter().all(|item| item
+        .labels
+        .get("staged.platform")
+        .is_some_and(|value| value == &platform)));
+    assert!(plan.actions().iter().any(|item| item
+        .labels
+        .get("authority.tool.0")
+        .is_some_and(|value| value == "planner")));
+}
+
+#[test]
+fn staged_plan_action_rejects_sandbox_and_graph_failures_without_artifact() {
+    let scratch = Scratch::new("staged-plan-failures");
+    let source = scratch.join("source");
+    let artifacts = scratch.join("artifacts");
+    fs::create_dir_all(&source).unwrap();
+    let input = b"declared staged input";
+    fs::write(source.join("manifest"), input).unwrap();
+    let platform = format!("{}-{}", std::env::consts::OS, std::env::consts::ARCH);
+    let tools = HashMap::from([("planner".to_string(), std::env::current_exe().unwrap())]);
+    let context = jetpack::Recipe::StagedPlanContext {
+        source_dir: &source,
+        artifact_root: &artifacts,
+    };
+    let make_action = |name: &str| {
+        jetpack::Recipe::StagedPlanAction::new(
+            name,
+            0,
+            1,
+            vec![jetpack::Recipe::PlanInput::new(
+                "manifest",
+                format!("sha256-{}", jetpack::SHA256::sha256_hex(input)),
+            )],
+            jetpack::Recipe::PlanAuthority {
+                tools: vec!["planner".to_string()],
+                effects: vec![BuildEffect::Exec],
+                platform: platform.clone(),
+            },
+        )
+    };
+    let valid_fragment = |tool: &str, output: &str| {
+        let mut emitted = jetpack::Recipe::PlanFragmentAction::new("step", tool);
+        emitted.inputs = vec!["manifest".to_string()];
+        emitted.outputs = vec![output.to_string()];
+        emitted.effects = vec![BuildEffect::Exec];
+        emitted.platform = platform.clone();
+        jetpack::Recipe::BuildPlanFragment {
+            actions: vec![emitted],
+        }
+    };
+
+    let error = jetpack::Recipe::run_staged_plan_action(
+        &make_action("undeclared"),
+        &context,
+        &tools,
+        |sandbox| {
+            assert!(sandbox.read_store("private/store").is_err());
+            assert!(sandbox.resolve_package("unlocked").is_err());
+            sandbox.read_input("not-declared")?;
+            unreachable!("read_input must reject undeclared access")
+        },
+    )
+    .unwrap_err();
+    assert_eq!(error.code, "E1238");
+    assert!(error.why.contains("staged plan action denied"));
+    assert!(!artifacts.exists());
+
+    let mut cycle_a = jetpack::Recipe::PlanFragmentAction::new("a", "planner");
+    cycle_a.inputs = vec!["manifest".to_string()];
+    cycle_a.outputs = vec!["a.out".to_string()];
+    cycle_a.dependencies = vec!["b".to_string()];
+    cycle_a.effects = vec![BuildEffect::Exec];
+    cycle_a.platform = platform.clone();
+    let mut cycle_b = jetpack::Recipe::PlanFragmentAction::new("b", "planner");
+    cycle_b.inputs = vec!["manifest".to_string()];
+    cycle_b.outputs = vec!["b.out".to_string()];
+    cycle_b.dependencies = vec!["a".to_string()];
+    cycle_b.effects = vec![BuildEffect::Exec];
+    cycle_b.platform = platform.clone();
+    let error =
+        jetpack::Recipe::run_staged_plan_action(&make_action("cycle"), &context, &tools, |_| {
+            Ok(jetpack::Recipe::BuildPlanFragment {
+                actions: vec![cycle_a, cycle_b],
+            })
+        })
+        .unwrap_err();
+    assert_eq!(error.code, "E1238");
+    assert!(error.why.contains("cycle"));
+    assert!(!artifacts.exists());
+
+    let error = jetpack::Recipe::run_staged_plan_action(
+        &make_action("unauthorized-tool"),
+        &context,
+        &tools,
+        |_| Ok(valid_fragment("other-tool", "tool.out")),
+    )
+    .unwrap_err();
+    assert_eq!(error.code, "E1238");
+    assert!(error.why.contains("undeclared tool `other-tool`"));
+    assert!(!artifacts.exists());
+
+    let missing_tools = HashMap::new();
+    let error = jetpack::Recipe::run_staged_plan_action(
+        &make_action("missing-realized-tool"),
+        &context,
+        &missing_tools,
+        |_| Ok(valid_fragment("planner", "missing-tool.out")),
+    )
+    .unwrap_err();
+    assert_eq!(error.code, "E1238");
+    assert!(error.what.contains("not a realized dependency"));
+    assert!(!artifacts.exists());
+
+    let mut unauthorized_effect = valid_fragment("planner", "effect.out");
+    unauthorized_effect.actions[0].effects = vec![BuildEffect::FS];
+    let error = jetpack::Recipe::run_staged_plan_action(
+        &make_action("unauthorized-effect"),
+        &context,
+        &tools,
+        |_| Ok(unauthorized_effect),
+    )
+    .unwrap_err();
+    assert_eq!(error.code, "E1238");
+    assert!(error.why.contains("undeclared effect `fs`"));
+    assert!(!artifacts.exists());
+
+    let mut mismatched_platform = valid_fragment("planner", "platform.out");
+    mismatched_platform.actions[0].platform = "other-platform".to_string();
+    let error = jetpack::Recipe::run_staged_plan_action(
+        &make_action("platform-mismatch"),
+        &context,
+        &tools,
+        |_| Ok(mismatched_platform),
+    )
+    .unwrap_err();
+    assert_eq!(error.code, "E1238");
+    assert!(error.why.contains("not declared platform"));
+    assert!(!artifacts.exists());
+
+    let error = jetpack::Recipe::run_staged_plan_action(
+        &make_action("invalid-output"),
+        &context,
+        &tools,
+        |_| Ok(valid_fragment("planner", "../escape")),
+    )
+    .unwrap_err();
+    assert_eq!(error.code, "E1238");
+    assert!(error.why.contains("output `../escape`"));
+    assert!(!artifacts.exists());
+
+    let mut overlapping_outputs = valid_fragment("planner", "overlap.out");
+    let mut nested_output = jetpack::Recipe::PlanFragmentAction::new("nested", "planner");
+    nested_output.inputs = vec!["manifest".to_string()];
+    nested_output.outputs = vec!["overlap.out/child".to_string()];
+    nested_output.effects = vec![BuildEffect::Exec];
+    nested_output.platform = platform.clone();
+    overlapping_outputs.actions.push(nested_output);
+    let error = jetpack::Recipe::run_staged_plan_action(
+        &make_action("overlapping-output"),
+        &context,
+        &tools,
+        |_| Ok(overlapping_outputs),
+    )
+    .unwrap_err();
+    assert_eq!(error.code, "E1238");
+    assert!(error.why.contains("overlap"));
+    assert!(!artifacts.exists());
+
+    let mut mismatched_input = make_action("input-mismatch");
+    mismatched_input.inputs[0].digest = format!("sha256-{}", "0".repeat(64));
+    let error =
+        jetpack::Recipe::run_staged_plan_action(&mismatched_input, &context, &tools, |_| {
+            Ok(valid_fragment("planner", "mismatch.out"))
+        })
+        .unwrap_err();
+    assert_eq!(error.code, "E1238");
+    assert!(error.why.contains("digest mismatch"));
+    assert!(!artifacts.exists());
+
+    let error =
+        jetpack::Recipe::run_staged_plan_action(&make_action("failed"), &context, &tools, |_| {
+            Err(jetpack::Recipe::StagedPlanActionError::Failed(
+                "boom".to_string(),
+            ))
+        })
+        .unwrap_err();
+    assert_eq!(error.code, "E1238");
+    assert!(error.why.contains("failed before publication"));
+    assert!(!artifacts.exists());
+
+    let error = jetpack::Recipe::run_staged_plan_action(
+        &make_action("cancelled"),
+        &context,
+        &tools,
+        |_| Err(jetpack::Recipe::StagedPlanActionError::Cancelled),
+    )
+    .unwrap_err();
+    assert_eq!(error.code, "E1238");
+    assert!(error.what.contains("cancelled"));
+    assert!(!artifacts.exists());
 }
 
 #[test]
@@ -5545,6 +6115,10 @@ outputs: .{
     assert!(json.contains("\"graph_identity\":\""), "{json}");
     assert!(json.contains("\"ref\":\"ripgrep@nixpkgs\""), "{json}");
     assert!(json.contains("\"name\":\"ssh\""), "{json}");
+    assert!(
+        json.contains("\"fields\":[{\"key\":\"ports\",\"value\":\"[22]\"}]"),
+        "{json}"
+    );
     assert!(json.contains("\"key\":\"network.hostName\""), "{json}");
     assert!(
         !project.join("jet-root/systems/generations").exists(),
@@ -5633,4 +6207,41 @@ fn remote_scheduler_selects_capabilities_then_fails_over_in_order() {
     assert_eq!(dispatch.builder, "safe");
     assert_eq!(dispatch.attempted, vec!["fast", "safe"]);
     assert_eq!(dispatch.value, "safe");
+}
+
+#[test]
+fn remote_execution_identity_binds_the_complete_action_request() {
+    use jetpack::Remote::{
+        remote_execution_identity, ActionInputSnapshot, ActionKey, BuildPath, ContentDigest,
+        RemoteExecutionRequest, RemoteSandboxProof,
+    };
+
+    let key = ActionKey::new("remote-action");
+    let toolchain = ContentDigest::from_bytes(b"toolchain");
+    let request = RemoteExecutionRequest {
+        key: key.clone(),
+        attempt_id: "attempt-1".to_string(),
+        argv: vec!["compiler".to_string(), "src/main.jet".to_string()],
+        inputs: vec![ActionInputSnapshot {
+            path: BuildPath::new("src/main.jet").unwrap(),
+            digest: ContentDigest::from_bytes(b"source"),
+            byte_len: 6,
+        }],
+        outputs: vec![BuildPath::new("build/app").unwrap()],
+        toolchain_digest: toolchain.clone(),
+        sandbox: RemoteSandboxProof::new("sandbox", key.as_str(), toolchain),
+    };
+    let identity = remote_execution_identity(&request);
+
+    let mut changed_argv = request.clone();
+    changed_argv.argv[1] = "src/other.jet".to_string();
+    assert_ne!(identity, remote_execution_identity(&changed_argv));
+
+    let mut changed_input = request.clone();
+    changed_input.inputs[0].byte_len = 7;
+    assert_ne!(identity, remote_execution_identity(&changed_input));
+
+    let mut changed_output = request;
+    changed_output.outputs[0] = BuildPath::new("build/other").unwrap();
+    assert_ne!(identity, remote_execution_identity(&changed_output));
 }

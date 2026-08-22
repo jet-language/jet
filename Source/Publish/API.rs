@@ -264,10 +264,11 @@ fn format_struct_sig(s: &crate::AST::StructDef, dimensions: &crate::Sema::ApiFre
                 .serde_markers
                 .iter()
                 .any(|m| m.name == crate::Syntax::MARKER_FLAG);
-            let has_default = f
-                .serde_markers
-                .iter()
-                .any(|m| m.name == crate::Syntax::MARKER_DEFAULT);
+            // D-DEFAULT-SHAPE1=B: declaration defaults live on the field's
+            // typed-value slot. The retired `#Default` marker is removed by
+            // sema before API extraction, so freezing marker presence here
+            // misses `port: Int{3000}` and incorrectly makes it positional.
+            let has_default = f.default.is_some();
             let is_bool = matches!(f.ty, crate::AST::Type::Bool);
             let is_optional = matches!(f.ty, crate::AST::Type::Option(_));
             if !is_bool && !is_optional && !has_default && !flag_only {

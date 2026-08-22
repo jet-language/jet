@@ -605,7 +605,7 @@ pub(super) fn cmd_image(theme: &Theme, parsed: &Parsed) -> i32 {
         return 2;
     }
     let mut files = if image.from_environment {
-        environment_image_files(theme, &roots, &plan, name)
+        environment_image_files(theme, &roots, &plan, name, &mut projection)
     } else {
         let bin_path = dir.join("build").join(&image.from);
         let bin_data = match read_project_image_file(&dir.join("build"), &image.from) {
@@ -789,11 +789,40 @@ pub(super) fn cmd_image(theme: &Theme, parsed: &Parsed) -> i32 {
         user: image.user.unwrap_or(10_001),
         healthcheck: image.health.clone(),
     };
+    let projection_plan = Image::ProjectionPlan {
+        source: if image.from_environment {
+            format!("env:{}", image.from)
+        } else {
+            format!("package:{}", image.from)
+        },
+        platform: spec.platform.clone(),
+        entrypoint: spec.entrypoint.clone(),
+        user: spec.user,
+        expose: spec.expose.clone(),
+        healthcheck: spec.healthcheck.is_some(),
+        env_keys: image.env_vars.iter().map(|(key, _)| key.clone()).collect(),
+        layer_paths: spec.files.iter().map(|file| file.path.clone()).collect(),
+        services: image.services.clone(),
+        base: image.base.is_some(),
+        lock: if Lock::load(&dir).is_some() {
+            "present".to_string()
+        } else {
+            "absent".to_string()
+        },
+    };
     match Image::build_with_base(&spec, &out_dir, name, base_directory.as_deref()) {
         Ok(built) => {
-            if let Err(error) =
+            let artifact_result = if image.from_environment {
+                Image::write_projection_artifacts(
+                    &out_dir,
+                    &built.manifest_digest,
+                    &projection_plan,
+                    &projection,
+                )
+            } else {
                 Image::write_projection_report(&out_dir, &built.manifest_digest, &projection)
-            {
+            };
+            if let Err(error) = artifact_result {
                 theme.error(
                     &format!("couldn't write image {name} projection"),
                     &error.to_string(),
@@ -897,6 +926,7 @@ fn environment_image_files(
     roots: &Store::Roots,
     plan: &ModuleEval::EnvPlan,
     name: &str,
+    projection: &mut Image::ProjectionReport,
 ) -> Vec<Image::LayerFile> {
     let mut package_refs = plan.package_refs.clone();
     package_refs.sort();
@@ -923,6 +953,24 @@ fn environment_image_files(
             );
             return Vec::new();
         }
+        projection
+            .included
+            .push(format!("hangar:content:{}", entry.envelope.output_hash));
+        if !entry.envelope.platform.is_empty() {
+            projection
+                .included
+                .push(format!("hangar:platform:{}", entry.envelope.platform));
+        }
+        projection.included.push("hangar:provenance".to_string());
+        projection.changed.push("hangar:cache".to_string());
+        projection.changed.push(format!(
+            "hangar:signing:{}",
+            if entry.envelope.signature.is_empty() {
+                "unsigned"
+            } else {
+                "signed"
+            }
+        ));
         let binaries = match read_realized_package_binaries(&entry) {
             Ok(binaries) => binaries,
             Err(error) => {

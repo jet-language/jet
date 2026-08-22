@@ -5,8 +5,8 @@
 pub const KW_TODO: &str = "Todo";
 
 /// S60's former `#Pure fn` marker, retained only so D-SHAPE8=A can reject it
-/// with E0927. Explicit purity is the empty effect arrow `:[]>`; the same row
-/// on a callback type (`f: fn(T) :[]> U`) demands a pure callback, with E0747
+/// with E0927. Explicit purity is the empty effect arrow `-[]>`; the same row
+/// on a callback type (`f: fn(T) -[]> U`) demands a pure callback, with E0747
 /// for an argument whose effects exceed it.
 pub const KW_PURE: &str = "Pure";
 
@@ -358,7 +358,7 @@ pub const TXN_HANDLE_TYPE: &str = "Transaction";
 
 /// S14 / D-CASING1 follow-on (2026-06-21): retired lowercase spellings retained
 /// only for targeted diagnostics. `test` and `todo` teach their marker forms;
-/// the former `#Pure` marker is retired by D-SHAPE8=A (`:[]>`).
+/// the former `#Pure` marker is retired by D-SHAPE8=A (`-[]>`).
 pub const FOREIGN_TEST: &str = "test";
 pub const FOREIGN_TODO: &str = "todo";
 

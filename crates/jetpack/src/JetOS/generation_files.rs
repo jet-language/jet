@@ -30,7 +30,7 @@ use super::user_flatpak_perf::{
     write_flatpak_facts, write_performance_facts, write_user_environment_facts,
 };
 use jet_env_model::AST::{Expr, Item, StrPart};
-use jet_env_model::ModuleEval::{EnvPlan, SystemPlan};
+use jet_env_model::ModuleEval::{EnvPlan, ServicePlan, SystemPlan};
 use jet_env_model::{Lexer, Parser, Syntax};
 use crate::Store;
 use crate::JSON;
@@ -85,12 +85,7 @@ pub(super) fn write_generation_files(
     let services_json = system
         .services
         .iter()
-        .map(|s| {
-            JSON::object_of(&[
-                ("name", &s.name),
-                ("enable", if s.enable { "true" } else { "false" }),
-            ])
-        })
+        .map(service_plan_json)
         .collect::<Vec<_>>()
         .join(",");
     let options_json = system
@@ -685,12 +680,7 @@ pub(super) fn render_plan_json(
             let services = system
                 .services
                 .iter()
-                .map(|s| {
-                    JSON::object_of(&[
-                        ("name", &s.name),
-                        ("enable", if s.enable { "true" } else { "false" }),
-                    ])
-                })
+                .map(service_plan_json)
                 .collect::<Vec<_>>()
                 .join(",");
             let options = system
@@ -727,6 +717,21 @@ pub(super) fn render_plan_json(
         closure_json,
         services_json,
         options_json
+    )
+}
+
+fn service_plan_json(service: &ServicePlan) -> String {
+    let fields = service
+        .extra
+        .iter()
+        .map(|(key, value)| JSON::object_of(&[("key", key), ("value", value)]))
+        .collect::<Vec<_>>()
+        .join(",");
+    format!(
+        "{{\"name\":{},\"enable\":{},\"fields\":[{}]}}",
+        JSON::quote(&service.name),
+        if service.enable { "true" } else { "false" },
+        fields
     )
 }
 

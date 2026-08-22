@@ -105,7 +105,13 @@ impl RootWorkspace {
             }
         };
         let roots = Roots::at(path.clone());
-        Ingest::ensure_real_directory(&roots.hangar_dir(), "independent Hangar root")?;
+        if let Err(error) =
+            Ingest::ensure_real_directory(&roots.hangar_dir(), "independent Hangar root")
+        {
+            let _ = super::make_tree_writable_for_removal(&path);
+            let _ = fs::remove_dir_all(&path);
+            return Err(error);
+        }
         Ok(Self { path, roots })
     }
 }
@@ -341,6 +347,8 @@ fn entry_from_realized(
         &realized.envelope.output_hash,
         &realized.cache_identity,
     );
+    super::super::Provider::refresh_provider_facts(&mut producer, &realized.reference)
+        .map_err(|error| std::io::Error::other(format!("{error:?}")))?;
     let producer = ProducerRecord::decode(&producer.encode()).map_err(io::Error::other)?;
     let actual = Ingest::try_entry_output_hash(
         roots,
@@ -518,22 +526,13 @@ pub(crate) fn reproducibility_blocked(roots: &Roots, action_key: &str) -> io::Re
     }
 }
 
-/// Run one fresh agreeing registration while holding the Hangar lock. An old
-/// divergence report is removed only for this transaction and restored if the
-/// registration fails, so a failed promotion cannot silently clear evidence.
-pub(crate) fn with_fresh_agreement_unlocked<T>(
-    roots: &Roots,
-    action_key: &str,
-    operation: impl FnOnce() -> io::Result<T>,
-) -> io::Result<T> {
-    let result = operation();
-    match result {
-        Ok(value) => {
-            remove_report(roots, action_key)?;
-            Ok(value)
-        }
-        Err(error) => Err(error),
-    }
+/// Clear divergence evidence only after the complete promotion boundary has
+/// succeeded. Keeping the report until then makes a killed worker or a later
+/// publication failure remain fail-closed.
+pub(crate) fn clear_reproducibility_report(roots: &Roots, action_key: &str) -> io::Result<()> {
+    super::super::RuntimePolicy::with_lock(&roots.root, "hangar", || {
+        remove_report(roots, action_key)
+    })
 }
 
 fn remove_report(roots: &Roots, action_key: &str) -> io::Result<()> {
@@ -877,7 +876,11 @@ fn producer_provenance_facts(producer: &ProducerRecord) -> BTreeMap<String, Stri
         ("policy_facts".to_string(), producer.policy_facts.clone()),
     ]);
     for (key, value) in &producer.facts {
-        if !is_output_fact(key) && key != "cache.reproducibility" {
+        if !is_output_fact(key)
+            && key != "cache.reproducibility"
+            && key != "provider-facts"
+            && key != "provider-facts-digest"
+        {
             facts.insert(format!("fact.{key}"), value.clone());
         }
     }

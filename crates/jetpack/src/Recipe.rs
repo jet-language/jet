@@ -194,6 +194,14 @@ impl<'a> PlanSandbox<'a> {
     pub fn observed_inputs(&self) -> impl Iterator<Item = &str> {
         self.observed_inputs.iter().map(String::as_str)
     }
+
+    fn verify_declared_inputs(&mut self) -> Result<(), StagedPlanActionError> {
+        let paths = self.declared_inputs.keys().cloned().collect::<Vec<_>>();
+        for path in paths {
+            self.read_input(&path)?;
+        }
+        Ok(())
+    }
 }
 
 /// Validate a recipe against the safety contract without running it — the read
@@ -378,6 +386,9 @@ where
         .map_err(staged_plan_model_error)?;
     let mut sandbox = PlanSandbox::new(ctx.source_dir, &action.inputs);
     let fragment = emit(&mut sandbox).map_err(staged_plan_action_error)?;
+    sandbox
+        .verify_declared_inputs()
+        .map_err(staged_plan_action_error)?;
     action
         .validate(&fragment)
         .map_err(staged_plan_model_error)?;

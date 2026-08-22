@@ -218,6 +218,20 @@ pub struct CacheTransferReport {
     pub bytes: u64,
 }
 
+/// Read-only trust state exposed by package explanation. This is the host's
+/// accepted admission pin, not a new cache decision path; transfer still
+/// performs the full signature, provenance, freshness, and output checks.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct CacheAdmission {
+    pub role: String,
+    pub decision: String,
+    pub builder: String,
+    pub provenance: String,
+    pub receipt_version: Option<u64>,
+    pub receipt_expires_unix: Option<u64>,
+    pub reason: String,
+}
+
 impl CacheBinding {
     pub fn validate(&self) -> io::Result<()> {
         validate_component(&self.role, "cache role")?;
@@ -390,8 +404,10 @@ pub fn read_cache_binding(roots: &Roots, role: &str) -> io::Result<CacheBinding>
 
 pub fn list_cache_bindings(roots: &Roots) -> io::Result<Vec<CacheBinding>> {
     let dir = bindings_dir(roots);
-    let Ok(entries) = fs::read_dir(&dir) else {
-        return Ok(Vec::new());
+    let entries = match fs::read_dir(&dir) {
+        Ok(entries) => entries,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(error) => return Err(error),
     };
     let mut paths = entries
         .collect::<Result<Vec<_>, _>>()?
@@ -1061,6 +1077,82 @@ fn report_for(
     }
 }
 
+/// Project persisted cache admission pins without contacting a mirror or
+/// changing trust state. Explain is observational; the transfer boundary is
+/// the only path that admits bytes.
+pub(crate) fn cache_admissions_for_explain(
+    roots: &Roots,
+    entry: &StoreEntry,
+) -> io::Result<Vec<CacheAdmission>> {
+    let bindings = list_cache_bindings(roots)?;
+    let (builder, provenance) = match cache_provenance_for_entry(entry) {
+        Ok(provenance) => (provenance.builder, cache_deriver(entry).unwrap_or_default()),
+        Err(error) => {
+            return Ok(bindings
+                .into_iter()
+                .map(|binding| CacheAdmission {
+                    role: binding.role,
+                    decision: "denied".to_string(),
+                    builder: String::new(),
+                    provenance: String::new(),
+                    receipt_version: None,
+                    receipt_expires_unix: None,
+                    reason: format!("cache provenance is not admissible: {error}"),
+                })
+                .collect())
+        }
+    };
+    let store_name = format!("{}-{}", entry.envelope.output_hash, entry.id);
+    let now = now_seconds();
+    bindings
+        .into_iter()
+        .map(|binding| {
+            let role = binding.role;
+            let pin = cache_receipt_pin_path(roots, &role, &store_name)?;
+            let (decision, receipt_version, receipt_expires_unix, reason) =
+                match read_cache_receipt_pin(&pin) {
+                    Ok(pin) if pin.expires_unix <= now => (
+                        "expired".to_string(),
+                        Some(pin.version),
+                        Some(pin.expires_unix),
+                        format!(
+                            "accepted cache receipt expired at {}; refresh or rebuild",
+                            pin.expires_unix
+                        ),
+                    ),
+                    Ok(pin) => (
+                        "accepted".to_string(),
+                        Some(pin.version),
+                        Some(pin.expires_unix),
+                        "signed cache admission is pinned for this role and output".to_string(),
+                    ),
+                    Err(error) if error.kind() == io::ErrorKind::NotFound => (
+                        "not-accepted".to_string(),
+                        None,
+                        None,
+                        "no signed cache admission has been accepted for this role and output"
+                            .to_string(),
+                    ),
+                    Err(error) => (
+                        "invalid".to_string(),
+                        None,
+                        None,
+                        format!("cache admission pin is unusable: {error}"),
+                    ),
+                };
+            Ok(CacheAdmission {
+                role,
+                decision,
+                builder: builder.clone(),
+                provenance: provenance.clone(),
+                receipt_version,
+                receipt_expires_unix,
+                reason,
+            })
+        })
+        .collect()
+}
+
 fn fingerprint_for_key(key: &TrustKey) -> String {
     format!("{}:{}", key.key_id, key.algorithm)
 }
@@ -1274,6 +1366,68 @@ fn cache_receipt_key(store_name: &str) -> io::Result<String> {
     Ok(format!("trust/{store_name}.receipt"))
 }
 
+fn cache_receipt_pin_path(roots: &Roots, role: &str, store_name: &str) -> io::Result<PathBuf> {
+    validate_component(role, "cache role")?;
+    validate_component(store_name, "cache receipt store name")?;
+    let pin = roots
+        .root
+        .join("trust")
+        .join("cache-receipts")
+        .join(role)
+        .join(format!("{store_name}.pin"));
+    validate_path_components(&pin)?;
+    Ok(pin)
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct CacheReceiptPin {
+    version: u64,
+    expires_unix: u64,
+}
+
+fn read_cache_receipt_pin(path: &Path) -> io::Result<CacheReceiptPin> {
+    let text = String::from_utf8(read_regular_bounded(path, 4096)?)
+        .map_err(|_| invalid("cache trust pin is not UTF-8"))?;
+    let mut version = None;
+    let mut expires_unix = None;
+    let mut digest = None;
+    for raw in text.lines() {
+        let (name, value) = raw
+            .split_once('=')
+            .ok_or_else(|| invalid("cache trust pin has a malformed line"))?;
+        let slot = match name {
+            "version" => &mut version,
+            "expires" => &mut expires_unix,
+            "digest" => &mut digest,
+            _ => return Err(invalid("cache trust pin has an unknown field")),
+        };
+        if slot.is_some() {
+            return Err(invalid("cache trust pin has a duplicate field"));
+        }
+        *slot = Some(value.to_string());
+    }
+    let version = version
+        .ok_or_else(|| invalid("cache trust pin has no version"))?
+        .parse::<u64>()
+        .map_err(|_| invalid("cache trust pin version is not an integer"))?;
+    let expires_unix = expires_unix
+        .ok_or_else(|| invalid("cache trust pin has no expiry"))?
+        .parse::<u64>()
+        .map_err(|_| invalid("cache trust pin expiry is not an integer"))?;
+    let digest = digest.ok_or_else(|| invalid("cache trust pin has no digest"))?;
+    if version == 0
+        || expires_unix == 0
+        || digest.len() != 64
+        || !digest.bytes().all(|byte| byte.is_ascii_hexdigit())
+    {
+        return Err(invalid("cache trust pin has invalid fields"));
+    }
+    Ok(CacheReceiptPin {
+        version,
+        expires_unix,
+    })
+}
+
 fn cache_receipt_for_publication(
     endpoint: &CacheEndpoint,
     role: &str,
@@ -1457,37 +1611,24 @@ fn verify_cache_receipt(
         ));
     }
     let store_name = format!("{}-{}", expected.envelope.output_hash, expected.id);
-    let pin = roots
-        .root
-        .join("trust")
-        .join("cache-receipts")
-        .join(role)
-        .join(format!("{store_name}.pin"));
-    validate_path_components(&pin)?;
+    let pin = cache_receipt_pin_path(roots, role, &store_name)?;
     crate::RuntimePolicy::with_lock(&roots.root, "cache-trust", || {
         ensure_parent(&pin)?;
         let digest = SHA256::sha256_hex(encode_cache_receipt(receipt)?.as_bytes());
-        match read_regular_bounded(&pin, 4096) {
-            Ok(bytes) => {
-                let text = String::from_utf8(bytes)
-                    .map_err(|_| invalid("cache trust pin is not UTF-8"))?;
-                let mut version = None;
-                let mut accepted = None;
-                for line in text.lines() {
-                    if let Some(value) = line.strip_prefix("version=") {
-                        version = value.parse::<u64>().ok();
-                    } else if let Some(value) = line.strip_prefix("digest=") {
-                        accepted = Some(value.to_string());
-                    }
-                }
-                let version = version.ok_or_else(|| invalid("cache trust pin has no version"))?;
-                let accepted = accepted.ok_or_else(|| invalid("cache trust pin has no digest"))?;
+        match read_cache_receipt_pin(&pin) {
+            Ok(existing) => {
+                let version = existing.version;
                 if receipt.version < version {
                     return Err(invalid(&format!(
                         "cache trust metadata rollback rejected: current {version}, incoming {}; refresh or rebuild",
                         receipt.version
                     )));
                 }
+                let accepted = String::from_utf8(read_regular_bounded(&pin, 4096)?)
+                    .map_err(|_| invalid("cache trust pin is not UTF-8"))?
+                    .lines()
+                    .find_map(|line| line.strip_prefix("digest=").map(str::to_string))
+                    .ok_or_else(|| invalid("cache trust pin has no digest"))?;
                 if receipt.version == version && accepted != digest {
                     return Err(invalid(
                         "cache trust metadata changed at the same version; mix-and-match rejected",
@@ -1502,7 +1643,11 @@ fn verify_cache_receipt(
         }
         atomic_replace(
             &pin,
-            format!("version={}\ndigest={digest}\n", receipt.version).as_bytes(),
+            format!(
+                "version={}\nexpires={}\ndigest={digest}\n",
+                receipt.version, receipt.expires_unix
+            )
+            .as_bytes(),
         )
     })
 }
@@ -2972,17 +3117,8 @@ fn atomic_replace(path: &Path, bytes: &[u8]) -> io::Result<()> {
 }
 
 fn read_regular_bounded(path: &Path, limit: u64) -> io::Result<Vec<u8>> {
-    let metadata = fs::symlink_metadata(path)?;
-    if metadata.file_type().is_symlink() || !metadata.is_file() || metadata.len() > limit {
-        return Err(invalid("cache input is not a bounded regular file"));
-    }
-    let file = fs::File::open(path)?;
-    let mut bytes = Vec::new();
-    file.take(limit.saturating_add(1)).read_to_end(&mut bytes)?;
-    if bytes.len() as u64 > limit {
-        return Err(invalid("cache input exceeded its bound while being read"));
-    }
-    Ok(bytes)
+    let limit = usize::try_from(limit).map_err(|_| invalid("cache input bound is too large"))?;
+    super::Nar::read_bounded(path, limit)
 }
 
 fn remove_tree(path: &Path) -> io::Result<()> {
@@ -3106,5 +3242,28 @@ mod tests {
         };
         let error = binding.validate().unwrap_err();
         assert!(error.to_string().contains("typed credential"), "{error}");
+    }
+
+    #[test]
+    fn malformed_cache_binding_is_not_treated_as_unbound() {
+        let root = std::env::temp_dir().join(format!(
+            "jetpack-cache-binding-{}-{}",
+            std::process::id(),
+            now_seconds()
+        ));
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(root.join("cache/bindings")).unwrap();
+        fs::write(
+            root.join("cache/bindings/public.conf"),
+            "not a cache binding\n",
+        )
+        .unwrap();
+        let roots = Roots {
+            root: root.clone(),
+            dev_mode: false,
+        };
+        let error = list_cache_bindings(&roots).unwrap_err();
+        assert!(error.to_string().contains("cache binding"), "{error}");
+        fs::remove_dir_all(root).unwrap();
     }
 }

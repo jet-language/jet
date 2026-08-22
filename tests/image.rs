@@ -1,7 +1,8 @@
 //! U14 `.Oci` container images (D-JPK-IMAGE1=A, card c9jetpackgates, Epoch 4).
 //!
 //! `image.<name> { kind: .Oci, from: packages.<name> }` builds a deterministic,
-//! native OCI layout from an already-built package binary — no Docker, no
+//! native OCI layout from an already-built package binary. The same record with
+//! `from: env.<name>` projects a verified Hangar shell output — no Docker, no
 //! external OCI tooling (I6). `.Iso` disk images (the original U14 shape) ride
 //! the jetos installer tier (Phase D, owner-gated, untouched by this card).
 //!
@@ -138,6 +139,24 @@ fn committed_oci_image_example_field_checks_clean() {
     assert_eq!(image.files, vec!["config/app.toml".to_string()]);
 }
 
+#[test]
+fn committed_environment_image_example_field_checks_clean() {
+    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/fixtures/jetpack-typed/environment_image.jet");
+    let src = fs::read_to_string(&path).unwrap();
+    let plan = evaluate_env(&src, path.parent().unwrap()).unwrap();
+    assert_eq!(plan.images.len(), 1);
+    let image = &plan.images[0];
+    assert!(image.from_environment);
+    assert_eq!(image.from, "dev");
+    assert_eq!(image.target.as_deref(), Some("linux.arm64"));
+    assert_eq!(image.user, Some(10001));
+    assert_eq!(image.entrypoint.as_deref(), Some("/bin/sh"));
+    assert_eq!(image.health.as_deref(), Some("test -x /bin/sh"));
+    assert_eq!(image.expose, vec![8080]);
+    assert_eq!(image.files, vec!["config/app.toml".to_string()]);
+}
+
 /// A `from: packages.<name>` naming a `library`-kind package is rejected
 /// (E1267 `oci-from-non-executable`) — the specific test D-JPK-IMAGE1 calls
 /// out: a library has no binary to containerize.
@@ -174,6 +193,15 @@ fn oci_field_wrong_shape_is_e1269() {
     let scratch = Scratch::new("field-shape");
     write_project(&scratch.path, "executable", false);
     let src = "module image.server { from: packages.app, expose: \"8080\" }";
+    let err = evaluate_env(src, &scratch.path).unwrap_err();
+    assert_eq!(err.code, "E1269");
+}
+
+#[test]
+fn oci_expose_invalid_port_is_e1269() {
+    let scratch = Scratch::new("invalid-port");
+    write_project(&scratch.path, "executable", false);
+    let src = "module image.server { from: packages.app, expose: [0, 70000] }";
     let err = evaluate_env(src, &scratch.path).unwrap_err();
     assert_eq!(err.code, "E1269");
 }
@@ -261,6 +289,15 @@ fn environment_image_uses_realized_package_output() {
     let layer = image_layer(&image);
     assert!(layer.windows(6).any(|window| window == b"bin/sh\0"));
     assert!(!image_blob_containing(&image, br#""User":"10001""#).is_empty());
+    let plan = fs::read_to_string(image.join("plan.json")).unwrap();
+    assert!(plan.contains("\"source\":\"env:dev\""), "plan: {plan}");
+    assert!(plan.contains("\"entrypoint\":[\"/bin/sh\"]"), "plan: {plan}");
+    assert!(plan.contains("\"content\":\"Hangar\""), "plan: {plan}");
+    let dossier = fs::read_to_string(image.join("dossier.json")).unwrap();
+    assert!(
+        dossier.contains("runtime-mount-or-reference-only"),
+        "dossier: {dossier}"
+    );
 }
 
 #[test]
@@ -293,6 +330,30 @@ fn environment_image_projects_named_environment_not_default() {
         br#""architecture":"arm64""#,
     )
     .is_empty());
+}
+
+#[test]
+fn environment_image_requires_a_realized_shell_package() {
+    let project = Scratch::new("environment-no-shell");
+    let root = Scratch::new("environment-no-shell-root");
+    fs::write(
+        project.path.join("env.jet"),
+        "module env.dev { packages: [\"tool@nixpkgs\"] }\nmodule image.server { from: env.dev }\n",
+    )
+    .unwrap();
+    ingest_executable(&root.path, "tool", "tool@nixpkgs@default", "tool");
+
+    let out = jetpack()
+        .args(["image", "server"])
+        .current_dir(&project.path)
+        .env("JETPACK_ROOT", &root.path)
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert_eq!(out.status.code(), Some(2));
+    assert!(stderr.contains("E1336"), "stderr: {stderr}");
+    assert!(stderr.contains("no shell"), "stderr: {stderr}");
 }
 
 #[test]
@@ -341,6 +402,47 @@ module image.server { from: env.dev }
         !report.contains("database_password"),
         "secret name leaked: {report}"
     );
+    let image = project.path.join(".jet/images/server");
+    for blob in fs::read_dir(image.join("blobs/sha256")).unwrap() {
+        let bytes = fs::read(blob.unwrap().path()).unwrap();
+        assert!(
+            !bytes
+                .windows("aws_production".len())
+                .any(|window| window == b"aws_production")
+        );
+        assert!(
+            !bytes
+                .windows("database_password".len())
+                .any(|window| window == b"database_password")
+        );
+    }
+}
+
+#[test]
+fn environment_image_rejects_project_escape_layer_path() {
+    let project = Scratch::new("environment-layer-path");
+    let root = Scratch::new("environment-layer-path-root");
+    fs::write(
+        project.path.join("env.jet"),
+        "module env.dev { packages: [\"bash@nixpkgs\"] }\nmodule image.server { from: env.dev, files: [\"../outside\"] }\n",
+    )
+    .unwrap();
+    ingest_executable(&root.path, "bash", "bash@nixpkgs@default", "bash");
+
+    let out = jetpack()
+        .args(["image", "server"])
+        .current_dir(&project.path)
+        .env("JETPACK_ROOT", &root.path)
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert_eq!(out.status.code(), Some(2), "unsafe layer path must fail: {stderr}");
+    assert!(stderr.contains("safe project-relative paths"), "stderr: {stderr}");
+    let report = fs::read_to_string(project.path.join(".jet/images/server/projection.json"))
+        .unwrap();
+    assert!(report.contains("file:../outside"), "projection: {report}");
+    assert!(report.contains("\"rejected\""), "projection: {report}");
 }
 
 #[test]

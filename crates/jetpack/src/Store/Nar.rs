@@ -457,7 +457,7 @@ fn encode_node(
         if metadata.len() > MAX_NODE_BYTES {
             return Err(invalid("NAR file exceeds the 512 MiB limit"));
         }
-        let bytes = read_bounded(path, MAX_NODE_BYTES as usize)?;
+        let bytes = read_bounded_stable(path, MAX_NODE_BYTES as usize, &metadata)?;
         put_string(out, "(")?;
         put_string(out, "type")?;
         put_string(out, "regular")?;
@@ -897,6 +897,17 @@ fn validate_store_path_bytes(value: &[u8]) -> io::Result<()> {
     if !safe {
         return Err(invalid("narinfo has an unsafe store path"));
     }
+    for part in value
+        .split(|byte| *byte == b'/')
+        .filter(|part| !part.is_empty())
+    {
+        crate::Envelope::validate_path_component(part).map_err(|error| {
+            invalid(&format!(
+                "narinfo store path violates path law: {}",
+                error.detail
+            ))
+        })?;
+    }
     Ok(())
 }
 
@@ -926,6 +937,7 @@ fn validate_relative_url(value: &str) -> io::Result<()> {
         || value
             .bytes()
             .any(|byte| byte == 0 || byte.is_ascii_control() || matches!(byte, b'?' | b'#' | b'%'))
+        || value.contains('\\')
         || value.contains("//")
         || value.ends_with('/')
         || path.is_absolute()
@@ -1069,23 +1081,74 @@ fn narinfo_name(store_path: &str) -> io::Result<String> {
     Ok(format!("{name}.narinfo"))
 }
 
-fn read_bounded(path: &Path, limit: usize) -> io::Result<Vec<u8>> {
+pub(super) fn read_bounded(path: &Path, limit: usize) -> io::Result<Vec<u8>> {
+    read_bounded_with_expected(path, limit, None)
+}
+
+fn read_bounded_stable(path: &Path, limit: usize, expected: &fs::Metadata) -> io::Result<Vec<u8>> {
+    read_bounded_with_expected(path, limit, Some(expected))
+}
+
+fn read_bounded_with_expected(
+    path: &Path,
+    limit: usize,
+    expected: Option<&fs::Metadata>,
+) -> io::Result<Vec<u8>> {
     let metadata = fs::symlink_metadata(path)?;
     if !metadata.is_file() || metadata.file_type().is_symlink() || metadata.len() > limit as u64 {
         return Err(invalid(
             "binary-cache input is not a regular file within its limit",
         ));
     }
-    let file = fs::File::open(path)?;
+    if expected.is_some_and(|expected| !same_regular_metadata(expected, &metadata)) {
+        return Err(invalid("binary-cache input changed before being read"));
+    }
+    let mut options = fs::OpenOptions::new();
+    options.read(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt as _;
+        options.custom_flags(
+            crate::Envelope::nofollow_open_flag()
+                .map_err(|error| invalid(&format!("cannot open cache input safely: {error}")))?,
+        );
+    }
+    let mut file = options.open(path)?;
+    let opened = file.metadata()?;
+    if !same_regular_metadata(&metadata, &opened) {
+        return Err(invalid("binary-cache input changed before being read"));
+    }
     let mut bytes = Vec::new();
-    file.take((limit as u64).saturating_add(1))
+    (&mut file)
+        .take((limit as u64).saturating_add(1))
         .read_to_end(&mut bytes)?;
     if bytes.len() > limit {
         return Err(invalid(
             "binary-cache input exceeded its limit while being read",
         ));
     }
+    if !same_regular_metadata(&opened, &file.metadata()?) {
+        return Err(invalid("binary-cache input changed while being read"));
+    }
     Ok(bytes)
+}
+
+#[cfg(unix)]
+fn same_regular_metadata(left: &fs::Metadata, right: &fs::Metadata) -> bool {
+    use std::os::unix::fs::MetadataExt as _;
+    left.dev() == right.dev()
+        && left.ino() == right.ino()
+        && left.len() == right.len()
+        && left.mode() == right.mode()
+        && left.mtime() == right.mtime()
+        && left.mtime_nsec() == right.mtime_nsec()
+        && left.ctime() == right.ctime()
+        && left.ctime_nsec() == right.ctime_nsec()
+}
+
+#[cfg(not(unix))]
+fn same_regular_metadata(left: &fs::Metadata, right: &fs::Metadata) -> bool {
+    left.len() == right.len() && left.modified().ok() == right.modified().ok()
 }
 
 fn write_or_match(path: &Path, bytes: &[u8]) -> io::Result<()> {
@@ -1170,10 +1233,11 @@ fn set_mode(path: &Path, mode: u32) -> io::Result<()> {
 }
 
 fn remove_tree(path: &Path) -> io::Result<()> {
-    if !path.exists() {
-        return Ok(());
-    }
-    let metadata = fs::symlink_metadata(path)?;
+    let metadata = match fs::symlink_metadata(path) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(()),
+        Err(error) => return Err(error),
+    };
     if metadata.file_type().is_symlink() || !metadata.is_dir() {
         fs::remove_file(path)
     } else {
@@ -1310,5 +1374,23 @@ mod tests {
 
         assert!(publish_local(&root, info, nar, &key).is_err());
         assert!(!root.exists());
+    }
+
+    #[test]
+    fn narinfo_rejects_store_path_aliases() {
+        let info = NarInfo {
+            store_path: "/nix/store/CON".into(),
+            url: "nar/tool.nar".into(),
+            compression: "none".into(),
+            file_size: 0,
+            nar_size: 0,
+            nar_hash: nar_digest(b""),
+            references: Vec::new(),
+            deriver: None,
+            ca: None,
+            signatures: Vec::new(),
+        };
+
+        assert!(info.validate().is_err());
     }
 }

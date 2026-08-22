@@ -2013,8 +2013,8 @@ fn eval_pure_program_value_inner(src: &str, file: &str) -> Result<(CtValue, Stri
         vec![Diagnostics::Diagnostic::error(
             "E3401",
             "no `run` function found for `jet eval`".to_string(),
-            "pure evaluation needs a `fn run() =[]=>` entry point".to_string(),
-            "add `fn run() =[]=> { … }` to the program".to_string(),
+            "pure evaluation needs a `fn run() -[]>` entry point".to_string(),
+            "add `fn run() -[]> { … }` to the program".to_string(),
             None,
         )]
     })?;
@@ -2064,8 +2064,8 @@ fn eval_pure_program_inner(src: &str, file: &str) -> Result<String, Vec<Diagnost
         vec![Diagnostics::Diagnostic::error(
             "E3401",
             "no `run` function found for `jet eval`".to_string(),
-            "pure evaluation needs a `fn run() =[]=>` entry point".to_string(),
-            "add `fn run() =[]=> { … }` to the program".to_string(),
+            "pure evaluation needs a `fn run() -[]>` entry point".to_string(),
+            "add `fn run() -[]> { … }` to the program".to_string(),
             None,
         )]
     })?;

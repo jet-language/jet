@@ -108,7 +108,10 @@ pub fn export_unsigned_archive(
     target: &str,
     include_closure: bool,
 ) -> io::Result<Vec<u8>> {
-    build_archive(roots, target, include_closure)?.encode_unsigned()
+    // Keep the unsigned archive structurally complete.  `encode_unsigned`
+    // is the signature payload and intentionally omits the trailer; callers
+    // that hand bytes to the archive decoder need the explicit `None` trailer.
+    build_archive(roots, target, include_closure)?.encode()
 }
 
 /// Import a complete archive.  Objects are decoded and hashed in a private
@@ -188,13 +191,24 @@ pub(super) fn recover_repair_quarantine_unlocked(roots: &Roots) -> io::Result<us
         let Some(repair_name) = name.strip_prefix("repair-") else {
             continue;
         };
-        let Some((digest, nonce)) = repair_name.split_once('-') else {
+        let Some(digest_tail) = repair_name.strip_prefix("sha256-") else {
             return Err(invalid("repair quarantine name is malformed"));
         };
+        let digest_hex = digest_tail
+            .get(..64)
+            .filter(|value| value.as_bytes().iter().all(|byte| byte.is_ascii_hexdigit()));
+        let Some(digest_hex) = digest_hex else {
+            return Err(invalid("repair quarantine name is malformed"));
+        };
+        if digest_tail.as_bytes().get(64) != Some(&b'-') {
+            return Err(invalid("repair quarantine name is malformed"));
+        }
+        let nonce = digest_tail.get(65..).unwrap_or_default();
         if nonce.is_empty() {
             return Err(invalid("repair quarantine name has no recovery nonce"));
         }
-        validate_digest(digest)?;
+        let digest = format!("sha256-{digest_hex}");
+        validate_digest(&digest)?;
         let backup = item.path();
         let backup_metadata = fs::symlink_metadata(&backup)?;
         if backup_metadata.file_type().is_symlink() || !backup_metadata.is_dir() {
@@ -211,7 +225,7 @@ pub(super) fn recover_repair_quarantine_unlocked(roots: &Roots) -> io::Result<us
                 "repair quarantine backup `{digest}` has digest `{actual}`"
             )));
         }
-        let destination = objects.join(digest);
+        let destination = objects.join(&digest);
         match fs::symlink_metadata(&destination) {
             Ok(existing) if existing.file_type().is_symlink() || !existing.is_dir() => {
                 return Err(invalid(&format!(
@@ -709,6 +723,11 @@ fn import_archive_unlocked(roots: &Roots, archive: Archive) -> io::Result<usize>
                 }
                 remove_tree(&staged)?;
             } else {
+                // The staging tree is sealed before publication so every
+                // validation reads the final immutable bytes. Reopen only
+                // for this same-filesystem rename; seal the canonical path
+                // again before exposing it to the closure transaction.
+                make_tree_writable(&staged)?;
                 fs::rename(&staged, &destination)?;
                 moved.push((destination.clone(), staged.clone()));
                 seal_tree(&destination)?;

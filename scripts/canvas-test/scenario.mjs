@@ -2105,10 +2105,10 @@ fn run() {
           sources.push(await ctx.source());
         } else if (choice === 3) {
           const { doc, graph } = await currentGraphDoc(ctx, "scratch");
-          const hasExtra = (await ctx.source()).includes("extra: Int = 1");
+          const hasExtra = (await ctx.source()).includes("extra: Int{1}");
           const signature = hasExtra
             ? "fn scratch(limit: Int, text: String, flag: Bool, ratio: Float)"
-            : "fn scratch(limit: Int, text: String, flag: Bool, ratio: Float, extra: Int = 1)";
+            : "fn scratch(limit: Int, text: String, flag: Bool, ratio: Float, extra: Int{1})";
           const label = `signature ${hasExtra ? "remove" : "add"} extra`;
           opLog.push(label);
           await uiEdit(ctx, { schema_version: 1, op: "edit_function_signature", revision: doc.revision, graph_id: graph.graph_id, signature }, label);

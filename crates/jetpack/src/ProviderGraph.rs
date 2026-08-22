@@ -219,8 +219,16 @@ impl ProviderFactReport {
         reference: &str,
         platform: &str,
     ) -> Result<crate::SemanticLock::SemanticRecord, String> {
-        let shared = self.shared_facts_for(reference);
+        let requested = self.shared_facts_for(reference);
+        requested.validate()?;
+        let shared = self.shared_facts();
         shared.validate()?;
+        if requested.qualified_reference() != shared.qualified_reference() {
+            return Err(format!(
+                "provider lock reference `{reference}` disagrees with metadata identity `{}`",
+                shared.qualified_reference()
+            ));
+        }
         let qualified_reference = shared.qualified_reference();
         let mut record = crate::SemanticLock::SemanticRecord::new(
             crate::SemanticLock::LockIdentity {
@@ -233,7 +241,7 @@ impl ProviderFactReport {
             crate::SemanticLock::LockRationale {
                 owner_package: owner_package.to_string(),
                 reason: "provider-native facts lowered through the shared carrier".to_string(),
-                source_ref: qualified_reference,
+                source_ref: reference.to_string(),
                 provider: self.facts.family.label().to_string(),
                 exact_output: self.facts.source_identity.clone(),
                 ..Default::default()
@@ -1428,4 +1436,33 @@ fn dependency_keys(raw: &str, section: &str) -> Vec<String> {
         }
     }
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{normalize_provider_document, ProviderFamily};
+    use jet_pkg_model::ProviderFacts::ProviderFacts;
+
+    #[test]
+    fn lock_uses_canonical_carrier_and_retains_raw_reference() {
+        let native =
+            r#"{"name":"web","version":"1.0.0","dependencies":{"vite":"5"}}"#;
+        let report = normalize_provider_document(ProviderFamily::Npm, native);
+        report.validate().expect("lossless provider report");
+        let shared = report.shared_facts();
+        let lock = report
+            .lock_record("app", "web#1.0.0@npm", "any")
+            .expect("canonical provider lock");
+        let locked = ProviderFacts::from_json(
+            lock.future_fields
+                .get("provider-facts")
+                .expect("provider facts in lock"),
+        )
+        .expect("locked provider facts JSON");
+        assert_eq!(locked, shared);
+        assert_eq!(
+            lock.rationales[0].source_ref,
+            "web#1.0.0@npm".to_string()
+        );
+    }
 }

@@ -151,6 +151,121 @@ pub struct PolicyAudit {
     pub maturity: Vec<Diagnostic>,
 }
 
+/// The verified offline policy snapshot used by package resolution. The
+/// resolver receives this only after the feed, pinned key, sequence, digest,
+/// clock, and signature have all passed verification.
+#[derive(Debug, Clone)]
+pub struct AdvisoryPolicy {
+    pub feed: AdvisoryFeed,
+    pub trust: AdvisoryTrustRoot,
+    pub receipt: AdvisoryReceipt,
+    pub now: u64,
+}
+
+/// Load the project-local advisory policy, if one is configured. An absent
+/// feed keeps ordinary local development usable; once a feed is present, every
+/// read failure or trust failure is fatal rather than silently downgrading to
+/// an unaudited resolution.
+pub fn load_advisory_policy(project_root: &Path) -> Result<Option<AdvisoryPolicy>, Diagnostic> {
+    let feed_path = std::env::var_os("JET_ADVISORY_DB")
+        .map(std::path::PathBuf::from)
+        .or_else(|| {
+            let path = project_root.join(".jet").join("advisories.db");
+            path.is_file().then_some(path)
+        });
+    let Some(feed_path) = feed_path else {
+        return Ok(None);
+    };
+    let feed_text = std::fs::read_to_string(&feed_path).map_err(|error| {
+        e2610(
+            "advisory database",
+            &format!("could not read `{}`: {error}", feed_path.display()),
+        )
+    })?;
+    let feed = parse_advisory_feed(&feed_text)?;
+    let trust_path = std::env::var_os("JET_ADVISORY_TRUST")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|| project_root.join(".jet").join("advisory-trust"));
+    let trust = if let Some(public_key) = std::env::var_os("JET_ADVISORY_PUBLIC_KEY") {
+        AdvisoryTrustRoot {
+            public_key: public_key.to_string_lossy().trim().to_string(),
+            ..Default::default()
+        }
+    } else {
+        let trust_text = std::fs::read_to_string(&trust_path).map_err(|error| {
+            e2610(
+                "advisory trust root",
+                &format!("could not read `{}`: {error}", trust_path.display()),
+            )
+        })?;
+        parse_advisory_trust(&trust_text)?
+    };
+    let now = advisory_now();
+    let receipt = verify_advisory_feed(&feed, &trust, now)?;
+    Ok(Some(AdvisoryPolicy {
+        feed,
+        trust,
+        receipt,
+        now,
+    }))
+}
+
+/// Admit one newly selected registry version under an already verified feed.
+/// Existing exact locks bypass this function: freshness never moves an
+/// already locked or realized environment.
+pub fn authorize_registry_candidate(
+    policy: &AdvisoryPolicy,
+    package: &str,
+    version: &str,
+) -> Result<(), Diagnostic> {
+    let version = SemVer::parse(version).ok_or_else(|| {
+        e2610(
+            "registry package",
+            &format!("{package} has an invalid selected version `{version}`"),
+        )
+    })?;
+    let Some(release) = policy
+        .feed
+        .releases
+        .iter()
+        .find(|release| release.package == package && release.version == version)
+    else {
+        return Err(e2610(
+            "advisory feed",
+            &format!("no trusted release record exists for {package}#{version}"),
+        ));
+    };
+    let required = match release.source_class {
+        SourceClass::ThirdParty => policy.receipt.maturity_seconds,
+        SourceClass::FirstParty | SourceClass::Workspace => 0,
+    };
+    let mature_at = release.first_seen.saturating_add(required);
+    let excepted = policy.feed.exceptions.iter().any(|exception| {
+        exception.package == package
+            && exception.version == version
+            && exception.expires_at > policy.now
+    });
+    if policy.now < mature_at && !excepted {
+        return Err(e2609(package, &version.to_string(), mature_at, release.source_class));
+    }
+    if let Some(advisory) = policy
+        .feed
+        .advisories
+        .iter()
+        .find(|advisory| advisory.package == package && advisory.affects(&version))
+    {
+        return Err(e2603(
+            &advisory.id,
+            package,
+            &version.to_string(),
+            &advisory.title,
+            advisory.severity,
+            advisory.fixed.as_ref(),
+        ));
+    }
+    Ok(())
+}
+
 pub fn parse_advisory_feed(text: &str) -> Result<AdvisoryFeed, Diagnostic> {
     let mut lines = text.lines().enumerate().filter_map(|(number, raw)| {
         let line = raw.trim();
@@ -751,8 +866,8 @@ pub fn e2610(source: &str, detail: &str) -> Diagnostic {
     Diagnostic::error(
         "E2610",
         format!("{source} was rejected: {detail}"),
-        "advisory policy is security-sensitive; Jet will not use unsigned, stale, rolled-back, forked, or downgraded evidence.",
-        "refresh the signed offline feed and trust root, or repair the lock provenance before retrying.",
+        "advisory policy is security-sensitive; Jet will not use unsigned, stale, rolled-back, forked, or downgraded evidence.".to_string(),
+        "refresh the signed offline feed and trust root, or repair the lock provenance before retrying.".to_string(),
         None,
     )
 }
@@ -761,8 +876,8 @@ pub fn e2611(input: &str, fix: &str) -> Diagnostic {
     Diagnostic::error(
         "E2611",
         format!("jet inspect audit needs {input}"),
-        "an audit without its lock or advisory database could report a false clean result.",
-        fix,
+        "an audit without its lock or advisory database could report a false clean result.".to_string(),
+        fix.to_string(),
         None,
     )
 }
