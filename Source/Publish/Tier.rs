@@ -1,7 +1,7 @@
 //! Registry trust tiers and publish gates (D-REGCURATE1=C, card #1911).
 
 use crate::Diagnostics::Diagnostic;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use super::Index::IndexEntry;
 use super::NamePolicyDecision;
@@ -258,12 +258,7 @@ fn advisory_gate_status(project_root: &Path) -> GateState {
     let Ok(lock) = crate::Lock::parse(&lock_text) else {
         return GateState::Blocked;
     };
-    let path = std::env::var_os("JET_ADVISORY_DB")
-        .map(PathBuf::from)
-        .or_else(|| {
-            let path = project_root.join(".jet").join("advisories.db");
-            path.is_file().then_some(path)
-        });
+    let path = super::advisory_feed_path(project_root);
     let Some(path) = path else {
         return GateState::Blocked;
     };
@@ -273,22 +268,12 @@ fn advisory_gate_status(project_root: &Path) -> GateState {
     let Ok(feed) = super::parse_advisory_feed(&text) else {
         return GateState::Blocked;
     };
-    let trust = if let Some(public_key) = std::env::var_os("JET_ADVISORY_PUBLIC_KEY") {
-        super::AdvisoryTrustRoot {
-            public_key: public_key.to_string_lossy().trim().to_string(),
-            ..Default::default()
-        }
-    } else {
-        let trust_path = std::env::var_os("JET_ADVISORY_TRUST")
-            .map(PathBuf::from)
-            .unwrap_or_else(|| project_root.join(".jet").join("advisory-trust"));
-        let Ok(trust_text) = std::fs::read_to_string(trust_path) else {
-            return GateState::Blocked;
-        };
-        let Ok(trust) = super::parse_advisory_trust(&trust_text) else {
-            return GateState::Blocked;
-        };
-        trust
+    let trust_path = super::advisory_trust_path(project_root);
+    let Ok(trust_text) = std::fs::read_to_string(trust_path) else {
+        return GateState::Blocked;
+    };
+    let Ok(trust) = super::parse_advisory_trust(&trust_text) else {
+        return GateState::Blocked;
     };
     let Ok(report) = super::audit_advisory_feed(&lock, &feed, &trust, super::advisory_now()) else {
         return GateState::Blocked;

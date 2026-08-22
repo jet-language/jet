@@ -119,16 +119,51 @@ fn exact_selector_value(value: &str, kind: SelectorValue) -> bool {
                 && !value.contains(',')
                 && !matches!(value, "latest" | "next" | "main" | "master" | "head")
         }
-        SelectorValue::Revision => {
-            !matches!(
-                value,
-                "latest" | "next" | "main" | "master" | "head" | "develop"
-            ) && !value.starts_with("refs/heads/")
-        }
-        SelectorValue::Digest => {
-            value.starts_with("sha256-") || value.starts_with("sha256:") || value.len() >= 32
-        }
+        SelectorValue::Revision => exact_revision(value),
+        SelectorValue::Digest => exact_digest(value),
     }
+}
+
+fn exact_digest(value: &str) -> bool {
+    let value = value.trim();
+    let (algorithm, payload) = if let Some(payload) = value.strip_prefix("sha256-") {
+        ("sha256", payload)
+    } else if let Some(payload) = value.strip_prefix("sha256:") {
+        ("sha256", payload)
+    } else if let Some(payload) = value.strip_prefix("sha512-") {
+        ("sha512", payload)
+    } else if let Some(payload) = value.strip_prefix("sha512:") {
+        ("sha512", payload)
+    } else {
+        return is_hex(value) && matches!(value.len(), 64 | 128);
+    };
+    match algorithm {
+        "sha256" => {
+            (payload.len() == 64 && is_hex(payload))
+                || matches!(payload.len(), 43 | 44) && is_base64(payload)
+        }
+        "sha512" => {
+            (payload.len() == 128 && is_hex(payload))
+                || matches!(payload.len(), 86 | 88) && is_base64(payload)
+        }
+        _ => false,
+    }
+}
+
+fn exact_revision(value: &str) -> bool {
+    let value = value.trim();
+    (6..=128).contains(&value.len()) && is_hex(value)
+}
+
+fn is_hex(value: &str) -> bool {
+    !value.is_empty() && value.bytes().all(|byte| byte.is_ascii_hexdigit())
+}
+
+fn is_base64(value: &str) -> bool {
+    !value.is_empty()
+        && value.bytes().all(|byte| {
+            byte.is_ascii_alphanumeric() || matches!(byte, b'+' | b'/' | b'=' | b'-' | b'_')
+        })
 }
 
 #[derive(Default)]
@@ -287,10 +322,7 @@ impl Default for ProviderFacts {
 impl ProviderFacts {
     pub fn for_reference(provider: &str, reference: &str) -> ProviderFacts {
         let (reference_without_selector, selector_part) = split_reference_selector(reference);
-        let (target, inferred_provider) = reference_without_selector
-            .rsplit_once('@')
-            .map(|(target, provider)| (target, provider))
-            .unwrap_or((reference_without_selector.as_str(), ""));
+        let (target, inferred_provider) = split_reference_authority(&reference_without_selector);
         let explicit_provider = provider.trim();
         let provider = if explicit_provider.is_empty() {
             inferred_provider
@@ -361,6 +393,12 @@ impl ProviderFacts {
                 "provider",
                 "ambiguous provider fact: unresolved inference",
                 "profile-source",
+            );
+        } else if is_external_provider(provider) && inferred_provider.trim().is_empty() {
+            facts.add_loss(
+                "provider.reference",
+                "external provider references must retain a fully qualified provider source suffix",
+                "reference.provider",
             );
         } else if is_external_provider(provider) && !facts.selector.is_exact() {
             facts.add_loss(
@@ -509,9 +547,7 @@ impl ProviderFacts {
             );
         }
         let (reference_root, reference_selector) = split_reference_selector(&self.reference);
-        let (reference_target, _) = reference_root
-            .rsplit_once('@')
-            .unwrap_or((reference_root.as_str(), ""));
+        let (reference_target, reference_provider) = split_reference_authority(&reference_root);
         if reference_target != self.target {
             return Err(format!(
                 "provider fact target `{}` disagrees with reference target `{reference_target}`",
@@ -536,6 +572,20 @@ impl ProviderFacts {
             return Err(
                 "provider fact selector is present but the reference has no selector".to_string(),
             );
+        }
+        if is_external_provider(&self.provider) {
+            if reference_provider.is_empty() {
+                return Err(format!(
+                    "external provider `{}` requires a fully qualified provider source suffix",
+                    self.provider
+                ));
+            }
+            if is_external_provider(reference_provider) && reference_provider != self.provider {
+                return Err(format!(
+                    "provider `{}` conflicts with reference provider `{reference_provider}`",
+                    self.provider
+                ));
+            }
         }
         if is_external_provider(&self.provider) && !self.effective_selector().is_exact() {
             return Err(format!(
@@ -595,7 +645,8 @@ impl ProviderFacts {
         if selector.is_empty() {
             return root;
         }
-        if let Some((target, provider)) = root.rsplit_once('@') {
+        let (target, provider) = split_reference_authority(&root);
+        if !provider.is_empty() {
             format!("{target}#{selector}@{provider}")
         } else {
             format!("{root}#{selector}")
@@ -781,6 +832,16 @@ fn split_reference_selector(reference: &str) -> (String, Option<String>) {
         return (format!("{prefix}@{provider}"), Some(selector.to_string()));
     }
     (prefix.to_string(), Some(suffix.to_string()))
+}
+
+fn split_reference_authority(reference: &str) -> (&str, &str) {
+    let Some(index) = reference.rfind('@') else {
+        return (reference, "");
+    };
+    if index == 0 || index + 1 >= reference.len() {
+        return (reference, "");
+    }
+    (&reference[..index], &reference[index + 1..])
 }
 
 fn canonical_selector(selector: &ProviderSelector) -> String {
@@ -989,6 +1050,38 @@ mod tests {
     }
 
     #[test]
+    fn external_provider_requires_a_qualified_source_suffix() {
+        let facts = ProviderFacts::for_reference("npm", "left-pad#1.0.0");
+        assert!(facts.losses.iter().any(|loss| {
+            loss.reason
+                .contains("fully qualified provider source suffix")
+        }));
+        assert!(facts.validate().is_err());
+    }
+
+    #[test]
+    fn digest_selector_requires_a_real_digest_shape() {
+        let valid = ProviderSelector::parse(
+            "#digest=sha256-0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+        );
+        assert!(valid.is_exact());
+
+        let invalid = ProviderSelector::parse("#digest=0123456789abcdef0123456789abcdef");
+        assert!(!invalid.is_exact());
+    }
+
+    #[test]
+    fn mutable_revision_ref_is_an_explicit_loss() {
+        let facts =
+            ProviderFacts::for_reference("swiftpm", "swift-log#revision=feature/main@swiftpm");
+        assert!(facts
+            .losses
+            .iter()
+            .any(|loss| loss.key == "provider.selector.revision"));
+        assert!(facts.validate().is_err());
+    }
+
+    #[test]
     fn source_alias_is_retained_and_external_provider_mismatch_conflicts() {
         let alias = ProviderFacts::for_reference("nix", "ripgrep@default");
         assert_eq!(
@@ -998,10 +1091,7 @@ mod tests {
         alias.validate().expect("named source authority is valid");
 
         let conflict = ProviderFacts::for_reference("npm", "left-pad#1.0.0@cargo");
-        assert!(conflict
-            .conflicts
-            .iter()
-            .any(|item| item.key == "provider"));
+        assert!(conflict.conflicts.iter().any(|item| item.key == "provider"));
         assert!(conflict.validate().is_err());
     }
 }

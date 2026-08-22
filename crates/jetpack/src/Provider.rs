@@ -9,39 +9,39 @@
 //! path, or `JETPACK_FIXTURES`), we read a pinned compatibility result. The
 //! package provider has no installed-Nix process fallback.
 
-use jet_env_model::ModuleEval::{AdapterPlan, AdapterRecipe};
 use super::Package;
 use super::Recipe::{self, BuildContext, BuildRecipe, BuildStep};
 use super::RefSpec::{ProviderKind, RefSpec, Source, SourceTable};
 use super::JSON;
 use crate::SHA256;
 use crate::{ProviderFactValue, ProviderFacts};
+use jet_env_model::ModuleEval::{AdapterPlan, AdapterRecipe};
 use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-mod remote;
-mod package;
 mod cran;
 mod fetch;
 mod luarocks;
+mod package;
+mod remote;
 mod script_registry;
 use cran::CranProvider;
 use luarocks::LuaRocksProvider;
 use script_registry::{Kind as ScriptRegistryKind, ScriptRegistryProvider};
 
-use remote::{
-    copy_tree, fetch_remote_repo, infer_package_kind, parse_remote_source, source_cache_dir,
-    source_repo, tree_fingerprint, RemoteSource,
-};
 use package::{
     canonical_package_kind, canonical_source_dir, core_recipe_identity, core_tree_fingerprint,
     find_canonical_package, toolchain_facts, validate_core_source_tree,
 };
 #[cfg(test)]
 use remote::file_has_top_level_run;
+use remote::{
+    copy_tree, fetch_remote_repo, infer_package_kind, parse_remote_source, source_cache_dir,
+    source_repo, tree_fingerprint, RemoteSource,
+};
 
 /// A realized package: where its bytes are and what to put on PATH. `bin` is
 /// the directory to prepend to PATH, or **empty** for a `library` package (U10),
@@ -138,7 +138,10 @@ pub(crate) fn refresh_provider_facts(
     shared.set_resolved_source(&producer.immutable_source);
     shared.set_native_document("jet-producer-record-v1", &native.encode());
     for (key, value) in &producer.facts {
-        if matches!(key.as_str(), SHARED_PROVIDER_FACTS | SHARED_PROVIDER_FACTS_DIGEST) {
+        if matches!(
+            key.as_str(),
+            SHARED_PROVIDER_FACTS | SHARED_PROVIDER_FACTS_DIGEST
+        ) {
             continue;
         }
         shared.add_fact(
@@ -237,11 +240,7 @@ pub(crate) fn adapter_cache_identity(
     action_identity: &str,
     ctx: &Ctx,
 ) -> super::Store::CacheIdentity {
-    cache_identity(
-        source_digest,
-        &format!("adapter-v1:{action_identity}"),
-        ctx,
-    )
+    cache_identity(source_digest, &format!("adapter-v1:{action_identity}"), ctx)
 }
 
 fn provider_cache_identity(
@@ -272,7 +271,8 @@ fn nix_cache_identity(
     let (normalized_source, normalized_node, normalized_alias, normalized_query) =
         nix_identity_parts(spec, table);
     let authority = format!(
-        "source={normalized_source}\nnode={normalized_node}\nalias={normalized_alias}\nquery={normalized_query}"
+        "source={normalized_source}\nnode={normalized_node}\nalias={normalized_alias}\nquery={normalized_query}\nbuild-facts={}"
+        , nix_build_facts_digest()
     );
     let mut identity = provider_cache_identity(source, NIX_RECIPE_ID, ctx, &authority);
     identity.platform = platform.to_string();
@@ -284,22 +284,38 @@ pub fn validate_cache_authority(
     table: &SourceTable,
     ctx: &Ctx,
 ) -> Result<(), ProviderError> {
-    let Some(project) = ctx.project_dir else { return Ok(()); };
+    let Some(project) = ctx.project_dir else {
+        return Ok(());
+    };
     match resolve_kind(spec, table, ctx.offline, ctx.store_dir) {
         ProviderKind::Cran => {
-            let Some((_, _, repository, locked, _)) = super::Lock::cran_realization(project, &spec.raw) else { return Ok(()); };
+            let Some((_, _, repository, locked, _)) =
+                super::Lock::cran_realization(project, &spec.raw)
+            else {
+                return Ok(());
+            };
             let current = cran::cache_authority(ctx)?;
             ensure_locked_authority("CRAN", &repository, &locked, &current)
         }
         ProviderKind::LuaRocks => {
-            let Some((_, _, repository, locked, _)) = super::Lock::luarocks_realization(project, &spec.raw) else { return Ok(()); };
+            let Some((_, _, repository, locked, _)) =
+                super::Lock::luarocks_realization(project, &spec.raw)
+            else {
+                return Ok(());
+            };
             let current = luarocks::cache_authority(ctx)?;
             ensure_locked_authority("LuaRocks", &repository, &locked, &current)
         }
         ProviderKind::RubyGems | ProviderKind::Cpan | ProviderKind::Packagist => {
             let kind = script_registry_kind(resolve_kind(spec, table, ctx.offline, ctx.store_dir))
-                .ok_or_else(|| ProviderError::Registry("script registry", "unknown provider".into()))?;
-            let Some((_, _, repository, locked, _)) = super::Lock::registry_realization(project, kind.label(), &spec.raw) else { return Ok(()); };
+                .ok_or_else(|| {
+                    ProviderError::Registry("script registry", "unknown provider".into())
+                })?;
+            let Some((_, _, repository, locked, _)) =
+                super::Lock::registry_realization(project, kind.label(), &spec.raw)
+            else {
+                return Ok(());
+            };
             let current = script_registry::cache_authority(kind, ctx)?;
             ensure_locked_authority(kind.title(), &repository, &locked, &current)
         }
@@ -385,10 +401,11 @@ pub fn cache_expectation(
             .ok()?;
             Some(super::Store::CacheExpectation {
                 identity: cache_identity(&source_fingerprint, &recipe, ctx),
-                owned_output: Some(
-                    ctx.store_dir
-                        .join(format!("{}-{}", spec.package, &source_fingerprint[..12])),
-                ),
+                owned_output: Some(ctx.store_dir.join(format!(
+                    "{}-{}",
+                    spec.package,
+                    &source_fingerprint[..12]
+                ))),
                 allow_unsigned_local: true,
             })
         }
@@ -424,8 +441,17 @@ pub fn cache_expectation(
             let authority = cran::cache_authority(ctx).ok()?;
             Some(super::Store::CacheExpectation {
                 identity: super::Store::CacheIdentity {
-                    platform: if env.platform.is_empty() { super::Envelope::host_platform() } else { env.platform.clone() },
-                    ..provider_cache_identity(&source_hash, cran::RECIPE_ID, ctx, &authority.provenance())
+                    platform: if env.platform.is_empty() {
+                        super::Envelope::host_platform()
+                    } else {
+                        env.platform.clone()
+                    },
+                    ..provider_cache_identity(
+                        &source_hash,
+                        cran::RECIPE_ID,
+                        ctx,
+                        &authority.provenance(),
+                    )
                 },
                 owned_output: Some(PathBuf::from(output)),
                 allow_unsigned_local: true,
@@ -438,8 +464,17 @@ pub fn cache_expectation(
             let authority = luarocks::cache_authority(ctx).ok()?;
             Some(super::Store::CacheExpectation {
                 identity: super::Store::CacheIdentity {
-                    platform: if env.platform.is_empty() { super::Envelope::host_platform() } else { env.platform.clone() },
-                    ..provider_cache_identity(&source_hash, luarocks::RECIPE_ID, ctx, &authority.provenance())
+                    platform: if env.platform.is_empty() {
+                        super::Envelope::host_platform()
+                    } else {
+                        env.platform.clone()
+                    },
+                    ..provider_cache_identity(
+                        &source_hash,
+                        luarocks::RECIPE_ID,
+                        ctx,
+                        &authority.provenance(),
+                    )
                 },
                 owned_output: Some(PathBuf::from(output)),
                 allow_unsigned_local: true,
@@ -453,8 +488,17 @@ pub fn cache_expectation(
             let authority = script_registry::cache_authority(kind, ctx).ok()?;
             Some(super::Store::CacheExpectation {
                 identity: super::Store::CacheIdentity {
-                    platform: if env.platform.is_empty() { super::Envelope::host_platform() } else { env.platform.clone() },
-                    ..provider_cache_identity(&source_hash, kind.recipe(), ctx, &authority.provenance())
+                    platform: if env.platform.is_empty() {
+                        super::Envelope::host_platform()
+                    } else {
+                        env.platform.clone()
+                    },
+                    ..provider_cache_identity(
+                        &source_hash,
+                        kind.recipe(),
+                        ctx,
+                        &authority.provenance(),
+                    )
                 },
                 owned_output: Some(PathBuf::from(output)),
                 allow_unsigned_local: true,
@@ -557,9 +601,7 @@ pub(crate) fn envelope_digest(envelope: &super::Envelope::Envelope) -> String {
     )
 }
 
-fn primary_nix_output_digest(
-    named_output_digests: &BTreeMap<String, String>,
-) -> Option<String> {
+fn primary_nix_output_digest(named_output_digests: &BTreeMap<String, String>) -> Option<String> {
     named_output_digests
         .get("out")
         .or_else(|| named_output_digests.get("bin"))
@@ -631,12 +673,24 @@ pub(crate) fn prepare_nix_identity(
 
 fn prepared_nix_facts(identity: &PreparedNixIdentity) -> BTreeMap<String, String> {
     let mut facts = BTreeMap::from([
-        ("nix.identity.source".into(), identity.normalized_source.clone()),
+        (
+            "nix.identity.source".into(),
+            identity.normalized_source.clone(),
+        ),
         ("nix.identity.node".into(), identity.normalized_node.clone()),
-        ("nix.identity.alias".into(), identity.normalized_alias.clone()),
-        ("nix.identity.query".into(), identity.normalized_query.clone()),
+        (
+            "nix.identity.alias".into(),
+            identity.normalized_alias.clone(),
+        ),
+        (
+            "nix.identity.query".into(),
+            identity.normalized_query.clone(),
+        ),
         ("nix.lock.digest".into(), identity.lock_digest.clone()),
-        ("nix.envelope.digest".into(), identity.envelope_digest.clone()),
+        (
+            "nix.envelope.digest".into(),
+            identity.envelope_digest.clone(),
+        ),
         (
             "nix.cache.source_fingerprint".into(),
             identity.cache_identity.source_fingerprint.clone(),
@@ -653,11 +707,79 @@ fn prepared_nix_facts(identity: &PreparedNixIdentity) -> BTreeMap<String, String
             "nix.cache.platform".into(),
             identity.cache_identity.platform.clone(),
         ),
+        ("nix.build.facts.digest".into(), nix_build_facts_digest()),
     ]);
+    for (key, value) in nix_build_facts() {
+        facts.insert(key, value);
+    }
+    for (key, value) in nix_build_environment_facts() {
+        facts.insert(format!("nix.build.env.{key}"), value);
+    }
     for (name, digest) in &identity.named_output_digests {
         facts.insert(format!("nix.output.{name}.digest"), digest.clone());
     }
     facts
+}
+
+/// Canonical facts for the Nix 2.34 build boundary. These are data, not a
+/// second evaluator: the provider records them so cache identity and runtime
+/// projection can prove which compatibility contract was used.
+pub(crate) fn nix_build_facts() -> BTreeMap<String, String> {
+    BTreeMap::from([
+        ("nix.build.root".into(), "/build".into()),
+        ("nix.build.home".into(), "/homeless-shelter".into()),
+        ("nix.build.store".into(), "/nix/store".into()),
+        ("nix.build.uid".into(), "unprivileged".into()),
+        ("nix.build.time".into(), "deterministic".into()),
+        ("nix.build.locale".into(), "C".into()),
+    ])
+}
+
+fn nix_build_environment_facts() -> BTreeMap<String, String> {
+    BTreeMap::from([
+        ("HOME".into(), "/homeless-shelter".into()),
+        ("NIX_BUILD_TOP".into(), "/build".into()),
+        ("TMPDIR".into(), "/build".into()),
+        ("TEMPDIR".into(), "/build".into()),
+        ("TMP".into(), "/build".into()),
+        ("TEMP".into(), "/build".into()),
+        ("NIX_STORE".into(), "/nix/store".into()),
+        ("LANG".into(), "C".into()),
+        ("LC_ALL".into(), "C".into()),
+        ("TZ".into(), "UTC".into()),
+    ])
+}
+
+fn nix_build_facts_digest() -> String {
+    let mut canonical = String::new();
+    for (key, value) in nix_build_facts().into_iter().chain(
+        nix_build_environment_facts()
+            .into_iter()
+            .map(|(key, value)| (format!("nix.build.env.{key}"), value)),
+    ) {
+        canonical.push_str(&key);
+        canonical.push('=');
+        canonical.push_str(&value);
+        canonical.push('\n');
+    }
+    SHA256::sha256_hex(canonical.as_bytes())
+}
+
+/// Return only the fixed, audited environment projection recorded by a Nix
+/// producer. PATH stays under Jetpack's package composition law.
+pub(crate) fn nix_runtime_environment(
+    producer: &super::Store::ProducerRecord,
+) -> BTreeMap<String, String> {
+    if producer.provider != "nix" {
+        return BTreeMap::new();
+    }
+    nix_build_environment_facts()
+        .into_iter()
+        .filter_map(|(name, expected)| {
+            let fact = format!("nix.build.env.{name}");
+            (producer.facts.get(&fact) == Some(&expected)).then_some((name, expected))
+        })
+        .collect()
 }
 
 pub(crate) fn validate_nix_lock_before_store(
@@ -730,10 +852,11 @@ pub(crate) fn record_nix_lock_after_store(
     )
     .map_err(ProviderError::BadOutput)?;
     let lock_digest = project_lock_digest(Some(project))?;
-    super::Store::refresh_nix_lock_digest(roots, entry, &lock_digest)
-        .map_err(|error| ProviderError::BadOutput(format!(
+    super::Store::refresh_nix_lock_digest(roots, entry, &lock_digest).map_err(|error| {
+        ProviderError::BadOutput(format!(
             "could not refresh the Nix Store producer after lock publication: {error}"
-        )))
+        ))
+    })
 }
 
 /// How a dependency was realized, for the `jet build` per-package report
@@ -875,7 +998,9 @@ pub fn flake_ref(spec: &RefSpec, table: &SourceTable) -> String {
 }
 
 fn nix_package_name(package: &str) -> &str {
-    package.split_once("#version=").map_or(package, |(name, _)| name)
+    package
+        .split_once("#version=")
+        .map_or(package, |(name, _)| name)
 }
 
 /// The fixture filename for a ref, e.g. `nixpkgs-fastfetch.json`.
@@ -945,18 +1070,22 @@ impl Provider for NixProvider {
         let identity = prepare_nix_identity(spec, table, ctx, &realized)?;
         realized.cache_identity = identity.cache_identity.clone();
         let previous = realized.producer;
+        let prepared_facts = prepared_nix_facts(&identity);
         let mut facts = previous.facts;
-        facts.extend(prepared_nix_facts(&identity));
+        facts.extend(prepared_facts.clone());
+        let mut plan_facts = previous.plan.facts().clone();
+        plan_facts.extend(prepared_facts);
+        let plan = crate::Comptime::Build::BuildPlanReplay::from_facts(plan_facts)
+            .map_err(ProviderError::BadOutput)?;
         realized.producer = super::Store::ProducerRecord::new(
             previous.provider,
             previous.immutable_source,
             previous.source_digest,
-            previous.plan,
+            plan,
             previous.toolchain_facts,
             format!(
                 "policy={}\nplatform={}",
-                realized.cache_identity.policy_fingerprint,
-                realized.cache_identity.platform
+                realized.cache_identity.policy_fingerprint, realized.cache_identity.platform
             ),
             facts,
         )
@@ -985,33 +1114,36 @@ impl Provider for CoreProvider {
             ProviderError::CoreBuild(format!("source `{source_name}` has no upstream"))
         })?;
         let repo = source_repo(upstream, &spec.package, ctx)?;
-        let canonical_package = find_canonical_package(&repo, &spec.package)
-            .map_err(ProviderError::CoreBuild)?;
-        let (src_dir, canonical, canonical_kind, canonical_version) =
-            if let Some((package_root, facts)) = canonical_package {
-                let source = facts.source.as_deref().unwrap_or(".");
-                let source_path = Path::new(source);
-                if source_path.is_absolute()
-                    || source_path
-                        .components()
-                        .any(|component| component == std::path::Component::ParentDir)
-                {
-                    return Err(ProviderError::CoreBuild(format!(
-                        "canonical Package source `{source}` escapes {}",
-                        package_root.display()
-                    )));
-                }
-                let source_dir = package_root.join(source_path);
-                let kind = canonical_package_kind(&facts, &spec.package)
-                    .unwrap_or_else(|| infer_package_kind(&source_dir));
-                (
-                    source_dir,
-                    Some(facts.clone()),
-                    Some(kind),
-                    facts.version.clone().unwrap_or_default(),
-                )
-            } else {
-                let source_dir = Package::discover_module_in(&repo, &spec.package)
+        let canonical_package =
+            find_canonical_package(&repo, &spec.package).map_err(ProviderError::CoreBuild)?;
+        let (src_dir, canonical, canonical_kind, canonical_version) = if let Some((
+            package_root,
+            facts,
+        )) = canonical_package
+        {
+            let source = facts.source.as_deref().unwrap_or(".");
+            let source_path = Path::new(source);
+            if source_path.is_absolute()
+                || source_path
+                    .components()
+                    .any(|component| component == std::path::Component::ParentDir)
+            {
+                return Err(ProviderError::CoreBuild(format!(
+                    "canonical Package source `{source}` escapes {}",
+                    package_root.display()
+                )));
+            }
+            let source_dir = package_root.join(source_path);
+            let kind = canonical_package_kind(&facts, &spec.package)
+                .unwrap_or_else(|| infer_package_kind(&source_dir));
+            (
+                source_dir,
+                Some(facts.clone()),
+                Some(kind),
+                facts.version.clone().unwrap_or_default(),
+            )
+        } else {
+            let source_dir = Package::discover_module_in(&repo, &spec.package)
                     .map_err(|e| match e {
                         Package::DiscoveryError::NotFound { name } => {
                             ProviderError::CoreBuild(format!(
@@ -1032,8 +1164,8 @@ impl Provider for CoreProvider {
                             ))
                         }
                     })?;
-                (source_dir, None, None, String::new())
-            };
+            (source_dir, None, None, String::new())
+        };
         if !src_dir.is_dir() {
             return Err(ProviderError::CoreBuild(format!(
                 "package source {} does not exist",
@@ -1095,9 +1227,9 @@ impl Provider for CoreProvider {
             canonical_version
         } else {
             manifest
-            .as_ref()
-            .and_then(|pm| pm.version.clone())
-            .unwrap_or_default()
+                .as_ref()
+                .and_then(|pm| pm.version.clone())
+                .unwrap_or_default()
         };
         let (bin, rlib, recipe_id) = match kind {
             Package::PackageKind::Executable => (
@@ -1131,13 +1263,9 @@ impl Provider for CoreProvider {
                                 .to_string(),
                         ));
                     }
-                    let rlib = build_rlib_from_cargo_mode(
-                        &out_dir,
-                        ctx.store_dir,
-                        toolchain,
-                        ctx.offline,
-                    )
-                        .map_err(ProviderError::CoreBuild)?;
+                    let rlib =
+                        build_rlib_from_cargo_mode(&out_dir, ctx.store_dir, toolchain, ctx.offline)
+                            .map_err(ProviderError::CoreBuild)?;
                     (String::new(), rlib, "core-cargo-rlib")
                 } else {
                     (String::new(), String::new(), "core-source")
@@ -1171,7 +1299,10 @@ impl Provider for CoreProvider {
             &identity,
             BTreeMap::from([
                 ("source.kind".into(), "core-package-tree".into()),
-                ("source.tree_schema".into(), "jet-core-source-tree-v2".into()),
+                (
+                    "source.tree_schema".into(),
+                    "jet-core-source-tree-v2".into(),
+                ),
                 ("source.tree_fingerprint".into(), fp.clone()),
                 ("artifact.kind".into(), recipe_id.to_string()),
                 (
@@ -1227,7 +1358,9 @@ pub(crate) fn active_tmp_marker_is_live(path: &Path) -> bool {
             started = value.parse::<u64>().ok();
         }
     }
-    let Some(pid) = pid else { return false; };
+    let Some(pid) = pid else {
+        return false;
+    };
     if pid == std::process::id() {
         return true;
     }
@@ -1237,7 +1370,9 @@ pub(crate) fn active_tmp_marker_is_live(path: &Path) -> bool {
     }
     // Platforms without a process table still get a conservative grace
     // period. A malformed or very old marker is safe to reclaim.
-    let Some(started) = started else { return false; };
+    let Some(started) = started else {
+        return false;
+    };
     let now = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map(|duration| duration.as_secs())
@@ -1273,17 +1408,16 @@ struct BuildScratch {
 
 impl BuildScratch {
     fn new(hangar_dir: &Path, key: &str) -> Result<BuildScratch, String> {
-        if key.is_empty()
-            || key.contains(std::path::MAIN_SEPARATOR)
-            || key == "."
-            || key == ".."
-        {
+        if key.is_empty() || key.contains(std::path::MAIN_SEPARATOR) || key == "." || key == ".." {
             return Err("cargo scratch key is not a safe single path component".to_string());
         }
         let root = hangar_dir.join(BUILD_SCRATCH_DIR);
         match std::fs::symlink_metadata(&root) {
             Ok(metadata) if metadata.file_type().is_symlink() || !metadata.is_dir() => {
-                return Err(format!("build scratch root is not a directory: {}", root.display()));
+                return Err(format!(
+                    "build scratch root is not a directory: {}",
+                    root.display()
+                ));
             }
             Ok(_) => {}
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
@@ -1296,10 +1430,16 @@ impl BuildScratch {
         let path = root.join(format!("{key}-{}-{nonce}", std::process::id()));
         if let Ok(metadata) = std::fs::symlink_metadata(&path) {
             if metadata.file_type().is_symlink() || !metadata.is_dir() {
-                return Err(format!("build scratch path is not a directory: {}", path.display()));
+                return Err(format!(
+                    "build scratch path is not a directory: {}",
+                    path.display()
+                ));
             }
             if active_tmp_marker_is_live(&path) {
-                return Err(format!("build scratch path is already active: {}", path.display()));
+                return Err(format!(
+                    "build scratch path is already active: {}",
+                    path.display()
+                ));
             }
             std::fs::remove_dir_all(&path)
                 .map_err(|error| format!("could not clear build scratch: {error}"))?;
@@ -1314,7 +1454,7 @@ impl BuildScratch {
             path.join(ACTIVE_TMP_MARKER),
             format!("pid={}\nstarted={started}\n", std::process::id()),
         )
-            .map_err(|error| format!("could not mark build scratch active: {error}"))?;
+        .map_err(|error| format!("could not mark build scratch active: {error}"))?;
         Ok(BuildScratch { path })
     }
 }
@@ -1397,7 +1537,11 @@ fn build_rlib_from_cargo_mode(
             "pinned cargo failed with {}{}{}",
             out.status,
             if stderr.is_empty() { "" } else { ": " },
-            if stderr.is_empty() { stdout.trim() } else { stderr.trim() }
+            if stderr.is_empty() {
+                stdout.trim()
+            } else {
+                stderr.trim()
+            }
         ));
     }
     // Find the rlib in the scratch `release/` dir and copy it into the object.
@@ -1483,7 +1627,9 @@ pub fn resolve_kind(
     if matches!(spec.source, Source::Packagist) {
         return ProviderKind::Packagist;
     }
-    let Source::Named(name) = &spec.source else { return ProviderKind::Nix; };
+    let Source::Named(name) = &spec.source else {
+        return ProviderKind::Nix;
+    };
     match table.provider(name) {
         ProviderKind::Core => ProviderKind::Core,
         ProviderKind::Cran => ProviderKind::Cran,
@@ -1517,7 +1663,10 @@ pub fn uses_nix_provider(
     offline: bool,
     cache_dir: &Path,
 ) -> bool {
-    matches!(resolve_kind(spec, table, offline, cache_dir), ProviderKind::Nix | ProviderKind::Infer)
+    matches!(
+        resolve_kind(spec, table, offline, cache_dir),
+        ProviderKind::Nix | ProviderKind::Infer
+    )
 }
 
 /// U23 / D-JPK-NIXSTORE1=D: package refs that resolve through the Nix
@@ -1635,8 +1784,9 @@ pub(crate) fn realize_adapter(
             )));
     }
     let _ = attempt.persist(ctx.store_dir);
-    super::Store::seal_local_output(&out_dir)
-        .map_err(|error| ProviderError::Adapter(format!("could not seal adapter output: {error}")))?;
+    super::Store::seal_local_output(&out_dir).map_err(|error| {
+        ProviderError::Adapter(format!("could not seal adapter output: {error}"))
+    })?;
     let out = out_dir.to_string_lossy().into_owned();
     let bin_dir = out_dir.join("bin");
     let bin = if bin_dir.is_dir() {
@@ -1661,10 +1811,7 @@ pub(crate) fn realize_adapter(
         "adapter.build.dependencies".to_string(),
         declared_dependencies.clone(),
     );
-    replay_facts.insert(
-        "adapter.build.identity".to_string(),
-        build_identity.clone(),
-    );
+    replay_facts.insert("adapter.build.identity".to_string(), build_identity.clone());
     replay_facts.insert(
         "adapter.build.authority".to_string(),
         declared_authority.clone(),
@@ -1920,9 +2067,7 @@ fn parse_realization(spec: &RefSpec, stdout: &str) -> Result<Realized, ProviderE
         .and_then(|value| value.as_str())
         .map_err(&bad_output)?;
     if drv_path.trim().is_empty() {
-        return Err(bad_output(
-            "provider output had no exact `drvPath`".into(),
-        ));
+        return Err(bad_output("provider output had no exact `drvPath`".into()));
     }
 
     let named_outputs = outputs
@@ -2039,10 +2184,9 @@ mod tests {
     #[test]
     fn provider_module_stays_split_by_source_ownership() {
         const MAX_MODULE_LINES: usize = 2500;
-        let root = std::fs::read_to_string(
-            Path::new(env!("CARGO_MANIFEST_DIR")).join("src/Provider.rs"),
-        )
-        .unwrap();
+        let root =
+            std::fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("src/Provider.rs"))
+                .unwrap();
         let remote = std::fs::read_to_string(
             Path::new(env!("CARGO_MANIFEST_DIR")).join("src/Provider/remote.rs"),
         )
@@ -2189,9 +2333,46 @@ mod tests {
         );
         assert!(!r.producer.facts.contains_key("closure.authority"));
         assert_eq!(
-            r.producer.plan.facts().get("nix.output.out").map(String::as_str),
+            r.producer
+                .plan
+                .facts()
+                .get("nix.output.out")
+                .map(String::as_str),
             Some("/nix/store/abc-fastfetch-2.0")
         );
+    }
+
+    #[test]
+    fn nix_build_facts_are_fixed_and_runtime_path_stays_composed() {
+        let facts = nix_build_facts();
+        assert_eq!(facts.get("nix.build.root").map(String::as_str), Some("/build"));
+        assert_eq!(
+            facts.get("nix.build.home").map(String::as_str),
+            Some("/homeless-shelter")
+        );
+        assert_eq!(facts.get("nix.build.uid").map(String::as_str), Some("unprivileged"));
+        assert_eq!(facts.get("nix.build.time").map(String::as_str), Some("deterministic"));
+        let env_facts = nix_build_environment_facts();
+        let producer_facts = env_facts
+            .iter()
+            .map(|(name, value)| (format!("nix.build.env.{name}"), value.clone()))
+            .collect();
+        let plan = crate::Comptime::Build::BuildPlanReplay::from_facts(BTreeMap::new()).unwrap();
+        let producer = super::super::Store::ProducerRecord::new(
+            "nix",
+            "/nix/store/fake.drv",
+            "sha256-fake",
+            plan,
+            "nix-compat",
+            "policy=test\nplatform=test",
+            producer_facts,
+        )
+        .unwrap();
+        let runtime = nix_runtime_environment(&producer);
+        assert_eq!(runtime.get("HOME").map(String::as_str), Some("/homeless-shelter"));
+        assert_eq!(runtime.get("NIX_BUILD_TOP").map(String::as_str), Some("/build"));
+        assert_eq!(runtime.get("LC_ALL").map(String::as_str), Some("C"));
+        assert!(!runtime.contains_key("PATH"));
     }
 
     #[test]
@@ -2305,10 +2486,7 @@ mod tests {
     fn missing_exact_derivation_is_bad() {
         let spec = classify("x@nixpkgs").unwrap();
         assert!(matches!(
-            parse_realization(
-                &spec,
-                r#"[{"outputs":{"out":"/nix/store/x"}}]"#
-            ),
+            parse_realization(&spec, r#"[{"outputs":{"out":"/nix/store/x"}}]"#),
             Err(ProviderError::BadOutput(_))
         ));
     }
@@ -2369,7 +2547,9 @@ mod tests {
                 .expect("production provider embeds shared facts"),
         )
         .expect("production provider emits provider-facts JSON");
-        shared.validate().expect("production provider facts are lossless");
+        shared
+            .validate()
+            .expect("production provider facts are lossless");
         assert_eq!(shared.reference, r.reference);
         assert_eq!(shared.resolved_source, r.producer.immutable_source);
         assert!(!shared.native_document.is_empty());
@@ -2780,7 +2960,10 @@ mod tests {
 
         let remote = parse_remote_source(&upstream).unwrap();
         let cache = source_cache_dir(&store, &remote);
-        assert!(cache.join("packages/app/package.jet").is_file(), "app subtree");
+        assert!(
+            cache.join("packages/app/package.jet").is_file(),
+            "app subtree"
+        );
         assert!(
             cache.join("packages/logging/package.jet").is_file(),
             "in-repo dependency `logging` must be pulled into the sparse checkout: {}",
@@ -2883,14 +3066,20 @@ mod tests {
         let realized = realize(&spec, &table, &ctx).unwrap();
         let output = Path::new(&realized.out);
         assert!(output.join("main.jet").is_file());
-        assert!(!output.join("package.jet").is_file(), "source root is the member source dir");
+        assert!(
+            !output.join("package.jet").is_file(),
+            "source root is the member source dir"
+        );
         assert_eq!(realized.version, "0.1.0");
 
         let before = cache_expectation(&spec, &table, &ctx).expect("canonical cache identity");
         assert_eq!(before.identity, realized.cache_identity);
         std::fs::write(source.join("extra.jet"), "fn extra() {}\n").unwrap();
         let after = cache_expectation(&spec, &table, &ctx).expect("changed cache identity");
-        assert_ne!(before.identity.source_fingerprint, after.identity.source_fingerprint);
+        assert_ne!(
+            before.identity.source_fingerprint,
+            after.identity.source_fingerprint
+        );
         assert_ne!(before.owned_output, after.owned_output);
         std::fs::remove_dir_all(&base).ok();
     }

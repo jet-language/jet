@@ -125,7 +125,7 @@ pub struct ProviderFactReport {
 
 impl ProviderFactReport {
     pub fn is_lossless(&self) -> bool {
-        self.losses.is_empty() && self.conflicts.is_empty()
+        self.losses.is_empty() && self.conflicts.is_empty() && self.shared_facts().is_lossless()
     }
 
     pub fn validate(&self) -> Result<(), String> {
@@ -141,8 +141,11 @@ impl ProviderFactReport {
                 self.losses.join("; ")
             ));
         }
-        if self.facts.name.is_empty() || self.facts.version.is_empty() {
-            return Err("provider facts need both a name and an exact version".to_string());
+        if self.facts.name.is_empty() {
+            return Err("provider facts need a package name".to_string());
+        }
+        if metadata_identity_selector(&self.facts).1.is_empty() {
+            return Err("provider facts need an exact version, revision, or digest".to_string());
         }
         if self.facts.source_identity.is_empty() {
             return Err("provider facts need a resolved source identity".to_string());
@@ -171,10 +174,11 @@ impl ProviderFactReport {
         } else {
             None
         };
-        if selector_identity.as_deref() != Some(self.facts.version.as_str()) {
+        let (_, expected_identity) = metadata_identity_selector(&self.facts);
+        if selector_identity.as_deref() != Some(expected_identity.as_str()) {
             shared.add_conflict(
                 "provider.selector.identity",
-                &self.facts.version,
+                &expected_identity,
                 selector_identity.as_deref().unwrap_or("<missing>"),
                 "provider.metadata",
             );
@@ -198,10 +202,12 @@ impl ProviderFactReport {
     }
 
     pub fn shared_facts(&self) -> ProviderFacts {
+        let (selector_key, selector_value) = metadata_identity_selector(&self.facts);
         let reference = format!(
-            "{}#version={}@{}",
+            "{}#{}={}@{}",
             self.facts.name,
-            self.facts.version,
+            selector_key,
+            selector_value,
             self.facts.family.label()
         );
         self.shared_facts_for(&reference)
@@ -361,6 +367,26 @@ fn add_metadata_facts(shared: &mut ProviderFacts, facts: &MetadataFacts) {
     }
 }
 
+fn metadata_identity_selector(facts: &MetadataFacts) -> (&'static str, String) {
+    if facts.family == ProviderFamily::SwiftPM {
+        if let Some(revision) = facts
+            .typed
+            .get("provider.revision")
+            .and_then(|values| values.first())
+            .filter(|revision| !revision.is_empty())
+        {
+            return ("revision", revision.clone());
+        }
+    }
+    if !facts.version.is_empty() {
+        return ("version", facts.version.clone());
+    }
+    if !facts.integrity_hash.is_empty() {
+        return ("digest", facts.integrity_hash.clone());
+    }
+    ("version", String::new())
+}
+
 /// Normalize one provider-native metadata document into the shared fact model.
 /// The report is intentionally separate from `MetadataFacts`: unsupported or
 /// ambiguous fields stay visible instead of becoming silent defaults.
@@ -508,7 +534,7 @@ pub fn normalize_npm(package_json: &str) -> MetadataFacts {
     let name = obj
         .and_then(|m| m.get("name"))
         .and_then(|v| v.as_str().ok())
-        .unwrap_or("npm-package")
+        .unwrap_or_default()
         .to_string();
     let mut facts = MetadataFacts::empty(ProviderFamily::Npm, name);
     facts.version = obj
@@ -535,7 +561,7 @@ pub fn normalize_npm(package_json: &str) -> MetadataFacts {
 }
 
 pub fn normalize_cargo(cargo_toml: &str) -> MetadataFacts {
-    let name = toml_string(cargo_toml, "name").unwrap_or_else(|| "cargo-package".to_string());
+    let name = toml_string(cargo_toml, "name").unwrap_or_default();
     let mut facts = MetadataFacts::empty(ProviderFamily::Cargo, name);
     facts.version = toml_string(cargo_toml, "version").unwrap_or_default();
     facts.license = toml_string(cargo_toml, "license").unwrap_or_default();
@@ -565,6 +591,9 @@ pub fn normalize_swiftpm(name: &str, revision: &str) -> MetadataFacts {
     facts.version = revision.to_string();
     facts.source_identity = format!("swiftpm:{name}@{revision}");
     facts.integrity_hash = revision.to_string();
+    facts
+        .typed
+        .insert("provider.revision".to_string(), vec![revision.to_string()]);
     facts
 }
 
@@ -660,10 +689,25 @@ fn swiftpm_report(document: &str) -> ProviderFactReport {
             if pins.len() == 1 {
                 if let Some(JSONValue::Object(pin)) = pins.first() {
                     facts.name = json_string(pin, "identity").unwrap_or_default();
-                    facts.version = json_string(pin, "state")
-                        .or_else(|| json_string(pin, "revision"))
+                    let (version, revision) = match pin.get("state") {
+                        Some(JSONValue::Object(state)) => (
+                            json_string(state, "version"),
+                            json_string(state, "revision"),
+                        ),
+                        _ => (None, json_string(pin, "revision")),
+                    };
+                    facts.version = version
+                        .clone()
+                        .or_else(|| revision.clone())
                         .unwrap_or_default();
-                    facts.integrity_hash = facts.version.clone();
+                    if let Some(revision) = revision {
+                        facts.integrity_hash = revision.clone();
+                        facts
+                            .typed
+                            .insert("provider.revision".to_string(), vec![revision]);
+                    } else {
+                        facts.integrity_hash = facts.version.clone();
+                    }
                 }
             } else if pins.len() > 1 {
                 facts.name = "swiftpm-lock".to_string();
@@ -678,7 +722,14 @@ fn swiftpm_report(document: &str) -> ProviderFactReport {
             }
         }
     }
-    facts.source_identity = format!("swiftpm:{}@{}", facts.name, facts.version);
+    let source_revision = facts
+        .typed
+        .get("provider.revision")
+        .and_then(|values| values.first())
+        .filter(|revision| !revision.is_empty())
+        .cloned()
+        .unwrap_or_else(|| facts.version.clone());
+    facts.source_identity = format!("swiftpm:{}@{}", facts.name, source_revision);
     let mut report = report_with_identity(facts);
     if report.facts.version == "set" {
         report.losses.push(
@@ -976,7 +1027,14 @@ fn homebrew_report(document: &str) -> ProviderFactReport {
         ProviderFamily::Homebrew,
         json_string(&object, "name").unwrap_or_default(),
     );
-    facts.version = json_string(&object, "version").unwrap_or_default();
+    facts.version = json_string(&object, "version")
+        .or_else(|| {
+            object
+                .get("versions")
+                .and_then(|value| value.as_object().ok())
+                .and_then(|versions| json_string(versions, "stable"))
+        })
+        .unwrap_or_default();
     facts.license = json_string(&object, "license").unwrap_or_default();
     facts.dependencies = json_array_strings(&object, "dependencies");
     facts.source_identity = format!("homebrew:{}@{}", facts.name, facts.version);
@@ -1050,7 +1108,12 @@ fn binary_report(document: &str) -> ProviderFactReport {
         .or_else(|| json_string(&object, "sha256"))
         .unwrap_or_default();
     facts.platforms = json_array_strings(&object, "platforms");
-    facts.source_identity = format!("binary:{}@{}", facts.name, facts.version);
+    let identity = if facts.version.is_empty() {
+        facts.integrity_hash.clone()
+    } else {
+        facts.version.clone()
+    };
+    facts.source_identity = format!("binary:{}@{}", facts.name, identity);
     let mut report = report_with_identity(facts);
     if report.facts.integrity_hash.is_empty() {
         report
@@ -1065,8 +1128,8 @@ fn report_with_identity(facts: MetadataFacts) -> ProviderFactReport {
     if facts.name.is_empty() {
         losses.push("provider metadata has no package name".to_string());
     }
-    if facts.version.is_empty() {
-        losses.push("provider metadata has no exact version".to_string());
+    if metadata_identity_selector(&facts).1.is_empty() {
+        losses.push("provider metadata has no exact version, revision, or digest".to_string());
     }
     ProviderFactReport {
         facts,
@@ -1445,8 +1508,7 @@ mod tests {
 
     #[test]
     fn lock_uses_canonical_carrier_and_retains_raw_reference() {
-        let native =
-            r#"{"name":"web","version":"1.0.0","dependencies":{"vite":"5"}}"#;
+        let native = r#"{"name":"web","version":"1.0.0","dependencies":{"vite":"5"}}"#;
         let report = normalize_provider_document(ProviderFamily::Npm, native);
         report.validate().expect("lossless provider report");
         let shared = report.shared_facts();
@@ -1460,9 +1522,6 @@ mod tests {
         )
         .expect("locked provider facts JSON");
         assert_eq!(locked, shared);
-        assert_eq!(
-            lock.rationales[0].source_ref,
-            "web#1.0.0@npm".to_string()
-        );
+        assert_eq!(lock.rationales[0].source_ref, "web#1.0.0@npm".to_string());
     }
 }

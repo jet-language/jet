@@ -80,7 +80,11 @@ pub(super) fn file_has_top_level_run(src: &str) -> bool {
 /// migration-era `pkg.jet`), resolution is
 /// index-first: only that member's subtree — plus its in-repo dependencies — is
 /// materialized via a sparse checkout, never the whole repo (Slice C, D-MONOREF1).
-pub(super) fn source_repo(upstream: &str, want_package: &str, ctx: &Ctx) -> Result<PathBuf, ProviderError> {
+pub(super) fn source_repo(
+    upstream: &str,
+    want_package: &str,
+    ctx: &Ctx,
+) -> Result<PathBuf, ProviderError> {
     if let Some(p) = upstream.strip_prefix("path:") {
         let path = PathBuf::from(p);
         let path = if path.is_absolute() {
@@ -330,7 +334,11 @@ fn classify_canonical_dep(
     if let Some(member) = member_dirs.iter().find(|dir| dir_basename(dir) == name) {
         return InRepoDep::Member(member.clone());
     }
-    if let Package::DepSource::Provider { provider: Source::Path, target } = source {
+    if let Package::DepSource::Provider {
+        provider: Source::Path,
+        target,
+    } = source
+    {
         let resolved = join_repo_relative(member_dir, target);
         if let Some(resolved) = resolved {
             if member_dirs.contains(&resolved) {
@@ -450,7 +458,10 @@ fn split_ref(upstream: &str) -> (&str, Option<String>) {
     }
 }
 
-pub(super) fn fetch_remote_repo(remote: &RemoteSource, ctx: &Ctx) -> Result<PathBuf, ProviderError> {
+pub(super) fn fetch_remote_repo(
+    remote: &RemoteSource,
+    ctx: &Ctx,
+) -> Result<PathBuf, ProviderError> {
     let cache = source_cache_dir(ctx.store_dir, remote);
     if cache.is_dir() {
         return Ok(cache);

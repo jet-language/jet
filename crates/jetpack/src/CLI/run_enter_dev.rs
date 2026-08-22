@@ -1674,6 +1674,95 @@ fn cmd_env_sync(theme: &Theme, parsed: &Parsed) -> i32 {
     }
 }
 
+fn env_info_service_summary(service: &ModuleEval::DevServicePlan) -> String {
+    let mut facts = vec![if service.enable {
+        "enabled".to_string()
+    } else {
+        "disabled".to_string()
+    }];
+    if !service.ports.is_empty() {
+        facts.push(format!(
+            "ports={}",
+            service
+                .ports
+                .iter()
+                .map(ToString::to_string)
+                .collect::<Vec<_>>()
+                .join(",")
+        ));
+    }
+    if let Some(run) = &service.run {
+        facts.push(format!("run={}", run.join(" ")));
+    }
+    if let Some(shutdown) = &service.shutdown {
+        let value = match shutdown {
+            ModuleEval::ShutdownPolicy::Kill => "kill".to_string(),
+            ModuleEval::ShutdownPolicy::Term { grace_ms } => {
+                format!("term:{grace_ms}ms")
+            }
+        };
+        facts.push(format!("shutdown={value}"));
+    }
+    if let Some(data_dir) = &service.data_dir {
+        facts.push(format!("data_dir={data_dir}"));
+    }
+    if let Some(ready) = &service.ready {
+        facts.push(format!("ready={ready}"));
+    }
+    if let Some(probe) = &service.ready_probe {
+        let value = match probe {
+            ModuleEval::ReadyProbe::Exec(command) => format!("exec:{command}"),
+            ModuleEval::ReadyProbe::Http { url, status } => match status {
+                Some(status) => format!("http:{url}:{status}"),
+                None => format!("http:{url}"),
+            },
+            ModuleEval::ReadyProbe::Notify { path } => format!("notify:{path}"),
+            ModuleEval::ReadyProbe::Tcp { host, port } => format!("tcp:{host}:{port}"),
+        };
+        facts.push(format!("ready_probe={value}"));
+    }
+    let readiness = if service.ready.is_some() {
+        "command".to_string()
+    } else if service.ready_probe.is_some() {
+        "probe".to_string()
+    } else if let Some(port) = service.ports.first() {
+        format!("tcp:{port}")
+    } else {
+        "process".to_string()
+    };
+    facts.push(format!("readiness={readiness}"));
+    if let Some(restart) = &service.restart {
+        let value = match restart {
+            ModuleEval::RestartPolicy::Never => "never".to_string(),
+            ModuleEval::RestartPolicy::OnFailure {
+                max,
+                backoff_ms,
+                exponential,
+            } => format!("on_failure:max={max},backoff_ms={backoff_ms},exponential={exponential}"),
+            ModuleEval::RestartPolicy::Always {
+                max,
+                backoff_ms,
+                exponential,
+            } => format!("always:max={max},backoff_ms={backoff_ms},exponential={exponential}"),
+        };
+        facts.push(format!("restart={value}"));
+    }
+    for (label, values) in [
+        ("watch", &service.watch),
+        ("after", &service.after),
+        ("before_start", &service.before_start),
+        ("sockets", &service.sockets),
+    ] {
+        if !values.is_empty() {
+            facts.push(format!("{label}={}", values.join(",")));
+        }
+    }
+    for (name, value) in &service.extra {
+        facts.push(format!("extra={name}:{value}"));
+    }
+    format!("{} ({})", service.name, facts.join("; "))
+}
+
 /// `jet env info`: disclose the selected preset and the typed environment
 /// facts without realizing packages or executing lifecycle commands.
 fn cmd_env_info(theme: &Theme, parsed: &Parsed) -> i32 {
@@ -2251,10 +2340,7 @@ fn cmd_env_info(theme: &Theme, parsed: &Parsed) -> i32 {
     let services = plan
         .dev_services
         .iter()
-        .map(|service| {
-            let state = if service.enable { "enabled" } else { "disabled" };
-            format!("{} ({state})", service.name)
-        })
+        .map(env_info_service_summary)
         .collect::<Vec<_>>();
     theme.detail(&format!(
         "services: {}",

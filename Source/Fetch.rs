@@ -80,12 +80,10 @@ pub fn fetch(
         return Ok((lock.clone(), dep_dirs));
     }
 
-    // Resolve the full dependency graph. If an offline advisory feed is
-    // configured, verify it before registry resolution can fetch or install a
-    // candidate. An exact existing lock remains the explicit freshness escape.
-    let advisory_policy = Publish::load_advisory_policy(project_root)
-        .map_err(|diagnostic| vec![diagnostic])?;
-    let mut resolver = Resolver::new(project_root, existing_lock, opts, advisory_policy.as_ref());
+    // Resolve the full dependency graph. Load an offline advisory feed only
+    // when a new registry candidate needs authorization; an exact existing
+    // lock remains the explicit freshness escape.
+    let mut resolver = Resolver::new(project_root, existing_lock, opts);
     let (mut new_lock, dep_dirs) = resolver.resolve_manifest(manifest)?;
     if let Err(d) = enforce_provenance_policy(&new_lock, manifest) {
         return Err(vec![d]);
@@ -194,7 +192,7 @@ struct Resolver<'a> {
     project_root: &'a Path,
     existing_lock: Option<&'a LockFile>,
     opts: &'a FetchOptions,
-    advisory_policy: Option<&'a Publish::AdvisoryPolicy>,
+    advisory_policy: Option<Result<Option<Publish::AdvisoryPolicy>, Diagnostic>>,
     /// name → (version, source_dir, fingerprint, content hash, deps, provenance)
     resolved: BTreeMap<String, ResolvedPkg>,
     /// name → Vec<chain> — for E1201 blame chains.
@@ -217,13 +215,12 @@ impl<'a> Resolver<'a> {
         project_root: &'a Path,
         existing_lock: Option<&'a LockFile>,
         opts: &'a FetchOptions,
-        advisory_policy: Option<&'a Publish::AdvisoryPolicy>,
     ) -> Self {
         Resolver {
             project_root,
             existing_lock,
             opts,
-            advisory_policy,
+            advisory_policy: None,
             resolved: BTreeMap::new(),
             version_seen: HashMap::new(),
         }
@@ -648,7 +645,7 @@ impl<'a> Resolver<'a> {
                     )]);
                 };
                 if !reused_exact_lock {
-                    if let Some(policy) = self.advisory_policy {
+                    if let Some(policy) = self.load_advisory_policy()? {
                         Publish::authorize_registry_candidate(
                             policy,
                             dep_name,
@@ -727,11 +724,21 @@ impl<'a> Resolver<'a> {
                     .collect::<Vec<_>>();
                 let cap_digest = crate::Publish::ApiFreeze::project_capability_digest(&artifact);
                 let fp = Lock::compute_fingerprint(&content_hash, &dep_fps, &cap_digest);
+                let advisory_receipt = if reused_exact_lock {
+                    None
+                } else {
+                    self.advisory_policy
+                        .as_ref()
+                        .and_then(|result| result.as_ref().ok())
+                        .and_then(Option::as_ref)
+                        .map(|policy| &policy.receipt)
+                };
                 let store_path = ingest_registry_artifact(
                     &registry,
                     &selected,
                     &artifact,
                     &hangar_references,
+                    advisory_receipt,
                 )
                 .map_err(|error| {
                     vec![registry_diagnostic(
@@ -853,6 +860,18 @@ impl<'a> Resolver<'a> {
                 || self.opts.update_dep.as_deref() == Some(dep_name))
     }
 
+    fn load_advisory_policy(
+        &mut self,
+    ) -> Result<Option<&Publish::AdvisoryPolicy>, Vec<Diagnostic>> {
+        if self.advisory_policy.is_none() {
+            self.advisory_policy = Some(Publish::load_advisory_policy(self.project_root));
+        }
+        match self.advisory_policy.as_ref().expect("advisory policy is loaded") {
+            Ok(policy) => Ok(policy.as_ref()),
+            Err(diagnostic) => Err(vec![diagnostic.clone()]),
+        }
+    }
+
     fn locked_registry_config(&self, dep_name: &str) -> Option<Publish::RegistryConfig> {
         let package = self.existing_lock?.packages.iter().find(|package| {
             package.name == dep_name && matches!(&package.source, LockSource::Registry { .. })
@@ -931,6 +950,7 @@ fn ingest_registry_artifact(
     entry: &Publish::IndexEntry,
     artifact: &Path,
     references: &[String],
+    advisory_receipt: Option<&Publish::AdvisoryReceipt>,
 ) -> Result<PathBuf, String> {
     let roots = jetpack::Store::resolve();
     let policy = format!(
@@ -950,8 +970,22 @@ fn ingest_registry_artifact(
         entry.public_key,
         entry.signature,
     );
+    let advisory = advisory_receipt.map(|receipt| {
+        format!(
+            "sequence={},digest={},key={},maturity={}s",
+            receipt.sequence, receipt.digest, receipt.key_id, receipt.maturity_seconds
+        )
+    });
+    let policy = advisory
+        .as_deref()
+        .map(|receipt| format!("{policy};advisory-feed={receipt}"))
+        .unwrap_or(policy);
+    let provenance = advisory
+        .as_deref()
+        .map(|receipt| format!("{provenance};advisory-feed={receipt}"))
+        .unwrap_or(provenance);
     let reference = format!("registry:{}:{}#{}", registry.name, entry.name, entry.version);
-    let references = jetpack::Store::list(&roots)
+    let existing = jetpack::Store::list(&roots)
         .into_iter()
         .find(|existing| {
             existing.name.as_str() == entry.name.as_str()
@@ -959,9 +993,21 @@ fn ingest_registry_artifact(
                 && existing.reference.as_str() == reference.as_str()
                 && existing.cache_identity.source_fingerprint.as_str()
                     == entry.content_hash.as_str()
-        })
-        .map(|existing| existing.references)
+        });
+    let references = existing
+        .as_ref()
+        .map(|existing| existing.references.clone())
         .unwrap_or_else(|| references.to_vec());
+    let policy_fingerprint = existing
+        .as_ref()
+        .filter(|_| advisory_receipt.is_none())
+        .map(|existing| existing.cache_identity.policy_fingerprint.clone())
+        .unwrap_or_else(|| format!("sha256-{}", crate::SHA256::sha256_hex(policy.as_bytes())));
+    let provenance = existing
+        .as_ref()
+        .filter(|_| advisory_receipt.is_none())
+        .map(|existing| existing.envelope.provenance.clone())
+        .unwrap_or(provenance);
     let request = jetpack::Store::IngestRequest {
         name: entry.name.clone(),
         version: entry.version.clone(),
@@ -969,7 +1015,7 @@ fn ingest_registry_artifact(
         cache_identity: jetpack::Store::CacheIdentity {
             source_fingerprint: entry.content_hash.clone(),
             recipe_fingerprint: entry.fingerprint.clone(),
-            policy_fingerprint: format!("sha256-{}", crate::SHA256::sha256_hex(policy.as_bytes())),
+            policy_fingerprint,
             platform: jetpack::Envelope::host_platform(),
         },
         references,
@@ -1119,7 +1165,7 @@ fn build_dep_dirs_from_lock(
                         "restore the artifact in the local registry mirror; locked mode stays offline",
                     )]
                 })?;
-                ingest_registry_artifact(&config, &entry, &artifact, &[]).map_err(|error| {
+                ingest_registry_artifact(&config, &entry, &artifact, &[], None).map_err(|error| {
                     vec![registry_diagnostic(
                         dep_name,
                         &error,

@@ -746,6 +746,16 @@ fn choose_output_nodes(
             .filter(|node| node.kind != OutputNodeKind::Directory)
             .map(|node| node.digest.as_str())
             .collect::<BTreeSet<_>>();
+        if nodes
+            .iter()
+            .any(|node| node.kind == OutputNodeKind::Symlink)
+            && digests.len() > 1
+        {
+            return Err(io::Error::other(format!(
+                "E1335: collision at `{path}` has a symlink-target mismatch; contenders: {}",
+                contender_text(nodes)
+            )));
+        }
         let provider = plan.collisions.get(path);
         if digests.len() > 1 && provider.is_none() {
             return Err(io::Error::other(format!(

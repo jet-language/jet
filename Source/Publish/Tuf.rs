@@ -383,9 +383,41 @@ fn next_log_record(records: &[LogRecord], operation: &str, entry: IndexEntry) ->
 
 fn validate_log(records: &[LogRecord]) -> io::Result<()> {
     let mut previous = empty_log_root();
+    let mut identities = BTreeMap::<(String, String), IndexEntry>::new();
     for (index, record) in records.iter().enumerate() {
         if record.sequence != index as u64 + 1 || record.previous != previous {
             return Err(invalid("registry transparency log chain is not contiguous"));
+        }
+        match record.operation.as_str() {
+            "publish" if record.entry.yanked => {
+                return Err(invalid("registry publish log record is already yanked"));
+            }
+            "yank" if !record.entry.yanked => {
+                return Err(invalid("registry yank log record is not yanked"));
+            }
+            _ => {}
+        }
+        let identity = (record.entry.name.clone(), record.entry.version.clone());
+        if let Some(previous_entry) = identities.get(&identity) {
+            let mut previous_identity = previous_entry.clone();
+            previous_identity.yanked = false;
+            let mut current_identity = record.entry.clone();
+            current_identity.yanked = false;
+            if previous_identity != current_identity
+                || previous_entry.yanked
+                || record.operation != "yank"
+            {
+                return Err(invalid(
+                    "registry transparency log reuses or changes an immutable package version",
+                ));
+            }
+        } else {
+            if record.operation == "yank" {
+                return Err(invalid(
+                    "registry transparency log yanks an unpublished package version",
+                ));
+            }
+            identities.insert(identity, record.entry.clone());
         }
         let canonical = log_record_unsigned(
             record.sequence,

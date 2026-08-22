@@ -2,7 +2,7 @@ use super::package_hangar_vendor::auto_clean_after_success;
 use super::parse::{Flags, Parsed};
 use super::realize::{
     apply_locked_channels, classify_or_report, load_project_plan, realize_adapter, realize_ref,
-    report_nix_bridge_required, realize_ref_outcome, RefOutcome, RowStyle, RunPlan,
+    realize_ref_outcome, report_nix_bridge_required, RefOutcome, RowStyle, RunPlan,
 };
 use super::services_secrets_config::find_jet_binary;
 use super::workspace_sources::{
@@ -10,7 +10,6 @@ use super::workspace_sources::{
     workspace_root_snapshot_or_exit,
 };
 use crate::MemberSelect::{self, SelectRequest};
-use jet_env_model::ModuleEval;
 use crate::Output::{self, Theme};
 use crate::Provider;
 use crate::RefSpec::{self, ProviderKind};
@@ -20,6 +19,7 @@ use crate::Store::{self, Roots};
 use crate::Syntax;
 use crate::Trust;
 use crate::WorkspaceFile::WorkspaceMember;
+use jet_env_model::ModuleEval;
 use jet_pkg_model::Authority::AuthorityResolver;
 use jet_pkg_model::WorkspacePlan::{WorkspaceSource, WorkspaceSourceRole};
 
@@ -172,7 +172,12 @@ fn trust_record_matches(record: &Trust::TrustRecord, selector: &str) -> bool {
 
 /// Realize every ref in `plan` and compose the shell env (PATH dirs + prompt
 /// label). Returns an exit code after reporting if any ref fails to realize.
-pub(super) fn compose_env(theme: &Theme, roots: &Roots, flags: &Flags, plan: &RunPlan) -> Result<Env, i32> {
+pub(super) fn compose_env(
+    theme: &Theme,
+    roots: &Roots,
+    flags: &Flags,
+    plan: &RunPlan,
+) -> Result<Env, i32> {
     RuntimePolicy::enforce_sandbox_policy(theme, flags.json)?;
     if let Err(error) = validate_integration_facts(plan) {
         theme.error_coded(
@@ -184,7 +189,9 @@ pub(super) fn compose_env(theme: &Theme, roots: &Roots, flags: &Flags, plan: &Ru
         return Err(2);
     }
     let mut bin_dirs = Vec::new();
-    let mut provider_vars: std::collections::BTreeMap<String, Vec<String>> = std::collections::BTreeMap::new();
+    let mut provider_vars: std::collections::BTreeMap<String, Vec<String>> =
+        std::collections::BTreeMap::new();
+    let mut nix_vars = std::collections::BTreeMap::new();
     let mut realized_refs = Vec::new();
     let mut holes = Vec::new();
     let mut failed = false;
@@ -195,7 +202,16 @@ pub(super) fn compose_env(theme: &Theme, roots: &Roots, flags: &Flags, plan: &Ru
     // package, no state/duration column.
     let total_steps = plan.refs.len() + plan.adapters.len();
     for spec in plan.refs.iter() {
-        match realize_ref_outcome(theme, roots, flags, &plan.table, spec, name_w, RowStyle::Ready, None) {
+        match realize_ref_outcome(
+            theme,
+            roots,
+            flags,
+            &plan.table,
+            spec,
+            name_w,
+            RowStyle::Ready,
+            None,
+        ) {
             RefOutcome::Realized(entry, _state, _line, lease) => {
                 // A `library` package realizes with an empty `bin` (U10) — it
                 // stages source for import and contributes nothing to PATH.
@@ -212,11 +228,16 @@ pub(super) fn compose_env(theme: &Theme, roots: &Roots, flags: &Flags, plan: &Ru
                     ("perl5lib", "PERL5LIB"),
                     ("composer-autoload", "COMPOSER_AUTOLOAD"),
                 ] {
-                    if let Ok(value) = std::fs::read_to_string(std::path::Path::new(&entry.out).join(file)) {
+                    if let Ok(value) =
+                        std::fs::read_to_string(std::path::Path::new(&entry.out).join(file))
+                    {
                         let value = value.trim();
                         if !value.is_empty() {
                             if let Some(value) = resolve_provider_paths(&entry.out, file, value) {
-                                provider_vars.entry(variable.to_string()).or_default().push(value);
+                                provider_vars
+                                    .entry(variable.to_string())
+                                    .or_default()
+                                    .push(value);
                             } else {
                                 invalid_metadata.get_or_insert(file);
                             }
@@ -233,6 +254,9 @@ pub(super) fn compose_env(theme: &Theme, roots: &Roots, flags: &Flags, plan: &Ru
                         "reinstall the package; provider metadata paths must be absolute or contain only normal relative components.",
                     );
                     failed = true;
+                }
+                if let Ok(producer) = Store::ProducerRecord::decode(&entry.producer_record) {
+                    nix_vars.extend(Provider::nix_runtime_environment(&producer));
                 }
                 realized_refs.push(entry.reference);
                 cache_leases.push(lease);
@@ -292,18 +316,21 @@ pub(super) fn compose_env(theme: &Theme, roots: &Roots, flags: &Flags, plan: &Ru
         );
         return Err(2);
     }
-    let mut composed_vars: std::collections::BTreeMap<String, String> =
-        provider_vars
-            .into_iter()
-            .map(|(name, values)| {
-                let value = match name.as_str() {
-                    "LUA_PATH" | "LUA_CPATH" => format!("{};;", values.join(";")),
-                    "GEM_HOME" => values.into_iter().next().unwrap_or_default(),
-                    _ => values.join(&crate::Platform::path_separator().to_string()),
-                };
-                (name, value)
-            })
-            .collect();
+    let mut composed_vars: std::collections::BTreeMap<String, String> = provider_vars
+        .into_iter()
+        .map(|(name, values)| {
+            let value = match name.as_str() {
+                "LUA_PATH" | "LUA_CPATH" => format!("{};;", values.join(";")),
+                "GEM_HOME" => values.into_iter().next().unwrap_or_default(),
+                _ => values.join(&crate::Platform::path_separator().to_string()),
+            };
+            (name, value)
+        })
+        .collect();
+    // The Nix compatibility provider contributes the fixed builder facts it
+    // recorded at realization. PATH remains composed from verified packages;
+    // these values only cover HOME, build scratch, store identity, and locale.
+    composed_vars.extend(nix_vars);
     if let Some(preset) = &plan.environment.selected_preset {
         theme.detail(&format!("preset: {}", preset.applied.join(" -> ")));
         composed_vars.extend(preset.variables.clone());
@@ -372,7 +399,12 @@ fn validate_integration_facts(plan: &RunPlan) -> Result<(), String> {
         format!("{}-{os}", std::env::consts::ARCH)
     });
     for task in &plan.environment.integration_facts.task_facts {
-        if !plan.environment.integration_facts.tasks.contains(&task.name) {
+        if !plan
+            .environment
+            .integration_facts
+            .tasks
+            .contains(&task.name)
+        {
             return Err(format!(
                 "integration task `{}` is not disclosed by its fact projection",
                 task.name
@@ -397,12 +429,18 @@ fn validate_integration_facts(plan: &RunPlan) -> Result<(), String> {
             ModuleEval::IntegrationKind::Android
             | ModuleEval::IntegrationKind::Apple
             | ModuleEval::IntegrationKind::Editor => "nixpkgs",
-            ModuleEval::IntegrationKind::Certificates | ModuleEval::IntegrationKind::Vault => "vault",
+            ModuleEval::IntegrationKind::Certificates | ModuleEval::IntegrationKind::Vault => {
+                "vault"
+            }
             ModuleEval::IntegrationKind::CloudCredentials => "credential-store",
             ModuleEval::IntegrationKind::Hosts => "host-binding",
             ModuleEval::IntegrationKind::CodexAgent => "mcp",
         };
-        if !task.providers.iter().any(|provider| provider == expected_provider) {
+        if !task
+            .providers
+            .iter()
+            .any(|provider| provider == expected_provider)
+        {
             return Err(format!(
                 "integration task `{}` has no executable `{expected_provider}` provider",
                 task.name
@@ -420,7 +458,12 @@ fn validate_integration_facts(plan: &RunPlan) -> Result<(), String> {
             ));
         }
         for provider in &task.providers {
-            if !plan.environment.integration_facts.providers.contains(provider) {
+            if !plan
+                .environment
+                .integration_facts
+                .providers
+                .contains(provider)
+            {
                 return Err(format!(
                     "integration task `{}` lost provider `{provider}` before realization",
                     task.name
@@ -470,9 +513,7 @@ fn validate_task_secret_allowlist(
         .any(|name| name == secret)
         .then_some(())
         .ok_or_else(|| {
-            format!(
-                "integration task `{task_name}` lost secret `{secret}` before activation"
-            )
+            format!("integration task `{task_name}` lost secret `{secret}` before activation")
         })
 }
 
@@ -631,7 +672,10 @@ mod tests {
 }
 
 #[cfg(test)]
-pub(crate) fn compose_refs_for_test(roots: &Roots, refs: Vec<RefSpec::RefSpec>) -> Result<Env, i32> {
+pub(crate) fn compose_refs_for_test(
+    roots: &Roots,
+    refs: Vec<RefSpec::RefSpec>,
+) -> Result<Env, i32> {
     let parsed = super::parse::parse_args_for("", &[]);
     compose_env(
         &Theme::resolve(true),
@@ -717,13 +761,14 @@ fn run_workspace_members(
     if let Err(error) = resolver.revalidate_source(source) {
         return report_select_error(theme, &error.diagnostic());
     }
-    let ordered_members = match MemberSelect::dependency_order_packages_checked(resolver, plan_members) {
-        Ok(ordered_members) => ordered_members,
-        Err(error) => {
-            let diagnostic = error.diagnostic();
-            return report_select_error(theme, &diagnostic);
-        }
-    };
+    let ordered_members =
+        match MemberSelect::dependency_order_packages_checked(resolver, plan_members) {
+            Ok(ordered_members) => ordered_members,
+            Err(error) => {
+                let diagnostic = error.diagnostic();
+                return report_select_error(theme, &diagnostic);
+            }
+        };
     for (idx, (member, checked_package)) in ordered_members.iter().enumerate() {
         if let Err(error) = resolver.revalidate_member(&checked_package.member) {
             ok = false;
@@ -737,7 +782,11 @@ fn run_workspace_members(
             let _ = report_select_error(theme, &diagnostic);
             continue;
         }
-        theme.status(&format!("{} workspace member: {}", action.present(), member.name));
+        theme.status(&format!(
+            "{} workspace member: {}",
+            action.present(),
+            member.name
+        ));
         if ordered_members.len() > 1 {
             theme.progress_chain(
                 action.present(),
@@ -827,26 +876,26 @@ pub(super) fn cmd_build(theme: &Theme, parsed: &Parsed) -> i32 {
     if let Some(checked) = workspace_source.as_ref() {
         if let Some(result) = load_workspace_for_source(&workspace_dir, checked) {
             return match result {
-            Err(code) => code,
-            Ok(plan) => {
-                let req = select_request_from_flags(&parsed.flags);
-                let selected = match MemberSelect::select_members(&workspace_dir, &plan, &req) {
-                    Ok(m) => m,
-                    Err(d) => return report_select_error(theme, &d),
-                };
-                if selected.is_empty() {
-                    theme.status("no workspace members matched the selection.");
-                    return 0;
+                Err(code) => code,
+                Ok(plan) => {
+                    let req = select_request_from_flags(&parsed.flags);
+                    let selected = match MemberSelect::select_members(&workspace_dir, &plan, &req) {
+                        Ok(m) => m,
+                        Err(d) => return report_select_error(theme, &d),
+                    };
+                    if selected.is_empty() {
+                        theme.status("no workspace members matched the selection.");
+                        return 0;
+                    }
+                    run_workspace_members(
+                        theme,
+                        parsed,
+                        &workspace_dir,
+                        checked,
+                        &selected,
+                        WorkspaceAction::Build,
+                    )
                 }
-                run_workspace_members(
-                    theme,
-                    parsed,
-                    &workspace_dir,
-                    checked,
-                    &selected,
-                    WorkspaceAction::Build,
-                )
-            }
             };
         }
     }
@@ -1003,12 +1052,13 @@ fn run_jet_tests(dir: &std::path::Path) -> bool {
         .ok()
         .and_then(|exe| {
             let deps = exe.parent()?;
-            (deps.file_name().and_then(|name| name.to_str()) == Some("deps"))
-                .then_some(deps.parent()?.join(if cfg!(windows) {
+            (deps.file_name().and_then(|name| name.to_str()) == Some("deps")).then_some(
+                deps.parent()?.join(if cfg!(windows) {
                     "jet.exe"
                 } else {
                     Syntax::BINARY_NAME
-                }))
+                }),
+            )
         })
         .filter(|candidate| candidate.is_file())
         .map(|candidate| candidate.to_string_lossy().into_owned())
@@ -1037,28 +1087,32 @@ pub(super) fn cmd_test(theme: &Theme, parsed: &Parsed) -> i32 {
     if let Some(checked) = workspace_source.as_ref() {
         if let Some(result) = load_workspace_for_source(&workspace_dir, checked) {
             return match result {
-            Err(code) => code,
-            Ok(plan) => {
-                let req = select_request_from_flags(&parsed.flags);
-                let selected = match MemberSelect::select_members(&workspace_dir, &plan, &req) {
-                    Ok(m) => m,
-                    Err(d) => return report_select_error(theme, &d),
-                };
-                if selected.is_empty() {
-                    theme.status("no workspace members matched the selection.");
-                    return 0;
+                Err(code) => code,
+                Ok(plan) => {
+                    let req = select_request_from_flags(&parsed.flags);
+                    let selected = match MemberSelect::select_members(&workspace_dir, &plan, &req) {
+                        Ok(m) => m,
+                        Err(d) => return report_select_error(theme, &d),
+                    };
+                    if selected.is_empty() {
+                        theme.status("no workspace members matched the selection.");
+                        return 0;
+                    }
+                    let names: Vec<_> = selected.iter().map(|m| m.name.as_str()).collect();
+                    theme.status(&format!(
+                        "running {} members: {}",
+                        names.len(),
+                        names.join(", ")
+                    ));
+                    run_workspace_members(
+                        theme,
+                        parsed,
+                        &workspace_dir,
+                        checked,
+                        &selected,
+                        WorkspaceAction::Test,
+                    )
                 }
-                let names: Vec<_> = selected.iter().map(|m| m.name.as_str()).collect();
-                theme.status(&format!("running {} members: {}", names.len(), names.join(", ")));
-                run_workspace_members(
-                    theme,
-                    parsed,
-                    &workspace_dir,
-                    checked,
-                    &selected,
-                    WorkspaceAction::Test,
-                )
-            }
             };
         }
     }

@@ -354,6 +354,7 @@ fn build_artifact_receipt_collects_footprint_samples() {
     let source = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("examples/performance/receipts/hello");
     let dir = isolated_cwd("build_artifact_receipt");
     copy_dir_all(&source, &dir);
+    fs::remove_dir_all(dir.join(".jet")).ok();
     let output = Command::new(jet()).args(["budget", "check", "--json"]).current_dir(&dir).output().unwrap();
     assert_eq!(output.status.code(), Some(1), "missing statistical baseline must be unavailable");
     assert!(output.stderr.is_empty(), "JSON mode must keep diagnostics in stdout");

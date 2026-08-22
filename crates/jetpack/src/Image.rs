@@ -229,6 +229,11 @@ fn render_projection_dossier(
 
 fn render_ownership(plan: &ProjectionPlan) -> String {
     let environment = plan.source.starts_with("env:");
+    let publish = if environment {
+        "Hangar"
+    } else {
+        "jetpack image"
+    };
     let (content, cache, archive, signing, provenance, inputs, platforms) = if environment {
         (
             "Hangar",
@@ -251,7 +256,7 @@ fn render_ownership(plan: &ProjectionPlan) -> String {
         )
     };
     format!(
-        "{{\"content\":{},\"cache\":{},\"archive\":{},\"signing\":{},\"provenance\":{},\"inputs\":{},\"platforms\":{},\"publish\":\"jetpack image\",\"remote\":\"D-JPK-REMOTE1\"}}",
+        "{{\"content\":{},\"cache\":{},\"archive\":{},\"signing\":{},\"provenance\":{},\"inputs\":{},\"platforms\":{},\"publish\":{},\"remote\":\"D-JPK-REMOTE1\"}}",
         JSON::quote(content),
         JSON::quote(cache),
         JSON::quote(archive),
@@ -259,6 +264,7 @@ fn render_ownership(plan: &ProjectionPlan) -> String {
         JSON::quote(provenance),
         JSON::quote(inputs),
         JSON::quote(platforms),
+        JSON::quote(publish),
     )
 }
 

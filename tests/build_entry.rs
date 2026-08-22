@@ -1534,7 +1534,7 @@ fn root_build_can_emit_structured_program_diagnostics() {
         r#"
 struct Entity { id: Int }
 
-fn build(b: BuildContext) BuildPlan ! {
+fn build(b: BuildContext) BuildPlan ! -> {
     types :: b.program.types()
     entity :: types[0]
     b.error(

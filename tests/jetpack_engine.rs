@@ -316,6 +316,8 @@ fn binary_cache_local_publish_verify_and_reject_corruption() {
     assert!(explanation_json.contains("\"receipt_expires_unix\":"));
     assert!(explanation_json.contains(&published.builder));
     assert!(explanation.text().contains("cache-trust public accepted"));
+    assert!(explanation_json.contains("\"decision\":\"rebuild-required\""));
+    assert!(explanation_json.contains("producer record lacks the shared provider-facts carrier"));
 
     let restored = Scratch::new("cache-restored");
     jetpack::Store::substitute_cache_entry(
@@ -996,6 +998,7 @@ fn package_generation_lifecycle_preserves_source_facts_and_history() {
     assert!(explained_stdout.contains("\"profile_facts\":["));
     assert!(explained_stdout.contains("\"profile\":\"dev\""));
     assert!(explained_stdout.contains("\"generation\":1"));
+    assert!(explained_stdout.contains("\"output_hash\":\"sha256-"));
     assert!(explained_stdout.contains("\"output_digest\":\"matches\""));
     for lens in [
         "why-depends",
@@ -1093,6 +1096,83 @@ fn package_generation_lifecycle_preserves_source_facts_and_history() {
     assert!(rebuild_stdout.contains("stored output digest differs"));
 }
 
+fn seed_profile_fixture(root: &Path, fixtures: &Path, package: &str, setup: impl FnOnce(&Path)) {
+    fs::create_dir_all(fixtures).unwrap();
+    let staging = Scratch::new(&format!("profile-generation-{package}-staging"));
+    setup(&staging.path);
+    jetpack::Store::seal_local_output(&staging.path).unwrap();
+    let digest = jetpack::Envelope::try_output_hash_of(&staging.path.to_string_lossy()).unwrap();
+    let out_dir = root.join("hangar/objects").join(&digest);
+    fs::create_dir_all(out_dir.parent().unwrap()).unwrap();
+    let mut permissions = fs::metadata(&staging.path).unwrap().permissions();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        permissions.set_mode(permissions.mode() | 0o200);
+    }
+    #[cfg(not(unix))]
+    permissions.set_readonly(false);
+    fs::set_permissions(&staging.path, permissions).unwrap();
+    fs::rename(&staging.path, &out_dir).unwrap();
+    jetpack::Store::seal_local_output(&out_dir).unwrap();
+    fs::write(
+        fixtures.join(&format!("nixpkgs-{package}.json")),
+        format!(
+            "[{{\"drvPath\":\"/nix/store/0fixture00000000000000000000-{package}.drv\",\"outputs\":{{\"out\":{:?}}}}}]",
+            out_dir.to_string_lossy()
+        ),
+    )
+    .unwrap();
+}
+
+#[test]
+fn package_generation_build_applies_exact_path_collision_selection() {
+    let project = Scratch::new("profile-generation-selected-collision-project");
+    let root = Scratch::new("profile-generation-selected-collision-root");
+    let fixtures = Scratch::new("profile-generation-selected-collision-fixtures");
+
+    for (package, contents) in [("left", "left editor\n"), ("right", "right editor\n")] {
+        seed_profile_fixture(&root.path, &fixtures.path, package, |staging| {
+            let bin = staging.join("bin");
+            fs::create_dir_all(&bin).unwrap();
+            let editor = bin.join("editor");
+            fs::write(&editor, contents).unwrap();
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                fs::set_permissions(&editor, fs::Permissions::from_mode(0o755)).unwrap();
+            }
+        });
+    }
+    fs::write(
+        project.join("env.jet"),
+        "module profile.dev { packages: [default.left, default.right] collisions: {\"bin/editor\": \"right@default\"} }\n",
+    )
+    .unwrap();
+    let output = jetpack()
+        .args(["profile", "build", "dev", "--no-color", "--offline"])
+        .current_dir(&project.path)
+        .env("JETPACK_ROOT", &root.path)
+        .env("JETPACK_FIXTURES", &fixtures.path)
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let generation = project.join(".jet/profiles/dev/generations/1");
+    assert_eq!(
+        fs::read_to_string(generation.join("root/bin/editor")).unwrap(),
+        "right editor\n"
+    );
+    let metadata = fs::read_to_string(generation.join("meta.json")).unwrap();
+    assert!(metadata.contains("\"selected\":\"right@default\""));
+    assert!(metadata.contains("left@default"));
+    assert!(metadata.contains("right@default"));
+    assert!(metadata.matches("sha256-").count() >= 3);
+}
+
 #[test]
 fn package_generation_build_rejects_unresolved_exact_path_collision() {
     let project = Scratch::new("profile-generation-collision-project");
@@ -1100,38 +1180,17 @@ fn package_generation_build_rejects_unresolved_exact_path_collision() {
     let fixtures = Scratch::new("profile-generation-collision-fixtures");
 
     for (package, contents) in [("left", "left editor\n"), ("right", "right editor\n")] {
-        let staging = Scratch::new(&format!("profile-generation-{package}-staging"));
-        let bin = staging.join("bin");
-        fs::create_dir_all(&bin).unwrap();
-        let editor = bin.join("editor");
-        fs::write(&editor, contents).unwrap();
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            fs::set_permissions(&editor, fs::Permissions::from_mode(0o755)).unwrap();
-        }
-        jetpack::Store::seal_local_output(&staging.path).unwrap();
-        let digest = jetpack::Envelope::try_output_hash_of(&staging.path.to_string_lossy())
-            .unwrap();
-        let out_dir = root.join("hangar/objects").join(&digest);
-        fs::create_dir_all(out_dir.parent().unwrap()).unwrap();
-        let mut permissions = fs::metadata(&staging.path).unwrap().permissions();
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            permissions.set_mode(permissions.mode() | 0o200);
-        }
-        fs::set_permissions(&staging.path, permissions).unwrap();
-        fs::rename(&staging.path, &out_dir).unwrap();
-        jetpack::Store::seal_local_output(&out_dir).unwrap();
-        fs::write(
-            fixtures.join(&format!("nixpkgs-{package}.json")),
-            format!(
-                "[{{\"drvPath\":\"/nix/store/0fixture00000000000000000000-{package}.drv\",\"outputs\":{{\"out\":{:?}}}}}]",
-                out_dir.to_string_lossy()
-            ),
-        )
-        .unwrap();
+        seed_profile_fixture(&root.path, &fixtures.path, package, |staging| {
+            let bin = staging.join("bin");
+            fs::create_dir_all(&bin).unwrap();
+            let editor = bin.join("editor");
+            fs::write(&editor, contents).unwrap();
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                fs::set_permissions(&editor, fs::Permissions::from_mode(0o755)).unwrap();
+            }
+        });
     }
 
     fs::write(
@@ -1153,6 +1212,43 @@ fn package_generation_build_rejects_unresolved_exact_path_collision() {
     assert!(stderr.contains("left@default"), "{stderr}");
     assert!(stderr.contains("right@default"), "{stderr}");
     assert!(stderr.contains("sha256-"), "{stderr}");
+}
+
+#[cfg(unix)]
+#[test]
+fn package_generation_build_rejects_symlink_target_collision_even_when_selected() {
+    use std::os::unix::fs::symlink;
+
+    let project = Scratch::new("profile-generation-symlink-collision-project");
+    let root = Scratch::new("profile-generation-symlink-collision-root");
+    let fixtures = Scratch::new("profile-generation-symlink-collision-fixtures");
+
+    for (package, target) in [("left", "left-target"), ("right", "right-target")] {
+        seed_profile_fixture(&root.path, &fixtures.path, package, |staging| {
+            let bin = staging.join("bin");
+            fs::create_dir_all(&bin).unwrap();
+            fs::write(bin.join(target), format!("{target}\n")).unwrap();
+            symlink(target, bin.join("editor")).unwrap();
+        });
+    }
+    fs::write(
+        project.join("env.jet"),
+        "module profile.dev { packages: [default.left, default.right] collisions: {\"bin/editor\": \"left@default\"} }\n",
+    )
+    .unwrap();
+    let output = jetpack()
+        .args(["profile", "build", "dev", "--no-color", "--offline"])
+        .current_dir(&project.path)
+        .env("JETPACK_ROOT", &root.path)
+        .env("JETPACK_FIXTURES", &fixtures.path)
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(2));
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("E1335"), "{stderr}");
+    assert!(stderr.contains("symlink-target mismatch"), "{stderr}");
+    assert!(stderr.contains("left@default"), "{stderr}");
+    assert!(stderr.contains("right@default"), "{stderr}");
 }
 
 #[test]
@@ -1444,12 +1540,15 @@ fn build_resolves_fixture_ref() {
     let out = jetpack()
         .args(["build", "fastfetch@nixpkgs", "--no-color", "--offline"])
         .env("JETPACK_ROOT", &root.path)
+        .env("PATH", "")
         .env("JETPACK_FIXTURES", example_fixtures(&root.path))
         .output()
         .unwrap();
     assert!(out.status.success());
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert!(stderr.contains("fastfetch"), "stderr: {stderr}");
+    assert!(stderr.contains("substituted"), "stderr: {stderr}");
+    assert!(!stderr.contains("couldn't run `nix`"), "stderr: {stderr}");
     assert!(
         stderr.contains("/hangar/objects/sha256-"),
         "stderr: {stderr}"
@@ -1521,6 +1620,194 @@ fn build_resolves_fixture_ref() {
     assert!(rebuild_stdout.contains("\"output_digest\":\"mismatch\""));
     assert!(rebuild_stdout.contains("\"kind\":\"loss\""));
     assert!(rebuild_stdout.contains("stored output digest differs"));
+}
+
+#[test]
+fn no_nix_projects_external_output_and_build_facts() {
+    let root = Scratch::new("nix-projection-root");
+    let fixtures = Scratch::new("nix-projection-fixtures");
+    let staging = Scratch::new("nix-projection-output");
+    let bin = staging.join("bin");
+    fs::create_dir_all(&bin).unwrap();
+    let executable = bin.join("greet");
+    fs::write(&executable, "#!/bin/sh\necho projected\n").unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(&executable, fs::Permissions::from_mode(0o755)).unwrap();
+    }
+    // Nix outputs are sealed before their bytes are hashed. Keep this source
+    // outside Hangar so the production projection, not a fixture object, is
+    // what the build exercises.
+    jetpack::Store::seal_local_output(&staging.path).unwrap();
+    fs::write(
+        fixtures.join("nixpkgs-greet.json"),
+        format!(
+            "[{{\"drvPath\":\"/nix/store/0fixture00000000000000000000-greet.drv\",\"outputs\":{{\"out\":{:?}}}}}]",
+            staging.path.to_string_lossy()
+        ),
+    )
+    .unwrap();
+
+    let built = jetpack()
+        .args(["build", "greet@nixpkgs", "--no-color", "--offline"])
+        .env("JETPACK_ROOT", &root.path)
+        .env("JETPACK_FIXTURES", &fixtures.path)
+        .env("PATH", "")
+        .output()
+        .unwrap();
+    assert!(
+        built.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&built.stderr)
+    );
+
+    let roots = jetpack::Store::Roots::at(root.path.clone());
+    let entry = jetpack::Store::list_checked(&roots)
+        .unwrap()
+        .into_iter()
+        .find(|entry| entry.reference == "greet@nixpkgs")
+        .expect("raw Nix output must publish through the Store");
+    assert!(
+        Path::new(&entry.out).starts_with(roots.hangar_dir().join("objects")),
+        "Nix output escaped Hangar projection: {}",
+        entry.out
+    );
+    assert!(staging.path.exists(), "projection must not mutate the source store");
+    let producer = jetpack::Store::ProducerRecord::decode(&entry.producer_record).unwrap();
+    assert_eq!(producer.provider, "nix");
+    assert_eq!(
+        producer.facts.get("nix.projection.mode").map(String::as_str),
+        Some("canonical-hangar")
+    );
+    assert_eq!(
+        producer.facts.get("nix.build.root").map(String::as_str),
+        Some("/build")
+    );
+    assert_eq!(
+        producer.facts.get("nix.build.home").map(String::as_str),
+        Some("/homeless-shelter")
+    );
+
+    let entered = jetpack()
+        .args(["enter", "--no-color", "--trust", "--offline", "--fixtures"])
+        .arg(&fixtures.path)
+        .args([
+            "-p",
+            "greet",
+            "--",
+            "/bin/sh",
+            "-c",
+            "printf '%s|%s|%s|%s' \"$HOME\" \"$NIX_BUILD_TOP\" \"$TMPDIR\" \"$LC_ALL\"",
+        ])
+        .env("JETPACK_ROOT", &root.path)
+        .env("PATH", "")
+        .output()
+        .unwrap();
+    assert!(
+        entered.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&entered.stderr)
+    );
+    assert_eq!(
+        String::from_utf8_lossy(&entered.stdout).trim(),
+        "/homeless-shelter|/build|/build|C"
+    );
+}
+
+
+#[test]
+fn connected_receipt_reaches_lock_and_fails_closed_on_corruption() {
+    let project = Scratch::new("connected-receipt-project");
+    let root = Scratch::new("connected-receipt-root");
+    let fixtures = Scratch::new("connected-receipt-fixtures");
+    let staging = Scratch::new("connected-receipt-staging");
+    write_runnable_fixture(&fixtures.path, &root.path, &staging.path);
+    fs::write(
+        project.join("env.jet"),
+        "module dev { env.dev: Env{ packages: [nixpkgs.greet] } }\n",
+    )
+    .unwrap();
+
+    let build = || {
+        jetpack()
+            .args(["build", "--no-color", "--offline"])
+            .current_dir(&project.path)
+            .env("JETPACK_ROOT", &root.path)
+            .env("JETPACK_FIXTURES", &fixtures.path)
+            .output()
+            .unwrap()
+    };
+    let first = build();
+    assert!(
+        first.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&first.stderr)
+    );
+
+    let roots = jetpack::Store::Roots {
+        root: root.path.clone(),
+        dev_mode: false,
+    };
+    let entry = jetpack::Store::list_checked(&roots)
+        .unwrap()
+        .into_iter()
+        .find(|entry| entry.name == "greet")
+        .expect("production build must publish greet");
+    assert!(entry.receipt.starts_with("sha256-"));
+    let receipt_path = root.join("hangar/receipts").join(&entry.receipt);
+    let receipt = fs::read(&receipt_path).unwrap();
+    let receipt_text = String::from_utf8(receipt.clone()).unwrap();
+    assert!(receipt_text.starts_with("jet-hangar-receipt-v1\n"));
+    for field in [
+        "input\t",
+        "action\t",
+        "output\t",
+        "activation-proof\t\t\n",
+        "parent-generation\t\t\n",
+    ] {
+        assert!(
+            receipt_text.contains(field),
+            "missing {field:?}: {receipt_text}"
+        );
+    }
+    let lock = fs::read_to_string(project.join(".jet/lock")).unwrap();
+    assert!(
+        lock.contains(&format!("receipt = \"{}\"", entry.receipt)),
+        "lock does not project receipt {}: {lock}",
+        entry.receipt
+    );
+    let output = Path::new(&entry.out).join("bin/greet");
+    let output_before_failure = fs::read(&output).unwrap();
+
+    fs::write(&receipt_path, b"corrupt receipt").unwrap();
+    let failed = build();
+    assert!(!failed.status.success());
+    let failure = format!(
+        "{}{}",
+        String::from_utf8_lossy(&failed.stdout),
+        String::from_utf8_lossy(&failed.stderr)
+    );
+    assert!(
+        failure.contains("receipt"),
+        "corruption was not explained: {failure}"
+    );
+    assert_eq!(fs::read(&output).unwrap(), output_before_failure);
+
+    fs::remove_file(&receipt_path).unwrap();
+    let recovered = jetpack()
+        .args(["hangar", "recover", "--no-color"])
+        .current_dir(&project.path)
+        .env("JETPACK_ROOT", &root.path)
+        .output()
+        .unwrap();
+    assert!(
+        recovered.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&recovered.stderr)
+    );
+    assert_eq!(fs::read(&receipt_path).unwrap(), receipt);
+    assert!(build().status.success());
 }
 
 
@@ -2580,6 +2867,19 @@ fn package_and_environment_paths_have_no_installed_nix_shellout() {
             "CLI/run_enter_dev",
             include_str!("../crates/jetpack/src/CLI/run_enter_dev.rs"),
         ),
+        (
+            "CLI/profile",
+            include_str!("../crates/jetpack/src/CLI/profile.rs"),
+        ),
+        (
+            "CLI/tool",
+            include_str!("../crates/jetpack/src/CLI/tool.rs"),
+        ),
+        (
+            "CLI/trust_env_build",
+            include_str!("../crates/jetpack/src/CLI/trust_env_build.rs"),
+        ),
+        ("Store", include_str!("../crates/jetpack/src/Store.rs")),
     ];
     for (path, source) in sources {
         for forbidden in ["Command::new(\"nix\")", "Command::new(\"nix-store\")"] {
@@ -2639,11 +2939,11 @@ fn no_nix_mixed_env_realizes_core_then_reports_nix_hole() {
         .unwrap();
     assert_eq!(output.status.code(), Some(2));
     let stderr = String::from_utf8_lossy(&output.stderr);
-    // T4 ledger row: `✓ hello  <version>  built` (columns padded).
+    // T4 ledger row: `✓ hello  <version>  built [duration]` (columns padded).
     assert!(
         stderr
             .lines()
-            .any(|l| l.contains("hello") && l.trim_end().ends_with("built")),
+            .any(|l| l.contains("hello") && l.split_whitespace().any(|word| word == "built")),
         "stderr: {stderr}"
     );
     assert!(stderr.contains("E1272"), "stderr: {stderr}");
@@ -3816,6 +4116,11 @@ fn bridge_flake_uses_native_evaluator_without_nix() {
             && record.identity.exact
                 == "status=skipped;class=skipped;reason=dynamic staging has a separate compatibility boundary"
     }));
+    assert!(skipped.iter().any(|record| {
+        record.identity.key.ends_with(":ifd")
+            && record.identity.exact
+                == "status=skipped;class=skipped;reason=import-from-derivation requires a separate authority grant"
+    }));
     for (surface, class, reason) in [
         (
             "fixed-output-fetchers",
@@ -3889,6 +4194,8 @@ fn bridge_flake_breadth_and_json_budget_use_native_evaluator_without_nix() {
         "stdout: {}",
         String::from_utf8_lossy(&output.stdout)
     );
+    let lock_before_budget_failure = fs::read_to_string(dir.join(".jet/lock"))
+        .expect("native breadth bridge must commit a lock before the failure case");
 
     let nested_json = format!(
         "{}true{}",
@@ -3910,6 +4217,10 @@ fn bridge_flake_breadth_and_json_budget_use_native_evaluator_without_nix() {
     assert!(stderr.contains("E1256"), "stderr: {stderr}");
     assert!(stderr.contains("JSON value is too deeply nested"), "stderr: {stderr}");
     assert!(!stderr.contains("nix eval"), "stderr: {stderr}");
+    assert_eq!(
+        fs::read_to_string(dir.join(".jet/lock")).unwrap(),
+        lock_before_budget_failure
+    );
 }
 
 #[test]
@@ -5327,7 +5638,7 @@ fn independent_root_runner_promotes_only_agreed_source_output() {
     let repo = project.parent().unwrap().join("jet-pkgs");
     let table = jetpack::RefSpec::SourceTable::from_decls([(
         "mine".into(),
-        repo.to_string_lossy().into_owned(),
+        format!("path:{}", repo.display()),
         jetpack::RefSpec::ProviderKind::Core,
     )]);
     let spec = jetpack::RefSpec::classify_in("hello@mine", &table).unwrap();
@@ -5368,7 +5679,7 @@ fn independent_root_runner_rejects_divergence_before_registration() {
     let repo = project.parent().unwrap().join("jet-pkgs");
     let table = jetpack::RefSpec::SourceTable::from_decls([(
         "mine".into(),
-        repo.to_string_lossy().into_owned(),
+        format!("path:{}", repo.display()),
         jetpack::RefSpec::ProviderKind::Core,
     )]);
     let spec = jetpack::RefSpec::classify_in("hello@mine", &table).unwrap();
@@ -5422,7 +5733,7 @@ fn independent_root_runner_cancellation_leaves_no_store_result() {
     let repo = project.parent().unwrap().join("jet-pkgs");
     let table = jetpack::RefSpec::SourceTable::from_decls([(
         "mine".into(),
-        repo.to_string_lossy().into_owned(),
+        format!("path:{}", repo.display()),
         jetpack::RefSpec::ProviderKind::Core,
     )]);
     let spec = jetpack::RefSpec::classify_in("hello@mine", &table).unwrap();

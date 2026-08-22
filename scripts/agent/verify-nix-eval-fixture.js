@@ -5,8 +5,9 @@ const path = require("node:path");
 const { execFileSync } = require("node:child_process");
 
 const root = path.resolve(__dirname, "../..");
+const fixtureName = process.argv[2] || "stage-a.json";
 const fixture = JSON.parse(
-  fs.readFileSync(path.join(root, "tests/fixtures/nix-compat/stage-a.json"), "utf8"),
+  fs.readFileSync(path.join(root, "tests/fixtures/nix-compat", fixtureName), "utf8"),
 );
 const oracle = JSON.parse(
   fs.readFileSync(path.join(root, "tests/fixtures/nix-compat/oracle.json"), "utf8"),
@@ -103,4 +104,4 @@ for (const [system, expected] of Object.entries(fixture.output_identities)) {
   );
 }
 
-console.log(`verified Nix ${fixture.oracle.nix_version} Stage A fixture across ${Object.keys(fixture.output_identities).length} systems`);
+console.log(`verified Nix ${fixture.oracle.nix_version} ${fixtureName} across ${Object.keys(fixture.output_identities).length} systems`);

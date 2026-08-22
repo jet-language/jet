@@ -1,6 +1,8 @@
 //! Native CRAN provider (D-FFI-R1, D-JPK-PROVIDERS2).
 
-use super::{producer_record, provider_cache_identity, Ctx, Provider, ProviderError, Realized, SourceState};
+use super::{
+    producer_record, provider_cache_identity, Ctx, Provider, ProviderError, Realized, SourceState,
+};
 use crate::RefSpec::{RefSpec, SourceTable};
 use crate::SHA256;
 use std::collections::{BTreeMap, BTreeSet};
@@ -30,7 +32,10 @@ struct SourceArtifact {
     hash: String,
 }
 
-fn dependency_objects(root: &str, artifacts: &[SourceArtifact]) -> (Vec<String>, BTreeMap<String, String>) {
+fn dependency_objects(
+    root: &str,
+    artifacts: &[SourceArtifact],
+) -> (Vec<String>, BTreeMap<String, String>) {
     let mut references = Vec::new();
     let mut facts = BTreeMap::new();
     for artifact in artifacts
@@ -40,7 +45,11 @@ fn dependency_objects(root: &str, artifacts: &[SourceArtifact]) -> (Vec<String>,
         let digest = format!("sha256-{}", artifact.hash);
         let relative = format!(
             "sources/{}",
-            artifact.path.file_name().unwrap_or_default().to_string_lossy()
+            artifact
+                .path
+                .file_name()
+                .unwrap_or_default()
+                .to_string_lossy()
         );
         facts.insert(format!("dependency.object.{digest}"), relative);
         references.push(digest);
@@ -123,7 +132,10 @@ impl Provider for CranProvider {
             if let Some((_output, locked_hash, locked_repo, locked_authority, _)) =
                 crate::Lock::cran_realization(project, &spec.raw)
             {
-                if locked_hash != source_hash || locked_repo != repository || locked_authority != fetch_authority {
+                if locked_hash != source_hash
+                    || locked_repo != repository
+                    || locked_authority != fetch_authority
+                {
                     return Err(ProviderError::Cran(format!(
                         "locked CRAN source integrity changed for `{}` (expected {} from {}, got {} from {})",
                         spec.raw, locked_hash, locked_repo, source_hash, repository
@@ -226,9 +238,19 @@ impl Provider for CranProvider {
 
 fn authority(ctx: &Ctx<'_>, fetch: bool) -> Result<super::fetch::Authority, ProviderError> {
     let result = if fetch {
-        super::fetch::Authority::load(ctx, "cran", &repository(), &["cran.r-project.org", "cloud.r-project.org"])
+        super::fetch::Authority::load(
+            ctx,
+            "cran",
+            &repository(),
+            &["cran.r-project.org", "cloud.r-project.org"],
+        )
     } else {
-        super::fetch::Authority::load_for_cache(ctx, "cran", &repository(), &["cran.r-project.org", "cloud.r-project.org"])
+        super::fetch::Authority::load_for_cache(
+            ctx,
+            "cran",
+            &repository(),
+            &["cran.r-project.org", "cloud.r-project.org"],
+        )
     };
     result.map_err(ProviderError::Cran)
 }
@@ -525,7 +547,12 @@ fn which(tool: &str) -> Option<PathBuf> {
         .find(|path| path.is_file())
 }
 
-fn render_provenance(repository: &str, fetch_authority: &str, source_hash: &str, artifacts: &[SourceArtifact]) -> String {
+fn render_provenance(
+    repository: &str,
+    fetch_authority: &str,
+    source_hash: &str,
+    artifacts: &[SourceArtifact],
+) -> String {
     let mut out = format!(
         "schema=jet-cran-provider-v1\nrepository={repository}\nfetch_authority={fetch_authority}\nsource_hash={source_hash}\n"
     );
@@ -585,7 +612,9 @@ mod tests {
         let (references, facts) = dependency_objects("app", &artifacts);
         assert_eq!(references, vec!["sha256-abcd"]);
         assert_eq!(
-            facts.get("dependency.object.sha256-abcd").map(String::as_str),
+            facts
+                .get("dependency.object.sha256-abcd")
+                .map(String::as_str),
             Some("sources/dep.tar.gz")
         );
     }

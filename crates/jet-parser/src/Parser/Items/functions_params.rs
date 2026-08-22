@@ -453,10 +453,10 @@ impl<'a> Parser<'a> {
                     self.pos = self.pos.saturating_sub(1);
                     (None, None)
                 }
+            } else if let Some((ty, span)) = self.parse_unit_fallible_return()? {
+                (Some(ty), Some(span))
             } else if self.type_starts_here() {
                 let (ty, span) = self.return_type()?;
-                (Some(ty), Some(span))
-            } else if let Some((ty, span)) = self.parse_unit_fallible_return()? {
                 (Some(ty), Some(span))
             } else {
                 (None, None)

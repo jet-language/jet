@@ -151,7 +151,7 @@ fn platform_tier_gate_reports_missing_offline_component() {
         .unwrap();
     assert!(!output.status.success());
     let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(stderr.contains("error[E1315]"), "stderr: {stderr}");
+    assert!(stderr.contains("Error [E1315]:"), "stderr: {stderr}");
     assert!(stderr.contains("does not exist"), "stderr: {stderr}");
     assert_no_hangar_entry(&root.path, "native-jetpack-");
 }

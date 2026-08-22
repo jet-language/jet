@@ -157,6 +157,26 @@ fn jet_env_delegates_to_jetpack_enter() {
 }
 
 #[test]
+fn jet_run_without_nix_compatibility_output_reports_e1272() {
+    let root = Scratch::new("jet-run-no-nix-root");
+    let output = jet()
+        .args(["run", "postgres@nixpkgs", "--no-color"])
+        .env("JETPACK_ROOT", &root.path)
+        .env("PATH", "")
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(2));
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("E1272"), "stderr: {stderr}");
+    assert!(stderr.contains("postgres@nixpkgs"), "stderr: {stderr}");
+    assert!(
+        stderr.contains("does not invoke an installed Nix executable"),
+        "stderr: {stderr}"
+    );
+    assert!(!stderr.contains("couldn't run `nix`"), "stderr: {stderr}");
+}
+
+#[test]
 fn jet_env_sync_delegates_to_typed_managed_file_sync() {
     let project = Scratch::new("jet-env-sync");
     let root = Scratch::new("jet-env-sync-root");
@@ -274,6 +294,44 @@ module env.full {
     assert!(
         !project.join(".jet/services").exists(),
         "env info must not start a service supervisor"
+    );
+
+    let human = jet()
+        .args(["env", "info", "--offline", "--no-color"])
+        .current_dir(&project.path)
+        .env("JETPACK_ROOT", &root.path)
+        .env("HOME", "/test/home")
+        .output()
+        .unwrap();
+    assert!(
+        human.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&human.stderr)
+    );
+    let human_output = format!(
+        "{}{}",
+        String::from_utf8_lossy(&human.stdout),
+        String::from_utf8_lossy(&human.stderr)
+    );
+    for fact in [
+        "fixture (disabled",
+        "ports=8080",
+        "run=fixture --port 8080",
+        "ready=fixture --ready",
+        "data_dir=state/fixture",
+        "watch=src",
+        "after=database",
+        "before_start=lint",
+        "sockets=run/fixture.sock",
+    ] {
+        assert!(
+            human_output.contains(fact),
+            "missing {fact}; output={human_output}"
+        );
+    }
+    assert!(
+        !project.join(".jet/services").exists(),
+        "human env info must not start a service supervisor"
     );
 
     let full = jet()

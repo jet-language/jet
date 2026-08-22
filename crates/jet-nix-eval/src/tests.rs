@@ -726,6 +726,47 @@ fn breadth_fixture_matches_native_projection_for_every_seed() {
     // benchmark.
 }
 
+#[test]
+fn breadth_fixture_pins_lock_and_output_identity_corpus() {
+    let breadth = JSON::parse(BREADTH_FIXTURE).expect("breadth fixture must parse");
+    let breadth = breadth.as_object().expect("breadth fixture root object");
+    let stage_a = JSON::parse(STAGE_A_FIXTURE).expect("Stage A fixture must parse");
+    let stage_a = stage_a.as_object().expect("Stage A fixture root object");
+
+    assert_eq!(breadth.get("locks"), stage_a.get("locks"));
+    assert_eq!(
+        breadth.get("output_identities"),
+        stage_a.get("output_identities")
+    );
+
+    let identities = breadth
+        .get("output_identities")
+        .expect("breadth output identities")
+        .as_object()
+        .expect("breadth output identity object");
+    let manifest = ValidatedOracleManifest::embedded().expect("embedded oracle manifest");
+    for (system, identity) in identities {
+        let identity = identity.as_object().expect("output identity fields");
+        let observed = OracleBuildIdentity::new(
+            system,
+            identity
+                .get("build_nar_hash")
+                .expect("build NAR hash")
+                .as_str()
+                .expect("build NAR hash string"),
+            identity
+                .get("executable_nar_hash")
+                .expect("executable NAR hash")
+                .as_str()
+                .expect("executable NAR hash string"),
+        )
+        .expect("fixture output identity must use canonical SRI");
+        manifest
+            .verify_oracle(&observed)
+            .expect("fixture output identity must match pinned oracle");
+    }
+}
+
 fn fixture_strings(value: &JSONValue) -> Vec<String> {
     value
         .as_array()

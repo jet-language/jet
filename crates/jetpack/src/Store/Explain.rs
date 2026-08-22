@@ -5,7 +5,7 @@
 //! come from the stored action identity and build attempt record.
 
 use super::{entry_action_key, ClosureGraph, Lifecycle, ProducerRecord, Roots, StoreEntry};
-use crate::{BuildDebug, ProviderFactValue, ProviderFacts, SemanticLock, JSON};
+use crate::{BuildDebug, ProviderFacts, SemanticLock, JSON};
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::PathBuf;
@@ -101,6 +101,7 @@ pub struct ExplainProvider {
 pub struct ExplainProfile {
     pub profile: String,
     pub generation: u64,
+    pub output_hash: String,
     pub provider_facts: ProviderFacts,
 }
 
@@ -201,11 +202,7 @@ pub fn explain_package(
         }];
         let rebuild = rebuild_without_entry(&attempt);
         reports.push(ExplainReport {
-            kind: if attempt.status == "failed" {
-                "conflict".to_string()
-            } else {
-                "loss".to_string()
-            },
+            kind: "loss".to_string(),
             message: rebuild.reason.clone(),
         });
         return Ok(Some(PackageExplain {
@@ -367,14 +364,14 @@ fn provider_projection(
                         message: format!("embedded provider facts fail validation: {error}"),
                     });
                 }
-                facts
+                Some(facts)
             }
             Err(error) => {
                 reports.push(ExplainReport {
                     kind: "loss".to_string(),
                     message: format!("embedded provider facts could not be decoded: {error}"),
                 });
-                reconstructed_provider_facts(&producer, entry)
+                None
             }
         },
         None => {
@@ -382,31 +379,66 @@ fn provider_projection(
                 kind: "loss".to_string(),
                 message: "producer record lacks the shared provider-facts carrier".to_string(),
             });
-            reconstructed_provider_facts(&producer, entry)
+            None
         }
     };
-    match producer.facts.get("provider-facts-digest") {
-        Some(expected) => {
-            let actual = facts.digest();
-            if expected != &actual {
+    if let Some(facts) = facts.as_ref() {
+        let canonical_entry =
+            ProviderFacts::for_reference("", &entry.reference).qualified_reference();
+        if facts.qualified_reference() != canonical_entry {
+            reports.push(ExplainReport {
+                kind: "conflict".to_string(),
+                message: format!(
+                    "embedded provider facts identify `{}` but the Store entry is `{}`",
+                    facts.qualified_reference(),
+                    canonical_entry
+                ),
+            });
+        }
+        if !producer.provider.is_empty() && producer.provider != facts.provider {
+            reports.push(ExplainReport {
+                kind: "conflict".to_string(),
+                message: format!(
+                    "embedded provider facts name `{}` but the producer names `{}`",
+                    facts.provider, producer.provider
+                ),
+            });
+        }
+        if !producer.immutable_source.is_empty()
+            && !facts.resolved_source.is_empty()
+            && producer.immutable_source != facts.resolved_source
+        {
+            reports.push(ExplainReport {
+                kind: "conflict".to_string(),
+                message: format!(
+                    "embedded provider source `{}` differs from producer source `{}`",
+                    facts.resolved_source, producer.immutable_source
+                ),
+            });
+        }
+        match producer.facts.get("provider-facts-digest") {
+            Some(expected) => {
+                let actual = facts.digest();
+                if expected != &actual {
+                    reports.push(ExplainReport {
+                        kind: "conflict".to_string(),
+                        message: format!(
+                            "embedded provider-facts digest differs from its producer record: `{expected}` vs `{actual}`"
+                        ),
+                    });
+                }
+            }
+            None => {
                 reports.push(ExplainReport {
-                    kind: "conflict".to_string(),
-                    message: format!(
-                        "embedded provider-facts digest differs from its producer record: `{expected}` vs `{actual}`"
-                    ),
+                    kind: "loss".to_string(),
+                    message: "producer record has provider facts but no provider-facts digest"
+                        .to_string(),
                 });
             }
         }
-        None if producer.facts.contains_key("provider-facts") => {
-            reports.push(ExplainReport {
-                kind: "loss".to_string(),
-                message: "producer record has provider facts but no provider-facts digest".to_string(),
-            });
-        }
-        None => {}
+        report_provider_facts(facts, reports);
+        report_provider_validation(facts, "producer", reports);
     }
-    report_provider_facts(&facts, reports);
-    report_provider_validation(&facts, "producer", reports);
     Some(ExplainProvider {
         provider: producer.provider,
         immutable_source: producer.immutable_source,
@@ -414,43 +446,11 @@ fn provider_projection(
         toolchain_facts: producer.toolchain_facts,
         policy_facts: producer.policy_facts,
         producer_facts: producer.facts,
-        provider_facts: Some(facts),
+        provider_facts: facts,
         locked_provider_facts: None,
         profile_facts: Vec::new(),
         native_document: entry.producer_record.clone(),
     })
-}
-
-fn reconstructed_provider_facts(producer: &ProducerRecord, entry: &StoreEntry) -> ProviderFacts {
-    let mut facts = ProviderFacts::for_reference(&producer.provider, &entry.reference);
-    facts.set_resolved_source(&producer.immutable_source);
-    facts.set_native_document("jet-producer-record-v1", &entry.producer_record);
-    for (key, value) in &producer.facts {
-        if matches!(key.as_str(), "provider-facts" | "provider-facts-digest") {
-            continue;
-        }
-        facts.add_fact(
-            key,
-            ProviderFactValue::Text(value.clone()),
-            "jet-producer-record-v1",
-        );
-    }
-    facts.add_fact(
-        "provider.source_digest",
-        ProviderFactValue::Text(producer.source_digest.clone()),
-        "jet-producer-record-v1",
-    );
-    facts.add_fact(
-        "provider.toolchain_facts",
-        ProviderFactValue::Text(producer.toolchain_facts.clone()),
-        "jet-producer-record-v1",
-    );
-    facts.add_fact(
-        "provider.policy_facts",
-        ProviderFactValue::Text(producer.policy_facts.clone()),
-        "jet-producer-record-v1",
-    );
-    facts
 }
 
 fn report_provider_facts(facts: &ProviderFacts, reports: &mut Vec<ExplainReport>) {
@@ -510,13 +510,15 @@ fn locked_provider_facts(
         }
     };
     let mut matches = Vec::new();
+    let canonical_entry = ProviderFacts::for_reference("", &entry.reference).qualified_reference();
     for record in lock.records {
+        let record_matches = lock_record_matches_entry(&record, entry, &canonical_entry);
         let Some(raw) = record.future_fields.get("provider-facts") else {
-            if record.future_fields.contains_key("provider-facts-digest") {
+            if record_matches {
                 reports.push(ExplainReport {
                     kind: "loss".to_string(),
                     message: format!(
-                        "locked provider-fact digest exists for {} without its full fact record",
+                        "locked provider record `{}` lacks its full provider-facts carrier",
                         record.identity.exact
                     ),
                 });
@@ -525,14 +527,21 @@ fn locked_provider_facts(
         };
         match ProviderFacts::from_json(raw) {
             Ok(facts) => {
-                let canonical_entry =
-                    ProviderFacts::for_reference("", &entry.reference).qualified_reference();
-                report_provider_facts(&facts, reports);
-                report_provider_validation(&facts, "locked", reports);
+                let facts_match = facts.reference == entry.reference
+                    || facts.qualified_reference() == canonical_entry
+                    || record.identity.exact == entry.reference
+                    || record.identity.exact == facts.qualified_reference();
+                let matches_entry = record_matches || facts_match;
+                if matches_entry {
+                    report_provider_facts(&facts, reports);
+                    report_provider_validation(&facts, "locked", reports);
+                }
+                let mut record_identity_ok = true;
                 match record.future_fields.get("provider-facts-digest") {
                     Some(expected) => {
                         let actual = facts.digest();
-                        if expected != &actual {
+                        if matches_entry && expected != &actual {
+                            record_identity_ok = false;
                             reports.push(ExplainReport {
                                 kind: "conflict".to_string(),
                                 message: format!(
@@ -541,7 +550,8 @@ fn locked_provider_facts(
                             });
                         }
                     }
-                    None => {
+                    None if matches_entry => {
+                        record_identity_ok = false;
                         reports.push(ExplainReport {
                             kind: "loss".to_string(),
                             message: format!(
@@ -550,22 +560,44 @@ fn locked_provider_facts(
                             ),
                         });
                     }
+                    None => {}
+                }
+                if matches_entry && record.identity.hash.is_empty() {
+                    record_identity_ok = false;
+                    reports.push(ExplainReport {
+                        kind: "loss".to_string(),
+                        message: format!(
+                            "locked provider record `{}` lacks its fact identity hash",
+                            record.identity.exact
+                        ),
+                    });
+                } else if matches_entry && record.identity.hash != facts.digest() {
+                    record_identity_ok = false;
+                    reports.push(ExplainReport {
+                        kind: "conflict".to_string(),
+                        message: format!(
+                            "locked provider identity hash disagrees for {}: {} vs {}",
+                            record.identity.exact,
+                            record.identity.hash,
+                            facts.digest()
+                        ),
+                    });
                 }
                 if facts.validate().is_err() {
                     continue;
                 }
-                if facts.reference == entry.reference
-                    || facts.qualified_reference() == canonical_entry
-                    || record.identity.exact == entry.reference
-                    || record.identity.exact == facts.qualified_reference()
-                {
+                if matches_entry && record_identity_ok {
                     matches.push(facts);
                 }
             }
-            Err(error) => reports.push(ExplainReport {
+            Err(error) if record_matches => reports.push(ExplainReport {
                 kind: "loss".to_string(),
-                message: format!("locked provider facts could not be decoded: {error}"),
+                message: format!(
+                    "locked provider facts for {} could not be decoded: {error}",
+                    record.identity.exact
+                ),
             }),
+            Err(_) => {}
         }
     }
     matches.sort_by(|left, right| left.digest().cmp(&right.digest()));
@@ -587,6 +619,18 @@ fn locked_provider_facts(
     matches.into_iter().next()
 }
 
+fn lock_record_matches_entry(
+    record: &SemanticLock::SemanticRecord,
+    entry: &StoreEntry,
+    canonical_entry: &str,
+) -> bool {
+    record.identity.kind.as_str() == "package"
+        && (record.identity.exact == entry.reference
+            || record.identity.exact == canonical_entry
+            || record.identity.key == format!("provider:{canonical_entry}")
+            || record.identity.key == format!("provider:{}", entry.reference))
+}
+
 fn profile_provider_facts(
     entry: &StoreEntry,
     reports: &mut Vec<ExplainReport>,
@@ -605,25 +649,102 @@ fn profile_provider_facts(
         });
         return profiles;
     };
-    for profile in profile_dirs.flatten() {
-        let profile_path = profile.path();
-        let Ok(profile_metadata) = fs::symlink_metadata(&profile_path) else {
-            continue;
+    for profile in profile_dirs {
+        let profile = match profile {
+            Ok(profile) => profile,
+            Err(error) => {
+                reports.push(ExplainReport {
+                    kind: "loss".to_string(),
+                    message: format!(
+                        "profile provider facts are unavailable while reading {}: {error}",
+                        generations.display()
+                    ),
+                });
+                continue;
+            }
         };
-        if profile_metadata.file_type().is_symlink() || !profile_metadata.is_dir() {
+        let profile_path = profile.path();
+        let profile_metadata = match fs::symlink_metadata(&profile_path) {
+            Ok(metadata) => metadata,
+            Err(error) => {
+                reports.push(ExplainReport {
+                    kind: "loss".to_string(),
+                    message: format!(
+                        "profile provider facts are unavailable for {}: {error}",
+                        profile_path.display()
+                    ),
+                });
+                continue;
+            }
+        };
+        if profile_metadata.file_type().is_symlink() {
+            reports.push(ExplainReport {
+                kind: "loss".to_string(),
+                message: format!(
+                    "profile provider facts are unavailable: {} is a symlink",
+                    profile_path.display()
+                ),
+            });
+            continue;
+        }
+        if !profile_metadata.is_dir() {
             continue;
         }
         let profile_name = profile.file_name().to_string_lossy().into_owned();
         let generation_dir = profile_path.join("generations");
-        let Ok(generations) = fs::read_dir(&generation_dir) else {
-            continue;
-        };
-        for generation in generations.flatten() {
-            let generation_path = generation.path();
-            let Ok(generation_metadata) = fs::symlink_metadata(&generation_path) else {
+        let generations = match fs::read_dir(&generation_dir) {
+            Ok(generations) => generations,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
+            Err(error) => {
+                reports.push(ExplainReport {
+                    kind: "loss".to_string(),
+                    message: format!(
+                        "profile {profile_name} provider facts are unavailable: could not read {}: {error}",
+                        generation_dir.display()
+                    ),
+                });
                 continue;
+            }
+        };
+        for generation in generations {
+            let generation = match generation {
+                Ok(generation) => generation,
+                Err(error) => {
+                    reports.push(ExplainReport {
+                        kind: "loss".to_string(),
+                        message: format!(
+                            "profile {profile_name} provider facts are unavailable while reading {}: {error}",
+                            generation_dir.display()
+                        ),
+                    });
+                    continue;
+                }
             };
-            if generation_metadata.file_type().is_symlink() || !generation_metadata.is_dir() {
+            let generation_path = generation.path();
+            let generation_metadata = match fs::symlink_metadata(&generation_path) {
+                Ok(metadata) => metadata,
+                Err(error) => {
+                    reports.push(ExplainReport {
+                        kind: "loss".to_string(),
+                        message: format!(
+                            "profile {profile_name} generation provider facts are unavailable for {}: {error}",
+                            generation_path.display()
+                        ),
+                    });
+                    continue;
+                }
+            };
+            if generation_metadata.file_type().is_symlink() {
+                reports.push(ExplainReport {
+                    kind: "loss".to_string(),
+                    message: format!(
+                        "profile {profile_name} contains a symlinked generation `{}`",
+                        generation.file_name().to_string_lossy()
+                    ),
+                });
+                continue;
+            }
+            if !generation_metadata.is_dir() {
                 continue;
             }
             let Ok(number) = generation.file_name().to_string_lossy().parse::<u64>() else {
@@ -746,6 +867,27 @@ fn profile_provider_facts(
                 };
                 report_provider_facts(&facts, reports);
                 report_provider_validation(&facts, "profile", reports);
+                for (field, expected, actual) in [
+                    ("reference", raw_reference, facts.reference.as_str()),
+                    ("target", target, facts.target.as_str()),
+                    (
+                        "provider",
+                        package
+                            .get("provider")
+                            .and_then(|value| value.as_str().ok())
+                            .unwrap_or_default(),
+                        facts.provider.as_str(),
+                    ),
+                ] {
+                    if !expected.is_empty() && expected != actual {
+                        reports.push(ExplainReport {
+                            kind: "conflict".to_string(),
+                            message: format!(
+                                "profile {profile_name} generation {number} {field} differs: {expected} vs {actual}"
+                            ),
+                        });
+                    }
+                }
                 if let Some(expected) = package
                     .get("provider_facts_digest")
                     .and_then(|value| value.as_str().ok())
@@ -771,6 +913,7 @@ fn profile_provider_facts(
                 profiles.push(ExplainProfile {
                     profile: profile_name.clone(),
                     generation: number,
+                    output_hash: output_hash.to_string(),
                     provider_facts: facts,
                 });
             }
@@ -1109,6 +1252,17 @@ fn root_phase(phase: super::Lifecycle::RootPhase) -> &'static str {
     }
 }
 
+fn provider_is_usable(provider: &ExplainProvider) -> bool {
+    let Some(facts) = provider.provider_facts.as_ref() else {
+        return false;
+    };
+    facts.validate().is_ok()
+        && provider
+            .producer_facts
+            .get("provider-facts-digest")
+            .is_some_and(|digest| digest == &facts.digest())
+}
+
 fn rebuild_projection(
     roots: &Roots,
     entry: &StoreEntry,
@@ -1117,6 +1271,7 @@ fn rebuild_projection(
     reports: &mut Vec<ExplainReport>,
 ) -> ExplainRebuild {
     let mut checks = BTreeMap::new();
+    let provider_usable = provider.is_some_and(provider_is_usable);
     let cache_admissions = match super::Cache::cache_admissions_for_explain(roots, entry) {
         Ok(admissions) => admissions
             .into_iter()
@@ -1148,11 +1303,8 @@ fn rebuild_projection(
         if output_exists { "present" } else { "missing" }.to_string(),
     );
     let output_digest = if output_exists {
-        match crate::Envelope::try_output_hash_of_in_hangar(
-            &entry.out,
-            &roots.hangar_dir(),
-            false,
-        ) {
+        match crate::Envelope::try_output_hash_of_in_hangar(&entry.out, &roots.hangar_dir(), false)
+        {
             Ok(actual) if actual == entry.envelope.output_hash => {
                 checks.insert("output_digest".to_string(), "matches".to_string());
                 Some(true)
@@ -1202,7 +1354,7 @@ fn rebuild_projection(
     );
     checks.insert(
         "producer".to_string(),
-        if provider.is_some() {
+        if provider_usable {
             "decoded"
         } else {
             "missing"
@@ -1236,7 +1388,7 @@ fn rebuild_projection(
         output_exists,
         output_digest,
         action_recorded,
-        provider.is_some(),
+        provider_usable,
     ) {
         (Some(attempt), _, _, _, _) if attempt.status == "failed" => (
             "rebuild-required".to_string(),
@@ -1356,6 +1508,12 @@ impl PackageExplain {
             out.push_str(&format!("receipt  {}\n", empty_dash(&entry.receipt)));
         } else {
             out.push_str("entry    - (no realized StoreEntry)\n");
+            if let Some(attempt) = &self.rebuild.attempt {
+                out.push_str(&format!(
+                    "ref      {}\nprovider {}\nstatus   {}\nlogs     jet logs {}\n",
+                    attempt.reference, attempt.provider, attempt.status, attempt.package
+                ));
+            }
         }
         if let Some(provider) = &self.provider {
             out.push_str(&format!(
@@ -1379,8 +1537,8 @@ impl PackageExplain {
             }
             for profile in &provider.profile_facts {
                 out.push_str(&format!(
-                    "profile-facts {} generation {}\n",
-                    profile.profile, profile.generation
+                    "profile-facts {} generation {} output {}\n",
+                    profile.profile, profile.generation, profile.output_hash
                 ));
                 for line in profile.provider_facts.explain_lines() {
                     out.push_str("profile-fact ");
@@ -1469,9 +1627,10 @@ impl ExplainProvider {
 impl ExplainProfile {
     fn to_json(&self) -> String {
         format!(
-            "{{\"profile\":{},\"generation\":{},\"provider_facts\":{}}}",
+            "{{\"profile\":{},\"generation\":{},\"output_hash\":{},\"provider_facts\":{}}}",
             JSON::quote(&self.profile),
             self.generation,
+            JSON::quote(&self.output_hash),
             self.provider_facts.to_json(),
         )
     }

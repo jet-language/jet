@@ -330,10 +330,16 @@ fn hangar_repair_uses_jet_dispatch_and_restores_or_preserves_the_object() {
         &jetpack::Store::find_by_reference(&roots, "repairable@fixture").unwrap(),
     )
     .unwrap();
+    let repeated = repair(&archive);
+    assert!(
+        repeated.status.success(),
+        "repeated repair should be idempotent: {}",
+        String::from_utf8_lossy(&repeated.stderr)
+    );
+    assert_eq!(fs::read_to_string(&payload).unwrap(), "trusted bytes\n");
 
     let quarantine = root.path.join("hangar").join("quarantine");
     fs::create_dir_all(&quarantine).unwrap();
-    make_tree_writable(Path::new(&entry.out));
     fs::rename(
         &entry.out,
         quarantine.join(format!("repair-{}-crash", entry.envelope.output_hash)),

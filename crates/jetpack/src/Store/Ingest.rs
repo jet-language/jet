@@ -1084,7 +1084,7 @@ fn directory_snapshot(
     Ok(snapshot)
 }
 
-fn copy_nofollow_tree(src: &Path, dst: &Path) -> Result<(), IngestError> {
+pub(super) fn copy_nofollow_tree(src: &Path, dst: &Path) -> Result<(), IngestError> {
     let meta = source_metadata(src)?;
     #[cfg(windows)]
     {

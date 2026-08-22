@@ -220,11 +220,9 @@ mod tests {
 
         // Stage-1 compat bytes are Hangar-owned, but remain a separate
         // provider universe.
-        let compat = record_realized_mode(
-            &roots,
-            &fixture(&roots, "compat", "nix", Vec::new(), false),
-        )
-        .unwrap();
+        let compat =
+            record_realized_mode(&roots, &fixture(&roots, "compat", "nix", Vec::new(), false))
+                .unwrap();
         let compat_digest = compat.envelope.output_hash.clone();
 
         // A native runtime closure may contain a Hangar-native dependency and
@@ -815,6 +813,29 @@ mod tests {
                 .to_string()
                 .contains("needs a verified native store authority"),
             "error: {error}"
+        );
+    }
+
+    #[test]
+    fn nix_external_output_projects_into_hangar_without_mutating_source() {
+        let (roots, _g) = temp_roots();
+        let source = roots.root.join("external-nix-output");
+        fs::create_dir_all(source.join("bin")).unwrap();
+        fs::write(source.join("bin/tool"), "projected").unwrap();
+        seal_local_output(&source).unwrap();
+        let digest = crate::Envelope::try_output_hash_of(&source.to_string_lossy()).unwrap();
+
+        let projected = project_external_output_unlocked(&roots, &source, &digest).unwrap();
+        assert!(Path::new(&projected).starts_with(roots.hangar_dir().join("objects")));
+        assert!(source.is_dir(), "projection must not mutate the source output");
+        assert_eq!(
+            crate::Envelope::try_output_hash_of_in_hangar(
+                &projected,
+                &roots.hangar_dir(),
+                false,
+            )
+            .unwrap(),
+            digest
         );
     }
 

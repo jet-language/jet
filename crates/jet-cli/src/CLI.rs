@@ -278,6 +278,7 @@ const HANGAR_ACTIONS: &[NestedCommandSpec] = &[
     NestedCommandSpec { name: "dump", usage: "dump <entry>", summary: "Stream a signed Hangar archive", handler: HandlerKey::Hangar, also_canonical_top_level: false },
     NestedCommandSpec { name: "restore", usage: "restore", summary: "Restore a signed Hangar archive from stdin", handler: HandlerKey::Hangar, also_canonical_top_level: false },
     NestedCommandSpec { name: "sign", usage: "sign <entry-or-archive> [--to <path>]", summary: "Sign a Hangar object or archive", handler: HandlerKey::Hangar, also_canonical_top_level: false },
+    NestedCommandSpec { name: "recover", usage: "recover", summary: "Recover abandoned Hangar staging and leases", handler: HandlerKey::Hangar, also_canonical_top_level: false },
     NestedCommandSpec { name: "rollback", usage: "rollback", summary: "Restore an earlier package-store generation", handler: HandlerKey::Hangar, also_canonical_top_level: false },
     NestedCommandSpec { name: "generations", usage: "generations", summary: "List package-store generations", handler: HandlerKey::Hangar, also_canonical_top_level: false },
     NestedCommandSpec { name: "du", usage: "du", summary: "Show disk use for each stored object", handler: HandlerKey::Hangar, also_canonical_top_level: false },

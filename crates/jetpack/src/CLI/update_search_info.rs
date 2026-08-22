@@ -7,6 +7,7 @@ use super::workspace_sources::{fixtures_for, workspace_root};
 use crate::Output::{self, Theme};
 use crate::Store::{self, ExplainLens, Roots};
 use crate::{BuildDebug, Discovery, EnvFile, Lock, Overlay, SemanticLock, Syntax, WorkspaceFile};
+use std::path::{Path, PathBuf};
 
 /// `jetpack update [<source>]` — resolve channel source refs and move only
 /// their lock entries. Does not realize packages.
@@ -574,6 +575,10 @@ pub(super) fn shell_on_failed_build(theme: &Theme, roots: &Roots, package: &str)
     if attempt.scratch_dir.is_empty() {
         return;
     }
+    let Some(scratch) = verified_failed_scratch(roots, &attempt, package) else {
+        theme.detail("failed-build shell skipped: preserved scratch is not a real Hangar directory");
+        return;
+    };
     let shell = std::env::var("JETPACK_SHELL_ON_FAIL")
         .ok()
         .unwrap_or_else(|| {
@@ -587,14 +592,84 @@ pub(super) fn shell_on_failed_build(theme: &Theme, roots: &Roots, package: &str)
         });
     theme.status(&format!(
         "build failed at step {} · shell in preserved build dir {}",
-        attempt.failed_step, attempt.scratch_dir
+        attempt.failed_step,
+        scratch.display()
     ));
     let mut cmd = std::process::Command::new(&shell);
-    cmd.current_dir(&attempt.scratch_dir)
-        .env("JETPACK_FAILED_SCRATCH", &attempt.scratch_dir)
+    cmd.current_dir(&scratch)
+        .env("JETPACK_FAILED_SCRATCH", &scratch)
         .env("JETPACK_FAILED_STEP", attempt.failed_step.to_string())
         .env("JETPACK_FAILED_PACKAGE", package);
     let _ = cmd.status();
+}
+
+fn verified_failed_scratch(
+    roots: &Roots,
+    attempt: &BuildDebug::Attempt,
+    package: &str,
+) -> Option<PathBuf> {
+    let id = &attempt.id;
+    let expected_prefix = format!("{}-", BuildDebug::safe_name(package));
+    if attempt.package != package
+        || !id.starts_with(&expected_prefix)
+        || id.is_empty()
+        || matches!(id.as_str(), "." | "..")
+        || BuildDebug::safe_name(id) != id.as_str()
+    {
+        return None;
+    }
+    let hangar = roots.hangar_dir();
+    let hangar_metadata = std::fs::symlink_metadata(&hangar).ok()?;
+    if hangar_metadata.file_type().is_symlink() || !hangar_metadata.is_dir() {
+        return None;
+    }
+    let root = hangar.join("failed-scratch");
+    let root_metadata = std::fs::symlink_metadata(&root).ok()?;
+    if root_metadata.file_type().is_symlink() || !root_metadata.is_dir() {
+        return None;
+    }
+    let recorded = Path::new(&attempt.scratch_dir);
+    if !recorded.is_absolute() {
+        return None;
+    }
+    let recorded_metadata = std::fs::symlink_metadata(recorded).ok()?;
+    if recorded_metadata.file_type().is_symlink() || !recorded_metadata.is_dir() {
+        return None;
+    }
+    let root = std::fs::canonicalize(root).ok()?;
+    let recorded = std::fs::canonicalize(recorded).ok()?;
+    let expected = root.join(id);
+    (recorded == expected && recorded.starts_with(&root)).then_some(recorded)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn failed_shell_rejects_recorded_scratch_escape() {
+        let root = std::env::temp_dir().join(format!(
+            "jet-failed-shell-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let roots = Roots {
+            root: root.clone(),
+            dev_mode: false,
+        };
+        std::fs::create_dir_all(roots.hangar_dir().join("failed-scratch/pkg-1")).unwrap();
+        let outside = root.join("outside");
+        std::fs::create_dir_all(&outside).unwrap();
+        let mut attempt = BuildDebug::Attempt::new("pkg", "pkg@1", "fixture", "recipe", "source");
+        attempt.id = "pkg-1".to_string();
+        attempt.scratch_dir = outside.to_string_lossy().into_owned();
+
+        assert!(verified_failed_scratch(&roots, &attempt, "pkg").is_none());
+        let _ = std::fs::remove_dir_all(root);
+    }
 }
 
 fn discovery_index(theme: &Theme, parsed: &Parsed) -> Result<Discovery::Index, i32> {

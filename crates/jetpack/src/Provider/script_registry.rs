@@ -1,6 +1,8 @@
 //! Native RubyGems, CPAN, and Packagist providers (D-FFI-RUBY1/PERL1/PHP1).
 
-use super::{producer_record, provider_cache_identity, Ctx, Provider, ProviderError, Realized, SourceState};
+use super::{
+    producer_record, provider_cache_identity, Ctx, Provider, ProviderError, Realized, SourceState,
+};
 use crate::RefSpec::{RefSpec, SourceTable};
 use crate::JSON::JSONValue;
 use crate::SHA256;
@@ -140,13 +142,7 @@ impl Provider for ScriptRegistryProvider {
         let repository = authority.registry().to_string();
         let fetch_authority = authority.provenance();
         let scratch = Scratch::new(ctx.store_dir, kind)?;
-        let packages = resolve_closure(
-            kind,
-            &authority,
-            &scratch,
-            root_name,
-            root_version,
-        )?;
+        let packages = resolve_closure(kind, &authority, &scratch, root_name, root_version)?;
         let mut artifacts = Vec::new();
         for package in packages {
             let path = scratch.path.join(format!(
@@ -172,7 +168,10 @@ impl Provider for ScriptRegistryProvider {
             if let Some((_output, locked_hash, locked_repository, locked_authority, _)) =
                 crate::Lock::registry_realization(project, kind.label(), &spec.raw)
             {
-                if locked_hash != source_hash || locked_repository != repository || locked_authority != fetch_authority {
+                if locked_hash != source_hash
+                    || locked_repository != repository
+                    || locked_authority != fetch_authority
+                {
                     return Err(fail(
                         kind,
                         format!(
@@ -297,16 +296,33 @@ impl Provider for ScriptRegistryProvider {
     }
 }
 
-fn authority(kind: Kind, ctx: &Ctx<'_>, fetch: bool) -> Result<super::fetch::Authority, ProviderError> {
+fn authority(
+    kind: Kind,
+    ctx: &Ctx<'_>,
+    fetch: bool,
+) -> Result<super::fetch::Authority, ProviderError> {
     let result = if fetch {
-        super::fetch::Authority::load(ctx, kind.label(), &kind.repository(), kind.fetch_authorities())
+        super::fetch::Authority::load(
+            ctx,
+            kind.label(),
+            &kind.repository(),
+            kind.fetch_authorities(),
+        )
     } else {
-        super::fetch::Authority::load_for_cache(ctx, kind.label(), &kind.repository(), kind.fetch_authorities())
+        super::fetch::Authority::load_for_cache(
+            ctx,
+            kind.label(),
+            &kind.repository(),
+            kind.fetch_authorities(),
+        )
     };
     result.map_err(|error| fail(kind, error))
 }
 
-pub(super) fn cache_authority(kind: Kind, ctx: &Ctx<'_>) -> Result<super::fetch::Authority, ProviderError> {
+pub(super) fn cache_authority(
+    kind: Kind,
+    ctx: &Ctx<'_>,
+) -> Result<super::fetch::Authority, ProviderError> {
     authority(kind, ctx, false)
 }
 
@@ -351,11 +367,11 @@ fn resolve_closure(
         candidates: &mut BTreeMap<String, Vec<Package>>,
     ) -> Result<Option<BTreeMap<String, Package>>, ProviderError> {
         if selected.iter().any(|(name, package)| {
-            constraints
-                .get(name)
-                .is_some_and(|requirements| !requirements.iter().all(|requirement| {
-                    version_satisfies(kind, &package.version, requirement)
-                }))
+            constraints.get(name).is_some_and(|requirements| {
+                !requirements
+                    .iter()
+                    .all(|requirement| version_satisfies(kind, &package.version, requirement))
+            })
         }) {
             return Ok(None);
         }
@@ -430,8 +446,20 @@ fn resolve_closure(
         Ok(())
     }
     let constraints = BTreeMap::from([(root.to_string(), vec![format!("={version}")])]);
-    let selected = solve(kind, authority, scratch, constraints, BTreeMap::new(), &mut BTreeMap::new())?
-        .ok_or_else(|| fail(kind, format!("no complete dependency solution exists for `{root}` {version}")))?;
+    let selected = solve(
+        kind,
+        authority,
+        scratch,
+        constraints,
+        BTreeMap::new(),
+        &mut BTreeMap::new(),
+    )?
+    .ok_or_else(|| {
+        fail(
+            kind,
+            format!("no complete dependency solution exists for `{root}` {version}"),
+        )
+    })?;
     let mut out = Vec::new();
     order(
         kind,
@@ -546,7 +574,14 @@ fn fetch_cpan(
         )
         .ok()
         .and_then(|raw| crate::JSON::parse(&raw).ok())
-        .and_then(|value| value.get("distribution").ok()?.as_str().ok().map(str::to_string))
+        .and_then(|value| {
+            value
+                .get("distribution")
+                .ok()?
+                .as_str()
+                .ok()
+                .map(str::to_string)
+        })
         .unwrap_or_else(|| name.to_string());
     let query = format!(
         "{repository}/v1/release/_search?q={}&size=500",
@@ -563,7 +598,12 @@ fn fetch_cpan(
         .get("hits")
         .and_then(|hits| hits.get("hits"))
         .and_then(JSONValue::as_array)
-        .map_err(|error| fail(Kind::Cpan, format!("invalid MetaCPAN release search: {error}")))?;
+        .map_err(|error| {
+            fail(
+                Kind::Cpan,
+                format!("invalid MetaCPAN release search: {error}"),
+            )
+        })?;
     let mut out = Vec::new();
     for hit in releases {
         let release = hit
@@ -595,7 +635,9 @@ fn parse_cpan_release(repository: &str, value: &JSONValue) -> Result<Package, Pr
         ));
     }
     let mut dependencies = Vec::new();
-    if let Some(JSONValue::Array(items)) = value.as_object().ok().and_then(|obj| obj.get("dependency")) {
+    if let Some(JSONValue::Array(items)) =
+        value.as_object().ok().and_then(|obj| obj.get("dependency"))
+    {
         for item in items {
             let relationship = json_string(item, "relationship", Kind::Cpan)?;
             let phase = json_string(item, "phase", Kind::Cpan)?;
@@ -773,13 +815,21 @@ fn fetch_packagist(
                                     .map_err(|error| fail(Kind::Packagist, error))
                             })
                             .collect::<Result<Vec<_>, _>>()?,
-                        _ => return Err(fail(Kind::Packagist, "PSR-4 path must be a string or ordered string array")),
+                        _ => {
+                            return Err(fail(
+                                Kind::Packagist,
+                                "PSR-4 path must be a string or ordered string array",
+                            ))
+                        }
                     };
-                    if prefix.contains('\0') || paths.is_empty() || paths.iter().any(|path| {
-                        path.contains('\0')
-                            || (!path.trim_matches('/').is_empty()
-                                && !safe_relative(Path::new(path.trim_matches('/'))))
-                    }) {
+                    if prefix.contains('\0')
+                        || paths.is_empty()
+                        || paths.iter().any(|path| {
+                            path.contains('\0')
+                                || (!path.trim_matches('/').is_empty()
+                                    && !safe_relative(Path::new(path.trim_matches('/'))))
+                        })
+                    {
                         return Err(fail(Kind::Packagist, "unsafe PSR-4 autoload path"));
                     }
                     psr4.insert(prefix.clone(), paths);
@@ -861,7 +911,11 @@ fn fetch_json(
     })
 }
 
-fn verified_packagist_git_source(release: &JSONValue, dist_url: &str, reference: &str) -> Option<String> {
+fn verified_packagist_git_source(
+    release: &JSONValue,
+    dist_url: &str,
+    reference: &str,
+) -> Option<String> {
     if !matches!(reference.len(), 40 | 64)
         || !reference.bytes().all(|byte| byte.is_ascii_hexdigit())
     {
@@ -874,7 +928,9 @@ fn verified_packagist_git_source(release: &JSONValue, dist_url: &str, reference:
         return None;
     }
     let repository = json_string(source, "url", Kind::Packagist).ok()?;
-    let path = repository.strip_prefix("https://github.com/")?.strip_suffix(".git")?;
+    let path = repository
+        .strip_prefix("https://github.com/")?
+        .strip_suffix(".git")?;
     let mut pieces = path.split('/');
     let (owner, repo) = (pieces.next()?, pieces.next()?);
     if pieces.next().is_some() || !safe_piece(owner, "-_.") || !safe_piece(repo, "-_.") {
@@ -884,7 +940,11 @@ fn verified_packagist_git_source(release: &JSONValue, dist_url: &str, reference:
     (dist_url.split('?').next()? == expected).then(|| repository.to_string())
 }
 
-fn json_string<'a>(value: &'a JSONValue, field: &str, kind: Kind) -> Result<&'a str, ProviderError> {
+fn json_string<'a>(
+    value: &'a JSONValue,
+    field: &str,
+    kind: Kind,
+) -> Result<&'a str, ProviderError> {
     value
         .get(field)
         .and_then(JSONValue::as_str)
@@ -995,7 +1055,8 @@ fn install_composer(
     out: &Path,
     scratch: &Scratch,
 ) -> Result<(), ProviderError> {
-    super::fetch::ensure_download_budget(&artifact.path).map_err(|error| fail(Kind::Packagist, error))?;
+    super::fetch::ensure_download_budget(&artifact.path)
+        .map_err(|error| fail(Kind::Packagist, error))?;
     const ZIP_LIST: &str = "$z=new ZipArchive(); if($z->open($argv[1])!==true) exit(2); $count=$z->numFiles; if($count>(int)$argv[2]) exit(4); $total=0; for($i=0;$i<$count;$i++){ $stat=$z->statIndex($i); if($stat===false) exit(5); $name=$stat['name']; $size=(int)$stat['size']; if(strlen($name)>(int)$argv[5]||$size<0||$size>(int)$argv[3]) exit(6); $total+=$size; if($total>(int)$argv[4]) exit(7); $ops=0;$attr=0;$z->getExternalAttributesIndex($i,$ops,$attr); echo dechex(($attr>>16)&0xf000),\"\\t\",$name,\"\\n\"; }";
     let listing = Command::new("php")
         .args([
@@ -1245,8 +1306,7 @@ fn native_suffixes(kind: Kind) -> &'static [&'static str] {
     match kind {
         Kind::RubyGems => &[".so", ".bundle", ".dll", ".dylib", ".o", ".a"],
         Kind::Cpan => &[
-            ".xs", ".c", ".cc", ".cpp", ".h", ".so", ".bundle", ".dll", ".dylib",
-            ".bs", ".o", ".a",
+            ".xs", ".c", ".cc", ".cpp", ".h", ".so", ".bundle", ".dll", ".dylib", ".bs", ".o", ".a",
         ],
         Kind::Packagist => &[".so", ".bundle", ".dll", ".dylib", ".phar"],
     }
@@ -1298,11 +1358,16 @@ fn verify_integrity(kind: Kind, package: &Package, bytes: &[u8]) -> Result<(), P
     let (algorithm, expected, actual) = match &package.integrity {
         Integrity::Sha256(expected) => ("SHA-256", expected.clone(), SHA256::sha256_hex(bytes)),
         Integrity::Sha1(expected) => ("SHA-1", expected.clone(), sha1_hex(bytes)),
-        Integrity::ImmutableGit { repository, reference } => {
+        Integrity::ImmutableGit {
+            repository,
+            reference,
+        } => {
             if bytes.is_empty() {
                 return Err(fail(
                     kind,
-                    format!("empty source fetched for immutable `{repository}` reference `{reference}`"),
+                    format!(
+                        "empty source fetched for immutable `{repository}` reference `{reference}`"
+                    ),
                 ));
             }
             return Ok(());
@@ -1529,50 +1594,72 @@ fn composer_version_satisfies(actual: &str, requirement: &str) -> bool {
     if requirement.is_empty() || requirement == "*" {
         return true;
     }
-    requirement.replace("||", "|").split('|').any(|alternative| {
-        let normalized = alternative.replace(',', " ");
-        let tokens = normalized.split_whitespace().collect::<Vec<_>>();
-        if tokens.len() == 3 && tokens[1] == "-" {
-            return composer_hyphen_satisfies(actual, tokens[0], tokens[2]);
-        }
-        let mut index = 0;
-        while index < tokens.len() {
-            let token = tokens[index];
-            let (operator, wanted, consumed) = if is_operator(token) {
-                let Some(wanted) = tokens.get(index + 1) else { return false; };
-                (token, *wanted, 2)
-            } else {
-                let (operator, wanted) = [">=", "<=", "!=", "==", "=", ">", "<", "~", "^"]
-                    .into_iter()
-                    .find_map(|operator| token.strip_prefix(operator).map(|wanted| (operator, wanted)))
-                    .unwrap_or(("=", token));
-                (operator, wanted, 1)
-            };
-            let wanted = wanted.trim_start_matches('v');
-            let wildcard = wanted.split('.').any(|part| matches!(part, "*" | "x" | "X"));
-            let matched = if wildcard {
-                let matched = composer_wildcard_satisfies(actual, wanted);
-                if operator == "!=" { !matched } else { matches!(operator, "=" | "==") && matched }
-            } else if operator == "~" {
-                compare_versions(actual, wanted) != std::cmp::Ordering::Less
-                    && upper_bound(wanted, wanted.split('.').count() > 2)
-                        .is_some_and(|upper| compare_versions(actual, &upper) == std::cmp::Ordering::Less)
-            } else {
-                !wanted.is_empty() && satisfies_one(actual, operator, wanted)
-            };
-            if !matched {
-                return false;
+    requirement
+        .replace("||", "|")
+        .split('|')
+        .any(|alternative| {
+            let normalized = alternative.replace(',', " ");
+            let tokens = normalized.split_whitespace().collect::<Vec<_>>();
+            if tokens.len() == 3 && tokens[1] == "-" {
+                return composer_hyphen_satisfies(actual, tokens[0], tokens[2]);
             }
-            index += consumed;
-        }
-        !tokens.is_empty()
-    })
+            let mut index = 0;
+            while index < tokens.len() {
+                let token = tokens[index];
+                let (operator, wanted, consumed) = if is_operator(token) {
+                    let Some(wanted) = tokens.get(index + 1) else {
+                        return false;
+                    };
+                    (token, *wanted, 2)
+                } else {
+                    let (operator, wanted) = [">=", "<=", "!=", "==", "=", ">", "<", "~", "^"]
+                        .into_iter()
+                        .find_map(|operator| {
+                            token
+                                .strip_prefix(operator)
+                                .map(|wanted| (operator, wanted))
+                        })
+                        .unwrap_or(("=", token));
+                    (operator, wanted, 1)
+                };
+                let wanted = wanted.trim_start_matches('v');
+                let wildcard = wanted
+                    .split('.')
+                    .any(|part| matches!(part, "*" | "x" | "X"));
+                let matched = if wildcard {
+                    let matched = composer_wildcard_satisfies(actual, wanted);
+                    if operator == "!=" {
+                        !matched
+                    } else {
+                        matches!(operator, "=" | "==") && matched
+                    }
+                } else if operator == "~" {
+                    compare_versions(actual, wanted) != std::cmp::Ordering::Less
+                        && upper_bound(wanted, wanted.split('.').count() > 2).is_some_and(|upper| {
+                            compare_versions(actual, &upper) == std::cmp::Ordering::Less
+                        })
+                } else {
+                    !wanted.is_empty() && satisfies_one(actual, operator, wanted)
+                };
+                if !matched {
+                    return false;
+                }
+                index += consumed;
+            }
+            !tokens.is_empty()
+        })
 }
 
 fn composer_wildcard_satisfies(actual: &str, wanted: &str) -> bool {
     let wanted = wanted.split('.').collect::<Vec<_>>();
-    let actual = actual.trim_start_matches('v').split(['.', '-', '+']).collect::<Vec<_>>();
-    let Some(wildcard) = wanted.iter().position(|part| matches!(*part, "*" | "x" | "X")) else {
+    let actual = actual
+        .trim_start_matches('v')
+        .split(['.', '-', '+'])
+        .collect::<Vec<_>>();
+    let Some(wildcard) = wanted
+        .iter()
+        .position(|part| matches!(*part, "*" | "x" | "X"))
+    else {
         return false;
     };
     wildcard > 0
@@ -1593,8 +1680,9 @@ fn composer_hyphen_satisfies(actual: &str, lower: &str, upper: &str) -> bool {
     if components >= 3 {
         compare_versions(actual, upper) != std::cmp::Ordering::Greater
     } else {
-        partial_upper_bound(upper)
-            .is_some_and(|exclusive| compare_versions(actual, &exclusive) == std::cmp::Ordering::Less)
+        partial_upper_bound(upper).is_some_and(|exclusive| {
+            compare_versions(actual, &exclusive) == std::cmp::Ordering::Less
+        })
     }
 }
 
@@ -1605,7 +1693,13 @@ fn partial_upper_bound(version: &str) -> Option<String> {
     for part in parts.iter_mut().skip(index + 1) {
         *part = 0;
     }
-    Some(parts.into_iter().map(|part| part.to_string()).collect::<Vec<_>>().join("."))
+    Some(
+        parts
+            .into_iter()
+            .map(|part| part.to_string())
+            .collect::<Vec<_>>()
+            .join("."),
+    )
 }
 
 fn cpan_requirement(requirement: &str) -> String {
@@ -1821,7 +1915,9 @@ mod tests {
         );
         let reference = "0123456789abcdef0123456789abcdef01234567";
         let immutable = parse_packagist_fixture("jet/app", &format!(r#"{{"packages":{{"jet/app":[{{"version":"2.0.0","type":"library","source":{{"type":"git","url":"https://github.com/jet/app.git","reference":"{reference}"}},"dist":{{"type":"zip","url":"https://api.github.com/repos/jet/app/zipball/{reference}","reference":"{reference}","shasum":""}},"autoload":{{"psr-4":{{"Jet\\App\\":"src/"}}}}}}]}}}}"#)).unwrap();
-        assert!(matches!(&immutable[0].integrity, Integrity::ImmutableGit { repository, reference: locked } if repository == "https://github.com/jet/app.git" && locked == reference));
+        assert!(
+            matches!(&immutable[0].integrity, Integrity::ImmutableGit { repository, reference: locked } if repository == "https://github.com/jet/app.git" && locked == reference)
+        );
         assert!(parse_packagist_fixture("jet/app", &format!(r#"{{"packages":{{"jet/app":[{{"version":"2.0.0","type":"library","source":{{"type":"git","url":"https://github.com/attacker/jet-app.git","reference":"{reference}"}},"dist":{{"type":"zip","url":"https://api.github.com/repos/jet/app/zipball/{reference}?source=https://github.com/attacker/jet-app.git","reference":"{reference}","shasum":""}}}}]}}}}"#)).is_err());
 
         let tampered = Package {
@@ -1841,20 +1937,41 @@ mod tests {
         let _ = fs::remove_dir_all(&dir);
         fs::create_dir_all(dir.join("info")).unwrap();
         let hash = "a".repeat(64);
-        fs::write(dir.join("info/root"), format!("1.0 a:>= 1&< 3,b:= 1|checksum:{hash}\n")).unwrap();
-        fs::write(dir.join("info/a"), format!("2.0 c:>= 2|checksum:{hash}\n1.0 c:< 2|checksum:{hash}\n")).unwrap();
+        fs::write(
+            dir.join("info/root"),
+            format!("1.0 a:>= 1&< 3,b:= 1|checksum:{hash}\n"),
+        )
+        .unwrap();
+        fs::write(
+            dir.join("info/a"),
+            format!("2.0 c:>= 2|checksum:{hash}\n1.0 c:< 2|checksum:{hash}\n"),
+        )
+        .unwrap();
         fs::write(dir.join("info/b"), format!("1.0 c:< 2|checksum:{hash}\n")).unwrap();
-        fs::write(dir.join("info/c"), format!("2.0 |checksum:{hash}\n1.0 |checksum:{hash}\n")).unwrap();
+        fs::write(
+            dir.join("info/c"),
+            format!("2.0 |checksum:{hash}\n1.0 |checksum:{hash}\n"),
+        )
+        .unwrap();
         let scratch = Scratch::new(&dir, Kind::RubyGems).unwrap();
-        let ctx = Ctx { fixtures: None, store_dir: &dir, offline: false, project_dir: None };
+        let ctx = Ctx {
+            fixtures: None,
+            store_dir: &dir,
+            offline: false,
+            project_dir: None,
+        };
         let authority = super::super::fetch::Authority::load(
             &ctx,
             "ruby",
             &format!("file://{}", dir.display()),
             Kind::RubyGems.fetch_authorities(),
-        ).unwrap();
+        )
+        .unwrap();
         let closure = resolve_closure(Kind::RubyGems, &authority, &scratch, "root", "1.0").unwrap();
-        let selected = closure.iter().map(|package| (package.name.as_str(), package.version.as_str())).collect::<BTreeMap<_, _>>();
+        let selected = closure
+            .iter()
+            .map(|package| (package.name.as_str(), package.version.as_str()))
+            .collect::<BTreeMap<_, _>>();
         assert_eq!(selected.get("a"), Some(&"1.0"));
         assert_eq!(selected.get("c"), Some(&"1.0"));
 
@@ -1870,22 +1987,43 @@ mod tests {
             "php",
             &format!("file://{}", dir.display()),
             Kind::Packagist.fetch_authorities(),
-        ).unwrap();
-        let composer = resolve_closure(Kind::Packagist, &composer_authority, &composer_scratch, "vendor/root", "1.0.0").unwrap();
-        let composer_selected = composer.iter().map(|package| (package.name.as_str(), package.version.as_str())).collect::<BTreeMap<_, _>>();
+        )
+        .unwrap();
+        let composer = resolve_closure(
+            Kind::Packagist,
+            &composer_authority,
+            &composer_scratch,
+            "vendor/root",
+            "1.0.0",
+        )
+        .unwrap();
+        let composer_selected = composer
+            .iter()
+            .map(|package| (package.name.as_str(), package.version.as_str()))
+            .collect::<BTreeMap<_, _>>();
         assert_eq!(composer_selected.get("vendor/a"), Some(&"1.5.0"));
         assert_eq!(composer_selected.get("vendor/b"), Some(&"2.0.7"));
         assert_eq!(composer_selected.get("vendor/c"), Some(&"1.9.0"));
 
         let cpan = parse_cpan_search_fixture(r#"{"hits":{"hits":[{"_source":{"distribution":"Jet-App","version":"2.0","download_url":"/Jet-App-2.tar.gz","checksum_sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","dependency":[]}},{"_source":{"distribution":"Jet-App","version":"1.0","download_url":"/Jet-App-1.tar.gz","checksum_sha256":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","dependency":[]}}]}}"#).unwrap();
-        assert_eq!(cpan.iter().map(|package| package.version.as_str()).collect::<Vec<_>>(), vec!["2.0", "1.0"]);
-        assert!(cpan.iter().any(|package| version_satisfies(Kind::Cpan, &package.version, "=1.0")));
+        assert_eq!(
+            cpan.iter()
+                .map(|package| package.version.as_str())
+                .collect::<Vec<_>>(),
+            vec!["2.0", "1.0"]
+        );
+        assert!(cpan
+            .iter()
+            .any(|package| version_satisfies(Kind::Cpan, &package.version, "=1.0")));
         let _ = fs::remove_dir_all(&dir);
     }
 
     #[test]
     fn cached_registry_rejects_policy_authority_drift() {
-        let base = std::env::temp_dir().join(format!("jet-registry-authority-cache-{}", std::process::id()));
+        let base = std::env::temp_dir().join(format!(
+            "jet-registry-authority-cache-{}",
+            std::process::id()
+        ));
         let _ = fs::remove_dir_all(&base);
         let project = base.join("project");
         let repo = base.join("repo");
@@ -1901,7 +2039,12 @@ authority: .{{ providers: .{{ ruby: {{ registry: "file://{}", allow: [{allow}], 
         write_policy(&repo, "\"dist.example.test\"", "");
         let store = base.join("store");
         fs::create_dir_all(&store).unwrap();
-        let ctx = Ctx { fixtures: None, store_dir: &store, offline: true, project_dir: Some(&project) };
+        let ctx = Ctx {
+            fixtures: None,
+            store_dir: &store,
+            offline: true,
+            project_dir: Some(&project),
+        };
         let table = SourceTable::empty();
         let spec = crate::RefSpec::classify_in("demo#version=1.0@ruby", &table).unwrap();
         let authority = cache_authority(Kind::RubyGems, &ctx).unwrap();
@@ -1919,10 +2062,16 @@ authority: .{{ providers: .{{ ruby: {{ registry: "file://{}", allow: [{allow}], 
             crate::Lock::LockEnvelope::default(),
         );
         assert!(crate::Provider::validate_cache_authority(&spec, &table, &ctx).is_ok());
-        let locked_policy = crate::Provider::cache_expectation(&spec, &table, &ctx).unwrap().identity.policy_fingerprint;
+        let locked_policy = crate::Provider::cache_expectation(&spec, &table, &ctx)
+            .unwrap()
+            .identity
+            .policy_fingerprint;
 
         write_policy(&repo, "\"dist.example.test\", \"more.example.test\"", "");
-        let changed_policy = crate::Provider::cache_expectation(&spec, &table, &ctx).unwrap().identity.policy_fingerprint;
+        let changed_policy = crate::Provider::cache_expectation(&spec, &table, &ctx)
+            .unwrap()
+            .identity
+            .policy_fingerprint;
         assert_ne!(locked_policy, changed_policy);
         assert!(crate::Provider::validate_cache_authority(&spec, &table, &ctx).is_err());
         let remap = base.join("other-repo");
@@ -1940,10 +2089,13 @@ authority: .{{ providers: .{{ ruby: {{ registry: "file://{}", allow: [{allow}], 
         for tool in ["curl", "tar", "gzip", "ruby", "perl", "php"] {
             assert!(which(tool).is_some(), "Nix dev shell must provision {tool}");
         }
-        assert!(Command::new("php")
-            .args(["-r", "exit(class_exists('ZipArchive') ? 0 : 1);"])
-            .status()
-            .is_ok_and(|status| status.success()), "Nix dev shell PHP must provide ZipArchive");
+        assert!(
+            Command::new("php")
+                .args(["-r", "exit(class_exists('ZipArchive') ? 0 : 1);"])
+                .status()
+                .is_ok_and(|status| status.success()),
+            "Nix dev shell PHP must provide ZipArchive"
+        );
         let _guard = ENV_LOCK.lock().unwrap_or_else(|error| error.into_inner());
         let base = std::env::temp_dir().join(format!("jet-script-registry-{}", std::process::id()));
         let _ = fs::remove_dir_all(&base);
@@ -2067,17 +2219,54 @@ authority: .{{ providers: .{{ ruby: {{ registry: "file://{}", allow: [{allow}], 
         .map(|reference| crate::RefSpec::classify_in(reference, &table).unwrap())
         .collect();
         let env = crate::CLI::compose_refs_for_test(&compose_roots, refs).unwrap();
-        for variable in ["GEM_HOME", "GEM_PATH", "RUBYLIB", "PERL5LIB", "COMPOSER_AUTOLOAD"] {
-            let value = env.vars.get(variable).unwrap_or_else(|| panic!("compose_env omitted {variable}"));
-            assert!(value.split(crate::Platform::path_separator()).all(|path| Path::new(path).is_absolute()), "{variable} was not canonical: {value}");
+        for variable in [
+            "GEM_HOME",
+            "GEM_PATH",
+            "RUBYLIB",
+            "PERL5LIB",
+            "COMPOSER_AUTOLOAD",
+        ] {
+            let value = env
+                .vars
+                .get(variable)
+                .unwrap_or_else(|| panic!("compose_env omitted {variable}"));
+            assert!(
+                value
+                    .split(crate::Platform::path_separator())
+                    .all(|path| Path::new(path).is_absolute()),
+                "{variable} was not canonical: {value}"
+            );
         }
         for (runtime, variable, args) in [
-            ("ruby", "RUBYLIB", &["-e", "require 'jetapp'; print JetApp.value"][..]),
-            ("perl", "PERL5LIB", &["-MJetApp", "-e", "print JetApp::value()"][..]),
-            ("php", "COMPOSER_AUTOLOAD", &["-r", "require getenv('COMPOSER_AUTOLOAD'); echo Jet\\App\\Value::get();"][..]),
+            (
+                "ruby",
+                "RUBYLIB",
+                &["-e", "require 'jetapp'; print JetApp.value"][..],
+            ),
+            (
+                "perl",
+                "PERL5LIB",
+                &["-MJetApp", "-e", "print JetApp::value()"][..],
+            ),
+            (
+                "php",
+                "COMPOSER_AUTOLOAD",
+                &[
+                    "-r",
+                    "require getenv('COMPOSER_AUTOLOAD'); echo Jet\\App\\Value::get();",
+                ][..],
+            ),
         ] {
-            let output = Command::new(runtime).args(args).env(variable, &env.vars[variable]).output().unwrap();
-            assert!(output.status.success(), "{runtime}: {}", String::from_utf8_lossy(&output.stderr));
+            let output = Command::new(runtime)
+                .args(args)
+                .env(variable, &env.vars[variable])
+                .output()
+                .unwrap();
+            assert!(
+                output.status.success(),
+                "{runtime}: {}",
+                String::from_utf8_lossy(&output.stderr)
+            );
             assert_eq!(String::from_utf8_lossy(&output.stdout), "42");
         }
         std::env::set_current_dir(original_dir).unwrap();
@@ -2093,10 +2282,13 @@ authority: .{{ providers: .{{ ruby: {{ registry: "file://{}", allow: [{allow}], 
         for tool in ["tar", "gzip", "php"] {
             assert!(which(tool).is_some(), "Nix dev shell must provision {tool}");
         }
-        assert!(Command::new("php")
-            .args(["-r", "exit(class_exists('ZipArchive') ? 0 : 1);"])
-            .status()
-            .is_ok_and(|status| status.success()), "Nix dev shell PHP must provide ZipArchive");
+        assert!(
+            Command::new("php")
+                .args(["-r", "exit(class_exists('ZipArchive') ? 0 : 1);"])
+                .status()
+                .is_ok_and(|status| status.success()),
+            "Nix dev shell PHP must provide ZipArchive"
+        );
 
         let base = std::env::temp_dir().join(format!("jet-script-native-{}", std::process::id()));
         let _ = fs::remove_dir_all(&base);
@@ -2134,7 +2326,10 @@ authority: .{{ providers: .{{ ruby: {{ registry: "file://{}", allow: [{allow}], 
         let _ = fs::remove_dir_all(&base);
         let source = base.join("source/Bad-1.0/lib");
         fs::create_dir_all(&source).unwrap();
-        fs::File::create(source.join("Bad.pm")).unwrap().set_len(super::super::fetch::MAX_ARCHIVE_ENTRY_BYTES + 1).unwrap();
+        fs::File::create(source.join("Bad.pm"))
+            .unwrap()
+            .set_len(super::super::fetch::MAX_ARCHIVE_ENTRY_BYTES + 1)
+            .unwrap();
         let archive = base.join("Bad-1.0.tar.gz");
         assert!(Command::new("tar")
             .args(["--sparse", "-czf"])
@@ -2152,8 +2347,13 @@ authority: .{{ providers: .{{ ruby: {{ registry: "file://{}", allow: [{allow}], 
         let scratch = Scratch::new(&base, Kind::Cpan).unwrap();
         let out = base.join("out");
         let error = install_cpan(&artifact, &out, &scratch).unwrap_err();
-        let ProviderError::Registry(_, reason) = error else { panic!("{error:?}") };
-        assert!(reason.contains("per-entry limit") || reason.contains("sparse source"), "{reason}");
+        let ProviderError::Registry(_, reason) = error else {
+            panic!("{error:?}")
+        };
+        assert!(
+            reason.contains("per-entry limit") || reason.contains("sparse source"),
+            "{reason}"
+        );
         assert!(!out.exists());
 
         let total_root = base.join("total/Total-1.0/lib");
@@ -2176,9 +2376,18 @@ authority: .{{ providers: .{{ ruby: {{ registry: "file://{}", allow: [{allow}], 
             .success());
         let mut total = test_artifact(Kind::Cpan, "Total", "1.0", total_archive);
         total.package.integrity = Integrity::Sha256(total.sha256.clone());
-        assert!(verify_integrity(Kind::Cpan, &total.package, &fs::read(&total.path).unwrap()).is_ok());
-        let error = install_cpan(&total, &base.join("total-out"), &Scratch::new(&base, Kind::Cpan).unwrap()).unwrap_err();
-        let ProviderError::Registry(_, reason) = error else { panic!("{error:?}") };
+        assert!(
+            verify_integrity(Kind::Cpan, &total.package, &fs::read(&total.path).unwrap()).is_ok()
+        );
+        let error = install_cpan(
+            &total,
+            &base.join("total-out"),
+            &Scratch::new(&base, Kind::Cpan).unwrap(),
+        )
+        .unwrap_err();
+        let ProviderError::Registry(_, reason) = error else {
+            panic!("{error:?}")
+        };
         assert!(reason.contains("expands beyond"), "{reason}");
 
         let many_root = base.join("many/Many-1.0/lib");
@@ -2198,9 +2407,18 @@ authority: .{{ providers: .{{ ruby: {{ registry: "file://{}", allow: [{allow}], 
             .success());
         let mut many = test_artifact(Kind::Cpan, "Many", "1.0", many_archive);
         many.package.integrity = Integrity::Sha256(many.sha256.clone());
-        assert!(verify_integrity(Kind::Cpan, &many.package, &fs::read(&many.path).unwrap()).is_ok());
-        let error = install_cpan(&many, &base.join("many-out"), &Scratch::new(&base, Kind::Cpan).unwrap()).unwrap_err();
-        let ProviderError::Registry(_, reason) = error else { panic!("{error:?}") };
+        assert!(
+            verify_integrity(Kind::Cpan, &many.package, &fs::read(&many.path).unwrap()).is_ok()
+        );
+        let error = install_cpan(
+            &many,
+            &base.join("many-out"),
+            &Scratch::new(&base, Kind::Cpan).unwrap(),
+        )
+        .unwrap_err();
+        let ProviderError::Registry(_, reason) = error else {
+            panic!("{error:?}")
+        };
         assert!(reason.contains("too many entries"), "{reason}");
         let _ = fs::remove_dir_all(base);
     }
@@ -2349,13 +2567,19 @@ authority: .{{ providers: .{{ ruby: {{ registry: "file://{}", allow: [{allow}], 
         std::fs::create_dir_all(dir.join("info")).unwrap();
         std::fs::write(dir.join("info").join(name), raw).unwrap();
         let scratch = Scratch::new(&dir, Kind::RubyGems).unwrap();
-        let ctx = Ctx { fixtures: None, store_dir: &dir, offline: false, project_dir: None };
+        let ctx = Ctx {
+            fixtures: None,
+            store_dir: &dir,
+            offline: false,
+            project_dir: None,
+        };
         let authority = super::super::fetch::Authority::load(
             &ctx,
             Kind::RubyGems.label(),
             &format!("file://{}", dir.display()),
             Kind::RubyGems.fetch_authorities(),
-        ).unwrap();
+        )
+        .unwrap();
         let result = fetch_rubygems(&authority, &scratch, name);
         let _ = std::fs::remove_dir_all(dir);
         result
@@ -2369,18 +2593,21 @@ authority: .{{ providers: .{{ ruby: {{ registry: "file://{}", allow: [{allow}], 
         let dir = std::env::temp_dir().join(format!("jet-cpan-info-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(dir.join("v1/release")).unwrap();
-        std::fs::write(
-            dir.join("v1/release/_search-Jet-App"),
-            raw,
-        ).unwrap();
+        std::fs::write(dir.join("v1/release/_search-Jet-App"), raw).unwrap();
         let scratch = Scratch::new(&dir, Kind::Cpan).unwrap();
-        let ctx = Ctx { fixtures: None, store_dir: &dir, offline: false, project_dir: None };
+        let ctx = Ctx {
+            fixtures: None,
+            store_dir: &dir,
+            offline: false,
+            project_dir: None,
+        };
         let authority = super::super::fetch::Authority::load(
             &ctx,
             Kind::Cpan.label(),
             &format!("file://{}", dir.display()),
             Kind::Cpan.fetch_authorities(),
-        ).unwrap();
+        )
+        .unwrap();
         let result = fetch_cpan(&authority, &scratch, "Jet-App");
         let _ = std::fs::remove_dir_all(dir);
         result
@@ -2393,13 +2620,19 @@ authority: .{{ providers: .{{ ruby: {{ registry: "file://{}", allow: [{allow}], 
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
         std::fs::write(path, raw).unwrap();
         let scratch = Scratch::new(&dir, Kind::Packagist).unwrap();
-        let ctx = Ctx { fixtures: None, store_dir: &dir, offline: false, project_dir: None };
+        let ctx = Ctx {
+            fixtures: None,
+            store_dir: &dir,
+            offline: false,
+            project_dir: None,
+        };
         let authority = super::super::fetch::Authority::load(
             &ctx,
             Kind::Packagist.label(),
             &format!("file://{}", dir.display()),
             Kind::Packagist.fetch_authorities(),
-        ).unwrap();
+        )
+        .unwrap();
         let result = fetch_packagist(&authority, &scratch, name);
         let _ = std::fs::remove_dir_all(dir);
         result

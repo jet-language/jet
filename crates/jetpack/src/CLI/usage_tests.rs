@@ -57,6 +57,7 @@ pub(super) fn usage_with_color(color: bool) -> String {
   {bin} hangar sign <entry-or-archive> sign an object or archive
   {bin} hangar repair <entry> --from <archive.hangar>
                                       quarantine and repair a corrupt object
+  {bin} hangar recover                  recover interrupted Hangar publication
   {bin} cache bind <role> <mirror>...  bind ordered host-owned cache mirrors
   {bin} cache list                     list host-owned cache roles
   {bin} cache publish <entry> --role <role> --yes
@@ -224,6 +225,11 @@ mod tests {
             RuntimePolicy::verb_policy(Syntax::BROWSER_SUBCOMMAND, &[]).verb,
             Syntax::BROWSER_SUBCOMMAND
         );
+    }
+
+    #[test]
+    fn hangar_recovery_is_in_help() {
+        assert!(usage_with_color(false).contains("hangar recover"));
     }
 
     #[test]

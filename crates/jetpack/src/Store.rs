@@ -4,9 +4,9 @@
 //! `$XDG_DATA_HOME/jet` (or `~/.local/share/jet`), macOS uses
 //! `~/Library/Application Support/Jet`, and Windows uses
 //! `%LOCALAPPDATA%/Jet`; each holds the content-addressed **Hangar**.
-//! Jetpack *owns* the lifecycle even when the Nix provider realizes bytes into
-//! `/nix/store` — a Jetpack hangar entry is a small metadata record under our
-//! root that points at the realized output.
+//! Jetpack *owns* the lifecycle even when the Nix provider reports canonical
+//! `/nix/store` paths — the registration boundary projects their bytes into
+//! Hangar and keeps the original path only as producer provenance.
 //!
 //! A project also has a project-local **`.jet/` managed folder**
 //! (`Syntax::SOURCE_ROOT_DIR`) holding the single lockfile (`.jet/lock`),
@@ -29,8 +29,8 @@ pub use jet_pkg_model::Store::{
     CacheIdentity, ParsedMeta, Roots, StoreEntry,
 };
 
-use crate::SHA256;
 use crate::TrustRoot::{cache_builder_identity, is_cache_builder_revoked};
+use crate::SHA256;
 use ed25519_dalek::{Signature, Verifier, VerifyingKey};
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::fs;
@@ -363,12 +363,7 @@ impl IntegrityFailure {
 }
 
 pub fn report_integrity(theme: &super::Output::Theme, failure: &IntegrityFailure) {
-    theme.error_coded(
-        "E2604",
-        &failure.what(),
-        &failure.why(),
-        failure.fix(),
-    );
+    theme.error_coded("E2604", &failure.what(), &failure.why(), failure.fix());
 }
 
 /// Build the store id for a realization — human-readable `<name>-<version>`
@@ -531,88 +526,257 @@ fn record_realized_mode_unlocked(
     realized: &super::Provider::Realized,
     fresh_action_key: Option<&str>,
 ) -> std::io::Result<StoreEntry> {
-        ProducerRecord::decode(&realized.producer.encode()).map_err(std::io::Error::other)?;
-        let graph = Closure::closure_graph_structure_unlocked(roots)?;
-        Closure::validate_universe_references(
-            &realized.producer.provider,
-            &realized.references,
-            &graph,
-        )
-        .map_err(std::io::Error::other)?;
-        let (out, bin, rlib) = canonicalize_local_output_unlocked(
+    ProducerRecord::decode(&realized.producer.encode()).map_err(std::io::Error::other)?;
+    let graph = Closure::closure_graph_structure_unlocked(roots)?;
+    Closure::validate_universe_references(
+        &realized.producer.provider,
+        &realized.references,
+        &graph,
+    )
+    .map_err(std::io::Error::other)?;
+    // Capture named-output identities before projection may move a local
+    // staging path into Hangar. The bytes, not the transient source spelling,
+    // are the durable output facts.
+    let mut named_outputs = BTreeMap::new();
+    for (name, path) in &realized.named_outputs {
+        let digest = if name == "out" {
+            realized.envelope.output_hash.clone()
+        } else {
+            super::Envelope::try_output_hash_of(path).map_err(std::io::Error::other)?
+        };
+        named_outputs.insert(name.clone(), digest);
+    }
+    let (out, bin, rlib) = if realized.producer.provider == "nix" {
+        project_nix_outputs_unlocked(roots, realized)?
+    } else {
+        canonicalize_local_output_unlocked(
             roots,
             &realized.out,
             &realized.bin,
             &realized.rlib,
             &realized.envelope.output_hash,
-        )?;
-        let mut named_outputs = BTreeMap::new();
-        for (name, path) in &realized.named_outputs {
-            let digest = if name == "out" {
-                realized.envelope.output_hash.clone()
-            } else {
-                super::Envelope::try_output_hash_of(path).map_err(std::io::Error::other)?
-            };
-            named_outputs.insert(name.clone(), digest);
+        )?
+    };
+    named_outputs.insert("out".into(), realized.envelope.output_hash.clone());
+    let id = entry_id(&realized.name, &realized.version, &realized.reference, &out);
+    let dir = roots.hangar_dir().join(&id);
+    let now = now_secs();
+    let realized_at = read_meta(&dir)
+        .and_then(|meta| meta.realized_at)
+        .unwrap_or(now);
+    let mut producer = realized.producer.clone();
+    if producer.provider == "nix" {
+        // D-JPK-NIXSTORE1: the provider's canonical path remains a
+        // durable fact, but the bytes and closure are now Hangar-owned.
+        // This is the boundary that prevents a raw host `/nix/store`
+        // path from entering a reusable Store record.
+        producer
+            .facts
+            .insert("closure.authority".into(), "hangar-cas".into());
+        producer
+            .facts
+            .insert("nix.projection.authority".into(), "hangar-cas".into());
+        producer
+            .facts
+            .insert("nix.projection.mode".into(), "canonical-hangar".into());
+    }
+    producer.bind_cache_provenance(
+        &realized.reference,
+        &realized.envelope.output_hash,
+        &realized.cache_identity,
+    );
+    super::Provider::refresh_provider_facts(&mut producer, &realized.reference)
+        .map_err(|error| std::io::Error::other(format!("{error:?}")))?;
+    let mut entry = StoreEntry {
+        id,
+        name: realized.name.clone(),
+        version: realized.version.clone(),
+        reference: realized.reference.clone(),
+        out: out.clone(),
+        bin,
+        rlib,
+        envelope: realized.envelope.clone(),
+        cache_identity: realized.cache_identity.clone(),
+        references: realized.references.clone(),
+        named_outputs,
+        platform_artifact_kind: String::new(),
+        producer_record: producer.encode(),
+        receipt: String::new(),
+        realized_at,
+        last_used_at: now,
+    };
+    let created_dir = !dir.exists();
+    let gc_root = dir.join(NIX_GC_ROOT);
+    let had_gc_root = fs::symlink_metadata(&gc_root).is_ok();
+    fs::create_dir_all(&dir)?;
+    let registration = (|| {
+        pin_nix_gc_root(&dir, &out)?;
+        Closure::prepare_entry_receipt(roots, &mut entry)?;
+        if let Some(action_key) = fresh_action_key {
+            Closure::register_entry_unlocked_after_fresh_agreement(roots, &entry, action_key)
+        } else {
+            register_entry_unlocked(roots, &entry)
         }
-        named_outputs.insert("out".into(), realized.envelope.output_hash.clone());
-        let id = entry_id(
-            &realized.name,
-            &realized.version,
-            &realized.reference,
-            &out,
-        );
-        let dir = roots.hangar_dir().join(&id);
-        let now = now_secs();
-        let realized_at = read_meta(&dir).and_then(|meta| meta.realized_at).unwrap_or(now);
-        let mut producer = realized.producer.clone();
-        producer.bind_cache_provenance(
-            &realized.reference,
-            &realized.envelope.output_hash,
-            &realized.cache_identity,
-        );
-        super::Provider::refresh_provider_facts(&mut producer, &realized.reference)
-            .map_err(|error| std::io::Error::other(format!("{error:?}")))?;
-        let mut entry = StoreEntry {
-            id,
-            name: realized.name.clone(),
-            version: realized.version.clone(),
-            reference: realized.reference.clone(),
-            out: out.clone(),
-            bin,
-            rlib,
-            envelope: realized.envelope.clone(),
-            cache_identity: realized.cache_identity.clone(),
-            references: realized.references.clone(),
-            named_outputs,
-            platform_artifact_kind: String::new(),
-            producer_record: producer.encode(),
-            receipt: String::new(),
-            realized_at,
-            last_used_at: now,
+    })();
+    if let Err(error) = registration {
+        Closure::rollback_registration_dir(&dir, created_dir, had_gc_root)?;
+        return Err(error);
+    }
+    Ok(entry)
+}
+
+/// Project every Nix output into the Hangar CAS before Store registration.
+/// The original `/nix/store` spelling is retained in the producer facts for
+/// runtime namespace projection; it is never used as the durable output root.
+fn project_nix_outputs_unlocked(
+    roots: &Roots,
+    realized: &super::Provider::Realized,
+) -> std::io::Result<(String, String, String)> {
+    let mut projected = BTreeMap::new();
+    let mut seen_sources: BTreeMap<String, String> = BTreeMap::new();
+    for (name, source) in &realized.named_outputs {
+        let digest = if name == "out" {
+            realized.envelope.output_hash.clone()
+        } else {
+            super::Envelope::try_output_hash_of(source).map_err(std::io::Error::other)?
         };
-        let created_dir = !dir.exists();
-        let gc_root = dir.join(NIX_GC_ROOT);
-        let had_gc_root = fs::symlink_metadata(&gc_root).is_ok();
-        fs::create_dir_all(&dir)?;
-        let registration = (|| {
-            pin_nix_gc_root(&dir, &out)?;
-            Closure::prepare_entry_receipt(roots, &mut entry)?;
-            if let Some(action_key) = fresh_action_key {
-                Closure::register_entry_unlocked_after_fresh_agreement(
-                    roots,
-                    &entry,
-                    action_key,
-                )
-            } else {
-                register_entry_unlocked(roots, &entry)
-            }
-        })();
-        if let Err(error) = registration {
-            Closure::rollback_registration_dir(&dir, created_dir, had_gc_root)?;
-            return Err(error);
+        let canonical = if let Some(existing) = seen_sources.get(source) {
+            existing.clone()
+        } else {
+            let canonical = project_nix_output_unlocked(roots, source, &digest)?;
+            seen_sources.insert(source.clone(), canonical.clone());
+            canonical
+        };
+        projected.insert(name.clone(), canonical);
+    }
+
+    let primary_name = if projected.contains_key("out") {
+        "out"
+    } else {
+        "bin"
+    };
+    let primary = projected.get(primary_name).ok_or_else(|| {
+        std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "Nix provider returned no projected primary output",
+        )
+    })?;
+    let remap = |member: &str| {
+        if member.is_empty() {
+            return String::new();
         }
-        Ok(entry)
+        for (name, source) in &realized.named_outputs {
+            if let Ok(relative) = Path::new(member).strip_prefix(source) {
+                if let Some(destination) = projected.get(name) {
+                    return Path::new(destination).join(relative).to_string_lossy().into_owned();
+                }
+            }
+        }
+        member.to_string()
+    };
+    Ok((primary.clone(), remap(&realized.bin), remap(&realized.rlib)))
+}
+
+fn project_nix_output_unlocked(
+    roots: &Roots,
+    source: &str,
+    digest: &str,
+) -> std::io::Result<String> {
+    let source_path = Path::new(source);
+    if source_path.starts_with(roots.hangar_dir()) {
+        let (out, _, _) = canonicalize_local_output_unlocked(roots, source, "", "", digest)?;
+        return Ok(out);
+    }
+    project_external_output_unlocked(roots, source_path, digest)
+}
+
+/// Copy an external Nix output into the Hangar CAS without mutating the host
+/// store. The no-follow ingest and content re-hash are the authority; a
+/// missing/unreadable output fails the realization instead of leaving a raw
+/// external path behind.
+fn project_external_output_unlocked(
+    roots: &Roots,
+    source: &Path,
+    digest: &str,
+) -> std::io::Result<String> {
+    if digest.is_empty() {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "Nix output projection has an empty content digest",
+        ));
+    }
+    let hangar = roots.hangar_dir();
+    let objects = hangar.join(OBJECTS_DIR);
+    Ingest::ensure_real_directory(&objects, "Hangar object pool")?;
+    let destination = objects.join(digest);
+    let verify = |path: &Path| -> std::io::Result<()> {
+        let metadata = fs::symlink_metadata(path)?;
+        if metadata.file_type().is_symlink() {
+            return Err(std::io::Error::other(format!(
+                "Nix output projection `{}` is a symlink",
+                path.display()
+            )));
+        }
+        seal_node(path)?;
+        let actual =
+            super::Envelope::try_output_hash_of_in_hangar(&path.to_string_lossy(), &hangar, false)
+                .map_err(std::io::Error::other)?;
+        if actual != digest {
+            return Err(std::io::Error::other(format!(
+                "Nix output `{}` re-hashed as `{actual}`, expected `{digest}`",
+                source.display()
+            )));
+        }
+        fsync_tree(path)?;
+        Ok(())
+    };
+
+    match fs::symlink_metadata(&destination) {
+        Ok(metadata) if metadata.file_type().is_symlink() => {
+            return Err(std::io::Error::other(format!(
+                "Hangar object `{digest}` is a symlink"
+            )))
+        }
+        Ok(_) => {
+            verify(&destination)?;
+            sync_store_directory(&objects)?;
+            return Ok(destination.to_string_lossy().into_owned());
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => return Err(error),
+    }
+
+    static SEQUENCE: AtomicU64 = AtomicU64::new(0);
+    let stage = objects.join(format!(
+        ".nix-projection-{}-{}",
+        std::process::id(),
+        SEQUENCE.fetch_add(1, Ordering::Relaxed)
+    ));
+    let result = (|| {
+        Ingest::copy_nofollow_tree(source, &stage).map_err(|error| {
+            std::io::Error::other(format!(
+                "copying Nix output `{}` into Hangar failed: {}",
+                source.display(),
+                error.what()
+            ))
+        })?;
+        verify(&stage)?;
+        sync_store_directory(&objects)?;
+        fs::rename(&stage, &destination)?;
+        sync_store_directory(&objects)?;
+        Ok(destination.to_string_lossy().into_owned())
+    })();
+    if result.is_err() {
+        if let Ok(metadata) = fs::symlink_metadata(&stage) {
+            let _ = if metadata.is_dir() {
+                let _ = make_tree_writable_for_removal(&stage);
+                fs::remove_dir_all(&stage)
+            } else {
+                fs::remove_file(&stage)
+            };
+        }
+    }
+    result
 }
 
 fn canonicalize_local_output_unlocked(
@@ -640,7 +804,10 @@ fn canonicalize_local_output_unlocked(
     let objects = roots.hangar_dir().join(OBJECTS_DIR);
     let destination = objects.join(digest);
     Ingest::ensure_real_directory(&objects, "Hangar object pool").map_err(|error| {
-        std::io::Error::new(error.kind(), format!("creating canonical object directory: {error}"))
+        std::io::Error::new(
+            error.kind(),
+            format!("creating canonical object directory: {error}"),
+        )
     })?;
     if source.starts_with(&objects) {
         if source != destination {
@@ -683,7 +850,10 @@ fn canonicalize_local_output_unlocked(
         if source != destination && source.exists() {
             make_tree_writable_for_removal(source)?;
             fs::remove_dir_all(source).map_err(|error| {
-                std::io::Error::new(error.kind(), format!("removing duplicate provider output: {error}"))
+                std::io::Error::new(
+                    error.kind(),
+                    format!("removing duplicate provider output: {error}"),
+                )
             })?;
         }
     } else {
@@ -694,7 +864,10 @@ fn canonicalize_local_output_unlocked(
         make_tree_writable_for_removal(source)?;
         let source_parent = source.parent().map(Path::to_path_buf);
         fs::rename(source, &destination).map_err(|error| {
-            std::io::Error::new(error.kind(), format!("publishing canonical provider output: {error}"))
+            std::io::Error::new(
+                error.kind(),
+                format!("publishing canonical provider output: {error}"),
+            )
         })?;
         if let Some(parent) = source_parent {
             sync_store_directory(&parent)?;
@@ -713,7 +886,10 @@ fn canonicalize_local_output_unlocked(
         }
         fsync_tree(&destination)?;
         sync_store_directory(&objects).map_err(|error| {
-            std::io::Error::new(error.kind(), format!("syncing canonical object directory: {error}"))
+            std::io::Error::new(
+                error.kind(),
+                format!("syncing canonical object directory: {error}"),
+            )
         })?;
     }
     let remap = |member: &str| {
@@ -735,9 +911,9 @@ fn canonicalize_local_output_unlocked(
 
 const NIX_GC_ROOT: &str = "nix-gc-root";
 
-/// Reject direct `/nix/store` registration until a native store authority can
-/// prove and retain the closure. Jetpack never asks `nix-store` to create a
-/// root; local Hangar outputs use the normal closure proof below.
+/// Reject a raw `/nix/store` registration that bypassed the native projection.
+/// Jetpack never asks `nix-store` to create a root; projected Nix outputs use
+/// the normal Hangar closure proof below.
 fn pin_nix_gc_root(_entry_dir: &Path, out: &str) -> std::io::Result<()> {
     let out_path = Path::new(out);
     if out_path.starts_with("/nix/store") {
@@ -813,7 +989,9 @@ fn verify_cache_entry_with_graph(
 ) -> CacheVerification {
     let out = Path::new(&entry.out);
     let output_exists = fs::symlink_metadata(out)
-        .map(|metadata| !metadata.file_type().is_symlink() && (metadata.is_file() || metadata.is_dir()))
+        .map(|metadata| {
+            !metadata.file_type().is_symlink() && (metadata.is_file() || metadata.is_dir())
+        })
         .unwrap_or(false);
     let output_digest = output_exists
         && !entry.envelope.output_hash.is_empty()
@@ -941,7 +1119,8 @@ fn producer_authority_verified(
         && provenance.reference == entry.reference
         && provenance.source == producer.immutable_source
         && provenance.builder == builder
-        && provenance.action == cache_action_identity(&producer, &entry.reference, &entry.cache_identity)
+        && provenance.action
+            == cache_action_identity(&producer, &entry.reference, &entry.cache_identity)
         && provenance.output == entry.envelope.output_hash
         && provenance.platform == expectation.identity.platform
         && provenance.sandbox == "sandbox:policy-bound"
@@ -1020,6 +1199,9 @@ pub struct CacheLease {
     store_root: PathBuf,
     status: ConsumptionStatus,
     wrapper_root: Option<PathBuf>,
+    /// Logical `/nix/store/<name>` paths mapped to the verified private
+    /// snapshot. Shell consumers use this only inside a rootless namespace.
+    nix_store_projection: Vec<(String, PathBuf)>,
     _wrapper_dir_handle: Option<fs::File>,
 }
 
@@ -1036,6 +1218,10 @@ impl CacheLease {
 
     pub fn wrapper_dir(&self) -> Option<&Path> {
         self.wrapper_root.as_deref()
+    }
+
+    pub(crate) fn nix_store_projection(&self) -> &[(String, PathBuf)] {
+        &self.nix_store_projection
     }
 
     pub fn original_output(&self) -> &Path {
@@ -1059,7 +1245,9 @@ impl CacheLease {
             .collect::<std::io::Result<Vec<_>>>()?;
         executable_members.sort();
         if executable_members.is_empty() {
-            return Err(std::io::Error::other("verified tool lease has no executables"));
+            return Err(std::io::Error::other(
+                "verified tool lease has no executables",
+            ));
         }
         Ok(ProfileInstallReceipt {
             store_root: self.store_root.clone(),
@@ -1099,10 +1287,7 @@ impl CacheLease {
         if name.contains(std::path::MAIN_SEPARATOR) {
             return None;
         }
-        let (_, file) = self
-            .executables
-            .iter()
-            .find(|(member, _)| member == name)?;
+        let (_, file) = self.executables.iter().find(|(member, _)| member == name)?;
         #[cfg(target_os = "linux")]
         {
             use std::os::fd::AsRawFd as _;
@@ -1114,6 +1299,18 @@ impl CacheLease {
             let bin = self.bin_relative.as_ref()?;
             Some(self.snapshot_root.join(bin).join(name))
         }
+    }
+
+    pub(crate) fn projected_executable(&self, name: &str) -> Option<PathBuf> {
+        self.require_consumable().ok()?;
+        if name.contains(std::path::MAIN_SEPARATOR) {
+            return None;
+        }
+        self.executables.iter().any(|(member, _)| member == name).then(|| {
+            self.bin_relative
+                .as_ref()
+                .map(|bin| self.snapshot_root.join(bin).join(name))
+        })?
     }
 
     pub fn stable_path(&self, path: &str) -> std::io::Result<PathBuf> {
@@ -1128,7 +1325,9 @@ impl CacheLease {
             .components()
             .any(|component| matches!(component, std::path::Component::ParentDir))
         {
-            return Err(std::io::Error::other("leased consumer path contains parent traversal"));
+            return Err(std::io::Error::other(
+                "leased consumer path contains parent traversal",
+            ));
         }
         if let Some((_, file)) = self.files.iter().find(|(member, _)| member == relative) {
             #[cfg(target_os = "linux")]
@@ -1185,7 +1384,10 @@ impl CacheLease {
                 .iter()
                 .map(|(name, file)| {
                     use std::os::fd::AsRawFd as _;
-                    (name.clone(), PathBuf::from(format!("/proc/self/fd/{}", file.as_raw_fd())))
+                    (
+                        name.clone(),
+                        PathBuf::from(format!("/proc/self/fd/{}", file.as_raw_fd())),
+                    )
                 })
                 .collect::<Vec<_>>();
             expected.sort_by(|left, right| left.0.cmp(&right.0));
@@ -1243,7 +1445,9 @@ fn copy_open_profile_file(
     input.seek(std::io::SeekFrom::Start(0))?;
     let metadata = input.metadata()?;
     if !metadata.is_file() {
-        return Err(std::io::Error::other("profile executable is not a regular file"));
+        return Err(std::io::Error::other(
+            "profile executable is not a regular file",
+        ));
     }
     let mut output = fs::OpenOptions::new()
         .write(true)
@@ -1292,9 +1496,7 @@ pub(crate) fn copy_profile_store_member(
 ) -> std::io::Result<ProfileExecutableProof> {
     let entry = list_checked(roots)?
         .into_iter()
-        .find(|entry| {
-            entry.reference == reference && entry.envelope.output_hash == output_hash
-        })
+        .find(|entry| entry.reference == reference && entry.envelope.output_hash == output_hash)
         .ok_or_else(|| std::io::Error::other("profile StoreEntry authority is unavailable"))?;
     let source = Path::new(&entry.bin).join(member);
     let path_metadata = fs::symlink_metadata(&source)?;
@@ -1309,7 +1511,9 @@ pub(crate) fn copy_profile_store_member(
         use std::os::unix::fs::MetadataExt as _;
         let opened = source_file.metadata()?;
         if path_metadata.dev() != opened.dev() || path_metadata.ino() != opened.ino() {
-            return Err(std::io::Error::other("profile executable changed while opening"));
+            return Err(std::io::Error::other(
+                "profile executable changed while opening",
+            ));
         }
     }
     copy_open_profile_file(&source_file, destination)
@@ -1328,7 +1532,9 @@ pub(crate) fn profile_file_proof(path: &Path) -> std::io::Result<ProfileExecutab
         use std::os::unix::fs::{MetadataExt as _, PermissionsExt as _};
         let metadata = opened.metadata()?;
         if path_metadata.dev() != metadata.dev() || path_metadata.ino() != metadata.ino() {
-            return Err(std::io::Error::other("profile projection changed while opening"));
+            return Err(std::io::Error::other(
+                "profile projection changed while opening",
+            ));
         }
         return Ok(ProfileExecutableProof {
             digest: format!("sha256-{}", SHA256::sha256_file_hex(path)?),
@@ -1421,6 +1627,7 @@ fn snapshot_lease(roots: &Roots, entry: &StoreEntry) -> std::io::Result<CacheLea
                 reason: "realization has no canonical consumable output".to_string(),
             },
             wrapper_root: None,
+            nix_store_projection: Vec::new(),
             _wrapper_dir_handle: None,
         });
     }
@@ -1442,10 +1649,16 @@ fn snapshot_lease(roots: &Roots, entry: &StoreEntry) -> std::io::Result<CacheLea
     let mut files = Vec::new();
     open_snapshot_files(&snapshot_root, &snapshot_root, &mut files)?;
     let bin_relative = (!entry.bin.is_empty())
-        .then(|| Path::new(&entry.bin).strip_prefix(&entry.out).ok().map(PathBuf::from))
+        .then(|| {
+            Path::new(&entry.bin)
+                .strip_prefix(&entry.out)
+                .ok()
+                .map(PathBuf::from)
+        })
         .flatten();
     let executables = open_snapshot_executables(&snapshot_root, bin_relative.as_deref())?;
     let wrappers = create_exec_wrappers(&snapshot_root, &executables)?;
+    let nix_store_projection = nix_store_projection_for_entry(entry, &snapshot_root);
     Ok(CacheLease {
         files,
         executables,
@@ -1459,8 +1672,28 @@ fn snapshot_lease(roots: &Roots, entry: &StoreEntry) -> std::io::Result<CacheLea
         store_root: roots.root.clone(),
         status: ConsumptionStatus::Consumable,
         wrapper_root: wrappers.as_ref().map(|wrapper| wrapper.root.clone()),
+        nix_store_projection,
         _wrapper_dir_handle: wrappers.map(|wrapper| wrapper.directory),
     })
+}
+
+fn nix_store_projection_for_entry(entry: &StoreEntry, snapshot_root: &Path) -> Vec<(String, PathBuf)> {
+    let Ok(producer) = ProducerRecord::decode(&entry.producer_record) else {
+        return Vec::new();
+    };
+    if producer.provider != "nix" {
+        return Vec::new();
+    }
+    let Some(path) = producer.facts.get("nix.output.out") else {
+        return Vec::new();
+    };
+    let Some(name) = path.strip_prefix("/nix/store/") else {
+        return Vec::new();
+    };
+    if name.is_empty() || name.contains('/') || name == "." || name == ".." {
+        return Vec::new();
+    }
+    vec![(path.clone(), snapshot_root.to_path_buf())]
 }
 
 struct ExecWrappers {
@@ -1522,7 +1755,13 @@ printf 'sealed\n'
 IFS= read -r _ || true
 "#;
     let mut child = Command::new(unshare)
-        .args(["--user", "--map-root-user", "--mount", "--propagation", "private"])
+        .args([
+            "--user",
+            "--map-root-user",
+            "--mount",
+            "--propagation",
+            "private",
+        ])
         .arg(shell)
         .args(["-c", script, "jetpack-lease-keeper"])
         .arg(mount)
@@ -1537,7 +1776,10 @@ IFS= read -r _ || true
     let mut line = String::new();
     output.read_line(&mut line)?;
     if line.trim() != "ready" {
-        return Err(wrapper_keeper_error(child, "creating private executable mount"));
+        return Err(wrapper_keeper_error(
+            child,
+            "creating private executable mount",
+        ));
     }
     let root = PathBuf::from(format!("/proc/{}/root{}", child.id(), mountpoint.display()));
     for (name, file) in executables {
@@ -1551,7 +1793,10 @@ IFS= read -r _ || true
     line.clear();
     output.read_line(&mut line)?;
     if line.trim() != "sealed" {
-        return Err(wrapper_keeper_error(child, "sealing private executable mount"));
+        return Err(wrapper_keeper_error(
+            child,
+            "sealing private executable mount",
+        ));
     }
     let directory = fs::File::open(&root)?;
     clear_close_on_exec(&directory)?;
@@ -1559,7 +1804,9 @@ IFS= read -r _ || true
     drop(input);
     let status = child.wait()?;
     if !status.success() {
-        return Err(std::io::Error::other("private executable mount keeper failed"));
+        return Err(std::io::Error::other(
+            "private executable mount keeper failed",
+        ));
     }
     fs::remove_dir(&mountpoint)?;
     Ok(Some(ExecWrappers { root, directory }))
@@ -1572,7 +1819,12 @@ fn find_system_tool(name: &str) -> std::io::Result<PathBuf> {
         .map(PathBuf::from)
         .map(|dir| dir.join(name))
         .find(|path| path.is_file())
-        .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::NotFound, format!("required system tool `{name}` not found")))
+        .ok_or_else(|| {
+            std::io::Error::new(
+                std::io::ErrorKind::NotFound,
+                format!("required system tool `{name}` not found"),
+            )
+        })
 }
 
 #[cfg(target_os = "linux")]
@@ -1631,7 +1883,9 @@ fn copy_snapshot_node(
         #[cfg(not(unix))]
         {
             let _ = target;
-            return Err(std::io::Error::other("cache symlink snapshots need platform support"));
+            return Err(std::io::Error::other(
+                "cache symlink snapshots need platform support",
+            ));
         }
     } else {
         return Err(std::io::Error::other("special file in cache snapshot"));
@@ -1700,7 +1954,6 @@ fn clear_close_on_exec(_file: &fs::File) -> std::io::Result<()> {
     Ok(())
 }
 
-
 /// Single realization boundary for every product consumer. Cache reuse,
 /// quarantine, provider execution, and recording cannot be bypassed by CLI or
 /// JetOS callers.
@@ -1725,9 +1978,7 @@ pub fn realize_verified(
             )
         }
         RealizeRequest::Adapter {
-            plan,
-            expectation,
-            ..
+            plan, expectation, ..
         } => (
             format!("adapt:{}:{}", plan.name, plan.source),
             Some((*expectation).clone()),
@@ -1995,12 +2246,14 @@ fn record_receipt_projection(
     let mut lock = crate::Lock::parse(&raw).map_err(|error| {
         std::io::Error::new(
             std::io::ErrorKind::InvalidData,
-            format!("could not parse project lock `{}`: {error}", lock_path.display()),
+            format!(
+                "could not parse project lock `{}`: {error}",
+                lock_path.display()
+            ),
         )
     })?;
     let Some(package) = lock.packages.iter_mut().find(|package| {
-        package.name == package_name
-            && receipt_package_matches(package, reference, output_hash)
+        package.name == package_name && receipt_package_matches(package, reference, output_hash)
     }) else {
         return Ok(false);
     };
@@ -2022,10 +2275,18 @@ fn receipt_package_matches(
         super::Lock::LockSource::Root => reference == "." || reference == "root",
         super::Lock::LockSource::Path(path) => path == reference,
         super::Lock::LockSource::Git { url, .. } => url == reference,
-        super::Lock::LockSource::Nix { reference: value, .. }
-        | super::Lock::LockSource::Cran { reference: value, .. }
-        | super::Lock::LockSource::LuaRocks { reference: value, .. }
-        | super::Lock::LockSource::Registry { reference: value, .. } => value == reference,
+        super::Lock::LockSource::Nix {
+            reference: value, ..
+        }
+        | super::Lock::LockSource::Cran {
+            reference: value, ..
+        }
+        | super::Lock::LockSource::LuaRocks {
+            reference: value, ..
+        }
+        | super::Lock::LockSource::Registry {
+            reference: value, ..
+        } => value == reference,
     };
     let output_matches = package
         .envelope
@@ -2066,7 +2327,9 @@ fn write_project_lock_atomically(path: &Path, contents: &str) -> std::io::Result
             .open(&candidate)
         {
             Ok(mut file) => {
-                if let Err(error) = file.write_all(contents.as_bytes()).and_then(|()| file.sync_all())
+                if let Err(error) = file
+                    .write_all(contents.as_bytes())
+                    .and_then(|()| file.sync_all())
                 {
                     let _ = fs::remove_file(&candidate);
                     return Err(error);
@@ -2259,31 +2522,24 @@ fn realize_adapter_tools(
 
     for dependency in &plan.deps {
         let raw = jet_env_model::ModuleEval::pkg_ref(dependency);
-        let spec = if dependency.source.is_empty()
-            || dependency.source == crate::Syntax::DEFAULT_SOURCE
-        {
-            // `default` is the typed surface's name for the built-in nixpkgs
-            // provider. It is not a named SourceTable entry.
-            super::RefSpec::RefSpec {
-                source: super::RefSpec::Source::Nixpkgs,
-                package: dependency.name.clone(),
-                raw,
-            }
-        } else {
-            super::RefSpec::classify_in(&raw, table).map_err(|error| {
-                RealizeError::Provider(super::Provider::ProviderError::Adapter(format!(
-                    "build dependency `{raw}` is not a resolvable package ref: {error:?}"
-                )))
-            })?
-        };
-        let realized = realize_verified(
-            roots,
-            ctx,
-            RealizeRequest::Package {
-                spec: &spec,
-                table,
-            },
-        )?;
+        let spec =
+            if dependency.source.is_empty() || dependency.source == crate::Syntax::DEFAULT_SOURCE {
+                // `default` is the typed surface's name for the built-in nixpkgs
+                // provider. It is not a named SourceTable entry.
+                super::RefSpec::RefSpec {
+                    source: super::RefSpec::Source::Nixpkgs,
+                    package: dependency.name.clone(),
+                    raw,
+                }
+            } else {
+                super::RefSpec::classify_in(&raw, table).map_err(|error| {
+                    RealizeError::Provider(super::Provider::ProviderError::Adapter(format!(
+                        "build dependency `{raw}` is not a resolvable package ref: {error:?}"
+                    )))
+                })?
+            };
+        let realized =
+            realize_verified(roots, ctx, RealizeRequest::Package { spec: &spec, table })?;
         let (_entry, _state, lease) = realized.into_parts();
         let receipt = lease.profile_install_receipt().map_err(|error| {
             RealizeError::Provider(super::Provider::ProviderError::Adapter(format!(
@@ -2472,8 +2728,7 @@ fn closure_is_reachable(roots: &Roots, entry: &StoreEntry) -> bool {
     let out = Path::new(&entry.out);
     if out.starts_with("/nix/store") {
         let root = roots.hangar_dir().join(&entry.id).join(NIX_GC_ROOT);
-        return root.exists()
-            && fs::canonicalize(&root).ok() == fs::canonicalize(out).ok();
+        return root.exists() && fs::canonicalize(&root).ok() == fs::canonicalize(out).ok();
     }
     let Ok(canonical_out) = fs::canonicalize(out) else {
         return false;
@@ -2489,7 +2744,6 @@ fn closure_is_reachable(roots: &Roots, entry: &StoreEntry) -> bool {
         canonical_member != canonical_out && canonical_member.starts_with(&canonical_out)
     })
 }
-
 
 /// Opaque receipt for one prepared profile-generation root. Profile producers
 /// can commit only the exact incarnation and witness they prepared.
@@ -2508,9 +2762,7 @@ pub(crate) fn prepare_profile_generation_root(
     targets: Vec<String>,
     at: u64,
 ) -> std::io::Result<PreparedProfileGenerationRoot> {
-    let id = Lifecycle::RootId::new(format!(
-        "profile-generation:{owner}:{profile}:{generation}"
-    ))?;
+    let id = Lifecycle::RootId::new(format!("profile-generation:{owner}:{profile}:{generation}"))?;
     let incarnation = Lifecycle::Incarnation::new(1)?;
     let witness = Lifecycle::RootWitness::new(witness)?;
     let identity = Lifecycle::RootIdentity::new(
@@ -2618,9 +2870,7 @@ pub(crate) fn reconcile_external_consumer_root(
     let root = snapshot
         .roots
         .get(&id)
-        .ok_or_else(|| {
-            std::io::Error::other("external consumer root disappeared after prepare")
-        })?;
+        .ok_or_else(|| std::io::Error::other("external consumer root disappeared after prepare"))?;
     if root.phase == Lifecycle::RootPhase::Committed {
         return Ok(None);
     }
@@ -2988,7 +3238,9 @@ pub(super) fn verify_hangar_object_unlocked(
     }
     for (name, expected) in &expected_outputs {
         let object = graph.objects.get(expected).ok_or_else(|| {
-            IngestError::Invalid(format!("closure graph output `{name}` is missing `{expected}`"))
+            IngestError::Invalid(format!(
+                "closure graph output `{name}` is missing `{expected}`"
+            ))
         })?;
         let digest = super::Envelope::try_output_hash_of_in_hangar(&object.path, &hangar, allow)
             .map_err(IngestError::Invalid)?;
@@ -3147,9 +3399,9 @@ pub use Ingest::*;
 mod Closure;
 pub use Closure::*;
 mod Explain;
-pub use Explain::*;
-pub(crate) use Closure::dir_size;
 pub(crate) use Cache::{fsync_tree, make_tree_writable_for_removal, seal_node};
+pub(crate) use Closure::dir_size;
+pub use Explain::*;
 pub(crate) mod Lifecycle;
 pub(crate) use Lifecycle::{
     external_root_closure_size, list_external_roots, reconcile_profile_generation_root,

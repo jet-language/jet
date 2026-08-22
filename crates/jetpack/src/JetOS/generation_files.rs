@@ -724,7 +724,13 @@ fn service_plan_json(service: &ServicePlan) -> String {
     let fields = service
         .extra
         .iter()
-        .map(|(key, value)| JSON::object_of(&[("key", key), ("value", value)]))
+        .map(|(key, value)| {
+            format!(
+                "{{\"key\":{},\"value\":{}}}",
+                JSON::quote(key),
+                JSON::quote(value)
+            )
+        })
         .collect::<Vec<_>>()
         .join(",");
     format!(

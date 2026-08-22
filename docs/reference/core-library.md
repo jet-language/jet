@@ -828,7 +828,7 @@ persist; it contains public identity metadata, never key bytes.
 use core.crypto as crypto
 use core.crypto.vault as vault
 
-fn provision() ! vault.VaultError -[Secret]> {
+fn provision() vault.VaultError! -[Secret]> {
     plan :: vault.prepare_generate<crypto.SigningKey>("release")?
     write :: vault.authorize_write(&plan, reason: "create release signer")?
     key_ref :: vault.commit_generate<crypto.SigningKey>(take(write), take(plan))?

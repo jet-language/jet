@@ -1,7 +1,7 @@
 use crate::Diagnostics::Diagnostic;
 use crate::Lock::{LockFile, LockSource, LockedPackage};
 use std::collections::BTreeSet;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use super::SemVer::{SemVer, VersionReq};
@@ -162,17 +162,31 @@ pub struct AdvisoryPolicy {
     pub now: u64,
 }
 
+/// Resolve the project advisory feed. An explicitly configured feed is still
+/// checked against the project's pinned trust root; the path does not grant
+/// trust by itself.
+pub fn advisory_feed_path(project_root: &Path) -> Option<PathBuf> {
+    std::env::var_os("JET_ADVISORY_DB")
+        .map(PathBuf::from)
+        .or_else(|| {
+            let path = project_root.join(".jet").join("advisories.db");
+            path.is_file().then_some(path)
+        })
+}
+
+/// The trust root is project policy, never an environment-provided key. A
+/// key-only environment override would silently discard sequence, digest, and
+/// revocation constraints and therefore weaken the effective policy.
+pub fn advisory_trust_path(project_root: &Path) -> PathBuf {
+    project_root.join(".jet").join("advisory-trust")
+}
+
 /// Load the project-local advisory policy, if one is configured. An absent
 /// feed keeps ordinary local development usable; once a feed is present, every
 /// read failure or trust failure is fatal rather than silently downgrading to
 /// an unaudited resolution.
 pub fn load_advisory_policy(project_root: &Path) -> Result<Option<AdvisoryPolicy>, Diagnostic> {
-    let feed_path = std::env::var_os("JET_ADVISORY_DB")
-        .map(std::path::PathBuf::from)
-        .or_else(|| {
-            let path = project_root.join(".jet").join("advisories.db");
-            path.is_file().then_some(path)
-        });
+    let feed_path = advisory_feed_path(project_root);
     let Some(feed_path) = feed_path else {
         return Ok(None);
     };
@@ -183,23 +197,14 @@ pub fn load_advisory_policy(project_root: &Path) -> Result<Option<AdvisoryPolicy
         )
     })?;
     let feed = parse_advisory_feed(&feed_text)?;
-    let trust_path = std::env::var_os("JET_ADVISORY_TRUST")
-        .map(std::path::PathBuf::from)
-        .unwrap_or_else(|| project_root.join(".jet").join("advisory-trust"));
-    let trust = if let Some(public_key) = std::env::var_os("JET_ADVISORY_PUBLIC_KEY") {
-        AdvisoryTrustRoot {
-            public_key: public_key.to_string_lossy().trim().to_string(),
-            ..Default::default()
-        }
-    } else {
-        let trust_text = std::fs::read_to_string(&trust_path).map_err(|error| {
-            e2610(
-                "advisory trust root",
-                &format!("could not read `{}`: {error}", trust_path.display()),
-            )
-        })?;
-        parse_advisory_trust(&trust_text)?
-    };
+    let trust_path = advisory_trust_path(project_root);
+    let trust_text = std::fs::read_to_string(&trust_path).map_err(|error| {
+        e2610(
+            "advisory trust root",
+            &format!("could not read `{}`: {error}", trust_path.display()),
+        )
+    })?;
+    let trust = parse_advisory_trust(&trust_text)?;
     let now = advisory_now();
     let receipt = verify_advisory_feed(&feed, &trust, now)?;
     Ok(Some(AdvisoryPolicy {
@@ -679,6 +684,12 @@ pub fn verify_advisory_feed(
         return Err(e2610(
             "advisory feed",
             "the signed advisory metadata is stale or expired",
+        ));
+    }
+    if feed.maturity_seconds != 0 && feed.maturity_seconds < DEFAULT_MATURITY_SECONDS {
+        return Err(e2610(
+            "advisory feed",
+            "the signed third-party maturity window is weaker than the 24-hour default",
         ));
     }
     let signed_digest = crate::SHA256::sha256_hex(advisory_feed_payload(feed).as_bytes());

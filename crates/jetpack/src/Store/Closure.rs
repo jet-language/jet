@@ -19,9 +19,9 @@ pub struct DuEntry {
 }
 
 /// D-JPK-GC1 / U22: honest per-object disk usage. Sizes each realized object's
-/// output tree (source-built objects live under the hangar; nix outputs live in
-/// `/nix/store` and size 0 here since Jetpack doesn't own those bytes). A
-/// source-built object is counted honestly, envelope and all.
+/// output tree; Nix compatibility outputs are counted after their native
+/// Hangar projection, so Jetpack reports bytes it owns rather than a host-store
+/// estimate.
 pub fn du(roots: &Roots) -> Vec<DuEntry> {
     super::list(roots)
         .into_iter()
@@ -38,8 +38,7 @@ pub fn du(roots: &Roots) -> Vec<DuEntry> {
         .collect()
 }
 
-/// Total bytes on disk of a directory tree (0 if it isn't a local dir, e.g. a
-/// `/nix/store` path Jetpack references but does not own).
+/// Total bytes on disk of a directory tree (0 if it isn't a local directory).
 pub(crate) fn dir_size(path: &std::path::Path) -> u64 {
     if !path.is_dir() {
         return 0;
@@ -883,12 +882,7 @@ fn register_entry_unlocked_mode(
     verify_registration_output(roots, entry)?;
     let (_, graph) = migrate_closure_graph_unlocked(roots)?;
     if let Some(action_key) = fresh_action_key {
-        super::certify_registration_unlocked_with_fresh_agreement(
-            roots,
-            entry,
-            &[],
-            action_key,
-        )?;
+        super::certify_registration_unlocked_with_fresh_agreement(roots, entry, &[], action_key)?;
     } else {
         super::certify_registration_unlocked(roots, entry, &[])?;
     }

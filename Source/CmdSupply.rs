@@ -908,11 +908,7 @@ pub(crate) fn run_audit(db_path: Option<&str>) {
 
     let configured_path = db_path
         .map(PathBuf::from)
-        .or_else(|| std::env::var_os("JET_ADVISORY_DB").map(PathBuf::from))
-        .or_else(|| {
-            let path = root.join(".jet").join("advisories.db");
-            path.is_file().then_some(path)
-        });
+        .or_else(|| jet::Publish::advisory_feed_path(&root));
     let Some(feed_path) = configured_path else {
         audit_fail(
             &root,
@@ -943,32 +939,23 @@ pub(crate) fn run_audit(db_path: Option<&str>) {
         }
     };
 
-    let trust_path = std::env::var_os("JET_ADVISORY_TRUST")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| root.join(".jet").join("advisory-trust"));
-    let trust = if let Some(public_key) = std::env::var_os("JET_ADVISORY_PUBLIC_KEY") {
-        jet::Publish::AdvisoryTrustRoot {
-            public_key: public_key.to_string_lossy().trim().to_string(),
-            ..Default::default()
+    let trust_path = jet::Publish::advisory_trust_path(&root);
+    let trust_text = match fs::read_to_string(&trust_path) {
+        Ok(text) => text,
+        Err(error) => {
+            audit_fail(
+                &trust_path,
+                "",
+                jet::Publish::e2610(
+                    "advisory trust root",
+                    &format!("could not read `{}`: {error}", trust_path.display()),
+                ),
+            );
         }
-    } else {
-        let trust_text = match fs::read_to_string(&trust_path) {
-            Ok(text) => text,
-            Err(error) => {
-                audit_fail(
-                    &trust_path,
-                    "",
-                    jet::Publish::e2610(
-                        "advisory trust root",
-                        &format!("could not read `{}`: {error}", trust_path.display()),
-                    ),
-                );
-            }
-        };
-        match jet::Publish::parse_advisory_trust(&trust_text) {
-            Ok(trust) => trust,
-            Err(diagnostic) => audit_fail(&trust_path, &trust_text, diagnostic),
-        }
+    };
+    let trust = match jet::Publish::parse_advisory_trust(&trust_text) {
+        Ok(trust) => trust,
+        Err(diagnostic) => audit_fail(&trust_path, &trust_text, diagnostic),
     };
 
     let report = match jet::Publish::audit_advisory_feed(&lock, &feed, &trust, jet::Publish::advisory_now()) {

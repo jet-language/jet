@@ -61,19 +61,23 @@ impl Authority {
                     .into_iter()
                     .find(|authority| authority.provider == provider)
             });
-        let (registry, allow, deny): (String, BTreeSet<String>, BTreeSet<String>) = if let Some(configured) = configured {
-            (
-                configured.registry,
-                configured.allow.into_iter().collect(),
-                configured.deny.into_iter().collect(),
-            )
-        } else {
-            (
-                default_registry.to_string(),
-                default_allow.iter().map(|value| value.to_string()).collect(),
-                BTreeSet::new(),
-            )
-        };
+        let (registry, allow, deny): (String, BTreeSet<String>, BTreeSet<String>) =
+            if let Some(configured) = configured {
+                (
+                    configured.registry,
+                    configured.allow.into_iter().collect(),
+                    configured.deny.into_iter().collect(),
+                )
+            } else {
+                (
+                    default_registry.to_string(),
+                    default_allow
+                        .iter()
+                        .map(|value| value.to_string())
+                        .collect(),
+                    BTreeSet::new(),
+                )
+            };
         let registry_authority = authority_of(&registry)?;
         let mut normalized_allow = BTreeSet::new();
         normalized_allow.insert(registry_authority);
@@ -84,7 +88,10 @@ impl Authority {
         for value in deny {
             normalized_deny.insert(normalize_authority(&value)?);
         }
-        if normalized_deny.iter().any(|value| normalized_allow.contains(value)) {
+        if normalized_deny
+            .iter()
+            .any(|value| normalized_allow.contains(value))
+        {
             return Err(format!(
                 "authority.providers.{provider} denies an explicitly allowed authority"
             ));
@@ -122,7 +129,8 @@ impl Authority {
     pub(super) fn text(&self, url: &str, scratch: &Path) -> Result<String, String> {
         let path = scratch.join(format!("fetch-{}-metadata", stable_suffix(url)));
         self.to_path(url, &path, scratch)?;
-        let bytes = std::fs::read(&path).map_err(|error| format!("could not read fetch: {error}"))?;
+        let bytes =
+            std::fs::read(&path).map_err(|error| format!("could not read fetch: {error}"))?;
         String::from_utf8(bytes).map_err(|_| format!("metadata from `{url}` is not UTF-8"))
     }
 
@@ -137,15 +145,15 @@ impl Authority {
             self.check_url(&current)?;
             #[cfg(test)]
             if let Some(path) = file_path(&current) {
-                    let root = file_path(&self.registry)
-                        .ok_or_else(|| "file fetch requires a file registry".to_string())?;
-                    if !safe_file_under(&root, &path) {
-                        return Err("file fetch escaped provider registry root".to_string());
-                    }
-                    ensure_download_budget(&path)?;
-                    std::fs::copy(path, destination)
-                        .map_err(|error| format!("could not copy registry fixture: {error}"))?;
-                    return Ok(());
+                let root = file_path(&self.registry)
+                    .ok_or_else(|| "file fetch requires a file registry".to_string())?;
+                if !safe_file_under(&root, &path) {
+                    return Err("file fetch escaped provider registry root".to_string());
+                }
+                ensure_download_budget(&path)?;
+                std::fs::copy(path, destination)
+                    .map_err(|error| format!("could not copy registry fixture: {error}"))?;
+                return Ok(());
             }
             let headers = scratch.join(format!("fetch-{}-{redirect}.headers", stable_suffix(url)));
             let body = scratch.join(format!("fetch-{}-{redirect}.body", stable_suffix(url)));
@@ -181,7 +189,10 @@ impl Authority {
             let location = raw
                 .lines()
                 .rev()
-                .find_map(|line| line.split_once(':').filter(|(name, _)| name.eq_ignore_ascii_case("location")))
+                .find_map(|line| {
+                    line.split_once(':')
+                        .filter(|(name, _)| name.eq_ignore_ascii_case("location"))
+                })
                 .map(|(_, value)| value.trim())
                 .ok_or_else(|| format!("HTTP {status} from `{current}` had no Location"))?;
             current = redirect_url(&current, location)?;
@@ -222,9 +233,20 @@ fn hardened_curl(path: &Path) -> Command {
         "*",
     ]);
     for name in [
-        "http_proxy", "https_proxy", "all_proxy", "no_proxy", "HTTP_PROXY", "HTTPS_PROXY",
-        "ALL_PROXY", "NO_PROXY", "CURL_HOME", "XDG_CONFIG_HOME", "NETRC",
-        "CURL_CA_BUNDLE", "SSL_CERT_FILE", "SSL_CERT_DIR",
+        "http_proxy",
+        "https_proxy",
+        "all_proxy",
+        "no_proxy",
+        "HTTP_PROXY",
+        "HTTPS_PROXY",
+        "ALL_PROXY",
+        "NO_PROXY",
+        "CURL_HOME",
+        "XDG_CONFIG_HOME",
+        "NETRC",
+        "CURL_CA_BUNDLE",
+        "SSL_CERT_FILE",
+        "SSL_CERT_DIR",
     ] {
         command.env_remove(name);
     }
@@ -236,7 +258,9 @@ pub(super) fn ensure_download_budget(path: &Path) -> Result<(), String> {
         .map_err(|error| format!("could not inspect fetched bytes: {error}"))?
         .len();
     if size > MAX_DOWNLOAD_BYTES {
-        Err(format!("fetched object is {size} bytes; limit is {MAX_DOWNLOAD_BYTES}"))
+        Err(format!(
+            "fetched object is {size} bytes; limit is {MAX_DOWNLOAD_BYTES}"
+        ))
     } else {
         Ok(())
     }
@@ -261,7 +285,9 @@ pub(super) fn validate_tar_archive(path: &Path, gzip: bool) -> Result<(), String
     let mut total = 0u64;
     stream_tar_listing(path, verbose_flag, |line| {
         if !matches!(line.as_bytes().first(), Some(b'-' | b'd')) {
-            return Err("source archives may contain only regular files and directories".to_string());
+            return Err(
+                "source archives may contain only regular files and directories".to_string(),
+            );
         }
         let size = line
             .split_whitespace()
@@ -271,9 +297,13 @@ pub(super) fn validate_tar_archive(path: &Path, gzip: bool) -> Result<(), String
         if size > MAX_ARCHIVE_ENTRY_BYTES {
             return Err(format!("source archive entry is {size} bytes; per-entry limit is {MAX_ARCHIVE_ENTRY_BYTES}"));
         }
-        total = total.checked_add(size).ok_or_else(|| "source archive expanded size overflowed".to_string())?;
+        total = total
+            .checked_add(size)
+            .ok_or_else(|| "source archive expanded size overflowed".to_string())?;
         if total > MAX_ARCHIVE_TOTAL_BYTES {
-            return Err(format!("source archive expands beyond {MAX_ARCHIVE_TOTAL_BYTES} bytes"));
+            return Err(format!(
+                "source archive expands beyond {MAX_ARCHIVE_TOTAL_BYTES} bytes"
+            ));
         }
         Ok(())
     })
@@ -293,14 +323,19 @@ fn preflight_tar_stream(path: &Path, gzip: bool) -> Result<(), String> {
         if result.is_err() {
             let _ = child.kill();
         }
-        let status = child.wait().map_err(|error| format!("could not wait for archive preflight: {error}"))?;
+        let status = child
+            .wait()
+            .map_err(|error| format!("could not wait for archive preflight: {error}"))?;
         result?;
         if !status.success() {
             return Err("source is not a readable gzip tar archive".to_string());
         }
         Ok(())
     } else {
-        inspect_tar_stream(std::fs::File::open(path).map_err(|error| format!("could not open archive: {error}"))?)
+        inspect_tar_stream(
+            std::fs::File::open(path)
+                .map_err(|error| format!("could not open archive: {error}"))?,
+        )
     }
 }
 
@@ -319,7 +354,9 @@ fn inspect_tar_stream(mut input: impl Read) -> Result<(), String> {
     let mut total = 0u64;
     let mut pax_logical_size = None;
     loop {
-        input.read_exact(&mut header).map_err(|error| format!("truncated tar header: {error}"))?;
+        input
+            .read_exact(&mut header)
+            .map_err(|error| format!("truncated tar header: {error}"))?;
         if header.iter().all(|byte| *byte == 0) {
             return Ok(());
         }
@@ -331,23 +368,42 @@ fn inspect_tar_stream(mut input: impl Read) -> Result<(), String> {
         let kind = header[156];
         let metadata = matches!(kind, b'x' | b'g' | b'L' | b'K');
         let logical = pax_logical_size.take().unwrap_or_else(|| {
-            if kind == b'S' { tar_number(&header[483..495]).unwrap_or(stored) } else { stored }
+            if kind == b'S' {
+                tar_number(&header[483..495]).unwrap_or(stored)
+            } else {
+                stored
+            }
         });
         if logical > MAX_ARCHIVE_ENTRY_BYTES {
             return Err(format!("source archive entry is {logical} bytes; per-entry limit is {MAX_ARCHIVE_ENTRY_BYTES}"));
         }
-        total = total.checked_add(logical).ok_or_else(|| "source archive expanded size overflowed".to_string())?;
+        total = total
+            .checked_add(logical)
+            .ok_or_else(|| "source archive expanded size overflowed".to_string())?;
         if total > MAX_ARCHIVE_TOTAL_BYTES {
-            return Err(format!("source archive expands beyond {MAX_ARCHIVE_TOTAL_BYTES} bytes"));
+            return Err(format!(
+                "source archive expands beyond {MAX_ARCHIVE_TOTAL_BYTES} bytes"
+            ));
         }
-        let mut payload = if metadata { Vec::with_capacity(stored as usize) } else { Vec::new() };
-        read_tar_payload(&mut input, stored, if metadata { Some(&mut payload) } else { None })?;
+        let mut payload = if metadata {
+            Vec::with_capacity(stored as usize)
+        } else {
+            Vec::new()
+        };
+        read_tar_payload(
+            &mut input,
+            stored,
+            if metadata { Some(&mut payload) } else { None },
+        )?;
         if matches!(kind, b'x' | b'g') {
-            let text = std::str::from_utf8(&payload).map_err(|_| "tar PAX metadata is not UTF-8".to_string())?;
+            let text = std::str::from_utf8(&payload)
+                .map_err(|_| "tar PAX metadata is not UTF-8".to_string())?;
             pax_logical_size = text.lines().find_map(|line| {
                 let (_, field) = line.split_once(' ')?;
                 let (key, value) = field.split_once('=')?;
-                matches!(key, "GNU.sparse.realsize" | "GNU.sparse.size").then(|| value.parse::<u64>().ok()).flatten()
+                matches!(key, "GNU.sparse.realsize" | "GNU.sparse.size")
+                    .then(|| value.parse::<u64>().ok())
+                    .flatten()
             });
             if pax_logical_size.is_some_and(|size| size > MAX_ARCHIVE_ENTRY_BYTES) {
                 return Err("sparse source archive entry exceeds the per-entry limit".to_string());
@@ -360,25 +416,41 @@ fn tar_number(field: &[u8]) -> Result<u64, String> {
     if field.first().is_some_and(|byte| byte & 0x80 != 0) {
         let mut value = (field[0] & 0x7f) as u64;
         for byte in &field[1..] {
-            value = value.checked_mul(256).and_then(|value| value.checked_add(*byte as u64))
+            value = value
+                .checked_mul(256)
+                .and_then(|value| value.checked_add(*byte as u64))
                 .ok_or_else(|| "tar size overflows".to_string())?;
         }
         Ok(value)
     } else {
         let text = std::str::from_utf8(field).map_err(|_| "tar size is not ASCII".to_string())?;
         let text = text.trim_matches(['\0', ' ']);
-        if text.is_empty() { Ok(0) } else { u64::from_str_radix(text, 8).map_err(|_| "tar size is malformed".to_string()) }
+        if text.is_empty() {
+            Ok(0)
+        } else {
+            u64::from_str_radix(text, 8).map_err(|_| "tar size is malformed".to_string())
+        }
     }
 }
 
-fn read_tar_payload(input: &mut impl Read, size: u64, capture: Option<&mut Vec<u8>>) -> Result<(), String> {
-    let padded = size.checked_add(511).ok_or_else(|| "tar size overflows".to_string())? / 512 * 512;
+fn read_tar_payload(
+    input: &mut impl Read,
+    size: u64,
+    capture: Option<&mut Vec<u8>>,
+) -> Result<(), String> {
+    let padded = size
+        .checked_add(511)
+        .ok_or_else(|| "tar size overflows".to_string())?
+        / 512
+        * 512;
     let mut remaining = padded;
     let mut buffer = [0u8; 8192];
     let mut capture = capture;
     while remaining > 0 {
         let take = remaining.min(buffer.len() as u64) as usize;
-        input.read_exact(&mut buffer[..take]).map_err(|error| format!("truncated tar payload: {error}"))?;
+        input
+            .read_exact(&mut buffer[..take])
+            .map_err(|error| format!("truncated tar payload: {error}"))?;
         if let Some(output) = capture.as_deref_mut() {
             let meaningful = size.saturating_sub(output.len() as u64).min(take as u64) as usize;
             output.extend_from_slice(&buffer[..meaningful]);
@@ -405,7 +477,8 @@ fn stream_tar_listing(
     let mut line = Vec::new();
     loop {
         line.clear();
-        let read = reader.read_until(b'\n', &mut line)
+        let read = reader
+            .read_until(b'\n', &mut line)
             .map_err(|error| format!("could not read source archive listing: {error}"))?;
         if read == 0 {
             break;
@@ -426,7 +499,11 @@ fn stream_tar_listing(
             return Err(reason);
         }
     }
-    if child.wait().map_err(|error| format!("could not wait for archive inspector: {error}"))?.success() {
+    if child
+        .wait()
+        .map_err(|error| format!("could not wait for archive inspector: {error}"))?
+        .success()
+    {
         Ok(())
     } else {
         Err("source is not a readable tar archive".to_string())
@@ -435,7 +512,9 @@ fn stream_tar_listing(
 
 fn safe_archive_path(path: &Path) -> bool {
     !path.as_os_str().is_empty()
-        && path.components().all(|component| matches!(component, Component::Normal(_)))
+        && path
+            .components()
+            .all(|component| matches!(component, Component::Normal(_)))
 }
 
 fn authority_of(url: &str) -> Result<String, String> {
@@ -445,7 +524,9 @@ fn authority_of(url: &str) -> Result<String, String> {
     if let Some(rest) = url.strip_prefix("https://") {
         let authority = rest.split(['/', '?', '#']).next().unwrap_or("");
         if authority.is_empty() || authority.contains('@') || authority.contains('\\') {
-            return Err(format!("provider URL has invalid or credentialed authority `{authority}`"));
+            return Err(format!(
+                "provider URL has invalid or credentialed authority `{authority}`"
+            ));
         }
         let mut authority = authority.to_ascii_lowercase();
         if authority.ends_with(":443") {
@@ -472,7 +553,9 @@ fn valid_host(authority: &str) -> bool {
                 && label.len() <= 63
                 && !label.starts_with('-')
                 && !label.ends_with('-')
-                && label.bytes().all(|byte| byte.is_ascii_alphanumeric() || byte == b'-')
+                && label
+                    .bytes()
+                    .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-')
         })
 }
 
@@ -497,7 +580,10 @@ fn redirect_url(current: &str, location: &str) -> Result<String, String> {
     if location.starts_with('/') {
         return Ok(format!("https://{authority}{location}"));
     }
-    let base = current.rsplit_once('/').map(|(base, _)| base).unwrap_or(current);
+    let base = current
+        .rsplit_once('/')
+        .map(|(base, _)| base)
+        .unwrap_or(current);
     Ok(format!("{base}/{location}"))
 }
 
@@ -512,9 +598,9 @@ fn file_path(url: &str) -> Option<PathBuf> {
             .find_map(|field| field.strip_prefix("q=distribution%3A"))
             .and_then(percent_decode)?;
         if distribution.is_empty()
-            || !distribution
-                .chars()
-                .all(|character| character.is_ascii_alphanumeric() || matches!(character, '-' | '_' | '.'))
+            || !distribution.chars().all(|character| {
+                character.is_ascii_alphanumeric() || matches!(character, '-' | '_' | '.')
+            })
         {
             return None;
         }
@@ -544,9 +630,11 @@ fn percent_decode(value: &str) -> Option<String> {
 #[cfg(test)]
 fn safe_file_under(root: &Path, path: &Path) -> bool {
     path.starts_with(root)
-        && path
-            .strip_prefix(root)
-            .is_ok_and(|relative| relative.components().all(|component| matches!(component, Component::Normal(_))))
+        && path.strip_prefix(root).is_ok_and(|relative| {
+            relative
+                .components()
+                .all(|component| matches!(component, Component::Normal(_)))
+        })
 }
 
 fn stable_suffix(value: &str) -> String {
@@ -591,18 +679,33 @@ mod tests {
             curl: PathBuf::from("curl"),
         };
         assert!(authority.check_url("https://dist.example.test/a").is_ok());
-        assert!(authority.check_url("https://blocked.example.test/a").is_err());
+        assert!(authority
+            .check_url("https://blocked.example.test/a")
+            .is_err());
         assert!(authority.check_url("https://other.example.test/a").is_err());
         assert_eq!(
-            redirect_url("https://repo.example.test/a/index", "https://dist.example.test/pkg").unwrap(),
+            redirect_url(
+                "https://repo.example.test/a/index",
+                "https://dist.example.test/pkg"
+            )
+            .unwrap(),
             "https://dist.example.test/pkg"
         );
-        assert!(authority.check_url(&redirect_url("https://repo.example.test/a", "https://blocked.example.test/pkg").unwrap()).is_err());
+        assert!(authority
+            .check_url(
+                &redirect_url(
+                    "https://repo.example.test/a",
+                    "https://blocked.example.test/pkg"
+                )
+                .unwrap()
+            )
+            .is_err());
     }
 
     #[test]
     fn configured_provider_authority_replaces_defaults() {
-        let dir = std::env::temp_dir().join(format!("jet-provider-authority-{}", std::process::id()));
+        let dir =
+            std::env::temp_dir().join(format!("jet-provider-authority-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(
@@ -619,32 +722,68 @@ authority: {
     },
 }
 "#,
-        ).unwrap();
-        let ctx = Ctx { fixtures: None, store_dir: &dir, offline: false, project_dir: Some(&dir) };
-        let authority = Authority::load(&ctx, "ruby", "https://index.rubygems.org", &["index.rubygems.org"]).unwrap();
+        )
+        .unwrap();
+        let ctx = Ctx {
+            fixtures: None,
+            store_dir: &dir,
+            offline: false,
+            project_dir: Some(&dir),
+        };
+        let authority = Authority::load(
+            &ctx,
+            "ruby",
+            "https://index.rubygems.org",
+            &["index.rubygems.org"],
+        )
+        .unwrap();
         assert_eq!(authority.registry(), "https://mirror.example.test");
-        assert!(authority.check_url("https://mirror.example.test/info/a").is_ok());
-        assert!(authority.check_url("https://dist.example.test/a.gem").is_ok());
-        assert!(authority.check_url("https://index.rubygems.org/info/a").is_err());
-        assert!(authority.check_url("https://blocked.example.test/a.gem").is_err());
-        assert!(authority.provenance().contains("registry=https://mirror.example.test"));
+        assert!(authority
+            .check_url("https://mirror.example.test/info/a")
+            .is_ok());
+        assert!(authority
+            .check_url("https://dist.example.test/a.gem")
+            .is_ok());
+        assert!(authority
+            .check_url("https://index.rubygems.org/info/a")
+            .is_err());
+        assert!(authority
+            .check_url("https://blocked.example.test/a.gem")
+            .is_err());
+        assert!(authority
+            .provenance()
+            .contains("registry=https://mirror.example.test"));
         let _ = std::fs::remove_dir_all(dir);
     }
 
     #[test]
     fn curl_command_disables_ambient_configuration_and_proxies() {
         let command = hardened_curl(Path::new("/usr/bin/curl"));
-        assert_eq!(command.get_args().next().and_then(|value| value.to_str()), Some("--disable"));
+        assert_eq!(
+            command.get_args().next().and_then(|value| value.to_str()),
+            Some("--disable")
+        );
         let removed = command
             .get_envs()
-            .filter_map(|(name, value)| value.is_none().then(|| name.to_string_lossy().into_owned()))
+            .filter_map(|(name, value)| {
+                value.is_none().then(|| name.to_string_lossy().into_owned())
+            })
             .collect::<BTreeSet<_>>();
         let expected = BTreeSet::from([
-            "http_proxy".to_string(), "https_proxy".to_string(), "all_proxy".to_string(),
-            "no_proxy".to_string(), "HTTP_PROXY".to_string(), "HTTPS_PROXY".to_string(),
-            "ALL_PROXY".to_string(), "NO_PROXY".to_string(), "CURL_HOME".to_string(),
-            "XDG_CONFIG_HOME".to_string(), "NETRC".to_string(), "CURL_CA_BUNDLE".to_string(),
-            "SSL_CERT_FILE".to_string(), "SSL_CERT_DIR".to_string(),
+            "http_proxy".to_string(),
+            "https_proxy".to_string(),
+            "all_proxy".to_string(),
+            "no_proxy".to_string(),
+            "HTTP_PROXY".to_string(),
+            "HTTPS_PROXY".to_string(),
+            "ALL_PROXY".to_string(),
+            "NO_PROXY".to_string(),
+            "CURL_HOME".to_string(),
+            "XDG_CONFIG_HOME".to_string(),
+            "NETRC".to_string(),
+            "CURL_CA_BUNDLE".to_string(),
+            "SSL_CERT_FILE".to_string(),
+            "SSL_CERT_DIR".to_string(),
         ]);
         assert_eq!(removed, expected);
         assert!(!command.get_args().any(|value| value == "--netrc"));
@@ -656,7 +795,10 @@ authority: {
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         let source = dir.join("huge");
-        std::fs::File::create(&source).unwrap().set_len(MAX_DOWNLOAD_BYTES + 1).unwrap();
+        std::fs::File::create(&source)
+            .unwrap()
+            .set_len(MAX_DOWNLOAD_BYTES + 1)
+            .unwrap();
         let authority = Authority {
             provider: "ruby".into(),
             registry: format!("file://{}", dir.display()),
@@ -665,7 +807,9 @@ authority: {
             curl: PathBuf::new(),
         };
         let destination = dir.join("copied");
-        assert!(authority.to_path(&format!("file://{}", source.display()), &destination, &dir).is_err());
+        assert!(authority
+            .to_path(&format!("file://{}", source.display()), &destination, &dir)
+            .is_err());
         assert!(!destination.exists());
         let _ = std::fs::remove_dir_all(dir);
     }

@@ -12,7 +12,7 @@
 
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::process::{Command, Stdio};
 use std::sync::Mutex;
 
 mod common;
@@ -881,6 +881,68 @@ fn provider_report_surfaces_missing_identity_as_loss() {
         .losses
         .iter()
         .any(|loss| loss.reason.contains("exact version")));
+}
+
+#[test]
+fn swiftpm_v2_report_keeps_revision_and_native_bytes() {
+    use jetpack::ProviderGraph::{normalize_provider_document, ProviderFamily};
+    let revision = "0123456789abcdef0123456789abcdef01234567";
+    let native = format!(
+        "{{\"pins\":[{{\"identity\":\"swift-log\",\"state\":{{\"revision\":\"{revision}\",\"version\":\"1.5.4\"}}}}]}}"
+    );
+    let report = normalize_provider_document(ProviderFamily::SwiftPM, &native);
+    report.validate().expect("SwiftPM v2 pin is lossless");
+    let shared = report.shared_facts();
+    assert_eq!(shared.qualified_reference(), format!("swift-log#revision={revision}@swiftpm"));
+    assert_eq!(shared.native_document, native);
+    assert!(shared
+        .facts
+        .get("provider.revision")
+        .is_some_and(|value| format!("{value:?}").contains(revision)));
+}
+
+#[test]
+fn homebrew_report_reads_stable_version_and_dependencies() {
+    use jetpack::ProviderGraph::{normalize_provider_document, ProviderFamily};
+    let native =
+        r#"{"name":"jq","versions":{"stable":"1.7.1"},"license":"MIT","dependencies":["oniguruma"]}"#;
+    let report = normalize_provider_document(ProviderFamily::Homebrew, native);
+    report.validate().expect("Homebrew formula identity is lossless");
+    assert_eq!(report.facts.version, "1.7.1");
+    assert_eq!(report.facts.dependencies, vec!["oniguruma".to_string()]);
+    assert_eq!(report.shared_facts().native_document, native);
+}
+
+#[test]
+fn binary_report_uses_digest_identity_without_fabricating_a_version() {
+    use jetpack::ProviderGraph::{normalize_provider_document, ProviderFamily};
+    let digest = "sha256-0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+    let native = format!(
+        "{{\"name\":\"tool\",\"hash\":\"{digest}\",\"platforms\":[\"linux\"]}}"
+    );
+    let report = normalize_provider_document(ProviderFamily::Binary, &native);
+    report.validate().expect("binary digest is an exact identity");
+    assert_eq!(
+        report.shared_facts().qualified_reference(),
+        format!("tool#digest={digest}@binary")
+    );
+    assert_eq!(report.shared_facts().native_document, native);
+}
+
+#[test]
+fn binary_report_surfaces_an_invalid_digest_as_loss() {
+    use jetpack::ProviderGraph::{normalize_provider_document, ProviderFamily};
+    let report = normalize_provider_document(
+        ProviderFamily::Binary,
+        r#"{"name":"tool","hash":"sha256-aa","platforms":["linux"]}"#,
+    );
+    assert!(!report.is_lossless());
+    let shared = report.shared_facts();
+    assert!(shared
+        .losses
+        .iter()
+        .any(|loss| loss.reason.contains("exact version, revision, or digest")));
+    assert!(report.validate().is_err());
 }
 
 #[test]
@@ -4303,6 +4365,110 @@ fn cli_publish_pushes_index_and_enforces_immutability_e1234() {
 }
 
 #[test]
+fn cli_concurrent_publish_keeps_one_immutable_version() {
+    if !jet_bin().is_file() || !have_git() {
+        eprintln!("note: skipping cli_concurrent_publish (need built binary and git)");
+        return;
+    }
+
+    let tmp = tmp_dir("pub_concurrent");
+    let left = tmp.join("left");
+    let right = tmp.join("right");
+    let bare = tmp.join("registry.git");
+    let url = bare_registry(&bare);
+    let cache = tmp.join("cache");
+    let keys = tmp.join("keys");
+    fs::create_dir_all(&left).unwrap();
+    fs::create_dir_all(&right).unwrap();
+    init_clean_project(&left, "racekit", "1.0.0");
+    init_clean_project(&right, "racekit", "1.0.0");
+    write(
+        &right,
+        "run.jet",
+        "#Test(\"smoke\") { expect(1 == 1) }\nfn run() { print(\"different bytes\"); }\n",
+    );
+    for args in &[vec!["add", "."], vec!["commit", "-m", "different source"]] {
+        Command::new("git")
+            .args(args)
+            .current_dir(&right)
+            .output()
+            .unwrap();
+    }
+    seed_core_review(&bare, "racekit", "1.0.0");
+
+    let keygen = jet_cmd_env(
+        &["registry", "keygen"],
+        &left,
+        &[("JET_KEYS_DIR", keys.to_str().unwrap())],
+    );
+    assert!(
+        keygen.status.success(),
+        "shared publish keygen failed: {}",
+        String::from_utf8_lossy(&keygen.stderr)
+    );
+
+    let spawn = |project: &Path, store: &Path| {
+        Command::new(jet_bin())
+            .args(["registry", "publish"])
+            .current_dir(project)
+            .env("JET_REGISTRY_URL", &url)
+            .env("JET_REGISTRY_CACHE_DIR", &cache)
+            .env("JET_KEYS_DIR", &keys)
+            .env("JET_STORE_DIR", store)
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .unwrap()
+    };
+    let left_child = spawn(&left, &tmp.join("left-store"));
+    let right_child = spawn(&right, &tmp.join("right-store"));
+    let left_output = left_child.wait_with_output().unwrap();
+    let right_output = right_child.wait_with_output().unwrap();
+    let outputs = [&left_output, &right_output];
+    assert_eq!(
+        outputs.iter().filter(|output| output.status.success()).count(),
+        1,
+        "exactly one concurrent immutable publish may win: left={:?}, right={:?}",
+        left_output.status,
+        right_output.status
+    );
+    let loser = outputs
+        .iter()
+        .find(|output| !output.status.success())
+        .expect("one concurrent publisher must lose");
+    assert!(
+        String::from_utf8_lossy(&loser.stderr).contains("E1234"),
+        "duplicate concurrent publish must report immutable-version error: {}",
+        String::from_utf8_lossy(&loser.stderr)
+    );
+
+    let index = read_index_file(&bare, "racekit").expect("winning index entry must be published");
+    assert_eq!(
+        index
+            .lines()
+            .filter(|line| line.contains("\"version\":\"1.0.0\""))
+            .count(),
+        1,
+        "concurrent publication must leave one immutable index line: {index}"
+    );
+    for path in [
+        "artifacts/racekit/1.0.0/package.jet",
+        "metadata/racekit.json",
+        "transparency/log",
+        "transparency/checkpoint",
+    ] {
+        let output = Command::new("git")
+            .args(["--git-dir", bare.to_str().unwrap(), "cat-file", "-e"])
+            .arg(format!("HEAD:{path}"))
+            .output()
+            .unwrap();
+        assert!(output.status.success(), "winning publish omitted {path}");
+    }
+
+    let _ = fs::remove_dir_all(&tmp);
+}
+
+#[test]
 fn registry_fetch_installs_verified_artifact_in_hangar_and_locked_reuses_it() {
     if !jet_bin().is_file() || !have_git() {
         eprintln!(
@@ -4464,6 +4630,173 @@ fn registry_fetch_installs_verified_artifact_in_hangar_and_locked_reuses_it() {
 }
 
 #[test]
+fn registry_fetch_applies_verified_advisory_freshness_before_hangar_ingest() {
+    if !jet_bin().is_file() || !have_git() {
+        eprintln!(
+            "note: skipping registry_fetch_applies_advisory_freshness (need built binary and git)"
+        );
+        return;
+    }
+
+    let tmp = tmp_dir("registry_fetch_advisory_freshness");
+    let publisher = tmp.join("publisher");
+    let consumer = tmp.join("consumer");
+    let bare = tmp.join("registry.git");
+    let url = bare_registry(&bare);
+    let cache = tmp.join("registry-cache");
+    let store = tmp.join("legacy-store");
+    let hangar_root = tmp.join("jetpack-root");
+    let keys = tmp.join("keys");
+    fs::create_dir_all(&publisher).unwrap();
+    fs::create_dir_all(&consumer).unwrap();
+    fs::create_dir_all(&store).unwrap();
+    init_clean_project(&publisher, "freshlib", "1.2.0");
+    seed_core_review(&bare, "freshlib", "1.2.0");
+
+    let publish = jet_cmd_env(
+        &["registry", "publish"],
+        &publisher,
+        &[
+            ("JET_REGISTRY_URL", url.as_str()),
+            ("JET_REGISTRY_CACHE_DIR", cache.to_str().unwrap()),
+            ("JET_STORE_DIR", store.to_str().unwrap()),
+            ("JET_KEYS_DIR", keys.to_str().unwrap()),
+        ],
+    );
+    assert!(
+        publish.status.success(),
+        "registry publish failed:\n{}",
+        String::from_utf8_lossy(&publish.stderr)
+    );
+
+    let raw = manifest_with_deps("fresh-consumer", "0.1.0", "    freshlib: freshlib#1.2.0,");
+    write(&consumer, "package.jet", &raw);
+    let manifest = jet::Manifest::parse(&consumer.join("package.jet"), &raw).unwrap();
+    let opts = jet::Fetch::FetchOptions {
+        locked: false,
+        update: false,
+        update_dep: None,
+        resolution: jet::Publish::ResolveMode::Conservative,
+    };
+
+    with_keys(&keys, || {
+        let (seed, _public_path, public_key) =
+            jet::Publish::Sign::keygen("advisory", false).expect("advisory keygen should succeed");
+        let mut feed = jet::Publish::AdvisoryFeed {
+            sequence: 1,
+            issued_at: 100,
+            expires_at: 200_000,
+            maturity_seconds: jet::Publish::DEFAULT_MATURITY_SECONDS,
+            key_id: jet::Publish::advisory_key_id(&public_key).unwrap(),
+            public_key: public_key.clone(),
+            signature: String::new(),
+            releases: vec![jet::Publish::AdvisoryRelease {
+                package: "freshlib".into(),
+                version: jet::Publish::SemVer::SemVer::parse("1.2.0").unwrap(),
+                first_seen: 100,
+                source_class: jet::Publish::SourceClass::ThirdParty,
+            }],
+            advisories: Vec::new(),
+            exceptions: Vec::new(),
+        };
+        feed.signature = jet::Publish::sign_advisory_feed(&feed, &seed).unwrap();
+        fs::create_dir_all(consumer.join(".jet")).unwrap();
+        fs::write(
+            consumer.join(".jet/advisories.db"),
+            jet::Publish::advisory_feed_text(&feed),
+        )
+        .unwrap();
+        fs::write(
+            consumer.join(".jet/advisory-trust"),
+            format!("public_key={public_key}\nmin_sequence=1\n"),
+        )
+        .unwrap();
+
+        let env_keys = [
+            "JET_REGISTRY_URL",
+            "JET_REGISTRY_CACHE_DIR",
+            "JET_STORE_DIR",
+            "JETPACK_ROOT",
+            "JET_ADVISORY_NOW",
+            "JET_ADVISORY_DB",
+            "JET_ADVISORY_TRUST",
+            "JET_ADVISORY_PUBLIC_KEY",
+        ];
+        let previous = env_keys
+            .iter()
+            .map(|key| (*key, std::env::var_os(key)))
+            .collect::<Vec<_>>();
+        std::env::set_var("JET_REGISTRY_URL", &url);
+        std::env::set_var("JET_REGISTRY_CACHE_DIR", &cache);
+        std::env::set_var("JET_STORE_DIR", &store);
+        std::env::set_var("JETPACK_ROOT", &hangar_root);
+        std::env::set_var("JET_ADVISORY_NOW", "200");
+        std::env::remove_var("JET_ADVISORY_DB");
+        std::env::remove_var("JET_ADVISORY_TRUST");
+        std::env::remove_var("JET_ADVISORY_PUBLIC_KEY");
+
+        let immature = jet::Fetch::fetch(&consumer, &manifest, None, &opts)
+            .expect_err("an immature registry candidate must be rejected");
+        assert_eq!(first_diag_code(&immature), "E2609", "diagnostics: {immature:?}");
+        assert!(immature[0].what.contains("freshlib#1.2.0"));
+        assert!(
+            !consumer.join(".jet-build/deps/freshlib").exists(),
+            "freshness must fail before a registry artifact is usable"
+        );
+
+        std::env::set_var("JET_ADVISORY_NOW", "100000");
+        let (lock, dep_dirs) = jet::Fetch::fetch(&consumer, &manifest, None, &opts)
+            .expect("a mature, verified candidate should resolve and ingest");
+        assert!(dep_dirs.contains_key("freshlib"));
+        assert!(lock.packages.iter().any(|package| package.name == "freshlib"));
+        let entry = jetpack::Store::list(&jetpack::Store::Roots::at(hangar_root.clone()))
+            .into_iter()
+            .find(|entry| entry.name == "freshlib" && entry.version == "1.2.0")
+            .expect("mature candidate must produce a Hangar entry");
+        assert!(
+            entry.envelope.provenance.contains("advisory-feed=sequence=1"),
+            "verified advisory receipt must be visible in Hangar provenance: {}",
+            entry.envelope.provenance
+        );
+        assert!(entry.envelope.provenance.contains("maturity=86400s"));
+
+        let mut stale = feed.clone();
+        stale.expires_at = 150;
+        stale.signature =
+            jet::Publish::sign_advisory_feed(&stale, &seed).expect("stale feed should sign");
+        fs::write(&consumer.join(".jet/advisories.db"), jet::Publish::advisory_feed_text(&stale))
+            .unwrap();
+        std::env::set_var("JET_ADVISORY_NOW", "200");
+        let (_same_lock, locked_dirs) = jet::Fetch::fetch(&consumer, &manifest, Some(&lock), &opts)
+            .expect("an exact lock must remain usable when advisory metadata expires");
+        assert_eq!(
+            locked_dirs.get("freshlib"),
+            dep_dirs.get("freshlib"),
+            "exact-lock reuse must keep the same Hangar object"
+        );
+        let reused_entry = jetpack::Store::list(&jetpack::Store::Roots::at(hangar_root.clone()))
+            .into_iter()
+            .find(|entry| entry.name == "freshlib" && entry.version == "1.2.0")
+            .expect("exact-lock reuse must keep the Hangar entry");
+        assert!(
+            reused_entry.envelope.provenance.contains("advisory-feed=sequence=1"),
+            "exact-lock reuse must not erase the verified advisory receipt"
+        );
+
+        for (key, value) in previous {
+            if let Some(value) = value {
+                std::env::set_var(key, value);
+            } else {
+                std::env::remove_var(key);
+            }
+        }
+    });
+
+    common::make_tree_writable(&tmp);
+    fs::remove_dir_all(tmp).unwrap();
+}
+
+#[test]
 fn cli_yank_flips_index_entry() {
     // c56 (D-VERSION1=A): `jet registry yank <version>` flips the `yanked` flag on the
     // version's index line in place — it never deletes the line.
@@ -4585,6 +4918,7 @@ fn registry_interrupted_artifact_stage_leaves_no_partial() {
     let tmp = tmp_dir("registry_interrupted_artifact");
     let repo = tmp.join("registry");
     let source = tmp.join("source");
+    fs::create_dir_all(&repo).unwrap();
     fs::create_dir_all(&source).unwrap();
     fs::write(source.join("package.jet"), "package bytes").unwrap();
     symlink("package.jet", source.join("linked.jet")).unwrap();
@@ -4930,6 +5264,50 @@ fn cli_signed_advisory_feed_receipt_and_tamper_fail_closed() {
             "stdout={stdout}"
         );
         assert!(stdout.contains("no advisories found"), "stdout={stdout}");
+
+        fs::remove_file(project.join(".jet/advisory-trust")).unwrap();
+        let key_only = Command::new(jet_bin())
+            .args(["inspect", "audit"])
+            .current_dir(&project)
+            .env("JET_ADVISORY_NOW", "200")
+            .env("JET_ADVISORY_PUBLIC_KEY", &public_key)
+            .env("NO_COLOR", "1")
+            .output()
+            .unwrap();
+        assert_eq!(key_only.status.code(), Some(1));
+        assert!(
+            String::from_utf8_lossy(&key_only.stderr).contains("advisory trust root"),
+            "key-only environment input must not replace the pinned trust root: {}",
+            String::from_utf8_lossy(&key_only.stderr)
+        );
+        fs::write(
+            project.join(".jet/advisory-trust"),
+            format!("public_key={}\nmin_sequence=1\n", public_key),
+        )
+        .unwrap();
+
+        let mut weakened = feed.clone();
+        weakened.maturity_seconds = 1;
+        weakened.signature = jet::Publish::sign_advisory_feed(&weakened, &seed)
+            .expect("weakened feed signing should succeed");
+        fs::write(
+            &feed_path,
+            jet::Publish::advisory_feed_text(&weakened),
+        )
+        .unwrap();
+        let weakened_result = audit();
+        assert_eq!(weakened_result.status.code(), Some(1));
+        assert!(
+            String::from_utf8_lossy(&weakened_result.stderr)
+                .contains("weaker than the 24-hour default"),
+            "a signed feed must not weaken the default maturity policy: {}",
+            String::from_utf8_lossy(&weakened_result.stderr)
+        );
+        assert_eq!(
+            String::from_utf8(weakened_result.stderr).unwrap(),
+            include_str!("cli/advisory_weakened_maturity_e2610.txt")
+        );
+        fs::write(&feed_path, jet::Publish::advisory_feed_text(&feed)).unwrap();
 
         fs::write(
             project.join(".jet/advisory-trust"),

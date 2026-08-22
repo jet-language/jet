@@ -245,9 +245,9 @@ live acceptance, and documentation. Work order is binding.
 
 - Stop reporting a cache hit until output existence, canonical digest,
   platform, policy, signature, and closure are verified.
-- Create verified durable Nix GC roots for every referenced compatibility
-  closure. JP11 later replaces those roots with native Hangar closure import;
-  there is no unrooted transitional state.
+- Create verified durable roots for every referenced compatibility closure.
+  JP11 projects the verified bytes and references into native Hangar closure
+  records; there is no raw unrooted host-store state.
 - Stop reporting “strong sandbox” unless the child enters the jail.
 - Inventory every E4 `done` claim as live, model-only, schema-only, fixture-only,
   or compatibility-only; reopen incomplete product-claim cards.
@@ -378,7 +378,10 @@ Shipped slice evidence:
 - `jet build --builder <bound-name>` enters the canonical build executor. It
   uploads missing action inputs to the authenticated CAS, submits the exact
   action identity (including argv, input snapshots, outputs, and effective
-  resource pools), and restores only digest- and length-verified outputs.
+  resource pools), checks the returned execution identity against that exact
+  request, and restores only digest- and length-verified outputs. Local action
+  publication re-hashes the restored outputs before recording or re-uploading
+  them.
 - The transport rejects unauthenticated, malformed, mismatched, stale, or
   replayed records. Cancellation and result publication share one commit lock;
   result publication is idempotent only when a duplicate statement agrees
@@ -478,9 +481,10 @@ Shipped slice evidence:
   compatibility reason. The ledger is produced without an installed Nix
   executable and is discarded with the lock transaction when evaluation
   exceeds its input/resource budget.
-- `tests/fixtures/nix-compat/breadth.json` records exact values and errors for
-  the covered evaluator surface, including authority-backed cross, fetch, and
-  local-flake cases, with seven fixed syntax-preserving seeds.
+- `tests/fixtures/nix-compat/breadth.json` records exact values, errors, the
+  pinned lock, and output identities for the covered evaluator surface,
+  including authority-backed cross, fetch, and local-flake cases, with seven
+  fixed syntax-preserving seeds.
 - `scripts/agent/verify-nix-eval-breadth.js` runs every seed against the exact
   Nix 2.34.8 oracle. A value mismatch is a hard proof failure.
 - The native evaluator enforces pinned input, token, expression, import,
@@ -500,6 +504,23 @@ Shipped slice evidence:
   such as `/build`, `/homeless-shelter`, HOME, UID, time, and locale policy.
 - Static gate and PATH-stripped integration lane forbid regression.
 
+The shipped gate has both proof layers. `tests/jetpack_engine.rs` checks the
+package, environment, profile, tool, build, and Store entry paths for direct
+installed-Nix commands, then builds a pinned compatibility fixture with an
+empty `PATH`. `tests/jetpack_dispatch.rs` repeats the unsupported-package
+failure through the public `jet` front door. Native flake success and bounded
+failure remain covered by the same empty-`PATH` production bridge tests. The
+compatibility fixture is accepted only through the real Provider/Store path;
+it does not replace the native bridge or unsupported-input product checks.
+The Store registration boundary copies external Nix outputs through the
+no-follow Hangar ingest, re-hashes them, and records the original canonical
+path only as producer provenance. Linux command consumers receive that
+verified snapshot through a rootless `/nix/store` namespace projection. The
+producer record also carries the fixed Nix build facts (`/build`,
+`/homeless-shelter`, store path, unprivileged UID policy, deterministic time,
+and `C` locale) and the runtime environment projection never replaces
+Jetpack's composed `PATH`.
+
 ### E4-JP12 — live registry, solver, and package delivery
 
 - Immutable sparse metadata and content-addressed source/binary blobs.
@@ -518,13 +539,13 @@ Shipped slice evidence:
 
 The registry delivery slice now publishes the index line, source artifact,
 sparse package metadata, signed checkpoint, and transparency log as one git
-transaction. Local clones and artifact trees are built in private staging
-paths and installed by rename; duplicate versions remain reserved after a
-yank. Locked resolution verifies the recorded registry source and exact
-artifact, including an exact yanked version, while fresh resolution excludes
-yanked entries. A verified source is ingested into the canonical Jetpack
-Hangar before project linking, and the lock keeps the registry identity while
-the resolved output points at that immutable Hangar object. Registry git
+transaction. Initial and refreshed local clones and artifact trees are built
+in private staging paths and installed by rename; duplicate versions remain
+reserved after a yank. Locked resolution verifies the recorded registry source
+and exact artifact, including an exact yanked version, while fresh resolution
+excludes yanked entries. A verified source is ingested into the canonical
+Jetpack Hangar before project linking, and the lock keeps the registry identity
+while the resolved output points at that immutable Hangar object. Registry git
 transport rejects embedded credentials and redacts endpoint details in
 diagnostics.
 
@@ -646,7 +667,9 @@ reports a loss or conflict when it is absent, malformed, or changed.
   `.jet/advisories.db`, and pinned `.jet/advisory-trust`; it prints the verified
   feed receipt and fails with E2611 when the lock or advisory database is
   absent. A configured feed is verified before a new registry candidate can be
-  installed; existing exact locks remain unchanged by freshness policy.
+  installed; existing exact locks remain unchanged by freshness policy. The
+  accepted sequence, digest, key, and maturity window are carried into the
+  Hangar provenance for explain/audit output.
 - SPDX license expression policy, source mapping, yanks/retractions, release
   maturity, and trust-evidence no-downgrade.
 - OCI referrers bind SBOM, signature, provenance, and reproducibility proof.

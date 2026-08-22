@@ -169,6 +169,106 @@ pub fn run_command_in_silent(env: &Env, cmd_args: &[String], cwd: Option<&Path>)
     run_command_in_mode(env, cmd_args, cwd, false, true)
 }
 
+#[cfg(target_os = "linux")]
+fn nix_projection_command(
+    env: &Env,
+    program: &str,
+    rest: &[String],
+) -> std::io::Result<Option<Command>> {
+    let mut projections = Vec::new();
+    for lease in &env.cache_leases {
+        for (logical, source) in lease.nix_store_projection() {
+            if !projections
+                .iter()
+                .any(|(seen, path): &(String, PathBuf)| seen == logical && path == source)
+            {
+                projections.push((logical.clone(), source.clone()));
+            }
+        }
+    }
+    if projections.is_empty() {
+        return Ok(None);
+    }
+    let unshare = ["/run/current-system/sw/bin/unshare", "/usr/bin/unshare", "/bin/unshare"]
+        .into_iter()
+        .map(PathBuf::from)
+        .find(|path| path.is_file())
+        .ok_or_else(|| std::io::Error::other("rootless `/nix/store` projection needs `unshare`"))?;
+    let mount = ["/run/current-system/sw/bin/mount", "/usr/bin/mount", "/bin/mount"]
+        .into_iter()
+        .map(PathBuf::from)
+        .find(|path| path.is_file())
+        .ok_or_else(|| std::io::Error::other("rootless `/nix/store` projection needs `mount`"))?;
+    let shell = ["/run/current-system/sw/bin/sh", "/usr/bin/sh", "/bin/sh"]
+        .into_iter()
+        .map(PathBuf::from)
+        .find(|path| path.is_file())
+        .ok_or_else(|| std::io::Error::other("rootless `/nix/store` projection needs `sh`"))?;
+    let binary = env
+        .cache_leases
+        .iter()
+        .find_map(|lease| lease.projected_executable(program))
+        .unwrap_or_else(|| PathBuf::from(program));
+    let script = r#"set -eu
+mount="$1"
+shift
+mkdir -p /nix
+"$mount" -t tmpfs -o mode=0755 jetpack-nix-store /nix
+mkdir -p /nix/store
+count="$1"
+shift
+i=0
+while [ "$i" -lt "$count" ]; do
+    logical="$1"
+    source="$2"
+    shift 2
+    name="${logical#/nix/store/}"
+    case "$name" in
+        ""|*/*|.|..)
+            exit 125
+            ;;
+    esac
+    mkdir -p "/nix/store/$name"
+    "$mount" --bind "$source" "/nix/store/$name"
+    "$mount" -o remount,bind,ro "/nix/store/$name"
+    i=$((i + 1))
+done
+binary="$1"
+shift
+exec "$binary" "$@"
+"#;
+    let mut command = Command::new(unshare);
+    command
+        .args(["--user", "--map-root-user", "--mount", "--propagation", "private"])
+        .arg(shell)
+        .args(["-c", script, "jetpack-nix-run"])
+        .arg(mount)
+        .arg(projections.len().to_string());
+    for (logical, source) in projections {
+        command.arg(logical).arg(source);
+    }
+    command.arg(binary).args(rest);
+    Ok(Some(command))
+}
+
+#[cfg(not(target_os = "linux"))]
+fn nix_projection_command(
+    env: &Env,
+    _program: &str,
+    _rest: &[String],
+) -> std::io::Result<Option<Command>> {
+    if env
+        .cache_leases
+        .iter()
+        .any(|lease| !lease.nix_store_projection().is_empty())
+    {
+        return Err(std::io::Error::other(
+            "canonical `/nix/store` projection needs the approved host helper on this platform",
+        ));
+    }
+    Ok(None)
+}
+
 fn run_command_in_mode(
     env: &Env,
     cmd_args: &[String],
@@ -182,14 +282,28 @@ fn run_command_in_mode(
     let Some((program, rest)) = cmd_args.split_first() else {
         return 0;
     };
-    let stable_program = env
-        .cache_leases
-        .iter()
-        .find_map(|lease| lease.executable(program));
-    let mut cmd = stable_program
-        .as_ref()
-        .map_or_else(|| Command::new(program), Command::new);
-    cmd.args(rest);
+    let mut cmd = match nix_projection_command(env, program, rest) {
+        Ok(Some(command)) => command,
+        Ok(None) => {
+            let stable_program = env
+                .cache_leases
+                .iter()
+                .find_map(|lease| lease.executable(program));
+            let mut command = stable_program
+                .as_ref()
+                .map_or_else(|| Command::new(program), Command::new);
+            command.args(rest);
+            command
+        }
+        Err(error) => {
+            Theme::resolve_choice(jet_foundation::Terminal::ColorChoice::Auto).error(
+                &format!("could not project `{program}` through `/nix/store`"),
+                &error.to_string(),
+                "use a supported rootless host projection or provide a verified compatible output",
+            );
+            return 126;
+        }
+    };
     if let Some(cwd) = cwd {
         cmd.current_dir(cwd);
     }
@@ -275,7 +389,18 @@ fn enter_with_mode(theme: &Theme, env: &Env, kind: ShellKind, clean: bool) -> i3
         "nothing is installed",
     ]);
 
-    let mut cmd = Command::new(kind.binary());
+    let mut cmd = match nix_projection_command(env, kind.binary(), &[]) {
+        Ok(Some(command)) => command,
+        Ok(None) => Command::new(kind.binary()),
+        Err(error) => {
+            theme.error(
+                "could not project the temporary shell through `/nix/store`",
+                &error.to_string(),
+                "use a supported rootless host projection or provide a verified compatible output",
+            );
+            return 126;
+        }
+    };
     if clean {
         cmd.env_clear();
         env.apply_clean_to(&mut cmd);

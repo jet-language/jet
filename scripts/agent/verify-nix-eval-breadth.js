@@ -75,7 +75,7 @@ for (const [name, value] of Object.entries(fixture.budgets)) {
   }
 }
 
-for (const group of [fixture.values, fixture.errors]) {
+for (const group of [fixture.values, fixture.errors, fixture.locks || []]) {
   for (const test of group) {
     equal(evaluate(test.nix_expression), test.nix_value, `${test.name} reference value`);
     for (const seed of fixture.fuzz_seeds) {
@@ -99,6 +99,12 @@ for (const test of fixture.authority_values || []) {
   }
 }
 
+execFileSync(
+  process.execPath,
+  [path.join(root, "scripts/agent/verify-nix-eval-fixture.js"), "breadth.json"],
+  { cwd: root, env: process.env, stdio: "inherit" },
+);
+
 console.log(
-  `verified Nix ${fixture.oracle.nix_version} breadth fixture: ${fixture.values.length} values, ${fixture.errors.length} errors, ${fixture.authority_values?.length || 0} authority values, ${fixture.fuzz_seeds.length} seeds`,
+  `verified Nix ${fixture.oracle.nix_version} breadth fixture: ${fixture.values.length} values, ${fixture.errors.length} errors, ${fixture.locks?.length || 0} locks, ${fixture.authority_values?.length || 0} authority values, ${fixture.fuzz_seeds.length} seeds`,
 );

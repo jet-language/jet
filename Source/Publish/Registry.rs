@@ -319,36 +319,172 @@ fn registry_cache_component(name: &str) -> String {
     }
 }
 
-/// Clone the registry index into a private sibling, then install it by rename;
-/// an existing cache is refreshed with `git pull --ff-only`. A real
-/// network/auth failure surfaces as E1235.
-pub fn ensure_index_clone(registry: &RegistryConfig) -> Result<PathBuf, Diagnostic> {
-    validate_registry_transport(registry)?;
-    let dir = index_repo_path(registry);
-    match std::fs::symlink_metadata(&dir) {
+struct RegistryCacheLock(PathBuf);
+
+impl Drop for RegistryCacheLock {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.0);
+    }
+}
+
+fn acquire_registry_cache_lock(parent: &Path, name: &str) -> io::Result<RegistryCacheLock> {
+    let path = parent.join(format!(".{}.cache-lock", registry_cache_component(name)));
+    for _ in 0..100 {
+        match std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&path)
+        {
+            Ok(file) => {
+                file.sync_all()?;
+                return Ok(RegistryCacheLock(path));
+            }
+            Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {
+                let stale = std::fs::metadata(&path)
+                    .ok()
+                    .and_then(|metadata| metadata.modified().ok())
+                    .and_then(|modified| modified.elapsed().ok())
+                    .is_some_and(|age| age > std::time::Duration::from_secs(300));
+                if stale {
+                    let _ = std::fs::remove_file(&path);
+                    continue;
+                }
+                std::thread::sleep(std::time::Duration::from_millis(50));
+            }
+            Err(error) => return Err(error),
+        }
+    }
+    Err(io::Error::new(
+        io::ErrorKind::TimedOut,
+        "registry cache refresh is busy",
+    ))
+}
+
+fn clone_registry_to(registry: &RegistryConfig, path: &Path) -> Result<(), Diagnostic> {
+    let path_display = path.to_string_lossy().into_owned();
+    let output = git_command()
+        .args(["clone", &registry.url, &path_display])
+        .output();
+    match output {
+        Ok(output) if output.status.success() => Ok(()),
+        Ok(output) => Err(clone_failure(
+            registry,
+            path,
+            true,
+            clone_output_detail(&output),
+        )),
+        Err(error) => Err(clone_failure(registry, path, true, error.to_string())),
+    }
+}
+
+fn install_registry_clone(
+    registry: &RegistryConfig,
+    dir: &Path,
+    parent: &Path,
+    partial: &Path,
+    replace_existing: bool,
+) -> Result<PathBuf, Diagnostic> {
+    if !replace_existing {
+        return match std::fs::rename(partial, dir) {
+            Ok(()) => Ok(dir.to_path_buf()),
+            Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {
+                let cleanup = cleanup_owned_clone(partial, true);
+                if !dir.join(".git").is_dir() {
+                    return Err(e1235(
+                        &registry.url,
+                        "a concurrent registry cache winner is incomplete",
+                    ));
+                }
+                match cleanup {
+                    Ok(()) => Ok(dir.to_path_buf()),
+                    Err(cleanup_error) => Err(attach_checkout_cleanup_failure(
+                        e1235(&registry.url, "couldn't remove the losing partial registry clone"),
+                        partial,
+                        &cleanup_error,
+                    )),
+                }
+            }
+            Err(error) => Err(clone_failure(registry, partial, true, error.to_string())),
+        };
+    }
+
+    let backup = parent.join(format!(
+        ".{}.backup-{}",
+        registry_cache_component(&registry.name),
+        unique_suffix()
+    ));
+    std::fs::rename(dir, &backup).map_err(|error| {
+        clone_failure(
+            registry,
+            partial,
+            true,
+            format!("couldn't stage the existing registry cache: {error}"),
+        )
+    })?;
+    if let Err(error) = std::fs::rename(partial, dir) {
+        let restore = std::fs::rename(&backup, dir);
+        let cleanup = cleanup_owned_clone(partial, true);
+        let detail = match restore {
+            Ok(()) => format!("couldn't install the refreshed registry cache: {error}"),
+            Err(restore_error) => format!(
+                "couldn't install the refreshed registry cache: {error}; restoring the previous cache failed: {restore_error}"
+            ),
+        };
+        return match cleanup {
+            Ok(()) => Err(e1235(&registry.url, &detail)),
+            Err(cleanup_error) => Err(attach_checkout_cleanup_failure(
+                e1235(&registry.url, &detail),
+                partial,
+                &cleanup_error,
+            )),
+        };
+    }
+    cleanup_owned_clone(&backup, true).map_err(|error| {
+        e1235(
+            &registry.url,
+            &format!("refreshed registry cache installed but old-cache cleanup failed: {error}"),
+        )
+    })?;
+    Ok(dir.to_path_buf())
+}
+
+fn ensure_index_clone_locked(
+    registry: &RegistryConfig,
+    dir: &Path,
+    parent: &Path,
+) -> Result<PathBuf, Diagnostic> {
+    let existing = match std::fs::symlink_metadata(dir) {
         Ok(metadata) if metadata.file_type().is_symlink() || !metadata.is_dir() => {
             return Err(e1235(
                 &registry.url,
                 "the local registry cache path is not a real directory",
             ));
         }
-        Ok(_) => {}
-        Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+        Ok(_) => true,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => false,
         Err(error) => return Err(e1235(&registry.url, &error.to_string())),
-    }
+    };
     let git_dir = dir.join(".git");
-    if let Ok(metadata) = std::fs::symlink_metadata(&git_dir) {
-        if metadata.file_type().is_symlink() || !metadata.is_dir() {
-            return Err(e1235(
-                &registry.url,
-                "the local registry cache has an invalid git directory",
-            ));
+    if existing {
+        match std::fs::symlink_metadata(&git_dir) {
+            Ok(metadata) if metadata.file_type().is_symlink() || !metadata.is_dir() => {
+                return Err(e1235(
+                    &registry.url,
+                    "the local registry cache has an invalid git directory",
+                ));
+            }
+            Ok(_) => {}
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {
+                return Err(e1235(
+                    &registry.url,
+                    "the local registry cache is not a git repository",
+                ));
+            }
+            Err(error) => return Err(e1235(&registry.url, &error.to_string())),
         }
-    }
-    if git_dir.is_dir() {
         let origin = git_command()
             .args(["remote", "get-url", "origin"])
-            .current_dir(&dir)
+            .current_dir(dir)
             .output()
             .map_err(|error| e1235(&registry.url, &error.to_string()))?;
         if !origin.status.success()
@@ -359,27 +495,8 @@ pub fn ensure_index_clone(registry: &RegistryConfig) -> Result<PathBuf, Diagnost
                 "the local registry cache belongs to a different remote",
             ));
         }
-        let pull = git_command()
-            .args(["pull", "--ff-only"])
-            .current_dir(&dir)
-            .output()
-            .map_err(|error| e1235(&registry.url, &error.to_string()))?;
-        if !pull.status.success() {
-            return Err(e1235(
-                &registry.url,
-                String::from_utf8_lossy(&pull.stderr).trim(),
-            ));
-        }
-        return Ok(dir);
     }
-    if let Some(parent) = dir.parent() {
-        if let Err(error) = std::fs::create_dir_all(parent) {
-            return Err(e1235(&registry.url, &error.to_string()));
-        }
-    }
-    let parent = dir
-        .parent()
-        .ok_or_else(|| e1235(&registry.url, "registry cache path has no parent"))?;
+
     let partial = parent.join(format!(
         ".{}.partial-{}",
         registry_cache_component(&registry.name),
@@ -391,50 +508,27 @@ pub fn ensure_index_clone(registry: &RegistryConfig) -> Result<PathBuf, Diagnost
             "registry cache has a colliding partial clone",
         ));
     }
-    let partial_display = partial.to_string_lossy().into_owned();
-    let clone = git_command()
-        .args(["clone", &registry.url, &partial_display])
-        .output();
-    match clone {
-        Ok(o) if o.status.success() => match std::fs::rename(&partial, &dir) {
-            Ok(()) => Ok(dir),
-            Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {
-                let cleanup = cleanup_owned_clone(&partial, true);
-                if !dir.join(".git").is_dir() {
-                    return Err(e1235(
-                        &registry.url,
-                        "a concurrent registry cache winner is incomplete",
-                    ));
-                }
-                match cleanup {
-                    Ok(()) => Ok(dir),
-                    Err(cleanup_error) => Err(attach_checkout_cleanup_failure(
-                        e1235(&registry.url, "couldn't remove the losing partial registry clone"),
-                        &partial,
-                        &cleanup_error,
-                    )),
-                }
-            }
-            Err(error) => Err(clone_failure(
-                registry,
-                &partial,
-                true,
-                error.to_string(),
-            )),
-        },
-        Ok(o) => Err(clone_failure(
-            registry,
-            &partial,
-            true,
-            clone_output_detail(&o),
-        )),
-        Err(error) => Err(clone_failure(
-            registry,
-            &partial,
-            true,
-            error.to_string(),
-        )),
+    clone_registry_to(registry, &partial)?;
+    install_registry_clone(registry, dir, parent, &partial, existing)
+}
+
+/// Clone the registry index into a private sibling, then install it by rename.
+/// Refreshing an existing cache uses the same staged replacement, so an
+/// interrupted or failed fetch leaves the previous verified clone untouched.
+pub fn ensure_index_clone(registry: &RegistryConfig) -> Result<PathBuf, Diagnostic> {
+    validate_registry_transport(registry)?;
+    let dir = index_repo_path(registry);
+    if let Some(parent) = dir.parent() {
+        if let Err(error) = std::fs::create_dir_all(parent) {
+            return Err(e1235(&registry.url, &error.to_string()));
+        }
     }
+    let parent = dir
+        .parent()
+        .ok_or_else(|| e1235(&registry.url, "registry cache path has no parent"))?;
+    let _lock = acquire_registry_cache_lock(parent, &registry.name)
+        .map_err(|error| e1235(&registry.url, &error.to_string()))?;
+    ensure_index_clone_locked(registry, &dir, parent)
 }
 
 /// A short-lived clean checkout used for one registry mutation. The ordinary
@@ -711,9 +805,9 @@ fn push_index_inner(
         .map_err(|e| e1235(&registry.url, &e.to_string()))?;
     if !push.status.success() {
         // A concurrent publisher may have won the immutable version. Accept
-        // only a byte-identical winner. Otherwise rebase this exact commit
-        // onto the new branch head and retry once; a same-version conflict
-        // fails closed instead of overwriting or silently yanking bytes.
+        // only a byte-identical winner. Otherwise rebuild from a fresh remote
+        // checkout; rebasing append-only index files can merge two conflicting
+        // same-version lines and would violate immutable identity.
         let fetch = run(&["fetch", "origin"])
             .map_err(|e| e1235(&registry.url, &e.to_string()))?;
         if !fetch.status.success() {
@@ -730,50 +824,13 @@ fn push_index_inner(
                 return Ok(());
             }
         }
-        let rebase = run(&["rebase", &remote])
-            .map_err(|e| e1235(&registry.url, &e.to_string()))?;
-        if !rebase.status.success() {
-            let rebase_detail = String::from_utf8_lossy(&rebase.stderr).trim().to_owned();
-            let rebase_failure = if rebase_detail.is_empty() {
-                "concurrent registry publication changed an immutable version".to_owned()
-            } else {
-                format!(
-                    "concurrent registry publication changed an immutable version: {rebase_detail}"
-                )
-            };
-            let abort_failure = match run(&["rebase", "--abort"]) {
-                Ok(abort) if abort.status.success() => None,
-                Ok(abort) => {
-                    let detail = String::from_utf8_lossy(&abort.stderr).trim().to_owned();
-                    Some(if detail.is_empty() {
-                        "git rebase --abort exited unsuccessfully".to_owned()
-                    } else {
-                        format!("git rebase --abort failed: {detail}")
-                    })
-                }
-                Err(error) => Some(error.to_string()),
-            };
-            if let Some(abort_failure) = abort_failure {
-                return Err(e1235(
-                    &registry.url,
-                    &format!(
-                        "{rebase_failure}; rebase abort cleanup failed: {abort_failure}"
-                    ),
-                ));
-            }
-            if recover_race {
-                return rebuild_publication_after_race(registry, repo, message, paths, expected);
-            }
-            return Err(e1235(&registry.url, &rebase_failure));
+        if recover_race {
+            return rebuild_publication_after_race(registry, repo, message, paths, expected);
         }
-        let retry = run(&["push", "origin", &format!("HEAD:refs/heads/{branch}")])
-            .map_err(|e| e1235(&registry.url, &e.to_string()))?;
-        if !retry.status.success() {
-            return Err(e1235(
-                &registry.url,
-                String::from_utf8_lossy(&retry.stderr).trim(),
-            ));
-        }
+        return Err(e1235(
+            &registry.url,
+            "concurrent registry publication changed an immutable version",
+        ));
     }
     Ok(())
 }

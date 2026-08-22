@@ -66,7 +66,7 @@ pub(crate) fn run(raw: &[String]) -> i32 {
     };
     let active: Vec<_> = specs.into_iter().filter(|located| applicable(&located.spec, "native", "dev")).collect();
     let store = BudgetStore::new(&root);
-    let built = match build_report(&root, &store, &bundle, &effect_facts, &active, &measured_start, "native", "dev", None, None) {
+    let built = match build_report(&root, &store, &bundle, &effect_facts, &active, &measured_start, "native", "dev", None, None, options.bootstrap) {
         Ok(report) => report,
         Err(error) => return tool_failure(&options, &error),
     };
@@ -169,7 +169,7 @@ pub(crate) fn run_build_gates(entry:&str, artifact_path:&Path, target:&str, prof
         Err(error)=>return build_gate_tool_failure(&error),
     }
     let started=timestamp_now();
-    let built=match build_report(&root,&store,&bundle,&effect_facts,&active,&started,target,profile,artifact,None){Ok(report)=>report,Err(error)=>return build_gate_tool_failure(&error)};
+    let built=match build_report(&root,&store,&bundle,&effect_facts,&active,&started,target,profile,artifact,None,false){Ok(report)=>report,Err(error)=>return build_gate_tool_failure(&error)};
     let report_id=text_field(&built.value,"report_id").expect("verified report id").to_string();
     let path=format!(".jet/perf/reports/{report_id}.json");
     let created=match store.write_report(&built.bytes){Ok((_,created))=>created,Err(error)=>return build_gate_tool_failure(&format!("report write refused: {error}"))};
@@ -266,7 +266,7 @@ struct ResultRow { id:String, name:String, source:String, line:usize, column:usi
 
 type ArtifactIdentity = (PathBuf, u64, String);
 
-fn build_report(root:&Path, store:&BudgetStore, bundle:&jet::AST::ProgramBundle, effect_facts:&jet::Sema::SemIndexEffectFacts, specs:&[LocatedBudgetSpec], at:&str, target:&str, profile:&str, supplied_artifact:Option<ArtifactIdentity>, dev_evidence:Option<&DevEvidence>)->Result<BuiltReport,String>{
+fn build_report(root:&Path, store:&BudgetStore, bundle:&jet::AST::ProgramBundle, effect_facts:&jet::Sema::SemIndexEffectFacts, specs:&[LocatedBudgetSpec], at:&str, target:&str, profile:&str, supplied_artifact:Option<ArtifactIdentity>, dev_evidence:Option<&DevEvidence>, allow_bootstrap:bool)->Result<BuiltReport,String>{
     for located in specs { let spec=&located.spec; if !matches!(provider_kind(&spec.provider),"CompilerFacts"|"BuildArtifact"|"BenchMeasurement"|"AllocationProbe"|"ServiceProbe"|"SceneProbe"|"CompilerProbe") { return Err(format!("provider `{}` for budget `{}` has no command-owned measurement implementation",spec.provider,spec.name)); } }
     let mut ordered=specs.iter().collect::<Vec<_>>();ordered.sort_by(|a,b|a.spec.name.cmp(&b.spec.name));
     let needs_artifact=ordered.iter().any(|located|provider_kind(&located.spec.provider)=="BuildArtifact");
@@ -410,7 +410,8 @@ fn build_report(root:&Path, store:&BudgetStore, bundle:&jet::AST::ProgramBundle,
         }
         let pooled=if stale{Vec::new()}else{history_samples.iter().flatten().cloned().collect::<Vec<_>>()};
         let policy=evaluation_policy();
-        let evaluation = if matches!(comparison,Comparison::RelativeTo{..})&&pooled.is_empty(){let point=estimator(provider_samples,percentile(&spec.metric))?;Evaluation{point,lower95:None,upper95:None,evidence:Evidence::Unavailable,outcome:if enforcement==Enforcement::Warn{PolicyOutcome::Warn}else{PolicyOutcome::Fail},bootstrap:Vec::new()}}else{evaluate(&evidence_id, &bases[index].2, &history_ids, provider_samples, &pooled, percentile(&spec.metric), &comparison, improvement, enforcement,if spec.comparison_fact.kind=="Absolute"{None}else{Some(&policy)})?};
+        let missing_statistical_history = history_ids.is_empty() && matches!(comparison, Comparison::AbsoluteFrom { .. } | Comparison::RelativeTo { .. });
+        let evaluation = if missing_statistical_history && !allow_bootstrap || matches!(comparison,Comparison::RelativeTo{..})&&pooled.is_empty(){let point=estimator(provider_samples,percentile(&spec.metric))?;Evaluation{point,lower95:None,upper95:None,evidence:Evidence::Unavailable,outcome:if enforcement==Enforcement::Warn{PolicyOutcome::Warn}else{PolicyOutcome::Fail},bootstrap:Vec::new()}}else{evaluate(&evidence_id, &bases[index].2, &history_ids, provider_samples, &pooled, percentile(&spec.metric), &comparison, improvement, enforcement,if spec.comparison_fact.kind=="Absolute"{None}else{Some(&policy)})?};
         match evaluation.outcome { PolicyOutcome::Pass => pass += 1, PolicyOutcome::Warn => warn += 1, PolicyOutcome::Fail => fail += 1 }
         let evidence_name = match evaluation.evidence { Evidence::Pass => "pass", Evidence::Regression => "regression", Evidence::Inconclusive => "inconclusive", Evidence::Unavailable => "unavailable" };
         let outcome = match evaluation.outcome { PolicyOutcome::Pass => "pass", PolicyOutcome::Warn => "warn", PolicyOutcome::Fail => "fail" };
@@ -497,7 +498,7 @@ pub(crate) fn run_dev_refresh(entry: &str, service_evidence: &[ServiceEvidence],
     let evidence = DevEvidence { service: service_evidence.to_vec(), scene: scene_evidence.to_vec() };
     let store = BudgetStore::new(&root);
     let started = timestamp_now();
-    let built = match build_report(&root, &store, &bundle, &effect_facts, &active, &started, "native", "dev", None, Some(&evidence)) {
+    let built = match build_report(&root, &store, &bundle, &effect_facts, &active, &started, "native", "dev", None, Some(&evidence), false) {
         Ok(report) => report,
         Err(error) => return build_gate_tool_failure(&error),
     };

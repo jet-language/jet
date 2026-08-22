@@ -463,8 +463,8 @@ fn repair_archive_unlocked(
         Err(error) => return Err(error),
     };
     if had_object {
-        super::make_tree_writable_for_removal(&object_path)?;
         fs::rename(&object_path, &backup)?;
+        super::sync_store_directory(&quarantine)?;
         super::sync_store_directory(object_path.parent().unwrap_or(hangar.as_path()))?;
     }
     let report = archive.report();

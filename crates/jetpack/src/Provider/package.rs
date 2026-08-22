@@ -20,14 +20,27 @@ pub(super) fn find_canonical_package(
         Err(error) => return Err(error.to_string()),
     };
     if root_marker_metadata.file_type().is_symlink() {
-        return Err(format!("canonical Package marker is a symlink: {}", root_marker.display()));
+        return Err(format!(
+            "canonical Package marker is a symlink: {}",
+            root_marker.display()
+        ));
     }
     if !root_marker_metadata.is_file() {
         return Ok(None);
     }
     let root = PackageFacts::load(repo)
-        .ok_or_else(|| format!("canonical Package {} could not be read", root_marker.display()))?
-        .map_err(|error| format!("canonical Package {} is invalid: {error}", root_marker.display()))?;
+        .ok_or_else(|| {
+            format!(
+                "canonical Package {} could not be read",
+                root_marker.display()
+            )
+        })?
+        .map_err(|error| {
+            format!(
+                "canonical Package {} is invalid: {error}",
+                root_marker.display()
+            )
+        })?;
     let root_matches = root.name == requested || root.outputs.contains_key(requested);
     if root_matches {
         return Ok(Some((repo.to_path_buf(), root)));
@@ -74,15 +87,17 @@ fn collect_canonical_packages(
             ));
         }
         if discover {
-            let entries = std::fs::read_dir(&member_root)
-                .map_err(|error| format!("could not read Package member discovery `{relative}`: {error}"))?;
+            let entries = std::fs::read_dir(&member_root).map_err(|error| {
+                format!("could not read Package member discovery `{relative}`: {error}")
+            })?;
             for entry in entries {
-                let path = entry
-                    .map_err(|error| error.to_string())?
-                    .path();
-                let metadata = std::fs::symlink_metadata(&path)
-                    .map_err(|error| error.to_string())?;
-                let name = path.file_name().and_then(|name| name.to_str()).unwrap_or("");
+                let path = entry.map_err(|error| error.to_string())?.path();
+                let metadata =
+                    std::fs::symlink_metadata(&path).map_err(|error| error.to_string())?;
+                let name = path
+                    .file_name()
+                    .and_then(|name| name.to_str())
+                    .unwrap_or("");
                 if metadata.file_type().is_symlink()
                     || !metadata.is_dir()
                     || name.starts_with('.')
@@ -131,7 +146,10 @@ fn collect_one_canonical_package(
         return Err(format!("Package marker is a symlink: {}", marker.display()));
     }
     if !marker_metadata.is_file() {
-        return Err(format!("Package marker is not a file: {}", marker.display()));
+        return Err(format!(
+            "Package marker is not a file: {}",
+            marker.display()
+        ));
     }
     let facts = PackageFacts::load(path)
         .ok_or_else(|| format!("canonical Package {} could not be read", marker.display()))?
@@ -142,9 +160,7 @@ fn collect_one_canonical_package(
     Ok(())
 }
 
-pub(super) fn toolchain_facts(
-    toolchain: Option<&crate::Toolchain::Toolchain>,
-) -> String {
+pub(super) fn toolchain_facts(toolchain: Option<&crate::Toolchain::Toolchain>) -> String {
     let Some(toolchain) = toolchain else {
         return "missing".to_string();
     };
@@ -207,7 +223,10 @@ fn collect_core_files(
         let path = entry.map_err(|error| error.to_string())?.path();
         let metadata = std::fs::symlink_metadata(&path).map_err(|error| error.to_string())?;
         if metadata.file_type().is_symlink() {
-            return Err(format!("core source tree contains symlink {}", path.display()));
+            return Err(format!(
+                "core source tree contains symlink {}",
+                path.display()
+            ));
         }
         if metadata.is_dir() {
             collect_core_files(root, &path, out)?;
@@ -219,7 +238,10 @@ fn collect_core_files(
                 .replace('\\', "/");
             out.push((relative, path));
         } else {
-            return Err(format!("core source tree contains non-file {}", path.display()));
+            return Err(format!(
+                "core source tree contains non-file {}",
+                path.display()
+            ));
         }
     }
     Ok(())
@@ -238,8 +260,7 @@ pub(super) fn core_recipe_identity(
     // same manifest but a changed nested source tree cannot reuse a stale
     // realization.
     let source_tree = core_tree_fingerprint(src_dir)?;
-    let artifact = if kind == Package::PackageKind::Library
-        && src_dir.join("Cargo.toml").is_file()
+    let artifact = if kind == Package::PackageKind::Library && src_dir.join("Cargo.toml").is_file()
     {
         "cargo-rlib"
     } else if kind == Package::PackageKind::Library {
@@ -328,20 +349,24 @@ pub(super) fn validate_core_source_tree(root: &Path) -> Result<(), String> {
         let path = entry.map_err(|error| error.to_string())?.path();
         let metadata = std::fs::symlink_metadata(&path).map_err(|error| error.to_string())?;
         if metadata.file_type().is_symlink() {
-            return Err(format!("core source tree contains symlink {}", path.display()));
+            return Err(format!(
+                "core source tree contains symlink {}",
+                path.display()
+            ));
         }
         if metadata.is_dir() {
             validate_core_source_tree(&path)?;
         } else if !metadata.is_file() {
-            return Err(format!("core source tree contains non-file {}", path.display()));
+            return Err(format!(
+                "core source tree contains non-file {}",
+                path.display()
+            ));
         }
     }
     Ok(())
 }
 
-fn normalized_manifest_semantics(
-    manifest: Option<&Package::PackageFacts>,
-) -> String {
+fn normalized_manifest_semantics(manifest: Option<&Package::PackageFacts>) -> String {
     let Some(manifest) = manifest else {
         return "manifest=absent".to_string();
     };

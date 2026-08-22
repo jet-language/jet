@@ -269,7 +269,7 @@ fn environment_image_uses_realized_package_output() {
         "module env.dev { packages: [\"bash@nixpkgs\"] }\nmodule image.server { from: env.dev }\n",
     )
     .unwrap();
-    ingest_executable(&root.path, "bash", "bash@nixpkgs@default", "bash");
+    ingest_executable(&root.path, "bash", "bash@nixpkgs", "bash");
 
     let out = jetpack()
         .arg("image")
@@ -287,12 +287,29 @@ fn environment_image_uses_realized_package_output() {
     assert!(!project.path.join("build").exists());
     let image = project.path.join(".jet/images/server");
     let layer = image_layer(&image);
-    assert!(layer.windows(6).any(|window| window == b"bin/sh\0"));
+    assert!(
+        layer
+            .windows(b"bin/sh\0".len())
+            .any(|window| window == b"bin/sh\0")
+    );
     assert!(!image_blob_containing(&image, br#""User":"10001""#).is_empty());
     let plan = fs::read_to_string(image.join("plan.json")).unwrap();
     assert!(plan.contains("\"source\":\"env:dev\""), "plan: {plan}");
     assert!(plan.contains("\"entrypoint\":[\"/bin/sh\"]"), "plan: {plan}");
+    assert!(plan.contains("\"platform\":\"linux.x64\""), "plan: {plan}");
+    assert!(plan.contains("\"user\":10001"), "plan: {plan}");
+    assert!(plan.contains("\"expose\":[]"), "plan: {plan}");
+    assert!(plan.contains("\"healthcheck\":false"), "plan: {plan}");
+    assert!(plan.contains("\"services\":[]"), "plan: {plan}");
     assert!(plan.contains("\"content\":\"Hangar\""), "plan: {plan}");
+    assert!(plan.contains("\"cache\":\"Hangar\""), "plan: {plan}");
+    assert!(plan.contains("\"archive\":\"Hangar\""), "plan: {plan}");
+    assert!(plan.contains("\"signing\":\"Hangar\""), "plan: {plan}");
+    assert!(plan.contains("\"provenance\":\"Hangar+.jet/lock\""), "plan: {plan}");
+    assert!(plan.contains("\"inputs\":\".jet/lock\""), "plan: {plan}");
+    assert!(plan.contains("\"platforms\":\".jet/lock\""), "plan: {plan}");
+    assert!(plan.contains("\"publish\":\"Hangar\""), "plan: {plan}");
+    assert!(plan.contains("\"remote\":\"D-JPK-REMOTE1\""), "plan: {plan}");
     let dossier = fs::read_to_string(image.join("dossier.json")).unwrap();
     assert!(
         dossier.contains("runtime-mount-or-reference-only"),
@@ -309,8 +326,8 @@ fn environment_image_projects_named_environment_not_default() {
         "module env.dev { packages: [\"bash@nixpkgs\"] }\nmodule env.full { packages: [\"sh@nixpkgs\"] }\nmodule image.server { from: env.full, target: linux.arm64 }\n",
     )
     .unwrap();
-    ingest_executable(&root.path, "bash", "bash@nixpkgs@default", "bash");
-    ingest_executable(&root.path, "sh", "sh@nixpkgs@default", "sh");
+    ingest_executable(&root.path, "bash", "bash@nixpkgs", "bash");
+    ingest_executable(&root.path, "sh", "sh@nixpkgs", "sh");
 
     let out = jetpack()
         .args(["image", "server"])
@@ -341,7 +358,7 @@ fn environment_image_requires_a_realized_shell_package() {
         "module env.dev { packages: [\"tool@nixpkgs\"] }\nmodule image.server { from: env.dev }\n",
     )
     .unwrap();
-    ingest_executable(&root.path, "tool", "tool@nixpkgs@default", "tool");
+    ingest_executable(&root.path, "tool", "tool@nixpkgs", "tool");
 
     let out = jetpack()
         .args(["image", "server"])
@@ -373,7 +390,7 @@ module image.server { from: env.dev }
 "#,
     )
     .unwrap();
-    ingest_executable(&root.path, "bash", "bash@nixpkgs@default", "bash");
+    ingest_executable(&root.path, "bash", "bash@nixpkgs", "bash");
 
     let out = jetpack()
         .args(["image", "server"])
@@ -427,7 +444,7 @@ fn environment_image_rejects_project_escape_layer_path() {
         "module env.dev { packages: [\"bash@nixpkgs\"] }\nmodule image.server { from: env.dev, files: [\"../outside\"] }\n",
     )
     .unwrap();
-    ingest_executable(&root.path, "bash", "bash@nixpkgs@default", "bash");
+    ingest_executable(&root.path, "bash", "bash@nixpkgs", "bash");
 
     let out = jetpack()
         .args(["image", "server"])
@@ -488,7 +505,7 @@ fn environment_image_service_projection_is_e1336() {
     assert_eq!(out.status.code(), Some(2), "service projection must fail: {stderr}");
     let diagnostic = stderr
         .split("\n\n")
-        .find(|block| block.contains("error[E1336]"))
+        .find(|block| block.contains("Error [E1336]"))
         .map(|block| {
             block
                 .lines()

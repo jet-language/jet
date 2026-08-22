@@ -1,10 +1,10 @@
 use super::actions_policy::{ActionCache, BuildAction, BuildCapability, LegacyWrapperKind};
 use super::cache_cas::{
-    atomic_restore_file, ensure_real_directory, secure_read_file, ActionCacheProvenance,
-    ActionCacheStatus, ActionInputSnapshot, ActionKey, ActionOutcome, ActionOutputRecord,
-    ActionResultRecord, CacheHitReason, CacheMissReason, ContentDigest, FrontEndCompletion,
-    LocalCas, RemoteBuildBinding, RemoteCacheError, RemoteCachePolicy, RemoteCacheTransport,
-    RemoteDeniedReason, RemoteExecutionRequest,
+    atomic_restore_file, ensure_real_directory, remote_execution_identity, secure_read_file,
+    ActionCacheProvenance, ActionCacheStatus, ActionInputSnapshot, ActionKey, ActionOutcome,
+    ActionOutputRecord, ActionResultRecord, CacheHitReason, CacheMissReason, ContentDigest,
+    FrontEndCompletion, LocalCas, RemoteBuildBinding, RemoteCacheError, RemoteCachePolicy,
+    RemoteCacheTransport, RemoteDeniedReason, RemoteExecutionRequest,
 };
 use super::errors_keys::BuildError;
 use super::execution_helpers::action_pools;
@@ -779,10 +779,18 @@ fn execute_remote_attempt(
         toolchain_digest: toolchain_provenance_digest(plan, action.toolchain),
         sandbox: proof,
     };
+    let expected_execution_id = remote_execution_identity(&request);
     transport
         .submit_execution(&request, policy)
         .map_err(|error| remote_action(action, error.to_string()))?;
-    let result = wait_remote_execution_result(transport, policy, key, action, timeout_ms)?;
+    let result = wait_remote_execution_result(
+        transport,
+        policy,
+        key,
+        action,
+        &expected_execution_id,
+        timeout_ms,
+    )?;
     match result.outcome {
         ActionOutcome::Succeeded { exit_code } => {
             restore_remote_outputs(
@@ -809,6 +817,12 @@ fn execute_remote_attempt(
                         ActionCacheProvenance::miss(CacheMissReason::RemoteDenied),
                     )
                     .map_err(|e| io_action(action, e))?;
+                if record.outputs != result.outputs {
+                    return Err(RemoteAttemptFailure::terminal(remote_action(
+                        action,
+                        "remote output changed before local publication".to_string(),
+                    )));
+                }
                 if policy
                     .check(super::cache_cas::RemoteActionRequest::CacheWrite)
                     .is_ok()
@@ -959,12 +973,27 @@ fn wait_remote_execution_result(
     policy: &RemoteCachePolicy,
     key: &ActionKey,
     action: &BuildAction,
+    expected_execution_id: &ContentDigest,
     timeout_ms: u64,
 ) -> Result<super::cache_cas::RemoteExecutionResult, RemoteAttemptFailure> {
     let timeout = Duration::from_millis(timeout_ms);
     let deadline = Instant::now() + timeout;
     loop {
         match transport.download_execution_result(key, policy) {
+            Ok(result) if result.execution_id != *expected_execution_id => {
+                let detail = format!(
+                    "remote execution identity mismatch: expected {}, got {}",
+                    expected_execution_id.as_str(),
+                    result.execution_id.as_str(),
+                );
+                let detail = match transport.cancel_execution(key, policy) {
+                    Ok(()) => detail,
+                    Err(cancel_error) => format!("{detail}; cancellation failed: {cancel_error}"),
+                };
+                return Err(RemoteAttemptFailure::terminal(remote_action(
+                    action, detail,
+                )));
+            }
             Ok(result) => return Ok(result),
             Err(RemoteCacheError::Io(error))
                 if error.kind() == io::ErrorKind::NotFound && Instant::now() < deadline =>

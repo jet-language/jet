@@ -2304,10 +2304,13 @@ fn verify_wire_evaluation(
     };
     let stored_evidence = evidence_enum(&d["evidence"])?;
     let stored_outcome = outcome_enum(&d["policy_outcome"])?;
-    if matches!(comparison, Comparison::RelativeTo { .. }) && baseline.is_empty() {
-        if stored_evidence != Evidence::Unavailable {
-            return Err("relative decision without baseline must be unavailable".into());
-        }
+    if baseline.is_empty()
+        && matches!(
+            comparison,
+            Comparison::AbsoluteFrom { .. } | Comparison::RelativeTo { .. }
+        )
+        && stored_evidence == Evidence::Unavailable
+    {
         let expected = match enforcement {
             Enforcement::Warn => PolicyOutcome::Warn,
             Enforcement::Fail => PolicyOutcome::Fail,

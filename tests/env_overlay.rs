@@ -104,7 +104,7 @@ fn codegen_is_raw_locked_and_never_mutates_host_env() {
 use core.sys as env
 use core.process as process
 
-fn remove(name: String) Bool ! env.EnvError {
+fn remove(name: String) Bool env.EnvError! -> {
     return Ok(env.unset(name)?)
 }
 

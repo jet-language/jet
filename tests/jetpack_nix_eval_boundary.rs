@@ -80,6 +80,8 @@ fn oracle_pin_is_independent_from_mutable_root_flake_lock() {
     let breadth = fs::read_to_string(root.join("tests/fixtures/nix-compat/breadth.json"))
         .expect("pinned breadth fixture");
     assert!(breadth.contains("\"fuzz_seeds\""));
+    assert!(breadth.contains("\"locks\""));
+    assert!(breadth.contains("\"output_identities\""));
     assert!(breadth.contains("\"memory_bytes\": 16777216"));
     assert!(breadth.contains("\"latency_micros\": 1000000"));
     let breadth_verifier = fs::read_to_string(
@@ -89,6 +91,7 @@ fn oracle_pin_is_independent_from_mutable_root_flake_lock() {
     assert!(breadth_verifier.contains("function mutate"));
     assert!(breadth_verifier.contains("Object.entries(fixture.budgets)"));
     assert!(breadth_verifier.contains("reference value"));
+    assert!(breadth_verifier.contains("verify-nix-eval-fixture.js"));
     let stopline = fs::read_to_string(root.join("scripts/agent/verify-nix-eval-stopline.sh"))
         .expect("native evaluator stop-line");
     assert!(stopline.contains("breadth.json"));

@@ -2350,7 +2350,7 @@ fn main() {
                         &raw,
                     ));
                 }
-                "repair" | "copy" | "import" | "export" | "dump" | "restore" | "sign" => {
+                "repair" | "copy" | "import" | "export" | "dump" | "restore" | "sign" | "recover" => {
                     exit(EngineDispatch::dispatch(
                         jet::Syntax::JETPACK_BINARY_NAME,
                         "hangar",

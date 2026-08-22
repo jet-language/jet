@@ -455,6 +455,16 @@ fn fmt_keeps_optional_return_sugar() {
         "expected `Int !` fallible return to stay canonical, got:\n{fallible_out}"
     );
 
+    let retired_unit = r#"fn save() ! IOError {
+}
+"#;
+    let retired_unit_out =
+        jet::format_source(retired_unit).expect("fmt should migrate the retired unit form");
+    assert!(
+        retired_unit_out.contains("fn save() IOError! {"),
+        "expected retired `! IOError` to rewrite to `IOError!`, got:\n{retired_unit_out}"
+    );
+
     let retired = r#"fn parse_count(raw: String) Int ? String {
     return Err("empty");
 }

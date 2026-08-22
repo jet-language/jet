@@ -996,7 +996,12 @@ impl<'a> Parser<'a> {
             }
             TokKind::Bang => {
                 let bang = self.bump().span;
-                if self.type_starts_here() {
+                if bang.start == base_end {
+                    Type::Result {
+                        ok: Box::new(Type::Named(Syntax::INTERNAL_UNIT_TYPE.to_string())),
+                        err: Box::new(base),
+                    }
+                } else if self.type_starts_here() {
                     let err = self.type_()?.0;
                     self.diags.push(Diagnostic::from_row(
                         "E-ERR-SIGIL",
@@ -1006,11 +1011,6 @@ impl<'a> Parser<'a> {
                     Type::Result {
                         ok: Box::new(base),
                         err: Box::new(err),
-                    }
-                } else if bang.start == base_end {
-                    Type::Result {
-                        ok: Box::new(Type::Named(Syntax::INTERNAL_UNIT_TYPE.to_string())),
-                        err: Box::new(base),
                     }
                 } else {
                     Type::Result {
@@ -1154,7 +1154,13 @@ impl<'a> Parser<'a> {
         let mut arrow_return = false;
         let mut return_type_span = None;
         let ret = if canonical_effect || retired_colon {
-            if self.type_starts_here() {
+            if let Some((ty, span)) = self.parse_unit_fallible_return()? {
+                self.diags.push(Self::retired_signature_shape(
+                    prefix_effect_span.unwrap_or(span),
+                ));
+                return_type_span = Some(span);
+                Some(Box::new(ty))
+            } else if self.type_starts_here() {
                 arrow_return = true;
                 let (r, span) = self.type_()?;
                 return_type_span = Some(span);
@@ -1162,12 +1168,6 @@ impl<'a> Parser<'a> {
                     prefix_effect_span.unwrap_or(span),
                 ));
                 Some(Box::new(r))
-            } else if let Some((ty, span)) = self.parse_unit_fallible_return()? {
-                self.diags.push(Self::retired_signature_shape(
-                    prefix_effect_span.unwrap_or(span),
-                ));
-                return_type_span = Some(span);
-                Some(Box::new(ty))
             } else {
                 None
             }
@@ -1182,7 +1182,15 @@ impl<'a> Parser<'a> {
                     self.expect_unified_arrow("before a callable result type")?;
                 }
             }
-            if self.type_starts_here() {
+            if let Some((r, span)) = self.parse_unit_fallible_return()? {
+                return_type_span = Some(span);
+                if arrow.is_some() {
+                    self.diags.push(Self::retired_signature_shape(
+                        arrow.as_ref().map(|token| token.span).unwrap_or(span),
+                    ));
+                }
+                Some(Box::new(r))
+            } else if self.type_starts_here() {
                 let (r, span) = self.type_()?;
                 return_type_span = Some(span);
                 if arrow.is_some() {
@@ -1194,13 +1202,13 @@ impl<'a> Parser<'a> {
             } else {
                 None
             }
+        } else if let Some((ty, span)) = self.parse_unit_fallible_return()? {
+            return_type_span = Some(span);
+            Some(Box::new(ty))
         } else if self.type_starts_here() {
             let (r, span) = self.type_()?;
             return_type_span = Some(span);
             Some(Box::new(r))
-        } else if let Some((ty, span)) = self.parse_unit_fallible_return()? {
-            return_type_span = Some(span);
-            Some(Box::new(ty))
         } else {
             None
         };

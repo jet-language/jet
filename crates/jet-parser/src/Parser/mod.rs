@@ -1785,12 +1785,41 @@ fn notify(ready: Bool) -[Net]> {
     #[test]
     fn fallible_type_sigil_is_valid_in_all_type_positions() {
         let parsed = program(
-            "struct Holder { value: Int? IOError! }\n\
+            "struct Holder {\n\
+                 value: Int? IOError!\n\
+                 nested: [Int (DbError | TimeoutError)!]\n\
+                 callback: fn(Int? IOError!) Int (DbError | TimeoutError)!\n\
+             }\n\
              alias Box<T> :: T? IOError!;\n\
              fn fetch(value: Int? IOError!) Box<Int? IOError!> -> value\n\
              fn run() {}\n",
         );
         assert!(parsed.items.iter().any(|item| matches!(item, crate::AST::Item::Struct(_))));
+        let holder = parsed.items.iter().find_map(|item| match item {
+            crate::AST::Item::Struct(def) if def.name == "Holder" => Some(def),
+            _ => None,
+        }).expect("Holder");
+        assert!(matches!(
+            &holder.fields[0].ty,
+            crate::AST::Type::Result { ok, err }
+                if matches!(ok.as_ref(), crate::AST::Type::Option(inner) if matches!(inner.as_ref(), crate::AST::Type::Int))
+                    && matches!(err.as_ref(), crate::AST::Type::Named(name) if name == "IOError")
+        ));
+        assert!(matches!(
+            &holder.fields[1].ty,
+            crate::AST::Type::List(inner)
+                if matches!(inner.as_ref(), crate::AST::Type::Result { ok, err }
+                    if matches!(ok.as_ref(), crate::AST::Type::Int)
+                        && matches!(err.as_ref(), crate::AST::Type::Union(members) if members.len() == 2))
+        ));
+        assert!(matches!(
+            &holder.fields[2].ty,
+            crate::AST::Type::Fn { params, ret: Some(ret), .. }
+                if matches!(params.first(), Some(crate::AST::Type::Result { .. }))
+                    && matches!(ret.as_ref(), crate::AST::Type::Result { ok, err }
+                        if matches!(ok.as_ref(), crate::AST::Type::Int)
+                            && matches!(err.as_ref(), crate::AST::Type::Union(members) if members.len() == 2))
+        ));
         let alias = parsed.items.iter().find_map(|item| match item {
             crate::AST::Item::TypeAlias(alias) if alias.name == "Box" => Some(alias),
             _ => None,
@@ -1821,7 +1850,6 @@ fn notify(ready: Bool) -[Net]> {
                 if matches!(ok.as_ref(), crate::AST::Type::Option(inner) if matches!(inner.as_ref(), crate::AST::Type::Int))
                     && matches!(err.as_ref(), crate::AST::Type::Named(name) if name == "IOError")
         ));
-
         let fetch = parsed.items.iter().find_map(|item| match item {
             crate::AST::Item::Func(func) if func.name == "fetch" => Some(func),
             _ => None,
@@ -1906,6 +1934,20 @@ fn notify(ready: Bool) -[Net]> {
             .find(|diagnostic| diagnostic.code == "E-ERR-SIGIL")
             .expect("E-ERR-SIGIL");
         assert!(diagnostic.fix.contains("Entry? StoreError!"));
+    }
+
+    #[test]
+    fn leading_unit_infix_failure_spelling_teaches_suffix_zone() {
+        for source in ["fn save() ! IOError {}\n", "alias OldFn :: fn() ! IOError\n"] {
+            let (tokens, lex_diagnostics) = lex(source);
+            assert!(lex_diagnostics.is_empty(), "{lex_diagnostics:?}");
+            let diagnostics = parse(&tokens).expect_err("retired unit infix spelling");
+            let diagnostic = diagnostics
+                .iter()
+                .find(|diagnostic| diagnostic.code == "E-ERR-SIGIL")
+                .expect("E-ERR-SIGIL");
+            assert!(diagnostic.fix.contains("IOError!"));
+        }
     }
 
     #[test]

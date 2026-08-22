@@ -253,6 +253,25 @@ fn run() {
     assert_eq!(stdout, "4x4x4\n4x2x2\n4x2x1\n");
 }
 
+/// Card #2152 / D-DEFAULT-SHAPE1=B: declaration defaults that reference
+/// earlier parameters keep one meaning on AOT, default `jet run`, and the
+/// forced interpreter path.
+#[test]
+fn default_parameter_references_keep_tier_parity() {
+    let src = r#"
+fn dimensions(width: Int, height: Int{width}, depth: Int{height}) String -> {
+    return "{width}x{height}x{depth}"
+}
+
+fn run() {
+    print(dimensions(4))
+    print(dimensions(4, 2))
+    print(dimensions(4, 2, 1))
+}
+"#;
+    tir_support::assert_tiers_agree("default_parameter_references", src, "4x4x4\n4x2x2\n4x2x1\n");
+}
+
 /// D-APILABEL1=A: call-site labels bind by name. Sema hands TIR declaration-order
 /// arguments, and lowering pins observable reordered expressions to written order.
 #[test]

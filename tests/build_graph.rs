@@ -1415,11 +1415,14 @@ fn remote_driver_consumes_authenticated_worker_result() {
     let _ = fs::remove_dir_all(&project_root);
     fs::create_dir_all(&project_root).unwrap();
     let remote_root = project_root.join("remote-transport");
+    fs::create_dir_all(project_root.join("src")).unwrap();
+    fs::write(project_root.join("src/remote-input"), b"remote input").unwrap();
     let mut b = BuildContext::new();
     let action = b
         .action(
             "remote-action",
             ActionSpec::cached(["remote-tool"])
+                .with_inputs(["src/remote-input"])
                 .with_outputs(["build/remote-app"])
                 .with_cap(BuildCapability::Net),
         )
@@ -1429,10 +1432,14 @@ fn remote_driver_consumes_authenticated_worker_result() {
         .unwrap();
     let plan = b.plan_with_default(target).unwrap();
     let grants = [BuildCapability::Net].into_iter().collect();
+    let cas = LocalCas::new(project_root.join(".jet/build-cache/cas"));
+    let snapshots = cas
+        .snapshot_declared_inputs(&project_root, plan.action(action).unwrap())
+        .unwrap();
     let key = plan
         .effective_action_key(
             action,
-            &[],
+            &snapshots,
             &grants,
             std::path::Path::new("remote-tool"),
             &ContentDigest::from_bytes(b"remote-tool"),
@@ -1462,6 +1469,15 @@ fn remote_driver_consumes_authenticated_worker_result() {
                         true,
                         request.sandbox.clone(),
                     );
+                    assert_eq!(request.inputs.len(), 1);
+                    assert_eq!(request.inputs[0].path.as_str(), "src/remote-input");
+                    assert_eq!(
+                        transport
+                            .download_execution_blob(&request.inputs[0].digest, &policy)
+                            .unwrap(),
+                        b"remote input"
+                    );
+                    assert_eq!(request.inputs[0].byte_len, 12);
                     let bytes = b"remote worker output";
                     let digest = transport.upload_execution_blob(bytes, &policy).unwrap();
                     let (stdout_digest, stderr_digest) =
@@ -1518,6 +1534,10 @@ fn remote_driver_consumes_authenticated_worker_result() {
             } if *finished == action.id()
         )
     }));
+    assert_eq!(
+        fs::read(project_root.join("build/remote-app")).unwrap(),
+        b"remote worker output"
+    );
     let _ = fs::remove_dir_all(project_root);
 }
 
