@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 2154,
-    "rev": 41460,
+    "rev": 41474,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -141483,14 +141483,69 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": "e3-m19-arrow-slate",
-      "phase": "ready",
+      "phase": "done",
       "priority": "P2",
       "plan": null,
       "checkSteps": null,
       "blockedBy": [],
       "assignee": null,
       "log": [],
-      "criteria": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Syntax.rs carries the respelled arrow rows: OP_UNIFIED_ARROW is -> and EFFECT_ARROW_OPEN/CLOSE are -[ and ]>.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "crates/jet-foundation/src/Syntax.rs:145 and :167 record OP_UNIFIED_ARROW as -> and EFFECT_ARROW_OPEN/CLOSE as -[ / ]>, per D-ARROW-RESPELL1=A and D-EFFECT-ROW2=B.",
+          "at": "2026-08-22T19:08:09.869Z"
+        },
+        {
+          "n": 2,
+          "text": "The .jet corpus is migrated: no example or test source carries :> except deliberate retired-spelling fixtures.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Migrated from 387 .jet files carrying :> to 2, and both survivors are deliberate: tests/ui/retired_arrow_callable_body.jet and tests/ui/signature_shape_retired.jet.",
+          "at": "2026-08-22T19:08:10.663Z"
+        },
+        {
+          "n": 3,
+          "text": ":> and => in a callable position teach rather than being accepted, and the retired-spelling fixtures prove it.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "The 14 Rust files still holding :> are the lexer, parser, formatter and diagnostics paths that must recognise the retired spelling in order to teach it, plus the retirement ratchet itself.",
+          "at": "2026-08-22T19:08:11.723Z"
+        },
+        {
+          "n": 4,
+          "text": "jet fmt emits the canonical arrow and jet fmt --check examples is clean.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "jet fmt --check examples is clean. cargo test --test fmt is 199 passed, 1 failed; the single failure is fmt_lossless on examples/features/comptime/distinct_reflect.jet and belongs to card #2149, not to the respell — see the note logged there.",
+          "at": "2026-08-22T19:08:12.361Z"
+        },
+        {
+          "n": 5,
+          "text": "Editor grammars regenerate and cargo test --test grammar passes.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "cargo test --test grammar: 29 passed, 0 failed.",
+          "at": "2026-08-22T19:08:12.743Z"
+        },
+        {
+          "n": 6,
+          "text": "The retirement ratchet holds: cargo test --test retirement_ratchet passes.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "cargo test --test retirement_ratchet: 16 passed, 0 failed.",
+          "at": "2026-08-22T19:08:13.124Z"
+        }
+      ],
       "refs": [
         "#2144"
       ],
@@ -141498,8 +141553,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-21T22:17:00.903Z",
-      "updated": "2026-08-21T23:50:15.893Z",
-      "updatedBy": "Main"
+      "updated": "2026-08-22T19:08:14.390Z",
+      "updatedBy": "Main",
+      "completedAt": "2026-08-22T19:08:14.390Z"
     },
     {
       "id": "c0622n49",
@@ -141715,7 +141771,13 @@
         "c0ohqujv"
       ],
       "assignee": null,
-      "log": [],
+      "log": [
+        {
+          "at": "2026-08-22",
+          "by": "Main",
+          "text": "Blocker found while closing #2146. Six build entry points spell their signature `fn build(b: BuildContext) BuildPlan! ->` (examples/features/tooling/compiler_api.jet:6, tooling/programmable_build/main.jet:1, tooling/build_entry_discovery/packages/foundation/tools/build.jet:1, tooling/build_entry_discovery/tools/build_entry.jet:1, comptime/distinct_reflect.jet:5, packages/build_contribution/run.jet:2). Under D-ERRSUFFIX1=B a bare E! is unit-fallible, so BuildPlan! reads as unit success failing with BuildPlan. But these functions return a BuildPlan value (distinct_reflect.jet:20 returns b.plan(app)) and propagate with ?, so the corpus convention means the opposite of the ratified rule. The formatter already follows the ratified rule and strips the arrow, which is why fmt_lossless fails on distinct_reflect.jet. Respelling these to name both the success and the error type is this card work; do not guess the error type without checking the BuildContext surface."
+        }
+      ],
       "criteria": [],
       "refs": [
         "#2144"
@@ -141724,7 +141786,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-21T22:17:04.116Z",
-      "updated": "2026-08-21T23:50:18.124Z",
+      "updated": "2026-08-22T19:08:16.363Z",
       "updatedBy": "Main"
     },
     {
@@ -189783,6 +189845,104 @@
   ],
   "events": [
     {
+      "at": "2026-08-22T19:08:16.363Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c05mwfmo",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-08-22T19:08:14.391Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0ohqujv",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-22T19:08:13.124Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0ohqujv",
+      "note": "#6"
+    },
+    {
+      "at": "2026-08-22T19:08:12.744Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0ohqujv",
+      "note": "#5"
+    },
+    {
+      "at": "2026-08-22T19:08:12.361Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0ohqujv",
+      "note": "#4"
+    },
+    {
+      "at": "2026-08-22T19:08:11.723Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0ohqujv",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-22T19:08:10.664Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0ohqujv",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-22T19:08:09.869Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0ohqujv",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-22T19:08:09.491Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0ohqujv",
+      "note": "#6 The retirement ratchet holds: cargo test --test retirement_r"
+    },
+    {
+      "at": "2026-08-22T19:08:08.593Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0ohqujv",
+      "note": "#5 Editor grammars regenerate and cargo test --test grammar pas"
+    },
+    {
+      "at": "2026-08-22T19:08:07.928Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0ohqujv",
+      "note": "#4 jet fmt emits the canonical arrow and jet fmt --check exampl"
+    },
+    {
+      "at": "2026-08-22T19:08:07.164Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0ohqujv",
+      "note": "#3 :> and => in a callable position teach rather than being acc"
+    },
+    {
+      "at": "2026-08-22T19:08:06.516Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0ohqujv",
+      "note": "#2 The .jet corpus is migrated: no example or test source carri"
+    },
+    {
+      "at": "2026-08-22T19:08:05.777Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0ohqujv",
+      "note": "#1 Syntax.rs carries the respelled arrow rows: OP_UNIFIED_ARROW"
+    },
+    {
       "at": "2026-08-22T18:59:54.686Z",
       "by": "Main",
       "action": "card.update",
@@ -193183,104 +193343,6 @@
       "action": "card.update",
       "ref": "c0earl6i",
       "note": "phase"
-    },
-    {
-      "at": "2026-08-22T11:34:15.487Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0earl6i",
-      "note": "#7"
-    },
-    {
-      "at": "2026-08-22T11:34:14.839Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0earl6i",
-      "note": "#6"
-    },
-    {
-      "at": "2026-08-22T11:34:14.194Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0earl6i",
-      "note": "#5"
-    },
-    {
-      "at": "2026-08-22T11:34:13.446Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0earl6i",
-      "note": "#4"
-    },
-    {
-      "at": "2026-08-22T11:34:12.814Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0earl6i",
-      "note": "#3"
-    },
-    {
-      "at": "2026-08-22T11:34:12.087Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0earl6i",
-      "note": "#2"
-    },
-    {
-      "at": "2026-08-22T11:34:10.975Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0earl6i",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-22T11:34:09.474Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c02tdxr6",
-      "note": "phase"
-    },
-    {
-      "at": "2026-08-22T11:34:07.919Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c02tdxr6",
-      "note": "#7"
-    },
-    {
-      "at": "2026-08-22T11:34:06.690Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c02tdxr6",
-      "note": "#6"
-    },
-    {
-      "at": "2026-08-22T11:34:05.603Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c02tdxr6",
-      "note": "#5"
-    },
-    {
-      "at": "2026-08-22T11:34:04.600Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c02tdxr6",
-      "note": "#4"
-    },
-    {
-      "at": "2026-08-22T11:34:04.080Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c02tdxr6",
-      "note": "#3"
-    },
-    {
-      "at": "2026-08-22T11:34:03.599Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c02tdxr6",
-      "note": "#2"
     }
   ],
   "nextNum": 368,
