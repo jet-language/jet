@@ -789,7 +789,7 @@ pub fn substitute_cache_entry(
     )))
 }
 
-pub fn cache_binding_json(binding: &CacheBinding) -> String {
+fn cache_binding_fields(binding: &CacheBinding) -> String {
     let mirrors = binding
         .mirrors
         .iter()
@@ -797,7 +797,7 @@ pub fn cache_binding_json(binding: &CacheBinding) -> String {
         .collect::<Vec<_>>()
         .join(",");
     format!(
-        "{{\"role\":{},\"mirrors\":[{}],\"credential_provider\":{},\"write\":{}}}",
+        "\"role\":{},\"mirrors\":[{}],\"credential_provider\":{},\"write\":{}",
         crate::JSON::quote(&binding.role),
         mirrors,
         binding
@@ -809,37 +809,65 @@ pub fn cache_binding_json(binding: &CacheBinding) -> String {
     )
 }
 
+pub fn cache_binding_json(binding: &CacheBinding) -> String {
+    jet_foundation::Report::render_status_json(
+        "ok",
+        true,
+        "cache-bind",
+        &format!(",{}", cache_binding_fields(binding)),
+    )
+}
+
+pub(crate) fn cache_bindings_json(bindings: &[CacheBinding]) -> String {
+    let values = bindings
+        .iter()
+        .map(|binding| format!("{{{}}}", cache_binding_fields(binding)))
+        .collect::<Vec<_>>()
+        .join(",");
+    jet_foundation::Report::render_status_json(
+        "ok",
+        true,
+        "cache-list",
+        &format!(",\"bindings\":[{}]", values),
+    )
+}
+
 pub fn cache_report_json(operation: &str, report: &CacheTransferReport) -> String {
-    format!(
-        "{{\"operation\":{},\"role\":{},\"mirror\":{},\"entry\":{},\"output_hash\":{},\"nar_hash\":{},\"nix_nar_hash\":{},\"signed_fingerprint\":{},\"builder\":{},\"provenance\":{},\"receipt_version\":{},\"receipt_expires_unix\":{},\"credential_provider\":{},\"bytes\":{}}}",
-        crate::JSON::quote(operation),
-        crate::JSON::quote(&report.role),
-        crate::JSON::quote(&report.mirror),
-        crate::JSON::quote(&report.entry),
-        crate::JSON::quote(&report.output_hash),
-        crate::JSON::quote(&report.nar_hash),
-        report
-            .nix_nar_hash
-            .as_deref()
-            .map(crate::JSON::quote)
-            .unwrap_or_else(|| "null".to_string()),
-        crate::JSON::quote(&report.signed_fingerprint),
-        crate::JSON::quote(&report.builder),
-        crate::JSON::quote(&report.provenance),
-        report
-            .receipt_version
-            .map(|version| version.to_string())
-            .unwrap_or_else(|| "null".to_string()),
-        report
-            .receipt_expires_unix
-            .map(|expires| expires.to_string())
-            .unwrap_or_else(|| "null".to_string()),
-        report
-            .credential_provider
-            .as_deref()
-            .map(crate::JSON::quote)
-            .unwrap_or_else(|| "null".to_string()),
-        report.bytes
+    jet_foundation::Report::render_status_json(
+        "ok",
+        true,
+        operation,
+        &format!(
+            ",\"operation\":{},\"role\":{},\"mirror\":{},\"entry\":{},\"output_hash\":{},\"nar_hash\":{},\"nix_nar_hash\":{},\"signed_fingerprint\":{},\"builder\":{},\"provenance\":{},\"receipt_version\":{},\"receipt_expires_unix\":{},\"credential_provider\":{},\"bytes\":{}",
+            crate::JSON::quote(operation),
+            crate::JSON::quote(&report.role),
+            crate::JSON::quote(&report.mirror),
+            crate::JSON::quote(&report.entry),
+            crate::JSON::quote(&report.output_hash),
+            crate::JSON::quote(&report.nar_hash),
+            report
+                .nix_nar_hash
+                .as_deref()
+                .map(crate::JSON::quote)
+                .unwrap_or_else(|| "null".to_string()),
+            crate::JSON::quote(&report.signed_fingerprint),
+            crate::JSON::quote(&report.builder),
+            crate::JSON::quote(&report.provenance),
+            report
+                .receipt_version
+                .map(|version| version.to_string())
+                .unwrap_or_else(|| "null".to_string()),
+            report
+                .receipt_expires_unix
+                .map(|expires| expires.to_string())
+                .unwrap_or_else(|| "null".to_string()),
+            report
+                .credential_provider
+                .as_deref()
+                .map(crate::JSON::quote)
+                .unwrap_or_else(|| "null".to_string()),
+            report.bytes
+        ),
     )
 }
 

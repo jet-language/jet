@@ -2375,6 +2375,7 @@ mod tests {
             false,
         )
         .unwrap();
+        let live_package = fs::read(root.join(PACKAGE_FILE)).unwrap();
         let journal = fs::read_dir(root.join(JOURNAL_DIR))
             .unwrap()
             .next()
@@ -2384,7 +2385,7 @@ mod tests {
         fs::write(&journal, b"corrupt\n").unwrap();
         let error = fold(&root, Path::new("package/fleet.jet"), false).unwrap_err();
         assert!(error.0.contains("unknown format"), "{error}");
-        assert_eq!(fs::read(root.join(PACKAGE_FILE)).unwrap(), original); // root bytes stay live
+        assert_eq!(fs::read(root.join(PACKAGE_FILE)).unwrap(), live_package); // split state stays live
         assert!(root.join("package/fleet.jet").is_file());
         fs::remove_dir_all(root).unwrap();
     }

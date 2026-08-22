@@ -711,7 +711,7 @@ pub(super) fn shell_on_failed_build(theme: &Theme, roots: &Roots, package: &str)
     let Ok(Some(attempt)) = BuildDebug::latest(&roots.hangar_dir(), package) else {
         return;
     };
-    if attempt.scratch_dir.is_empty() {
+    if attempt.status != "failed" || attempt.scratch_dir.is_empty() {
         return;
     }
     let Some(scratch) = verified_failed_scratch(roots, &attempt, package) else {

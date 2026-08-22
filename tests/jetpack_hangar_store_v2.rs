@@ -169,6 +169,24 @@ fn hangar_ingest_verify_and_dedupe_roundtrip() {
     let listed = String::from_utf8_lossy(&list.stderr);
     assert!(listed.contains("hello"), "{listed}");
 
+    let list_json = jetpack()
+        .args(["list", "--json", "--no-color"])
+        .current_dir(&proj.path)
+        .env("JETPACK_ROOT", &root.path)
+        .output()
+        .unwrap();
+    assert!(list_json.status.success(), "stderr: {:?}", list_json.stderr);
+    assert!(
+        list_json.stderr.is_empty(),
+        "JSON list leaked stderr: {:?}",
+        list_json.stderr
+    );
+    let list_report = jetpack::JSON::parse(String::from_utf8_lossy(&list_json.stdout).trim())
+        .expect("list JSON report");
+    assert_eq!(json_string(&list_report, "schema"), "jet.report/v1");
+    assert_eq!(json_string(&list_report, "action"), "list");
+    assert!(String::from_utf8_lossy(&list_json.stdout).contains("\"packages\":["));
+
     // Verify via digest from first ingest line.
     let digest = stderr
         .split_whitespace()
@@ -1343,6 +1361,77 @@ fn hangar_recovery_reclaims_crashed_stages_and_dead_leases_without_following_esc
         assert_eq!(fs::read_to_string(outside.join("must-survive")).unwrap(), "live data");
         fs::remove_file(lease_root).unwrap();
     }
+}
+
+#[test]
+fn hangar_verify_reports_corrupt_store_instead_of_empty_success() {
+    let root = Scratch::new("hangar-v2-verify-corrupt-root");
+    let project = Scratch::new("hangar-v2-verify-corrupt-project");
+    let source = Scratch::new("hangar-v2-verify-corrupt-source");
+    fs::write(source.join("payload"), "live bytes").unwrap();
+
+    let ingest = jetpack()
+        .args([
+            "hangar",
+            "ingest",
+            source.path.to_str().unwrap(),
+            "--name",
+            "verify-corrupt",
+            "--ref",
+            "verify-corrupt@fixture",
+            "--no-color",
+        ])
+        .current_dir(&project.path)
+        .env("JETPACK_ROOT", &root.path)
+        .output()
+        .unwrap();
+    assert!(ingest.status.success(), "stderr: {:?}", ingest.stderr);
+
+    let roots = jetpack::Store::Roots {
+        root: root.path.clone(),
+        dev_mode: false,
+    };
+    let journal = roots.hangar_dir().join("closure-db/journal");
+    let journal_entry = fs::read_dir(&journal)
+        .unwrap()
+        .map(|entry| entry.unwrap().path())
+        .find(|path| path.extension().and_then(|value| value.to_str()) == Some("txn"))
+        .expect("committed closure transaction");
+    let journal_bytes = fs::read(&journal_entry).unwrap();
+    fs::write(&journal_entry, b"corrupt closure journal").unwrap();
+
+    let verify = jet()
+        .args([
+            "hangar",
+            "verify",
+            "verify-corrupt@fixture",
+            "--json",
+            "--no-color",
+        ])
+        .current_dir(&project.path)
+        .env("JETPACK_ROOT", &root.path)
+        .output()
+        .unwrap();
+    fs::write(&journal_entry, journal_bytes).unwrap();
+    assert_eq!(
+        verify.status.code(),
+        Some(2),
+        "stdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&verify.stdout),
+        String::from_utf8_lossy(&verify.stderr)
+    );
+    assert!(
+        verify.stderr.is_empty(),
+        "JSON verify leaked stderr: {:?}",
+        verify.stderr
+    );
+    let report = jetpack::JSON::parse(String::from_utf8_lossy(&verify.stdout).trim())
+        .expect("corrupt store report");
+    assert_eq!(json_string(&report, "schema"), "jet.report/v1");
+    assert_eq!(json_string(&report, "code"), "E1340");
+    assert_eq!(json_string(&report, "what"), "could not read the Hangar");
+    assert!(!String::from_utf8_lossy(&verify.stdout).contains("no hangar object"));
+    assert_eq!(fs::read_to_string(source.join("payload")).unwrap(), "live bytes");
 }
 
 #[test]

@@ -50,6 +50,20 @@ pub(super) fn build_generation(
     } else {
         None
     };
+    if let Some(proof) = published_proof.as_ref() {
+        // A valid named generation is immutable. Reusing it must not rebuild
+        // a staging tree: writers such as activation-diff intentionally see
+        // the published generation on a retry and would otherwise produce a
+        // different sealed manifest for the same request.
+        return publish_generation(
+            theme,
+            &roots,
+            &system.name,
+            generation_name,
+            final_dir,
+            proof.clone(),
+        );
+    }
     let dir = generation_staging_dir(&final_dir);
     fs::create_dir_all(dir.join("packages")).ok()?;
     let name_w = system
@@ -291,17 +305,7 @@ pub(super) fn build_generation(
         return None;
     }
     let parent = final_dir.parent()?;
-    if let Some(existing) = published_proof {
-        let _ = fs::remove_dir_all(&dir);
-        if existing != root_proof {
-            immutable_generation_error(
-                theme,
-                &final_dir,
-                &std::io::Error::other("current request has a different sealed witness"),
-            );
-            return None;
-        }
-    } else if let Err(e) = fs::rename(&dir, &final_dir) {
+    if let Err(e) = fs::rename(&dir, &final_dir) {
         if !final_dir.is_dir() {
             theme.error(
                 "could not publish the jetos generation",

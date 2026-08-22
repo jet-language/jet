@@ -560,6 +560,88 @@ fn binary_cache_local_publish_verify_and_reject_corruption() {
 }
 
 #[test]
+fn cache_cli_json_uses_shared_report_schema() {
+    let root = Scratch::new("cache-cli-json-root");
+    let mirror = Scratch::new("cache-cli-json-mirror");
+    let bind = jetpack()
+        .args([
+            "cache",
+            "bind",
+            "public",
+            mirror.path.to_str().unwrap(),
+            "--yes",
+            "--json",
+            "--no-color",
+        ])
+        .env("JETPACK_ROOT", &root.path)
+        .output()
+        .unwrap();
+    assert!(bind.status.success(), "stderr: {:?}", bind.stderr);
+    assert!(
+        bind.stderr.is_empty(),
+        "JSON bind leaked stderr: {:?}",
+        bind.stderr
+    );
+    let bind_report = jetpack::JSON::parse(String::from_utf8_lossy(&bind.stdout).trim())
+        .expect("cache bind JSON report");
+    assert_eq!(json_string(&bind_report, "schema"), "jet.report/v1");
+    assert_eq!(json_string(&bind_report, "moment"), "tool");
+    assert_eq!(json_string(&bind_report, "action"), "cache-bind");
+    assert_eq!(json_string(&bind_report, "role"), "public");
+
+    let list = jetpack()
+        .args(["cache", "list", "--json", "--no-color"])
+        .env("JETPACK_ROOT", &root.path)
+        .output()
+        .unwrap();
+    assert!(list.status.success(), "stderr: {:?}", list.stderr);
+    assert!(
+        list.stderr.is_empty(),
+        "JSON list leaked stderr: {:?}",
+        list.stderr
+    );
+    let list_stdout = String::from_utf8_lossy(&list.stdout);
+    let list_report = jetpack::JSON::parse(list_stdout.trim()).expect("cache list JSON report");
+    assert_eq!(json_string(&list_report, "schema"), "jet.report/v1");
+    assert_eq!(json_string(&list_report, "action"), "cache-list");
+    assert!(list_stdout.contains("\"bindings\":["));
+
+    let repeated = jetpack()
+        .args(["cache", "list", "--json", "--no-color"])
+        .env("JETPACK_ROOT", &root.path)
+        .output()
+        .unwrap();
+    assert_eq!(repeated.stdout, list.stdout);
+
+    let missing = jetpack()
+        .args(["cache", "verify", "missing", "--json", "--no-color"])
+        .env("JETPACK_ROOT", &root.path)
+        .output()
+        .unwrap();
+    assert_eq!(missing.status.code(), Some(2));
+    assert!(
+        missing.stderr.is_empty(),
+        "JSON failure leaked stderr: {:?}",
+        missing.stderr
+    );
+    let missing_report = jetpack::JSON::parse(String::from_utf8_lossy(&missing.stdout).trim())
+        .expect("cache failure JSON report");
+    assert_eq!(json_string(&missing_report, "schema"), "jet.report/v1");
+    assert_eq!(json_string(&missing_report, "code"), "E1340");
+
+    let remove = jetpack()
+        .args(["cache", "remove", "public", "--yes", "--json", "--no-color"])
+        .env("JETPACK_ROOT", &root.path)
+        .output()
+        .unwrap();
+    assert!(remove.status.success(), "stderr: {:?}", remove.stderr);
+    let remove_report = jetpack::JSON::parse(String::from_utf8_lossy(&remove.stdout).trim())
+        .expect("cache remove JSON report");
+    assert_eq!(json_string(&remove_report, "schema"), "jet.report/v1");
+    assert_eq!(json_string(&remove_report, "action"), "cache-remove");
+}
+
+#[test]
 fn binary_cache_trust_receipt_rejects_rollback_freeze_and_mix_and_match() {
     let root = Scratch::new("cache-trust-root");
     let source = Scratch::new("cache-trust-source");
@@ -3062,7 +3144,7 @@ fn clean_removes_only_stale_unreferenced_hangar_objects() {
     assert!(fresh.exists(), "fresh object should be kept");
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert!(
-        stderr.contains("removed 1 stale object"),
+        stderr.contains("removed 2 stale object"),
         "stderr: {stderr}"
     );
 }
@@ -3140,6 +3222,27 @@ fn clean_sweeps_orphan_build_scratch_but_keeps_active_scratch() {
     );
     assert!(!orphan.exists(), "orphan scratch should be swept");
     assert!(active.exists(), "active scratch marker protects scratch");
+}
+
+#[test]
+fn clean_sweeps_preserved_failed_build_scratch() {
+    let root = Scratch::new("root");
+    let scratch = root.path.join("hangar/failed-scratch");
+    let failed = scratch.join("weirdctl-1");
+    fs::create_dir_all(&failed).unwrap();
+    fs::write(failed.join("build.log"), "failed build").unwrap();
+
+    let out = jetpack()
+        .args(["clean", "--no-color", "--yes"])
+        .env("JETPACK_ROOT", &root.path)
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(!failed.exists(), "failed-build scratch should be swept");
 }
 
 #[test]

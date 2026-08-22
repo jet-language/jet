@@ -482,7 +482,7 @@ pub fn main(args: Vec<String>) -> i32 {
         v if v == Syntax::TRUST_SUBCOMMAND => cmd_trust(&theme, &parsed),
         "build" => cmd_build(&theme, &parsed),
         "test" => cmd_test(&theme, &parsed),
-        "list" => cmd_list(&theme),
+        "list" => cmd_list(&theme, &parsed),
         "hangar" => cmd_hangar(&theme, &parsed),
         "cache" => cmd_cache(&theme, &parsed),
         "shared-store" => cmd_shared_store(&theme, &parsed),

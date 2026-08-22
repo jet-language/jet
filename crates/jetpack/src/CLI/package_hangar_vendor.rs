@@ -6,11 +6,57 @@ use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 /// `jetpack list` — show realized store entries.
-pub(super) fn cmd_list(theme: &Theme) -> i32 {
+pub(super) fn cmd_list(theme: &Theme, parsed: &Parsed) -> i32 {
     let roots = Store::resolve();
-    let entries = Store::list(&roots);
+    let entries = match Store::list_checked(&roots) {
+        Ok(entries) => entries,
+        Err(error) => {
+            return hangar_report_error(
+                theme,
+                parsed,
+                "E1340",
+                "could not read the Hangar",
+                &error.to_string(),
+                "repair the Hangar journal, then retry listing.",
+            );
+        }
+    };
     if entries.is_empty() {
-        theme.status("no realized packages yet.");
+        if parsed.flags.json {
+            println!(
+                "{}",
+                jet_foundation::Report::render_status_json("ok", true, "list", ",\"packages\":[]")
+            );
+        } else {
+            theme.status("no realized packages yet.");
+        }
+        return 0;
+    }
+    if parsed.flags.json {
+        let packages = entries
+            .iter()
+            .map(|entry| {
+                format!(
+                    "{{\"id\":{},\"name\":{},\"version\":{},\"reference\":{},\"output_hash\":{},\"source_built\":{}}}",
+                    crate::JSON::quote(&entry.id),
+                    crate::JSON::quote(&entry.name),
+                    crate::JSON::quote(&entry.version),
+                    crate::JSON::quote(&entry.reference),
+                    crate::JSON::quote(&entry.envelope.output_hash),
+                    entry.envelope.provenance.contains("core-"),
+                )
+            })
+            .collect::<Vec<_>>()
+            .join(",");
+        println!(
+            "{}",
+            jet_foundation::Report::render_status_json(
+                "ok",
+                true,
+                "list",
+                &format!(",\"packages\":[{}]", packages),
+            )
+        );
         return 0;
     }
     theme.status(&format!("{} realized package(s):", entries.len()));
@@ -56,13 +102,23 @@ pub(super) fn cmd_cache(theme: &Theme, parsed: &Parsed) -> i32 {
     match action {
         "bind" => {
             let Some(role) = parsed.positional.get(1) else {
-                return cache_usage(theme, "`cache bind` needs a role and mirror", "jet cache bind public /absolute/cache");
+                return cache_usage(
+                    theme,
+                    parsed,
+                    "`cache bind` needs a role and mirror",
+                    "jet cache bind public /absolute/cache",
+                );
             };
             let mirrors = parsed.positional[2..].to_vec();
             if mirrors.is_empty() {
-                return cache_usage(theme, "`cache bind` needs at least one mirror", "jet cache bind public /absolute/cache");
+                return cache_usage(
+                    theme,
+                    parsed,
+                    "`cache bind` needs at least one mirror",
+                    "jet cache bind public /absolute/cache",
+                );
             }
-            if !theme.confirm_apply(parsed.flags.assume_yes) {
+            if !cache_confirm_apply(theme, parsed, "cache-bind") {
                 return 0;
             }
             match Store::bind_cache(
@@ -86,18 +142,13 @@ pub(super) fn cmd_cache(theme: &Theme, parsed: &Parsed) -> i32 {
                     }
                     0
                 }
-                Err(error) => cache_error(theme, "bind", error),
+                Err(error) => cache_error(theme, parsed, "bind", error),
             }
         }
         "list" => match Store::list_cache_bindings(&roots) {
             Ok(bindings) => {
                 if parsed.flags.json {
-                    let values = bindings
-                        .iter()
-                        .map(Store::cache_binding_json)
-                        .collect::<Vec<_>>()
-                        .join(",");
-                    println!("[{values}]");
+                    println!("{}", Store::cache_bindings_json(&bindings));
                 } else if bindings.is_empty() {
                     theme.status("no host-owned cache bindings.");
                 } else {
@@ -117,35 +168,69 @@ pub(super) fn cmd_cache(theme: &Theme, parsed: &Parsed) -> i32 {
                 }
                 0
             }
-            Err(error) => cache_error(theme, "list", error),
+            Err(error) => cache_error(theme, parsed, "list", error),
         },
         "remove" => {
             let Some(role) = parsed.positional.get(1) else {
-                return cache_usage(theme, "`cache remove` needs a role", "jet cache remove public --yes");
+                return cache_usage(
+                    theme,
+                    parsed,
+                    "`cache remove` needs a role",
+                    "jet cache remove public --yes",
+                );
             };
-            if !theme.confirm_apply(parsed.flags.assume_yes) {
+            if !cache_confirm_apply(theme, parsed, "cache-remove") {
                 return 0;
             }
             match Store::remove_cache_binding(&roots, role) {
                 Ok(true) => {
+                    if parsed.flags.json {
+                        println!(
+                            "{}",
+                            jet_foundation::Report::render_status_json(
+                                "ok",
+                                true,
+                                "cache-remove",
+                                &format!(",\"role\":{},\"removed\":true", crate::JSON::quote(role)),
+                            )
+                        );
+                        return 0;
+                    }
                     theme.status(&format!("removed cache role `{role}`"));
                     0
                 }
                 Ok(false) => {
+                    if parsed.flags.json {
+                        println!(
+                            "{}",
+                            jet_foundation::Report::render_status_json(
+                                "ok",
+                                true,
+                                "cache-remove",
+                                &format!(",\"role\":{},\"removed\":false", crate::JSON::quote(role)),
+                            )
+                        );
+                        return 0;
+                    }
                     theme.status(&format!("cache role `{role}` was not bound"));
                     0
                 }
-                Err(error) => cache_error(theme, "remove", error),
+                Err(error) => cache_error(theme, parsed, "remove", error),
             }
         }
         "publish" | "verify" | "substitute" => {
             let Some(target) = parsed.positional.get(1) else {
-                return cache_usage(theme, "cache transfer needs an entry, reference, or output digest", "jet cache verify <entry> --role public");
+                return cache_usage(
+                    theme,
+                    parsed,
+                    "cache transfer needs an entry, reference, or output digest",
+                    "jet cache verify <entry> --role public",
+                );
             };
             let role = parsed.flags.cache_role.as_deref().unwrap_or("public");
             match action {
                 "publish" => {
-                    if !theme.confirm_apply(parsed.flags.assume_yes) {
+                    if !cache_confirm_apply(theme, parsed, "publish") {
                         return 0;
                     }
                     report_cache(
@@ -163,9 +248,14 @@ pub(super) fn cmd_cache(theme: &Theme, parsed: &Parsed) -> i32 {
                 ),
                 "substitute" => {
                     let Some(destination) = parsed.flags.archive_to.as_deref() else {
-                        return cache_usage(theme, "`cache substitute` needs `--to <directory>`", "jet cache substitute <entry> --role public --to /tmp/output --yes");
+                        return cache_usage(
+                            theme,
+                            parsed,
+                            "`cache substitute` needs `--to <directory>`",
+                            "jet cache substitute <entry> --role public --to /tmp/output --yes",
+                        );
                     };
-                    if !theme.confirm_apply(parsed.flags.assume_yes) {
+                    if !cache_confirm_apply(theme, parsed, "substitute") {
                         return 0;
                     }
                     report_cache(
@@ -180,6 +270,7 @@ pub(super) fn cmd_cache(theme: &Theme, parsed: &Parsed) -> i32 {
         }
         _ => cache_usage(
             theme,
+            parsed,
             &format!("`cache {action}` is not a cache command"),
             "jet cache bind|list|remove|publish|verify|substitute",
         ),
@@ -206,22 +297,49 @@ fn report_cache(
             }
             0
         }
-        Err(error) => cache_error(theme, action, error),
+        Err(error) => cache_error(theme, parsed, action, error),
     }
 }
 
-fn cache_error(theme: &Theme, action: &str, error: std::io::Error) -> i32 {
-    theme.error(
+fn cache_confirm_apply(theme: &Theme, parsed: &Parsed, action: &str) -> bool {
+    if !parsed.flags.json {
+        return theme.confirm_apply(parsed.flags.assume_yes);
+    }
+    if parsed.flags.assume_yes {
+        return true;
+    }
+    println!(
+        "{}",
+        jet_foundation::Report::render_status_json(
+            "plan",
+            true,
+            action,
+            ",\"applied\":false",
+        )
+    );
+    false
+}
+
+fn cache_error(theme: &Theme, parsed: &Parsed, action: &str, error: std::io::Error) -> i32 {
+    hangar_report_error(
+        theme,
+        parsed,
+        "E1340",
         &format!("cache {action} failed"),
         &error.to_string(),
         "bind a verified host-owned mirror and check the role trust key; never put credentials in the endpoint.",
-    );
-    2
+    )
 }
 
-fn cache_usage(theme: &Theme, what: &str, fix: &str) -> i32 {
-    theme.error(what, "cache roles and mirrors are host-owned and verified before use.", fix);
-    2
+fn cache_usage(theme: &Theme, parsed: &Parsed, what: &str, fix: &str) -> i32 {
+    hangar_report_error(
+        theme,
+        parsed,
+        "E1340",
+        what,
+        "cache roles and mirrors are host-owned and verified before use.",
+        fix,
+    )
 }
 
 /// `jetpack hangar du` — honest per-object disk usage (U22 / D-JPK-GC1).
@@ -906,7 +1024,19 @@ fn cmd_hangar_verify(theme: &Theme, parsed: &Parsed) -> i32 {
         return 0;
     };
     let target = target.to_string_lossy().into_owned();
-    let entries = Store::list(&roots);
+    let entries = match Store::list_checked(&roots) {
+        Ok(entries) => entries,
+        Err(error) => {
+            return hangar_report_error(
+                theme,
+                parsed,
+                "E1340",
+                "could not read the Hangar",
+                &error.to_string(),
+                "repair the Hangar journal, then retry verification.",
+            );
+        }
+    };
     if PathBuf::from(&target).is_file() {
         return report_archive_result(
             theme,

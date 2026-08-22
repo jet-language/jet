@@ -95,6 +95,7 @@ pub fn migrate_legacy_hangar(roots: &Roots) -> std::io::Result<bool> {
 }
 
 const BUILD_SCRATCH_DIR: &str = "build-scratch";
+const FAILED_SCRATCH_DIR: &str = "failed-scratch";
 const AUTO_CLEAN_STAMP: &str = ".last-auto-clean";
 const STALE_AFTER: Duration = Duration::from_secs(30 * 24 * 60 * 60);
 const AUTO_CLEAN_AFTER: Duration = Duration::from_secs(24 * 60 * 60);
@@ -3181,7 +3182,12 @@ fn current_project_root() -> std::io::Result<Option<PathBuf>> {
     }
     // A project can be preparing its first lock. Serialize that preparation
     // against cleanup at the current root even before `.jet/lock` exists.
-    Ok(Some(cwd))
+    // Filesystem root is the neutral cwd used by no-project commands; never
+    // try to create `/.jet` there.
+    let is_below_filesystem_root = cwd
+        .parent()
+        .is_some_and(|parent| !parent.as_os_str().is_empty() && parent != cwd.as_path());
+    Ok(is_below_filesystem_root.then_some(cwd))
 }
 
 /// Cleanup uses the project lock before the Hangar lock. Build publication has
@@ -3400,8 +3406,9 @@ fn sweep_receipts(
 }
 
 /// D-JPK-GC1=B / U22: collect only unreferenced stale hangar objects, sweep
-/// orphan build scratch, then optimize duplicate Jet-owned files. Lockfile
-/// reachable entries and unknown legacy records are retained.
+/// orphan transient and failed-build scratch, then optimize duplicate
+/// Jet-owned files. Lockfile reachable entries and unknown legacy records are
+/// retained.
 pub fn clean_plan(roots: &Roots) -> std::io::Result<CleanReport> {
     let store = roots.hangar_dir();
     match fs::symlink_metadata(&store) {
@@ -3533,60 +3540,77 @@ pub fn maybe_auto_clean(roots: &Roots) -> std::io::Result<Option<CleanReport>> {
 }
 
 fn sweep_build_scratch_plan(hangar: &Path) -> std::io::Result<CleanReport> {
-    let root = hangar.join(BUILD_SCRATCH_DIR);
     let mut report = CleanReport::default();
-    match fs::symlink_metadata(&root) {
-        Ok(_) => Ingest::require_real_directory(&root, "Hangar build scratch")?,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(report),
-        Err(error) => return Err(error),
+    for scratch_name in [BUILD_SCRATCH_DIR, FAILED_SCRATCH_DIR] {
+        let root = hangar.join(scratch_name);
+        let label = if scratch_name == BUILD_SCRATCH_DIR {
+            "Hangar build scratch"
+        } else {
+            "Hangar failed-build scratch"
+        };
+        match fs::symlink_metadata(&root) {
+            Ok(_) => Ingest::require_real_directory(&root, label)?,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
+            Err(error) => return Err(error),
+        }
+        for ent in fs::read_dir(&root)? {
+            let ent = ent?;
+            let path = ent.path();
+            if fs::symlink_metadata(&path)?.file_type().is_symlink() {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    format!("{label} entry is a symlink: {}", path.display()),
+                ));
+            }
+            if scratch_name == BUILD_SCRATCH_DIR
+                && super::Provider::active_tmp_marker_is_live(&path)
+            {
+                continue;
+            }
+            report.swept_tmp += 1;
+            report.swept_tmp_bytes += dir_size(&path);
+        }
     }
-    let rd = fs::read_dir(&root)?;
-    for ent in rd {
-        let ent = ent?;
-        let path = ent.path();
-        if fs::symlink_metadata(&path)?.file_type().is_symlink() {
-            return Err(std::io::Error::new(
-                std::io::ErrorKind::InvalidData,
-                format!("Hangar build scratch entry is a symlink: {}", path.display()),
-            ));
-        }
-        if super::Provider::active_tmp_marker_is_live(&path) {
-            continue;
-        }
-        report.swept_tmp += 1;
-        report.swept_tmp_bytes += dir_size(&path);
-    };
     Ok(report)
 }
 
 fn sweep_build_scratch(hangar: &Path) -> std::io::Result<CleanReport> {
-    let root = hangar.join(BUILD_SCRATCH_DIR);
     let mut report = CleanReport::default();
-    match fs::symlink_metadata(&root) {
-        Ok(_) => Ingest::require_real_directory(&root, "Hangar build scratch")?,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(report),
-        Err(error) => return Err(error),
-    };
-    for ent in fs::read_dir(&root)? {
-        let ent = ent?;
-        let path = ent.path();
-        if fs::symlink_metadata(&path)?.file_type().is_symlink() {
-            return Err(std::io::Error::new(
-                std::io::ErrorKind::InvalidData,
-                format!("Hangar build scratch entry is a symlink: {}", path.display()),
-            ));
-        }
-        if super::Provider::active_tmp_marker_is_live(&path) {
-            continue;
-        }
-        let bytes = dir_size(&path);
-        if fs::symlink_metadata(&path)?.is_dir() {
-            fs::remove_dir_all(&path)?;
+    for scratch_name in [BUILD_SCRATCH_DIR, FAILED_SCRATCH_DIR] {
+        let root = hangar.join(scratch_name);
+        let label = if scratch_name == BUILD_SCRATCH_DIR {
+            "Hangar build scratch"
         } else {
-            fs::remove_file(&path)?;
+            "Hangar failed-build scratch"
+        };
+        match fs::symlink_metadata(&root) {
+            Ok(_) => Ingest::require_real_directory(&root, label)?,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
+            Err(error) => return Err(error),
         }
-        report.swept_tmp += 1;
-        report.swept_tmp_bytes += bytes;
+        for ent in fs::read_dir(&root)? {
+            let ent = ent?;
+            let path = ent.path();
+            if fs::symlink_metadata(&path)?.file_type().is_symlink() {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    format!("{label} entry is a symlink: {}", path.display()),
+                ));
+            }
+            if scratch_name == BUILD_SCRATCH_DIR
+                && super::Provider::active_tmp_marker_is_live(&path)
+            {
+                continue;
+            }
+            let bytes = dir_size(&path);
+            if fs::symlink_metadata(&path)?.is_dir() {
+                fs::remove_dir_all(&path)?;
+            } else {
+                fs::remove_file(&path)?;
+            }
+            report.swept_tmp += 1;
+            report.swept_tmp_bytes += bytes;
+        }
     }
     Ok(report)
 }
@@ -3996,6 +4020,7 @@ fn object_dirs(hangar: &Path) -> std::io::Result<Vec<fs::DirEntry>> {
         let path = ent.path();
         let name = ent.file_name().to_string_lossy().into_owned();
         let reserved = name == BUILD_SCRATCH_DIR
+            || name == FAILED_SCRATCH_DIR
             || name == STAGE_DIR
             || name == OBJECTS_DIR
             || name == CAS_DIR
