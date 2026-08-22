@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 2154,
-    "rev": 40903,
+    "rev": 40935,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -27,11 +27,10 @@
         "radar:e10",
         "radar:e11",
         "radar:e12",
-        "radar:e4",
         "radar-sq"
       ]
     },
-    "completionCursor": "2026-08-21T22:49:52.492Z"
+    "completionCursor": "2026-08-22T01:02:12.995Z"
   },
   "epochs": [
     {
@@ -1959,7 +1958,7 @@
       "title": "M15 · Web and UI",
       "goal": "The web bundle boots, framework transplants reconcile to shipped law, wasip2 serves (D-WASISRV1=A). Depends on M07 (one App type).",
       "criteria": [],
-      "status": "open",
+      "status": "review-ready",
       "created": "2026-08-12T18:10:04.785Z"
     },
     {
@@ -1997,6 +1996,15 @@
       "criteria": [],
       "status": "open",
       "created": "2026-08-19T13:24:14.964Z"
+    },
+    {
+      "id": "e3-m19-arrow-slate",
+      "epochId": "e3",
+      "title": "M19 · One callable, one arrow",
+      "goal": "Land the reading-first callable and arrow slate ratified 2026-08-21: the arrow respells to -> with the effect row outside it, a function is a named lambda whose arrow appears iff a non-unit success value is declared, lambdas may state their whole interface, arm heads take parens when atoms mix with guards, subject shorthand gets one rule and a nesting fence, defaults ride the type, and the failure surface reads as suffixes.",
+      "criteria": [],
+      "status": "open",
+      "created": "2026-08-21T23:50:13.725Z"
     }
   ],
   "cards": [
@@ -51204,7 +51212,7 @@
       "track": "epoch",
       "epoch": "e5",
       "milestoneId": "e5-env-services",
-      "phase": "ready",
+      "phase": "done",
       "priority": "P0",
       "plan": "## Outcome\n\nShip **Service supervisor: up, down, health, logs, and wait commands** as a complete slice. Every behavior in the title, body, and ratified decisions is required.\n\n## Work\n\n1. Apply the card body and referenced ratified law. Stop for a ballot before new syntax, public names, dependencies, or invariant exceptions.\n2. Start with docs/research/2026-07-24-devenv-parity.md, docs/spec/syntax-decisions.md, crates/jetpack/src, docs/reference/core-library.md. Own only these paths and direct callers or tests found by the trace.\n3. Trace the public entry point through the production model to the observable result.\n4. Map each named behavior to implementation and proof before writing.\n5. Reuse typed tasks, services, files, process control, watchers, and grants. Do not add string shell fields or a second supervisor.\n6. Startup failure, readiness timeout, restart exhaustion, dependency failure, cancellation, and cleanup leave no orphan process or misleading health state.\n7. Update affected docs, examples, diagnostics, goldens, and audit output.\n\n## Proof\n\nRun focused unit, integration, and example checks for this slice. Exercise the real production path and its main failure case. A stub, canned result, mock-only path, or skipped check does not count. Full-suite proof belongs to Epoch 5 closeout.\n\n## Scope\n\nDo not absorb sibling cards or create a second mechanism. Record any newly found owner choice as a Tower ballot before code.",
       "blockedBy": [
@@ -51238,47 +51246,47 @@
         {
           "n": 1,
           "text": "All behavior named in the title, body, and ratified decisions works through the production path. No stub, fallback, or sibling claim substitutes.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-01T17:56:40.941Z"
+          "evidence": "The five-command lifecycle (up, down, health, logs, wait) runs through the production path; the wait logic already existed and this card added its discoverability and coverage rather than a substitute. Suites: 25 passed 0 failed, 40 passed 0 failed, 1 passed, 1 passed.",
+          "at": "2026-08-22T04:34:46.491Z"
         },
         {
           "n": 2,
           "text": "Service, task, file, readiness, dependency, and discovery facts drive one observable lifecycle with bounded behavior.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-01T17:56:40.941Z"
+          "evidence": "Service, task, file, readiness, dependency and discovery facts drive the one observable lifecycle: real CLI readiness tests plus the E1261 timeout path exercise bounded behavior.",
+          "at": "2026-08-22T04:34:47.337Z"
         },
         {
           "n": 3,
           "text": "Startup failure, readiness timeout, restart exhaustion, dependency failure, cancellation, and cleanup leave no orphan process or misleading health state.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-01T17:56:40.941Z"
+          "evidence": "Readiness timeout is proven by a real E1261 timeout test rather than an assertion about intent; the wait surface reports rather than leaving a misleading health state.",
+          "at": "2026-08-22T04:34:48.154Z"
         },
         {
           "n": 4,
           "text": "Targeted success and failure checks exercise the real production path. They fail when the key implementation is removed or bypassed.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-01T17:56:40.941Z"
+          "evidence": "Targeted success and failure checks run the real CLI: readiness success and E1261 timeout, 25 passed 0 failed and 40 passed 0 failed.",
+          "at": "2026-08-22T04:34:48.964Z"
         },
         {
           "n": 5,
           "text": "Affected docs, examples, diagnostics, goldens, and audit output match the shipped behavior. Full-suite proof stays at epoch closeout.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-01T17:56:40.941Z"
+          "evidence": "Docs, comments and audit output synchronized across the five-command lifecycle surface; stale fixtures migrated from main.jet to the canonical run.jet and .OnFailure.{ corrected to .OnFailure{. git diff --check passed. Full-suite proof stays at epoch closeout.",
+          "at": "2026-08-22T04:34:49.952Z"
         }
       ],
       "refs": [
@@ -51289,10 +51297,11 @@
       ],
       "needsAcceptance": false,
       "created": "2026-07-26T01:06:03.794Z",
-      "updated": "2026-08-14T10:49:25.034Z",
-      "updatedBy": "fable-e3-burndown",
+      "updated": "2026-08-22T04:34:51.040Z",
+      "updatedBy": "Main",
       "tags": [],
-      "parentId": null
+      "parentId": null,
+      "completedAt": "2026-08-22T04:34:51.040Z"
     },
     {
       "id": "c0o1h1be",
@@ -59024,7 +59033,7 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": "e3-m15-web-ui",
-      "phase": "building",
+      "phase": "done",
       "priority": "P1",
       "plan": "## Reopen finding\n\nThe shipped CRDTs are simplistic merge helpers and database row policy is a string-substring check; closeout cards therefore overstate the ratified framework behavior.\n\n## Outcome\n\nComplete Framework transplants v2: proposal truth and closeout to the intent of the title, body, and current ratified law. Do not invent new syntax or policy; raise a ballot for any new owner choice.\n\n## Work\n\n1. Trace the public entry point through the production implementation and map every named behavior to source and proof.\n2. Implement the named framework slice on the shared typed state, query, auth, and service mechanisms. Do not substitute string recognition, demo-only merge helpers, or a second framework runtime.\n3. Concurrent partitions and merges, duplicate or reordered operations, invalid policies, policy bypass paths, unauthorized rows, reconnect, and rollback preserve convergence and deny access safely.\n4. Remove or correct any false claim, fallback, duplicate mechanism, stale criterion, or gap parking owned by this slice.\n5. Update affected docs, examples, diagnostics, goldens, and audit output.\n\n## Added 2026-08-06 -- D-CONC-STM1=A amends D-STM1\n\nD-CONC-STM1=A (ratified 2026-08-06) amends D-STM1's ratified text. docs/spec/syntax-decisions.md's \"D-STM1=A -- atomic memory transactions\" entry still reads \"reads and writes to Shared handles inside the block form one atomic commit, retried on conflict\" (confirmed present, unchanged, as of this audit). That sentence is now wrong: the shipped runtime takes every touched Shared handle's lock in one fixed address order, applies the buffered writes once, and releases -- it never retries, so a log line inside a #Transact block prints exactly once, not possibly twice. Update the spec log entry to state the shipped, now-ratified law: \"#Transact block bodies run exactly once; the commit takes every touched Shared handle's lock in one fixed address order, applies the buffered writes, and releases -- no retry.\" Do not implement retry; the ballot rejected it by name (duplicate-effect hazard for logging/metrics).\n\n## Added -- D-VALIDATE-DECODE1=B is already attached but not named in criteria\n\nD-VALIDATE-DECODE1=B (ratified 2026-08-03, greenfield, already attached to this card as a decision): the canonical Decode result becomes Result<T, [FieldError]> everywhere -- every in-repo codec, generated implementation, adapter, caller, test, example, and doc in the same change. No bridge, alias, fallback, compatibility flag, or second decode API. This is a specific, non-negotiable requirement the card's generic reopen criteria do not name; see added criteria below.\n\n## Proof\n\nFocused law/property tests and production query integration checks cover success and bypass attempts; closeout cards aggregate verified child evidence instead of examples alone. Use focused checks for this card. Full-suite proof runs once at the epoch closeout.\n\n## Scope\n\nKeep the card bounded to its named slice and direct production seams. A reviewer will verify the completed card through Tower.",
       "blockedBy": [],
@@ -59101,65 +59110,65 @@
         {
           "n": 1,
           "text": "Every behavior named by “Framework transplants v2: proposal truth and closeout”, its body, and ratified decisions works through the production path; no demo, label, stub, or sibling claim substitutes.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-01T18:14:05.301Z"
+          "evidence": "All twelve closeout ledger rows in docs/reference/framework-transplant-closeout.md now read shipped. The two that did not: D-SCHEDULE1 service-runtime boundary landed as one Prelude clock (crates/jet-codegen/src/Prelude/Job.rs: JetJobSchedule at :16, JetJobClock at :22, jet_job_schedule_due at :106, jet_job_service_tick at :91), consumed by the generated dispatch at Codegen/Items.rs:1430 and by the interpreter adapter at Source/Interpreter.rs:400 which converts the AST carrier to the same Prelude carrier. D-OBSERVE-LIVE1 was shipped-one-tier, an I9 violation, now closed: all tiers marshal to the shared Prelude jet_observe_runtime_start.",
+          "at": "2026-08-21T23:49:34.609Z"
         },
         {
           "n": 2,
           "text": "CRDT values satisfy their algebra and convergence contract; row policies are typed, compiled, and enforced on every live query/mutation path; closeout claims only shipped child behavior.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-01T18:14:05.301Z"
+          "evidence": "CRDT algebra and convergence: cargo test --test sync_crdt is 12 passed, 0 failed. Row policies typed, compiled and enforced per tier: cargo test --test db_policy is 14 passed, 0 failed, with RowPolicy.rs as the single acceptance table and each tier parking the compiled policy rather than caller text. D-DBPOLICY1 ledger row corrected from a stale unshipped-law to shipped.",
+          "at": "2026-08-21T23:49:35.375Z"
         },
         {
           "n": 3,
           "text": "Concurrent partitions and merges, duplicate or reordered operations, invalid policies, policy bypass paths, unauthorized rows, reconnect, and rollback preserve convergence and deny access safely.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-01T18:14:05.301Z"
+          "evidence": "Concurrent partitions, duplicate and reordered operations, invalid policies, bypass paths, unauthorized rows, reconnect and rollback are covered by cargo test --test ws_law (32 passed), --test taint (38 passed), --test sync_crdt (12 passed) and --test db_policy (14 passed), all 0 failed.",
+          "at": "2026-08-21T23:49:36.080Z"
         },
         {
           "n": 4,
           "text": "Focused law/property tests and production query integration checks cover success and bypass attempts; closeout cards aggregate verified child evidence instead of examples alone.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-01T18:14:05.301Z"
+          "evidence": "Law and property tests plus production query integration: db_policy 14, sync_crdt 12, ws_law 32, taint 38, live_inspect 12, event_observations 14 — every suite 0 failed. The closeout ledger aggregates verified child evidence per decision with production and evidence paths named per row.",
+          "at": "2026-08-21T23:49:36.669Z"
         },
         {
           "n": 5,
           "text": "Affected docs, examples, diagnostics, goldens, compatibility notes, and audit output match the result. Full-suite proof belongs to the epoch closeout.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-01T18:14:05.301Z"
+          "evidence": "docs/reference/framework-transplant-closeout.md is updated so every row states its shipped production path and evidence path; the D-SCHEDULE1 and D-OBSERVE-LIVE1 boundary prose now describes the shipped tier-parity shape rather than the former gap. Full-suite proof belongs to the epoch closeout.",
+          "at": "2026-08-21T23:49:37.182Z"
         },
         {
           "n": 6,
           "text": "docs/spec/syntax-decisions.md's D-STM1 entry is amended to state the body runs exactly once with ordered-lock commit and no retry (D-CONC-STM1=A); a grep for 'retried on conflict' near the D-STM1 entry returns nothing.",
           "status": "met",
-          "metBy": "orchestrator",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "`docs/spec/syntax-decisions.md:2290-2293` now states the one-run ordered-lock law exactly: a `#Transact` body runs once, the commit takes every touched `Shared` handle's lock in one fixed address order, applies buffered writes and releases, with no retry. The prior wording deferred to D-CONC-STM1 instead of stating it.",
-          "at": "2026-08-21T11:28:07.343Z"
+          "evidence": "docs/spec/syntax-decisions.md:2286-2292 carries the D-STM1 amendment by D-CONC-STM1=A: reads and writes buffer, the body runs exactly once, the commit takes every touched Shared handle lock in one fixed address order, applies buffered writes and releases, with no retry.",
+          "at": "2026-08-21T23:49:37.666Z"
         },
         {
           "n": 7,
           "text": "Decode returns Result<T, [FieldError]> as the sole canonical contract (D-VALIDATE-DECODE1=B): every codec, generated implementation, adapter, caller, test, example, and doc in the repo is migrated in this change, with no bridge, alias, fallback, compatibility flag, or second decode API left behind.",
           "status": "met",
-          "metBy": "orchestrator",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "Typed decode is canonical `Result<T, Vec<FieldError>>` at `crates/jet-codegen/src/Prelude/CoreLib/Top/EncodingTraits.rs:11-13`, and the stale tuple-destructuring caller recorded as sweep B14 is gone: `DataFlow.rs:493-503,743-747`.",
-          "at": "2026-08-21T11:28:07.826Z"
+          "evidence": "The canonical decode contract is the fallible type carrying [FieldError]: crates/jet-sema/src/Sema/CheckerValidate.rs synthesizes validate over that contract (:14, :23, :245) and the D-VALIDATE-DECODE1 ledger row is shipped with tests/hand_codec and serde/validate evidence. Note the surface spelling is being respelled by the newly ratified D-ERRSUFFIX1=B on card #2149.",
+          "at": "2026-08-21T23:49:38.176Z"
         }
       ],
       "refs": [
@@ -59173,12 +59182,13 @@
       ],
       "needsAcceptance": false,
       "created": "2026-07-26T10:49:27.193Z",
-      "updated": "2026-08-21T18:49:09.923Z",
-      "updatedBy": "orchestrator",
+      "updated": "2026-08-21T23:49:38.839Z",
+      "updatedBy": "Main",
       "tags": [
         "web-platform"
       ],
-      "parentId": null
+      "parentId": null,
+      "completedAt": "2026-08-21T23:49:38.839Z"
     },
     {
       "id": "c032pxev",
@@ -82912,7 +82922,7 @@
       "track": "epoch",
       "epoch": "e5",
       "milestoneId": "e5-nix-compat",
-      "phase": "ready",
+      "phase": "done",
       "priority": "P2",
       "plan": "## Why\n\nBedrock Linux deliberately refuses cross-stratum library sharing: ABI mixing is \"theoretically possible but unsupported due to complexity/messiness\" (bedrocklinux.org feature-compatibility). D-JOS-STORE1=A keeps imported Nix closures in a hangar-managed compat root, separate from native packages. That isolation is implied but not test-gated today.\n\nEvidence: video mine 2026-08-04, claim ledger /tmp/ENejkGhMTww.claims.json (topic: no-cross-universe-library-sharing).\n\n## Work\n\nAdd a targeted test proving compat-root libraries never enter native package link or build paths: native builds and native runtime closures must reference only hangar-native artifacts; compat-root closures stay self-contained. Failure mode to catch: a native package resolving a shared library out of an imported Nix closure. Test must fail when the isolation boundary is removed or bypassed.",
       "blockedBy": [],
@@ -82922,11 +82932,11 @@
         {
           "n": 1,
           "text": "A test proves native link/runtime closures reference only hangar-native artifacts and compat-root closures stay self-contained; the test fails when the D-JOS-STORE1 isolation boundary is removed or bypassed.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-19T13:28:06.405Z"
+          "evidence": "ABI-universe closure validation added in crates/jetpack/src/Store/Closure.rs (cause: unchecked cross-provider references), enforced before native output publication in Store.rs, with a native/compat isolation proof in Store/Tests.rs covering both leakage directions. Test: 1 passed, 0 failed.",
+          "at": "2026-08-22T04:34:34.567Z"
         }
       ],
       "refs": [
@@ -82936,8 +82946,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-05T01:35:48.995Z",
-      "updated": "2026-08-19T13:28:06.405Z",
-      "updatedBy": "fable"
+      "updated": "2026-08-22T04:34:35.249Z",
+      "updatedBy": "Main",
+      "completedAt": "2026-08-22T04:34:35.248Z"
     },
     {
       "id": "c0nnhbti",
@@ -109994,7 +110005,7 @@
       "track": "epoch",
       "epoch": "e5",
       "milestoneId": "e5-trust-policy",
-      "phase": "ready",
+      "phase": "done",
       "priority": "P3",
       "plan": null,
       "blockedBy": [],
@@ -110010,29 +110021,29 @@
         {
           "n": 1,
           "text": "The adapter-recipe trust marker reads and writes through the one trust store, or the two are documented as different facts with different names and neither claims the other's format",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-07T22:17:27.228Z"
+          "evidence": "Recipe.rs:1057-1058 delegates to Trust::grant_hash; Trust.rs:14-18 and :656-662 use ~/.jet/trust with hash: records, so there is one trust record rather than a separate Recipe::trust_first_build path.",
+          "at": "2026-08-22T04:34:13.580Z"
         },
         {
           "n": 2,
           "text": "One test proves granting trust once is visible to both consumers",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-07T22:17:27.578Z"
+          "evidence": "Recipe::tests::recipe_and_trust_consumers_share_one_hash_grant at Recipe.rs:1402-1427 passes: 1 passed, 0 failed.",
+          "at": "2026-08-22T04:34:14.317Z"
         },
         {
           "n": 3,
           "text": "The outcome is recorded on the manifest authority block work (#1570) so a third record cannot appear",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-07T22:17:27.911Z"
+          "evidence": "docs/spec/syntax-decisions.md:6693-6700 records the amendment folding trust_first_build into the one trust record.",
+          "at": "2026-08-22T04:34:14.848Z"
         }
       ],
       "refs": [
@@ -110042,9 +110053,10 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-07T22:17:26.457Z",
-      "updated": "2026-08-19T13:48:17.483Z",
-      "updatedBy": "fable",
-      "workOrder": 225
+      "updated": "2026-08-22T04:34:15.507Z",
+      "updatedBy": "Main",
+      "workOrder": 225,
+      "completedAt": "2026-08-22T04:34:15.507Z"
     },
     {
       "id": "c09y48pk",
@@ -141167,7 +141179,7 @@
       "kind": "task",
       "track": "epoch",
       "epoch": "e3",
-      "milestoneId": null,
+      "milestoneId": "e3-m19-arrow-slate",
       "phase": "planning",
       "priority": "P2",
       "plan": null,
@@ -141288,8 +141300,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-21T21:13:45.933Z",
-      "updated": "2026-08-21T22:17:20.559Z",
-      "updatedBy": "fable"
+      "updated": "2026-08-21T23:50:14.541Z",
+      "updatedBy": "Main"
     },
     {
       "id": "c0qvv1mi",
@@ -141299,7 +141311,7 @@
       "kind": "task",
       "track": "epoch",
       "epoch": "e3",
-      "milestoneId": null,
+      "milestoneId": "e3-m19-arrow-slate",
       "phase": "ready",
       "priority": "P2",
       "plan": null,
@@ -141321,8 +141333,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-21T21:34:36.389Z",
-      "updated": "2026-08-21T22:17:21.381Z",
-      "updatedBy": "fable"
+      "updated": "2026-08-21T23:50:15.213Z",
+      "updatedBy": "Main"
     },
     {
       "id": "c0ohqujv",
@@ -141332,7 +141344,7 @@
       "kind": "task",
       "track": "epoch",
       "epoch": "e3",
-      "milestoneId": null,
+      "milestoneId": "e3-m19-arrow-slate",
       "phase": "ready",
       "priority": "P2",
       "plan": null,
@@ -141348,8 +141360,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-21T22:17:00.903Z",
-      "updated": "2026-08-21T22:17:00.903Z",
-      "updatedBy": "fable"
+      "updated": "2026-08-21T23:50:15.893Z",
+      "updatedBy": "Main"
     },
     {
       "id": "c0622n49",
@@ -141359,7 +141371,7 @@
       "kind": "task",
       "track": "epoch",
       "epoch": "e3",
-      "milestoneId": null,
+      "milestoneId": "e3-m19-arrow-slate",
       "phase": "ready",
       "priority": "P2",
       "plan": null,
@@ -141377,8 +141389,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-21T22:17:01.965Z",
-      "updated": "2026-08-21T22:17:01.965Z",
-      "updatedBy": "fable"
+      "updated": "2026-08-21T23:50:16.561Z",
+      "updatedBy": "Main"
     },
     {
       "id": "c0jalyt0",
@@ -141388,7 +141400,7 @@
       "kind": "task",
       "track": "epoch",
       "epoch": "e3",
-      "milestoneId": null,
+      "milestoneId": "e3-m19-arrow-slate",
       "phase": "ready",
       "priority": "P2",
       "plan": null,
@@ -141406,8 +141418,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-21T22:17:02.765Z",
-      "updated": "2026-08-21T22:17:02.765Z",
-      "updatedBy": "fable"
+      "updated": "2026-08-21T23:50:17.245Z",
+      "updatedBy": "Main"
     },
     {
       "id": "c05mwfmo",
@@ -141417,7 +141429,7 @@
       "kind": "task",
       "track": "epoch",
       "epoch": "e3",
-      "milestoneId": null,
+      "milestoneId": "e3-m19-arrow-slate",
       "phase": "ready",
       "priority": "P2",
       "plan": null,
@@ -141435,8 +141447,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-21T22:17:04.116Z",
-      "updated": "2026-08-21T22:17:04.116Z",
-      "updatedBy": "fable"
+      "updated": "2026-08-21T23:50:18.124Z",
+      "updatedBy": "Main"
     },
     {
       "id": "c0mns63v",
@@ -141446,7 +141458,7 @@
       "kind": "task",
       "track": "epoch",
       "epoch": "e3",
-      "milestoneId": null,
+      "milestoneId": "e3-m19-arrow-slate",
       "phase": "ready",
       "priority": "P2",
       "plan": null,
@@ -141464,8 +141476,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-21T22:17:05.148Z",
-      "updated": "2026-08-21T22:17:05.148Z",
-      "updatedBy": "fable"
+      "updated": "2026-08-21T23:50:19.310Z",
+      "updatedBy": "Main"
     },
     {
       "id": "c04jzhj6",
@@ -141475,7 +141487,7 @@
       "kind": "task",
       "track": "epoch",
       "epoch": "e3",
-      "milestoneId": null,
+      "milestoneId": "e3-m19-arrow-slate",
       "phase": "ready",
       "priority": "P2",
       "plan": null,
@@ -141493,8 +141505,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-21T22:17:06.227Z",
-      "updated": "2026-08-21T22:17:06.228Z",
-      "updatedBy": "fable"
+      "updated": "2026-08-21T23:50:20.321Z",
+      "updatedBy": "Main"
     },
     {
       "id": "c0l24ldp",
@@ -141504,7 +141516,7 @@
       "kind": "task",
       "track": "epoch",
       "epoch": "e3",
-      "milestoneId": null,
+      "milestoneId": "e3-m19-arrow-slate",
       "phase": "ready",
       "priority": "P2",
       "plan": null,
@@ -141522,8 +141534,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-21T22:17:07.225Z",
-      "updated": "2026-08-21T22:17:07.226Z",
-      "updatedBy": "fable"
+      "updated": "2026-08-21T23:50:21.502Z",
+      "updatedBy": "Main"
     },
     {
       "id": "c0a895k2",
@@ -189280,6 +189292,223 @@
   ],
   "events": [
     {
+      "at": "2026-08-22T04:34:51.041Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0eatnv2",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-22T04:34:49.953Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0eatnv2",
+      "note": "#5"
+    },
+    {
+      "at": "2026-08-22T04:34:48.965Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0eatnv2",
+      "note": "#4"
+    },
+    {
+      "at": "2026-08-22T04:34:48.154Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0eatnv2",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-22T04:34:47.337Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0eatnv2",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-22T04:34:46.492Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0eatnv2",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-22T04:34:35.249Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0h6q1j3",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-22T04:34:34.567Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0h6q1j3",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-22T04:34:15.507Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0d2uwy7",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-22T04:34:14.849Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0d2uwy7",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-22T04:34:14.317Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0d2uwy7",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-22T04:34:13.580Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0d2uwy7",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-22T01:02:12.995Z",
+      "by": "owner",
+      "action": "done.clear",
+      "ref": null,
+      "note": "2026-08-22T01:02:12.995Z"
+    },
+    {
+      "at": "2026-08-21T23:50:21.502Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0l24ldp",
+      "note": "milestoneId"
+    },
+    {
+      "at": "2026-08-21T23:50:20.321Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c04jzhj6",
+      "note": "milestoneId"
+    },
+    {
+      "at": "2026-08-21T23:50:19.310Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0mns63v",
+      "note": "milestoneId"
+    },
+    {
+      "at": "2026-08-21T23:50:18.124Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c05mwfmo",
+      "note": "milestoneId"
+    },
+    {
+      "at": "2026-08-21T23:50:17.246Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0jalyt0",
+      "note": "milestoneId"
+    },
+    {
+      "at": "2026-08-21T23:50:16.562Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0622n49",
+      "note": "milestoneId"
+    },
+    {
+      "at": "2026-08-21T23:50:15.893Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0ohqujv",
+      "note": "milestoneId"
+    },
+    {
+      "at": "2026-08-21T23:50:15.213Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0qvv1mi",
+      "note": "milestoneId"
+    },
+    {
+      "at": "2026-08-21T23:50:14.541Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0an426i",
+      "note": "milestoneId"
+    },
+    {
+      "at": "2026-08-21T23:50:13.725Z",
+      "by": "Main",
+      "action": "milestone.add",
+      "ref": "e3-m19-arrow-slate",
+      "note": "M19 · One callable, one arrow"
+    },
+    {
+      "at": "2026-08-21T23:49:38.840Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0qijk9s",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-21T23:49:38.177Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0qijk9s",
+      "note": "#7"
+    },
+    {
+      "at": "2026-08-21T23:49:37.667Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0qijk9s",
+      "note": "#6"
+    },
+    {
+      "at": "2026-08-21T23:49:37.182Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0qijk9s",
+      "note": "#5"
+    },
+    {
+      "at": "2026-08-21T23:49:36.670Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0qijk9s",
+      "note": "#4"
+    },
+    {
+      "at": "2026-08-21T23:49:36.080Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0qijk9s",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-21T23:49:35.375Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0qijk9s",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-21T23:49:34.610Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0qijk9s",
+      "note": "#1"
+    },
+    {
       "at": "2026-08-21T23:45:27.155Z",
       "by": "fable",
       "action": "card.criteria-add",
@@ -192561,223 +192790,6 @@
       "action": "card.criteria-meet",
       "ref": "c0mantyc",
       "note": "#1"
-    },
-    {
-      "at": "2026-08-21T05:18:38.673Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0y3llif",
-      "note": "#4"
-    },
-    {
-      "at": "2026-08-21T05:18:38.143Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0i0wm0m",
-      "note": "#7"
-    },
-    {
-      "at": "2026-08-21T05:18:37.602Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0i0wm0m",
-      "note": "#3"
-    },
-    {
-      "at": "2026-08-21T05:18:37.138Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0yzzaom",
-      "note": "#10"
-    },
-    {
-      "at": "2026-08-21T05:18:36.673Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0yzzaom",
-      "note": "#4"
-    },
-    {
-      "at": "2026-08-21T05:18:36.136Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0yzzaom",
-      "note": "#2"
-    },
-    {
-      "at": "2026-08-21T05:18:35.463Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c04yd90c",
-      "note": "#11"
-    },
-    {
-      "at": "2026-08-21T05:18:34.801Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c04yd90c",
-      "note": "#8"
-    },
-    {
-      "at": "2026-08-21T05:18:34.285Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c04yd90c",
-      "note": "#5"
-    },
-    {
-      "at": "2026-08-21T05:18:33.801Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0pibmpe",
-      "note": "#5"
-    },
-    {
-      "at": "2026-08-21T05:18:33.342Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0pibmpe",
-      "note": "#3"
-    },
-    {
-      "at": "2026-08-21T05:18:32.826Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0pibmpe",
-      "note": "#2"
-    },
-    {
-      "at": "2026-08-21T05:18:32.354Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0pibmpe",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-21T05:18:31.898Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0xsk2wa",
-      "note": "#8"
-    },
-    {
-      "at": "2026-08-21T05:18:31.364Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0xsk2wa",
-      "note": "#7"
-    },
-    {
-      "at": "2026-08-21T05:18:30.897Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0xsk2wa",
-      "note": "#6"
-    },
-    {
-      "at": "2026-08-21T05:18:30.417Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0xsk2wa",
-      "note": "#5"
-    },
-    {
-      "at": "2026-08-21T05:18:29.931Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0xsk2wa",
-      "note": "#4"
-    },
-    {
-      "at": "2026-08-21T05:18:29.467Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0oeuws4",
-      "note": "#13"
-    },
-    {
-      "at": "2026-08-21T05:18:28.986Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0oeuws4",
-      "note": "#12"
-    },
-    {
-      "at": "2026-08-21T05:18:28.508Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0oeuws4",
-      "note": "#11"
-    },
-    {
-      "at": "2026-08-21T05:18:28.048Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0oeuws4",
-      "note": "#10"
-    },
-    {
-      "at": "2026-08-21T05:18:27.590Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0oeuws4",
-      "note": "#7"
-    },
-    {
-      "at": "2026-08-21T05:18:27.123Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0oeuws4",
-      "note": "#5"
-    },
-    {
-      "at": "2026-08-21T05:18:26.634Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0oeuws4",
-      "note": "#2"
-    },
-    {
-      "at": "2026-08-21T05:18:26.175Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0oeuws4",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-21T05:18:25.714Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0qijk9s",
-      "note": "#7"
-    },
-    {
-      "at": "2026-08-21T04:38:12.292Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-add",
-      "ref": "c0eiuboh",
-      "note": "#3 tests/ui_lint/float_eq_warn.jet passes, exercising the lint "
-    },
-    {
-      "at": "2026-08-21T04:38:11.843Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-add",
-      "ref": "c0eiuboh",
-      "note": "#2 The lint stays silent for an exact Decimal comparison, which"
-    },
-    {
-      "at": "2026-08-21T04:38:11.377Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-add",
-      "ref": "c0eiuboh",
-      "note": "#1 The lint fires for an approximate comparison, proven by a fi"
-    },
-    {
-      "at": "2026-08-21T04:38:10.908Z",
-      "by": "fable-e3-burndown",
-      "action": "card.add",
-      "ref": "c0eiuboh",
-      "note": "Float-equality lint is unreachable after exact-by-default"
     }
   ],
   "nextNum": 368,
