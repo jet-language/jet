@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 2154,
-    "rev": 41317,
+    "rev": 41360,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -12158,7 +12158,7 @@
       "track": "epoch",
       "epoch": "e5",
       "milestoneId": "e5-registry-delivery",
-      "phase": "ready",
+      "phase": "done",
       "priority": "P0",
       "plan": "## Outcome\n\nShip **Registry delivery: immutable metadata and atomic publish** as a complete slice. Every behavior in the title, body, and ratified decisions is required.\n\n## Work\n\n1. Apply these ratified decisions: D-JPK-RESOLUTIONDOMAIN1=D, D-JPK-REGISTRY1=D, D-JPK-RESOLVEMODE1=D.\n2. Start with docs/plans/epoch-4/world-class-package-manager.md, Source/Publish/Registry.rs, crates/jetpack/src, tests/pkg.rs, tests/jetpack_engine.rs. Own only these paths and direct callers or tests found by the trace.\n3. Trace the public entry point through the production model to the observable result.\n4. Map each named behavior to implementation and proof before writing.\n5. Use the canonical registry, resolver, lock, and Hangar path from publish through fresh-machine consumption.\n6. Concurrent publish, duplicate version, interrupted upload, stale index, bad credential, and corrupt artifact fail atomically and redact secrets.\n7. Update affected docs, examples, diagnostics, goldens, and audit output.\n\n## Proof\n\nRun focused unit, integration, and example checks for this slice. Exercise the real production path and its main failure case. A stub, canned result, mock-only path, or skipped check does not count. Full-suite proof belongs to Epoch 5 closeout.\n\n## Scope\n\nDo not absorb sibling cards or create a second mechanism. Record any newly found owner choice as a Tower ballot before code.",
       "blockedBy": [
@@ -12223,52 +12223,52 @@
         }
       ],
       "created": "2026-07-09T20:38:07.183Z",
-      "updated": "2026-08-19T13:27:32.290Z",
+      "updated": "2026-08-22T17:17:14.641Z",
       "criteria": [
         {
           "n": 1,
           "text": "All behavior named in the title, body, and ratified decisions works through the production path. No stub, fallback, or sibling claim substitutes.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-01T17:56:11.271Z"
+          "evidence": "evidence: atomic root-pin publish at Source/Publish/Registry.rs:243 and :305; concurrent production publish produced left_status=1 right_status=0, loser E1234, one index line, artifact, metadata, checkpoint, and log. [lane y423]",
+          "at": "2026-08-22T17:17:12.034Z"
         },
         {
           "n": 2,
           "text": "Publish, metadata, resolution, download, lock, and install agree on immutable package identity and dependency meaning.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-01T17:56:11.271Z"
+          "evidence": "evidence: immutable index at Source/Publish/Index.rs:191, signed metadata at Source/Publish/Tuf.rs:65, Hangar ingest at Source/Fetch.rs:950; registry suite passed. [lane y423]",
+          "at": "2026-08-22T17:17:12.374Z"
         },
         {
           "n": 3,
           "text": "Concurrent publish, duplicate version, interrupted upload, stale index, bad credential, and corrupt artifact fail atomically and redact secrets.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-01T17:56:11.271Z"
+          "evidence": "evidence: corruption, interruption, stale cache, credential redaction, duplicate, yank, and concurrent publish checks all passed. [lane y423]",
+          "at": "2026-08-22T17:17:12.723Z"
         },
         {
           "n": 4,
           "text": "Targeted success and failure checks exercise the real production path. They fail when the key implementation is removed or bypassed.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-01T17:56:11.271Z"
+          "evidence": "evidence: fresh production-path tests passed for publish, concurrent publish, yank, signing, entropy failure, dirty-tree rejection, and 10 registry cases. [lane y423]",
+          "at": "2026-08-22T17:17:13.053Z"
         },
         {
           "n": 5,
           "text": "Affected docs, examples, diagnostics, goldens, and audit output match the shipped behavior. Full-suite proof stays at epoch closeout.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-01T17:56:11.271Z"
+          "evidence": "evidence: [world-class-package-manager.md:550](/home/nate/Projects/Github/jet/docs/plans/epoch-4/world-class-package-manager.md:550), diagnostics [diagnostic-rows.md:648](/home/nate/Projects/Github/jet/docs/spec/diagnostic-rows.md:648), and test fixture alignment at tests/pkg.rs:4856. [lane y423]",
+          "at": "2026-08-22T17:17:13.393Z"
         }
       ],
       "needsAcceptance": false,
@@ -12279,9 +12279,10 @@
         "tests/pkg.rs",
         "tests/jetpack_engine.rs"
       ],
-      "updatedBy": "fable",
+      "updatedBy": "Main",
       "tags": [],
-      "parentId": null
+      "parentId": null,
+      "completedAt": "2026-08-22T17:17:14.641Z"
     },
     {
       "id": "c0esko6c",
@@ -12292,7 +12293,7 @@
       "track": "epoch",
       "epoch": "e5",
       "milestoneId": "e5-profiles-providers",
-      "phase": "building",
+      "phase": "done",
       "priority": "P1",
       "plan": "## Outcome\n\nShip **Package profiles: source-backed generation model** as a complete slice. Every behavior in the title, body, and ratified decisions is required.\n\n## Work\n\n1. Apply these ratified decisions: D-JPK-PROFILE1=D, D-JPK-PROFILECOLLISION1=A.\n2. Start with docs/plans/epoch-4/world-class-package-manager.md, crates/jetpack/src/CLI/tool.rs, crates/jetpack/src/Store.rs, tests/jetpack_engine.rs. Own only these paths and direct callers or tests found by the trace.\n3. Trace the public entry point through the production model to the observable result.\n4. Map each named behavior to implementation and proof before writing.\n5. Lower profiles and providers into the shared typed fact model. Preserve lossless import, export, lock, and explain behavior.\n6. Unsupported, lossy, ambiguous, or conflicting provider facts produce explicit loss or conflict reports. Silent defaults do not count.\n7. Update affected docs, examples, diagnostics, goldens, and audit output.\n\n## Proof\n\nRun focused unit, integration, and example checks for this slice. Exercise the real production path and its main failure case. A stub, canned result, mock-only path, or skipped check does not count. Full-suite proof belongs to Epoch 5 closeout.\n\n## Scope\n\nDo not absorb sibling cards or create a second mechanism. Record any newly found owner choice as a Tower ballot before code.",
       "blockedBy": [
@@ -12406,7 +12407,7 @@
         }
       ],
       "created": "2026-07-09T20:38:07.502Z",
-      "updated": "2026-08-22T16:27:30.270Z",
+      "updated": "2026-08-22T17:17:17.116Z",
       "criteria": [
         {
           "n": 1,
@@ -12438,11 +12439,11 @@
         {
           "n": 4,
           "text": "Targeted success and failure checks exercise the real production path. They fail when the key implementation is removed or bypassed.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-01T17:56:11.497Z"
+          "evidence": "evidence: package_generation_ production filter: 8 passed, including success and failure paths. [lane y425]",
+          "at": "2026-08-22T17:17:15.696Z"
         },
         {
           "n": 5,
@@ -12463,7 +12464,8 @@
       ],
       "updatedBy": "Main",
       "tags": [],
-      "parentId": null
+      "parentId": null,
+      "completedAt": "2026-08-22T17:17:17.115Z"
     },
     {
       "id": "c0kalcyg",
@@ -12979,7 +12981,7 @@
       "track": "epoch",
       "epoch": "e5",
       "milestoneId": "e5-profiles-providers",
-      "phase": "ready",
+      "phase": "building",
       "priority": "P1",
       "plan": "## Outcome\n\nShip **Package explain: dependency, closure, liveness, and rebuild queries** as a complete slice. Every behavior in the title, body, and ratified decisions is required.\n\n## Work\n\n1. Apply these ratified decisions: D-JPK-STORECLI1=D.\n2. Start with docs/plans/epoch-4/world-class-package-manager.md, crates/jetpack/src/CLI/update_search_info.rs, crates/jetpack/src/Store.rs, tests/jetpack_engine.rs. Own only these paths and direct callers or tests found by the trace.\n3. Trace the public entry point through the production model to the observable result.\n4. Map each named behavior to implementation and proof before writing.\n5. Lower profiles and providers into the shared typed fact model. Preserve lossless import, export, lock, and explain behavior.\n6. Unsupported, lossy, ambiguous, or conflicting provider facts produce explicit loss or conflict reports. Silent defaults do not count.\n7. Update affected docs, examples, diagnostics, goldens, and audit output.\n\n## Proof\n\nRun focused unit, integration, and example checks for this slice. Exercise the real production path and its main failure case. A stub, canned result, mock-only path, or skipped check does not count. Full-suite proof belongs to Epoch 5 closeout.\n\n## Scope\n\nDo not absorb sibling cards or create a second mechanism. Record any newly found owner choice as a Tower ballot before code.",
       "blockedBy": [
@@ -13081,34 +13083,34 @@
         }
       ],
       "created": "2026-07-09T20:38:08.317Z",
-      "updated": "2026-08-01T17:56:12.445Z",
+      "updated": "2026-08-22T17:17:21.836Z",
       "criteria": [
         {
           "n": 1,
           "text": "All behavior named in the title, body, and ratified decisions works through the production path. No stub, fallback, or sibling claim substitutes.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-01T17:56:12.445Z"
+          "evidence": "evidence: crates/jetpack/src/Store/Explain.rs:177, tests/jetpack_engine.rs:984 [lane y430]",
+          "at": "2026-08-22T17:17:18.552Z"
         },
         {
           "n": 2,
           "text": "Provider and profile changes retain identity, provenance, and meaning across source, lock, explain, and generated outputs.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-01T17:56:12.445Z"
+          "evidence": "evidence: typed provider/profile carriers at crates/jetpack/src/Store/Explain.rs:349, :634 [lane y430]",
+          "at": "2026-08-22T17:17:18.891Z"
         },
         {
           "n": 3,
           "text": "Unsupported, lossy, ambiguous, or conflicting provider facts produce explicit loss or conflict reports. Silent defaults do not count.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-01T17:56:12.445Z"
+          "evidence": "evidence: explicit loss/conflict reports at crates/jetpack/src/Store/Explain.rs:363, :461 [lane y430]",
+          "at": "2026-08-22T17:17:19.214Z"
         },
         {
           "n": 4,
@@ -13122,11 +13124,11 @@
         {
           "n": 5,
           "text": "Affected docs, examples, diagnostics, goldens, and audit output match the shipped behavior. Full-suite proof stays at epoch closeout.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-01T17:56:12.445Z"
+          "evidence": "evidence: docs docs/plans/epoch-4/world-class-package-manager.md:660, passing lifecycle explain test [lane y430]",
+          "at": "2026-08-22T17:17:20.234Z"
         }
       ],
       "needsAcceptance": false,
@@ -13136,7 +13138,7 @@
         "crates/jetpack/src/Store.rs",
         "tests/jetpack_engine.rs"
       ],
-      "updatedBy": "codex-plan-audit",
+      "updatedBy": "Main",
       "tags": [],
       "parentId": null
     },
@@ -13149,7 +13151,7 @@
       "track": "epoch",
       "epoch": "e5",
       "milestoneId": "e5-trust-policy",
-      "phase": "ready",
+      "phase": "done",
       "priority": "P1",
       "plan": "## Outcome\n\nShip **Package policy: advisory feeds and offline freshness** as a complete slice. Every behavior in the title, body, and ratified decisions is required.\n\n## Work\n\n1. Apply these ratified decisions: D-JPK-FRESHNESS1=D, D-JPK-POLICYSURFACE1=D.\n2. Start with docs/plans/epoch-4/world-class-package-manager.md, crates/jetpack/src, Source/Publish, tests/jetpack_engine.rs. Own only these paths and direct callers or tests found by the trace.\n3. Trace the public entry point through the production model to the observable result.\n4. Map each named behavior to implementation and proof before writing.\n5. Apply trust and policy before any package, cache, or remote result becomes usable. Keep decisions visible in receipts and explain output.\n6. Tamper, rollback, freeze, mix-and-match, stale metadata, and compromised-key cases fail closed with a useful recovery path.\n7. Update affected docs, examples, diagnostics, goldens, and audit output.\n\n## Proof\n\nRun focused unit, integration, and example checks for this slice. Exercise the real production path and its main failure case. A stub, canned result, mock-only path, or skipped check does not count. Full-suite proof belongs to Epoch 5 closeout.\n\n## Scope\n\nDo not absorb sibling cards or create a second mechanism. Record any newly found owner choice as a Tower ballot before code.",
       "blockedBy": [
@@ -13261,61 +13263,61 @@
         }
       ],
       "created": "2026-07-09T20:38:08.477Z",
-      "updated": "2026-08-19T13:28:04.190Z",
+      "updated": "2026-08-22T17:17:27.536Z",
       "criteria": [
         {
           "n": 1,
           "text": "All behavior named in the title, body, and ratified decisions works through the production path. No stub, fallback, or sibling claim substitutes.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-01T17:56:12.680Z"
+          "evidence": "evidence: Source/Fetch.rs:83-115,837-948; passing cli_signed_advisory_feed_receipt_and_tamper_fail_closed [lane y431]",
+          "at": "2026-08-22T17:17:22.438Z"
         },
         {
           "n": 2,
           "text": "Identity, signatures, provenance, locks, advisory policy, and offline state produce one deterministic allow or deny result.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-01T17:56:12.680Z"
+          "evidence": "evidence: Source/Publish/Advisory.rs:654-720,800-859 [lane y431]",
+          "at": "2026-08-22T17:17:23.213Z"
         },
         {
           "n": 3,
           "text": "Tamper, rollback, freeze, mix-and-match, stale metadata, and compromised-key cases fail closed with a useful recovery path.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-01T17:56:12.680Z"
+          "evidence": "evidence: Source/Publish/Advisory.rs:660-707,873-903; passing cli_signed_advisory_feed_receipt_and_tamper_fail_closed [lane y431]",
+          "at": "2026-08-22T17:17:24.019Z"
         },
         {
           "n": 4,
           "text": "Targeted success and failure checks exercise the real production path. They fail when the key implementation is removed or bypassed.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-01T17:56:12.680Z"
+          "evidence": "evidence: passing jet_inspect_audit_missing_inputs_fails_closed and cli_signed_advisory_feed_receipt_and_tamper_fail_closed [lane y431]",
+          "at": "2026-08-22T17:17:24.602Z"
         },
         {
           "n": 5,
           "text": "Affected docs, examples, diagnostics, goldens, and audit output match the shipped behavior. Full-suite proof stays at epoch closeout.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-01T17:56:12.680Z"
+          "evidence": "evidence: docs/plans/epoch-4/world-class-package-manager.md:684-692; diagnostics at docs/spec/diagnostics.md:1298-1306 [lane y431]",
+          "at": "2026-08-22T17:17:25.346Z"
         },
         {
           "n": 6,
           "text": "jet inspect audit exits nonzero (or requires an explicit --allow-missing-db opt-out) when no advisory database or lockfile is present, with a probe test",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-12T16:09:20.634Z"
+          "evidence": "evidence: Source/CmdSupply.rs:868-920; passing jet_inspect_audit_missing_inputs_fails_closed [lane y431]",
+          "at": "2026-08-22T17:17:26.418Z"
         }
       ],
       "needsAcceptance": false,
@@ -13325,9 +13327,10 @@
         "Source/Publish",
         "tests/jetpack_engine.rs"
       ],
-      "updatedBy": "fable",
+      "updatedBy": "Main",
       "tags": [],
-      "parentId": null
+      "parentId": null,
+      "completedAt": "2026-08-22T17:17:27.536Z"
     },
     {
       "id": "c0xm7b14",
@@ -18000,7 +18003,7 @@
       "track": "epoch",
       "epoch": "e5",
       "milestoneId": "e5-store-repair",
-      "phase": "building",
+      "phase": "done",
       "priority": "P0",
       "plan": "## Outcome\n\nShip **Package graph: System Output projection** as a complete slice. Every behavior in the title, body, and ratified decisions is required.\n\n## Work\n\n1. Apply these ratified decisions: D-ECO-JETOS2=A, D-ECO-JETOS-PREVIEW1=A, D-ECO-FLEETVERB1=A.\n2. Start with docs/proposals/ecosystem-shape.md, docs/spec/syntax-decisions.md, docs/spec/architecture.md, crates/jet-pkg-model, crates/jet-env-model, crates/jetpack/src/Output.rs, crates/jet-semindex/src, tests/jetpack_engine.rs, tests/canvas.rs. Own only these paths and direct callers or tests found by the trace.\n3. Trace the public entry point through the production model to the observable result.\n4. Map each named behavior to implementation and proof before writing.\n5. Use the canonical Hangar and closure model. Make every mutation atomic, recoverable, and explainable.\n6. Crash, corruption, stale lease, path escape, and concurrent-update cases preserve live data and give a safe repair or rollback path.\n7. Update affected docs, examples, diagnostics, goldens, and audit output.\n\n## Proof\n\nRun focused unit, integration, and example checks for this slice. Exercise the real production path and its main failure case. A stub, canned result, mock-only path, or skipped check does not count. Full-suite proof belongs to Epoch 5 closeout.\n\n## Scope\n\nDo not absorb sibling cards or create a second mechanism. Record any newly found owner choice as a Tower ballot before code.",
       "blockedBy": [
@@ -18100,11 +18103,11 @@
         {
           "n": 4,
           "text": "Targeted success and failure checks exercise the real production path. They fail when the key implementation is removed or bypassed.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-01T17:56:14.138Z"
+          "evidence": "evidence: jetos_plan_projects_package_system_output_deterministically; jetos_plan_rejects_invalid_package_system_without_mutating_store. [lane y609]",
+          "at": "2026-08-22T17:17:29.642Z"
         },
         {
           "n": 5,
@@ -18129,10 +18132,11 @@
       ],
       "needsAcceptance": false,
       "created": "2026-07-14T23:00:05.144Z",
-      "updated": "2026-08-22T16:27:36.695Z",
+      "updated": "2026-08-22T17:17:30.410Z",
       "updatedBy": "Main",
       "tags": [],
-      "parentId": null
+      "parentId": null,
+      "completedAt": "2026-08-22T17:17:30.409Z"
     },
     {
       "id": "c0m1zysi",
@@ -24927,7 +24931,7 @@
       "track": "epoch",
       "epoch": "e5",
       "milestoneId": "e5-images-packs",
-      "phase": "building",
+      "phase": "done",
       "priority": "P1",
       "plan": "Option A is ratified. Project an Environment through the existing image record. Use a safe non-root shell image as the beginner default. Let experts select services, platforms, users, entrypoints, layers, ports, health, cache, and provenance. Classify each environment fact as included, changed, omitted, or rejected. Keep secrets out of layers. Use runtime mounts or references for secrets. Reuse Hangar, .jet/lock, D-JPK-REMOTE1, and jet os image. Add no second container record, lock, publish path, or Dockerfile mechanism. Cards #783 and the existing service prerequisite remain blockers.",
       "blockedBy": [
@@ -25012,11 +25016,11 @@
         {
           "n": 5,
           "text": "Projection plans, dossier JSON, atomic recovery, path containment, diagnostics, docs, examples, goldens, platform tests, and independent review prove image behavior.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-26T01:11:48.798Z"
+          "evidence": "evidence: Image.rs:157-350,1806-1887; tests/image.rs:264-520; path checks add_remove_push_image.rs:1029-1115; docs/examples/goldens cited at architecture.md:118-125, syntax-decisions.md:4837-4860, environment_image.jet:1-18, image_service_projection_e1336.txt:1-3; platform test tests/image.rs:321-349; independent read-only diff review found no findings. [lane y788]",
+          "at": "2026-08-22T17:17:31.779Z"
         }
       ],
       "refs": [
@@ -25027,11 +25031,12 @@
       ],
       "needsAcceptance": false,
       "created": "2026-07-24T20:52:52.145Z",
-      "updated": "2026-08-22T16:27:40.307Z",
+      "updated": "2026-08-22T17:17:33.295Z",
       "workOrder": 3520,
       "updatedBy": "Main",
       "tags": [],
-      "parentId": null
+      "parentId": null,
+      "completedAt": "2026-08-22T17:17:33.294Z"
     },
     {
       "id": "c0wbxcvq",
@@ -25042,7 +25047,7 @@
       "track": "epoch",
       "epoch": "e5",
       "milestoneId": "e5-env-services",
-      "phase": "building",
+      "phase": "done",
       "priority": "P1",
       "plan": "## Outcome\n\nShip **Environment discovery: package, service, task, and variable summary** as a complete slice. Every behavior in the title, body, and ratified decisions is required.\n\n## Work\n\n1. Apply the card body and referenced ratified law. Stop for a ballot before new syntax, public names, dependencies, or invariant exceptions.\n2. Start with docs/research/2026-07-24-devenv-parity.md, docs/spec/syntax-decisions.md, Source/LSP, Source/main.rs. Own only these paths and direct callers or tests found by the trace.\n3. Trace the public entry point through the production model to the observable result.\n4. Map each named behavior to implementation and proof before writing.\n5. Reuse typed tasks, services, files, process control, watchers, and grants. Do not add string shell fields or a second supervisor.\n6. Startup failure, readiness timeout, restart exhaustion, dependency failure, cancellation, and cleanup leave no orphan process or misleading health state.\n7. Update affected docs, examples, diagnostics, goldens, and audit output.\n\n## Proof\n\nRun focused unit, integration, and example checks for this slice. Exercise the real production path and its main failure case. A stub, canned result, mock-only path, or skipped check does not count. Full-suite proof belongs to Epoch 5 closeout.\n\n## Scope\n\nDo not absorb sibling cards or create a second mechanism. Record any newly found owner choice as a Tower ballot before code.",
       "blockedBy": [
@@ -25096,11 +25101,11 @@
         {
           "n": 1,
           "text": "All behavior named in the title, body, and ratified decisions works through the production path. No stub, fallback, or sibling claim substitutes.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-01T17:56:16.068Z"
+          "evidence": "evidence: run_enter_dev.rs:1777, trust_env_build.rs:391, and 6 passing env-info production tests covering packages, services, jobs, variables, presets, and integrations [lane y789]",
+          "at": "2026-08-22T17:17:34.806Z"
         },
         {
           "n": 2,
@@ -25123,11 +25128,11 @@
         {
           "n": 4,
           "text": "Targeted success and failure checks exercise the real production path. They fail when the key implementation is removed or bypassed.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-01T17:56:16.068Z"
+          "evidence": "evidence: fresh harness results below; unsupported Apple path returns E1335 with apple integration [lane y789]",
+          "at": "2026-08-22T17:17:36.102Z"
         },
         {
           "n": 5,
@@ -25147,11 +25152,12 @@
       ],
       "needsAcceptance": false,
       "created": "2026-07-24T20:52:52.276Z",
-      "updated": "2026-08-22T16:27:45.459Z",
+      "updated": "2026-08-22T17:17:36.913Z",
       "workOrder": 3610,
       "updatedBy": "Main",
       "tags": [],
-      "parentId": null
+      "parentId": null,
+      "completedAt": "2026-08-22T17:17:36.912Z"
     },
     {
       "id": "c0yf5gxv",
@@ -34073,7 +34079,7 @@
       "track": "epoch",
       "epoch": "e5",
       "milestoneId": "e5-nix-compat",
-      "phase": "building",
+      "phase": "done",
       "priority": "P0",
       "plan": "## Outcome\n\nShip **Nix evaluator breadth: differential fuzzing and performance budgets** as a complete slice. Every behavior in the title, body, and ratified decisions is required.\n\n## Work\n\n1. Apply the card body and referenced ratified law. Stop for a ballot before new syntax, public names, dependencies, or invariant exceptions.\n2. Start with docs/plans/epoch-4/world-class-package-manager.md, crates/jetpack/src, crates/jet-pkg-model/src, tests/jetpack_engine.rs. Own only these paths and direct callers or tests found by the trace.\n3. Trace the public entry point through the production model to the observable result.\n4. Map each named behavior to implementation and proof before writing.\n5. Extend the private compatibility evaluator without exposing Nix as a second Jet model. Keep imports bounded by explicit authority.\n6. Unsupported or over-budget input fails honestly. The product proof runs with Nix absent and PATH stripped, with no hidden shell-out.\n7. Update affected docs, examples, diagnostics, goldens, and audit output.\n\n## Proof\n\nRun focused unit, integration, and example checks for this slice. Exercise the real production path and its main failure case. A stub, canned result, mock-only path, or skipped check does not count. Full-suite proof belongs to Epoch 5 closeout.\n\n## Scope\n\nDo not absorb sibling cards or create a second mechanism. Record any newly found owner choice as a Tower ballot before code.",
       "blockedBy": [
@@ -34101,11 +34107,11 @@
         {
           "n": 2,
           "text": "Pinned differential fixtures match the required Nix behavior, including values, errors, locks, and output identities.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-01T17:56:20.449Z"
+          "evidence": "evidence: exact Nix 2.34.8 verifier matched 4 systems: 6 values, 3 errors, 1 locks, 2 authority values, 1 authority derivations, 1 derivations, 7 seeds. [lane y889]",
+          "at": "2026-08-22T17:17:39.377Z"
         },
         {
           "n": 3,
@@ -34143,10 +34149,11 @@
       ],
       "needsAcceptance": false,
       "created": "2026-07-26T01:04:37.778Z",
-      "updated": "2026-08-21T18:49:27.456Z",
-      "updatedBy": "orchestrator",
+      "updated": "2026-08-22T17:17:41.028Z",
+      "updatedBy": "Main",
       "tags": [],
-      "parentId": null
+      "parentId": null,
+      "completedAt": "2026-08-22T17:17:41.028Z"
     },
     {
       "id": "c07n83cy",
@@ -37458,7 +37465,7 @@
       "track": "epoch",
       "epoch": "e5",
       "milestoneId": "e5-cache-remote",
-      "phase": "ready",
+      "phase": "done",
       "priority": "P1",
       "plan": "## Outcome\n\nShip **Remote builders: signed result statements and malicious-worker rejection** as a complete slice. Every behavior in the title, body, and ratified decisions is required.\n\n## Work\n\n1. Apply the card body and referenced ratified law. Stop for a ballot before new syntax, public names, dependencies, or invariant exceptions.\n2. Start with docs/plans/epoch-4/world-class-package-manager.md, crates/jetpack/src, tests/jetpack_engine.rs. Own only these paths and direct callers or tests found by the trace.\n3. Trace the public entry point through the production model to the observable result.\n4. Map each named behavior to implementation and proof before writing.\n5. Reuse the content-addressed store and action identity. Verify all remote facts before they can become local truth.\n6. Reject corrupt, unsigned, mismatched, replayed, or malicious results. Cancellation, retry, and worker loss cannot publish partial output.\n7. Update affected docs, examples, diagnostics, goldens, and audit output.\n\n## Proof\n\nRun focused unit, integration, and example checks for this slice. Exercise the real production path and its main failure case. A stub, canned result, mock-only path, or skipped check does not count. Full-suite proof belongs to Epoch 5 closeout.\n\n## Scope\n\nDo not absorb sibling cards or create a second mechanism. Record any newly found owner choice as a Tower ballot before code.",
       "blockedBy": [
@@ -37477,47 +37484,47 @@
         {
           "n": 1,
           "text": "All behavior named in the title, body, and ratified decisions works through the production path. No stub, fallback, or sibling claim substitutes.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-01T17:56:23.505Z"
+          "evidence": "evidence: production path execution_runtime.rs:699-838; remote_driver_consumes_authenticated_worker_result passed. [lane y926]",
+          "at": "2026-08-22T17:17:42.279Z"
         },
         {
           "n": 2,
           "text": "Cache and remote results preserve local build identity, declared capabilities, provenance, and deterministic outputs.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-01T17:56:23.505Z"
+          "evidence": "evidence: execution_runtime.rs:1584-1593, cache_cas.rs:371-387; policy/provenance binding test at tests/build_graph.rs:1450-1490. [lane y926]",
+          "at": "2026-08-22T17:17:43.295Z"
         },
         {
           "n": 3,
           "text": "Reject corrupt, unsigned, mismatched, replayed, or malicious results. Cancellation, retry, and worker loss cannot publish partial output.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-01T17:56:23.505Z"
+          "evidence": "evidence: authenticated envelope checks cache_cas.rs:1238-1252,1633-1725; hostile, tamper, cancellation, and retry tests passed. [lane y926]",
+          "at": "2026-08-22T17:17:44.647Z"
         },
         {
           "n": 4,
           "text": "Targeted success and failure checks exercise the real production path. They fail when the key implementation is removed or bypassed.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-01T17:56:23.505Z"
+          "evidence": "evidence: production success, retry, and hostile-worker tests all passed. [lane y926]",
+          "at": "2026-08-22T17:17:45.166Z"
         },
         {
           "n": 5,
           "text": "Affected docs, examples, diagnostics, goldens, and audit output match the shipped behavior. Full-suite proof stays at epoch closeout.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-01T17:56:23.505Z"
+          "evidence": "evidence: docs world-class-package-manager.md:378-398; API documentation crates/jetpack/src/Remote.rs:1-9; scoped git diff --check clean. [lane y926]",
+          "at": "2026-08-22T17:17:46.151Z"
         }
       ],
       "refs": [
@@ -37527,10 +37534,11 @@
       ],
       "needsAcceptance": false,
       "created": "2026-07-26T01:04:55.412Z",
-      "updated": "2026-08-01T17:56:23.505Z",
-      "updatedBy": "codex-plan-audit",
+      "updated": "2026-08-22T17:17:47.679Z",
+      "updatedBy": "Main",
       "tags": [],
-      "parentId": null
+      "parentId": null,
+      "completedAt": "2026-08-22T17:17:47.679Z"
     },
     {
       "id": "c09xefbn",
@@ -37636,7 +37644,7 @@
       "track": "epoch",
       "epoch": "e5",
       "milestoneId": "e5-registry-delivery",
-      "phase": "ready",
+      "phase": "building",
       "priority": "P0",
       "plan": "## Outcome\n\nShip **Registry delivery: dependency roles, features, and constraints** as a complete slice. Every behavior in the title, body, and ratified decisions is required.\n\n## Work\n\n1. Apply the card body and referenced ratified law. Stop for a ballot before new syntax, public names, dependencies, or invariant exceptions.\n2. Start with docs/plans/epoch-4/world-class-package-manager.md, Source/Publish/Registry.rs, crates/jetpack/src, tests/pkg.rs, tests/jetpack_engine.rs. Own only these paths and direct callers or tests found by the trace.\n3. Trace the public entry point through the production model to the observable result.\n4. Map each named behavior to implementation and proof before writing.\n5. Use the canonical registry, resolver, lock, and Hangar path from publish through fresh-machine consumption.\n6. Concurrent publish, duplicate version, interrupted upload, stale index, bad credential, and corrupt artifact fail atomically and redact secrets.\n7. Update affected docs, examples, diagnostics, goldens, and audit output.\n\n## Proof\n\nRun focused unit, integration, and example checks for this slice. Exercise the real production path and its main failure case. A stub, canned result, mock-only path, or skipped check does not count. Full-suite proof belongs to Epoch 5 closeout.\n\n## Scope\n\nDo not absorb sibling cards or create a second mechanism. Record any newly found owner choice as a Tower ballot before code.",
       "blockedBy": [
@@ -37707,8 +37715,8 @@
       ],
       "needsAcceptance": false,
       "created": "2026-07-26T01:04:56.393Z",
-      "updated": "2026-08-01T17:56:24.021Z",
-      "updatedBy": "codex-plan-audit",
+      "updated": "2026-08-22T17:17:48.839Z",
+      "updatedBy": "Main",
       "tags": [],
       "parentId": null
     },
@@ -37721,7 +37729,7 @@
       "track": "epoch",
       "epoch": "e5",
       "milestoneId": "e5-registry-delivery",
-      "phase": "ready",
+      "phase": "building",
       "priority": "P0",
       "plan": "## Outcome\n\nShip **Registry delivery: scoped credential providers and redaction** as a complete slice. Every behavior in the title, body, and ratified decisions is required.\n\n## Work\n\n1. Apply the card body and referenced ratified law. Stop for a ballot before new syntax, public names, dependencies, or invariant exceptions.\n2. Start with docs/plans/epoch-4/world-class-package-manager.md, Source/Publish/Registry.rs, crates/jetpack/src, tests/pkg.rs, tests/jetpack_engine.rs. Own only these paths and direct callers or tests found by the trace.\n3. Trace the public entry point through the production model to the observable result.\n4. Map each named behavior to implementation and proof before writing.\n5. Use the canonical registry, resolver, lock, and Hangar path from publish through fresh-machine consumption.\n6. Concurrent publish, duplicate version, interrupted upload, stale index, bad credential, and corrupt artifact fail atomically and redact secrets.\n7. Update affected docs, examples, diagnostics, goldens, and audit output.\n\n## Proof\n\nRun focused unit, integration, and example checks for this slice. Exercise the real production path and its main failure case. A stub, canned result, mock-only path, or skipped check does not count. Full-suite proof belongs to Epoch 5 closeout.\n\n## Scope\n\nDo not absorb sibling cards or create a second mechanism. Record any newly found owner choice as a Tower ballot before code.",
       "blockedBy": [
@@ -37776,11 +37784,11 @@
         {
           "n": 5,
           "text": "Affected docs, examples, diagnostics, goldens, and audit output match the shipped behavior. Full-suite proof stays at epoch closeout.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-01T17:56:24.288Z"
+          "evidence": "evidence: updated docs at docs/plans/epoch-4/world-class-package-manager.md:558-562 and diagnostic row at docs/spec/diagnostic-rows.md:649; git diff --check passed. [lane y929]",
+          "at": "2026-08-22T17:17:49.609Z"
         }
       ],
       "refs": [
@@ -37792,8 +37800,8 @@
       ],
       "needsAcceptance": false,
       "created": "2026-07-26T01:04:56.721Z",
-      "updated": "2026-08-01T17:56:24.288Z",
-      "updatedBy": "codex-plan-audit",
+      "updated": "2026-08-22T17:17:50.317Z",
+      "updatedBy": "Main",
       "tags": [],
       "parentId": null
     },
@@ -37806,7 +37814,7 @@
       "track": "epoch",
       "epoch": "e5",
       "milestoneId": "e5-registry-delivery",
-      "phase": "ready",
+      "phase": "building",
       "priority": "P0",
       "plan": "## Outcome\n\nShip **Registry delivery: verified online and offline package execution** as a complete slice. Every behavior in the title, body, and ratified decisions is required.\n\n## Work\n\n1. Apply the card body and referenced ratified law. Stop for a ballot before new syntax, public names, dependencies, or invariant exceptions.\n2. Start with docs/plans/epoch-4/world-class-package-manager.md, Source/Publish/Registry.rs, crates/jetpack/src, tests/pkg.rs, tests/jetpack_engine.rs. Own only these paths and direct callers or tests found by the trace.\n3. Trace the public entry point through the production model to the observable result.\n4. Map each named behavior to implementation and proof before writing.\n5. Use the canonical registry, resolver, lock, and Hangar path from publish through fresh-machine consumption.\n6. Concurrent publish, duplicate version, interrupted upload, stale index, bad credential, and corrupt artifact fail atomically and redact secrets.\n7. Update affected docs, examples, diagnostics, goldens, and audit output.\n\n## Proof\n\nRun focused unit, integration, and example checks for this slice. Exercise the real production path and its main failure case. A stub, canned result, mock-only path, or skipped check does not count. Full-suite proof belongs to Epoch 5 closeout.\n\n## Scope\n\nDo not absorb sibling cards or create a second mechanism. Record any newly found owner choice as a Tower ballot before code.",
       "blockedBy": [
@@ -37834,11 +37842,11 @@
         {
           "n": 2,
           "text": "Publish, metadata, resolution, download, lock, and install agree on immutable package identity and dependency meaning.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-01T17:56:24.546Z"
+          "evidence": "evidence: tests/pkg.rs:4472, Source/Publish/Tuf.rs:65. [lane y930]",
+          "at": "2026-08-22T17:17:50.895Z"
         },
         {
           "n": 3,
@@ -37861,11 +37869,11 @@
         {
           "n": 5,
           "text": "Affected docs, examples, diagnostics, goldens, and audit output match the shipped behavior. Full-suite proof stays at epoch closeout.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-01T17:56:24.546Z"
+          "evidence": "evidence: docs/reference/jetpack-epoch5.md:80, docs/spec/diagnostics.md:1985, git diff --check exit=0. [lane y930]",
+          "at": "2026-08-22T17:17:52.148Z"
         }
       ],
       "refs": [
@@ -37877,8 +37885,8 @@
       ],
       "needsAcceptance": false,
       "created": "2026-07-26T01:04:57.074Z",
-      "updated": "2026-08-01T17:56:24.546Z",
-      "updatedBy": "codex-plan-audit",
+      "updated": "2026-08-22T17:17:53.648Z",
+      "updatedBy": "Main",
       "tags": [],
       "parentId": null
     },
@@ -141050,7 +141058,7 @@
       "track": "sidequest",
       "epoch": null,
       "milestoneId": null,
-      "phase": "building",
+      "phase": "done",
       "priority": "P3",
       "plan": "1. Keep the existing hello and http_ready receipt programs and expected outputs.\\n2. Change the server budget/measurement path to ServiceReadiness through the existing ServiceProbe contract, retaining StartupTime for hello and making TCP/HTTP readiness the server claim.\\n3. Capture both programs on the named box under the pinned target/profile/toolchain, bootstrap or update only the matching baseline, and refresh the documented receipt table.\\n4. Run budget and ServiceProbe tests and verify the JSON reports; keep throughput out of scope and do not compare profiles.",
       "checkSteps": "- Both receipt programs exist as examples with declared BinarySize/StartupTime/MemoryHighWater budgets and pinned baselines\n- jet budget passes on them in CI-equivalent invocation; baseline update path exercised once\n- Receipt table in docs states hardware/profile/toolchain and reproduces via one documented command\n- No cross-profile or throughput comparison appears in the receipt",
@@ -141121,11 +141129,11 @@
         {
           "n": 7,
           "text": "The existing build-artifact receipt regression and ServiceProbe regression pass, including tests/cli_parts/budget.rs::build_artifact_receipt_collects_footprint_samples and the ServiceReadiness test in tests/cli_parts/expand.rs.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-21T22:56:32.574Z"
+          "evidence": "evidence: tests/cli_parts/budget.rs:351; cli_budget::build_artifact_receipt_collects_footprint_samples. tests/cli_parts/expand.rs:962; cli_expand::service_probe_uses_jetpack_lifecycle_and_produces_twenty_samples. [lane y2142]",
+          "at": "2026-08-22T17:17:10.296Z"
         }
       ],
       "refs": [],
@@ -141136,8 +141144,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-21T15:34:28.652Z",
-      "updated": "2026-08-22T15:37:17.065Z",
-      "updatedBy": "Main"
+      "updated": "2026-08-22T17:17:11.016Z",
+      "updatedBy": "Main",
+      "completedAt": "2026-08-22T17:17:11.016Z"
     },
     {
       "id": "c0zx0ihz",
@@ -189763,6 +189772,307 @@
   ],
   "events": [
     {
+      "at": "2026-08-22T17:17:53.649Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0qv7ncu",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-22T17:17:52.148Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0qv7ncu",
+      "note": "#5"
+    },
+    {
+      "at": "2026-08-22T17:17:50.895Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0qv7ncu",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-22T17:17:50.317Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0l1auuh",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-22T17:17:49.609Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0l1auuh",
+      "note": "#5"
+    },
+    {
+      "at": "2026-08-22T17:17:48.839Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0flp0gw",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-22T17:17:47.680Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0zdso7f",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-22T17:17:46.151Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0zdso7f",
+      "note": "#5"
+    },
+    {
+      "at": "2026-08-22T17:17:45.166Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0zdso7f",
+      "note": "#4"
+    },
+    {
+      "at": "2026-08-22T17:17:44.648Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0zdso7f",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-22T17:17:43.296Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0zdso7f",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-22T17:17:42.279Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0zdso7f",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-22T17:17:41.028Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0vqrufi",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-22T17:17:39.378Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0vqrufi",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-22T17:17:36.913Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0wbxcvq",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-22T17:17:36.103Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0wbxcvq",
+      "note": "#4"
+    },
+    {
+      "at": "2026-08-22T17:17:34.806Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0wbxcvq",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-22T17:17:33.295Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0u5x7kf",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-22T17:17:31.780Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0u5x7kf",
+      "note": "#5"
+    },
+    {
+      "at": "2026-08-22T17:17:30.410Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0kxss7s",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-22T17:17:29.643Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0kxss7s",
+      "note": "#4"
+    },
+    {
+      "at": "2026-08-22T17:17:27.537Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0ux5rmy",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-22T17:17:26.418Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0ux5rmy",
+      "note": "#6"
+    },
+    {
+      "at": "2026-08-22T17:17:25.346Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0ux5rmy",
+      "note": "#5"
+    },
+    {
+      "at": "2026-08-22T17:17:24.602Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0ux5rmy",
+      "note": "#4"
+    },
+    {
+      "at": "2026-08-22T17:17:24.020Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0ux5rmy",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-22T17:17:23.214Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0ux5rmy",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-22T17:17:22.439Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0ux5rmy",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-22T17:17:21.837Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0sa3d63",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-22T17:17:20.235Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0sa3d63",
+      "note": "#5"
+    },
+    {
+      "at": "2026-08-22T17:17:19.214Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0sa3d63",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-22T17:17:18.891Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0sa3d63",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-22T17:17:18.552Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0sa3d63",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-22T17:17:17.116Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0esko6c",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-22T17:17:15.696Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0esko6c",
+      "note": "#4"
+    },
+    {
+      "at": "2026-08-22T17:17:14.641Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c09itznu",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-22T17:17:13.394Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c09itznu",
+      "note": "#5"
+    },
+    {
+      "at": "2026-08-22T17:17:13.053Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c09itznu",
+      "note": "#4"
+    },
+    {
+      "at": "2026-08-22T17:17:12.724Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c09itznu",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-22T17:17:12.374Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c09itznu",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-22T17:17:12.035Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c09itznu",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-22T17:17:11.016Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0af6jch",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-22T17:17:10.296Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0af6jch",
+      "note": "#7"
+    },
+    {
       "at": "2026-08-22T16:28:01.397Z",
       "by": "Main",
       "action": "card.update",
@@ -192960,307 +193270,6 @@
       "action": "card.criteria-add",
       "ref": "c0earl6i",
       "note": "#2 The proposal names the current flow-only StateTable/FlowFact"
-    },
-    {
-      "at": "2026-08-21T22:56:16.377Z",
-      "by": "sqcriteria",
-      "action": "card.criteria-add",
-      "ref": "c0earl6i",
-      "note": "#1 docs/proposals/stored-invariant-facts.md is explicitly a des"
-    },
-    {
-      "at": "2026-08-21T22:56:15.841Z",
-      "by": "sqcriteria",
-      "action": "card.update",
-      "ref": "c02tdxr6",
-      "note": "plan"
-    },
-    {
-      "at": "2026-08-21T22:56:15.138Z",
-      "by": "sqcriteria",
-      "action": "card.criteria-add",
-      "ref": "c02tdxr6",
-      "note": "#7 If a future audit selects a named method, its exit evidence "
-    },
-    {
-      "at": "2026-08-21T22:56:14.605Z",
-      "by": "sqcriteria",
-      "action": "card.criteria-add",
-      "ref": "c02tdxr6",
-      "note": "#6 The audit records whether lower_bound is declined or deferre"
-    },
-    {
-      "at": "2026-08-21T22:56:14.037Z",
-      "by": "sqcriteria",
-      "action": "card.criteria-add",
-      "ref": "c02tdxr6",
-      "note": "#5 The no-add disposition for slide and gather records a concre"
-    },
-    {
-      "at": "2026-08-21T22:56:13.084Z",
-      "by": "sqcriteria",
-      "action": "card.criteria-add",
-      "ref": "c02tdxr6",
-      "note": "#4 The reference docs state that partition preserves source ord"
-    },
-    {
-      "at": "2026-08-21T22:56:12.072Z",
-      "by": "sqcriteria",
-      "action": "card.criteria-add",
-      "ref": "c02tdxr6",
-      "note": "#3 The audit states that position is a linear scan and that bin"
-    },
-    {
-      "at": "2026-08-21T22:56:11.074Z",
-      "by": "sqcriteria",
-      "action": "card.criteria-add",
-      "ref": "c02tdxr6",
-      "note": "#2 crates/jet-codegen/src/Prelude/Core/Collections.rs exposes t"
-    },
-    {
-      "at": "2026-08-21T22:56:10.049Z",
-      "by": "sqcriteria",
-      "action": "card.criteria-add",
-      "ref": "c02tdxr6",
-      "note": "#1 docs/reference/core-library.md has a sequence-algorithm audi"
-    },
-    {
-      "at": "2026-08-21T22:56:08.942Z",
-      "by": "sqcriteria",
-      "action": "card.update",
-      "ref": "c03i6njo",
-      "note": "plan"
-    },
-    {
-      "at": "2026-08-21T22:56:07.753Z",
-      "by": "sqcriteria",
-      "action": "card.criteria-add",
-      "ref": "c03i6njo",
-      "note": "#6 scripts/agent/jet-env cargo test --test diagnostic_snapshots"
-    },
-    {
-      "at": "2026-08-21T22:56:06.635Z",
-      "by": "sqcriteria",
-      "action": "card.criteria-add",
-      "ref": "c03i6njo",
-      "note": "#5 The method regression fixture and snapshot in tests/ui/types"
-    },
-    {
-      "at": "2026-08-21T22:56:05.832Z",
-      "by": "sqcriteria",
-      "action": "card.criteria-add",
-      "ref": "c03i6njo",
-      "note": "#4 The same free-function snapshot keeps the Why text about bou"
-    },
-    {
-      "at": "2026-08-21T22:56:04.845Z",
-      "by": "sqcriteria",
-      "action": "card.criteria-add",
-      "ref": "c03i6njo",
-      "note": "#3 tests/ui/typestate_wrong_state_free_function.stderr reports "
-    },
-    {
-      "at": "2026-08-21T22:56:03.852Z",
-      "by": "sqcriteria",
-      "action": "card.criteria-add",
-      "ref": "c03i6njo",
-      "note": "#2 tests/ui/typestate_wrong_state_free_function.jet contains a "
-    },
-    {
-      "at": "2026-08-21T22:56:02.723Z",
-      "by": "sqcriteria",
-      "action": "card.criteria-add",
-      "ref": "c03i6njo",
-      "note": "#1 In crates/jet-sema/src/Sema/State.rs, both free-function typ"
-    },
-    {
-      "at": "2026-08-21T22:56:01.598Z",
-      "by": "sqcriteria",
-      "action": "card.update",
-      "ref": "c05rc0xv",
-      "note": "plan"
-    },
-    {
-      "at": "2026-08-21T22:56:00.671Z",
-      "by": "sqcriteria",
-      "action": "card.criteria-add",
-      "ref": "c05rc0xv",
-      "note": "#6 The card change is documentation-only: no new user-typeable "
-    },
-    {
-      "at": "2026-08-21T22:55:59.882Z",
-      "by": "sqcriteria",
-      "action": "card.criteria-add",
-      "ref": "c05rc0xv",
-      "note": "#5 docs/reference/prior-art.md contains a dated Function-design"
-    },
-    {
-      "at": "2026-08-21T22:55:58.858Z",
-      "by": "sqcriteria",
-      "action": "card.criteria-add",
-      "ref": "c05rc0xv",
-      "note": "#4 The review checklist in docs/spec/stdlib-api-laws.md repeats"
-    },
-    {
-      "at": "2026-08-21T22:55:58.068Z",
-      "by": "sqcriteria",
-      "action": "card.criteria-add",
-      "ref": "c05rc0xv",
-      "note": "#3 The review preamble in docs/spec/stdlib-api-laws.md asks for"
-    },
-    {
-      "at": "2026-08-21T22:55:57.563Z",
-      "by": "sqcriteria",
-      "action": "card.criteria-add",
-      "ref": "c05rc0xv",
-      "note": "#2 In docs/spec/stdlib-api-laws.md, Law 4 uses the canonical ef"
-    },
-    {
-      "at": "2026-08-21T22:55:57.051Z",
-      "by": "sqcriteria",
-      "action": "card.criteria-add",
-      "ref": "c05rc0xv",
-      "note": "#1 In docs/spec/stdlib-api-laws.md, the signature-honesty table"
-    },
-    {
-      "at": "2026-08-21T22:49:52.492Z",
-      "by": "owner",
-      "action": "done.clear",
-      "ref": null,
-      "note": "2026-08-21T22:49:52.492Z"
-    },
-    {
-      "at": "2026-08-21T22:48:43.573Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c06zs6dw",
-      "note": "phase"
-    },
-    {
-      "at": "2026-08-21T22:48:42.343Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c06zs6dw",
-      "note": "#3"
-    },
-    {
-      "at": "2026-08-21T22:48:41.318Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c06zs6dw",
-      "note": "#2"
-    },
-    {
-      "at": "2026-08-21T22:48:40.732Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c06zs6dw",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-21T22:17:21.381Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c0qvv1mi",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-21T22:17:20.559Z",
-      "by": "fable",
-      "action": "card.criteria-meet",
-      "ref": "c0an426i",
-      "note": "#6"
-    },
-    {
-      "at": "2026-08-21T22:17:19.061Z",
-      "by": "fable",
-      "action": "card.criteria-meet",
-      "ref": "c0an426i",
-      "note": "#3"
-    },
-    {
-      "at": "2026-08-21T22:17:07.226Z",
-      "by": "fable",
-      "action": "card.add",
-      "ref": "c0l24ldp",
-      "note": "Defaults ride the type: name: Type{value} in parameters and fields"
-    },
-    {
-      "at": "2026-08-21T22:17:06.228Z",
-      "by": "fable",
-      "action": "card.add",
-      "ref": "c04jzhj6",
-      "note": "Subject shorthand: method heads in call slots plus nesting lint"
-    },
-    {
-      "at": "2026-08-21T22:17:05.148Z",
-      "by": "fable",
-      "action": "card.add",
-      "ref": "c0mns63v",
-      "note": "Dispatch arm heads: parens required when atoms mix with boolean operators"
-    },
-    {
-      "at": "2026-08-21T22:17:04.116Z",
-      "by": "fable",
-      "action": "card.add",
-      "ref": "c05mwfmo",
-      "note": "Failure surface suffixes: Success? (E1 | E2)! in every type position"
-    },
-    {
-      "at": "2026-08-21T22:17:02.765Z",
-      "by": "fable",
-      "action": "card.add",
-      "ref": "c0jalyt0",
-      "note": "Lambda interface parity: return type, error, effect row on lambdas"
-    },
-    {
-      "at": "2026-08-21T22:17:01.965Z",
-      "by": "fable",
-      "action": "card.add",
-      "ref": "c0622n49",
-      "note": "One callable shape: arrow present iff a non-unit success value is declared"
-    },
-    {
-      "at": "2026-08-21T22:17:00.903Z",
-      "by": "fable",
-      "action": "card.add",
-      "ref": "c0ohqujv",
-      "note": "Arrow respell migration: :> becomes -> and :[E]> becomes -[E]>"
-    },
-    {
-      "at": "2026-08-21T22:15:32.352Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c0an426i",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-21T22:15:22.104Z",
-      "by": "fable",
-      "action": "decision.ratify",
-      "ref": "D-DEFAULT-SHAPE1",
-      "note": "B (by fable, quoting owner: \"Excellent, I like the rides the type. Please ratify for me directly\")"
-    },
-    {
-      "at": "2026-08-21T22:15:12.487Z",
-      "by": "fable",
-      "action": "decision.update",
-      "ref": "D-DEFAULT-SHAPE1",
-      "note": ""
-    },
-    {
-      "at": "2026-08-21T22:06:17.803Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c0an426i",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-21T22:00:08.229Z",
-      "by": "owner",
-      "action": "decision.ratify",
-      "ref": "D-LAMBDA-IFACE1",
-      "note": "A"
     }
   ],
   "nextNum": 368,
