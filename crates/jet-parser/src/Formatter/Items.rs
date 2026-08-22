@@ -540,8 +540,13 @@ impl<'a> Fmt<'a> {
 
     /// D-STRUCT-POLICY1=A: policy wrappers are carried beside ordinary items,
     /// so preserve their checked source boundary in the formatter's first
-    /// implementation slice.
+    /// implementation slice. `span` starts at the `policy` keyword, so the
+    /// visibility prefix comes from `is_pub` — echoing the slice alone drops
+    /// `pub` and the formatter's own output then fails E0003.
     pub(super) fn fmt_user_policy_decl(&mut self, declaration: &crate::AST::UserPolicyDecl) {
+        if declaration.is_pub {
+            self.write("pub ");
+        }
         let text = &self.src[declaration.span.start..declaration.span.end];
         self.write(text);
         self.newline();
