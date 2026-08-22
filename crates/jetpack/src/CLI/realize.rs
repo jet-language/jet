@@ -619,7 +619,7 @@ pub(super) fn load_project_plan_with_selections(
                 "no ref was given and there is no {} here.",
                 Syntax::ENV_FILE
             ),
-            "try `jetpack run fastfetch@nixpkgs`, or `jetpack add <ref>` first.",
+            "try `jet run fastfetch@nixpkgs`, or `jet add <ref>` first.",
         );
         return Err(2);
     };

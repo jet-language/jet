@@ -228,6 +228,7 @@ pub fn explain_package(
 
     let mut reports = Vec::new();
     let graph = load_graph(roots, &mut reports);
+    let receipt_ok = receipt_projection(roots, &entry, graph.as_ref(), &mut reports);
     let provider = provider_projection(&entry, &mut reports);
     let provider = provider.map(|mut provider| {
         provider.locked_provider_facts = locked_provider_facts(&entry, &mut reports);
@@ -247,6 +248,7 @@ pub fn explain_package(
         &entry,
         graph.as_ref(),
         provider.as_ref(),
+        receipt_ok,
         &mut reports,
     );
 
@@ -348,6 +350,96 @@ fn load_graph(roots: &Roots, reports: &mut Vec<ExplainReport>) -> Option<Closure
             }
         }
     }
+}
+
+/// Check the immutable receipt projection without repairing it. Explain must
+/// identify a missing, unsafe, or mismatched receipt as a loss of proof while
+/// leaving recovery to `hangar recover` or an explicit repair operation.
+fn receipt_projection(
+    roots: &Roots,
+    entry: &StoreEntry,
+    graph: Option<&ClosureGraph>,
+    reports: &mut Vec<ExplainReport>,
+) -> bool {
+    let before = reports.len();
+    if entry.receipt.is_empty() {
+        reports.push(ExplainReport {
+            kind: "loss".to_string(),
+            message: format!("StoreEntry `{}` has no connected Hangar receipt", entry.id),
+        });
+        return false;
+    }
+    if !super::valid_receipt_digest(&entry.receipt) {
+        reports.push(ExplainReport {
+            kind: "conflict".to_string(),
+            message: format!(
+                "StoreEntry `{}` has an invalid Hangar receipt digest `{}`",
+                entry.id, entry.receipt
+            ),
+        });
+        return false;
+    }
+    let path = roots
+        .hangar_dir()
+        .join(super::Closure::RECEIPTS_DIR)
+        .join(&entry.receipt);
+    match fs::symlink_metadata(&path) {
+        Ok(metadata) if metadata.file_type().is_symlink() || !metadata.is_file() => {
+            reports.push(ExplainReport {
+                kind: "loss".to_string(),
+                message: format!("Hangar receipt `{}` is not a regular file", path.display()),
+            });
+        }
+        Ok(_) => match fs::read(&path) {
+            Ok(bytes) => {
+                let actual = format!("sha256-{}", crate::SHA256::sha256_hex(&bytes));
+                if actual != entry.receipt {
+                    reports.push(ExplainReport {
+                        kind: "conflict".to_string(),
+                        message: format!(
+                            "Hangar receipt `{}` is corrupt: content hashes as `{actual}`",
+                            entry.receipt
+                        ),
+                    });
+                }
+            }
+            Err(error) => reports.push(ExplainReport {
+                kind: "loss".to_string(),
+                message: format!("Hangar receipt `{}` could not be read: {error}", entry.receipt),
+            }),
+        },
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => reports.push(ExplainReport {
+            kind: "loss".to_string(),
+            message: format!("Hangar receipt `{}` is missing", entry.receipt),
+        }),
+        Err(error) => reports.push(ExplainReport {
+            kind: "loss".to_string(),
+            message: format!("Hangar receipt `{}` could not be inspected: {error}", entry.receipt),
+        }),
+    }
+    if let Some(graph) = graph {
+        if let Some(record) = graph.records.get(&entry.id) {
+            match super::parse_meta(&record.package_meta) {
+                Some(meta)
+                    if meta.receipt != entry.receipt
+                        || meta.name != entry.name
+                        || meta.version != entry.version
+                        || meta.reference != entry.reference
+                        || meta.envelope.output_hash != entry.envelope.output_hash =>
+                {
+                    reports.push(ExplainReport {
+                        kind: "conflict".to_string(),
+                        message: format!(
+                            "Hangar closure record `{}` disagrees with the Store receipt projection",
+                            entry.id
+                        ),
+                    });
+                }
+                Some(_) | None => {}
+            }
+        }
+    }
+    reports.len() == before
 }
 
 fn provider_projection(
@@ -1304,6 +1396,7 @@ fn rebuild_projection(
     entry: &StoreEntry,
     graph: Option<&ClosureGraph>,
     provider: Option<&ExplainProvider>,
+    receipt_ok: bool,
     reports: &mut Vec<ExplainReport>,
 ) -> ExplainRebuild {
     let mut checks = BTreeMap::new();
@@ -1397,6 +1490,10 @@ fn rebuild_projection(
         }
         .to_string(),
     );
+    checks.insert(
+        "receipt".to_string(),
+        if receipt_ok { "verified" } else { "unavailable" }.to_string(),
+    );
     if !output_exists {
         reports.push(ExplainReport {
             kind: "loss".to_string(),
@@ -1425,30 +1522,35 @@ fn rebuild_projection(
         output_digest,
         action_recorded,
         provider_usable,
+        receipt_ok,
     ) {
-        (Some(attempt), _, _, _, _) if attempt.status == "failed" => (
+        (Some(attempt), _, _, _, _, _) if attempt.status == "failed" => (
             "rebuild-required".to_string(),
             format!("latest recorded build attempt failed at step {}", attempt.failed_step),
         ),
-        (_, false, _, _, _) => (
+        (_, false, _, _, _, _) => (
             "rebuild-required".to_string(),
             "the realized output is missing; the stored action cannot be used as a live result".to_string(),
         ),
-        (_, true, Some(false), _, _) => (
+        (_, true, Some(false), _, _, _) => (
             "rebuild-required".to_string(),
             "the realized output digest does not match its stored identity".to_string(),
         ),
-        (_, true, None, _, _) => (
+        (_, true, None, _, _, _) => (
             "rebuild-required".to_string(),
             "the realized output digest cannot be verified".to_string(),
         ),
-        (_, true, Some(true), false, _) => (
+        (_, true, Some(true), false, _, _) => (
             "rebuild-required".to_string(),
             "the closure does not prove the stored action/output relation".to_string(),
         ),
-        (_, true, Some(true), _, false) => (
+        (_, true, Some(true), _, false, _) => (
             "rebuild-required".to_string(),
             "producer provenance is unavailable; identity cannot be safely reused".to_string(),
+        ),
+        (_, true, Some(true), _, _, false) => (
+            "rebuild-required".to_string(),
+            "the connected Hangar receipt is unavailable or disagrees with its projection".to_string(),
         ),
         _ => (
             "realized".to_string(),

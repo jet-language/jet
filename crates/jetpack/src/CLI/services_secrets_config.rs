@@ -73,8 +73,8 @@ pub(super) fn wait_for_services_ready(
             if let Some(field) = Services::unknown_field(svc) {
                 theme.error_coded(
                     "E1262",
-                    &format!("service `{}` has a field jetpack doesn't recognize: `{field}`", svc.name),
-                    "a dev-supervised `Service` stays open at parse time, but jetpack's dev-runtime tier is the only consumer of its fields — an unrecognized key is almost always a typo.",
+                    &format!("service `{}` has a field Jet doesn't recognize: `{field}`", svc.name),
+                    "a dev-supervised `Service` stays open at parse time, but Jet's dev-runtime tier is the only consumer of its fields — an unrecognized key is almost always a typo.",
                     "rename it to one of `enable`, `ports`, `run`, `shutdown`, `data_dir`, `ready`, `restart`, `watch`, `after`, `before_start`, or `sockets`, or remove it.",
                 );
                 return Err(format!("service `{}` has an unsupported field", svc.name));
@@ -109,8 +109,8 @@ fn report_service_start_error(theme: &Theme, title: &str, error: &str) {
         theme.error_coded(
             "E1261",
             &format!("service `{name}` never became healthy"),
-            "jetpack waited for the service's typed readiness contract and it did not pass in time.",
-            &format!("inspect `jetpack services logs {name}` and fix the service's run or readiness declaration."),
+            "jet waited for the service's typed readiness contract and it did not pass in time.",
+            &format!("inspect `jet os services logs {name}` and fix the service's run or readiness declaration."),
         );
     } else {
         theme.error(
@@ -403,14 +403,14 @@ fn selected_service_order(
         .collect())
 }
 
-/// `jetpack services up|down|health|logs|wait [<name>]` (U12). With no `<name>`,
+/// `jet os services up|down|health|logs|wait [<name>]` (U12). With no `<name>`,
 /// every declared dev service is targeted; `logs` requires exactly one name.
 pub(super) fn cmd_services(theme: &Theme, parsed: &Parsed) -> i32 {
     let Some(verb) = parsed.positional.first().cloned() else {
         theme.error(
-            "`jetpack services` needs a verb",
+            "`jet os services` needs a verb",
             &format!("known verbs: {}.", Syntax::SERVICES_VERBS.join(", ")),
-            "try `jetpack services up`.",
+            "try `jet os services up`.",
         );
         return 2;
     };
@@ -480,9 +480,9 @@ pub(super) fn cmd_services(theme: &Theme, parsed: &Parsed) -> i32 {
         v if v == Syntax::SERVICES_VERB_LOGS => {
             let Some(n) = &name else {
                 theme.error(
-                    "`jetpack services logs` needs a service name",
+                    "`jet os services logs` needs a service name",
                     "logs are per service.",
-                    "try `jetpack services logs <name>`.",
+                    "try `jet os services logs <name>`.",
                 );
                 return 2;
             };
@@ -520,8 +520,8 @@ pub(super) fn cmd_services(theme: &Theme, parsed: &Parsed) -> i32 {
                     if let Some(field) = Services::unknown_field(svc) {
                         theme.error_coded(
                             "E1262",
-                            &format!("service `{}` has a field jetpack doesn't recognize: `{field}`", svc.name),
-                            "a dev-supervised `Service` stays open at parse time, but jetpack's dev-runtime tier is the only consumer of its fields — an unrecognized key is almost always a typo.",
+                            &format!("service `{}` has a field Jet doesn't recognize: `{field}`", svc.name),
+                            "a dev-supervised `Service` stays open at parse time, but Jet's dev-runtime tier is the only consumer of its fields — an unrecognized key is almost always a typo.",
                             "rename it to one of `enable`, `ports`, `run`, `shutdown`, `data_dir`, `ready`, `restart`, `watch`, `after`, `before_start`, or `sockets`, or remove it.",
                         );
                         return Err(format!("service `{}` has an unsupported field", svc.name));
@@ -572,8 +572,8 @@ pub(super) fn cmd_services(theme: &Theme, parsed: &Parsed) -> i32 {
                     if let Some(field) = Services::unknown_field(svc) {
                         theme.error_coded(
                             "E1262",
-                            &format!("service `{}` has a field jetpack doesn't recognize: `{field}`", svc.name),
-                            "a dev-supervised `Service` stays open at parse time, but jetpack's dev-runtime tier is the only consumer of its fields — an unrecognized key is almost always a typo.",
+                            &format!("service `{}` has a field Jet doesn't recognize: `{field}`", svc.name),
+                            "a dev-supervised `Service` stays open at parse time, but Jet's dev-runtime tier is the only consumer of its fields — an unrecognized key is almost always a typo.",
                             "rename it to one of `enable`, `ports`, `run`, `shutdown`, `data_dir`, `ready`, `restart`, `watch`, `after`, `before_start`, or `sockets`, or remove it.",
                         );
                         return Err(format!("service `{}` has an unsupported field", svc.name));
@@ -708,8 +708,8 @@ pub(super) fn cmd_services(theme: &Theme, parsed: &Parsed) -> i32 {
                     theme.error_coded(
                         "E1261",
                         &format!("service `{}` is not ready", svc.name),
-                        "jetpack waited for the service's typed readiness contract and it did not pass.",
-                        &format!("start it with `jetpack services up {}` or inspect its logs.", svc.name),
+                        "jet waited for the service's typed readiness contract and it did not pass.",
+                        &format!("start it with `jet os services up {}` or inspect its logs.", svc.name),
                     );
                     return 1;
                 }
@@ -741,8 +741,8 @@ pub(super) fn cmd_services(theme: &Theme, parsed: &Parsed) -> i32 {
                     if let Some(field) = Services::unknown_field(svc) {
                         theme.error_coded(
                             "E1262",
-                            &format!("service `{}` has a field jetpack doesn't recognize: `{field}`", svc.name),
-                            "a dev-supervised `Service` stays open at parse time, but jetpack's dev-runtime tier is the only consumer of its fields — an unrecognized key is almost always a typo.",
+                            &format!("service `{}` has a field Jet doesn't recognize: `{field}`", svc.name),
+                            "a dev-supervised `Service` stays open at parse time, but Jet's dev-runtime tier is the only consumer of its fields — an unrecognized key is almost always a typo.",
                             "rename it to one of `enable`, `ports`, `run`, `shutdown`, `data_dir`, `ready`, `restart`, `watch`, `after`, `before_start`, or `sockets`, or remove it.",
                         );
                         return Err(format!("service `{}` has an unsupported field", svc.name));
@@ -779,9 +779,9 @@ pub(super) fn cmd_services(theme: &Theme, parsed: &Parsed) -> i32 {
         }
         other => {
             theme.error(
-                &format!("`{other}` is not a `jetpack services` verb"),
+                &format!("`{other}` is not a `jet os services` verb"),
                 &format!("known verbs: {}.", Syntax::SERVICES_VERBS.join(", ")),
-                "try `jetpack services up`.",
+                "try `jet os services up`.",
             );
             2
         }
@@ -1262,15 +1262,15 @@ pub(super) fn project_job_metadata(
     })
 }
 
-/// `jetpack config trust add/list/remove` (U19) — durable glob/prefix patterns
+/// `jet os config trust add/list/remove` (U19) — durable glob/prefix patterns
 /// that pre-authorize matching projects with no per-hash prompt at all.
 pub(super) fn cmd_config(theme: &Theme, parsed: &Parsed) -> i32 {
     let group = parsed.positional.first().map(String::as_str);
     if group != Some(Syntax::CONFIG_VERB_TRUST) && group != Some(Syntax::CONFIG_VERB_SANDBOX) {
         theme.error(
-            &format!("`jetpack config {}` isn't a command", group.unwrap_or("")),
-            "jetpack config manages the env/dev trust store and sandbox fallback policy.",
-            "try `jetpack config trust list` or `jetpack config sandbox status`.",
+            &format!("`jet os config {}` isn't a command", group.unwrap_or("")),
+            "jet os config manages the env/dev trust store and sandbox fallback policy.",
+            "try `jet os config trust list` or `jet os config sandbox status`.",
         );
         return 2;
     }
@@ -1332,9 +1332,9 @@ pub(super) fn cmd_config(theme: &Theme, parsed: &Parsed) -> i32 {
         {
             let Some(pattern) = parsed.positional.get(2) else {
                 theme.error(
-                    "`jetpack config trust add` needs a pattern",
+                    "`jet os config trust add` needs a pattern",
                     "a pattern pre-authorizes matching projects by path prefix/glob.",
-                    "try `jetpack config trust add ~/work/*`.",
+                    "try `jet os config trust add ~/work/*`.",
                 );
                 return 2;
             };
@@ -1365,9 +1365,9 @@ pub(super) fn cmd_config(theme: &Theme, parsed: &Parsed) -> i32 {
         {
             let Some(pattern) = parsed.positional.get(2) else {
                 theme.error(
-                    "`jetpack config trust remove` needs a pattern",
+                    "`jet os config trust remove` needs a pattern",
                     "removes a previously trusted path pattern.",
-                    "try `jetpack config trust remove ~/work/*`.",
+                    "try `jet os config trust remove ~/work/*`.",
                 );
                 return 2;
             };
@@ -1381,7 +1381,7 @@ pub(super) fn cmd_config(theme: &Theme, parsed: &Parsed) -> i32 {
         }
         _ if group == Some(Syntax::CONFIG_VERB_TRUST) => {
             theme.error(
-                "`jetpack config trust` needs a verb",
+                "`jet os config trust` needs a verb",
                 &format!(
                     "the trust verbs are: {}.",
                     Syntax::CONFIG_TRUST_VERBS.join(", ")
@@ -1392,7 +1392,7 @@ pub(super) fn cmd_config(theme: &Theme, parsed: &Parsed) -> i32 {
         }
         _ if group == Some(Syntax::CONFIG_VERB_SANDBOX) => {
             theme.error(
-                "`jetpack config sandbox` needs a verb",
+                "`jet os config sandbox` needs a verb",
                 &format!(
                     "the sandbox verbs are: {}.",
                     Syntax::CONFIG_SANDBOX_VERBS.join(", ")
@@ -1403,9 +1403,9 @@ pub(super) fn cmd_config(theme: &Theme, parsed: &Parsed) -> i32 {
         }
         _ => {
             theme.error(
-                &format!("`jetpack config {}` isn't a command", group.unwrap_or("")),
-                "jetpack config manages trust and sandbox fallback policy.",
-                "try `jetpack config trust list` or `jetpack config sandbox status`.",
+                &format!("`jet os config {}` isn't a command", group.unwrap_or("")),
+                "jet os config manages trust and sandbox fallback policy.",
+                "try `jet os config trust list` or `jet os config sandbox status`.",
             );
             2
         }

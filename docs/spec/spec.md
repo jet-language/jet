@@ -2846,8 +2846,9 @@ dashed-name = ident { "-" ident } ;                (* S84: kebab-case names *)
   closure edges, liveness roots, and rebuild checks. The causal views
   `jet explain why-depends|what-depends|closure|why-live|rebuild <ref>` select
   one part of the same fact model. `jet explain <ref> --json` emits the stable `jet.report/v1`
-  projection; code-form `jet explain E1234` keeps the existing diagnostic essay
-  behavior.
+  projection. Syntax, overlay, and code-form explanations use the same
+  `jet.report/v1` status renderer; code-form `jet explain E1234` keeps the
+  existing diagnostic essay content inside that status projection.
 - **Hybrid CLI output (D-FE-CLI1):** trivial reads stay quiet, multi-package
   realization/build work reports dependency-chain progress, and mutations plan
   before applying. Plan rows use `+`, `-`, and `~` in both colored and plain

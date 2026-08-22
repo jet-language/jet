@@ -1399,7 +1399,7 @@ fn read_blob(root: &Path, digest: &str) -> io::Result<Vec<u8>> {
         return Err(invalid("OCI blob is not a regular file within its limit"));
     }
     let bytes = read_regular_bounded(&path, 512 * 1024 * 1024)?;
-    if digest_for(&bytes) != digest {
+    if SHA256::sha256_hex(&bytes) != digest {
         return Err(invalid("OCI blob digest mismatch"));
     }
     Ok(bytes)

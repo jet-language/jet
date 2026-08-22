@@ -77,6 +77,9 @@ pub fn project_package_outputs(
     }
 
     let mut fleets = Vec::new();
+    // Fleet deploy scripts are stored as fleet/deploy-{host}.sh, so host
+    // names must be unique across the complete Package projection, not only
+    // within one System or Fleet.
     let mut fleet_names = BTreeMap::new();
     let mut host_paths = BTreeMap::new();
     for (key, output) in &facts.outputs {
@@ -96,8 +99,7 @@ pub fn project_package_outputs(
         }
         for host in &fleet.hosts {
             let host_path = format!("{path}.hosts.{}", host.name);
-            let collision = (host.system.clone(), host.name.clone());
-            if let Some(previous) = host_paths.insert(collision, host_path.clone()) {
+            if let Some(previous) = host_paths.insert(host.name.clone(), host_path.clone()) {
                 return Err(PackageOutputError::new(
                     host_path,
                     format!(
@@ -637,8 +639,9 @@ outputs: .{
             r#"name: "demo"
 outputs: .{
     workstation: System{ target: linux.x64 }
+    laptop: System{ target: linux.arm64 }
     blue: Fleet{ hosts: .{ edge: system.workstation } }
-    green: Fleet{ hosts: .{ edge: system.workstation } }
+    green: Fleet{ hosts: .{ edge: system.laptop } }
 }"#,
             "package.jet",
         )

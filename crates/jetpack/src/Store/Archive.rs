@@ -191,9 +191,9 @@ pub(super) fn recover_repair_quarantine_unlocked(roots: &Roots) -> io::Result<us
     let objects = roots.hangar_dir().join("objects");
     super::Ingest::ensure_real_directory(&objects, "Hangar object pool")?;
     let mut permissions = super::Ingest::MovePathPermissions::default();
-    permissions.make_writable(&quarantine, &roots.hangar_dir())?;
-    permissions.make_writable(&objects, &roots.hangar_dir())?;
     let result = (|| {
+        permissions.make_writable(&quarantine, &roots.hangar_dir())?;
+        permissions.make_writable(&objects, &roots.hangar_dir())?;
         let mut recovered = 0;
         for item in fs::read_dir(&quarantine)? {
             let item = item?;
@@ -503,70 +503,74 @@ fn repair_archive_unlocked(
     } else {
         object_path.parent().unwrap_or(hangar.as_path())
     };
-    permissions.make_writable(writable_source, &hangar)?;
-    permissions.make_writable(&quarantine, &hangar)?;
-    if had_object {
-        fs::rename(&object_path, &backup)?;
-        permissions.renamed(&object_path, &backup);
-        super::sync_store_directory(&quarantine)?;
-        super::sync_store_directory(object_path.parent().unwrap_or(hangar.as_path()))?;
-    }
-    let report = archive.report();
-    let imported = import_archive_unlocked(roots, archive);
-    let result = match imported {
-        Ok(_) => {
-            if had_object {
-                if let Err(error) = remove_tree(&backup) {
-                    return Err(io::Error::other(format!(
-                        "repair committed; quarantined backup remains at `{}`: {error}",
-                        backup.display()
-                    )));
-                }
-                super::sync_store_directory(&quarantine)?;
-            }
-            Ok(report)
+    let result = (|| {
+        permissions.make_writable(writable_source, &hangar)?;
+        permissions.make_writable(&quarantine, &hangar)?;
+        if had_object {
+            fs::rename(&object_path, &backup)?;
+            permissions.renamed(&object_path, &backup);
+            super::sync_store_directory(&quarantine)?;
+            super::sync_store_directory(object_path.parent().unwrap_or(hangar.as_path()))?;
         }
-        Err(error) => {
-            let mut rollback_errors = Vec::new();
-            match fs::symlink_metadata(&object_path) {
-                Ok(_) => {
-                    if let Err(rollback) = remove_tree(&object_path) {
-                        rollback_errors.push(format!("removing imported output: {rollback}"));
+        let report = archive.report();
+        let imported = import_archive_unlocked(roots, archive);
+        match imported {
+            Ok(_) => {
+                if had_object {
+                    if let Err(error) = remove_tree(&backup) {
+                        return Err(io::Error::other(format!(
+                            "repair committed; quarantined backup remains at `{}`: {error}",
+                            backup.display()
+                        )));
                     }
+                    super::sync_store_directory(&quarantine)?;
                 }
-                Err(rollback) if rollback.kind() != io::ErrorKind::NotFound => {
-                    rollback_errors.push(format!("checking imported output: {rollback}"));
-                }
-                Err(_) => {}
+                Ok(report)
             }
-            if had_object {
-                if rollback_errors.is_empty() {
-                    if let Err(rollback) = fs::rename(&backup, &object_path) {
-                        rollback_errors.push(format!("restoring quarantined output: {rollback}"));
-                    } else {
-                        permissions.renamed(&backup, &object_path);
-                        if let Err(rollback) = super::sync_store_directory(
-                            object_path.parent().unwrap_or(hangar.as_path()),
-                        ) {
-                            rollback_errors.push(format!("syncing restored output: {rollback}"));
+            Err(error) => {
+                let mut rollback_errors = Vec::new();
+                match fs::symlink_metadata(&object_path) {
+                    Ok(_) => {
+                        if let Err(rollback) = remove_tree(&object_path) {
+                            rollback_errors.push(format!("removing imported output: {rollback}"));
                         }
                     }
-                } else {
-                    rollback_errors.push(format!(
-                        "quarantined output remains at `{}`",
-                        backup.display()
+                    Err(rollback) if rollback.kind() != io::ErrorKind::NotFound => {
+                        rollback_errors.push(format!("checking imported output: {rollback}"));
+                    }
+                    Err(_) => {}
+                }
+                if had_object {
+                    if rollback_errors.is_empty() {
+                        if let Err(rollback) = fs::rename(&backup, &object_path) {
+                            rollback_errors
+                                .push(format!("restoring quarantined output: {rollback}"));
+                        } else {
+                            permissions.renamed(&backup, &object_path);
+                            if let Err(rollback) = super::sync_store_directory(
+                                object_path.parent().unwrap_or(hangar.as_path()),
+                            ) {
+                                rollback_errors
+                                    .push(format!("syncing restored output: {rollback}"));
+                            }
+                        }
+                    } else {
+                        rollback_errors.push(format!(
+                            "quarantined output remains at `{}`",
+                            backup.display()
+                        ));
+                    }
+                }
+                if !rollback_errors.is_empty() {
+                    return Err(io::Error::new(
+                        error.kind(),
+                        format!("{error}; repair rollback: {}", rollback_errors.join("; ")),
                     ));
                 }
+                Err(error)
             }
-            if !rollback_errors.is_empty() {
-                return Err(io::Error::new(
-                    error.kind(),
-                    format!("{error}; repair rollback: {}", rollback_errors.join("; ")),
-                ));
-            }
-            Err(error)
         }
-    };
+    })();
     match (result, permissions.restore()) {
         (Ok(report), Ok(())) => Ok(report),
         (Err(error), Ok(())) => Err(error),
@@ -741,7 +745,7 @@ fn import_archive_unlocked(roots: &Roots, archive: Archive) -> io::Result<usize>
                 return Err(invalid(&format!(
                     "archive output `{}` re-hashes as `{actual}`",
                     object.digest
-                )))
+                )));
             }
         }
 
@@ -985,6 +989,10 @@ fn verify_archive_contents(roots: &Roots, archive: &Archive) -> io::Result<()> {
 }
 
 fn select_entry_unlocked(roots: &Roots, target: &str) -> io::Result<StoreEntry> {
+    // Archive operations are receipt consumers too. Upgrade legacy package
+    // projections before selecting an entry so export, sign, and repair never
+    // publish or act on a pre-receipt view.
+    Closure::migrate_closure_graph_unlocked(roots)?;
     let entries = super::list_unlocked(roots)?;
     select_entry_from(&entries, target)
 }

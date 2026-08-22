@@ -156,13 +156,13 @@ pub(super) fn cmd_outdated(theme: &Theme, parsed: &Parsed) -> i32 {
     }
 }
 
-/// `jetpack search <query>` — local/offline package discovery (U26).
+/// `jet search <query>` — local/offline package discovery (U26).
 pub(super) fn cmd_search(theme: &Theme, parsed: &Parsed) -> i32 {
     let Some(query) = parsed.positional.first() else {
         theme.error(
             "search needs a query",
-            "`jetpack search` reads the local discovery index; it never fetches.",
-            "write `jetpack search postgres`.",
+            "`jet search` reads the local discovery index; it never fetches.",
+            "write `jet search postgres`.",
         );
         return 2;
     };
@@ -193,13 +193,13 @@ pub(super) fn cmd_search(theme: &Theme, parsed: &Parsed) -> i32 {
     0
 }
 
-/// `jetpack info <ref>` — local/offline package metadata (U26).
+/// `jet info <ref>` — local/offline package metadata (U26).
 pub(super) fn cmd_info(theme: &Theme, parsed: &Parsed) -> i32 {
     let Some(query) = parsed.positional.first() else {
         theme.error(
             "info needs a package ref",
-            "`jetpack info` reads the local discovery index; it never fetches.",
-            "write `jetpack info default.ripgrep`.",
+            "`jet info` reads the local discovery index; it never fetches.",
+            "write `jet info default.ripgrep`.",
         );
         return 2;
     };
@@ -210,11 +210,11 @@ pub(super) fn cmd_info(theme: &Theme, parsed: &Parsed) -> i32 {
     let Some(record) = index.info(query) else {
         let fix = index
             .nearest(query)
-            .map(|n| format!("try `jetpack info {n}`."))
-            .unwrap_or_else(|| "run `jetpack search <name>` to see local matches.".to_string());
+            .map(|n| format!("try `jet info {n}`."))
+            .unwrap_or_else(|| "run `jet search <name>` to see local matches.".to_string());
         theme.error(
             &format!("no local package info for `{query}`"),
-            "`jetpack info` uses only the local discovery index.",
+            "`jet info` uses only the local discovery index.",
             &fix,
         );
         return 2;
@@ -230,6 +230,7 @@ pub(super) fn cmd_info(theme: &Theme, parsed: &Parsed) -> i32 {
     println!("  source: {}", record.source);
     println!("  provenance: {}", record.provenance);
     println!("  tier: {}", record.tier);
+    println!("  maintainer liveness: {}", record.maintainer_liveness());
     println!("  gate status: {}", record.gate_status);
     if !record.options.is_empty() {
         println!("  service options:");
@@ -262,7 +263,37 @@ pub(super) fn cmd_explain(theme: &Theme, parsed: &Parsed) -> i32 {
     if Syntax::lookup(query).is_some() {
         let explanation = jet_cli::Explain::lookup(query)
             .expect("Syntax::lookup and Explain::lookup must share the dictionary");
-        print!("{}", jet_cli::Explain::render(&explanation, theme.color));
+        if parsed.flags.json {
+            let optional = |value: Option<&String>| {
+                value
+                    .map(|value| crate::JSON::quote(value))
+                    .unwrap_or_else(|| "null".to_string())
+            };
+            println!(
+                "{}",
+                jet_foundation::Report::render_status_json(
+                    "ok",
+                    true,
+                    "explain",
+                    &format!(
+                        ",\"code\":{},\"stage\":{},\"what\":{},\"why\":{},\"fix\":{},\"example\":{}",
+                        crate::JSON::quote(&explanation.code),
+                        crate::JSON::quote(&explanation.stage),
+                        crate::JSON::quote(
+                            explanation
+                                .what
+                                .as_deref()
+                                .unwrap_or(explanation.meaning.as_str())
+                        ),
+                        optional(explanation.why.as_ref()),
+                        optional(explanation.fix.as_ref()),
+                        optional(explanation.example.as_ref()),
+                    ),
+                )
+            );
+        } else {
+            print!("{}", jet_cli::Explain::render(&explanation, theme.color));
+        }
         return 0;
     }
     if Syntax::looks_like_query(query) {
@@ -383,14 +414,25 @@ fn cmd_explain_overlay(theme: &Theme, parsed: &Parsed, query: &str) -> i32 {
     let plan = match result {
         Ok(plan) => plan,
         Err(d) => {
-            eprint!(
-                "{}",
-                crate::Diagnostics::render_all(
-                    Syntax::WORKSPACE_FILE,
-                    "",
-                    std::slice::from_ref(&d)
-                )
-            );
+            if parsed.flags.json {
+                print!(
+                    "{}",
+                    crate::Diagnostics::render_all_json(
+                        &crate::Diagnostics::ReportPath::from_process(Syntax::WORKSPACE_FILE),
+                        "",
+                        std::slice::from_ref(&d),
+                    )
+                );
+            } else {
+                eprint!(
+                    "{}",
+                    crate::Diagnostics::render_all(
+                        Syntax::WORKSPACE_FILE,
+                        "",
+                        std::slice::from_ref(&d)
+                    )
+                );
+            }
             return 2;
         }
     };
@@ -425,6 +467,58 @@ fn cmd_explain_overlay(theme: &Theme, parsed: &Parsed, query: &str) -> i32 {
             "query `package-overlay:<overlay>:<package>`.",
         );
     };
+    if parsed.flags.json {
+        let owners = fact
+            .owners
+            .iter()
+            .map(|owner| crate::JSON::quote(owner))
+            .collect::<Vec<_>>()
+            .join(",");
+        let contenders = fact
+            .contenders
+            .iter()
+            .map(|contender| {
+                format!(
+                    "{{\"owner\":{},\"provider\":{},\"exact\":{},\"reason\":{},\"source\":{},\"channel\":{},\"policy\":{},\"recipe\":{},\"adapter\":{},\"signature\":{},\"cache_provenance\":{},\"update\":{}}}",
+                    crate::JSON::quote(&contender.owner_package),
+                    crate::JSON::quote(&contender.provider),
+                    crate::JSON::quote(&contender.exact_output),
+                    crate::JSON::quote(&contender.reason),
+                    crate::JSON::quote(&contender.source_ref),
+                    crate::JSON::quote(&contender.channel_input),
+                    crate::JSON::quote(&contender.policy_fingerprint),
+                    crate::JSON::quote(&contender.recipe_id),
+                    crate::JSON::quote(&contender.adapter_id),
+                    crate::JSON::quote(&contender.signature),
+                    crate::JSON::quote(&contender.cache_provenance),
+                    crate::JSON::quote(&contender.update_command),
+                )
+            })
+            .collect::<Vec<_>>()
+            .join(",");
+        println!(
+            "{}",
+            jet_foundation::Report::render_status_json(
+                "ok",
+                true,
+                "explain",
+                &format!(
+                    ",\"query\":{},\"lens\":\"overlay\",\"semantic_key\":{},\"owners\":[{}],\"contenders\":[{}],\"provider\":{},\"platform\":{},\"exact\":{},\"policy\":{},\"update\":{},\"offline\":{}",
+                    crate::JSON::quote(query),
+                    crate::JSON::quote(&fact.semantic_key),
+                    owners,
+                    contenders,
+                    crate::JSON::quote(&fact.provider),
+                    crate::JSON::quote(&fact.platform),
+                    crate::JSON::quote(&fact.exact_artifact),
+                    crate::JSON::quote(&fact.policy_fingerprint),
+                    crate::JSON::quote(&fact.update_command),
+                    fact.offline_satisfied,
+                ),
+            )
+        );
+        return 0;
+    }
     println!("{}", fact.semantic_key);
     println!("  owners: {}", fact.owners.join(", "));
     println!("  winner: {}", empty_dash(&fact.exact_artifact));
@@ -726,7 +820,7 @@ fn discovery_index(theme: &Theme, parsed: &Parsed) -> Result<Discovery::Index, i
             theme.error(
                 "local discovery index is malformed",
                 &e,
-                "delete `.jet/discovery/index.jsonl` and rerun `jetpack search` from a project with env metadata.",
+                "delete `.jet/discovery/index.jsonl` and rerun `jet search` from a project with env metadata.",
             );
             return Err(2);
         }
@@ -757,7 +851,7 @@ fn discovery_index(theme: &Theme, parsed: &Parsed) -> Result<Discovery::Index, i
     if index.is_empty() {
         theme.error(
             "no local discovery index",
-            "`jetpack search` and `jetpack info` never fetch package metadata.",
+            "`jet search` and `jet info` never fetch package metadata.",
             "run from a project with env metadata, or realize packages once so hangar metadata exists.",
         );
         return Err(2);

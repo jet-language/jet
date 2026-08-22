@@ -77,6 +77,10 @@ impl Attempt {
         self.status = "ok".to_string();
     }
 
+    pub fn mark_failed(&mut self) {
+        self.status = "failed".to_string();
+    }
+
     pub fn persist(&mut self, hangar_dir: &Path) -> std::io::Result<()> {
         validate_id(&self.id)?;
         let dir = log_dir(hangar_dir, &self.package).join(&self.id);
@@ -85,8 +89,14 @@ impl Attempt {
         self.log_dir = dir.to_string_lossy().into_owned();
         for step in &self.steps {
             let stem = format!("{:02}-{}", step.index, safe_name(&step.name));
-            write_atomic(&dir.join(format!("{stem}.stdout.log")), step.stdout.as_bytes())?;
-            write_atomic(&dir.join(format!("{stem}.stderr.log")), step.stderr.as_bytes())?;
+            write_atomic(
+                &dir.join(format!("{stem}.stdout.log")),
+                step.stdout.as_bytes(),
+            )?;
+            write_atomic(
+                &dir.join(format!("{stem}.stderr.log")),
+                step.stderr.as_bytes(),
+            )?;
         }
         let json = self.to_json();
         write_atomic(&dir.join("attempt.json"), json.as_bytes())?;
@@ -193,7 +203,10 @@ pub fn recover_scratch(hangar_dir: &Path) -> io::Result<usize> {
         if metadata.file_type().is_symlink() {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidData,
-                format!("failed-build scratch stage is a symlink: {}", path.display()),
+                format!(
+                    "failed-build scratch stage is a symlink: {}",
+                    path.display()
+                ),
             ));
         }
         remove_tree_without_following(&path)?;
@@ -229,6 +242,57 @@ pub fn latest_json(hangar_dir: &Path, package: &str) -> Result<Option<String>, S
     std::fs::read_to_string(&path)
         .map(Some)
         .map_err(|e| e.to_string())
+}
+
+/// Promote a failed attempt out of a private reproducibility root before the
+/// root is removed. The published scratch tree is copied through a staging
+/// directory, and the attempt is re-persisted with paths in the user Hangar.
+pub fn promote_failed_attempt(
+    source_hangar: &Path,
+    target_hangar: &Path,
+    package: &str,
+) -> io::Result<bool> {
+    let Some(mut attempt) = latest(source_hangar, package).map_err(io::Error::other)? else {
+        return Ok(false);
+    };
+    if attempt.scratch_dir.is_empty() {
+        return Ok(false);
+    }
+    validate_id(&attempt.id)?;
+
+    let source_root = source_hangar.join(SCRATCH_ROOT);
+    let source_root = std::fs::canonicalize(&source_root)?;
+    let source_scratch = std::fs::canonicalize(&attempt.scratch_dir)?;
+    if source_scratch == source_root || !source_scratch.starts_with(&source_root) {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "failed-build scratch path escapes its private Hangar",
+        ));
+    }
+
+    let target_root = target_hangar.join(SCRATCH_ROOT);
+    ensure_real_directory(&target_root, "failed-build scratch root")?;
+    let target_scratch = target_root.join(&attempt.id);
+    ensure_absent(&target_scratch, "promoted failed-build scratch")?;
+    let sequence = WRITE_SEQUENCE.fetch_add(1, Ordering::Relaxed);
+    let stage = target_root.join(format!(
+        ".jet-build-stage-promote-{}-{}-{}",
+        attempt.id,
+        std::process::id(),
+        sequence
+    ));
+    let result = (|| {
+        ensure_absent(&stage, "promoted failed-build scratch staging")?;
+        copy_tree(&source_scratch, &stage)?;
+        std::fs::rename(&stage, &target_scratch)?;
+        attempt.scratch_dir = target_scratch.to_string_lossy().into_owned();
+        attempt.persist(target_hangar)
+    })();
+    if result.is_err() {
+        let _ = remove_tree_without_following(&stage);
+    }
+    result?;
+    Ok(true)
 }
 
 pub fn text_logs(attempt: &Attempt) -> String {
@@ -356,7 +420,10 @@ fn parse_attempt(text: &str) -> Result<Attempt, String> {
     Ok(attempt)
 }
 
-fn str_field(obj: &std::collections::BTreeMap<String, JSONValue>, key: &str) -> Result<String, String> {
+fn str_field(
+    obj: &std::collections::BTreeMap<String, JSONValue>,
+    key: &str,
+) -> Result<String, String> {
     obj.get(key)
         .ok_or_else(|| format!("missing key `{key}`"))?
         .as_str()
@@ -376,7 +443,10 @@ fn copy_tree(src: &Path, dst: &Path) -> std::io::Result<()> {
     if source_metadata.file_type().is_symlink() || !source_metadata.is_dir() {
         return Err(io::Error::new(
             io::ErrorKind::InvalidData,
-            format!("build scratch source is not a real directory: {}", src.display()),
+            format!(
+                "build scratch source is not a real directory: {}",
+                src.display()
+            ),
         ));
     }
     std::fs::create_dir(dst)?;
@@ -398,7 +468,10 @@ fn copy_tree(src: &Path, dst: &Path) -> std::io::Result<()> {
         } else {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidData,
-                format!("build scratch contains an unsupported entry: {}", from.display()),
+                format!(
+                    "build scratch contains an unsupported entry: {}",
+                    from.display()
+                ),
             ));
         }
     }

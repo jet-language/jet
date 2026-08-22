@@ -84,12 +84,12 @@ impl Theme {
         self.shared().border(t)
     }
 
-    /// The aligned `jetpack` gutter every status line shares.
+    /// The aligned `jet` gutter every status line shares.
     fn gutter(&self) -> String {
         self.cyan(Syntax::JETPACK_PROMPT_LABEL)
     }
 
-    /// A primary status line: `  jetpack  <msg>`.
+    /// A primary status line: `  jet  <msg>`.
     pub fn status(&self, msg: &str) {
         eprintln!("  {}  {}", self.gutter(), msg);
     }
@@ -416,10 +416,10 @@ impl Theme {
         }
     }
 
-    /// Render an operational Jetpack failure through the registered E1340 row.
+    /// Render an operational Jet failure through the registered E1340 row.
     pub fn error(&self, headline: &str, why: &str, fix: &str) {
         let why = if why.is_empty() {
-            "Jetpack cannot finish this command without the input or valid operation named above"
+            "Jet cannot finish this command without the input or valid operation named above"
         } else {
             why
         };
@@ -605,7 +605,7 @@ pub fn ref_error(theme: &Theme, err: &RefError) {
     match err {
         RefError::MissingSeparator(raw) => theme.error(
             &format!("`{raw}` is missing a source"),
-            "Jetpack refs are written `name#version@source`; `#version` is optional.",
+            "Jet refs are written `name#version@source`; `#version` is optional.",
             &format!("try `{example}` or `owner/repo@github`."),
         ),
         RefError::EmptyHalf(raw) => theme.error(

@@ -664,10 +664,11 @@ mod tests {
         assert!(fish.contains("--on-variable PWD"));
         assert!(fish.contains("command jet env export fish"));
 
-        // Help prefill ships with the hook so normal shells (not only jetpack
+        // Help prefill ships with the hook so normal shells (not only Jet
         // enter) get Alt-? / literal `jet ?` editable-buffer insertion.
         for hook in [&bash, &zsh, &fish] {
-            assert!(hook.contains("__jetpack_help_prefill"));
+            assert!(hook.contains("__jet_help_prefill"));
+            assert!(!hook.contains("__jetpack_"));
             assert!(hook.contains("JET_HELP_SHELL_PREFILL"));
         }
         assert!(bash.contains("READLINE_LINE=$picked"));

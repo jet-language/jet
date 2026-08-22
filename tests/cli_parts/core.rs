@@ -475,6 +475,48 @@ fn project_parts_lists_skipped_explicit_and_conflicting_modules() {
     assert!(stderr.contains(" Fix:"), "{stderr}");
 }
 
+#[test]
+fn project_parts_lists_plain_source_files() {
+    let dir = isolated_cwd("project_parts_plain_files");
+    for name in ["one", "two", "three", "four", "five"] {
+        fs::write(dir.join(format!("{name}.jet")), "fn run() {}\n").unwrap();
+    }
+
+    let listed = Command::new(jet())
+        .args(["project", "parts"])
+        .current_dir(&dir)
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    assert_eq!(listed.status.code(), Some(0));
+    let stdout = String::from_utf8(listed.stdout).unwrap();
+    assert_eq!(stdout.lines().count(), 5, "{stdout}");
+    for name in ["one", "two", "three", "four", "five"] {
+        assert!(stdout.contains(&format!("project.{name}")), "{stdout}");
+        assert!(stdout.contains(&format!("{name}.jet")), "{stdout}");
+    }
+
+    let skipped = Command::new(jet())
+        .args(["project", "parts", "--skipped"])
+        .current_dir(&dir)
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    assert_eq!(skipped.status.code(), Some(0));
+    assert!(skipped.stdout.is_empty(), "unexpected stdout: {:?}", skipped.stdout);
+
+    let json = Command::new(jet())
+        .args(["project", "parts", "--json"])
+        .current_dir(&dir)
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    assert_eq!(json.status.code(), Some(0));
+    let json = String::from_utf8(json.stdout).unwrap();
+    assert!(parse_json(&json).is_ok(), "project parts JSON must parse: {json}");
+    assert!(json.contains("\"name\":\"project.one\"") && json.contains("\"path\":\"five.jet\""), "{json}");
+}
+
 #[cfg(unix)]
 #[test]
 fn project_parts_reports_authority_scan_failures() {

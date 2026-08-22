@@ -2,7 +2,7 @@ use crate::Syntax;
 use jet_foundation::Terminal::Theme;
 
 pub(super) fn usage_with_color(color: bool) -> String {
-    let bin = Syntax::JETPACK_BINARY_NAME;
+    let bin = Syntax::BINARY_NAME;
     let pack = Syntax::ENV_FILE;
     let theme = Theme::new(color);
     let h = |s: &str| theme.accent(s);
@@ -189,7 +189,7 @@ mod tests {
         assert!(Syntax::JETPACK_VERBS.contains(&"doctor"));
         assert!(Syntax::JETPACK_VERBS.contains(&"cache"));
         assert!(Syntax::JETPACK_VERBS.contains(&"shared-store"));
-        assert!(usage_with_color(false).contains("jetpack doctor [--online]"));
+        assert!(usage_with_color(false).contains("jet doctor [--online]"));
         assert_eq!(RuntimePolicy::verb_policy("doctor", &[]).verb, "doctor");
     }
 

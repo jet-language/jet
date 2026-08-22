@@ -253,7 +253,19 @@ pub(super) fn cmd_hangar(theme: &Theme, parsed: &Parsed) -> i32 {
         }
         Some("du") | None => {
             let roots = Store::resolve();
-            let entries = Store::du(&roots);
+            let entries = match Store::du(&roots) {
+                Ok(entries) => entries,
+                Err(error) => {
+                    return hangar_report_error(
+                        theme,
+                        parsed,
+                        "E1340",
+                        "could not read Hangar disk usage",
+                        &error.to_string(),
+                        "run `jet hangar recover`, repair the reported state, then retry.",
+                    )
+                }
+            };
             if entries.is_empty() {
                 if parsed.flags.json {
                     hangar_status_json(

@@ -178,7 +178,14 @@ pub(crate) fn build_for_cache(
         let left = match realize_uncached(&left_workspace.roots, &left_ctx, request) {
             Ok(realized) => realized,
             Err(_error) if attempt + 1 < attempts => continue,
-            Err(error) => return Err(error),
+            Err(error) => {
+                let _ = super::super::BuildDebug::promote_failed_attempt(
+                    &left_workspace.roots.hangar_dir(),
+                    &roots.hangar_dir(),
+                    request_package(request),
+                );
+                return Err(error);
+            }
         };
         if left.source_state != super::super::Provider::SourceState::Built {
             if require_built {
@@ -209,7 +216,14 @@ pub(crate) fn build_for_cache(
         let right = match realize_uncached(&right_workspace.roots, &right_ctx, request) {
             Ok(realized) => realized,
             Err(_error) if attempt + 1 < attempts => continue,
-            Err(error) => return Err(error),
+            Err(error) => {
+                let _ = super::super::BuildDebug::promote_failed_attempt(
+                    &right_workspace.roots.hangar_dir(),
+                    &roots.hangar_dir(),
+                    request_package(request),
+                );
+                return Err(error);
+            }
         };
         let left_entry = entry_from_realized(&left_workspace.roots, &left)
             .map_err(super::RealizeError::Store)?;
@@ -273,6 +287,13 @@ pub(crate) fn build_for_cache(
     Err(super::RealizeError::Store(io::Error::other(
         "independent reproducibility runner exhausted its attempts",
     )))
+}
+
+fn request_package<'a>(request: &'a super::RealizeRequest<'a>) -> &'a str {
+    match request {
+        super::RealizeRequest::Package { spec, .. } => &spec.package,
+        super::RealizeRequest::Adapter { plan, .. } => &plan.name,
+    }
 }
 
 fn check_cancelled(options: &super::IndependentRootOptions<'_>) -> Result<(), super::RealizeError> {

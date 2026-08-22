@@ -31,10 +31,7 @@ impl TempDir {
             .map_err(|error| error.to_string())?
             .as_nanos();
         for attempt in 0..32u32 {
-            let path = base.join(format!(
-                "jet-fmt-{}-{stamp}-{attempt}",
-                std::process::id()
-            ));
+            let path = base.join(format!("jet-fmt-{}-{stamp}-{attempt}", std::process::id()));
             match fs::create_dir(&path) {
                 Ok(()) => return Ok(Self(path)),
                 Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
@@ -115,11 +112,7 @@ pub(super) fn cmd_fmt(theme: &Theme, parsed: &Parsed) -> i32 {
         return ExitCodes::USER_ERROR;
     };
     let formatter_package = formatter.package.clone();
-    let Some(formatter_ref) = plan
-        .refs
-        .iter()
-        .find(|spec| spec.raw == formatter_package)
-    else {
+    let Some(formatter_ref) = plan.refs.iter().find(|spec| spec.raw == formatter_package) else {
         theme.error_coded(
             "E1340",
             "the environment formatter is not in the realization plan",
@@ -174,8 +167,7 @@ pub(super) fn cmd_fmt(theme: &Theme, parsed: &Parsed) -> i32 {
         files
             .into_iter()
             .filter(|path| {
-                relative_display(&project_dir, path)
-                    .is_some_and(|rel| changed.contains(&rel))
+                relative_display(&project_dir, path).is_some_and(|rel| changed.contains(&rel))
             })
             .collect::<Vec<_>>()
     } else {
@@ -208,7 +200,7 @@ pub(super) fn cmd_fmt(theme: &Theme, parsed: &Parsed) -> i32 {
             &project_dir,
             &changed,
             parsed.flags.json,
-            parsed.flags.fmt_diff,
+            parsed.flags.fmt_diff || parsed.flags.fmt_dry_run,
         );
         return ExitCodes::USER_ERROR;
     }
@@ -361,9 +353,7 @@ fn stage_and_run(
             theme.error_coded(
                 "E1340",
                 &format!("environment formatter {program} failed"),
-                &format!(
-                    "the formatter returned exit code {code}; source files were not written"
-                ),
+                &format!("the formatter returned exit code {code}; source files were not written"),
                 "fix the formatter configuration or run the realized formatter directly",
             );
             return Err(code);
@@ -418,13 +408,7 @@ fn changed_files(root: &Path) -> Result<BTreeSet<String>, String> {
     Ok(changed)
 }
 
-fn report_changed(
-    _theme: &Theme,
-    root: &Path,
-    files: &[&StagedFile],
-    json: bool,
-    show_diff: bool,
-) {
+fn report_changed(_theme: &Theme, root: &Path, files: &[&StagedFile], json: bool, show_diff: bool) {
     let entries = files
         .iter()
         .filter_map(|file| {
@@ -432,7 +416,9 @@ fn report_changed(
                 let diff = String::from_utf8(file.before.clone())
                     .ok()
                     .zip(String::from_utf8(file.after.clone()).ok())
-                    .map(|(before, after)| jet_codegen::Formatter::unified_diff(&path, &before, &after));
+                    .map(|(before, after)| {
+                        jet_codegen::Formatter::unified_diff(&path, &before, &after)
+                    });
                 (path, diff)
             })
         })

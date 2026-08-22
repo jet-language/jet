@@ -7,7 +7,7 @@ const JOURNAL_DIR: &str = "journal";
 const PARTIAL_SUFFIX: &str = ".partial";
 const TXN_SUFFIX: &str = ".txn";
 const COMPACT_AFTER: usize = 64;
-pub(super) const RECEIPTS_DIR: &str = "receipts";
+pub(crate) const RECEIPTS_DIR: &str = "receipts";
 const RECEIPT_PARTIAL_SUFFIX: &str = ".partial";
 const MAX_CLOSURE_OBJECTS: usize = 1_000_000;
 const MAX_CLOSURE_RECORDS: usize = 1_000_000;
@@ -26,20 +26,95 @@ pub struct DuEntry {
 /// output tree; Nix compatibility outputs are counted after their native
 /// Hangar projection, so Jetpack reports bytes it owns rather than a host-store
 /// estimate.
-pub fn du(roots: &Roots) -> Vec<DuEntry> {
-    super::list(roots)
-        .into_iter()
-        .map(|e| {
-            let bytes = dir_size(std::path::Path::new(&e.out));
-            let source_built = e.envelope.provenance.contains("core-");
-            DuEntry {
-                id: e.id,
-                name: e.name,
-                bytes,
-                source_built,
-            }
-        })
-        .collect()
+pub fn du(roots: &Roots) -> std::io::Result<Vec<DuEntry>> {
+    super::super::RuntimePolicy::with_lock(&roots.root, "hangar", || {
+        // Do not migrate here: a damaged metadata path must be compared with
+        // the committed journal, not promoted into a new projection.
+        let (_, graph) = recover_closure_journal_graph_unlocked(roots)?;
+        let entries = super::list_unlocked(roots)?;
+        let entry_ids = entries
+            .iter()
+            .map(|entry| entry.id.as_str())
+            .collect::<BTreeSet<_>>();
+        if let Some(record) = graph
+            .records
+            .values()
+            .find(|record| !entry_ids.contains(record.id.as_str()))
+        {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                format!(
+                    "closure graph has package record `{}` but its metadata projection is missing",
+                    record.id
+                ),
+            ));
+        }
+        entries
+            .into_iter()
+            .map(|entry| {
+                let object = graph.objects.get(&entry.envelope.output_hash).ok_or_else(|| {
+                    std::io::Error::new(
+                        std::io::ErrorKind::InvalidData,
+                        format!(
+                            "closure graph has no output object `{}` for `{}`",
+                            entry.envelope.output_hash, entry.id
+                        ),
+                    )
+                })?;
+                let metadata_path = std::path::Path::new(&entry.out);
+                if metadata_path != std::path::Path::new(&object.path) {
+                    return Err(std::io::Error::new(
+                        std::io::ErrorKind::InvalidData,
+                        format!(
+                            "Hangar metadata output for `{}` disagrees with its closure path",
+                            entry.id
+                        ),
+                    ));
+                }
+                let bytes = checked_dir_size(metadata_path)?;
+                let source_built = entry.envelope.provenance.contains("core-");
+                Ok(DuEntry {
+                    id: entry.id,
+                    name: entry.name,
+                    bytes,
+                    source_built,
+                })
+            })
+            .collect()
+    })
+}
+
+fn checked_dir_size(path: &std::path::Path) -> std::io::Result<u64> {
+    let metadata = fs::symlink_metadata(path)?;
+    if metadata.file_type().is_symlink() || !metadata.is_dir() {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            format!("Hangar output `{}` is not a real directory", path.display()),
+        ));
+    }
+    let mut total = 0u64;
+    for entry in fs::read_dir(path)? {
+        let entry = entry?;
+        let child = entry.path();
+        let metadata = fs::symlink_metadata(&child)?;
+        if metadata.file_type().is_symlink() {
+            continue;
+        }
+        let bytes = if metadata.is_dir() {
+            checked_dir_size(&child)?
+        } else if metadata.is_file() {
+            metadata.len()
+        } else {
+            0
+        };
+        total = total.checked_add(bytes).ok_or_else(|| {
+            std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                format!("Hangar output `{}` is too large to measure", path.display()),
+            )
+        })?;
+    }
+    Ok(total)
 }
 
 /// Total bytes on disk of a directory tree (0 if it isn't a local directory).
@@ -761,7 +836,9 @@ pub fn migrate_closure_graph(roots: &Roots) -> std::io::Result<usize> {
     })
 }
 
-fn migrate_closure_graph_unlocked(roots: &Roots) -> std::io::Result<(usize, ClosureGraph)> {
+pub(super) fn migrate_closure_graph_unlocked(
+    roots: &Roots,
+) -> std::io::Result<(usize, ClosureGraph)> {
     let (_, mut graph) = recover_closure_journal_graph_unlocked(roots)?;
     let mut entries = list_unlocked(roots)?;
     entries.sort_by(|left, right| left.id.cmp(&right.id));

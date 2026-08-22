@@ -1125,7 +1125,7 @@ fn run_jet_tests(dir: &std::path::Path) -> bool {
     {
         Ok(status) => status.success(),
         Err(error) => {
-            eprintln!("jetpack could not run jet test: {error}");
+            eprintln!("jet could not run jet test: {error}");
             false
         }
     }

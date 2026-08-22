@@ -805,7 +805,9 @@ Shipped slice evidence:
 - Failed-build shell recreates the exact sandbox and declared closure.
 - Stable JSON and LSP use the same fact engine. Hangar status output uses the
   `jet.report/v1` status schema, and Hangar failures use the registered report
-  renderer with the same What, Why, and Fix fields as other Jet tools.
+  renderer with the same What, Why, and Fix fields as other Jet tools. Every
+  `explain --json` route uses that renderer too; no Hangar or explain command
+  emits a legacy schema envelope.
 - Hangar recovery proofs cover path escape, source mutation, corrupt payloads,
   stale leases, interrupted repair, and concurrent closure updates. Failed
   operations preserve the committed object and leave repair evidence.

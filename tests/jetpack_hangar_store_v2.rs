@@ -1344,3 +1344,129 @@ fn hangar_recovery_reclaims_crashed_stages_and_dead_leases_without_following_esc
         fs::remove_file(lease_root).unwrap();
     }
 }
+
+#[test]
+fn hangar_du_rejects_corrupt_output_projection_without_following_escape() {
+    let root = Scratch::new("hangar-v2-du-root");
+    let project = Scratch::new("hangar-v2-du-project");
+    let source = Scratch::new("hangar-v2-du-source");
+    fs::write(source.join("payload"), "owned bytes").unwrap();
+
+    let ingest = jetpack()
+        .args([
+            "hangar",
+            "ingest",
+            source.path.to_str().unwrap(),
+            "--name",
+            "du-proof",
+            "--ref",
+            "du-proof@fixture",
+            "--no-color",
+        ])
+        .current_dir(&project.path)
+        .env("JETPACK_ROOT", &root.path)
+        .output()
+        .unwrap();
+    assert!(
+        ingest.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&ingest.stderr)
+    );
+
+    let roots = jetpack::Store::Roots {
+        root: root.path.clone(),
+        dev_mode: false,
+    };
+    let entry = jetpack::Store::find_by_reference(&roots, "du-proof@fixture").unwrap();
+    let entry_dir = roots.hangar_dir().join(&entry.id);
+    make_tree_writable(&entry_dir);
+    let outside = Scratch::new("hangar-v2-du-outside");
+    fs::write(outside.join("must-survive"), "outside bytes").unwrap();
+    let meta = entry_dir.join("meta.json");
+    let original = fs::read_to_string(&meta).unwrap();
+    let escaped = original.replace(&entry.out, &outside.path.to_string_lossy());
+    assert_ne!(escaped, original);
+    fs::write(&meta, escaped).unwrap();
+    let journal = roots.hangar_dir().join("closure-db/journal");
+    let journal_backup = roots.hangar_dir().join("closure-db/journal.corrupt-backup");
+    fs::rename(&journal, &journal_backup).unwrap();
+
+    let du = jetpack()
+        .args(["hangar", "du", "--json", "--no-color"])
+        .current_dir(&project.path)
+        .env("JETPACK_ROOT", &root.path)
+        .output()
+        .unwrap();
+    fs::rename(&journal_backup, &journal).unwrap();
+    assert_eq!(
+        du.status.code(),
+        Some(2),
+        "du stdout: {}; stderr: {}",
+        String::from_utf8_lossy(&du.stdout),
+        String::from_utf8_lossy(&du.stderr)
+    );
+    assert!(
+        du.stderr.is_empty(),
+        "JSON disk-usage failure leaked stderr: {:?}",
+        du.stderr
+    );
+    let report = jetpack::JSON::parse(String::from_utf8_lossy(&du.stdout).trim())
+        .expect("du corruption report");
+    assert_eq!(json_string(&report, "schema"), "jet.report/v1");
+    assert_eq!(json_string(&report, "moment"), "compile");
+    assert_eq!(json_string(&report, "code"), "E1340");
+    assert!(entry.out.starts_with(root.path.to_str().unwrap()));
+    assert!(Path::new(&entry.out).is_dir());
+    assert_eq!(
+        fs::read_to_string(outside.path.join("must-survive")).unwrap(),
+        "outside bytes"
+    );
+
+    let repair = jetpack()
+        .args(["hangar", "recover", "--json", "--no-color"])
+        .current_dir(&project.path)
+        .env("JETPACK_ROOT", &root.path)
+        .output()
+        .unwrap();
+    assert!(
+        repair.status.success(),
+        "repair stderr: {}",
+        String::from_utf8_lossy(&repair.stderr)
+    );
+    assert!(repair.stderr.is_empty(), "JSON repair leaked stderr");
+    let repair_report = jetpack::JSON::parse(String::from_utf8_lossy(&repair.stdout).trim())
+        .expect("repair report");
+    assert_eq!(json_string(&repair_report, "schema"), "jet.report/v1");
+    assert_eq!(json_string(&repair_report, "action"), "recover");
+    assert_eq!(fs::read_to_string(&meta).unwrap(), original);
+    assert_eq!(
+        fs::read_to_string(outside.path.join("must-survive")).unwrap(),
+        "outside bytes"
+    );
+}
+
+#[test]
+fn explain_json_uses_the_report_schema_for_registered_queries() {
+    let project = Scratch::new("hangar-v2-explain-project");
+    for command in ["jet", "jetpack"] {
+        let mut process = if command == "jet" { jet() } else { jetpack() };
+        let output = process
+            .args(["explain", "@", "--json", "--no-color"])
+            .current_dir(&project.path)
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{command} explain stderr: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert!(output.stderr.is_empty(), "{command} JSON explain leaked stderr");
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        assert!(!stdout.contains("schema_version"), "legacy explain schema: {stdout}");
+        let report = jetpack::JSON::parse(stdout.trim()).expect("explain report");
+        assert_eq!(json_string(&report, "schema"), "jet.report/v1");
+        assert_eq!(json_string(&report, "moment"), "tool");
+        assert_eq!(json_string(&report, "action"), "explain");
+        assert_eq!(json_string(&report, "status"), "ok");
+    }
+}

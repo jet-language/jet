@@ -1141,7 +1141,7 @@ fn shape6_inspect_routes_and_retired_bare_snapshots() {
         }
     }
 
-    for verb in ["build", "run", "test", "fmt"] {
+    for verb in ["build", "run", "test", "fmt", "search"] {
         assert!(jet::CLI::is_canonical_top_level(verb), "jet {verb} must stay flat");
         assert!(jet::CLI::moved_command(verb).is_none(), "jet {verb} must not redirect");
     }

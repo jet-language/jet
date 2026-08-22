@@ -440,6 +440,41 @@ mod tests {
     }
 
     #[test]
+    fn lock_receipt_version_mismatch_fails_closed_before_projection() {
+        let (roots, _g) = temp_roots();
+        let entry = ingest_fixture(
+            &roots,
+            "receipt-version-mismatch",
+            &[("out", "bytes")],
+            Vec::new(),
+        );
+        let project = roots.root.join("receipt-version-mismatch-project");
+        let managed = project.join(crate::Syntax::SOURCE_ROOT_DIR);
+        fs::create_dir_all(&managed).unwrap();
+        fs::write(
+            managed.join("lock"),
+            format!(
+                "version = 1\n\n[[package]]\nname = \"{}\"\nversion = \"wrong-version\"\nsource = {{ path = \"{}\" }}\nfingerprint = \"\"\ndependencies = []\n",
+                entry.entry.name, entry.entry.reference
+            ),
+        )
+        .unwrap();
+
+        let error = super::record_receipt_projection(
+            &project,
+            &entry.entry.name,
+            &entry.entry.version,
+            &entry.entry.reference,
+            &entry.entry.envelope.output_hash,
+            &entry.entry.receipt,
+        )
+        .unwrap_err();
+        assert!(error.to_string().contains("no matching package"));
+        let lock = crate::Lock::load(&project).unwrap();
+        assert!(lock.packages[0].receipt.is_none());
+    }
+
+    #[test]
     fn clean_sweeps_unreachable_receipt_objects() {
         let (roots, _g) = temp_roots();
         let entry = ingest_fixture(&roots, "orphan-receipt", &[("out", "bytes")], Vec::new());

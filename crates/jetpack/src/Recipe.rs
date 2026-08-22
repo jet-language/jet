@@ -1252,9 +1252,12 @@ fn confined_source(
         .canonicalize()
         .map_err(|error| recipe_io_error("could not resolve the recipe source root", error))?;
     let path = source_root.join(relative);
-    let canonical = path
-        .canonicalize()
-        .map_err(|error| recipe_io_error("could not resolve a recipe source", error))?;
+    let canonical = path.canonicalize().map_err(|error| {
+        recipe_io_error(
+            &format!("could not resolve recipe source `{source}`"),
+            error,
+        )
+    })?;
     if !canonical.starts_with(&root) {
         return Err(e1237_source(source));
     }

@@ -116,6 +116,10 @@ impl ProjectPartConflict {
 pub struct ProjectPartsReport {
     pub parts: Vec<ProjectPart>,
     pub conflicts: Vec<ProjectPartConflict>,
+    /// Successfully parsed source files without a declared module part.
+    /// These remain loaded project modules for tooling, but are not names
+    /// accepted by `use project.…`.
+    pub source_files: Vec<PathBuf>,
 }
 
 impl ProjectPartsReport {
@@ -221,6 +225,7 @@ pub fn scan_with_diagnostics(
 
     let mut explicit = BTreeSet::new();
     let mut declarations: BTreeMap<String, Vec<(PathBuf, bool)>> = BTreeMap::new();
+    let mut source_files = Vec::new();
     let mut failures = Vec::new();
     if let Some((path, error)) = authority_failure {
         failures.push(authority_failure_for(path, error));
@@ -278,6 +283,7 @@ pub fn scan_with_diagnostics(
                 continue;
             }
         };
+        source_files.push(path.clone());
         if let Some(file) = checked_files.iter().find(|file| file.path == path) {
             if let Some(resolver) = resolver.as_ref() {
                 if let Err(error) = resolver.revalidate_file(file) {
@@ -310,7 +316,17 @@ pub fn scan_with_diagnostics(
         }
     }
 
-    let mut report = ProjectPartsReport::default();
+    let declared_paths = declarations
+        .values()
+        .flat_map(|parts| parts.iter().map(|(path, _)| path.clone()))
+        .collect::<BTreeSet<_>>();
+    let mut report = ProjectPartsReport {
+        source_files: source_files
+            .into_iter()
+            .filter(|path| !declared_paths.contains(path))
+            .collect(),
+        ..ProjectPartsReport::default()
+    };
     for (name, declarations) in declarations {
         if declarations.len() > 1 {
             report.conflicts.push(ProjectPartConflict {

@@ -1,12 +1,12 @@
 use super::options_rendering::{
     clean_bool_json, clean_symbol, is_option_priority_metadata, option_default, option_doc,
-    option_rows_json, option_type, option_value, prefixed_options, resolved_option,
-    service_extra, shell_single_quote,
+    option_rows_json, option_type, option_value, prefixed_options, resolved_option, service_extra,
+    shell_single_quote,
 };
 use super::root_projection::enable_unit;
 use super::studio_projection::make_executable;
-use jet_env_model::ModuleEval::{EnvPlan, ImageKind, SystemPlan};
 use crate::JSON;
+use jet_env_model::ModuleEval::{EnvPlan, ImageKind, SystemPlan};
 use std::fs;
 use std::path::Path;
 
@@ -172,7 +172,7 @@ pub(super) fn write_fleet_deploy_facts(
                 ),
             )?;
             make_executable(&script_path)?;
-            hosts.push(JSON::object_of(&[
+            hosts.push(compact_object(&[
                 ("fleet", &fleet.name),
                 ("host", &host.name),
                 ("system", &host.system),
@@ -200,6 +200,17 @@ pub(super) fn write_fleet_deploy_facts(
     let launcher_path = bin_dir.join("jetos-fleet-deploy");
     fs::write(&launcher_path, launcher)?;
     make_executable(&launcher_path)
+}
+
+fn compact_object(fields: &[(&str, &str)]) -> String {
+    format!(
+        "{{{}}}",
+        fields
+            .iter()
+            .map(|(key, value)| format!("{}:{}", JSON::quote(key), JSON::quote(value)))
+            .collect::<Vec<_>>()
+            .join(",")
+    )
 }
 
 fn render_fleet_host_script(

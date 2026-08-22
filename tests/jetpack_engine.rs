@@ -2505,6 +2505,31 @@ fn override_draft_writes_reviewed_workspace_policy_and_explains_it() {
             && stdout.contains("policy: workspace.overlay.resolved:foo"),
         "explain: {stdout}"
     );
+
+    let explain_json = jetpack()
+        .args([
+            "explain",
+            "package-overlay:plasma_beta:foo",
+            "--json",
+            "--no-color",
+        ])
+        .current_dir(&project.path)
+        .output()
+        .unwrap();
+    assert!(
+        explain_json.status.success(),
+        "JSON explain stderr: {}",
+        String::from_utf8_lossy(&explain_json.stderr)
+    );
+    assert!(explain_json.stderr.is_empty());
+    let explain_json_stdout = String::from_utf8_lossy(&explain_json.stdout);
+    assert!(!explain_json_stdout.contains("schema_version"));
+    let report = jetpack::JSON::parse(explain_json_stdout.trim()).expect("overlay explain JSON");
+    assert_eq!(json_string(&report, "schema"), "jet.report/v1");
+    assert_eq!(json_string(&report, "moment"), "tool");
+    assert_eq!(json_string(&report, "action"), "explain");
+    assert_eq!(json_string(&report, "status"), "ok");
+    assert_eq!(json_string(&report, "lens"), "overlay");
 }
 
 #[test]
@@ -8055,8 +8080,9 @@ fn package_host_split_preserves_system_projection_and_reaches_jetos() {
         .unwrap();
     let before = jet_env_model::ModuleEval::project_package_outputs(&before_facts).unwrap();
     let split = jet()
-        .args(["split", "hosts", "server", "--no-color"])
+        .args(["split", "hosts", "server"])
         .current_dir(&project.path)
+        .env("NO_COLOR", "1")
         .output()
         .unwrap();
     assert!(
@@ -8095,6 +8121,44 @@ fn package_host_split_preserves_system_projection_and_reaches_jetos() {
     let plan_json = String::from_utf8_lossy(&plan.stdout);
     assert!(plan_json.contains("\"host\":\"halcyon\""), "{plan_json}");
     assert!(plan_json.contains("\"graph_identity\":\""), "{plan_json}");
+}
+
+#[test]
+fn jetos_plan_rejects_package_fleet_host_path_collision_before_generation() {
+    let project = Scratch::new("jetos-package-fleet-host-collision");
+    fs::write(
+        project.join("package.jet"),
+        r#"name: "demo"
+outputs: .{
+    workstation: System{ target: linux.x64 }
+    laptop: System{ target: linux.arm64 }
+    blue: Fleet{ hosts: .{ edge: system.workstation } }
+    green: Fleet{ hosts: .{ edge: system.laptop } }
+}"#,
+    )
+    .unwrap();
+
+    let output = jet()
+        .args([
+            "os",
+            "plan",
+            "workstation",
+            "--json",
+            "--no-color",
+            "--offline",
+        ])
+        .current_dir(&project.path)
+        .env("JETPACK_ROOT", project.join("jet-root"))
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(2));
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("outputs.green.hosts.edge"), "{stderr}");
+    assert!(stderr.contains("collides with Fleet host"), "{stderr}");
+    assert!(
+        !project.join("jet-root/systems").exists(),
+        "projection failure must not publish generation files"
+    );
 }
 
 #[test]

@@ -1169,7 +1169,7 @@ receipt: sha256:91b8…
 rollback: gen-41 ready
 ```
 
-The type/default/docs declarations feed source checks, completion, `jet inspect search`, `jet inspect info`, Studio, and generated reference pages. Final-value reads use the checked resolved graph; a dependency cycle reports the shortest option cycle and every source span. Lists and maps merge by their declared type law; unequal ordinary scalars conflict. Experts use ordinary functions to construct one final ecosystem value (D-ECO-COMPOSE2). Only option contributions may use `OptionValue{ value, priority: .Force }` (D-JOS-PRIORITY-SURFACE2), never a parallel `force` grammar.
+The type/default/docs declarations feed source checks, completion, `jet search`, `jet inspect info`, Studio, and generated reference pages. Final-value reads use the checked resolved graph; a dependency cycle reports the shortest option cycle and every source span. Lists and maps merge by their declared type law; unequal ordinary scalars conflict. Experts use ordinary functions to construct one final ecosystem value (D-ECO-COMPOSE2). Only option contributions may use `OptionValue{ value, priority: .Force }` (D-JOS-PRIORITY-SURFACE2), never a parallel `force` grammar.
 
 Representative NixOS comparison:
 
@@ -1361,7 +1361,7 @@ The S7/S8 shape covers every requirement in the Epoch 4 JetOS research appendix 
 | Required reach | Where it appears |
 |---|---|
 | Multi-host, ISO host, hardware, variants | Fleet host map; Image `.Iso`; hardware Config; named System deltas and boot variants. |
-| Typed options with type/default/docs/enums | `OptionSet` declarations feed checks, `jet inspect search`, `jet inspect info`, Studio, and docs (`NEW: D-ECO-JETOS2`). |
+| Typed options with type/default/docs/enums | `OptionSet` declarations feed checks, `jet search`, `jet inspect info`, Studio, and docs (`NEW: D-ECO-JETOS2`). |
 | Final-value reads and cycle diagnostics | Resolved graph view; shortest cycle with all source spans. |
 | Deterministic merge and provenance | Field-law composition; `.jet/lock`; `jet explain` shows contributors, priority, winner, and reason. |
 | One-character disable | S7's `system/_nvidia.jet` uses D-ECO-FILEROOT1's proposed discovered-file rule. |
@@ -1418,7 +1418,7 @@ Raw escape hatches remain explicit and audited. A compatibility file or service 
 |---|---|
 | First install asks for daemon and root choices | Per-user Hangar works first. Shared broker is an administrator opt-in and absent without consequence. |
 | Old and experimental command families disagree | One versioned `jet` command registry dispatches to engines and rejects version skew. |
-| Package attribute differs from executable name | `jet inspect search ripgrep` returns Package and Output names; `jet inspect info` shows the exact runnable address. |
+| Package attribute differs from executable name | `jet search ripgrep` returns Package and Output names; `jet inspect info` shows the exact runnable address. |
 | Dev shell requires choosing `shell.nix`, `flake.nix`, or framework | `jet env` selects the Package's Environment Output or consumes a foreign flake when no Environment exists. |
 | Flake schema and `${system}` precede first build | `jet build` derives host target; `--target` reveals explicit control only when asked. |
 | Untracked source disappears from a flake snapshot | Plan names every included and excluded source with the owning source-set rule before build. |

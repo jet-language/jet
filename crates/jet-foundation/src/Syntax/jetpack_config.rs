@@ -56,8 +56,8 @@ pub const ENGINE_PROTOCOL_FLAG: &str = "--engine-protocol";
 /// dispatching an engine process. Migration code also verifies the live parent.
 pub const ROOT_ENGINE_DISPATCH_PID_ENV: &str = "JET_INTERNAL_ROOT_DISPATCH_PID";
 
-/// D-JPK14: the default visible prompt label inside a Jetpack shell.
-pub const JETPACK_PROMPT_LABEL: &str = "jetpack";
+/// D-JPK14: the default visible prompt label inside a Jet shell.
+pub const JETPACK_PROMPT_LABEL: &str = "jet";
 
 /// D-JPK14: shell marker env var set inside a Jetpack shell.
 pub const JETPACK_ENV_MARKER: &str = "JETPACK_ENV";

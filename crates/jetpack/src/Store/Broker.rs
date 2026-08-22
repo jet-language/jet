@@ -1817,6 +1817,7 @@ fn remove_incoming_entry(path: &Path) -> io::Result<()> {
         return Err(invalid("shared-store incoming staging contains a symlink"));
     }
     if metadata.is_dir() {
+        super::make_tree_writable_for_removal(path)?;
         fs::remove_dir_all(path)
     } else if metadata.is_file() {
         fs::remove_file(path)
@@ -1861,6 +1862,78 @@ mod tests {
             platform: "platform".into(),
             sandbox: "sandbox".into(),
             policy: "policy".into(),
+        }
+    }
+
+    #[cfg(unix)]
+    fn short_test_root(tag: &str) -> PathBuf {
+        PathBuf::from("/tmp").join(format!(
+            "jet-{tag}-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .map(|duration| duration.as_nanos())
+                .unwrap_or_default()
+        ))
+    }
+
+    #[cfg(unix)]
+    fn configure_test_broker(roots: &Roots) -> SharedStoreConfig {
+        let base = roots.root.join(SHARED_DIR);
+        let shared_root = base.join("root");
+        let trust_key = base.join("trust/hangar.key");
+        let grants = base.join("users");
+        for directory in [
+            base.clone(),
+            shared_root.clone(),
+            trust_key.parent().unwrap().to_path_buf(),
+            grants.clone(),
+        ] {
+            fs::create_dir_all(&directory).unwrap();
+            set_mode(&directory, 0o700).unwrap();
+        }
+        fs::write(&trust_key, [b'k'; 32]).unwrap();
+        set_private_mode(&trust_key).unwrap();
+        let config = SharedStoreConfig {
+            socket: base.join("broker.sock"),
+            shared_root,
+            trust_key,
+            grants,
+        };
+        let mut text = format!("{CONFIG_MAGIC}\n");
+        for (key, value) in [
+            ("socket", &config.socket),
+            ("shared_root", &config.shared_root),
+            ("trust_key", &config.trust_key),
+            ("grants", &config.grants),
+        ] {
+            text.push_str(key);
+            text.push('=');
+            text.push_str(&encode_hex(value.to_string_lossy().as_bytes()));
+            text.push('\n');
+        }
+        let config_path = base.join("config");
+        fs::write(&config_path, text).unwrap();
+        set_private_mode(&config_path).unwrap();
+        config
+    }
+
+    #[cfg(unix)]
+    fn accept_with_timeout(
+        listener: &std::os::unix::net::UnixListener,
+    ) -> std::os::unix::net::UnixStream {
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        loop {
+            match listener.accept() {
+                Ok((stream, _)) => return stream,
+                Err(error)
+                    if error.kind() == io::ErrorKind::WouldBlock
+                        && std::time::Instant::now() < deadline =>
+                {
+                    std::thread::sleep(std::time::Duration::from_millis(1));
+                }
+                Err(error) => panic!("shared-store broker request did not arrive: {error}"),
+            }
         }
     }
 
@@ -2173,7 +2246,8 @@ mod tests {
             .unwrap()
             .next()
             .is_none());
-        let _ = fs::remove_dir_all(root);
+        super::super::make_tree_writable_for_removal(&root).unwrap();
+        fs::remove_dir_all(root).unwrap();
     }
 
     #[cfg(unix)]
@@ -2181,14 +2255,7 @@ mod tests {
     fn authenticated_socket_handler_promotes_reads_and_rejects_failures() {
         use std::os::unix::net::{UnixListener, UnixStream};
 
-        let root = std::env::temp_dir().join(format!(
-            "jss-{}-{}",
-            std::process::id(),
-            SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .map(|duration| duration.as_nanos())
-                .unwrap_or_default()
-        ));
+        let root = short_test_root("jss");
         let _ = fs::remove_dir_all(&root);
         let local = Roots {
             root: root.join("l"),
@@ -2219,46 +2286,7 @@ mod tests {
         .unwrap()
         .entry;
         let archive = Archive::export_unsigned_archive(&local, &entry.id, true).unwrap();
-        let configure_user_broker = |roots: &Roots| {
-            let base = roots.root.join(SHARED_DIR);
-            let shared_root = base.join("root");
-            let trust_key = base.join("trust/hangar.key");
-            let grants = base.join("users");
-            for directory in [
-                base.clone(),
-                shared_root.clone(),
-                trust_key.parent().unwrap().to_path_buf(),
-                grants.clone(),
-            ] {
-                fs::create_dir_all(&directory).unwrap();
-                set_mode(&directory, 0o700).unwrap();
-            }
-            fs::write(&trust_key, [b'k'; 32]).unwrap();
-            set_private_mode(&trust_key).unwrap();
-            let config = SharedStoreConfig {
-                socket: base.join("broker.sock"),
-                shared_root,
-                trust_key,
-                grants,
-            };
-            let mut text = format!("{CONFIG_MAGIC}\n");
-            for (key, value) in [
-                ("socket", &config.socket),
-                ("shared_root", &config.shared_root),
-                ("trust_key", &config.trust_key),
-                ("grants", &config.grants),
-            ] {
-                text.push_str(key);
-                text.push('=');
-                text.push_str(&encode_hex(value.to_string_lossy().as_bytes()));
-                text.push('\n');
-            }
-            let config_path = base.join("config");
-            fs::write(config_path, text).unwrap();
-            set_private_mode(&base.join("config")).unwrap();
-            config
-        };
-        let config = configure_user_broker(&local);
+        let config = configure_test_broker(&local);
         let shared_root = config.shared_root.clone();
         let binding = provenance_binding_for_entry(&entry).unwrap();
 
@@ -2301,7 +2329,7 @@ mod tests {
             root: root.join("r"),
             dev_mode: false,
         };
-        let reader_config = configure_user_broker(&reader);
+        let reader_config = configure_test_broker(&reader);
         let listener = UnixListener::bind(&reader_config.socket).unwrap();
         let thread = std::thread::spawn({
             let config = config.clone();
@@ -2342,7 +2370,177 @@ mod tests {
             .unwrap()
             .next()
             .is_none());
-        let _ = fs::remove_dir_all(root);
+        super::super::make_tree_writable_for_removal(&root).unwrap();
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn realize_verified_round_trips_through_broker_and_fails_closed_on_auth() {
+        use std::os::unix::net::UnixListener;
+
+        let root = short_test_root("shared-realize");
+        let _ = fs::remove_dir_all(&root);
+        let repo = root.join("repo");
+        let package = repo.join("pkgs/hello");
+        fs::create_dir_all(package.join("bin")).unwrap();
+        fs::write(package.join("hello.jet"), "module hello { }\n").unwrap();
+        fs::write(
+            repo.join("package.jet"),
+            "name: \"fixture\"\nversion: \"0.1.0\"\npackages: { hello: executable }\n",
+        )
+        .unwrap();
+        let executable = package.join("bin/hello");
+        fs::write(&executable, "#!/bin/sh\necho broker-realize\n").unwrap();
+        let mut executable_mode = fs::metadata(&executable).unwrap().permissions();
+        executable_mode.set_readonly(false);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            executable_mode.set_mode(0o755);
+        }
+        fs::set_permissions(&executable, executable_mode).unwrap();
+
+        let table = crate::RefSpec::SourceTable::from_decls([(
+            "mine".to_string(),
+            format!("path:{}", repo.display()),
+            crate::RefSpec::ProviderKind::Core,
+        )]);
+        let spec = crate::RefSpec::classify_in("hello@mine", &table).unwrap();
+        let local = Roots {
+            root: root.join("local"),
+            dev_mode: false,
+        };
+        let config = configure_test_broker(&local);
+        let listener = UnixListener::bind(&config.socket).unwrap();
+        listener.set_nonblocking(true).unwrap();
+        let broker_config = config.clone();
+        let broker = std::thread::spawn(move || {
+            for _ in 0..2 {
+                let stream = accept_with_timeout(&listener);
+                serve_shared_store_connection(stream, broker_config.clone()).unwrap();
+            }
+        });
+        let store_dir = local.hangar_dir();
+        let ctx = crate::Provider::Ctx {
+            fixtures: None,
+            store_dir: &store_dir,
+            offline: true,
+            project_dir: None,
+        };
+        let realized = super::super::realize_verified(
+            &local,
+            &ctx,
+            super::super::RealizeRequest::Package {
+                spec: &spec,
+                table: &table,
+            },
+        )
+        .unwrap();
+        assert_eq!(realized.source_state(), crate::Provider::SourceState::Built);
+        broker.join().unwrap();
+        fs::remove_file(&config.socket).unwrap();
+
+        let shared = Roots {
+            root: config.shared_root.clone(),
+            dev_mode: false,
+        };
+        let published = super::super::find_by_reference(&shared, "hello@mine").unwrap();
+        super::super::verify_hangar_object(&shared, &published).unwrap();
+        let (archive, _) = Archive::export_archive(
+            &shared,
+            &published.id,
+            true,
+            Some(config.trust_key.to_str().unwrap()),
+        )
+        .unwrap();
+
+        let reader = Roots {
+            root: root.join("reader"),
+            dev_mode: false,
+        };
+        let reader_config = configure_test_broker(&reader);
+        Archive::import_archive(
+            &Roots {
+                root: reader_config.shared_root.clone(),
+                dev_mode: false,
+            },
+            &archive,
+            Some(reader_config.trust_key.to_str().unwrap()),
+            false,
+        )
+        .unwrap();
+        let listener = UnixListener::bind(&reader_config.socket).unwrap();
+        listener.set_nonblocking(true).unwrap();
+        let broker_config = reader_config.clone();
+        let broker = std::thread::spawn(move || {
+            let stream = accept_with_timeout(&listener);
+            serve_shared_store_connection(stream, broker_config).unwrap();
+        });
+        let reader_store_dir = reader.hangar_dir();
+        let reader_ctx = crate::Provider::Ctx {
+            fixtures: None,
+            store_dir: &reader_store_dir,
+            offline: true,
+            project_dir: None,
+        };
+        let reused = super::super::realize_verified(
+            &reader,
+            &reader_ctx,
+            super::super::RealizeRequest::Package {
+                spec: &spec,
+                table: &table,
+            },
+        )
+        .unwrap();
+        assert_eq!(reused.source_state(), crate::Provider::SourceState::Cached);
+        assert_eq!(
+            reused.metadata().envelope.output_hash,
+            published.envelope.output_hash
+        );
+        broker.join().unwrap();
+        fs::remove_file(&reader_config.socket).unwrap();
+
+        let denied = Roots {
+            root: root.join("denied"),
+            dev_mode: false,
+        };
+        let denied_config = configure_test_broker(&denied);
+        let listener = UnixListener::bind(&denied_config.socket).unwrap();
+        listener.set_nonblocking(true).unwrap();
+        let mut server_config = denied_config.clone();
+        server_config.socket = PathBuf::from(ADMIN_SOCKET);
+        server_config.grants = root.join("missing-grants");
+        let broker = std::thread::spawn(move || {
+            let stream = accept_with_timeout(&listener);
+            assert!(serve_shared_store_connection(stream, server_config).is_err());
+        });
+        let denied_store_dir = denied.hangar_dir();
+        let denied_ctx = crate::Provider::Ctx {
+            fixtures: None,
+            store_dir: &denied_store_dir,
+            offline: true,
+            project_dir: None,
+        };
+        let error = match super::super::realize_verified(
+            &denied,
+            &denied_ctx,
+            super::super::RealizeRequest::Package {
+                spec: &spec,
+                table: &table,
+            },
+        ) {
+            Ok(_) => panic!("unauthorized broker read must not reach provider realization"),
+            Err(error) => error,
+        };
+        assert!(format!("{error:?}").contains("Store"), "{error:?}");
+        assert!(super::super::find_by_reference(&denied, "hello@mine").is_none());
+        broker.join().unwrap();
+
+        drop(reused);
+        drop(realized);
+        super::super::make_tree_writable_for_removal(&root).unwrap();
+        fs::remove_dir_all(root).unwrap();
     }
 
     #[test]

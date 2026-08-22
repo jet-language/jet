@@ -2,7 +2,7 @@ use super::parse::Parsed;
 use crate::Output::Theme;
 use crate::Store;
 
-/// `jetpack shared-store install|enroll|broker` — optional authenticated shared store.
+/// `jet shared-store install|enroll|broker` — optional authenticated shared store.
 pub(super) fn cmd_shared_store(theme: &Theme, parsed: &Parsed) -> i32 {
     match parsed.positional.first().map(String::as_str).unwrap_or("install") {
         "install" => match Store::install_shared_store(&Store::resolve()) {
@@ -20,7 +20,7 @@ pub(super) fn cmd_shared_store(theme: &Theme, parsed: &Parsed) -> i32 {
                 theme.error(
                     "shared-store install failed",
                     &error.to_string(),
-                    "check the administrator-selected Jetpack root and keep the broker optional.",
+                    "check the administrator-selected Jet root and keep the broker optional.",
                 );
                 2
             }

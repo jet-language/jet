@@ -5878,10 +5878,10 @@ ratified job.
 2026-07-11, card #497)*: no verb leaves the jet binary. The four silent
 aliases die (`doctor`/`devtools`/`toolchain` → teaching errors naming
 `jet self …`; `gc` → teaching error naming `jet clean`). `env`, `fetch`,
-`clean` join the flat ring; `search`, `info`, `logs`, `outdated` group under
-`jet inspect`; `push`, `bridge`, `services`, `image`, `config` group under
-`jet os`. `jet trust` (D-JPK-GRANTCMD1) and `jet os` (D-JPK-OSVERB1) stay
-as ratified.
+`search`, `clean` stay in the flat ring; `info`, `logs`,
+`outdated` group under `jet inspect`; `push`, `bridge`, `services`, `image`,
+`config` group under `jet os`. `jet trust` (D-JPK-GRANTCMD1) and `jet os`
+(D-JPK-OSVERB1) stay as ratified.
 
 **D-CLI-BARE1=A — bare project verbs** *(ratified 2026-07-11, card #497)*:
 one shared entry-resolution rule makes `run`, `dev`, and `debug`,

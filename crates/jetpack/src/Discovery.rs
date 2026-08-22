@@ -45,6 +45,21 @@ impl PackageRecord {
         format!("{}.{}", self.source, self.name)
     }
 
+    /// Project the registry's maintainer gate as a named package detail.
+    ///
+    /// The gate status remains the signed source of truth. This projection
+    /// gives package detail consumers one stable field without creating a
+    /// second liveness mechanism.
+    pub fn maintainer_liveness(&self) -> &str {
+        if self.gate_status == "not-applicable" {
+            return "not-applicable";
+        }
+        self.gate_status
+            .split(';')
+            .find_map(|field| field.strip_prefix("liveness="))
+            .unwrap_or("unknown")
+    }
+
     fn merge_from(&mut self, other: PackageRecord) {
         if self.version.is_empty() && !other.version.is_empty() {
             self.version = other.version;
@@ -471,7 +486,7 @@ fn record_to_json(record: &PackageRecord) -> String {
         .collect::<Vec<_>>()
         .join(",");
     format!(
-        "{{\"source\":{},\"name\":{},\"reference\":{},\"version\":{},\"platforms\":{},\"docs\":{},\"provenance\":{},\"tier\":{},\"gate_status\":{},\"options\":[{}]}}",
+        "{{\"source\":{},\"name\":{},\"reference\":{},\"version\":{},\"platforms\":{},\"docs\":{},\"provenance\":{},\"tier\":{},\"gate_status\":{},\"maintainer_liveness\":{},\"options\":[{}]}}",
         JSON::quote(&record.source),
         JSON::quote(&record.name),
         JSON::quote(&record.reference),
@@ -481,6 +496,7 @@ fn record_to_json(record: &PackageRecord) -> String {
         JSON::quote(&record.provenance),
         JSON::quote(&record.tier),
         JSON::quote(&record.gate_status),
+        JSON::quote(record.maintainer_liveness()),
         options
     )
 }
@@ -601,9 +617,11 @@ mod tests {
             record.gate_status,
             "signature=passed;audit=passed;name=passed;liveness=passed;review=not-required"
         );
+        assert_eq!(record.maintainer_liveness(), "passed");
         let json = info_json(record);
         assert!(json.contains("\"tier\":\"community\""));
         assert!(json.contains("\"gate_status\":\"signature=passed;"));
+        assert!(json.contains("\"maintainer_liveness\":\"passed\""));
     }
 
     #[test]

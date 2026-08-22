@@ -860,7 +860,29 @@ pub(super) fn cmd_image(theme: &Theme, parsed: &Parsed) -> i32 {
                 return 2;
             }
         }
-        let data = match read_project_image_file(&dir, rel) {
+        let layer_path = match normalize_project_relative_image_path(rel) {
+            Ok(path) => path,
+            Err(error) => {
+                projection.rejected.push(format!("file:{rel}"));
+                let _ = write_rejected_projection(&out_dir, &projection);
+                if image.from_environment {
+                    theme.error_coded(
+                        "E1336",
+                        &format!("environment image {name} cannot project extra file `{rel}`"),
+                        &error,
+                        "use a regular, project-relative, non-secret file that stays inside the project root",
+                    );
+                } else {
+                    theme.error(
+                        &format!("image file {rel} cannot be projected"),
+                        &error,
+                        "use a regular project-relative file that stays inside the project root.",
+                    );
+                }
+                return 2;
+            }
+        };
+        let data = match read_project_image_file(&dir, &layer_path) {
             Ok(data) => data,
             Err(error) => {
                 projection.rejected.push(format!("file:{rel}"));
@@ -882,12 +904,23 @@ pub(super) fn cmd_image(theme: &Theme, parsed: &Parsed) -> i32 {
                 return 2;
             }
         };
+        if image.from_environment && image_layer_path_conflicts(&files, &layer_path) {
+            projection.rejected.push(format!("file:{layer_path}"));
+            let _ = write_rejected_projection(&out_dir, &projection);
+            theme.error_coded(
+                "E1336",
+                &format!("environment image {name} cannot project extra file `{rel}`"),
+                "the extra file conflicts with another projected image path",
+                "choose an extra file path that does not replace a package, shell, or service projection",
+            );
+            return 2;
+        }
         files.push(Image::LayerFile {
-            path: rel.to_string(),
+            path: layer_path.clone(),
             data,
             mode: 0o644,
         });
-        projection.included.push(format!("file:{rel}"));
+        projection.included.push(format!("file:{layer_path}"));
     }
 
     let (service_commands, service_names) = if image.from_environment {
@@ -909,6 +942,27 @@ pub(super) fn cmd_image(theme: &Theme, parsed: &Parsed) -> i32 {
         (Vec::new(), Vec::new())
     };
     if !service_commands.is_empty() {
+        if image.from_environment && image_layer_path_conflicts(&files, "jet/supervise") {
+            let conflicting_path = files
+                .iter()
+                .find(|file| {
+                    image_layer_path_conflicts(std::slice::from_ref(file), "jet/supervise")
+                })
+                .map(|file| file.path.clone())
+                .unwrap_or_else(|| "jet/supervise".to_string());
+            projection
+                .included
+                .retain(|fact| fact != &format!("file:{conflicting_path}"));
+            projection.rejected.push(format!("file:{conflicting_path}"));
+            let _ = write_rejected_projection(&out_dir, &projection);
+            theme.error_coded(
+                "E1336",
+                &format!("environment image {name} cannot project extra file `{conflicting_path}`"),
+                "the extra file conflicts with the generated service supervisor",
+                "choose an extra file path that does not replace a service projection",
+            );
+            return 2;
+        }
         files.push(Image::LayerFile {
             path: "jet/supervise".to_string(),
             data: supervisor_script(&service_commands).into_bytes(),
@@ -1057,23 +1111,54 @@ fn looks_like_registry_reference(reference: &str) -> bool {
     authority == "localhost" || authority.contains('.')
 }
 
-fn read_project_image_file(root: &std::path::Path, relative: &str) -> Result<Vec<u8>, String> {
+fn normalize_project_relative_image_path(relative: &str) -> Result<String, String> {
     let path = std::path::Path::new(relative);
     if relative.is_empty()
         || relative.contains('\\')
         || relative.bytes().any(|byte| byte.is_ascii_control())
         || path.is_absolute()
-        || path.components().any(|component| {
-            matches!(
-                component,
-                std::path::Component::ParentDir | std::path::Component::Prefix(_)
-            )
-        })
     {
         return Err("image files must be safe project-relative paths".to_string());
     }
+    let mut components = Vec::new();
+    for component in path.components() {
+        match component {
+            std::path::Component::Normal(name) => {
+                let name = name
+                    .to_str()
+                    .ok_or_else(|| "image file path must be valid UTF-8".to_string())?;
+                components.push(name);
+            }
+            std::path::Component::CurDir => {}
+            std::path::Component::ParentDir
+            | std::path::Component::RootDir
+            | std::path::Component::Prefix(_) => {
+                return Err("image files must be safe project-relative paths".to_string());
+            }
+        }
+    }
+    if components.is_empty() {
+        return Err("image files must name a regular project file".to_string());
+    }
+    let normalized = components.join("/");
+    if normalized.len() > 100 {
+        return Err("image file path exceeds the OCI tar path limit".to_string());
+    }
+    Ok(normalized)
+}
+
+fn image_layer_path_conflicts(files: &[Image::LayerFile], candidate: &str) -> bool {
+    files.iter().any(|file| {
+        file.path == candidate
+            || candidate.starts_with(&format!("{}/", file.path))
+            || file.path.starts_with(&format!("{}/", candidate))
+    })
+}
+
+fn read_project_image_file(root: &std::path::Path, relative: &str) -> Result<Vec<u8>, String> {
+    let relative = normalize_project_relative_image_path(relative)?;
     let root = std::fs::canonicalize(root).map_err(|error| error.to_string())?;
-    let source = root.join(path);
+    let source = root.join(&relative);
     let metadata = std::fs::symlink_metadata(&source).map_err(|error| error.to_string())?;
     if metadata.file_type().is_symlink() || !metadata.is_file() {
         return Err("image file must be a regular file, not a symlink or directory".to_string());
@@ -1296,7 +1381,7 @@ fn environment_image_files(
                 "E1336",
                 &format!("environment image `{name}` cannot project package `{reference}`"),
                 &format!(
-                    "the verified Hangar output targets `{realized_platform}`, but the image targets `{target}`"
+                    "the verified Hangar output platform is `{realized_platform}`, but the image platform is `{target}`"
                 ),
                 "realize the environment package for the image target, or choose a matching `target`",
             );
@@ -1376,13 +1461,12 @@ fn hangar_platform_matches(target: &str, realized: &str) -> bool {
 }
 
 fn environment_image_file_rejection(plan: &ModuleEval::EnvPlan, relative: &str) -> Option<String> {
-    let normalized = relative.strip_prefix("./").unwrap_or(relative);
-    let path = Path::new(normalized);
-    if path.components().any(|component| {
-        let std::path::Component::Normal(name) = component else {
-            return false;
-        };
-        let name = name.to_string_lossy().to_ascii_lowercase();
+    let normalized = match normalize_project_relative_image_path(relative) {
+        Ok(path) => path,
+        Err(error) => return Some(error),
+    };
+    if normalized.split('/').any(|component| {
+        let name = component.to_ascii_lowercase();
         name == ".jet"
             || name == ".env"
             || name.starts_with(".env.")
@@ -1396,34 +1480,41 @@ fn environment_image_file_rejection(plan: &ModuleEval::EnvPlan, relative: &str) 
         .lifecycle
         .dotenv
         .iter()
-        .any(|dotenv| normalized == dotenv.file.strip_prefix("./").unwrap_or(&dotenv.file))
+        .any(|dotenv| normalized_project_path_matches(&dotenv.file, &normalized))
     {
         return Some(
             "dotenv files are environment inputs and never image-layer inputs".to_string(),
         );
     }
     if plan.files.iter().any(|file| {
-        file.sensitive
-            && (file.destination == normalized
+        normalized_project_path_matches(&file.destination, &normalized)
+            || file
+                .source
+                .as_deref()
+                .map(|source| normalized_project_path_matches(source, &normalized))
+                .unwrap_or(false)
+    }) || plan.integrations.iter().any(|integration| {
+        integration.files.iter().any(|file| {
+            normalized_project_path_matches(&file.destination, &normalized)
                 || file
                     .source
                     .as_deref()
-                    .map(|source| source.strip_prefix("./").unwrap_or(source) == normalized)
-                    .unwrap_or(false))
-    }) || plan.integrations.iter().any(|integration| {
-        integration.files.iter().any(|file| {
-            file.sensitive
-                && (file.destination == normalized
-                    || file
-                        .source
-                        .as_deref()
-                        .map(|source| source.strip_prefix("./").unwrap_or(source) == normalized)
-                        .unwrap_or(false))
+                    .map(|source| normalized_project_path_matches(source, &normalized))
+                    .unwrap_or(false)
         })
     }) {
-        return Some("a sensitive environment file cannot become an image-layer input".to_string());
+        return Some(
+            "managed environment files are environment inputs and never image-layer inputs"
+                .to_string(),
+        );
     }
     None
+}
+
+fn normalized_project_path_matches(candidate: &str, normalized: &str) -> bool {
+    normalize_project_relative_image_path(candidate)
+        .map(|candidate| candidate == normalized)
+        .unwrap_or(false)
 }
 
 fn write_rejected_projection(

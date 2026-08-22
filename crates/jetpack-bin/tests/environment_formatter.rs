@@ -39,6 +39,17 @@ fn write_executable(path: &Path, source: &str) {
 }
 
 fn fixture(project: &Path, root: &Path, fixtures: &Path, scratch: &Path, fail: bool) -> Output {
+    fixture_with_args(project, root, fixtures, scratch, fail, &[])
+}
+
+fn fixture_with_args(
+    project: &Path,
+    root: &Path,
+    fixtures: &Path,
+    scratch: &Path,
+    fail: bool,
+    extra_args: &[&str],
+) -> Output {
     fs::create_dir_all(fixtures).unwrap();
     let out = root.join("hangar/provider-fixture-nixfmt");
     let bin = out.join("bin");
@@ -71,15 +82,9 @@ fn fixture(project: &Path, root: &Path, fixtures: &Path, scratch: &Path, fail: b
 
     let mut command = Command::new(env!("CARGO_BIN_EXE_jetpack"));
     command
-        .args([
-            "fmt",
-            "--lang",
-            "nix",
-            "--trust",
-            "--offline",
-            "--no-color",
-            "--fixtures",
-        ])
+        .args(["fmt", "--lang", "nix", "--trust", "--offline", "--no-color"])
+        .args(extra_args)
+        .arg("--fixtures")
         .arg(fixtures)
         .current_dir(project)
         .env("JETPACK_ROOT", root)
@@ -173,5 +178,33 @@ fn formatter_failure_keeps_sources_and_cleans_staging() {
     assert!(
         fs::read_dir(&scratch).unwrap().next().is_none(),
         "formatter staging directory leaked after failure"
+    );
+}
+
+#[test]
+fn formatter_dry_run_reports_a_diff_without_writing_sources() {
+    let tree = TempTree::new("dry-run");
+    let project = tree.join("project");
+    let root = tree.join("root");
+    let fixtures = tree.join("fixtures");
+    let scratch = tree.join("scratch");
+    fs::create_dir_all(&project).unwrap();
+    fs::create_dir_all(&root).unwrap();
+    fs::create_dir_all(&scratch).unwrap();
+
+    let output = fixture_with_args(&project, &root, &fixtures, &scratch, false, &["--dry-run"]);
+    assert_eq!(output.status.code(), Some(1));
+    assert!(
+        String::from_utf8_lossy(&output.stdout).contains("--- flake.nix"),
+        "dry-run must report a unified diff: {}",
+        String::from_utf8_lossy(&output.stdout)
+    );
+    assert_eq!(
+        fs::read_to_string(project.join("flake.nix")).unwrap(),
+        "unformatted\n"
+    );
+    assert!(
+        fs::read_dir(&scratch).unwrap().next().is_none(),
+        "formatter staging directory leaked after dry-run"
     );
 }

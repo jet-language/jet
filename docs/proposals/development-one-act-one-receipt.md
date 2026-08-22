@@ -297,7 +297,7 @@ $ jet find --example '"a,b" -> ["a","b"]'         # proposed: run pure candidate
 String.split(sep) -> [String]                      (1 match on the example)
 ```
 
-One naming settlement, owned by the ballot: `find` joins `search` in the discovery word-space — `search`/`info` are ratified discovery verbs for **packages** — so D-DEVR-FIND1 fixes the split the way WITNESS1 fixed `verify`: `find` asks code by shape and contract, `search` asks the package catalog by name. (Pre-existing drift found while checking this: the live binary teaches `jet inspect search` while D-CLI-SURFACE1=B lists `search` flat — carded separately.)
+One naming settlement, owned by the ballot: `find` joins `search` in the discovery word-space — `search`/`info` are ratified discovery verbs for **packages** — so D-DEVR-FIND1 fixes the split the way WITNESS1 fixed `verify`: `find` asks code by shape and contract, `search` asks the package catalog by name. `jet search` is the flat package-catalog route.
 
 Signature search is Hoogle — loved for two decades, still confined to Haskell because nobody else's toolchain holds full typed signatures. Effect search and example search are Jet-only: effects are typed facts here, and comptime can safely run pure candidates against the example. Rails: semindex (definitions and signatures), the digest (the same rows the LLM surface renders), the comptime evaluator. Exits: it is a read-only query; there is nothing to refuse; `--json` for agents.
 

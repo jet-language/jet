@@ -1927,6 +1927,19 @@ pub(crate) fn realize_adapter(
         &source_hash,
     );
     if let Err(d) = Recipe::run_logged(&recipe, &build_ctx, None, &mut attempt) {
+        if attempt.steps.is_empty() {
+            attempt.push_step(super::BuildDebug::StepLog {
+                index: 0,
+                total: 0,
+                name: "recipe validation".into(),
+                command: d.what.clone(),
+                cwd: staged.to_string_lossy().into_owned(),
+                status: "failed".into(),
+                stdout: String::new(),
+                stderr: format!("{}: {}\n", d.code, d.why),
+            });
+        }
+        attempt.mark_failed();
         let scratch_error = attempt
             .preserve_scratch(ctx.store_dir, &staged, &out_dir)
             .err()
@@ -2386,10 +2399,7 @@ mod tests {
 
         std::fs::write(
             &lock_path,
-            format!(
-                "{base}receipt = \"sha256-{}\"\n",
-                "a".repeat(64)
-            ),
+            format!("{base}receipt = \"sha256-{}\"\n", "a".repeat(64)),
         )
         .unwrap();
         let with_receipt = project_lock_digest(Some(&root)).unwrap();
@@ -2579,13 +2589,22 @@ mod tests {
     #[test]
     fn nix_build_facts_are_fixed_and_runtime_path_stays_composed() {
         let facts = nix_build_facts();
-        assert_eq!(facts.get("nix.build.root").map(String::as_str), Some("/build"));
+        assert_eq!(
+            facts.get("nix.build.root").map(String::as_str),
+            Some("/build")
+        );
         assert_eq!(
             facts.get("nix.build.home").map(String::as_str),
             Some("/homeless-shelter")
         );
-        assert_eq!(facts.get("nix.build.uid").map(String::as_str), Some("unprivileged"));
-        assert_eq!(facts.get("nix.build.time").map(String::as_str), Some("deterministic"));
+        assert_eq!(
+            facts.get("nix.build.uid").map(String::as_str),
+            Some("unprivileged")
+        );
+        assert_eq!(
+            facts.get("nix.build.time").map(String::as_str),
+            Some("deterministic")
+        );
         let producer_facts = nix_build_facts_record();
         let plan = crate::Comptime::Build::BuildPlanReplay::from_facts(BTreeMap::new()).unwrap();
         let producer = super::super::Store::ProducerRecord::new(
@@ -2599,8 +2618,14 @@ mod tests {
         )
         .unwrap();
         let runtime = nix_runtime_environment(&producer);
-        assert_eq!(runtime.get("HOME").map(String::as_str), Some("/homeless-shelter"));
-        assert_eq!(runtime.get("NIX_BUILD_TOP").map(String::as_str), Some("/build"));
+        assert_eq!(
+            runtime.get("HOME").map(String::as_str),
+            Some("/homeless-shelter")
+        );
+        assert_eq!(
+            runtime.get("NIX_BUILD_TOP").map(String::as_str),
+            Some("/build")
+        );
         assert_eq!(runtime.get("LC_ALL").map(String::as_str), Some("C"));
         assert!(!runtime.contains_key("PATH"));
 

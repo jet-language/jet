@@ -2010,7 +2010,13 @@ pub fn record_nix_realization(
         .find(|package| {
             package.name == name
                 && package.version == version
-                && matches!(&package.source, LockSource::Nix { .. })
+                && matches!(
+                    &package.source,
+                    LockSource::Nix {
+                        reference: locked_reference,
+                        output: locked_output,
+                    } if locked_reference == reference && locked_output == output
+                )
                 && package
                     .envelope
                     .as_ref()
@@ -2172,7 +2178,20 @@ pub fn record_cran_realization(
         .find(|package| {
             package.name == name
                 && package.version == version
-                && matches!(&package.source, LockSource::Cran { .. })
+                && matches!(
+                    &package.source,
+                    LockSource::Cran {
+                        reference: locked_reference,
+                        output: locked_output,
+                        source_hash: locked_source_hash,
+                        repository: locked_repository,
+                        authority: locked_authority,
+                    } if locked_reference == reference
+                        && locked_output == output
+                        && locked_source_hash == source_hash
+                        && locked_repository == repository
+                        && locked_authority == authority
+                )
                 && package
                     .envelope
                     .as_ref()
@@ -2279,7 +2298,20 @@ pub fn record_luarocks_realization(
         .find(|package| {
             package.name == name
                 && package.version == version
-                && matches!(&package.source, LockSource::LuaRocks { .. })
+                && matches!(
+                    &package.source,
+                    LockSource::LuaRocks {
+                        reference: locked_reference,
+                        output: locked_output,
+                        source_hash: locked_source_hash,
+                        repository: locked_repository,
+                        authority: locked_authority,
+                    } if locked_reference == reference
+                        && locked_output == output
+                        && locked_source_hash == source_hash
+                        && locked_repository == repository
+                        && locked_authority == authority
+                )
                 && package
                     .envelope
                     .as_ref()
@@ -2387,7 +2419,23 @@ pub fn record_registry_realization(
         .find(|package| {
             package.name == name
                 && package.version == version
-                && matches!(&package.source, LockSource::Registry { registry: value, .. } if value == registry)
+                && matches!(
+                    &package.source,
+                    LockSource::Registry {
+                        registry: locked_registry,
+                        reference: locked_reference,
+                        output: locked_output,
+                        source_hash: locked_source_hash,
+                        repository: locked_repository,
+                        authority: locked_authority,
+                        ..
+                    } if locked_registry == registry
+                        && locked_reference == reference
+                        && locked_output == output
+                        && locked_source_hash == source_hash
+                        && locked_repository == repository
+                        && locked_authority == authority
+                )
                 && package
                     .envelope
                     .as_ref()

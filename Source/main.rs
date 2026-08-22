@@ -759,14 +759,34 @@ fn run_project_parts(raw: &[String], mode: OutputMode) -> ! {
         .iter()
         .filter(|part| !skipped_only || part.state == jet::ProjectParts::ProjectPartState::Skipped)
         .collect::<Vec<_>>();
+    let source_files = if skipped_only {
+        Vec::new()
+    } else {
+        report
+            .source_files
+            .iter()
+            .collect::<Vec<_>>()
+    };
     let relative = |path: &Path| {
         path.strip_prefix(&root)
             .unwrap_or(path)
             .to_string_lossy()
             .replace('\\', "/")
     };
+    let source_name = |path: &Path| {
+        let mut name = relative(path);
+        let extension = format!(".{}", jet::Syntax::FILE_EXT);
+        if name.ends_with(&extension) {
+            name.truncate(name.len() - extension.len());
+        }
+        format!(
+            "{}{}",
+            jet::Syntax::PROJECT_IMPORT_PREFIX,
+            name.replace('/', ".")
+        )
+    };
     if mode.json {
-        let parts = parts
+        let mut part_rows = parts
             .iter()
             .map(|part| {
                 format!(
@@ -776,8 +796,15 @@ fn run_project_parts(raw: &[String], mode: OutputMode) -> ! {
                     part.state.name()
                 )
             })
-            .collect::<Vec<_>>()
-            .join(",");
+            .collect::<Vec<_>>();
+        part_rows.extend(source_files.iter().map(|path| {
+            format!(
+                "{{\"name\":\"{}\",\"path\":\"{}\",\"state\":\"automatic\"}}",
+                esc(&source_name(path)),
+                esc(&relative(path))
+            )
+        }));
+        let parts = part_rows.join(",");
         let conflicts = report
             .conflicts
             .iter()
@@ -807,6 +834,14 @@ fn run_project_parts(raw: &[String], mode: OutputMode) -> ! {
                 part.state.name(),
                 part.canonical_name(),
                 relative(&part.path)
+            );
+        }
+        for path in source_files {
+            println!(
+                "{:<9} {:<24} {}",
+                "automatic",
+                source_name(path),
+                relative(path)
             );
         }
         for conflict in &report.conflicts {

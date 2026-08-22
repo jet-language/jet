@@ -448,7 +448,7 @@ fn image_push_uses_the_real_oci_distribution_path() {
     assert_eq!(
         requests
             .iter()
-            .filter(|(method, path, _)| method == "PUT" && path.contains("/uploads/"))
+            .filter(|(method, path, _)| method == "PUT" && path.starts_with("/test-upload"))
             .count(),
         2
     );
@@ -612,6 +612,79 @@ fn environment_image_projects_explicit_extra_file_reproducibly() {
         first, second,
         "extra-file projection must preserve image identity"
     );
+}
+
+#[test]
+fn environment_image_rejects_public_managed_extra_file() {
+    let project = Scratch::new("environment-managed-file");
+    let root = Scratch::new("environment-managed-file-root");
+    fs::create_dir_all(project.path.join("config")).unwrap();
+    fs::write(
+        project.path.join("env.jet"),
+        r#"module env.dev {
+    packages: ["bash@nixpkgs"]
+    files: ["config/generated.txt": File{ content: "managed\n", mode: .Copy }]
+}
+module image.server { from: env.dev, files: ["config/generated.txt"] }
+"#,
+    )
+    .unwrap();
+    fs::write(project.path.join("config/generated.txt"), b"project\n").unwrap();
+    ingest_executable(&root.path, "bash", "bash@nixpkgs", "bash");
+
+    let out = jetpack()
+        .args(["image", "server"])
+        .current_dir(&project.path)
+        .env("JETPACK_ROOT", &root.path)
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert_eq!(out.status.code(), Some(2), "{stderr}");
+    assert!(stderr.contains("E1336"), "stderr: {stderr}");
+    assert!(
+        stderr.contains("managed environment files"),
+        "stderr: {stderr}"
+    );
+    let report =
+        fs::read_to_string(project.path.join(".jet/images/server/projection.json")).unwrap();
+    assert!(
+        report.contains("file:config/generated.txt"),
+        "projection: {report}"
+    );
+    assert!(report.contains("\"rejected\""), "projection: {report}");
+    assert!(!project.path.join(".jet/images/server/blobs").exists());
+}
+
+#[test]
+fn environment_image_rejects_extra_file_path_conflict() {
+    let project = Scratch::new("environment-file-conflict");
+    let root = Scratch::new("environment-file-conflict-root");
+    fs::create_dir_all(project.path.join("bin")).unwrap();
+    fs::write(
+        project.path.join("env.jet"),
+        "module env.dev { packages: [\"bash@nixpkgs\"] }\nmodule image.server { from: env.dev, files: [\"bin/sh\"] }\n",
+    )
+    .unwrap();
+    fs::write(project.path.join("bin/sh"), b"project shell\n").unwrap();
+    ingest_executable(&root.path, "bash", "bash@nixpkgs", "bash");
+
+    let out = jetpack()
+        .args(["image", "server"])
+        .current_dir(&project.path)
+        .env("JETPACK_ROOT", &root.path)
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert_eq!(out.status.code(), Some(2), "{stderr}");
+    assert!(stderr.contains("E1336"), "stderr: {stderr}");
+    assert!(stderr.contains("conflicts"), "stderr: {stderr}");
+    let report =
+        fs::read_to_string(project.path.join(".jet/images/server/projection.json")).unwrap();
+    assert!(report.contains("file:bin/sh"), "projection: {report}");
+    assert!(report.contains("\"rejected\""), "projection: {report}");
+    assert!(!project.path.join(".jet/images/server/blobs").exists());
 }
 
 #[test]
@@ -975,6 +1048,7 @@ fn environment_image_projects_supervised_services() {
     let out = jetpack()
         .args(["image", "server"])
         .current_dir(&project.path)
+        .env("JETPACK_ROOT", &project.path)
         .env("NO_COLOR", "1")
         .output()
         .unwrap();

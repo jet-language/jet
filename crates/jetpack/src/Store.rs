@@ -74,7 +74,10 @@ pub(crate) fn list_read_only(roots: &Roots) -> Vec<StoreEntry> {
 
 pub fn list_checked(roots: &Roots) -> std::io::Result<Vec<StoreEntry>> {
     super::RuntimePolicy::with_lock(&roots.root, "hangar", || {
-        Closure::recover_closure_journal_unlocked(roots)?;
+        // Listing is a checked engine boundary, not the model-only view. Run
+        // the same legacy closure migration used by verify, clean, and cache
+        // reuse so every consumer observes one receipt-bearing projection.
+        Closure::migrate_closure_graph_unlocked(roots)?;
         list_unlocked(roots)
     })
 }
@@ -176,7 +179,8 @@ pub fn recover_hangar(roots: &Roots) -> std::io::Result<usize> {
         let build_debug = super::BuildDebug::recover_scratch(&roots.hangar_dir())?;
         let leases = recover_stale_leases_unlocked(roots)?;
         let closure = Closure::recover_closure_journal_unlocked(roots)?;
-        Ok(staging + reproducibility + archive + repairs + build_debug + leases + closure)
+        let migrated = Closure::migrate_closure_graph_unlocked(roots)?.0;
+        Ok(staging + reproducibility + archive + repairs + build_debug + leases + closure + migrated)
     })
 }
 
@@ -2294,6 +2298,7 @@ fn project_receipt_projection(
         record_receipt_projection(
             project,
             &entry.name,
+            &entry.version,
             &entry.reference,
             &entry.envelope.output_hash,
             &entry.receipt,
@@ -2307,6 +2312,7 @@ fn project_receipt_projection(
 fn record_receipt_projection(
     project_root: &Path,
     package_name: &str,
+    package_version: &str,
     reference: &str,
     output_hash: &str,
     receipt: &str,
@@ -2345,15 +2351,9 @@ fn record_receipt_projection(
         .iter()
         .position(|package| {
             package.name == package_name
+                && package.version == package_version
                 && receipt_source_matches(package, reference)
-                && receipt_envelope_matches(package, output_hash)
-        })
-        .or_else(|| {
-            lock.packages.iter().position(|package| {
-                package.name == package_name
-                    && receipt_output_matches(package, output_hash)
-                    && receipt_envelope_matches(package, output_hash)
-            })
+                && receipt_projection_envelope_matches(package, output_hash)
         })
         .ok_or_else(|| {
             std::io::Error::new(
@@ -2425,17 +2425,23 @@ fn receipt_source_matches(package: &super::Lock::LockedPackage, reference: &str)
     }
 }
 
-fn receipt_output_matches(package: &super::Lock::LockedPackage, output_hash: &str) -> bool {
+fn receipt_envelope_matches(package: &super::Lock::LockedPackage, output_hash: &str) -> bool {
+    package
+        .envelope
+        .as_ref()
+        .is_none_or(|envelope| {
+            output_hash.is_empty() || envelope.output_hash == output_hash
+        })
+}
+
+fn receipt_projection_envelope_matches(
+    package: &super::Lock::LockedPackage,
+    output_hash: &str,
+) -> bool {
     package
         .envelope
         .as_ref()
         .is_some_and(|envelope| !output_hash.is_empty() && envelope.output_hash == output_hash)
-}
-
-fn receipt_envelope_matches(package: &super::Lock::LockedPackage, output_hash: &str) -> bool {
-    package.envelope.as_ref().is_none_or(|envelope| {
-        output_hash.is_empty() || envelope.output_hash == output_hash
-    })
 }
 
 fn valid_receipt_digest(value: &str) -> bool {
@@ -3093,42 +3099,40 @@ fn live_roots_from(roots: &Roots, start: &Path) -> std::io::Result<LiveRoots> {
     let graph = Closure::lifecycle_closure_graph_unlocked(roots)?;
     let mut targets = live.output_hashes.clone();
     for (receipt, package) in &live.receipt_packages {
-        let Some(record) = graph.records.values().find(|record| {
-            parse_meta(&record.package_meta)
-                .is_some_and(|meta| meta.receipt == *receipt)
-        }) else {
+        let mut matching = Vec::new();
+        for record in graph.records.values().filter(|record| {
+            parse_meta(&record.package_meta).is_some_and(|meta| meta.receipt == *receipt)
+        }) {
+            let meta = parse_meta(&record.package_meta).ok_or_else(|| {
+                std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    format!(
+                        "Hangar closure record `{}` has invalid package metadata for receipt `{receipt}`",
+                        record.id
+                    ),
+                )
+            })?;
+            if meta.name == package.name
+                && meta.version == package.version
+                && receipt_source_matches(package, &meta.reference)
+                && receipt_envelope_matches(package, &meta.envelope.output_hash)
+            {
+                matching.push((record, meta));
+            }
+        }
+        if matching.is_empty() {
             return Err(std::io::Error::new(
                 std::io::ErrorKind::InvalidData,
                 format!(
-                    "project lock receipt `{receipt}` has no matching Hangar closure record"
-                ),
-            ));
-        };
-        let meta = parse_meta(&record.package_meta).ok_or_else(|| {
-            std::io::Error::new(
-                std::io::ErrorKind::InvalidData,
-                format!(
-                    "Hangar closure record `{}` has invalid package metadata for receipt `{receipt}`",
-                    record.id
-                ),
-            )
-        })?;
-        if meta.name != package.name
-            || meta.version != package.version
-            || !receipt_source_matches(package, &meta.reference)
-            || !receipt_envelope_matches(package, &meta.envelope.output_hash)
-        {
-            return Err(std::io::Error::new(
-                std::io::ErrorKind::InvalidData,
-                format!(
-                    "project lock receipt `{receipt}` disagrees with Hangar closure record `{}`",
-                    record.id
+                    "project lock receipt `{receipt}` disagrees with Hangar closure record: no matching package identity"
                 ),
             ));
         }
         // A receipt is the lock's projection of the action root. Reachability
         // follows the same graph closure as output and lifecycle roots.
-        targets.insert(record.primary.clone());
+        for (record, _) in matching {
+            targets.insert(record.primary.clone());
+        }
     }
     for id in &live.ids {
         if let Some(record) = graph.records.get(id) {
@@ -3221,6 +3225,13 @@ fn retained_receipts(
             }
             Ok(_) => {}
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                if fs::read_dir(&path)?.next().is_none() {
+                    // Closure deletion tombstones the metadata file first and
+                    // leaves an empty projection directory until cleanup.
+                    // It is not a live object and must not block collection;
+                    // non-empty unknown directories still fail closed below.
+                    continue;
+                }
                 return Err(std::io::Error::new(
                     std::io::ErrorKind::InvalidData,
                     format!(
@@ -3990,6 +4001,7 @@ fn object_dirs(hangar: &Path) -> std::io::Result<Vec<fs::DirEntry>> {
             || name == CAS_DIR
             || name == REFERRERS_DIR
             || name == "receipts"
+            || name == "reproducibility-staging"
             || name == "lifecycle-db"
             || name == "closure-db"
             || name == "quarantine"

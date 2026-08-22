@@ -862,6 +862,27 @@ fn lsp_mcp_environment_resources_are_read_only() {
     assert!(read.contains("HOME"), "read: {read}");
     assert!(read.contains("lint"), "read: {read}");
     assert!(!read.contains("/test/home"), "resource leaked a variable value: {read}");
+    let resource = parse_json(&read).expect("MCP resource response must be JSON");
+    let contents = json_array_field(json_object_field(&resource, "result"), "contents");
+    let resource_text = json_str(json_object_field(&contents[0], "text"))
+        .expect("MCP resource content must be text");
+    let direct = Command::new(jet_bin())
+        .args(["env", "info", "--json", "--no-color"])
+        .current_dir(&project.path)
+        .env("HOME", "/test/home")
+        .output()
+        .expect("run direct env info");
+    assert!(
+        direct.status.success(),
+        "direct env info failed: {}",
+        String::from_utf8_lossy(&direct.stderr)
+    );
+    let direct_text = String::from_utf8(direct.stdout).expect("direct env info must be UTF-8");
+    assert_json_values_equal(
+        "MCP resource must use the env info production projection",
+        &parse_json(resource_text).expect("MCP resource text must be JSON"),
+        &parse_json(direct_text.trim()).expect("direct env info must be JSON"),
+    );
     assert!(
         !project.join(".jet/services").exists(),
         "resource discovery must not start services"

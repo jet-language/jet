@@ -1992,13 +1992,21 @@ fn print_explanation(explanation: &jet::Explain::Explanation, mode: OutputMode) 
                 .unwrap_or_else(|| "null".to_string())
         };
         println!(
-            "{{\"schema_version\":1,\"code\":{},\"stage\":{},\"what\":{},\"why\":{},\"fix\":{},\"example\":{}}}",
-            json_string(&explanation.code),
-            json_string(&explanation.stage),
-            json_string(what),
-            optional(explanation.why.as_ref()),
-            optional(explanation.fix.as_ref()),
-            optional(explanation.example.as_ref()),
+            "{}",
+            jet::Diagnostics::render_status_json(
+                "ok",
+                true,
+                "explain",
+                &format!(
+                    ",\"code\":{},\"stage\":{},\"what\":{},\"why\":{},\"fix\":{},\"example\":{}",
+                    json_string(&explanation.code),
+                    json_string(&explanation.stage),
+                    json_string(what),
+                    optional(explanation.why.as_ref()),
+                    optional(explanation.fix.as_ref()),
+                    optional(explanation.example.as_ref()),
+                ),
+            )
         );
         return;
     }
@@ -2080,8 +2088,7 @@ pub(crate) fn run_explain_marker(site: Option<&str>, key: Option<&str>, mode: Ou
         jet::Policy::PolicyScope::Function | jet::Policy::PolicyScope::Block => declaration.target.is_some_and(|target| target.start <= offset && offset <= target.end),
     }).cloned().collect::<Vec<_>>();
     let Some(explanation) = jet::Explain::lookup_policy(policy_key, declarations) else { crate::cli_error!("E2104", "`{key}` has no effective declaration at {site}"); exit(ExitCodes::USER_ERROR) };
-    let color = ColorChoice::resolve(mode.color, std::io::stdout().is_terminal());
-    print!("{}", jet::Explain::render(&explanation, color));
+    print_explanation(&explanation, mode);
 }
 
 /// `jet inspect bind <header.h> [--pkg <lib>] [-o <out.jet>]` (S59 / E2-M14 Phase 4).

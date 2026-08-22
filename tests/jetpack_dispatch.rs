@@ -35,6 +35,48 @@ fn jet_clean_delegates_to_jetpack_clean() {
     assert!(stderr.contains("cleaned hangar"), "stderr: {stderr}");
 }
 
+#[test]
+fn jet_shared_store_status_does_not_default_to_install() {
+    let home = Scratch::new("shared-store-status-home");
+    let data = Scratch::new("shared-store-status-data");
+    let state = Scratch::new("shared-store-status-state");
+    let legacy_hangar = state.join("jet/hangar");
+    fs::create_dir_all(&legacy_hangar).unwrap();
+    fs::write(legacy_hangar.join("marker"), "legacy").unwrap();
+
+    let output = jet()
+        .args(["shared-store", "status", "--no-color"])
+        .env_remove("JETPACK_ROOT")
+        .env("HOME", &home.path)
+        .env("XDG_DATA_HOME", &data.path)
+        .env("XDG_STATE_HOME", &state.path)
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("shared-store broker is not installed."),
+        "stderr: {stderr}"
+    );
+    assert!(!stderr.contains("Error [E1340]"), "stderr: {stderr}");
+    assert!(
+        !stderr.contains("shared-store install failed"),
+        "stderr: {stderr}"
+    );
+    assert!(!stderr.contains("sudo"), "stderr: {stderr}");
+    assert!(
+        !stderr.contains("jetpack shared-store install"),
+        "stderr: {stderr}"
+    );
+    assert!(legacy_hangar.join("marker").is_file());
+    assert!(!data.path.join("jet/hangar").exists());
+    assert!(!data.path.join("jet/shared-store").exists());
+}
 
 /// D-CLI-SURFACE3=B: `outdated` moved under `jet inspect` — bare
 /// `jet outdated` is now a teaching error (E2101) naming the new spelling.

@@ -80,9 +80,10 @@ fn hook_prints_installable_snippet_per_shell() {
             "`hook {shell}` must call back into `jet env export {shell}`:\n{stdout}"
         );
         assert!(
-            stdout.contains("__jetpack_help_prefill"),
+            stdout.contains("__jet_help_prefill"),
             "`hook {shell}` must install help-app prefill widgets:\n{stdout}"
         );
+        assert!(!stdout.contains("__jetpack_"), "hook {shell} leaked engine identifiers:\n{stdout}");
     }
 }
 
