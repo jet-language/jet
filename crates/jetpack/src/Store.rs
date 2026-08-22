@@ -3003,7 +3003,25 @@ fn live_roots_unlocked(roots: &Roots) -> std::io::Result<LiveRoots> {
     let mut live = current_lock_roots();
     let lifecycle = Lifecycle::protected_targets_unlocked(roots)?;
     let graph = Closure::lifecycle_closure_graph_unlocked(roots)?;
-    for target in lifecycle {
+    let mut targets = live.output_hashes.clone();
+    for id in &live.ids {
+        if let Some(record) = graph.records.get(id) {
+            targets.insert(record.primary.clone());
+        }
+    }
+    for record in graph.records.values() {
+        let Some(meta) = parse_meta(&record.package_meta) else {
+            continue;
+        };
+        if live
+            .name_versions
+            .contains(&(meta.name.clone(), meta.version.clone()))
+        {
+            targets.insert(record.primary.clone());
+        }
+    }
+    targets.extend(lifecycle);
+    for target in targets {
         live.output_hashes.extend(graph.closure(&target));
     }
     Ok(live)
@@ -3050,6 +3068,9 @@ fn clean_plan_unlocked(roots: &Roots) -> std::io::Result<CleanReport> {
     let opt = optimize_hangar_plan(&store)?;
     report.optimized_files += opt.optimized_files;
     report.optimized_bytes += opt.optimized_bytes;
+    let cas = optimize_objects_cas_pool_plan(&store)?;
+    report.optimized_files += cas.optimized_files;
+    report.optimized_bytes += cas.optimized_bytes;
     Ok(report)
 }
 
@@ -3078,6 +3099,7 @@ fn clean_unlocked(roots: &Roots) -> std::io::Result<CleanReport> {
             continue;
         }
         let bytes = dir_size(&path);
+        Closure::tombstone_closure_record_unlocked(roots, &id)?;
         fs::remove_dir_all(&path)?;
         report.removed_objects += 1;
         report.removed_bytes += bytes;
@@ -3190,6 +3212,102 @@ fn optimize_hangar_plan(hangar: &Path) -> std::io::Result<CleanReport> {
                 report.optimized_bytes += meta.len();
             } else {
                 seen.insert(key, file);
+            }
+        }
+    }
+    Ok(report)
+}
+
+/// Read-only counterpart to [`optimize_objects_cas_pool`]. Keep the plan
+/// honest for Store-v2 objects: `clean` applies the CAS pass even when there
+/// are no legacy package directories at the Hangar root.
+fn optimize_objects_cas_pool_plan(hangar: &Path) -> std::io::Result<CleanReport> {
+    let objects = hangar.join(OBJECTS_DIR);
+    let objects_metadata = match fs::symlink_metadata(&objects) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            return Ok(CleanReport::default())
+        }
+        Err(error) => return Err(error),
+    };
+    if objects_metadata.file_type().is_symlink() || !objects_metadata.is_dir() {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            format!("Hangar object pool is not a real directory: {}", objects.display()),
+        ));
+    }
+
+    let cas = hangar.join(CAS_DIR);
+    match fs::symlink_metadata(&cas) {
+        Ok(metadata) if metadata.file_type().is_symlink() || !metadata.is_dir() => {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                format!("Hangar CAS pool is not a real directory: {}", cas.display()),
+            ))
+        }
+        Ok(_) => {}
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => return Err(error),
+    }
+
+    let mut object_dirs = Vec::new();
+    for ent in fs::read_dir(&objects)? {
+        let ent = ent?;
+        let path = ent.path();
+        let name = ent.file_name().to_string_lossy().into_owned();
+        let metadata = fs::symlink_metadata(&path)?;
+        if metadata.file_type().is_symlink() {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                format!("Hangar object entry is a symlink: {}", path.display()),
+            ));
+        }
+        if metadata.is_dir() && !name.ends_with(PARTIAL_SUFFIX) {
+            object_dirs.push(path);
+        }
+    }
+
+    let mut report = CleanReport::default();
+    for object_dir in object_dirs {
+        for file in files_under(&object_dir) {
+            let metadata = fs::symlink_metadata(&file)?;
+            if metadata.file_type().is_symlink() || !metadata.is_file() || metadata.len() == 0 {
+                continue;
+            }
+            let bytes = fs::read(&file)?;
+            let digest = format!(
+                "{}-{:08x}",
+                SHA256::sha256_hex(&bytes),
+                permission_identity(&metadata)
+            );
+            let cas_file = cas.join(&digest);
+            match fs::symlink_metadata(&cas_file) {
+                Ok(existing) if existing.file_type().is_symlink() || !existing.is_file() => {
+                    return Err(std::io::Error::new(
+                        std::io::ErrorKind::InvalidData,
+                        format!("Hangar CAS entry is not a regular file: {}", cas_file.display()),
+                    ));
+                }
+                Ok(existing) => {
+                    if existing.len() != metadata.len()
+                        || permission_identity(&existing) != permission_identity(&metadata)
+                        || fs::read(&cas_file)? != bytes
+                    {
+                        return Err(std::io::Error::new(
+                            std::io::ErrorKind::InvalidData,
+                            format!("Hangar CAS entry is corrupt: {}", cas_file.display()),
+                        ));
+                    }
+                    if !same_file_inode(&file, &cas_file) {
+                        report.optimized_files += 1;
+                        report.optimized_bytes += metadata.len();
+                    }
+                }
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                    report.optimized_files += 1;
+                    report.optimized_bytes += metadata.len();
+                }
+                Err(error) => return Err(error),
             }
         }
     }

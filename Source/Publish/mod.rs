@@ -44,6 +44,9 @@ pub use Index::IndexEntry;
 pub use NamePolicy::*;
 pub use Policy::*;
 pub use Registry::*;
+pub(crate) use Registry::{
+    read_registry_package_metadata, RegistryDependency, RegistryPackageMetadata,
+};
 pub use Resolve::*;
 pub use SemVer::*;
 pub use Vendor::*;
@@ -584,7 +587,53 @@ mod tests {
         std::fs::write(blob, bytes).unwrap();
         let error = Registry::verify_oci_referrers(&repo, &entry)
             .expect_err("a tampered OCI referrer must fail closed");
-        assert!(error.to_string().contains("digest"));
+        assert!(
+            error.to_string().contains("digest") || error.to_string().contains("size"),
+            "tampering must fail on a bound OCI blob: {error}"
+        );
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn registry_publish_rejects_missing_sbom_before_index_exposure() {
+        let root = std::env::temp_dir().join(format!(
+            "jet_registry_missing_sbom_{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let repo = root.join("registry");
+        let source = root.join("source");
+        std::fs::create_dir_all(&repo).unwrap();
+        std::fs::create_dir_all(&source).unwrap();
+        std::fs::write(source.join("package.jet"), "package bytes\n").unwrap();
+
+        let content_hash = crate::SHA256::tree_hash(&source);
+        Registry::publish_artifact(&repo, &source, "ref-kit", "1.0.0", &content_hash).unwrap();
+        let pending = repo
+            .join("referrers")
+            .join(&content_hash)
+            .join(".sbom.pending");
+        std::fs::remove_file(&pending).unwrap();
+        let entry = IndexEntry {
+            name: "ref-kit".into(),
+            version: "1.0.0".into(),
+            content_hash,
+            fingerprint: "sha256-fingerprint".into(),
+            yanked: false,
+            tier: RegistryTier::Core,
+            gate_status: GateStatus::core_reviewed(),
+            public_key: String::new(),
+            signature: String::new(),
+        };
+
+        let error = Index::write_index_entry(&repo, &entry)
+            .expect_err("a publication without its staged SBOM must fail closed");
+        assert!(error.to_string().contains("SBOM evidence was not staged"));
+        assert!(Index::find_entry(&repo, "ref-kit", "1.0.0")
+            .unwrap()
+            .is_none());
         std::fs::remove_dir_all(root).unwrap();
     }
 

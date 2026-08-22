@@ -513,6 +513,16 @@ fn binary_cache_local_publish_verify_and_reject_corruption() {
     )
     .is_err());
     assert!(!revoked_destination.join("out").exists());
+    let revoked_explanation = jetpack::Store::explain_package(
+        &roots,
+        &entry.id,
+        jetpack::Store::ExplainLens::Rebuild,
+    )
+    .unwrap()
+    .unwrap()
+    .to_json();
+    assert!(revoked_explanation.contains("\"decision\":\"denied\""));
+    assert!(revoked_explanation.contains("cache builder is revoked"));
 }
 
 #[test]
@@ -969,7 +979,7 @@ fn package_generation_lifecycle_preserves_source_facts_and_history() {
     write_runnable_fixture(&fixtures.path, &root.path, &staging.path);
     fs::write(
         project.join("env.jet"),
-        "module profile.dev { packages: [default.greet] }\n",
+        "module profile.dev { packages: [default.greet] }\nmodule env.full { packages: [] }\n",
     )
     .unwrap();
 
@@ -1061,6 +1071,8 @@ fn package_generation_lifecycle_preserves_source_facts_and_history() {
         "--no-color",
         "--trust",
         "--offline",
+        "--env",
+        "full",
         "--",
         "/bin/sh",
         "-c",
@@ -1128,8 +1140,12 @@ fn package_generation_lifecycle_preserves_source_facts_and_history() {
     );
 
     let generation_one_root = project.join(".jet/profiles/dev/generations/1/root");
+    let generation_one_bin = generation_one_root.join("bin");
     let generation_one_binary = generation_one_root.join("bin/greet");
     let generation_one_original = fs::read(&generation_one_binary).unwrap();
+    let generation_one_root_permissions = fs::metadata(&generation_one_root).unwrap().permissions();
+    let generation_one_bin_permissions = fs::metadata(&generation_one_bin).unwrap().permissions();
+    let generation_one_permissions = fs::metadata(&generation_one_binary).unwrap().permissions();
     make_writable(&generation_one_root.to_string_lossy());
     fs::write(&generation_one_binary, "tampered generation\n").unwrap();
     let failed_rollback = run(["profile", "rollback", "dev", "1", "--no-color"].as_slice());
@@ -1144,7 +1160,10 @@ fn package_generation_lifecycle_preserves_source_facts_and_history() {
             .unwrap()
             .contains("\"generation\":2")
     );
-    fs::write(generation_one_binary, generation_one_original).unwrap();
+    fs::write(&generation_one_binary, generation_one_original).unwrap();
+    fs::set_permissions(generation_one_root, generation_one_root_permissions).unwrap();
+    fs::set_permissions(generation_one_bin, generation_one_bin_permissions).unwrap();
+    fs::set_permissions(generation_one_binary, generation_one_permissions).unwrap();
 
     let roots = jetpack::Store::Roots {
         root: root.path.clone(),
@@ -1174,7 +1193,7 @@ fn package_generation_lifecycle_preserves_source_facts_and_history() {
     assert!(rebuild_stdout.contains("\"kind\":\"loss\""));
     assert!(rebuild_stdout.contains("stored output digest differs"));
 
-    fs::remove_dir_all(root.join("lifecycle-db")).unwrap();
+    fs::remove_dir_all(root.join("hangar/lifecycle-db")).unwrap();
     let missing_root = run(["profile", "generations", "dev", "--json"].as_slice());
     assert_eq!(missing_root.status.code(), Some(2));
     let missing_root_stderr = String::from_utf8_lossy(&missing_root.stderr);
@@ -1448,6 +1467,38 @@ policy: {
 }
 
 #[test]
+fn package_policy_parses_exact_expiring_source_exception() {
+    let raw = r#"
+name: "consumer"
+version: "0.1.0"
+policy: {
+    exceptions: [PolicyException.{
+        id: "JSA-2026-0001",
+        scope: "Acme.Widget#1.2.3",
+        reason: "urgent security fix",
+        expires: 9999999999,
+    }],
+}
+"#;
+    let manifest = jet::Manifest::parse(Path::new("package.jet"), raw)
+        .expect("source policy exception should parse");
+    assert_eq!(manifest.policy.exceptions.len(), 1);
+    let exception = &manifest.policy.exceptions[0];
+    assert_eq!(exception.id, "JSA-2026-0001");
+    assert_eq!(exception.scope, "Acme.Widget#1.2.3");
+    assert!(exception.matches("Acme.Widget", "1.2.3"));
+    assert!(exception.summary().contains("reason=urgent security fix"));
+
+    let invalid = jet::Manifest::parse(
+        Path::new("package.jet"),
+        "name: \"consumer\"\nversion: \"0.1.0\"\npolicy: { exceptions: [PolicyException.{ id: \"JSA-1\", scope: \"Acme.Widget#^1.2\", reason: \"why\", expires: 10 }] }\n",
+    )
+    .expect_err("exception scope ranges must fail closed");
+    assert_eq!(invalid.code, "E1206");
+    assert!(invalid.why.contains("PolicyException.scope"));
+}
+
+#[test]
 fn package_policy_rejects_unmapped_or_non_spdx_candidates_before_ingest() {
     let policy = jet::Package::PackagePolicy {
         licenses: Some(vec!["MIT".to_string()]),
@@ -1593,6 +1644,64 @@ checksum = "insta-checksum"
 }
 
 #[test]
+fn cargo_import_keeps_unlocked_target_identity_without_duplicate_selector_facts() {
+    let plan = jetpack::MigrationImport::import_cargo(
+        "[package]\nname = \"app\"\nversion = \"0.1.0\"\n[target.'cfg(unix)'.dependencies]\ncc = \"1\"\n",
+        "",
+    );
+    assert_eq!(plan.deps[0].provider_ref, "cc#platform=cfg(unix)@cargo");
+    let facts = plan
+        .provider_facts
+        .get("cc#platform=cfg(unix)@cargo")
+        .expect("unlocked target provider facts");
+    assert!(facts.losses.iter().all(|loss| {
+        !loss.reason.contains("duplicate selector fact `platform=cfg(unix)`")
+    }));
+    assert!(plan.todos.iter().any(|todo| {
+        todo.source_path == "Cargo.lock" && todo.message.contains("unresolved")
+    }));
+    assert!(!plan.emit_pkg_jet().contains("cc:"));
+}
+
+#[test]
+fn jet_registry_dependency_roles_features_and_constraints_round_trip() {
+    use jetpack::ProviderFacts;
+    use jetpack::ProviderGraph::{normalize_provider_document, ProviderFamily};
+
+    let native = r#"{"name":"rolekit","version":"1.0.0","content_hash":"sha256-rolekit","dependencies":{"runtime":"^1.0"},"build_dependencies":{"cc":{"require":"^1.0","strict":true}},"dev_dependencies":{"insta":"^1.0"},"optional_dependencies":{"trace":"^1.0"},"peer_dependencies":{"host":"^2.0"},"features":{"default":["trace"]},"constraints":{"runtime":{"prefer":"1.0.1","reject":["1.0.2"],"strict":true}}}"#;
+    let report = normalize_provider_document(ProviderFamily::JetRegistry, native);
+    report
+        .validate()
+        .expect("registry dependency metadata must be lossless");
+    for key in [
+        "provider.registry.dependency-role.build",
+        "provider.registry.dependency.build.cc",
+        "provider.registry.features",
+        "provider.registry.constraints",
+    ] {
+        assert!(
+            report.facts.typed.contains_key(key),
+            "registry fact carrier omitted {key}"
+        );
+    }
+
+    let lock = report
+        .lock_record("engine-test", "rolekit#version=1.0.0@jet-registry", "x86_64-linux")
+        .expect("registry provider lock");
+    let facts = ProviderFacts::from_json(
+        lock.future_fields
+            .get("provider-facts")
+            .expect("provider facts in semantic lock"),
+    )
+    .expect("provider facts round trip");
+    assert_eq!(facts.native_document, native);
+    assert!(facts
+        .facts
+        .contains_key("provider.registry.dependency-role.build"));
+    assert!(facts.facts.contains_key("provider.registry.constraints"));
+}
+
+#[test]
 fn provider_conformance_nuget_conan_vcpkg_uses_shared_production_carrier() {
     use jetpack::ProviderFacts;
     use jetpack::ProviderGraph::{normalize_provider_document, ProviderFamily};
@@ -1649,6 +1758,146 @@ fn provider_conformance_nuget_conan_vcpkg_uses_shared_production_carrier() {
         .conflicts
         .iter()
         .any(|conflict| conflict.contains("conflicting version fields")));
+}
+
+#[test]
+fn provider_conformance_homebrew_github_binary_uses_shared_production_carrier() {
+    use jetpack::ProviderFacts;
+    use jetpack::ProviderGraph::{normalize_provider_document, ProviderFamily};
+
+    let digest = "sha256-0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+    let revision = "0123456789abcdef0123456789abcdef01234567";
+    let homebrew = r##"{"name":"jq","version":"1.7.1","versions":{"stable":"1.7.1"},"tap":"homebrew/core","dependencies":["oniguruma"],"source":{"url":"https://example.invalid/jq.tar.gz","sha256":"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"},"bottle":{"stable":{"files":{"x86_64_linux":{"url":"https://example.invalid/jq.bottle.tar.gz","sha256":"abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789"}}}},"relocatable":true,"test":"system \"#{bin}/jq\""}"##;
+    let github = format!(
+        r#"{{"name":"tool","tag_name":"v1.2.3","target_commitish":"{revision}","repository":{{"full_name":"acme/tool"}},"assets":[{{"name":"tool-linux","platform":"x86_64-linux","digest":"{digest}","browser_download_url":"https://example.invalid/tool"}}],"signature":{{"key":"pk","value":"sig"}},"advisories":["CVE-0000-0000"]}}"#
+    );
+    let binary = format!(
+        r#"{{"name":"tool","hash":"{digest}","platforms":["x86_64-linux"],"url":"https://example.invalid/tool","signature":{{"key":"pk","value":"sig"}},"provenance":{{"builder":"ci"}},"sbom":{{"format":"spdx"}},"variants":{{"debug":{{"features":["trace"]}}}}}}"#
+    );
+
+    for (family, native, reference) in [
+        (
+            ProviderFamily::Homebrew,
+            homebrew,
+            "jq#version=1.7.1@homebrew",
+        ),
+        (
+            ProviderFamily::Github,
+            github.as_str(),
+            "tool#version=v1.2.3@github",
+        ),
+        (
+            ProviderFamily::Binary,
+            binary.as_str(),
+            "tool#digest=sha256-0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef@binary",
+        ),
+    ] {
+        let report = normalize_provider_document(family, native);
+        report
+            .validate()
+            .unwrap_or_else(|error| panic!("lossless provider report: {error}"));
+        let shared = report.shared_facts();
+        assert_eq!(shared.native_document, native);
+        assert!(shared
+            .explain_lines()
+            .iter()
+            .any(|line| line.contains("native") && line.contains("retained")));
+
+        let exported = ProviderFacts::from_json(&report.export_json())
+            .expect("provider export uses the shared carrier");
+        assert_eq!(exported, shared);
+
+        let lock = report
+            .lock_record("engine-test", reference, "x86_64-linux")
+            .expect("provider lock uses the shared carrier");
+        let locked = ProviderFacts::from_json(
+            lock.future_fields
+                .get("provider-facts")
+                .expect("provider facts in lock"),
+        )
+        .expect("locked provider facts JSON");
+        assert_eq!(locked, shared);
+        assert_eq!(
+            lock.future_fields.get("provider-facts-digest"),
+            Some(&shared.digest())
+        );
+    }
+
+    let homebrew_report = normalize_provider_document(ProviderFamily::Homebrew, homebrew);
+    assert!(homebrew_report
+        .facts
+        .typed
+        .contains_key("provider.homebrew.bottle.x86_64_linux.sha256"));
+    let github_report = normalize_provider_document(ProviderFamily::Github, &github);
+    assert!(github_report
+        .facts
+        .typed
+        .contains_key("provider.github.revision"));
+    assert!(github_report
+        .shared_facts()
+        .facts
+        .contains_key("provider.github.asset.tool-linux.browser_download_url"));
+    let binary_report = normalize_provider_document(ProviderFamily::Binary, &binary);
+    assert!(binary_report
+        .shared_facts()
+        .facts
+        .contains_key("provider.binary.provenance"));
+}
+
+#[test]
+fn provider_conformance_homebrew_github_binary_reports_loss_and_conflict_without_defaults() {
+    use jetpack::ProviderGraph::{normalize_provider_document, ProviderFamily};
+
+    let homebrew = normalize_provider_document(
+        ProviderFamily::Homebrew,
+        r#"{"name":"jq","version":"1.7.1","versions":{"stable":"1.7.2"}}"#,
+    );
+    assert!(homebrew
+        .conflicts
+        .iter()
+        .any(|conflict| conflict.contains("conflicting version")));
+    assert!(homebrew.validate().is_err());
+    assert!(homebrew
+        .shared_facts()
+        .conflicts
+        .iter()
+        .any(|conflict| {
+            conflict.right.contains("conflicting version") && conflict.left != conflict.right
+        }));
+
+    let github = normalize_provider_document(
+        ProviderFamily::Github,
+        r#"{"name":"tool","tag_name":"v1.2.3","assets":[{"name":"tool-linux","platform":"x86_64-linux","browser_download_url":"https://example.invalid/tool"}]}"#,
+    );
+    assert!(github
+        .losses
+        .iter()
+        .any(|loss| loss.contains("no content digest")));
+    assert!(github.validate().is_err());
+    assert!(github
+        .shared_facts()
+        .losses
+        .iter()
+        .any(|loss| loss.reason.contains("no content digest")));
+
+    let binary = normalize_provider_document(
+        ProviderFamily::Binary,
+        r#"{"name":"tool","hash":"sha256-aa"}"#,
+    );
+    assert!(binary
+        .losses
+        .iter()
+        .any(|loss| loss.contains("not an exact digest")));
+    assert!(binary
+        .losses
+        .iter()
+        .any(|loss| loss.contains("no target platform")));
+    assert!(binary.validate().is_err());
+    assert!(binary
+        .shared_facts()
+        .losses
+        .iter()
+        .any(|loss| loss.reason.contains("exact version, revision, or digest")));
 }
 
 #[test]
@@ -2271,6 +2520,21 @@ fn no_nix_projects_external_output_and_build_facts() {
         producer.facts.get("nix.build.home").map(String::as_str),
         Some("/homeless-shelter")
     );
+    let provider_facts = jetpack::ProviderFacts::from_json(
+        producer
+            .facts
+            .get("provider-facts")
+            .expect("Nix production path must publish the shared provider carrier"),
+    )
+    .expect("Nix producer provider facts must decode");
+    provider_facts
+        .validate()
+        .expect("Nix producer provider facts must remain lossless");
+    assert_eq!(provider_facts.native_format, "json");
+    assert!(provider_facts.native_document.contains("drvPath"));
+    assert!(provider_facts
+        .facts
+        .contains_key("nix.native.document"));
 
     let entered = jetpack()
         .args(["enter", "--no-color", "--trust", "--offline", "--fixtures"])
@@ -6986,12 +7250,16 @@ fn staged_plan_action_production_path_is_deterministic_and_complete() {
         1,
         vec![jetpack::Recipe::PlanInput::new("manifest", digest.clone())],
         jetpack::Recipe::PlanAuthority {
-            tools: vec!["planner".to_string()],
+            tools: vec!["planner".to_string(), "planner-alt".to_string()],
             effects: vec![BuildEffect::Exec, BuildEffect::FS],
             platform: platform.clone(),
         },
     );
-    let tools = HashMap::from([("planner".to_string(), std::env::current_exe().unwrap())]);
+    let executable = std::env::current_exe().unwrap();
+    let tools = HashMap::from([
+        ("planner".to_string(), executable.clone()),
+        ("planner-alt".to_string(), executable),
+    ]);
     let context = jetpack::Recipe::StagedPlanContext {
         source_dir: &source,
         artifact_root: &artifacts,
@@ -7073,6 +7341,30 @@ fn staged_plan_action_production_path_is_deterministic_and_complete() {
         .labels
         .get("authority.tool.0")
         .is_some_and(|value| value == "planner")));
+
+    let mut reordered = action.clone();
+    reordered.authority.tools.reverse();
+    reordered.authority.effects.reverse();
+    let reordered_plan = jetpack::Recipe::lower_staged_plan_action(
+        &reordered,
+        &jetpack::Recipe::BuildPlanFragment {
+            actions: vec![{
+                let mut emitted = jetpack::Recipe::PlanFragmentAction::new("compile", "planner");
+                emitted.inputs = vec!["manifest".to_string()];
+                emitted.outputs = vec!["result.bin".to_string()];
+                emitted.effects = vec![BuildEffect::Exec, BuildEffect::FS];
+                emitted.platform = platform.clone();
+                emitted
+            }],
+        },
+        &tools,
+    )
+    .unwrap();
+    assert_eq!(
+        jetpack::Recipe::plan_recipe_fingerprint(&plan).unwrap(),
+        jetpack::Recipe::plan_recipe_fingerprint(&reordered_plan).unwrap(),
+        "authority declaration order must not change canonical plan identity"
+    );
 }
 
 #[test]

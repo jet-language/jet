@@ -573,7 +573,7 @@ fn render_function(marker: &str, function: &Function, body: &[String]) -> String
     let result = if function.result == "()" {
         String::new()
     } else {
-        format!(" -> {}", function.result)
+        format!(" {} ->", function.result)
     };
     let mut output = format!("{marker}fn {}({params}){result} {{\n", function.name);
     for line in body {

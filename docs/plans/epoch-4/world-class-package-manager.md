@@ -376,13 +376,15 @@ Shipped slice evidence:
   builder's declared concurrency slot, then advances to the next candidate
   only for a retryable worker loss.
 - `jet build --builder <bound-name>` enters the canonical build executor. It
-  uploads missing action inputs to the authenticated CAS, submits the exact
-  action identity (including argv, input snapshots, outputs, and effective
-  resource pools), carries a deterministic policy/provenance digest in the
-  worker proof, checks the returned execution identity against that exact
-  request, and restores only digest- and length-verified outputs. Local action
-  publication re-hashes the restored outputs before recording or re-uploading
-  them.
+  uses the named host binding as the primary candidate, then uploads missing
+  action inputs to the authenticated CAS, submits the exact action identity
+  (including argv, input snapshots, outputs, and effective resource pools),
+  carries a deterministic policy/provenance digest in the worker proof,
+  checks the returned execution identity against that exact request, and
+  restores only digest- and length-verified outputs. Other registered bindings
+  with matching platform and trust facts are deterministic failover candidates;
+  local action publication re-hashes the restored outputs before recording or
+  re-uploading them.
 - The result statement is an HMAC-SHA256-authenticated envelope over the exact
   action, named output digests and lengths, stdout/stderr digests, worker proof,
   provenance signer, and execution identity. The transport rejects unsigned,
@@ -573,6 +575,15 @@ fixes. `jet update <pkg>` moves only that package's locked dependency closure;
 unrelated machine and semantic lock records stay byte-stable, and the update
 rationale is committed with the new lock in one atomic write.
 
+Registry artifacts may also carry one content-bound `registry.json` record. Its
+existing provider-shaped fields (`dependencies`, build/tool/dev/test,
+optional, peer/plugin, and target dependency maps; `features`; and
+`constraints`) are validated before publish. Resolution enables only the
+production roles and the `default` feature closure, while `require`, `prefer`,
+`reject`, and `strict` rules are applied to the same verified candidate set.
+The exact record is retained in the semantic lock, so metadata, resolution,
+Hangar install, and the immutable source hash describe one package identity.
+
 ### E4-JP13 — one semantic lock, catalogs, overlays, and source maps
 
 - Fold machine lock and semantic rationale into one forward-compatible schema.
@@ -711,6 +722,9 @@ Shipped slice evidence:
 - NuGet, Conan, and vcpkg conformance tests exercise the production normalizer,
   shared-carrier export, exact lock identity, and explicit malformed/conflicting
   provider findings.
+- PyPI, SwiftPM, and Maven conformance tests exercise the same production
+  normalizer path, retained native documents, explain output, exact lock
+  identity, and explicit malformed/conflicting provider findings.
 
 ### E4-JP18 — reproducibility certification
 
@@ -785,9 +799,15 @@ Shipped slice evidence:
   patterns to source authorities. Jet requires a concrete SPDX expression,
   checks both fields after registry identity, signature, and artifact checks,
   and rejects the candidate before Hangar ingest when a rule fails.
+- Source-owned freshness exceptions use the same namespace:
+  `policy.exceptions: [PolicyException.{ id: "JSA-…", scope: "package#version",
+  reason: "…", expires: 9999999999 }]`. The scope is exact, the record is
+  expiring, and an active exception can waive only release maturity. Signed
+  trust-root failures and matching advisories still deny the candidate.
 - The allow or deny result carries the matched source rule and policy
   fingerprint into Hangar provenance, cache identity, and semantic-lock
-  explanation. Locked and offline resolution repeat the metadata check.
+  explanation. Exception id, scope, reason, and expiry are carried in the
+  same evidence. Locked and offline resolution repeat the metadata check.
 - Yanks/retractions, release maturity, and trust-evidence no-downgrade remain
   part of the same fail-closed policy path.
 - OCI referrers bind SBOM, signature, provenance, and reproducibility proof.
@@ -795,13 +815,17 @@ Shipped slice evidence:
   referrers/<content-hash>/: a subject-bound index.json and four
   content-addressed blobs. The SBOM uses canonical lock bytes when a lock is
   present, while the signature, provenance, and reproducibility blobs bind the
-  exact index entry.
+  exact index entry. Signed sparse metadata also binds the referrer index
+  digest, so replacing an index and its SBOM together cannot create a mixed
+  evidence set.
 - Publication stages the referrer set in the same explicit git transaction as
   the artifact, index line, sparse metadata, checkpoint, and transparency log.
   Fetch verifies every descriptor, blob digest, subject, and bound fact before
   a candidate is usable; missing, stale, mixed, or tampered evidence fails
   closed and asks for republish or restoration of the immutable evidence set.
-- Policy failures explain exact owner, edge, evidence, and smallest source fix.
+- Policy failures explain the exact source owner and dependency edge, retain
+  the policy evidence, and give the smallest source fix. Freshness exceptions
+  are also printed by `jet inspect audit` when they actually apply.
 
 ### E4-JP21 — explicit finite staged planning
 

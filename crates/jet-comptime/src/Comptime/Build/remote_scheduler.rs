@@ -5,7 +5,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
-use std::sync::{Arc, Condvar, Mutex};
+use std::sync::{Arc, Mutex};
 
 use super::{ActionKey, BuildCapability, BuildResourcePool, RemoteBuildBinding};
 
@@ -333,7 +333,6 @@ pub struct RemoteDispatch<T> {
 pub struct RemoteScheduler {
     builders: BTreeMap<String, RemoteBuilder>,
     active: Arc<Mutex<BTreeMap<String, usize>>>,
-    available: Arc<Condvar>,
 }
 
 impl RemoteScheduler {
@@ -351,7 +350,6 @@ impl RemoteScheduler {
         Ok(Self {
             builders: registered,
             active: Arc::default(),
-            available: Arc::default(),
         })
     }
 
@@ -448,28 +446,6 @@ impl RemoteScheduler {
         })
     }
 
-    pub(super) fn acquire(&self, builder: &RemoteBuilder) -> RemoteBuilderLease {
-        let mut active = self
-            .active
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
-        loop {
-            let count = active.entry(builder.builder().to_string()).or_default();
-            if *count < builder.capabilities.concurrency {
-                *count += 1;
-                return RemoteBuilderLease {
-                    active: Arc::clone(&self.active),
-                    available: Arc::clone(&self.available),
-                    builder: builder.builder().to_string(),
-                };
-            }
-            active = self
-                .available
-                .wait(active)
-                .unwrap_or_else(|poisoned| poisoned.into_inner());
-        }
-    }
-
     fn reserve(&self, builder: &RemoteBuilder) -> Option<RemoteBuilderLease> {
         let mut active = self
             .active
@@ -482,15 +458,13 @@ impl RemoteScheduler {
         *count += 1;
         Some(RemoteBuilderLease {
             active: Arc::clone(&self.active),
-            available: Arc::clone(&self.available),
             builder: builder.builder().to_string(),
         })
     }
 }
 
-pub(super) struct RemoteBuilderLease {
+struct RemoteBuilderLease {
     active: Arc<Mutex<BTreeMap<String, usize>>>,
-    available: Arc<Condvar>,
     builder: String,
 }
 
@@ -506,7 +480,6 @@ impl Drop for RemoteBuilderLease {
                 active.remove(&self.builder);
             }
         }
-        self.available.notify_one();
     }
 }
 

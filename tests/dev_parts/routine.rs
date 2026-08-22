@@ -6814,7 +6814,7 @@ fn tiered_run_selects_per_function_tiers_and_cross_calls() {
     let file = dir.join("mixed.jet");
     fs::write(
         &file,
-        r#"#Memo fn cached(n: Int) Int :[]> n * 2
+        r#"#Memo fn cached(n: Int) Int -[]> n * 2
 
 fn add1(n: Int) Int {
     return n + 1

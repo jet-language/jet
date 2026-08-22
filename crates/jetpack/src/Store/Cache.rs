@@ -1104,12 +1104,21 @@ pub(crate) fn cache_admissions_for_explain(
     };
     let store_name = format!("{}-{}", entry.envelope.output_hash, entry.id);
     let now = now_seconds();
+    let builder_revoked =
+        is_cache_builder_revoked(&roots.root, &builder).map_err(io::Error::other)?;
     bindings
         .into_iter()
         .map(|binding| {
             let role = binding.role;
             let pin = cache_receipt_pin_path(roots, &role, &store_name)?;
-            let (decision, receipt_version, receipt_expires_unix, reason) =
+            let (decision, receipt_version, receipt_expires_unix, reason) = if builder_revoked {
+                (
+                    "denied".to_string(),
+                    None,
+                    None,
+                    "cache builder is revoked; rebuild before reuse".to_string(),
+                )
+            } else {
                 match read_cache_receipt_pin(&pin) {
                     Ok(pin) if pin.expires_unix <= now => (
                         "expired".to_string(),
@@ -1139,7 +1148,8 @@ pub(crate) fn cache_admissions_for_explain(
                         None,
                         format!("cache admission pin is unusable: {error}"),
                     ),
-                };
+                }
+            };
             Ok(CacheAdmission {
                 role,
                 decision,

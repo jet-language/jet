@@ -562,6 +562,9 @@ fn validate_relative_path(path: &str) -> Result<(), String> {
     if path.trim().is_empty() || has_control(path) {
         return Err("path is empty or contains control characters".to_string());
     }
+    if path.contains('\\') {
+        return Err("path must use slash-separated relative names".to_string());
+    }
     if Path::new(path).is_absolute()
         || Path::new(path).components().any(|component| {
             matches!(
@@ -900,6 +903,11 @@ mod tests {
         overlapping.actions.push(nested);
         let error = action.validate(&overlapping).unwrap_err();
         assert!(error.to_string().contains("overlap"));
+
+        let mut windows_escape = staged_fragment("linux-x86_64");
+        windows_escape.actions[0].outputs = vec![r"..\escape".to_string()];
+        let error = action.validate(&windows_escape).unwrap_err();
+        assert!(error.to_string().contains("slash-separated"));
     }
 
     #[test]

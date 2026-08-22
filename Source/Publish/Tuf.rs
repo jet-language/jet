@@ -15,7 +15,7 @@ use std::io;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-const METADATA_MAGIC: &str = "jet-tuf-sparse-v1";
+const METADATA_MAGIC: &str = "jet-tuf-sparse-v2";
 const LOG_MAGIC: &str = "jet-transparency-log-v1";
 const CHECKPOINT_MAGIC: &str = "jet-transparency-checkpoint-v1";
 const MAX_METADATA_BYTES: usize = 4 * 1024 * 1024;
@@ -25,6 +25,11 @@ const MAX_LOG_BYTES: usize = 64 * 1024 * 1024;
 struct SparseMetadata {
     name: String,
     entries: Vec<IndexEntry>,
+    /// The signed projection of each entry's immutable OCI referrer index.
+    /// The blobs are individually content-addressed, but without this
+    /// projection a caller could replace both `index.json` and an SBOM while
+    /// leaving the signed package entry unchanged.
+    referrers: BTreeMap<String, String>,
     checkpoint: String,
     public_key: String,
     signature: String,
@@ -119,12 +124,14 @@ pub fn refresh_registry_metadata(
         let checkpoint = write_checkpoint(repo, registry_name, &root_key, &records)?;
         let mut paths = vec![transparency_log_path(repo), checkpoint_path(repo)];
         for (name, entries) in &grouped {
+            let referrers = referrer_digests(repo, entries)?;
             paths.push(write_sparse_metadata(
                 repo,
                 registry_name,
                 &root_key,
                 name,
                 entries,
+                &referrers,
                 &checkpoint,
             )?);
         }
@@ -192,6 +199,14 @@ pub fn verify_registry_package(
         )));
     }
     for entry in &metadata.entries {
+        let actual = super::Registry::referrer_index_digest(repo, entry)
+            .map_err(|error| metadata_diagnostic(&error))?;
+        if metadata.referrers.get(&entry.version) != Some(&actual) {
+            return Err(metadata_diagnostic(&io::Error::new(
+                io::ErrorKind::InvalidData,
+                "OCI referrer index digest disagrees with signed sparse metadata",
+            )));
+        }
         super::Registry::verify_oci_referrers(repo, entry)
             .map_err(|error| metadata_diagnostic(&error))?;
     }
@@ -237,13 +252,15 @@ fn write_sparse_metadata(
     root_key: &str,
     name: &str,
     entries: &[IndexEntry],
+    referrers: &BTreeMap<String, String>,
     checkpoint: &str,
 ) -> io::Result<PathBuf> {
     let (seed, _public) = crate::Publish::Sign::key_paths(registry_name);
     let public_key = root_key.to_string();
     let mut entries = entries.to_vec();
     validate_entries(name, &mut entries)?;
-    let unsigned = sparse_unsigned(name, &entries, checkpoint, &public_key);
+    validate_referrers(&entries, referrers)?;
+    let unsigned = sparse_unsigned(name, &entries, referrers, checkpoint, &public_key);
     let signature = sign_payload(&seed, &unsigned)?;
     let mut out = unsigned;
     line(&mut out, "signature", &signature)?;
@@ -264,10 +281,13 @@ fn read_sparse_metadata(repo: &Path, name: &str) -> io::Result<SparseMetadata> {
         let (key, value) = raw
             .split_once('=')
             .ok_or_else(|| invalid("registry sparse metadata has a malformed line"))?;
-        if !matches!(key, "name" | "entry" | "checkpoint" | "public_key" | "signature") {
+        if !matches!(
+            key,
+            "name" | "entry" | "referrer" | "checkpoint" | "public_key" | "signature"
+        ) {
             return Err(invalid("registry sparse metadata has an unknown field"));
         }
-        if key != "entry" && fields.contains_key(key) {
+        if key != "entry" && key != "referrer" && fields.contains_key(key) {
             return Err(invalid("registry sparse metadata has a duplicate field"));
         }
         fields.entry(key.to_string()).or_default().push(value.to_string());
@@ -285,9 +305,25 @@ fn read_sparse_metadata(repo: &Path, name: &str) -> io::Result<SparseMetadata> {
         entries.push(entry);
     }
     validate_entries(name, &mut entries)?;
+    let mut referrers = BTreeMap::new();
+    for encoded in fields.get("referrer").cloned().unwrap_or_default() {
+        let binding = decode_text(&encoded)?;
+        let (version, digest) = binding
+            .split_once('\t')
+            .ok_or_else(|| invalid("registry sparse metadata has a malformed referrer binding"))?;
+        if version.is_empty()
+            || digest.is_empty()
+            || referrers
+                .insert(version.to_string(), digest.to_string())
+                .is_some()
+        {
+            return Err(invalid("registry sparse metadata has a duplicate referrer binding"));
+        }
+    }
     Ok(SparseMetadata {
         name: parsed_name,
         entries,
+        referrers,
         checkpoint: decode_text(one_field(&fields, "checkpoint")?)?,
         public_key: decode_text(one_field(&fields, "public_key")?)?,
         signature: one_field(&fields, "signature")?.to_string(),
@@ -297,6 +333,7 @@ fn read_sparse_metadata(repo: &Path, name: &str) -> io::Result<SparseMetadata> {
 fn verify_sparse_metadata(metadata: &SparseMetadata) -> io::Result<()> {
     let mut entries = metadata.entries.clone();
     validate_entries(&metadata.name, &mut entries)?;
+    validate_referrers(&entries, &metadata.referrers)?;
     if metadata.public_key.len() != 64
         || !metadata.public_key.bytes().all(|byte| byte.is_ascii_hexdigit())
         || metadata.signature.is_empty()
@@ -306,13 +343,20 @@ fn verify_sparse_metadata(metadata: &SparseMetadata) -> io::Result<()> {
     let unsigned = sparse_unsigned(
         &metadata.name,
         &entries,
+        &metadata.referrers,
         &metadata.checkpoint,
         &metadata.public_key,
     );
     verify_payload(&metadata.public_key, &unsigned, &metadata.signature)
 }
 
-fn sparse_unsigned(name: &str, entries: &[IndexEntry], checkpoint: &str, public_key: &str) -> String {
+fn sparse_unsigned(
+    name: &str,
+    entries: &[IndexEntry],
+    referrers: &BTreeMap<String, String>,
+    checkpoint: &str,
+    public_key: &str,
+) -> String {
     let mut out = String::new();
     out.push_str(METADATA_MAGIC);
     out.push('\n');
@@ -322,7 +366,55 @@ fn sparse_unsigned(name: &str, entries: &[IndexEntry], checkpoint: &str, public_
     for entry in entries {
         let _ = line(&mut out, "entry", &encode_text(&entry.to_jsonl()));
     }
+    for entry in entries {
+        if let Some(digest) = referrers.get(&entry.version) {
+            let binding = format!("{}\t{}", entry.version, digest);
+            let _ = line(&mut out, "referrer", &encode_text(&binding));
+        }
+    }
     out
+}
+
+fn referrer_digests(
+    repo: &Path,
+    entries: &[IndexEntry],
+) -> io::Result<BTreeMap<String, String>> {
+    let mut referrers = BTreeMap::new();
+    for entry in entries {
+        super::Registry::verify_oci_referrers(repo, entry)?;
+        let digest = super::Registry::referrer_index_digest(repo, entry)?;
+        if referrers.insert(entry.version.clone(), digest).is_some() {
+            return Err(invalid("registry metadata has duplicate package versions"));
+        }
+    }
+    validate_referrers(entries, &referrers)?;
+    Ok(referrers)
+}
+
+fn validate_referrers(
+    entries: &[IndexEntry],
+    referrers: &BTreeMap<String, String>,
+) -> io::Result<()> {
+    if referrers.len() != entries.len()
+        || entries
+            .iter()
+            .any(|entry| !referrers.contains_key(&entry.version))
+    {
+        return Err(invalid(
+            "registry sparse metadata has an incomplete OCI referrer projection",
+        ));
+    }
+    for digest in referrers.values() {
+        if !digest.starts_with("sha256-")
+            || digest.len() != 71
+            || !digest[7..].bytes().all(|byte| byte.is_ascii_hexdigit())
+        {
+            return Err(invalid(
+                "registry sparse metadata has an invalid OCI referrer index digest",
+            ));
+        }
+    }
+    Ok(())
 }
 
 fn read_log(repo: &Path) -> io::Result<Vec<LogRecord>> {

@@ -719,7 +719,7 @@ fn nix_import_emits_role_modules_and_todos() {
 fn nix_import_emits_exact_refs_and_retains_native_facts() {
     let plan = jetpack::MigrationImport::import_nix_facts(
         "flake.lock",
-        r#"{"name":"app","version":"1.0.0","source":"nixpkgs","packages":[{"name":"ripgrep","version":"14.1.1","drvPath":"/nix/store/hash-ripgrep-14.1.1.drv"}]}"#,
+        r#"{"name":"app","version":"1.0.0","source":"nixpkgs","packages":[{"name":"ripgrep","version":"14.1.1","drvPath":"/nix/store/hash-ripgrep-14.1.1.drv","buildInputs":["openssl"],"system":"x86_64-linux","license":"BSD-3-Clause"}]}"#,
     );
     assert_eq!(
         plan.deps[0].provider_ref,
@@ -736,6 +736,14 @@ fn nix_import_emits_exact_refs_and_retains_native_facts() {
     assert!(facts
         .facts
         .contains_key("provider.nix.import.drvPath"));
+    assert!(facts
+        .facts
+        .contains_key("provider.nix.dependency.build"));
+    assert!(facts.facts.contains_key("provider.nix.variant.system"));
+    assert!(facts.facts.contains_key("provider.nix.license"));
+    assert!(facts
+        .facts
+        .contains_key("provider.nix.source.drv_path"));
 }
 
 #[test]
@@ -754,6 +762,24 @@ fn nix_import_keeps_mutable_refs_out_of_generated_source() {
         .todos
         .iter()
         .any(|todo| todo.message.contains("migration remains unresolved")));
+}
+
+#[test]
+fn nix_import_reports_malformed_package_facts_without_generating_them() {
+    let plan = jetpack::MigrationImport::import_nix_facts(
+        "flake.lock",
+        r#"{"name":"app","version":"1.0.0","packages":[{"name":"broken","version":"1.0.0","drvPath":1,"buildInputs":false}]}"#,
+    );
+    let facts = &plan.provider_facts["broken#version=1.0.0@nixpkgs"];
+    assert!(facts
+        .losses
+        .iter()
+        .any(|loss| loss.reason.contains("drvPath")));
+    assert!(facts
+        .losses
+        .iter()
+        .any(|loss| loss.reason.contains("buildInputs")));
+    assert!(!plan.emit_pkg_jet().contains("broken: broken#version=1.0.0@nixpkgs"));
 }
 
 #[test]
@@ -5028,6 +5054,12 @@ fn registry_fetch_installs_verified_artifact_in_hangar_and_locked_reuses_it() {
     assert!(semantic_lock.contains("adapter-id = \"registry.pubgrub\""));
     assert!(semantic_lock.contains("update-command = \"jet update textkit\""));
     assert!(semantic_lock.contains("exact = \"textkit#1.2.0\""));
+    assert!(
+        semantic_lock.contains(
+            "package-policy=package=textkit#1.2.0;license=MIT;source=jet;source-rule=textkit => [jet];fingerprint=sha256-"
+        ),
+        "semantic lock must retain the matched source rule and policy receipt: {semantic_lock}"
+    );
     assert!(semantic_lock.contains("pattern = \"textkit\""));
     assert!(semantic_lock.contains("sources = [\"jet\"]"));
 
@@ -5085,6 +5117,271 @@ fn registry_fetch_installs_verified_artifact_in_hangar_and_locked_reuses_it() {
         offline.status.success(),
         "offline registry fetch must use the verified local lock path:\n{}",
         String::from_utf8_lossy(&offline.stderr)
+    );
+
+    common::make_tree_writable(&tmp);
+    fs::remove_dir_all(tmp).unwrap();
+}
+
+#[test]
+fn registry_fetch_rejects_tampered_referrer_index_before_hangar_ingest() {
+    if !jet_bin().is_file() || !have_git() {
+        eprintln!(
+            "note: skipping registry_fetch_rejects_tampered_referrer_index (need built binary and git)"
+        );
+        return;
+    }
+
+    let tmp = tmp_dir("registry_referrer_tamper");
+    let publisher = tmp.join("publisher");
+    let consumer = tmp.join("consumer");
+    let tamper = tmp.join("tamper");
+    let bare = tmp.join("registry.git");
+    let url = bare_registry(&bare);
+    let cache = tmp.join("registry-cache");
+    let store = tmp.join("legacy-store");
+    let hangar_root = tmp.join("jetpack-root");
+    let keys = tmp.join("keys");
+    fs::create_dir_all(&publisher).unwrap();
+    fs::create_dir_all(&consumer).unwrap();
+    fs::create_dir_all(&store).unwrap();
+    init_clean_project(&publisher, "refkit", "1.2.0");
+    seed_core_review(&bare, "refkit", "1.2.0");
+
+    let publish = jet_cmd_env(
+        &["registry", "publish"],
+        &publisher,
+        &[
+            ("JET_REGISTRY_URL", url.as_str()),
+            ("JET_REGISTRY_CACHE_DIR", cache.to_str().unwrap()),
+            ("JET_STORE_DIR", store.to_str().unwrap()),
+            ("JET_KEYS_DIR", keys.to_str().unwrap()),
+        ],
+    );
+    assert!(
+        publish.status.success(),
+        "registry publish failed:\n{}",
+        String::from_utf8_lossy(&publish.stderr)
+    );
+    let entry = read_index_file(&bare, "refkit")
+        .and_then(|text| text.lines().find_map(jet::Publish::IndexEntry::parse_line))
+        .expect("published refkit entry");
+
+    assert!(
+        Command::new("git")
+            .args(["clone", url.as_str(), tamper.to_str().unwrap()])
+            .status()
+            .unwrap()
+            .success()
+    );
+    let referrer_index = tamper
+        .join("referrers")
+        .join(&entry.content_hash)
+        .join("index.json");
+    let mut bytes = fs::read(&referrer_index).unwrap();
+    bytes.push(b'\n');
+    fs::write(&referrer_index, bytes).unwrap();
+    for args in [
+        vec!["config", "user.email", "test@jet.test"],
+        vec!["config", "user.name", "Jet Test"],
+        vec!["add", "."],
+        vec!["commit", "-m", "tamper referrer index"],
+        vec!["push", "origin", "HEAD:main"],
+    ] {
+        assert!(
+            Command::new("git")
+                .args(&args)
+                .current_dir(&tamper)
+                .status()
+                .unwrap()
+                .success(),
+            "tamper registry command failed: {:?}",
+            args
+        );
+    }
+
+    let raw = manifest_with_deps("ref-consumer", "0.1.0", "    refkit: refkit#1.2.0,");
+    write(&consumer, "package.jet", &raw);
+    let manifest = jet::Manifest::parse(&consumer.join("package.jet"), &raw).unwrap();
+    let opts = jet::Fetch::FetchOptions {
+        locked: false,
+        update: false,
+        update_dep: None,
+        resolution: jet::Publish::ResolveMode::Conservative,
+    };
+    let denied = with_store(&store, || {
+        let previous = [
+            ("JET_REGISTRY_URL", std::env::var_os("JET_REGISTRY_URL")),
+            (
+                "JET_REGISTRY_CACHE_DIR",
+                std::env::var_os("JET_REGISTRY_CACHE_DIR"),
+            ),
+            ("JET_KEYS_DIR", std::env::var_os("JET_KEYS_DIR")),
+            ("JETPACK_ROOT", std::env::var_os("JETPACK_ROOT")),
+        ];
+        std::env::set_var("JET_REGISTRY_URL", &url);
+        std::env::set_var("JET_REGISTRY_CACHE_DIR", &cache);
+        std::env::set_var("JET_KEYS_DIR", &keys);
+        std::env::set_var("JETPACK_ROOT", &hangar_root);
+        let result = jet::Fetch::fetch(&consumer, &manifest, None, &opts);
+        for (key, value) in previous {
+            if let Some(value) = value {
+                std::env::set_var(key, value);
+            } else {
+                std::env::remove_var(key);
+            }
+        }
+        result
+    })
+    .expect_err("a referrer index changed outside signed metadata must fail closed");
+    assert_eq!(denied[0].code, "E1207");
+    assert!(
+        denied[0]
+            .fix
+            .contains("restore the immutable OCI referrer set")
+            || denied[0].what.contains("OCI referrer index digest"),
+        "tampered referrer recovery must be explicit: {:?}",
+        denied[0]
+    );
+    assert!(
+        jetpack::Store::list(&jetpack::Store::Roots::at(hangar_root))
+            .into_iter()
+            .all(|entry| !(entry.name == "refkit" && entry.version == "1.2.0")),
+        "tampered registry evidence must not reach Hangar"
+    );
+
+    common::make_tree_writable(&tmp);
+    fs::remove_dir_all(tmp).unwrap();
+}
+
+#[test]
+fn registry_fetch_applies_artifact_dependency_roles_features_and_constraints() {
+    if !jet_bin().is_file() || !have_git() {
+        eprintln!(
+            "note: skipping registry dependency metadata delivery (need built binary and git)"
+        );
+        return;
+    }
+
+    let tmp = tmp_dir("registry_dependency_metadata");
+    let bare = tmp.join("registry.git");
+    let url = bare_registry(&bare);
+    let cache = tmp.join("registry-cache");
+    let keys = tmp.join("keys");
+    let store = tmp.join("store");
+    let hangar_root = tmp.join("jetpack-root");
+    let consumer = tmp.join("consumer");
+    fs::create_dir_all(&store).unwrap();
+    fs::create_dir_all(&consumer).unwrap();
+
+    let publish = |name: &str, version: &str, metadata: Option<&str>| {
+        let project = tmp.join(format!("publish-{name}-{version}"));
+        fs::create_dir_all(&project).unwrap();
+        init_clean_project(&project, name, version);
+        if let Some(metadata) = metadata {
+            write(&project, "registry.json", metadata);
+            for args in &[vec!["add", "."], vec!["commit", "-m", "registry metadata"]] {
+                Command::new("git")
+                    .args(args)
+                    .current_dir(&project)
+                    .output()
+                    .unwrap();
+            }
+        }
+        seed_core_review(&bare, name, version);
+        let output = jet_cmd_env(
+            &["registry", "publish"],
+            &project,
+            &[
+                ("JET_REGISTRY_URL", url.as_str()),
+                ("JET_REGISTRY_CACHE_DIR", cache.to_str().unwrap()),
+                ("JET_STORE_DIR", store.to_str().unwrap()),
+                ("JET_KEYS_DIR", keys.to_str().unwrap()),
+            ],
+        );
+        assert!(
+            output.status.success(),
+            "publishing {name} {version} failed:\n{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    };
+
+    publish("runtime", "1.0.0", None);
+    publish("runtime", "1.0.1", None);
+    publish("buildtool", "1.0.0", None);
+    publish("trace", "1.0.0", None);
+    publish(
+        "rolekit",
+        "1.0.0",
+        Some(
+            r#"{"name":"rolekit","version":"1.0.0","dependencies":{"runtime":"^1.0"},"build_dependencies":{"buildtool":"1.0.0"},"dev_dependencies":{"devkit":"1.0.0"},"optional_dependencies":{"trace":"1.0.0"},"features":{"default":["trace"]},"constraints":{"runtime":{"require":"^1.0","prefer":"1.0.1","reject":["1.0.1"],"strict":true}}}"#,
+        ),
+    );
+
+    let raw = manifest_with_deps("consumer", "0.1.0", "    rolekit: rolekit#1.0.0,");
+    write(&consumer, "package.jet", &raw);
+    let manifest = jet::Manifest::parse(&consumer.join("package.jet"), &raw).unwrap();
+    let opts = jet::Fetch::FetchOptions {
+        locked: false,
+        update: false,
+        update_dep: None,
+        resolution: jet::Publish::ResolveMode::Latest,
+    };
+    let (lock, dep_dirs) = with_store(&store, || {
+        let previous = [
+            ("JET_REGISTRY_URL", std::env::var_os("JET_REGISTRY_URL")),
+            (
+                "JET_REGISTRY_CACHE_DIR",
+                std::env::var_os("JET_REGISTRY_CACHE_DIR"),
+            ),
+            ("JET_KEYS_DIR", std::env::var_os("JET_KEYS_DIR")),
+            ("JETPACK_ROOT", std::env::var_os("JETPACK_ROOT")),
+        ];
+        std::env::set_var("JET_REGISTRY_URL", &url);
+        std::env::set_var("JET_REGISTRY_CACHE_DIR", &cache);
+        std::env::set_var("JET_KEYS_DIR", &keys);
+        std::env::set_var("JETPACK_ROOT", &hangar_root);
+        let result = jet::Fetch::fetch(&consumer, &manifest, None, &opts);
+        for (key, value) in previous {
+            if let Some(value) = value {
+                std::env::set_var(key, value);
+            } else {
+                std::env::remove_var(key);
+            }
+        }
+        result.expect("artifact dependency metadata should resolve through Hangar")
+    });
+
+    let rolekit = lock
+        .packages
+        .iter()
+        .find(|package| package.name == "rolekit")
+        .expect("rolekit must be locked");
+    assert_eq!(rolekit.version, "1.0.0");
+    assert!(
+        rolekit.dependencies.contains(&"runtime".to_string())
+            && rolekit.dependencies.contains(&"buildtool".to_string())
+            && rolekit.dependencies.contains(&"trace".to_string()),
+        "active normal/build/default-feature edges must enter the lock: {:?}",
+        rolekit.dependencies
+    );
+    assert!(
+        !rolekit.dependencies.contains(&"devkit".to_string()),
+        "dev dependency must stay outside the production closure"
+    );
+    assert_eq!(
+        lock.packages
+            .iter()
+            .find(|package| package.name == "runtime")
+            .map(|package| package.version.as_str()),
+        Some("1.0.0"),
+        "reject must exclude 1.0.1 even though prefer requests it"
+    );
+    assert!(dep_dirs.contains_key("buildtool") && dep_dirs.contains_key("trace"));
+    let lock_text = fs::read_to_string(consumer.join(".jet/lock")).unwrap();
+    assert!(
+        lock_text.contains("dependency-metadata = "),
+        "semantic lock must carry the exact artifact-bound dependency meaning"
     );
 
     common::make_tree_writable(&tmp);
@@ -5208,6 +5505,33 @@ fn registry_fetch_applies_verified_advisory_freshness_before_hangar_ingest() {
         assert!(
             !consumer.join(".jet-build/deps/freshlib").exists(),
             "freshness must fail before a registry artifact is usable"
+        );
+
+        let exception_raw = format!(
+            "{raw}\npolicy: {{ exceptions: [PolicyException.{{ id: \"JSA-2026-0001\", scope: \"freshlib#1.2.0\", reason: \"urgent security fix\", expires: 9999999999 }}] }}\n"
+        );
+        let exception_manifest =
+            jet::Manifest::parse(&consumer.join("package.jet"), &exception_raw)
+                .expect("source exception manifest should parse");
+        let (_exception_lock, exception_dirs) = jet::Fetch::fetch(
+            &consumer,
+            &exception_manifest,
+            None,
+            &opts,
+        )
+        .expect("an active exact source exception should admit the fresh release");
+        assert!(exception_dirs.contains_key("freshlib"));
+        let excepted_entry = jetpack::Store::list(&jetpack::Store::Roots::at(hangar_root.clone()))
+            .into_iter()
+            .find(|entry| entry.name == "freshlib" && entry.version == "1.2.0")
+            .expect("source exception must still use the production Hangar path");
+        assert!(
+            excepted_entry
+                .envelope
+                .provenance
+                .contains("source-policy-exception=id=JSA-2026-0001;scope=freshlib#1.2.0"),
+            "source exception evidence must be visible in provenance: {}",
+            excepted_entry.envelope.provenance
         );
 
         std::env::set_var("JET_ADVISORY_NOW", "100000");
@@ -5991,6 +6315,29 @@ fn cli_signed_advisory_feed_receipt_and_tamper_fail_closed() {
             String::from_utf8(immature.stderr).unwrap(),
             include_str!("cli/audit_maturity_e2609.txt")
         );
+
+        fs::write(
+            project.join("package.jet"),
+            format!(
+                "{}\npolicy: {{ exceptions: [PolicyException.{{ id: \"JSA-2026-0001\", scope: \"mylib#1.0.0\", reason: \"urgent security fix\", expires: 1000 }}] }}\n",
+                min_manifest("app", "0.1.0")
+            ),
+        )
+        .unwrap();
+        let source_excepted = audit();
+        assert_eq!(
+            source_excepted.status.code(),
+            Some(0),
+            "the source-owned exact exception should clear only maturity: {}",
+            String::from_utf8_lossy(&source_excepted.stderr)
+        );
+        assert!(
+            String::from_utf8_lossy(&source_excepted.stdout)
+                .contains("source policy exception applied: id=JSA-2026-0001"),
+            "audit must show the source exception evidence: {}",
+            String::from_utf8_lossy(&source_excepted.stdout)
+        );
+        fs::write(project.join("package.jet"), min_manifest("app", "0.1.0")).unwrap();
 
         let mut excepted_feed = immature_feed;
         excepted_feed

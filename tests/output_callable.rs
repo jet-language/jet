@@ -188,7 +188,7 @@ fn runnable_contracts_and_selection_fail_in_sema() {
     )
     .contains(&"E1321".to_string()));
     assert!(codes(
-        "release: Output :: .Check.{ name: \"release\", entry: verify }\nfn verify() => Int { return 1 }\n",
+        "release: Output :: .Check.{ name: \"release\", entry: verify }\nfn verify() Int -> { return 1 }\n",
         jet::Sema::CompileMode::Check,
     )
     .contains(&"E1321".to_string()));

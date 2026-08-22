@@ -1289,7 +1289,7 @@ fn mk() {
         // MethodCall and is only rewritten to an `EnumLit` by full sema; that path is
         // proven end-to-end by
         // `tests/tir_collections_and_methods.rs::fallible_try_and_or_fallback`.)
-        let src = "fn f(x: Int) => Int Err! {\n if x == 0 {\n return Err(\"bad\")\n }\n return Ok(x)\n}\nfn g(x: Int) => Int Err! {\n n :: f(x)?\n return Ok((n + 1))\n}\nfn run() {}\n";
+        let src = "fn f(x: Int) Int Err! -> {\n if x == 0 {\n return Err(\"bad\")\n }\n return Ok(x)\n}\nfn g(x: Int) Int Err! -> {\n n :: f(x)?\n return Ok((n + 1))\n}\nfn run() {}\n";
         assert!(covers_after_sema(src, "f"));
         assert!(covers_after_sema(src, "g"));
     }

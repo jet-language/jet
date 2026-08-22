@@ -1,5 +1,5 @@
 use crate::Diagnostics::Diagnostic;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use super::SemVer::{SemVer, VersionReq};
 
@@ -130,12 +130,21 @@ pub struct VersionConstraint {
 pub(crate) struct SolverCandidate {
     pub(crate) version: SemVer,
     pub(crate) dependencies: Vec<VersionConstraint>,
+    /// Candidate-local rich constraints on its dependency edges. The loader
+    /// parses these from the immutable registry artifact; the solver only
+    /// applies the already-typed rules.
+    pub(crate) rejected: BTreeMap<String, BTreeSet<SemVer>>,
+    pub(crate) preferred: BTreeMap<String, Vec<VersionReq>>,
+    pub(crate) strict: BTreeSet<String>,
 }
 
 #[derive(Debug, Clone, Default)]
 struct SolverState {
     constraints: BTreeMap<String, Vec<VersionConstraint>>,
     assignments: BTreeMap<String, SemVer>,
+    rejected: BTreeMap<String, BTreeSet<SemVer>>,
+    preferred: BTreeMap<String, Vec<VersionReq>>,
+    strict: BTreeSet<String>,
 }
 
 /// Resolve one registry graph with PubGrub-style incompatibility backtracking.
@@ -203,6 +212,7 @@ fn solve_registry_state(
         .get(&package)
         .map(Vec::as_slice)
         .unwrap_or(&[]);
+    let strict = state.strict.contains(&package);
     let mut viable = candidates
         .get(&package)
         .into_iter()
@@ -211,6 +221,14 @@ fn solve_registry_state(
             requirements
                 .iter()
                 .all(|constraint| constraint.req.matches(&candidate.version))
+                && !state
+                    .rejected
+                    .get(&package)
+                    .is_some_and(|rejected| rejected.contains(&candidate.version))
+                && (!strict
+                    || requirements
+                        .iter()
+                        .all(|constraint| constraint.req.matches(&candidate.version)))
         })
         .cloned()
         .collect::<Vec<_>>();
@@ -230,6 +248,12 @@ fn solve_registry_state(
         || matches!(mode, ResolveMode::LowestDirect) && direct.contains(&package);
     let preserve_lock = matches!(mode, ResolveMode::Conservative);
     viable.sort_by(|left, right| {
+        let left_preferred = state.preferred.get(&package).is_some_and(|rules| {
+            rules.iter().any(|requirement| requirement.matches(&left.version))
+        });
+        let right_preferred = state.preferred.get(&package).is_some_and(|rules| {
+            rules.iter().any(|requirement| requirement.matches(&right.version))
+        });
         let left_locked = locked.get(&package).is_some_and(|version| {
             preserve_lock
                 && !update_scope.contains(&package)
@@ -240,8 +264,11 @@ fn solve_registry_state(
                 && !update_scope.contains(&package)
                 && version == &right.version.to_string()
         });
-        right_locked
+        right_preferred
+            .cmp(&left_preferred)
+            .then_with(|| right_locked
             .cmp(&left_locked)
+            )
             .then_with(|| {
                 if low_first {
                     left.version.cmp(&right.version)
@@ -271,6 +298,19 @@ fn solve_registry_state(
                 .or_default()
                 .push(dependency);
         }
+        for (dependency, rejected) in candidate.rejected {
+            next.rejected
+                .entry(dependency)
+                .or_default()
+                .extend(rejected);
+        }
+        for (dependency, preferred) in candidate.preferred {
+            next.preferred
+                .entry(dependency)
+                .or_default()
+                .extend(preferred);
+        }
+        next.strict.extend(candidate.strict);
         match solve_registry_state(&next, candidates, locked, update_scope, mode, direct) {
             Ok(assignments) => return Ok(assignments),
             Err(error) => {
@@ -343,6 +383,11 @@ fn proof_diagnostic(
         detail.push_str(&format!(
             "\nSmallest fixes: change `{}` or `{}` so their `{package}` requirements overlap.",
             a.from, b.from
+        ));
+    } else if let Some(a) = first {
+        detail.push_str(&format!(
+            "\nSmallest fixes: change `{}` to a published compatible requirement or publish a version that satisfies it.",
+            a.from
         ));
     }
     diagnostic.detail = Some(detail);
@@ -486,6 +531,9 @@ mod tests {
                         req: VersionReq::parse("^2.0").expect("test requirement is valid"),
                         from: "app 1.1.0".to_string(),
                     }],
+                    rejected: BTreeMap::new(),
+                    preferred: BTreeMap::new(),
+                    strict: BTreeSet::new(),
                 },
                 SolverCandidate {
                     version: version("1.0.0"),
@@ -494,6 +542,9 @@ mod tests {
                         req: VersionReq::parse("^1.0").expect("test requirement is valid"),
                         from: "app 1.0.0".to_string(),
                     }],
+                    rejected: BTreeMap::new(),
+                    preferred: BTreeMap::new(),
+                    strict: BTreeSet::new(),
                 },
             ],
         );
@@ -502,6 +553,9 @@ mod tests {
             vec![SolverCandidate {
                 version: version("1.0.0"),
                 dependencies: Vec::new(),
+                rejected: BTreeMap::new(),
+                preferred: BTreeMap::new(),
+                strict: BTreeSet::new(),
             }],
         );
 
@@ -523,6 +577,9 @@ mod tests {
             vec![SolverCandidate {
                 version: version("3.0.0"),
                 dependencies: Vec::new(),
+                rejected: BTreeMap::new(),
+                preferred: BTreeMap::new(),
+                strict: BTreeSet::new(),
             }],
         );
         let error = solve_registry(
@@ -561,6 +618,9 @@ mod tests {
                 vec![SolverCandidate {
                     version: version("1.0.0"),
                     dependencies: Vec::new(),
+                    rejected: BTreeMap::new(),
+                    preferred: BTreeMap::new(),
+                    strict: BTreeSet::new(),
                 }],
             ),
             (
@@ -568,6 +628,9 @@ mod tests {
                 vec![SolverCandidate {
                     version: version("2.0.0"),
                     dependencies: Vec::new(),
+                    rejected: BTreeMap::new(),
+                    preferred: BTreeMap::new(),
+                    strict: BTreeSet::new(),
                 }],
             ),
         ]);

@@ -1715,6 +1715,213 @@ fn remote_execution_retries_after_worker_loss() {
 }
 
 #[test]
+fn remote_execution_fails_over_to_registered_builder_after_worker_loss() {
+    let _guard = REMOTE_HOST_ENV_LOCK.lock().unwrap();
+    let project_root = std::env::temp_dir().join(format!(
+        "jet_remote_failover_{}_{}",
+        std::process::id(),
+        "registered"
+    ));
+    let _ = fs::remove_dir_all(&project_root);
+    fs::create_dir_all(&project_root).unwrap();
+    let config_root = project_root.join("config");
+    let fast_root = project_root.join("fast-transport");
+    let safe_root = project_root.join("safe-transport");
+    let fast_credential = project_root.join("fast.credential");
+    let safe_credential = project_root.join("safe.credential");
+    fs::write(&fast_credential, b"fast-failover-key").unwrap();
+    fs::write(&safe_credential, b"safe-failover-key").unwrap();
+    let previous_config = std::env::var_os("XDG_CONFIG_HOME");
+    std::env::set_var("XDG_CONFIG_HOME", &config_root);
+    let fast_name = format!("remote-fast-{}", std::process::id());
+    let safe_name = format!("remote-safe-{}", std::process::id());
+    let fast = RemoteBuildBinding::bind_host(
+        &fast_name,
+        &fast_root,
+        &fast_credential,
+        "trusted",
+        "worker-fast",
+        &format!("{}-{}", std::env::consts::OS, std::env::consts::ARCH),
+        "native",
+        false,
+        false,
+        true,
+        false,
+        20,
+    )
+    .unwrap();
+    let safe = RemoteBuildBinding::bind_host(
+        &safe_name,
+        &safe_root,
+        &safe_credential,
+        "trusted",
+        "worker-safe",
+        &format!("{}-{}", std::env::consts::OS, std::env::consts::ARCH),
+        "native",
+        false,
+        false,
+        true,
+        false,
+        20,
+    )
+    .unwrap();
+
+    let mut b = BuildContext::new();
+    let action = b
+        .action(
+            "remote-failover",
+            ActionSpec::cached(["remote-tool"])
+                .with_outputs(["build/failover"])
+                .with_cap(BuildCapability::Net),
+        )
+        .unwrap();
+    let target = b
+        .add_executable("failover", TargetSpec::new().with_action(action))
+        .unwrap();
+    let plan = b.plan_with_default(target).unwrap();
+    let grants = [BuildCapability::Net].into_iter().collect();
+    let cas = LocalCas::new(project_root.join(".jet/build-cache/cas"));
+    let snapshots = cas
+        .snapshot_declared_inputs(&project_root, plan.action(action).unwrap())
+        .unwrap();
+    let key = plan
+        .effective_action_key(
+            action,
+            &snapshots,
+            &grants,
+            std::path::Path::new("remote-tool"),
+            &ContentDigest::from_bytes(b"remote-tool"),
+            &[],
+        )
+        .unwrap();
+
+    let lost_key = key.clone();
+    let lost_binding = fast.clone();
+    let lost_worker = std::thread::spawn(move || {
+        let transport = RemoteCacheTransport::for_binding(&lost_binding).unwrap();
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+        let mut attempts = std::collections::BTreeSet::new();
+        loop {
+            match transport.read_execution_request(&lost_key) {
+                Ok(request) => {
+                    assert!(
+                        std::time::Instant::now() < deadline,
+                        "lost worker did not observe both retry attempts"
+                    );
+                    attempts.insert(request.attempt_id);
+                    if attempts.len() >= 2 {
+                        return;
+                    }
+                    std::thread::sleep(std::time::Duration::from_millis(40));
+                }
+                Err(RemoteCacheError::Io(error))
+                    if error.kind() == std::io::ErrorKind::NotFound
+                        && std::time::Instant::now() < deadline =>
+                {
+                    std::thread::sleep(std::time::Duration::from_millis(2));
+                }
+                Err(error) => panic!("lost worker could not inspect request: {error}"),
+            }
+        }
+    });
+
+    let safe_key = key.clone();
+    let safe_binding = safe.clone();
+    let safe_worker = std::thread::spawn(move || {
+        let transport = RemoteCacheTransport::for_binding(&safe_binding).unwrap();
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+        loop {
+            match transport.read_execution_request(&safe_key) {
+                Ok(request) => {
+                    let policy = RemoteCachePolicy::with_grants(
+                        false,
+                        false,
+                        true,
+                        request.sandbox.clone(),
+                    );
+                    let bytes = b"failover output";
+                    let digest = transport.upload_execution_blob(bytes, &policy).unwrap();
+                    let (stdout_digest, stderr_digest) =
+                        remote_empty_log_digests(&transport, &policy);
+                    transport
+                        .publish_execution_result(
+                            &RemoteExecutionResult {
+                                key: request.key.clone(),
+                                attempt_id: request.attempt_id.clone(),
+                                execution_id: remote_execution_identity(&request),
+                                outcome: ActionOutcome::Succeeded { exit_code: 0 },
+                                outputs: vec![ActionOutputRecord {
+                                    path: request.outputs[0].clone(),
+                                    digest,
+                                    byte_len: bytes.len() as u64,
+                                }],
+                                toolchain_digest: request.toolchain_digest.clone(),
+                                sandbox: request.sandbox.clone(),
+                                stdout_digest,
+                                stderr_digest,
+                                provenance_signer: request.sandbox.worker_id.clone(),
+                            },
+                            &policy,
+                        )
+                        .unwrap();
+                    return;
+                }
+                Err(RemoteCacheError::Io(error))
+                    if error.kind() == std::io::ErrorKind::NotFound
+                        && std::time::Instant::now() < deadline =>
+                {
+                    std::thread::sleep(std::time::Duration::from_millis(2));
+                }
+                Err(error) => panic!("failover worker could not inspect request: {error}"),
+            }
+        }
+    });
+
+    let execution = execute_build_plan_with_front_end_and_remote(
+        &plan,
+        &project_root,
+        &grants,
+        FrontEndCompletion::all_complete(),
+        Some(&fast),
+    );
+    let lost_join = lost_worker.join();
+    let safe_join = safe_worker.join();
+    assert!(RemoteBuildBinding::remove_host(&fast_name).is_ok());
+    assert!(RemoteBuildBinding::remove_host(&safe_name).is_ok());
+    match previous_config {
+        Some(value) => std::env::set_var("XDG_CONFIG_HOME", value),
+        None => std::env::remove_var("XDG_CONFIG_HOME"),
+    }
+    assert!(lost_join.is_ok(), "lost worker thread panicked");
+    assert!(safe_join.is_ok(), "failover worker thread panicked");
+    let cancellation_digest = ContentDigest::from_bytes(key.as_str().as_bytes());
+    let cancellation_hex = cancellation_digest
+        .as_str()
+        .strip_prefix("sha256:")
+        .unwrap();
+    assert!(fast_root
+        .join("execution/cancelled")
+        .join(&cancellation_hex[..2])
+        .join(&cancellation_hex[2..])
+        .is_file());
+    let execution = execution.unwrap();
+    assert!(execution.report.events.iter().any(|event| {
+        matches!(
+            event,
+            BuildExecutionEvent::Finished {
+                action: finished,
+                outcome: ActionOutcome::Succeeded { exit_code: 0 },
+            } if *finished == action.id()
+        )
+    }));
+    assert_eq!(
+        fs::read(project_root.join("build/failover")).unwrap(),
+        b"failover output"
+    );
+    let _ = fs::remove_dir_all(project_root);
+}
+
+#[test]
 fn remote_execution_timeout_uses_declared_local_fallback() {
     let project_root = std::env::temp_dir().join(format!(
         "jet_remote_fallback_{}_{}",

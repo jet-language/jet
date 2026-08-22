@@ -1357,11 +1357,11 @@ impl<'a> Parser<'a> {
     /// at `#`. `#Pure` yields the empty set (`Some([])`); `#(E1, E2, …)` yields the
     /// listed names (validated against the effect vocabulary in sema, not here).
     /// The caller has confirmed via lookahead that a `fn` follows.
-    /// D-EFF2/D-VERDICT-732-1 (formerly D-MARKERMOVE2, G1): parse a callback effect bound. `fn(…) :[]>`
-    /// is the one carve-out where a contract marker prefixes a function TYPE
-    /// instead of a declaration — the retired `fn(…) --[]->` spelling still
-    /// parses here so it can teach E0062. The general effect-list form,
-    /// `fn(…) --[Net]->`, is retained only for a migration diagnostic.
+    /// D-EFF2/D-VERDICT-732-1 (formerly D-MARKERMOVE2, G1): parse a retired
+    /// callback effect-bound prefix. Canonical function types carry their
+    /// effect row after the result as `fn(…) R -[E]>` or `fn(…) R -[]>`;
+    /// `#Pure` and `#(E1, E2, …)` remain recognized only to teach the retired
+    /// spelling, including the old `fn(…) --[Net]->` form.
     fn parse_fn_type_effect_bound(&mut self) -> Result<Vec<(String, Span)>, Diagnostic> {
         if matches!(self.peek().kind, TokKind::Hash) {
             self.bump();

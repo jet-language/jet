@@ -617,9 +617,13 @@ fn add_authority_labels(
     tools: &[String],
     effects: &[jet_foundation::BuildEffect],
 ) -> crate::Comptime::Build::ActionSpec {
+    let mut tools = tools.to_vec();
+    tools.sort();
     for (index, tool) in tools.iter().enumerate() {
         spec = spec.with_label(format!("authority.tool.{index}"), tool.clone());
     }
+    let mut effects = effects.to_vec();
+    effects.sort();
     for (index, effect) in effects.iter().enumerate() {
         spec = spec.with_label(format!("authority.effect.{index}"), effect.flag());
     }
@@ -2107,6 +2111,52 @@ mod tests {
         assert_eq!(action.labels.get("stage.bound"), Some(&"1".to_string()));
         assert!(action.labels.contains_key("platform.os"));
         assert!(action.labels.contains_key("platform.arch"));
+    }
+
+    #[test]
+    fn staged_plan_authority_order_does_not_change_plan_fingerprint() {
+        let platform = format!("{}-{}", std::env::consts::OS, std::env::consts::ARCH);
+        let action = StagedPlanAction::new(
+            "discover",
+            0,
+            1,
+            vec![PlanInput::new("manifest", "sha256-input")],
+            PlanAuthority {
+                tools: vec!["planner".to_string(), "planner-alt".to_string()],
+                effects: vec![
+                    jet_foundation::BuildEffect::Exec,
+                    jet_foundation::BuildEffect::FS,
+                ],
+                platform: platform.clone(),
+            },
+        );
+        let mut emitted = PlanFragmentAction::new("compile", "planner");
+        emitted.inputs = vec!["manifest".to_string()];
+        emitted.outputs = vec!["result.bin".to_string()];
+        emitted.effects = vec![
+            jet_foundation::BuildEffect::Exec,
+            jet_foundation::BuildEffect::FS,
+        ];
+        emitted.platform = platform;
+        let fragment = BuildPlanFragment {
+            actions: vec![emitted],
+        };
+        let tools = HashMap::from([
+            ("planner".to_string(), PathBuf::from("/hangar/bin/planner")),
+            (
+                "planner-alt".to_string(),
+                PathBuf::from("/hangar/bin/planner-alt"),
+            ),
+        ]);
+        let first = lower_staged_plan_action(&action, &fragment, &tools).unwrap();
+        let mut reordered = action;
+        reordered.authority.tools.reverse();
+        reordered.authority.effects.reverse();
+        let second = lower_staged_plan_action(&reordered, &fragment, &tools).unwrap();
+        assert_eq!(
+            plan_recipe_fingerprint(&first).unwrap(),
+            plan_recipe_fingerprint(&second).unwrap()
+        );
     }
 
     #[test]

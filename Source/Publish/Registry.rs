@@ -10,7 +10,7 @@ use jet_foundation::JSON::{json_escape, parse_json, JSONValue};
 use super::Tuf::verify_registry_package;
 use super::Tier::{RegistryTier, community_gate_error};
 use std::cell::Cell;
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::io;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -1126,11 +1126,10 @@ pub fn resolve_from_index(
     registry: &RegistryConfig,
     name: &str,
 ) -> Result<Vec<IndexEntry>, Diagnostic> {
-    let repo = ensure_index_clone(registry)?;
-    let entries = verify_registry_package(&repo, &registry.name, name)?;
-    for entry in &entries {
-        verify_entry_tier(entry)?;
-    }
+    // Keep this older convenience API on the same trust path as the live
+    // resolver. It must not expose a TUF/OCI-verified entry while bypassing
+    // the publisher signature and community gate checks.
+    let (entries, _warnings) = resolve_and_verify(registry, name)?;
     Ok(entries.into_iter().filter(|entry| !entry.yanked).collect())
 }
 
@@ -1161,6 +1160,7 @@ pub fn publish_artifact(
             "registry source artifact is not a directory",
         ));
     }
+    validate_registry_metadata_file(source, name, version)?;
     let actual = SHA256::tree_hash(source);
     if !expected_hash.is_empty() && actual != expected_hash {
         return Err(io::Error::new(
@@ -1402,7 +1402,17 @@ pub(super) fn finalize_oci_referrers(repo: &Path, entry: &IndexEntry) -> io::Res
             io::Error::new(io::ErrorKind::InvalidData, "registry OCI SBOM is not UTF-8")
         })?,
         Err(error) if error.kind() == io::ErrorKind::NotFound => {
-            super::SBOM::registry_spdx(None, &entry.name, &entry.version, &entry.content_hash)
+            // A missing staged SBOM is an incomplete publication, not an
+            // invitation to synthesize a weaker fallback. The lock-backed
+            // payload must remain the exact evidence chosen by the publisher.
+            if root.join(OCI_REFERRER_INDEX).is_file() {
+                verify_oci_referrers(repo, entry)?;
+                return Ok(());
+            }
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "registry OCI SBOM evidence was not staged; restore or rebuild the immutable evidence set",
+            ));
         }
         Err(error) => return Err(error),
     };
@@ -1563,6 +1573,23 @@ fn read_oci_file(path: &Path, limit: usize) -> io::Result<Vec<u8>> {
         ));
     }
     std::fs::read(path)
+}
+
+pub(super) fn referrer_index_digest(repo: &Path, entry: &IndexEntry) -> io::Result<String> {
+    let root = existing_oci_referrer_root(repo, &entry.content_hash).map_err(|error| {
+        io::Error::new(
+            error.kind(),
+            format!("OCI referrer index is unavailable: {error}"),
+        )
+    })?;
+    let bytes = read_oci_file(&root.join(OCI_REFERRER_INDEX), MAX_OCI_REFERRER_BYTES)
+        .map_err(|error| {
+            io::Error::new(
+                error.kind(),
+                format!("OCI referrer index is unavailable: {error}"),
+            )
+        })?;
+    Ok(format!("sha256-{}", SHA256::sha256_hex(&bytes)))
 }
 
 fn render_oci_index(
@@ -1816,6 +1843,430 @@ pub fn verify_artifact(repo: &Path, entry: &IndexEntry) -> io::Result<PathBuf> {
     }
     verify_oci_referrers(repo, entry)?;
     Ok(path)
+}
+
+// ──────────────────────────────────────────────
+// Registry package dependency metadata
+// ──────────────────────────────────────────────
+
+/// Optional metadata shipped inside an immutable registry artifact. The
+/// source tree hash binds this file to the index entry; the resolver therefore
+/// never mixes dependency meaning from one artifact with bytes from another.
+/// The wire shape reuses the provider registry JSON vocabulary and does not
+/// add a second Jet manifest syntax.
+const REGISTRY_PACKAGE_METADATA_FILE: &str = "registry.json";
+const MAX_REGISTRY_PACKAGE_METADATA_BYTES: u64 = 1024 * 1024;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct RegistryDependency {
+    pub(crate) name: String,
+    pub(crate) requirements: Vec<String>,
+    pub(crate) roles: BTreeSet<String>,
+    pub(crate) prefer: Vec<String>,
+    pub(crate) reject: BTreeSet<String>,
+    pub(crate) strict: bool,
+    pub(crate) enabled_by_default: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct RegistryPackageMetadata {
+    pub(crate) name: String,
+    pub(crate) version: String,
+    dependencies: Vec<RegistryDependency>,
+    active_features: BTreeSet<String>,
+    canonical: String,
+}
+
+impl RegistryPackageMetadata {
+    pub(crate) fn active_dependencies(&self) -> Vec<RegistryDependency> {
+        self.dependencies
+            .iter()
+            .filter(|dependency| {
+                let dev_or_test_only = dependency
+                    .roles
+                    .iter()
+                    .all(|role| matches!(role.as_str(), "dev" | "test"));
+                if dev_or_test_only {
+                    return false;
+                }
+                let has_non_optional_role = dependency
+                    .roles
+                    .iter()
+                    .any(|role| role != "optional" && role != "dev" && role != "test");
+                !dependency.roles.contains("optional")
+                    || dependency.enabled_by_default
+                    || self.active_features.contains(&dependency.name)
+                    || has_non_optional_role
+            })
+            .cloned()
+            .collect()
+    }
+
+    pub(crate) fn contains_dependency(&self, name: &str) -> bool {
+        self.dependencies.iter().any(|dependency| dependency.name == name)
+    }
+
+    pub(crate) fn canonical(&self) -> &str {
+        &self.canonical
+    }
+}
+
+/// Read and validate the artifact-bound registry metadata. Missing metadata
+/// is intentional: ordinary `package.jet` registry dependencies retain the
+/// normal role and the resolver supplies that compatibility default.
+pub(crate) fn read_registry_package_metadata(
+    artifact: &Path,
+    expected_name: &str,
+    expected_version: &str,
+) -> io::Result<Option<RegistryPackageMetadata>> {
+    let path = artifact.join(REGISTRY_PACKAGE_METADATA_FILE);
+    let metadata = match std::fs::symlink_metadata(&path) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(error),
+    };
+    if metadata.file_type().is_symlink() || !metadata.is_file() {
+        return Err(invalid_registry_metadata(
+            "registry.json is not a regular file",
+        ));
+    }
+    if metadata.len() > MAX_REGISTRY_PACKAGE_METADATA_BYTES {
+        return Err(invalid_registry_metadata(
+            "registry.json exceeds its size limit",
+        ));
+    }
+    let text = std::fs::read_to_string(&path)?;
+    parse_registry_package_metadata(&text, expected_name, expected_version).map(Some)
+}
+
+/// Publish-side validation runs before the immutable artifact staging path is
+/// created. A malformed role/feature/constraint record cannot leave a partial
+/// artifact or a publishable index line behind.
+pub(crate) fn validate_registry_metadata_file(
+    source: &Path,
+    expected_name: &str,
+    expected_version: &str,
+) -> io::Result<()> {
+    read_registry_package_metadata(source, expected_name, expected_version).map(|_| ())
+}
+
+fn parse_registry_package_metadata(
+    text: &str,
+    expected_name: &str,
+    expected_version: &str,
+) -> io::Result<RegistryPackageMetadata> {
+    // Keep the lock's one-line future field stable even when a publisher
+    // formats registry.json across lines. JSON strings cannot contain literal
+    // newlines, so trimming and joining lines preserves the parsed meaning.
+    let canonical = text.lines().map(str::trim).collect::<String>();
+    let JSONValue::Object(object) = parse_json(&canonical)
+        .map_err(|_| invalid_registry_metadata("registry.json is not valid JSON"))?
+    else {
+        return Err(invalid_registry_metadata(
+            "registry.json must contain one JSON object",
+        ));
+    };
+    let name = required_metadata_string(&object, "name")?;
+    let version = required_metadata_string(&object, "version")?;
+    if name != expected_name || version != expected_version {
+        return Err(invalid_registry_metadata(
+            "registry.json identity disagrees with its artifact path",
+        ));
+    }
+
+    let mut dependencies = BTreeMap::<String, RegistryDependency>::new();
+    for (field, role) in [
+        ("dependencies", "normal"),
+        ("build_dependencies", "build"),
+        ("tool_dependencies", "tool"),
+        ("dev_dependencies", "dev"),
+        ("test_dependencies", "test"),
+        ("optional_dependencies", "optional"),
+        ("peer_dependencies", "peer"),
+        ("plugin_dependencies", "plugin"),
+        ("target_dependencies", "target"),
+    ] {
+        let Some(value) = object.get(field) else {
+            continue;
+        };
+        let JSONValue::Object(values) = value else {
+            return Err(invalid_registry_metadata(&format!(
+                "registry `{field}` dependencies must be an object"
+            )));
+        };
+        for (dependency_name, descriptor) in values {
+            merge_registry_dependency(
+                &mut dependencies,
+                dependency_name,
+                descriptor,
+                role,
+            )?;
+        }
+    }
+
+    let mut feature_map = BTreeMap::<String, Vec<String>>::new();
+    if let Some(value) = object.get("features") {
+        let JSONValue::Object(features) = value else {
+            return Err(invalid_registry_metadata(
+                "registry `features` must be an object of string arrays",
+            ));
+        };
+        for (feature, values) in features {
+            let JSONValue::Array(values) = values else {
+                return Err(invalid_registry_metadata(
+                    "registry feature values must be arrays",
+                ));
+            };
+            let mut names = Vec::new();
+            for value in values {
+                let JSONValue::String(name) = value else {
+                    return Err(invalid_registry_metadata(
+                        "registry feature members must be strings",
+                    ));
+                };
+                validate_registry_dependency_name(name)?;
+                names.push(name.clone());
+            }
+            names.sort();
+            names.dedup();
+            feature_map.insert(feature.clone(), names);
+        }
+    }
+
+    if let Some(value) = object.get("constraints") {
+        let JSONValue::Object(constraints) = value else {
+            return Err(invalid_registry_metadata(
+                "registry `constraints` must be an object",
+            ));
+        };
+        for (dependency_name, descriptor) in constraints {
+            merge_registry_dependency(
+                &mut dependencies,
+                dependency_name,
+                descriptor,
+                "normal",
+            )?;
+        }
+    }
+
+    let dependency_names = dependencies.keys().cloned().collect::<BTreeSet<_>>();
+    for values in feature_map.values() {
+        for value in values {
+            if !feature_map.contains_key(value) && !dependency_names.contains(value) {
+                return Err(invalid_registry_metadata(
+                    "registry feature names an undeclared dependency",
+                ));
+            }
+        }
+    }
+    let mut active_features = BTreeSet::new();
+    if feature_map.contains_key("default") {
+        activate_registry_feature(
+            "default",
+            &feature_map,
+            &mut active_features,
+            &mut BTreeSet::new(),
+        );
+    }
+    for dependency in dependencies.values_mut() {
+        if dependency.roles.contains("optional") && active_features.contains(&dependency.name) {
+            dependency.enabled_by_default = true;
+        }
+    }
+
+    Ok(RegistryPackageMetadata {
+        name,
+        version,
+        dependencies: dependencies.into_values().collect(),
+        active_features,
+        canonical,
+    })
+}
+
+fn merge_registry_dependency(
+    dependencies: &mut BTreeMap<String, RegistryDependency>,
+    name: &str,
+    descriptor: &JSONValue,
+    role: &str,
+) -> io::Result<()> {
+    validate_registry_dependency_name(name)?;
+    let (requirements, prefer, reject, strict, enabled_by_default) =
+        parse_registry_dependency_descriptor(descriptor)?;
+    let dependency = dependencies
+        .entry(name.to_string())
+        .or_insert_with(|| RegistryDependency {
+            name: name.to_string(),
+            requirements: Vec::new(),
+            roles: BTreeSet::new(),
+            prefer: Vec::new(),
+            reject: BTreeSet::new(),
+            strict: false,
+            enabled_by_default: false,
+        });
+    dependency.roles.insert(role.to_string());
+    for requirement in requirements {
+        if !dependency.requirements.contains(&requirement) {
+            dependency.requirements.push(requirement);
+        }
+    }
+    for requirement in prefer {
+        if !dependency.prefer.contains(&requirement) {
+            dependency.prefer.push(requirement);
+        }
+    }
+    dependency.reject.extend(reject);
+    dependency.strict |= strict;
+    dependency.enabled_by_default |= enabled_by_default;
+    Ok(())
+}
+
+fn parse_registry_dependency_descriptor(
+    descriptor: &JSONValue,
+) -> io::Result<(Vec<String>, Vec<String>, BTreeSet<String>, bool, bool)> {
+    let mut requirements = Vec::new();
+    let mut prefer = Vec::new();
+    let mut reject = BTreeSet::new();
+    let mut strict = false;
+    let mut enabled_by_default = false;
+    match descriptor {
+        JSONValue::String(requirement) => requirements.push(requirement.clone()),
+        JSONValue::Object(fields) => {
+            if let Some(value) = fields.get("require").or_else(|| fields.get("version")) {
+                let JSONValue::String(requirement) = value else {
+                    return Err(invalid_registry_metadata(
+                        "registry dependency `require` must be a string",
+                    ));
+                };
+                requirements.push(requirement.clone());
+            } else {
+                requirements.push("*".to_string());
+            }
+            if let Some(value) = fields.get("prefer") {
+                let JSONValue::String(requirement) = value else {
+                    return Err(invalid_registry_metadata(
+                        "registry dependency `prefer` must be a string",
+                    ));
+                };
+                prefer.push(requirement.clone());
+            }
+            if let Some(value) = fields.get("reject") {
+                let JSONValue::Array(values) = value else {
+                    return Err(invalid_registry_metadata(
+                        "registry dependency `reject` must be an array",
+                    ));
+                };
+                for value in values {
+                    let JSONValue::String(version) = value else {
+                        return Err(invalid_registry_metadata(
+                            "registry dependency reject values must be strings",
+                        ));
+                    };
+                    if super::SemVer::SemVer::parse(version).is_none() {
+                        return Err(invalid_registry_metadata(
+                            "registry dependency reject values must be SemVer",
+                        ));
+                    }
+                    reject.insert(version.clone());
+                }
+            }
+            if let Some(value) = fields.get("strict") {
+                let JSONValue::Bool(value) = value else {
+                    return Err(invalid_registry_metadata(
+                        "registry dependency `strict` must be boolean",
+                    ));
+                };
+                strict = *value;
+            }
+            if let Some(value) = fields.get("default") {
+                let JSONValue::Bool(value) = value else {
+                    return Err(invalid_registry_metadata(
+                        "registry dependency `default` must be boolean",
+                    ));
+                };
+                enabled_by_default = *value;
+            }
+            if let Some(value) = fields.get("features") {
+                let JSONValue::Array(values) = value else {
+                    return Err(invalid_registry_metadata(
+                        "registry dependency `features` must be an array",
+                    ));
+                };
+                if values
+                    .iter()
+                    .any(|value| !matches!(value, JSONValue::String(_)))
+                {
+                    return Err(invalid_registry_metadata(
+                        "registry dependency feature values must be strings",
+                    ));
+                }
+            }
+        }
+        _ => {
+            return Err(invalid_registry_metadata(
+                "registry dependency values must be strings or objects",
+            ));
+        }
+    }
+    for requirement in requirements.iter().chain(prefer.iter()) {
+        if super::SemVer::VersionReq::parse(requirement).is_none() {
+            return Err(invalid_registry_metadata(
+                "registry dependency constraints must be valid SemVer requirements",
+            ));
+        }
+    }
+    Ok((requirements, prefer, reject, strict, enabled_by_default))
+}
+
+fn activate_registry_feature(
+    feature: &str,
+    features: &BTreeMap<String, Vec<String>>,
+    active: &mut BTreeSet<String>,
+    visiting: &mut BTreeSet<String>,
+) {
+    if !visiting.insert(feature.to_string()) {
+        return;
+    }
+    if let Some(values) = features.get(feature) {
+        for value in values {
+            if features.contains_key(value) {
+                activate_registry_feature(value, features, active, visiting);
+            } else {
+                active.insert(value.clone());
+            }
+        }
+    }
+    visiting.remove(feature);
+}
+
+fn required_metadata_string(
+    object: &BTreeMap<String, JSONValue>,
+    key: &str,
+) -> io::Result<String> {
+    match object.get(key) {
+        Some(JSONValue::String(value)) if !value.trim().is_empty() => Ok(value.clone()),
+        _ => Err(invalid_registry_metadata(&format!(
+            "registry.json requires a non-empty `{key}`"
+        ))),
+    }
+}
+
+fn validate_registry_dependency_name(name: &str) -> io::Result<()> {
+    if name.is_empty()
+        || name == "."
+        || name == ".."
+        || name.contains('/')
+        || name.contains('\\')
+        || name.bytes().any(|byte| byte.is_ascii_control())
+    {
+        return Err(invalid_registry_metadata(
+            "registry dependency name is not a safe package name",
+        ));
+    }
+    Ok(())
+}
+
+fn invalid_registry_metadata(detail: &str) -> io::Error {
+    io::Error::new(io::ErrorKind::InvalidData, detail)
 }
 
 fn validate_artifact_component(value: &str, label: &str) -> io::Result<()> {

@@ -1175,7 +1175,8 @@ pub(super) fn parse_policy(
                     && (name == Syntax::POLICY_FIELD_CONTAIN
                         || name == Syntax::POLICY_FIELD_HARDEN
                         || name == Syntax::POLICY_FIELD_LICENSES
-                        || name == Syntax::POLICY_FIELD_SOURCES))
+                        || name == Syntax::POLICY_FIELD_SOURCES
+                        || name == Syntax::POLICY_FIELD_EXCEPTIONS))
             {
                 continue;
             }
@@ -1221,11 +1222,20 @@ pub(super) fn parse_policy(
 /// namespace but are carried as typed package facts for the resolver.
 pub(super) fn parse_package_policy_surface(
     body: &str,
-) -> Result<(Option<Vec<String>>, Vec<(String, Vec<String>)>), PackageParseError> {
+) -> Result<
+    (
+        Option<Vec<String>>,
+        Vec<(String, Vec<String>)>,
+        Vec<super::PackagePolicyException>,
+    ),
+    PackageParseError,
+> {
     let mut licenses = None;
     let mut source_maps = Vec::new();
+    let mut exceptions = Vec::new();
     let mut seen_sources = HashSet::new();
     let mut sources_seen = false;
+    let mut exceptions_seen = false;
     for (name, raw) in key_value_entries(body)? {
         match name.as_str() {
             Syntax::POLICY_FIELD_LICENSES => {
@@ -1297,10 +1307,195 @@ pub(super) fn parse_package_policy_surface(
                     source_maps.push((pattern, sources));
                 }
             }
+            Syntax::POLICY_FIELD_EXCEPTIONS => {
+                if exceptions_seen {
+                    return Err(bad_policy("`policy.exceptions` is declared more than once"));
+                }
+                exceptions_seen = true;
+                exceptions = parse_policy_exceptions(&raw)?;
+            }
             _ => {}
         }
     }
-    Ok((licenses, source_maps))
+    Ok((licenses, source_maps, exceptions))
+}
+
+fn parse_policy_exceptions(
+    raw: &str,
+) -> Result<Vec<super::PackagePolicyException>, PackageParseError> {
+    let inner = raw
+        .trim()
+        .strip_prefix('[')
+        .and_then(|value| value.strip_suffix(']'))
+        .ok_or_else(|| bad_policy("`policy.exceptions` must be a list of PolicyException records"))?;
+    let mut exceptions = Vec::new();
+    let mut seen_ids = HashSet::new();
+    let mut seen_scopes = HashSet::new();
+    for entry in top_level_commas(inner) {
+        let entry = entry.trim();
+        if entry.is_empty() {
+            continue;
+        }
+        let exception_prefix = format!("{}.{{", Syntax::POLICY_EXCEPTION_TYPE);
+        let body = entry
+            .strip_prefix(&exception_prefix)
+            .and_then(|value| value.strip_suffix('}'))
+            .ok_or_else(|| {
+                bad_policy(
+                    "`policy.exceptions` entries must use `PolicyException.{ id: \"…\", scope: \"package#version\", reason: \"…\", expires: … }`",
+                )
+            })?;
+        let mut id = None;
+        let mut scope = None;
+        let mut reason = None;
+        let mut expires = None;
+        for (field, value) in key_value_entries(body)? {
+            let target = match field.as_str() {
+                Syntax::POLICY_EXCEPTION_FIELD_ID => &mut id,
+                Syntax::POLICY_EXCEPTION_FIELD_SCOPE => &mut scope,
+                Syntax::POLICY_EXCEPTION_FIELD_REASON => &mut reason,
+                Syntax::POLICY_EXCEPTION_FIELD_EXPIRES => &mut expires,
+                _ => {
+                    return Err(bad_policy(format!(
+                        "unknown `PolicyException` field `{field}`"
+                    )))
+                }
+            };
+            if target.replace(value).is_some() {
+                return Err(bad_policy(format!(
+                    "`PolicyException.{field}` is declared more than once"
+                )));
+            }
+        }
+        let id = exception_string(id, Syntax::POLICY_EXCEPTION_FIELD_ID)?;
+        let scope = exception_string(scope, Syntax::POLICY_EXCEPTION_FIELD_SCOPE)?;
+        let reason = exception_string(reason, Syntax::POLICY_EXCEPTION_FIELD_REASON)?;
+        let expires = expires
+            .as_deref()
+            .ok_or_else(|| bad_policy("`PolicyException.expires` is required"))
+            .and_then(parse_policy_expiry)?;
+        validate_exception_text("id", &id)?;
+        validate_exception_text("scope", &scope)?;
+        validate_exception_text("reason", &reason)?;
+        if !is_exact_exception_scope(&scope) {
+            return Err(bad_policy(
+                "`PolicyException.scope` must be an exact `package#version` target; wildcards, `@`, and ranges are not allowed",
+            ));
+        }
+        if !seen_ids.insert(id.clone()) {
+            return Err(bad_policy(format!(
+                "`policy.exceptions` repeats exception id `{id}`"
+            )));
+        }
+        if !seen_scopes.insert(scope.clone()) {
+            return Err(bad_policy(format!(
+                "`policy.exceptions` repeats exact scope `{scope}`"
+            )));
+        }
+        exceptions.push(super::PackagePolicyException {
+            id,
+            scope,
+            reason,
+            expires_at: expires,
+        });
+    }
+    Ok(exceptions)
+}
+
+fn exception_string(
+    value: Option<String>,
+    field: &str,
+) -> Result<String, PackageParseError> {
+    let value = value
+        .ok_or_else(|| bad_policy(format!("`PolicyException.{field}` is required")))?;
+    let value = unquote(&value);
+    if value.trim().is_empty() {
+        return Err(bad_policy(format!("`PolicyException.{field}` must not be empty")));
+    }
+    Ok(value)
+}
+
+fn validate_exception_text(field: &str, value: &str) -> Result<(), PackageParseError> {
+    if value.chars().any(|character| character.is_control() || matches!(character, ';' | '|')) {
+        return Err(bad_policy(format!(
+            "`PolicyException.{field}` cannot contain control, `;`, or `|` characters"
+        )));
+    }
+    Ok(())
+}
+
+fn is_exact_exception_scope(scope: &str) -> bool {
+    let Some((package, version)) = scope.split_once('#') else {
+        return false;
+    };
+    !package.is_empty()
+        && !version.is_empty()
+        && !scope.contains('@')
+        && scope.matches('#').count() == 1
+        && !package.chars().any(char::is_whitespace)
+        && !version.chars().any(char::is_whitespace)
+        && !version
+            .chars()
+            .any(|character| matches!(character, '*' | '^' | '<' | '>' | '=' | '~' | '|' | ','))
+}
+
+fn parse_policy_expiry(raw: &str) -> Result<u64, PackageParseError> {
+    let value = raw.trim();
+    if let Ok(timestamp) = value.parse::<u64>() {
+        return Ok(timestamp);
+    }
+    let date = value
+        .strip_prefix("Date.parse(\"")
+        .and_then(|value| value.strip_suffix("\")?"))
+        .map(str::to_string)
+        .or_else(|| {
+            let unquoted = unquote(value);
+            (unquoted != value).then_some(unquoted)
+        })
+        .ok_or_else(|| {
+            bad_policy(
+                "`PolicyException.expires` must be a Unix timestamp or `Date.parse(\"YYYY-MM-DD\")?`",
+            )
+        })?;
+    let mut parts = date.split('-');
+    let year = parts.next().and_then(|value| value.parse::<i64>().ok());
+    let month = parts.next().and_then(|value| value.parse::<i64>().ok());
+    let day = parts.next().and_then(|value| value.parse::<i64>().ok());
+    if parts.next().is_some() {
+        return Err(bad_policy("`PolicyException.expires` has an invalid calendar date"));
+    }
+    let (Some(year), Some(month), Some(day)) = (year, month, day) else {
+        return Err(bad_policy("`PolicyException.expires` has an invalid calendar date"));
+    };
+    if !(1..=12).contains(&month) || day < 1 || day > days_in_month(year, month) {
+        return Err(bad_policy("`PolicyException.expires` has an invalid calendar date"));
+    }
+    let days = days_from_civil(year, month, day);
+    u64::try_from(days)
+        .ok()
+        .and_then(|days| days.checked_mul(86_400))
+        .ok_or_else(|| bad_policy("`PolicyException.expires` is outside the supported date range"))
+}
+
+fn days_in_month(year: i64, month: i64) -> i64 {
+    match month {
+        2 if year % 4 == 0 && (year % 100 != 0 || year % 400 == 0) => 29,
+        2 => 28,
+        4 | 6 | 9 | 11 => 30,
+        _ => 31,
+    }
+}
+
+// Proleptic Gregorian days since 1970-01-01 (Howard Hinnant's civil-date
+// conversion, kept local so the manifest parser remains dependency-free).
+fn days_from_civil(year: i64, month: i64, day: i64) -> i64 {
+    let year = year - i64::from(month <= 2);
+    let era = (if year >= 0 { year } else { year - 399 }) / 400;
+    let year_of_era = year - era * 400;
+    let month = month + if month > 2 { -3 } else { 9 };
+    let day_of_year = (153 * month + 2) / 5 + day - 1;
+    let day_of_era = year_of_era * 365 + year_of_era / 4 - year_of_era / 100 + day_of_year;
+    era * 146_097 + day_of_era - 719_468
 }
 
 fn bad_policy(detail: impl Into<String>) -> PackageParseError {

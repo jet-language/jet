@@ -1233,7 +1233,9 @@ pub(super) fn dev_shell_projection(
     project_dir: &Path,
     environment: &jet_env_model::ModuleEval::EnvironmentFacts,
 ) -> io::Result<Option<PathBuf>> {
-    let name = environment.active_environment.as_deref().unwrap_or("dev");
+    // `--env` selects an environment module, not a package generation. The
+    // dev shell has one canonical package projection: `profile.dev`.
+    let name = "dev";
     if !environment
         .package_profiles
         .iter()

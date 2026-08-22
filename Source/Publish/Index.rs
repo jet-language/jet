@@ -232,10 +232,14 @@ pub fn write_index_entry(repo: &Path, entry: &IndexEntry) -> io::Result<()> {
         if !text.is_empty() && !text.ends_with('\n') {
             text.push('\n');
         }
+        // Complete the immutable evidence set before exposing the index line.
+        // If referrer finalization fails, no partially usable package record
+        // is left in the checkout.
+        super::Registry::finalize_oci_referrers(repo, entry)?;
         text.push_str(&entry.to_jsonl());
         text.push('\n');
         atomic_replace(&path, text.as_bytes())?;
-        super::Registry::finalize_oci_referrers(repo, entry)
+        Ok(())
     })
 }
 

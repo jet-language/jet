@@ -312,7 +312,9 @@ pub fn import_nix_facts(source_path: &str, facts_json: &str) -> ImportPlan {
     );
     if let Some(JSONValue::Array(pkgs)) = obj.and_then(|m| m.get("packages")) {
         for (index, pkg) in pkgs.iter().enumerate() {
-            let Some((name, provider_ref, locked, source, exact)) = nix_import_package(pkg) else {
+            let Some((name, provider_ref, locked, immutable_source, exact)) =
+                nix_import_package(pkg)
+            else {
                 plan.record_provider_finding(
                     source_path.to_string(),
                     format!(
@@ -328,27 +330,39 @@ pub fn import_nix_facts(source_path: &str, facts_json: &str) -> ImportPlan {
                 dev: false,
             });
             let mut facts = ProviderFacts::for_reference("nix", &provider_ref);
+            if let JSONValue::Object(_) = pkg {
+                let package_report = normalize_provider_document(
+                    ProviderFamily::Nix,
+                    &nix_json_value(pkg),
+                );
+                merge_provider_projection(
+                    &mut facts,
+                    &package_report.shared_facts_for(&provider_ref),
+                    source_path,
+                );
+            }
             facts.set_native_document("flake-facts.json", facts_json);
             facts.add_fact(
                 "package.name",
                 ProviderFactValue::Text(name),
                 source_path,
             );
-            if let Some(source) = source {
-                facts.set_resolved_source(&source);
+            if let Some(source) = immutable_source {
+                if facts.resolved_source.is_empty() {
+                    facts.set_resolved_source(&source);
+                }
             } else {
                 facts.add_loss(
                     "provider.source",
-                    "Nix package entry has no immutable source or source authority",
+                    "Nix package entry has no immutable source identity",
                     source_path,
                 );
             }
             if !exact {
-                facts.add_loss(
-                    "provider.selector",
-                    "imported Nix package has no exact version, revision, or digest; retain the flake lock before realization",
-                    source_path,
-                );
+                let reason = "imported Nix package has no exact version, revision, or digest; retain the flake lock before realization";
+                if !facts.losses.iter().any(|loss| loss.reason == reason) {
+                    facts.add_loss("provider.selector", reason, source_path);
+                }
             }
             if let JSONValue::Object(package) = pkg {
                 for key in [
@@ -401,6 +415,56 @@ fn nix_import_string(
         .and_then(|value| value.as_str().ok())
         .filter(|value| !value.trim().is_empty())
         .map(str::to_string)
+}
+
+fn merge_provider_projection(target: &mut ProviderFacts, source: &ProviderFacts, source_path: &str) {
+    if target.resolved_source.is_empty() && !source.resolved_source.is_empty() {
+        target.set_resolved_source(&source.resolved_source);
+    }
+    for (key, value) in &source.facts {
+        let provenance = source
+            .provenance
+            .get(key)
+            .map(String::as_str)
+            .unwrap_or(source_path);
+        target.add_fact(key, value.clone(), provenance);
+    }
+    for loss in &source.losses {
+        if !target.losses.contains(loss) {
+            target.losses.push(loss.clone());
+        }
+    }
+    for conflict in &source.conflicts {
+        if !target.conflicts.contains(conflict) {
+            target.conflicts.push(conflict.clone());
+        }
+    }
+}
+
+fn nix_json_value(value: &JSONValue) -> String {
+    match value {
+        JSONValue::Null => "null".to_string(),
+        JSONValue::Bool(value) => value.to_string(),
+        JSONValue::Number(value) => value.to_string(),
+        JSONValue::Flt(value) => value.to_string(),
+        JSONValue::String(value) => JSON::quote(value),
+        JSONValue::Array(values) => format!(
+            "[{}]",
+            values
+                .iter()
+                .map(nix_json_value)
+                .collect::<Vec<_>>()
+                .join(",")
+        ),
+        JSONValue::Object(values) => format!(
+            "{{{}}}",
+            values
+                .iter()
+                .map(|(key, value)| format!("{}:{}", JSON::quote(key), nix_json_value(value)))
+                .collect::<Vec<_>>()
+                .join(",")
+        ),
+    }
 }
 
 fn nix_import_package(
@@ -464,18 +528,14 @@ fn nix_import_package(
         selector_facts.selector.digest.clone()
     };
     let exact = selector_facts.selector.is_exact();
-    let source = source
-        .or_else(|| match value {
-            JSONValue::Object(object) => nix_import_string(object, "drvPath")
-                .or_else(|| nix_import_string(object, "immutableSource")),
-            _ => None,
-        })
-        .or_else(|| {
-            provider_ref
-                .rsplit_once('@')
-                .map(|(_, authority)| authority.to_string())
-        });
-    Some((name, provider_ref, locked, source, exact))
+    let immutable_source = match value {
+        JSONValue::Object(object) => nix_import_string(object, "drvPath")
+            .or_else(|| nix_import_string(object, "immutableSource"))
+            .or_else(|| nix_import_string(object, "sourceIdentity"))
+            .or_else(|| nix_import_string(object, "sourcePath")),
+        _ => None,
+    };
+    Some((name, provider_ref, locked, immutable_source, exact))
 }
 
 pub fn import_cargo(cargo_toml: &str, cargo_lock: &str) -> ImportPlan {
@@ -519,14 +579,10 @@ pub fn import_cargo(cargo_toml: &str, cargo_lock: &str) -> ImportPlan {
                 .map(|platform| format!("&platform={platform}"))
                 .unwrap_or_default();
             let provider_ref = if locked.is_empty() {
-                if platform_selector.is_empty() {
-                    format!("{dep}@cargo")
-                } else {
-                    format!(
-                        "{dep}#platform={}{platform_selector}@cargo",
-                        platform.as_deref().unwrap_or_default()
-                    )
-                }
+                platform
+                    .as_deref()
+                    .map(|platform| format!("{dep}#platform={platform}@cargo"))
+                    .unwrap_or_else(|| format!("{dep}@cargo"))
             } else {
                 format!("{dep}#version={locked}{platform_selector}@cargo")
             };

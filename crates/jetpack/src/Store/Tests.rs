@@ -1195,7 +1195,7 @@ mod tests {
         mismatch.identity.source_fingerprint = "wrong-source".into();
 
         let error = quarantine_invalid_entry(&roots, &ingested.entry, &mismatch).unwrap_err();
-        assert_eq!(error.kind(), std::io::ErrorKind::AlreadyExists);
+        assert_eq!(error.kind(), std::io::ErrorKind::InvalidData);
         assert_eq!(
             fs::metadata(&hangar).unwrap().permissions().mode() & 0o777,
             0o555

@@ -11,10 +11,9 @@ use super::execution_helpers::action_pools;
 use super::handles::{ActionHandle, ActionId, ProbeId, ToolchainHandle};
 use super::plan_graph::{BuildExecutionReport, BuildPlan};
 use super::provenance_toolchains::{ProbeKind, ReproducibilityClass};
-use super::remote_scheduler::RemoteBuilderLease;
 use super::targets::BuildPath;
 use super::validation::resolve_under;
-use super::{RemoteBuildRequest, RemoteBuilder, RemoteScheduler};
+use super::{RemoteAttemptError, RemoteBuildRequest, RemoteBuilder, RemoteScheduler};
 use std::collections::{BTreeMap, BTreeSet};
 use std::io::Write;
 use std::path::{Component, Path, PathBuf};
@@ -210,11 +209,11 @@ pub fn execute_build_plan_with_front_end_and_remote_and_compiler(
     let records = project_root.join(".jet/build-cache/actions");
     let remote_scheduler = remote_binding
         .filter(|binding| binding.is_enabled())
-        .map(|binding| RemoteScheduler::new([RemoteBuilder::from_binding(binding.clone())]))
+        .map(remote_scheduler_for_binding)
         .transpose()
         .map_err(|error| BuildExecutionError::IO {
             action: "remote scheduler".to_string(),
-            detail: error.to_string(),
+            detail: error,
         })?;
     ensure_real_directory(&records).map_err(|e| BuildExecutionError::IO {
         action: "cache".to_string(),
@@ -427,7 +426,7 @@ fn execute_one_action(
         }
     }
     if action.cache == ActionCache::Cached && cache_lookup_allowed {
-        if let Some((transport, policy, _execute, _lease)) = &remote {
+        if let Some((transport, policy, _execute)) = &remote {
             match transport.download_action_record(&key, policy) {
                 Ok(record) => {
                     if !matches!(
@@ -540,7 +539,7 @@ fn execute_one_action(
         return Ok(outcome);
     }
 
-    if let Some((transport, policy, true, _lease)) = &remote {
+    if let Some((_transport, _policy, true)) = &remote {
         let timeout_ms = remote_binding
             .map(|binding| binding.timeout_ms)
             .unwrap_or(30_000);
@@ -552,10 +551,9 @@ fn execute_one_action(
             &record_path,
             &snapshots,
             &key,
-            transport,
-            policy,
             rebuild_status,
             timeout_ms,
+            remote_scheduler.expect("enabled remote execution requires its scheduler"),
             remote_binding.expect("enabled remote execution requires its host binding"),
         );
         match remote_result {
@@ -680,7 +678,7 @@ fn execute_one_action(
                 ActionCacheProvenance::miss(CacheMissReason::NoLocalActionRecord),
             )
             .map_err(|e| io_action(action, e))?;
-        if let Some((transport, policy, _, _lease)) = &remote {
+        if let Some((transport, policy, _execute)) = &remote {
             if policy
                 .check(super::cache_cas::RemoteActionRequest::CacheWrite)
                 .is_ok()
@@ -704,12 +702,58 @@ fn execute_remote_action(
     record_path: &Path,
     snapshots: &[ActionInputSnapshot],
     key: &ActionKey,
+    rebuild_status: ActionCacheStatus,
+    timeout_ms: u64,
+    scheduler: &RemoteScheduler,
+    binding: &RemoteBuildBinding,
+) -> Result<ActionOutcome, BuildExecutionError> {
+    let request = remote_execution_request(action, key, binding);
+    let dispatch = scheduler.dispatch(&request, |builder| {
+        let transport = RemoteCacheTransport::for_binding(&builder.binding)
+            .map_err(RemoteAttemptError::rejected)?;
+        let policy = remote_attempt_policy(plan, action, key, &builder.binding, &transport)
+            .map_err(|error| RemoteAttemptError::rejected(format!("{error:?}")))?;
+        match execute_remote_candidate(
+            plan,
+            action,
+            project_root,
+            cas,
+            record_path,
+            snapshots,
+            key,
+            &transport,
+            &policy,
+            rebuild_status,
+            timeout_ms,
+            &builder.binding,
+        ) {
+            Ok(outcome) => Ok(outcome),
+            Err(failure) if failure.retryable => Err(RemoteAttemptError::worker_lost(format!(
+                "{:?}",
+                failure.error
+            ))),
+            Err(failure) => Err(RemoteAttemptError::rejected(format!("{:?}", failure.error))),
+        }
+    });
+    dispatch
+        .map(|dispatch| dispatch.value)
+        .map_err(|error| remote_action(action, error.to_string()))
+}
+
+fn execute_remote_candidate(
+    plan: &BuildPlan,
+    action: &BuildAction,
+    project_root: &Path,
+    cas: &LocalCas,
+    record_path: &Path,
+    snapshots: &[ActionInputSnapshot],
+    key: &ActionKey,
     transport: &RemoteCacheTransport,
     policy: &RemoteCachePolicy,
     rebuild_status: ActionCacheStatus,
     timeout_ms: u64,
     binding: &RemoteBuildBinding,
-) -> Result<ActionOutcome, BuildExecutionError> {
+) -> Result<ActionOutcome, RemoteAttemptFailure> {
     let mut policy = policy.clone();
     let mut last_failure = None;
     for attempt in 0..MAX_REMOTE_EXECUTION_ATTEMPTS {
@@ -728,10 +772,10 @@ fn execute_remote_action(
         ) {
             Ok(outcome) => return Ok(outcome),
             Err(failure) if failure.retryable && attempt + 1 < MAX_REMOTE_EXECUTION_ATTEMPTS => {
-                last_failure = Some(failure.error);
+                last_failure = Some(failure);
                 policy = remote_attempt_policy(plan, action, key, binding, transport)?;
             }
-            Err(failure) => return Err(failure.error),
+            Err(failure) => return Err(failure),
         }
     }
     Err(last_failure.expect("remote execution attempt loop must produce a result"))
@@ -863,15 +907,7 @@ fn remote_for_action(
     grants: &BTreeSet<BuildCapability>,
     binding: Option<&RemoteBuildBinding>,
     scheduler: Option<&RemoteScheduler>,
-) -> Result<
-    Option<(
-        RemoteCacheTransport,
-        RemoteCachePolicy,
-        bool,
-        RemoteBuilderLease,
-    )>,
-    BuildExecutionError,
-> {
+) -> Result<Option<(RemoteCacheTransport, RemoteCachePolicy, bool)>, BuildExecutionError> {
     let Some(binding) = binding.filter(|binding| binding.is_enabled()) else {
         return Ok(None);
     };
@@ -906,10 +942,9 @@ fn remote_for_action(
             capability: BuildCapability::Net,
         });
     }
-    // The CLI selects one host-owned binding by name, but the selected binding
-    // still crosses the canonical capability scheduler. Multi-builder callers
-    // use the same model with more candidates; this adapter keeps the driver
-    // entry point's explicit single-name contract intact.
+    // The CLI names one host-owned binding as the primary candidate. The
+    // canonical scheduler may add compatible host bindings for retryable
+    // worker-loss failover; cache policy still belongs to the named binding.
     let request = action_pools(action)
         .into_iter()
         .fold(RemoteBuildRequest::new(key.clone()), |request, pool| {
@@ -927,14 +962,56 @@ fn remote_for_action(
             "remote builder binding has no canonical scheduler".to_string(),
         )
     })?;
-    let selected = match scheduler.select(&request) {
-        Ok(selected) => selected,
+    match scheduler.select(&request) {
+        Ok(_) => {}
         Err(_error) if binding.fallback_local => return Ok(None),
         Err(error) => return Err(remote_action(action, error.to_string())),
-    };
+    }
     let policy = remote_attempt_policy(plan, action, key, binding, &transport)?;
-    let lease = scheduler.acquire(selected);
-    Ok(Some((transport, policy, binding.execute, lease)))
+    Ok(Some((transport, policy, binding.execute)))
+}
+
+fn remote_scheduler_for_binding(binding: &RemoteBuildBinding) -> Result<RemoteScheduler, String> {
+    let mut selected = RemoteBuilder::from_binding(binding.clone());
+    // `--builder` names the primary binding. Other compatible host bindings
+    // remain deterministic failover candidates after it loses its worker.
+    selected.capabilities.priority = 1;
+    let mut builders = vec![selected];
+
+    let selected_is_registered = match RemoteBuildBinding::load_host(&binding.builder) {
+        Ok(registered) => registered == *binding,
+        Err(_) => false,
+    };
+    if selected_is_registered {
+        for name in RemoteBuildBinding::list_host()? {
+            if name == binding.builder {
+                continue;
+            }
+            let Ok(candidate) = RemoteBuildBinding::load_host(&name) else {
+                continue;
+            };
+            let mut candidate = RemoteBuilder::from_binding(candidate);
+            candidate.capabilities.priority = 0;
+            builders.push(candidate);
+        }
+    }
+    RemoteScheduler::new(builders).map_err(|error| error.to_string())
+}
+
+fn remote_execution_request(
+    action: &BuildAction,
+    key: &ActionKey,
+    binding: &RemoteBuildBinding,
+) -> RemoteBuildRequest {
+    action_pools(action)
+        .into_iter()
+        .fold(RemoteBuildRequest::new(key.clone()), |request, pool| {
+            request.with_pool(pool)
+        })
+        .with_platform(binding.platform.clone())
+        .with_trust_domain(binding.trust_domain.clone())
+        .with_execute(true)
+        .with_local_fallback(binding.fallback_local)
 }
 
 fn remote_attempt_policy(

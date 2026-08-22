@@ -217,7 +217,7 @@ marker Recorded(@sites: [.Type])
 marker AddGreeting(@sites: [.Type]) {
     tname :: target.name
     impl @tname {
-        fn greeting(self) => String :: "hello"
+        fn greeting(self) String -> "hello"
     }
 }
 
@@ -388,7 +388,7 @@ fn source_rule_collision_names_generated_and_written_spans() {
 marker AddGreeting(@sites: [.Type]) {
     tname :: target.name
     impl @tname {
-        fn greeting(self) => String :: "generated"
+        fn greeting(self) String -> "generated"
     }
 }
 
@@ -396,7 +396,7 @@ marker AddGreeting(@sites: [.Type]) {
 struct Person { name: String }
 
 impl Person {
-    fn greeting(self) => String {
+    fn greeting(self) String -> {
         return "written"
     }
 }

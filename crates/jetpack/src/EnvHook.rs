@@ -64,7 +64,9 @@ pub fn definition_fingerprint_with_selections(
                 file.fingerprint().into_bytes(),
             ));
         }
-        let profile_name = plan.active_environment.as_deref().unwrap_or("dev");
+        // `--env` selects an environment module, not a package generation.
+        // Shell activation always observes the canonical `profile.dev` root.
+        let profile_name = "dev";
         if plan
             .package_profiles
             .iter()
@@ -685,12 +687,19 @@ mod tests {
         std::fs::create_dir_all(&root).unwrap();
         std::fs::write(
             root.join(Syntax::ENV_FILE),
-            "module env.dev { packages: [nixpkgs.ripgrep] }\nmodule env.full { packages: [nixpkgs.fd] }\n",
+            "module profile.dev { packages: [nixpkgs.ripgrep] }\nmodule env.dev { packages: [nixpkgs.ripgrep] }\nmodule env.full { packages: [nixpkgs.fd] }\n",
         )
         .unwrap();
+        let current = root.join(".jet/profiles/dev");
+        std::fs::create_dir_all(&current).unwrap();
+        std::fs::write(current.join("current"), "generation-1\n").unwrap();
         let dev = definition_fingerprint_with_selections(&root, None, Some("dev")).unwrap();
         let full = definition_fingerprint_with_selections(&root, None, Some("full")).unwrap();
         assert_ne!(dev, full);
+        std::fs::write(current.join("current"), "generation-2\n").unwrap();
+        let full_after_switch =
+            definition_fingerprint_with_selections(&root, None, Some("full")).unwrap();
+        assert_ne!(full, full_after_switch);
         let _ = std::fs::remove_dir_all(root);
     }
 

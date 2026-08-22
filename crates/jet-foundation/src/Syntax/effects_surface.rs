@@ -490,6 +490,12 @@ pub const REF_SOURCE_RUBY: &str = "ruby";
 pub const REF_SOURCE_PERL: &str = "perl";
 /// D-FFI-PHP1 / D-JPK7: direct Packagist ecosystem root.
 pub const REF_SOURCE_PHP: &str = "php";
+/// D-JPK-PROVIDERS2 / D-JPK-REGISTRY1: the first-party Jet registry root.
+pub const REF_SOURCE_JET_REGISTRY: &str = "jet-registry";
+/// D-JPK-PROVIDERS2: direct npm ecosystem root.
+pub const REF_SOURCE_NPM: &str = "npm";
+/// D-JPK-PROVIDERS2: direct Cargo ecosystem root.
+pub const REF_SOURCE_CARGO: &str = "cargo";
 
 /// The one home for "which source tokens are built-in providers" — every
 /// recognized `REF_SOURCE_*` above, in the order a ref may not put them
@@ -506,6 +512,9 @@ pub const REF_SOURCE_PROVIDERS: &[&str] = &[
     REF_SOURCE_RUBY,
     REF_SOURCE_PERL,
     REF_SOURCE_PHP,
+    REF_SOURCE_JET_REGISTRY,
+    REF_SOURCE_NPM,
+    REF_SOURCE_CARGO,
 ];
 
 /// D-JPK2/9: the Phase 1 verb set.

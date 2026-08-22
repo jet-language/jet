@@ -59,7 +59,7 @@ def risky(x: int) -> int:
     assert!(stdout.contains("JT0101"), "{stdout}");
 
     let generated = fs::read_to_string(root.join("jet/app/math.jet")).unwrap();
-    assert!(generated.contains("fn add(x: Int, y: Int) => Int"), "{generated}");
+    assert!(generated.contains("fn add(x: Int, y: Int) Int ->"), "{generated}");
     assert!(generated.contains("total := x + y"), "{generated}");
     assert!(generated.contains("#Test fn test_add()"), "{generated}");
     assert!(generated.contains("assert_eq(add(2, 3), 5)"), "{generated}");

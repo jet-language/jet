@@ -340,6 +340,42 @@ fn hangar_repair_uses_jet_dispatch_and_restores_or_preserves_the_object() {
 
     let quarantine = root.path.join("hangar").join("quarantine");
     fs::create_dir_all(&quarantine).unwrap();
+
+    // A crash after quarantine can leave the already-corrupt object under a
+    // repair-* name. Recovery preserves that evidence and leaves the signed
+    // archive as the next repair source.
+    make_tree_writable(Path::new(&entry.out));
+    fs::write(&payload, "crashed corrupt bytes\n").unwrap();
+    let corrupt_backup =
+        quarantine.join(format!("repair-{}-corrupt", entry.envelope.output_hash));
+    fs::rename(&entry.out, &corrupt_backup).unwrap();
+    seal_tree(&corrupt_backup);
+    let recovered_corrupt = jet()
+        .args(["hangar", "recover", "--no-color"])
+        .current_dir(&project.path)
+        .env("JETPACK_ROOT", &root.path)
+        .output()
+        .unwrap();
+    assert!(
+        recovered_corrupt.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&recovered_corrupt.stderr)
+    );
+    assert!(!Path::new(&entry.out).exists());
+    assert!(
+        fs::read_dir(&quarantine)
+            .unwrap()
+            .flatten()
+            .any(|item| item.file_name().to_string_lossy().starts_with("rejected-repair-"))
+    );
+    let repaired_after_crash = repair(&archive);
+    assert!(
+        repaired_after_crash.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&repaired_after_crash.stderr)
+    );
+    assert_eq!(fs::read_to_string(&payload).unwrap(), "trusted bytes\n");
+
     make_tree_writable(Path::new(&entry.out));
     let crash_backup = quarantine.join(format!("repair-{}-crash", entry.envelope.output_hash));
     fs::rename(&entry.out, &crash_backup).unwrap();

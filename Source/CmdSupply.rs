@@ -881,6 +881,19 @@ pub(crate) fn run_audit(db_path: Option<&str>) {
         "error: no package.jet found — run `jet inspect audit` inside a project",
     );
 
+    let source_exceptions = match jet::Manifest::load(&root) {
+        Some(Ok(manifest)) => manifest.policy.exceptions,
+        Some(Err(diagnostic)) => audit_fail(&root.join(jet::Syntax::PACKAGE_FILE), "", diagnostic),
+        None => audit_fail(
+            &root.join(jet::Syntax::PACKAGE_FILE),
+            "",
+            jet::Publish::e2611(
+                "a readable package manifest",
+                "repair `package.jet` and run `jet inspect audit` again",
+            ),
+        ),
+    };
+
     let lock_path = root.join(".jet").join("lock");
     let lock_text = match fs::read_to_string(&lock_path) {
         Ok(text) => text,
@@ -974,7 +987,13 @@ pub(crate) fn run_audit(db_path: Option<&str>) {
         Err(diagnostic) => audit_fail(&trust_path, &trust_text, diagnostic),
     };
 
-    let report = match jet::Publish::audit_advisory_feed(&lock, &feed, &trust, jet::Publish::advisory_now()) {
+    let report = match jet::Publish::audit_advisory_feed_with_source_exceptions(
+        &lock,
+        &feed,
+        &trust,
+        jet::Publish::advisory_now(),
+        &source_exceptions,
+    ) {
         Ok(report) => report,
         Err(diagnostic) => audit_fail(&feed_path, &feed_text, diagnostic),
     };
@@ -989,6 +1008,9 @@ pub(crate) fn run_audit(db_path: Option<&str>) {
         report.receipt.maturity_seconds,
         lock.packages.len()
     );
+    for exception in &report.source_exceptions {
+        println!("audit: source policy exception applied: {exception}");
+    }
 
     let raw = String::new();
     let diags: Vec<_> = report

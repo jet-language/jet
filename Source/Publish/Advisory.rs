@@ -1,5 +1,6 @@
 use crate::Diagnostics::Diagnostic;
 use crate::Lock::{LockFile, LockSource, LockedPackage};
+use crate::Package::PackagePolicyException;
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -149,6 +150,7 @@ pub struct PolicyAudit {
     pub receipt: AdvisoryReceipt,
     pub matches: Vec<AuditMatch>,
     pub maturity: Vec<Diagnostic>,
+    pub source_exceptions: Vec<String>,
 }
 
 /// The verified offline policy snapshot used by package resolution. The
@@ -223,6 +225,18 @@ pub fn authorize_registry_candidate(
     package: &str,
     version: &str,
 ) -> Result<(), Diagnostic> {
+    authorize_registry_candidate_with_source_exception(policy, package, version, None)
+}
+
+/// Admit one newly selected registry version with the source-owned exception
+/// requested by the root package. The signed feed and advisory checks remain
+/// authoritative: a source exception can only waive freshness maturity.
+pub(crate) fn authorize_registry_candidate_with_source_exception(
+    policy: &AdvisoryPolicy,
+    package: &str,
+    version: &str,
+    source_exception: Option<&PackagePolicyException>,
+) -> Result<(), Diagnostic> {
     let version = SemVer::parse(version).ok_or_else(|| {
         e2610(
             "registry package",
@@ -245,12 +259,28 @@ pub fn authorize_registry_candidate(
         SourceClass::FirstParty | SourceClass::Workspace => 0,
     };
     let mature_at = release.first_seen.saturating_add(required);
-    let excepted = policy.feed.exceptions.iter().any(|exception| {
+    if let Some(exception) = source_exception {
+        if !exception.matches(package, &version.to_string())
+            || exception.id.trim().is_empty()
+            || exception.reason.trim().is_empty()
+            || exception.expires_at <= policy.now
+        {
+            return Err(e2610(
+                "source policy exception",
+                &format!(
+                    "exception `{}` is not an active exact exception for {package}#{version}",
+                    exception.id
+                ),
+            ));
+        }
+    }
+    let feed_exception = policy.feed.exceptions.iter().any(|exception| {
         exception.package == package
             && exception.version == version
             && exception.expires_at > policy.now
     });
-    if policy.now < mature_at && !excepted {
+    let source_exception = source_exception.is_some_and(|exception| exception.expires_at > policy.now);
+    if policy.now < mature_at && !feed_exception && !source_exception {
         return Err(e2609(package, &version.to_string(), mature_at, release.source_class));
     }
     if let Some(advisory) = policy
@@ -803,6 +833,16 @@ pub fn audit_advisory_feed(
     trust: &AdvisoryTrustRoot,
     now: u64,
 ) -> Result<PolicyAudit, Diagnostic> {
+    audit_advisory_feed_with_source_exceptions(lock, feed, trust, now, &[])
+}
+
+pub fn audit_advisory_feed_with_source_exceptions(
+    lock: &LockFile,
+    feed: &AdvisoryFeed,
+    trust: &AdvisoryTrustRoot,
+    now: u64,
+    source_exceptions: &[PackagePolicyException],
+) -> Result<PolicyAudit, Diagnostic> {
     let receipt = verify_advisory_feed(feed, trust, now)?;
     if let Some(requirement) = lock
         .authority
@@ -814,6 +854,7 @@ pub fn audit_advisory_feed(
             .map_err(|error| e2610("lock provenance", &error))?;
     }
     let mut maturity = Vec::new();
+    let mut applied_source_exceptions = Vec::new();
     for package in &lock.packages {
         let version = locked_package_version(package)?;
         let Some(release) = feed
@@ -837,13 +878,25 @@ pub fn audit_advisory_feed(
             SourceClass::FirstParty | SourceClass::Workspace => 0,
         };
         let mature_at = release.first_seen.saturating_add(required);
-        if now < mature_at
-            && !feed.exceptions.iter().any(|exception| {
-                exception.package == package.name
-                    && exception.version == version
-                    && exception.expires_at > now
-            })
-        {
+        let feed_exception = feed.exceptions.iter().any(|exception| {
+            exception.package == package.name
+                && exception.version == version
+                && exception.expires_at > now
+        });
+        let source_exception = source_exceptions.iter().find(|exception| {
+            exception.matches(&package.name, &version.to_string())
+                && !exception.id.trim().is_empty()
+                && !exception.reason.trim().is_empty()
+                && exception.expires_at > now
+        });
+        if source_exception.is_some() {
+            applied_source_exceptions.push(
+                source_exception
+                    .expect("source exception was found")
+                    .summary(),
+            );
+        }
+        if now < mature_at && !feed_exception && source_exception.is_none() {
             maturity.push(e2609(
                 &package.name,
                 &package.version,
@@ -856,6 +909,7 @@ pub fn audit_advisory_feed(
         receipt,
         matches: audit_lockfile(lock, &feed.advisories)?,
         maturity,
+        source_exceptions: applied_source_exceptions,
     })
 }
 
@@ -883,7 +937,7 @@ pub fn e2609(
         "E2609",
         format!("{package}#{version} is not mature under the advisory policy"),
         format!("the signed feed classifies this {} release as new until Unix time {mature_at}", source_class.label()),
-        format!("wait for the maturity window, or add a reviewed exact exception for {package}#{version} with a reason, reviewer, and expiry"),
+        format!("wait for the maturity window, or add a reviewed exact `policy.exceptions` record for {package}#{version} with an id, reason, and expiry"),
         None,
     )
 }

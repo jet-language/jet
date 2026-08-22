@@ -244,6 +244,9 @@ fn profile_provider_label(source: &Source, source_name: &str, table: &SourceTabl
         Source::RubyGems => "ruby".to_string(),
         Source::Cpan => "perl".to_string(),
         Source::Packagist => "php".to_string(),
+        Source::JetRegistry => "jet-registry".to_string(),
+        Source::Npm => "npm".to_string(),
+        Source::Cargo => "cargo".to_string(),
         Source::Named(_) => table
             .upstream(source_name)
             .and_then(|upstream| upstream.rsplit_once('@').map(|(_, provider)| provider))
@@ -1108,6 +1111,9 @@ fn infer_provider_kind(pref: &RefSpec::ProviderRef, base_dir: &Path) -> Provider
         Source::RubyGems => ProviderKind::RubyGems,
         Source::Cpan => ProviderKind::Cpan,
         Source::Packagist => ProviderKind::Packagist,
+        Source::JetRegistry => ProviderKind::JetRegistry,
+        Source::Npm => ProviderKind::Npm,
+        Source::Cargo => ProviderKind::Cargo,
         // `…@nixpkgs` is always the nix collection; never probed. (`Named` can't
         // appear in a `target@provider` ref.)
         _ => ProviderKind::Nix,

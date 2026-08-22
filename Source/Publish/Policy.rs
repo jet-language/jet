@@ -6,7 +6,7 @@
 //! and semantic-lock rationale.
 
 use crate::Diagnostics::Diagnostic;
-use crate::Package::PackagePolicy;
+use crate::Package::{PackagePolicy, PackagePolicyException};
 use crate::SHA256;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -16,6 +16,7 @@ pub struct PackagePolicyReceipt {
     pub license: String,
     pub source: String,
     pub source_rule: String,
+    pub exception: Option<String>,
     pub fingerprint: String,
 }
 
@@ -26,9 +27,20 @@ impl PackagePolicyReceipt {
         } else {
             self.source_rule.as_str()
         };
+        let exception = self
+            .exception
+            .as_deref()
+            .map(|value| format!(";exception={value}"))
+            .unwrap_or_default();
         format!(
-            "package={}#{};license={};source={};source-rule={};fingerprint={}",
-            self.package, self.version, self.license, self.source, source_rule, self.fingerprint
+            "package={}#{};license={};source={};source-rule={};fingerprint={}{}",
+            self.package,
+            self.version,
+            self.license,
+            self.source,
+            source_rule,
+            self.fingerprint,
+            exception
         )
     }
 }
@@ -140,6 +152,11 @@ pub fn authorize_package_candidate(
         license: license.to_string(),
         source: source.to_string(),
         source_rule,
+        exception: policy
+            .exceptions
+            .iter()
+            .find(|exception| exception.matches(package, version))
+            .map(PackagePolicyException::summary),
         fingerprint: policy_fingerprint(policy),
     })
 }
@@ -166,8 +183,32 @@ pub fn validate_published_license(
 pub fn package_policy_diagnostic(error: &PackagePolicyError) -> Diagnostic {
     Diagnostic::error(
         "E2607",
-        error.detail.clone(),
-        "SPDX license and source authority are security-sensitive package policy evidence; Jet rejects missing, malformed, or disallowed metadata before ingest".to_string(),
+        format!("source-owned package policy rejected the candidate: {}", error.detail),
+        "the package source owns the requested license and source policy; this security-sensitive evidence is rejected before ingest".to_string(),
+        error.fix.clone(),
+        None,
+    )
+}
+
+/// Explain a package-policy denial at the dependency edge that supplied it.
+/// The resolver owns the graph context; the policy gate owns the evidence and
+/// smallest source fix. Keeping both here prevents a generic registry error
+/// from hiding which source declaration must change.
+pub(crate) fn package_policy_edge_diagnostic(
+    owner: &str,
+    edge: &str,
+    source: &str,
+    error: &PackagePolicyError,
+) -> Diagnostic {
+    Diagnostic::error(
+        "E1207",
+        format!(
+            "source-owned package policy rejected dependency edge `{edge}`: {}",
+            error.detail
+        ),
+        format!(
+            "package `{owner}` requested source authority `{source}`; policy evidence is evaluated after registry identity and before Hangar ingest"
+        ),
         error.fix.clone(),
         None,
     )
@@ -184,7 +225,12 @@ pub fn policy_fingerprint(policy: &PackagePolicy) -> String {
         sources.sort();
     }
     source_maps.sort_by(|left, right| left.0.cmp(&right.0));
-    let canonical = format!("licenses={:?};sources={:?}", licenses, source_maps);
+    let mut exceptions = policy.exceptions.clone();
+    exceptions.sort();
+    let canonical = format!(
+        "licenses={:?};sources={:?};exceptions={:?}",
+        licenses, source_maps, exceptions
+    );
     format!("sha256-{}", SHA256::sha256_hex(canonical.as_bytes()))
 }
 

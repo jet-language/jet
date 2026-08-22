@@ -187,89 +187,110 @@ pub(super) fn recover_repair_quarantine_unlocked(roots: &Roots) -> io::Result<us
     let mut permissions = super::Ingest::MovePathPermissions::default();
     permissions.make_writable(&quarantine, &roots.hangar_dir())?;
     permissions.make_writable(&objects, &roots.hangar_dir())?;
-    let mut recovered = 0;
-    for item in fs::read_dir(&quarantine)? {
-        let item = item?;
-        let name = item.file_name().to_string_lossy().into_owned();
-        let Some(repair_name) = name.strip_prefix("repair-") else {
-            continue;
-        };
-        let Some(digest_tail) = repair_name.strip_prefix("sha256-") else {
-            return Err(invalid("repair quarantine name is malformed"));
-        };
-        let digest_hex = digest_tail
-            .get(..64)
-            .filter(|value| value.as_bytes().iter().all(|byte| byte.is_ascii_hexdigit()));
-        let Some(digest_hex) = digest_hex else {
-            return Err(invalid("repair quarantine name is malformed"));
-        };
-        if digest_tail.as_bytes().get(64) != Some(&b'-') {
-            return Err(invalid("repair quarantine name is malformed"));
-        }
-        let nonce = digest_tail.get(65..).unwrap_or_default();
-        if nonce.is_empty() {
-            return Err(invalid("repair quarantine name has no recovery nonce"));
-        }
-        let digest = format!("sha256-{digest_hex}");
-        validate_digest(&digest)?;
-        let backup = item.path();
-        let backup_metadata = fs::symlink_metadata(&backup)?;
-        if backup_metadata.file_type().is_symlink() || !backup_metadata.is_dir() {
-            return Err(invalid("repair quarantine contains a non-directory backup"));
-        }
-        let actual = Envelope::try_output_hash_of_in_hangar(
-            &backup.to_string_lossy(),
-            &roots.hangar_dir(),
-            true,
-        )
-        .map_err(io::Error::other)?;
-        if actual != digest {
-            return Err(invalid(&format!(
-                "repair quarantine backup `{digest}` has digest `{actual}`"
-            )));
-        }
-        let destination = objects.join(&digest);
-        match fs::symlink_metadata(&destination) {
-            Ok(existing) if existing.file_type().is_symlink() || !existing.is_dir() => {
-                return Err(invalid(&format!(
-                    "existing Hangar object `{digest}` is not a directory"
-                )))
+    let result = (|| {
+        let mut recovered = 0;
+        for item in fs::read_dir(&quarantine)? {
+            let item = item?;
+            let name = item.file_name().to_string_lossy().into_owned();
+            let Some(repair_name) = name.strip_prefix("repair-") else {
+                continue;
+            };
+            let Some(digest_tail) = repair_name.strip_prefix("sha256-") else {
+                return Err(invalid("repair quarantine name is malformed"));
+            };
+            let digest_hex = digest_tail
+                .get(..64)
+                .filter(|value| value.as_bytes().iter().all(|byte| byte.is_ascii_hexdigit()));
+            let Some(digest_hex) = digest_hex else {
+                return Err(invalid("repair quarantine name is malformed"));
+            };
+            if digest_tail.as_bytes().get(64) != Some(&b'-') {
+                return Err(invalid("repair quarantine name is malformed"));
             }
-            Ok(_) => {
-                let existing_hash = Envelope::try_output_hash_of_in_hangar(
-                    &destination.to_string_lossy(),
-                    &roots.hangar_dir(),
-                    true,
-                )
-                .map_err(io::Error::other)?;
-                if existing_hash != digest {
-                    return Err(invalid(&format!(
-                        "existing Hangar object `{digest}` has a conflicting digest"
-                    )));
+            let nonce = digest_tail.get(65..).unwrap_or_default();
+            if nonce.is_empty() {
+                return Err(invalid("repair quarantine name has no recovery nonce"));
+            }
+            let digest = format!("sha256-{digest_hex}");
+            validate_digest(&digest)?;
+            let backup = item.path();
+            let backup_metadata = fs::symlink_metadata(&backup)?;
+            if backup_metadata.file_type().is_symlink() || !backup_metadata.is_dir() {
+                return Err(invalid("repair quarantine contains a non-directory backup"));
+            }
+            let actual = Envelope::try_output_hash_of_in_hangar(
+                &backup.to_string_lossy(),
+                &roots.hangar_dir(),
+                true,
+            )
+            .map_err(io::Error::other)?;
+            if actual != digest {
+                // A repair can crash after moving an already-corrupt object.
+                // Preserve that evidence, but do not let it block the next
+                // signed repair or pretend it is safe to restore.
+                let rejected = quarantine.join(format!(
+                    "rejected-repair-{digest}-{}",
+                    unique_suffix()
+                ));
+                if fs::symlink_metadata(&rejected).is_ok() {
+                    return Err(invalid("rejected repair quarantine name already exists"));
                 }
-                remove_tree(&backup)?;
+                fs::rename(&backup, &rejected)?;
+                super::sync_store_directory(&quarantine)?;
+                recovered += 1;
+                continue;
             }
-            Err(error) if error.kind() == io::ErrorKind::NotFound => {
-                make_tree_writable(&backup)?;
-                fs::rename(&backup, &destination)?;
-                if let Err(error) = seal_tree(&destination) {
-                    let restored = make_tree_writable(&destination)
-                        .and_then(|()| fs::rename(&destination, &backup));
-                    if let Err(restore) = restored {
-                        return Err(io::Error::other(format!(
-                            "{error}; repair quarantine restore failed: {restore}"
+            let destination = objects.join(&digest);
+            match fs::symlink_metadata(&destination) {
+                Ok(existing) if existing.file_type().is_symlink() || !existing.is_dir() => {
+                    return Err(invalid(&format!(
+                        "existing Hangar object `{digest}` is not a directory"
+                    )))
+                }
+                Ok(_) => {
+                    let existing_hash = Envelope::try_output_hash_of_in_hangar(
+                        &destination.to_string_lossy(),
+                        &roots.hangar_dir(),
+                        true,
+                    )
+                    .map_err(io::Error::other)?;
+                    if existing_hash != digest {
+                        return Err(invalid(&format!(
+                            "existing Hangar object `{digest}` has a conflicting digest"
                         )));
                     }
-                    return Err(error);
+                    remove_tree(&backup)?;
                 }
-                super::sync_store_directory(&objects)?;
+                Err(error) if error.kind() == io::ErrorKind::NotFound => {
+                    make_tree_writable(&backup)?;
+                    fs::rename(&backup, &destination)?;
+                    if let Err(error) = seal_tree(&destination) {
+                        let restored = make_tree_writable(&destination)
+                            .and_then(|()| fs::rename(&destination, &backup));
+                        if let Err(restore) = restored {
+                            return Err(io::Error::other(format!(
+                                "{error}; repair quarantine restore failed: {restore}"
+                            )));
+                        }
+                        return Err(error);
+                    }
+                    super::sync_store_directory(&objects)?;
+                }
+                Err(error) => return Err(error),
             }
-            Err(error) => return Err(error),
+            recovered += 1;
         }
-        recovered += 1;
+        Ok(recovered)
+    })();
+    let restored = permissions.restore();
+    match (result, restored) {
+        (Ok(recovered), Ok(())) => Ok(recovered),
+        (Err(error), Ok(())) => Err(error),
+        (Ok(_), Err(error)) => Err(error),
+        (Err(error), Err(restore)) => Err(io::Error::other(format!(
+            "{error}; restoring Hangar permissions failed: {restore}"
+        ))),
     }
-    permissions.restore()?;
-    Ok(recovered)
 }
 
 /// Have the shared-store broker sign a bounded, content-verified archive.
@@ -492,6 +513,7 @@ fn repair_archive_unlocked(
                         backup.display()
                     )));
                 }
+                super::sync_store_directory(&quarantine)?;
             }
             Ok(report)
         }

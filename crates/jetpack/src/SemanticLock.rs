@@ -2729,7 +2729,13 @@ pub fn write(lock: &SemanticLockFile) -> String {
     for map in source_maps {
         out.push_str("\n[[source_map]]\n");
         out.push_str(&line("pattern", &map.pattern));
-        out.push_str(&line("sources", &format!("[{}]", map.sources.iter().map(|s| format!("\"{s}\"")).collect::<Vec<_>>().join(", "))));
+        let sources = map
+            .sources
+            .iter()
+            .map(|source| format!("\"{}\"", source.replace('\\', "\\\\").replace('"', "\\\"")))
+            .collect::<Vec<_>>()
+            .join(", ");
+        out.push_str(&format!("sources = [{sources}]\n"));
     }
     for rec in records {
         out.push_str("\n[[semantic_record]]\n");

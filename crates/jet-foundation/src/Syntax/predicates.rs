@@ -312,6 +312,14 @@ pub const POLICY_FIELD_HARDEN: &str = "harden";
 pub const POLICY_FIELD_LICENSES: &str = "licenses";
 /// D-JPK-POLICYSURFACE1=D: package-pattern to source-authority mapping.
 pub const POLICY_FIELD_SOURCES: &str = "sources";
+/// D-JPK-POLICYSURFACE1=D: reviewed, expiring package policy exceptions.
+pub const POLICY_FIELD_EXCEPTIONS: &str = "exceptions";
+/// D-JPK-POLICYSURFACE1=D: typed exception record in `policy.exceptions`.
+pub const POLICY_EXCEPTION_TYPE: &str = "PolicyException";
+pub const POLICY_EXCEPTION_FIELD_ID: &str = "id";
+pub const POLICY_EXCEPTION_FIELD_SCOPE: &str = "scope";
+pub const POLICY_EXCEPTION_FIELD_REASON: &str = "reason";
+pub const POLICY_EXCEPTION_FIELD_EXPIRES: &str = "expires";
 /// D-AUTHORITY-MANIFEST1=A / D-BOUND-PROV1=A: source-reviewed trust and
 /// provider authority live under the one `authority: { … }` block.
 pub const MANIFEST_BLOCK_AUTHORITY: &str = "authority"; // D-AUTHORITY-MANIFEST1

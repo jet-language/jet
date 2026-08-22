@@ -359,8 +359,10 @@ publication. It accepts a missing or corrupt canonical object only from a
 signed archive, stages and re-hashes the replacement before registration, and
 restores the quarantined object if import fails. A process crash leaves the
 old object in a `repair-*` quarantine entry; `jet hangar recover` re-hashes and
-restores that entry without following symlinks. Repair rejects an entry whose
-output is not exactly its content-addressed `hangar/objects/<digest>` path.
+restores that entry without following symlinks. If the quarantined bytes were
+already corrupt, recovery preserves them under `rejected-repair-*` and leaves
+the signed archive as the repair source. Repair rejects an entry whose output
+is not exactly its content-addressed `hangar/objects/<digest>` path.
 
 ## Host-owned binary caches
 

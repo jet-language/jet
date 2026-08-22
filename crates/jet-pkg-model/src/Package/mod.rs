@@ -246,6 +246,34 @@ pub struct PackagePolicy {
     pub licenses: Option<Vec<String>>,
     /// D-JPK-POLICYSURFACE1=D: package-pattern to source-authority rules.
     pub source_maps: Vec<(String, Vec<String>)>,
+    /// D-JPK-POLICYSURFACE1=D / D-JPK-FRESHNESS1=D: exact, expiring
+    /// source-owned exceptions. These can narrow the maturity decision only;
+    /// they never weaken a signed trust or advisory denial.
+    pub exceptions: Vec<PackagePolicyException>,
+}
+
+/// One source-owned package policy exception. The scope is an exact
+/// `package#version` identity; graph context is supplied by the resolver when
+/// it explains the affected dependency edge.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub struct PackagePolicyException {
+    pub id: String,
+    pub scope: String,
+    pub reason: String,
+    pub expires_at: u64,
+}
+
+impl PackagePolicyException {
+    pub fn summary(&self) -> String {
+        format!(
+            "id={};scope={};reason={};expires={}",
+            self.id, self.scope, self.reason, self.expires_at
+        )
+    }
+
+    pub fn matches(&self, package: &str, version: &str) -> bool {
+        self.scope == format!("{package}#{version}")
+    }
 }
 
 /// D-AUTHORITY-MANIFEST1=A / D-BOUND-PROV1=A: authority facts are package
@@ -443,7 +471,7 @@ impl PackageFacts {
         let mut semantic = String::new();
         write!(
             &mut semantic,
-            "name={:?};version={:?};jet={:?};source={:?};deps={:?};boundaries={:?};services={:?};outputs={:?};environments={:?};defaults={:?};build_profiles={:?};settings={:?};configs={:?};members={:?};authority={:?};effects_enabled={:?};effects_allow={:?};effects_deny={:?};policy_contain={:?};policy_harden={:?};policy_licenses={:?};policy_source_maps={:?};",
+            "name={:?};version={:?};jet={:?};source={:?};deps={:?};boundaries={:?};services={:?};outputs={:?};environments={:?};defaults={:?};build_profiles={:?};settings={:?};configs={:?};members={:?};authority={:?};effects_enabled={:?};effects_allow={:?};effects_deny={:?};policy_contain={:?};policy_harden={:?};policy_licenses={:?};policy_source_maps={:?};policy_exceptions={:?};",
             self.name,
             self.version,
             self.jet,
@@ -466,6 +494,7 @@ impl PackageFacts {
             self.policy.harden,
             self.policy.licenses,
             self.policy.source_maps,
+            self.policy.exceptions,
         )
         .expect("writing to a String cannot fail");
         for (name, config) in &self.inline_configs {
@@ -1791,7 +1820,8 @@ fn parse_common(
             "policy" => {
                 let body = record_body(&value, "policy")?;
                 let (contain, harden) = Blocks::parse_guarantee_policy(body)?;
-                let (licenses, source_maps) = Blocks::parse_package_policy_surface(body)?;
+                let (licenses, source_maps, exceptions) =
+                    Blocks::parse_package_policy_surface(body)?;
                 facts.policy = PackagePolicy {
                     declarations: Blocks::parse_policy(body, true)?,
                     lints_deny: Blocks::parse_lints_policy(body)?,
@@ -1799,6 +1829,7 @@ fn parse_common(
                     harden,
                     licenses,
                     source_maps,
+                    exceptions,
                 };
             }
             crate::Syntax::MANIFEST_BLOCK_MEMBERS if config => return Err(PackageParseError::ConfigMembers),

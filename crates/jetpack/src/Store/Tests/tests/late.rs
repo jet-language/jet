@@ -55,6 +55,9 @@ fn cas_pool_hardlink_preserves_cache_verification_and_rejects_outside_peers() {
         fourth.entry.envelope.output_hash
     );
 
+    let planned = clean_plan(&roots).unwrap();
+    assert!(planned.optimized_files >= 2, "{planned:?}");
+
     // Ingest leaves nlink=1 (no cas peers yet).
     let pay_c = Path::new(&third.entry.out).join("payload");
     assert_eq!(fs::metadata(&pay_c).unwrap().nlink(), 1);

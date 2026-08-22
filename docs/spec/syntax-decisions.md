@@ -5496,6 +5496,10 @@ the window per source class; first-party/workspace sources default to zero.
 Advisory fixes may receive an audited exact exception bound to
 `package#version`, evidence, reviewer, and expiry. The owner's amendment is
 absolute: Jet package versions use `package#version`, never `package@version`.
+The source-side record is an exact, expiring `PolicyException` under
+`policy.exceptions`; it carries the exception id, exact scope, reason, and
+expiry and can waive maturity only. Signed trust failures and matching
+advisories still deny the candidate.
 
 **D-JPK-BUILDSCRIPT1=D — reviewed hooks, always contained**: metadata probing
 never executes upstream code. An upstream hook is held until an exact grant binds
@@ -5553,6 +5557,9 @@ apply when absent. Effective policy is the intersection with stronger host/org
 policy, which can never be weakened by source. Exceptions require id, exact
 package-edge scope, reason, and expiry. `jet policy draft` writes reviewable
 source diffs only.
+The package manifest spelling is
+`policy: { exceptions: [PolicyException.{ id: "…", scope: "package#version", reason: "…", expires: … }] }`;
+the exact target is required and ranges/wildcards are rejected.
 
 **D-JPK-CACHECONFIG1=D — role-bound cache configuration**: workspace policy
 requests cache roles/trust, while `jet cache bind` maps roles to ordered host
@@ -6276,7 +6283,7 @@ and Canvas. Checked defaults and explicit addresses select Executable or
 Service entries; `jet test` runs every Check. E1321 owns stale, mismatched, and
 ambiguous links. Implemented end to end on card #544.
 
-**2026-07-28 — D-TRAILBLOCK2=A** *(arrow spelling amended by D-ARROW-UNIFY1=B)*: code-as-argument uses explicit `() :> { … }` inside call parentheses (multiline bodies and multiple code args allowed); retires D-TRAILBLOCK1 trailing `{ }` sugar (`twice { … }` / `f() { … }`). E0335 teaches the `() :>` form. Card #1266.
+**2026-07-28 — D-TRAILBLOCK2=A** *(arrow spelling amended by D-ARROW-RESPELL1=A)*: code-as-argument uses explicit `() -> { … }` inside call parentheses (multiline bodies and multiple code args allowed); retires D-TRAILBLOCK1 trailing `{ }` sugar (`twice { … }` / `f() { … }`). E0335 teaches the `() ->` form. Card #1266.
 
 **2026-07-28 — D-UNIFYLIT1=A** *(head spelling amended by D-LIT-DOT1=B)*: typed heads only for domain text (`SQL{"…"}`/`HTML{"…"}`/`Sh{"…"}` + `.raw`); byte patterns `[U8]{"…"}`; retires `sql"`/`html"`/`sh"` prefixes, silent expected-type rewrite of bare quotes, and `b"…"`; text patterns keep plain `"…"` convenience. Amends D-TYPEDTEXT1/2 and D-BINPAT1; supersedes D-LITERAL-PREFIX1 prefix surface. Card #1265.
 

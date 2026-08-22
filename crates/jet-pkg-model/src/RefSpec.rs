@@ -32,6 +32,12 @@ pub enum Source {
     Cpan,
     /// A package from Packagist (D-FFI-PHP1).
     Packagist,
+    /// A package from Jet's first-party registry (D-JPK-REGISTRY1).
+    JetRegistry,
+    /// A package from npm (D-JPK-PROVIDERS2).
+    Npm,
+    /// A package from Cargo (D-JPK-PROVIDERS2).
+    Cargo,
     /// A pack-declared named source, e.g. `stable` → a pinned nixpkgs (D-JPK17).
     Named(String),
 }
@@ -48,6 +54,9 @@ impl Source {
             Source::RubyGems => Syntax::REF_SOURCE_RUBY,
             Source::Cpan => Syntax::REF_SOURCE_PERL,
             Source::Packagist => Syntax::REF_SOURCE_PHP,
+            Source::JetRegistry => Syntax::REF_SOURCE_JET_REGISTRY,
+            Source::Npm => Syntax::REF_SOURCE_NPM,
+            Source::Cargo => Syntax::REF_SOURCE_CARGO,
             Source::Named(name) => name,
         }
     }
@@ -69,13 +78,19 @@ impl Source {
             n if n == Syntax::REF_SOURCE_RUBY => Some(Source::RubyGems),
             n if n == Syntax::REF_SOURCE_PERL => Some(Source::Cpan),
             n if n == Syntax::REF_SOURCE_PHP => Some(Source::Packagist),
+            n if n == Syntax::REF_SOURCE_JET_REGISTRY => Some(Source::JetRegistry),
+            n if n == Syntax::REF_SOURCE_NPM => Some(Source::Npm),
+            n if n == Syntax::REF_SOURCE_CARGO => Some(Source::Cargo),
             _ => None,
         }
     }
 }
 
-/// Which backend realizes a source: the `nix` compatibility provider or the
-/// first-party `core` provider (R2). Default is `nix` (R1 behavior).
+/// Which backend realizes a source: the `nix` compatibility provider, the
+/// first-party `core` provider, or an explicit external provider boundary.
+/// Unknown named-source declarations still default to `nix` (R1 behavior),
+/// while direct external roots retain their concrete kind for fail-closed
+/// dispatch.
 ///
 /// `Infer` is a third, *unresolved* state used by the typed surface (U9): a
 /// `…@github` source's kind can't be known during pure `evaluate_env`
@@ -93,6 +108,9 @@ pub enum ProviderKind {
     RubyGems,
     Cpan,
     Packagist,
+    JetRegistry,
+    Npm,
+    Cargo,
     /// Decide `Nix` vs `Core` at realize time by peeking the source's
     /// `package.jet` (U9). Only the typed `…@github` surface produces this.
     Infer,
@@ -100,7 +118,8 @@ pub enum ProviderKind {
 
 impl ProviderKind {
     /// Parse a provider name from a source declaration's third argument.
-    /// Anything other than `core` is the default `nix`.
+    /// Recognized direct ecosystem roots retain their concrete kind; unknown
+    /// names remain the default `nix` for named-source inference.
     pub fn parse(s: &str) -> ProviderKind {
         match s {
             "core" => ProviderKind::Core,
@@ -109,6 +128,9 @@ impl ProviderKind {
             "ruby" => ProviderKind::RubyGems,
             "perl" => ProviderKind::Cpan,
             "php" => ProviderKind::Packagist,
+            "jet-registry" => ProviderKind::JetRegistry,
+            "npm" => ProviderKind::Npm,
+            "cargo" => ProviderKind::Cargo,
             _ => ProviderKind::Nix,
         }
     }
@@ -122,6 +144,9 @@ impl ProviderKind {
             ProviderKind::RubyGems => "ruby",
             ProviderKind::Cpan => "perl",
             ProviderKind::Packagist => "php",
+            ProviderKind::JetRegistry => "jet-registry",
+            ProviderKind::Npm => "npm",
+            ProviderKind::Cargo => "cargo",
             // Never user-shown: resolved before any listing/diagnostic.
             ProviderKind::Infer => "infer",
         }
@@ -713,6 +738,27 @@ mod tests {
                 "monolog/monolog#version=3.9.0@php",
                 Source::Packagist,
                 ProviderKind::Packagist,
+            ),
+        ] {
+            let spec = classify(raw).unwrap();
+            assert_eq!(spec.source, source);
+            assert_eq!(ProviderKind::parse(spec.source.label()), provider);
+        }
+    }
+
+    #[test]
+    fn classifies_direct_jet_registry_npm_and_cargo_roots() {
+        for (raw, source, provider) in [
+            (
+                "hello#version=1.0.0@jet-registry",
+                Source::JetRegistry,
+                ProviderKind::JetRegistry,
+            ),
+            ("left-pad#version=1.3.0@npm", Source::Npm, ProviderKind::Npm),
+            (
+                "serde#version=1.0.200@cargo",
+                Source::Cargo,
+                ProviderKind::Cargo,
             ),
         ] {
             let spec = classify(raw).unwrap();

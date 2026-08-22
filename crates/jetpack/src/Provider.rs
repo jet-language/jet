@@ -115,6 +115,8 @@ pub(super) fn producer_record(
 
 const SHARED_PROVIDER_FACTS: &str = "provider-facts";
 const SHARED_PROVIDER_FACTS_DIGEST: &str = "provider-facts-digest";
+const NIX_NATIVE_FORMAT: &str = "nix.native.format";
+const NIX_NATIVE_DOCUMENT: &str = "nix.native.document";
 
 /// Refresh the one provider carrier after a producer record changes. The
 /// native producer record is retained as an opaque document, while its scalar
@@ -136,7 +138,18 @@ pub(crate) fn refresh_provider_facts(
 
     let mut shared = ProviderFacts::for_reference(&producer.provider, reference);
     shared.set_resolved_source(&producer.immutable_source);
-    shared.set_native_document("jet-producer-record-v1", &native.encode());
+    let native_document = producer
+        .facts
+        .get(NIX_NATIVE_DOCUMENT)
+        .filter(|document| !document.trim().is_empty());
+    let native_format = producer
+        .facts
+        .get(NIX_NATIVE_FORMAT)
+        .filter(|format| !format.trim().is_empty());
+    match (producer.provider.as_str(), native_format, native_document) {
+        ("nix", Some(format), Some(document)) => shared.set_native_document(format, document),
+        _ => shared.set_native_document("jet-producer-record-v1", &native.encode()),
+    }
     for (key, value) in &producer.facts {
         if matches!(
             key.as_str(),
@@ -504,6 +517,7 @@ pub fn cache_expectation(
                 allow_unsigned_local: true,
             })
         }
+        ProviderKind::JetRegistry | ProviderKind::Npm | ProviderKind::Cargo => None,
         // An inferred source realized offline defaults to nix with no lock-backed
         // identity to match; no early cache path.
         ProviderKind::Infer => None,
@@ -988,10 +1002,11 @@ pub struct Ctx<'a> {
 /// constant so a lock-backed reuse reproduces it without any Nix/network call.
 pub(crate) const NIX_RECIPE_ID: &str = "nix-compat-v1";
 
-/// Translate a Jetpack ref into the provider's flake ref. Users never type
-/// `#`; this is the single place `:` becomes the Nix selector. A named source
-/// (D-JPK17) resolves through `table` to its upstream/pin, then selects the
-/// package as a flake attr: `<upstream>#<package>`.
+/// Translate a Jetpack ref into the backend reference. Nix sources use `#` as
+/// the flake selector; direct ecosystem roots retain their package selector
+/// facts in the provider reference. A named source (D-JPK17) resolves through
+/// `table` to its upstream/pin, then selects the package as a flake attr:
+/// `<upstream>#<package>`.
 pub fn flake_ref(spec: &RefSpec, table: &SourceTable) -> String {
     match &spec.source {
         Source::Nixpkgs => format!("nixpkgs#{}", nix_package_name(&spec.package)),
@@ -1002,6 +1017,9 @@ pub fn flake_ref(spec: &RefSpec, table: &SourceTable) -> String {
         Source::RubyGems => format!("ruby:{}", spec.package),
         Source::Cpan => format!("perl:{}", spec.package),
         Source::Packagist => format!("php:{}", spec.package),
+        Source::JetRegistry => format!("jet-registry:{}", spec.package),
+        Source::Npm => format!("npm:{}", spec.package),
+        Source::Cargo => format!("cargo:{}", spec.package),
         Source::Named(name) => {
             let upstream = table.upstream(name).unwrap_or(name);
             let package = if table.provider(name) == ProviderKind::Nix {
@@ -1058,6 +1076,22 @@ pub(crate) trait Provider {
 /// an explicit pinned result or a verified Hangar reuse.
 pub(crate) struct NixProvider;
 
+struct UnsupportedProvider(&'static str);
+
+impl Provider for UnsupportedProvider {
+    fn realize(
+        &self,
+        spec: &RefSpec,
+        _table: &SourceTable,
+        _ctx: &Ctx,
+    ) -> Result<Realized, ProviderError> {
+        Err(ProviderError::Unsupported(format!(
+            "provider `{}` has no realization path for `{}`; import and lock its native facts first",
+            self.0, spec.raw
+        )))
+    }
+}
+
 impl Provider for NixProvider {
     fn realize(
         &self,
@@ -1084,6 +1118,14 @@ impl Provider for NixProvider {
             }
         };
         let mut realized = parse_realization(spec, &stdout)?;
+        realized
+            .producer
+            .facts
+            .insert(NIX_NATIVE_FORMAT.to_string(), "json".to_string());
+        realized
+            .producer
+            .facts
+            .insert(NIX_NATIVE_DOCUMENT.to_string(), stdout.clone());
         let identity = prepare_nix_identity(spec, table, ctx, &realized)?;
         realized.cache_identity = identity.cache_identity.clone();
         let previous = realized.producer;
@@ -1601,8 +1643,9 @@ fn find_rlib_in(pkg_dir: &Path) -> Option<String> {
         .map(|p| p.to_string_lossy().into_owned())
 }
 
-/// Pick the provider for an already-resolved kind. `Core` → the first-party
-/// builder; everything else → the Nix compatibility provider.
+/// Pick the provider for an already-resolved kind. Direct external roots use
+/// an explicit fail-closed boundary until their native realization path exists;
+/// they never fall through to the Nix compatibility provider.
 pub(crate) fn provider_for(kind: ProviderKind) -> Box<dyn Provider> {
     match kind {
         ProviderKind::Core => Box::new(CoreProvider),
@@ -1611,11 +1654,14 @@ pub(crate) fn provider_for(kind: ProviderKind) -> Box<dyn Provider> {
         ProviderKind::RubyGems => Box::new(ScriptRegistryProvider(ScriptRegistryKind::RubyGems)),
         ProviderKind::Cpan => Box::new(ScriptRegistryProvider(ScriptRegistryKind::Cpan)),
         ProviderKind::Packagist => Box::new(ScriptRegistryProvider(ScriptRegistryKind::Packagist)),
+        ProviderKind::JetRegistry => Box::new(UnsupportedProvider("jet-registry")),
+        ProviderKind::Npm => Box::new(UnsupportedProvider("npm")),
+        ProviderKind::Cargo => Box::new(UnsupportedProvider("cargo")),
         _ => Box::new(NixProvider),
     }
 }
 
-/// Resolve a ref's concrete provider kind (`Nix`/`Core`), running the U9
+/// Resolve a ref's concrete provider kind, running the U9
 /// realize-time probe when the source table left the kind to **inference**
 /// (a typed `…@github` source). `offline`/`cache_dir` come from the realize
 /// context: offline never hits the network — it reuses a cached checkout if
@@ -1644,6 +1690,15 @@ pub fn resolve_kind(
     if matches!(spec.source, Source::Packagist) {
         return ProviderKind::Packagist;
     }
+    if matches!(spec.source, Source::JetRegistry) {
+        return ProviderKind::JetRegistry;
+    }
+    if matches!(spec.source, Source::Npm) {
+        return ProviderKind::Npm;
+    }
+    if matches!(spec.source, Source::Cargo) {
+        return ProviderKind::Cargo;
+    }
     let Source::Named(name) = &spec.source else {
         return ProviderKind::Nix;
     };
@@ -1654,6 +1709,9 @@ pub fn resolve_kind(
         ProviderKind::RubyGems => ProviderKind::RubyGems,
         ProviderKind::Cpan => ProviderKind::Cpan,
         ProviderKind::Packagist => ProviderKind::Packagist,
+        ProviderKind::JetRegistry => ProviderKind::JetRegistry,
+        ProviderKind::Npm => ProviderKind::Npm,
+        ProviderKind::Cargo => ProviderKind::Cargo,
         ProviderKind::Nix => ProviderKind::Nix,
         // U9: peek the remote's `pkg.jet` to choose core vs nix.
         ProviderKind::Infer => match table.upstream(name) {
@@ -1941,6 +1999,10 @@ fn stage_adapter_source(
             "scripting-registry packages must be realized before they can be adapter source bytes."
                 .to_string(),
         )),
+        Source::JetRegistry | Source::Npm | Source::Cargo => Err(ProviderError::Adapter(
+            "Jet registry, npm, and Cargo packages must be realized before they can be adapter source bytes."
+                .to_string(),
+        )),
         Source::Named(_) => Err(ProviderError::Adapter(
             "adapter source must be a source ref such as `owner/repo@github` or a bare path such as `./vendor/tool`.".to_string(),
         )),
@@ -2080,6 +2142,12 @@ fn parse_realization(spec: &RefSpec, stdout: &str) -> Result<Realized, ProviderE
     let parsed = JSON::parse_lenient(stdout).map_err(ProviderError::BadOutput)?;
     let bad_output = |reason: String| ProviderError::BadOutput(parsed.diagnostic(reason));
     let arr = parsed.value.as_array().map_err(&bad_output)?;
+    if arr.len() != 1 {
+        return Err(bad_output(format!(
+            "provider produced {} build results; expected exactly one",
+            arr.len()
+        )));
+    }
     let first = arr
         .first()
         .ok_or_else(|| bad_output("provider produced no build results".into()))?;
@@ -2292,6 +2360,45 @@ mod tests {
     }
 
     #[test]
+    fn direct_ecosystem_roots_do_not_default_to_nix() {
+        let ctx = Ctx {
+            fixtures: None,
+            store_dir: Path::new("."),
+            offline: true,
+            project_dir: None,
+        };
+        for (raw, kind, expected_ref) in [
+            (
+                "hello#version=1.0.0@jet-registry",
+                ProviderKind::JetRegistry,
+                "jet-registry:hello#version=1.0.0",
+            ),
+            (
+                "left-pad#version=1.3.0@npm",
+                ProviderKind::Npm,
+                "npm:left-pad#version=1.3.0",
+            ),
+            (
+                "serde#version=1.0.200@cargo",
+                ProviderKind::Cargo,
+                "cargo:serde#version=1.0.200",
+            ),
+        ] {
+            let spec = classify(raw).unwrap();
+            assert_eq!(resolve_kind(&spec, &empty(), true, Path::new(".")), kind);
+            assert_eq!(flake_ref(&spec, &empty()), expected_ref);
+            match provider_for(kind).realize(&spec, &empty(), &ctx) {
+                Err(ProviderError::Unsupported(message)) => {
+                    assert!(message.contains(kind.label()));
+                    assert!(message.contains("import and lock"));
+                }
+                Err(error) => panic!("unexpected provider error: {error:?}"),
+                Ok(_) => panic!("direct ecosystem root unexpectedly used a provider"),
+            }
+        }
+    }
+
+    #[test]
     fn named_source_flake_ref_uses_pin() {
         let table = SourceTable::from_decls([(
             "stable".to_string(),
@@ -2457,6 +2564,19 @@ mod tests {
             parse_realization(&spec, &format!("{payload}\n{payload}\n")),
             Err(ProviderError::BadOutput(_))
         ));
+    }
+
+    #[test]
+    fn rejects_multiple_nix_realization_results_in_one_payload() {
+        let spec = classify("fastfetch@nixpkgs").unwrap();
+        let stdout = r#"[
+            {"drvPath":"/nix/store/abc-fastfetch.drv","outputs":{"out":"/nix/store/abc-fastfetch-2.0"}},
+            {"drvPath":"/nix/store/def-fastfetch.drv","outputs":{"out":"/nix/store/def-fastfetch-2.0"}}
+        ]"#;
+        let Err(ProviderError::BadOutput(reason)) = parse_realization(&spec, stdout) else {
+            panic!("multiple Nix results must be rejected");
+        };
+        assert!(reason.contains("expected exactly one"), "{reason}");
     }
 
     #[test]

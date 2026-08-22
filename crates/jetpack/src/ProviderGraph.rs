@@ -470,9 +470,28 @@ fn metadata_identity_selector(facts: &MetadataFacts) -> (&'static str, String) {
 }
 
 fn exact_provider_version(value: &str) -> bool {
-    !value.contains("$(")
-        && !value.contains("${")
-        && ProviderSelector::parse(&format!("#version={value}")).is_exact()
+    let value = value.trim();
+    if value.is_empty() || value.contains("$(") || value.contains("${") {
+        return false;
+    }
+    // NuGet's `[1.2.3]` is an exact version range. Every other bracketed
+    // range remains a request, not a package identity.
+    if let Some(exact) = value
+        .strip_prefix('[')
+        .and_then(|value| value.strip_suffix(']'))
+    {
+        return !exact
+            .chars()
+            .any(|character| matches!(character, '[' | ']' | '(' | ')' | ','))
+            && exact_provider_version(exact);
+    }
+    if value
+        .chars()
+        .any(|character| matches!(character, '[' | ']' | '(' | ')' | ','))
+    {
+        return false;
+    }
+    ProviderSelector::parse(&format!("#version={value}")).is_exact()
 }
 
 /// Normalize one provider-native metadata document into the shared fact model.
@@ -1317,11 +1336,63 @@ fn pypi_json_report(object: &std::collections::BTreeMap<String, JSONValue>) -> P
 
     let mut losses = Vec::new();
     let mut conflicts = Vec::new();
+    if !object.contains_key("info") {
+        losses.push("PyPI JSON has no `info` object".to_string());
+    }
     if object
         .get("info")
         .is_some_and(|value| value.as_object().is_err())
     {
         losses.push("PyPI `info` must be an object".to_string());
+    }
+    if info != object {
+        for field in ["name", "version"] {
+            if let Some(value) = object.get(field) {
+                if !matches!(value, JSONValue::String(_)) {
+                    losses.push(format!("PyPI top-level `{field}` must be a string"));
+                }
+            }
+        }
+    }
+    for field in [
+        "name",
+        "version",
+        "license",
+        "summary",
+        "home_page",
+        "download_url",
+        "author",
+        "author_email",
+        "maintainer",
+        "maintainer_email",
+        "requires_python",
+        "description_content_type",
+    ] {
+        if let Some(value) = info.get(field) {
+            if !matches!(value, JSONValue::String(_)) {
+                losses.push(format!("PyPI `info.{field}` must be a string"));
+            }
+        }
+    }
+    if let (Some(info_name), Some(root_name)) = (
+        json_string(info, "name"),
+        json_string(object, "name"),
+    ) {
+        if info != object && info_name != root_name {
+            conflicts.push(format!(
+                "PyPI metadata declares conflicting name values: {info_name}, {root_name}"
+            ));
+        }
+    }
+    if let (Some(info_version), Some(root_version)) = (
+        json_string(info, "version"),
+        json_string(object, "version"),
+    ) {
+        if info != object && info_version != root_version {
+            conflicts.push(format!(
+                "PyPI metadata declares conflicting version values: {info_version}, {root_version}"
+            ));
+        }
     }
     for (key, value) in [
         ("summary", "summary"),
@@ -1418,6 +1489,9 @@ fn pypi_json_report(object: &std::collections::BTreeMap<String, JSONValue>) -> P
     if let Some(JSONValue::Array(values)) = info.get("dynamic") {
         for (index, value) in values.iter().enumerate() {
             add_typed_json_fact(&mut facts, format!("provider.pypi.dynamic.{index}"), value);
+            if !matches!(value, JSONValue::String(_)) {
+                losses.push(format!("PyPI `dynamic[{index}]` must be a field name"));
+            }
         }
         if !values.is_empty() {
             losses.push("dynamic Python metadata must be resolved to an exact lock".to_string());
@@ -1453,22 +1527,35 @@ fn pypi_json_report(object: &std::collections::BTreeMap<String, JSONValue>) -> P
                 index.to_string()
             });
             if let Some(JSONValue::Object(digests)) = url.get("digests") {
-                if let Some(sha256) = json_string(digests, "sha256") {
-                    artifact_hashes.push((filename.clone(), sha256.clone()));
-                    add_typed_text_fact(
-                        &mut facts,
-                        format!("provider.pypi.artifact.{index}.sha256"),
-                        &sha256,
-                    );
-                }
                 for algorithm in ["md5", "sha256", "sha384", "sha512"] {
-                    if let Some(value) = json_string(digests, algorithm) {
+                    let Some(value) = digests.get(algorithm) else {
+                        continue;
+                    };
+                    let JSONValue::String(value) = value else {
+                        losses.push(format!(
+                            "PyPI artifact `{filename}` digest `{algorithm}` must be a string"
+                        ));
+                        continue;
+                    };
+                    if value.trim().is_empty() {
+                        losses.push(format!(
+                            "PyPI artifact `{filename}` digest `{algorithm}` must not be empty"
+                        ));
+                        continue;
+                    }
+                    if algorithm == "sha256" {
+                        artifact_hashes.push((filename.clone(), value.clone()));
                         add_typed_text_fact(
                             &mut facts,
-                            format!("provider.pypi.signature.{index}.{algorithm}"),
-                            &value,
+                            format!("provider.pypi.artifact.{index}.sha256"),
+                            value,
                         );
                     }
+                    add_typed_text_fact(
+                        &mut facts,
+                        format!("provider.pypi.signature.{index}.{algorithm}"),
+                        value,
+                    );
                 }
             } else if url.contains_key("digests") {
                 losses.push(format!(
@@ -1518,6 +1605,11 @@ fn pypi_json_report(object: &std::collections::BTreeMap<String, JSONValue>) -> P
                 format!("provider.pypi.advisory.vulnerability.{index}"),
                 vulnerability,
             );
+            if !matches!(vulnerability, JSONValue::Object(_)) {
+                losses.push(format!(
+                    "PyPI vulnerability {index} must be an object"
+                ));
+            }
         }
     }
     if object
@@ -1552,11 +1644,21 @@ fn swiftpm_report(document: &str) -> ProviderFactReport {
             "Package.resolved is not valid JSON",
         );
     };
-    let pins = match root.get("pins").or_else(|| {
-        root.get("object")
-            .and_then(|value| value.as_object().ok())
-            .and_then(|object| object.get("pins"))
-    }) {
+    let root_pins = root.get("pins");
+    let object_pins = root
+        .get("object")
+        .and_then(|value| value.as_object().ok())
+        .and_then(|object| object.get("pins"));
+    if let (Some(root_pins), Some(object_pins)) = (root_pins, object_pins) {
+        if root_pins != object_pins {
+            return empty_report(
+                ProviderFamily::SwiftPM,
+                "swiftpm",
+                "SwiftPM lock has conflicting top-level and object `pins` arrays",
+            );
+        }
+    }
+    let pins = match root_pins.or(object_pins) {
         Some(JSONValue::Array(pins)) => pins,
         Some(_) => {
             return empty_report(
@@ -1578,18 +1680,19 @@ fn swiftpm_report(document: &str) -> ProviderFactReport {
     let mut losses = Vec::new();
     let mut conflicts = Vec::new();
     add_json_projection(&mut facts, "provider.swiftpm.native", &root);
-    if root
-        .get("version")
-        .is_some_and(|value| !matches!(value, JSONValue::Number(_)))
-    {
-        losses.push("SwiftPM lock `version` must be numeric".to_string());
-    }
-    if let Some(JSONValue::Number(version)) = root.get("version") {
-        add_typed_text_fact(
-            &mut facts,
-            "provider.swiftpm.lock.version",
-            &version.to_string(),
-        );
+    match root.get("version") {
+        Some(JSONValue::Number(version)) if matches!(*version, 1..=3) => {
+            add_typed_text_fact(
+                &mut facts,
+                "provider.swiftpm.lock.version",
+                &version.to_string(),
+            );
+        }
+        Some(JSONValue::Number(version)) => losses.push(format!(
+            "SwiftPM lock version `{version}` is unsupported; expected v1, v2, or v3"
+        )),
+        Some(_) => losses.push("SwiftPM lock `version` must be numeric".to_string()),
+        None => losses.push("SwiftPM lock has no numeric `version`".to_string()),
     }
 
     if pins.len() == 1 {
@@ -1601,10 +1704,43 @@ fn swiftpm_report(document: &str) -> ProviderFactReport {
             );
         };
         add_json_projection(&mut facts, "provider.swiftpm.pin", pin);
-        facts.name = json_string(pin, "identity")
-            .or_else(|| json_string(pin, "package"))
-            .unwrap_or_default();
-        let state = pin.get("state").and_then(|value| value.as_object().ok());
+        let identity = json_string(pin, "identity");
+        let package = json_string(pin, "package");
+        if let (Some(identity), Some(package)) = (&identity, &package) {
+            if identity != package {
+                conflicts.push(format!(
+                    "SwiftPM pin declares conflicting identity values: {identity}, {package}"
+                ));
+            }
+        }
+        for field in ["identity", "package", "location", "repositoryURL", "kind"] {
+            if let Some(value) = pin.get(field) {
+                if !matches!(value, JSONValue::String(_)) {
+                    losses.push(format!("SwiftPM pin `{field}` must be a string"));
+                }
+            }
+        }
+        facts.name = identity.or(package).unwrap_or_default();
+        let state = match pin.get("state") {
+            Some(JSONValue::Object(state)) => Some(state),
+            Some(_) => {
+                losses.push(format!("SwiftPM pin `{}` state must be an object", facts.name));
+                None
+            }
+            None => None,
+        };
+        if let Some(state) = state {
+            for field in ["version", "revision", "branch"] {
+                if let Some(value) = state.get(field) {
+                    if !matches!(value, JSONValue::String(_) | JSONValue::Null) {
+                        losses.push(format!(
+                            "SwiftPM pin `{}` state field `{field}` must be a string or null",
+                            facts.name
+                        ));
+                    }
+                }
+            }
+        }
         let version = state
             .and_then(|state| json_string(state, "version"))
             .or_else(|| json_string(pin, "version"));
@@ -1639,7 +1775,7 @@ fn swiftpm_report(document: &str) -> ProviderFactReport {
         {
             add_typed_text_fact(&mut facts, "provider.swiftpm.source.location", &location);
         }
-        if state.is_none() {
+        if state.is_none() && !pin.contains_key("state") {
             losses.push(format!("SwiftPM pin `{}` has no state object", facts.name));
         }
         let source_identity = facts
@@ -1714,20 +1850,130 @@ fn maven_exact_value(value: &str) -> bool {
         && !value.eq_ignore_ascii_case("release")
 }
 
-fn maven_report(document: &str) -> ProviderFactReport {
-    if !document.contains("<project") {
-        return empty_report(
-            ProviderFamily::Maven,
-            "maven",
-            "Maven POM has no project element",
-        );
+fn maven_xml_loss(document: &str) -> Option<String> {
+    const MAVEN_NAMESPACE: &str = "http://maven.apache.org/POM/4.0.0";
+    const XML_SCHEMA_NAMESPACE: &str = "http://www.w3.org/2001/XMLSchema-instance";
+
+    let mut stack = Vec::<String>::new();
+    let mut cursor = 0usize;
+    let mut root_seen = false;
+    while cursor < document.len() {
+        let Some(relative_start) = document[cursor..].find('<') else {
+            if !document[cursor..].trim().is_empty() && root_seen && stack.is_empty() {
+                return Some("Maven POM has non-whitespace text outside the project element".to_string());
+            }
+            break;
+        };
+        let start = cursor + relative_start;
+        if !document[cursor..start].trim().is_empty() && (!root_seen || stack.is_empty()) {
+            return Some("Maven POM has text outside the project element".to_string());
+        }
+        if document[start..].starts_with("<!--") {
+            let Some(end) = document[start + 4..].find("-->") else {
+                return Some("Maven POM has an unterminated XML comment".to_string());
+            };
+            cursor = start + 4 + end + 3;
+            continue;
+        }
+        if document[start..].starts_with("<![CDATA[") {
+            let Some(end) = document[start + 9..].find("]]>") else {
+                return Some("Maven POM has an unterminated CDATA section".to_string());
+            };
+            cursor = start + 9 + end + 3;
+            continue;
+        }
+        if document[start..].starts_with("<?") {
+            let Some(end) = document[start + 2..].find("?>") else {
+                return Some("Maven POM has an unterminated processing instruction".to_string());
+            };
+            cursor = start + 2 + end + 2;
+            continue;
+        }
+        if document[start..].starts_with("<!") {
+            let Some(end) = xml_opening_tag_end(&document[start..]) else {
+                return Some("Maven POM has an unterminated declaration".to_string());
+            };
+            cursor = start + end + 1;
+            continue;
+        }
+        let Some(relative_end) = xml_opening_tag_end(&document[start..]) else {
+            return Some("Maven POM has an unterminated XML element".to_string());
+        };
+        let end = start + relative_end;
+        let opening = &document[start..=end];
+        let name = xml_opening_name(opening);
+        if name.is_empty() {
+            return Some("Maven POM has an XML element with no name".to_string());
+        }
+        if name.contains(':') {
+            return Some(
+                "Maven POM uses a namespaced XML vocabulary that this provider cannot normalize"
+                    .to_string(),
+            );
+        }
+        if !stack.is_empty() && (opening.contains("xmlns=") || opening.contains("xmlns:")) {
+            return Some(
+                "Maven POM uses a nested XML namespace that this provider cannot normalize"
+                    .to_string(),
+            );
+        }
+        let closing = opening.starts_with("</");
+        let self_closing = opening.trim_end().ends_with("/>");
+        if closing {
+            if self_closing {
+                return Some("Maven POM has an invalid self-closing end element".to_string());
+            }
+            if stack.pop().as_deref() != Some(name) {
+                return Some(format!("Maven POM has mismatched closing element `{name}`"));
+            }
+        } else if stack.is_empty() {
+            if root_seen {
+                return Some("Maven POM has multiple root elements".to_string());
+            }
+            if name != "project" {
+                return Some("Maven POM has no project root element".to_string());
+            }
+            if let Some(namespace) = xml_attribute(opening, "xmlns") {
+                if namespace != MAVEN_NAMESPACE {
+                    return Some(format!(
+                        "Maven POM uses unsupported XML namespace `{namespace}`"
+                    ));
+                }
+            }
+            if let Some(namespace) = xml_attribute(opening, "xmlns:xsi") {
+                if namespace != XML_SCHEMA_NAMESPACE {
+                    return Some(format!(
+                        "Maven POM uses unsupported XML namespace `{namespace}`"
+                    ));
+                }
+            }
+            if opening.contains("xmlns:") && !opening.contains("xmlns:xsi=") {
+                return Some(
+                    "Maven POM uses a namespaced XML vocabulary that this provider cannot normalize"
+                        .to_string(),
+                );
+            }
+            root_seen = true;
+            if !self_closing {
+                stack.push(name.to_string());
+            }
+        } else if !self_closing {
+            stack.push(name.to_string());
+        }
+        cursor = end + 1;
     }
-    if document.contains("<m:project") || document.contains("<pom:") {
-        return empty_report(
-            ProviderFamily::Maven,
-            "maven",
-            "Maven POM uses a namespaced XML vocabulary that this provider cannot normalize",
-        );
+    if !root_seen {
+        return Some("Maven POM has no project root element".to_string());
+    }
+    if !stack.is_empty() {
+        return Some("Maven POM has an unterminated XML element".to_string());
+    }
+    None
+}
+
+fn maven_report(document: &str) -> ProviderFactReport {
+    if let Some(loss) = maven_xml_loss(document) {
+        return empty_report(ProviderFamily::Maven, "maven", &loss);
     }
 
     let project_group = xml_direct_child_values(document, "project", "groupId");
@@ -1837,10 +2083,18 @@ fn maven_report(document: &str) -> ProviderFactReport {
         ));
     }
 
+    let mut dependency_versions = std::collections::BTreeMap::<String, String>::new();
     for (index, (_, block)) in xml_blocks(document, "dependency").iter().enumerate() {
         let artifact = xml_tag(block, "artifactId").unwrap_or_default();
         let dependency_group = xml_tag(block, "groupId").unwrap_or_default();
         let dependency_version = xml_tag(block, "version").unwrap_or_default();
+        let declared_versions = distinct_values(&xml_tag_values(block, "version"));
+        if declared_versions.len() > 1 {
+            conflicts.push(format!(
+                "Maven dependency `{dependency_group}:{artifact}` declares conflicting version values: {}",
+                declared_versions.join(", ")
+            ));
+        }
         let scope_defaulted = xml_tag(block, "scope").is_none();
         let scope = xml_tag(block, "scope").unwrap_or_else(|| "compile".to_string());
         let coordinate = format_dependency(
@@ -1860,6 +2114,16 @@ fn maven_report(document: &str) -> ProviderFactReport {
             losses.push(format!(
                 "Maven dependency `{coordinate}` has a non-exact version"
             ));
+        }
+        let dependency_key = format!("{dependency_group}:{artifact}");
+        if let Some(previous) =
+            dependency_versions.insert(dependency_key.clone(), dependency_version.clone())
+        {
+            if previous != dependency_version {
+                conflicts.push(format!(
+                    "Maven dependency `{dependency_key}` declares conflicting version values: {previous}, {dependency_version}"
+                ));
+            }
         }
         facts.dependencies.push(coordinate.clone());
         add_typed_text_fact(
@@ -2011,6 +2275,13 @@ fn nuget_report(document: &str) -> ProviderFactReport {
     if let Ok(JSONValue::Object(object)) = JSON::parse(document) {
         return nuget_json_report(&object);
     }
+    if xml_has_namespace(document) {
+        return empty_report(
+            ProviderFamily::NuGet,
+            "nuget",
+            "NuGet XML uses a namespaced vocabulary that this provider cannot normalize",
+        );
+    }
     let mut facts = MetadataFacts::empty(ProviderFamily::NuGet, String::new());
     let root_package = match (
         xml_tag(document, "id").or_else(|| xml_tag(document, "Id")),
@@ -2027,6 +2298,39 @@ fn nuget_report(document: &str) -> ProviderFactReport {
             Some((name, version, tag))
         })
         .collect::<Vec<_>>();
+    let package_config_references = xml_opening_tags(document, "package")
+        .into_iter()
+        .filter_map(|tag| {
+            let name = xml_attribute(&tag, "id")?;
+            let version = xml_attribute(&tag, "version").unwrap_or_default();
+            Some((name, version, tag))
+        })
+        .collect::<Vec<_>>();
+    let mut losses = Vec::new();
+    for tag in xml_opening_tags(document, "PackageReference") {
+        let Some(name) = xml_attribute(&tag, "Include").or_else(|| xml_attribute(&tag, "Update"))
+        else {
+            losses.push("NuGet `PackageReference` has no Include or Update identity".to_string());
+            continue;
+        };
+        let version = xml_attribute(&tag, "Version").unwrap_or_default();
+        if version.is_empty() || !exact_provider_version(&version) {
+            losses.push(format!(
+                "NuGet PackageReference `{name}` has no resolved exact version"
+            ));
+        }
+    }
+    for tag in xml_opening_tags(document, "package") {
+        let Some(name) = xml_attribute(&tag, "id") else {
+            continue;
+        };
+        let version = xml_attribute(&tag, "version").unwrap_or_default();
+        if version.is_empty() || !exact_provider_version(&version) {
+            losses.push(format!(
+                "NuGet package `{name}` has no resolved exact version"
+            ));
+        }
+    }
     let dependency_values = xml_opening_tags(document, "dependency")
         .into_iter()
         .filter_map(|tag| {
@@ -2036,6 +2340,20 @@ fn nuget_report(document: &str) -> ProviderFactReport {
             Some(dependency)
         })
         .collect::<Vec<_>>();
+    for tag in xml_opening_tags(document, "dependency") {
+        let Some(name) = xml_attribute(&tag, "id").or_else(|| xml_attribute(&tag, "name")) else {
+            losses.push("NuGet dependency has no id or name".to_string());
+            continue;
+        };
+        let version = xml_attribute(&tag, "version").unwrap_or_default();
+        if version.is_empty() || !exact_provider_version(&version) {
+            losses.push(format!(
+                "NuGet dependency `{name}` has no resolved exact version"
+            ));
+        }
+    }
+    let mut package_references = package_references;
+    package_references.extend(package_config_references);
     if let Some((name, version)) = root_package.clone() {
         facts.name = name;
         facts.version = version;
@@ -2049,6 +2367,9 @@ fn nuget_report(document: &str) -> ProviderFactReport {
             .iter()
             .map(|(name, version, _)| format_dependency(name, version))
             .collect();
+        if package_references.is_empty() {
+            losses.push("NuGet metadata has no package identity".to_string());
+        }
     }
     facts.license = xml_tag(document, "license")
         .or_else(|| xml_tag(document, "licenseExpression"))
@@ -2058,6 +2379,13 @@ fn nuget_report(document: &str) -> ProviderFactReport {
         .into_iter()
         .filter_map(|tag| xml_attribute(&tag, "targetFramework"))
         .collect();
+    facts.platforms.extend(
+        package_references
+            .iter()
+            .filter_map(|(_, _, tag)| xml_attribute(tag, "targetFramework")),
+    );
+    facts.platforms.sort();
+    facts.platforms.dedup();
     facts.dependencies = if !dependency_values.is_empty() {
         dependency_values
     } else if root_package.is_none() && package_references.len() > 1 {
@@ -2117,6 +2445,15 @@ fn nuget_report(document: &str) -> ProviderFactReport {
         ("copyright", "copyright"),
         ("tags", "tags"),
         ("contentHash", "content_hash"),
+        ("signature", "signature"),
+        ("signatures", "signatures"),
+        ("signatureValidation", "signature_validation"),
+        ("deprecated", "deprecated"),
+        ("deprecation", "deprecation"),
+        ("vulnerability", "vulnerability"),
+        ("vulnerabilities", "vulnerabilities"),
+        ("advisory", "advisory"),
+        ("advisories", "advisories"),
     ] {
         for (index, value) in xml_tag_values(document, tag).into_iter().enumerate() {
             add_typed_text_fact(
@@ -2149,6 +2486,21 @@ fn nuget_report(document: &str) -> ProviderFactReport {
             }
         }
     }
+    for (tag_name, fact_name) in [
+        ("signature", "signature"),
+        ("signatures", "signatures"),
+        ("deprecation", "deprecation"),
+        ("vulnerability", "vulnerability"),
+        ("advisory", "advisory"),
+    ] {
+        for (index, tag) in xml_opening_tags(document, tag_name).into_iter().enumerate() {
+            add_typed_text_fact(
+                &mut facts,
+                format!("provider.nuget.metadata.{fact_name}.opening.{index}"),
+                &tag,
+            );
+        }
+    }
     for (index, tag) in xml_opening_tags(document, "file").into_iter().enumerate() {
         if let Some(source) = xml_attribute(&tag, "src") {
             add_typed_text_fact(
@@ -2172,6 +2524,7 @@ fn nuget_report(document: &str) -> ProviderFactReport {
     facts.integrity_hash = xml_tag(document, "contentHash").unwrap_or_default();
     facts.source_identity = format!("nuget:{}@{}", facts.name, facts.version);
     let mut report = report_with_identity(facts);
+    report.losses.append(&mut losses);
     if root_package.is_none() && package_references.len() > 1 {
         report.losses.push(
             "NuGet metadata contains multiple packages; lock each package identity separately"
@@ -2194,8 +2547,12 @@ fn nuget_json_report(object: &std::collections::BTreeMap<String, JSONValue>) -> 
     let mut packages = Vec::new();
     let mut dependency_values = Vec::new();
     let mut losses = Vec::new();
+    let mut typed_projection = Vec::new();
+    let mut target_frameworks = Vec::new();
+    let mut library_hashes = Vec::new();
     if let Some(JSONValue::Object(dependencies)) = object.get("dependencies") {
         for (framework, packages_for_framework) in dependencies {
+            target_frameworks.push(format!("framework:{framework}"));
             if let JSONValue::Object(entries) = packages_for_framework {
                 for (name, value) in entries {
                     if let JSONValue::Object(entry) = value {
@@ -2208,8 +2565,24 @@ fn nuget_json_report(object: &std::collections::BTreeMap<String, JSONValue>) -> 
                         } else {
                             resolved.clone()
                         };
-                        packages.push((name.clone(), selected.clone()));
-                        dependency_values.push(format_dependency(name, &selected));
+                        if !selected.is_empty() {
+                            packages.push((name.clone(), selected.clone()));
+                            dependency_values.push(format_dependency(name, &selected));
+                        }
+                        if let Some(requested) = entry.get("requested") {
+                            typed_projection.push((
+                                format!("provider.nuget.request.{framework}.{name}"),
+                                json_value_json(requested),
+                            ));
+                        }
+                        if let Some(resolved) =
+                            entry.get("resolved").or_else(|| entry.get("version"))
+                        {
+                            typed_projection.push((
+                                format!("provider.nuget.resolution.{framework}.{name}"),
+                                json_value_json(resolved),
+                            ));
+                        }
                         if resolved.is_empty() || !exact_provider_version(&selected) {
                             losses.push(format!(
                                 "NuGet dependency `{name}` on framework `{framework}` has no resolved exact version"
@@ -2246,7 +2619,18 @@ fn nuget_json_report(object: &std::collections::BTreeMap<String, JSONValue>) -> 
             }
             packages.push((name.to_string(), version.to_string()));
             dependency_values.push(format_dependency(name, version));
-            if !matches!(value, JSONValue::Object(_)) {
+            if !exact_provider_version(version) {
+                losses.push(format!(
+                    "NuGet library identity `{identity}` is not an exact package identity"
+                ));
+            }
+            if let JSONValue::Object(record) = value {
+                if let Some(hash) =
+                    json_string(record, "sha512").or_else(|| json_string(record, "contentHash"))
+                {
+                    library_hashes.push((identity.clone(), hash));
+                }
+            } else {
                 losses.push(format!(
                     "NuGet library `{identity}` metadata is not an object"
                 ));
@@ -2254,6 +2638,93 @@ fn nuget_json_report(object: &std::collections::BTreeMap<String, JSONValue>) -> 
         }
     } else if object.contains_key("libraries") {
         losses.push("NuGet `libraries` must be an object keyed by name/version".to_string());
+    }
+    if let Some(JSONValue::Object(targets)) = object.get("targets") {
+        for (framework, packages_for_framework) in targets {
+            target_frameworks.push(format!("framework:{framework}"));
+            let Some(entries) = packages_for_framework.as_object().ok() else {
+                losses.push(format!(
+                    "NuGet target framework `{framework}` is not an object"
+                ));
+                continue;
+            };
+            for (identity, value) in entries {
+                let Some((name, version)) = identity.rsplit_once('/') else {
+                    losses.push(format!(
+                        "NuGet target identity `{identity}` is not `name/version`"
+                    ));
+                    continue;
+                };
+                packages.push((name.to_string(), version.to_string()));
+                if !exact_provider_version(version) {
+                    losses.push(format!(
+                        "NuGet target identity `{identity}` is not an exact package identity"
+                    ));
+                }
+                let Some(record) = value.as_object().ok() else {
+                    losses.push(format!(
+                        "NuGet target package `{identity}` metadata is not an object"
+                    ));
+                    continue;
+                };
+                if let Some(JSONValue::Object(dependencies)) = record.get("dependencies") {
+                    for (dependency, resolved) in dependencies {
+                        typed_projection.push((
+                            format!("provider.nuget.target.{framework}.{identity}.{dependency}"),
+                            json_value_json(resolved),
+                        ));
+                        let version = match resolved {
+                            JSONValue::String(value) => value.clone(),
+                            JSONValue::Object(value) => {
+                                json_string(value, "version").unwrap_or_default()
+                            }
+                            _ => String::new(),
+                        };
+                        if version.is_empty() || !exact_provider_version(&version) {
+                            losses.push(format!(
+                                "NuGet target dependency `{dependency}` on framework `{framework}` has no resolved exact version"
+                            ));
+                        } else {
+                            dependency_values.push(format_dependency(dependency, &version));
+                        }
+                    }
+                } else if record.contains_key("dependencies") {
+                    losses.push(format!(
+                        "NuGet target package `{identity}` dependencies are not an object"
+                    ));
+                }
+            }
+        }
+    } else if object.contains_key("targets") {
+        losses.push("NuGet `targets` must be an object keyed by target framework".to_string());
+    }
+    if let Some(JSONValue::Object(groups)) = object.get("projectFileDependencyGroups") {
+        for (framework, requests) in groups {
+            target_frameworks.push(format!("framework:{framework}"));
+            let Some(requests) = requests.as_array().ok() else {
+                losses.push(format!(
+                    "NuGet project dependency group `{framework}` is not an array"
+                ));
+                continue;
+            };
+            for (index, request) in requests.iter().enumerate() {
+                if !matches!(request, JSONValue::String(_)) {
+                    losses.push(format!(
+                        "NuGet project dependency `{framework}[{index}]` is not a string"
+                    ));
+                    continue;
+                }
+                typed_projection.push((
+                    format!("provider.nuget.project.request.{framework}.{index}"),
+                    json_value_json(request),
+                ));
+            }
+        }
+    } else if object.contains_key("projectFileDependencyGroups") {
+        losses.push(
+            "NuGet `projectFileDependencyGroups` must be an object keyed by target framework"
+                .to_string(),
+        );
     }
     let root_identity = match (
         json_string(object, "id").or_else(|| json_string(object, "name")),
@@ -2302,9 +2773,20 @@ fn nuget_json_report(object: &std::collections::BTreeMap<String, JSONValue>) -> 
     } else {
         dependency_values
     };
+    target_frameworks.sort();
+    target_frameworks.dedup();
+    facts.platforms = target_frameworks;
     facts.integrity_hash = json_string(object, "contentHash")
         .or_else(|| json_string(object, "hash"))
         .unwrap_or_default();
+    if facts.integrity_hash.is_empty() {
+        let identity = format!("{}/{}", facts.name, facts.version);
+        facts.integrity_hash = library_hashes
+            .iter()
+            .find(|(library, _)| library == &identity)
+            .map(|(_, hash)| hash.clone())
+            .unwrap_or_default();
+    }
     facts.license = json_string(object, "licenseExpression")
         .or_else(|| json_string(object, "license"))
         .or_else(|| json_string(object, "licenseUrl"))
@@ -2333,6 +2815,9 @@ fn nuget_json_report(object: &std::collections::BTreeMap<String, JSONValue>) -> 
         if let Some(value) = object.get(key) {
             add_typed_json_fact(&mut facts, format!("provider.nuget.{key}"), value);
         }
+    }
+    for (key, value) in typed_projection {
+        add_typed_text_fact(&mut facts, key, &value);
     }
     facts.source_identity = format!("nuget:{}@{}", facts.name, facts.version);
     let mut report = report_with_identity(facts);
@@ -2435,7 +2920,13 @@ fn conan_report(document: &str) -> ProviderFactReport {
     }
     if document.lines().any(|line| {
         let line = line.trim();
-        line.starts_with("def build")
+        line.starts_with("def source")
+            || line.starts_with("def generate")
+            || line.starts_with("def build")
+            || line.starts_with("def package")
+            || line.starts_with("def validate")
+            || line.starts_with("def configure")
+            || line.starts_with("def layout")
             || line.contains("self.run(")
             || line.starts_with("python_requires")
     }) {
@@ -2521,11 +3012,13 @@ fn conan_json_report(object: &std::collections::BTreeMap<String, JSONValue>) -> 
     ));
     facts.build_dependencies = build_dependencies;
 
-    if let Some(JSONValue::Object(nodes)) = object
-        .get("graph_lock")
+    let graph_value = object.get("graph_lock").or_else(|| object.get("graph"));
+    let graph_nodes = graph_value
         .and_then(|value| value.as_object().ok())
         .and_then(|graph| graph.get("nodes"))
-    {
+        .and_then(|value| value.as_object().ok())
+        .or_else(|| object.get("nodes").and_then(|value| value.as_object().ok()));
+    if let Some(nodes) = graph_nodes {
         let mut node_identities = Vec::new();
         for (node_id, node_value) in nodes {
             let Some(node) = node_value.as_object().ok() else {
@@ -2536,6 +3029,11 @@ fn conan_json_report(object: &std::collections::BTreeMap<String, JSONValue>) -> 
                 &mut facts,
                 &format!("provider.conan.graph.node.{node_id}"),
                 node,
+            );
+            add_typed_json_fact(
+                &mut facts,
+                format!("provider.conan.graph.node.{node_id}"),
+                node_value,
             );
             if let Some(reference) = json_string(node, "ref") {
                 let name = conan_ref_part(&reference, 0).unwrap_or_default();
@@ -2551,31 +3049,52 @@ fn conan_json_report(object: &std::collections::BTreeMap<String, JSONValue>) -> 
                 losses.push(format!("Conan graph node `{node_id}` has no package ref"));
             }
             if let Some(requires) = node.get("requires") {
-                let _ = conan_json_dependencies(
+                let dependencies = conan_json_dependencies(
                     &mut facts,
                     Some(requires),
                     &format!("graph.{node_id}"),
                     &mut losses,
                 );
+                facts.dependencies.extend(dependencies);
+            }
+            if let Some(tool_requires) = node.get("tool_requires") {
+                let dependencies = conan_json_dependencies(
+                    &mut facts,
+                    Some(tool_requires),
+                    &format!("graph.{node_id}.tool"),
+                    &mut losses,
+                );
+                facts.build_dependencies.extend(dependencies);
+            }
+            if let Some(build_requires) = node.get("build_requires") {
+                let dependencies = conan_json_dependencies(
+                    &mut facts,
+                    Some(build_requires),
+                    &format!("graph.{node_id}.build"),
+                    &mut losses,
+                );
+                facts.build_dependencies.extend(dependencies);
             }
         }
         node_identities.sort();
         node_identities.dedup();
-        if facts.name.is_empty() && node_identities.len() == 1 {
-            facts.name = node_identities[0].0.clone();
-            facts.version = node_identities[0].1.clone();
-            facts.typed.insert(
-                "provider.conan.source.ref".to_string(),
-                vec![node_identities[0].2.clone()],
-            );
-        } else if node_identities.len() > 1 {
-            losses.push(
-                "Conan graph lock contains multiple package identities; lock each node separately"
-                    .to_string(),
-            );
+        if facts.name.is_empty() {
+            if node_identities.len() == 1 {
+                facts.name = node_identities[0].0.clone();
+                facts.version = node_identities[0].1.clone();
+                facts.typed.insert(
+                    "provider.conan.source.ref".to_string(),
+                    vec![node_identities[0].2.clone()],
+                );
+            } else if node_identities.len() > 1 {
+                losses.push(
+                    "Conan graph lock contains multiple package identities; lock each node separately"
+                        .to_string(),
+                );
+            }
         }
-    } else if object.contains_key("graph_lock") {
-        losses.push("Conan `graph_lock.nodes` must be an object".to_string());
+    } else if graph_value.is_some() || object.contains_key("nodes") {
+        losses.push("Conan graph lock `nodes` must be an object".to_string());
     }
 
     for key in [
@@ -2710,6 +3229,9 @@ fn vcpkg_report(document: &str) -> ProviderFactReport {
         .first()
         .map(|(_, version)| version.clone())
         .unwrap_or_default();
+    for (key, value) in &versions {
+        add_typed_text_fact(&mut facts, format!("provider.vcpkg.variant.{key}"), value);
+    }
     facts.dependencies = vcpkg_dependencies(&object, &mut facts.typed, &mut losses);
     if let Some(value) = object.get("supports") {
         match value {
@@ -2733,10 +3255,19 @@ fn vcpkg_report(document: &str) -> ProviderFactReport {
     }
     if let Some(value) = object.get("port-version") {
         add_typed_json_fact(&mut facts, "provider.vcpkg.variant.port-version", value);
+        if !matches!(value, JSONValue::Number(value) if *value >= 0) {
+            losses.push("vcpkg `port-version` must be a non-negative integer".to_string());
+        }
     }
     if let Some(value) = object.get("builtin-baseline") {
         if !matches!(value, JSONValue::String(value) if !value.trim().is_empty()) {
             losses.push("vcpkg `builtin-baseline` must be a non-empty string".to_string());
+        } else {
+            add_typed_text_fact(
+                &mut facts,
+                "provider.vcpkg.variant.baseline",
+                value.as_str().unwrap_or_default(),
+            );
         }
     }
     if let Some(JSONValue::Object(features)) = object.get("features") {
@@ -2752,8 +3283,38 @@ fn vcpkg_report(document: &str) -> ProviderFactReport {
         losses.push("vcpkg `features` must be an object".to_string());
     }
     if let Some(value) = object.get("overrides") {
-        if !matches!(value, JSONValue::Array(values) if values.iter().all(|item| item.as_object().is_ok()))
-        {
+        if let Some(overrides) = value.as_array().ok() {
+            for (index, value) in overrides.iter().enumerate() {
+                let Some(override_value) = value.as_object().ok() else {
+                    losses.push(format!("vcpkg override {index} must be an object"));
+                    continue;
+                };
+                if json_string(override_value, "name").is_none() {
+                    losses.push(format!("vcpkg override {index} has no non-empty `name`"));
+                }
+                for key in [
+                    "version",
+                    "version-string",
+                    "version-semver",
+                    "version-date",
+                ] {
+                    if let Some(value) = override_value.get(key) {
+                        if !matches!(value, JSONValue::String(value) if !value.trim().is_empty()) {
+                            losses.push(format!(
+                                "vcpkg override {index} field `{key}` must be a non-empty string"
+                            ));
+                        }
+                    }
+                }
+                if let Some(value) = override_value.get("port-version") {
+                    if !matches!(value, JSONValue::Number(value) if *value >= 0) {
+                        losses.push(format!(
+                            "vcpkg override {index} `port-version` must be a non-negative integer"
+                        ));
+                    }
+                }
+            }
+        } else {
             losses.push("vcpkg `overrides` must be an array of objects".to_string());
         }
     }
@@ -2940,6 +3501,59 @@ fn jet_registry_report(document: &str) -> ProviderFactReport {
             }
         } else {
             losses.push("registry dependencies must be an object".to_string());
+        }
+    }
+    for (field, role) in [
+        ("build_dependencies", "build"),
+        ("tool_dependencies", "tool"),
+        ("dev_dependencies", "dev"),
+        ("test_dependencies", "test"),
+        ("optional_dependencies", "optional"),
+        ("peer_dependencies", "peer"),
+        ("plugin_dependencies", "plugin"),
+        ("target_dependencies", "target"),
+    ] {
+        if let Some(value) = object.get(field) {
+            if let JSONValue::Object(dependencies) = value {
+                add_typed_json_fact(
+                    &mut facts,
+                    format!("provider.registry.dependency-role.{role}"),
+                    value,
+                );
+                for (name, requirement) in dependencies {
+                    add_typed_json_fact(
+                        &mut facts,
+                        format!("provider.registry.dependency.{role}.{name}"),
+                        requirement,
+                    );
+                }
+            } else {
+                losses.push(format!("registry `{field}` dependencies must be an object"));
+            }
+        }
+    }
+    if let Some(value) = object.get("features") {
+        if let JSONValue::Object(features) = value {
+            if features.values().all(|value| {
+                matches!(
+                    value,
+                    JSONValue::Array(values)
+                        if values.iter().all(|item| matches!(item, JSONValue::String(_)))
+                )
+            }) {
+                add_typed_json_fact(&mut facts, "provider.registry.features", value);
+            } else {
+                losses.push("registry feature values must be arrays of strings".to_string());
+            }
+        } else {
+            losses.push("registry `features` must be an object".to_string());
+        }
+    }
+    if let Some(value) = object.get("constraints") {
+        if matches!(value, JSONValue::Object(_)) {
+            add_typed_json_fact(&mut facts, "provider.registry.constraints", value);
+        } else {
+            losses.push("registry `constraints` must be an object".to_string());
         }
     }
     if let Some(value) = object.get("platforms") {
@@ -3370,6 +3984,12 @@ fn nix_object_report(object: &std::collections::BTreeMap<String, JSONValue>) -> 
     }
     if let Some(locked) = locked {
         add_json_projection(&mut facts, "provider.nix.locked", locked);
+        if locked_source_identity(Some(locked)).is_none() {
+            losses.push(
+                "Nix `locked` source facts have no complete immutable owner/revision identity"
+                    .to_string(),
+            );
+        }
     } else if object.contains_key("locked") {
         losses.push("Nix `locked` source facts must be a JSON object".to_string());
     }
@@ -3492,6 +4112,31 @@ fn nix_object_report(object: &std::collections::BTreeMap<String, JSONValue>) -> 
         add_json_projection(&mut facts, "provider.nix.lock.nodes", nodes);
         for (name, node) in nodes {
             add_typed_json_fact(&mut facts, format!("provider.nix.lock.node.{name}"), node);
+            let JSONValue::Object(node) = node else {
+                losses.push(format!(
+                    "Nix flake lock node `{name}` must be a JSON object"
+                ));
+                continue;
+            };
+            let Some(locked) = node.get("locked") else {
+                continue;
+            };
+            let Ok(locked) = locked.as_object() else {
+                losses.push(format!(
+                    "Nix flake lock node `{name}` `locked` facts must be a JSON object"
+                ));
+                continue;
+            };
+            if locked_source_identity(Some(locked)).is_none() {
+                losses.push(format!(
+                    "Nix flake lock node `{name}` has no complete immutable owner/revision identity"
+                ));
+            }
+            add_json_projection(
+                &mut facts,
+                &format!("provider.nix.source.locked.{name}"),
+                locked,
+            );
         }
         if nodes.len() > 1 && (facts.name.is_empty() || facts.version.is_empty()) {
             facts.name = "nix-lock".to_string();
@@ -3536,6 +4181,7 @@ fn nix_object_report(object: &std::collections::BTreeMap<String, JSONValue>) -> 
     }
 
     let source_identity = nix_source_identity(object, locked, drv_path.as_deref());
+    let has_immutable_source = source_identity.is_some();
     facts.source_identity = source_identity.unwrap_or_else(|| {
         if facts.name.is_empty() || facts.version.is_empty() {
             String::new()
@@ -3543,7 +4189,13 @@ fn nix_object_report(object: &std::collections::BTreeMap<String, JSONValue>) -> 
             format!("nix:{}@{}", facts.name, facts.version)
         }
     });
-    if facts.source_identity.is_empty() {
+    if !has_immutable_source
+        && (facts.name.is_empty()
+            || facts.version.is_empty()
+            || pname.is_some()
+            || package.is_some()
+            || meta_name.is_some())
+    {
         losses.push("Nix metadata has no immutable source identity".to_string());
     }
     let mut report = report_with_identity(facts);
@@ -3650,7 +4302,13 @@ fn nix_hash_field(
 ) -> Option<String> {
     for key in ["narHash", "outputHash", "hash", "sha256", "contentHash"] {
         if object.contains_key(key) {
-            return nix_string_field(object, key, key, losses);
+            let hash = nix_string_field(object, key, key, losses);
+            if let Some(hash) = &hash {
+                if !ProviderSelector::parse(&format!("#digest={hash}")).is_exact() {
+                    losses.push(format!("Nix `{key}` is not an exact digest"));
+                }
+            }
+            return hash;
         }
     }
     None
@@ -3761,7 +4419,7 @@ fn nix_dependencies(
 fn nix_hooks(
     facts: &mut MetadataFacts,
     object: &std::collections::BTreeMap<String, JSONValue>,
-    _losses: &mut Vec<String>,
+    losses: &mut Vec<String>,
 ) {
     for key in [
         "builder",
@@ -3778,6 +4436,25 @@ fn nix_hooks(
     ] {
         if let Some(value) = object.get(key) {
             add_typed_json_fact(facts, format!("provider.nix.hook.{key}"), value);
+            let valid = match key {
+                "args" => match value {
+                    JSONValue::String(_) => true,
+                    JSONValue::Array(values) => values
+                        .iter()
+                        .all(|value| matches!(value, JSONValue::String(_))),
+                    _ => false,
+                },
+                "hooks" => matches!(
+                    value,
+                    JSONValue::String(_)
+                        | JSONValue::Array(_)
+                        | JSONValue::Object(_)
+                ),
+                _ => matches!(value, JSONValue::String(_)),
+            };
+            if !valid {
+                losses.push(format!("Nix `{key}` hook has an unsupported shape"));
+            }
             facts.scripts.push(key.to_string());
         }
     }
@@ -3865,13 +4542,19 @@ fn nix_license(
     facts: &mut MetadataFacts,
     object: &std::collections::BTreeMap<String, JSONValue>,
     meta: Option<&std::collections::BTreeMap<String, JSONValue>>,
-    _losses: &mut Vec<String>,
+    losses: &mut Vec<String>,
 ) {
     let license = object
         .get("license")
         .or_else(|| meta.and_then(|value| value.get("license")));
     if let Some(value) = license {
         add_typed_json_fact(facts, "provider.nix.license", value);
+        if !matches!(
+            value,
+            JSONValue::String(_) | JSONValue::Object(_) | JSONValue::Array(_)
+        ) {
+            losses.push("Nix `license` must be a string, object, or array".to_string());
+        }
         facts.license = json_value_text(value);
     }
 }
@@ -3975,21 +4658,54 @@ fn nix_source_identity(
             }
         }
     }
-    if let Some(locked) = locked {
-        let kind = json_string(locked, "type").unwrap_or_else(|| "flake".to_string());
-        let owner = json_string(locked, "owner");
-        let repo = json_string(locked, "repo");
-        let revision = json_string(locked, "rev").or_else(|| json_string(locked, "narHash"));
-        let name = match (owner, repo) {
-            (Some(owner), Some(repo)) => format!("{owner}/{repo}"),
-            (Some(owner), None) | (None, Some(owner)) => owner,
-            (None, None) => String::new(),
-        };
-        if !name.is_empty() {
-            return Some(format!("{kind}:{name}@{}", revision.unwrap_or_default()));
+    if let Some(identity) = locked_source_identity(locked) {
+        return Some(identity);
+    }
+    let root = object
+        .get("root")
+        .and_then(|value| value.as_str().ok())
+        .unwrap_or("root");
+    if let Some(JSONValue::Object(nodes)) = object.get("nodes") {
+        if let Some(JSONValue::Object(node)) = nodes.get(root) {
+            if let Some(locked) = node.get("locked").and_then(|value| value.as_object().ok()) {
+                if let Some(identity) = locked_source_identity(Some(locked)) {
+                    return Some(identity);
+                }
+            }
         }
     }
     drv_path.map(|path| format!("nix:drv:{path}"))
+}
+
+fn locked_source_identity(
+    locked: Option<&std::collections::BTreeMap<String, JSONValue>>,
+) -> Option<String> {
+    let locked = locked?;
+    let kind = json_string(locked, "type").unwrap_or_else(|| "flake".to_string());
+    let owner = json_string(locked, "owner");
+    let repo = json_string(locked, "repo");
+    let revision = if let Some(revision) = json_string(locked, "rev") {
+        ProviderSelector::parse(&format!("#revision={revision}"))
+            .is_exact()
+            .then_some(revision)
+    } else if let Some(hash) = json_string(locked, "narHash") {
+        ProviderSelector::parse(&format!("#digest={hash}"))
+            .is_exact()
+            .then_some(hash)
+    } else {
+        None
+    };
+    let name = match (owner, repo) {
+        (Some(owner), Some(repo)) => format!("{owner}/{repo}"),
+        (Some(owner), None) | (None, Some(owner)) => owner,
+        (None, None) => String::new(),
+    };
+    match (name.is_empty(), revision) {
+        (false, Some(revision)) if !revision.trim().is_empty() => {
+            Some(format!("{kind}:{name}@{revision}"))
+        }
+        _ => None,
+    }
 }
 
 fn provider_dependency_field(
@@ -4402,6 +5118,23 @@ fn vcpkg_dependencies(
                             format!("vcpkg.dependency.{name}.{key}"),
                             vec![json_value_text(value)],
                         );
+                        let valid = match key {
+                            "features" => matches!(
+                                value,
+                                JSONValue::Array(values)
+                                    if values.iter().all(|item| matches!(item, JSONValue::String(_)))
+                            ),
+                            "platform" => {
+                                matches!(value, JSONValue::String(value) if !value.trim().is_empty())
+                            }
+                            "host" | "default-features" => matches!(value, JSONValue::Bool(_)),
+                            _ => true,
+                        };
+                        if !valid {
+                            losses.push(format!(
+                                "vcpkg dependency `{name}` field `{key}` has an invalid shape"
+                            ));
+                        }
                     }
                 }
                 for key in ["version>=", "version>", "version"] {
@@ -4533,11 +5266,9 @@ fn xml_direct_child_values(document: &str, parent: &str, child: &str) -> Vec<Str
             let child_closing = format!("</{child}>");
             if let Some(relative_close) = document[end + 1..body_end].find(&child_closing) {
                 let value_start = end + 1;
-                values.push(
-                    document[value_start..value_start + relative_close]
-                        .trim()
-                        .to_string(),
-                );
+                values.push(xml_unescape(
+                    document[value_start..value_start + relative_close].trim(),
+                ));
                 cursor = value_start + relative_close + child_closing.len();
                 continue;
             }
@@ -4560,6 +5291,33 @@ fn xml_opening_name(opening: &str) -> &str {
         .unwrap_or_default()
 }
 
+fn xml_has_namespace(document: &str) -> bool {
+    if document.contains("xmlns:") || document.contains("xmlns=") {
+        return true;
+    }
+    let mut cursor = 0;
+    while cursor < document.len() {
+        let Some(relative_start) = document[cursor..].find('<') else {
+            break;
+        };
+        let start = cursor + relative_start;
+        let Some(relative_end) = xml_opening_tag_end(&document[start..]) else {
+            break;
+        };
+        let end = start + relative_end;
+        let opening = &document[start..=end];
+        if !opening.starts_with("<!--")
+            && !opening.starts_with("<?")
+            && !opening.starts_with("<!")
+            && xml_opening_name(opening).contains(':')
+        {
+            return true;
+        }
+        cursor = end + 1;
+    }
+    false
+}
+
 fn xml_tag(document: &str, tag: &str) -> Option<String> {
     xml_tag_values(document, tag).into_iter().next()
 }
@@ -4576,9 +5334,19 @@ fn xml_tag_values(document: &str, tag: &str) -> Vec<String> {
             document
                 .get(value_start..)?
                 .split_once(&closing)
-                .map(|(value, _)| value.trim().to_string())
+                .map(|(value, _)| xml_unescape(value.trim()))
         })
         .collect()
+}
+
+fn xml_unescape(value: &str) -> String {
+    value
+        .replace("&lt;", "<")
+        .replace("&gt;", ">")
+        .replace("&quot;", "\"")
+        .replace("&apos;", "'")
+        // Decode ampersands last so `&amp;lt;` remains the literal text `&lt;`.
+        .replace("&amp;", "&")
 }
 
 fn xml_opening_tags(document: &str, tag: &str) -> Vec<String> {
@@ -4964,6 +5732,25 @@ checksum = "abc123"
             .shared_facts()
             .facts
             .contains_key("provider.nix.native.meta"));
+
+        let flake_lock = concat!(
+            r#"{"name":"nixpkgs","version":"24.05","root":"root","nodes":{"#,
+            r#""root":{"locked":{"type":"github","owner":"NixOS","repo":"nixpkgs","#,
+            r#""rev":"0123456789abcdef0123456789abcdef01234567"}}}}"#
+        );
+        let flake_report = normalize_provider_document(ProviderFamily::Nix, flake_lock);
+        flake_report
+            .validate()
+            .expect("Nix flake lock source facts are lossless");
+        assert_eq!(
+            flake_report.facts.source_identity,
+            "github:NixOS/nixpkgs@0123456789abcdef0123456789abcdef01234567"
+        );
+        assert!(flake_report
+            .shared_facts()
+            .facts
+            .contains_key("provider.nix.source.locked.root.rev"));
+
         let shared = report.shared_facts();
         let exported = ProviderFacts::from_json(&report.export_json())
             .expect("Nix provider export uses the shared carrier");
@@ -4987,6 +5774,26 @@ checksum = "abc123"
 
     #[test]
     fn nix_conformance_reports_loss_and_conflict_in_native_facts() {
+        let missing_source = normalize_provider_document(
+            ProviderFamily::Nix,
+            r#"{"pname":"ripgrep","version":"14.1.1","buildInputs":["openssl"]}"#,
+        );
+        assert!(missing_source.validate().is_err());
+        assert!(missing_source
+            .losses
+            .iter()
+            .any(|loss| loss.contains("immutable source identity")));
+
+        let mutable_lock = normalize_provider_document(
+            ProviderFamily::Nix,
+            r#"{"pname":"ripgrep","version":"14.1.1","locked":{"type":"github","owner":"NixOS","repo":"nixpkgs","rev":"main"}}"#,
+        );
+        assert!(mutable_lock.validate().is_err());
+        assert!(mutable_lock
+            .losses
+            .iter()
+            .any(|loss| loss.contains("complete immutable owner/revision identity")));
+
         let lossy = normalize_provider_document(
             ProviderFamily::Nix,
             r#"{"pname":"ripgrep","version":"14.1.1","drvPath":"/nix/store/hash-ripgrep-14.1.1.drv","platforms":1,"yanked":"unknown","inputDrvs":[1]}"#,
@@ -5127,6 +5934,54 @@ checksum = "abc123"
     }
 
     #[test]
+    fn pypi_swiftpm_maven_reject_malformed_native_shapes_without_defaults() {
+        let pypi = normalize_provider_document(
+            ProviderFamily::PyPI,
+            r#"{"info":{"name":"sample","version":"1.0.0"},"urls":[{"filename":"sample.whl","digests":{"sha256":false}}]}"#,
+        );
+        assert!(pypi
+            .losses
+            .iter()
+            .any(|loss| loss.contains("digest `sha256` must be a string")));
+        assert!(pypi.validate().is_err());
+
+        let swiftpm = normalize_provider_document(
+            ProviderFamily::SwiftPM,
+            r#"{"version":9,"pins":[{"identity":"swift-log","state":{"revision":1}}]}"#,
+        );
+        assert!(swiftpm
+            .losses
+            .iter()
+            .any(|loss| loss.contains("unsupported") && loss.contains("version")));
+        assert!(swiftpm
+            .losses
+            .iter()
+            .any(|loss| loss.contains("revision") && loss.contains("string")));
+        assert!(swiftpm.validate().is_err());
+
+        let maven_namespace = normalize_provider_document(
+            ProviderFamily::Maven,
+            r#"<project xmlns="urn:unsupported"><groupId>com.example</groupId><artifactId>sample</artifactId><version>1.0.0</version></project>"#,
+        );
+        assert!(maven_namespace
+            .losses
+            .iter()
+            .any(|loss| loss.contains("unsupported XML namespace")));
+        assert!(maven_namespace.validate().is_err());
+
+        let duplicate_dependency = normalize_provider_document(
+            ProviderFamily::Maven,
+            r#"<project><groupId>com.example</groupId><artifactId>sample</artifactId><version>1.0.0</version><dependencies><dependency><groupId>org.example</groupId><artifactId>dep</artifactId><version>1.0.0</version></dependency><dependency><groupId>org.example</groupId><artifactId>dep</artifactId><version>2.0.0</version></dependency></dependencies></project>"#,
+        );
+        assert!(duplicate_dependency
+            .conflicts
+            .iter()
+            .any(|conflict| conflict.contains("org.example:dep")
+                && conflict.contains("conflicting version")));
+        assert!(duplicate_dependency.validate().is_err());
+    }
+
+    #[test]
     fn nuget_conan_and_vcpkg_conformance_retains_native_facts_and_lock_identity() {
         let nuget = r#"<package>
   <metadata>
@@ -5226,5 +6081,75 @@ class Widget(ConanFile):
             .losses
             .iter()
             .any(|loss| loss.contains("no non-empty `name`")));
+    }
+
+    #[test]
+    fn provider_conformance_retains_real_lock_shapes_and_rejects_hooks() {
+        let nuget = r#"{
+  "targets":{"net8.0":{"widget/1.2.3":{"type":"package","dependencies":{"serde":"1.0.0"}}}},
+  "libraries":{"widget/1.2.3":{"type":"package","sha512":"sha512-widget"}},
+  "projectFileDependencyGroups":{"net8.0":["widget >= 1.0.0"]}
+        }"#;
+        let report = normalize_provider_document(ProviderFamily::NuGet, nuget);
+        report
+            .validate()
+            .expect("single NuGet lock identity is lossless");
+        assert_eq!(report.facts.platforms, vec!["framework:net8.0"]);
+        assert_eq!(report.facts.integrity_hash, "sha512-widget");
+        assert!(report
+            .facts
+            .typed
+            .contains_key("provider.nuget.target.net8.0.widget/1.2.3.serde"));
+        assert!(report
+            .facts
+            .typed
+            .contains_key("provider.nuget.project.request.net8.0.0"));
+
+        let ranged_xml = r#"<package><metadata><id>widget</id><version>1.2.3</version><dependencies><dependency id="serde" version="[1.0.0,2.0.0)" /></dependencies></metadata></package>"#;
+        let ranged = normalize_provider_document(ProviderFamily::NuGet, ranged_xml);
+        assert!(ranged.validate().is_err());
+        assert!(ranged
+            .losses
+            .iter()
+            .any(|loss| loss.contains("serde") && loss.contains("exact version")));
+
+        let graph = r#"{"ref":"widget/1.2.3","graph":{"nodes":{"0":{"ref":"widget/1.2.3","requires":["1"],"tool_requires":["2"],"package_id":"pkgid"},"1":{"ref":"zlib/1.3.1"},"2":{"ref":"cmake/3.29.0"}}}}"#;
+        let graph_report = normalize_provider_document(ProviderFamily::Conan, graph);
+        graph_report
+            .validate()
+            .expect("Conan graph root identity is lossless");
+        assert!(graph_report
+            .facts
+            .typed
+            .contains_key("provider.conan.graph.node.0"));
+        assert!(graph_report
+            .facts
+            .build_dependencies
+            .iter()
+            .any(|dependency| dependency == "2"));
+
+        let hook = normalize_provider_document(
+            ProviderFamily::Conan,
+            "name = \"widget\"\nversion = \"1.2.3\"\ndef generate(self):\n    self.run(\"cmake\")\n",
+        );
+        assert!(hook.validate().is_err());
+        assert!(hook
+            .losses
+            .iter()
+            .any(|loss| loss.contains("executable build or Python hook")));
+
+        let malformed_vcpkg = normalize_provider_document(
+            ProviderFamily::Vcpkg,
+            r#"{"name":"widget","version":"1.0.0","dependencies":[{"name":"zlib","features":"core"}],"overrides":[{"version":"1.0.0"}]}"#,
+        );
+        assert!(malformed_vcpkg.validate().is_err());
+        assert!(malformed_vcpkg
+            .losses
+            .iter()
+            .any(|loss| loss.contains("features") && loss.contains("invalid shape")));
+        assert!(malformed_vcpkg
+            .losses
+            .iter()
+            .any(|loss| loss.contains("override 0") && loss.contains("name")));
     }
 }

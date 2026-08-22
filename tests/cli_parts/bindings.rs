@@ -444,8 +444,8 @@ func main() {}
     );
     let generated = fs::read_to_string(dir.join(".jet/bindings/go/handles.jet")).unwrap();
     assert!(generated.contains("pub struct Handle { value: Int }"));
-    assert!(generated.contains("pub fn new_handle(value: Int) => Handle"));
-    assert!(generated.contains("pub fn consume_handle(handle: Handle) => Int"));
+    assert!(generated.contains("pub fn new_handle(value: Int) Handle ->"));
+    assert!(generated.contains("pub fn consume_handle(handle: Handle) Int ->"));
 
     fs::write(
         dir.join("main.jet"),
